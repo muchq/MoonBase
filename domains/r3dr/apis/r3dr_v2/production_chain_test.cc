@@ -16,9 +16,9 @@
 
 #include "absl/time/time.h"
 #include "domains/platform/libs/aura/middleware.h"
-#include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "domains/r3dr/apis/r3dr_v2/smithy_handler.h"
+#include "domains/r3dr/apis/r3dr_v2/test_support.h"
 #include "moonbase/r3dr/server.h"
 #include "smithy/http/beast_transport.h"
 #include "smithy/http/loopback.h"
@@ -29,22 +29,6 @@ namespace {
 
 using futility::rate_limiter::SlidingWindowRateLimiter;
 using futility::rate_limiter::SlidingWindowRateLimiterConfig;
-
-constexpr absl::Time kNow = absl::FromUnixMillis(1755000000000);
-
-class ChainStore final : public UrlStore {
- public:
-  absl::StatusOr<std::string> Insert(const std::string& long_url, absl::Time expires_at) override {
-    targets["AQA"] = Target{long_url, expires_at};
-    return std::string("AQA");
-  }
-  absl::StatusOr<std::optional<Target>> Lookup(const std::string& slug) override {
-    const auto found = targets.find(slug);
-    if (found == targets.end()) return std::optional<Target>();
-    return std::optional<Target>(found->second);
-  }
-  std::map<std::string, Target> targets;
-};
 
 // Mutexed like aura's: the beast transport fires on_rejected on an io
 // thread, and the test thread reads while that thread is still live.
@@ -78,13 +62,9 @@ class ProductionChainTest : public ::testing::Test {
                                            .ttl = std::chrono::minutes(5),
                                            .cleanup_interval = std::chrono::seconds(30),
                                            .max_keys = 100})),
-        store_(std::make_shared<ChainStore>()),
-        server_(std::make_shared<SmithyShortenerHandler>(std::make_shared<Shortener>(
-            store_,
-            std::make_shared<Shortener::Cache>(
-                "url_cache", 100,
-                std::make_shared<futility::otel::CapturingMetricsRecorder>("r3dr_v2_test")),
-            [] { return kNow; }))) {
+        store_(std::make_shared<FakeUrlStore>()),
+        server_(
+            std::make_shared<SmithyShortenerHandler>(MakeShortener(store_, [] { return kNow; }))) {
     handler_ = aura::ProductionChain(
         aura::ChainOptions{
             .metrics = sink_,
@@ -109,7 +89,7 @@ class ProductionChainTest : public ::testing::Test {
 
   std::shared_ptr<RecordingSink> sink_;
   std::shared_ptr<SlidingWindowRateLimiter<std::string>> limiter_;
-  std::shared_ptr<ChainStore> store_;
+  std::shared_ptr<FakeUrlStore> store_;
   moonbase::r3dr::R3drV2Server server_;
   smithy::http::RequestHandler handler_;
   std::shared_ptr<smithy::http::Loopback> loopback_;

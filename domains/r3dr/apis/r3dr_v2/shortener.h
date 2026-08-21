@@ -39,8 +39,8 @@ class Shortener {
 
   absl::StatusOr<std::string> Shorten(const std::string& long_url, int64_t expires_at_millis);
 
-  /// nullopt for unknown, expired, or sub-3-char slugs (real slugs are
-  /// 3/6/11 chars; the short ones skip the store).
+  /// nullopt for unknown, expired, or non-slug-shaped input (see
+  /// IsPossibleSlug — anything else skips the store).
   absl::StatusOr<std::optional<std::string>> Resolve(const std::string& slug);
 
  private:

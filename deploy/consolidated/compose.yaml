@@ -280,10 +280,7 @@ services:
       OTEL_SERVICE_NAME: r3dr_v2
       OTEL_RESOURCE_ATTRIBUTES: service.name=r3dr_v2,service.version=${R3DR_V2_SHA:-${DEPLOY_SHA:-latest}}
     networks:
-      # Alias: java.net.URI nulls underscored hosts.
-      app_network:
-        aliases:
-          - r3dr-v2
+      - app_network
     depends_on:
       r3dr_v2_db_init:
         condition: service_completed_successfully

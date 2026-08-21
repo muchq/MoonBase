@@ -10,12 +10,10 @@
 
 #include "absl/status/status.h"
 #include "absl/time/time.h"
-#include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
+#include "domains/r3dr/apis/r3dr_v2/test_support.h"
 
 namespace r3dr_v2 {
 namespace {
-
-constexpr absl::Time kNow = absl::FromUnixMillis(1755000000000);  // 2025-08-12T12:00:00Z
 
 // --- ResolveExpiry: the clock-dependent rules, both sides of every line ---
 
@@ -51,47 +49,13 @@ TEST(ResolveExpiryTest, ThirtyDaysExactlyIsTheCeiling) {
 
 // --- Shortener: cache discipline over a scripted store ---
 
-class FakeStore final : public UrlStore {
- public:
-  absl::StatusOr<std::string> Insert(const std::string& long_url, absl::Time expires_at) override {
-    ++inserts;
-    last_expires_at = expires_at;
-    targets[next_slug] = Target{long_url, expires_at};
-    return next_slug;
-  }
-
-  absl::StatusOr<std::optional<Target>> Lookup(const std::string& slug) override {
-    ++lookups;
-    if (fail_lookups) {
-      return absl::UnavailableError("postgres is down");
-    }
-    const auto found = targets.find(slug);
-    if (found == targets.end() || found->second.expires_at <= now) {
-      return std::optional<Target>();
-    }
-    return std::optional<Target>(found->second);
-  }
-
-  std::string next_slug = "AQA";
-  std::map<std::string, Target> targets;
-  absl::Time now = kNow;
-  absl::Time last_expires_at;
-  bool fail_lookups = false;
-  int inserts = 0;
-  int lookups = 0;
-};
-
 class ShortenerTest : public testing::Test {
  protected:
   ShortenerTest()
-      : store_(std::make_shared<FakeStore>()),
-        cache_(std::make_shared<Shortener::Cache>(
-            "url_cache", 100,
-            std::make_shared<futility::otel::CapturingMetricsRecorder>("r3dr_v2_test"))),
-        shortener_(store_, cache_, [this] { return now_; }) {}
+      : store_(std::make_shared<FakeUrlStore>()),
+        shortener_(*MakeShortener(store_, [this] { return now_; })) {}
 
-  std::shared_ptr<FakeStore> store_;
-  std::shared_ptr<Shortener::Cache> cache_;
+  std::shared_ptr<FakeUrlStore> store_;
   Shortener shortener_;
   absl::Time now_ = kNow;
 };

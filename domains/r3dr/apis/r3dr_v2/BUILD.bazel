@@ -38,11 +38,27 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":encoding",
         "//domains/platform/libs/aura:cache",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# Shared test doubles: the in-memory store and Shortener factory all three
+# suites use.
+cc_library(
+    name = "test_support",
+    testonly = True,
+    hdrs = ["test_support.h"],
+    deps = [
+        ":shortener",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/time",
     ],
 )
@@ -53,7 +69,7 @@ cc_test(
     srcs = ["shortener_test.cc"],
     deps = [
         ":shortener",
-        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        ":test_support",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
@@ -143,7 +159,6 @@ cc_test(
         "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:server",
     ],
 )
 
@@ -156,8 +171,7 @@ cc_test(
         ":r3dr_v2_smithy_server",
         ":shortener",
         ":smithy_handler",
-        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
-        "@com_google_absl//absl/status",
+        ":test_support",
         "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
         "@smithy_cpp//runtime:client",
@@ -204,9 +218,8 @@ cc_test(
         ":r3dr_v2_smithy_server",
         ":shortener",
         ":smithy_handler",
+        ":test_support",
         "//domains/platform/libs/aura",
-        "//domains/platform/libs/aura:cache",
-        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
         "@com_google_absl//absl/time",
         "@googletest//:gtest_main",

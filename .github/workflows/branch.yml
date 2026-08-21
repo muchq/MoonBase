@@ -222,22 +222,23 @@ jobs:
   # own object tree, not an extra flag on an existing one.
   #
   # Scope is the first-party C++ tests whose dependency closure is also
-  # first-party — which is why four of one_d4_worker's tests are named here
-  # and the rest of that package is not. The two Postgres ones skip without
-  # PG_TEST_DB_URL, which this job does not supply, so instrumenting libpq
-  # for them would buy two skipped tests; the other two pull in Beast and
-  # opentelemetry-cpp. That is a build-cost line, not a compatibility one —
-  # those targets do build and pass under ASan; they just add a full
+  # first-party. Two exclusion classes, one mechanism each:
+  #
+  # DB-gated tests (env_inherit on a *_TEST_DB_URL) are excluded by that
+  # attribute — this job supplies no database, so they GTEST_SKIP and
+  # instrumenting libpq for them buys skipped tests. Derived, not named,
+  # because the hand-list had already drifted: two of one_d4_worker's
+  # Postgres tests were being instrumented for nothing.
+  #
+  # The named list is the build-cost class: targets pulling Beast and
+  # opentelemetry-cpp build and pass under ASan, but add a full
   # instrumented -c dbg rebuild of boost and otel to a runner that has to
   # free disk before it can build at all. Widening that is a runner-budget
-  # call rather than a technical one.
-  #
-  # Named one by one rather than excluding the package, so a new test in it
-  # is sanitized by default and only leaves on purpose. Adding a line here
-  # REMOVES a test from all three sanitizers — the opposite of what the
-  # shape of the list suggests at a glance, and worth reading twice for a
-  # test that spawns threads, which is what they are for. run_ceiling_test
-  # was added here by mistake on exactly that misreading.
+  # call. Named one by one so a new test is sanitized by default and only
+  # leaves on purpose. Adding a line here REMOVES a test from all three
+  # sanitizers — worth reading twice for a test that spawns threads, which
+  # is what they are for; run_ceiling_test was added here by mistake on
+  # exactly that misreading.
   #
   # A matrix rather than three steps in one job, for two reasons. The three
   # configs share no build output — each is a distinct object tree, so
@@ -282,15 +283,12 @@ jobs:
       - name: Resolve target set
         id: targets
         run: |
-          TARGETS=$(bazel query 'kind(cc_test, //domains/...) except (
+          TARGETS=$(bazel query 'kind(cc_test, //domains/...)
+            except attr(env_inherit, "_TEST_DB_URL", kind(cc_test, //domains/...))
+            except (
             //domains/games/apis/golf_hub/... union
-            //domains/games/apis/one_d4_worker:pg_queue_test union
-            //domains/games/apis/one_d4_worker:pg_game_sink_test union
             //domains/games/apis/one_d4_worker:chess_com_archive_test union
             //domains/games/apis/one_d4_worker:metrics_test union
-            //domains/games/apis/one_d4_worker:db_options_test union
-            //domains/r3dr/apis/r3dr_v2:pg_url_store_test union
-            //domains/platform/libs/pg/... union
             //domains/platform/libs/aura/... union
             //domains/platform/libs/futility/otel/... union
             //domains/graphics/apis/portrait/...)' | tr '\n' ' ')

@@ -12,13 +12,15 @@
 namespace r3dr_v2 {
 namespace {
 
-// $1 = id, $2 = slug, $3 = long url, $4 = expiry epoch millis. Zero rows =
-// replayed insert (see header); both counts are success.
+// $1 = id, $2 = slug, $3 = long url, $4 = expiry epoch millis. One row
+// always: xmax = 0 marks a fresh insert; on conflict the returned long_url
+// tells a replay (ours) from an import that outran the sequence (someone
+// else's), atomically.
 constexpr char kInsert[] = R"sql(
     INSERT INTO urls (id, short_url, long_url, expires_at)
     VALUES ($1::bigint, $2, $3, to_timestamp($4::bigint / 1000.0))
-    ON CONFLICT (id) DO NOTHING
-    RETURNING 1)sql";
+    ON CONFLICT (id) DO UPDATE SET long_url = urls.long_url
+    RETURNING (xmax = 0) AS inserted, long_url)sql";
 
 // Millis out, so the value reaches absl::Time without a timestamp parse.
 constexpr char kLookup[] = R"sql(
@@ -48,17 +50,12 @@ absl::StatusOr<std::string> PgUrlStore::Insert(const std::string& long_url, absl
   if (!inserted.ok()) {
     return inserted.status();
   }
-  if (inserted->rows() == 0) {
-    // Zero rows is a replayed insert only if the stored URL is ours; a
-    // mismatch means url_ids is behind the table (an import without
-    // setval) and the slug belongs to someone else.
-    auto existing = writes_->Exec("SELECT long_url FROM urls WHERE id = $1", {absl::StrCat(id)});
-    if (!existing.ok()) {
-      return existing.status();
-    }
-    if (existing->rows() == 0 || existing->Get(0, 0) != long_url) {
-      return absl::InternalError("url_ids is behind the urls table; refusing to alias a slug");
-    }
+  if (inserted->rows() != 1) {
+    return absl::InternalError("insert returned no row");
+  }
+  if (inserted->Get(0, 0) != std::optional<std::string>("t") &&
+      inserted->Get(0, 1) != std::optional<std::string>(long_url)) {
+    return absl::InternalError("url_ids is behind the urls table; refusing to alias a slug");
   }
   return slug;
 }
@@ -71,14 +68,14 @@ absl::StatusOr<std::optional<Target>> PgUrlStore::Lookup(const std::string& slug
   if (result->rows() == 0) {
     return std::optional<Target>();
   }
-  const std::optional<std::string> long_url = result->Get(0, 0);
+  std::optional<std::string> long_url = result->Get(0, 0);
   const std::optional<std::string> expires_millis = result->Get(0, 1);
   int64_t millis = 0;
   if (!long_url.has_value() || !expires_millis.has_value() ||
       !absl::SimpleAtoi(*expires_millis, &millis)) {
     return absl::InternalError("urls row came back unreadable");
   }
-  return std::optional<Target>(Target{*long_url, absl::FromUnixMillis(millis)});
+  return std::optional<Target>(Target{*std::move(long_url), absl::FromUnixMillis(millis)});
 }
 
 }  // namespace r3dr_v2

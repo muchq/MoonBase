@@ -9,8 +9,8 @@
 #include <utility>
 
 #include "absl/time/time.h"
-#include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
 #include "domains/r3dr/apis/r3dr_v2/smithy_handler.h"
+#include "domains/r3dr/apis/r3dr_v2/test_support.h"
 #include "moonbase/r3dr/client.h"
 #include "moonbase/r3dr/server.h"
 #include "smithy/http/loopback.h"
@@ -23,44 +23,14 @@ namespace {
 
 using ::testing::HasSubstr;
 
-constexpr absl::Time kNow = absl::FromUnixMillis(1755000000000);
-
-// A slug table with no failure modes.
-class WireStore final : public UrlStore {
- public:
-  absl::StatusOr<std::string> Insert(const std::string& long_url, absl::Time expires_at) override {
-    last_expires_at = expires_at;
-    targets[next_slug] = Target{long_url, expires_at};
-    return next_slug;
-  }
-
-  absl::StatusOr<std::optional<Target>> Lookup(const std::string& slug) override {
-    if (fail_lookups) {
-      return absl::UnavailableError("password authentication failed for host shared_postgres");
-    }
-    const auto found = targets.find(slug);
-    if (found == targets.end()) {
-      return std::optional<Target>();
-    }
-    return std::optional<Target>(found->second);
-  }
-
-  std::string next_slug = "AQA";
-  std::map<std::string, Target> targets;
-  absl::Time last_expires_at;
-  bool fail_lookups = false;
-};
+// Expiry literals below: 1755003600000 = kNow+1h; 1754000000000 < kNow;
+// 1758000000000 > kNow+30d.
 
 class WireTest : public testing::Test {
  protected:
   WireTest()
-      : store_(std::make_shared<WireStore>()),
-        shortener_(std::make_shared<Shortener>(
-            store_,
-            std::make_shared<Shortener::Cache>(
-                "url_cache", 100,
-                std::make_shared<futility::otel::CapturingMetricsRecorder>("r3dr_v2_test")),
-            [] { return kNow; })) {
+      : store_(std::make_shared<FakeUrlStore>()),
+        shortener_(MakeShortener(store_, [] { return kNow; })) {
     server_ = std::make_unique<moonbase::r3dr::R3drV2Server>(
         std::make_shared<SmithyShortenerHandler>(shortener_));
     loopback_ = std::make_shared<smithy::http::Loopback>();
@@ -82,7 +52,7 @@ class WireTest : public testing::Test {
     return response.ok() ? *response : smithy::http::HttpResponse{};
   }
 
-  std::shared_ptr<WireStore> store_;
+  std::shared_ptr<FakeUrlStore> store_;
   std::shared_ptr<Shortener> shortener_;
   std::unique_ptr<moonbase::r3dr::R3drV2Server> server_;
   std::shared_ptr<smithy::http::Loopback> loopback_;

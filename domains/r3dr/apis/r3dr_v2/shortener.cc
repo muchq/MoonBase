@@ -6,6 +6,7 @@
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
+#include "domains/r3dr/apis/r3dr_v2/encoding.h"
 
 namespace r3dr_v2 {
 
@@ -39,14 +40,14 @@ absl::StatusOr<std::string> Shortener::Shorten(const std::string& long_url,
 }
 
 absl::StatusOr<std::optional<std::string>> Shortener::Resolve(const std::string& slug) {
-  if (slug.size() < 3) {
-    return std::optional<std::string>();
+  if (!IsPossibleSlug(slug)) {
+    return std::nullopt;
   }
-  if (const std::optional<Target> cached = cache_->get(slug); cached.has_value()) {
+  if (std::optional<Target> cached = cache_->get(slug); cached.has_value()) {
     if (now_() >= cached->expires_at) {
-      return std::optional<std::string>();
+      return std::nullopt;
     }
-    return std::optional<std::string>(cached->long_url);
+    return std::optional<std::string>(std::move(cached->long_url));
   }
   absl::StatusOr<std::optional<Target>> looked = store_->Lookup(slug);
   if (!looked.ok()) {
@@ -54,10 +55,10 @@ absl::StatusOr<std::optional<std::string>> Shortener::Resolve(const std::string&
     return looked.status();
   }
   if (!looked->has_value()) {
-    return std::optional<std::string>();
+    return std::nullopt;
   }
   cache_->insert(slug, **looked);
-  return std::optional<std::string>((*looked)->long_url);
+  return std::optional<std::string>(std::move((*looked)->long_url));
 }
 
 }  // namespace r3dr_v2

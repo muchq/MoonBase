@@ -6,15 +6,23 @@
 namespace r3dr_v2 {
 
 namespace gen = moonbase::r3dr;
+namespace {
+
+template <class Detail>
+smithy::Error Modeled(const char* code, std::string message) {
+  smithy::Error error = smithy::Error::Modeled(code, message);
+  error.set_detail(Detail{.message = std::move(message)});
+  return error;
+}
+
+}  // namespace
 
 smithy::Error ToSmithyError(const absl::Status& status) {
-  const std::string message(status.message());
+  std::string message(status.message());
   if (status.code() == absl::StatusCode::kInvalidArgument) {
-    smithy::Error error = smithy::Error::Modeled("InvalidRequestError", message);
-    error.set_detail(gen::InvalidRequestError{.message = message});
-    return error;
+    return Modeled<gen::InvalidRequestError>("InvalidRequestError", std::move(message));
   }
-  return smithy::Error::Unknown(message);
+  return smithy::Error::Unknown(std::move(message));
 }
 
 smithy::Outcome<gen::ShortenOutput> SmithyShortenerHandler::Shorten(
@@ -35,9 +43,7 @@ smithy::Outcome<gen::RedirectOutput> SmithyShortenerHandler::Redirect(
     return ToSmithyError(resolved.status());
   }
   if (!resolved->has_value()) {
-    smithy::Error error = smithy::Error::Modeled("NotFoundError", "no such link");
-    error.set_detail(gen::NotFoundError{.message = "no such link"});
-    return error;
+    return Modeled<gen::NotFoundError>("NotFoundError", "no such link");
   }
   gen::RedirectOutput output;
   output.location = **std::move(resolved);

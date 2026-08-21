@@ -36,4 +36,8 @@ absl::StatusOr<std::string> EncodeId(int64_t id) {
   return slug;
 }
 
+bool IsPossibleSlug(std::string_view slug) {
+  return slug.size() == 3 || slug.size() == 6 || slug.size() == 11;
+}
+
 }  // namespace r3dr_v2

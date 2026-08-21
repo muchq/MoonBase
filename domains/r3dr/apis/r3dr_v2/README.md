@@ -10,8 +10,7 @@ The C++ URL shortener (#1359), replacing the Go service in `../r3dr`. Serves
   `http://`/`https://`, trait-validated. `expiresAt` (epoch millis)
   required: in the future, ceiling 30d.
 - `GET /r3dr/v1/r/{slug}` → 302 with `Location`. Expiry enforced in the SQL
-  and in the cache entry. Unknown/expired/too-short slugs: one modeled JSON
-  404. Store failure: 500, not 404.
+  and in the cache entry. Unknown, expired, or non-slug-shaped: one modeled JSON 404. Store failure: 500, not 404.
 - `/health` via aura.
 
 The API returns a bare slug; the short link is
@@ -53,7 +52,6 @@ silently without `PG_TEST_DB_URL` (CI supplies it).
 
 ## Deployment
 
-`ghcr.io/muchq/r3dr_v2` (pin `R3DR_V2_SHA`), port 8091, alias `r3dr-v2`.
 Caddy proxies exactly the two operation routes, unrewritten.
 `TRUSTED_PROXY_CIDRS` anchors the per-client limit (120/min, bounded keys)
 to real client addresses. 0.25 CPU / 256M. Redeploys are safe: boot
