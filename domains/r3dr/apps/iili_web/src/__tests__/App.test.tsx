@@ -24,13 +24,13 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Shorten' }));
 
     const recent = await screen.findByRole('region', { name: 'Recent links' });
-    expect(within(recent).getByRole('link', { name: 'r3dr.net/r/AQA' })).toBeInTheDocument();
-    expect(localStorage.getItem('r3dr.recent')).toContain('"AQA"');
+    expect(within(recent).getByRole('link', { name: 'iili.uk/r/AQA' })).toBeInTheDocument();
+    expect(localStorage.getItem('iili.recent')).toContain('"AQA"');
   });
 
   it('boots with stored links, skipping expired ones', () => {
     localStorage.setItem(
-      'r3dr.recent',
+      'iili.recent',
       JSON.stringify([
         { slug: 'AQA', longUrl: 'https://example.com/live', expiresAt: NOW + 1000 },
         { slug: 'DAA', longUrl: 'https://example.com/dead', expiresAt: NOW - 1000 },
@@ -39,13 +39,13 @@ describe('App', () => {
     render(<App />);
 
     const recent = screen.getByRole('region', { name: 'Recent links' });
-    expect(within(recent).getByRole('link', { name: 'r3dr.net/r/AQA' })).toBeInTheDocument();
+    expect(within(recent).getByRole('link', { name: 'iili.uk/r/AQA' })).toBeInTheDocument();
     expect(within(recent).queryByText(/DAA/)).not.toBeInTheDocument();
   });
 
   it('clears the list and the storage together', async () => {
     localStorage.setItem(
-      'r3dr.recent',
+      'iili.recent',
       JSON.stringify([{ slug: 'AQA', longUrl: 'https://example.com/x', expiresAt: NOW + 1000 }])
     );
     render(<App />);
@@ -54,6 +54,6 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Clear recent links' }));
 
     expect(screen.queryByRole('region', { name: 'Recent links' })).not.toBeInTheDocument();
-    expect(localStorage.getItem('r3dr.recent')).toBeNull();
+    expect(localStorage.getItem('iili.recent')).toBeNull();
   });
 });

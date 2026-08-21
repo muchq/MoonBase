@@ -8,7 +8,7 @@ export interface RecentLink {
   expiresAt: number;
 }
 
-const KEY = 'r3dr.recent';
+const KEY = 'iili.recent';
 const MAX = 5;
 
 // Slugs are exactly 3, 6, or 11 base64url chars (the encoder's widths). A

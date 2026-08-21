@@ -3,11 +3,12 @@
 const API_BASE: string =
   (import.meta.env.VITE_API_BASE as string | undefined) ?? 'https://api.muchq.com';
 
-// Short links keep v1's shape: the worker 302s /r/{slug} to the API.
-// VITE_SHORT_LINK_BASE points minted links at a preview host before the DNS
-// flip — until then, r3dr.net still resolves through the old stack.
+// Short links keep v1's /r/{slug} shape (bare /{slug} would collide with
+// slug-shaped asset paths): the worker 302s them to the API.
+// VITE_SHORT_LINK_BASE points minted links at a workers.dev preview until
+// the iili.uk custom domain is attached.
 const SHORT_LINK_BASE: string =
-  (import.meta.env.VITE_SHORT_LINK_BASE as string | undefined) ?? 'https://r3dr.net/r/';
+  (import.meta.env.VITE_SHORT_LINK_BASE as string | undefined) ?? 'https://iili.uk/r/';
 
 export function shortLink(slug: string): string {
   // Identity on the slug alphabet; a URL-context barrier for anything else.

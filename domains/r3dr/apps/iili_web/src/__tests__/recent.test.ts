@@ -39,19 +39,19 @@ describe('addRecent + loadRecent', () => {
   });
 
   it('shrugs off garbage and missing storage', () => {
-    localStorage.setItem('r3dr.recent', 'not json');
+    localStorage.setItem('iili.recent', 'not json');
     expect(loadRecent(NOW)).toEqual([]);
 
-    localStorage.setItem('r3dr.recent', '{"an":"object"}');
+    localStorage.setItem('iili.recent', '{"an":"object"}');
     expect(loadRecent(NOW)).toEqual([]);
 
-    localStorage.setItem('r3dr.recent', '[{"slug":1}]');
+    localStorage.setItem('iili.recent', '[{"slug":1}]');
     expect(loadRecent(NOW)).toEqual([]);
   });
 
   it('drops entries whose slug is not slug-shaped', () => {
     localStorage.setItem(
-      'r3dr.recent',
+      'iili.recent',
       JSON.stringify([
         { slug: '<img src=x>', longUrl: 'https://example.com/a', expiresAt: NOW + 1000 },
         { slug: 'javascript:alert(1)', longUrl: 'https://example.com/b', expiresAt: NOW + 1000 },

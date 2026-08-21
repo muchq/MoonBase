@@ -1,9 +1,9 @@
-name = "r3dr-web"
+name = "iili-web"
 main = "worker/index.js"
 compatibility_date = "2024-04-03"
 
-# Domain: r3dr.net. The worker serves the SPA and 302s /r/{slug} to the v2
-# API — the same short-link shape v1 minted.
+# Domain: iili.uk. The worker serves the SPA and 302s /r/{slug} to the v2
+# API — the same short-link shape v1 minted on r3dr.net.
 
 [assets]
 directory = "dist/client"

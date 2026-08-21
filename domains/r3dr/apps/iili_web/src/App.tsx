@@ -21,7 +21,7 @@ export default function App() {
     <div className="shell">
       <header className="hero">
         <h1 className="wordmark">
-          r<span className="wordmark-blossom">3</span>dr
+          ii<span className="wordmark-blossom">l</span>i
         </h1>
         <p className="tagline">Shorten a link. Share it anywhere. It expires on your schedule.</p>
       </header>
@@ -36,7 +36,7 @@ export default function App() {
         />
       </main>
       <footer className="footer">
-        Links live at <code>r3dr.net/r/&#123;slug&#125;</code> and always expire — 30 days max.
+        Links live at <code>iili.uk/r/&#123;slug&#125;</code> and always expire — 30 days max.
       </footer>
     </div>
   );

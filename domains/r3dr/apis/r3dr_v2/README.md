@@ -13,9 +13,10 @@ The C++ URL shortener (#1359), replacing the Go service in `../r3dr`. Serves
   and in the cache entry. Unknown, expired, or non-slug-shaped: one modeled JSON 404. Store failure: 500, not 404.
 - `/health` via aura.
 
-The API returns a bare slug; [`r3dr_web_v2`](../../apps/r3dr_web_v2) fronts
-it as `https://r3dr.net/r/{slug}`, 302ing to this API. CORS for `muchq.com`
-and `r3dr.net` is set at the api.muchq.com Caddy block.
+The API returns a bare slug; [`iili_web`](../../apps/iili_web) fronts it as
+`https://iili.uk/r/{slug}`, 302ing to this API, and muchq.com/r3dr mints
+the same links. CORS for `muchq.com` and `iili.uk` is set at the
+api.muchq.com Caddy block.
 
 Error shapes: 404s and clock-rule 400s are modeled JSON (`{"message":...}`);
 trait 400s use the generated `{"fieldList":[...],"message":...}` shape.

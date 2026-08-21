@@ -673,8 +673,8 @@ func TestTheMcpCorsAllowListCarriesTheProtocolHeaders(t *testing.T) {
 	}
 }
 
-// api.muchq.com is called from browsers on muchq.com and on r3dr.net (the
-// r3dr_web_v2 worker SPA; the localhost origin is its vite dev server).
+// api.muchq.com is called from browsers on muchq.com (incl. /r3dr) and on
+// iili.uk (the iili_web worker SPA; the localhost origin is vite dev).
 // ACAO takes a single value, so the Caddyfile echoes it per allowed origin
 // via named matchers — on ordinary responses and on the preflight handler
 // both. An origin falling out of either list breaks that frontend's fetches
@@ -702,9 +702,9 @@ func TestApiCorsEchoesEachAllowedOrigin(t *testing.T) {
 	}
 
 	origins := map[string]string{
-		"@from_muchq":    "https://muchq.com",
-		"@from_r3dr":     "https://r3dr.net",
-		"@from_r3dr_dev": "http://localhost:5173",
+		"@from_muchq": "https://muchq.com",
+		"@from_iili":  "https://iili.uk",
+		"@from_dev":   "http://localhost:5173",
 	}
 	count := func(lines []string, want string) int {
 		n := 0

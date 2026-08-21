@@ -77,7 +77,7 @@ describe('shorten', () => {
 });
 
 describe('shortLink', () => {
-  it('mints v1-shaped r3dr.net links', () => {
-    expect(shortLink('AQA')).toBe('https://r3dr.net/r/AQA');
+  it('mints iili.uk short links', () => {
+    expect(shortLink('AQA')).toBe('https://iili.uk/r/AQA');
   });
 });
