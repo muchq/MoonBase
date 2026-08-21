@@ -263,7 +263,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # r3dr v2 (#1359): the C++ shortener on /r3dr/v1/*. Runs beside the Go
+  # r3dr v2 (#1359): the C++ shortener on /r3dr/v2/*. Runs beside the Go
   # r3dr (separate storage) until that one retires.
   r3dr_v2:
     image: ghcr.io/muchq/r3dr_v2:${R3DR_V2_SHA:-${DEPLOY_SHA:-latest}}

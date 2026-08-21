@@ -14,7 +14,7 @@ describe('worker', () => {
     const response = await worker.fetch(new Request('https://r3dr.net/r/AQA'), env);
 
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('https://api.muchq.com/r3dr/v1/r/AQA');
+    expect(response.headers.get('Location')).toBe('https://api.muchq.com/r3dr/v2/r/AQA');
     expect(env.ASSETS.fetch).not.toHaveBeenCalled();
   });
 
@@ -38,7 +38,7 @@ describe('worker', () => {
     const env = makeEnv();
     const response = await worker.fetch(new Request('https://r3dr.net/r/AQA/'), env);
     expect(response.status).toBe(302);
-    expect(response.headers.get('Location')).toBe('https://api.muchq.com/r3dr/v1/r/AQA');
+    expect(response.headers.get('Location')).toBe('https://api.muchq.com/r3dr/v2/r/AQA');
   });
 
   it('serves everything else from assets', async () => {

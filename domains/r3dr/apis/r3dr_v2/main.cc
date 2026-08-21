@@ -2,7 +2,7 @@
 // transport, with observability, health, and per-client rate limiting.
 //
 //   R3DR_V2_DB_URL=postgresql://... bazel run //domains/r3dr/apis/r3dr_v2
-//   curl localhost:8091/r3dr/v1/shorten -H 'content-type: application/json' \
+//   curl localhost:8091/r3dr/v2/shorten -H 'content-type: application/json' \
 //     -d '{"longUrl":"https://example.com/some/where"}'
 
 #include <pthread.h>
@@ -120,8 +120,8 @@ int main() {
   LOG(INFO) << "r3dr_v2 running on http://" << options.address << ":" << transport.port();
   LOG(INFO) << "Serving:";
   LOG(INFO) << "  GET  http://localhost:" << transport.port() << "/health";
-  LOG(INFO) << "  POST http://localhost:" << transport.port() << "/r3dr/v1/shorten";
-  LOG(INFO) << "  GET  http://localhost:" << transport.port() << "/r3dr/v1/r/{slug}";
+  LOG(INFO) << "  POST http://localhost:" << transport.port() << "/r3dr/v2/shorten";
+  LOG(INFO) << "  GET  http://localhost:" << transport.port() << "/r3dr/v2/r/{slug}";
 
   int signal_number = 0;
   sigwait(&shutdown_signals, &signal_number);

@@ -19,7 +19,7 @@ individually targetable.
   - [`microgpt-serve`](../../domains/ai/apis/microgpt_serve) (port 8087)
   - [`one_d4`](../../domains/games/apis/one_d4) (port 8088)
   - [`one_d4_v2`](../../domains/games/apis/one_d4_v2) (port 8090)
-  - [`r3dr_v2`](../../domains/r3dr/apis/r3dr_v2) (port 8091, `/r3dr/v1/*`)
+  - [`r3dr_v2`](../../domains/r3dr/apis/r3dr_v2) (port 8091, `/r3dr/v2/*`)
 
 - **r3dr.net** - URL shortener service
   - [`r3dr`](../../domains/r3dr/apis/r3dr) (port 8085)

@@ -80,7 +80,7 @@ class ProductionChainTest : public ::testing::Test {
   smithy::http::HttpResponse RedirectAs(const std::string& peer) {
     smithy::http::HttpRequest request;
     request.method = "GET";
-    request.target = "/r3dr/v1/r/DAA";
+    request.target = "/r3dr/v2/r/DAA";
     request.peer_address = peer;
     auto response = loopback_->Send(std::move(request));
     EXPECT_TRUE(response.ok());
@@ -114,7 +114,7 @@ TEST_F(ProductionChainTest, ServesRedirectHealthAnd429ThroughTheChain) {
   // either. A per-op split in main.cc must fail here.
   smithy::http::HttpRequest shorten;
   shorten.method = "POST";
-  shorten.target = "/r3dr/v1/shorten";
+  shorten.target = "/r3dr/v2/shorten";
   shorten.peer_address = "203.0.113.4";
   shorten.headers.Set("content-type", "application/json");
   shorten.body = R"({"longUrl":"https://www.example.com","expiresAt":1755003600000})";
@@ -138,7 +138,7 @@ TEST_F(ProductionChainTest, ServesRedirectHealthAnd429ThroughTheChain) {
 TEST_F(ProductionChainTest, ShortenCarriesItsOwnRouteLabel) {
   smithy::http::HttpRequest request;
   request.method = "POST";
-  request.target = "/r3dr/v1/shorten";
+  request.target = "/r3dr/v2/shorten";
   request.peer_address = "203.0.113.6";
   request.headers.Set("content-type", "application/json");
   request.body = R"({"longUrl":"https://www.example.com","expiresAt":1755003600000})";
@@ -167,7 +167,7 @@ TEST_F(ProductionChainTest, TheTransportAndTheUrlBoundSplitTheOversizedSpace) {
 
   smithy::http::HttpRequest big_url;
   big_url.method = "POST";
-  big_url.target = "/r3dr/v1/shorten";
+  big_url.target = "/r3dr/v2/shorten";
   big_url.peer_address = "203.0.113.9";
   big_url.headers.Set("content-type", "application/json");
   big_url.body =

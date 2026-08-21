@@ -1,15 +1,15 @@
 # r3dr_v2
 
 The C++ URL shortener (#1359), replacing the Go service in `../r3dr`. Serves
-`/r3dr/v1/*` behind `api.muchq.com` beside the Go binary (which keeps
+`/r3dr/v2/*` behind `api.muchq.com` beside the Go binary (which keeps
 `r3dr.net` until deprecation). Separate databases, no shared state.
 
 ## Routes
 
-- `POST /r3dr/v1/shorten` → 201 `{"slug":"..."}`. `longUrl`: 11–1000 chars,
+- `POST /r3dr/v2/shorten` → 201 `{"slug":"..."}`. `longUrl`: 11–1000 chars,
   `http://`/`https://`, trait-validated. `expiresAt` (epoch millis)
   required: in the future, ceiling 30d.
-- `GET /r3dr/v1/r/{slug}` → 302 with `Location`. Expiry enforced in the SQL
+- `GET /r3dr/v2/r/{slug}` → 302 with `Location`. Expiry enforced in the SQL
   and in the cache entry. Unknown, expired, or non-slug-shaped: one modeled JSON 404. Store failure: 500, not 404.
 - `/health` via aura.
 
@@ -45,9 +45,9 @@ refuses rather than alias a slug.
 ```bash
 R3DR_V2_DB_URL=postgresql://user:pass@localhost:5432/r3dr_v2 \
   bazel run //domains/r3dr/apis/r3dr_v2
-curl localhost:8091/r3dr/v1/shorten -H 'content-type: application/json' \
+curl localhost:8091/r3dr/v2/shorten -H 'content-type: application/json' \
   -d "{\"longUrl\":\"https://example.com/some/where\",\"expiresAt\":$(( ($(date +%s) + 3600) * 1000 ))}"
-curl -i localhost:8091/r3dr/v1/r/AQA
+curl -i localhost:8091/r3dr/v2/r/AQA
 ```
 
 `bazel test //domains/r3dr/apis/r3dr_v2/...` — `pg_url_store_test` skips

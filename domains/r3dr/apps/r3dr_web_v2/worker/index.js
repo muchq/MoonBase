@@ -12,7 +12,7 @@ export default {
     const url = new URL(request.url);
     const slug = /^\/r\/([^/]+)\/?$/.exec(url.pathname)?.[1];
     if (slug && (request.method === 'GET' || request.method === 'HEAD')) {
-      return Response.redirect(`${API_BASE}/r3dr/v1/r/${slug}`, 302);
+      return Response.redirect(`${API_BASE}/r3dr/v2/r/${slug}`, 302);
     }
     return env.ASSETS.fetch(request);
   },

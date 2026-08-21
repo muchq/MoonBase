@@ -40,7 +40,7 @@ function errorMessage(body: string | null): string | null {
 export async function shorten(longUrl: string, expiresAt: number): Promise<{ slug: string }> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}/r3dr/v1/shorten`, {
+    res = await fetch(`${API_BASE}/r3dr/v2/shorten`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ longUrl, expiresAt }),

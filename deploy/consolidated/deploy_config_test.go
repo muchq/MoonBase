@@ -1014,8 +1014,8 @@ var publicRoutes = []struct {
 	// Compose network, but the public route is served through Caddy.
 	{"@post_v2_analyze", []string{"method POST", "path /v2/analyze"}, "one_d4_v2:8090"},
 	// r3dr_v2 (#1359): the redirect matcher is the product.
-	{"@post_r3dr_shorten", []string{"method POST", "path /r3dr/v1/shorten"}, "r3dr_v2:8091"},
-	{"@get_r3dr_redirect", []string{"method GET", "path /r3dr/v1/r/*"}, "r3dr_v2:8091"},
+	{"@post_r3dr_shorten", []string{"method POST", "path /r3dr/v2/shorten"}, "r3dr_v2:8091"},
+	{"@get_r3dr_redirect", []string{"method GET", "path /r3dr/v2/r/*"}, "r3dr_v2:8091"},
 }
 
 func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {

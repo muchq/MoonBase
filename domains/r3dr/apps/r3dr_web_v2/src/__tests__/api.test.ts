@@ -19,7 +19,7 @@ describe('shorten', () => {
 
     expect(result).toEqual({ slug: 'AQA' });
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://api.muchq.com/r3dr/v1/shorten');
+    expect(url).toBe('https://api.muchq.com/r3dr/v2/shorten');
     expect(init.method).toBe('POST');
     // Without this header the browser sends text/plain and drops out of the
     // preflighted class the Caddy CORS allow-list serves.

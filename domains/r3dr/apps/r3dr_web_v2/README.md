@@ -12,7 +12,7 @@ that served the Go service and its static page.
   result. The last five links live in `localStorage`; nothing is tracked
   server-side.
 - **Redirect** — the worker 302s `GET /r/{slug}` — v1's short-link shape — to
-  `api.muchq.com/r3dr/v1/r/{slug}`, so the API's per-client rate limit still
+  `api.muchq.com/r3dr/v2/r/{slug}`, so the API's per-client rate limit still
   keys on the real client. Everything else is the SPA.
 
 The browser calls `https://api.muchq.com` directly; CORS for this origin is

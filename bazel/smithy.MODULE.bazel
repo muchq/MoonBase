@@ -8,7 +8,7 @@ bazel_dep(name = "smithy_cpp", version = "0.0.0")
 #
 # Pinned past muchq/smithy-cpp#187 (46bcd4d): modeled 3xx redirects — a
 # typed success carrying Location instead of a GenericError. r3dr_v2's
-# GET /r3dr/v1/r/{slug} needs it (#1359).
+# GET /r3dr/v2/r/{slug} needs it (#1359).
 #
 # Carries muchq/smithy-cpp#173 (4208f791): terminal transitions fire the
 # parked send before the parked receive so End()/Close cannot deadlock when a
