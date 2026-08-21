@@ -1075,6 +1075,83 @@ func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {
 	}
 }
 
+// i.iili.uk is the short-link redirect host (#1359): A-record to the
+// consolidated box, SPA stays on Cloudflare at iili.uk. Public path is
+// /r/{slug}; r3dr_v2's modeled path is /r3dr/v2/r/{slug}, so this site
+// rewrites — the deliberate exception to "gateway path == model path"
+// on api.muchq.com. HEAD is forwarded with GET (#1433 pins end-to-end 302).
+func TestIiliRedirectHostRewritesSlugPathsToR3drV2(t *testing.T) {
+	site := caddySiteBlock(t, "Caddyfile", "i.iili.uk")
+
+	matcher := ""
+	for i, line := range site {
+		if !strings.HasPrefix(line, "handle @") || !strings.HasSuffix(line, "{") {
+			continue
+		}
+		body := caddyBlockAt(site, i)
+		rewrites := false
+		proxies := false
+		for _, inner := range body {
+			if strings.HasPrefix(inner, "rewrite ") && strings.Contains(inner, "/r3dr/v2") {
+				rewrites = true
+			}
+			if strings.HasPrefix(inner, "reverse_proxy r3dr_v2:8091") {
+				proxies = true
+			}
+		}
+		if rewrites && proxies {
+			matcher = strings.TrimSuffix(strings.Fields(line)[1], "{")
+			break
+		}
+	}
+	if matcher == "" {
+		t.Fatalf("no `handle @… { rewrite …/r3dr/v2…; reverse_proxy r3dr_v2:8091 }` in the "+
+			"i.iili.uk block; short links would 404 or hit the wrong upstream. Block was:\n%s",
+			strings.Join(site, "\n"))
+	}
+
+	defined := false
+	for i, line := range site {
+		if line != matcher+" {" {
+			continue
+		}
+		defined = true
+		want := map[string]bool{
+			"method GET HEAD": false,
+			"path /r/*":       false,
+		}
+		for _, inner := range caddyBlockAt(site, i) {
+			if _, ok := want[inner]; ok {
+				want[inner] = true
+			}
+		}
+		for directive, found := range want {
+			if !found {
+				t.Errorf("%s does not declare %q — GET/HEAD /r/* is the public short-link "+
+					"contract on i.iili.uk.", matcher, directive)
+			}
+		}
+	}
+	if !defined {
+		t.Fatalf("%s gates the redirect proxy but is never defined in the block. Block was:\n%s",
+			matcher, strings.Join(site, "\n"))
+	}
+}
+
+// r3dr.net's Caddy frontage retired with the iili.uk / i.iili.uk split;
+// the Go service stays in compose until chunk 3, but nothing internet-facing
+// should still name the old host (any address-line spelling).
+func TestR3drNetCaddySitesAreGone(t *testing.T) {
+	for _, host := range []string{"r3dr.net", "www.r3dr.net"} {
+		for _, line := range directiveLines(t, "Caddyfile") {
+			if strings.Contains(line, host) {
+				t.Errorf("Caddyfile still names %q (%q); short links live on "+
+					"i.iili.uk now and the SPA on Cloudflare at iili.uk.", host, line)
+			}
+		}
+	}
+}
+
 // Whether a Caddy line mentions one of the route's path directives (glob
 // suffix trimmed).
 func namesARoutePath(line string, directives []string) bool {

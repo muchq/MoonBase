@@ -16,18 +16,18 @@ describe('CopyButton', () => {
   it('copies the exact text and confirms', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     stubClipboard(writeText);
-    render(<CopyButton text="https://iili.uk/r/AQA" />);
+    render(<CopyButton text="https://i.iili.uk/r/AQA" />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy https://iili.uk/r/AQA' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy https://i.iili.uk/r/AQA' }));
 
     expect(await screen.findByRole('button', { name: 'Copied' })).toHaveTextContent('Copied ✓');
-    expect(writeText).toHaveBeenCalledWith('https://iili.uk/r/AQA');
+    expect(writeText).toHaveBeenCalledWith('https://i.iili.uk/r/AQA');
   });
 
   it('admits failure when no copy path works', async () => {
     stubClipboard(vi.fn().mockRejectedValue(new Error('denied')));
     document.execCommand = vi.fn().mockReturnValue(false);
-    render(<CopyButton text="https://iili.uk/r/AQA" />);
+    render(<CopyButton text="https://i.iili.uk/r/AQA" />);
 
     fireEvent.click(screen.getByRole('button', { name: /^Copy / }));
 
@@ -37,7 +37,7 @@ describe('CopyButton', () => {
   it('falls back to execCommand when the clipboard API is refused', async () => {
     stubClipboard(vi.fn().mockRejectedValue(new Error('denied')));
     document.execCommand = vi.fn().mockReturnValue(true);
-    render(<CopyButton text="https://iili.uk/r/AQA" />);
+    render(<CopyButton text="https://i.iili.uk/r/AQA" />);
 
     fireEvent.click(screen.getByRole('button', { name: /^Copy / }));
 

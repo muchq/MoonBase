@@ -84,7 +84,7 @@ describe('shorten', () => {
 });
 
 describe('shortLink', () => {
-  it('mints iili.uk short links', () => {
-    expect(shortLink('AQA')).toBe('https://iili.uk/r/AQA');
+  it('mints i.iili.uk short links', () => {
+    expect(shortLink('AQA')).toBe('https://i.iili.uk/r/AQA');
   });
 });
