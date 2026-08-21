@@ -683,44 +683,89 @@ func TestTheMcpCorsAllowListCarriesTheProtocolHeaders(t *testing.T) {
 func TestApiCorsEchoesEachAllowedOrigin(t *testing.T) {
 	site := caddySiteBlock(t, "Caddyfile", "api.muchq.com")
 
+	// Split the preflight handler from the rest: each origin needs its echo
+	// in BOTH, and a global count of two can't tell one missing from one
+	// duplicated.
+	var preflight []string
+	rest := site
+	for i, line := range site {
+		if line == "handle @options {" {
+			preflight = caddyBlockAt(site, i)
+			rest = append(append([]string{}, site[:i]...), site[i+len(preflight)+2:]...)
+			break
+		}
+	}
+	if preflight == nil {
+		t.Fatalf("no `handle @options` block in api.muchq.com; preflights fall through to "+
+			"the 404 handler and every cross-origin POST dies. Block was:\n%s",
+			strings.Join(site, "\n"))
+	}
+
 	origins := map[string]string{
 		"@from_muchq":    "https://muchq.com",
 		"@from_r3dr":     "https://r3dr.net",
 		"@from_r3dr_dev": "http://localhost:5173",
 	}
-	for matcher, origin := range origins {
-		defined := false
-		echoes := 0
-		for _, line := range site {
-			if line == matcher+" header Origin "+origin {
-				defined = true
-			}
-			if line == "header "+matcher+` Access-Control-Allow-Origin "`+origin+`"` {
-				echoes++
+	count := func(lines []string, want string) int {
+		n := 0
+		for _, line := range lines {
+			if line == want {
+				n++
 			}
 		}
-		if !defined {
+		return n
+	}
+	for matcher, origin := range origins {
+		if count(site, matcher+" header Origin "+origin) != 1 {
 			t.Errorf("no `%s header Origin %s` matcher in the api.muchq.com block; that "+
 				"frontend's fetches lose CORS.", matcher, origin)
 		}
-		if echoes != 2 {
-			t.Errorf("found %d ACAO echoes for %s, want 2 (the response's and the "+
-				"preflight's).", echoes, origin)
+		echo := "header " + matcher + ` Access-Control-Allow-Origin "` + origin + `"`
+		if count(preflight, echo) != 1 {
+			t.Errorf("the @options preflight handler lacks the ACAO echo for %s; the browser "+
+				"never sends the POST.", origin)
+		}
+		if count(rest, echo) != 1 {
+			t.Errorf("ordinary responses lack the ACAO echo for %s; the browser drops the "+
+				"response it already received.", origin)
 		}
 	}
 
-	vary := 0
+	// The allow-list is closed: an origin added to the Caddyfile must be
+	// added here deliberately.
 	for _, line := range site {
+		if strings.HasPrefix(line, "@from_") {
+			matcher := strings.Fields(line)[0]
+			if _, known := origins[matcher]; !known {
+				t.Errorf("unexpected origin matcher %q; add it to this test's allow-list "+
+					"deliberately or remove it.", line)
+			}
+		}
 		if strings.HasPrefix(line, "Access-Control-Allow-Origin") {
 			t.Errorf("unconditional %q would override the per-origin echo for every caller.", line)
 		}
-		if line == "Vary Origin" {
-			vary++
-		}
 	}
-	if vary != 2 {
-		t.Errorf("found %d `Vary Origin` declarations, want 2; without both, a shared cache "+
-			"can serve one origin's answer to another.", vary)
+
+	for _, half := range []struct {
+		name  string
+		lines []string
+	}{{"preflight handler", preflight}, {"response path", rest}} {
+		if n := count(half.lines, "Vary Origin"); n != 1 {
+			t.Errorf("found %d `Vary Origin` in the %s, want 1; a shared cache can serve one "+
+				"origin's answer to another.", n, half.name)
+		}
+		// Content-Type in the allow-list is what admits the JSON POST.
+		found := false
+		for _, line := range half.lines {
+			if strings.HasPrefix(line, "Access-Control-Allow-Headers") &&
+				strings.Contains(line, "Content-Type") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("the %s allow-list lost Content-Type; the shorten preflight fails and "+
+				"no JSON POST leaves the browser.", half.name)
+		}
 	}
 }
 

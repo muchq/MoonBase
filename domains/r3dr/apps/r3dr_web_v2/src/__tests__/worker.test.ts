@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import worker from '../../worker/index.js';
+import { shortLink } from '../api';
 
 function makeEnv() {
   // A fresh Response per call: bodies are single-read.
@@ -15,6 +16,29 @@ describe('worker', () => {
     expect(response.status).toBe(302);
     expect(response.headers.get('Location')).toBe('https://api.muchq.com/r3dr/v1/r/AQA');
     expect(env.ASSETS.fetch).not.toHaveBeenCalled();
+  });
+
+  it('handles exactly the links the SPA mints', async () => {
+    const env = makeEnv();
+    const response = await worker.fetch(new Request(shortLink('AQA')), env);
+    expect(response.status).toBe(302);
+  });
+
+  it('gives HEAD the same answer as GET — unfurlers and probes see the redirect', async () => {
+    const env = makeEnv();
+    const response = await worker.fetch(
+      new Request('https://r3dr.net/r/AQA', { method: 'HEAD' }),
+      env
+    );
+    expect(response.status).toBe(302);
+    expect(env.ASSETS.fetch).not.toHaveBeenCalled();
+  });
+
+  it('tolerates a trailing slash', async () => {
+    const env = makeEnv();
+    const response = await worker.fetch(new Request('https://r3dr.net/r/AQA/'), env);
+    expect(response.status).toBe(302);
+    expect(response.headers.get('Location')).toBe('https://api.muchq.com/r3dr/v1/r/AQA');
   });
 
   it('serves everything else from assets', async () => {

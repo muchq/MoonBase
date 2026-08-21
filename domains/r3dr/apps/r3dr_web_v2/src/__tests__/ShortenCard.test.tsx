@@ -7,7 +7,9 @@ import * as api from '../api';
 vi.mock('../api', { spy: true });
 
 const NOW = 1755000000000;
-const DAY = 24 * 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 describe('normalizeUrl', () => {
   it('prefixes bare domains with https://', () => {
@@ -15,19 +17,30 @@ describe('normalizeUrl', () => {
     expect(normalizeUrl('  example.com  ')).toBe('https://example.com');
   });
 
-  it('leaves schemes alone, right or wrong', () => {
+  it('lowercases an uppercased http(s) scheme instead of bouncing it', () => {
+    expect(normalizeUrl('HTTPS://Example.com/Path')).toBe('https://Example.com/Path');
+    expect(normalizeUrl('HTTP://g.co')).toBe('http://g.co');
+  });
+
+  it('leaves other schemes alone to fail validation', () => {
     expect(normalizeUrl('http://example.com')).toBe('http://example.com');
     expect(normalizeUrl('ftp://example.com')).toBe('ftp://example.com');
   });
 });
 
 describe('validateUrl', () => {
-  it('mirrors the API traits', () => {
+  it('mirrors the API traits at both edges', () => {
     expect(validateUrl('')).toMatch(/paste/i);
     expect(validateUrl('ftp://example.com')).toMatch(/http/);
     expect(validateUrl('http://g.c')).toMatch(/short/);
-    expect(validateUrl(`https://example.com/${'a'.repeat(1000)}`)).toMatch(/1000/);
     expect(validateUrl('http://g.co')).toBeNull();
+    expect(validateUrl('https://e.co/' + 'a'.repeat(987))).toBeNull(); // exactly 1000
+    expect(validateUrl('https://e.co/' + 'a'.repeat(988))).toMatch(/1000/);
+  });
+
+  it('counts code points like the server, not UTF-16 units', () => {
+    // 13 + 987 code points = 1000; twice that many UTF-16 units.
+    expect(validateUrl('https://e.co/' + '🌸'.repeat(987))).toBeNull();
   });
 });
 
@@ -51,6 +64,7 @@ describe('ShortenCard', () => {
       'href',
       'https://r3dr.net/r/AQA'
     );
+    expect(screen.getByText(/expires in 7 days/)).toBeInTheDocument();
     expect(onMinted).toHaveBeenCalledWith({
       slug: 'AQA',
       longUrl: 'https://example.com/page',
@@ -60,18 +74,50 @@ describe('ShortenCard', () => {
     expect(screen.getByLabelText('Long link')).toHaveValue('');
   });
 
-  it('mints with a chosen expiry chip', async () => {
+  it('mints a bare domain through the real form', async () => {
+    vi.mocked(api.shorten).mockResolvedValue({ slug: 'AQA' });
+    render(<ShortenCard onMinted={vi.fn()} />);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Long link'), 'example.com/page');
+    await user.click(screen.getByRole('button', { name: 'Shorten' }));
+
+    await screen.findByRole('link', { name: 'r3dr.net/r/AQA' });
+    expect(api.shorten).toHaveBeenCalledWith('https://example.com/page', NOW + 7 * DAY);
+  });
+
+  it('mints with a chosen expiry chip, the 30-day one under the ceiling', async () => {
     vi.mocked(api.shorten).mockResolvedValue({ slug: 'DAA' });
     render(<ShortenCard onMinted={vi.fn()} />);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('radio', { name: '1 hour' }));
-    expect(screen.getByRole('radio', { name: '1 hour' })).toHaveAttribute('aria-checked', 'true');
+    await user.click(screen.getByRole('button', { name: '30 days' }));
+    expect(screen.getByRole('button', { name: '30 days' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+    expect(screen.getByRole('button', { name: '7 days' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
 
     await user.type(screen.getByLabelText('Long link'), 'https://example.com/page');
     await user.click(screen.getByRole('button', { name: 'Shorten' }));
 
-    expect(api.shorten).toHaveBeenCalledWith('https://example.com/page', NOW + 60 * 60 * 1000);
+    expect(api.shorten).toHaveBeenCalledWith(
+      'https://example.com/page',
+      NOW + 30 * DAY - 5 * MINUTE
+    );
+  });
+
+  it('asks for a link on an empty submit', async () => {
+    render(<ShortenCard onMinted={vi.fn()} />);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Shorten' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/paste/i);
+    expect(api.shorten).not.toHaveBeenCalled();
   });
 
   it('blocks invalid input before it reaches the API', async () => {
@@ -91,13 +137,51 @@ describe('ShortenCard', () => {
     render(<ShortenCard onMinted={vi.fn()} />);
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText('Long link'), 'https://example.com/page');
+    const field = screen.getByLabelText('Long link');
+    await user.type(field, 'https://example.com/page');
     await user.click(screen.getByRole('button', { name: 'Shorten' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('expiresAt is in the past');
 
+    await user.clear(field);
+    await user.type(field, 'https://example.com/page');
+    await user.click(screen.getByRole('button', { name: 'Shorten' }));
+    await screen.findByRole('link', { name: 'r3dr.net/r/AQA' });
+    expect(screen.getByRole('alert')).toBeEmptyDOMElement();
+  });
+
+  it('ignores a second submit while one is in flight', async () => {
+    let release!: (value: { slug: string }) => void;
+    vi.mocked(api.shorten).mockImplementation(
+      () => new Promise((resolve) => (release = resolve))
+    );
+    render(<ShortenCard onMinted={vi.fn()} />);
+
+    const user = userEvent.setup();
     await user.type(screen.getByLabelText('Long link'), 'https://example.com/page');
     await user.click(screen.getByRole('button', { name: 'Shorten' }));
-    expect(await screen.findByRole('link', { name: 'r3dr.net/r/AQA' })).toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Shortening…' }));
+
+    release({ slug: 'AQA' });
+    await screen.findByRole('link', { name: 'r3dr.net/r/AQA' });
+    expect(api.shorten).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps text typed while the request was in flight', async () => {
+    let release!: (value: { slug: string }) => void;
+    vi.mocked(api.shorten).mockImplementation(
+      () => new Promise((resolve) => (release = resolve))
+    );
+    render(<ShortenCard onMinted={vi.fn()} />);
+
+    const user = userEvent.setup();
+    const field = screen.getByLabelText('Long link');
+    await user.type(field, 'https://example.com/first');
+    await user.click(screen.getByRole('button', { name: 'Shorten' }));
+    await user.clear(field);
+    await user.type(field, 'https://example.com/next');
+
+    release({ slug: 'AQA' });
+    await screen.findByRole('link', { name: 'r3dr.net/r/AQA' });
+    expect(field).toHaveValue('https://example.com/next');
   });
 });

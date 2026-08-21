@@ -35,14 +35,21 @@ export default function CopyButton({ text, compact = false }: { text: string; co
     timer.current = window.setTimeout(() => setState('idle'), 2000);
   }
 
+  const visible = state === 'idle' ? 'Copy' : state === 'copied' ? 'Copied ✓' : 'Copy failed';
   return (
-    <button
-      type="button"
-      className={`copy-btn${compact ? ' copy-btn--compact' : ''}${state === 'copied' ? ' copied' : ''}`}
-      onClick={copy}
-      aria-label={`Copy ${text}`}
-    >
-      {state === 'idle' ? 'Copy' : state === 'copied' ? 'Copied ✓' : 'Press ⌘C'}
-    </button>
+    <>
+      <button
+        type="button"
+        className={`copy-btn${compact ? ' copy-btn--compact' : ''}${state === 'copied' ? ' copied' : ''}`}
+        onClick={copy}
+        aria-label={state === 'idle' ? `Copy ${text}` : visible.replace(' ✓', '')}
+      >
+        {visible}
+      </button>
+      {/* The label swap alone is silent to screen readers. */}
+      <span className="sr-only" aria-live="polite">
+        {state === 'idle' ? '' : state === 'copied' ? 'Copied' : 'Copy failed'}
+      </span>
+    </>
   );
 }

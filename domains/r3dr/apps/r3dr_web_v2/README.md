@@ -56,7 +56,13 @@ Cloudflare CI is configured in the Workers dashboard:
 
 Pointing the `r3dr.net` custom domain at this worker is the cutover: the Go
 VM stops receiving traffic, and slugs minted by v1 (stored in its own
-database) stop resolving. That retirement is #1359 chunk 3.
+database) stop resolving — as 404s, not misdirections: v2's migrations floor
+its `url_ids` sequence above v1's lifetime id space, since both generations
+derive the same slug from the same id. That retirement is #1359 chunk 3.
+
+To smoke-test on a `workers.dev` preview before the flip, build with
+`VITE_SHORT_LINK_BASE=https://r3dr-web.<account>.workers.dev/r/` — minted
+`r3dr.net` links would otherwise still resolve through the old stack.
 
 ## Dependencies
 

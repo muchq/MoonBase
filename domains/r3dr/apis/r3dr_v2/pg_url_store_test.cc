@@ -133,6 +133,20 @@ TEST_F(PgUrlStoreTest, AForeignSlugAtOurIdRefusesEvenWithMatchingFields) {
   EXPECT_EQ(refused.status().code(), absl::StatusCode::kInternal);
 }
 
+// v1 minted the same slugs from its own url_ids; the migration floor keeps
+// v2's ids out of v1's space so dead v1 links 404 rather than alias — and
+// re-floors a rewound sequence on the next boot.
+TEST_F(PgUrlStoreTest, MigrationsFloorTheSequenceAboveV1sIdSpace) {
+  ASSERT_TRUE(db_->Exec("SELECT setval('url_ids', 3)").ok());
+  ASSERT_TRUE(RunMigrations(*db_).ok());
+
+  const auto raw = db_->Exec("SELECT last_value FROM url_ids");
+  ASSERT_TRUE(raw.ok());
+  int64_t last = 0;
+  ASSERT_TRUE(absl::SimpleAtoi(*raw->Get(0, 0), &last));
+  EXPECT_GE(last, 1000000);
+}
+
 // A sequence behind the table (an import without setval) must refuse, not
 // alias someone else's slug.
 TEST_F(PgUrlStoreTest, ASequenceBehindTheTableRefusesToAliasASlug) {

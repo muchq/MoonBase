@@ -1,10 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import ShortenCard from './components/ShortenCard';
 import RecentLinks from './components/RecentLinks';
 import { addRecent, clearRecent, loadRecent, type RecentLink } from './recent';
 
 export default function App() {
   const [recent, setRecent] = useState<RecentLink[]>(() => loadRecent(Date.now()));
+
+  // Re-render each minute so "expires in …" stays true in a tab left open,
+  // and dead links drop out. In-memory prune, not a storage reload — the
+  // list must survive when storage doesn't.
+  useEffect(() => {
+    const id = window.setInterval(
+      () => setRecent((prev) => prev.filter((link) => link.expiresAt > Date.now())),
+      60_000
+    );
+    return () => window.clearInterval(id);
+  }, []);
 
   return (
     <div className="shell">

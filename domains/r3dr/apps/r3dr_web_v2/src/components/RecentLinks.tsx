@@ -12,10 +12,15 @@ export default function RecentLinks({
 }) {
   if (links.length === 0) return null;
   return (
-    <section className="recent" aria-label="Recent links">
+    <section className="recent" aria-labelledby="recent-heading">
       <div className="recent-head">
-        <h2>Recent links</h2>
-        <button type="button" className="ghost-btn" onClick={onClear}>
+        <h2 id="recent-heading">Recent links</h2>
+        <button
+          type="button"
+          className="ghost-btn"
+          onClick={onClear}
+          aria-label="Clear recent links"
+        >
           Clear
         </button>
       </div>

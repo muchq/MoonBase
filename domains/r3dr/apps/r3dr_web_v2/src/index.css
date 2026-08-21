@@ -9,11 +9,11 @@
   --border: #d9e4d4;
   --border-bright: #c2d4bd;
   --text: #2c3a31;
-  --text-muted: #6b7d70;
-  --accent: #35935a;
-  --accent-bright: #237a47;
-  --accent-soft: rgba(53, 147, 90, 0.13);
-  --blossom: #e07aa4;
+  --text-muted: #5c6f63;
+  --accent: #2e7d4f;
+  --accent-deep: #1f5c39;
+  --accent-soft: rgba(46, 125, 79, 0.13);
+  --blossom: #cf5f8f;
   --success: #2e7d4f;
   --error: #c0504d;
   --radius: 10px;
@@ -77,7 +77,7 @@ body::before {
   line-height: 1.1;
   /* Leaf gradient; blending green into pink muddies, so the blossom gets
      one glyph to itself instead. */
-  background: linear-gradient(135deg, #278a4e 0%, #5cb974 100%);
+  background: linear-gradient(135deg, #27824b 0%, #3f9e61 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -85,7 +85,7 @@ body::before {
 }
 
 .wordmark-blossom {
-  background: linear-gradient(135deg, var(--blossom) 0%, #ef9dbd 100%);
+  background: linear-gradient(135deg, #c9548a 0%, #d66b98 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -149,7 +149,7 @@ body::before {
 }
 
 .field-row input::placeholder {
-  color: #a2b2a5;
+  color: #6f8174;
 }
 
 .field-row input:focus {
@@ -160,7 +160,8 @@ body::before {
 
 .submit-btn {
   padding: 0.8rem 1.35rem;
-  background: linear-gradient(135deg, #3ea768 0%, var(--accent) 100%);
+  /* White on green: both stops hold 4.5:1 for the 16px/600 label. */
+  background: linear-gradient(135deg, #338457 0%, #2a7148 100%);
   color: #fff;
   border: none;
   border-radius: var(--radius);
@@ -172,20 +173,21 @@ body::before {
   transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease;
 }
 
-.submit-btn:hover:not(:disabled) {
+.submit-btn:hover:not([aria-busy="true"]) {
   filter: brightness(1.05);
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(53, 147, 90, 0.32);
+  box-shadow: 0 6px 18px rgba(46, 125, 79, 0.32);
 }
 
-.submit-btn:active:not(:disabled) {
+.submit-btn:active:not([aria-busy="true"]) {
   transform: translateY(0);
   box-shadow: none;
 }
 
-.submit-btn:disabled {
-  opacity: 0.6;
-  cursor: wait;
+/* Busy, not disabled: disabling would blur keyboard focus. */
+.submit-btn[aria-busy="true"] {
+  opacity: 0.75;
+  cursor: progress;
 }
 
 /* Expiry chips */
@@ -217,13 +219,13 @@ body::before {
 
 .chip:hover {
   border-color: var(--accent);
-  color: var(--accent-bright);
+  color: var(--accent-deep);
 }
 
 .chip--on {
   background: var(--accent-soft);
   border-color: var(--accent);
-  color: var(--accent-bright);
+  color: var(--accent-deep);
   font-weight: 600;
 }
 
@@ -315,7 +317,7 @@ body::before {
 
 .copy-btn:hover {
   border-color: var(--accent);
-  color: var(--accent-bright);
+  color: var(--accent-deep);
 }
 
 .copy-btn.copied {
@@ -365,7 +367,7 @@ body::before {
 }
 
 .ghost-btn:hover {
-  color: var(--accent-bright);
+  color: var(--accent-deep);
 }
 
 .recent-list {
@@ -398,7 +400,7 @@ body::before {
 .recent-urls a {
   font-family: var(--font-mono);
   font-size: 0.9rem;
-  color: var(--accent-bright);
+  color: var(--accent-deep);
   text-decoration: none;
   overflow-wrap: anywhere;
 }
@@ -417,14 +419,14 @@ body::before {
 
 .recent-expiry {
   font-size: 0.75rem;
-  color: #8a9a8d;
+  color: var(--text-muted);
 }
 
 /* Footer */
 .footer {
   margin-top: auto;
   padding-top: 2.5rem;
-  color: #8a9a8d;
+  color: var(--text-muted);
   font-size: 0.8rem;
   text-align: center;
 }
@@ -433,6 +435,27 @@ body::before {
   font-family: var(--font-mono);
   font-size: 0.75rem;
   color: var(--text-muted);
+}
+
+/* Screen-reader-only announcements (CopyButton's state) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* An empty, always-mounted live region: zero footprint until it fills. */
+.live-slot {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-height: 0;
 }
 
 /* Keyboard focus everywhere the mouse styles are */

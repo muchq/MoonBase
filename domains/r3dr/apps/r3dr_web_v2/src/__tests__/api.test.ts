@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { shorten, shortLink, type ApiError } from '../api';
+import { shorten, shortLink } from '../api';
 
 function mockFetch(status: number, body: string) {
   const fn = vi.fn().mockResolvedValue(
@@ -12,7 +12,7 @@ function mockFetch(status: number, body: string) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('shorten', () => {
-  it('POSTs longUrl and expiresAt and returns the slug', async () => {
+  it('POSTs longUrl and expiresAt as JSON and returns the slug', async () => {
     const fetchMock = mockFetch(201, '{"slug":"AQA"}');
 
     const result = await shorten('https://example.com/page', 1755003600000);
@@ -21,6 +21,9 @@ describe('shorten', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('https://api.muchq.com/r3dr/v1/shorten');
     expect(init.method).toBe('POST');
+    // Without this header the browser sends text/plain and drops out of the
+    // preflighted class the Caddy CORS allow-list serves.
+    expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
     expect(JSON.parse(init.body)).toEqual({
       longUrl: 'https://example.com/page',
       expiresAt: 1755003600000,
@@ -55,13 +58,19 @@ describe('shorten', () => {
     );
   });
 
-  it('attaches the status for callers that branch on it', async () => {
-    mockFetch(500, 'oops');
+  it('never renders an empty error for a bodyless gateway failure', async () => {
+    mockFetch(502, '');
 
-    await expect(shorten('https://example.com', 1)).rejects.toMatchObject({
-      status: 500,
-      message: 'oops',
-    } satisfies Partial<ApiError>);
+    await expect(shorten('https://example.com', 1)).rejects.toThrow(/something went wrong/i);
+  });
+
+  it('maps a network failure or timeout to a friendly message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockRejectedValue(new DOMException('signal timed out', 'TimeoutError'))
+    );
+
+    await expect(shorten('https://example.com', 1)).rejects.toThrow(/network trouble/i);
   });
 });
 

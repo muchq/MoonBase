@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { addRecent, clearRecent, loadRecent, type RecentLink } from '../recent';
 
 const NOW = 1755000000000;
@@ -10,6 +10,7 @@ const link = (slug: string, expiresAt = NOW + 1000): RecentLink => ({
 });
 
 beforeEach(() => localStorage.clear());
+afterEach(() => vi.restoreAllMocks());
 
 describe('addRecent + loadRecent', () => {
   it('round-trips through localStorage newest first', () => {
@@ -49,11 +50,11 @@ describe('addRecent + loadRecent', () => {
   });
 
   it('still returns the list when localStorage throws', () => {
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    // Restored in afterEach so a failed expect can't leak the throwing spy.
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new Error('quota');
     });
     expect(addRecent([], link('AAA')).map((l) => l.slug)).toEqual(['AAA']);
-    setItem.mockRestore();
   });
 });
 

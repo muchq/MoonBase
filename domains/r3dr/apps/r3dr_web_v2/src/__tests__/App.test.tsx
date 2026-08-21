@@ -51,7 +51,7 @@ describe('App', () => {
     render(<App />);
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'Clear' }));
+    await user.click(screen.getByRole('button', { name: 'Clear recent links' }));
 
     expect(screen.queryByRole('region', { name: 'Recent links' })).not.toBeInTheDocument();
     expect(localStorage.getItem('r3dr.recent')).toBeNull();
