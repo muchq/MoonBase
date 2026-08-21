@@ -156,5 +156,25 @@ describe('api', () => {
       expect(retryUnlessClientError(0, new Error('network'))).toBe(true);
       expect(retryUnlessClientError(3, new Error('network'))).toBe(false);
     });
+
+    it('still retries 408 and 429 — the two 4xx that are not deterministic', () => {
+      const timeout = Object.assign(new Error('timeout'), { status: 408 });
+      const throttled = Object.assign(new Error('throttled'), { status: 429 });
+      expect(retryUnlessClientError(0, timeout)).toBe(true);
+      expect(retryUnlessClientError(0, throttled)).toBe(true);
+      expect(retryUnlessClientError(3, throttled)).toBe(false);
+    });
+  });
+
+  describe('makeQueryClient', () => {
+    it('wires retryUnlessClientError as the default query retry', async () => {
+      // main.tsx cannot be imported under vitest (it renders into #root), so the wiring lives in
+      // this factory — otherwise deleting the defaultOptions line would leave every test green
+      // while restoring the ~7s retry delay on 4xx.
+      const { makeQueryClient } = await import('../api');
+      expect(makeQueryClient().getDefaultOptions().queries?.retry).toBe(
+        retryUnlessClientError
+      );
+    });
   });
 });

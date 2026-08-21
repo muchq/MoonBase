@@ -106,10 +106,10 @@ are validated at compile time; malformed strings (or numbers) are rejected. `dat
 are filter-only: they are not allowed in `IN` lists or in `groupBy` on `/v1/aggregate`.
 
 `played.at` itself stays available for sub-day precision — it compares the raw timestamp and
-requires a full ISO value (`played.at >= "2026-07-01T13:30:00"`, the stored UTC wall clock). A
-bare date there is rejected rather than silently compared as midnight, because `date` already
-means "that day" and a midnight comparison masquerading as one is the kind of zero-row answer
-nothing would ever flag.
+requires a full ISO value (`played.at >= "2026-07-01T13:30:00"`, the stored UTC wall clock; a
+trailing `Z` or offset is converted to UTC). A bare date there is rejected rather than silently
+compared as midnight, because `date` already means "that day" and a midnight comparison
+masquerading as one is the kind of zero-row answer nothing would ever flag.
 
 > **A date filter scopes the indexed corpus, not your whole game history.** Nothing reports which
 > periods have been indexed, and a `date` / `month` filter over a period that was never indexed
@@ -245,9 +245,9 @@ against the `motif_occurrences` table. 11 motifs are stored directly as rows in 
 - **Numbers**: integer literals, optionally negative. Examples: `2500`, `-1`, `0`
 - **Strings**: double-quoted. Backslash escapes supported. Examples: `"chess.com"`, `"B90"`, `"hikaru"`
 - **Timestamps**: `played.at` takes a full ISO timestamp string read as the stored UTC wall
-  clock: `played.at >= "2026-07-01T13:30:00"`. A bare date on `played.at` is rejected at compile
-  time — day and month filtering is what `date` / `month` are for (see
-  [Date scoping](#date-scoping)).
+  clock: `played.at >= "2026-07-01T13:30:00"`. A trailing `Z` or explicit offset is accepted and
+  converted to UTC. A bare date on `played.at` is rejected at compile time — day and month
+  filtering is what `date` / `month` are for (see [Date scoping](#date-scoping)).
 - **No NULL literal.** `played.at = NULL` — or any `= NULL` / `!= NULL`, or SQL's `IS NULL` — is
   a syntax error, deliberately: a game whose field is unset never matches *any* comparison (the
   NULL semantics described for the title/elo fields above), so there is nothing a NULL value
@@ -310,15 +310,24 @@ platform IN ["chess.com"] AND black.elo > 2700 AND motif(discovered_attack)
 
 ## Error Handling
 
-- **Unknown field**: `IllegalArgumentException` — "Unknown field: X"
-- **Unknown motif**: `IllegalArgumentException` — "Unknown motif: X"
+Two exception kinds, and the split is visible on the API's 400 envelope: a `ParseException`
+(syntax) carries a structured `position` field alongside `error`; an `IllegalArgumentException`
+(everything else below) carries only `error`, with any position mentioned in the prose.
+
 - **Syntax error**: `ParseException` — says what the grammar wanted in the language's own terms
   (`Expected a number or a double-quoted string, got 'B90'`), plus the position; common
-  near-misses get a specific hint (`NULL` → no NULL literal, an unquoted string → quote it, a
-  single-quoted string → use double quotes, two conditions with no connector → AND/OR)
-- **Unterminated string**: `IllegalArgumentException` — includes position
+  near-misses get a specific hint (`NULL` / `IS NULL` → no NULL literal, an unquoted string →
+  quote it, two conditions with no connector → AND/OR, an out-of-range number)
+- **Unknown field**: `IllegalArgumentException` — "Unknown field: X. Known fields: ..." (the
+  sorted roster, filterable and perspective)
+- **Unknown motif**: `IllegalArgumentException` — "Unknown motif: X. Known motifs: ..."
+- **Wrong value type**: `IllegalArgumentException` — a quoted number against a numeric field
+  (`white.elo takes a number, got: "2500" — drop the quotes`) or a bare number against a string
+  field; enforced at compile time so it cannot become an engine-dependent runtime error
+- **Single-quoted or unterminated string**: `IllegalArgumentException` — the fix is in the
+  message (`Strings use double quotes...`), position in prose only
 - **Bad `played.at` / `date` / `month` value**: `IllegalArgumentException` — names the field,
-  the accepted format, and the rejected value
+  the accepted format, and the rejected value; ISO-valid years outside 0–9999 are rejected too
 
 ## Security
 

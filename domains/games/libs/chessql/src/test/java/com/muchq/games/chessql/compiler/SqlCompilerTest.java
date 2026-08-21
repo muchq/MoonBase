@@ -598,9 +598,137 @@ public class SqlCompilerTest {
     assertThatThrownBy(() -> compile("played.at >= \"2026-07-01\""))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage(
-            "played.at requires a full ISO timestamp (\"YYYY-MM-DDTHH:MM:SS\", the UTC wall"
-                + " clock), got: 2026-07-01. To filter by day or month use date or month instead,"
-                + " e.g. date >= \"2026-07-01\" or month = \"2026-07\"");
+            "played.at requires a full ISO timestamp (\"YYYY-MM-DDTHH:MM:SS\", the stored UTC"
+                + " wall clock; a trailing Z or offset is converted), got: 2026-07-01. To filter"
+                + " by day or month use date or month instead, e.g. date >= \"2026-07-01\" or"
+                + " month = \"2026-07\"");
+  }
+
+  @Test
+  public void testPlayedAtAcceptsZuluAndOffsetTimestampsAsUtc() {
+    // "...T13:30:00Z" is the likeliest shape an MCP/LLM caller writes. The convention is a UTC
+    // wall clock, so a zone-qualified instant has exactly one correct reading — take it.
+    CompiledQuery zulu = compile("played.at >= \"2026-07-01T13:30:00Z\"");
+    assertThat(zulu.parameters()).isEqualTo(List.of(utc("2026-07-01T13:30:00Z")));
+
+    CompiledQuery offset = compile("played.at >= \"2026-07-01T18:30:00+05:00\"");
+    assertThat(offset.parameters()).isEqualTo(List.of(utc("2026-07-01T13:30:00Z")));
+  }
+
+  @Test
+  public void testPlayedAtTruncatesToMicroseconds() {
+    // Both engines store microsecond TIMESTAMPs, but only pgjdbc rounds the parameter; H2 would
+    // compare full nanoseconds. Truncating at compile time keeps the two engines agreeing.
+    CompiledQuery result = compile("played.at = \"2026-07-01T13:30:00.123456789\"");
+    assertThat(result.parameters())
+        .isEqualTo(List.of(LocalDateTime.of(2026, 7, 1, 13, 30, 0, 123_456_000)));
+  }
+
+  @Test
+  public void testDateScopingFieldsRejectAbsurdYears() {
+    // LocalDate/LocalDateTime accept year ±999,999,999; Postgres timestamps stop at 294276 AD.
+    // Reject at compile time so the caller gets a 400 with the format, not an engine-dependent
+    // 500 (or a silently wrapped comparison).
+    assertThatThrownBy(() -> compile("played.at > \"+300000000-01-01T00:00\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("played.at requires a full ISO timestamp");
+    assertThatThrownBy(() -> compile("date >= \"+300000000-01-01\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("date requires an ISO date string (\"YYYY-MM-DD\"), got: +300000000-01-01");
+    assertThatThrownBy(() -> compile("month = \"+300000000-01\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("month requires a \"YYYY-MM\" string, got: +300000000-01");
+  }
+
+  // === value/column type coercion ===
+  // JDBI binds a String parameter as VARCHAR; H2 coerces it against a typed column, Postgres
+  // rejects it at the operator — a 500 in production for a green local test. So a mistyped value
+  // is rejected at compile time, with the fix in the message.
+
+  @Test
+  public void testQuotedNumberAgainstAnIntColumnIsRejectedWithTheFix() {
+    assertThatThrownBy(() -> compile("white.elo >= \"2500\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("white.elo takes a number, got: \"2500\" — drop the quotes");
+  }
+
+  @Test
+  public void testBareNumberAgainstAStringColumnIsRejectedWithTheFix() {
+    assertThatThrownBy(() -> compile("eco = 90"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("eco takes a double-quoted string, got: 90 — add quotes: \"90\"");
+  }
+
+  @Test
+  public void testInListValuesAreCoercedPerColumnType() {
+    assertThatThrownBy(() -> compile("white_elo IN [\"2500\"]"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("white_elo takes a number");
+    assertThatThrownBy(() -> compile("platform IN [5]"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("platform takes a double-quoted string");
+  }
+
+  @Test
+  public void testPerspectiveValuesAreCoercedByKind() {
+    assertThatThrownBy(() -> compiler.compile(Parser.parse("me.elo >= \"2500\""), "hikaru"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("me.elo takes a number");
+    assertThatThrownBy(() -> compiler.compile(Parser.parse("me.color = 5"), "hikaru"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("me.color takes a double-quoted string");
+    assertThatThrownBy(() -> compiler.compile(Parser.parse("outcome IN [5]"), "hikaru"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("outcome takes a double-quoted string");
+  }
+
+  // === played.at parameter position on the re-ordering paths ===
+
+  @Test
+  public void testPlayedAtParamStaysAfterTheMotifCountParam() {
+    // The ORDER BY motif_count path prepends the motif param ahead of the WHERE params — the one
+    // select-path re-ordering where a misplaced timestamp would silently bind to the wrong slot.
+    CompiledQuery result =
+        compile("played.at >= \"2026-07-01T00:00:00\" ORDER BY motif_count(pin) DESC");
+    assertThat(result.parameters()).isEqualTo(List.of("PIN", utc("2026-07-01T00:00:00Z")));
+  }
+
+  @Test
+  public void testPlayedAtFilterCompilesThroughTheAggregatePath() {
+    CompiledQuery result =
+        compiler.compileAggregate(
+            Parser.parse("played.at >= \"2026-07-01T00:00:00\""), List.of("eco"));
+    assertThat(result.parameters()).isEqualTo(List.of(utc("2026-07-01T00:00:00Z")));
+    assertThat(result.selectSql()).contains("GROUP BY eco");
+  }
+
+  // === unknown-name rejections enumerate the vocabulary ===
+
+  @Test
+  public void testUnknownFieldNamesTheRoster() {
+    assertThatThrownBy(() -> compile("played = \"x\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Unknown field: played")
+        .hasMessageContaining("Known fields: ")
+        .hasMessageContaining("played.at")
+        .hasMessageContaining("month")
+        .hasMessageContaining("with a player: ")
+        .hasMessageContaining("outcome");
+  }
+
+  @Test
+  public void testUnknownMotifNamesTheRosterEverywhereMotifsAreNamed() {
+    assertThatThrownBy(() -> compile("motif(windmill)"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Unknown motif: windmill")
+        .hasMessageContaining("Known motifs: ")
+        .hasMessageContaining("smothered_mate");
+    assertThatThrownBy(() -> compile("motif(pin) ORDER BY motif_count(windmill)"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Known motifs: ");
+    assertThatThrownBy(() -> compile("sequence(pin THEN windmill)"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Known motifs: ");
   }
 
   @Test
@@ -1792,6 +1920,7 @@ public class SqlCompilerTest {
             case "date" -> "\"2026-07-01\"";
             case "month" -> "\"2026-07\"";
             case "played.at" -> "\"2026-07-01T13:30:00\"";
+            case "white.elo", "black.elo", "num.moves" -> "2500";
             default -> "\"x\"";
           };
       assertThatCode(() -> compile(field + " = " + literal))

@@ -206,10 +206,18 @@ public class Parser {
         advance();
         yield ">=";
       }
-      default ->
+      default -> {
+        // The other SQL spelling of the NULL habit lands here: `field IS NULL` fails at `IS`.
+        if (t.type() == TokenType.IDENTIFIER && t.value().equalsIgnoreCase("is")) {
           throw new ParseException(
-              "Expected a comparison operator (=, !=, <, <=, >, >=) or IN, got " + describe(t),
+              "ChessQL has no IS NULL / IS NOT NULL — a game whose field is unset never matches"
+                  + " any comparison, so a filter cannot select NULL rows",
               t.position());
+        }
+        throw new ParseException(
+            "Expected a comparison operator (=, !=, <, <=, >, >=) or IN, got " + describe(t),
+            t.position());
+      }
     };
   }
 
@@ -221,7 +229,11 @@ public class Parser {
     Token t = current();
     if (t.type() == TokenType.NUMBER) {
       advance();
-      return Integer.parseInt(t.value());
+      try {
+        return Integer.parseInt(t.value());
+      } catch (NumberFormatException e) {
+        throw new ParseException("Number out of range: " + t.value(), t.position());
+      }
     }
     if (t.type() == TokenType.STRING) {
       advance();
@@ -239,12 +251,37 @@ public class Parser {
           "Expected a number or a double-quoted string, got "
               + describe(t)
               + " — strings must be double-quoted: \""
-              + t.value()
+              + unquotedValueText()
               + "\"",
           t.position());
     }
     throw new ParseException(
         "Expected a number or a double-quoted string, got " + describe(t), t.position());
+  }
+
+  /**
+   * The would-be string starting at the current token: the run of identifiers, numbers, and dots,
+   * rejoined with the original spacing (inferred from token positions). Echoing only the first
+   * token would suggest a fix that just produces the next error — {@code opening.family = Caro Kann
+   * Defense} must come back as {@code "Caro Kann Defense"}, not {@code "Caro"}.
+   */
+  private String unquotedValueText() {
+    StringBuilder sb = new StringBuilder();
+    Token prev = null;
+    for (int i = pos; i < tokens.size(); i++) {
+      Token t = tokens.get(i);
+      if (t.type() != TokenType.IDENTIFIER
+          && t.type() != TokenType.NUMBER
+          && t.type() != TokenType.DOT) {
+        break;
+      }
+      if (prev != null && t.position() > prev.position() + prev.value().length()) {
+        sb.append(' ');
+      }
+      sb.append(t.value());
+      prev = t;
+    }
+    return sb.toString();
   }
 
   private InExpr parseInValues(String field) {
@@ -276,13 +313,29 @@ public class Parser {
   private Token expect(TokenType type) {
     Token t = current();
     if (t.type() != type) {
-      throw new ParseException("Expected " + describe(type) + ", got " + describe(t), t.position());
+      // The missing-connector mistake one paren deep — `(a = "x" b = "y")` — surfaces as an
+      // unmet ')' on a token that starts a condition; give it the same hint the top level gets.
+      // RPAREN only: inside an IN list the right fix would be a comma, not AND/OR.
+      String hint =
+          type == TokenType.RPAREN && startsACondition(t.type())
+              ? " — combine conditions with AND or OR"
+              : "";
+      throw new ParseException(
+          "Expected " + describe(type) + ", got " + describe(t) + hint, t.position());
     }
     return advance();
   }
 
   private static String describe(Token t) {
-    return t.type() == TokenType.EOF ? "end of query" : "'" + t.value() + "'";
+    if (t.type() == TokenType.EOF) {
+      return "end of query";
+    }
+    // A STRING echoed bare would be indistinguishable from a name — and "Expected a name, got
+    // 'fork'" for motif("fork") reads as a self-contradiction when the quotes are the problem.
+    if (t.type() == TokenType.STRING) {
+      return "\"" + t.value() + "\"";
+    }
+    return "'" + t.value() + "'";
   }
 
   private static String describe(TokenType type) {

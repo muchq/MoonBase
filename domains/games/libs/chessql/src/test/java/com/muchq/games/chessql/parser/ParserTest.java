@@ -209,6 +209,56 @@ public class ParserTest {
   }
 
   @Test
+  public void isNullGetsTheNoNullHintNotAnOperatorList() {
+    // The other SQL spelling of the same habit. The operator-list error would be technically
+    // correct and teach nothing.
+    assertThatThrownBy(() -> Parser.parse("played.at IS NULL"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("ChessQL has no IS NULL");
+  }
+
+  @Test
+  public void multiTokenUnquotedStringIsEchoedWhole() {
+    // Suggesting just the first word ("Caro") would be a fix that produces the next error.
+    assertThatThrownBy(() -> Parser.parse("opening.family = Caro Kann Defense"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("\"Caro Kann Defense\"");
+  }
+
+  @Test
+  public void dottedUnquotedStringIsEchoedWhole() {
+    assertThatThrownBy(() -> Parser.parse("white.username = magnus.carlsen"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("\"magnus.carlsen\"");
+  }
+
+  @Test
+  public void quotedStringWhereANameBelongsShowsItsQuotes() {
+    // describe() must keep the token kind visible: echoing "fork" back as 'fork' and calling it
+    // not-a-name reads as a self-contradiction when the quotes are exactly the problem.
+    assertThatThrownBy(() -> Parser.parse("motif(\"fork\")"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("got \"fork\"");
+  }
+
+  @Test
+  public void outOfRangeNumberSpeaksChessQlNotJdk() {
+    assertThatThrownBy(() -> Parser.parse("white.elo > 99999999999"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("Number out of range")
+        .hasMessageContaining("99999999999")
+        .hasMessageNotContaining("For input string");
+  }
+
+  @Test
+  public void missingConnectorInsideParensGetsTheAndOrHintToo() {
+    assertThatThrownBy(() -> Parser.parse("(eco = \"B90\" time.class = \"blitz\")"))
+        .isInstanceOf(ParseException.class)
+        .hasMessageContaining("Expected ')', got 'time'")
+        .hasMessageContaining("AND or OR");
+  }
+
+  @Test
   public void trailingNonConditionGetsNoAndOrHint() {
     // A stray ')' is an unbalanced-paren mistake; suggesting AND/OR there would mislead.
     assertThatThrownBy(() -> Parser.parse("motif(fork))"))

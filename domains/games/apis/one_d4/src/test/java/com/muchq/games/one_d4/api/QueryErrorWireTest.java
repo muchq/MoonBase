@@ -2,6 +2,8 @@ package com.muchq.games.one_d4.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
 import java.net.URI;
@@ -24,6 +26,8 @@ import org.junit.jupiter.api.Test;
  * {@code Expected value, got: Token(IDENTIFIER, NULL, pos=12) at position 12}.
  */
 public class QueryErrorWireTest {
+
+  private static final ObjectMapper MAPPER = new ObjectMapper();
 
   private EmbeddedServer server;
   private HttpClient client;
@@ -49,7 +53,8 @@ public class QueryErrorWireTest {
   }
 
   private HttpResponse<String> postQuery(String chessql) throws Exception {
-    String body = "{\"query\":\"" + chessql + "\",\"limit\":10,\"offset\":0}";
+    String escaped = chessql.replace("\\", "\\\\").replace("\"", "\\\"");
+    String body = "{\"query\":\"" + escaped + "\",\"limit\":10,\"offset\":0}";
     HttpRequest request =
         HttpRequest.newBuilder()
             .uri(URI.create(baseUrl + "/v1/query"))
@@ -77,5 +82,35 @@ public class QueryErrorWireTest {
 
     assertThat(response.statusCode()).isEqualTo(200);
     assertThat(response.body()).contains("\"count\":");
+  }
+
+  /**
+   * The compiler's rejections are IllegalArgumentException, a different ErrorHandler branch from
+   * ParseException — this pins that a bad played.at value is a 400 with the guidance, not the
+   * generic 500, and that (unlike a ParseException) the envelope carries no {@code position} key.
+   */
+  @Test
+  public void badPlayedAtValue_returns400WithGuidance() throws Exception {
+    HttpResponse<String> response = postQuery("played.at >= \"2026-07-01\"");
+
+    assertThat(response.statusCode()).isEqualTo(400);
+    JsonNode envelope = MAPPER.readTree(response.body());
+    assertThat(envelope.get("error").asText())
+        .contains("played.at requires a full ISO timestamp")
+        .contains("date or month");
+    assertThat(envelope.get("position")).isNull();
+  }
+
+  /**
+   * Error messages echo query fragments back; a fragment containing a double quote must survive
+   * JSON serialization as a parseable envelope, not break it.
+   */
+  @Test
+  public void echoedQuoteSurvivesTheJsonEnvelope() throws Exception {
+    HttpResponse<String> response = postQuery("eco = 'B\"90'");
+
+    assertThat(response.statusCode()).isEqualTo(400);
+    JsonNode envelope = MAPPER.readTree(response.body());
+    assertThat(envelope.get("error").asText()).contains("double quotes").contains("B\"90");
   }
 }

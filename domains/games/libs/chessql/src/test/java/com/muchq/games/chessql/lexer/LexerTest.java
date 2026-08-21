@@ -99,6 +99,16 @@ public class LexerTest {
   }
 
   @Test
+  public void apostropheInsideSingleQuotesSuppressesTheSuggestion() {
+    // 'King's Gambit' has three quote marks; a naive scan to the next quote would suggest the
+    // truncated "King". When the quote count is ambiguous, saying less beats suggesting wrong.
+    assertThatThrownBy(() -> new Lexer("opening.name = 'King's Gambit'").tokenize())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("double quotes")
+        .hasMessageNotContaining("try");
+  }
+
+  @Test
   public void otherUnexpectedCharactersKeepTheGenericError() {
     assertThatThrownBy(() -> new Lexer("white.elo >= #").tokenize())
         .isInstanceOf(IllegalArgumentException.class)

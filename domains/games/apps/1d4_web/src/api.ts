@@ -1,3 +1,4 @@
+import { QueryClient } from '@tanstack/react-query';
 import type { GameRow, IndexRequest, OccurrenceRow, QueryResponse } from './types';
 
 // re-export so consumers can import from one place
@@ -32,16 +33,32 @@ function errorMessage(body: string | null): string | null {
 
 // react-query retry policy: a 4xx is deterministic (the same bad query fails identically every
 // time), so retrying only delays showing the error — ~7s under the default 3-retry backoff.
-// Everything else keeps the default three attempts.
+// Except 408 (timeout) and 429 (throttled), the two 4xx a retry can actually fix; those and
+// everything else keep the default three attempts.
 export function retryUnlessClientError(
   failureCount: number,
   error: unknown
 ): boolean {
   const status = (error as ApiError | null)?.status;
-  if (typeof status === 'number' && status >= 400 && status < 500) {
+  if (
+    typeof status === 'number' &&
+    status >= 400 &&
+    status < 500 &&
+    status !== 408 &&
+    status !== 429
+  ) {
     return false;
   }
   return failureCount < 3;
+}
+
+// The QueryClient the app boots with. A factory rather than inline config in main.tsx so a test
+// can pin that the retry policy is actually wired — main.tsx renders into #root and cannot be
+// imported under vitest, and every component test builds its own client.
+export function makeQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: retryUnlessClientError } },
+  });
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {

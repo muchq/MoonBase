@@ -90,11 +90,16 @@ public class Lexer {
   /**
    * The SQL habit: 'B90' instead of "B90". The generic unexpected-character error is technically
    * true here and practically useless; the fix is one specific thing, so name it — echoing the
-   * would-be string back double-quoted when the closing quote is there to find.
+   * would-be string back double-quoted, but only when the input holds exactly two single quotes.
+   * With any other count the closing quote is ambiguous ('King's Gambit' would echo back the
+   * truncated "King"), and saying less beats suggesting wrong.
    */
   private String singleQuoteMessage() {
-    int close = input.indexOf('\'', pos + 1);
-    String example = close < 0 ? "" : ": try \"" + input.substring(pos + 1, close) + "\"";
+    int close = input.lastIndexOf('\'');
+    String example =
+        input.chars().filter(c -> c == '\'').count() == 2 && close > pos
+            ? ": try \"" + input.substring(pos + 1, close) + "\""
+            : "";
     return "Strings use double quotes, not single quotes" + example + " (at position " + pos + ")";
   }
 
