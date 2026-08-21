@@ -133,10 +133,10 @@ TEST_F(PgUrlStoreTest, AForeignSlugAtOurIdRefusesEvenWithMatchingFields) {
   EXPECT_EQ(refused.status().code(), absl::StatusCode::kInternal);
 }
 
-// v1 minted the same slugs from its own url_ids; the migration floor keeps
-// v2's ids out of v1's space so dead v1 links 404 rather than alias — and
-// re-floors a rewound sequence on the next boot. nextval, not last_value:
-// an is_called flip would hand out 1000000 itself, inside v1's space.
+// Floor keeps v2's next ids out of the low shared-encoder space v1 used,
+// and re-floors a rewound sequence on the next boot. nextval, not
+// last_value: an is_called flip would hand out 1000000 itself, inside
+// that low space.
 TEST_F(PgUrlStoreTest, MigrationsFloorTheSequenceAboveV1sIdSpace) {
   ASSERT_TRUE(db_->Exec("SELECT setval('url_ids', 3)").ok());
   ASSERT_TRUE(RunMigrations(*db_).ok());
@@ -160,8 +160,8 @@ TEST_F(PgUrlStoreTest, RemigratingAboveTheFloorStaysMonotone) {
   EXPECT_GT(id, 2000000);
 }
 
-// Rows minted below the floor sit in v1's slug space; migrations clear
-// them so the 404 contract holds even for pre-floor deploys.
+// Rows minted below the floor (early v2 deploys) are cleared so Lookup
+// 404s those slugs even on a database that saw a pre-floor mint.
 TEST_F(PgUrlStoreTest, MigrationsClearRowsMintedBelowTheFloor) {
   ASSERT_TRUE(db_->Exec("INSERT INTO urls (id, short_url, long_url, expires_at)"
                         " VALUES (42, 'KgA', 'https://example.com/prefloor',"

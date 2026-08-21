@@ -1,6 +1,6 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import * as api from '../api';
 
@@ -13,6 +13,10 @@ describe('App', () => {
     localStorage.clear();
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('adds a minted link to Recent links and persists it', async () => {
@@ -41,6 +45,30 @@ describe('App', () => {
     const recent = screen.getByRole('region', { name: 'Recent links' });
     expect(within(recent).getByRole('link', { name: 'iili.uk/r/AQA' })).toBeInTheDocument();
     expect(within(recent).queryByText(/DAA/)).not.toBeInTheDocument();
+  });
+
+  it('drops a soon-to-expire link on the minute prune', () => {
+    // Date-only fakes leave setInterval real — deleting the prune effect
+    // would still green every other App test. Include the interval APIs.
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(NOW);
+    localStorage.setItem(
+      'iili.recent',
+      JSON.stringify([
+        { slug: 'AQA', longUrl: 'https://example.com/live', expiresAt: NOW + 30_000 },
+      ])
+    );
+    render(<App />);
+
+    const recent = screen.getByRole('region', { name: 'Recent links' });
+    expect(within(recent).getByRole('link', { name: 'iili.uk/r/AQA' })).toBeInTheDocument();
+
+    act(() => {
+      vi.setSystemTime(NOW + 60_000);
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(screen.queryByRole('region', { name: 'Recent links' })).not.toBeInTheDocument();
   });
 
   it('clears the list and the storage together', async () => {

@@ -25,9 +25,9 @@ Slugs are the Go encoder's, bit-exact: little-endian id bytes (2/4/8,
 stepping at MaxInt16/MaxInt32), base64url unpadded → 3/6/11 chars. No
 decoder exists; `encoding_test.cc` carries the Go vectors as the pin.
 
-Not here: UI (#1359 chunk 2, muchq.com), stats, vanity slugs, the expired-row
-sweep (#373 — `idx_urls_expires_at` is in place), negative caching (the LRU
-has no invalidation; the per-client rate limit is the scan defense).
+Not here: stats, vanity slugs, the expired-row sweep (#373 —
+`idx_urls_expires_at` is in place), negative caching (the LRU has no
+invalidation; the per-client rate limit is the scan defense).
 
 ## Storage
 

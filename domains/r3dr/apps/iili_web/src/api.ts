@@ -43,6 +43,9 @@ function errorMessage(body: string | null): string | null {
   return body;
 }
 
+/** Dead-network budget for shorten: hand the form back, don't hold it hostage. */
+export const SHORTEN_TIMEOUT_MS = 10_000;
+
 export async function shorten(longUrl: string, expiresAt: number): Promise<{ slug: string }> {
   let res: Response;
   try {
@@ -50,8 +53,7 @@ export async function shorten(longUrl: string, expiresAt: number): Promise<{ slu
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ longUrl, expiresAt }),
-      // A dead network must hand the form back, not hold it hostage.
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(SHORTEN_TIMEOUT_MS),
     });
   } catch (_) {
     throw new Error('Network trouble — check your connection and try again.');

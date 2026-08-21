@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { shorten, shortLink } from '../api';
+import { SHORTEN_TIMEOUT_MS, shorten, shortLink } from '../api';
 
 function mockFetch(status: number, body: string) {
   const fn = vi.fn().mockResolvedValue(
@@ -9,10 +9,14 @@ function mockFetch(status: number, body: string) {
   return fn;
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe('shorten', () => {
   it('POSTs longUrl and expiresAt as JSON and returns the slug', async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, 'timeout');
     const fetchMock = mockFetch(201, '{"slug":"AQA"}');
 
     const result = await shorten('https://example.com/page', 1755003600000);
@@ -24,7 +28,10 @@ describe('shorten', () => {
     // Without this header the browser sends text/plain and drops out of the
     // preflighted class the Caddy CORS allow-list serves.
     expect(init.headers).toMatchObject({ 'Content-Type': 'application/json' });
-    // The timeout that hands a dead-network form back to the user.
+    // Pin the budget, not just "some AbortSignal" — 1ms or an hour would
+    // still green an instanceof check.
+    expect(SHORTEN_TIMEOUT_MS).toBe(10_000);
+    expect(timeoutSpy).toHaveBeenCalledWith(10_000);
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(JSON.parse(init.body)).toEqual({
       longUrl: 'https://example.com/page',

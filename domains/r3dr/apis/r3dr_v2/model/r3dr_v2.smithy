@@ -4,8 +4,8 @@ namespace moonbase.r3dr
 
 /// r3dr v2 (#1359): mint a slug for a long URL, redirect a slug back to it.
 /// Serves /r3dr/v2/* itself — the gateway path and the modeled path are one
-/// string (no Caddy rewrite). Path v1 is the public contract's first
-/// version; _v2 names the implementation generation. longUrl is
+/// string (no Caddy rewrite). /r3dr/v2/* is the public HTTP contract;
+/// _v2 names the implementation generation. longUrl is
 /// trait-validated here; the clock-dependent expiry rules answer as
 /// InvalidRequestError from the service.
 service R3drV2 {

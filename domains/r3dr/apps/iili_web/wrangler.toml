@@ -1,6 +1,11 @@
 name = "iili-web"
 main = "worker/index.js"
-compatibility_date = "2024-04-03"
+# ≥ 2025-04-01 turns on assets_navigation_prefers_asset_serving: browser
+# navigations that miss an asset get the SPA shell without invoking the
+# user Worker unless run_worker_first claims the path. 1d4 can keep an
+# older date because its Worker is a no-op ASSETS proxy; this Worker is
+# the 302 for /r/{slug}, so the date is only safe with the rule below.
+compatibility_date = "2025-04-01"
 
 # Domain: iili.uk. The worker serves the SPA and 302s /r/{slug} to the v2
 # API — the same short-link shape v1 minted on r3dr.net.
@@ -12,3 +17,8 @@ not_found_handling = "single-page-application"
 # Same as 1d4_web: let non-asset paths fall through to the SPA fallback
 # instead of html_handling's 307s.
 html_handling = "none"
+# SPA navigations must not own /r/* — without this, a missed asset serves
+# index.html and never reaches the Worker's 302. worker.test.ts calls
+# worker.fetch directly, so it cannot see assets routing; this flag is
+# the contract the unit suite can't pin.
+run_worker_first = ["/r/*"]
