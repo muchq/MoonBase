@@ -23,13 +23,13 @@ describe('addRecent + loadRecent', () => {
 
   it('dedupes by slug and caps at five', () => {
     let links: RecentLink[] = [];
-    for (const slug of ['a', 'b', 'c', 'd', 'e', 'f']) {
+    for (const slug of ['aaa', 'bbb', 'ccc', 'ddd', 'eee', 'fff']) {
       links = addRecent(links, link(slug));
     }
-    links = addRecent(links, link('d'));
+    links = addRecent(links, link('ddd'));
 
-    expect(links.map((l) => l.slug)).toEqual(['d', 'f', 'e', 'c', 'b']);
-    expect(loadRecent(NOW).map((l) => l.slug)).toEqual(['d', 'f', 'e', 'c', 'b']);
+    expect(links.map((l) => l.slug)).toEqual(['ddd', 'fff', 'eee', 'ccc', 'bbb']);
+    expect(loadRecent(NOW).map((l) => l.slug)).toEqual(['ddd', 'fff', 'eee', 'ccc', 'bbb']);
   });
 
   it('drops expired links on load', () => {
@@ -47,6 +47,18 @@ describe('addRecent + loadRecent', () => {
 
     localStorage.setItem('r3dr.recent', '[{"slug":1}]');
     expect(loadRecent(NOW)).toEqual([]);
+  });
+
+  it('drops entries whose slug is not slug-shaped', () => {
+    localStorage.setItem(
+      'r3dr.recent',
+      JSON.stringify([
+        { slug: '<img src=x>', longUrl: 'https://example.com/a', expiresAt: NOW + 1000 },
+        { slug: 'javascript:alert(1)', longUrl: 'https://example.com/b', expiresAt: NOW + 1000 },
+        { slug: 'AQA', longUrl: 'https://example.com/c', expiresAt: NOW + 1000 },
+      ])
+    );
+    expect(loadRecent(NOW).map((l) => l.slug)).toEqual(['AQA']);
   });
 
   it('still returns the list when localStorage throws', () => {

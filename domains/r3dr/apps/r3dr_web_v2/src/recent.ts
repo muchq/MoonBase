@@ -11,6 +11,10 @@ export interface RecentLink {
 const KEY = 'r3dr.recent';
 const MAX = 5;
 
+// Slugs are 3/6/11 base64url chars. A hand-edited store must not render
+// arbitrary text into links.
+const SLUG_SHAPE = /^[A-Za-z0-9_-]{3,11}$/;
+
 export function loadRecent(now: number): RecentLink[] {
   try {
     const raw = localStorage.getItem(KEY);
@@ -26,7 +30,7 @@ export function loadRecent(now: number): RecentLink[] {
           typeof (entry as RecentLink).longUrl === 'string' &&
           typeof (entry as RecentLink).expiresAt === 'number'
       )
-      .filter((entry) => entry.expiresAt > now)
+      .filter((entry) => SLUG_SHAPE.test(entry.slug) && entry.expiresAt > now)
       .slice(0, MAX);
   } catch (_) {
     return [];

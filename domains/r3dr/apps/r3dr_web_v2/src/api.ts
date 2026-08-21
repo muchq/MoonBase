@@ -10,7 +10,8 @@ const SHORT_LINK_BASE: string =
   (import.meta.env.VITE_SHORT_LINK_BASE as string | undefined) ?? 'https://r3dr.net/r/';
 
 export function shortLink(slug: string): string {
-  return `${SHORT_LINK_BASE}${slug}`;
+  // Identity on the slug alphabet; a URL-context barrier for anything else.
+  return `${SHORT_LINK_BASE}${encodeURIComponent(slug)}`;
 }
 
 // Two error shapes: generated trait validation ({fieldList: [{message}...],
