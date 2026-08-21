@@ -1226,8 +1226,7 @@ func TestTheMigrateStepIsAOneShotWithAJdbcUrl(t *testing.T) {
 		t.Fatal("no one_d4_migrate service in compose.yaml — the worker's depends_on gate " +
 			"has nothing to wait for.")
 	}
-	var restart, url string
-	var sawUsername, sawPassword bool
+	var restart, url, username, password string
 	urlPattern := regexp.MustCompile(`INDEXER_DB_URL=(\S+)`)
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -1241,10 +1240,10 @@ func TestTheMigrateStepIsAOneShotWithAJdbcUrl(t *testing.T) {
 			url = match[1]
 		}
 		if strings.HasPrefix(trimmed, "- INDEXER_DB_USERNAME=") {
-			sawUsername = true
+			username = strings.TrimPrefix(trimmed, "- INDEXER_DB_USERNAME=")
 		}
 		if strings.HasPrefix(trimmed, "- INDEXER_DB_PASSWORD=") {
-			sawPassword = true
+			password = strings.TrimPrefix(trimmed, "- INDEXER_DB_PASSWORD=")
 		}
 	}
 	if restart != `"no"` {
@@ -1255,11 +1254,23 @@ func TestTheMigrateStepIsAOneShotWithAJdbcUrl(t *testing.T) {
 		t.Errorf("one_d4_migrate's INDEXER_DB_URL=%q is not a JDBC URL — same trap "+
 			"TestOneD4sDatabaseUrlIsAJdbcUrl pins for the service, same driver.", url)
 	}
-	if !sawUsername || !sawPassword {
-		t.Errorf("one_d4_migrate is missing INDEXER_DB_USERNAME/INDEXER_DB_PASSWORD "+
-			"(username: %v, password: %v) — the exact variable names matter, the same "+
-			"INDEXER_DB_USER slip TestOneD4sCredentialsAreNotInTheUrl names for the service.",
-			sawUsername, sawPassword)
+	if !strings.Contains(url, "socketTimeout=1800") {
+		t.Errorf("one_d4_migrate's INDEXER_DB_URL=%q lost socketTimeout=1800. That parameter "+
+			"is load-bearing: DataSourceFactory's 150s default severs a quiet CREATE INDEX on "+
+			"a populated table, and a failed one-shot under restart \"no\" gates the worker "+
+			"off until the next deploy.", url)
+	}
+	// The same value pins TestOneD4sCredentialsAreNotInTheUrl holds the service
+	// to: the exact variable names (INDEXER_DB_USER is the plausible slip), the
+	// bootstrap role, and an interpolation rather than a committed literal.
+	if username != "one_d4" {
+		t.Errorf("one_d4_migrate's INDEXER_DB_USERNAME=%q, expected one_d4. The URL carries "+
+			"no credentials, so the connection has no user without it.", username)
+	}
+	if password != "${ONE_D4_DB_PASSWORD}" {
+		t.Errorf("one_d4_migrate's INDEXER_DB_PASSWORD=%q should interpolate "+
+			"${ONE_D4_DB_PASSWORD} from the host's ~/.env. A literal here would be a "+
+			"credential committed to the repo.", password)
 	}
 }
 

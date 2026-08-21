@@ -252,7 +252,8 @@ Java service to boot, the service so its own boot-time migration (which
 still runs, until #1426 demotes it to a verifier) is serialized behind this
 one rather than racing it.
 
-Two things about it are load-bearing and easy to undo by accident:
+Two things about `shared_postgres` are load-bearing and easy to undo by
+accident:
 
 - **The volume key is not the volume's name.** Compose prefixes it with the
   project, so `shared_pgdata` is `ubuntu_shared_pgdata` here and
