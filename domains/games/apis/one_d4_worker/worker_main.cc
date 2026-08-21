@@ -7,7 +7,8 @@
 //
 // The table is the queue (#1279), so this runs beside the Java worker
 // rather than instead of it: same claims, same leases, same fences. It
-// creates no schema — the Java service owns the migrations.
+// creates no schema — one_d4's migrations/ .sql files own that (#1419),
+// applied by the one_d4_migrate step before this starts.
 
 #include <unistd.h>
 

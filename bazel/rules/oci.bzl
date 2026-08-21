@@ -13,8 +13,13 @@ def _push_and_load(image_name, bin_name):
       image_name: the image name
       bin_name: the binary name for the image
     """
+
+    # Named per binary, not "push_image"/"oci_load_tarball": fixed names
+    # meant one image per package, and one_d4 ships two (the service and its
+    # migrate step). Nothing addresses these by label — publish.yml queries
+    # kind(oci_push, //...) and reads the repository attribute.
     oci_push(
-        name = "push_image",
+        name = bin_name + "_push_image",
         image = ":" + image_name,
         remote_tags = ["latest"],
         repository = "ghcr.io/muchq/" + bin_name,
@@ -22,7 +27,7 @@ def _push_and_load(image_name, bin_name):
     )
 
     oci_load(
-        name = "oci_load_tarball",
+        name = bin_name + "_oci_load_tarball",
         image = ":" + image_name,
         repo_tags = ["ghcr.io/muchq/" + bin_name + ":latest"],
     )

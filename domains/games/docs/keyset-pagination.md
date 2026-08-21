@@ -61,8 +61,9 @@ ON game_features (played_at DESC, game_url ASC);
 ```
 
 This index also speeds up the current LIMIT/OFFSET approach and is safe to add
-at any time without waiting for the full keyset migration. **Done:** it ships in
-`Migration.java` as `idx_game_features_played_at` (PR #1312).
+at any time without waiting for the full keyset migration. **Done:** it ships as
+`idx_game_features_played_at` in the one_d4 migrations (PR #1312; since #1419,
+`migrations/V011__game_features_read_indexes.sql`).
 
 ### Frontend change
 
@@ -88,7 +89,7 @@ Replace `page` state with `cursorStack: string[]` state:
 
 Add the composite index now — it's a one-line migration, improves the current
 LIMIT/OFFSET approach, and is required for keyset pagination anyway. **Done in
-PR #1312:** `Migration.java` creates `idx_game_features_played_at` (plain
+PR #1312:** the migrations create `idx_game_features_played_at` (plain
 `CREATE INDEX IF NOT EXISTS`, matching the other migration indexes — fine at
 this table's 7-day-retention size; `CONCURRENTLY` would matter on a large live
 table).

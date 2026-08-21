@@ -86,7 +86,7 @@ com.muchq.indexer/
 
   db/
     DataSourceFactory.java          HikariCP DataSource builder
-    Migration.java                  DDL bootstrap (CREATE TABLE IF NOT EXISTS)
+    Migration.java                  Applies the migrations/ .sql files (idempotent, manifest-ordered)
     IndexingRequestDao.java         CRUD for indexing_requests (JDBI3 fluent API)
     IndexingRequestStore.java       Store interface for indexing_requests
     GameFeatureDao.java             Insert + parameterized query for game_features (JDBI3 fluent API)

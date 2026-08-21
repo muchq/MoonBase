@@ -116,6 +116,11 @@ INDEXER_DB_URL="jdbc:postgresql://localhost:5432/indexer" \
 dev and production speak the same dialect. Migrations run at startup against an empty
 database, so nothing else is needed to bring one up.
 
+The schema itself is the numbered `.sql` files in [`migrations/`](migrations/) (#1419) —
+`Migration` applies them at boot, and the deploy runs the same files first as the
+`one_d4_migrate` one-shot (`compose.yaml`), which is what lets `one_d4_worker` start
+without waiting for this service. `migrations/README.md` has the authoring rules.
+
 Credentials in the URL still work, but only if the password survives URL decoding —
 pgjdbc decodes query values, so `+` becomes a space, `&` truncates the rest, and a bare
 `%` fails to parse. The separate variables have no such constraint; see

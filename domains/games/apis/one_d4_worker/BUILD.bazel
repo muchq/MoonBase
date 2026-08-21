@@ -254,9 +254,9 @@ cc_test(
     ],
 )
 
-# The Beyoncé rule applied to somebody else's table: the Java service owns
-# the indexing_requests schema and its migrations, and nothing but agreement
-# makes this poller safe against it.
+# The Beyoncé rule applied to somebody else's table: one_d4's migrations/
+# .sql files own the schema (#1419), and nothing but agreement makes this
+# poller safe against it. Reads the real DDL, not Java string literals.
 cc_test(
     name = "schema_contract_test",
     size = "small",
@@ -267,6 +267,7 @@ cc_test(
         "pg_reanalysis_test.cc",
         "poller.cc",
         "reanalysis_queue_test.cc",
+        "//domains/games/apis/one_d4:migrations_sql",
         "//domains/games/apis/one_d4:worker_schema_sources",
     ],
     deps = [

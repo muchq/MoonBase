@@ -1161,6 +1161,108 @@ func TestOneD4sDatabaseUrlIsAJdbcUrl(t *testing.T) {
 	}
 }
 
+// The deploy-order decoupling #1419 exists for: one_d4_worker gates on the
+// one_d4_migrate one-shot having finished, not on the Java service being
+// healthy. Reverting the gate to one_d4 quietly restores the "Java service
+// must be up first" coupling that #1418 measured as a worker error-loop, and
+// nothing else would fail — the stack still comes up, just serialized again.
+func TestTheWorkerGatesOnTheMigrateStepNotTheJavaService(t *testing.T) {
+	deps := dependsOn(t, "one_d4_worker")
+	for _, dep := range deps {
+		if dep == "one_d4" {
+			t.Errorf("one_d4_worker depends_on one_d4 — the worker must not wait for the Java " +
+				"service, only for the schema.")
+		}
+	}
+	if !gatesOnCompletedMigrate(t, "one_d4_worker") {
+		t.Errorf("one_d4_worker does not gate on one_d4_migrate with "+
+			"service_completed_successfully (depends_on: %v). Without that gate the worker "+
+			"races the schema step and error-loops on missing tables (#1418).", deps)
+	}
+}
+
+// The Java service gates on the same one-shot — not for the schema (it still
+// applies the migrations at boot until #1426), but for serialization: released
+// together, the two runners execute identical DDL concurrently, and
+// CREATE TABLE/INDEX IF NOT EXISTS is idempotent yet not concurrency-safe on
+// Postgres. The loser of that race under restart:"no" is one_d4_migrate, and
+// its failure gates one_d4_worker off until the next deploy.
+func TestTheJavaServiceAlsoGatesOnTheMigrateStep(t *testing.T) {
+	if !gatesOnCompletedMigrate(t, "one_d4") {
+		t.Errorf("one_d4 does not gate on one_d4_migrate with "+
+			"service_completed_successfully (depends_on: %v) — its boot-time migration then "+
+			"runs concurrently with the one-shot's, and the one-shot losing that race blocks "+
+			"the worker.", dependsOn(t, "one_d4"))
+	}
+}
+
+// Whether service's depends_on carries one_d4_migrate with
+// condition: service_completed_successfully (read by adjacency, since
+// dependsOn deliberately strips conditions).
+func gatesOnCompletedMigrate(t *testing.T, service string) bool {
+	t.Helper()
+	previous := ""
+	for _, line := range composeServiceLines(t, "compose.yaml")[service] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if previous == "one_d4_migrate:" && trimmed == "condition: service_completed_successfully" {
+			return true
+		}
+		previous = trimmed
+	}
+	return false
+}
+
+// A one-shot under `restart: always` is a restart loop: the container exits 0
+// and Docker brings it straight back, forever. golf_hub_db_init carries the
+// same shape; this pins it for the migrate step, whose exit is load-bearing —
+// service_completed_successfully never fires for a container that keeps
+// restarting.
+func TestTheMigrateStepIsAOneShotWithAJdbcUrl(t *testing.T) {
+	lines := composeServiceLines(t, "compose.yaml")["one_d4_migrate"]
+	if len(lines) == 0 {
+		t.Fatal("no one_d4_migrate service in compose.yaml — the worker's depends_on gate " +
+			"has nothing to wait for.")
+	}
+	var restart, url string
+	var sawUsername, sawPassword bool
+	urlPattern := regexp.MustCompile(`INDEXER_DB_URL=(\S+)`)
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "restart:") {
+			restart = strings.TrimSpace(strings.TrimPrefix(trimmed, "restart:"))
+		}
+		if match := urlPattern.FindStringSubmatch(trimmed); match != nil {
+			url = match[1]
+		}
+		if strings.HasPrefix(trimmed, "- INDEXER_DB_USERNAME=") {
+			sawUsername = true
+		}
+		if strings.HasPrefix(trimmed, "- INDEXER_DB_PASSWORD=") {
+			sawPassword = true
+		}
+	}
+	if restart != `"no"` {
+		t.Errorf("one_d4_migrate's restart is %q, want \"no\": a one-shot under any restart "+
+			"policy loops, and service_completed_successfully never fires for it.", restart)
+	}
+	if !strings.HasPrefix(url, "jdbc:postgresql://") {
+		t.Errorf("one_d4_migrate's INDEXER_DB_URL=%q is not a JDBC URL — same trap "+
+			"TestOneD4sDatabaseUrlIsAJdbcUrl pins for the service, same driver.", url)
+	}
+	if !sawUsername || !sawPassword {
+		t.Errorf("one_d4_migrate is missing INDEXER_DB_USERNAME/INDEXER_DB_PASSWORD "+
+			"(username: %v, password: %v) — the exact variable names matter, the same "+
+			"INDEXER_DB_USER slip TestOneD4sCredentialsAreNotInTheUrl names for the service.",
+			sawUsername, sawPassword)
+	}
+}
+
 // pgjdbc URL-decodes query parameter values, so a password interpolated into
 // ?password= is silently corrupted when the secret contains + (becomes a space)
 // or %XX, and truncated at &. `openssl rand -base64` emits + routinely, so this
