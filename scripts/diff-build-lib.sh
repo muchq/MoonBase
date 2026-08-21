@@ -17,6 +17,10 @@ FULL_BUILD_PATHSPECS=(
   .bazelrc
   'bazel/rules/*.bzl'
   bazel/rules/BUILD.bazel
+  # Dependency pins: bazel-diff is not run with external-repo hashing, so an
+  # archive_override bump would otherwise miss every consumer.
+  MODULE.bazel
+  'bazel/*.MODULE.bazel'
 )
 
 # Fail loudly when BASE_REVISION does not resolve. An unfetched origin/main,

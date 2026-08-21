@@ -59,6 +59,16 @@ api.muchq.com {
 		path /v2/analyze
 	}
 
+	@post_r3dr_shorten {
+		method POST
+		path /r3dr/v1/shorten
+	}
+
+	@get_r3dr_redirect {
+		method GET
+		path /r3dr/v1/r/*
+	}
+
 	@ws_thoughts {
 		path /games/v1/thoughts-ws
 	}
@@ -128,6 +138,10 @@ api.muchq.com {
 	# No rewrite: one_d4_v2 serves the gateway path itself, so the route a
 	# client sees and the route the model declares are one string.
 	reverse_proxy @post_v2_analyze one_d4_v2:8090
+
+	# Same pattern (#1359): r3dr_v2 serves /r3dr/v1/* unrewritten.
+	reverse_proxy @post_r3dr_shorten r3dr_v2:8091
+	reverse_proxy @get_r3dr_redirect r3dr_v2:8091
 
 	log {
 		output file /var/log/caddy/access.log {

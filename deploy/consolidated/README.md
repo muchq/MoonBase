@@ -18,6 +18,8 @@ individually targetable.
   - [`mcpserver`](../../domains/games/apis/mcpserver) (port 8086)
   - [`microgpt-serve`](../../domains/ai/apis/microgpt_serve) (port 8087)
   - [`one_d4`](../../domains/games/apis/one_d4) (port 8088)
+  - [`one_d4_v2`](../../domains/games/apis/one_d4_v2) (port 8090)
+  - [`r3dr_v2`](../../domains/r3dr/apis/r3dr_v2) (port 8091, `/r3dr/v1/*`)
 
 - **r3dr.net** - URL shortener service
   - [`r3dr`](../../domains/r3dr/apis/r3dr) (port 8085)
@@ -201,14 +203,17 @@ nothing from the host filesystem.
 
 ### Database URLs
 
-golf_hub and one_d4 take their database URLs from `compose.yaml`, interpolating a password from
-the host's `~/.env`: `GOLF_HUB_DB_URL` (libpq form, read from C++) and `INDEXER_DB_URL` (JDBC form,
-read by pgjdbc). Both point at the `shared_postgres` service.
+golf_hub, one_d4 and r3dr_v2 take their database URLs from `compose.yaml`, interpolating a
+password from the host's `~/.env`: `GOLF_HUB_DB_URL` and `R3DR_V2_DB_URL` (libpq form, read from
+C++) and `INDEXER_DB_URL` (JDBC form, read by pgjdbc). All point at the `shared_postgres` service.
+**`R3DR_V2_DB_PASSWORD` is a new secret** in `~/.env` (#1359); `r3dr_v2_db_init` provisions the
+`r3dr_v2` role and database with it on every deploy, idempotently. Keep it URL-safe (no
+`@ / ? # %` or quotes): it rides in a libpq URL and a single-quoted SQL literal. Compose
+refuses to start the service if it's unset.
 
-**r3dr is the exception and still reads a host file.** `ReadConnectionString` takes
-`DB_CONNECTION_STRING` then falls back to `/etc/r3dr/db_config`, and r3dr's compose block sets no
-environment at all — the same shape one_d4 had before #1351. Tracked as #1357; until then the guard
-below cannot see r3dr, because there is no URL in this file for it to check.
+**The Go r3dr is the exception and still reads a host file** (`DB_CONNECTION_STRING`, then
+`/etc/r3dr/db_config`), on storage that is not `shared_postgres`. It stays as is until it
+retires with r3dr.net (#1359), so the guard below cannot see it.
 
 Keeping a URL here rather than in a host file is what makes the hostname visible to this repo:
 `deploy_config_test.go` fails if a database host is not a Postgres service this file publishes, so
@@ -238,10 +243,11 @@ All services run on the `muchq_network` Docker bridge network.
 
 ## The shared database
 
-`shared_postgres` is the one Postgres instance on the host. `one_d4` and
-`golf_hub` each keep a database on it, and `golf_hub_db_init` provisions
-golf_hub's role and database on every deploy (idempotently — the
-`docker-entrypoint-initdb.d` hook only fires on a fresh volume).
+`shared_postgres` is the one Postgres instance on the host. `one_d4`,
+`golf_hub` and `r3dr_v2` each keep a database on it; `golf_hub_db_init` and
+`r3dr_v2_db_init` provision their roles and databases on every deploy
+(idempotently — the `docker-entrypoint-initdb.d` hook only fires on a
+fresh volume).
 
 `one_d4_migrate` is the same one-shot shape for one_d4's schema (#1419): it
 applies the numbered `.sql` files in

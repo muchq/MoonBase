@@ -126,6 +126,12 @@ already obvious from the code and tests — a short paragraph. If that paragraph
 keeps growing, that's a sign the *change* should have been split, not that the
 message needs more room.
 
+**Comments are terse and present-tense.** A comment states a constraint the
+code can't show, in a sentence or two. No novels, no archeology: how the old
+implementation did it, what defect a line replaces, or which review added it
+belongs in the PR body or the issue, not the source. Keep the *why* — one
+line of why beats five of history.
+
 ## Review panel
 
 Before committing anything non-trivial, run a self-review panel:

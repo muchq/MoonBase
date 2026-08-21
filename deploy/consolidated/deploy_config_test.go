@@ -106,6 +106,7 @@ var servicesWithSteadyProbes = []string{
 	"one_d4_v2",
 	"portrait",
 	"posterize",
+	"r3dr_v2",
 }
 
 func TestEveryServiceOnTheStandardRailsIsProbed(t *testing.T) {
@@ -949,9 +950,66 @@ func TestTheV2AnalyzeRouteIsDeliberatelyPublic(t *testing.T) {
 		}
 	}
 	if !proxied {
-		t.Errorf("Caddy has no reverse_proxy for @post_v2_analyze. mcpserver reaches one_d4_v2 "+
-			"directly over the Compose network, but the public route (#1389 phase 6) is served "+
+		t.Errorf("Caddy has no reverse_proxy for @post_v2_analyze. mcpserver reaches one_d4_v2 " +
+			"directly over the Compose network, but the public route (#1389 phase 6) is served " +
 			"through Caddy; without it /v2/analyze is dead from the internet.")
+	}
+}
+
+// The same property for r3dr_v2's two routes (#1359): exact matchers,
+// verbatim upstream, no rewrite.
+func TestTheR3drV2RoutesAreDeliberatelyPublic(t *testing.T) {
+	lines := directiveLines(t, "Caddyfile")
+
+	matchers := map[string]map[string]bool{
+		"@post_r3dr_shorten": {"method POST": false, "path /r3dr/v1/shorten": false},
+		"@get_r3dr_redirect": {"method GET": false, "path /r3dr/v1/r/*": false},
+	}
+	proxied := map[string]bool{"@post_r3dr_shorten": false, "@get_r3dr_redirect": false}
+
+	inMatcher := ""
+	for _, line := range lines {
+		switch {
+		case matchers[strings.TrimSuffix(line, " {")] != nil && strings.HasSuffix(line, " {"):
+			inMatcher = strings.TrimSuffix(line, " {")
+		case inMatcher != "" && line == "}":
+			inMatcher = ""
+		case inMatcher != "":
+			if _, ok := matchers[inMatcher][line]; ok {
+				matchers[inMatcher][line] = true
+			} else {
+				t.Errorf("the %s matcher carries %q beyond the two decided directives — a "+
+					"broader matcher exposes more of r3dr_v2 than the decision covered.",
+					inMatcher, line)
+			}
+		case strings.HasPrefix(line, "reverse_proxy @post_r3dr_shorten") ||
+			strings.HasPrefix(line, "reverse_proxy @get_r3dr_redirect"):
+			name := strings.Fields(line)[1]
+			proxied[name] = true
+			if want := "reverse_proxy " + name + " r3dr_v2:8091"; line != want {
+				t.Errorf("the r3dr_v2 route %s goes somewhere other than r3dr_v2:8091 (%q).",
+					name, line)
+			}
+		case (strings.HasPrefix(line, "rewrite") || strings.HasPrefix(line, "uri strip_prefix")) &&
+			(strings.Contains(line, "/r3dr/") || strings.Contains(line, "@post_r3dr_shorten") ||
+				strings.Contains(line, "@get_r3dr_redirect")):
+			t.Errorf("Caddy rewrites an r3dr_v2 route (%q); the service serves /r3dr/v1/* "+
+				"directly.", line)
+		}
+	}
+
+	for name, directives := range matchers {
+		for directive, found := range directives {
+			if !found {
+				t.Errorf("the %s matcher does not declare %q. The public surface is meant to "+
+					"be exactly POST /r3dr/v1/shorten and GET /r3dr/v1/r/* — a broader matcher "+
+					"exposes more of r3dr_v2 than the decision covered.", name, directive)
+			}
+		}
+		if !proxied[name] {
+			t.Errorf("Caddy has no reverse_proxy for %s; without it the route is dead from "+
+				"the internet.", name)
+		}
 	}
 }
 
