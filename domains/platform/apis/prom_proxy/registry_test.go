@@ -178,6 +178,20 @@ func allQueriesFor(entry serviceEntry) []string {
 	return queries
 }
 
+// The scoping test below can't tell hit rate from miss rate; the exact
+// strings are the contract with Prometheus.
+func TestRegistry_CacheHelpersEmitTheExactQueries(t *testing.T) {
+	assert.Equal(t,
+		`rate(cache_hits_total{service_name="r3dr_v2",cache="url_cache"}[5m])`+
+			`/(rate(cache_hits_total{service_name="r3dr_v2",cache="url_cache"}[5m])`+
+			`+rate(cache_misses_total{service_name="r3dr_v2",cache="url_cache"}[5m]))*100`,
+		cacheHitPercent("r3dr_v2", "url_cache"))
+	assert.Equal(t,
+		`{__name__=~"cache_hits_total|cache_misses_total",`+
+			`service_name="r3dr_v2",cache="url_cache"}`,
+		cacheOps("r3dr_v2", "url_cache"))
+}
+
 // Cache queries follow the emitter: aura::Cache emits the standard cache
 // family labeled by service and cache, so bespoke series (portrait's old
 // trace_cache_*) no longer exist to be queried. A rename on one side only
