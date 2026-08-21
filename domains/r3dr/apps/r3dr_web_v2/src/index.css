@@ -1,20 +1,21 @@
 @import "tailwindcss";
 
-/* r3dr's own palette — the navy-and-crimson the domain has always worn,
-   on 1d4_web's token structure. */
+/* Springtime palette — morning-light meadow: warm whites, leaf green,
+   blossom pink — on 1d4_web's token structure. */
 :root {
-  --bg: #0f0f1e;
-  --bg-2: #16213e;
-  --surface: rgba(13, 13, 28, 0.72);
-  --border: #2b2b45;
-  --border-bright: #3d3d5e;
-  --text: #e8e8f0;
-  --text-muted: #8f8fa8;
-  --accent: #e94560;
-  --accent-bright: #ff6b8a;
-  --accent-soft: rgba(233, 69, 96, 0.12);
-  --success: #4ade80;
-  --error: #f87171;
+  --bg: #f6f8f2;
+  --bg-2: #e6f2ec;
+  --surface: rgba(255, 255, 255, 0.78);
+  --border: #d9e4d4;
+  --border-bright: #c2d4bd;
+  --text: #2c3a31;
+  --text-muted: #6b7d70;
+  --accent: #35935a;
+  --accent-bright: #237a47;
+  --accent-soft: rgba(53, 147, 90, 0.13);
+  --blossom: #e07aa4;
+  --success: #2e7d4f;
+  --error: #c0504d;
   --radius: 10px;
   --radius-lg: 18px;
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
@@ -26,13 +27,13 @@
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
-  background: linear-gradient(150deg, var(--bg) 0%, #1a1a2e 55%, var(--bg-2) 100%);
+  background: linear-gradient(150deg, #f9fbf5 0%, #eef5ea 55%, var(--bg-2) 100%);
   background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-sans);
@@ -41,14 +42,14 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* The two glows that made old r3dr.net feel lit from behind. */
+/* Soft blossom and leaf glows in the corners — spring light, not neon. */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(circle at 18% 82%, rgba(233, 69, 96, 0.10) 0%, transparent 45%),
-    radial-gradient(circle at 82% 18%, rgba(233, 69, 96, 0.06) 0%, transparent 45%);
+    radial-gradient(circle at 18% 82%, rgba(224, 122, 164, 0.14) 0%, transparent 45%),
+    radial-gradient(circle at 82% 18%, rgba(94, 183, 124, 0.16) 0%, transparent 45%);
   pointer-events: none;
   z-index: -1;
 }
@@ -74,7 +75,17 @@ body::before {
   font-weight: 800;
   letter-spacing: -0.03em;
   line-height: 1.1;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-bright) 100%);
+  /* Leaf gradient; blending green into pink muddies, so the blossom gets
+     one glyph to itself instead. */
+  background: linear-gradient(135deg, #278a4e 0%, #5cb974 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.wordmark-blossom {
+  background: linear-gradient(135deg, var(--blossom) 0%, #ef9dbd 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -105,9 +116,9 @@ body::before {
   border-radius: var(--radius-lg);
   padding: clamp(1.1rem, 4vw, 1.75rem);
   box-shadow:
-    0 18px 40px rgba(0, 0, 0, 0.42),
-    0 0 60px rgba(233, 69, 96, 0.07),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    0 16px 36px rgba(47, 72, 55, 0.10),
+    0 2px 8px rgba(47, 72, 55, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
 .field-label {
@@ -128,8 +139,8 @@ body::before {
   flex: 1;
   min-width: 0;
   padding: 0.8rem 0.95rem;
-  background: rgba(15, 15, 30, 0.8);
-  border: 1px solid var(--border);
+  background: #ffffff;
+  border: 1px solid var(--border-bright);
   border-radius: var(--radius);
   color: var(--text);
   font-family: inherit;
@@ -138,7 +149,7 @@ body::before {
 }
 
 .field-row input::placeholder {
-  color: #55556e;
+  color: #a2b2a5;
 }
 
 .field-row input:focus {
@@ -149,7 +160,7 @@ body::before {
 
 .submit-btn {
   padding: 0.8rem 1.35rem;
-  background: linear-gradient(135deg, var(--accent) 0%, #d63a54 100%);
+  background: linear-gradient(135deg, #3ea768 0%, var(--accent) 100%);
   color: #fff;
   border: none;
   border-radius: var(--radius);
@@ -162,9 +173,9 @@ body::before {
 }
 
 .submit-btn:hover:not(:disabled) {
-  filter: brightness(1.1);
+  filter: brightness(1.05);
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(233, 69, 96, 0.35);
+  box-shadow: 0 6px 18px rgba(53, 147, 90, 0.32);
 }
 
 .submit-btn:active:not(:disabled) {
@@ -194,8 +205,8 @@ body::before {
 
 .chip {
   padding: 0.35rem 0.85rem;
-  background: transparent;
-  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid var(--border-bright);
   border-radius: 999px;
   color: var(--text-muted);
   font-family: inherit;
@@ -206,7 +217,7 @@ body::before {
 
 .chip:hover {
   border-color: var(--accent);
-  color: var(--text);
+  color: var(--accent-bright);
 }
 
 .chip--on {
@@ -225,17 +236,17 @@ body::before {
 }
 
 .message.error {
-  background: rgba(248, 113, 113, 0.12);
-  border: 1px solid rgba(248, 113, 113, 0.25);
-  color: var(--error);
+  background: rgba(192, 80, 77, 0.08);
+  border: 1px solid rgba(192, 80, 77, 0.28);
+  color: #a13f3c;
 }
 
 /* Result */
 .result {
   margin-top: 1.1rem;
   padding: 0.95rem 1rem;
-  background: rgba(74, 222, 128, 0.06);
-  border: 1px solid rgba(74, 222, 128, 0.22);
+  background: rgba(46, 125, 79, 0.07);
+  border: 1px solid rgba(46, 125, 79, 0.25);
   border-radius: var(--radius);
   animation: rise 240ms ease;
 }
@@ -290,7 +301,7 @@ body::before {
 /* Copy buttons */
 .copy-btn {
   padding: 0.45rem 0.9rem;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.7);
   border: 1px solid var(--border-bright);
   border-radius: var(--radius);
   color: var(--text);
@@ -308,7 +319,7 @@ body::before {
 }
 
 .copy-btn.copied {
-  border-color: rgba(74, 222, 128, 0.5);
+  border-color: rgba(46, 125, 79, 0.5);
   color: var(--success);
 }
 
@@ -406,14 +417,14 @@ body::before {
 
 .recent-expiry {
   font-size: 0.75rem;
-  color: #6a6a85;
+  color: #8a9a8d;
 }
 
 /* Footer */
 .footer {
   margin-top: auto;
   padding-top: 2.5rem;
-  color: #6a6a85;
+  color: #8a9a8d;
   font-size: 0.8rem;
   text-align: center;
 }

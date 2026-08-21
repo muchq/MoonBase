@@ -9,7 +9,9 @@ export default function App() {
   return (
     <div className="shell">
       <header className="hero">
-        <h1 className="wordmark">r3dr</h1>
+        <h1 className="wordmark">
+          r<span className="wordmark-blossom">3</span>dr
+        </h1>
         <p className="tagline">Shorten a link. Share it anywhere. It expires on your schedule.</p>
       </header>
       <main className="content">
