@@ -673,6 +673,57 @@ func TestTheMcpCorsAllowListCarriesTheProtocolHeaders(t *testing.T) {
 	}
 }
 
+// api.muchq.com is called from browsers on muchq.com and on r3dr.net (the
+// r3dr_web_v2 worker SPA; the localhost origin is its vite dev server).
+// ACAO takes a single value, so the Caddyfile echoes it per allowed origin
+// via named matchers — on ordinary responses and on the preflight handler
+// both. An origin falling out of either list breaks that frontend's fetches
+// with no server-side signal; an unconditional ACAO would hand every caller
+// the wrong origin.
+func TestApiCorsEchoesEachAllowedOrigin(t *testing.T) {
+	site := caddySiteBlock(t, "Caddyfile", "api.muchq.com")
+
+	origins := map[string]string{
+		"@from_muchq":    "https://muchq.com",
+		"@from_r3dr":     "https://r3dr.net",
+		"@from_r3dr_dev": "http://localhost:5173",
+	}
+	for matcher, origin := range origins {
+		defined := false
+		echoes := 0
+		for _, line := range site {
+			if line == matcher+" header Origin "+origin {
+				defined = true
+			}
+			if line == "header "+matcher+` Access-Control-Allow-Origin "`+origin+`"` {
+				echoes++
+			}
+		}
+		if !defined {
+			t.Errorf("no `%s header Origin %s` matcher in the api.muchq.com block; that "+
+				"frontend's fetches lose CORS.", matcher, origin)
+		}
+		if echoes != 2 {
+			t.Errorf("found %d ACAO echoes for %s, want 2 (the response's and the "+
+				"preflight's).", echoes, origin)
+		}
+	}
+
+	vary := 0
+	for _, line := range site {
+		if strings.HasPrefix(line, "Access-Control-Allow-Origin") {
+			t.Errorf("unconditional %q would override the per-origin echo for every caller.", line)
+		}
+		if line == "Vary Origin" {
+			vary++
+		}
+	}
+	if vary != 2 {
+		t.Errorf("found %d `Vary Origin` declarations, want 2; without both, a shared cache "+
+			"can serve one origin's answer to another.", vary)
+	}
+}
+
 // caddySiteBlock returns the comment-stripped, trimmed lines inside one site
 // block, excluding its own braces.
 func caddySiteBlock(t *testing.T, name, host string) []string {

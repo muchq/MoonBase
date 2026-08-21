@@ -1,0 +1,14 @@
+name = "r3dr-web"
+main = "worker/index.js"
+compatibility_date = "2024-04-03"
+
+# Domain: r3dr.net. The worker serves the SPA and 302s /r/{slug} to the v2
+# API — the same short-link shape v1 minted.
+
+[assets]
+directory = "dist/client"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# Same as 1d4_web: let non-asset paths fall through to the SPA fallback
+# instead of html_handling's 307s.
+html_handling = "none"

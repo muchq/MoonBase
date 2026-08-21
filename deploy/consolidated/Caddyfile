@@ -90,20 +90,36 @@ api.muchq.com {
 		method OPTIONS
 	}
 
+	# Two browser origins call this API: muchq.com pages and the r3dr.net
+	# worker SPA (plus vite dev for the latter — every API here is public
+	# and credential-less, so a localhost origin grants nothing curl
+	# doesn't have). ACAO takes one value, so it's echoed per origin;
+	# Vary keeps shared caches from serving one origin's answer to the
+	# other.
+	@from_muchq header Origin https://muchq.com
+	@from_r3dr header Origin https://r3dr.net
+	@from_r3dr_dev header Origin http://localhost:5173
+
 	header {
-		Access-Control-Allow-Origin "https://muchq.com"
 		Access-Control-Allow-Methods "GET, POST, OPTIONS"
 		Access-Control-Allow-Headers "Content-Type, Authorization"
 		Access-Control-Max-Age "86400"
+		Vary Origin
 	}
+	header @from_muchq Access-Control-Allow-Origin "https://muchq.com"
+	header @from_r3dr Access-Control-Allow-Origin "https://r3dr.net"
+	header @from_r3dr_dev Access-Control-Allow-Origin "http://localhost:5173"
 
 	handle @options {
 		header {
-			Access-Control-Allow-Origin "https://muchq.com"
 			Access-Control-Allow-Methods "GET, POST, OPTIONS"
 			Access-Control-Allow-Headers "Content-Type, Authorization"
 			Access-Control-Max-Age "86400"
+			Vary Origin
 		}
+		header @from_muchq Access-Control-Allow-Origin "https://muchq.com"
+		header @from_r3dr Access-Control-Allow-Origin "https://r3dr.net"
+		header @from_r3dr_dev Access-Control-Allow-Origin "http://localhost:5173"
 		respond 204
 	}
 

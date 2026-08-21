@@ -11,6 +11,8 @@ URL shortening services and related applications.
 
 ## Apps
 
-- [**r3dr Web**](apps/r3dr_web): The `r3dr.net` frontend, retiring with the
-  domain; its replacement is a `muchq.com` page (#1359 chunk 2, in the
-  muchq.github.io repo).
+- [**r3dr Web v2**](apps/r3dr_web_v2): The new `r3dr.net` frontend (#1359
+  chunk 2) — a Cloudflare Worker SPA on the 1d4_web stack. Its `/r/{slug}`
+  redirect keeps v1's short-link shape, backed by the v2 API.
+- [**r3dr Web**](apps/r3dr_web): The old static frontend, served by the Go
+  VM; retires with it at DNS cutover (#1359 chunk 3).
