@@ -131,4 +131,43 @@ describe('QueryView', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(api.query).not.toHaveBeenCalled();
   });
+
+  it('shows the API error message when a query fails', async () => {
+    vi.mocked(api.query).mockRejectedValue(
+      new Error('ChessQL has no NULL literal at position 12')
+    );
+    render(<QueryView />, { wrapper: makeWrapper() });
+    fireEvent.change(
+      screen.getByPlaceholderText('e.g. motif(fork) AND white.elo >= 2500'),
+      { target: { value: 'played.at = NULL' } }
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Run query' }));
+    await waitFor(() =>
+      expect(
+        screen.getByText('ChessQL has no NULL literal at position 12')
+      ).toBeInTheDocument()
+    );
+  });
+
+  it('documents the date and month fields in the syntax help', () => {
+    // "How do I query by date?" must be answerable from the page itself: the help has to name
+    // the date-scoping fields with a usable example of each, not just list played.at.
+    render(<QueryView />, { wrapper: makeWrapper() });
+    expect(screen.getByText('date >= "2026-07-01"')).toBeInTheDocument();
+    expect(screen.getByText('month = "2026-07"')).toBeInTheDocument();
+  });
+
+  it('offers a date-scoped example chip', () => {
+    render(<QueryView />, { wrapper: makeWrapper() });
+    const chip = screen.getByRole('button', {
+      name: 'month = "2026-07" AND motif(fork)',
+    });
+    fireEvent.click(chip);
+    const textarea = screen.getByPlaceholderText(
+      'e.g. motif(fork) AND white.elo >= 2500'
+    );
+    expect((textarea as HTMLTextAreaElement).value).toBe(
+      'month = "2026-07" AND motif(fork)'
+    );
+  });
 });

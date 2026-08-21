@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createIndex, listIndexRequests, query } from '../api';
+import {
+  createIndex,
+  listIndexRequests,
+  query,
+  retryUnlessClientError,
+} from '../api';
 
 describe('api', () => {
   afterEach(() => {
@@ -88,6 +93,87 @@ describe('api', () => {
       );
       await expect(listIndexRequests()).rejects.toThrow(
         'Internal Server Error'
+      );
+    });
+
+    it('unwraps the API JSON error envelope so the message is the error, not the JSON', async () => {
+      const body =
+        '{"error":"ChessQL has no NULL literal at position 12","position":12}';
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 400,
+          statusText: 'Bad Request',
+          text: () => Promise.resolve(body),
+        })
+      );
+      const err = (await query({
+        query: 'played.at = NULL',
+        limit: 50,
+        offset: 0,
+      }).catch((e: unknown) => e)) as Error & {
+        status?: number;
+        body?: string | null;
+      };
+      expect(err.message).toBe('ChessQL has no NULL literal at position 12');
+      expect(err.status).toBe(400);
+      expect(err.body).toBe(body);
+    });
+
+    it('keeps a non-envelope JSON body as raw text', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 502,
+          statusText: 'Bad Gateway',
+          text: () => Promise.resolve('{"message":"upstream down"}'),
+        })
+      );
+      await expect(listIndexRequests()).rejects.toThrow(
+        '{"message":"upstream down"}'
+      );
+    });
+  });
+
+  describe('retryUnlessClientError', () => {
+    // A 4xx is deterministic — the same bad query fails the same way every time, and
+    // react-query's default 3 retries with backoff only delay showing the error by ~7s.
+    it('does not retry 4xx responses', () => {
+      const err = Object.assign(new Error('bad request'), { status: 400 });
+      expect(retryUnlessClientError(0, err)).toBe(false);
+    });
+
+    it('retries 5xx responses up to 3 times', () => {
+      const err = Object.assign(new Error('server error'), { status: 503 });
+      expect(retryUnlessClientError(0, err)).toBe(true);
+      expect(retryUnlessClientError(2, err)).toBe(true);
+      expect(retryUnlessClientError(3, err)).toBe(false);
+    });
+
+    it('retries errors with no status (network failures)', () => {
+      expect(retryUnlessClientError(0, new Error('network'))).toBe(true);
+      expect(retryUnlessClientError(3, new Error('network'))).toBe(false);
+    });
+
+    it('still retries 408 and 429 — the two 4xx that are not deterministic', () => {
+      const timeout = Object.assign(new Error('timeout'), { status: 408 });
+      const throttled = Object.assign(new Error('throttled'), { status: 429 });
+      expect(retryUnlessClientError(0, timeout)).toBe(true);
+      expect(retryUnlessClientError(0, throttled)).toBe(true);
+      expect(retryUnlessClientError(3, throttled)).toBe(false);
+    });
+  });
+
+  describe('makeQueryClient', () => {
+    it('wires retryUnlessClientError as the default query retry', async () => {
+      // main.tsx cannot be imported under vitest (it renders into #root), so the wiring lives in
+      // this factory — otherwise deleting the defaultOptions line would leave every test green
+      // while restoring the ~7s retry delay on 4xx.
+      const { makeQueryClient } = await import('../api');
+      expect(makeQueryClient().getDefaultOptions().queries?.retry).toBe(
+        retryUnlessClientError
       );
     });
   });

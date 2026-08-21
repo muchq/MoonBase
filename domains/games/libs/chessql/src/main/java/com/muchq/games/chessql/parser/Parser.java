@@ -34,8 +34,22 @@ public class Parser {
       parser.expect(TokenType.BY);
       orderBy = parser.parseOrderByClause();
     }
-    parser.expect(TokenType.EOF);
+    if (!parser.check(TokenType.EOF)) {
+      // Trailing input. When it could start another condition the mistake is almost always a
+      // missing connector, so say so; a stray ')' or ',' gets no hint rather than a wrong one.
+      Token t = parser.current();
+      String hint = startsACondition(t.type()) ? " — combine conditions with AND or OR" : "";
+      throw new ParseException("Expected end of query, got " + describe(t) + hint, t.position());
+    }
     return new ParsedQuery(expr, orderBy);
+  }
+
+  private static boolean startsACondition(TokenType type) {
+    return type == TokenType.IDENTIFIER
+        || type == TokenType.MOTIF
+        || type == TokenType.SEQUENCE
+        || type == TokenType.NOT
+        || type == TokenType.LPAREN;
   }
 
   public Expr parseExpr() {
@@ -96,7 +110,11 @@ public class Parser {
       return parseFieldExpr();
     }
 
-    throw new ParseException("Unexpected token: " + current(), current().position());
+    throw new ParseException(
+        "Expected a condition — a field comparison like white.elo >= 2500, motif(...),"
+            + " sequence(...), or a parenthesized expression — got "
+            + describe(current()),
+        current().position());
   }
 
   private Expr parseMotif() {
@@ -188,21 +206,82 @@ public class Parser {
         advance();
         yield ">=";
       }
-      default -> throw new ParseException("Expected comparison operator, got: " + t, t.position());
+      default -> {
+        // The other SQL spelling of the NULL habit lands here: `field IS NULL` fails at `IS`.
+        if (t.type() == TokenType.IDENTIFIER && t.value().equalsIgnoreCase("is")) {
+          throw new ParseException(
+              "ChessQL has no IS NULL / IS NOT NULL — a game whose field is unset never matches"
+                  + " any comparison, so a filter cannot select NULL rows",
+              t.position());
+        }
+        throw new ParseException(
+            "Expected a comparison operator (=, !=, <, <=, >, >=) or IN, got " + describe(t),
+            t.position());
+      }
     };
   }
 
+  // Values are where SQL habits land, so the two commonest mistakes get their own message: NULL
+  // (which the language deliberately lacks) and an unquoted string. These strings are user-facing
+  // — the web UI and MCP clients render them verbatim — so they speak ChessQL, not parser
+  // internals.
   private Object parseValue() {
     Token t = current();
     if (t.type() == TokenType.NUMBER) {
       advance();
-      return Integer.parseInt(t.value());
+      try {
+        return Integer.parseInt(t.value());
+      } catch (NumberFormatException e) {
+        throw new ParseException("Number out of range: " + t.value(), t.position());
+      }
     }
     if (t.type() == TokenType.STRING) {
       advance();
       return t.value();
     }
-    throw new ParseException("Expected value, got: " + t, t.position());
+    if (t.type() == TokenType.IDENTIFIER && t.value().equalsIgnoreCase("null")) {
+      throw new ParseException(
+          "ChessQL has no NULL literal — a game whose field is unset never matches any comparison,"
+              + " so there is nothing to compare NULL against. Expected a number or a double-quoted"
+              + " string",
+          t.position());
+    }
+    if (t.type() == TokenType.IDENTIFIER) {
+      throw new ParseException(
+          "Expected a number or a double-quoted string, got "
+              + describe(t)
+              + " — strings must be double-quoted: \""
+              + unquotedValueText()
+              + "\"",
+          t.position());
+    }
+    throw new ParseException(
+        "Expected a number or a double-quoted string, got " + describe(t), t.position());
+  }
+
+  /**
+   * The would-be string starting at the current token: the run of identifiers, numbers, and dots,
+   * rejoined with the original spacing (inferred from token positions). Echoing only the first
+   * token would suggest a fix that just produces the next error — {@code opening.family = Caro Kann
+   * Defense} must come back as {@code "Caro Kann Defense"}, not {@code "Caro"}.
+   */
+  private String unquotedValueText() {
+    StringBuilder sb = new StringBuilder();
+    Token prev = null;
+    for (int i = pos; i < tokens.size(); i++) {
+      Token t = tokens.get(i);
+      if (t.type() != TokenType.IDENTIFIER
+          && t.type() != TokenType.NUMBER
+          && t.type() != TokenType.DOT) {
+        break;
+      }
+      if (prev != null && t.position() > prev.position() + prev.value().length()) {
+        sb.append(' ');
+      }
+      sb.append(t.value());
+      prev = t;
+    }
+    return sb.toString();
   }
 
   private InExpr parseInValues(String field) {
@@ -234,8 +313,61 @@ public class Parser {
   private Token expect(TokenType type) {
     Token t = current();
     if (t.type() != type) {
-      throw new ParseException("Expected " + type + ", got " + t.type(), t.position());
+      // The missing-connector mistake one paren deep — `(a = "x" b = "y")` — surfaces as an
+      // unmet ')' on a token that starts a condition; give it the same hint the top level gets.
+      // RPAREN only: inside an IN list the right fix would be a comma, not AND/OR.
+      String hint =
+          type == TokenType.RPAREN && startsACondition(t.type())
+              ? " — combine conditions with AND or OR"
+              : "";
+      throw new ParseException(
+          "Expected " + describe(type) + ", got " + describe(t) + hint, t.position());
     }
     return advance();
+  }
+
+  private static String describe(Token t) {
+    if (t.type() == TokenType.EOF) {
+      return "end of query";
+    }
+    // A STRING echoed bare would be indistinguishable from a name — and "Expected a name, got
+    // 'fork'" for motif("fork") reads as a self-contradiction when the quotes are the problem.
+    if (t.type() == TokenType.STRING) {
+      return "\"" + t.value() + "\"";
+    }
+    return "'" + t.value() + "'";
+  }
+
+  private static String describe(TokenType type) {
+    return switch (type) {
+      case NUMBER -> "a number";
+      case STRING -> "a double-quoted string";
+      case IDENTIFIER -> "a name";
+      case EQ -> "'='";
+      case NEQ -> "'!='";
+      case LT -> "'<'";
+      case LTE -> "'<='";
+      case GT -> "'>'";
+      case GTE -> "'>='";
+      case AND -> "AND";
+      case OR -> "OR";
+      case NOT -> "NOT";
+      case IN -> "IN";
+      case MOTIF -> "motif";
+      case ORDER -> "ORDER";
+      case BY -> "BY";
+      case ASC -> "ASC";
+      case DESC -> "DESC";
+      case MOTIF_COUNT -> "motif_count";
+      case SEQUENCE -> "sequence";
+      case THEN -> "THEN";
+      case LPAREN -> "'('";
+      case RPAREN -> "')'";
+      case LBRACKET -> "'['";
+      case RBRACKET -> "']'";
+      case COMMA -> "','";
+      case DOT -> "'.'";
+      case EOF -> "end of query";
+    };
   }
 }

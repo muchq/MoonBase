@@ -72,6 +72,8 @@ public class Lexer {
         tokens.add(readNumber());
       } else if (Character.isLetter(c) || c == '_') {
         tokens.add(readIdentifierOrKeyword());
+      } else if (c == '\'') {
+        throw new IllegalArgumentException(singleQuoteMessage());
       } else {
         throw new IllegalArgumentException("Unexpected character '" + c + "' at position " + pos);
       }
@@ -83,6 +85,22 @@ public class Lexer {
 
   private char peek() {
     return pos + 1 < input.length() ? input.charAt(pos + 1) : '\0';
+  }
+
+  /**
+   * The SQL habit: 'B90' instead of "B90". The generic unexpected-character error is technically
+   * true here and practically useless; the fix is one specific thing, so name it — echoing the
+   * would-be string back double-quoted, but only when the input holds exactly two single quotes.
+   * With any other count the closing quote is ambiguous ('King's Gambit' would echo back the
+   * truncated "King"), and saying less beats suggesting wrong.
+   */
+  private String singleQuoteMessage() {
+    int close = input.lastIndexOf('\'');
+    String example =
+        input.chars().filter(c -> c == '\'').count() == 2 && close > pos
+            ? ": try \"" + input.substring(pos + 1, close) + "\""
+            : "";
+    return "Strings use double quotes, not single quotes" + example + " (at position " + pos + ")";
   }
 
   private Token readString() {

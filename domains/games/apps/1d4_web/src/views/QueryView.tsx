@@ -8,6 +8,7 @@ const EXAMPLE_QUERIES = [
   'motif(fork)',
   'white.elo >= 2500 AND motif(pin)',
   'eco = "B90"',
+  'month = "2026-07" AND motif(fork)',
   'motif(back_rank_mate) OR motif(smothered_mate)',
   'motif(skewer) OR motif(discovered_attack)',
   'motif(promotion_with_check) OR motif(promotion_with_checkmate)',
@@ -95,9 +96,14 @@ export default function QueryView() {
         <code>motif(checkmate)</code>, <code>motif(double_check)</code>,{' '}
         <code>motif(back_rank_mate)</code>, <code>motif(smothered_mate)</code>,{' '}
         <code>motif(promotion)</code>, <code>motif(promotion_with_check)</code>,{' '}
-        <code>motif(promotion_with_checkmate)</code>. Combine with{' '}
-        <code>AND</code>, <code>OR</code>, <code>NOT</code>. Strings in double
-        quotes, e.g. <code>eco = &quot;B90&quot;</code>. Do not use SELECT or *.
+        <code>motif(promotion_with_checkmate)</code>. Filter by when a game was
+        played with <code>date</code> and <code>month</code>:{' '}
+        <code>date &gt;= &quot;2026-07-01&quot;</code>,{' '}
+        <code>month = &quot;2026-07&quot;</code> (<code>played.at</code> takes a
+        full timestamp like <code>&quot;2026-07-01T13:30:00&quot;</code>).
+        Combine with <code>AND</code>, <code>OR</code>, <code>NOT</code>.
+        Strings in double quotes, e.g. <code>eco = &quot;B90&quot;</code>. Do
+        not use SELECT or *.
       </div>
 
       {error && (

@@ -601,6 +601,32 @@ public class GameFeatureDaoTest {
     assertThat(page2.get(0).gameUrl()).isEqualTo("https://chess.com/game/zzz-last");
   }
 
+  /**
+   * The execution half of the {@code played.at} contract: SqlCompilerTest pins that a full ISO
+   * timestamp compiles to a LocalDateTime parameter, but only a real store proves that parameter
+   * matches the stored wall clock — including exactly on the boundary, where a mis-bound value (the
+   * old raw-String bind, or a zone-shifted conversion) silently drops or admits rows.
+   */
+  @Test
+  public void query_playedAtComparisonMatchesStoredRows() {
+    Instant noon = Instant.parse("2024-03-01T12:00:00Z");
+    Instant onePm = Instant.parse("2024-03-01T13:00:00Z");
+    dao.insertBatch(
+        List.of(
+            createGameAt("https://chess.com/game/played-at-noon", noon),
+            createGameAt("https://chess.com/game/played-at-1pm", onePm)));
+
+    CompiledQuery afterHalfPast =
+        new SqlCompiler().compile(Parser.parse("played.at >= \"2024-03-01T12:30:00\""));
+    List<GameFeature> later = dao.query(afterHalfPast, 10, 0);
+    assertThat(later).hasSize(1);
+    assertThat(later.get(0).gameUrl()).isEqualTo("https://chess.com/game/played-at-1pm");
+
+    CompiledQuery fromNoonExactly =
+        new SqlCompiler().compile(Parser.parse("played.at >= \"2024-03-01T12:00:00\""));
+    assertThat(dao.query(fromNoonExactly, 10, 0)).hasSize(2);
+  }
+
   @Test
   public void deleteOccurrencesByGameUrls_thenReinsert_doesNotDuplicate() {
     // Regression test: re-indexing a partial month must not accumulate duplicate occurrences.

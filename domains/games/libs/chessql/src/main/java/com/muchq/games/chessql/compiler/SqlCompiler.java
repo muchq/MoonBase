@@ -12,8 +12,11 @@ import com.muchq.games.chessql.ast.SequenceExpr;
 import com.muchq.games.chessql.parser.ParsedQuery;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.YearMonth;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -101,9 +104,9 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * copy and the compiler disagree, which is the whole reason the reference can be served verbatim
    * over MCP (#1326) instead of generated.
    *
-   * <p>Note what they are <em>not</em>: the rejections do not enumerate them. "Unknown field: x"
-   * names only the offending field, which is #1257 — these accessors are what a fix for it would be
-   * built from, but nothing suggests alternatives today.
+   * <p>The rejections enumerate them: "Unknown field: x" and "Unknown motif: x" append the sorted
+   * roster, built from these accessors. That is the cheap half of #1257 — near-miss suggestions
+   * ("did you mean white.elo?") remain open.
    *
    * <p>Canonical spellings only. Underscore forms ({@code white_elo} for {@code white.elo}) are
    * accepted everywhere the dotted form is, mechanically, so listing both would say nothing extra.
@@ -281,7 +284,8 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     if (orderBy != null) {
       String motifName = orderBy.motifName();
       if (!VALID_MOTIFS.contains(motifName)) {
-        throw new IllegalArgumentException("Unknown motif in ORDER BY: " + motifName);
+        throw new IllegalArgumentException(
+            "Unknown motif in ORDER BY: " + motifName + knownMotifs());
       }
       String direction = orderBy.ascending() ? "ASC" : "DESC";
 
@@ -791,7 +795,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     PerspectiveField perspectiveField = PERSPECTIVE_FIELDS.get(cmp.field());
     if (perspectiveField != null) {
       String expr = perspectiveExpr(cmp.field(), perspectiveField, perspective, params);
-      params.add(cmp.value());
+      params.add(coercePerspectiveValue(cmp.field(), perspectiveField, cmp.value()));
       if (perspectiveField.kind() == GroupKind.CATEGORICAL && (op.equals("=") || op.equals("!="))) {
         return "LOWER" + expr + " " + op + " LOWER(?)";
       }
@@ -799,11 +803,116 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     }
 
     String column = resolveColumn(cmp.field());
-    params.add(cmp.value());
+    params.add(coerceValue(cmp.field(), column, cmp.value()));
     if (STRING_COLUMNS.contains(column) && (op.equals("=") || op.equals("!="))) {
       return "LOWER(" + column + ") " + op + " LOWER(?)";
     }
     return column + " " + op + " ?";
+  }
+
+  /**
+   * Coerces a comparison/IN value to its column's type, or rejects it with the fix in the message.
+   * Binding untyped is not an option: JDBI sends a String parameter as VARCHAR, which H2 coerces
+   * against a typed column and Postgres rejects at the operator — so a quoted number against an INT
+   * column was a green local test and a 500 in production. The type partition needs no new
+   * hand-maintained list: {@link #STRING_COLUMNS} is the string side, played_at is the one
+   * timestamp, and every remaining physical column is INT.
+   */
+  private static Object coerceValue(String field, String column, Object value) {
+    if ("played_at".equals(column)) {
+      return parsePlayedAtValue(field, value);
+    }
+    if (STRING_COLUMNS.contains(column)) {
+      return requireString(field, value);
+    }
+    return requireInteger(field, value);
+  }
+
+  /** The same coercion for perspective fields, whose type is their {@link GroupKind}. */
+  private static Object coercePerspectiveValue(
+      String field, PerspectiveField perspectiveField, Object value) {
+    return perspectiveField.kind() == GroupKind.CATEGORICAL
+        ? requireString(field, value)
+        : requireInteger(field, value);
+  }
+
+  private static String requireString(String field, Object value) {
+    if (value instanceof String s) {
+      return s;
+    }
+    throw new IllegalArgumentException(
+        field
+            + " takes a double-quoted string, got: "
+            + value
+            + " — add quotes: \""
+            + value
+            + "\"");
+  }
+
+  private static Integer requireInteger(String field, Object value) {
+    if (value instanceof Integer i) {
+      return i;
+    }
+    // "drop the quotes" only when doing so would actually work: for white.elo >= "GM" that edit
+    // just produces the unquoted-identifier error, which advises quoting it again.
+    String hint = isIntegerText(value) ? " — drop the quotes" : "";
+    throw new IllegalArgumentException(field + " takes a number, got: \"" + value + "\"" + hint);
+  }
+
+  private static boolean isIntegerText(Object value) {
+    if (!(value instanceof String s)) {
+      return false;
+    }
+    try {
+      Integer.parseInt(s);
+      return true;
+    } catch (NumberFormatException e) {
+      return false;
+    }
+  }
+
+  /**
+   * played.at compares the raw TIMESTAMP, so its value must be a full ISO timestamp, bound as the
+   * zone-free {@link LocalDateTime} the column stores (the UTC wall clock — same convention as
+   * {@link #compileDateComparison}), truncated to the microsecond precision both engines store so
+   * they cannot disagree on a sub-microsecond literal. A zone-qualified instant ("...Z" or an
+   * explicit offset — the likeliest shape an MCP/LLM caller writes) has exactly one correct reading
+   * under that convention, so it is converted rather than rejected. The likeliest malformed value —
+   * a bare date — would otherwise compare as midnight while reading as "that day", so the rejection
+   * hands over the fields that mean that.
+   */
+  private static LocalDateTime parsePlayedAtValue(String field, Object value) {
+    if (value instanceof String s) {
+      LocalDateTime parsed = null;
+      try {
+        parsed = LocalDateTime.parse(s);
+      } catch (DateTimeParseException e) {
+        try {
+          parsed = OffsetDateTime.parse(s).withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
+        } catch (DateTimeParseException alsoNotZoned) {
+          // fall through to the shared error below
+        }
+      }
+      if (parsed != null && hasSaneYear(parsed.getYear())) {
+        return parsed.truncatedTo(ChronoUnit.MICROS);
+      }
+    }
+    throw new IllegalArgumentException(
+        field
+            + " requires a full ISO timestamp (\"YYYY-MM-DDTHH:MM:SS\", the stored UTC wall clock;"
+            + " a trailing Z or offset is converted), got: "
+            + value
+            + ". To filter by day or month use date or month instead, e.g. date >="
+            + " \"2026-07-01\" or month = \"2026-07\"");
+  }
+
+  /**
+   * java.time accepts years to ±999,999,999; Postgres timestamps stop at 294276 AD, so an ISO-valid
+   * absurd year would be a compile-time pass and an engine-dependent runtime failure. Four digits
+   * is every year a chess game can have been played in.
+   */
+  private static boolean hasSaneYear(int year) {
+    return year >= 0 && year <= 9999;
   }
 
   /**
@@ -862,7 +971,10 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   private static LocalDate parseDateValue(Object value) {
     if (value instanceof String s) {
       try {
-        return LocalDate.parse(s);
+        LocalDate parsed = LocalDate.parse(s);
+        if (hasSaneYear(parsed.getYear())) {
+          return parsed;
+        }
       } catch (DateTimeParseException e) {
         // fall through to the shared error below
       }
@@ -874,7 +986,10 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   private static YearMonth parseMonthValue(Object value) {
     if (value instanceof String s) {
       try {
-        return YearMonth.parse(s);
+        YearMonth parsed = YearMonth.parse(s);
+        if (hasSaneYear(parsed.getYear())) {
+          return parsed;
+        }
       } catch (DateTimeParseException e) {
         // fall through to the shared error below
       }
@@ -898,7 +1013,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     PerspectiveField perspectiveField = PERSPECTIVE_FIELDS.get(in.field());
     if (perspectiveField != null) {
       String expr = perspectiveExpr(in.field(), perspectiveField, perspective, params);
-      params.addAll(in.values());
+      in.values().forEach(v -> params.add(coercePerspectiveValue(in.field(), perspectiveField, v)));
       if (perspectiveField.kind() == GroupKind.CATEGORICAL) {
         String lowerPlaceholders =
             in.values().stream().map(v -> "LOWER(?)").collect(Collectors.joining(", "));
@@ -909,7 +1024,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     }
 
     String column = resolveColumn(in.field());
-    params.addAll(in.values());
+    in.values().forEach(v -> params.add(coerceValue(in.field(), column, v)));
     if (STRING_COLUMNS.contains(column)) {
       String lowerPlaceholders =
           in.values().stream().map(v -> "LOWER(?)").collect(Collectors.joining(", "));
@@ -968,7 +1083,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   private String compileMotif(MotifExpr motif) {
     String name = motif.motifName();
     if (!VALID_MOTIFS.contains(name)) {
-      throw new IllegalArgumentException("Unknown motif: " + name);
+      throw new IllegalArgumentException("Unknown motif: " + name + knownMotifs());
     }
     return switch (name) {
       // Derived: ATTACK where the revealing piece uncovers the attack (is_discovered flag)
@@ -1026,7 +1141,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     }
     for (String name : names) {
       if (!VALID_MOTIFS.contains(name)) {
-        throw new IllegalArgumentException("Unknown motif in sequence: " + name);
+        throw new IllegalArgumentException("Unknown motif in sequence: " + name + knownMotifs());
       }
     }
 
@@ -1116,6 +1231,21 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     if (VALID_COLUMNS.contains(underscored)) {
       return underscored;
     }
-    throw new IllegalArgumentException("Unknown field: " + field);
+    throw new IllegalArgumentException(
+        "Unknown field: "
+            + field
+            + ". Known fields: "
+            + sorted(filterableFields())
+            + "; with a player: "
+            + sorted(perspectiveFields()));
+  }
+
+  /** One line per rejection: the roster the caller should have picked from. */
+  private static String knownMotifs() {
+    return ". Known motifs: " + sorted(VALID_MOTIFS);
+  }
+
+  private static String sorted(Set<String> names) {
+    return names.stream().sorted().collect(Collectors.joining(", "));
   }
 }

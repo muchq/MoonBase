@@ -649,6 +649,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmupTest.java",
         "src/test/java/com/muchq/games/one_d4/api/HealthProbeRouteLabelTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexResponseWireTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/QueryErrorWireTest.java",
     ],
     runtime_deps = [
         "//domains/platform/libs/logging",

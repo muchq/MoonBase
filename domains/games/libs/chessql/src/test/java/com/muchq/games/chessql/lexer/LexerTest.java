@@ -87,4 +87,31 @@ public class LexerTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Unterminated string");
   }
+
+  @Test
+  public void singleQuotedStringSaysUseDoubleQuotes() {
+    // The SQL habit. The generic unexpected-character error is technically true and practically
+    // useless here; the fix is one specific thing, so say it.
+    assertThatThrownBy(() -> new Lexer("eco = 'B90'").tokenize())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("double quotes")
+        .hasMessageContaining("\"B90\"");
+  }
+
+  @Test
+  public void apostropheInsideSingleQuotesSuppressesTheSuggestion() {
+    // 'King's Gambit' has three quote marks; a naive scan to the next quote would suggest the
+    // truncated "King". When the quote count is ambiguous, saying less beats suggesting wrong.
+    assertThatThrownBy(() -> new Lexer("opening.name = 'King's Gambit'").tokenize())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("double quotes")
+        .hasMessageNotContaining("try");
+  }
+
+  @Test
+  public void otherUnexpectedCharactersKeepTheGenericError() {
+    assertThatThrownBy(() -> new Lexer("white.elo >= #").tokenize())
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Unexpected character '#'");
+  }
 }
