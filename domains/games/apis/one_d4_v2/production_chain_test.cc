@@ -136,15 +136,26 @@ TEST_F(ProductionChainTest, TheTransportAndThePgnCapSplitTheOversizedSpace) {
   big_pgn.headers.Set("content-type", "application/json");
   big_pgn.body = std::string("{\"pgn\": \"") + std::string(300 * 1024, 'x') + "\"}";
   const auto refused = raw.Send(big_pgn);
-  ASSERT_TRUE(refused.ok());
+  ASSERT_TRUE(refused.ok()) << refused.error().message();
   EXPECT_EQ(refused->status, 400);
 
-  // Over the transport limit: never reaches the handler at all.
+  // Over the transport limit: never reaches the handler at all. The
+  // transport answers 413 and then drains only a bounded slice of the
+  // unread body before hard-closing (the nginx-style lingering close), so a
+  // client that writes everything before reading may take the reset instead
+  // of the status line — which of the two depends on socket buffering, and
+  // differs between Linux and macOS. The seam itself is what's pinned: the
+  // rejection lands in the instruments under the sentinel route, and the
+  // handler is never invoked.
+  const auto completes_before = sink_->completes_.size();
   smithy::http::HttpRequest oversized = big_pgn;
   oversized.body = std::string(2 * 1024 * 1024, 'x');
   const auto rejected = raw.Send(oversized);
-  ASSERT_TRUE(rejected.ok());
-  EXPECT_EQ(rejected->status, 413);
+  if (rejected.ok()) {
+    EXPECT_EQ(rejected->status, 413);
+  }
+  ASSERT_EQ(sink_->completes_.size(), completes_before + 1);
+  EXPECT_EQ(sink_->completes_.back(), (std::pair<std::string, int>{aura::kUnmatchedRoute, 413}));
 
   transport.Stop();
 }
