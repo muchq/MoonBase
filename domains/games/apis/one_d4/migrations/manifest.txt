@@ -1,0 +1,24 @@
+# The one_d4 schema, as ordered migration steps. This file is the ordering:
+# Migration (Java, both engines), the one_d4_migrate deploy step, and
+# one_d4_worker's schema_contract_test all read it, and a step not listed
+# here never runs anywhere.
+#
+# Each step resolves to exactly one file per engine: <engine>/<step>.sql
+# when the engines fork, <step>.sql when they agree. See README.md.
+V001__core_tables
+V002__exclude_bullet
+V003__indexed_periods_unique
+V004__game_features_indexed_at
+V005__drop_motifs_json
+V006__motif_occurrences
+V007__openings_and_titles
+V008__drop_has_motif_columns
+V009__dedupe_key
+V010__dedupe_key_unique
+V011__game_features_read_indexes
+V012__username_indexes
+V013__indexed_at_index
+V014__lease_columns
+V015__dispatch_columns
+V016__claimable_index
+V017__reanalysis_requests

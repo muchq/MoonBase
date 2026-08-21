@@ -1,14 +1,17 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
@@ -17,14 +20,16 @@
 namespace one_d4_worker {
 namespace {
 
-// The Java service owns `indexing_requests`; this worker is a second poller
-// on it. Nothing but agreement makes that safe, and the agreement is
-// invisible from either side alone: pg_queue_test builds its own copy of
-// the table, so a column the Java migration changes would leave the C++
-// tests green and production broken.
+// The schema lives in one_d4's migrations/ .sql files (#1419); this worker
+// is a second poller on the tables they create. Nothing but agreement makes
+// that safe, and the agreement is invisible from either side alone:
+// pg_queue_test builds its own copy of the table, so a column a migration
+// changes would leave the C++ tests green and production broken.
 //
 // The id column is why this exists. It is UUID, and a fixture that invents
 // VARCHAR ids passes every test while telling you nothing.
+
+constexpr char kMigrationsDir[] = "domains/games/apis/one_d4/migrations";
 
 std::string Read(const std::string& path) {
   std::ifstream file(path);
@@ -32,6 +37,44 @@ std::string Read(const std::string& path) {
   std::ostringstream contents;
   contents << file.rdbuf();
   return contents.str();
+}
+
+/// manifest.txt's step names, in order — the same list Migration runs.
+std::vector<std::string> ManifestSteps() {
+  std::istringstream lines(Read(absl::StrCat(kMigrationsDir, "/manifest.txt")));
+  std::vector<std::string> steps;
+  std::string line;
+  while (std::getline(lines, line)) {
+    absl::StripAsciiWhitespace(&line);
+    if (!line.empty() && line[0] != '#') steps.push_back(line);
+  }
+  return steps;
+}
+
+/// One step's file for one engine, resolved the way Migration resolves it:
+/// the engine directory when the engines fork, the shared file when they
+/// agree — and never both, which would be two sources of truth.
+std::string ResolveStep(const std::string& step, const std::string& engine) {
+  const std::string engine_path = absl::StrCat(kMigrationsDir, "/", engine, "/", step, ".sql");
+  const std::string shared_path = absl::StrCat(kMigrationsDir, "/", step, ".sql");
+  const bool engine_exists = std::filesystem::exists(engine_path);
+  const bool shared_exists = std::filesystem::exists(shared_path);
+  EXPECT_FALSE(engine_exists && shared_exists)
+      << step << " has both an " << engine << " file and a shared file";
+  EXPECT_TRUE(engine_exists || shared_exists) << step << " has no file for " << engine;
+  return engine_exists ? engine_path : shared_path;
+}
+
+/// Every statement the Postgres migration runs, concatenated in order.
+const std::string& PostgresMigrationSql() {
+  static const std::string* const sql = [] {
+    auto* all = new std::string;
+    for (const std::string& step : ManifestSteps()) {
+      absl::StrAppend(all, Read(ResolveStep(step, "pg")), "\n");
+    }
+    return all;
+  }();
+  return *sql;
 }
 
 /// column name -> declared type, from a CREATE TABLE body plus any ALTER
@@ -60,45 +103,84 @@ std::map<std::string, std::string> Columns(const std::string& source, const std:
   return columns;
 }
 
-/// The DDL for one table, as the dialect creates it and the migrations
-/// then alter it.
-std::map<std::string, std::string> JavaSchemaFor(const std::string& table) {
-  std::map<std::string, std::string> columns =
-      Columns(Read("domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/db/"
-                   "PostgresSqlDialect.java"),
-              table);
-  for (const auto& [name, type] :
-       Columns(Read("domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/db/"
-                    "Migration.java"),
-               table)) {
-    columns[name] = type;
-  }
-  return columns;
+/// The DDL for one table, as the migrations create and then alter it.
+std::map<std::string, std::string> MigrationSchemaFor(const std::string& table) {
+  return Columns(PostgresMigrationSql(), table);
 }
 
-std::map<std::string, std::string> JavaSchema() { return JavaSchemaFor("indexing_requests"); }
+std::map<std::string, std::string> MigrationSchema() {
+  return MigrationSchemaFor("indexing_requests");
+}
 
-TEST(SchemaContract, TheJavaSchemaHasEveryColumnThisWorkerReadsOrWrites) {
-  const std::map<std::string, std::string> java = JavaSchema();
+// The migration files are read blind off the manifest, so an unreachable
+// file — in :migrations_sql but missing from the manifest, or shadowed by
+// the resolution rule — is one this test silently never scrapes and
+// production never runs. Walks the runfiles copy of :migrations_sql only:
+// a file on disk but absent from that filegroup (or from BUILD entirely)
+// is invisible to every bazel test, which migrations/README.md documents
+// as this repo's standing trap.
+TEST(SchemaContract, EveryMigrationFileIsReachableFromTheManifest) {
+  std::set<std::string> reachable = {"manifest.txt"};
+  for (const std::string& step : ManifestSteps()) {
+    for (const std::string& engine : {"pg", "h2"}) {
+      if (std::filesystem::exists(absl::StrCat(kMigrationsDir, "/", engine, "/", step, ".sql"))) {
+        reachable.insert(absl::StrCat(engine, "/", step, ".sql"));
+      }
+    }
+    if (std::filesystem::exists(absl::StrCat(kMigrationsDir, "/", step, ".sql"))) {
+      reachable.insert(absl::StrCat(step, ".sql"));
+    }
+  }
+  int seen = 0;
+  for (const auto& entry : std::filesystem::recursive_directory_iterator(kMigrationsDir)) {
+    if (!entry.is_regular_file()) continue;
+    // lexically_relative, not relative: runfiles are symlinks, and relative()
+    // canonicalizes through them to somewhere outside the tree.
+    const std::string relative = entry.path().lexically_relative(kMigrationsDir).generic_string();
+    EXPECT_TRUE(reachable.count(relative) == 1)
+        << relative << " is not reachable from manifest.txt — it never runs anywhere";
+    ++seen;
+  }
+  // A loose floor: only there to catch the walk finding nothing at all, so a
+  // legitimate consolidation of steps doesn't trip it.
+  EXPECT_GT(seen, 10) << "the directory walk found almost nothing — the data moved";
+}
+
+// Both engines resolve every step, checked here as well as in
+// MigrationFilesTest because this test's view of the schema is built from
+// the same resolution rule: a step it cannot resolve is a step it is not
+// checking the fixtures against.
+TEST(SchemaContract, EveryManifestStepResolvesForBothEngines) {
+  const std::vector<std::string> steps = ManifestSteps();
+  ASSERT_FALSE(steps.empty()) << "read no steps at all — the manifest moved";
+  for (const std::string& step : steps) {
+    for (const std::string& engine : {"pg", "h2"}) {
+      ResolveStep(step, engine);  // EXPECTs inside
+    }
+  }
+}
+
+TEST(SchemaContract, TheMigrationSchemaHasEveryColumnThisWorkerReadsOrWrites) {
+  const std::map<std::string, std::string> java = MigrationSchema();
   ASSERT_FALSE(java.empty()) << "read no columns at all — the DDL moved";
 
   for (const std::string& column :
        {"id", "player", "platform", "start_month", "end_month", "status", "created_at",
         "updated_at", "error_message", "games_indexed", "exclude_bullet", "skip_cache", "attempts",
         "owner_id", "lease_expires_at", "dedupe_key"}) {
-    EXPECT_TRUE(java.count(column) == 1) << column << " is gone from the Java schema";
+    EXPECT_TRUE(java.count(column) == 1) << column << " is gone from the migration schema";
   }
 }
 
 TEST(SchemaContract, TheTestFixtureDeclaresTheSameTypes) {
-  const std::map<std::string, std::string> java = JavaSchema();
+  const std::map<std::string, std::string> java = MigrationSchema();
   const std::map<std::string, std::string> fixture =
       Columns(Read("domains/games/apis/one_d4_worker/pg_queue_test.cc"), "indexing_requests");
   ASSERT_FALSE(fixture.empty()) << "read no columns from the fixture";
 
   for (const auto& [name, type] : fixture) {
     const auto declared = java.find(name);
-    ASSERT_TRUE(declared != java.end()) << name << " is not in the Java schema";
+    ASSERT_TRUE(declared != java.end()) << name << " is not in the migration schema";
     EXPECT_EQ(type, declared->second) << name << " is declared differently in the fixture";
   }
 }
@@ -106,16 +188,15 @@ TEST(SchemaContract, TheTestFixtureDeclaresTheSameTypes) {
 TEST(SchemaContract, IdIsAUuid) {
   // Named on its own because it is the one a text fixture gets wrong
   // silently: 'job-1' is a fine VARCHAR and not a UUID at all.
-  EXPECT_EQ(JavaSchema()["id"], "UUID");
+  EXPECT_EQ(MigrationSchema()["id"], "UUID");
 }
 
 // The same argument, for the three tables the sink writes. Its fixture
-// hand-copies their DDL too, so a column the Java migration changes leaves
-// these tests green and production broken — and unlike indexing_requests,
-// these are tables the C++ worker writes rows into rather than just claims
-// from.
+// hand-copies their DDL too, so a column a migration changes leaves these
+// tests green and production broken — and unlike indexing_requests, these
+// are tables the C++ worker writes rows into rather than just claims from.
 
-TEST(SchemaContract, TheJavaSchemaHasEveryColumnTheSinkWrites) {
+TEST(SchemaContract, TheMigrationSchemaHasEveryColumnTheSinkWrites) {
   for (const auto& [table, wanted] : std::vector<std::pair<std::string, std::vector<std::string>>>{
            {"game_features",
             {"id", "request_id", "game_url", "platform", "white_username", "black_username",
@@ -128,7 +209,7 @@ TEST(SchemaContract, TheJavaSchemaHasEveryColumnTheSinkWrites) {
            {"indexed_periods",
             {"id", "player", "platform", "year_month", "fetched_at", "is_complete", "games_count",
              "exclude_bullet"}}}) {
-    const std::map<std::string, std::string> java = JavaSchemaFor(table);
+    const std::map<std::string, std::string> java = MigrationSchemaFor(table);
     ASSERT_FALSE(java.empty()) << "read no columns of " << table << " — the DDL moved";
     for (const std::string& column : wanted) {
       EXPECT_TRUE(java.count(column) == 1) << column << " is gone from " << table;
@@ -140,13 +221,13 @@ TEST(SchemaContract, TheSinkFixtureDeclaresTheSameTypes) {
   const std::string fixture_source = Read("domains/games/apis/one_d4_worker/pg_game_sink_test.cc");
   int checked = 0;
   for (const std::string& table : {"game_features", "motif_occurrences", "indexed_periods"}) {
-    const std::map<std::string, std::string> java = JavaSchemaFor(table);
+    const std::map<std::string, std::string> java = MigrationSchemaFor(table);
     const std::map<std::string, std::string> fixture = Columns(fixture_source, table);
     ASSERT_FALSE(fixture.empty()) << "read no columns of " << table << " from the fixture";
 
     for (const auto& [name, type] : fixture) {
       const auto declared = java.find(name);
-      ASSERT_TRUE(declared != java.end()) << name << " is not in the Java " << table;
+      ASSERT_TRUE(declared != java.end()) << name << " is not in the migration " << table;
       EXPECT_EQ(type, declared->second)
           << name << " is declared differently in the " << table << " fixture";
       ++checked;
@@ -160,8 +241,8 @@ TEST(SchemaContract, TheOccurrenceIdIsNotAUuidColumn) {
   // id here — which is why the sink generates it with gen_random_uuid()
   // cast to text. A fixture that made it UUID would accept a cast the real
   // column rejects.
-  EXPECT_EQ(JavaSchemaFor("motif_occurrences")["id"], "VARCHAR(36)");
-  EXPECT_EQ(JavaSchemaFor("game_features")["id"], "UUID");
+  EXPECT_EQ(MigrationSchemaFor("motif_occurrences")["id"], "VARCHAR(36)");
+  EXPECT_EQ(MigrationSchemaFor("game_features")["id"], "UUID");
 }
 
 // The reanalysis fixture is a third hand-copy of the two tables the pass
@@ -170,13 +251,13 @@ TEST(SchemaContract, TheReanalysisFixtureDeclaresTheSameTypes) {
   const std::string fixture_source = Read("domains/games/apis/one_d4_worker/pg_reanalysis_test.cc");
   int checked = 0;
   for (const std::string& table : {"game_features", "motif_occurrences"}) {
-    const std::map<std::string, std::string> java = JavaSchemaFor(table);
+    const std::map<std::string, std::string> java = MigrationSchemaFor(table);
     const std::map<std::string, std::string> fixture = Columns(fixture_source, table);
     ASSERT_FALSE(fixture.empty()) << "read no columns of " << table << " from the fixture";
 
     for (const auto& [name, type] : fixture) {
       const auto declared = java.find(name);
-      ASSERT_TRUE(declared != java.end()) << name << " is not in the Java " << table;
+      ASSERT_TRUE(declared != java.end()) << name << " is not in the migration " << table;
       EXPECT_EQ(type, declared->second)
           << name << " is declared differently in the reanalysis " << table << " fixture";
       ++checked;
@@ -186,13 +267,13 @@ TEST(SchemaContract, TheReanalysisFixtureDeclaresTheSameTypes) {
 }
 
 // reanalysis_requests is not a shared table — the indexers never touch it,
-// which is the point of it existing (#1389 phase 5). But the Java migration
-// still owns its DDL and this worker still hand-copies it into a fixture, so
-// the same drift is available: a column renamed in PostgresSqlDialect leaves
+// which is the point of it existing (#1389 phase 5). But the migrations
+// still own its DDL and this worker still hand-copies it into a fixture, so
+// the same drift is available: a column renamed in pg/V017 leaves
 // reanalysis_queue_test green against a table production does not have.
 
-TEST(SchemaContract, TheJavaSchemaHasEveryColumnTheReanalysisQueueTouches) {
-  const std::map<std::string, std::string> java = JavaSchemaFor("reanalysis_requests");
+TEST(SchemaContract, TheMigrationSchemaHasEveryColumnTheReanalysisQueueTouches) {
+  const std::map<std::string, std::string> java = MigrationSchemaFor("reanalysis_requests");
   ASSERT_FALSE(java.empty()) << "read no columns at all — the DDL moved";
 
   for (const std::string& column :
@@ -203,7 +284,7 @@ TEST(SchemaContract, TheJavaSchemaHasEveryColumnTheReanalysisQueueTouches) {
 }
 
 TEST(SchemaContract, TheReanalysisRequestFixtureDeclaresTheSameTypes) {
-  const std::map<std::string, std::string> java = JavaSchemaFor("reanalysis_requests");
+  const std::map<std::string, std::string> java = MigrationSchemaFor("reanalysis_requests");
   // Both copies. pg_reanalysis_test carries one too, and it is the one
   // behind the fence — a lease_expires_at that drifted to TIMESTAMPTZ
   // there would compare against NOW() differently than production does.
@@ -215,7 +296,7 @@ TEST(SchemaContract, TheReanalysisRequestFixtureDeclaresTheSameTypes) {
 
     for (const auto& [name, type] : fixture) {
       const auto declared = java.find(name);
-      ASSERT_TRUE(declared != java.end()) << name << " is not in the Java schema";
+      ASSERT_TRUE(declared != java.end()) << name << " is not in the migration schema";
       EXPECT_EQ(type, declared->second) << name << " is declared differently in " << path;
       ++checked;
     }
@@ -224,7 +305,7 @@ TEST(SchemaContract, TheReanalysisRequestFixtureDeclaresTheSameTypes) {
 }
 
 TEST(SchemaContract, TheReanalysisIdIsAUuidToo) {
-  EXPECT_EQ(JavaSchemaFor("reanalysis_requests")["id"], "UUID");
+  EXPECT_EQ(MigrationSchemaFor("reanalysis_requests")["id"], "UUID");
 }
 
 TEST(SchemaContract, ThePollerDefaultsMatchTheRetentionPolicy) {

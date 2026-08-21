@@ -360,6 +360,34 @@ services:
       shared_postgres:
         condition: service_healthy
 
+  # The schema step (#1419): applies one_d4's migrations/ .sql files and
+  # exits, before anything that needs the tables. Idempotent — safe on every
+  # deploy, like golf_hub_db_init above. The Java service still runs the
+  # same migrations at boot, after this (#1426 is the demotion to a
+  # verifier); what the step already buys is one_d4_worker starting without
+  # waiting for the Java service (#1418 measured that coupling as an
+  # error-loop until one_d4 came up).
+  one_d4_migrate:
+    image: ghcr.io/muchq/one_d4_migrate:${ONE_D4_MIGRATE_SHA:-${DEPLOY_SHA:-latest}}
+    labels:
+      com.muchq.description: "one_d4 schema migrations (one-shot)"
+    restart: "no"
+    environment:
+      # socketTimeout: DataSourceFactory's 150s default was sized for the
+      # retention sweep, but this step is the one that builds indexes — a
+      # CREATE INDEX on a populated game_features sends nothing until it
+      # finishes, and severing it here gates the worker off until the next
+      # deploy. 30 minutes clears any plausible build while still ending a
+      # true TCP black hole.
+      - INDEXER_DB_URL=jdbc:postgresql://shared_postgres:5432/one_d4?socketTimeout=1800
+      - INDEXER_DB_USERNAME=one_d4
+      - INDEXER_DB_PASSWORD=${ONE_D4_DB_PASSWORD}
+    networks:
+      - app_network
+    depends_on:
+      shared_postgres:
+        condition: service_healthy
+
   one_d4:
     image: ghcr.io/muchq/one_d4:${ONE_D4_SHA:-${DEPLOY_SHA:-latest}}
     labels:
@@ -386,8 +414,15 @@ services:
         aliases:
           - one-d4
     depends_on:
-      shared_postgres:
-        condition: service_healthy
+      # The migrate gate is a strict superset of the old shared_postgres one
+      # (the one-shot itself waits for Postgres), and it serializes the two
+      # migration runners: this service still applies the same files at boot
+      # (#1426 is the demotion to a verifier), and released together the two
+      # would race — CREATE TABLE/INDEX IF NOT EXISTS is idempotent but not
+      # concurrency-safe, and the one-shot losing that race gates the worker
+      # off until the next deploy.
+      one_d4_migrate:
+        condition: service_completed_successfully
     deploy:
       resources:
         limits:
@@ -411,8 +446,9 @@ services:
   # index_runs_total{indexer="cpp"} advancing, which a probe could not
   # tell you anyway — a worker with an empty queue is idle, not sick.
   #
-  # Creates no schema. one_d4 owns the migrations and must be up first,
-  # or this polls a table that does not exist yet.
+  # Creates no schema. The one_d4_migrate step owns getting the tables in
+  # place, so this gates on that one-shot finishing rather than on the Java
+  # service being up — the two services now deploy in either order (#1419).
   one_d4_worker:
     image: ghcr.io/muchq/one_d4_worker:${ONE_D4_WORKER_SHA:-${DEPLOY_SHA:-latest}}
     labels:
@@ -437,8 +473,8 @@ services:
     networks:
       - app_network
     depends_on:
-      one_d4:
-        condition: service_healthy
+      one_d4_migrate:
+        condition: service_completed_successfully
     # Shutdown drains the runs in flight. A run checks per game, but it
     # cannot interrupt a chess.com call it is already inside, and that is
     # 60s per attempt times three attempts plus backoff — so the grace has

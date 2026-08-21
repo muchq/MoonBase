@@ -1,0 +1,4 @@
+# fixture manifest
+
+V001__forked
+V002__shared

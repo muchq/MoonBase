@@ -1,13 +1,12 @@
 package com.muchq.games.one_d4.db;
 
-import java.util.List;
-
 /**
  * SQL that differs across engines. Production ships {@link PostgresSqlDialect} only. The H2 variant
  * lives under {@code src/test} and is wired by tests — never by {@code IndexerModule}.
  *
- * <p>Pure SQL: every method returns statements for {@link Migration} (or the DAOs) to execute. The
- * dialect does not take a {@link java.sql.Statement}; the migration's ordering stays in one place.
+ * <p>Only runtime statements for the DAOs live here. The DDL is the {@code migrations/} .sql files
+ * (#1419); a dialect's part in those is naming which engine directory {@link Migration} resolves
+ * forked steps from.
  */
 public interface SqlDialect {
 
@@ -20,46 +19,9 @@ public interface SqlDialect {
   String upsertIndexedPeriod();
 
   /**
-   * Create {@code indexing_requests}, {@code game_features}, and {@code indexed_periods}, in that
-   * order.
+   * The {@code migrations/} engine directory this dialect's forked DDL lives in: {@code "pg"} or
+   * {@code "h2"}. Both engines run the same step list in the same order; only a forked step's SQL
+   * differs. See {@code migrations/README.md}.
    */
-  List<String> createCoreTables();
-
-  /**
-   * After {@code exclude_bullet} is added to indexed_periods: statements that drop the old 3-column
-   * unique when this engine needs that, then add the 4-column unique.
-   */
-  List<String> indexedPeriodsUniqueMigration();
-
-  /** Add the unique constraint on {@code indexing_requests.dedupe_key}. */
-  String addDedupeKeyUnique();
-
-  /**
-   * Indexes behind username search. Postgres uses expression indexes on {@code LOWER(...)}; H2 has
-   * no expression indexes and carries plain-column stand-ins so the migration path stays identical.
-   */
-  List<String> usernameIndexes();
-
-  /**
-   * Index behind {@code claimNext}. Postgres uses a partial index; H2 approximates with a composite
-   * because it has no partial indexes.
-   */
-  String claimableRequestsIndex();
-
-  /**
-   * Create {@code reanalysis_requests}.
-   *
-   * <p>Its own table rather than a {@code job_type} column on {@code indexing_requests}, because
-   * the indexers claim from that one unfiltered: a reanalysis row there is one an indexer takes,
-   * cannot run, and fails. Separate tables make that unreachable rather than a filter every present
-   * and future poller has to remember.
-   */
-  String createReanalysisRequests();
-
-  /**
-   * At most one live reanalysis pass, refused at insert. Postgres enforces it with a partial unique
-   * index; H2 has no partial indexes and carries a plain same-named index so the migration path
-   * stays identical — the uniqueness itself is asserted against Postgres.
-   */
-  String singleLiveReanalysisIndex();
+  String migrationsEngine();
 }

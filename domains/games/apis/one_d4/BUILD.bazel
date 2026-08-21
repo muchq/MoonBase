@@ -27,13 +27,21 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/db/IndexingRequestDao.java",
         "src/main/java/com/muchq/games/one_d4/db/IndexingRequestStore.java",
         "src/main/java/com/muchq/games/one_d4/db/Migration.java",
+        "src/main/java/com/muchq/games/one_d4/db/MigrationFiles.java",
+        # In :db rather than only in the binary so MigrationRunnerTest can
+        # reach run() — the exit contract one_d4_worker's compose gate keys on.
+        "src/main/java/com/muchq/games/one_d4/db/MigrationRunner.java",
         "src/main/java/com/muchq/games/one_d4/db/PostgresSqlDialect.java",
         "src/main/java/com/muchq/games/one_d4/db/ReanalysisRequestDao.java",
         "src/main/java/com/muchq/games/one_d4/db/RetentionPolicy.java",
         "src/main/java/com/muchq/games/one_d4/db/SqlDialect.java",
+        "src/main/java/com/muchq/games/one_d4/db/SqlStatements.java",
         "src/main/java/com/muchq/games/one_d4/db/StatementTimeouts.java",
     ],
     visibility = ["//visibility:public"],
+    runtime_deps = [
+        ":migrations",
+    ],
     deps = [
         ":dto",
         ":model",
@@ -44,6 +52,111 @@ java_library(
         artifact("org.slf4j:slf4j-api"),
     ],
 )
+
+# The schema itself (#1419): numbered idempotent .sql files, manifest-ordered.
+# One copy of the DDL, three readers — Migration at boot (both engines), the
+# one_d4_migrate deploy step, and one_d4_worker's schema_contract_test via
+# :migrations_sql. Each file is named exactly once, in one of the three
+# groups below; the shipping and test targets compose the groups, so a new
+# step is a line in manifest.txt plus a line in one group.
+filegroup(
+    name = "migrations_shared_sql",
+    srcs = [
+        "migrations/V002__exclude_bullet.sql",
+        "migrations/V004__game_features_indexed_at.sql",
+        "migrations/V005__drop_motifs_json.sql",
+        "migrations/V006__motif_occurrences.sql",
+        "migrations/V007__openings_and_titles.sql",
+        "migrations/V008__drop_has_motif_columns.sql",
+        "migrations/V009__dedupe_key.sql",
+        "migrations/V011__game_features_read_indexes.sql",
+        "migrations/V013__indexed_at_index.sql",
+        "migrations/V014__lease_columns.sql",
+        "migrations/V015__dispatch_columns.sql",
+    ],
+)
+
+filegroup(
+    name = "migrations_pg_sql",
+    srcs = [
+        "migrations/pg/V001__core_tables.sql",
+        "migrations/pg/V003__indexed_periods_unique.sql",
+        "migrations/pg/V010__dedupe_key_unique.sql",
+        "migrations/pg/V012__username_indexes.sql",
+        "migrations/pg/V016__claimable_index.sql",
+        "migrations/pg/V017__reanalysis_requests.sql",
+    ],
+)
+
+filegroup(
+    name = "migrations_h2_sql",
+    testonly = True,
+    srcs = [
+        "migrations/h2/V001__core_tables.sql",
+        "migrations/h2/V003__indexed_periods_unique.sql",
+        "migrations/h2/V010__dedupe_key_unique.sql",
+        "migrations/h2/V012__username_indexes.sql",
+        "migrations/h2/V016__claimable_index.sql",
+        "migrations/h2/V017__reanalysis_requests.sql",
+    ],
+)
+
+# What ships with the service: Postgres + shared files only. The H2
+# translations are test-only (:h2_migrations) and never reach this image —
+# IndexerModuleTest pins that, step by step.
+java_library(
+    name = "migrations",
+    resource_strip_prefix = "domains/games/apis",
+    resources = [
+        "migrations/manifest.txt",
+        ":migrations_pg_sql",
+        ":migrations_shared_sql",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# The H2 side of every forked step, test classpaths only (option 1 of #1419's
+# H2 discussion): the test engine's DDL as files beside the Postgres ones,
+# same step list, wired through :test_db exactly as H2SqlDialect is.
+java_library(
+    name = "h2_migrations",
+    testonly = True,
+    resource_strip_prefix = "domains/games/apis",
+    resources = [":migrations_h2_sql"],
+    visibility = ["//visibility:public"],
+)
+
+# Every migration file plus the manifest, as plain files: data for
+# one_d4_worker's schema_contract_test, which scrapes the Postgres DDL and
+# checks that no .sql file is unreachable from the manifest.
+filegroup(
+    name = "migrations_sql",
+    testonly = True,
+    srcs = [
+        "migrations/manifest.txt",
+        ":migrations_h2_sql",
+        ":migrations_pg_sql",
+        ":migrations_shared_sql",
+    ],
+    visibility = ["//domains/games:__subpackages__"],
+)
+
+# The deploy-time migration step (#1419): applies migrations/ and exits.
+# Ships as ghcr.io/muchq/one_d4_migrate and runs as a one-shot compose
+# service that one_d4_worker gates on, so the worker no longer needs the
+# Java service to have booted first.
+java_binary(
+    name = "one_d4_migrate",
+    main_class = "com.muchq.games.one_d4.db.MigrationRunner",
+    visibility = ["//visibility:public"],
+    runtime_deps = [
+        ":db",
+        "//domains/platform/libs/logging",
+        artifact("org.postgresql:postgresql"),
+    ],
+)
+
+linux_oci_java(bin_name = "one_d4_migrate")
 
 # The opening derivation, alone, because two callers need it and they sit on opposite sides of the
 # service: the index path derives a family when a game arrives, and /admin/rederive-openings
@@ -279,13 +392,14 @@ filegroup(
     visibility = ["//domains/games:__subpackages__"],
 )
 
+# The DDL itself moved to :migrations_sql (#1419); what remains here are the
+# Java constants schema_contract_test still pins against the C++ side — the
+# attempt budget and the lease/max-run policy.
 filegroup(
     name = "worker_schema_sources",
     testonly = True,
     srcs = [
         "src/main/java/com/muchq/games/one_d4/db/IndexingRequestStore.java",
-        "src/main/java/com/muchq/games/one_d4/db/Migration.java",
-        "src/main/java/com/muchq/games/one_d4/db/PostgresSqlDialect.java",
         "src/main/java/com/muchq/games/one_d4/db/RetentionPolicy.java",
     ],
     visibility = ["//domains/games:__subpackages__"],
@@ -415,6 +529,25 @@ java_test_suite(
     ],
 )
 
+# The resolution failure modes MigrationFilesTest pins (a step with two
+# files, a step with none) as a miniature classpath tree — the real tree is
+# valid by construction, so the errors need somewhere else to live.
+java_library(
+    name = "migrations_fixture",
+    testonly = True,
+    resource_strip_prefix = "domains/games/apis/one_d4/src/test/resources",
+    resources = [
+        "src/test/resources/migrations_fixture/ambiguous/V001__both.sql",
+        "src/test/resources/migrations_fixture/ambiguous/manifest.txt",
+        "src/test/resources/migrations_fixture/ambiguous/pg/V001__both.sql",
+        "src/test/resources/migrations_fixture/good/V002__shared.sql",
+        "src/test/resources/migrations_fixture/good/h2/V001__forked.sql",
+        "src/test/resources/migrations_fixture/good/manifest.txt",
+        "src/test/resources/migrations_fixture/good/pg/V001__forked.sql",
+        "src/test/resources/migrations_fixture/missing/manifest.txt",
+    ],
+)
+
 java_test_suite(
     name = "db_tests",
     size = "small",
@@ -424,13 +557,17 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/db/GameFeatureDaoTest.java",
         "src/test/java/com/muchq/games/one_d4/db/IndexedPeriodDaoTest.java",
         "src/test/java/com/muchq/games/one_d4/db/IndexingRequestDaoTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/MigrationFilesTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/MigrationRunnerTest.java",
         "src/test/java/com/muchq/games/one_d4/db/MigrationTest.java",
         "src/test/java/com/muchq/games/one_d4/db/ReanalysisRequestDaoTest.java",
         "src/test/java/com/muchq/games/one_d4/db/RetentionPolicyTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/SqlStatementsTest.java",
         "src/test/java/com/muchq/games/one_d4/db/StatementTimeoutsTest.java",
         "src/test/java/com/muchq/games/one_d4/db/TableDispatchTest.java",
     ],
     deps = [
+        ":migrations_fixture",
         ":db",
         ":dto",
         ":model",
@@ -506,6 +643,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/db/H2IsNotOnThePostgresSuiteClasspathTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresAggregateCompatTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresConcurrentWriteTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/PostgresMigrationRunnerTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresPlayerIndexTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresReadTimeoutTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresRetentionIndexTest.java",
@@ -554,6 +692,9 @@ java_library(
     ],
     visibility = ["//visibility:public"],
     runtime_deps = [
+        # The H2 DDL rides with the H2 driver: a suite that can open
+        # jdbc:h2:mem:… can also migrate it.
+        ":h2_migrations",
         artifact("com.h2database:h2"),
     ],
     deps = [

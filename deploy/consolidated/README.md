@@ -243,7 +243,17 @@ All services run on the `muchq_network` Docker bridge network.
 golf_hub's role and database on every deploy (idempotently — the
 `docker-entrypoint-initdb.d` hook only fires on a fresh volume).
 
-Two things about it are load-bearing and easy to undo by accident:
+`one_d4_migrate` is the same one-shot shape for one_d4's schema (#1419): it
+applies the numbered `.sql` files in
+[`one_d4/migrations/`](../../domains/games/apis/one_d4/migrations/) and
+exits. Both `one_d4` and `one_d4_worker` gate on it with
+`service_completed_successfully` — the worker so it no longer waits for the
+Java service to boot, the service so its own boot-time migration (which
+still runs, until #1426 demotes it to a verifier) is serialized behind this
+one rather than racing it.
+
+Two things about `shared_postgres` are load-bearing and easy to undo by
+accident:
 
 - **The volume key is not the volume's name.** Compose prefixes it with the
   project, so `shared_pgdata` is `ubuntu_shared_pgdata` here and

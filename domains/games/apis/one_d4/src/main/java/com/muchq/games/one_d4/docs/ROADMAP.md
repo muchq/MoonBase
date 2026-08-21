@@ -452,7 +452,7 @@ The retention system can be introduced incrementally:
 ### Estimated Changes
 
 - 3-4 new files (RetentionWorker, S3Archiver, archive migration, retention config)
-- 2-3 files modified (Migration.java for archive table, QueryController for archive queries)
+- 2-3 files modified (a new `migrations/V0NN` step for the archive table, QueryController for archive queries)
 - ~500 lines of code
 
 ---

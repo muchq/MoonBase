@@ -182,6 +182,28 @@ public class IndexerModuleTest {
         .contains("ON CONFLICT");
   }
 
+  /**
+   * The same fact about the DDL now that it is files (#1419): the H2 translations ride {@code
+   * :h2_migrations}, a test-only target this suite deliberately does not depend on, so their
+   * absence here is their absence from every production classpath. Every step, not a sample — a
+   * future forked step whose h2 file landed in {@code :migrations} by mistake would ship, and
+   * nothing else inspects the production classpath. The control is the same loop resolving each
+   * step for Postgres the way the service does: an empty classpath would pass the absence half
+   * while proving nothing.
+   */
+  @Test
+  public void h2MigrationFilesAreNotOnTheProductionClasspath() {
+    ClassLoader cl = com.muchq.games.one_d4.db.Migration.class.getClassLoader();
+    for (String step : com.muchq.games.one_d4.db.MigrationFiles.steps()) {
+      assertThat(com.muchq.games.one_d4.db.MigrationFiles.sqlFor(step, "pg"))
+          .as("the Postgres DDL for %s must resolve on the service classpath", step)
+          .isNotBlank();
+      assertThat(cl.getResource("one_d4/migrations/h2/" + step + ".sql"))
+          .as("the H2 DDL for %s is test-only and must not ship with the service", step)
+          .isNull();
+    }
+  }
+
   @Test
   public void resolveJdbcUrl_prefersConfiguredProperty() {
     assertThat(IndexerModule.resolveJdbcUrl("  jdbc:h2:mem:x  ")).isEqualTo("jdbc:h2:mem:x");

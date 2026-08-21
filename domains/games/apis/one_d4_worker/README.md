@@ -6,7 +6,9 @@ extracts features and motifs, and writes `game_features`,
 
 It is the only indexer. The table is the queue (#1279) — any number of
 these workers poll the same rows under the same claims, leases and fences.
-It creates no schema — one_d4 owns the migrations and must be up first.
+It creates no schema — that lives in one_d4's `migrations/` .sql files
+(#1419), applied by the `one_d4_migrate` deploy step this worker gates on,
+so it no longer waits for the Java service to be up.
 
 ```bash
 ONE_D4_DB_URL=postgresql://... bazel run //domains/games/apis/one_d4_worker
