@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -30,13 +31,23 @@ using futility::rate_limiter::SlidingWindowRateLimiterConfig;
 constexpr char kScholarsMateJson[] =
     R"({"pgn": "[Event \"Live Chess\"]\n[White \"alice\"]\n[Black \"bob\"]\n\n1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# 1-0"})";
 
+// Mutexed like aura's: the beast transport fires on_rejected on an io
+// thread, and the test thread reads while that thread is still live.
 class RecordingSink final : public aura::HttpMetricsSink {
  public:
   void RecordRequestStart(const std::string& /*method*/) override {}
   void RecordRequestComplete(const std::string& route, const std::string& /*method*/,
                              int status_code, std::chrono::microseconds /*duration*/) override {
+    const std::lock_guard<std::mutex> lock(mu_);
     completes_.push_back({route, status_code});
   }
+  std::vector<std::pair<std::string, int>> completes() {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return completes_;
+  }
+
+ private:
+  std::mutex mu_;
   std::vector<std::pair<std::string, int>> completes_;
 };
 
@@ -88,10 +99,11 @@ TEST_F(ProductionChainTest, ServesAnalyzeHealthAnd429ThroughTheChain) {
   for (int i = 0; i < kMaxRequestsPerKey; ++i) {
     EXPECT_EQ(AnalyzeAs("203.0.113.4").status, 200);
   }
-  ASSERT_FALSE(sink_->completes_.empty());
+  const auto completes = sink_->completes();
+  ASSERT_FALSE(completes.empty());
   // The operation name the generated router matched — the bounded route
   // vocabulary, not the raw path.
-  EXPECT_EQ(sink_->completes_[0], (std::pair<std::string, int>{"Analyze", 200}));
+  EXPECT_EQ(completes[0], (std::pair<std::string, int>{"Analyze", 200}));
 
   const auto limited = AnalyzeAs("203.0.113.4");
   EXPECT_EQ(limited.status, 429);
@@ -136,15 +148,27 @@ TEST_F(ProductionChainTest, TheTransportAndThePgnCapSplitTheOversizedSpace) {
   big_pgn.headers.Set("content-type", "application/json");
   big_pgn.body = std::string("{\"pgn\": \"") + std::string(300 * 1024, 'x') + "\"}";
   const auto refused = raw.Send(big_pgn);
-  ASSERT_TRUE(refused.ok());
+  ASSERT_TRUE(refused.ok()) << refused.error().message();
   EXPECT_EQ(refused->status, 400);
 
-  // Over the transport limit: never reaches the handler at all.
+  // Over the transport limit: never reaches the handler at all. The
+  // transport answers 413 and then drains only a bounded slice of the
+  // unread body before hard-closing (the nginx-style lingering close), so a
+  // client that writes everything before reading may take the reset instead
+  // of the status line — which of the two depends on socket buffering, and
+  // differs between Linux and macOS. The seam itself is what's pinned: the
+  // rejection lands in the instruments under the sentinel route, and the
+  // handler is never invoked.
+  const auto completes_before = sink_->completes().size();
   smithy::http::HttpRequest oversized = big_pgn;
   oversized.body = std::string(2 * 1024 * 1024, 'x');
   const auto rejected = raw.Send(oversized);
-  ASSERT_TRUE(rejected.ok());
-  EXPECT_EQ(rejected->status, 413);
+  if (rejected.ok()) {
+    EXPECT_EQ(rejected->status, 413);
+  }
+  const auto completes = sink_->completes();
+  ASSERT_EQ(completes.size(), completes_before + 1);
+  EXPECT_EQ(completes.back(), (std::pair<std::string, int>{aura::kUnmatchedRoute, 413}));
 
   transport.Stop();
 }
