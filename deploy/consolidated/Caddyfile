@@ -168,25 +168,22 @@ api.muchq.com {
 	}
 }
 
-www.r3dr.net {
-	redir https://r3dr.net{uri}
-}
-
-r3dr.net {
-	encode gzip
-	@postshorten {
-		method POST
-		path /shorten
-	}
+# Short-link redirects for iili.uk (#1359). SPA stays on Cloudflare at
+# iili.uk; this host (A-record to the consolidated box) only answers
+# /r/{slug}. Public path is rewritten onto r3dr_v2's modeled
+# /r3dr/v2/r/{slug} — the deliberate exception to "gateway == model path"
+# on api.muchq.com. GET and HEAD both reach the upstream (unfurlers).
+i.iili.uk {
 	@getredir {
-		method GET
+		method GET HEAD
 		path /r/*
 	}
-	root * /var/www/r3dr
-	reverse_proxy @postshorten r3dr:8080
-	reverse_proxy @getredir r3dr:8080
+	handle @getredir {
+		rewrite * /r3dr/v2{path}
+		reverse_proxy r3dr_v2:8091
+	}
+	respond 404
 
-	file_server
 	log {
 		output file /var/log/caddy/access.log {
 			roll_size 1gb

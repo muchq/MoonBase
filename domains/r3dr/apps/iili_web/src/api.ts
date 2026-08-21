@@ -3,12 +3,11 @@
 const API_BASE: string =
   (import.meta.env.VITE_API_BASE as string | undefined) ?? 'https://api.muchq.com';
 
-// Short links keep v1's /r/{slug} shape (bare /{slug} would collide with
-// slug-shaped asset paths): the worker 302s them to the API.
-// VITE_SHORT_LINK_BASE points minted links at a workers.dev preview until
-// the iili.uk custom domain is attached.
+// Short links resolve on i.iili.uk (Caddy → r3dr_v2). The SPA is on
+// Cloudflare at iili.uk; /r/{slug} is not a Worker path. VITE_SHORT_LINK_BASE
+// overrides for local / preview experiments.
 const SHORT_LINK_BASE: string =
-  (import.meta.env.VITE_SHORT_LINK_BASE as string | undefined) ?? 'https://iili.uk/r/';
+  (import.meta.env.VITE_SHORT_LINK_BASE as string | undefined) ?? 'https://i.iili.uk/r/';
 
 export function shortLink(slug: string): string {
   // Identity on the slug alphabet; a URL-context barrier for anything else.

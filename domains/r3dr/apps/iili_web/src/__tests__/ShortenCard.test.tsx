@@ -60,9 +60,9 @@ describe('ShortenCard', () => {
     await user.click(screen.getByRole('button', { name: 'Shorten' }));
 
     expect(api.shorten).toHaveBeenCalledWith('https://example.com/page', NOW + 7 * DAY);
-    expect(await screen.findByRole('link', { name: 'iili.uk/r/AQA' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: 'i.iili.uk/r/AQA' })).toHaveAttribute(
       'href',
-      'https://iili.uk/r/AQA'
+      'https://i.iili.uk/r/AQA'
     );
     expect(screen.getByText(/expires in 7 days/)).toBeInTheDocument();
     expect(onMinted).toHaveBeenCalledWith({
@@ -82,7 +82,7 @@ describe('ShortenCard', () => {
     await user.type(screen.getByLabelText('Long link'), 'example.com/page');
     await user.click(screen.getByRole('button', { name: 'Shorten' }));
 
-    await screen.findByRole('link', { name: 'iili.uk/r/AQA' });
+    await screen.findByRole('link', { name: 'i.iili.uk/r/AQA' });
     expect(api.shorten).toHaveBeenCalledWith('https://example.com/page', NOW + 7 * DAY);
   });
 
@@ -145,7 +145,7 @@ describe('ShortenCard', () => {
     await user.clear(field);
     await user.type(field, 'https://example.com/page');
     await user.click(screen.getByRole('button', { name: 'Shorten' }));
-    await screen.findByRole('link', { name: 'iili.uk/r/AQA' });
+    await screen.findByRole('link', { name: 'i.iili.uk/r/AQA' });
     expect(screen.getByRole('alert')).toBeEmptyDOMElement();
   });
 
@@ -167,7 +167,7 @@ describe('ShortenCard', () => {
     await user.click(busy);
 
     release({ slug: 'AQA' });
-    await screen.findByRole('link', { name: 'iili.uk/r/AQA' });
+    await screen.findByRole('link', { name: 'i.iili.uk/r/AQA' });
     expect(api.shorten).toHaveBeenCalledTimes(1);
   });
 
@@ -186,7 +186,7 @@ describe('ShortenCard', () => {
     await user.type(field, 'https://example.com/next');
 
     release({ slug: 'AQA' });
-    await screen.findByRole('link', { name: 'iili.uk/r/AQA' });
+    await screen.findByRole('link', { name: 'i.iili.uk/r/AQA' });
     expect(field).toHaveValue('https://example.com/next');
   });
 });

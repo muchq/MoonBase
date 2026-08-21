@@ -12,8 +12,8 @@ URL shortening services and related applications.
 ## Apps
 
 - [**iili**](apps/iili_web): The standalone frontend (#1359 chunk 2) — a
-  Cloudflare Worker SPA on the 1d4_web stack at `iili.uk`, whose
-  `/r/{slug}` redirect fronts the v2 API. A second frontend lives at
-  muchq.com/r3dr (the muchq.github.io repo).
+  Cloudflare Worker SPA at `iili.uk`. Short links mint as
+  `i.iili.uk/r/{slug}` (Caddy on the consolidated host → r3dr_v2). A
+  second frontend lives at muchq.com/r3dr (the muchq.github.io repo).
 - [**r3dr Web**](apps/r3dr_web): The old static frontend, served with the
   Go service; retires with it (#1359 chunk 3).

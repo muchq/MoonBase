@@ -36,7 +36,7 @@ export default function App() {
         />
       </main>
       <footer className="footer">
-        Links live at <code>iili.uk/r/&#123;slug&#125;</code> and always expire — 30 days max.
+        Links live at <code>i.iili.uk/r/&#123;slug&#125;</code> and always expire — 30 days max.
       </footer>
     </div>
   );

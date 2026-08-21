@@ -14,9 +14,9 @@ The C++ URL shortener (#1359), replacing the Go service in `../r3dr`. Serves
 - `/health` via aura.
 
 The API returns a bare slug; [`iili_web`](../../apps/iili_web) fronts it as
-`https://iili.uk/r/{slug}`, 302ing to this API, and muchq.com/r3dr mints
-the same links. CORS for `muchq.com` and `iili.uk` is set at the
-api.muchq.com Caddy block.
+`https://i.iili.uk/r/{slug}` (SPA at iili.uk on Cloudflare; redirects on
+Caddy at i.iili.uk), and muchq.com/r3dr mints the same links. CORS for
+`muchq.com` and `iili.uk` is set at the api.muchq.com Caddy block.
 
 Error shapes: 404s and clock-rule 400s are modeled JSON (`{"message":...}`);
 trait 400s use the generated `{"fieldList":[...],"message":...}` shape.
@@ -56,7 +56,9 @@ silently without `PG_TEST_DB_URL` (CI supplies it).
 
 ## Deployment
 
-Caddy proxies exactly the two operation routes, unrewritten.
-`TRUSTED_PROXY_CIDRS` anchors the per-client limit (120/min, bounded keys)
-to real client addresses. 0.25 CPU / 256M. Redeploys are safe: boot
-migrations are idempotent.
+On `api.muchq.com`, Caddy proxies the two operation routes unrewritten.
+On `i.iili.uk`, Caddy rewrites `GET|HEAD /r/{slug}` onto
+`/r3dr/v2/r/{slug}` before the same upstream. `TRUSTED_PROXY_CIDRS`
+anchors the per-client limit (120/min, bounded keys) to real client
+addresses. 0.25 CPU / 256M. Redeploys are safe: boot migrations are
+idempotent.

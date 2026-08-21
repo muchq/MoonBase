@@ -28,7 +28,7 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Shorten' }));
 
     const recent = await screen.findByRole('region', { name: 'Recent links' });
-    expect(within(recent).getByRole('link', { name: 'iili.uk/r/AQA' })).toBeInTheDocument();
+    expect(within(recent).getByRole('link', { name: 'i.iili.uk/r/AQA' })).toBeInTheDocument();
     expect(localStorage.getItem('iili.recent')).toContain('"AQA"');
   });
 
@@ -43,7 +43,7 @@ describe('App', () => {
     render(<App />);
 
     const recent = screen.getByRole('region', { name: 'Recent links' });
-    expect(within(recent).getByRole('link', { name: 'iili.uk/r/AQA' })).toBeInTheDocument();
+    expect(within(recent).getByRole('link', { name: 'i.iili.uk/r/AQA' })).toBeInTheDocument();
     expect(within(recent).queryByText(/DAA/)).not.toBeInTheDocument();
   });
 
@@ -61,7 +61,7 @@ describe('App', () => {
     render(<App />);
 
     const recent = screen.getByRole('region', { name: 'Recent links' });
-    expect(within(recent).getByRole('link', { name: 'iili.uk/r/AQA' })).toBeInTheDocument();
+    expect(within(recent).getByRole('link', { name: 'i.iili.uk/r/AQA' })).toBeInTheDocument();
 
     act(() => {
       vi.setSystemTime(NOW + 60_000);
