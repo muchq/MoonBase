@@ -363,7 +363,7 @@ services:
   one_d4:
     image: ghcr.io/muchq/one_d4:${ONE_D4_SHA:-${DEPLOY_SHA:-latest}}
     labels:
-      com.muchq.description: "Chess game indexer and analysis"
+      com.muchq.description: "Chess corpus API: index submits, ChessQL queries (indexing runs in one_d4_worker)"
     restart: always
     ports:
       - "8088:8080"

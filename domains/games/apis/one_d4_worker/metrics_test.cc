@@ -38,8 +38,8 @@ IndexedGame AGame() {
 }
 
 TEST(WorkerMetrics, LabelsEverySeriesWithTheWorkerThatWroteIt) {
-  // Two indexers fill these series. Unlabelled, a dashboard cannot tell a
-  // C++ run that indexed nothing from a Java one that was never scheduled.
+  // The label states which implementation did the work; stored series
+  // recorded under other values stay distinguishable from these forever.
   CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
 
@@ -182,70 +182,15 @@ TEST(WorkerMetrics, DeclaresItsSeriesBeforeAnythingHappens) {
   EXPECT_TRUE(recorder.Declared(kMonthsMetric, Cpp("result", "cached")));
 }
 
-// --- the names are the Java worker's ---------------------------------------
-
-std::string JavaSource() {
-  std::ifstream file(
-      "domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/worker/IndexWorker.java");
-  EXPECT_TRUE(file.good()) << "IndexWorker.java is not where this test looks";
-  std::ostringstream contents;
-  contents << file.rdbuf();
-  return contents.str();
-}
-
-TEST(WorkerMetrics, WritesTheSeriesTheJavaWorkerWrites) {
-  // Both workers fill the same series. A name that drifts does not fail
-  // anything — it quietly splits one chart into two, one of them empty.
-  const std::string java = JavaSource();
-  for (const std::string& name :
-       {std::string(kRunsMetric), std::string(kGamesIndexedMetric), std::string(kMonthsMetric),
-        std::string(kArchiveFetchesMetric), std::string(kMotifOccurrencesMetric),
-        std::string(kRunDurationMetric), std::string(kGamesPerMonthMetric)}) {
-    EXPECT_THAT(java, ::testing::HasSubstr(absl::StrCat("\"", name, "\"")))
-        << name << " is not a name IndexWorker.java uses";
-  }
-}
-
-/// The numbers in a Java `static final double[] NAME = { ... };`.
-std::vector<double> JavaBounds(const std::string& name) {
-  const std::string java = JavaSource();
-  const auto start = java.find(name + " = {");
-  EXPECT_NE(start, std::string::npos) << name << " is gone from IndexWorker";
-  if (start == std::string::npos) return {};
-  const std::string body = java.substr(start, java.find("};", start) - start);
-
-  std::vector<double> bounds;
-  const std::regex number(R"(([0-9][0-9_]*)L?)");
-  for (std::sregex_iterator it(body.begin(), body.end(), number), end; it != end; ++it) {
-    std::string digits = (*it)[1];
-    digits.erase(std::remove(digits.begin(), digits.end(), '_'), digits.end());
-    bounds.push_back(std::stod(digits));
-  }
-  return bounds;
-}
-
-TEST(WorkerMetrics, MeasuresARunOnTheSameBucketsTheJavaWorkerDoes) {
-  // One name, two processes, one histogram. Two layouts under it makes any
-  // quantile across them a comparison of nothing — and on the shared HTTP
-  // default the top finite bound is ten seconds, which no index run has
-  // ever finished inside: every observation lands in +Inf and the p95
-  // reads a flat 10ms forever.
-  const std::vector<double> java = JavaBounds("RUN_DURATION_BOUNDS");
-  ASSERT_GE(java.size(), 10u) << "the bounds were not read out of IndexWorker";
-  EXPECT_EQ(WorkerMetrics::HistogramBounds()[kRunDurationMetric], java);
-}
-
-TEST(WorkerMetrics, MeasuresAMonthOnTheSameBucketsToo) {
-  const std::vector<double> java = JavaBounds("GAMES_PER_MONTH_BOUNDS");
-  ASSERT_GE(java.size(), 10u) << "the bounds were not read out of IndexWorker";
-  EXPECT_EQ(WorkerMetrics::HistogramBounds()[kGamesPerMonthMetric], java);
-}
+// The series names are a wire contract with prom_proxy, pinned from the
+// reading side: its registry_test reads metrics.h and fails on any name its
+// queries don't match.
 
 TEST(WorkerMetrics, RecordsTheRunDurationUnderItsOwnNameAndNotARenamedOne) {
   // MetricsRecorder::RecordLatency appends _microseconds to the instrument
   // name — which would export this as index_run_duration_micros_microseconds,
-  // a name the Java worker does not write and prom_proxy does not query,
-  // and hand it the shared HTTP bucket view as a bonus. The distribution
+  // a name prom_proxy does not query, and hand it the shared HTTP bucket
+  // view as a bonus. The distribution
   // form keeps the name. Checked in the source because the capturing
   // recorder sees the name before the exporter renames it.
   std::ifstream file("domains/games/apis/one_d4_worker/metrics.cc");
@@ -257,22 +202,17 @@ TEST(WorkerMetrics, RecordsTheRunDurationUnderItsOwnNameAndNotARenamedOne) {
   EXPECT_NE(source.find("RecordDistribution(kRunDurationMetric"), std::string::npos)
       << "the run duration is no longer recorded through the name-preserving call";
   EXPECT_EQ(source.find("RecordLatency("), std::string::npos)
-      << "RecordLatency renames the instrument; these series are shared with Java";
+      << "RecordLatency renames the instrument; prom_proxy queries these names";
 }
 
-TEST(WorkerMetrics, SpellsTheRunOutcomesTheJavaWorkerSpells) {
-  // The outcome label is shared too: a run this worker calls lease_lost
-  // and the other calls lost_lease is two series nobody sums.
-  const std::string java = JavaSource();
-  const auto start = java.find("RUN_OUTCOMES =");
-  ASSERT_NE(start, std::string::npos) << "RUN_OUTCOMES is gone from IndexWorker";
-  const std::string list = java.substr(start, java.find(';', start) - start);
-
-  for (const RunOutcome outcome : {RunOutcome::kCompleted, RunOutcome::kFailed,
-                                   RunOutcome::kInterrupted, RunOutcome::kLeaseLost}) {
-    EXPECT_THAT(list, ::testing::HasSubstr(absl::StrCat("\"", ToString(outcome), "\"")))
-        << ToString(outcome) << " is not an outcome the Java worker reports";
-  }
+TEST(WorkerMetrics, SpellsTheRunOutcomesTheDashboardsQuery) {
+  // The outcome label is a wire contract with prom_proxy's registry, whose
+  // selectors name these spellings literally: an outcome this worker calls
+  // lost_lease instead of lease_lost is a series nobody charts.
+  EXPECT_EQ(ToString(RunOutcome::kCompleted), "completed");
+  EXPECT_EQ(ToString(RunOutcome::kFailed), "failed");
+  EXPECT_EQ(ToString(RunOutcome::kInterrupted), "interrupted");
+  EXPECT_EQ(ToString(RunOutcome::kLeaseLost), "lease_lost");
 }
 
 }  // namespace

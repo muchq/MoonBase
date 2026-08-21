@@ -61,7 +61,7 @@ TEST(AnalyzeTest, DerivesForkFromTheAttackRowsLikeEveryOtherReadPath) {
   const auto analysis = Analyze(kKnightFork);
   ASSERT_TRUE(analysis.ok()) << analysis.status();
   ASSERT_TRUE(analysis->occurrences.count("fork"))
-      << "5. Nxf7 forks queen and rook, and /v1/analyze says so";
+      << "5. Nxf7 forks queen and rook, and the v1 wire said so";
 
   // The same rows the attack primitive carried: at least two, same ply,
   // same attacker, none discovered — a discovered attacker is not forking,

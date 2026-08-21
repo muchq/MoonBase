@@ -4,10 +4,9 @@ Claims a range off `indexing_requests`, reads the months from chess.com,
 extracts features and motifs, and writes `game_features`,
 `motif_occurrences` and `indexed_periods`. Tracking issue: MoonBase#1389.
 
-It runs *beside* the Java worker rather than instead of it. The table is
-the queue (#1279), so both poll the same rows under the same claims,
-leases and fences. It creates no schema — one_d4 owns the migrations and
-must be up first.
+It is the only indexer. The table is the queue (#1279) — any number of
+these workers poll the same rows under the same claims, leases and fences.
+It creates no schema — one_d4 owns the migrations and must be up first.
 
 ```bash
 ONE_D4_DB_URL=postgresql://... bazel run //domains/games/apis/one_d4_worker
@@ -21,7 +20,7 @@ Each instance also polls `reanalysis_requests` on a thread of its own
 detectors — same code the index path runs, on `pgn` already in the table,
 so no chess.com call and no network at all.
 
-**Its own table, not a job type on `indexing_requests`.** Both indexers
+**Its own table, not a job type on `indexing_requests`.** Index pollers
 claim from that table with no job-type predicate, so a reanalysis row
 there is one an indexer takes, finds no player or months on, and fails —
 spending an attempt on work it cannot do. Separate tables make that

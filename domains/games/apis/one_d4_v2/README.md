@@ -74,9 +74,10 @@ an underscored authority — while Caddy uses the service key. Two callers:
 analysis is a parse and a fixed detector pass with nothing retained between
 requests, and the ply cap bounds the largest transient.
 
-Rolling deploys and rollbacks are safe in both directions: the route is
-stateless and the v1 Java route still exists internally, so an old mcpserver
-(pointing at v1) and a new one (pointing at v2) can coexist during the roll.
+Rolling deploys and rollbacks are safe: the route is stateless, so instances
+on different versions can serve interleaved requests. No service serves
+`/v1/analyze` — an mcpserver rollback past the v2 cutover points at a route
+that answers nothing.
 
 Metrics report as `service_name="one_d4_v2"` (standard aura `http_server_*`
 instruments plus transport rejections) and the service has its own prom_proxy

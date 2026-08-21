@@ -3,8 +3,6 @@ package com.muchq.games.one_d4.service;
 import com.muchq.games.one_d4.api.dto.IndexResponse;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.db.RetentionPolicy;
-import com.muchq.games.one_d4.queue.IndexMessage;
-import com.muchq.games.one_d4.queue.IndexQueue;
 import java.time.Clock;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
@@ -12,7 +10,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.function.Consumer;
 
 /**
  * The single owner of the index-request lifecycle: validate → normalize → dedupe → create →
@@ -25,22 +22,15 @@ public class IndexRequestService {
   public static final int MAX_MONTH_SPAN = 12;
 
   private final IndexingRequestStore requestStore;
-  private final IndexQueue queue;
-  private final Consumer<IndexMessage> inlineProcessor;
   private final DataAvailabilityResolver dataAvailability;
   private final Clock clock;
 
   public IndexRequestService(
-      IndexingRequestStore requestStore,
-      IndexQueue queue,
-      Consumer<IndexMessage> inlineProcessor,
-      DataAvailabilityResolver dataAvailability) {
-    this(requestStore, queue, inlineProcessor, dataAvailability, Clock.systemUTC());
+      IndexingRequestStore requestStore, DataAvailabilityResolver dataAvailability) {
+    this(requestStore, dataAvailability, Clock.systemUTC());
   }
 
   /**
-   * @param inlineProcessor runs a message to completion on the calling thread; used by {@link
-   *     #submitHybrid} for single-month ranges (bind IndexWorker::process)
    * @param dataAvailability required, not optional, so neither entry point can report a COMPLETED
    *     request without saying whether its games still exist. When only the REST controller
    *     enriched the response, the MCP {@code index_status} tool told agents "COMPLETED, 325 games"
@@ -49,14 +39,8 @@ public class IndexRequestService {
    *     step over the cutoff instead of sleeping through it
    */
   public IndexRequestService(
-      IndexingRequestStore requestStore,
-      IndexQueue queue,
-      Consumer<IndexMessage> inlineProcessor,
-      DataAvailabilityResolver dataAvailability,
-      Clock clock) {
+      IndexingRequestStore requestStore, DataAvailabilityResolver dataAvailability, Clock clock) {
     this.requestStore = requestStore;
-    this.queue = queue;
-    this.inlineProcessor = inlineProcessor;
     this.dataAvailability = dataAvailability;
     this.clock = clock;
   }
@@ -79,18 +63,13 @@ public class IndexRequestService {
       boolean excludeBullet,
       boolean skipCache) {}
 
-  /** Starts (or reuses) an indexing request; work always runs in the background. */
-  public IndexResponse submit(Submission submission) {
-    return start(submission, false);
-  }
-
   /**
-   * Like {@link #submit}, but single-month ranges run inline so the caller gets a final status in
-   * one round trip (typically well under a minute). Longer ranges are enqueued and can be polled
-   * via {@link #status}.
+   * Starts (or reuses) an indexing request. Creating the row is the whole dispatch: the table is
+   * the queue (#1279), and the C++ one_d4_worker's poller claims it — no work runs in this JVM
+   * (#1389). Callers poll {@link #status}.
    */
-  public IndexResponse submitHybrid(Submission submission) {
-    return start(submission, true);
+  public IndexResponse submit(Submission submission) {
+    return start(submission);
   }
 
   public Optional<IndexResponse> status(UUID requestId) {
@@ -102,7 +81,7 @@ public class IndexRequestService {
     return toResponse(row).withData(dataAvailability.resolve(row).orElse(null));
   }
 
-  private IndexResponse start(Submission submission, boolean inlineSingleMonth) {
+  private IndexResponse start(Submission submission) {
     if (submission.player() == null || submission.player().isBlank()) {
       throw new IllegalArgumentException("player is required");
     }
@@ -144,57 +123,8 @@ public class IndexRequestService {
     if (!claim.created()) {
       return toResponse(claim.request());
     }
-    UUID id = claim.request().id();
-    IndexMessage message =
-        new IndexMessage(
-            id,
-            player,
-            platform,
-            submission.startMonth(),
-            submission.endMonth(),
-            submission.excludeBullet(),
-            submission.skipCache());
-
-    if (inlineSingleMonth && monthSpan <= 1) {
-      // The row is the queue now, so a throw here no longer strands it — a poller will claim it,
-      // on this instance or another. This handler is still worth having: it turns an Error that
-      // escaped IndexWorker.process into a recorded outcome rather than a silent requeue, and
-      // submitHybrid's caller is waiting for an answer rather than polling for one.
-      try {
-        inlineProcessor.accept(message);
-      } catch (Throwable t) {
-        try {
-          requestStore.updateStatus(id, "FAILED", "Inline indexing failed: " + t, 0);
-        } catch (Throwable suppressed) {
-          // Catch Throwable, not RuntimeException, to match the outer catch. The outer one is
-          // wide precisely because an Error can escape the processor — and if that Error is an
-          // OutOfMemoryError, this recovery allocates a connection, a statement and a message
-          // string, so the likeliest second failure is another Error. Catching only
-          // RuntimeException here would let it replace the original instead of being attached to
-          // it, contradicting the line below.
-          t.addSuppressed(suppressed);
-        }
-        // The original failure is what the caller needs to see; the staleness sweep is the
-        // backstop for the row if the update above did not land.
-        throw t;
-      }
-      return status(id)
-          .orElse(
-              new IndexResponse(
-                  id,
-                  player,
-                  platform,
-                  submission.startMonth(),
-                  submission.endMonth(),
-                  "UNKNOWN",
-                  0,
-                  null,
-                  submission.excludeBullet()));
-    }
-
-    queue.enqueue(message);
     return new IndexResponse(
-        id,
+        claim.request().id(),
         player,
         platform,
         submission.startMonth(),

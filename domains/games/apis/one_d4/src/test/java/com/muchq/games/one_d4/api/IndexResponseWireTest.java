@@ -77,6 +77,10 @@ public class IndexResponseWireTest {
    * The positive twin for the assertion above, sharing its fixture. Without it every assertion in
    * this class would still pass if {@code IndexResponse.data} were deleted from the record outright
    * — an absence test alone cannot tell "correctly omitted" from "never existed".
+   *
+   * <p>The terminal state is written through the store beans, the way the C++ worker writes it —
+   * nothing in this JVM completes a request (#1389), so a poll would wait forever. The wire claim
+   * under test is unchanged: a COMPLETED row with a recorded period serves {@code data}.
    */
   @Test
   public void completedRequest_carriesDataOnTheWire() throws Exception {
@@ -86,11 +90,24 @@ public class IndexResponseWireTest {
                 + "\"startMonth\":\"2024-01\",\"endMonth\":\"2024-01\"}");
     String id = created.replaceAll("^\\{\"id\":\"([^\"]+)\".*$", "$1");
 
-    String body = pollUntilCompleted(id);
-
-    // FakeChessClient defaults to an empty archive (HTTP 200), so the month indexes as empty —
-    // and an empty month still records a period, which is what keeps this AVAILABLE rather than
+    server
+        .getApplicationContext()
+        .getBean(com.muchq.games.one_d4.db.IndexingRequestStore.class)
+        .updateStatus(java.util.UUID.fromString(id), "COMPLETED", null, 0);
+    // An empty month still records a period, which is what keeps this AVAILABLE rather than
     // EXPIRED.
+    server
+        .getApplicationContext()
+        .getBean(com.muchq.games.one_d4.db.IndexedPeriodStore.class)
+        .upsertPeriod("wiretest", "CHESS_COM", "2024-01", java.time.Instant.now(), true, 0, false);
+
+    HttpResponse<String> response =
+        client.send(
+            HttpRequest.newBuilder().uri(URI.create(baseUrl + "/v1/index/" + id)).build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(response.statusCode()).isEqualTo(200);
+    String body = response.body();
+
     assertThat(body).contains("\"status\":\"COMPLETED\"");
     assertThat(body).contains("\"data\":");
     assertThat(body).contains("\"status\":\"AVAILABLE\"");
@@ -109,21 +126,5 @@ public class IndexResponseWireTest {
             HttpResponse.BodyHandlers.ofString());
     assertThat(response.statusCode()).isEqualTo(200);
     return response.body();
-  }
-
-  /** The worker runs in the background, so the terminal state has to be waited for. */
-  private String pollUntilCompleted(String id) throws Exception {
-    for (int attempt = 0; attempt < 100; attempt++) {
-      HttpResponse<String> response =
-          client.send(
-              HttpRequest.newBuilder().uri(URI.create(baseUrl + "/v1/index/" + id)).build(),
-              HttpResponse.BodyHandlers.ofString());
-      assertThat(response.statusCode()).isEqualTo(200);
-      if (response.body().contains("\"status\":\"COMPLETED\"")) {
-        return response.body();
-      }
-      Thread.sleep(50);
-    }
-    throw new AssertionError("request " + id + " never reached COMPLETED");
   }
 }

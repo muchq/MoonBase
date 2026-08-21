@@ -4,13 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.muchq.games.one_d4.db.IndexingRequestStore;
-import com.muchq.games.one_d4.queue.IndexQueue;
-import com.muchq.games.one_d4.worker.IndexWorker;
-import io.micronaut.context.annotation.Bean;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -52,29 +47,26 @@ public class IndexerModuleTest {
   }
 
   /**
-   * The poller is a daemon thread, so nothing stops it at shutdown unless the container is told to.
-   * Without this annotation a deploy is indistinguishable from a crash: the in-flight row stays
-   * owned by a process that no longer exists for a full lease, and the attempt it spent is gone.
-   *
-   * <p>Asserted on the factory method rather than by booting a context, because that is where the
-   * mistake would be made — the method is easy to edit without noticing the annotation, and
-   * IndexWorkerLifecycleTest already covers what stop() does once it is called. McpModuleTest boots
-   * a real context and closes it, which is where the container's half of this is exercised.
+   * This JVM runs no chess (#1389), as a fact about the class files: the module's constant pool
+   * naming an extraction or worker type would mean a Java pipeline grew back without anyone
+   * deciding it should.
    */
   @Test
-  public void indexWorkerLifecycleIsToldToStopOnShutdown() throws Exception {
-    Bean bean =
-        IndexerModule.class
-            .getMethod(
-                "indexWorkerLifecycle",
-                IndexQueue.class,
-                IndexWorker.class,
-                IndexingRequestStore.class,
-                Clock.class)
-            .getAnnotation(Bean.class);
+  public void theModuleWiresNoExtractionAndNoIndexWorker() throws Exception {
+    String constantPool = compiledBytesOfIndexerModule();
 
-    assertThat(bean).as("the lifecycle bean declares no preDestroy").isNotNull();
-    assertThat(bean.preDestroy()).isEqualTo("stop");
+    assertThat(constantPool).as("not the bytes we meant to scan").contains("IndexRequestService");
+    for (String retired :
+        List.of(
+            "FeatureExtractor", "MotifDetector", "IndexWorker", "PositionAnalyzer", "IndexQueue")) {
+      assertThat(constantPool)
+          .as(
+              "IndexerModule names %s. Indexing, reanalysis and analysis are C++"
+                  + " (one_d4_worker, one_d4_v2); a Java pipeline must not grow back by"
+                  + " accident (#1389).",
+              retired)
+          .doesNotContain(retired);
+    }
   }
 
   @Test
@@ -216,32 +208,5 @@ public class IndexerModuleTest {
       assertThat(in).as("%s is not on the test classpath", resource).isNotNull();
       return new String(in.readAllBytes(), StandardCharsets.ISO_8859_1);
     }
-  }
-
-  @Test
-  public void parseThreads_returnsDefault_whenNull() {
-    assertThat(IndexerModule.parseThreads(null, 4)).isEqualTo(4);
-  }
-
-  @Test
-  public void parseThreads_returnsDefault_whenBlank() {
-    assertThat(IndexerModule.parseThreads("   ", 4)).isEqualTo(4);
-  }
-
-  @Test
-  public void parseThreads_returnsDefault_whenUnparseable() {
-    assertThat(IndexerModule.parseThreads("abc", 4)).isEqualTo(4);
-  }
-
-  @Test
-  public void parseThreads_returnsDefault_whenNonPositive() {
-    assertThat(IndexerModule.parseThreads("0", 4)).isEqualTo(4);
-    assertThat(IndexerModule.parseThreads("-3", 4)).isEqualTo(4);
-  }
-
-  @Test
-  public void parseThreads_respectsValidValue() {
-    assertThat(IndexerModule.parseThreads("8", 4)).isEqualTo(8);
-    assertThat(IndexerModule.parseThreads(" 16 ", 4)).isEqualTo(16);
   }
 }

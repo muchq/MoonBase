@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Response for POST /v1/analyze.
+ * Response for POST /v2/analyze (served by one_d4_v2).
  *
  * <p>{@code motifs} names the motifs that occurred at least once, lowercased, and is exactly the
  * key set of {@code occurrences} — carried separately so a caller that only wants "what happened in

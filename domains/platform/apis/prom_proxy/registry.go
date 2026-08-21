@@ -391,14 +391,13 @@ var serviceRegistry = map[string]serviceEntry{
 			probesTile("mcpserver"),
 		},
 	},
-	// The first Java service with a custom set, now that yodel has counters and
-	// distributions to record into. Counts, outcomes and motif names only — the
-	// emitter never labels by player or by game, so no series here is per-user.
+	// Counts, outcomes and motif names only — the emitter never labels by
+	// player or by game, so no series here is per-user.
 	//
-	// The indexing selectors match one_d4_worker too (#1389). Two processes
-	// index into one table, and they report under their own service names;
-	// pinned to one_d4 alone, every tile here would show half the work and
-	// read as a drop the day the second worker took a share of the queue.
+	// The indexing series come from one_d4_worker. The
+	// service_name=~"one_d4(_worker)?" selectors also match stored series
+	// recorded under service_name="one_d4"; both names are one timeline, and
+	// narrowing the selector would cut every chart off where they meet.
 	// The probes tile stays scoped to one_d4: the worker serves no HTTP.
 	"one_d4": {
 		CustomScalars: []customScalarDef{
@@ -426,25 +425,6 @@ var serviceRegistry = map[string]serviceEntry{
 			// reads that way if the two share a window, hence the same one.
 			counterOver("Indexing", "runs_lease_lost", "",
 				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="lease_lost"}`, alarmWindow),
-			// The migration, as one number: what share of the games indexed in
-			// the window the C++ worker did. This is what decides when the Java
-			// worker is deleted (#1389), and it is meaningless without the
-			// unfiltered denominator — over its own numerator it reads 100%
-			// from the first game the C++ worker ever indexes.
-			//
-			// burstWindow, not alarmWindow: every other tile reading
-			// games_indexed_total counts over the burst window, and a share
-			// drawn from a different population than the count beside it is
-			// two tiles describing different things.
-			//
-			// A ratio, so no rate/count toggle: both halves are rates over the
-			// same window and the toggle would offer a second form that means
-			// the same thing. Safe from the Result[0] truncation in
-			// service_handlers.go because sum()/sum() is always one series.
-			scalar("Indexing", "cpp_share_of_games", "%",
-				`sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?",indexer="cpp"}[`+burstWindow+`]))`+
-					` / sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?"}[`+burstWindow+`])) * 100`),
-
 			// Windowed averages over the histograms: rate(sum)/rate(count) is the
 			// mean per run in the window, the same shape portrait uses. Means, so
 			// no rate form.

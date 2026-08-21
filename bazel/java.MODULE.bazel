@@ -34,8 +34,6 @@ maven.install(
         "com.google.errorprone:error_prone_core:%s" % ERROR_PRONE_VERSION,
         "com.uber.nullaway:nullaway:%s" % NULLAWAY_VERSION,
         "com.zaxxer:HikariCP:7.1.0",
-        "dev.failsafe:failsafe:3.3.2",
-        "io.github.tors42:chariot:0.2.10",
         "com.h2database:h2:2.4.240",
         "org.jdbi:jdbi3-core:3.54.0",
         "org.postgresql:postgresql:42.7.13",

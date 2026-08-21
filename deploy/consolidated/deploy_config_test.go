@@ -884,20 +884,15 @@ func assertUpstreamHostResolves(t *testing.T, envVar, service string) {
 		"network, so %q does not resolve.", host, service, aliases, service, host)
 }
 
-// one_d4's API stays internal. mcpserver calls /v1/index, /v1/query and
-// /v1/aggregate over the Compose network; none of that requires a public
-// route, and /v1/analyze in particular is unauthenticated CPU on
-// caller-supplied PGN with a size cap and a timeout but no rate limiting,
-// which is a different proposition on the open internet than between two
-// containers. The public analyze route is /v2/analyze on one_d4_v2, which
-// carries its own limiter — see the next test.
-func TestTheAnalyzeRouteIsNotPubliclyExposed(t *testing.T) {
+// No service serves /v1/analyze; the one analyze route is /v2/analyze on
+// one_d4_v2 — see the next test. A Caddy line naming the old path routes
+// the public internet at a 404, and its likeliest cause is a rollback or
+// copy-paste resurrecting the v1 surface without anyone deciding to.
+func TestTheRetiredV1AnalyzeRouteStaysGone(t *testing.T) {
 	for _, line := range directiveLines(t, "Caddyfile") {
 		if strings.Contains(line, "/v1/analyze") {
-			t.Errorf("Caddy routes /v1/analyze (%q). Analysis is unauthenticated work on "+
-				"caller-supplied input, bounded by a size cap and a timeout but not by auth or "+
-				"rate limiting; exposing it publicly is a deliberate decision that needs both "+
-				"(#1332).", line)
+			t.Errorf("Caddy routes /v1/analyze (%q), which no service serves. Analysis is "+
+				"POST /v2/analyze on one_d4_v2 (#1389).", line)
 		}
 	}
 }

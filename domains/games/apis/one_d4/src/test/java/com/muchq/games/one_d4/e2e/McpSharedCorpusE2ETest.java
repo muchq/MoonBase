@@ -8,6 +8,8 @@ import com.muchq.games.mcpserver.tools.IndexGamesTool;
 import com.muchq.games.mcpserver.tools.IndexerFacade;
 import com.muchq.games.mcpserver.tools.OneD4Client;
 import com.muchq.games.mcpserver.tools.QueryGamesTool;
+import com.muchq.games.one_d4.api.dto.GameFeature;
+import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.platform.http_client.jdk.Jdk11HttpClient;
 import com.muchq.platform.json.JsonUtils;
 import io.micronaut.context.ApplicationContext;
@@ -17,8 +19,10 @@ import io.modelcontextprotocol.spec.McpSchema.TextContent;
 import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -27,15 +31,16 @@ import org.junit.jupiter.api.Test;
  * One corpus, reached both ways.
  *
  * <p>This is the headline claim of #1332 and the sentence now on 1d4.net/mcp: what you index
- * through the MCP tools is the same corpus the site serves. Nothing proved it. {@code
- * IndexerFacadeHttpTest} stops at a fake upstream and {@code AnalyzeEndpointTest} starts at one_d4,
- * so both sides of the seam were tested and the seam itself was not — a base URL that pointed
- * somewhere else, a path that did not match, a response the client could not read, would all have
- * passed everything.
+ * through the MCP tools is the same corpus the site serves. {@code IndexerFacadeHttpTest} stops at
+ * a fake upstream, so both sides of the seam were tested and the seam itself was not — a base URL
+ * that pointed somewhere else, a path that did not match, a response the client could not read,
+ * would all have passed everything.
  *
  * <p>So: a real one_d4 with a real database, the real {@code OneD4Client} and the real tool objects
- * over real HTTP. Indexing goes in through MCP and comes back out through both one_d4's own API and
- * the MCP query tool, and the two have to agree.
+ * over real HTTP. The corpus is seeded through {@code GameFeatureStore} — the same rows a worker
+ * flush writes — because indexing does not run in this JVM: the C++ one_d4_worker claims requests
+ * off the table (#1389), so what this service owes an index submit is the row, not the work. The
+ * submit tool's test asserts exactly that contract.
  *
  * <p>What this deliberately does not do is boot a second Micronaut context for mcpserver. Both
  * factories on one classpath would wire each other's beans, so the MCP context under test would not
@@ -54,8 +59,6 @@ public class McpSharedCorpusE2ETest {
 
   @BeforeAll
   public static void startOneD4() {
-    // FakeChessClient @Replaces the real one, so indexing is deterministic and nothing reaches
-    // api.chess.com.
     oneD4 =
         ApplicationContext.run(
             EmbeddedServer.class,
@@ -66,12 +69,49 @@ public class McpSharedCorpusE2ETest {
                 "-1"));
     http = java.net.http.HttpClient.newHttpClient();
 
-    FakeChessClient chess =
-        (FakeChessClient)
-            oneD4
-                .getApplicationContext()
-                .getBean(com.muchq.games.chess_com_client.ChessClient.class);
-    chess.addGame("hikaru", java.time.YearMonth.of(2024, 1), GAME_URL);
+    // The corpus, written the way a worker flush writes it: a request row first (game_features
+    // carries a foreign key onto it), then the game. The fixture's players are White and Black,
+    // White won — the aggregate metrics tests read that result back through the stack.
+    UUID requestId =
+        oneD4
+            .getApplicationContext()
+            .getBean(com.muchq.games.one_d4.db.IndexingRequestStore.class)
+            .createOrAdopt(
+                "seed",
+                "CHESS_COM",
+                "2024-01",
+                "2024-01",
+                false,
+                false,
+                java.time.Duration.ofHours(1),
+                Instant.now())
+            .request()
+            .id();
+    oneD4
+        .getApplicationContext()
+        .getBean(GameFeatureStore.class)
+        .insertBatch(
+            List.of(
+                new GameFeature(
+                    UUID.randomUUID(),
+                    requestId,
+                    GAME_URL,
+                    "CHESS_COM",
+                    "White",
+                    "Black",
+                    2800,
+                    2700,
+                    null,
+                    null,
+                    "blitz",
+                    "C50",
+                    "Italian Game",
+                    "Italian Game",
+                    "1-0",
+                    Instant.parse("2024-01-15T12:00:00Z"),
+                    35,
+                    Instant.now(),
+                    "1. e4 e5")));
 
     // The wiring McpModule performs, built by hand because a second Micronaut context is not
     // usable here. Same client, same mapper, same facade the deployment gets.
@@ -93,27 +133,49 @@ public class McpSharedCorpusE2ETest {
   }
 
   /**
-   * Index through MCP, read back through both doors.
+   * The submit contract: creating the row IS the dispatch (#1389). The tool's answer must carry a
+   * request id and a live status — the C++ worker claims the row from there, and {@code
+   * index_status} is how a caller follows it. A COMPLETED here would mean this JVM ran an indexer
+   * again.
    *
-   * <p>The one_d4 read is what makes this a shared-corpus test rather than a round-trip: if the MCP
-   * tools were writing somewhere of their own — which is exactly what they did before #1332 — the
-   * MCP query would still find the game and the site would still not have it.
+   * <p>A two-month range, deliberately: the facade polls single-month submits toward a completion
+   * that no in-process worker will ever produce, and burning its whole inline budget to receive the
+   * same PENDING is IndexerFacadeHttpTest's edge to cover against a fake upstream.
    */
   @Test
-  public void aGameIndexedThroughMcpIsVisibleToOneD4AndBack() throws Exception {
+  public void indexingThroughMcpCreatesTheRowTheWorkerWillClaim() throws Exception {
     String indexed =
         payloadOf(
-            indexTool.indexChessGames("hikaru", "chess.com", "2024-01", "2024-01", null, null));
+            indexTool.indexChessGames("hikaru", "chess.com", "2024-01", "2024-02", null, null));
     JsonNode indexResult = JsonUtils.mapper().readTree(indexed);
 
-    assertThat(indexResult.path("error").isMissingNode())
-        .as("indexing failed: %s", indexed)
-        .isTrue();
-    assertThat(indexResult.get("status").asText())
-        .as("a single month is polled to completion, so the tool answers with a final status")
-        .isEqualTo("COMPLETED");
-    assertThat(indexResult.get("gamesIndexed").asInt()).isPositive();
+    assertThat(indexResult.path("error").isMissingNode()).as("submit failed: %s", indexed).isTrue();
+    assertThat(indexResult.get("status").asText()).isEqualTo("PENDING");
+    String requestId = indexResult.get("id").asText();
 
+    // The row is real and visible through one_d4's own API, which is what the worker's claim and
+    // the index_status tool both read.
+    HttpResponse<String> status =
+        http.send(
+            HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + oneD4.getPort() + "/v1/index/" + requestId))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(status.statusCode()).isEqualTo(200);
+    assertThat(JsonUtils.mapper().readTree(status.body()).get("status").asText())
+        .isEqualTo("PENDING");
+  }
+
+  /**
+   * The seeded corpus, read back through both doors.
+   *
+   * <p>The one_d4 read is what makes this a shared-corpus test rather than a round-trip: if the MCP
+   * tools were reading somewhere of their own — which is exactly what they did before #1332 — the
+   * MCP query would answer and the site would see something else.
+   */
+  @Test
+  public void aGameInTheCorpusIsVisibleToOneD4AndMcpAlike() throws Exception {
     // Door one: one_d4's own API, which is what api.1d4.net and the Games page use.
     HttpResponse<String> direct =
         http.send(
@@ -127,7 +189,7 @@ public class McpSharedCorpusE2ETest {
             HttpResponse.BodyHandlers.ofString());
     assertThat(direct.statusCode()).isEqualTo(200);
     JsonNode siteGames = JsonUtils.mapper().readTree(direct.body()).get("games");
-    assertThat(siteGames).as("the site sees nothing of what MCP indexed").isNotEmpty();
+    assertThat(siteGames).as("the site sees nothing of the corpus").isNotEmpty();
 
     // Door two: the MCP tool, over HTTP to the same service.
     JsonNode mcpGames =
@@ -146,8 +208,6 @@ public class McpSharedCorpusE2ETest {
   /** Aggregation over the shared corpus, through the extra hop. */
   @Test
   public void aggregatingThroughMcpCountsTheSharedCorpus() throws Exception {
-    indexTool.indexChessGames("hikaru", "chess.com", "2024-01", "2024-01", null, null);
-
     JsonNode aggregate =
         JsonUtils.mapper()
             .readTree(
@@ -172,15 +232,13 @@ public class McpSharedCorpusE2ETest {
    */
   @Test
   public void aggregatingThroughMcpCarriesTheOutcomeMetrics() throws Exception {
-    indexTool.indexChessGames("hikaru", "chess.com", "2024-01", "2024-01", null, null);
-
     JsonNode aggregate =
         JsonUtils.mapper()
             .readTree(
                 payloadOf(
                     aggregateTool.aggregateChessGames(
-                        // The indexed game's players are the fixture's own White and Black; the
-                        // perspective is White's, who won it.
+                        // The seeded game's players are White and Black; the perspective is
+                        // White's, who won it.
                         "white.username = \"White\" OR black.username = \"White\"",
                         List.of("time_class"),
                         "White",
@@ -202,8 +260,6 @@ public class McpSharedCorpusE2ETest {
   /** The same call without a player: no metrics, rather than zeroed ones. */
   @Test
   public void aggregatingThroughMcpWithoutAPlayerCarriesNoOutcomeMetrics() throws Exception {
-    indexTool.indexChessGames("hikaru", "chess.com", "2024-01", "2024-01", null, null);
-
     JsonNode aggregate =
         JsonUtils.mapper()
             .readTree(

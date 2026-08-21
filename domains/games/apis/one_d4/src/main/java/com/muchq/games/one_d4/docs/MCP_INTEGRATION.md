@@ -26,7 +26,7 @@ corpus-backed tool is a call to this service over the internal network (#1332).
 │      │           │ ───────► │  /v1/index/{id}               │
 │  IndexerFacade   │          │  /v1/aggregate                │
 │  (HTTP client)   │          │            │                  │
-│      │           │          │  Indexer engine + PostgreSQL  │
+│      │           │          │  ChessQL + PostgreSQL         │
 │      │           │          └───────────────────────────────┘
 │      │           │          ┌───────────────────────────────┐
 │      └───────────│──HTTP──► │  one_d4_v2 (C++)              │
@@ -185,10 +185,10 @@ Detect motifs in a single PGN without indexing it to the database.
 ```
 {
   "numMoves": 42,
-  "motifs": ["PIN", "FORK"],
+  "motifs": ["fork", "pin"],
   "occurrences": {
-    "PIN": [{"moveNumber": 15, "description": "Pin detected at move 15"}],
-    "FORK": [{"moveNumber": 23, "description": "Fork detected at move 23"}]
+    "pin": [{"moveNumber": 15, "description": "Pin detected at move 15"}],
+    "fork": [{"moveNumber": 23, "description": "Fork detected at move 23"}]
   }
 }
 ```

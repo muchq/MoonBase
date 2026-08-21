@@ -1,69 +1,19 @@
 load("//bazel/rules:java.bzl", "artifact", "java_binary", "java_library", "java_test_suite")
 load("//bazel/rules:oci.bzl", "linux_oci_java")
 
+# The row model the query side reads and the DAOs write. Motif's enum
+# constants travel through the database, which is why the package name
+# cannot move cheaply.
 java_library(
     name = "model",
     srcs = [
         "src/main/java/com/muchq/games/one_d4/engine/model/GameFeatures.java",
         "src/main/java/com/muchq/games/one_d4/engine/model/Motif.java",
-        "src/main/java/com/muchq/games/one_d4/engine/model/ParsedGame.java",
-        "src/main/java/com/muchq/games/one_d4/engine/model/PositionContext.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
         artifact("org.jspecify:jspecify"),
     ],
-)
-
-java_library(
-    name = "motifs",
-    srcs = [
-        "src/main/java/com/muchq/games/one_d4/motifs/AttackDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/BackRankMateDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/BoardUtils.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/CheckDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/CrossPinDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/Detectors.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/MotifDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/PinDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/PromotionDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/PromotionWithCheckDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/PromotionWithCheckmateDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/SkewerDetector.java",
-        "src/main/java/com/muchq/games/one_d4/motifs/SmotheredMateDetector.java",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":model",
-    ],
-)
-
-java_library(
-    name = "engine",
-    srcs = [
-        "src/main/java/com/muchq/games/one_d4/engine/FeatureExtractor.java",
-        "src/main/java/com/muchq/games/one_d4/engine/GameReplayer.java",
-        "src/main/java/com/muchq/games/one_d4/engine/PgnParser.java",
-        "src/main/java/com/muchq/games/one_d4/engine/ReplayBoard.java",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":model",
-        ":motifs",
-        artifact("io.github.tors42:chariot"),
-        artifact("org.slf4j:slf4j-api"),
-    ],
-)
-
-java_library(
-    name = "queue",
-    srcs = [
-        "src/main/java/com/muchq/games/one_d4/queue/InMemoryIndexQueue.java",
-        "src/main/java/com/muchq/games/one_d4/queue/IndexMessage.java",
-        "src/main/java/com/muchq/games/one_d4/queue/IndexQueue.java",
-    ],
-    visibility = ["//visibility:public"],
 )
 
 java_library(
@@ -110,33 +60,21 @@ java_library(
     ],
 )
 
+# Retention only: indexing and reanalysis run in the C++ one_d4_worker
+# (#1389); this JVM's one background job is the chess-free hourly retention
+# sweep.
 java_library(
     name = "worker",
     srcs = [
-        "src/main/java/com/muchq/games/one_d4/worker/IndexWorker.java",
-        "src/main/java/com/muchq/games/one_d4/worker/IndexWorkerLifecycle.java",
-        "src/main/java/com/muchq/games/one_d4/worker/ResultMapper.java",
         "src/main/java/com/muchq/games/one_d4/worker/RetentionWorker.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":db",
-        ":dto",
-        ":engine",
-        ":model",
-        ":openings",
-        ":queue",
-        "//domains/games/libs/chess_com_client",
-        "//domains/platform/libs/yodel",
-        artifact("com.fasterxml.jackson.core:jackson-core"),
-        artifact("com.fasterxml.jackson.core:jackson-databind"),
-        artifact("dev.failsafe:failsafe"),
         artifact("io.micronaut:micronaut-context"),
-        artifact("io.micronaut:micronaut-http-server-netty"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("io.micronaut:micronaut-runtime"),
         artifact("jakarta.inject:jakarta-inject-api"),
-        artifact("org.jspecify:jspecify"),
         artifact("org.slf4j:slf4j-api"),
     ],
 )
@@ -173,15 +111,12 @@ java_library(
     srcs = [
         "src/main/java/com/muchq/games/one_d4/service/DataAvailabilityResolver.java",
         "src/main/java/com/muchq/games/one_d4/service/IndexRequestService.java",
-        "src/main/java/com/muchq/games/one_d4/service/PositionAnalyzer.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
         ":db",
         ":dto",
-        ":engine",
         ":model",
-        ":queue",
         artifact("org.jspecify:jspecify"),
     ],
 )
@@ -192,7 +127,6 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/AdminController.java",
         "src/main/java/com/muchq/games/one_d4/api/AggregateController.java",
         "src/main/java/com/muchq/games/one_d4/api/AggregateRequestValidator.java",
-        "src/main/java/com/muchq/games/one_d4/api/AnalyzeController.java",
         "src/main/java/com/muchq/games/one_d4/api/ErrorHandler.java",
         "src/main/java/com/muchq/games/one_d4/api/FirstPageCache.java",
         "src/main/java/com/muchq/games/one_d4/api/FirstPageWarmer.java",
@@ -205,12 +139,10 @@ java_library(
     visibility = ["//visibility:public"],
     deps = [
         ":dto",
-        ":engine",
         ":model",
         ":openings",
         ":service",
         "//domains/games/apis/one_d4:db",
-        "//domains/games/apis/one_d4:queue",
         "//domains/games/libs/chessql:ast",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
@@ -237,16 +169,9 @@ java_library(
         ":api",
         ":db",
         ":dto",
-        ":engine",
         ":model",
-        ":motifs",
-        ":queue",
         ":service",
-        ":worker",
-        "//domains/games/libs/chess_com_client",
         "//domains/games/libs/chessql:compiler",
-        "//domains/platform/libs/http_client:core",
-        "//domains/platform/libs/http_client:jdk11",
         "//domains/platform/libs/json",
         "//domains/platform/libs/yodel",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
@@ -282,16 +207,12 @@ java_binary(
         ":api",
         ":db",
         ":dto",
-        ":engine",
         ":model",
-        ":motifs",
-        ":queue",
         ":service",
+        # RetentionWorker is a @Context bean discovered from the classpath;
+        # nothing in App/IndexerModule references it at compile time.
         ":worker",
-        "//domains/games/libs/chess_com_client",
         "//domains/games/libs/chessql:compiler",
-        "//domains/platform/libs/http_client:core",
-        "//domains/platform/libs/http_client:jdk11",
         "//domains/platform/libs/json",
         "//domains/platform/libs/logging",
         "//domains/platform/libs/yodel",
@@ -327,27 +248,6 @@ java_test_suite(
     ],
 )
 
-java_test_suite(
-    name = "engine_tests",
-    size = "small",
-    srcs = [
-        "src/test/java/com/muchq/games/one_d4/engine/FeatureExtractorTest.java",
-        "src/test/java/com/muchq/games/one_d4/engine/GameReplayerParityTest.java",
-        "src/test/java/com/muchq/games/one_d4/engine/GameReplayerTest.java",
-        "src/test/java/com/muchq/games/one_d4/engine/PgnParserTest.java",
-        "src/test/java/com/muchq/games/one_d4/engine/PlyDerivationTest.java",
-        "src/test/java/com/muchq/games/one_d4/engine/ReplayBoardTest.java",
-    ],
-    deps = [
-        ":engine",
-        ":model",
-        ":motifs",
-        artifact("io.github.tors42:chariot"),
-        artifact("org.junit.jupiter:junit-jupiter-api"),
-        artifact("org.assertj:assertj-core"),
-    ],
-)
-
 java_library(
     name = "hikaru_corpus",
     testonly = True,
@@ -366,74 +266,16 @@ filegroup(
     visibility = ["//domains/games:__subpackages__"],
 )
 
-# The Java pipeline's extraction output, as sorted TSV. The oracle the C++
-# port is measured against (#1389 phase 2): MotifGoldenTest asserts the
-# checked-in golden still matches what the pipeline produces, and
-# //domains/games/libs/one_d4_motifs:parity_test asserts the C++ port
-# matches the golden. Neither half is any use without the other.
-java_library(
-    name = "motif_dump",
-    testonly = True,
-    srcs = ["src/test/java/com/muchq/games/one_d4/parity/MotifDump.java"],
-    visibility = ["//visibility:private"],
-    deps = [
-        ":engine",
-        ":model",
-        ":motifs",
-    ],
-)
-
-java_binary(
-    name = "motif_dump_main",
-    testonly = True,
-    srcs = ["src/test/java/com/muchq/games/one_d4/parity/MotifDumpMain.java"],
-    main_class = "com.muchq.games.one_d4.parity.MotifDumpMain",
-    deps = [":motif_dump"],
-)
-
+# The frozen parity oracle: the Java pipeline's extraction output over
+# hikaru_corpus.pgn, as sorted TSV (#1389). It has no generator — the
+# production corpus was indexed under what it records, and
+# //domains/games/libs/one_d4_motifs:parity_test measures the C++ detectors
+# against it. A deliberate detector change edits it by hand, with the
+# reason, in the same commit.
 filegroup(
     name = "motif_parity_golden",
     testonly = True,
     srcs = ["src/test/resources/motif_parity_golden.tsv"],
-    visibility = ["//domains/games:__subpackages__"],
-)
-
-java_library(
-    name = "golden_resources",
-    testonly = True,
-    resource_strip_prefix = "domains/games/apis/one_d4/src/test/resources",
-    resources = ["src/test/resources/motif_parity_golden.tsv"],
-)
-
-java_test_suite(
-    name = "parity_tests",
-    size = "medium",
-    srcs = ["src/test/java/com/muchq/games/one_d4/parity/MotifGoldenTest.java"],
-    deps = [
-        ":golden_resources",
-        ":hikaru_corpus",
-        ":motif_dump",
-        artifact("org.assertj:assertj-core"),
-        artifact("org.junit.jupiter:junit-jupiter-api"),
-    ],
-)
-
-# The schema the C++ worker is a second poller on (#1389 phase 4). Read as
-# text by //domains/games/apis/one_d4_worker:schema_contract_test, which is
-# the only thing standing between two implementations of the same table.
-filegroup(
-    name = "worker_result_mapper",
-    testonly = True,
-    srcs = ["src/main/java/com/muchq/games/one_d4/worker/ResultMapper.java"],
-    visibility = ["//domains/games:__subpackages__"],
-)
-
-# The metric names and outcome labels the Java worker writes. The C++
-# worker fills the same series.
-filegroup(
-    name = "worker_metric_names",
-    testonly = True,
-    srcs = ["src/main/java/com/muchq/games/one_d4/worker/IndexWorker.java"],
     visibility = ["//domains/games:__subpackages__"],
 )
 
@@ -470,107 +312,23 @@ java_library(
     resources = ["src/test/resources/first_page_request.json"],
 )
 
-# 500 real chess.com games replayed against chariot per ply — the wide-net regression bank for
-# the internal ReplayBoard. Kept out of engine_tests so the small suite stays fast.
-java_test_suite(
-    name = "corpus_tests",
-    size = "medium",
-    srcs = [
-        "src/test/java/com/muchq/games/one_d4/engine/HikaruCorpusParityTest.java",
-    ],
-    deps = [
-        ":engine",
-        ":hikaru_corpus",
-        ":model",
-        artifact("io.github.tors42:chariot"),
-        artifact("org.junit.jupiter:junit-jupiter-api"),
-        artifact("org.assertj:assertj-core"),
-    ],
-)
-
-java_test_suite(
-    name = "motifs_tests",
-    size = "small",
-    srcs = [
-        "src/test/java/com/muchq/games/one_d4/motifs/AttackDetectorTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/BackRankMateDetectorTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/BoardUtilsTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/CheckDetectorTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/DetectorsTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/DiscoveredAttackDetectorTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/EmptiedAndLandedSquaresTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/PinDetectorTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/PromotionDetectorTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/PromotionWithCheckDetectorTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/PromotionWithCheckmateDetectorTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/SkewerDetectorTest.java",
-        "src/test/java/com/muchq/games/one_d4/motifs/SmotheredMateDetectorTest.java",
-    ],
-    deps = [
-        ":model",
-        ":motifs",
-        artifact("org.junit.jupiter:junit-jupiter-api"),
-        artifact("org.assertj:assertj-core"),
-    ],
-)
-
-java_test_suite(
-    name = "full_motif_tests",
-    size = "small",
-    srcs = [
-        "src/test/java/com/muchq/games/one_d4/motifs/FullMotifDetectorTest.java",
-    ],
-    deps = [
-        ":engine",
-        ":model",
-        ":motifs",
-        artifact("org.junit.jupiter:junit-jupiter-api"),
-        artifact("org.assertj:assertj-core"),
-    ],
-)
-
-java_test_suite(
-    name = "queue_tests",
-    size = "small",
-    srcs = ["src/test/java/com/muchq/games/one_d4/queue/InMemoryIndexQueueTest.java"],
-    deps = [
-        ":queue",
-        artifact("org.junit.jupiter:junit-jupiter-api"),
-        artifact("org.assertj:assertj-core"),
-    ],
-)
-
 java_test_suite(
     name = "worker_tests",
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/one_d4/openings/OpeningsCorpusTest.java",
         "src/test/java/com/muchq/games/one_d4/openings/OpeningsTest.java",
-        "src/test/java/com/muchq/games/one_d4/worker/IndexWorkerLifecycleTest.java",
-        "src/test/java/com/muchq/games/one_d4/worker/IndexWorkerTest.java",
-        "src/test/java/com/muchq/games/one_d4/worker/RequestInterruptCheckpointTest.java",
-        "src/test/java/com/muchq/games/one_d4/worker/RequestLeaseCeilingTest.java",
-        "src/test/java/com/muchq/games/one_d4/worker/RequestLeaseOwnershipTest.java",
-        "src/test/java/com/muchq/games/one_d4/worker/RequestLivenessHarness.java",
-        "src/test/java/com/muchq/games/one_d4/worker/ResultMapperTest.java",
         "src/test/java/com/muchq/games/one_d4/worker/RetentionWorkerTest.java",
     ],
     deps = [
         ":db",
         ":dto",
-        ":engine",
         ":hikaru_corpus",
-        ":model",
-        ":motifs",
         ":openings",
-        ":queue",
         ":test_db",
         ":worker",
-        "//domains/games/libs/chess_com_client",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
-        "//domains/platform/libs/yodel",
-        artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
         artifact("org.jdbi:jdbi3-core"),
@@ -598,10 +356,8 @@ java_test_suite(
         ":api",
         ":db",
         ":dto",
-        ":engine",
         ":first_page_request_fixture",
         ":model",
-        ":queue",
         ":service",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
@@ -629,15 +385,11 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/service/DataAvailabilityResolverTest.java",
         "src/test/java/com/muchq/games/one_d4/service/IndexRequestServiceTest.java",
-        "src/test/java/com/muchq/games/one_d4/service/PositionAnalyzerTest.java",
     ],
     deps = [
         ":db",
         ":dto",
-        ":engine",
         ":model",
-        ":motifs",
-        ":queue",
         ":service",
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
@@ -653,8 +405,6 @@ java_test_suite(
     deps = [
         ":db",
         ":module",
-        ":queue",
-        ":worker",
         artifact("io.micronaut:micronaut-inject"),
         # The driver itself, so the URL shape compose hands this container is checked
         # against the parser that will actually read it (#1351).
@@ -814,58 +564,14 @@ java_library(
     name = "e2e_support",
     testonly = True,
     srcs = [
-        "src/test/java/com/muchq/games/one_d4/e2e/FakeChessClient.java",
-        "src/test/java/com/muchq/games/one_d4/e2e/LatchIndexedPeriodDao.java",
         "src/test/java/com/muchq/games/one_d4/e2e/TestSqlDialectFactory.java",
     ],
     deps = [
         ":db",
         ":test_db",
-        "//domains/games/libs/chess_com_client",
-        artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-inject"),
         artifact("jakarta.inject:jakarta-inject-api"),
-        artifact("org.jdbi:jdbi3-core"),
-    ],
-)
-
-java_test_suite(
-    name = "concurrent_e2e_tests",
-    size = "medium",
-    srcs = [
-        "src/test/java/com/muchq/games/one_d4/e2e/ConcurrentIndexE2ETest.java",
-        "src/test/java/com/muchq/games/one_d4/e2e/LatchIndexedPeriodDaoWiringTest.java",
-    ],
-    runtime_deps = [
-        "//domains/platform/libs/logging",
-        # The same integration the binary carries. IndexerModule injects yodel's
-        # CustomMetrics into the worker, and the bean that supplies it lives here —
-        # without it a context boot fails on a missing bean rather than on anything
-        # these tests are about. Not a duplicate of the compile-time yodel dep
-        # that rides in through :module — that is :yodel only, not :micronaut.
-        "//domains/platform/libs/yodel:micronaut",
-        artifact("org.postgresql:postgresql"),
-    ],
-    deps = [
-        # Module-boot suites set indexer.db.url to H2 without going through :test_db, so
-        # the driver has to be declared here. TestDb consumers get it from :test_db instead.
-        artifact("com.h2database:h2"),
-        ":db",
-        ":e2e_support",
-        ":module",
-        ":worker",
-        "//domains/games/libs/chess_com_client",
-        artifact("com.fasterxml.jackson.core:jackson-databind"),
-        artifact("io.micronaut:micronaut-context"),
-        artifact("io.micronaut:micronaut-http-server-netty"),
-        artifact("io.micronaut:micronaut-inject"),
-        artifact("io.micronaut:micronaut-runtime"),
-        # LatchIndexedPeriodDaoWiringTest boots a context and asserts the latch shares the
-        # module's SqlDialect bean.
-        artifact("org.jdbi:jdbi3-core"),
-        artifact("org.junit.jupiter:junit-jupiter-api"),
-        artifact("org.assertj:assertj-core"),
     ],
 )
 
@@ -887,10 +593,11 @@ java_test_suite(
         artifact("com.h2database:h2"),
         # CallToolResult: the MCP tools return it since #1331.
         artifact("io.modelcontextprotocol.sdk:mcp-core"),
+        ":db",
+        ":dto",
         ":e2e_support",
         ":module",
         "//domains/games/apis/mcpserver:tools",
-        "//domains/games/libs/chess_com_client",
         "//domains/platform/libs/http_client:jdk11",
         "//domains/platform/libs/json",
         "//domains/platform/libs/yodel",
@@ -909,8 +616,6 @@ java_test_suite(
     name = "e2e_tests",
     size = "small",
     srcs = [
-        "src/test/java/com/muchq/games/one_d4/e2e/IndexE2ETest.java",
-        "src/test/java/com/muchq/games/one_d4/e2e/MotifE2ETest.java",
         "src/test/java/com/muchq/games/one_d4/e2e/RederiveOpeningsE2ETest.java",
     ],
     deps = [
@@ -918,14 +623,9 @@ java_test_suite(
         ":db",
         ":dto",
         ":e2e_support",
-        ":engine",
         ":model",
-        ":motifs",
-        ":queue",
         ":service",
         ":test_db",
-        ":worker",
-        "//domains/games/libs/chess_com_client",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
@@ -943,7 +643,6 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/api/AdminResponseWireTest.java",
         "src/test/java/com/muchq/games/one_d4/api/AggregateResponseWireTest.java",
-        "src/test/java/com/muchq/games/one_d4/api/AnalyzeEndpointTest.java",
         "src/test/java/com/muchq/games/one_d4/api/ContentTypeHandlingTest.java",
         "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmupTest.java",
         "src/test/java/com/muchq/games/one_d4/api/HealthProbeRouteLabelTest.java",
@@ -961,9 +660,6 @@ java_test_suite(
         # Module-boot suites set indexer.db.url to H2 without going through :test_db, so
         # the driver has to be declared here. TestDb consumers get it from :test_db instead.
         artifact("com.h2database:h2"),
-        # e2e_support supplies FakeChessClient (@Replaces ChessClient). Without it these tests
-        # boot the real client, and any request that reaches the worker opens a live TLS
-        # connection to api.chess.com.
         # FirstPageWarmupTest reads FirstPageCache (:api) and its QueryResponse (:dto) out of the
         # booted context and seeds a row through GameFeatureStore/Jdbi (:db, jdbi3-core); Bazel
         # java deps are not transitive, so riding on :module is not enough.
@@ -971,9 +667,6 @@ java_test_suite(
         ":db",
         ":dto",
         ":e2e_support",
-        # AnalyzeEndpointTest compares the served motifs against the container's own
-        # FeatureExtractor bean, and reads PositionAnalyzer.MAX_PGN_BYTES for the size case.
-        ":engine",
         ":first_page_request_fixture",
         ":model",
         ":module",

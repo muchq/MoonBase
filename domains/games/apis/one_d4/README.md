@@ -2,6 +2,11 @@
 
 The `one_d4` API provides endpoints for indexing and querying chess game features.
 
+**This JVM runs no chess** (#1389): submitting an index or reanalysis request
+writes a row, and the C++ `one_d4_worker` claims it off the table; ad-hoc
+analysis is `one_d4_v2`'s `/v2/analyze`. What lives here is the API surface,
+ChessQL, the query side, the schema and its migrations, and retention.
+
 ## Architecture
 
 **High-level**
@@ -9,11 +14,12 @@ The `one_d4` API provides endpoints for indexing and querying chess game feature
 ```mermaid
 flowchart LR
   Client["Clients"] --> API["REST API"]
-  API --> Index["Index pipeline"]
+  API --> Submit["Index submit\n(row = queue)"]
   API --> Query["Query pipeline"]
-  Index --> DB[(Database)]
+  Submit --> DB[(Database)]
   Query --> DB
-  Index -.-> Chess["Chess.com API"]
+  Worker["one_d4_worker (C++)"] -->|claims & indexes| DB
+  Worker -.-> Chess["Chess.com API"]
 ```
 
 **Detailed component view**
@@ -35,15 +41,8 @@ flowchart TB
     IndexVal["IndexRequestValidator"]
   end
 
-  subgraph IndexPath["Index Path"]
-    Queue["IndexQueue\n(InMemory)"]
-    Lifecycle["IndexWorkerLifecycle\n(claims from indexing_requests)"]
-    Worker["IndexWorker"]
-    ChessClient["ChessClient"]
-    Extractor["FeatureExtractor"]
-    PgnParser["PgnParser"]
-    Replayer["GameReplayer"]
-    Detectors["MotifDetectors\n(pin, fork, check, ...)"]
+  subgraph IndexPath["Index Path (out of process)"]
+    Worker["one_d4_worker (C++)\nclaims from indexing_requests,\nfetches, extracts, flushes"]
   end
 
   subgraph QueryPath["Query Path"]
@@ -71,7 +70,6 @@ flowchart TB
   HTTP --> HealthCtrl
   IndexCtrl --> IndexVal
   IndexCtrl --> RequestStore
-  IndexCtrl --> Queue
   QueryCtrl --> QueryVal
   QueryCtrl --> Parser
   Parser --> Compiler
@@ -81,27 +79,15 @@ flowchart TB
   RequestStore --> DB
   PeriodStore --> DB
 
-  RequestStore --> Lifecycle
-  Queue -.nudge.-> Lifecycle
-  Lifecycle --> Worker
-  Worker --> ChessClient
-  Worker --> RequestStore
-  Worker --> PeriodStore
-  Worker --> Extractor
-  Worker --> GameStore
-  ChessClient --> ChessAPI
-  Extractor --> PgnParser
-  Extractor --> Replayer
-  Extractor --> Detectors
-  Extractor --> GameStore
-  GameStore --> DB
+  Worker -->|claims via lease| DB
+  Worker --> ChessAPI
 
   RetentionWorker --> GameStore
   RetentionWorker --> PeriodStore
   RetentionWorker --> RequestStore
 ```
 
-**Index flow:** Client posts to `POST /v1/index` → a row is stored in `indexing_requests`, which is the work queue. A background thread (IndexWorkerLifecycle) on **any** instance claims the oldest unheld row and takes a lease on it; a local in-memory nudge just wakes the poller sooner. IndexWorker fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs FeatureExtractor (PgnParser → GameReplayer → MotifDetectors) on each game, and writes to GameFeatureStore (game_features + motif_occurrences) and IndexedPeriodStore. Fork occurrences are derived inside FeatureExtractor from ATTACK occurrences (same ply + attacker targeting 2+ pieces).
+**Index flow:** Client posts to `POST /v1/index` → a row is stored in `indexing_requests`, which is the work queue — creating the row is the whole dispatch. `one_d4_worker` (see `domains/games/apis/one_d4_worker`) polls that table, claims the oldest unheld row under a lease, fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs the detectors from `one_d4_motifs`, and flushes to game_features + motif_occurrences and IndexedPeriodStore. Callers follow the request via `GET /v1/index/{id}`.
 
 **Query flow:** Client posts a ChessQL string to `POST /v1/query` → Parser and SqlCompiler produce SQL → GameFeatureStore runs the query and loads motif_occurrences for the result set → response returns GameFeatureRow list with per-game occurrences.
 

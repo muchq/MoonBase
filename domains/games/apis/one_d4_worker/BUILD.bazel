@@ -256,7 +256,8 @@ cc_test(
 )
 
 # The Beyoncé rule applied to somebody else's table: the Java service owns
-# indexing_requests, and nothing but agreement makes a second poller safe.
+# the indexing_requests schema and its migrations, and nothing but agreement
+# makes this poller safe against it.
 cc_test(
     name = "schema_contract_test",
     size = "small",
@@ -267,7 +268,6 @@ cc_test(
         "pg_reanalysis_test.cc",
         "poller.cc",
         "reanalysis_queue_test.cc",
-        "//domains/games/apis/one_d4:worker_metric_names",
         "//domains/games/apis/one_d4:worker_schema_sources",
     ],
     deps = [
@@ -286,14 +286,12 @@ cc_library(
     deps = ["@com_google_absl//absl/types:span"],
 )
 
-# The result words are chess.com's, and both indexers write `result` for the
-# same games — so the vocabulary is read out of the Java mapper rather than
-# copied and hoped over.
+# The result words are chess.com's. The Java mapper this vocabulary was
+# cross-checked against retired in #1389 phase 7; the cases here are the pin.
 cc_test(
     name = "result_test",
     size = "small",
     srcs = ["result_test.cc"],
-    data = ["//domains/games/apis/one_d4:worker_result_mapper"],
     deps = [
         ":result",
         "@googletest//:gtest_main",
@@ -462,16 +460,15 @@ cc_library(
     ],
 )
 
-# Names and label values shared with the Java worker, read out of
-# IndexWorker.java: a name that drifts fails nothing at runtime, it just
-# splits one chart into two and leaves one of them empty.
+# A name that drifts fails nothing at runtime, it just splits one chart into
+# two and leaves one of them empty — prom_proxy's registry_test reads
+# metrics.h from the query side; this covers the recording side.
 cc_test(
     name = "metrics_test",
     size = "small",
     srcs = ["metrics_test.cc"],
     data = [
         "metrics.cc",
-        "//domains/games/apis/one_d4:worker_metric_names",
     ],
     deps = [
         ":metrics",

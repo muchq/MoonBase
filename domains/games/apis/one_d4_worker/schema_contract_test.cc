@@ -232,21 +232,14 @@ TEST(SchemaContract, BothQueuesShareOneAttemptBudget) {
   EXPECT_EQ(PgReanalysisQueue::kMaxAttempts, PgQueue::kMaxAttempts);
 }
 
-TEST(SchemaContract, AFailedRunSaysWhatTheJavaWorkerSays) {
+TEST(SchemaContract, AFailedRunSaysAFixedSentenceAndNotTheCause) {
   // error_message is a column the API hands back, so what goes in it is a
-  // contract with the caller and not a debugging aid. Both workers write
-  // the same sentence, and neither writes the cause.
-  const std::string java = Read(
-      "domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/worker/"
-      "IndexWorker.java");
+  // contract with the caller and not a debugging aid: one fixed sentence,
+  // never the cause. Stored rows already carry this exact string, so a
+  // caller that matches on it must keep matching.
   const std::string poller = Read("domains/games/apis/one_d4_worker/poller.cc");
-
-  const std::regex message(R"re("(Indexing failed[^"]*)")re");
-  std::smatch found;
-  ASSERT_TRUE(std::regex_search(java, found, message))
-      << "IndexWorker no longer stores a fixed failure message";
-  EXPECT_THAT(poller, testing::HasSubstr(absl::StrCat("\"", found[1].str(), "\"")))
-      << "the C++ worker stores a different sentence than the Java one";
+  EXPECT_THAT(poller, testing::HasSubstr("\"Indexing failed due to an internal error\""))
+      << "the worker stores a different sentence than the API's callers have seen";
 }
 
 TEST(SchemaContract, AttemptsAgreeWithTheJavaLimit) {
