@@ -673,6 +673,111 @@ func TestTheMcpCorsAllowListCarriesTheProtocolHeaders(t *testing.T) {
 	}
 }
 
+// api.muchq.com is called from browsers on muchq.com (incl. /r3dr) and on
+// iili.uk (the iili_web worker SPA; the localhost origin is vite dev).
+// ACAO takes a single value, so the Caddyfile echoes it per allowed origin
+// via named matchers — on ordinary responses and on the preflight handler
+// both. An origin falling out of either list breaks that frontend's fetches
+// with no server-side signal; an unconditional ACAO would hand every caller
+// the wrong origin.
+func TestApiCorsEchoesEachAllowedOrigin(t *testing.T) {
+	site := caddySiteBlock(t, "Caddyfile", "api.muchq.com")
+
+	// Split the preflight handler from the rest: each origin needs its echo
+	// in BOTH, and a global count of two can't tell one missing from one
+	// duplicated.
+	var preflight []string
+	rest := site
+	for i, line := range site {
+		if line == "handle @options {" {
+			preflight = caddyBlockAt(site, i)
+			rest = append(append([]string{}, site[:i]...), site[i+len(preflight)+2:]...)
+			break
+		}
+	}
+	if preflight == nil {
+		t.Fatalf("no `handle @options` block in api.muchq.com; preflights fall through to "+
+			"the 404 handler and every cross-origin POST dies. Block was:\n%s",
+			strings.Join(site, "\n"))
+	}
+
+	origins := map[string]string{
+		"@from_muchq": "https://muchq.com",
+		"@from_iili":  "https://iili.uk",
+		"@from_dev":   "http://localhost:5173",
+	}
+	count := func(lines []string, want string) int {
+		n := 0
+		for _, line := range lines {
+			if line == want {
+				n++
+			}
+		}
+		return n
+	}
+	for matcher, origin := range origins {
+		if count(site, matcher+" header Origin "+origin) != 1 {
+			t.Errorf("no `%s header Origin %s` matcher in the api.muchq.com block; that "+
+				"frontend's fetches lose CORS.", matcher, origin)
+		}
+		echo := "header " + matcher + ` Access-Control-Allow-Origin "` + origin + `"`
+		if count(preflight, echo) != 1 {
+			t.Errorf("the @options preflight handler lacks the ACAO echo for %s; the browser "+
+				"never sends the POST.", origin)
+		}
+		if count(rest, echo) != 1 {
+			t.Errorf("ordinary responses lack the ACAO echo for %s; the browser drops the "+
+				"response it already received.", origin)
+		}
+	}
+
+	// The allow-list is closed: an origin added to the Caddyfile must be
+	// added here deliberately.
+	for _, line := range site {
+		if strings.HasPrefix(line, "@from_") {
+			matcher := strings.Fields(line)[0]
+			if _, known := origins[matcher]; !known {
+				t.Errorf("unexpected origin matcher %q; add it to this test's allow-list "+
+					"deliberately or remove it.", line)
+			}
+		}
+		if strings.HasPrefix(line, "Access-Control-Allow-Origin") ||
+			strings.HasPrefix(line, "header Access-Control-Allow-Origin") {
+			t.Errorf("unconditional %q would override the per-origin echo for every caller.", line)
+		}
+	}
+
+	for _, half := range []struct {
+		name  string
+		lines []string
+	}{{"preflight handler", preflight}, {"response path", rest}} {
+		if n := count(half.lines, "Vary Origin"); n != 1 {
+			t.Errorf("found %d `Vary Origin` in the %s, want 1; a shared cache can serve one "+
+				"origin's answer to another.", n, half.name)
+		}
+		// Content-Type in the allow-list and POST in the methods are what
+		// admit the JSON POST.
+		headers, methods := false, false
+		for _, line := range half.lines {
+			if strings.HasPrefix(line, "Access-Control-Allow-Headers") &&
+				strings.Contains(line, "Content-Type") {
+				headers = true
+			}
+			if strings.HasPrefix(line, "Access-Control-Allow-Methods") &&
+				strings.Contains(line, "POST") {
+				methods = true
+			}
+		}
+		if !headers {
+			t.Errorf("the %s allow-list lost Content-Type; the shorten preflight fails and "+
+				"no JSON POST leaves the browser.", half.name)
+		}
+		if !methods {
+			t.Errorf("the %s allow-methods lost POST; the shorten preflight fails.", half.name)
+		}
+	}
+}
+
 // caddySiteBlock returns the comment-stripped, trimmed lines inside one site
 // block, excluding its own braces.
 func caddySiteBlock(t *testing.T, name, host string) []string {
@@ -918,8 +1023,8 @@ var publicRoutes = []struct {
 	// Compose network, but the public route is served through Caddy.
 	{"@post_v2_analyze", []string{"method POST", "path /v2/analyze"}, "one_d4_v2:8090"},
 	// r3dr_v2 (#1359): the redirect matcher is the product.
-	{"@post_r3dr_shorten", []string{"method POST", "path /r3dr/v1/shorten"}, "r3dr_v2:8091"},
-	{"@get_r3dr_redirect", []string{"method GET", "path /r3dr/v1/r/*"}, "r3dr_v2:8091"},
+	{"@post_r3dr_shorten", []string{"method POST", "path /r3dr/v2/shorten"}, "r3dr_v2:8091"},
+	{"@get_r3dr_redirect", []string{"method GET", "path /r3dr/v2/r/*"}, "r3dr_v2:8091"},
 }
 
 func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {

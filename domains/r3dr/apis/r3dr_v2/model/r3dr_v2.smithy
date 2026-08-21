@@ -3,9 +3,9 @@ $version: "2.0"
 namespace moonbase.r3dr
 
 /// r3dr v2 (#1359): mint a slug for a long URL, redirect a slug back to it.
-/// Serves /r3dr/v1/* itself — the gateway path and the modeled path are one
-/// string (no Caddy rewrite). Path v1 is the public contract's first
-/// version; _v2 names the implementation generation. longUrl is
+/// Serves /r3dr/v2/* itself — the gateway path and the modeled path are one
+/// string (no Caddy rewrite). /r3dr/v2/* is the public HTTP contract;
+/// _v2 names the implementation generation. longUrl is
 /// trait-validated here; the clock-dependent expiry rules answer as
 /// InvalidRequestError from the service.
 service R3drV2 {
@@ -15,7 +15,7 @@ service R3drV2 {
 
 /// 201 with the slug alone: the caller builds the short link, so the
 /// link's domain is a client constant.
-@http(method: "POST", uri: "/r3dr/v1/shorten", code: 201)
+@http(method: "POST", uri: "/r3dr/v2/shorten", code: 201)
 operation Shorten {
     input := {
         @required
@@ -43,7 +43,7 @@ operation Shorten {
 /// wire_test pins ours.
 @readonly
 @suppress(["HttpResponseCodeSemantics"])
-@http(method: "GET", uri: "/r3dr/v1/r/{slug}", code: 302)
+@http(method: "GET", uri: "/r3dr/v2/r/{slug}", code: 302)
 operation Redirect {
     input := {
         @required

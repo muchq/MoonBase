@@ -261,30 +261,26 @@ type serviceEntry struct {
 	CustomTimeseries map[string]customTimeseriesDef
 }
 
-// Portrait's render cache emits the standard cache family (#1209) from
-// aura::Cache rather than bespoke trace_cache_* counters, so its queries
-// select on both labels: which service, and which cache within it. Named
-// here because every cache query below is built from the same two rates.
-//
-// These stay in portrait's custom block for now: generalizing them into a
-// standard cache block parameterized by service_name — the way the
-// http_server_* block already works — is the prom_proxy half of #1209, and
-// wants a second emitter to generalize against.
-const (
-	portraitCacheHitRate  = `rate(cache_hits_total{service_name="portrait",cache="trace"}[5m])`
-	portraitCacheMissRate = `rate(cache_misses_total{service_name="portrait",cache="trace"}[5m])`
+// aura::Cache emitters share the standard cache family (#1209), selected on
+// both labels: which service, and which cache within it. Parameterized —
+// the prom_proxy half of #1209 — now that r3dr_v2's url_cache is the second
+// emitter (#1359).
+func cacheHitPercent(service, cache string) string {
+	hit := fmt.Sprintf(`rate(cache_hits_total{service_name=%q,cache=%q}[5m])`, service, cache)
+	miss := fmt.Sprintf(`rate(cache_misses_total{service_name=%q,cache=%q}[5m])`, service, cache)
+	return hit + `/(` + hit + `+` + miss + `)*100`
+}
 
-	portraitCacheHitPercent = portraitCacheHitRate + `/(` + portraitCacheHitRate + `+` +
-		portraitCacheMissRate + `)*100`
-
-	// Both cache counters as one selector, so the operations tile can be built
-	// in either view from a single expression. Selected by __name__ rather
-	// than summed as rate(hits)+rate(misses): that form is two instant vectors
-	// joined by binary matching, which yields nothing at all if one side has
-	// no series yet — a fresh process whose cache has only ever missed.
-	portraitCacheOps = `{__name__=~"cache_hits_total|cache_misses_total",` +
-		`service_name="portrait",cache="trace"}`
-)
+// Both cache counters as one selector, so the operations tile can be built
+// in either view from a single expression. Selected by __name__ rather
+// than summed as rate(hits)+rate(misses): that form is two instant vectors
+// joined by binary matching, which yields nothing at all if one side has
+// no series yet — a fresh process whose cache has only ever missed.
+func cacheOps(service, cache string) string {
+	return fmt.Sprintf(
+		`{__name__=~"cache_hits_total|cache_misses_total",service_name=%q,cache=%q}`,
+		service, cache)
+}
 
 // Scene complexity is recorded on both cache paths and labelled by cache_hit
 // (#1287). Summing across the label is offered load — what callers asked to
@@ -486,10 +482,16 @@ var serviceRegistry = map[string]serviceEntry{
 			probesTile("one_d4_v2"),
 		},
 	},
-	// r3dr v2 (#1359): standard instruments plus the Probes tile.
+	// r3dr v2 (#1359): standard instruments, Probes, and the URL cache.
 	"r3dr_v2": {
 		CustomScalars: []customScalarDef{
 			probesTile("r3dr_v2"),
+			scalar("URL cache", "hit_rate_percent", "%", cacheHitPercent("r3dr_v2", "url_cache")),
+			counter("URL cache", "operations", "", cacheOps("r3dr_v2", "url_cache")),
+		},
+		CustomTimeseries: map[string]customTimeseriesDef{
+			"cache_hit_rate":   tsFixed(cacheHitPercent("r3dr_v2", "url_cache")),
+			"cache_operations": tsCounter(cacheOps("r3dr_v2", "url_cache")),
 		},
 	},
 	// Wordchains: server_pal's standard instruments plus the standard
@@ -509,8 +511,8 @@ var serviceRegistry = map[string]serviceEntry{
 	"portrait": {
 		CustomScalars: []customScalarDef{
 			probesTile("portrait"),
-			scalar("Render cache", "hit_rate_percent", "%", portraitCacheHitPercent),
-			counter("Render cache", "operations", "", portraitCacheOps),
+			scalar("Render cache", "hit_rate_percent", "%", cacheHitPercent("portrait", "trace")),
+			counter("Render cache", "operations", "", cacheOps("portrait", "trace")),
 			// Windowed averages over RecordDistribution histograms:
 			// rate(sum)/rate(count) = mean per observation in the window.
 			// Requested is every accepted request; rendered is the cache
@@ -527,8 +529,8 @@ var serviceRegistry = map[string]serviceEntry{
 		// only cost clarity for a chart that was never going to pair with
 		// anything.
 		CustomTimeseries: map[string]customTimeseriesDef{
-			"cache_hit_rate":          tsFixed(portraitCacheHitPercent),
-			"cache_operations":        tsCounter(portraitCacheOps),
+			"cache_hit_rate":          tsFixed(cacheHitPercent("portrait", "trace")),
+			"cache_operations":        tsCounter(cacheOps("portrait", "trace")),
 			"scene_spheres_requested": tsFixed(`sum(rate(scene_sphere_count_sum[5m]))/sum(rate(scene_sphere_count_count[5m]))`),
 			"scene_spheres_rendered":  tsFixed(`sum(rate(scene_sphere_count_sum{cache_hit="false"}[5m]))/sum(rate(scene_sphere_count_count{cache_hit="false"}[5m]))`),
 			"scene_lights_requested":  tsFixed(`sum(rate(scene_light_count_sum[5m]))/sum(rate(scene_light_count_count[5m]))`),

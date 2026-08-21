@@ -61,12 +61,12 @@ api.muchq.com {
 
 	@post_r3dr_shorten {
 		method POST
-		path /r3dr/v1/shorten
+		path /r3dr/v2/shorten
 	}
 
 	@get_r3dr_redirect {
 		method GET
-		path /r3dr/v1/r/*
+		path /r3dr/v2/r/*
 	}
 
 	@ws_thoughts {
@@ -90,20 +90,36 @@ api.muchq.com {
 		method OPTIONS
 	}
 
+	# Browser origins that call this API: muchq.com pages (incl. /r3dr)
+	# and the iili.uk SPA (plus its vite dev — every API here is public
+	# and credential-less, so a localhost origin grants nothing curl
+	# doesn't have). ACAO takes one value, so it's echoed per origin;
+	# Vary keeps shared caches from serving one origin's answer to the
+	# other.
+	@from_muchq header Origin https://muchq.com
+	@from_iili header Origin https://iili.uk
+	@from_dev header Origin http://localhost:5173
+
 	header {
-		Access-Control-Allow-Origin "https://muchq.com"
 		Access-Control-Allow-Methods "GET, POST, OPTIONS"
 		Access-Control-Allow-Headers "Content-Type, Authorization"
 		Access-Control-Max-Age "86400"
+		Vary Origin
 	}
+	header @from_muchq Access-Control-Allow-Origin "https://muchq.com"
+	header @from_iili Access-Control-Allow-Origin "https://iili.uk"
+	header @from_dev Access-Control-Allow-Origin "http://localhost:5173"
 
 	handle @options {
 		header {
-			Access-Control-Allow-Origin "https://muchq.com"
 			Access-Control-Allow-Methods "GET, POST, OPTIONS"
 			Access-Control-Allow-Headers "Content-Type, Authorization"
 			Access-Control-Max-Age "86400"
+			Vary Origin
 		}
+		header @from_muchq Access-Control-Allow-Origin "https://muchq.com"
+		header @from_iili Access-Control-Allow-Origin "https://iili.uk"
+		header @from_dev Access-Control-Allow-Origin "http://localhost:5173"
 		respond 204
 	}
 
@@ -139,7 +155,7 @@ api.muchq.com {
 	# client sees and the route the model declares are one string.
 	reverse_proxy @post_v2_analyze one_d4_v2:8090
 
-	# Same pattern (#1359): r3dr_v2 serves /r3dr/v1/* unrewritten.
+	# Same pattern (#1359): r3dr_v2 serves /r3dr/v2/* unrewritten.
 	reverse_proxy @post_r3dr_shorten r3dr_v2:8091
 	reverse_proxy @get_r3dr_redirect r3dr_v2:8091
 

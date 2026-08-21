@@ -2,7 +2,7 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
-# r3dr_v2 (#1359): the C++ URL shortener serving /r3dr/v1/* on
+# r3dr_v2 (#1359): the C++ URL shortener serving /r3dr/v2/* on
 # api.muchq.com, beside the Go service until it retires.
 
 cc_library(

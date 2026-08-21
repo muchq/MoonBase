@@ -59,7 +59,7 @@ class WireTest : public testing::Test {
 };
 
 TEST_F(WireTest, ShortenReturns201WithTheSlugAloneInTheBody) {
-  const auto response = Send("POST", "/r3dr/v1/shorten",
+  const auto response = Send("POST", "/r3dr/v2/shorten",
                              R"({"longUrl":"https://www.example.com","expiresAt":1755003600000})");
   EXPECT_EQ(response.status, 201);
   // One key, nothing else; the spelling is the contract.
@@ -68,7 +68,7 @@ TEST_F(WireTest, ShortenReturns201WithTheSlugAloneInTheBody) {
 
 TEST_F(WireTest, AnOmittedExpiryIsA400) {
   const auto response =
-      Send("POST", "/r3dr/v1/shorten", R"({"longUrl":"https://www.example.com"})");
+      Send("POST", "/r3dr/v2/shorten", R"({"longUrl":"https://www.example.com"})");
   EXPECT_EQ(response.status, 400);
   EXPECT_THAT(response.body, HasSubstr("expiresAt"));
 }
@@ -77,7 +77,7 @@ TEST_F(WireTest, AnOmittedExpiryIsA400) {
 TEST_F(WireTest, TheGeneratedServerEnforcesTheLongUrlTraits) {
   // Whole body once: the fieldList shape is the contract.
   const auto tooShort =
-      Send("POST", "/r3dr/v1/shorten", R"({"longUrl":"http://g.c","expiresAt":1755003600000})");
+      Send("POST", "/r3dr/v2/shorten", R"({"longUrl":"http://g.c","expiresAt":1755003600000})");
   EXPECT_EQ(tooShort.status, 400);
   EXPECT_EQ(tooShort.body,
             "{\"fieldList\":[{\"message\":\"Value with length 10 at '/longUrl' failed to satisfy"
@@ -86,17 +86,17 @@ TEST_F(WireTest, TheGeneratedServerEnforcesTheLongUrlTraits) {
             " 10 at '/longUrl' failed to satisfy constraint: Member must have length between 11"
             " and 1000, inclusive\"}");
 
-  const auto noProtocol = Send("POST", "/r3dr/v1/shorten",
+  const auto noProtocol = Send("POST", "/r3dr/v2/shorten",
                                R"({"longUrl":"www.example.com/path","expiresAt":1755003600000})");
   EXPECT_EQ(noProtocol.status, 400);
   EXPECT_THAT(noProtocol.body, HasSubstr("/longUrl"));
 
-  const auto tooLong = Send("POST", "/r3dr/v1/shorten",
+  const auto tooLong = Send("POST", "/r3dr/v2/shorten",
                             std::string(R"({"longUrl":"https://example.com/)") +
                                 std::string(1000, 'a') + R"(","expiresAt":1755003600000})");
   EXPECT_EQ(tooLong.status, 400);
 
-  const auto missing = Send("POST", "/r3dr/v1/shorten", R"({})");
+  const auto missing = Send("POST", "/r3dr/v2/shorten", R"({})");
   EXPECT_EQ(missing.status, 400);
 }
 
@@ -104,12 +104,12 @@ TEST_F(WireTest, TheGeneratedServerEnforcesTheLongUrlTraits) {
 // the reason the bound is 11) and exactly 1000.
 TEST_F(WireTest, TheLengthBoundsAcceptTheirOwnEdges) {
   const auto shortest =
-      Send("POST", "/r3dr/v1/shorten", R"({"longUrl":"http://g.co","expiresAt":1755003600000})");
+      Send("POST", "/r3dr/v2/shorten", R"({"longUrl":"http://g.co","expiresAt":1755003600000})");
   EXPECT_EQ(shortest.status, 201);
 
   const std::string longest = "https://example.com/" + std::string(980, 'a');
   ASSERT_EQ(longest.size(), 1000u);
-  const auto atMax = Send("POST", "/r3dr/v1/shorten",
+  const auto atMax = Send("POST", "/r3dr/v2/shorten",
                           R"({"longUrl":")" + longest + R"(","expiresAt":1755003600000})");
   EXPECT_EQ(atMax.status, 201);
 }
@@ -119,7 +119,7 @@ TEST_F(WireTest, TheLengthBoundsAcceptTheirOwnEdges) {
 // twin proving error messages do reach bodies when meant to.
 TEST_F(WireTest, AStoreFailureIsANonLeaking500NotA404) {
   store_->fail_lookups = true;
-  const auto response = Send("GET", "/r3dr/v1/r/DAA", "");
+  const auto response = Send("GET", "/r3dr/v2/r/DAA", "");
   EXPECT_GE(response.status, 500);
   EXPECT_THAT(response.body, ::testing::Not(HasSubstr("password")));
   EXPECT_THAT(response.body, ::testing::Not(HasSubstr("shared_postgres")));
@@ -128,12 +128,12 @@ TEST_F(WireTest, AStoreFailureIsANonLeaking500NotA404) {
 // The clock rules cannot be traits; they answer as the modeled error, and
 // the message names the rule.
 TEST_F(WireTest, TheExpiryRulesAnswerAsTheModeledError) {
-  const auto past = Send("POST", "/r3dr/v1/shorten",
+  const auto past = Send("POST", "/r3dr/v2/shorten",
                          R"({"longUrl":"https://www.example.com","expiresAt":1754000000000})");
   EXPECT_EQ(past.status, 400);
   EXPECT_THAT(past.body, HasSubstr("expiresAt is in the past"));
 
-  const auto tooFar = Send("POST", "/r3dr/v1/shorten",
+  const auto tooFar = Send("POST", "/r3dr/v2/shorten",
                            R"({"longUrl":"https://www.example.com","expiresAt":1758000000000})");
   EXPECT_EQ(tooFar.status, 400);
   EXPECT_THAT(tooFar.body, HasSubstr("30 days"));
@@ -143,7 +143,7 @@ TEST_F(WireTest, TheExpiryRulesAnswerAsTheModeledError) {
 TEST_F(WireTest, RedirectIsA302WithLocationAndTheConformancePinnedBody) {
   store_->targets["DAA"] = Target{"https://www.example.com/target", kNow + absl::Hours(1)};
 
-  const auto response = Send("GET", "/r3dr/v1/r/DAA", "");
+  const auto response = Send("GET", "/r3dr/v2/r/DAA", "");
   EXPECT_EQ(response.status, 302);
   EXPECT_EQ(response.headers.Get("Location").value_or(""), "https://www.example.com/target");
   EXPECT_EQ(response.body, "{}");
@@ -152,12 +152,12 @@ TEST_F(WireTest, RedirectIsA302WithLocationAndTheConformancePinnedBody) {
 // Unknown and expired collapse into one exact 404 body: the reader can't
 // probe which it was.
 TEST_F(WireTest, UnknownAndExpiredSlugsShareTheOneModeledJson404) {
-  const auto unknown = Send("GET", "/r3dr/v1/r/zzz", "");
+  const auto unknown = Send("GET", "/r3dr/v2/r/zzz", "");
   EXPECT_EQ(unknown.status, 404);
   EXPECT_EQ(unknown.body, R"({"message":"no such link"})");
 
   store_->targets["DAA"] = Target{"https://www.example.com", kNow - absl::Seconds(1)};
-  const auto expired = Send("GET", "/r3dr/v1/r/DAA", "");
+  const auto expired = Send("GET", "/r3dr/v2/r/DAA", "");
   EXPECT_EQ(expired.status, 404);
   EXPECT_EQ(expired.body, unknown.body);
 }

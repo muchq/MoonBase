@@ -178,52 +178,75 @@ func allQueriesFor(entry serviceEntry) []string {
 	return queries
 }
 
-// Portrait's cache queries follow the emitter: aura::Cache emits the
-// standard cache family labeled by service and cache, so the bespoke
-// trace_cache_* series no longer exist to be queried. A rename on one side
-// only leaves the dashboard reading a metric nothing writes — which looks
-// exactly like a cache that is never used.
-func TestRegistry_PortraitCacheQueriesUseTheStandardFamily(t *testing.T) {
-	portrait := serviceRegistry["portrait"]
+// The scoping test below can't tell hit rate from miss rate; the exact
+// strings are the contract with Prometheus.
+func TestRegistry_CacheHelpersEmitTheExactQueries(t *testing.T) {
+	assert.Equal(t,
+		`rate(cache_hits_total{service_name="r3dr_v2",cache="url_cache"}[5m])`+
+			`/(rate(cache_hits_total{service_name="r3dr_v2",cache="url_cache"}[5m])`+
+			`+rate(cache_misses_total{service_name="r3dr_v2",cache="url_cache"}[5m]))*100`,
+		cacheHitPercent("r3dr_v2", "url_cache"))
+	assert.Equal(t,
+		`{__name__=~"cache_hits_total|cache_misses_total",`+
+			`service_name="r3dr_v2",cache="url_cache"}`,
+		cacheOps("r3dr_v2", "url_cache"))
+}
 
-	// The panels the UI actually receives: cache_hit_rate is fixed-form and
-	// keeps its def-map key; cache_operations is toggleable, so its def-map
-	// key ("cache_operations") never reaches a response — only its expanded
-	// _rate/_count panels do.
-	require.Contains(t, portrait.CustomTimeseries, "cache_hit_rate")
-	panels := expandCustomTimeseries(portrait.CustomTimeseries, "5m")
-	require.Contains(t, panels, "cache_operations_rate")
-	require.Contains(t, panels, "cache_operations_count")
+// Cache queries follow the emitter: aura::Cache emits the standard cache
+// family labeled by service and cache, so bespoke series (portrait's old
+// trace_cache_*) no longer exist to be queried. A rename on one side only
+// leaves the dashboard reading a metric nothing writes — which looks
+// exactly like a cache that is never used. One case per emitter.
+func TestRegistry_CacheQueriesUseTheStandardFamily(t *testing.T) {
+	for _, emitter := range []struct {
+		service string
+		cache   string
+	}{
+		{"portrait", "trace"},
+		{"r3dr_v2", "url_cache"},
+	} {
+		entry := serviceRegistry[emitter.service]
 
-	queries := allQueriesFor(portrait)
-	require.NotEmpty(t, queries)
+		// The panels the UI actually receives: cache_hit_rate is fixed-form
+		// and keeps its def-map key; cache_operations is toggleable, so its
+		// def-map key never reaches a response — only its expanded
+		// _rate/_count panels do.
+		require.Contains(t, entry.CustomTimeseries, "cache_hit_rate", emitter.service)
+		panels := expandCustomTimeseries(entry.CustomTimeseries, "5m")
+		require.Contains(t, panels, "cache_operations_rate", emitter.service)
+		require.Contains(t, panels, "cache_operations_count", emitter.service)
 
-	seen := map[string]int{}
-	for _, query := range queries {
-		assert.NotContains(t, query, "trace_cache_",
-			"query still reads the deleted bespoke series: %s", query)
+		queries := allQueriesFor(entry)
+		require.NotEmpty(t, queries, emitter.service)
 
-		// Per selector, not per query. A hit-rate query names both counters,
-		// so asserting the query as a whole contains the labels passes while
-		// either half of it is unscoped — and an unscoped half silently sums
-		// every service's caches into portrait's panel.
-		for _, selector := range cacheSelectorsIn(query) {
-			seen[selector.name]++
-			assert.Contains(t, selector.labels, `service_name="portrait"`,
-				"selector %q is not scoped to portrait, in %s", selector.raw, query)
-			assert.Contains(t, selector.labels, `cache="trace"`,
-				"selector %q does not name which cache, in %s", selector.raw, query)
+		seen := map[string]int{}
+		for _, query := range queries {
+			assert.NotContains(t, query, "trace_cache_",
+				"query still reads the deleted bespoke series: %s", query)
+
+			// Per selector, not per query. A hit-rate query names both
+			// counters, so asserting the query as a whole contains the labels
+			// passes while either half of it is unscoped — and an unscoped
+			// half silently sums every service's caches into this panel.
+			for _, selector := range cacheSelectorsIn(query) {
+				seen[selector.name]++
+				assert.Contains(t, selector.labels,
+					fmt.Sprintf(`service_name=%q`, emitter.service),
+					"selector %q is not scoped to %s, in %s", selector.raw, emitter.service, query)
+				assert.Contains(t, selector.labels, fmt.Sprintf(`cache=%q`, emitter.cache),
+					"selector %q does not name which cache, in %s", selector.raw, query)
+			}
 		}
-	}
 
-	// Both halves by name, not a bare count: the hit-rate panel divides one
-	// by the sum of both, so a rename that left only the hits selector
-	// standing would keep the count non-zero while the panel silently read a
-	// series nothing writes.
-	assert.NotZero(t, seen["cache_hits_total"], "nothing queries cache_hits_total")
-	assert.NotZero(t, seen["cache_misses_total"], "nothing queries cache_misses_total")
-	assert.Empty(t, mapKeysExcept(seen, "cache_hits_total", "cache_misses_total"),
-		"portrait queries a cache series outside the standard family")
+		// Both halves by name, not a bare count: the hit-rate panel divides
+		// one by the sum of both, so a rename that left only the hits
+		// selector standing would keep the count non-zero while the panel
+		// silently read a series nothing writes.
+		assert.NotZero(t, seen["cache_hits_total"], "nothing queries cache_hits_total")
+		assert.NotZero(t, seen["cache_misses_total"], "nothing queries cache_misses_total")
+		assert.Empty(t, mapKeysExcept(seen, "cache_hits_total", "cache_misses_total"),
+			"%s queries a cache series outside the standard family", emitter.service)
+	}
 }
 
 // Every cache selector in the whole registry has to name a service, not just
