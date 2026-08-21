@@ -466,10 +466,9 @@ func TestRegistry_MicrogptTokensReplacesTokensPerSecond(t *testing.T) {
 // names so a new instrument has to be declared here too.
 var oneD4SelectorPattern = regexp.MustCompile(`\b((?:games_indexed|index_runs|index_months|chess_com_archive_fetches|motif_occurrences|index_run_duration_micros|index_games_per_month)[a-z_]*)(\{[^}]*\})?`)
 
-// What the C++ one_d4_worker emits, plus the suffixes the collector's
-// Prometheus exporter appends: _total for a cumulative monotonic sum,
-// _sum/_count for a histogram. The recording end is the worker's own
-// metrics_test, which reads metrics.h.
+// What one_d4_worker emits, plus the suffixes the collector's Prometheus
+// exporter appends: _total for a cumulative monotonic sum, _sum/_count for
+// a histogram. The recording end is the worker's own metrics_test.
 var oneD4ExportedNames = map[string]bool{
 	"games_indexed_total":             true,
 	"index_runs_total":                true,

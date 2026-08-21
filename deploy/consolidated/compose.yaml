@@ -402,11 +402,10 @@ services:
       retries: 3
       start_period: 15s
 
-  # The C++ index worker (#1389). Another poller on the same
-  # indexing_requests table (#1279) rather than a second protocol: it
-  # claims, leases and fences exactly as one_d4's own worker does, and the
-  # two run side by side. Every metric it writes carries indexer="cpp", so
-  # a dashboard can tell them apart.
+  # The index worker (#1389): the one thing that indexes. A poller on the
+  # indexing_requests table (#1279) — any number of replicas claim, lease
+  # and fence against the same rows. Every metric it writes carries
+  # indexer="cpp", the label stored series are already keyed by.
   #
   # No port and no healthcheck: it serves nothing. Liveness is visible as
   # index_runs_total{indexer="cpp"} advancing, which a probe could not

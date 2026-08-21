@@ -1,11 +1,10 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
-# one_d4_worker: the C++ index worker (#1389 phase 4).
+# one_d4_worker: the index worker (#1389).
 #
-# The table is the queue (#1279), so this is another poller on
-# indexing_requests rather than a new protocol — it claims, leases and
-# fences exactly as the Java worker does, and the two run side by side.
+# The table is the queue (#1279): a poller on indexing_requests rather than
+# a protocol, claiming, leasing and fencing against the schema one_d4 owns.
 
 cc_library(
     name = "job",
@@ -272,8 +271,10 @@ cc_test(
     ],
     deps = [
         ":pg_queue",
+        ":poller",
         ":reanalysis_queue",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
     ],
 )
@@ -460,9 +461,9 @@ cc_library(
     ],
 )
 
-# A name that drifts fails nothing at runtime, it just splits one chart into
-# two and leaves one of them empty — prom_proxy's registry_test reads
-# metrics.h from the query side; this covers the recording side.
+# A name or bucket layout that drifts fails nothing at runtime — it splits
+# one chart into two, or flattens every p95 onto the top finite bound. This
+# is the recording-side pin.
 cc_test(
     name = "metrics_test",
     size = "small",
@@ -519,15 +520,6 @@ filegroup(
     name = "worker_service_name",
     testonly = True,
     srcs = ["worker_main.cc"],
-    visibility = ["//domains/platform:__subpackages__"],
-)
-
-# The indexer label and value this worker stamps. prom_proxy's share tile
-# hardcodes both; renaming either here would make it read zero.
-filegroup(
-    name = "indexer_label",
-    testonly = True,
-    srcs = ["metrics.h"],
     visibility = ["//domains/platform:__subpackages__"],
 )
 

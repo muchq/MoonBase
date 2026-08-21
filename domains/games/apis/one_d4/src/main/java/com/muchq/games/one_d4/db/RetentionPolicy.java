@@ -50,8 +50,8 @@ public final class RetentionPolicy {
    *
    * <p>An hour is generous for detecting an outage and harmless for a healthy fleet, where a queued
    * request is claimed within seconds and its {@code updated_at} moves. The invariant that {@link
-   * #REQUEST} must exceed {@link #PERIOD} is asserted in {@code IndexE2ETest} rather than in a
-   * static initializer here, where a violation would surface as an {@code
+   * #REQUEST} must exceed {@link #PERIOD} is asserted in {@code RetentionPolicyTest} rather than in
+   * a static initializer here, where a violation would surface as an {@code
    * ExceptionInInitializerError} during Micronaut startup instead of as a failing test.
    */
   public static final Duration STALE_REQUEST = Duration.ofHours(1);
@@ -76,10 +76,11 @@ public final class RetentionPolicy {
    * for hours, renewing throughout, up to {@link #MAX_RUN} — and a lease that lapses without anyone
    * taking it is renewed rather than abandoned, so a stalled pool costs a warning and not a run.
    *
-   * <p>{@code IndexWorker.DEFAULT_HEARTBEAT_INTERVAL} must stay below this, and the relationship is
-   * asserted in {@code IndexE2ETest} rather than left to inspection — an interval longer than the
-   * lease means every lease lapses between beats, which does not fail loudly. It shows up as work
-   * being reclaimed out from under healthy workers.
+   * <p>The renewer's interval must stay well below this — an interval at or above the lease means
+   * every lease lapses between beats, which does not fail loudly. It shows up as work being
+   * reclaimed out from under healthy workers. The renewer is the C++ poller ({@code
+   * Poller::Options::renew_every}), and one_d4_worker's schema_contract_test holds its defaults to
+   * this policy.
    */
   public static final Duration LEASE = Duration.ofMinutes(5);
 
@@ -134,8 +135,8 @@ public final class RetentionPolicy {
    * beat, and {@link IndexingRequestStore#releaseOwned} stamps it again on the way out. It is that
    * a ceiling below the staleness window would cut runs short of the very window the system uses to
    * decide whether anything is happening at all, which is incoherent — a run still going is the
-   * clearest evidence there is that something is. Asserted in {@code IndexE2ETest} rather than
-   * here, where a violation would surface as an {@code ExceptionInInitializerError} during
+   * clearest evidence there is that something is. Asserted in {@code RetentionPolicyTest} rather
+   * than here, where a violation would surface as an {@code ExceptionInInitializerError} during
    * Micronaut startup.
    */
   public static final Duration MAX_RUN = Duration.ofHours(6);

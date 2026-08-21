@@ -11,6 +11,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
+#include "domains/games/apis/one_d4_worker/poller.h"
 #include "domains/games/apis/one_d4_worker/reanalysis_queue.h"
 
 namespace one_d4_worker {
@@ -224,6 +225,24 @@ TEST(SchemaContract, TheReanalysisRequestFixtureDeclaresTheSameTypes) {
 
 TEST(SchemaContract, TheReanalysisIdIsAUuidToo) {
   EXPECT_EQ(JavaSchemaFor("reanalysis_requests")["id"], "UUID");
+}
+
+TEST(SchemaContract, ThePollerDefaultsMatchTheRetentionPolicy) {
+  // The lease vocabulary is the Java service's: RetentionPolicy.LEASE is
+  // what reclaimStale compares lease_expires_at against, and MAX_RUN is
+  // the ceiling both sides agree makes a run a fault. The renewal interval
+  // must leave several losable renewals inside one lease, or every lease
+  // lapses between beats and healthy workers lose their ranges.
+  const Poller::Options defaults;
+  EXPECT_EQ(defaults.lease, absl::Minutes(5));
+  EXPECT_EQ(defaults.max_run, absl::Hours(6));
+  EXPECT_LE(defaults.renew_every * 4, defaults.lease);
+
+  const std::string policy = Read(
+      "domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/db/"
+      "RetentionPolicy.java");
+  EXPECT_THAT(policy, testing::HasSubstr("LEASE = Duration.ofMinutes(5)"));
+  EXPECT_THAT(policy, testing::HasSubstr("MAX_RUN = Duration.ofHours(6)"));
 }
 
 TEST(SchemaContract, BothQueuesShareOneAttemptBudget) {

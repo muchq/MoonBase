@@ -182,9 +182,27 @@ TEST(WorkerMetrics, DeclaresItsSeriesBeforeAnythingHappens) {
   EXPECT_TRUE(recorder.Declared(kMonthsMetric, Cpp("result", "cached")));
 }
 
-// The series names are a wire contract with prom_proxy, pinned from the
-// reading side: its registry_test reads metrics.h and fails on any name its
-// queries don't match.
+// The series names and histogram layouts are a wire contract with the
+// stored series and with prom_proxy's queries, pinned here on the
+// recording side.
+
+TEST(WorkerMetrics, MeasuresARunOnTheLayoutTheStoredSeriesUse) {
+  // One name, one histogram, one layout: stored samples already sit in
+  // these buckets, and a quantile across two layouts compares nothing.
+  // The sharpest wrong answer is shrinking toward the SDK default, whose
+  // top finite bound is 10ms — every run lands in +Inf and the p95 reads
+  // a flat 10ms forever, green all the way down. Exact vector, edited
+  // deliberately or not at all.
+  EXPECT_EQ(WorkerMetrics::HistogramBounds()[kRunDurationMetric],
+            (std::vector<double>{1'000, 10'000, 100'000, 1'000'000, 5'000'000, 30'000'000,
+                                 60'000'000, 300'000'000, 900'000'000, 1'800'000'000, 3'600'000'000,
+                                 10'800'000'000, 21'600'000'000}));
+}
+
+TEST(WorkerMetrics, MeasuresAMonthOnTheLayoutTheStoredSeriesUse) {
+  EXPECT_EQ(WorkerMetrics::HistogramBounds()[kGamesPerMonthMetric],
+            (std::vector<double>{1, 2, 5, 10, 25, 50, 100, 200, 400, 800, 1'600, 3'200}));
+}
 
 TEST(WorkerMetrics, RecordsTheRunDurationUnderItsOwnNameAndNotARenamedOne) {
   // MetricsRecorder::RecordLatency appends _microseconds to the instrument

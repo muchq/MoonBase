@@ -346,15 +346,15 @@ public class IndexRequestServiceTest {
     }
 
     /**
-     * Unimplemented on purpose. The submit path never claims — it creates a row and hands the work
-     * to a worker, and {@code IndexWorkerLifecycle} is the only thing that takes rows off the
-     * table. Returning empty here would be the quieter choice and the worse one: if a later change
-     * makes the service claim, an empty answer looks like "no work" and the test still passes.
+     * Unimplemented on purpose. The submit path never claims — it creates a row, and the C++
+     * worker's poller is the only thing that takes rows off the table. Returning empty here would
+     * be the quieter choice and the worse one: if a later change makes the service claim, an empty
+     * answer looks like "no work" and the test still passes.
      */
     @Override
     public Optional<IndexingRequest> claimNext(String ownerId, Duration lease, Instant now) {
       throw new UnsupportedOperationException(
-          "the submit path does not claim; see IndexWorkerLifecycleTest");
+          "the submit path does not claim; the worker's poller does");
     }
 
     @Override
