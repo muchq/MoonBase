@@ -1079,7 +1079,7 @@ func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {
 // consolidated box, SPA stays on Cloudflare at iili.uk. Public path is
 // /r/{slug}; r3dr_v2's modeled path is /r3dr/v2/r/{slug}, so this site
 // rewrites — the deliberate exception to "gateway path == model path"
-// on api.muchq.com. GET and HEAD both reach the upstream (unfurlers).
+// on api.muchq.com. HEAD is forwarded with GET (#1433 pins end-to-end 302).
 func TestIiliRedirectHostRewritesSlugPathsToR3drV2(t *testing.T) {
 	site := caddySiteBlock(t, "Caddyfile", "i.iili.uk")
 
@@ -1095,7 +1095,7 @@ func TestIiliRedirectHostRewritesSlugPathsToR3drV2(t *testing.T) {
 			if strings.HasPrefix(inner, "rewrite ") && strings.Contains(inner, "/r3dr/v2") {
 				rewrites = true
 			}
-			if strings.HasPrefix(inner, "reverse_proxy r3dr_v2") {
+			if strings.HasPrefix(inner, "reverse_proxy r3dr_v2:8091") {
 				proxies = true
 			}
 		}
@@ -1105,7 +1105,7 @@ func TestIiliRedirectHostRewritesSlugPathsToR3drV2(t *testing.T) {
 		}
 	}
 	if matcher == "" {
-		t.Fatalf("no `handle @… { rewrite …/r3dr/v2…; reverse_proxy r3dr_v2 … }` in the "+
+		t.Fatalf("no `handle @… { rewrite …/r3dr/v2…; reverse_proxy r3dr_v2:8091 }` in the "+
 			"i.iili.uk block; short links would 404 or hit the wrong upstream. Block was:\n%s",
 			strings.Join(site, "\n"))
 	}
@@ -1140,13 +1140,13 @@ func TestIiliRedirectHostRewritesSlugPathsToR3drV2(t *testing.T) {
 
 // r3dr.net's Caddy frontage retired with the iili.uk / i.iili.uk split;
 // the Go service stays in compose until chunk 3, but nothing internet-facing
-// should still name the old host.
+// should still name the old host (any address-line spelling).
 func TestR3drNetCaddySitesAreGone(t *testing.T) {
 	for _, host := range []string{"r3dr.net", "www.r3dr.net"} {
 		for _, line := range directiveLines(t, "Caddyfile") {
-			if line == host+" {" {
-				t.Errorf("Caddyfile still declares a %s site block; short links live on "+
-					"i.iili.uk now and the SPA on Cloudflare at iili.uk.", host)
+			if strings.Contains(line, host) {
+				t.Errorf("Caddyfile still names %q (%q); short links live on "+
+					"i.iili.uk now and the SPA on Cloudflare at iili.uk.", host, line)
 			}
 		}
 	}

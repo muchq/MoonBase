@@ -24,6 +24,10 @@ individually targetable.
 - **i.iili.uk** - Short-link redirects (#1359)
   - Caddy rewrites `GET|HEAD /r/{slug}` → `r3dr_v2` `/r3dr/v2/r/{slug}`
   - SPA lives on Cloudflare at `iili.uk` (not this host)
+  - `HEAD` end-to-end 302 tracked in #1433
+
+- **r3dr (Go, internal)** - Still in compose until #1359 chunk 3; no
+  Caddy frontage (r3dr.net sites removed — those links are dead now)
 
 - **Observability Stack**
   - Prometheus (port 9090)

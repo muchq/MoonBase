@@ -172,7 +172,8 @@ api.muchq.com {
 # iili.uk; this host (A-record to the consolidated box) only answers
 # /r/{slug}. Public path is rewritten onto r3dr_v2's modeled
 # /r3dr/v2/r/{slug} — the deliberate exception to "gateway == model path"
-# on api.muchq.com. GET and HEAD both reach the upstream (unfurlers).
+# on api.muchq.com. HEAD is forwarded with GET for unfurlers; end-to-end
+# 302 on HEAD waits on #1433 (smithy registers GET only today → 405).
 i.iili.uk {
 	@getredir {
 		method GET HEAD

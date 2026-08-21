@@ -10,7 +10,6 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - /var/log/caddy:/var/log/caddy
-      - /var/www/r3dr:/var/www/r3dr
     depends_on:
       - games_ws_backend
       - golf_hub
@@ -20,7 +19,6 @@ services:
       - one_d4_v2
       - portrait
       - prom_proxy
-      - r3dr
       - r3dr_v2
       - mcpserver
     networks:

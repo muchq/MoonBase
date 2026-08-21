@@ -16,8 +16,9 @@ muchq.github.io repo); both mint `i.iili.uk/r/{slug}` links.
 - **Redirect** — short links resolve on `i.iili.uk` (A-record to the
   consolidated host). Caddy rewrites `GET|HEAD /r/{slug}` onto
   `r3dr_v2`'s `/r3dr/v2/r/{slug}` so the API's per-client rate limit still
-  keys on the real client. This Worker is SPA-only. (`/r/`, not bare
-  `/{slug}`: asset paths like `/assets` are themselves slug-shaped.)
+  keys on the real client. `HEAD` end-to-end 302 is #1433. This Worker is
+  SPA-only. (`/r/`, not bare `/{slug}`: asset paths like `/assets` are
+  themselves slug-shaped.)
 
 The browser calls `https://api.muchq.com` directly; CORS for this origin is
 set in the consolidated Caddyfile. `VITE_API_BASE` overrides the API for
@@ -59,8 +60,10 @@ Cloudflare CI is configured in the Workers dashboard:
 - **Root directory:** `/domains/r3dr/apps/iili_web`
 
 `iili.uk` is the SPA; `i.iili.uk` is the redirect edge on the consolidated
-host. The old `r3dr.net` (Go service, own database) retires separately in
-#1359 chunk 3, and its links die with it.
+host. The r3dr.net Caddy frontage (and its short links) died with that
+hosting move; the Go `r3dr` container remains in compose until #1359
+chunk 3 removes the service itself. No `iili.uk/r/{slug}` links were
+minted in the #1430 Worker window — minting moved straight to `i.iili.uk`.
 
 To smoke-test before custom domains attach: the `workers.dev` preview
 exercises the static UI, but can't mint — API CORS echoes only `iili.uk`,
