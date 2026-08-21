@@ -316,8 +316,9 @@ Two exception kinds, and the split is visible on the API's 400 envelope: a `Pars
 
 - **Syntax error**: `ParseException` — says what the grammar wanted in the language's own terms
   (`Expected a number or a double-quoted string, got 'B90'`), plus the position; common
-  near-misses get a specific hint (`NULL` / `IS NULL` → no NULL literal, an unquoted string →
-  quote it, two conditions with no connector → AND/OR, an out-of-range number)
+  near-misses get a specific hint (`= NULL` → "ChessQL has no NULL literal", `IS NULL` →
+  "ChessQL has no IS NULL / IS NOT NULL", an unquoted string → quote it, two conditions with no
+  connector → AND/OR, an out-of-range number)
 - **Unknown field**: `IllegalArgumentException` — "Unknown field: X. Known fields: ..." (the
   sorted roster, filterable and perspective)
 - **Unknown motif**: `IllegalArgumentException` — "Unknown motif: X. Known motifs: ..."

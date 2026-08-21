@@ -853,8 +853,22 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     if (value instanceof Integer i) {
       return i;
     }
-    throw new IllegalArgumentException(
-        field + " takes a number, got: \"" + value + "\" — drop the quotes");
+    // "drop the quotes" only when doing so would actually work: for white.elo >= "GM" that edit
+    // just produces the unquoted-identifier error, which advises quoting it again.
+    String hint = isIntegerText(value) ? " — drop the quotes" : "";
+    throw new IllegalArgumentException(field + " takes a number, got: \"" + value + "\"" + hint);
+  }
+
+  private static boolean isIntegerText(Object value) {
+    if (!(value instanceof String s)) {
+      return false;
+    }
+    try {
+      Integer.parseInt(s);
+      return true;
+    } catch (NumberFormatException e) {
+      return false;
+    }
   }
 
   /**

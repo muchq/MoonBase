@@ -653,6 +653,16 @@ public class SqlCompilerTest {
   }
 
   @Test
+  public void testNonNumericStringAgainstAnIntColumnGetsNoDropTheQuotesHint() {
+    // The negative twin: "drop the quotes" for white.elo >= "GM" would advise the edit that
+    // produces the unquoted-identifier error, which advises quoting it again. When the string is
+    // not a number, name the type and stop.
+    assertThatThrownBy(() -> compile("white.elo >= \"GM\""))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("white.elo takes a number, got: \"GM\"");
+  }
+
+  @Test
   public void testBareNumberAgainstAStringColumnIsRejectedWithTheFix() {
     assertThatThrownBy(() -> compile("eco = 90"))
         .isInstanceOf(IllegalArgumentException.class)
