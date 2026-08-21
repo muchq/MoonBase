@@ -1,11 +1,12 @@
 name = "iili-web"
 main = "worker/index.js"
-# ≥ 2025-04-01 turns on assets_navigation_prefers_asset_serving: browser
-# navigations that miss an asset get the SPA shell without invoking the
-# user Worker unless run_worker_first claims the path. 1d4 can keep an
-# older date because its Worker is a no-op ASSETS proxy; this Worker is
-# the 302 for /r/{slug}, so the date is only safe with the rule below.
-compatibility_date = "2025-04-01"
+# Current date (CF's recommendation). ≥ 2025-04-01 turns on
+# assets_navigation_prefers_asset_serving: browser navigations that miss
+# an asset get the SPA shell without invoking the user Worker unless
+# run_worker_first claims the path. 1d4 can keep an older date because
+# its Worker is a no-op ASSETS proxy; this Worker is the 302 for
+# /r/{slug}, so a current date is only safe with the rule below.
+compatibility_date = "2026-08-21"
 
 # Domain: iili.uk. The worker serves the SPA and 302s /r/{slug} to the v2
 # API — the same short-link shape v1 minted on r3dr.net.
