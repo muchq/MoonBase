@@ -58,6 +58,20 @@ cc_library(
     ],
 )
 
+# A MetricReader the test drives itself, in place of the periodic one every
+# service runs. The periodic reader collects on a worker thread and can only be
+# asked to; a test that has to wait for another thread to get round to it is a
+# test that can hang.
+cc_library(
+    name = "collect_on_demand_reader",
+    testonly = True,
+    hdrs = ["collect_on_demand_reader.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@opentelemetry-cpp//sdk/src/metrics",
+    ],
+)
+
 # The shared HTTP serving instruments; transport-agnostic so every HTTP
 # service exports the same names and labels regardless of server framework.
 cc_library(
@@ -75,10 +89,19 @@ cc_test(
     size = "small",
     srcs = ["otel_provider_test.cc"],
     deps = [
+        ":collect_on_demand_reader",
         ":otel_provider",
         "@googletest//:gtest_main",
-        "@opentelemetry-cpp//exporters/memory:in_memory_metric_data",
-        "@opentelemetry-cpp//exporters/memory:in_memory_metric_exporter_factory",
+    ],
+)
+
+cc_test(
+    name = "collect_on_demand_reader_test",
+    size = "small",
+    srcs = ["collect_on_demand_reader_test.cc"],
+    deps = [
+        ":collect_on_demand_reader",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -101,12 +124,11 @@ cc_test(
     size = "small",
     srcs = ["http_instrument_descriptions_test.cc"],
     deps = [
+        ":collect_on_demand_reader",
         ":http_instrument_descriptions",
         ":metrics",
         ":otel_provider",
         "@googletest//:gtest_main",
-        "@opentelemetry-cpp//exporters/memory:in_memory_metric_data",
-        "@opentelemetry-cpp//exporters/memory:in_memory_metric_exporter_factory",
     ],
 )
 
