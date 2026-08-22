@@ -1,8 +1,8 @@
 # r3dr_v2
 
-The C++ URL shortener (#1359), replacing the Go service in `../r3dr`. Serves
-`/r3dr/v2/*` behind `api.muchq.com` beside the Go binary (which keeps
-`r3dr.net` until deprecation). Separate databases, no shared state.
+The C++ URL shortener (#1359). Serves `/r3dr/v2/*` behind `api.muchq.com`,
+and the short links on `i.iili.uk`. The Go service it replaced retired in
+chunk 3, along with `r3dr.net`; its database was never migrated.
 
 ## Routes
 

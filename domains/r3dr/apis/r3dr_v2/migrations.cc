@@ -22,7 +22,7 @@ absl::Status RunMigrations(pg::Client& db) {
       // keeps v2's id space above v1's lifetime mint count — cleanup for
       // early v2 deploys that shared the low range, and optional insurance
       // if a slug shape ever shares a host with leftover v1 rows again
-      // (iili.uk owns shorts now; r3dr.net dies with v1). GREATEST keeps
+      // (iili.uk owns shorts now; v1 and r3dr.net retired). GREATEST keeps
       // the bump monotone across re-runs.
       R"sql(SELECT setval('url_ids',
           GREATEST((SELECT last_value FROM url_ids), 1000000), true))sql",
