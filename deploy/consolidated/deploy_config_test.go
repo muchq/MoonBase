@@ -1138,8 +1138,8 @@ func TestIiliRedirectHostRewritesSlugPathsToR3drV2(t *testing.T) {
 	}
 }
 
-// Short links live on i.iili.uk and the SPA on Cloudflare at iili.uk, so
-// nothing internet-facing names r3dr.net — in any address-line spelling.
+// Contains, not equality: the host also returns on a multi-host or
+// scheme-prefixed address line.
 func TestR3drNetCaddySitesAreGone(t *testing.T) {
 	for _, host := range []string{"r3dr.net", "www.r3dr.net"} {
 		for _, line := range directiveLines(t, "Caddyfile") {
@@ -1151,16 +1151,11 @@ func TestR3drNetCaddySitesAreGone(t *testing.T) {
 	}
 }
 
-// r3dr_v2 is the shortener. Nothing in the deploy surface names the Go r3dr
-// stack — its compose service, its image, the /var/www/r3dr webroot and the
-// r3dr_web sources behind it, /etc/r3dr, or the asset copies in the deploy
-// scripts. Every file that could carry one is checked, so no half returns on
-// its own. r3dr_v2 spellings are rewritten away first: the live service
-// shares the prefix and would otherwise trip most of these tokens.
+// r3dr_v2 shares the prefix and would trip most of these tokens, so it is
+// rewritten away before each line is checked.
 func TestNoDeployConfigNamesTheGoR3drStack(t *testing.T) {
 	if _, ok := composeServiceLines(t, "compose.yaml")["r3dr"]; ok {
-		t.Error("compose.yaml declares an `r3dr` service; r3dr_v2 is the shortener, " +
-			"and it serves /r3dr/v2/* on its own storage")
+		t.Error("compose.yaml declares an `r3dr` service; r3dr_v2 is the shortener")
 	}
 	forbidden := []string{"ghcr.io/muchq/r3dr:", "/var/www/r3dr", "r3dr-assets", "r3dr_web", "/etc/r3dr"}
 	files := []string{"compose.yaml", "Caddyfile", "Caddyfile.local", "deploy.sh", "local_deploy.sh", "initialize_host.sh"}
@@ -1169,8 +1164,8 @@ func TestNoDeployConfigNamesTheGoR3drStack(t *testing.T) {
 			sansV2 := strings.ReplaceAll(line, "r3dr_v2", "V2")
 			for _, token := range forbidden {
 				if strings.Contains(sansV2, token) {
-					t.Errorf("%s:%d names %q (%q); nothing serves the Go r3dr stack — "+
-						"r3dr_v2 is the shortener", name, i+1, token, strings.TrimSpace(line))
+					t.Errorf("%s:%d names %q (%q); r3dr_v2 is the shortener",
+						name, i+1, token, strings.TrimSpace(line))
 				}
 			}
 		}
