@@ -363,22 +363,22 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
-          cache-dependency-path: domains/r3dr/apps/iili_web/package-lock.json
+          cache-dependency-path: domains/iili/apps/iili_web/package-lock.json
 
       - name: Install dependencies
-        working-directory: domains/r3dr/apps/iili_web
+        working-directory: domains/iili/apps/iili_web
         run: npm ci
 
       - name: Typecheck
-        working-directory: domains/r3dr/apps/iili_web
+        working-directory: domains/iili/apps/iili_web
         run: npm run typecheck
 
       - name: Run tests
-        working-directory: domains/r3dr/apps/iili_web
+        working-directory: domains/iili/apps/iili_web
         run: npm test
 
       - name: Build
-        working-directory: domains/r3dr/apps/iili_web
+        working-directory: domains/iili/apps/iili_web
         run: npm run build
 
   # iOS targets can't build on Ubuntu; run Swift tests on macOS when relevant files change.

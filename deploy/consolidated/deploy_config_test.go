@@ -105,8 +105,8 @@ var servicesWithSteadyProbes = []string{
 	"one_d4",
 	"one_d4_v2",
 	"portrait",
+	"iili",
 	"posterize",
-	"r3dr_v2",
 }
 
 func TestEveryServiceOnTheStandardRailsIsProbed(t *testing.T) {
@@ -673,7 +673,7 @@ func TestTheMcpCorsAllowListCarriesTheProtocolHeaders(t *testing.T) {
 	}
 }
 
-// api.muchq.com is called from browsers on muchq.com (incl. /r3dr) and on
+// api.muchq.com is called from browsers on muchq.com (incl. /iili) and on
 // iili.uk (the iili_web worker SPA; the localhost origin is vite dev).
 // ACAO takes a single value, so the Caddyfile echoes it per allowed origin
 // via named matchers — on ordinary responses and on the preflight handler
@@ -1022,9 +1022,9 @@ var publicRoutes = []struct {
 	// one_d4_v2 (#1389 phase 6): mcpserver reaches it directly over the
 	// Compose network, but the public route is served through Caddy.
 	{"@post_v2_analyze", []string{"method POST", "path /v2/analyze"}, "one_d4_v2:8090"},
-	// r3dr_v2 (#1359): the redirect matcher is the product.
-	{"@post_r3dr_shorten", []string{"method POST", "path /r3dr/v2/shorten"}, "r3dr_v2:8091"},
-	{"@get_r3dr_redirect", []string{"method GET", "path /r3dr/v2/r/*"}, "r3dr_v2:8091"},
+	// iili (#1359): the redirect matcher is the product.
+	{"@post_iili_shorten", []string{"method POST", "path /iili/v1/shorten"}, "iili:8091"},
+	{"@get_iili_redirect", []string{"method GET", "path /iili/v1/r/*"}, "iili:8091"},
 }
 
 func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {
@@ -1077,10 +1077,9 @@ func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {
 
 // i.iili.uk is the short-link redirect host (#1359): A-record to the
 // consolidated box, SPA stays on Cloudflare at iili.uk. Public path is
-// /r/{slug}; r3dr_v2's modeled path is /r3dr/v2/r/{slug}, so this site
-// rewrites — the deliberate exception to "gateway path == model path"
-// on api.muchq.com. HEAD is forwarded with GET (#1433 pins end-to-end 302).
-func TestIiliRedirectHostRewritesSlugPathsToR3drV2(t *testing.T) {
+// /r/{slug}; iili's modeled path is /iili/v1/r/{slug}, so this site
+// rewrites — the deliberate exception to "gateway path == model path".
+func TestIiliRedirectHostRewritesSlugPathsToIili(t *testing.T) {
 	site := caddySiteBlock(t, "Caddyfile", "i.iili.uk")
 
 	matcher := ""
@@ -1092,10 +1091,10 @@ func TestIiliRedirectHostRewritesSlugPathsToR3drV2(t *testing.T) {
 		rewrites := false
 		proxies := false
 		for _, inner := range body {
-			if strings.HasPrefix(inner, "rewrite ") && strings.Contains(inner, "/r3dr/v2") {
+			if strings.HasPrefix(inner, "rewrite ") && strings.Contains(inner, "/iili/v1") {
 				rewrites = true
 			}
-			if strings.HasPrefix(inner, "reverse_proxy r3dr_v2:8091") {
+			if strings.HasPrefix(inner, "reverse_proxy iili:8091") {
 				proxies = true
 			}
 		}
@@ -1105,7 +1104,7 @@ func TestIiliRedirectHostRewritesSlugPathsToR3drV2(t *testing.T) {
 		}
 	}
 	if matcher == "" {
-		t.Fatalf("no `handle @… { rewrite …/r3dr/v2…; reverse_proxy r3dr_v2:8091 }` in the "+
+		t.Fatalf("no `handle @… { rewrite …/iili/v1…; reverse_proxy iili:8091 }` in the "+
 			"i.iili.uk block; short links would 404 or hit the wrong upstream. Block was:\n%s",
 			strings.Join(site, "\n"))
 	}
@@ -1138,35 +1137,18 @@ func TestIiliRedirectHostRewritesSlugPathsToR3drV2(t *testing.T) {
 	}
 }
 
-// Contains, not equality: the host also returns on a multi-host or
-// scheme-prefixed address line.
-func TestR3drNetCaddySitesAreGone(t *testing.T) {
-	for _, host := range []string{"r3dr.net", "www.r3dr.net"} {
-		for _, line := range directiveLines(t, "Caddyfile") {
-			if strings.Contains(line, host) {
-				t.Errorf("Caddyfile still names %q (%q); short links live on "+
-					"i.iili.uk now and the SPA on Cloudflare at iili.uk.", host, line)
-			}
-		}
-	}
-}
-
-// r3dr_v2 shares the prefix and would trip most of these tokens, so it is
-// rewritten away before each line is checked.
-func TestNoDeployConfigNamesTheGoR3drStack(t *testing.T) {
-	if _, ok := composeServiceLines(t, "compose.yaml")["r3dr"]; ok {
-		t.Error("compose.yaml declares an `r3dr` service; r3dr_v2 is the shortener")
-	}
-	forbidden := []string{"ghcr.io/muchq/r3dr:", "/var/www/r3dr", "r3dr-assets", "r3dr_web", "/etc/r3dr"}
-	files := []string{"compose.yaml", "Caddyfile", "Caddyfile.local", "deploy.sh", "local_deploy.sh", "initialize_host.sh"}
+// Only the r3dr_v2 database role, database and password keep the old name
+// (see compose.yaml); any other r3dr in the deploy surface is the retired Go
+// stack or a missed rename.
+func TestNoDeployConfigNamesR3dr(t *testing.T) {
+	dbIdentifier := regexp.MustCompile(`(?i)r3dr_v2`)
+	files := []string{"compose.yaml", "Caddyfile", "Caddyfile.local", "deploy.sh",
+		"local_deploy.sh", "initialize_host.sh"}
 	for _, name := range files {
 		for i, line := range strings.Split(readConfig(t, name), "\n") {
-			sansV2 := strings.ReplaceAll(line, "r3dr_v2", "V2")
-			for _, token := range forbidden {
-				if strings.Contains(sansV2, token) {
-					t.Errorf("%s:%d names %q (%q); r3dr_v2 is the shortener",
-						name, i+1, token, strings.TrimSpace(line))
-				}
+			if strings.Contains(strings.ToLower(dbIdentifier.ReplaceAllString(line, "")), "r3dr") {
+				t.Errorf("%s:%d names r3dr (%q); the shortener is iili", name, i+1,
+					strings.TrimSpace(line))
 			}
 		}
 	}

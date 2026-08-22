@@ -19,12 +19,11 @@ individually targetable.
   - [`microgpt-serve`](../../domains/ai/apis/microgpt_serve) (port 8087)
   - [`one_d4`](../../domains/games/apis/one_d4) (port 8088)
   - [`one_d4_v2`](../../domains/games/apis/one_d4_v2) (port 8090)
-  - [`r3dr_v2`](../../domains/r3dr/apis/r3dr_v2) (port 8091, `/r3dr/v2/*`)
+  - [`iili`](../../domains/iili/apis/iili) (port 8091, `/iili/v1/*`)
 
 - **i.iili.uk** - Short-link redirects (#1359)
-  - Caddy rewrites `GET|HEAD /r/{slug}` → `r3dr_v2` `/r3dr/v2/r/{slug}`
+  - Caddy rewrites `GET|HEAD /r/{slug}` → `iili` `/iili/v1/r/{slug}`
   - SPA lives on Cloudflare at `iili.uk` (not this host)
-  - `HEAD` end-to-end 302 tracked in #1433
 
 - **Observability Stack**
   - Prometheus (port 9090)
@@ -200,11 +199,12 @@ nothing from the host filesystem.
 
 ### Database URLs
 
-golf_hub, one_d4 and r3dr_v2 take their database URLs from `compose.yaml`, interpolating a
-password from the host's `~/.env`: `GOLF_HUB_DB_URL` and `R3DR_V2_DB_URL` (libpq form, read from
+golf_hub, one_d4 and iili take their database URLs from `compose.yaml`, interpolating a
+password from the host's `~/.env`: `GOLF_HUB_DB_URL` and `IILI_DB_URL` (libpq form, read from
 C++) and `INDEXER_DB_URL` (JDBC form, read by pgjdbc). All point at the `shared_postgres` service.
-**`R3DR_V2_DB_PASSWORD` is a new secret** in `~/.env` (#1359); `r3dr_v2_db_init` provisions the
-`r3dr_v2` role and database with it on every deploy, idempotently. Keep it URL-safe (no
+**`R3DR_V2_DB_PASSWORD`** in `~/.env` (#1359) is the one place the old name survives: `iili_db_init`
+provisions the `r3dr_v2` role and database with it on every deploy, idempotently, because renaming
+a role and database holding live rows is an operation, not a rename. Keep it URL-safe (no
 `@ / ? # %` or quotes): it rides in a libpq URL and a single-quoted SQL literal. Compose
 refuses to start the service if it's unset.
 
@@ -237,8 +237,8 @@ All services run on the `muchq_network` Docker bridge network.
 ## The shared database
 
 `shared_postgres` is the one Postgres instance on the host. `one_d4`,
-`golf_hub` and `r3dr_v2` each keep a database on it; `golf_hub_db_init` and
-`r3dr_v2_db_init` provision their roles and databases on every deploy
+`golf_hub` and `iili` each keep a database on it; `golf_hub_db_init` and
+`iili_db_init` provision their roles and databases on every deploy
 (idempotently — the `docker-entrypoint-initdb.d` hook only fires on a
 fresh volume).
 
