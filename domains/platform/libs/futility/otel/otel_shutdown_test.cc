@@ -28,6 +28,9 @@ namespace memory_exporter = opentelemetry::exporter::memory;
 
 constexpr const char* kScope = "otel_shutdown_test";
 
+/// How long a flush issued by this test waits before giving up.
+constexpr std::chrono::seconds kFlushTimeout{5};
+
 // Accepts the handshake and never answers. A refused connection is not the
 // failure this is about — the exporter gives up on that in microseconds. This
 // is the collector that is up and wedged, which is the one that can hold an
@@ -134,7 +137,11 @@ TEST(OtelProviderShutdownTest, ShutsTheReadersDownAsWellAsFlushingThem) {
   auto meter = published->GetMeter(kScope, "1.0.0");
   auto counter = meter->CreateUInt64Counter("after_shutdown");
   counter->Add(1);
-  published->ForceFlush();
+  // Bounded, like every other flush this rail issues. ForceFlush with no
+  // argument has no ceiling at all, so a reader that never answers would end
+  // this test at the harness timeout — the assertion below never reached, and
+  // nothing in the log to say what stalled.
+  published->ForceFlush(kFlushTimeout);
 
   EXPECT_TRUE(data->Get(kScope, "after_shutdown").empty())
       << "the readers are still collecting after the provider was destroyed";
