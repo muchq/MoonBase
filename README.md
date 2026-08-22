@@ -21,7 +21,7 @@ The repository is organized into **domains**, each containing its own libraries,
 - [**🎨 Graphics**](domains/graphics/README.md): Ray tracers, image processing, and rendering tools.
 - [**🎮 Games**](domains/games/README.md): Game engines, chess tools, and multiplayer backends.
 - [**🌐 Platform**](domains/platform/README.md): Core infrastructure, gRPC/HTTP wrappers, and utilities.
-- [**🔗 r3dr**](domains/r3dr/README.md): URL shortening ecosystem.
+- [**🔗 iili**](domains/iili/README.md): URL shortening ecosystem.
 - [**💬 Chat**](domains/chat/README.md): Real-time communication services.
 - [**🤖 AI**](domains/ai/README.md): Neural network and machine learning experiments.
 - [**🏆 Leet**](domains/leet/README.md): Algorithmic solutions and C utility libraries.

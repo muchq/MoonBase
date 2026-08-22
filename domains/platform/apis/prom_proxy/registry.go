@@ -263,7 +263,7 @@ type serviceEntry struct {
 
 // aura::Cache emitters share the standard cache family (#1209), selected on
 // both labels: which service, and which cache within it. Parameterized —
-// the prom_proxy half of #1209 — now that r3dr_v2's url_cache is the second
+// the prom_proxy half of #1209 — now that iili's url_cache is the second
 // emitter (#1359).
 func cacheHitPercent(service, cache string) string {
 	hit := fmt.Sprintf(`rate(cache_hits_total{service_name=%q,cache=%q}[5m])`, service, cache)
@@ -303,7 +303,7 @@ const (
 )
 
 // Catalog order doubles as the UI's tab order.
-var serviceOrder = []string{"golf_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "one_d4_v2", "portrait", "posterize", "r3dr_v2"}
+var serviceOrder = []string{"golf_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "one_d4_v2", "portrait", "posterize", "iili"}
 
 var serviceRegistry = map[string]serviceEntry{
 	"golf_hub": {
@@ -482,16 +482,16 @@ var serviceRegistry = map[string]serviceEntry{
 			probesTile("one_d4_v2"),
 		},
 	},
-	// r3dr v2 (#1359): standard instruments, Probes, and the URL cache.
-	"r3dr_v2": {
+	// iili (#1359): standard instruments, Probes, and the URL cache.
+	"iili": {
 		CustomScalars: []customScalarDef{
-			probesTile("r3dr_v2"),
-			scalar("URL cache", "hit_rate_percent", "%", cacheHitPercent("r3dr_v2", "url_cache")),
-			counter("URL cache", "operations", "", cacheOps("r3dr_v2", "url_cache")),
+			probesTile("iili"),
+			scalar("URL cache", "hit_rate_percent", "%", cacheHitPercent("iili", "url_cache")),
+			counter("URL cache", "operations", "", cacheOps("iili", "url_cache")),
 		},
 		CustomTimeseries: map[string]customTimeseriesDef{
-			"cache_hit_rate":   tsFixed(cacheHitPercent("r3dr_v2", "url_cache")),
-			"cache_operations": tsCounter(cacheOps("r3dr_v2", "url_cache")),
+			"cache_hit_rate":   tsFixed(cacheHitPercent("iili", "url_cache")),
+			"cache_operations": tsCounter(cacheOps("iili", "url_cache")),
 		},
 	},
 	// Wordchains: server_pal's standard instruments plus the standard
