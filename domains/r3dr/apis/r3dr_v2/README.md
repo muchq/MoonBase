@@ -1,8 +1,7 @@
 # r3dr_v2
 
-The C++ URL shortener (#1359). Serves `/r3dr/v2/*` behind `api.muchq.com`,
-and the short links on `i.iili.uk`. The Go service it replaced retired in
-chunk 3, along with `r3dr.net`; its database was never migrated.
+The C++ URL shortener (#1359). Serves `/r3dr/v2/*` behind `api.muchq.com`;
+short links resolve on `i.iili.uk`, which Caddy rewrites onto that path.
 
 ## Routes
 

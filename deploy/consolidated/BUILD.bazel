@@ -9,10 +9,9 @@ go_test(
     srcs = ["deploy_config_test.go"],
     data = [
         "Caddyfile",
-        # Scanned by TestR3drGoServiceStackIsRetired: the retired Go stack had
-        # a surface in every one of these, so the guard has to see them all.
-        # Read, not run — but a file absent here is a runfiles error, not a
-        # silent pass, which is why the guard reads rather than globs.
+        # Scanned by TestNoDeployConfigNamesTheGoR3drStack, which names the files it
+        # reads rather than globbing: one missing here is a runfiles error, not
+        # a silent pass.
         "Caddyfile.local",
         "compose.yaml",
         # Run, not read, by TestTheServicesListingMatchesWhatCanBeDeployed: the

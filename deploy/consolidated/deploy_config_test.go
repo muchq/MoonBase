@@ -1138,9 +1138,8 @@ func TestIiliRedirectHostRewritesSlugPathsToR3drV2(t *testing.T) {
 	}
 }
 
-// r3dr.net's Caddy frontage retired with the iili.uk / i.iili.uk split
-// (#1432), and the Go service followed in #1359 chunk 3; nothing
-// internet-facing should still name the old host (any address-line spelling).
+// Short links live on i.iili.uk and the SPA on Cloudflare at iili.uk, so
+// nothing internet-facing names r3dr.net — in any address-line spelling.
 func TestR3drNetCaddySitesAreGone(t *testing.T) {
 	for _, host := range []string{"r3dr.net", "www.r3dr.net"} {
 		for _, line := range directiveLines(t, "Caddyfile") {
@@ -1152,25 +1151,26 @@ func TestR3drNetCaddySitesAreGone(t *testing.T) {
 	}
 }
 
-// #1359 chunk 3: the Go r3dr serving stack retired whole — compose service,
-// image, /var/www/r3dr webroot, /etc/r3dr host config, and the static-asset
-// copies in the deploy scripts. Pinned per file so no half of it quietly
-// returns. Lines are checked with r3dr_v2 spellings rewritten away first, so
-// the replacement service never trips the guard.
-func TestR3drGoServiceStackIsRetired(t *testing.T) {
+// r3dr_v2 is the shortener. Nothing in the deploy surface names the Go r3dr
+// stack — its compose service, its image, the /var/www/r3dr webroot and the
+// r3dr_web sources behind it, /etc/r3dr, or the asset copies in the deploy
+// scripts. Every file that could carry one is checked, so no half returns on
+// its own. r3dr_v2 spellings are rewritten away first: the live service
+// shares the prefix and would otherwise trip most of these tokens.
+func TestNoDeployConfigNamesTheGoR3drStack(t *testing.T) {
 	if _, ok := composeServiceLines(t, "compose.yaml")["r3dr"]; ok {
-		t.Error("compose.yaml declares an `r3dr` service again; the Go shortener " +
-			"retired in #1359 chunk 3 (r3dr_v2 replaced it, on its own storage)")
+		t.Error("compose.yaml declares an `r3dr` service; r3dr_v2 is the shortener, " +
+			"and it serves /r3dr/v2/* on its own storage")
 	}
-	retired := []string{"ghcr.io/muchq/r3dr:", "/var/www/r3dr", "r3dr-assets", "r3dr_web", "/etc/r3dr"}
+	forbidden := []string{"ghcr.io/muchq/r3dr:", "/var/www/r3dr", "r3dr-assets", "r3dr_web", "/etc/r3dr"}
 	files := []string{"compose.yaml", "Caddyfile", "Caddyfile.local", "deploy.sh", "local_deploy.sh", "initialize_host.sh"}
 	for _, name := range files {
 		for i, line := range strings.Split(readConfig(t, name), "\n") {
 			sansV2 := strings.ReplaceAll(line, "r3dr_v2", "V2")
-			for _, token := range retired {
+			for _, token := range forbidden {
 				if strings.Contains(sansV2, token) {
-					t.Errorf("%s:%d names %q (%q); the Go r3dr stack retired in #1359 chunk 3",
-						name, i+1, token, strings.TrimSpace(line))
+					t.Errorf("%s:%d names %q (%q); nothing serves the Go r3dr stack — "+
+						"r3dr_v2 is the shortener", name, i+1, token, strings.TrimSpace(line))
 				}
 			}
 		}
