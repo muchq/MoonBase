@@ -9,6 +9,11 @@ go_test(
     srcs = ["deploy_config_test.go"],
     data = [
         "Caddyfile",
+        # Scanned by TestR3drGoServiceStackIsRetired: the retired Go stack had
+        # a surface in every one of these, so the guard has to see them all.
+        # Read, not run — but a file absent here is a runfiles error, not a
+        # silent pass, which is why the guard reads rather than globs.
+        "Caddyfile.local",
         "compose.yaml",
         # Run, not read, by TestTheServicesListingMatchesWhatCanBeDeployed: the
         # --services listing is awk and sed, and asserting on their text is not
@@ -17,6 +22,8 @@ go_test(
         # in the runfiles tree too.
         "deploy.sh",
         "docker-compose.observability.yml",
+        "initialize_host.sh",
+        "local_deploy.sh",
         "o11y/otel-collector.yml",
         # Read by TestCIStillRunsTheCollectorDryRun, which checks that CI has not
         # quietly stopped invoking the collector dry-run.

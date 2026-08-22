@@ -211,23 +211,6 @@ services:
       retries: 3
       start_period: 15s
 
-  r3dr:
-    image: ghcr.io/muchq/r3dr:${R3DR_SHA:-${DEPLOY_SHA:-latest}}
-    labels:
-      com.muchq.description: "URL shortener"
-    restart: always
-    ports:
-      - "8085:8080"
-    volumes:
-      - /etc/r3dr:/etc/r3dr
-    networks:
-      - app_network
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
-          memory: 256M
-
   one_d4_v2:
     image: ghcr.io/muchq/one_d4_v2:${ONE_D4_V2_SHA:-${DEPLOY_SHA:-latest}}
     labels:
@@ -261,8 +244,8 @@ services:
       retries: 3
       start_period: 10s
 
-  # r3dr v2 (#1359): the C++ shortener on /r3dr/v2/*. Runs beside the Go
-  # r3dr (separate storage) until that one retires.
+  # r3dr v2 (#1359): the C++ shortener on /r3dr/v2/*. The Go predecessor
+  # retired in chunk 3; its Neon storage was never migrated.
   r3dr_v2:
     image: ghcr.io/muchq/r3dr_v2:${R3DR_V2_SHA:-${DEPLOY_SHA:-latest}}
     labels:
