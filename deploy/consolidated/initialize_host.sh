@@ -1,20 +1,6 @@
 #!/bin/bash
 set -e
 
-# Check if db_config file is provided
-if [ -z "$1" ]; then
-  echo "Error: db_config file path required"
-  echo "Usage: $0 <path_to_db_config>"
-  exit 1
-fi
-
-DB_CONFIG_FILE="$1"
-
-if [ ! -f "$DB_CONFIG_FILE" ]; then
-  echo "Error: db_config file not found at $DB_CONFIG_FILE"
-  exit 1
-fi
-
 echo "Initializing fresh Lightsail instance for api.muchq.com..."
 
 ssh ubuntu@api.muchq.com << 'EOF'
@@ -47,10 +33,6 @@ ssh ubuntu@api.muchq.com << 'EOF'
   echo "Installing Docker..."
   sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin -y
 
-  # Create r3dr config directory
-  echo "Creating r3dr config directory..."
-  sudo mkdir -p /etc/r3dr
-
   # Create Forgejo config directory
   echo "Creating Forgejo config directory..."
   sudo mkdir -p /etc/forgejo
@@ -58,11 +40,6 @@ ssh ubuntu@api.muchq.com << 'EOF'
 
   echo "Docker installation complete!"
 EOF
-
-# Copy db_config file
-echo "Copying db_config file..."
-scp "$DB_CONFIG_FILE" ubuntu@api.muchq.com:~/db_config
-ssh ubuntu@api.muchq.com "sudo mv ~/db_config /etc/r3dr/db_config"
 
 echo ""
 echo "Host initialization complete!"

@@ -197,21 +197,7 @@ m.HandleFunc("POST /predict", predictHandler)
 http.ListenAndServe(":8080", m)
 ```
 
-### 2. URL Shortener Service
-
-Used in [`r3dr`](../../../../domains/r3dr/apis/r3dr/):
-
-```go
-m := mucks.NewJsonMucks()
-m.Add(ipRateLimiter)      // Per-IP rate limiting
-m.Add(fallbackLimiter)    // Global rate limiting
-m.Add(tracingMiddleware)  // Distributed tracing
-
-m.HandleFunc("POST /shorten", shortenHandler)
-m.HandleFunc("GET /{code}", redirectHandler)
-```
-
-### 3. Metrics Proxy
+### 2. Metrics Proxy
 
 Used in [`prom_proxy`](../../apis/prom_proxy/):
 

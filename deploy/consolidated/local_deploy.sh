@@ -20,11 +20,6 @@ cp deploy/consolidated/compose.yaml local_docker/
 cp deploy/consolidated/Caddyfile local_docker/
 cp deploy/consolidated/docker-compose.observability.yml local_docker/
 
-# Copy r3dr static assets
-echo "Copying r3dr static assets..."
-mkdir -p local_docker/r3dr-assets
-cp -r domains/r3dr/apps/r3dr_web/* local_docker/r3dr-assets/
-
 # Create observability directory structure and copy configs
 echo "Setting up observability configs..."
 mkdir -p local_docker/o11y

@@ -10,7 +10,6 @@ Services in the consolidated deploy:
 - `prom_proxy` (Go)
 - `mithril` (Rust)
 - `posterize` (Rust)
-- `r3dr` (Go)
 - `mcpserver` (Java)
 
 ## Phase 1: Timeouts and Limits
@@ -20,11 +19,6 @@ Services in the consolidated deploy:
 - Add WebSocket message rate limiting and per-connection limits.
 - Add WS read/write deadlines tuned for production.
 - Make allowed origins configurable (env/config), defaulting to current list.
-
-### r3dr (Go)
-- Replace `http.ListenAndServe` with configured `http.Server` timeouts.
-- Enforce request body size limits for `/shorten`.
-- Add global and per-IP limiter (reuse `resilience4g/rate_limit` after fixes).
 
 ### prom_proxy (Go)
 - Add HTTP server timeouts.
@@ -79,10 +73,6 @@ Services in the consolidated deploy:
 ### games_ws_backend
 - Hub tests for origin validation and WS size limits.
 - Integration tests for rate limiting and abusive patterns.
-
-### r3dr
-- Rate limiting eviction tests.
-- Integration tests for body size limits and invalid inputs.
 
 ### prom_proxy
 - Tests for query caps (range/step validation).

@@ -18,12 +18,9 @@ absl::Status RunMigrations(pg::Client& db) {
       ))sql",
       // For the expired-row sweep (#373); reads ride the short_url index.
       R"sql(CREATE INDEX IF NOT EXISTS idx_urls_expires_at ON urls (expires_at))sql",
-      // v1 minted from its own url_ids with the same encoder. Flooring
-      // keeps v2's id space above v1's lifetime mint count — cleanup for
-      // early v2 deploys that shared the low range, and optional insurance
-      // if a slug shape ever shares a host with leftover v1 rows again
-      // (iili.uk owns shorts now; r3dr.net dies with v1). GREATEST keeps
-      // the bump monotone across re-runs.
+      // The Go shortener minted from its own url_ids with this same encoder;
+      // the floor holds v2's ids clear of the slugs it issued. GREATEST keeps
+      // re-runs monotone.
       R"sql(SELECT setval('url_ids',
           GREATEST((SELECT last_value FROM url_ids), 1000000), true))sql",
       // The floor only governs future ids; rows minted below it (pre-floor

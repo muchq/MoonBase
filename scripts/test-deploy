@@ -144,23 +144,23 @@ make_repo() {
   rm -rf "$TESTROOT" "$ORIGIN"
   mkdir -p "$TESTROOT/deploy/consolidated/o11y" \
     "$TESTROOT/deploy/consolidated/forgejo" \
-    "$TESTROOT/domains/r3dr/apps/r3dr_web"
+    "$TESTROOT/fixture"
   cp "$REPO/deploy/consolidated/deploy.sh" "$TESTROOT/deploy/consolidated/"
   cp "$REPO/deploy/consolidated/compose.yaml" "$TESTROOT/deploy/consolidated/"
   cp "$REPO/deploy/consolidated/docker-compose.observability.yml" "$TESTROOT/deploy/consolidated/"
   cp "$REPO/deploy/consolidated/o11y/"* "$TESTROOT/deploy/consolidated/o11y/"
   echo "# caddy" > "$TESTROOT/deploy/consolidated/Caddyfile"
   echo "[server]" > "$TESTROOT/deploy/consolidated/forgejo/app.ini"
-  echo "<html></html>" > "$TESTROOT/domains/r3dr/apps/r3dr_web/index.html"
+  echo "<html></html>" > "$TESTROOT/fixture/index.html"
 
   git -C "$TESTROOT" init -q -b main
   local g="git -C $TESTROOT -c user.email=t@example.com -c user.name=test"
   $g add -A
   $g commit -qm "older change (#1001)"
-  echo "x" > "$TESTROOT/domains/r3dr/apps/r3dr_web/v2.txt"
+  echo "x" > "$TESTROOT/fixture/v2.txt"
   $g add -A
   $g commit -qm "middle change (#1002)"
-  echo "y" >> "$TESTROOT/domains/r3dr/apps/r3dr_web/v2.txt"
+  echo "y" >> "$TESTROOT/fixture/v2.txt"
   $g add -A
   $g commit -qm "newest change (#1003)"
 

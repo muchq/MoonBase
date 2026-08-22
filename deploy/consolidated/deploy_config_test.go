@@ -1138,15 +1138,35 @@ func TestIiliRedirectHostRewritesSlugPathsToR3drV2(t *testing.T) {
 	}
 }
 
-// r3dr.net's Caddy frontage retired with the iili.uk / i.iili.uk split;
-// the Go service stays in compose until chunk 3, but nothing internet-facing
-// should still name the old host (any address-line spelling).
+// Contains, not equality: the host also returns on a multi-host or
+// scheme-prefixed address line.
 func TestR3drNetCaddySitesAreGone(t *testing.T) {
 	for _, host := range []string{"r3dr.net", "www.r3dr.net"} {
 		for _, line := range directiveLines(t, "Caddyfile") {
 			if strings.Contains(line, host) {
 				t.Errorf("Caddyfile still names %q (%q); short links live on "+
 					"i.iili.uk now and the SPA on Cloudflare at iili.uk.", host, line)
+			}
+		}
+	}
+}
+
+// r3dr_v2 shares the prefix and would trip most of these tokens, so it is
+// rewritten away before each line is checked.
+func TestNoDeployConfigNamesTheGoR3drStack(t *testing.T) {
+	if _, ok := composeServiceLines(t, "compose.yaml")["r3dr"]; ok {
+		t.Error("compose.yaml declares an `r3dr` service; r3dr_v2 is the shortener")
+	}
+	forbidden := []string{"ghcr.io/muchq/r3dr:", "/var/www/r3dr", "r3dr-assets", "r3dr_web", "/etc/r3dr"}
+	files := []string{"compose.yaml", "Caddyfile", "Caddyfile.local", "deploy.sh", "local_deploy.sh", "initialize_host.sh"}
+	for _, name := range files {
+		for i, line := range strings.Split(readConfig(t, name), "\n") {
+			sansV2 := strings.ReplaceAll(line, "r3dr_v2", "V2")
+			for _, token := range forbidden {
+				if strings.Contains(sansV2, token) {
+					t.Errorf("%s:%d names %q (%q); r3dr_v2 is the shortener",
+						name, i+1, token, strings.TrimSpace(line))
+				}
 			}
 		}
 	}

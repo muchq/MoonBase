@@ -350,10 +350,6 @@ done
 echo "Copying deployment files..."
 scp -r deploy/consolidated/compose.yaml deploy/consolidated/Caddyfile deploy/consolidated/docker-compose.observability.yml "$HOST":~/
 
-# Copy r3dr static assets
-echo "Copying r3dr static assets..."
-scp -r domains/r3dr/apps/r3dr_web/* "$HOST":~/r3dr-assets/
-
 # Create observability directory structure and copy configs if they exist
 echo "Setting up observability configs..."
 ssh "$HOST" "mkdir -p ~/o11y"
@@ -375,10 +371,6 @@ fi
 # Pull images and restart services
 echo "Pulling images and restarting services..."
 ssh "$HOST" << EOF
-  # Move r3dr static assets to web root
-  sudo mkdir -p /var/www/r3dr
-  sudo cp -r ~/r3dr-assets/* /var/www/r3dr/
-
   # Set up Forgejo config directory
   sudo mkdir -p /etc/forgejo
   sudo cp ~/forgejo-app.ini /etc/forgejo/app.ini

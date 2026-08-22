@@ -26,9 +26,6 @@ individually targetable.
   - SPA lives on Cloudflare at `iili.uk` (not this host)
   - `HEAD` end-to-end 302 tracked in #1433
 
-- **r3dr (Go, internal)** - Still in compose until #1359 chunk 3; no
-  Caddy frontage (r3dr.net sites removed — those links are dead now)
-
 - **Observability Stack**
   - Prometheus (port 9090)
   - OpenTelemetry Collector (ports 4318, 8889)
@@ -51,18 +48,16 @@ individually targetable.
 To set up a fresh Lightsail (or similar) instance:
 
 ```bash
-./deploy/consolidated/initialize_host.sh /path/to/db_config
+./deploy/consolidated/initialize_host.sh
 ```
 
 This script will:
 1. Update system packages
 2. Install Docker and Docker Compose
-3. Create necessary directories (`/etc/r3dr`)
-4. Copy the database config file to `/etc/r3dr/db_config`
+3. Create the Forgejo config directory (`/etc/forgejo`)
 
 **Requirements:**
 - SSH access to the host configured (e.g., `ssh ubuntu@consolidated.cmptr.info`)
-- Database config file for r3dr service
 
 After initialization, you may need to reboot the instance.
 
@@ -104,10 +99,9 @@ COMMIT     DATE        SUBJECT
 Add `-y` to skip the confirmation. The deploy itself will:
 1. Verify every image exists at that commit, before touching the host
 2. Copy deployment files to the host
-3. Copy r3dr static assets
-4. Copy observability configuration
-5. Pull the images for that commit
-6. Restart the affected services
+3. Copy observability configuration
+4. Pull the images for that commit
+5. Restart the affected services
 
 ### Deploying one service
 
@@ -179,7 +173,7 @@ Deploy an earlier commit — pick one with `--list`, then:
 The whole stack moves together rather than leaving a hand-edited pin behind.
 
 Note this rolls back **images only**. Config — `compose.yaml`, the `Caddyfile`,
-`o11y/*`, and r3dr's static assets — is always copied from your working tree,
+and `o11y/*` — is always copied from your working tree,
 so it stays at whatever you have checked out. Deploy from a clean checkout of
 `main`, and be aware that rolling images back past a config change (a new env
 var, a new route) leaves the newer config in front of an older binary.
@@ -193,7 +187,6 @@ point.
 
 Services require configuration files in their respective `/etc` directories on the host:
 
-- `/etc/r3dr/db_config` - Database connection string for r3dr
 - `/etc/games_ws_backend/` - Games backend configuration
 - `/etc/portrait/` - Portrait service configuration
 - `/etc/prom_proxy/` - Prometheus proxy configuration
@@ -214,10 +207,6 @@ C++) and `INDEXER_DB_URL` (JDBC form, read by pgjdbc). All point at the `shared_
 `r3dr_v2` role and database with it on every deploy, idempotently. Keep it URL-safe (no
 `@ / ? # %` or quotes): it rides in a libpq URL and a single-quoted SQL literal. Compose
 refuses to start the service if it's unset.
-
-**The Go r3dr is the exception and still reads a host file** (`DB_CONNECTION_STRING`, then
-`/etc/r3dr/db_config`), on storage that is not `shared_postgres`. It stays as is until it
-retires with r3dr.net (#1359), so the guard below cannot see it.
 
 Keeping a URL here rather than in a host file is what makes the hostname visible to this repo:
 `deploy_config_test.go` fails if a database host is not a Postgres service this file publishes, so
