@@ -2,16 +2,19 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
-#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "opentelemetry/exporters/memory/in_memory_metric_data.h"
-#include "opentelemetry/exporters/memory/in_memory_metric_exporter_factory.h"
-#include "opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h"
-#include "opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_options.h"
+#include "domains/platform/libs/futility/otel/collect_on_demand_reader.h"
+#include "opentelemetry/nostd/variant.h"
+#include "opentelemetry/sdk/instrumentationscope/instrumentation_scope.h"
+#include "opentelemetry/sdk/metrics/data/metric_data.h"
+#include "opentelemetry/sdk/metrics/data/point_data.h"
+#include "opentelemetry/sdk/metrics/export/metric_producer.h"
+#include "opentelemetry/sdk/metrics/meter_provider.h"
 #include "opentelemetry/sdk/metrics/meter_provider_factory.h"
 
 // The view #1286 turns on, exercised rather than described.
@@ -24,32 +27,58 @@
 // contract test green and put every C++ latency histogram back on the SDK's
 // millisecond defaults.
 //
-// So this drives a real MeterProvider through an in-memory reader and reads
-// the boundaries back off an exported histogram.
+// So this drives a real MeterProvider and reads the boundaries back off a
+// collected histogram.
 
 namespace futility::otel {
 namespace {
 
 namespace metrics_sdk = opentelemetry::sdk::metrics;
-namespace memory_exporter = opentelemetry::exporter::memory;
 
 constexpr const char* kScope = "otel_provider_test";
+
+/// The bucket boundaries `reader` reports for this instrument, or an empty
+/// vector with a failure already recorded if it reports no histogram under
+/// that name.
+std::vector<double> BoundariesOf(metrics_sdk::MetricReader& reader,
+                                 const std::string& instrument_name) {
+  bool found = false;
+  bool as_histogram = true;
+  std::vector<double> boundaries;
+
+  reader.Collect([&](metrics_sdk::ResourceMetrics& metrics) {
+    for (const auto& scope : metrics.scope_metric_data_) {
+      if (scope.scope_ == nullptr || scope.scope_->GetName() != kScope) continue;
+      for (const auto& metric : scope.metric_data_) {
+        if (metric.instrument_descriptor.name_ != instrument_name) continue;
+        for (const auto& point : metric.point_data_attr_) {
+          found = true;
+          const auto* histogram_point =
+              opentelemetry::nostd::get_if<metrics_sdk::HistogramPointData>(&point.point_data);
+          if (histogram_point == nullptr) {
+            as_histogram = false;
+            continue;
+          }
+          boundaries = histogram_point->boundaries_;
+        }
+      }
+    }
+    return true;
+  });
+
+  EXPECT_TRUE(found) << instrument_name << " reported no data point";
+  EXPECT_TRUE(as_histogram) << instrument_name << " did not aggregate as a histogram";
+  return boundaries;
+}
 
 class LatencyBucketViewTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    data_ = std::make_shared<memory_exporter::SimpleAggregateInMemoryMetricData>();
-
     auto provider = metrics_sdk::MeterProviderFactory::Create();
     provider_ = std::shared_ptr<metrics_sdk::MeterProvider>(provider.release());
 
-    metrics_sdk::PeriodicExportingMetricReaderOptions options;
-    // Long enough that the background thread never races the explicit
-    // ForceFlush below; the flush is what actually drives the export.
-    options.export_interval_millis = std::chrono::milliseconds(60000);
-    options.export_timeout_millis = std::chrono::milliseconds(5000);
-    provider_->AddMetricReader(metrics_sdk::PeriodicExportingMetricReaderFactory::Create(
-        memory_exporter::InMemoryMetricExporterFactory::Create(data_), options));
+    reader_ = std::make_shared<CollectOnDemandReader>();
+    provider_->AddMetricReader(reader_);
   }
 
   /// Records one observation into a histogram of this name and returns the
@@ -58,22 +87,11 @@ class LatencyBucketViewTest : public ::testing::Test {
     auto meter = provider_->GetMeter(kScope, "1.0.0");
     auto histogram = meter->CreateUInt64Histogram(instrument_name);
     histogram->Record(1, opentelemetry::context::Context{});
-    provider_->ForceFlush();
 
-    const auto& series = data_->Get(kScope, instrument_name);
-    EXPECT_FALSE(series.empty()) << instrument_name << " exported no data point";
-    if (series.empty()) return {};
-
-    const auto& point = series.begin()->second;
-    const auto* histogram_point =
-        opentelemetry::nostd::get_if<metrics_sdk::HistogramPointData>(&point);
-    EXPECT_NE(histogram_point, nullptr) << instrument_name << " did not export as a histogram";
-    if (histogram_point == nullptr) return {};
-
-    return histogram_point->boundaries_;
+    return BoundariesOf(*reader_, instrument_name);
   }
 
-  std::shared_ptr<memory_exporter::SimpleAggregateInMemoryMetricData> data_;
+  std::shared_ptr<CollectOnDemandReader> reader_;
   std::shared_ptr<metrics_sdk::MeterProvider> provider_;
 };
 
@@ -94,7 +112,7 @@ TEST_F(LatencyBucketViewTest, NamedBoundsClaimOnlyTheirOwnInstrument) {
 
   const std::vector<double> neighbour = BoundariesFor("run_seconds_extra");
   EXPECT_NE(neighbour, (std::vector<double>{1, 2, 3}));
-  EXPECT_FALSE(neighbour.empty()) << "the neighbour exported nothing to compare";
+  EXPECT_FALSE(neighbour.empty()) << "the neighbour reported nothing to compare";
 }
 
 TEST_F(LatencyBucketViewTest, AMicrosecondsHistogramGetsTheExplicitBounds) {
@@ -157,15 +175,13 @@ TEST_F(LatencyBucketViewTest, WithoutTheViewTheSameInstrumentGetsTheSdkDefaults)
 // tests still green. This closes that by going through the constructor and
 // reading the view off the provider it publishes globally.
 TEST(OtelProviderWiringTest, TheConstructorRegistersTheView) {
-  auto data = std::make_shared<memory_exporter::SimpleAggregateInMemoryMetricData>();
-
   OtelConfig config;
   config.service_name = "otel_provider_wiring_test";
   config.enable_metrics = true;
-  // Nothing listens here. The OTLP reader the constructor installs is flushed
-  // alongside ours and fails to connect, which is fine — the export under test
-  // is the in-memory one. A port that refuses immediately keeps that failure
-  // from costing the export timeout.
+  // Nothing listens here, and nothing needs to: the reader added below
+  // collects in process and the constructor's own OTLP reader is not what is
+  // under test. A port that refuses immediately keeps that reader's flush on
+  // the way out from costing the export timeout.
   config.otlp_endpoint = "http://127.0.0.1:1/v1/metrics";
   config.export_interval = std::chrono::seconds(3600);
 
@@ -174,26 +190,16 @@ TEST(OtelProviderWiringTest, TheConstructorRegistersTheView) {
       std::static_pointer_cast<metrics_sdk::MeterProvider>(provider.GetMeterProvider());
   ASSERT_NE(published, nullptr);
 
-  metrics_sdk::PeriodicExportingMetricReaderOptions options;
-  options.export_interval_millis = std::chrono::milliseconds(60000);
-  options.export_timeout_millis = std::chrono::milliseconds(1000);
-  published->AddMetricReader(metrics_sdk::PeriodicExportingMetricReaderFactory::Create(
-      memory_exporter::InMemoryMetricExporterFactory::Create(data), options));
+  auto reader = std::make_shared<CollectOnDemandReader>();
+  published->AddMetricReader(reader);
 
   auto meter = published->GetMeter(kScope, "1.0.0");
   auto histogram = meter->CreateUInt64Histogram("http_server_request_duration_microseconds");
   histogram->Record(1, opentelemetry::context::Context{});
-  published->ForceFlush();
-
-  const auto& series = data->Get(kScope, "http_server_request_duration_microseconds");
-  ASSERT_FALSE(series.empty()) << "the provider exported no data point";
-  const auto* point =
-      opentelemetry::nostd::get_if<metrics_sdk::HistogramPointData>(&series.begin()->second);
-  ASSERT_NE(point, nullptr);
 
   const std::vector<double> expected(kHttpLatencyBucketBoundsMicros.begin(),
                                      kHttpLatencyBucketBoundsMicros.end());
-  EXPECT_EQ(point->boundaries_, expected)
+  EXPECT_EQ(BoundariesOf(*reader, "http_server_request_duration_microseconds"), expected)
       << "OtelProvider built a provider without the latency view, so every service on this rail "
          "is back on the SDK's millisecond defaults (#1286)";
 }

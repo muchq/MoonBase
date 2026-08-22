@@ -6,15 +6,15 @@
 #include <memory>
 #include <string>
 
+#include "domains/platform/libs/futility/otel/collect_on_demand_reader.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
-#include "opentelemetry/exporters/memory/in_memory_metric_data.h"
-#include "opentelemetry/exporters/memory/in_memory_metric_exporter_factory.h"
 #include "opentelemetry/metrics/noop.h"
 #include "opentelemetry/metrics/provider.h"
-#include "opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h"
-#include "opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_options.h"
+#include "opentelemetry/sdk/metrics/data/metric_data.h"
+#include "opentelemetry/sdk/metrics/export/metric_producer.h"
 #include "opentelemetry/sdk/metrics/instruments.h"
+#include "opentelemetry/sdk/metrics/meter_provider.h"
 #include "opentelemetry/sdk/metrics/meter_provider_factory.h"
 
 // The descriptions this rail exports, exercised rather than declared.
@@ -29,30 +29,22 @@
 // over whatever the instrument declared.
 //
 // So this drives a real MeterProvider, records through the recorder services
-// actually use, and reads the description back off the exported instrument
+// actually use, and reads the description back off the collected instrument
 // descriptor.
 
 namespace futility::otel {
 namespace {
 
 namespace metrics_sdk = opentelemetry::sdk::metrics;
-namespace memory_exporter = opentelemetry::exporter::memory;
 
 class ExportedDescriptionTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    data_ = std::make_shared<memory_exporter::CircularBufferInMemoryMetricData>(64);
-
     auto provider = metrics_sdk::MeterProviderFactory::Create();
     provider_ = std::shared_ptr<metrics_sdk::MeterProvider>(provider.release());
 
-    metrics_sdk::PeriodicExportingMetricReaderOptions options;
-    // Long enough that the background thread never races the explicit
-    // ForceFlush below; the flush is what actually drives the export.
-    options.export_interval_millis = std::chrono::milliseconds(60000);
-    options.export_timeout_millis = std::chrono::milliseconds(5000);
-    provider_->AddMetricReader(metrics_sdk::PeriodicExportingMetricReaderFactory::Create(
-        memory_exporter::InMemoryMetricExporterFactory::Create(data_), options));
+    reader_ = std::make_shared<CollectOnDemandReader>();
+    provider_->AddMetricReader(reader_);
 
     // The view is part of what is under test here, not scaffolding: it is the
     // half of this that used to overwrite descriptions.
@@ -74,28 +66,27 @@ class ExportedDescriptionTest : public ::testing::Test {
             new opentelemetry::metrics::NoopMeterProvider()));
   }
 
-  /// The descriptor the SDK exported for `instrument_name`, after everything —
+  /// The descriptor the SDK reports for `instrument_name`, after everything —
   /// instrument creation and the view — has had its say.
   ///
   /// Returns the whole descriptor rather than the description alone so that an
-  /// instrument that was never exported is distinguishable from one exported
+  /// instrument that was never reported is distinguishable from one reported
   /// with an empty description; the tests below assert both cases.
   metrics_sdk::InstrumentDescriptor ExportedDescriptorFor(const std::string& instrument_name) {
-    provider_->ForceFlush();
-
     bool found = false;
     metrics_sdk::InstrumentDescriptor descriptor;
-    for (const auto& resource_metrics : data_->Get()) {
-      for (const auto& scope : resource_metrics->scope_metric_data_) {
+    reader_->Collect([&](metrics_sdk::ResourceMetrics& metrics) {
+      for (const auto& scope : metrics.scope_metric_data_) {
         for (const auto& metric : scope.metric_data_) {
           if (metric.instrument_descriptor.name_ != instrument_name) continue;
           found = true;
           descriptor = metric.instrument_descriptor;
         }
       }
-    }
+      return true;
+    });
 
-    EXPECT_TRUE(found) << instrument_name << " was never exported";
+    EXPECT_TRUE(found) << instrument_name << " was never reported";
     return descriptor;
   }
 
@@ -103,7 +94,7 @@ class ExportedDescriptionTest : public ::testing::Test {
     return ExportedDescriptorFor(instrument_name).description_;
   }
 
-  std::shared_ptr<memory_exporter::CircularBufferInMemoryMetricData> data_;
+  std::shared_ptr<CollectOnDemandReader> reader_;
   std::shared_ptr<metrics_sdk::MeterProvider> provider_;
 };
 
