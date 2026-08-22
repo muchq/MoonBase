@@ -19,7 +19,7 @@ services:
       - one_d4_v2
       - portrait
       - prom_proxy
-      - r3dr_v2
+      - iili
       - mcpserver
     networks:
       # Static address so services can name Caddy — and only Caddy — as
@@ -244,8 +244,8 @@ services:
       retries: 3
       start_period: 10s
 
-  r3dr_v2:
-    image: ghcr.io/muchq/r3dr_v2:${R3DR_V2_SHA:-${DEPLOY_SHA:-latest}}
+  iili:
+    image: ghcr.io/muchq/iili:${IILI_SHA:-${DEPLOY_SHA:-latest}}
     labels:
       com.muchq.description: "URL shortener v2 API (C++)"
     restart: always
@@ -253,15 +253,15 @@ services:
       - "8091:8091"
     environment:
       PORT: "8091"
-      R3DR_V2_DB_URL: postgresql://r3dr_v2:${R3DR_V2_DB_PASSWORD:?unset}@shared_postgres:5432/r3dr_v2
+      IILI_DB_URL: postgresql://r3dr_v2:${R3DR_V2_DB_PASSWORD:?unset}@shared_postgres:5432/r3dr_v2
       TRUSTED_PROXY_CIDRS: *caddy_ip
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
-      OTEL_SERVICE_NAME: r3dr_v2
-      OTEL_RESOURCE_ATTRIBUTES: service.name=r3dr_v2,service.version=${R3DR_V2_SHA:-${DEPLOY_SHA:-latest}}
+      OTEL_SERVICE_NAME: iili
+      OTEL_RESOURCE_ATTRIBUTES: service.name=iili,service.version=${IILI_SHA:-${DEPLOY_SHA:-latest}}
     networks:
       - app_network
     depends_on:
-      r3dr_v2_db_init:
+      iili_db_init:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -373,10 +373,10 @@ services:
       shared_postgres:
         condition: service_healthy
 
-  # Idempotent one-shot provisioning of r3dr_v2's database and role
-  # (#1359), mirroring golf_hub_db_init. Deliberately not named r3dr: the
-  # Go service's storage must stay un-aliasable from this file.
-  r3dr_v2_db_init:
+  # The role, database and password keep the r3dr_v2 names the live rows were
+  # provisioned under: renaming those is a live-database operation, not a
+  # rename of this file.
+  iili_db_init:
     image: postgres:18
     restart: "no"
     environment:

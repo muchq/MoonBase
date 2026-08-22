@@ -59,14 +59,14 @@ api.muchq.com {
 		path /v2/analyze
 	}
 
-	@post_r3dr_shorten {
+	@post_iili_shorten {
 		method POST
-		path /r3dr/v2/shorten
+		path /iili/v1/shorten
 	}
 
-	@get_r3dr_redirect {
+	@get_iili_redirect {
 		method GET
-		path /r3dr/v2/r/*
+		path /iili/v1/r/*
 	}
 
 	@ws_thoughts {
@@ -90,7 +90,7 @@ api.muchq.com {
 		method OPTIONS
 	}
 
-	# Browser origins that call this API: muchq.com pages (incl. /r3dr)
+	# Browser origins that call this API: muchq.com pages (incl. /iili)
 	# and the iili.uk SPA (plus its vite dev — every API here is public
 	# and credential-less, so a localhost origin grants nothing curl
 	# doesn't have). ACAO takes one value, so it's echoed per origin;
@@ -155,9 +155,9 @@ api.muchq.com {
 	# client sees and the route the model declares are one string.
 	reverse_proxy @post_v2_analyze one_d4_v2:8090
 
-	# Same pattern (#1359): r3dr_v2 serves /r3dr/v2/* unrewritten.
-	reverse_proxy @post_r3dr_shorten r3dr_v2:8091
-	reverse_proxy @get_r3dr_redirect r3dr_v2:8091
+	# Same pattern (#1359): iili serves /iili/v1/* unrewritten.
+	reverse_proxy @post_iili_shorten iili:8091
+	reverse_proxy @get_iili_redirect iili:8091
 
 	log {
 		output file /var/log/caddy/access.log {
@@ -168,20 +168,17 @@ api.muchq.com {
 	}
 }
 
-# Short-link redirects for iili.uk (#1359). SPA stays on Cloudflare at
-# iili.uk; this host (A-record to the consolidated box) only answers
-# /r/{slug}. Public path is rewritten onto r3dr_v2's modeled
-# /r3dr/v2/r/{slug} — the deliberate exception to "gateway == model path"
-# on api.muchq.com. HEAD is forwarded with GET for unfurlers; end-to-end
-# 302 on HEAD waits on #1433 (smithy registers GET only today → 405).
+# Short-link redirects for iili.uk (#1359); the SPA is on Cloudflare at
+# iili.uk. The public /r/{slug} is rewritten onto iili's modeled
+# /iili/v1/r/{slug} — the deliberate exception to "gateway == model path".
 i.iili.uk {
 	@getredir {
 		method GET HEAD
 		path /r/*
 	}
 	handle @getredir {
-		rewrite * /r3dr/v2{path}
-		reverse_proxy r3dr_v2:8091
+		rewrite * /iili/v1{path}
+		reverse_proxy iili:8091
 	}
 	respond 404
 

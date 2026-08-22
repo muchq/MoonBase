@@ -182,14 +182,14 @@ func allQueriesFor(entry serviceEntry) []string {
 // strings are the contract with Prometheus.
 func TestRegistry_CacheHelpersEmitTheExactQueries(t *testing.T) {
 	assert.Equal(t,
-		`rate(cache_hits_total{service_name="r3dr_v2",cache="url_cache"}[5m])`+
-			`/(rate(cache_hits_total{service_name="r3dr_v2",cache="url_cache"}[5m])`+
-			`+rate(cache_misses_total{service_name="r3dr_v2",cache="url_cache"}[5m]))*100`,
-		cacheHitPercent("r3dr_v2", "url_cache"))
+		`rate(cache_hits_total{service_name="iili",cache="url_cache"}[5m])`+
+			`/(rate(cache_hits_total{service_name="iili",cache="url_cache"}[5m])`+
+			`+rate(cache_misses_total{service_name="iili",cache="url_cache"}[5m]))*100`,
+		cacheHitPercent("iili", "url_cache"))
 	assert.Equal(t,
 		`{__name__=~"cache_hits_total|cache_misses_total",`+
-			`service_name="r3dr_v2",cache="url_cache"}`,
-		cacheOps("r3dr_v2", "url_cache"))
+			`service_name="iili",cache="url_cache"}`,
+		cacheOps("iili", "url_cache"))
 }
 
 // Cache queries follow the emitter: aura::Cache emits the standard cache
@@ -203,7 +203,7 @@ func TestRegistry_CacheQueriesUseTheStandardFamily(t *testing.T) {
 		cache   string
 	}{
 		{"portrait", "trace"},
-		{"r3dr_v2", "url_cache"},
+		{"iili", "url_cache"},
 	} {
 		entry := serviceRegistry[emitter.service]
 
