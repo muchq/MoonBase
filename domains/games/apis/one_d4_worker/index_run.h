@@ -24,10 +24,11 @@ class RunObserver {
   virtual ~RunObserver() = default;
 
   /// `result` is "ok", "no_archive", or "error".
-  virtual void ArchiveFetched(std::string_view result) {}
+  virtual void ArchiveFetched([[maybe_unused]] std::string_view result) {}
   /// `result` is "indexed", "degraded", "empty", or "cached".
-  virtual void MonthFinished(std::string_view result, int games) {}
-  virtual void GameIndexed(const IndexedGame& game) {}
+  virtual void MonthFinished([[maybe_unused]] std::string_view result, [[maybe_unused]] int games) {
+  }
+  virtual void GameIndexed([[maybe_unused]] const IndexedGame& game) {}
 };
 
 /// Indexes one job: every month of its range, oldest first.

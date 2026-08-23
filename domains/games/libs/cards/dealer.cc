@@ -29,6 +29,6 @@ void Dealer::ShuffleDeck(deque<Card>& deck) {
   }
 }
 
-void NoShuffleDealer::ShuffleDeck(deque<Card>& deck) {}
+void NoShuffleDealer::ShuffleDeck([[maybe_unused]] deque<Card>& deck) {}
 
 }  // namespace cards

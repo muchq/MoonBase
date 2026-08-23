@@ -48,7 +48,7 @@ struct AppContext {
   complex<double> mouse_down_raw = {0, 0};
   int iterations = 100;
   bool first = true;
-  SDL_FRect selected;
+  SDL_FRect selected = {};
 };
 
 bool no_change(const AppContext* app_context) {
@@ -58,7 +58,8 @@ bool no_change(const AppContext* app_context) {
          app_context->current_bottom_right == app_context->previous_bottom_right;
 }
 
-SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
+SDL_AppResult SDL_AppInit(void** appstate, [[maybe_unused]] int argc,
+                          [[maybe_unused]] char* argv[]) {
   trill::InitConfig init_config{.name = "Mandelbrot"};
 
   auto [result, sdlContext] = trill::Initialize(init_config);
@@ -184,7 +185,7 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
   return SDL_APP_CONTINUE;
 }
 
-void SDL_AppQuit(void* appstate, SDL_AppResult result) {
+void SDL_AppQuit(void* appstate, [[maybe_unused]] SDL_AppResult result) {
   auto* app = (AppContext*)appstate;
   if (app) {
     SDL_DestroyTexture(app->sdl_context.background);

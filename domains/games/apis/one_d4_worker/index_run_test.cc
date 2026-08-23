@@ -46,7 +46,7 @@ ArchivedGame AGame(std::string_view url, std::string_view pgn = kScholarsMate) {
 /// Serves months from a map, and remembers what was asked for.
 class FakeArchive : public ArchiveSource {
  public:
-  absl::StatusOr<std::vector<ArchivedGame>> FetchMonth(std::string_view player,
+  absl::StatusOr<std::vector<ArchivedGame>> FetchMonth([[maybe_unused]] std::string_view player,
                                                        YearMonth month) override {
     asked.push_back(month.ToString());
     if (on_fetch) on_fetch();

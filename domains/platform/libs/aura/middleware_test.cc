@@ -425,7 +425,7 @@ TEST(ConnectionEventLogTest, LogsUpgradeFailureKind) {
 // mint a series per path (#1305).
 TEST(RejectionMetricsTest, UnparsedRejectionLandsOnStableLabels) {
   auto sink = std::make_shared<RecordingSink>();
-  aura::RejectionMetrics(sink)({.status = 431});
+  aura::RejectionMetrics(sink)({.status = 431, .peer_address = "", .method = "", .target = ""});
   const auto completes = sink->completes();
   ASSERT_EQ(completes.size(), 1u);
   EXPECT_EQ(completes[0].route, aura::kUnmatchedRoute);

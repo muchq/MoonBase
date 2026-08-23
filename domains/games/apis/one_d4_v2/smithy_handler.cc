@@ -49,7 +49,8 @@ smithy::Error ToSmithyError(const absl::Status& status) {
 }
 
 smithy::Outcome<gen::AnalyzeOutput> SmithyAnalyzeHandler::Analyze(
-    const gen::AnalyzeInput& input, const smithy::server::RequestContext& context) {
+    const gen::AnalyzeInput& input,
+    [[maybe_unused]] const smithy::server::RequestContext& context) {
   const absl::StatusOr<Analysis> analysis = one_d4_v2::Analyze(input.pgn);
   if (!analysis.ok()) {
     return ToSmithyError(analysis.status());

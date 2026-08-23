@@ -32,43 +32,49 @@ using ::testing::IsEmpty;
 
 class FakeQueue : public IndexQueue {
  public:
-  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
-                                                    absl::Duration lease) override {
+  absl::StatusOr<std::optional<IndexJob>> ClaimNext(
+      [[maybe_unused]] std::string_view owner, [[maybe_unused]] absl::Duration lease) override {
     if (!next.has_value()) return std::nullopt;
     IndexJob job = *next;
     next.reset();
     return job;
   }
 
-  absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
-                                 absl::Duration lease) override {
+  absl::StatusOr<bool> Heartbeat([[maybe_unused]] std::string_view id,
+                                 [[maybe_unused]] std::string_view owner,
+                                 [[maybe_unused]] absl::Duration lease) override {
     ++heartbeats;
     return held.load();
   }
 
-  absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
-                                int games_indexed) override {
+  absl::StatusOr<bool> Progress([[maybe_unused]] std::string_view id,
+                                [[maybe_unused]] std::string_view owner,
+                                [[maybe_unused]] int games_indexed) override {
     return held.load();
   }
 
-  absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner,
+  absl::StatusOr<bool> Complete([[maybe_unused]] std::string_view id,
+                                [[maybe_unused]] std::string_view owner,
                                 int games_indexed) override {
     calls.push_back(absl::StrCat("complete ", games_indexed));
     return true;
   }
 
-  absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
-                            std::string_view message) override {
+  absl::StatusOr<bool> Fail([[maybe_unused]] std::string_view id,
+                            [[maybe_unused]] std::string_view owner,
+                            [[maybe_unused]] std::string_view message) override {
     calls.push_back("fail");
     return true;
   }
 
-  absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override {
+  absl::StatusOr<bool> HandBack([[maybe_unused]] std::string_view id,
+                                [[maybe_unused]] std::string_view owner) override {
     calls.push_back("hand back");
     return true;
   }
 
-  absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override {
+  absl::StatusOr<bool> Release([[maybe_unused]] std::string_view id,
+                               [[maybe_unused]] std::string_view owner) override {
     calls.push_back("release");
     return true;
   }
@@ -97,7 +103,7 @@ ArchivedGame AGame(std::string_view url) {
 
 class SlowArchive : public ArchiveSource {
  public:
-  absl::StatusOr<std::vector<ArchivedGame>> FetchMonth(std::string_view player,
+  absl::StatusOr<std::vector<ArchivedGame>> FetchMonth([[maybe_unused]] std::string_view player,
                                                        YearMonth month) override {
     asked.push_back(month.ToString());
     absl::SleepFor(per_month);
@@ -118,7 +124,8 @@ class RecordingSink : public GameSink {
     return absl::OkStatus();
   }
 
-  absl::StatusOr<std::optional<int>> MonthAlreadyIndexed(const IndexedMonth& month) override {
+  absl::StatusOr<std::optional<int>> MonthAlreadyIndexed(
+      [[maybe_unused]] const IndexedMonth& month) override {
     return std::nullopt;
   }
 

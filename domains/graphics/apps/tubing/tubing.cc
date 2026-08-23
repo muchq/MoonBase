@@ -21,7 +21,8 @@ struct AppContext {
   int height;
 };
 
-SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
+SDL_AppResult SDL_AppInit(void** appstate, [[maybe_unused]] int argc,
+                          [[maybe_unused]] char* argv[]) {
   trill::InitConfig init_config{
       .name = "TuberProV6",
       .width = 1000,
@@ -37,7 +38,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]) {
   return result;
 }
 
-SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event) {
+SDL_AppResult SDL_AppEvent([[maybe_unused]] void* appstate, SDL_Event* event) {
   if (event->type == SDL_EVENT_QUIT) {
     return SDL_APP_SUCCESS;
   }
@@ -92,7 +93,7 @@ SDL_AppResult SDL_AppIterate(void* appstate) {
   return SDL_APP_CONTINUE;
 }
 
-void SDL_AppQuit(void* appstate, SDL_AppResult result) {
+void SDL_AppQuit(void* appstate, [[maybe_unused]] SDL_AppResult result) {
   auto* app = static_cast<AppContext*>(appstate);
   if (app) {
     SDL_DestroyTexture(app->sdl_context.background);
