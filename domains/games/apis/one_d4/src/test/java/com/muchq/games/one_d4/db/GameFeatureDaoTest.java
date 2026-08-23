@@ -756,6 +756,99 @@ public class GameFeatureDaoTest {
   }
 
   /**
+   * #1302, through the real store, on the query the issue was filed from. Untitled players are
+   * stored as NULL — the column is nullable and the worker binds {@code NULLIF($8, '')} — so a bare
+   * SQL inequality evaluated to NULL for them and the WHERE clause dropped the row. No error, no
+   * warning, just a smaller number that looked right.
+   *
+   * <p>The partition is the assertion that bites hardest, and it is the reconciliation the issue
+   * said was otherwise impossible from the outside: every game has exactly one opponent, so "= GM"
+   * and "!= GM" must sum to the corpus. They summed to 3 of 4.
+   */
+  @Test
+  public void query_negatedOpponentTitleKeepsUntitledOpponents() {
+    dao.insertBatch(titledGames("negtitle"));
+
+    assertThat(urlsMatchingAs("opponent.title != \"GM\"", "hikaru"))
+        .containsExactly("https://chess.com/game/negtitle-3", "https://chess.com/game/negtitle-4");
+
+    // Same question, other spelling — and the list form, which SQL NOT IN breaks identically.
+    assertThat(urlsMatchingAs("NOT opponent.title = \"GM\"", "hikaru"))
+        .containsExactly("https://chess.com/game/negtitle-3", "https://chess.com/game/negtitle-4");
+    assertThat(urlsMatchingAs("NOT opponent.title IN [\"GM\", \"FM\"]", "hikaru"))
+        .containsExactly("https://chess.com/game/negtitle-4");
+
+    // The partition. The control is the positive half: it must NOT pick up the untitled row,
+    // or "!= GM returns everything" would pass this test for the wrong reason.
+    assertThat(urlsMatchingAs("opponent.title = \"GM\"", "hikaru"))
+        .containsExactly("https://chess.com/game/negtitle-1", "https://chess.com/game/negtitle-2");
+    assertThat(urlsMatching("time.class = \"blitz\"")).hasSize(4);
+  }
+
+  /**
+   * The other half of #1302, and the one with no perspective CASE in front of it: a negated filter
+   * on the physical title columns. Same defect, same cure, different branch of the compiler — the
+   * perspective path could be fixed alone and this would still drop rows, so it gets its own
+   * fixture rather than riding on the test above.
+   *
+   * <p>{@code titledGames} sits hikaru on both colors, so white_title is IM, GM, IM, and NULL: the
+   * negated filter has to keep the NULL and the two IMs and drop only the GM.
+   */
+  @Test
+  public void query_negatedPhysicalTitleColumnKeepsNullTitles() {
+    dao.insertBatch(titledGames("physneg"));
+
+    assertThat(urlsMatching("white.title != \"GM\""))
+        .containsExactly(
+            "https://chess.com/game/physneg-1",
+            "https://chess.com/game/physneg-3",
+            "https://chess.com/game/physneg-4");
+    assertThat(urlsMatching("NOT white.title = \"GM\""))
+        .containsExactly(
+            "https://chess.com/game/physneg-1",
+            "https://chess.com/game/physneg-3",
+            "https://chess.com/game/physneg-4");
+    assertThat(urlsMatching("NOT white.title IN [\"GM\", \"IM\"]"))
+        .containsExactly("https://chess.com/game/physneg-4");
+
+    // The control: the positive filter still excludes the NULL-titled row.
+    assertThat(urlsMatching("white.title = \"GM\""))
+        .containsExactly("https://chess.com/game/physneg-2");
+    assertThat(urlsMatching("white.title IN [\"GM\", \"IM\"]"))
+        .containsExactly(
+            "https://chess.com/game/physneg-1",
+            "https://chess.com/game/physneg-2",
+            "https://chess.com/game/physneg-3");
+  }
+
+  /**
+   * The negated filter's count now equals what grouping reports, which is the reconciliation #1311
+   * made visible and this fixes. Untitled opponents are the {@code null} bucket; before the fix the
+   * filter returned every other bucket's games and silently omitted that one.
+   */
+  @Test
+  public void query_negatedOpponentTitleReconcilesWithTheNullGroupBucket() {
+    dao.insertBatch(titledGames("recon"));
+
+    SqlCompiler compiler = new SqlCompiler();
+    List<AggregateRow> groups =
+        dao.aggregate(
+            compiler.compileAggregate(
+                Parser.parse("time.class = \"blitz\""), List.of("opponent.title"), "hikaru"),
+            List.of("opponent_title"),
+            10);
+
+    long notGmByGrouping =
+        groups.stream()
+            .filter(g -> !"GM".equals(g.group().get("opponent_title")))
+            .mapToLong(AggregateRow::count)
+            .sum();
+
+    assertThat(notGmByGrouping).isEqualTo(2);
+    assertThat(urlsMatchingAs("opponent.title != \"GM\"", "hikaru")).hasSize(2);
+  }
+
+  /**
    * The mirror of the opponent.title test above: me.title pools the player's own title from
    * whichever side they sat — four games, two colors, one IM bucket — and the opponents' titles
    * reach no bucket. Together the two tests pin that the two CASEs pick opposite sides of the same
@@ -1328,7 +1421,13 @@ public class GameFeatureDaoTest {
 
     assertThat(urlsMatching("date = \"2026-06-15\""))
         .containsExactly("dayEnd", "dayMid", "dayStart");
-    assertThat(urlsMatching("date != \"2026-06-15\"")).containsExactly("nextStart", "prevEnd");
+    // noPlayedAt is on this side of the negation (#1302): a row whose timestamp is unknown was
+    // not played on the 15th, and every negation is NULL-inclusive. Both spellings agree, which
+    // is the property the compiler test cannot show — there they differ by a pair of parens.
+    assertThat(urlsMatching("date != \"2026-06-15\""))
+        .containsExactly("nextStart", "noPlayedAt", "prevEnd");
+    assertThat(urlsMatching("NOT date = \"2026-06-15\""))
+        .containsExactly("nextStart", "noPlayedAt", "prevEnd");
     assertThat(urlsMatching("date < \"2026-06-15\"")).containsExactly("prevEnd");
     assertThat(urlsMatching("date <= \"2026-06-15\""))
         .containsExactly("dayEnd", "dayMid", "dayStart", "prevEnd");
@@ -1338,9 +1437,9 @@ public class GameFeatureDaoTest {
     assertThat(urlsMatching("month = \"2026-06\""))
         .containsExactly("dayEnd", "dayMid", "dayStart", "nextStart", "prevEnd");
 
-    // The row is really there — it is only invisible to date predicates. SQL three-valued logic
-    // means NULL played_at satisfies neither `date = D` nor `date != D`, so a game with no
-    // timestamp silently drops out of any date-scoped query, including the negated one.
+    // The positive operators still exclude it, and that is not an oversight: a row with no
+    // timestamp was not played on the 15th, before it, or after it. Only negation admits it, and
+    // the count below is what the negated predicate has to reconcile against.
     SqlCompiler compiler = new SqlCompiler();
     assertThat(
             dao.aggregateTotals(
@@ -1411,6 +1510,18 @@ public class GameFeatureDaoTest {
   /** Game URLs matching a ChessQL filter, sorted so assertions read as a set. */
   private List<String> urlsMatching(String chessql) {
     return dao.query(new SqlCompiler().compile(Parser.parse(chessql)), 50, 0).stream()
+        .map(GameFeature::gameUrl)
+        .sorted()
+        .toList();
+  }
+
+  /**
+   * The same, resolved against a perspective player. Sorted rather than left in query order on
+   * purpose: {@code ORDER BY played_at DESC} sorts NULLs to opposite ends on H2 and Postgres, and
+   * these fixtures carry NULL-valued rows.
+   */
+  private List<String> urlsMatchingAs(String chessql, String player) {
+    return dao.query(new SqlCompiler().compile(Parser.parse(chessql), player), 50, 0).stream()
         .map(GameFeature::gameUrl)
         .sorted()
         .toList();

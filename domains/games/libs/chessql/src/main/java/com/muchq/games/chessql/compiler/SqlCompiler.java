@@ -773,12 +773,29 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           and.operands().stream()
               .map(e -> compileExpr(e, params, perspective))
               .collect(Collectors.joining(" AND ", "(", ")"));
-      case NotExpr not -> "(NOT " + compileExpr(not.operand(), params, perspective) + ")";
+      case NotExpr not -> negate(compileExpr(not.operand(), params, perspective));
       case ComparisonExpr cmp -> compileComparison(cmp, params, perspective);
       case InExpr in -> compileIn(in, params, perspective);
       case MotifExpr motif -> compileMotif(motif);
       case SequenceExpr seq -> compileSequence(seq, params);
     };
+  }
+
+  /**
+   * The one way this compiler negates, because SQL's own NOT is three-valued and a WHERE clause is
+   * not: {@code NOT NULL} is NULL, a NULL row is not selected, so a bare negation silently drops
+   * exactly the rows the caller wrote it to catch. Every filterable column but game_url and
+   * platform is nullable, so this is the common case, not a corner: {@code opponent.title != "GM"}
+   * dropped every untitled opponent and returned a plausible smaller number (#1302).
+   *
+   * <p>{@code IS NOT TRUE} folds the unknown to TRUE at the negation boundary — a value nobody
+   * knows is not the value you named — and yields TRUE or FALSE but never NULL, so negations nest
+   * without the fold compounding. Wrapping the compiled predicate rather than rewriting each
+   * operator also keeps it to one rendering: the perspective CASEs carry bind params, and a second
+   * rendering would need a second param in the right position.
+   */
+  private static String negate(String predicate) {
+    return "(" + predicate + ") IS NOT TRUE";
   }
 
   private String compileComparison(
@@ -792,22 +809,29 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       return compileDateComparison(cmp, params);
     }
 
+    // != is compiled as the negation of =, not as a SQL !=, so the two spellings of one question
+    // ("x != v" and "NOT x = v") cannot drift apart on NULL handling. See negate().
+    boolean negated = op.equals("!=");
+    String positiveOp = negated ? "=" : op;
+
     PerspectiveField perspectiveField = PERSPECTIVE_FIELDS.get(cmp.field());
     if (perspectiveField != null) {
       String expr = perspectiveExpr(cmp.field(), perspectiveField, perspective, params);
       params.add(coercePerspectiveValue(cmp.field(), perspectiveField, cmp.value()));
-      if (perspectiveField.kind() == GroupKind.CATEGORICAL && (op.equals("=") || op.equals("!="))) {
-        return "LOWER" + expr + " " + op + " LOWER(?)";
-      }
-      return expr + " " + op + " ?";
+      String compiled =
+          perspectiveField.kind() == GroupKind.CATEGORICAL && positiveOp.equals("=")
+              ? "LOWER" + expr + " = LOWER(?)"
+              : expr + " " + positiveOp + " ?";
+      return negated ? negate(compiled) : compiled;
     }
 
     String column = resolveColumn(cmp.field());
     params.add(coerceValue(cmp.field(), column, cmp.value()));
-    if (STRING_COLUMNS.contains(column) && (op.equals("=") || op.equals("!="))) {
-      return "LOWER(" + column + ") " + op + " LOWER(?)";
-    }
-    return column + " " + op + " ?";
+    String compiled =
+        STRING_COLUMNS.contains(column) && positiveOp.equals("=")
+            ? "LOWER(" + column + ") = LOWER(?)"
+            : column + " " + positiveOp + " ?";
+    return negated ? negate(compiled) : compiled;
   }
 
   /**
@@ -950,7 +974,9 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       case "!=":
         params.add(start);
         params.add(end);
-        return "(played_at < ? OR played_at >= ?)";
+        // Negating the interval rather than flipping its boundaries, so a row with no played_at
+        // survives here for the same reason it survives any other negation. See negate().
+        return negate("played_at >= ? AND played_at < ?");
       case "<":
         params.add(start);
         return "played_at < ?";

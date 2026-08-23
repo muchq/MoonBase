@@ -119,11 +119,16 @@ public class SqlCompilerTest {
     assertThat(result.parameters()).isEmpty();
   }
 
+  /**
+   * A motif is an EXISTS, which is two-valued already — but it negates through the same {@code IS
+   * NOT TRUE} as everything else. One negation idiom, no per-predicate table of which subexpression
+   * can be NULL for a later reader to consult and get wrong.
+   */
   @Test
   public void testNotExpression() {
     CompiledQuery result = compile("NOT motif(pin)");
     assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "(NOT " + motifExists("PIN") + ")" + BASE_SUFFIX);
+        .isEqualTo(BASE_PREFIX + "(" + motifExists("PIN") + ") IS NOT TRUE" + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
   }
 
@@ -481,7 +486,8 @@ public class SqlCompilerTest {
 
     CompiledQuery black = compile("black.title != \"GM\"");
     assertThat(black.selectSql())
-        .isEqualTo(BASE_PREFIX + "LOWER(black_title) != LOWER(?)" + BASE_SUFFIX);
+        .isEqualTo(BASE_PREFIX + "(LOWER(black_title) = LOWER(?)) IS NOT TRUE" + BASE_SUFFIX);
+    assertThat(black.parameters()).isEqualTo(List.of("GM"));
   }
 
   @Test
@@ -490,6 +496,108 @@ public class SqlCompilerTest {
     assertThat(result.selectSql())
         .isEqualTo(BASE_PREFIX + "LOWER(black_title) IN (LOWER(?), LOWER(?))" + BASE_SUFFIX);
     assertThat(result.parameters()).isEqualTo(List.of("GM", "IM"));
+  }
+
+  /**
+   * #1302. Every filterable column but game_url and platform is nullable, and SQL's NOT is
+   * three-valued: {@code NOT NULL} is NULL, WHERE drops a NULL row, so a bare negation deleted
+   * precisely the rows the caller wrote it to catch. {@code opponent.title != "GM"} dropped every
+   * untitled opponent and returned a plausible smaller number.
+   *
+   * <p>{@code IS NOT TRUE} folds NULL to TRUE at the negation boundary, which is what a negated
+   * filter means: a value nobody knows is not the value you named.
+   */
+  @Test
+  public void testNegationKeepsNullRows() {
+    String negatedTitle = BASE_PREFIX + "(LOWER(black_title) = LOWER(?)) IS NOT TRUE" + BASE_SUFFIX;
+    assertThat(compile("black.title != \"GM\"").selectSql()).isEqualTo(negatedTitle);
+    assertThat(compile("NOT black.title = \"GM\"").selectSql())
+        .as("the two spellings are the same question and must compile alike")
+        .isEqualTo(negatedTitle);
+
+    assertThat(compile("NOT black.title IN [\"GM\", \"IM\"]").selectSql())
+        .isEqualTo(
+            BASE_PREFIX + "(LOWER(black_title) IN (LOWER(?), LOWER(?))) IS NOT TRUE" + BASE_SUFFIX);
+
+    // Not a string-column special case: num.moves is nullable too, and so is every rating.
+    assertThat(compile("num.moves != 40").selectSql())
+        .isEqualTo(BASE_PREFIX + "(num_moves = ?) IS NOT TRUE" + BASE_SUFFIX);
+  }
+
+  /**
+   * The control for the test above: only negation changes. A positive comparison still excludes
+   * NULLs, which is what {@code title = "GM"} means, and the ordering operators are not negations —
+   * an unknown rating is not "below 2500", it is unknown.
+   */
+  @Test
+  public void testPositiveComparisonsStillExcludeNullRows() {
+    assertThat(compile("black.title = \"GM\"").selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(black_title) = LOWER(?)" + BASE_SUFFIX);
+    assertThat(compile("black.title IN [\"GM\"]").selectSql())
+        .isEqualTo(BASE_PREFIX + "LOWER(black_title) IN (LOWER(?))" + BASE_SUFFIX);
+    assertThat(compile("white.elo < 2500").selectSql())
+        .isEqualTo(BASE_PREFIX + "white_elo < ?" + BASE_SUFFIX);
+  }
+
+  /**
+   * Negation stays its own inverse. {@code IS NOT TRUE} always yields TRUE or FALSE, never NULL, so
+   * the outer negation of a doubled one is an ordinary two-valued flip — {@code NOT NOT X} selects
+   * the same rows as {@code X}, including dropping the NULL ones. A rewrite that folded NULL to
+   * TRUE on the *inside* of the negation instead would quietly break this.
+   */
+  @Test
+  public void testDoubleNegationSelectsTheSameRowsAsThePositive() {
+    assertThat(compile("NOT NOT black.title = \"GM\"").selectSql())
+        .isEqualTo(
+            BASE_PREFIX
+                + "((LOWER(black_title) = LOWER(?)) IS NOT TRUE) IS NOT TRUE"
+                + BASE_SUFFIX);
+    assertThat(compile("NOT black.title != \"GM\"").selectSql())
+        .as("NOT (x != v) is the double negation spelled the other way")
+        .isEqualTo(compile("NOT NOT black.title = \"GM\"").selectSql());
+  }
+
+  /**
+   * The perspective path is the one the issue was filed from: {@code opponent.title} resolves to a
+   * CASE over both title columns, so the negation wraps the whole CASE. Wrapping rather than
+   * duplicating it into an {@code IS NULL OR ...} is load-bearing — the CASE carries a player bind
+   * param, and a second rendering would need a second param in the right position.
+   */
+  @Test
+  public void testNegatedPerspectiveTitleKeepsUntitledOpponents() {
+    CompiledQuery result = compiler.compile(Parser.parse("opponent.title != \"GM\""), "hikaru");
+
+    assertThat(result.selectSql())
+        .isEqualTo(
+            BASE_PREFIX
+                + "("
+                + PARTICIPATION_GUARD
+                + " AND (LOWER(CASE WHEN LOWER(white_username) = LOWER(?) THEN black_title"
+                + " ELSE white_title END) = LOWER(?)) IS NOT TRUE)"
+                + BASE_SUFFIX);
+    assertThat(result.parameters()).isEqualTo(List.of("hikaru", "hikaru", "hikaru", "GM"));
+  }
+
+  /**
+   * played_at is nullable too, so the date fields carry the same defect (#1256's first half) and
+   * take the same cure. Worth pinning separately because {@code date != "D"} is not compiled as a
+   * bare {@code !=}: a day is an interval, so the negation is of the whole half-open range rather
+   * than of either boundary.
+   */
+  @Test
+  public void testNegatedDateKeepsRowsWithNoPlayedAt() {
+    CompiledQuery result = compile("date != \"2026-07-01\"");
+    assertThat(result.selectSql())
+        .isEqualTo(BASE_PREFIX + "(played_at >= ? AND played_at < ?) IS NOT TRUE" + BASE_SUFFIX);
+    assertThat(result.parameters())
+        .isEqualTo(List.of(utc("2026-07-01T00:00:00Z"), utc("2026-07-02T00:00:00Z")));
+
+    // The other spelling differs by one redundant pair of parens and nothing else: the day range
+    // arrives at the negation already wrapped, and negate() does not inspect what it is handed.
+    // That the two select the same rows is pinned where it can actually be observed, in
+    // GameFeatureDaoTest.dateOperators_boundaryInstantsOnH2.
+    assertThat(compile("NOT date = \"2026-07-01\"").selectSql())
+        .isEqualTo(BASE_PREFIX + "((played_at >= ? AND played_at < ?)) IS NOT TRUE" + BASE_SUFFIX);
   }
 
   @Test
@@ -552,15 +660,6 @@ public class SqlCompilerTest {
     CompiledQuery result = compile("date = \"2026-07-01\"");
     assertThat(result.selectSql())
         .isEqualTo(BASE_PREFIX + "(played_at >= ? AND played_at < ?)" + BASE_SUFFIX);
-    assertThat(result.parameters())
-        .isEqualTo(List.of(utc("2026-07-01T00:00:00Z"), utc("2026-07-02T00:00:00Z")));
-  }
-
-  @Test
-  public void testDateInequalityExcludesDayRange() {
-    CompiledQuery result = compile("date != \"2026-07-01\"");
-    assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "(played_at < ? OR played_at >= ?)" + BASE_SUFFIX);
     assertThat(result.parameters())
         .isEqualTo(List.of(utc("2026-07-01T00:00:00Z"), utc("2026-07-02T00:00:00Z")));
   }

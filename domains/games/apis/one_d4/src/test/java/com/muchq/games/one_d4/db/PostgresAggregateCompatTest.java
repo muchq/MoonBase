@@ -550,6 +550,78 @@ public class PostgresAggregateCompatTest {
   }
 
   /**
+   * #1302's cure on the deployment target. Every negation compiles to {@code (predicate) IS NOT
+   * TRUE}, which is the construct that decides whether a NULL-valued row survives a negated filter
+   * — so a dialect that parsed it differently, or applied it to the CASE's result rather than the
+   * comparison's, would silently restore the bug in production while H2 stayed green.
+   *
+   * <p>Both nullable shapes in one fixture: a NULL title reached through the perspective CASE, and
+   * a NULL played_at reached through the date range rewrite. The positive halves are the controls —
+   * without them "every negation returns everything" would pass.
+   */
+  @Test
+  public void negationIsNullInclusiveOnPostgres() {
+    dao.insertBatch(
+        List.of(
+            game(
+                "neg-gm",
+                "hikaru",
+                "gmfoe",
+                null,
+                "GM",
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-06-15T10:00:00Z")),
+            game(
+                "neg-fm",
+                "fmfoe",
+                "hikaru",
+                "FM",
+                null,
+                "0-1",
+                "Caro Kann",
+                Instant.parse("2026-06-15T11:00:00Z")),
+            game(
+                "neg-untitled",
+                "hikaru",
+                "untitled_foe",
+                null,
+                null,
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-06-16T10:00:00Z")),
+            game(
+                "neg-noplayedat",
+                "hikaru",
+                "untitled_foe2",
+                null,
+                null,
+                "1-0",
+                "Caro Kann",
+                null)));
+
+    assertThat(urlsMatching("opponent.title != \"GM\"", "hikaru"))
+        .containsExactly("neg-fm", "neg-noplayedat", "neg-untitled");
+    assertThat(urlsMatching("NOT opponent.title = \"GM\"", "hikaru"))
+        .containsExactly("neg-fm", "neg-noplayedat", "neg-untitled");
+    assertThat(urlsMatching("NOT opponent.title IN [\"GM\", \"FM\"]", "hikaru"))
+        .containsExactly("neg-noplayedat", "neg-untitled");
+    assertThat(urlsMatching("opponent.title = \"GM\"", "hikaru")).containsExactly("neg-gm");
+
+    // The physical columns take the same branch of compileComparison but not the same one as the
+    // perspective fields above, so they are negated here too. white_title is NULL on three rows.
+    assertThat(urlsMatching("white.title != \"FM\""))
+        .containsExactly("neg-gm", "neg-noplayedat", "neg-untitled");
+    assertThat(urlsMatching("NOT white.title IN [\"FM\"]"))
+        .containsExactly("neg-gm", "neg-noplayedat", "neg-untitled");
+    assertThat(urlsMatching("white.title = \"FM\"")).containsExactly("neg-fm");
+
+    assertThat(urlsMatching("date != \"2026-06-15\""))
+        .containsExactly("neg-noplayedat", "neg-untitled");
+    assertThat(urlsMatching("date = \"2026-06-15\"")).containsExactly("neg-fm", "neg-gm");
+  }
+
+  /**
    * A perspective filter, a date bound and the motif_count ORDER BY each contribute bind params at
    * different points in the statement. Postgres rejects a placeholder whose inferred type does not
    * match the value, so a misordered list fails here even when H2 would coerce it.

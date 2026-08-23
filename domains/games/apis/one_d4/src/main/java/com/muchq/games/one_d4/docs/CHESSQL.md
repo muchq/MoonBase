@@ -201,12 +201,30 @@ numerically in the tiebreak. Rows with a NULL elo (chess.com omitted that side's
 form a `null` bucket, like the title fields. One width per field per request:
 `["me.elo(100)", "me.elo(200)"]` is rejected rather than silently picking one.
 
-Like the physical `*.title` / `*.elo` columns they resolve to, `me.title`, `opponent.title`,
-`me.elo`, and `opponent.elo` follow SQL NULL semantics: NULLs (untitled players, rows indexed
-before the title columns existed, sides whose rating chess.com omitted) never match a comparison
-— so `opponent.title != "GM"` returns only games against *titled* non-GM opponents, not games
-against untitled ones (#1302 tracks making `!=` NULL-inclusive; until then, grouping by
-`opponent.title` is how to count the `null` bucket `!=` drops).
+### Unset fields and negation
+
+Most columns are nullable, and a row can be unset for ordinary reasons: an untitled player, a
+side whose rating chess.com omitted, a row indexed before the title columns existed. Two rules
+cover every filter over them.
+
+**A positive comparison never matches an unset field.** `opponent.title = "GM"`,
+`opponent.title IN ["GM", "IM"]`, and `me.elo < 2500` all skip the rows where that field is
+NULL. Nothing is known about them, so they match nothing you name.
+
+**A negated one always matches it.** `opponent.title != "GM"`, `NOT opponent.title = "GM"`, and
+`NOT opponent.title IN ["GM", "IM"]` all *include* untitled opponents — a title nobody knows is
+not `GM`. The same holds for `date != "D"` on a game with no timestamp, and for `NOT` in front of
+any condition.
+
+Together these partition the corpus: `opponent.title = "GM"` and `opponent.title != "GM"` have no
+overlap and no gap, so the two counts sum to the games the rest of your filter admits. That
+reconciliation is worth using — it is the check that would have caught the bug this behavior
+replaces (#1302), where negated filters silently dropped every untitled opponent.
+
+Note that negation is therefore *not* the same as flipping an ordering operator:
+`NOT me.elo > 2500` includes games where the rating is unknown, while `me.elo <= 2500` does not.
+
+To count unset rows directly, group by the field on `/v1/aggregate` and read the `null` bucket.
 
 ## Motifs
 
@@ -249,10 +267,10 @@ against the `motif_occurrences` table. 11 motifs are stored directly as rows in 
   converted to UTC. A bare date on `played.at` is rejected at compile time — day and month
   filtering is what `date` / `month` are for (see [Date scoping](#date-scoping)).
 - **No NULL literal.** `played.at = NULL` — or any `= NULL` / `!= NULL`, or SQL's `IS NULL` — is
-  a syntax error, deliberately: a game whose field is unset never matches *any* comparison (the
-  NULL semantics described for the title/elo fields above), so there is nothing a NULL value
-  could usefully mean in a filter. To count unset rows, group by the field on `/v1/aggregate`
-  and read the `null` group.
+  a syntax error, deliberately. Unset fields are reached through ordinary comparisons instead:
+  a negated filter includes them and a positive one excludes them (see
+  [Unset fields and negation](#unset-fields-and-negation)), and grouping by the field on
+  `/v1/aggregate` counts them under the `null` group.
 
 ## Examples
 
