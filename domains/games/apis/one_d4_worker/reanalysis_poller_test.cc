@@ -82,23 +82,19 @@ class PassThrough : public ReanalysisQueue {
     return target_.ClaimNext(owner, lease);
   }
   absl::StatusOr<bool> Heartbeat(ClaimRef claim, absl::Duration lease) override {
-    return target_.Heartbeat({.id = claim.id, .owner = claim.owner}, lease);
+    return target_.Heartbeat(claim, lease);
   }
   absl::StatusOr<bool> Progress(ClaimRef claim, std::string_view cursor, int p, int f) override {
-    return target_.Progress({.id = claim.id, .owner = claim.owner}, cursor, p, f);
+    return target_.Progress(claim, cursor, p, f);
   }
   absl::StatusOr<bool> Complete(ClaimRef claim, int p, int f) override {
-    return target_.Complete({.id = claim.id, .owner = claim.owner}, p, f);
+    return target_.Complete(claim, p, f);
   }
   absl::StatusOr<bool> Fail(ClaimRef claim, std::string_view message) override {
-    return target_.Fail({.id = claim.id, .owner = claim.owner}, message);
+    return target_.Fail(claim, message);
   }
-  absl::StatusOr<bool> HandBack(ClaimRef claim) override {
-    return target_.HandBack({.id = claim.id, .owner = claim.owner});
-  }
-  absl::StatusOr<bool> Release(ClaimRef claim) override {
-    return target_.Release({.id = claim.id, .owner = claim.owner});
-  }
+  absl::StatusOr<bool> HandBack(ClaimRef claim) override { return target_.HandBack(claim); }
+  absl::StatusOr<bool> Release(ClaimRef claim) override { return target_.Release(claim); }
 
  private:
   ReanalysisQueue& target_;
