@@ -47,16 +47,17 @@ class QueueLease : public LeaseKeeper {
         id_(std::move(id)),
         owner_(std::move(owner)),
         lease_(lease),
-        core_([this] { return queue_.Heartbeat(id_, owner_, lease_); }, lease, renew_every,
-              max_run) {}
+        core_([this] { return queue_.Heartbeat({.id = id_, .owner = owner_}, lease_); }, lease,
+              renew_every, max_run) {}
 
   bool Keep() override { return core_.Keep(); }
 
   bool OutOfTime() override { return core_.OutOfTime(); }
 
   bool Report(int games_indexed) override {
-    return core_.Fenced(
-        [this, games_indexed] { return queue_.Progress(id_, owner_, games_indexed); });
+    return core_.Fenced([this, games_indexed] {
+      return queue_.Progress({.id = id_, .owner = owner_}, games_indexed);
+    });
   }
 
   bool lost() const { return core_.lost(); }
@@ -113,7 +114,7 @@ absl::StatusOr<RunOutcome> Poller::RunClaimed(const Claim& claim) {
   // of looping on it forever — or is refused because the range really did
   // change hands, and Finish calls that what it is.
   if (report.ok() && report->stopped.has_value() && *report->stopped == Stopped::kRunCeiling) {
-    return Finish(RunOutcome::kInterrupted, queue_.Release(job.id, owner));
+    return Finish(RunOutcome::kInterrupted, queue_.Release(claim.ref()));
   }
 
   // Before anything else, including a failure: a run that lost its lease
@@ -125,16 +126,16 @@ absl::StatusOr<RunOutcome> Poller::RunClaimed(const Claim& claim) {
     // handed back by the API, and a chess.com body or a libpq diagnostic
     // in there is an internal detail told to whoever asked for the index.
     LOG(ERROR) << "Run failed request_id=" << job.id << " error=" << report.status();
-    return Finish(RunOutcome::kFailed, queue_.Fail(job.id, owner, kInternalFailure));
+    return Finish(RunOutcome::kFailed, queue_.Fail(claim.ref(), kInternalFailure));
   }
 
   // Only kShutdown reaches here; the ceiling is handled above. The
   // request did nothing wrong, so the attempt is refunded.
   if (report->stopped.has_value()) {
-    return Finish(RunOutcome::kInterrupted, queue_.HandBack(job.id, owner));
+    return Finish(RunOutcome::kInterrupted, queue_.HandBack(claim.ref()));
   }
 
-  return Finish(RunOutcome::kCompleted, queue_.Complete(job.id, owner, report->games_indexed));
+  return Finish(RunOutcome::kCompleted, queue_.Complete(claim.ref(), report->games_indexed));
 }
 
 absl::StatusOr<bool> Poller::PollOnce() {

@@ -10,6 +10,7 @@
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
+#include "domains/games/apis/one_d4_worker/claim_ref.h"
 #include "domains/games/apis/one_d4_worker/index_run.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
 #include "domains/games/apis/one_d4_worker/queue.h"
@@ -40,41 +41,31 @@ class FakeQueue : public IndexQueue {
     return job;
   }
 
-  absl::StatusOr<bool> Heartbeat([[maybe_unused]] std::string_view id,
-                                 [[maybe_unused]] std::string_view owner,
-                                 [[maybe_unused]] absl::Duration lease) override {
+  absl::StatusOr<bool> Heartbeat(ClaimRef, [[maybe_unused]] absl::Duration lease) override {
     ++heartbeats;
     return held.load();
   }
 
-  absl::StatusOr<bool> Progress([[maybe_unused]] std::string_view id,
-                                [[maybe_unused]] std::string_view owner,
-                                [[maybe_unused]] int games_indexed) override {
+  absl::StatusOr<bool> Progress(ClaimRef, [[maybe_unused]] int games_indexed) override {
     return held.load();
   }
 
-  absl::StatusOr<bool> Complete([[maybe_unused]] std::string_view id,
-                                [[maybe_unused]] std::string_view owner,
-                                int games_indexed) override {
+  absl::StatusOr<bool> Complete(ClaimRef, int games_indexed) override {
     calls.push_back(absl::StrCat("complete ", games_indexed));
     return true;
   }
 
-  absl::StatusOr<bool> Fail([[maybe_unused]] std::string_view id,
-                            [[maybe_unused]] std::string_view owner,
-                            [[maybe_unused]] std::string_view message) override {
+  absl::StatusOr<bool> Fail(ClaimRef, [[maybe_unused]] std::string_view message) override {
     calls.push_back("fail");
     return true;
   }
 
-  absl::StatusOr<bool> HandBack([[maybe_unused]] std::string_view id,
-                                [[maybe_unused]] std::string_view owner) override {
+  absl::StatusOr<bool> HandBack(ClaimRef) override {
     calls.push_back("hand back");
     return true;
   }
 
-  absl::StatusOr<bool> Release([[maybe_unused]] std::string_view id,
-                               [[maybe_unused]] std::string_view owner) override {
+  absl::StatusOr<bool> Release(ClaimRef) override {
     calls.push_back("release");
     return true;
   }

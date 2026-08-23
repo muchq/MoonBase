@@ -8,6 +8,7 @@
 
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
+#include "domains/games/apis/one_d4_worker/claim_ref.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace one_d4_worker {
@@ -43,29 +44,25 @@ class ReanalysisQueue {
   virtual absl::StatusOr<std::optional<ReanalysisJob>> ClaimNext(std::string_view owner,
                                                                  absl::Duration lease) = 0;
 
-  virtual absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
-                                         absl::Duration lease) = 0;
+  virtual absl::StatusOr<bool> Heartbeat(ClaimRef claim, absl::Duration lease) = 0;
 
   /// Records how far the pass has got. Carries the cursor as well as the
   /// counts, because resuming needs the position and reporting needs the
   /// numbers, and writing them separately lets a crash between the two
   /// leave a count that does not match the position.
-  virtual absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
-                                        std::string_view cursor_game_url, int games_processed,
-                                        int games_failed) = 0;
-
-  virtual absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner,
+  virtual absl::StatusOr<bool> Progress(ClaimRef claim, std::string_view cursor_game_url,
                                         int games_processed, int games_failed) = 0;
 
-  virtual absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
-                                    std::string_view message) = 0;
+  virtual absl::StatusOr<bool> Complete(ClaimRef claim, int games_processed, int games_failed) = 0;
+
+  virtual absl::StatusOr<bool> Fail(ClaimRef claim, std::string_view message) = 0;
 
   /// Gives the row back unfinished and refunds the attempt. For a shutdown,
   /// which is not the request's fault.
-  virtual absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) = 0;
+  virtual absl::StatusOr<bool> HandBack(ClaimRef claim) = 0;
 
   /// Gives the row back unfinished, attempt spent.
-  virtual absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) = 0;
+  virtual absl::StatusOr<bool> Release(ClaimRef claim) = 0;
 };
 
 /// ReanalysisQueue over Postgres.
@@ -80,17 +77,13 @@ class PgReanalysisQueue : public ReanalysisQueue {
 
   absl::StatusOr<std::optional<ReanalysisJob>> ClaimNext(std::string_view owner,
                                                          absl::Duration lease) override;
-  absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
-                                 absl::Duration lease) override;
-  absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
-                                std::string_view cursor_game_url, int games_processed,
-                                int games_failed) override;
-  absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner, int games_processed,
-                                int games_failed) override;
-  absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
-                            std::string_view message) override;
-  absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override;
-  absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override;
+  absl::StatusOr<bool> Heartbeat(ClaimRef claim, absl::Duration lease) override;
+  absl::StatusOr<bool> Progress(ClaimRef claim, std::string_view cursor_game_url,
+                                int games_processed, int games_failed) override;
+  absl::StatusOr<bool> Complete(ClaimRef claim, int games_processed, int games_failed) override;
+  absl::StatusOr<bool> Fail(ClaimRef claim, std::string_view message) override;
+  absl::StatusOr<bool> HandBack(ClaimRef claim) override;
+  absl::StatusOr<bool> Release(ClaimRef claim) override;
 
  private:
   pg::Client& client_;

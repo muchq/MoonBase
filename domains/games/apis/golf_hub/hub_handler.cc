@@ -609,7 +609,7 @@ bool HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore:
     entry.version = row.version;
     if (row.state.has_value()) entry.state.emplace(*row.state);
     for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
-    if (over) StageGameOverLocked(room_id, room, row.game_id, outbox);
+    if (over) StageGameOverLocked(room, row.game_id, outbox);
   }
   for (auto game = room.games.begin(); game != room.games.end();) {
     if (stored_ids.contains(game->first)) {
@@ -1813,8 +1813,7 @@ void HubHandler::StageGameViewsLocked(const std::string& game_id, const GameEntr
   }
 }
 
-void HubHandler::StageGameOverLocked([[maybe_unused]] const std::string& room_id, Room& room,
-                                     const std::string& game_id, Outbox& outbox) {
+void HubHandler::StageGameOverLocked(Room& room, const std::string& game_id, Outbox& outbox) {
   const auto game = room.games.find(game_id);
   if (game == room.games.end() || !game->second.started()) return;
   const golf::GameState& state = *game->second.state;
@@ -1866,7 +1865,7 @@ void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
     member->second.total_score += delta.score;
   }
 
-  StageGameOverLocked(room_id, room, game_id, outbox);
+  StageGameOverLocked(room, game_id, outbox);
   // The terminal row is the durable handoff to other instances. It
   // remains until the room is deleted and its foreign-key cascade runs;
   // deleting it here can outrun a listener that has not handled the
