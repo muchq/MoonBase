@@ -19,8 +19,8 @@ std::string Seconds(absl::Duration lease) {
 }
 
 int ToInt(const std::optional<std::string>& value) {
-  // SimpleAtoi leaves parsed unspecified when it fails, so absent and
-  // unparseable both have to answer 0 here rather than fall through.
+  // SimpleAtoi leaves parsed unspecified on failure, so the 0 has to be
+  // returned explicitly rather than read back out of parsed.
   int parsed = 0;
   if (!value.has_value() || !absl::SimpleAtoi(*value, &parsed)) return 0;
   return parsed;
