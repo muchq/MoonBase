@@ -95,12 +95,18 @@ build:sanitizer --strip=never
 # in a file whose own header said which mutex the field needed.
 #
 # Scoped to domains/ because external code is not ours to annotate.
-build --per_file_copt=domains/.*@-Werror=thread-safety-analysis
+build --per_file_copt=^domains/.*@-Werror=thread-safety-analysis
 
 # No warnings in our own C++ (#1408), same scoping and for the same reason:
 # a warning in a dependency is not ours to fix, and one buried in a passing
 # build is one nobody reads.
-build --per_file_copt=domains/.*@-Wall,-Werror
+#
+# Anchored: per_file_copt matches the exec path, so an unanchored domains/
+# also catches generated sources under bazel-out/*/bin/domains/ — including
+# cc_proto_library output, which has no copts attribute to opt back out
+# with. Excluding them afterwards does not work either, because the filter
+# matches the owner label as well as the path.
+build --per_file_copt=^domains/.*@-Wall,-Werror
 
 build:sanitizer --copt=-g
 build:sanitizer --copt=-fno-omit-frame-pointer
