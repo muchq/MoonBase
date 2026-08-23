@@ -864,6 +864,31 @@ public class GameFeatureDaoTest {
   }
 
   /**
+   * The sentinel is not the unknown, and negation does not confuse them. A rating chess.com omitted
+   * is written as 0 rather than NULL, and 0 is a known value: it answers every comparison, so the
+   * negated filter and the flipped operator agree about it. Only a genuine NULL splits them.
+   *
+   * <p>Review read the CHESSQL.md callout the other way — that a negated filter would drop the
+   * 0-rated row the way it drops nothing else — so the distinction is pinned here rather than left
+   * to the prose. The 0 row appears on both sides below; the NULL row appears only under negation.
+   */
+  @Test
+  public void query_negationTreatsTheZeroRatingSentinelAsKnown() {
+    dao.insertBatch(
+        List.of(
+            eloGame("https://chess.com/game/sent-zero", "hikaru", "unrated", 2800, 0),
+            eloGame("https://chess.com/game/sent-null", "hikaru", "unknown", 2800, null),
+            eloGame("https://chess.com/game/sent-high", "hikaru", "strong", 2800, 2600)));
+
+    assertThat(urlsMatchingAs("NOT opponent.elo > 2500", "hikaru"))
+        .as("0 is not above 2500, and neither is the unknown")
+        .containsExactly("https://chess.com/game/sent-null", "https://chess.com/game/sent-zero");
+    assertThat(urlsMatchingAs("opponent.elo <= 2500", "hikaru"))
+        .as("0 is below 2500; the unknown is not, which is the only difference")
+        .containsExactly("https://chess.com/game/sent-zero");
+  }
+
+  /**
    * #1256's second half, pinned: a row with no played_at survives the read path. The mapper used to
    * call {@code rs.getTimestamp("played_at").toInstant()} unguarded, so such a row crashed
    * /v1/query the moment a filter matched it — and until #1302 no date filter ever did, which is

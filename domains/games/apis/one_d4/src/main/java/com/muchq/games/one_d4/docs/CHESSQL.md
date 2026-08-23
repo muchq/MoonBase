@@ -211,7 +211,10 @@ rules cover every filter over them.
 
 (Ratings are the exception to watch: a side whose rating chess.com omitted is stored as **0**, not
 NULL, so `me.elo < 2500` *matches* it and `me.elo(100)` files it under `0` rather than in the null
-bucket. That is a write-side sentinel this section's rules cannot reach.)
+bucket. That is a write-side sentinel this section's rules cannot reach — and note that 0 is a
+*known* value, so both rules below treat it like any other rating. It is not unset, and neither
+rule gives it special handling: `NOT me.elo > 2500` matches it for the ordinary reason that 0 is
+not above 2500.)
 
 **A positive comparison never matches an unset field.** `opponent.title = "GM"`,
 `opponent.title IN ["GM", "IM"]`, and `me.elo < 2500` all skip the rows where that field is
