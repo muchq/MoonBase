@@ -6,6 +6,7 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/one_d4_worker/occurrence_writer.h"
 #include "domains/games/libs/chess_cpp/side.h"
@@ -150,7 +151,12 @@ absl::StatusOr<std::optional<int>> PgGameSink::MonthAlreadyIndexed(const Indexed
   if (found->rows() == 0) return std::nullopt;
   const std::optional<std::string> count = found->Get(0, 0);
   if (!count.has_value()) return std::nullopt;
-  return std::stoi(*count);
+  // stoi throws, and nothing here catches; a malformed row is a status.
+  int games = 0;
+  if (!absl::SimpleAtoi(*count, &games)) {
+    return absl::InternalError("indexed_periods.games_count is not an integer");
+  }
+  return games;
 }
 
 absl::Status PgGameSink::RecordMonth(const IndexedMonth& month) {

@@ -103,6 +103,11 @@ build --per_file_copt=^domains/.*@-Werror=thread-safety-analysis
 # path does not work either — the filter matches the owner label too.
 build --per_file_copt=^domains/.*@-Wall,-Werror
 
+# -Werror is per translation unit, not per file, so a dependency's header
+# is fatal in our compile without this: it puts external headers behind
+# -isystem, where warnings are suppressed.
+build --features=external_include_paths
+
 build:sanitizer --copt=-g
 build:sanitizer --copt=-fno-omit-frame-pointer
 build:sanitizer --copt=-fno-optimize-sibling-calls
