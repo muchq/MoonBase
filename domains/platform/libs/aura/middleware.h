@@ -90,7 +90,7 @@ smithy::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink>
 /// services without a rate limiter — the guard is skipped entirely.
 struct ChainOptions {
   std::shared_ptr<HttpMetricsSink> metrics;
-  std::function<bool(const std::string& client)> allow_request;
+  std::function<bool(const std::string& client)> allow_request = nullptr;
   smithy::http::TrustedProxies trusted_proxies = smithy::http::TrustedProxies::None();
   std::chrono::seconds retry_after = std::chrono::seconds(60);
 };

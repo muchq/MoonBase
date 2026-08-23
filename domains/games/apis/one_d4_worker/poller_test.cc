@@ -23,8 +23,8 @@ using ::testing::IsEmpty;
 /// Records what the poller asked of the queue, and answers as told.
 class FakeQueue : public IndexQueue {
  public:
-  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
-                                                    absl::Duration lease) override {
+  absl::StatusOr<std::optional<IndexJob>> ClaimNext(
+      std::string_view owner, [[maybe_unused]] absl::Duration lease) override {
     ++claims;
     owners.push_back(std::string(owner));
     if (claim_fails) return absl::UnavailableError("queue is down");
@@ -34,8 +34,8 @@ class FakeQueue : public IndexQueue {
     return job;
   }
 
-  absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
-                                 absl::Duration lease) override {
+  absl::StatusOr<bool> Heartbeat([[maybe_unused]] std::string_view id, std::string_view owner,
+                                 [[maybe_unused]] absl::Duration lease) override {
     ++heartbeats;
     {
       const absl::MutexLock lock(fence_mu);
@@ -45,7 +45,7 @@ class FakeQueue : public IndexQueue {
     return lease_held.load();
   }
 
-  absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
+  absl::StatusOr<bool> Progress([[maybe_unused]] std::string_view id, std::string_view owner,
                                 int games_indexed) override {
     progress.push_back(games_indexed);
     {
@@ -281,7 +281,7 @@ TEST(Poller, CompletesAJobItRan) {
   queue.next = AJob();
   Poller poller(
       queue,
-      [](const Claim& claim, LeaseKeeper&) {
+      []([[maybe_unused]] const Claim& claim, LeaseKeeper&) {
         RunReport report;
         report.games_indexed = 42;
         return report;

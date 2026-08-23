@@ -56,11 +56,13 @@ class Detector {
   virtual Motif motif() const = 0;
 
   /// Once per position after a move, in order. Never the starting position.
-  virtual void OnPosition(const chess_cpp::Position& position, Findings& out) {}
+  virtual void OnPosition([[maybe_unused]] const chess_cpp::Position& position,
+                          [[maybe_unused]] Findings& out) {}
 
   /// Once, with the final position, for patterns that are only ever how a
   /// game ended. Not called for a game with no moves.
-  virtual void OnGameEnd(const chess_cpp::Position& final_position, Findings& out) {}
+  virtual void OnGameEnd([[maybe_unused]] const chess_cpp::Position& final_position,
+                         [[maybe_unused]] Findings& out) {}
 };
 
 }  // namespace one_d4

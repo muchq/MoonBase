@@ -57,6 +57,17 @@ Bazel formatting do.
 - **Postgres-gated suites skip silently** without `PG_TEST_DB_URL` /
   `GOLF_HUB_TEST_DB_URL`. CI supplies them from a `postgres:18` service; a
   local green run may have exercised no SQL at all.
+- **C++ warnings are errors for `domains/` (#1408)** — `.bazelrc` sets
+  `--per_file_copt=^domains/.*@-Wall,-Werror`. The anchor is load-bearing:
+  unanchored, it also matches generated sources under `bazel-out/*/bin/domains/`,
+  and `cc_proto_library` has no `copts` to opt back out with. You cannot exclude
+  them afterwards either — the filter matches the owner label as well as the
+  path, so a `-bazel-out.*` exclusion silently changes nothing.
+  To land a fix when a dependency bump turns a new warning fatal, add
+  `build --per_file_copt=^domains/.*@-Wno-error=<check>` **below** that line;
+  later flags win. Reaching for `copts` on the target does not reliably work,
+  because the `-Wall` from this flag comes after and re-enables the check.
+
 - **NullAway is on by default for all of `com.muchq`**, with exemptions listed
   one by one in `_NULLAWAY_LEGACY_OPT_OUTS` (`bazel/rules/java.bzl`). A new
   package is analyzed the day it exists; nobody has to remember to add it. The

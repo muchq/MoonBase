@@ -108,7 +108,7 @@ struct OtelConfig {
 
   /// Explicit bucket boundaries per histogram name, applied as SDK views.
   /// See RegisterHistogramBounds.
-  std::map<std::string, std::vector<double>> histogram_bounds;
+  std::map<std::string, std::vector<double>> histogram_bounds = {};
 
   /// Whether metrics collection is enabled. Set to false to disable all metrics.
   bool enable_metrics = true;

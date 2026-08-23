@@ -1813,7 +1813,7 @@ void HubHandler::StageGameViewsLocked(const std::string& game_id, const GameEntr
   }
 }
 
-void HubHandler::StageGameOverLocked(const std::string& room_id, Room& room,
+void HubHandler::StageGameOverLocked([[maybe_unused]] const std::string& room_id, Room& room,
                                      const std::string& game_id, Outbox& outbox) {
   const auto game = room.games.find(game_id);
   if (game == room.games.end() || !game->second.started()) return;

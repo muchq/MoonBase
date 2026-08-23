@@ -15,7 +15,7 @@ using image_core::RGB_Double;
 
 namespace constants {
 
-const RGB_Double UNSET{-1.0};
+const RGB_Double UNSET{-1.0, 0.0, 0.0};
 const RGB_Double BLACK{0.0, 0.0, 0.0};
 const RGB_Double DEEP_SPACE{13.0, 12.0, 24.0};
 const RGB_Double RED{255.0, 0.0, 0.0};

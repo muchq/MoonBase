@@ -95,7 +95,18 @@ build:sanitizer --strip=never
 # in a file whose own header said which mutex the field needed.
 #
 # Scoped to domains/ because external code is not ours to annotate.
-build --per_file_copt=domains/.*@-Werror=thread-safety-analysis
+build --per_file_copt=^domains/.*@-Werror=thread-safety-analysis
+
+# Anchored: per_file_copt matches the exec path, so unanchored this also
+# catches generated sources under bazel-out/*/bin/domains/, and
+# cc_proto_library has no copts to exclude them with. Excluding them by
+# path does not work either — the filter matches the owner label too.
+build --per_file_copt=^domains/.*@-Wall,-Wextra,-Werror
+
+# -Werror is per translation unit, not per file, so a dependency's header
+# is fatal in our compile without this: it puts external headers behind
+# -isystem, where warnings are suppressed.
+build --features=external_include_paths
 
 build:sanitizer --copt=-g
 build:sanitizer --copt=-fno-omit-frame-pointer

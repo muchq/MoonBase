@@ -26,7 +26,8 @@ smithy::Error ToSmithyError(const absl::Status& status) {
 }
 
 smithy::Outcome<gen::ShortenOutput> SmithyShortenerHandler::Shorten(
-    const gen::ShortenInput& input, const smithy::server::RequestContext& context) {
+    const gen::ShortenInput& input,
+    [[maybe_unused]] const smithy::server::RequestContext& context) {
   absl::StatusOr<std::string> slug = shortener_->Shorten(input.longUrl, input.expiresAt);
   if (!slug.ok()) {
     return ToSmithyError(slug.status());
@@ -37,7 +38,8 @@ smithy::Outcome<gen::ShortenOutput> SmithyShortenerHandler::Shorten(
 }
 
 smithy::Outcome<gen::RedirectOutput> SmithyShortenerHandler::Redirect(
-    const gen::RedirectInput& input, const smithy::server::RequestContext& context) {
+    const gen::RedirectInput& input,
+    [[maybe_unused]] const smithy::server::RequestContext& context) {
   absl::StatusOr<std::optional<std::string>> resolved = shortener_->Resolve(input.slug);
   if (!resolved.ok()) {
     return ToSmithyError(resolved.status());

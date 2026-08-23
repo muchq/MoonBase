@@ -134,8 +134,8 @@ class FailingHistoryChatStore final : public ChatStore {
                                  const std::string& notify_payload) override {
     return delegate_->Append(room_id, player_id, text, notify_payload);
   }
-  absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
-                                                  std::size_t limit) override {
+  absl::StatusOr<std::vector<ChatRow>> LoadRecent([[maybe_unused]] const std::string& room_id,
+                                                  [[maybe_unused]] std::size_t limit) override {
     return absl::InternalError("chat database unavailable");
   }
   absl::StatusOr<std::vector<ChatRow>> LoadAfter(const std::string& room_id,
@@ -158,9 +158,10 @@ class FailingAppendChatStore final : public ChatStore {
   explicit FailingAppendChatStore(std::shared_ptr<ChatStore> delegate)
       : delegate_(std::move(delegate)) {}
 
-  absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
-                                 const std::string& text,
-                                 const std::string& notify_payload) override {
+  absl::StatusOr<ChatRow> Append([[maybe_unused]] const std::string& room_id,
+                                 [[maybe_unused]] const std::string& player_id,
+                                 [[maybe_unused]] const std::string& text,
+                                 [[maybe_unused]] const std::string& notify_payload) override {
     return absl::UnavailableError("chat store unreachable");
   }
   absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
@@ -186,9 +187,10 @@ class NotAMemberChatStore final : public ChatStore {
   explicit NotAMemberChatStore(std::shared_ptr<ChatStore> delegate)
       : delegate_(std::move(delegate)) {}
 
-  absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
-                                 const std::string& text,
-                                 const std::string& notify_payload) override {
+  absl::StatusOr<ChatRow> Append([[maybe_unused]] const std::string& room_id,
+                                 [[maybe_unused]] const std::string& player_id,
+                                 [[maybe_unused]] const std::string& text,
+                                 [[maybe_unused]] const std::string& notify_payload) override {
     return NotAMemberError();
   }
   absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
