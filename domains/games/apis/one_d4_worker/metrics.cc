@@ -43,6 +43,43 @@ void WorkerMetrics::Declare() {
   for (std::string_view result : kReanalyzedResults) {
     metrics_.DeclareCounter(kGamesReanalyzedMetric, With("result", std::string(result)));
   }
+  for (std::string_view outcome : kSweepOutcomes) {
+    metrics_.DeclareCounter(kRetentionSweepsMetric, With("outcome", std::string(outcome)));
+  }
+  for (std::string_view table : kRetentionTables) {
+    metrics_.DeclareCounter(kRetentionRowsDeletedMetric, With("table", std::string(table)));
+  }
+  for (std::string_view arm : kSettleArms) {
+    metrics_.DeclareCounter(kRetentionRequestsSettledMetric, With("arm", std::string(arm)));
+  }
+}
+
+void WorkerMetrics::SweepFinished(std::string_view outcome, const SweepReport& report) {
+  metrics_.RecordCounter(kRetentionSweepsMetric, 1, With("outcome", std::string(outcome)));
+
+  // Zeroes are skipped rather than recorded: the series already exist from
+  // Declare, so adding nothing is what "nothing to delete" should look like.
+  const std::pair<std::string_view, int> deleted[] = {
+      {"game_features", report.games_deleted},
+      {"indexed_periods", report.periods_deleted},
+      {"indexing_requests", report.requests_deleted},
+  };
+  for (const auto& [table, rows] : deleted) {
+    if (rows > 0) {
+      metrics_.RecordCounter(kRetentionRowsDeletedMetric, rows, With("table", std::string(table)));
+    }
+  }
+
+  const std::pair<std::string_view, int> settled[] = {
+      {"poisoned", report.poisoned},
+      {"stalled", report.stalled},
+      {"released", report.released},
+  };
+  for (const auto& [arm, rows] : settled) {
+    if (rows > 0) {
+      metrics_.RecordCounter(kRetentionRequestsSettledMetric, rows, With("arm", std::string(arm)));
+    }
+  }
 }
 
 void WorkerMetrics::PassFinished(RunOutcome outcome, int games_processed, int games_failed) {

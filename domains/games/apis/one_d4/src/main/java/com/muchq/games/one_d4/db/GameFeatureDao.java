@@ -192,9 +192,12 @@ public class GameFeatureDao implements GameFeatureStore {
    */
   @Override
   public int deleteOlderThan(Instant threshold) {
-    // Bounded at the sweep timeout, not the read one: RetentionWorker shares the warmer's
-    // scheduled pool with no lease or interrupt machinery, and this cascade delete is the
-    // statement most likely to sit behind a lock. Idempotent, so a truncated pass loses nothing.
+    // No Java caller since the sweep moved to one_d4_worker (#1424) — the C++ sweep issues its
+    // own equivalent of this statement. Kept because the store interface is the Java side's, and
+    // the DaoTest below is what documents the semantics the C++ copy has to match.
+    //
+    // Bounded at the sweep timeout rather than the read one: a cascade delete is the statement
+    // most likely to sit behind a lock. Idempotent, so a truncated pass loses nothing.
     return StatementTimeouts.withStatementTimeout(
         jdbi,
         StatementTimeouts.RETENTION_SWEEP_SECONDS,

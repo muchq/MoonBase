@@ -51,7 +51,7 @@ flowchart TB
   end
 
   subgraph Retention["Retention"]
-    RetentionWorker["RetentionWorker\n@Scheduled 1h\n(7d data / 30d requests)"]
+    RetentionSweep["one_d4_worker sweep\nhourly\n(7d data / 30d requests)"]
   end
 
   subgraph Store["Stores & DB"]
@@ -82,9 +82,9 @@ flowchart TB
   Worker -->|claims via lease| DB
   Worker --> ChessAPI
 
-  RetentionWorker --> GameStore
-  RetentionWorker --> PeriodStore
-  RetentionWorker --> RequestStore
+  RetentionSweep --> GameStore
+  RetentionSweep --> PeriodStore
+  RetentionSweep --> RequestStore
 ```
 
 **Index flow:** Client posts to `POST /v1/index` → a row is stored in `indexing_requests`, which is the work queue — creating the row is the whole dispatch. `one_d4_worker` (see `domains/games/apis/one_d4_worker`) polls that table, claims the oldest unheld row under a lease, fetches games from Chess.com per month (skipping months already in IndexedPeriodStore), runs the detectors from `one_d4_motifs`, and flushes to game_features + motif_occurrences and IndexedPeriodStore. Callers follow the request via `GET /v1/index/{id}`.
@@ -93,7 +93,9 @@ flowchart TB
 
 **First-page cache:** The exact request 1d4_web fires on first load (`num.moves >= 0`, limit 25, offset 0, no player) is answered from an in-memory snapshot kept warm by FirstPageWarmer, which re-runs the query every 30s — scheduled rather than lazily populated because on a low-traffic site a lazy cache misses for exactly the first visitor it exists for. Staleness is bounded at ~60s by time, not by write invalidation, since index workers on other JVMs can write to the shared database; a snapshot older than that is reloaded through the cache on demand, with concurrent cold misses sharing a single query. See `docs/API.md` § First-page cache.
 
-**Retention:** RetentionWorker runs hourly. It deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days, and indexing_requests older than 30 days — games first, so a request and its games clear in one pass. It also settles live requests nobody is working on: a lapsed lease returns the work to the queue for another worker, and only an exhausted attempt count or a fleet that is demonstrably not running anything retires a request to FAILED. Since the sweep is hourly, those windows say when a request becomes eligible, not when it is settled.
+**Retention:** the sweep runs hourly, in `one_d4_worker` rather than here (#1424) — its
+guarantees are cross-worker facts ("no worker anywhere holds a live lease"), so it lives in the
+process that holds the leases. It deletes game_features, motif_occurrences (via FK cascade), and indexed_periods older than 7 days, and indexing_requests older than 30 days — games first, so a request and its games clear in one pass. It also settles live requests nobody is working on: a lapsed lease returns the work to the queue for another worker, and only an exhausted attempt count or a fleet that is demonstrably not running anything retires a request to FAILED. Since the sweep is hourly, those windows say when a request becomes eligible, not when it is settled.
 
 ## Running Locally
 
@@ -240,7 +242,25 @@ curl -X POST http://localhost:8080/v1/query \
 
 ### Data Retention Policy
 
-Two windows, both enforced by a background worker that runs hourly:
+The numbers below are `retention_policy.json`, which is where they live — not in either language
+(#1424). The C++ worker reads it out of its image at startup, and the Java service reads the same
+file off its classpath at class load, so neither holds a copy that could drift from the other. A
+window is changed by editing the file.
+
+That makes a malformed file a startup failure rather than a compile error, and both sides refuse to
+run on one: each checks every window is present, integral and positive, the worker exits 1 and the
+service fails class initialisation — eagerly, from a `@Context` bean, so it is a failed startup and
+not a healthy container that 500s every request.
+
+The *relationships* between the windows are checked only by the worker, which is the process that
+deletes; a contradictory file would stop it while the service went on quoting expiry dates. That
+asymmetry is bounded by the build rather than by the runtime: `retention_policy_test` loads the
+shipped file and asserts every relationship, without needing a database, so a policy that would
+take the worker down fails CI instead of the next deploy.
+
+This section is the rationale for the numbers; the JSON is the numbers.
+
+Two windows, both enforced by the hourly sweep in `one_d4_worker`:
 
 | What | Window | Measured from |
 |---|---|---|
@@ -253,7 +273,7 @@ between the two windows the surviving row is what lets `GET /v1/index/{id}` repo
 ("pruned — re-run it") rather than 404. The sweep deletes games before requests so both clear in
 one pass, and skips any request still referenced by a game.
 
-Separately, a live request that nobody is working on is settled by the retention worker. Three
+Separately, a live request that nobody is working on is settled by the same sweep. Three
 outcomes, because "nobody is working on it" means three different things:
 
 | Situation | Outcome | Why |

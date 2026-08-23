@@ -38,9 +38,12 @@
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
 #include "domains/games/apis/one_d4_worker/pg_reanalysis.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
+#include "domains/games/apis/one_d4_worker/poller_options.h"
 #include "domains/games/apis/one_d4_worker/reanalysis_poller.h"
 #include "domains/games/apis/one_d4_worker/reanalysis_queue.h"
 #include "domains/games/apis/one_d4_worker/reanalysis_run.h"
+#include "domains/games/apis/one_d4_worker/retention.h"
+#include "domains/games/apis/one_d4_worker/retention_policy.h"
 #include "domains/games/apis/one_d4_worker/title_roster.h"
 #include "domains/games/apis/one_d4_worker/worker.h"
 #include "domains/games/libs/chess_com_cpp/production_client.h"
@@ -61,6 +64,15 @@ static_assert(std::atomic<bool>::is_always_lock_free,
 
 void RequestShutdown(int /*signal*/) { g_stopping.store(true, std::memory_order_relaxed); }
 
+/// The sweep's cadence, unchanged from the Java worker it replaces. The
+/// windows say when a request becomes eligible, not when it is settled; this
+/// is what makes the difference up to an hour.
+constexpr absl::Duration kSweepInterval = absl::Hours(1);
+
+/// How often the sweep thread looks up from its wait to notice a shutdown. An
+/// hour-long sleep would hold a SIGTERM for up to an hour.
+constexpr absl::Duration kShutdownCheckInterval = absl::Seconds(5);
+
 std::string Env(const char* name, std::string fallback = "") {
   const char* value = std::getenv(name);
   return value != nullptr && *value != '\0' ? std::string(value) : std::move(fallback);
@@ -75,7 +87,7 @@ std::string Hostname() {
 
 }  // namespace
 
-int main() {
+int main(int /*argc*/, char** argv) {
   absl::InitializeLog();
   absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
 
@@ -98,15 +110,33 @@ int main() {
   // than springing into existence carrying its first event's value.
   metrics.Declare();
 
-  // The lease, its renewal interval and the run ceiling are not
-  // configured here, deliberately. They are protocol constants of the
-  // queue rather than deployment knobs: two pollers that disagree about
-  // them misbehave against each other, and schema_contract_test holds the
-  // C++ values equal to RetentionPolicy's. An environment variable would
-  // put a third value in play that no test can see, at the one moment
-  // nobody is looking. Changing one is a code change with a rationale.
-  one_d4_worker::Poller::Options poller_options;
-  poller_options.owner = one_d4_worker::OwnerId(Hostname(), getpid());
+  // The lease, its renewal interval, the run ceiling and the retention
+  // windows all come from one file — the same one the Java service reads off
+  // its classpath — rather than from constants on either side. They are
+  // protocol constants of the queue rather than deployment knobs: two pollers
+  // that disagree about them misbehave against each other.
+  //
+  // ONE_D4_RETENTION_POLICY can point this at a different file, which is a
+  // real hole in that and worth naming: an override is a policy no test sees,
+  // and the Java service has no equivalent, so a fleet running one splits from
+  // the service that quotes users their expiry dates. It exists to run against
+  // a different policy without rebuilding an image; changing the numbers for a
+  // deployment is a code change to the file below.
+  //
+  // Read before anything claims or deletes, and fatal if it cannot be read. A
+  // worker that cannot read its windows must not pick some and start sweeping
+  // against them, and the poller takes its lease vocabulary from the same
+  // load — the two disagreeing is how healthy workers lose ranges they are
+  // still working.
+  const absl::StatusOr<one_d4_worker::RetentionPolicy> policy =
+      one_d4_worker::LoadRetentionPolicy(one_d4_worker::RetentionPolicyPath(argv[0]));
+  if (!policy.ok()) {
+    LOG(ERROR) << "Cannot start: " << policy.status();
+    return 1;
+  }
+
+  const one_d4_worker::Poller::Options poller_options =
+      one_d4_worker::PollerOptionsFrom(*policy, one_d4_worker::OwnerId(Hostname(), getpid()));
 
   // How often to ask an empty queue is local: it costs one round trip and
   // affects nobody else.
@@ -196,8 +226,51 @@ int main() {
   });
   LOG(INFO) << "Polling reanalysis_requests as " << reanalysis_options.owner;
 
+  // The hourly sweep (#1424), a third thread for the same reason as the
+  // second: it is one connection doing occasional bulk deletes, and a slot
+  // spent waiting on a 120-second statement is a slot not indexing.
+  //
+  // This process rather than the Java service because the sweep's guarantees
+  // are cross-worker facts — "no worker anywhere holds a live lease" — and
+  // this is the process that holds the leases.
+  std::thread retention([&] {
+    pg::Client client(bounded_db_url);
+    // An hour after start, not immediately: nothing has aged out in the first
+    // hour of a process's life that had not already aged out before it, and a
+    // sweep racing the pool's first claims is avoidable noise.
+    while (!stopping()) {
+      for (absl::Duration slept; slept < kSweepInterval && !stopping();
+           slept += kShutdownCheckInterval) {
+        absl::SleepFor(kShutdownCheckInterval);
+      }
+      if (stopping()) break;
+
+      one_d4_worker::SweepReport report;
+      const absl::Status swept = one_d4_worker::Sweep(client, *policy, absl::Now(), report);
+      if (!swept.ok()) {
+        // Counted, not just logged: a database the sweep cannot reach must not
+        // look the same as a sweep with nothing to do. The report goes with it
+        // — settling commits before the deletes are attempted, so a failed
+        // pass still has arms to report, and that is the pass where knowing
+        // how many rows were reclaimed matters most.
+        metrics.SweepFinished("error", report);
+        LOG(ERROR) << "Retention sweep failed after settling " << report.settled()
+                   << " requests: " << swept;
+        continue;
+      }
+      metrics.SweepFinished("ok", report);
+      LOG(INFO) << "Retention sweep: deleted " << report.games_deleted << " games, "
+                << report.periods_deleted << " periods, " << report.requests_deleted
+                << " requests; settled " << report.settled() << " requests (" << report.poisoned
+                << " poisoned, " << report.stalled << " stalled, " << report.released
+                << " released)";
+    }
+  });
+  LOG(INFO) << "Sweeping retention every " << kSweepInterval;
+
   pool.Run(stopping, sleep);
   reanalysis.join();
+  retention.join();
 
   LOG(INFO) << "Shutting down";
   return 0;

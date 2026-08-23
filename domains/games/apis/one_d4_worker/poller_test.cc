@@ -13,6 +13,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/synchronization/mutex.h"
 #include "domains/games/apis/one_d4_worker/claim_ref.h"
+#include "domains/games/apis/one_d4_worker/poller_options.h"
 #include "domains/games/apis/one_d4_worker/queue.h"
 
 namespace one_d4_worker {
@@ -120,6 +121,28 @@ IndexJob AJob() {
   job.start_month = "2026-01";
   job.end_month = "2026-01";
   return job;
+}
+
+/// The startup wiring, which lives in a function precisely so that a target
+/// compiles it: main has none. Every window distinct and none of them the
+/// defaults, so a mapping that crossed two fields — or dropped them and left
+/// the defaults standing — cannot satisfy this by coincidence.
+TEST(PollerOptionsFromTest, TakesEachWindowFromItsOwnFieldOfThePolicy) {
+  RetentionPolicy policy;
+  policy.period = absl::Seconds(1);
+  policy.request = absl::Seconds(2);
+  policy.stale_request = absl::Seconds(3);
+  policy.lease = absl::Seconds(11);
+  policy.lease_renewal = absl::Seconds(22);
+  policy.max_run = absl::Seconds(33);
+  policy.statement_timeout = absl::Seconds(44);
+
+  const Poller::Options options = PollerOptionsFrom(policy, "worker-9");
+
+  EXPECT_EQ(options.lease, absl::Seconds(11));
+  EXPECT_EQ(options.renew_every, absl::Seconds(22));
+  EXPECT_EQ(options.max_run, absl::Seconds(33));
+  EXPECT_EQ(options.owner, "worker-9");
 }
 
 Poller::Options Options() {

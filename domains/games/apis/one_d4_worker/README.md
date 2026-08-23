@@ -144,9 +144,20 @@ call a run is already inside, which is why the stop grace is 240s.
 | `ONE_D4_DB_URL` | required; no default, the worker exits 1 without it |
 | `ONE_D4_INDEX_SLOTS` | requests at once, default 4, capped at 16 |
 | `ONE_D4_POLL_SECONDS` | how long to wait before asking an empty queue again, default 5 |
+| `ONE_D4_RETENTION_POLICY` | path to the retention policy; defaults to the copy shipped beside the binary |
 
-The lease, its renewal interval and the run ceiling are deliberately not
-configurable. They are protocol constants of the queue rather than
-deployment knobs — two pollers that disagree about them misbehave against
-each other — and `schema_contract_test` holds the C++ values equal to
-`RetentionPolicy`'s.
+The lease, its renewal interval, the run ceiling and the retention windows
+are not per-deployment knobs. They are protocol constants of the queue —
+two pollers that disagree about them misbehave against each other — so they
+come from one file, `one_d4/retention_policy.json`, which the Java service
+reads off its classpath and this worker reads out of its image at startup.
+`ONE_D4_RETENTION_POLICY` points somewhere else, for running against a
+different policy without a rebuild; it does not make the numbers a
+deployment choice, since a fleet split across two policies is the failure
+this arrangement exists to prevent.
+
+The worker validates the file and exits 1 rather than starting without it:
+a worker that cannot read its windows would otherwise pick some and start
+deleting against them. `retention_policy_test` covers the loader and the
+shipped file's own validity, so a policy that would take the fleet down
+fails the build instead of the next deploy.

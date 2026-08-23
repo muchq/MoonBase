@@ -487,7 +487,7 @@ func TestRegistry_MicrogptTokensReplacesTokensPerSecond(t *testing.T) {
 // So this borrows the shape TestRegistry_PortraitCacheQueriesUseTheStandardFamily
 // already uses: match each selector, assert on that selector, and close the set of
 // names so a new instrument has to be declared here too.
-var oneD4SelectorPattern = regexp.MustCompile(`\b((?:games_indexed|index_runs|index_months|chess_com_archive_fetches|motif_occurrences|index_run_duration_micros|index_games_per_month)[a-z_]*)(\{[^}]*\})?`)
+var oneD4SelectorPattern = regexp.MustCompile(`\b((?:games_indexed|index_runs|index_months|chess_com_archive_fetches|motif_occurrences|index_run_duration_micros|index_games_per_month|retention_sweeps|retention_rows_deleted|retention_requests_settled)[a-z_]*)(\{[^}]*\})?`)
 
 // What one_d4_worker emits, plus the suffixes the collector's Prometheus
 // exporter appends: _total for a cumulative monotonic sum, _sum/_count for
@@ -502,6 +502,11 @@ var oneD4ExportedNames = map[string]bool{
 	"index_run_duration_micros_count": true,
 	"index_games_per_month_sum":       true,
 	"index_games_per_month_count":     true,
+	// The hourly sweep (#1424). Emitted from the same worker, so the same
+	// service_name selector covers them.
+	"retention_sweeps_total":            true,
+	"retention_rows_deleted_total":      true,
+	"retention_requests_settled_total":  true,
 }
 
 // The selector above covers both indexers by name, and the C++ worker's
@@ -604,8 +609,25 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 		joined += query + "\n"
 	}
 	for _, label := range []string{`outcome="completed"`, `outcome="failed"`,
-		`outcome="interrupted"`, `outcome="lease_lost"`, `result="empty"`, `result="cached"`} {
+		`outcome="interrupted"`, `outcome="lease_lost"`, `result="empty"`, `result="cached"`,
+		`outcome="ok"`, `outcome="error"`,
+		`arm="released"`, `arm="poisoned"`, `arm="stalled"`} {
 		assert.Contains(t, joined, label, "no query selects %s", label)
+	}
+
+	// And closed, which is the half that catches the likely mistake. The
+	// worker emits arm="released"; the README and these tiles call it
+	// "Requeued", because that is what it means to a reader. A selector
+	// written in the UI's language matches nothing, errors nowhere, and leaves
+	// a tile reading zero for as long as anyone believes it.
+	for _, match := range regexp.MustCompile(`arm="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
+		assert.Contains(t, []string{"released", "poisoned", "stalled"}, match[1],
+			"no worker emits arm=%q, so this tile reads zero forever", match[1])
+	}
+	for _, match := range regexp.MustCompile(
+		`retention_sweeps_total\{[^}]*outcome="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
+		assert.Contains(t, []string{"ok", "error"}, match[1],
+			"no worker emits a sweep outcome=%q", match[1])
 	}
 
 	// The duration histogram carries the same outcome label the run counter does, and both

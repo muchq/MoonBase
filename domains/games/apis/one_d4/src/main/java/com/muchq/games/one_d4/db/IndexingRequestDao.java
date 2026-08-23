@@ -335,9 +335,10 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   private int reclaim(String keyOrNull, Duration staleAfter, Instant now) {
     String keyClause = keyOrNull == null ? "" : "  AND dedupe_key = :key\n";
-    // Bounded at the sweep timeout: this runs on the retention tick's shared scheduled pool with
-    // no lease or interrupt machinery, and settling is idempotent — a truncated pass re-runs in
-    // an hour (or on the next submit of the same tuple).
+    // Bounded at the sweep timeout: this is the submit path's reclaim of the tuple being
+    // submitted, with no lease or interrupt machinery behind it, and settling is idempotent — a
+    // truncated pass re-runs on the next submit of the same tuple, or in the C++ worker's next
+    // hourly sweep.
     return StatementTimeouts.inTransactionWithTimeout(
         jdbi,
         StatementTimeouts.RETENTION_SWEEP_SECONDS,
@@ -736,7 +737,9 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   @Override
   public int deleteOlderThan(Instant threshold) {
-    // Bounded at the sweep timeout: idempotent hourly cleanup, re-run in an hour if truncated.
+    // Bounded at the sweep timeout: idempotent cleanup, safe to truncate and repeat. The hourly
+    // caller is the C++ worker's sweep; nothing in this JVM calls this now, and the DAO tests are
+    // what document the semantics that copy mirrors.
     return StatementTimeouts.withStatementTimeout(
         jdbi,
         StatementTimeouts.RETENTION_SWEEP_SECONDS,

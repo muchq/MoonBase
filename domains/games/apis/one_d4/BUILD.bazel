@@ -43,6 +43,9 @@ java_library(
         ":migrations",
     ],
     deps = [
+        ":retention_policy_resource",
+        "//domains/platform/libs/json",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
         ":dto",
         ":model",
         "//domains/games/libs/chessql:compiler",
@@ -173,25 +176,9 @@ java_library(
     ],
 )
 
-# Retention only: indexing and reanalysis run in the C++ one_d4_worker
-# (#1389); this JVM's one background job is the chess-free hourly retention
-# sweep.
-java_library(
-    name = "worker",
-    srcs = [
-        "src/main/java/com/muchq/games/one_d4/worker/RetentionWorker.java",
-    ],
-    visibility = ["//visibility:public"],
-    deps = [
-        ":db",
-        artifact("io.micronaut:micronaut-context"),
-        artifact("io.micronaut:micronaut-inject"),
-        artifact("io.micronaut:micronaut-runtime"),
-        artifact("jakarta.inject:jakarta-inject-api"),
-        artifact("org.slf4j:slf4j-api"),
-    ],
-)
-
+# Serving only: indexing, reanalysis and the hourly retention sweep all run in
+# the C++ one_d4_worker (#1389, #1424). This JVM answers requests and warms the
+# first page; it runs no chess and no unattended sweep.
 java_library(
     name = "dto",
     srcs = [
@@ -322,9 +309,6 @@ java_binary(
         ":dto",
         ":model",
         ":service",
-        # RetentionWorker is a @Context bean discovered from the classpath;
-        # nothing in App/IndexerModule references it at compile time.
-        ":worker",
         "//domains/games/libs/chessql:compiler",
         "//domains/platform/libs/json",
         "//domains/platform/libs/logging",
@@ -394,16 +378,39 @@ filegroup(
     visibility = ["//domains/games:__subpackages__"],
 )
 
-# The DDL itself moved to :migrations_sql (#1419); what remains here are the
-# Java constants schema_contract_test still pins against the C++ side — the
-# attempt budget and the lease/max-run policy.
+# The DDL itself lives in :migrations_sql (#1419); what schema_contract_test
+# still scrapes from Java source is the attempt budget, and nothing else. The
+# lease and retention windows reach it as data, from :retention_policy_json
+# (#1424), so RetentionPolicy.java does not belong here — listing a source
+# nothing opens would re-run the contract test on every edit to it.
 filegroup(
     name = "worker_schema_sources",
     testonly = True,
     srcs = [
         "src/main/java/com/muchq/games/one_d4/db/IndexingRequestStore.java",
-        "src/main/java/com/muchq/games/one_d4/db/RetentionPolicy.java",
     ],
+    visibility = ["//domains/games:__subpackages__"],
+)
+
+# The retention windows, as data rather than as a constant in either language (#1424).
+#
+# Both readers load this at startup — the C++ worker out of its image's runfiles, Java off its
+# classpath — so neither keeps a copy that could drift from it, and a window is changed by editing
+# this file. See README.md for what the numbers mean and why they are what they are.
+filegroup(
+    name = "retention_policy_json",
+    srcs = ["retention_policy.json"],
+    visibility = ["//domains/games:__subpackages__"],
+)
+
+# Deliberately not testonly: RetentionPolicy reads this off the classpath at
+# class load, so it ships inside the deploy jar. That is what makes the
+# read-or-fail safe — "missing" becomes a build error rather than something a
+# deploy can produce.
+java_library(
+    name = "retention_policy_resource",
+    resource_strip_prefix = "domains/games/apis/one_d4",
+    resources = ["retention_policy.json"],
     visibility = ["//domains/games:__subpackages__"],
 )
 
@@ -435,7 +442,6 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/openings/OpeningsCorpusTest.java",
         "src/test/java/com/muchq/games/one_d4/openings/OpeningsTest.java",
-        "src/test/java/com/muchq/games/one_d4/worker/RetentionWorkerTest.java",
     ],
     deps = [
         ":db",
@@ -443,7 +449,6 @@ java_test_suite(
         ":hikaru_corpus",
         ":openings",
         ":test_db",
-        ":worker",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("org.junit.jupiter:junit-jupiter-api"),
@@ -573,12 +578,18 @@ java_test_suite(
         ":db",
         ":dto",
         ":model",
+        # RetentionPolicy reads the shared windows off the classpath in its class
+        # initializer (#1424). Arrives transitively through :db as well; listed
+        # here so the reason is visible where the tests are.
+        ":retention_policy_resource",
         ":test_db",
+        "//domains/platform/libs/json",
         # HikariConfig: DataSourceFactoryTest asserts on the config create() builds,
         # including the credentials passed beside the URL (#1351).
         artifact("com.zaxxer:HikariCP"),
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
         artifact("org.jdbi:jdbi3-core"),

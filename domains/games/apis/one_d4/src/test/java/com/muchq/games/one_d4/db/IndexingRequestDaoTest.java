@@ -470,8 +470,8 @@ public class IndexingRequestDaoTest {
    * Age alone is not licence to delete. A request only reaches this age while still live if the
    * staleness reclamation never ran, and deleting it would take the row out from under a worker
    * that is still writing against its id — losing the FK's protection and the user's status.
-   * Unreachable through {@code RetentionWorker}, which reclaims first, but the guard belongs on the
-   * delete rather than in the caller's ordering.
+   * Unreachable through the C++ worker's sweep, which settles before it deletes, but the guard
+   * belongs on the delete rather than in the caller's ordering.
    */
   @Test
   public void deleteOlderThan_refusesToSweepALiveRequestHoweverOldItIs() {

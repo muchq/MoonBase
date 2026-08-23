@@ -13,9 +13,12 @@
 
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
+#include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
+#include "domains/games/apis/one_d4_worker/poller_options.h"
 #include "domains/games/apis/one_d4_worker/reanalysis_queue.h"
+#include "domains/games/apis/one_d4_worker/retention_policy.h"
 
 namespace one_d4_worker {
 namespace {
@@ -308,22 +311,77 @@ TEST(SchemaContract, TheReanalysisIdIsAUuidToo) {
   EXPECT_EQ(MigrationSchemaFor("reanalysis_requests")["id"], "UUID");
 }
 
-TEST(SchemaContract, ThePollerDefaultsMatchTheRetentionPolicy) {
-  // The lease vocabulary is the Java service's: RetentionPolicy.LEASE is
-  // what reclaimStale compares lease_expires_at against, and MAX_RUN is
-  // the ceiling both sides agree makes a run a fault. The renewal interval
-  // must leave several losable renewals inside one lease, or every lease
-  // lapses between beats and healthy workers lose their ranges.
-  const Poller::Options defaults;
-  EXPECT_EQ(defaults.lease, absl::Minutes(5));
-  EXPECT_EQ(defaults.max_run, absl::Hours(6));
-  EXPECT_LE(defaults.renew_every * 4, defaults.lease);
+/// The shipped windows, loaded the way the worker loads them at startup.
+///
+/// Neither language holds a copy of the numbers — the worker reads the file at
+/// startup, the Java service reads it off its classpath — so there is nothing
+/// here to compare the two against each other. What is left to check is what
+/// the worker does with what it read.
+const RetentionPolicy& ShippedPolicy() {
+  static const RetentionPolicy* const policy = [] {
+    auto loaded = LoadRetentionPolicy("domains/games/apis/one_d4/retention_policy.json");
+    EXPECT_TRUE(loaded.ok()) << loaded.status();
+    return new RetentionPolicy(loaded.value_or(RetentionPolicy{}));
+  }();
+  return *policy;
+}
 
-  const std::string policy = Read(
-      "domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/db/"
-      "RetentionPolicy.java");
-  EXPECT_THAT(policy, testing::HasSubstr("LEASE = Duration.ofMinutes(5)"));
-  EXPECT_THAT(policy, testing::HasSubstr("MAX_RUN = Duration.ofHours(6)"));
+/// The lease vocabulary production actually runs, taken through the same
+/// function worker_main calls rather than through Poller::Options' defaults.
+///
+/// PollerOptionsFrom overwrites all three defaults, so asserting on them would
+/// pin numbers no deployed worker reads, and would leave the mapping itself —
+/// where the numbers can actually go wrong — unchecked. poller_test pins that
+/// mapping against synthetic windows; this pins it against the file that
+/// ships.
+TEST(SchemaContract, ThePollerRunsTheShippedLeaseVocabulary) {
+  const Poller::Options options = PollerOptionsFrom(ShippedPolicy(), "worker-1");
+  EXPECT_EQ(options.lease, ShippedPolicy().lease);
+  EXPECT_EQ(options.renew_every, ShippedPolicy().lease_renewal);
+  EXPECT_EQ(options.max_run, ShippedPolicy().max_run);
+
+  // The protocol invariant, restated against what the poller is handed rather
+  // than against the file. LoadRetentionPolicy rejects a file that violates
+  // it, so this holds unless the mapping loses it between the two.
+  EXPECT_LE(options.renew_every * 4, options.lease);
+}
+
+/// The columns the sweep keys on, against the real DDL.
+///
+/// retention_test's fixture is deliberately minimal — it declares what the
+/// sweep touches and not the other fifteen columns of game_features — so it
+/// cannot be compared column-for-column the way pg_queue_test's is. What can
+/// be checked is that the columns the sweep names still exist and still hold
+/// what it binds: every timestamp it compares is written as a naive UTC
+/// TIMESTAMP, so one drifted to TIMESTAMPTZ would compare against a bound
+/// literal differently than production does, and delete a different set of
+/// rows than the tests say it deletes.
+TEST(SchemaContract, TheMigrationSchemaHasTheColumnsTheSweepKeysOn) {
+  const std::vector<std::pair<std::string, std::vector<std::string>>> keyed = {
+      {"indexing_requests",
+       {"id", "status", "attempts", "owner_id", "lease_expires_at", "updated_at", "created_at",
+        "dedupe_key", "error_message"}},
+      {"game_features", {"request_id", "indexed_at"}},
+      {"indexed_periods", {"fetched_at"}}};
+
+  for (const auto& [table, wanted] : keyed) {
+    const std::map<std::string, std::string> java = MigrationSchemaFor(table);
+    ASSERT_FALSE(java.empty()) << "read no columns of " << table << " — the DDL moved";
+    for (const std::string& column : wanted) {
+      EXPECT_TRUE(java.count(column) == 1)
+          << column << " is gone from " << table << ", and the sweep keys on it";
+    }
+  }
+
+  for (const auto& [table, column] :
+       std::vector<std::pair<std::string, std::string>>{{"indexing_requests", "updated_at"},
+                                                        {"indexing_requests", "created_at"},
+                                                        {"indexing_requests", "lease_expires_at"},
+                                                        {"game_features", "indexed_at"},
+                                                        {"indexed_periods", "fetched_at"}}) {
+    EXPECT_EQ(MigrationSchemaFor(table)[column], "TIMESTAMP")
+        << table << "." << column << " is not a naive TIMESTAMP, but the sweep binds one";
+  }
 }
 
 TEST(SchemaContract, BothQueuesShareOneAttemptBudget) {

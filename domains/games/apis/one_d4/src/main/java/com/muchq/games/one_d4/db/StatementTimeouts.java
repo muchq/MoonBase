@@ -13,7 +13,7 @@ import org.slf4j.LoggerFactory;
  * points that apply them. HikariCP's connectionTimeout bounds pool <em>checkout</em> only — nothing
  * bounded execution, so a statement wedged on a lock wait ran forever, and the loops that never
  * re-enter while a run is in flight (the first-page warmer's {@code @Scheduled(fixedDelay)}, the
- * dispatch poller's single thread, the hourly retention sweep) stayed wedged until a restart.
+ * dispatch poller's single thread) stayed wedged until a restart.
  *
  * <p>JDBC's queryTimeout cancels server-side execution (lock waits, slow plans). A true network
  * black hole additionally needs a driver-level socket timeout, which {@link DataSourceFactory}
@@ -39,19 +39,22 @@ public final class StatementTimeouts {
   public static final int SERVING_READ_SECONDS = 10;
 
   /**
-   * The bound for the hourly retention tick's statements — the reclaim transaction's three settles
-   * and the three deletes. Sized for a sweep, not a page: the steady-state pass covers roughly one
-   * hour of aged-out rows, and even a post-outage backlog clears in well under this. Per statement,
-   * not per tick: a tick where every statement wedges is bounded at six windows (~12 minutes),
-   * still far inside the hourly schedule. The deletes are idempotent, so a truncated delete pass
-   * loses nothing; a truncated reclaim rolls back as a unit — which is why it runs in {@link
-   * #inTransactionWithTimeout} — and re-runs next tick.
+   * The bound for retention statements. The hourly sweep itself is the C++ worker's, and reads this
+   * number out of the same {@code retention_policy.json} (#1424); what is left on this side is the
+   * submit path's reclaim of the one tuple being submitted, and the uncalled {@code
+   * deleteOlderThan} the DAO tests exercise.
+   *
+   * <p>Sized for a sweep rather than a page: a steady-state pass covers roughly an hour of aged-out
+   * rows, and even a post-outage backlog clears well inside this. It bounds a statement, not a
+   * pass. Settling rolls back as a unit — which is why it runs in {@link #inTransactionWithTimeout}
+   * — and is idempotent, so a truncated one costs a repeat and nothing else.
    *
    * <p>Must stay under {@link DataSourceFactory}'s default Postgres socketTimeout, or the driver
    * would sever the connection under a legitimately long sweep before the server-side cancel fires.
    * DataSourceFactoryTest pins that ordering.
    */
-  public static final int RETENTION_SWEEP_SECONDS = 120;
+  public static final int RETENTION_SWEEP_SECONDS =
+      (int) RetentionPolicy.SWEEP_STATEMENT_TIMEOUT.toSeconds();
 
   private StatementTimeouts() {}
 
@@ -69,9 +72,11 @@ public final class StatementTimeouts {
 
   /**
    * {@link #withStatementTimeout}'s transactional sibling, for bounded work that must stay one
-   * transaction — the retention tick's reclaim, whose three UPDATEs settle abandoned requests as a
-   * unit. Same bound-and-clear contract; the session clear runs inside the transaction, which is
-   * safe because session settings are not transactional on either engine.
+   * transaction — the submit path's reclaim, whose three UPDATEs settle abandoned requests as a
+   * unit. The C++ sweep draws the same boundary for the same reason, and commits it before it
+   * deletes anything so that a failing delete cannot undo it. Same bound-and-clear contract; the
+   * session clear runs inside the transaction, which is safe because session settings are not
+   * transactional on either engine.
    */
   public static <T> T inTransactionWithTimeout(
       Jdbi jdbi, int timeoutSeconds, HandleCallback<T, RuntimeException> body) {

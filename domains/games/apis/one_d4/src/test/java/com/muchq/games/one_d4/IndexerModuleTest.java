@@ -4,12 +4,46 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.micronaut.context.annotation.Context;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 public class IndexerModuleTest {
+
+  /**
+   * The retention windows are read at startup, not at the first request that needs one.
+   *
+   * <p>{@code RetentionPolicy} keeps them in static finals loaded from the classpath in its class
+   * initializer, and every other reader is a method body — so without an eager bean touching the
+   * class, a malformed {@code retention_policy.json} lets the container boot and answer {@code
+   * /health} 200, then throws {@code ExceptionInInitializerError} on the first request that needed
+   * a window and {@code NoClassDefFoundError}, with no cause attached, on every one after. That is
+   * silent breakage where a failed startup is the correct answer, the same argument {@link
+   * IndexerModule#readJdbcUrl} makes about its variable.
+   *
+   * <p>Asserted as a fact about the class file rather than about the returned value: a bean body of
+   * {@code return Duration.ofDays(7);} touches nothing, initializes nothing, and would satisfy any
+   * assertion comparing it to {@code RetentionPolicy.PERIOD} — because the test JVM evaluates that
+   * expected value itself. The constant pool is what distinguishes reading the policy from
+   * returning a number that happens to match it.
+   */
+  @Test
+  public void theRetentionWindowsAreReadAtStartupRatherThanOnFirstUse() throws Exception {
+    assertThat(IndexerModule.class.getMethod("retentionWindows").isAnnotationPresent(Context.class))
+        .as("@Context is what makes this eager; without it the read moves to the first request")
+        .isTrue();
+
+    String constantPool = compiledBytesOfIndexerModule();
+    assertThat(constantPool).as("not the bytes we meant to scan").contains("IndexRequestService");
+    assertThat(constantPool)
+        .as(
+            "IndexerModule does not name RetentionPolicy, so nothing forces its class initializer"
+                + " at startup and a broken retention_policy.json becomes a 500 per request"
+                + " behind a healthy /health")
+        .contains("RetentionPolicy");
+  }
 
   /**
    * compose hands this container {@code jdbc:postgresql://one_d4_postgres:5432/one_d4} (#1351), and

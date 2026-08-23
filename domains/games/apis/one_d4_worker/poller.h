@@ -80,7 +80,10 @@ class Poller {
     /// right when the run holding it has ended, wrong when another run
     /// of this process is still wedged on it.
     std::string owner;
+    /// How long a claim is good for without renewal. See max_run below for
+    /// where this and the two after it come from in production.
     absl::Duration lease = absl::Minutes(5);
+
     /// How often a claim is renewed in the background, independent of what
     /// the run is doing. A quarter of the lease, so three renewals can be
     /// missed before it lapses.
@@ -93,11 +96,11 @@ class Poller {
 
     /// How long a run may hold a range before it is treated as wedged.
     ///
-    /// RetentionPolicy.MAX_RUN in the Java worker, and it must stay equal
-    /// to it: both poll one table, so a shorter value here hands back
-    /// ranges the other considers healthy and a longer one leaves a wedge
-    /// sitting past the point the system has decided is a fault. Nothing
-    /// enforces that — changing either means changing both.
+    /// Production does not use this default, nor the two above:
+    /// PollerOptionsFrom fills all three from retention_policy.json, the
+    /// shared file the Java service reads too. They are fallbacks for tests
+    /// that construct an Options directly and do not care about the value —
+    /// the ones that do care set their own, at millisecond scale.
     ///
     /// Deliberately far above any legitimate run — a twelve-month range
     /// for a prolific player is minutes against a healthy chess.com — so
