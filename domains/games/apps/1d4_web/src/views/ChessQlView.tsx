@@ -1,11 +1,16 @@
 import reference from 'virtual:chessql-reference';
 
 /**
- * The ChessQL reference (#1425) — CHESSQL.md itself, not a copy of it.
+ * The ChessQL reference (#1425) — rendered from CHESSQL.md rather than from a
+ * copy of its vocabulary.
  *
- * The same file mcpserver serves as `chessql://reference` (#1326), so browser
- * and MCP readers cannot disagree, and ChessQlReferenceTest’s pinning of the
- * field and motif tables against SqlCompiler covers this page for free.
+ * Same source file mcpserver reads for `chessql://reference` (#1326), so
+ * ChessQlReferenceTest’s pinning of the field, perspective and motif tables
+ * against SqlCompiler reaches this page too. Not the same bytes: MCP serves
+ * the markdown from the API jar at its own boot, this is HTML snapshotted at
+ * Vite build into a different deploy unit, so an edit to the doc reaches the
+ * two at whatever times they each ship. What holds is that neither is a third
+ * roster anyone maintains by hand.
  *
  * The HTML is generated from a checked-in document at build time by
  * vite-plugin-chessql, so it is a constant in the bundle: there is no input

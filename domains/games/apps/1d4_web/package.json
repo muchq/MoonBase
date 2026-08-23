@@ -31,6 +31,7 @@
     "@vitejs/plugin-react": "^6.0.0",
     "jsdom": "^30.0.1",
     "marked": "^18.0.10",
+    "marked-gfm-heading-id": "^4.1.4",
     "tailwindcss": "^4.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.2.0",

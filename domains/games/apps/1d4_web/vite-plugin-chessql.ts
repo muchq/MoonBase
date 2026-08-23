@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { marked } from 'marked';
+import { Marked } from 'marked';
+import { gfmHeadingId } from 'marked-gfm-heading-id';
 import type { Plugin } from 'vite';
 
 /**
@@ -8,9 +9,9 @@ import type { Plugin } from 'vite';
  * browser (#1425).
  *
  * The document is static, so a markdown renderer in the bundle would be a
- * parser shipped to every reader to produce the same bytes every time —
- * measured at 54 kB gzipped, against 21 kB for the rendered HTML. Converting
- * at build time also keeps marked a devDependency.
+ * parser shipped to every reader to produce the same bytes every time — 54 kB
+ * gzipped, against 8 kB for the HTML it would produce. Converting at build
+ * time also keeps marked a devDependency.
  *
  * A virtual module rather than an import of the .md path, because the file
  * lives outside this app's root and Vite's dev server refuses to serve those
@@ -27,8 +28,14 @@ export const CHESSQL_SOURCE = fileURLToPath(
   ),
 );
 
+// gfmHeadingId, because the document links to its own sections (#date-scoping,
+// #unset-fields-and-negation) and marked emits no heading ids on its own — so
+// without this every in-doc link renders as a no-op. The slugs match GitHub's,
+// which is what the author of a markdown link is writing against.
+const renderer = new Marked({ gfm: true }, gfmHeadingId());
+
 export function renderReference(markdown: string): string {
-  const html = marked.parse(markdown, { async: false, gfm: true });
+  const html = renderer.parse(markdown, { async: false });
   // Every roster is wider than a phone, and the wrapper is what the CSS
   // scrolls. Markdown tables cannot nest, and marked escapes anything inside a
   // fence, so these are the generated table elements and only those.
