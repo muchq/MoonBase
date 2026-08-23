@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { query as apiQuery } from '../api';
 import type { GameRow } from '../types';
@@ -84,26 +85,15 @@ export default function QueryView() {
       </div>
 
       <div className="syntax-help">
-        <strong>ChessQL</strong> — Fields: <code>white.elo</code>,{' '}
-        <code>black.elo</code>, <code>white.username</code>,{' '}
-        <code>black.username</code>, <code>time.class</code>,{' '}
-        <code>num.moves</code>, <code>eco</code>, <code>result</code>,{' '}
-        <code>platform</code>, <code>game.url</code>, <code>played.at</code>.{' '}
-        Motifs: <code>motif(discovered_attack)</code>,{' '}
-        <code>motif(discovered_check)</code>, <code>motif(fork)</code>,{' '}
-        <code>motif(pin)</code>, <code>motif(cross_pin)</code>,{' '}
-        <code>motif(skewer)</code>, <code>motif(check)</code>,{' '}
-        <code>motif(checkmate)</code>, <code>motif(double_check)</code>,{' '}
-        <code>motif(back_rank_mate)</code>, <code>motif(smothered_mate)</code>,{' '}
-        <code>motif(promotion)</code>, <code>motif(promotion_with_check)</code>,{' '}
-        <code>motif(promotion_with_checkmate)</code>. Filter by when a game was
-        played with <code>date</code> and <code>month</code>:{' '}
+        <strong>ChessQL</strong> — compare a field, or ask for a motif:{' '}
+        <code>white.elo &gt; 2000</code>, <code>motif(fork)</code>. Combine
+        with <code>AND</code>, <code>OR</code>, <code>NOT</code>. Strings in
+        double quotes, e.g. <code>eco = &quot;B90&quot;</code>. Filter by when
+        a game was played with <code>date</code> or <code>month</code>:{' '}
         <code>date &gt;= &quot;2026-07-01&quot;</code>,{' '}
-        <code>month = &quot;2026-07&quot;</code> (<code>played.at</code> takes a
-        full timestamp like <code>&quot;2026-07-01T13:30:00&quot;</code>).
-        Combine with <code>AND</code>, <code>OR</code>, <code>NOT</code>.
-        Strings in double quotes, e.g. <code>eco = &quot;B90&quot;</code>. Do
-        not use SELECT or *.
+        <code>month = &quot;2026-07&quot;</code>. Do not use SELECT or *.{' '}
+        <Link to="/chessql">Full reference</Link> — every field and motif, the
+        grammar, and operator precedence.
       </div>
 
       {error && (
