@@ -144,17 +144,19 @@ call a run is already inside, which is why the stop grace is 240s.
 | `ONE_D4_DB_URL` | required; no default, the worker exits 1 without it |
 | `ONE_D4_INDEX_SLOTS` | requests at once, default 4, capped at 16 |
 | `ONE_D4_POLL_SECONDS` | how long to wait before asking an empty queue again, default 5 |
-| `ONE_D4_RETENTION_POLICY` | path to the retention policy; defaults to the copy shipped beside the binary |
 
 The lease, its renewal interval, the run ceiling and the retention windows
-are not per-deployment knobs. They are protocol constants of the queue —
+are not configurable, by design. They are protocol constants of the queue —
 two pollers that disagree about them misbehave against each other — so they
 come from one file, `one_d4/retention_policy.json`, which the Java service
-reads off its classpath and this worker reads out of its image at startup.
-`ONE_D4_RETENTION_POLICY` points somewhere else, for running against a
-different policy without a rebuild; it does not make the numbers a
-deployment choice, since a fleet split across two policies is the failure
-this arrangement exists to prevent.
+reads off its classpath and this worker reads out of its image at startup,
+at a path derived from `argv[0]` and nothing else.
+
+There is no variable that points either reader somewhere else. One would let
+a deployment run windows no test has seen while the service, which never had
+an equivalent, went on quoting users the numbers in the shipped file — a
+fleet split across two policies, which is the failure this arrangement
+exists to prevent. Changing a window is an edit to that file.
 
 The worker validates the file and exits 1 rather than starting without it:
 a worker that cannot read its windows would otherwise pick some and start

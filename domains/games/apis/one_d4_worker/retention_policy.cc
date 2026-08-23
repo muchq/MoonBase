@@ -1,7 +1,6 @@
 #include "domains/games/apis/one_d4_worker/retention_policy.h"
 
 #include <cstdint>
-#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -33,10 +32,6 @@ absl::StatusOr<absl::Duration> Seconds(const nlohmann::json& policy, std::string
 }  // namespace
 
 std::string RetentionPolicyPath(std::string_view argv0) {
-  if (const char* override_path = std::getenv("ONE_D4_RETENTION_POLICY");
-      override_path != nullptr && *override_path != '\0') {
-    return override_path;
-  }
   return absl::StrCat(argv0, ".runfiles/_main/domains/games/apis/one_d4/retention_policy.json");
 }
 

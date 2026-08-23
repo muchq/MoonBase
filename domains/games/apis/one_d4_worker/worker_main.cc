@@ -114,14 +114,10 @@ int main(int /*argc*/, char** argv) {
   // windows all come from one file — the same one the Java service reads off
   // its classpath — rather than from constants on either side. They are
   // protocol constants of the queue rather than deployment knobs: two pollers
-  // that disagree about them misbehave against each other.
-  //
-  // ONE_D4_RETENTION_POLICY can point this at a different file, which is a
-  // real hole in that and worth naming: an override is a policy no test sees,
-  // and the Java service has no equivalent, so a fleet running one splits from
-  // the service that quotes users their expiry dates. It exists to run against
-  // a different policy without rebuilding an image; changing the numbers for a
-  // deployment is a code change to the file below.
+  // that disagree about them misbehave against each other, and a worker
+  // pointed at its own file would split from the Java service that quotes
+  // users their expiry dates. There is deliberately no way to override the
+  // path — changing a window is an edit to the shared file.
   //
   // Read before anything claims or deletes, and fatal if it cannot be read. A
   // worker that cannot read its windows must not pick some and start sweeping
