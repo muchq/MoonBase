@@ -88,8 +88,7 @@ absl::StatusOr<std::optional<ReanalysisJob>> PgReanalysisQueue::ClaimNext(std::s
   return job;
 }
 
-absl::StatusOr<bool> PgReanalysisQueue::Heartbeat(std::string_view id, std::string_view owner,
-                                                  absl::Duration lease) {
+absl::StatusOr<bool> PgReanalysisQueue::Heartbeat(ClaimRef claim, absl::Duration lease) {
   // status IN, not status = 'PROCESSING'. #1417 found the two workers
   // fencing this step differently; this is the side that matches every
   // other fence in both languages.
@@ -98,7 +97,7 @@ absl::StatusOr<bool> PgReanalysisQueue::Heartbeat(std::string_view id, std::stri
          SET lease_expires_at = NOW() + $3::interval, updated_at = NOW()
          WHERE id = $1 AND owner_id = $2 AND status IN ('PENDING', 'PROCESSING')
          RETURNING id)",
-      {std::string(id), std::string(owner), Seconds(lease)});
+      {std::string(claim.id), std::string(claim.owner), Seconds(lease)});
   if (!held.ok()) return held.status();
   return held->rows() > 0;
 }
@@ -106,8 +105,7 @@ absl::StatusOr<bool> PgReanalysisQueue::Heartbeat(std::string_view id, std::stri
 // Terminal and progress writes need a live lease, not just our name on the
 // row: at expiry a takeover is already licensed even before a rival has
 // written its own owner_id, and the old owner must not win that race.
-absl::StatusOr<bool> PgReanalysisQueue::Progress(std::string_view id, std::string_view owner,
-                                                 std::string_view cursor_game_url,
+absl::StatusOr<bool> PgReanalysisQueue::Progress(ClaimRef claim, std::string_view cursor_game_url,
                                                  int games_processed, int games_failed) {
   // Cursor and counts in one statement. Written separately, a crash between
   // them leaves a pass that resumes from a position its numbers disagree
@@ -119,14 +117,14 @@ absl::StatusOr<bool> PgReanalysisQueue::Progress(std::string_view id, std::strin
            AND status IN ('PENDING', 'PROCESSING')
            AND lease_expires_at > NOW()
          RETURNING id)",
-      {std::string(id), std::string(owner), std::string(cursor_game_url),
+      {std::string(claim.id), std::string(claim.owner), std::string(cursor_game_url),
        std::to_string(games_processed), std::to_string(games_failed)});
   if (!written.ok()) return written.status();
   return written->rows() > 0;
 }
 
-absl::StatusOr<bool> PgReanalysisQueue::Complete(std::string_view id, std::string_view owner,
-                                                 int games_processed, int games_failed) {
+absl::StatusOr<bool> PgReanalysisQueue::Complete(ClaimRef claim, int games_processed,
+                                                 int games_failed) {
   const auto written = client_.Exec(
       R"(UPDATE reanalysis_requests
          SET status = 'COMPLETED', games_processed = $3, games_failed = $4,
@@ -135,14 +133,13 @@ absl::StatusOr<bool> PgReanalysisQueue::Complete(std::string_view id, std::strin
            AND status IN ('PENDING', 'PROCESSING')
            AND lease_expires_at > NOW()
          RETURNING id)",
-      {std::string(id), std::string(owner), std::to_string(games_processed),
+      {std::string(claim.id), std::string(claim.owner), std::to_string(games_processed),
        std::to_string(games_failed)});
   if (!written.ok()) return written.status();
   return written->rows() > 0;
 }
 
-absl::StatusOr<bool> PgReanalysisQueue::Fail(std::string_view id, std::string_view owner,
-                                             std::string_view message) {
+absl::StatusOr<bool> PgReanalysisQueue::Fail(ClaimRef claim, std::string_view message) {
   const auto written = client_.Exec(
       R"(UPDATE reanalysis_requests
          SET status = 'FAILED', error_message = $3, owner_id = NULL, updated_at = NOW()
@@ -150,32 +147,32 @@ absl::StatusOr<bool> PgReanalysisQueue::Fail(std::string_view id, std::string_vi
            AND status IN ('PENDING', 'PROCESSING')
            AND lease_expires_at > NOW()
          RETURNING id)",
-      {std::string(id), std::string(owner), std::string(message)});
+      {std::string(claim.id), std::string(claim.owner), std::string(message)});
   if (!written.ok()) return written.status();
   return written->rows() > 0;
 }
 
 // The cursor survives both of these on purpose: whoever picks the row up
 // next resumes from where this run stopped.
-absl::StatusOr<bool> PgReanalysisQueue::HandBack(std::string_view id, std::string_view owner) {
+absl::StatusOr<bool> PgReanalysisQueue::HandBack(ClaimRef claim) {
   const auto handed = client_.Exec(
       R"(UPDATE reanalysis_requests
          SET owner_id = NULL, updated_at = NOW(),
              attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END
          WHERE id = $1 AND owner_id = $2 AND status IN ('PENDING', 'PROCESSING')
          RETURNING id)",
-      {std::string(id), std::string(owner)});
+      {std::string(claim.id), std::string(claim.owner)});
   if (!handed.ok()) return handed.status();
   return handed->rows() > 0;
 }
 
-absl::StatusOr<bool> PgReanalysisQueue::Release(std::string_view id, std::string_view owner) {
+absl::StatusOr<bool> PgReanalysisQueue::Release(ClaimRef claim) {
   const auto released = client_.Exec(
       R"(UPDATE reanalysis_requests
          SET owner_id = NULL, updated_at = NOW()
          WHERE id = $1 AND owner_id = $2 AND status IN ('PENDING', 'PROCESSING')
          RETURNING id)",
-      {std::string(id), std::string(owner)});
+      {std::string(claim.id), std::string(claim.owner)});
   if (!released.ok()) return released.status();
   return released->rows() > 0;
 }
@@ -191,28 +188,21 @@ class OwnedReanalysisQueue : public ReanalysisQueue {
                                                          absl::Duration lease) override {
     return queue_.ClaimNext(owner, lease);
   }
-  absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
-                                 absl::Duration lease) override {
-    return queue_.Heartbeat(id, owner, lease);
+  absl::StatusOr<bool> Heartbeat(ClaimRef claim, absl::Duration lease) override {
+    return queue_.Heartbeat(claim, lease);
   }
-  absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
-                                std::string_view cursor, int processed, int failed) override {
-    return queue_.Progress(id, owner, cursor, processed, failed);
-  }
-  absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner, int processed,
+  absl::StatusOr<bool> Progress(ClaimRef claim, std::string_view cursor, int processed,
                                 int failed) override {
-    return queue_.Complete(id, owner, processed, failed);
+    return queue_.Progress(claim, cursor, processed, failed);
   }
-  absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
-                            std::string_view message) override {
-    return queue_.Fail(id, owner, message);
+  absl::StatusOr<bool> Complete(ClaimRef claim, int processed, int failed) override {
+    return queue_.Complete(claim, processed, failed);
   }
-  absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override {
-    return queue_.HandBack(id, owner);
+  absl::StatusOr<bool> Fail(ClaimRef claim, std::string_view message) override {
+    return queue_.Fail(claim, message);
   }
-  absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override {
-    return queue_.Release(id, owner);
-  }
+  absl::StatusOr<bool> HandBack(ClaimRef claim) override { return queue_.HandBack(claim); }
+  absl::StatusOr<bool> Release(ClaimRef claim) override { return queue_.Release(claim); }
 
  private:
   pg::Client client_;

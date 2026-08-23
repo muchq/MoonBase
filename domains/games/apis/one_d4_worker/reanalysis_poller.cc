@@ -27,8 +27,8 @@ class PassLease : public ReanalysisLease {
         id_(std::move(id)),
         owner_(std::move(owner)),
         lease_(lease),
-        core_([this] { return queue_.Heartbeat(id_, owner_, lease_); }, lease, renew_every,
-              max_run) {}
+        core_([this] { return queue_.Heartbeat({.id = id_, .owner = owner_}, lease_); }, lease,
+              renew_every, max_run) {}
 
   bool Keep() override { return core_.Keep(); }
 
@@ -37,7 +37,7 @@ class PassLease : public ReanalysisLease {
   bool Report(std::string_view cursor, int games_processed, int games_failed) override {
     const std::string at(cursor);
     return core_.Fenced([this, at, games_processed, games_failed] {
-      return queue_.Progress(id_, owner_, at, games_processed, games_failed);
+      return queue_.Progress({.id = id_, .owner = owner_}, at, games_processed, games_failed);
     });
   }
 
@@ -100,7 +100,7 @@ absl::StatusOr<RunOutcome> ReanalysisPoller::RunClaimed(const ReanalysisClaim& c
               << " advanced=" << advanced;
     const absl::StatusOr<RunOutcome> outcome =
         Finish(RunOutcome::kInterrupted,
-               advanced ? queue_.HandBack(job.id, owner) : queue_.Release(job.id, owner));
+               advanced ? queue_.HandBack(claim.ref()) : queue_.Release(claim.ref()));
     if (!outcome.ok()) return outcome;
     return finished(*outcome);
   }
@@ -114,7 +114,7 @@ absl::StatusOr<RunOutcome> ReanalysisPoller::RunClaimed(const ReanalysisClaim& c
     // handed back by the API.
     LOG(ERROR) << "Reanalysis failed request_id=" << job.id << " error=" << report.status();
     const absl::StatusOr<RunOutcome> outcome =
-        Finish(RunOutcome::kFailed, queue_.Fail(job.id, owner, kInternalFailure));
+        Finish(RunOutcome::kFailed, queue_.Fail(claim.ref(), kInternalFailure));
     if (!outcome.ok()) return outcome;
     return finished(*outcome);
   }
@@ -124,7 +124,7 @@ absl::StatusOr<RunOutcome> ReanalysisPoller::RunClaimed(const ReanalysisClaim& c
     // cursor is written, so the attempt is refunded and whoever takes it
     // next carries on.
     const absl::StatusOr<RunOutcome> outcome =
-        Finish(RunOutcome::kInterrupted, queue_.HandBack(job.id, owner));
+        Finish(RunOutcome::kInterrupted, queue_.HandBack(claim.ref()));
     if (!outcome.ok()) return outcome;
     return finished(*outcome);
   }
@@ -133,7 +133,7 @@ absl::StatusOr<RunOutcome> ReanalysisPoller::RunClaimed(const ReanalysisClaim& c
             << " processed=" << report->games_processed << " failed=" << report->games_failed;
   const absl::StatusOr<RunOutcome> outcome =
       Finish(RunOutcome::kCompleted,
-             queue_.Complete(job.id, owner, report->games_processed, report->games_failed));
+             queue_.Complete(claim.ref(), report->games_processed, report->games_failed));
   if (!outcome.ok()) return outcome;
   return finished(*outcome);
 }

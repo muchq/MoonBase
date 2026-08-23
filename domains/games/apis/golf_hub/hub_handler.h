@@ -412,8 +412,7 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// The game-over ceremony: final face-up views, then gameEnded, then
   /// the game is erased locally. Shared by the local finisher and the
   /// refresh path (a game another instance finished).
-  void StageGameOverLocked(const std::string& room_id, Room& room, const std::string& game_id,
-                           Outbox& outbox);
+  void StageGameOverLocked(Room& room, const std::string& game_id, Outbox& outbox);
   /// The local finisher: mirrors the stat deltas the finish commit
   /// already applied (or, without a store, applies them — same code)
   /// and runs the ceremony.

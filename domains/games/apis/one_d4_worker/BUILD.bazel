@@ -30,10 +30,17 @@ cc_test(
 )
 
 cc_library(
+    name = "claim_ref",
+    hdrs = ["claim_ref.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "queue",
     hdrs = ["queue.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":claim_ref",
         ":job",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/time",
@@ -125,6 +132,7 @@ cc_library(
     hdrs = ["reanalysis_queue.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":claim_ref",
         "//domains/platform/libs/pg",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",

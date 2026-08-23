@@ -8,6 +8,7 @@
 
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
+#include "domains/games/apis/one_d4_worker/claim_ref.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
 #include "domains/games/apis/one_d4_worker/reanalysis_queue.h"
 #include "domains/games/apis/one_d4_worker/reanalysis_run.h"
@@ -18,6 +19,8 @@ namespace one_d4_worker {
 struct ReanalysisClaim {
   ReanalysisJob job;
   std::string owner;
+
+  ClaimRef ref() const { return {.id = job.id, .owner = owner}; }
 };
 
 /// Claims one reanalysis pass and runs it.

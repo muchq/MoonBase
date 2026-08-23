@@ -7,6 +7,7 @@
 
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
+#include "domains/games/apis/one_d4_worker/claim_ref.h"
 #include "domains/games/apis/one_d4_worker/job.h"
 #include "domains/games/apis/one_d4_worker/queue.h"
 
@@ -61,6 +62,8 @@ class LeaseKeeper {
 struct Claim {
   IndexJob job;
   std::string owner;
+
+  ClaimRef ref() const { return {.id = job.id, .owner = owner}; }
 };
 
 /// Claims one request and runs it.

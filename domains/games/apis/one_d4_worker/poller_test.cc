@@ -12,6 +12,7 @@
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/synchronization/mutex.h"
+#include "domains/games/apis/one_d4_worker/claim_ref.h"
 #include "domains/games/apis/one_d4_worker/queue.h"
 
 namespace one_d4_worker {
@@ -34,61 +35,57 @@ class FakeQueue : public IndexQueue {
     return job;
   }
 
-  absl::StatusOr<bool> Heartbeat([[maybe_unused]] std::string_view id, std::string_view owner,
-                                 [[maybe_unused]] absl::Duration lease) override {
+  absl::StatusOr<bool> Heartbeat(ClaimRef claim, [[maybe_unused]] absl::Duration lease) override {
     ++heartbeats;
     {
       const absl::MutexLock lock(fence_mu);
-      fenced_on.push_back(std::string(owner));
+      fenced_on.push_back(std::string(claim.owner));
     }
     if (heartbeat_fails) return absl::UnavailableError("queue is down");
     return lease_held.load();
   }
 
-  absl::StatusOr<bool> Progress([[maybe_unused]] std::string_view id, std::string_view owner,
-                                int games_indexed) override {
+  absl::StatusOr<bool> Progress(ClaimRef claim, int games_indexed) override {
     progress.push_back(games_indexed);
     {
       const absl::MutexLock lock(fence_mu);
-      fenced_on.push_back(std::string(owner));
+      fenced_on.push_back(std::string(claim.owner));
     }
     return progress_accepted.load();
   }
 
-  absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner,
-                                int games_indexed) override {
-    calls.push_back(absl::StrCat("complete ", id, " ", games_indexed));
+  absl::StatusOr<bool> Complete(ClaimRef claim, int games_indexed) override {
+    calls.push_back(absl::StrCat("complete ", claim.id, " ", games_indexed));
     {
       const absl::MutexLock lock(fence_mu);
-      fenced_on.push_back(std::string(owner));
+      fenced_on.push_back(std::string(claim.owner));
     }
     return terminal_write_wins;
   }
 
-  absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
-                            std::string_view message) override {
-    calls.push_back(absl::StrCat("fail ", id, " ", message));
+  absl::StatusOr<bool> Fail(ClaimRef claim, std::string_view message) override {
+    calls.push_back(absl::StrCat("fail ", claim.id, " ", message));
     {
       const absl::MutexLock lock(fence_mu);
-      fenced_on.push_back(std::string(owner));
+      fenced_on.push_back(std::string(claim.owner));
     }
     return terminal_write_wins;
   }
 
-  absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override {
-    calls.push_back(absl::StrCat("hand back ", id));
+  absl::StatusOr<bool> HandBack(ClaimRef claim) override {
+    calls.push_back(absl::StrCat("hand back ", claim.id));
     {
       const absl::MutexLock lock(fence_mu);
-      fenced_on.push_back(std::string(owner));
+      fenced_on.push_back(std::string(claim.owner));
     }
     return true;
   }
 
-  absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override {
-    calls.push_back(absl::StrCat("release ", id));
+  absl::StatusOr<bool> Release(ClaimRef claim) override {
+    calls.push_back(absl::StrCat("release ", claim.id));
     {
       const absl::MutexLock lock(fence_mu);
-      fenced_on.push_back(std::string(owner));
+      fenced_on.push_back(std::string(claim.owner));
     }
     return true;
   }

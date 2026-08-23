@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "absl/status/status.h"
+#include "domains/games/apis/one_d4_worker/claim_ref.h"
 
 namespace one_d4_worker {
 namespace {
@@ -26,33 +27,30 @@ class FakeQueue : public ReanalysisQueue {
     return job_;
   }
 
-  absl::StatusOr<bool> Heartbeat(std::string_view, std::string_view, absl::Duration) override {
-    return held_;
-  }
+  absl::StatusOr<bool> Heartbeat(ClaimRef, absl::Duration) override { return held_; }
 
-  absl::StatusOr<bool> Progress(std::string_view, std::string_view, std::string_view cursor, int p,
-                                int f) override {
+  absl::StatusOr<bool> Progress(ClaimRef, std::string_view cursor, int p, int f) override {
     progress_.push_back({std::string(cursor), p, f});
     if (!progress_status_.ok()) return progress_status_;
     return held_;
   }
 
-  absl::StatusOr<bool> Complete(std::string_view, std::string_view, int p, int f) override {
+  absl::StatusOr<bool> Complete(ClaimRef, int p, int f) override {
     completed_ = {p, f};
     return true;
   }
 
-  absl::StatusOr<bool> Fail(std::string_view, std::string_view, std::string_view message) override {
+  absl::StatusOr<bool> Fail(ClaimRef, std::string_view message) override {
     failed_ = std::string(message);
     return true;
   }
 
-  absl::StatusOr<bool> HandBack(std::string_view, std::string_view) override {
+  absl::StatusOr<bool> HandBack(ClaimRef) override {
     ++handed_back_;
     return true;
   }
 
-  absl::StatusOr<bool> Release(std::string_view, std::string_view) override {
+  absl::StatusOr<bool> Release(ClaimRef) override {
     ++released_;
     return true;
   }
@@ -83,27 +81,23 @@ class PassThrough : public ReanalysisQueue {
                                                          absl::Duration lease) override {
     return target_.ClaimNext(owner, lease);
   }
-  absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
-                                 absl::Duration lease) override {
-    return target_.Heartbeat(id, owner, lease);
+  absl::StatusOr<bool> Heartbeat(ClaimRef claim, absl::Duration lease) override {
+    return target_.Heartbeat({.id = claim.id, .owner = claim.owner}, lease);
   }
-  absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
-                                std::string_view cursor, int p, int f) override {
-    return target_.Progress(id, owner, cursor, p, f);
+  absl::StatusOr<bool> Progress(ClaimRef claim, std::string_view cursor, int p, int f) override {
+    return target_.Progress({.id = claim.id, .owner = claim.owner}, cursor, p, f);
   }
-  absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner, int p,
-                                int f) override {
-    return target_.Complete(id, owner, p, f);
+  absl::StatusOr<bool> Complete(ClaimRef claim, int p, int f) override {
+    return target_.Complete({.id = claim.id, .owner = claim.owner}, p, f);
   }
-  absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
-                            std::string_view message) override {
-    return target_.Fail(id, owner, message);
+  absl::StatusOr<bool> Fail(ClaimRef claim, std::string_view message) override {
+    return target_.Fail({.id = claim.id, .owner = claim.owner}, message);
   }
-  absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override {
-    return target_.HandBack(id, owner);
+  absl::StatusOr<bool> HandBack(ClaimRef claim) override {
+    return target_.HandBack({.id = claim.id, .owner = claim.owner});
   }
-  absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override {
-    return target_.Release(id, owner);
+  absl::StatusOr<bool> Release(ClaimRef claim) override {
+    return target_.Release({.id = claim.id, .owner = claim.owner});
   }
 
  private:
@@ -352,7 +346,7 @@ TEST(ReanalysisPollerTest, ALostLeaseStillReportsItsOutcome) {
 TEST(ReanalysisPollerTest, AQueueErrorOnTheTerminalWriteEmitsNothing) {
   class BrokenComplete : public FakeQueue {
    public:
-    absl::StatusOr<bool> Complete(std::string_view, std::string_view, int, int) override {
+    absl::StatusOr<bool> Complete(ClaimRef, int, int) override {
       return absl::UnavailableError("pg went away");
     }
   };
@@ -386,9 +380,7 @@ TEST(ReanalysisPollerTest, AFailedPassStillReportsItsOutcome) {
 TEST(ReanalysisPollerTest, ARefusedCompleteMeansTheLeaseWentSomewhereElse) {
   class RefusingQueue : public FakeQueue {
    public:
-    absl::StatusOr<bool> Complete(std::string_view, std::string_view, int, int) override {
-      return false;
-    }
+    absl::StatusOr<bool> Complete(ClaimRef, int, int) override { return false; }
   };
   RefusingQueue queue;
   ReanalysisPoller poller(queue, Reporting({}), Options());

@@ -130,11 +130,11 @@ TEST_F(PgQueueTest, HeartbeatHoldsTheLeaseAndSaysWhenItIsLost) {
   Insert(Id(1), "hikaru");
   ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Minutes(5)).ok());
 
-  const auto held = queue_->Heartbeat(Id(1), "worker-1", absl::Minutes(5));
+  const auto held = queue_->Heartbeat({.id = Id(1), .owner = "worker-1"}, absl::Minutes(5));
   ASSERT_TRUE(held.ok()) << held.status();
   EXPECT_TRUE(*held);
 
-  const auto stolen = queue_->Heartbeat(Id(1), "worker-2", absl::Minutes(5));
+  const auto stolen = queue_->Heartbeat({.id = Id(1), .owner = "worker-2"}, absl::Minutes(5));
   ASSERT_TRUE(stolen.ok()) << stolen.status();
   EXPECT_FALSE(*stolen);
 }
@@ -143,12 +143,12 @@ TEST_F(PgQueueTest, CompleteIsFencedOnOwnership) {
   Insert(Id(1), "hikaru");
   ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Minutes(5)).ok());
 
-  const auto stranger = queue_->Complete(Id(1), "worker-2", 99);
+  const auto stranger = queue_->Complete({.id = Id(1), .owner = "worker-2"}, 99);
   ASSERT_TRUE(stranger.ok()) << stranger.status();
   EXPECT_FALSE(*stranger);
   EXPECT_EQ(Column(Id(1), "status"), "PROCESSING");
 
-  const auto owner = queue_->Complete(Id(1), "worker-1", 42);
+  const auto owner = queue_->Complete({.id = Id(1), .owner = "worker-1"}, 42);
   ASSERT_TRUE(owner.ok()) << owner.status();
   EXPECT_TRUE(*owner);
   EXPECT_EQ(Column(Id(1), "status"), "COMPLETED");
@@ -160,12 +160,12 @@ TEST_F(PgQueueTest, FailIsFencedOnOwnershipToo) {
   Insert(Id(1), "hikaru");
   ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Minutes(5)).ok());
 
-  const auto stranger = queue_->Fail(Id(1), "worker-2", "not mine to fail");
+  const auto stranger = queue_->Fail({.id = Id(1), .owner = "worker-2"}, "not mine to fail");
   ASSERT_TRUE(stranger.ok()) << stranger.status();
   EXPECT_FALSE(*stranger);
   EXPECT_EQ(Column(Id(1), "status"), "PROCESSING");
 
-  const auto owner = queue_->Fail(Id(1), "worker-1", "chess.com said no");
+  const auto owner = queue_->Fail({.id = Id(1), .owner = "worker-1"}, "chess.com said no");
   ASSERT_TRUE(owner.ok()) << owner.status();
   EXPECT_TRUE(*owner);
   EXPECT_EQ(Column(Id(1), "status"), "FAILED");
@@ -254,11 +254,11 @@ TEST_F(PgQueueTest, TerminalWritesAreRefusedOnceTheLeaseHasExpired) {
   Insert(Id(1), "hikaru");
   ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Seconds(-1)).ok());
 
-  const auto completed = queue_->Complete(Id(1), "worker-1", 42);
+  const auto completed = queue_->Complete({.id = Id(1), .owner = "worker-1"}, 42);
   ASSERT_TRUE(completed.ok()) << completed.status();
   EXPECT_FALSE(*completed);
 
-  const auto failed = queue_->Fail(Id(1), "worker-1", "too late");
+  const auto failed = queue_->Fail({.id = Id(1), .owner = "worker-1"}, "too late");
   ASSERT_TRUE(failed.ok()) << failed.status();
   EXPECT_FALSE(*failed);
   EXPECT_EQ(Column(Id(1), "status"), "PROCESSING");
@@ -269,7 +269,7 @@ TEST_F(PgQueueTest, TerminalWritesLandWhileTheLeaseIsLive) {
   Insert(Id(1), "hikaru");
   ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Minutes(5)).ok());
 
-  const auto completed = queue_->Complete(Id(1), "worker-1", 42);
+  const auto completed = queue_->Complete({.id = Id(1), .owner = "worker-1"}, 42);
   ASSERT_TRUE(completed.ok()) << completed.status();
   EXPECT_TRUE(*completed);
 }
@@ -279,7 +279,7 @@ TEST_F(PgQueueTest, HandBackFreesTheRowAndRefundsTheAttempt) {
   ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Minutes(5)).ok());
   ASSERT_EQ(Column(Id(1), "attempts"), "1");
 
-  const auto handed = queue_->HandBack(Id(1), "worker-1");
+  const auto handed = queue_->HandBack({.id = Id(1), .owner = "worker-1"});
   ASSERT_TRUE(handed.ok()) << handed.status();
   EXPECT_TRUE(*handed);
   EXPECT_EQ(Column(Id(1), "owner_id"), "(null)");
@@ -295,7 +295,7 @@ TEST_F(PgQueueTest, ReleaseFreesTheRowAndKeepsTheAttemptSpent) {
   Insert(Id(1), "hikaru");
   ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Minutes(5)).ok());
 
-  const auto released = queue_->Release(Id(1), "worker-1");
+  const auto released = queue_->Release({.id = Id(1), .owner = "worker-1"});
   ASSERT_TRUE(released.ok()) << released.status();
   EXPECT_TRUE(*released);
   EXPECT_EQ(Column(Id(1), "owner_id"), "(null)");
@@ -306,11 +306,11 @@ TEST_F(PgQueueTest, HandBackAndReleaseAreFencedToo) {
   Insert(Id(1), "hikaru");
   ASSERT_TRUE(queue_->ClaimNext("worker-1", absl::Minutes(5)).ok());
 
-  const auto handed = queue_->HandBack(Id(1), "worker-2");
+  const auto handed = queue_->HandBack({.id = Id(1), .owner = "worker-2"});
   ASSERT_TRUE(handed.ok()) << handed.status();
   EXPECT_FALSE(*handed);
 
-  const auto released = queue_->Release(Id(1), "worker-2");
+  const auto released = queue_->Release({.id = Id(1), .owner = "worker-2"});
   ASSERT_TRUE(released.ok()) << released.status();
   EXPECT_FALSE(*released);
   EXPECT_EQ(Column(Id(1), "owner_id"), "worker-1");
@@ -334,7 +334,7 @@ TEST_F(PgQueueTest, ProgressMovesTheCountWithoutFinishingTheRun) {
   const auto claimed = queue_->ClaimNext("worker-1", absl::Minutes(5));
   ASSERT_TRUE(claimed.ok() && claimed->has_value());
 
-  const auto recorded = queue_->Progress(Id(1), "worker-1", 42);
+  const auto recorded = queue_->Progress({.id = Id(1), .owner = "worker-1"}, 42);
   ASSERT_TRUE(recorded.ok()) << recorded.status();
   EXPECT_TRUE(*recorded);
   EXPECT_EQ(Column(Id(1), "games_indexed"), "42");
@@ -349,7 +349,7 @@ TEST_F(PgQueueTest, ProgressIsFencedOnOwnershipToo) {
   const auto claimed = queue_->ClaimNext("worker-1", absl::Minutes(5));
   ASSERT_TRUE(claimed.ok() && claimed->has_value());
 
-  const auto refused = queue_->Progress(Id(1), "worker-2", 42);
+  const auto refused = queue_->Progress({.id = Id(1), .owner = "worker-2"}, 42);
   ASSERT_TRUE(refused.ok()) << refused.status();
   EXPECT_FALSE(*refused);
   EXPECT_EQ(Column(Id(1), "games_indexed"), "0");
@@ -365,7 +365,7 @@ TEST_F(PgQueueTest, ProgressIsRefusedOnceTheLeaseHasExpired) {
                          {Id(1)})
                   .ok());
 
-  const auto refused = queue_->Progress(Id(1), "worker-1", 42);
+  const auto refused = queue_->Progress({.id = Id(1), .owner = "worker-1"}, 42);
   ASSERT_TRUE(refused.ok()) << refused.status();
   EXPECT_FALSE(*refused);
   EXPECT_EQ(Column(Id(1), "games_indexed"), "0");

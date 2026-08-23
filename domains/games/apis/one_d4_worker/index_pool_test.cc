@@ -18,6 +18,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
+#include "domains/games/apis/one_d4_worker/claim_ref.h"
 #include "domains/games/apis/one_d4_worker/queue.h"
 #include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
 
@@ -46,20 +47,16 @@ class FakeQueue : public IndexQueue {
     return job;
   }
 
-  absl::StatusOr<bool> Heartbeat(std::string_view, std::string_view, absl::Duration) override {
-    return true;
-  }
-  absl::StatusOr<bool> Progress(std::string_view, std::string_view, int) override { return true; }
-  absl::StatusOr<bool> Complete(std::string_view, std::string_view, int) override {
+  absl::StatusOr<bool> Heartbeat(ClaimRef, absl::Duration) override { return true; }
+  absl::StatusOr<bool> Progress(ClaimRef, int) override { return true; }
+  absl::StatusOr<bool> Complete(ClaimRef, int) override {
     const absl::MutexLock lock(mu_);
     if (!terminal_status_.ok()) return terminal_status_;
     return true;
   }
-  absl::StatusOr<bool> Fail(std::string_view, std::string_view, std::string_view) override {
-    return true;
-  }
-  absl::StatusOr<bool> HandBack(std::string_view, std::string_view) override { return true; }
-  absl::StatusOr<bool> Release(std::string_view, std::string_view) override { return true; }
+  absl::StatusOr<bool> Fail(ClaimRef, std::string_view) override { return true; }
+  absl::StatusOr<bool> HandBack(ClaimRef) override { return true; }
+  absl::StatusOr<bool> Release(ClaimRef) override { return true; }
 
   int claims() const {
     const absl::MutexLock lock(mu_);
@@ -168,26 +165,20 @@ class SharedQueue : public IndexQueue {
                                                     absl::Duration lease) override {
     return to_.ClaimNext(owner, lease);
   }
-  absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
-                                 absl::Duration lease) override {
-    return to_.Heartbeat(id, owner, lease);
+  absl::StatusOr<bool> Heartbeat(ClaimRef claim, absl::Duration lease) override {
+    return to_.Heartbeat(claim, lease);
   }
-  absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner, int games) override {
-    return to_.Progress(id, owner, games);
+  absl::StatusOr<bool> Progress(ClaimRef claim, int games) override {
+    return to_.Progress(claim, games);
   }
-  absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner, int games) override {
-    return to_.Complete(id, owner, games);
+  absl::StatusOr<bool> Complete(ClaimRef claim, int games) override {
+    return to_.Complete(claim, games);
   }
-  absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
-                            std::string_view message) override {
-    return to_.Fail(id, owner, message);
+  absl::StatusOr<bool> Fail(ClaimRef claim, std::string_view message) override {
+    return to_.Fail(claim, message);
   }
-  absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override {
-    return to_.HandBack(id, owner);
-  }
-  absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override {
-    return to_.Release(id, owner);
-  }
+  absl::StatusOr<bool> HandBack(ClaimRef claim) override { return to_.HandBack(claim); }
+  absl::StatusOr<bool> Release(ClaimRef claim) override { return to_.Release(claim); }
 
  private:
   IndexQueue& to_;

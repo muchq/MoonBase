@@ -161,7 +161,8 @@ TEST_F(ReanalysisQueueTest, ATakeoverResumesFromTheCursor) {
   const std::string id = Enqueue();
   ASSERT_TRUE(queue_->ClaimNext("worker-a", kLease).ok());
 
-  auto recorded = queue_->Progress(id, "worker-a", "https://chess.com/game/500", 500, 3);
+  auto recorded =
+      queue_->Progress({.id = id, .owner = "worker-a"}, "https://chess.com/game/500", 500, 3);
   ASSERT_TRUE(recorded.ok());
   EXPECT_TRUE(*recorded);
 
@@ -178,12 +179,14 @@ TEST_F(ReanalysisQueueTest, ProgressIsFencedOnALiveLease) {
   const std::string id = Enqueue();
   ASSERT_TRUE(queue_->ClaimNext("worker-a", kLease).ok());
 
-  auto stranger = queue_->Progress(id, "worker-b", "https://chess.com/game/9", 9, 0);
+  auto stranger =
+      queue_->Progress({.id = id, .owner = "worker-b"}, "https://chess.com/game/9", 9, 0);
   ASSERT_TRUE(stranger.ok());
   EXPECT_FALSE(*stranger) << "a worker that does not hold the row must not move its cursor";
 
   ExpireLease(id);
-  auto expired = queue_->Progress(id, "worker-a", "https://chess.com/game/9", 9, 0);
+  auto expired =
+      queue_->Progress({.id = id, .owner = "worker-a"}, "https://chess.com/game/9", 9, 0);
   ASSERT_TRUE(expired.ok());
   EXPECT_FALSE(*expired)
       << "at expiry a takeover is already licensed, so the old owner must not win that race";
@@ -193,12 +196,12 @@ TEST_F(ReanalysisQueueTest, CompleteIsFencedOnOwnership) {
   const std::string id = Enqueue();
   ASSERT_TRUE(queue_->ClaimNext("worker-a", kLease).ok());
 
-  auto stranger = queue_->Complete(id, "worker-b", 10, 0);
+  auto stranger = queue_->Complete({.id = id, .owner = "worker-b"}, 10, 0);
   ASSERT_TRUE(stranger.ok());
   EXPECT_FALSE(*stranger);
   EXPECT_EQ(Column(id, "status"), "PROCESSING");
 
-  auto owner = queue_->Complete(id, "worker-a", 10, 1);
+  auto owner = queue_->Complete({.id = id, .owner = "worker-a"}, 10, 1);
   ASSERT_TRUE(owner.ok());
   EXPECT_TRUE(*owner);
   EXPECT_EQ(Column(id, "status"), "COMPLETED");
@@ -210,11 +213,11 @@ TEST_F(ReanalysisQueueTest, FailIsFencedOnOwnershipToo) {
   const std::string id = Enqueue();
   ASSERT_TRUE(queue_->ClaimNext("worker-a", kLease).ok());
 
-  auto stranger = queue_->Fail(id, "worker-b", "not mine to fail");
+  auto stranger = queue_->Fail({.id = id, .owner = "worker-b"}, "not mine to fail");
   ASSERT_TRUE(stranger.ok());
   EXPECT_FALSE(*stranger);
 
-  auto owner = queue_->Fail(id, "worker-a", "pg went away");
+  auto owner = queue_->Fail({.id = id, .owner = "worker-a"}, "pg went away");
   ASSERT_TRUE(owner.ok());
   EXPECT_TRUE(*owner);
   EXPECT_EQ(Column(id, "status"), "FAILED");
@@ -224,7 +227,7 @@ TEST_F(ReanalysisQueueTest, FailIsFencedOnOwnershipToo) {
 TEST_F(ReanalysisQueueTest, WillNotClaimAPassThatIsAlreadyFinished) {
   const std::string id = Enqueue();
   ASSERT_TRUE(queue_->ClaimNext("worker-a", kLease).ok());
-  ASSERT_TRUE(queue_->Complete(id, "worker-a", 1, 0).ok());
+  ASSERT_TRUE(queue_->Complete({.id = id, .owner = "worker-a"}, 1, 0).ok());
 
   auto again = queue_->ClaimNext("worker-b", kLease);
   ASSERT_TRUE(again.ok());
@@ -237,7 +240,7 @@ TEST_F(ReanalysisQueueTest, HandBackRefundsTheAttemptAndReleaseSpendsIt) {
   EXPECT_EQ(Column(id, "attempts"), "1");
 
   // A shutdown is not the pass's fault.
-  auto handed = queue_->HandBack(id, "worker-a");
+  auto handed = queue_->HandBack({.id = id, .owner = "worker-a"});
   ASSERT_TRUE(handed.ok());
   EXPECT_TRUE(*handed);
   EXPECT_EQ(Column(id, "attempts"), "0");
@@ -246,7 +249,7 @@ TEST_F(ReanalysisQueueTest, HandBackRefundsTheAttemptAndReleaseSpendsIt) {
   EXPECT_EQ(Column(id, "attempts"), "1");
 
   // Hitting its own ceiling is. Refunding that would retry forever.
-  auto released = queue_->Release(id, "worker-a");
+  auto released = queue_->Release({.id = id, .owner = "worker-a"});
   ASSERT_TRUE(released.ok());
   EXPECT_TRUE(*released);
   EXPECT_EQ(Column(id, "attempts"), "1");
@@ -259,8 +262,10 @@ TEST_F(ReanalysisQueueTest, HandBackRefundsTheAttemptAndReleaseSpendsIt) {
 TEST_F(ReanalysisQueueTest, HandBackAndReleaseLeaveTheCursorForTheNextOwner) {
   const std::string id = Enqueue();
   ASSERT_TRUE(queue_->ClaimNext("worker-a", kLease).ok());
-  ASSERT_TRUE(queue_->Progress(id, "worker-a", "https://chess.com/game/0500", 500, 3).ok());
-  ASSERT_TRUE(queue_->HandBack(id, "worker-a").ok());
+  ASSERT_TRUE(
+      queue_->Progress({.id = id, .owner = "worker-a"}, "https://chess.com/game/0500", 500, 3)
+          .ok());
+  ASSERT_TRUE(queue_->HandBack({.id = id, .owner = "worker-a"}).ok());
 
   auto after_handback = queue_->ClaimNext("worker-b", kLease);
   ASSERT_TRUE(after_handback.ok());
@@ -269,8 +274,10 @@ TEST_F(ReanalysisQueueTest, HandBackAndReleaseLeaveTheCursorForTheNextOwner) {
   EXPECT_EQ((*after_handback)->games_processed, 500);
   EXPECT_EQ((*after_handback)->games_failed, 3);
 
-  ASSERT_TRUE(queue_->Progress(id, "worker-b", "https://chess.com/game/0700", 700, 4).ok());
-  ASSERT_TRUE(queue_->Release(id, "worker-b").ok());
+  ASSERT_TRUE(
+      queue_->Progress({.id = id, .owner = "worker-b"}, "https://chess.com/game/0700", 700, 4)
+          .ok());
+  ASSERT_TRUE(queue_->Release({.id = id, .owner = "worker-b"}).ok());
 
   auto after_release = queue_->ClaimNext("worker-c", kLease);
   ASSERT_TRUE(after_release.ok());
@@ -305,11 +312,11 @@ TEST_F(ReanalysisQueueTest, HeartbeatHoldsTheLeaseAndSaysWhenItIsLost) {
   const std::string id = Enqueue();
   ASSERT_TRUE(queue_->ClaimNext("worker-a", kLease).ok());
 
-  auto held = queue_->Heartbeat(id, "worker-a", kLease);
+  auto held = queue_->Heartbeat({.id = id, .owner = "worker-a"}, kLease);
   ASSERT_TRUE(held.ok());
   EXPECT_TRUE(*held);
 
-  auto stranger = queue_->Heartbeat(id, "worker-b", kLease);
+  auto stranger = queue_->Heartbeat({.id = id, .owner = "worker-b"}, kLease);
   ASSERT_TRUE(stranger.ok());
   EXPECT_FALSE(*stranger);
 }
@@ -328,14 +335,16 @@ TEST_F(ReanalysisQueueTest, AQueueThatOwnsItsConnectionClaimsAndFencesLikeAnyOth
   ASSERT_TRUE(claimed->has_value());
   EXPECT_EQ((*claimed)->id, id);
 
-  EXPECT_TRUE(*owned->Heartbeat(id, "worker-a", kLease));
-  EXPECT_FALSE(*owned->Heartbeat(id, "worker-b", kLease));
+  EXPECT_TRUE(*owned->Heartbeat({.id = id, .owner = "worker-a"}, kLease));
+  EXPECT_FALSE(*owned->Heartbeat({.id = id, .owner = "worker-b"}, kLease));
 
-  EXPECT_TRUE(*owned->Progress(id, "worker-a", "https://chess.com/game/0009", 9, 1));
-  EXPECT_FALSE(*owned->Progress(id, "worker-b", "https://chess.com/game/0009", 9, 1));
+  EXPECT_TRUE(
+      *owned->Progress({.id = id, .owner = "worker-a"}, "https://chess.com/game/0009", 9, 1));
+  EXPECT_FALSE(
+      *owned->Progress({.id = id, .owner = "worker-b"}, "https://chess.com/game/0009", 9, 1));
 
-  EXPECT_FALSE(*owned->Complete(id, "worker-b", 9, 1));
-  EXPECT_TRUE(*owned->Complete(id, "worker-a", 9, 1));
+  EXPECT_FALSE(*owned->Complete({.id = id, .owner = "worker-b"}, 9, 1));
+  EXPECT_TRUE(*owned->Complete({.id = id, .owner = "worker-a"}, 9, 1));
   EXPECT_EQ(Column(id, "status"), "COMPLETED");
   EXPECT_EQ(Column(id, "cursor_game_url"), "https://chess.com/game/0009");
 }
@@ -346,13 +355,13 @@ TEST_F(ReanalysisQueueTest, AnOwnedQueueHandsBackAndReleasesUnderTheRightOwnerTo
       NewOwnedReanalysisQueue(Conninfo(std::getenv("PG_TEST_DB_URL")));
   ASSERT_TRUE(owned->ClaimNext("worker-a", kLease).ok());
 
-  EXPECT_FALSE(*owned->HandBack(id, "worker-b"));
-  EXPECT_TRUE(*owned->HandBack(id, "worker-a"));
+  EXPECT_FALSE(*owned->HandBack({.id = id, .owner = "worker-b"}));
+  EXPECT_TRUE(*owned->HandBack({.id = id, .owner = "worker-a"}));
   EXPECT_EQ(Column(id, "attempts"), "0");
 
   ASSERT_TRUE(owned->ClaimNext("worker-a", kLease).ok());
-  EXPECT_FALSE(*owned->Release(id, "worker-b"));
-  EXPECT_TRUE(*owned->Release(id, "worker-a"));
+  EXPECT_FALSE(*owned->Release({.id = id, .owner = "worker-b"}));
+  EXPECT_TRUE(*owned->Release({.id = id, .owner = "worker-a"}));
   EXPECT_EQ(Column(id, "attempts"), "1");
 }
 
@@ -362,8 +371,8 @@ TEST_F(ReanalysisQueueTest, AnOwnedQueueFailsUnderTheRightOwner) {
       NewOwnedReanalysisQueue(Conninfo(std::getenv("PG_TEST_DB_URL")));
   ASSERT_TRUE(owned->ClaimNext("worker-a", kLease).ok());
 
-  EXPECT_FALSE(*owned->Fail(id, "worker-b", "not mine"));
-  EXPECT_TRUE(*owned->Fail(id, "worker-a", "pg went away"));
+  EXPECT_FALSE(*owned->Fail({.id = id, .owner = "worker-b"}, "not mine"));
+  EXPECT_TRUE(*owned->Fail({.id = id, .owner = "worker-a"}, "pg went away"));
   EXPECT_EQ(Column(id, "error_message"), "pg went away");
 }
 

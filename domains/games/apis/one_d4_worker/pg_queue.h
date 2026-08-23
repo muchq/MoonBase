@@ -24,17 +24,13 @@ class PgQueue : public IndexQueue {
 
   absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
                                                     absl::Duration lease) override;
-  absl::StatusOr<bool> Heartbeat(std::string_view id, std::string_view owner,
-                                 absl::Duration lease) override;
-  absl::StatusOr<bool> Progress(std::string_view id, std::string_view owner,
-                                int games_indexed) override;
+  absl::StatusOr<bool> Heartbeat(ClaimRef claim, absl::Duration lease) override;
+  absl::StatusOr<bool> Progress(ClaimRef claim, int games_indexed) override;
 
-  absl::StatusOr<bool> Complete(std::string_view id, std::string_view owner,
-                                int games_indexed) override;
-  absl::StatusOr<bool> Fail(std::string_view id, std::string_view owner,
-                            std::string_view message) override;
-  absl::StatusOr<bool> HandBack(std::string_view id, std::string_view owner) override;
-  absl::StatusOr<bool> Release(std::string_view id, std::string_view owner) override;
+  absl::StatusOr<bool> Complete(ClaimRef claim, int games_indexed) override;
+  absl::StatusOr<bool> Fail(ClaimRef claim, std::string_view message) override;
+  absl::StatusOr<bool> HandBack(ClaimRef claim) override;
+  absl::StatusOr<bool> Release(ClaimRef claim) override;
 
  private:
   pg::Client& client_;
