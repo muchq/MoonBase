@@ -356,6 +356,8 @@ java_test_suite(
     deps = [
         ":chessql_reference",
         "//domains/games/libs/chessql:compiler",
+        # The Compilation Examples table is checked by compiling its first column.
+        "//domains/games/libs/chessql:parser",
         artifact("org.assertj:assertj-core"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
     ],
@@ -790,6 +792,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmupTest.java",
         "src/test/java/com/muchq/games/one_d4/api/HealthProbeRouteLabelTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexResponseWireTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/NegatedFilterHttpTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryErrorWireTest.java",
     ],
     runtime_deps = [

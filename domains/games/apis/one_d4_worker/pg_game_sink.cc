@@ -88,7 +88,9 @@ std::string Number(int value) { return std::to_string(value); }
 /// The one place this worker does not follow the Java worker's handling of
 /// a missing field. Java stores 1970-01-01, which lands the game in a
 /// month it was not played in and changes what a date filter returns;
-/// absent is the honest answer and drops out of those filters cleanly.
+/// absent is the honest answer. It is not invisible to date filters: a
+/// positive one excludes it and a negated one returns it, which is what
+/// ChessQL does with every unset field (#1302).
 /// The integer columns take Java's value, since 0 there is only ever a
 /// rating or a move count nobody can read anything into.
 std::string OptionalNumber(int64_t value) { return value == 0 ? "" : std::to_string(value); }
