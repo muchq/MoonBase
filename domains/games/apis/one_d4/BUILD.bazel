@@ -356,6 +356,8 @@ java_test_suite(
     deps = [
         ":chessql_reference",
         "//domains/games/libs/chessql:compiler",
+        # The Compilation Examples table is checked by compiling its first column.
+        "//domains/games/libs/chessql:parser",
         artifact("org.assertj:assertj-core"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
     ],
@@ -718,39 +720,6 @@ java_library(
     ],
 )
 
-# ChessQL's negated filters at the caller's boundary: raw JSON to a booted server (#1302). Its
-# own target rather than a case in :e2e_tests because it boots Micronaut, which is the medium-size
-# shape mcp_shared_corpus_tests below has — the DAO- and compiler-level halves stay small.
-java_test_suite(
-    name = "negated_filter_e2e_tests",
-    size = "small",
-    srcs = ["src/test/java/com/muchq/games/one_d4/e2e/NegatedFilterE2ETest.java"],
-    runtime_deps = [
-        "//domains/platform/libs/logging",
-        "//domains/platform/resources:micronaut_config_lib",
-        artifact("org.postgresql:postgresql"),
-    ],
-    deps = [
-        # Module-boot suites set indexer.db.url to H2 without going through :test_db, so the
-        # driver has to be declared here. TestDb consumers get it from :test_db instead.
-        artifact("com.h2database:h2"),
-        ":db",
-        ":dto",
-        # TestSqlDialectFactory: without it the context boots an H2 pool and runs the Postgres
-        # migrations against it.
-        ":e2e_support",
-        ":module",
-        "//domains/platform/libs/json",
-        artifact("com.fasterxml.jackson.core:jackson-databind"),
-        artifact("io.micronaut:micronaut-context"),
-        artifact("io.micronaut:micronaut-http-server-netty"),
-        artifact("io.micronaut:micronaut-inject"),
-        artifact("io.micronaut:micronaut-runtime"),
-        artifact("org.assertj:assertj-core"),
-        artifact("org.junit.jupiter:junit-jupiter-api"),
-    ],
-)
-
 # The MCP-to-one_d4 seam: real tools, real HTTP, real corpus (#1332). Lives here rather than in
 # mcpserver because it needs one_d4's e2e_support (FakeChessClient) and a booted one_d4 server;
 # the mcpserver side is just the tool objects, which are a plain library dep.
@@ -823,6 +792,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmupTest.java",
         "src/test/java/com/muchq/games/one_d4/api/HealthProbeRouteLabelTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexResponseWireTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/NegatedFilterHttpTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryErrorWireTest.java",
     ],
     runtime_deps = [

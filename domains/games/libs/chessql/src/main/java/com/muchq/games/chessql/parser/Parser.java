@@ -210,8 +210,9 @@ public class Parser {
         // The other SQL spelling of the NULL habit lands here: `field IS NULL` fails at `IS`.
         if (t.type() == TokenType.IDENTIFIER && t.value().equalsIgnoreCase("is")) {
           throw new ParseException(
-              "ChessQL has no IS NULL / IS NOT NULL — a game whose field is unset never matches"
-                  + " any comparison, so a filter cannot select NULL rows",
+              "ChessQL has no IS NULL / IS NOT NULL — a negated filter already selects the rows"
+                  + " whose field is unset, so NOT title = \"GM\" (or title != \"GM\") is how to"
+                  + " reach them, and a positive comparison is how to exclude them",
               t.position());
         }
         throw new ParseException(
@@ -241,9 +242,9 @@ public class Parser {
     }
     if (t.type() == TokenType.IDENTIFIER && t.value().equalsIgnoreCase("null")) {
       throw new ParseException(
-          "ChessQL has no NULL literal — a game whose field is unset never matches any comparison,"
-              + " so there is nothing to compare NULL against. Expected a number or a double-quoted"
-              + " string",
+          "ChessQL has no NULL literal — an unset field is reached by negating a comparison"
+              + " (title != \"GM\" includes untitled players) rather than by naming NULL, so there"
+              + " is nothing to compare NULL against. Expected a number or a double-quoted string",
           t.position());
     }
     if (t.type() == TokenType.IDENTIFIER) {

@@ -120,16 +120,27 @@ public class SqlCompilerTest {
   }
 
   /**
-   * A motif is an EXISTS, which is two-valued already — but it negates through the same {@code IS
-   * NOT TRUE} as everything else. One negation idiom, no per-predicate table of which subexpression
-   * can be NULL for a later reader to consult and get wrong.
+   * The one exception to negating through {@code IS NOT TRUE}: a motif compiles to an EXISTS, which
+   * is two-valued already, so the fold would buy nothing — and it would cost a plan. Postgres pulls
+   * a SubLink up into an anti-join only through a literal NOT; wrapped in a BooleanTest the same
+   * subquery stays a per-row SubPlan. Sequences compile to EXISTS too and take the same path.
    */
   @Test
   public void testNotExpression() {
     CompiledQuery result = compile("NOT motif(pin)");
     assertThat(result.selectSql())
-        .isEqualTo(BASE_PREFIX + "(" + motifExists("PIN") + ") IS NOT TRUE" + BASE_SUFFIX);
+        .isEqualTo(BASE_PREFIX + "(NOT " + motifExists("PIN") + ")" + BASE_SUFFIX);
     assertThat(result.parameters()).isEmpty();
+
+    // A nullable comparison beside it in one query still folds, so the exception is scoped to the
+    // EXISTS operand rather than to the whole expression containing one.
+    assertThat(compile("NOT motif(pin) AND black.title != \"GM\"").selectSql())
+        .isEqualTo(
+            BASE_PREFIX
+                + "((NOT "
+                + motifExists("PIN")
+                + ") AND (LOWER(black_title) = LOWER(?)) IS NOT TRUE)"
+                + BASE_SUFFIX);
   }
 
   @Test
@@ -924,7 +935,9 @@ public class SqlCompilerTest {
   public void testMonthRejectsNonEqualityOperatorsWithExactMessage() {
     assertThatThrownBy(() -> compile("month > \"2026-07\""))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("month supports only '=' (use date for range comparisons), got: >");
+        .hasMessage(
+            "month supports only '=' (use date for range comparisons, or NOT month = \"YYYY-MM\""
+                + " to exclude one), got: >");
   }
 
   @Test

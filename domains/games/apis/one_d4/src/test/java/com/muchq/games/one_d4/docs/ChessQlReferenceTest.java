@@ -3,6 +3,7 @@ package com.muchq.games.one_d4.docs;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.muchq.games.chessql.compiler.SqlCompiler;
+import com.muchq.games.chessql.parser.Parser;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -76,6 +77,54 @@ public class ChessQlReferenceTest {
   }
 
   /**
+   * The Compilation Examples table, compiled. Every other assertion here pins which names appear;
+   * this one pins what the doc claims the compiler <em>emits</em>, which is the part that had no
+   * check at all — #1302 changed the SQL for negation and left the table describing the old shape,
+   * green, in a file served verbatim to MCP clients as the query-language reference.
+   *
+   * <p>The documented fragment is matched as an ordered set of substrings so a row may elide with
+   * {@code ...}, which several do rather than reprint a whole EXISTS subquery. Parameters are not
+   * pinned: the column renders them for a human (a bound {@code LocalDateTime} prints unlike its
+   * {@code toString}), and the SQL is what drifted.
+   */
+  @Test
+  public void theCompilationExamplesTableMatchesWhatTheCompilerEmits() throws IOException {
+    SqlCompiler compiler = new SqlCompiler();
+    int checked = 0;
+
+    for (String line : section("## Compilation Examples", "## Error Handling").split("\n")) {
+      String[] cells = line.split("\\|");
+      // A data row is `| `input` | `sql` | ... |`; the heading and separator rows have no
+      // backticks.
+      if (cells.length < 3 || !cells[1].trim().startsWith("`")) {
+        continue;
+      }
+      String input = unbacktick(cells[1]);
+      String documentedSql = unbacktick(cells[2]);
+
+      String actual = compiler.compile(Parser.parse(input)).selectSql();
+      String cursor = actual;
+      for (String fragment : documentedSql.split("\\.\\.\\.")) {
+        assertThat(cursor)
+            .as(
+                "CHESSQL.md documents `%s` as compiling to `%s`, but it emits: %s",
+                input, documentedSql, actual)
+            .contains(fragment);
+        cursor = cursor.substring(cursor.indexOf(fragment) + fragment.length());
+      }
+      checked++;
+    }
+
+    assertThat(checked)
+        .as("the Compilation Examples table must still have rows to check")
+        .isGreaterThanOrEqualTo(8);
+  }
+
+  private static String unbacktick(String cell) {
+    return cell.trim().replaceAll("^`|`$", "");
+  }
+
+  /**
    * The control. Every assertion above is a set comparison against text carved out by heading, so a
    * renamed heading would silently compare against an empty section and the roster tests would fail
    * for a confusing reason — or, if the compiler roster were ever empty too, pass while checking
@@ -89,6 +138,7 @@ public class ChessQlReferenceTest {
     // The bound that keeps Compilation Examples out of the motif roster. If this heading is
     // renamed, section() fails loudly here rather than the scan silently widening to EOF.
     assertThat(reference()).contains("## Values");
+    assertThat(section("## Compilation Examples", "## Error Handling")).isNotBlank();
     assertThat(SqlCompiler.filterableFields()).isNotEmpty();
     assertThat(SqlCompiler.perspectiveFields()).isNotEmpty();
     assertThat(SqlCompiler.motifs()).isNotEmpty();

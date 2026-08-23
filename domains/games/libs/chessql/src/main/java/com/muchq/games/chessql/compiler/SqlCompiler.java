@@ -773,7 +773,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
           and.operands().stream()
               .map(e -> compileExpr(e, params, perspective))
               .collect(Collectors.joining(" AND ", "(", ")"));
-      case NotExpr not -> negate(compileExpr(not.operand(), params, perspective));
+      case NotExpr not -> negateOperand(not.operand(), params, perspective);
       case ComparisonExpr cmp -> compileComparison(cmp, params, perspective);
       case InExpr in -> compileIn(in, params, perspective);
       case MotifExpr motif -> compileMotif(motif);
@@ -782,11 +782,12 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   }
 
   /**
-   * The one way this compiler negates, because SQL's own NOT is three-valued and a WHERE clause is
-   * not: {@code NOT NULL} is NULL, a NULL row is not selected, so a bare negation silently drops
-   * exactly the rows the caller wrote it to catch. Every filterable column but game_url and
-   * platform is nullable, so this is the common case, not a corner: {@code opponent.title != "GM"}
-   * dropped every untitled opponent and returned a plausible smaller number (#1302).
+   * How this compiler negates anything that can be NULL, because SQL's own NOT is three-valued and
+   * a WHERE clause is not: {@code NOT NULL} is NULL, a NULL row is not selected, so a bare negation
+   * silently drops exactly the rows the caller wrote it to catch. Every filterable column but
+   * game_url and platform is nullable, so this is the common case, not a corner: {@code
+   * opponent.title != "GM"} dropped every untitled opponent and returned a plausible smaller number
+   * (#1302).
    *
    * <p>{@code IS NOT TRUE} folds the unknown to TRUE at the negation boundary — a value nobody
    * knows is not the value you named — and yields TRUE or FALSE but never NULL, so negations nest
@@ -796,6 +797,24 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    */
   private static String negate(String predicate) {
     return "(" + predicate + ") IS NOT TRUE";
+  }
+
+  /**
+   * Negates a subexpression, with one exception to {@link #negate}: motif and sequence compile to
+   * EXISTS, which is two-valued already, so the fold buys them nothing — and it costs a plan.
+   * Postgres pulls a SubLink up into an anti-join only when it sees a literal NOT; wrapped in a
+   * BooleanTest the same subquery stays a per-row SubPlan (measured: Hash Anti Join becomes a Seq
+   * Scan with a hashed SubPlan). These two keep the bare NOT, which is both correct and the plan
+   * the planner wants.
+   *
+   * <p>Keyed on the AST node, not on the shape of the emitted string, so it cannot drift if a
+   * compile method's output changes.
+   */
+  private String negateOperand(Expr operand, List<Object> params, Perspective perspective) {
+    String compiled = compileExpr(operand, params, perspective);
+    return operand instanceof MotifExpr || operand instanceof SequenceExpr
+        ? "(NOT " + compiled + ")"
+        : negate(compiled);
   }
 
   private String compileComparison(
@@ -956,7 +975,9 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
     if (MONTH_FIELD.equals(cmp.field())) {
       if (!cmp.operator().equals("=")) {
         throw new IllegalArgumentException(
-            "month supports only '=' (use date for range comparisons), got: " + cmp.operator());
+            "month supports only '=' (use date for range comparisons, or NOT month = \"YYYY-MM\""
+                + " to exclude one), got: "
+                + cmp.operator());
       }
       YearMonth month = parseMonthValue(cmp.value());
       start = month.atDay(1).atStartOfDay();

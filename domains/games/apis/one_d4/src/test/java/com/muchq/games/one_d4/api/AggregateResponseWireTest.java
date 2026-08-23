@@ -23,13 +23,14 @@ import org.junit.jupiter.api.Test;
  * Asserts the raw bytes a real server puts on the wire for /v1/aggregate's NULL group keys.
  *
  * <p>A NULL group key (untitled opponent, missing rating) must reach clients as an explicit {@code
- * "opponent_title":null} — the null bucket is how callers count what {@code !=} excludes, so a key
- * the HTTP mapper silently omits is indistinguishable from a dimension that was never requested.
- * The HTTP mapper omits null <em>bean fields</em> on purpose (IndexResponseWireTest pins that), and
- * with no explicit inclusion on the group map that same default swallows null map values — and, for
- * a group whose every value is NULL, the {@code group} property itself. Serializing through {@code
- * JsonUtils} (the MCP tool path) or asserting on the Java map cannot catch this; only the
- * container-configured mapper behind a real response can.
+ * "opponent_title":null} — it is how callers count unset values, and since #1302 it is also the
+ * figure a negated filter has to reconcile against, so a key the HTTP mapper silently omits is
+ * indistinguishable from a dimension that was never requested. The HTTP mapper omits null <em>bean
+ * fields</em> on purpose (IndexResponseWireTest pins that), and with no explicit inclusion on the
+ * group map that same default swallows null map values — and, for a group whose every value is
+ * NULL, the {@code group} property itself. Serializing through {@code JsonUtils} (the MCP tool
+ * path) or asserting on the Java map cannot catch this; only the container-configured mapper behind
+ * a real response can.
  */
 public class AggregateResponseWireTest {
 

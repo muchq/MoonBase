@@ -1,4 +1,4 @@
-package com.muchq.games.one_d4.e2e;
+package com.muchq.games.one_d4.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -38,7 +38,7 @@ import org.junit.jupiter.api.Test;
  * filter therefore admits both, which is the honest reading of a NULL — the alternative would be to
  * claim a distinction the schema does not carry.
  */
-public class NegatedFilterE2ETest {
+public class NegatedFilterHttpTest {
 
   private static final String PLAYER = "hikaru";
 
@@ -52,7 +52,7 @@ public class NegatedFilterE2ETest {
             EmbeddedServer.class,
             java.util.Map.of(
                 "indexer.db.url",
-                "jdbc:h2:mem:negated_filter_e2e_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1",
+                "jdbc:h2:mem:negated_filter_http_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1",
                 "micronaut.server.port",
                 "-1"));
     http = HttpClient.newHttpClient();
@@ -84,7 +84,10 @@ public class NegatedFilterE2ETest {
                 game(requestId, "gm-white", PLAYER, "gmfoe", "IM", "GM"),
                 game(requestId, "gm-black", "gmfoe2", PLAYER, "GM", "IM"),
                 game(requestId, "fm-white", PLAYER, "fmfoe", "IM", "FM"),
-                game(requestId, "untitled-black", "untitled_foe", PLAYER, null, "IM")));
+                game(requestId, "untitled-black", "untitled_foe", PLAYER, null, "IM"),
+                // No played_at: only a negated date filter reaches this row, and serializing it is
+                // the half of #1256 that used to crash the mapper.
+                gameWithoutPlayedAt(requestId, "no-played-at", PLAYER, "untitled_foe2")));
   }
 
   @AfterAll
@@ -93,29 +96,34 @@ public class NegatedFilterE2ETest {
   }
 
   /**
-   * The reported query. Two of the four opponents are GMs, so the answer is the other two — and the
-   * untitled one is the half that used to vanish.
+   * The reported query. Two of the five opponents are GMs, so the answer is the other three — two
+   * of which are untitled, the half that used to vanish.
    */
   @Test
   public void negatedTitleFilterReturnsTheUntitledOpponentOverHttp() throws Exception {
     assertThat(urlsFor("opponent.title != \\\"GM\\\""))
         .containsExactly(
-            "https://chess.com/game/fm-white", "https://chess.com/game/untitled-black");
+            "https://chess.com/game/fm-white",
+            "https://chess.com/game/no-played-at",
+            "https://chess.com/game/untitled-black");
 
     assertThat(urlsFor("NOT opponent.title = \\\"GM\\\""))
         .as("the other spelling of the same question")
         .containsExactly(
-            "https://chess.com/game/fm-white", "https://chess.com/game/untitled-black");
+            "https://chess.com/game/fm-white",
+            "https://chess.com/game/no-played-at",
+            "https://chess.com/game/untitled-black");
 
     assertThat(urlsFor("NOT opponent.title IN [\\\"GM\\\", \\\"FM\\\"]"))
-        .containsExactly("https://chess.com/game/untitled-black");
+        .containsExactly(
+            "https://chess.com/game/no-played-at", "https://chess.com/game/untitled-black");
   }
 
   /**
    * The control, and the reason the test above cannot pass by returning everything: the positive
-   * filter still excludes the untitled opponent, and the two halves partition the corpus. That sum
+   * filter still excludes the untitled opponents, and the two halves partition the corpus. That sum
    * is the check a caller could not make from outside before #1311 made the null bucket visible —
-   * it read 3 of 4 and looked like an answer.
+   * it read 3 of 5 and looked like an answer.
    */
   @Test
   public void positiveAndNegatedTitleFiltersPartitionTheCorpus() throws Exception {
@@ -127,23 +135,19 @@ public class NegatedFilterE2ETest {
     assertThat(areGm).doesNotContainAnyElementsOf(areNotGm);
     assertThat(areGm.size() + areNotGm.size())
         .as("every game has exactly one opponent, so the two halves must sum to the corpus")
-        .isEqualTo(4);
+        .isEqualTo(5);
   }
 
   /**
-   * The same number, reached the other way. {@code groupBy: ["opponent.title"]} has always counted
-   * untitled opponents into a {@code null} group (#1311), so the grouped answer is what the filter
-   * has to agree with — and disagreeing by exactly the null bucket was the shape of this bug.
+   * The same number, reached the other way, and through the aggregate endpoint's own parameter
+   * ordering — it binds SELECT before WHERE, which the query path never exercises. {@code groupBy:
+   * ["opponent.title"]} has always counted untitled opponents into a {@code null} group (#1311), so
+   * the grouped answer is what the filter has to agree with; disagreeing by exactly the null bucket
+   * was the shape of this bug.
    */
   @Test
   public void theNegatedFilterAgreesWithTheGroupedCount() throws Exception {
-    JsonNode aggregate =
-        postJson(
-            "/v1/aggregate",
-            "{\"query\":\"time.class = \\\"blitz\\\"\",\"groupBy\":[\"opponent.title\"],"
-                + "\"limit\":50,\"player\":\""
-                + PLAYER
-                + "\"}");
+    JsonNode aggregate = aggregateBy("time.class = \\\"blitz\\\"");
 
     long notGmByGrouping = 0;
     boolean sawNullBucket = false;
@@ -156,29 +160,69 @@ public class NegatedFilterE2ETest {
       }
     }
 
-    assertThat(sawNullBucket).as("the untitled opponent must reach a group at all").isTrue();
-    assertThat(notGmByGrouping).isEqualTo(2);
+    assertThat(sawNullBucket).as("the untitled opponents must reach a group at all").isTrue();
+    assertThat(notGmByGrouping).isEqualTo(3);
     assertThat(urlsFor("opponent.title != \\\"GM\\\"")).hasSize((int) notGmByGrouping);
+
+    // The negation inside the aggregate's own filter, rather than only compared against one.
+    JsonNode negated = aggregateBy("opponent.title != \\\"GM\\\"");
+    long negatedTotal = negated.get("totalGames").asLong();
+    assertThat(negatedTotal).isEqualTo(3);
   }
 
   /**
-   * Sorted, not left in response order: ORDER BY puts NULL-valued rows at opposite ends on H2 and
-   * Postgres, and these games are ordered by a column the fixture sets identically.
+   * #1256's other half at the wire: a game with no {@code played_at} serialized over HTTP. The row
+   * mapper used to dereference that column unguarded, so this request was a 500 — and only a
+   * negated date filter reaches the row at all, which is why #1302 is what puts it on this path.
+   * The HTTP mapper omits null bean fields, so "unset" reaches a caller as an absent key.
+   */
+  @Test
+  public void aGameWithNoPlayedAtSerializesOverHttp() throws Exception {
+    JsonNode response = queryFor("date != \\\"2024-01-15\\\"");
+
+    assertThat(response.get("games")).hasSize(1);
+    JsonNode game = response.get("games").get(0);
+    assertThat(game.get("gameUrl").asText()).isEqualTo("https://chess.com/game/no-played-at");
+    assertThat(game.hasNonNull("playedAt")).as("unset, not epoch").isFalse();
+    // The control: this is a fully mapped row, not a husk that happens to carry a URL.
+    assertThat(game.get("whiteUsername").asText()).isEqualTo(PLAYER);
+    assertThat(game.get("numMoves").asInt()).isEqualTo(35);
+    assertThat(game.hasNonNull("indexedAt")).isTrue();
+
+    // The positive twin: every other game is on that day, and none of them is this row.
+    assertThat(urlsFor("date = \\\"2024-01-15\\\""))
+        .hasSize(4)
+        .doesNotContain("https://chess.com/game/no-played-at");
+  }
+
+  /**
+   * Sorted, not left in response order. The fixture gives four games one identical {@code
+   * played_at} and the fifth none, so the default {@code ORDER BY played_at DESC} decides nothing
+   * here except where the unset row lands — and the two engines disagree about that. Where the row
+   * lands is pinned deliberately, on each engine, in the DAO suites.
    */
   private static List<String> urlsFor(String chessql) throws Exception {
-    JsonNode response =
-        postJson(
-            "/v1/query",
-            "{\"query\":\""
-                + chessql
-                + "\",\"limit\":50,\"offset\":0,\"player\":\""
-                + PLAYER
-                + "\"}");
     List<String> urls = new ArrayList<>();
-    for (JsonNode game : response.get("games")) {
+    for (JsonNode game : queryFor(chessql).get("games")) {
       urls.add(game.get("gameUrl").asText());
     }
     return urls.stream().sorted().toList();
+  }
+
+  private static JsonNode queryFor(String chessql) throws Exception {
+    return postJson(
+        "/v1/query",
+        "{\"query\":\"" + chessql + "\",\"limit\":50,\"offset\":0,\"player\":\"" + PLAYER + "\"}");
+  }
+
+  private static JsonNode aggregateBy(String chessql) throws Exception {
+    return postJson(
+        "/v1/aggregate",
+        "{\"query\":\""
+            + chessql
+            + "\",\"groupBy\":[\"opponent.title\"],\"limit\":50,\"player\":\""
+            + PLAYER
+            + "\"}");
   }
 
   private static JsonNode postJson(String path, String body) throws Exception {
@@ -192,6 +236,31 @@ public class NegatedFilterE2ETest {
             HttpResponse.BodyHandlers.ofString());
     assertThat(response.statusCode()).as("POST %s -> %s", path, response.body()).isEqualTo(200);
     return JsonUtils.mapper().readTree(response.body());
+  }
+
+  private static GameFeature gameWithoutPlayedAt(
+      UUID requestId, String slug, String white, String black) {
+    GameFeature withTime = game(requestId, slug, white, black, null, null);
+    return new GameFeature(
+        withTime.id(),
+        withTime.requestId(),
+        withTime.gameUrl(),
+        withTime.platform(),
+        withTime.whiteUsername(),
+        withTime.blackUsername(),
+        withTime.whiteElo(),
+        withTime.blackElo(),
+        withTime.whiteTitle(),
+        withTime.blackTitle(),
+        withTime.timeClass(),
+        withTime.eco(),
+        withTime.openingName(),
+        withTime.openingFamily(),
+        withTime.result(),
+        null,
+        withTime.numMoves(),
+        withTime.indexedAt(),
+        withTime.pgn());
   }
 
   private static GameFeature game(

@@ -9,12 +9,15 @@ import com.muchq.games.chessql.parser.ParsedQuery;
 import com.muchq.games.chessql.parser.Parser;
 import com.muchq.games.one_d4.api.dto.AggregateRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
+import com.muchq.games.one_d4.engine.model.GameFeatures;
+import com.muchq.games.one_d4.engine.model.Motif;
 import java.io.Closeable;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.jdbi.v3.core.Jdbi;
@@ -24,8 +27,8 @@ import org.junit.jupiter.api.Test;
 
 /**
  * The aggregate SQL is the part of the compiler where H2 and Postgres can legitimately disagree,
- * and Postgres is the deployment target while every other DAO test runs on H2. Two constructs carry
- * real dialect risk:
+ * and Postgres is the deployment target while every other DAO test runs on H2. Three constructs
+ * carry real dialect risk:
  *
  * <ul>
  *   <li>GROUP BY (and the ORDER BY tiebreak) referencing a SELECT-list <em>alias</em> rather than
@@ -38,6 +41,10 @@ import org.junit.jupiter.api.Test;
  *       pgjdbc stores the UTC wall clock as-is instead of converting through the JVM default zone;
  *       {@link PlayedAtTimeZoneTest} pins that under a non-UTC JVM on H2, and this suite checks
  *       pgjdbc honours it the same way.
+ *   <li>{@code (predicate) IS NOT TRUE}, which every negated filter compiles to since #1302. It
+ *       decides whether a NULL-valued row survives a negation, so a dialect that parsed it
+ *       differently would restore the bug in production with H2 still green. The NULL ordering it
+ *       newly exposes is pinned here too, against its H2 twin.
  * </ul>
  *
  * <p>Runs against the real postgres that CI's build-and-test job provides via {@code
@@ -619,6 +626,72 @@ public class PostgresAggregateCompatTest {
     assertThat(urlsMatching("date != \"2026-06-15\""))
         .containsExactly("neg-noplayedat", "neg-untitled");
     assertThat(urlsMatching("date = \"2026-06-15\"")).containsExactly("neg-fm", "neg-gm");
+
+    // A negation inside a compound, since IS NOT TRUE has to bind tighter than AND / OR here too.
+    assertThat(urlsMatching("date != \"2026-06-15\" AND game.url != \"neg-untitled\""))
+        .containsExactly("neg-noplayedat");
+  }
+
+  /**
+   * A motif keeps a bare NOT rather than the IS NOT TRUE every nullable comparison gets, because
+   * EXISTS is two-valued and because Postgres pulls a SubLink up into an anti-join only through a
+   * literal NOT. This is the engine that rationale is about, and {@code NOT motif(...)} is an
+   * advertised example in the MCP tool description, so it runs here rather than being reasoned
+   * about. Its H2 twin is {@code GameFeatureDaoTest.insertOccurrences_doesNotAffectOtherGames}.
+   */
+  @Test
+  public void negatedMotifRunsOnPostgres() {
+    dao.insertBatch(
+        List.of(
+            game(
+                "nm-pinned",
+                "hikaru",
+                "a",
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-02T10:00:00Z")),
+            game(
+                "nm-plain",
+                "hikaru",
+                "b",
+                "1-0",
+                "Caro Kann",
+                Instant.parse("2026-07-03T10:00:00Z"))));
+    dao.insertOccurrencesBatch(
+        Map.of(
+            "nm-pinned",
+            Map.of(
+                Motif.PIN,
+                List.of(
+                    new GameFeatures.MotifOccurrence(
+                        3, 2, "white", "Pin", null, "Bb5", "nc6", false, false, "ABSOLUTE")))));
+
+    assertThat(urlsMatching("motif(pin)")).containsExactly("nm-pinned");
+    assertThat(urlsMatching("NOT motif(pin)")).containsExactly("nm-plain");
+  }
+
+  /**
+   * Where a row with no played_at lands in the default ordering, on the deployment engine. {@code
+   * ORDER BY played_at DESC} leaves NULL placement to the engine and the two disagree: Postgres
+   * sorts it first, H2 last ({@code GameFeatureDaoTest.query_nullPlayedAtSortsLastInTheDefaultOrder
+   * OnH2} is the twin). #1302 is what makes that reachable from a date-scoped query — such a row
+   * now leads page one of {@code date != "D"} in production and trails it in every H2 test — so it
+   * is pinned on both engines rather than left as a comment. Deliberately unsorted, unlike every
+   * other assertion in this file.
+   */
+  @Test
+  public void nullPlayedAtLeadsTheDefaultOrderOnPostgres() {
+    dao.insertBatch(
+        List.of(
+            game("ord-null", "w", "b", "1-0", "Caro Kann", null),
+            game("ord-old", "w", "b", "1-0", "Caro Kann", Instant.parse("2024-01-01T00:00:00Z")),
+            game("ord-new", "w", "b", "1-0", "Caro Kann", Instant.parse("2026-01-01T00:00:00Z"))));
+
+    List<GameFeature> rows =
+        dao.query(new SqlCompiler().compile(Parser.parse("num.moves >= 0")), 10, 0);
+
+    assertThat(rows.stream().map(GameFeature::gameUrl))
+        .containsExactly("ord-null", "ord-new", "ord-old");
   }
 
   /**

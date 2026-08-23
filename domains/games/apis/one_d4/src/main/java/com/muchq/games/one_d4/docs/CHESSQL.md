@@ -197,15 +197,21 @@ Bare `opponent.elo` buckets by 100 points; a parenthesized width overrides it:
 *is* raw grouping, deliberately — `totalGroups` / `truncated` will say what it cost). Bands are
 half-open and keyed by their numeric lower bound — a group key of `2400` at width 200 means
 ratings in [2400, 2600) — under the underscore response key (`opponent_elo`), so bands sort
-numerically in the tiebreak. Rows with a NULL elo (chess.com omitted that side's rating data)
-form a `null` bucket, like the title fields. One width per field per request:
+numerically in the tiebreak. Rows with a NULL elo form a `null` bucket, like the title fields —
+though note that a rating chess.com omitted is written as `0`, not NULL, so it buckets under `0`
+rather than there (see [Unset fields and negation](#unset-fields-and-negation)). One width per
+field per request:
 `["me.elo(100)", "me.elo(200)"]` is rejected rather than silently picking one.
 
 ### Unset fields and negation
 
-Most columns are nullable, and a row can be unset for ordinary reasons: an untitled player, a
-side whose rating chess.com omitted, a row indexed before the title columns existed. Two rules
-cover every filter over them.
+Most columns are nullable, and a row can be unset for ordinary reasons: an untitled player, a row
+indexed before the title columns existed, a game whose archive entry carried no end time. Two
+rules cover every filter over them.
+
+(Ratings are the exception to watch: a side whose rating chess.com omitted is stored as **0**, not
+NULL, so `me.elo < 2500` *matches* it and `me.elo(100)` files it under `0` rather than in the null
+bucket. That is a write-side sentinel this section's rules cannot reach.)
 
 **A positive comparison never matches an unset field.** `opponent.title = "GM"`,
 `opponent.title IN ["GM", "IM"]`, and `me.elo < 2500` all skip the rows where that field is
@@ -224,7 +230,17 @@ replaces (#1302), where negated filters silently dropped every untitled opponent
 Note that negation is therefore *not* the same as flipping an ordering operator:
 `NOT me.elo > 2500` includes games where the rating is unknown, while `me.elo <= 2500` does not.
 
+A NULL title carries no distinction between "this player holds no title" and "the title roster
+was unavailable when this game was indexed" — the indexer writes the same empty value for both —
+so a negated title filter includes both. The second case is transient by construction: a month
+indexed against an unavailable or stale roster is recorded incomplete and refetched, so those
+NULLs resolve on the next pass rather than persisting.
+
 To count unset rows directly, group by the field on `/v1/aggregate` and read the `null` bucket.
+
+One paging consequence worth knowing: results are ordered by `played_at` descending, and the two
+engines sort unset timestamps to opposite ends — Postgres (the deployment) puts them first, H2
+last. A game with no `played_at` therefore leads the first page of `date != "D"` in production.
 
 ## Motifs
 
@@ -322,6 +338,8 @@ platform IN ["chess.com"] AND black.elo > 2700 AND motif(discovered_attack)
 | `motif(checkmate)` | `EXISTS (SELECT 1 FROM motif_occurrences mo WHERE mo.game_url = g.game_url AND mo.motif = 'ATTACK' AND mo.is_mate = TRUE)` | `[]` |
 | `white.elo >= 2500 AND motif(pin)` | `(white_elo >= ? AND EXISTS (...motif = 'PIN'...))` | `[2500]` |
 | `NOT motif(pin)` | `(NOT EXISTS (...motif = 'PIN'...))` | `[]` |
+| `black.title != "GM"` | `(LOWER(black_title) = LOWER(?)) IS NOT TRUE` | `["GM"]` |
+| `NOT black.title IN ["GM", "IM"]` | `(LOWER(black_title) IN (LOWER(?), LOWER(?))) IS NOT TRUE` | `["GM", "IM"]` |
 | `platform IN ["lichess", "chess.com"]` | `LOWER(platform) IN (LOWER(?), LOWER(?))` | `["lichess", "chess.com"]` |
 | `date >= "2026-07-01"` | `played_at >= ?` | `[2026-07-01T00:00:00Z]` |
 | `month = "2026-07"` | `(played_at >= ? AND played_at < ?)` | `[2026-07-01T00:00:00Z, 2026-08-01T00:00:00Z]` |

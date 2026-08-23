@@ -22,7 +22,9 @@ export interface GameRow {
   timeClass: string;
   eco: string;
   result: string;
-  playedAt: string | number;
+  // Nullable: a game whose archive entry carried no end time is stored with no played_at, and a
+  // negated date filter returns it (#1302). The API omits the key entirely in that case.
+  playedAt: string | number | null;
   indexedAt: string | number;
   numMoves: number;
   pgn?: string;
