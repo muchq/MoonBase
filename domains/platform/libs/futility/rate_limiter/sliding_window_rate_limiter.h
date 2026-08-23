@@ -28,6 +28,7 @@
 /// @endcode
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <mutex>
@@ -193,12 +194,12 @@ class SlidingWindowRateLimiter {
 
   void maybe_cleanup() {
     auto now = Clock::now();
-    if (now - last_cleanup_ < cleanup_interval_) {
+    if (now - last_cleanup_.load(std::memory_order_relaxed) < cleanup_interval_) {
       return;
     }
 
     std::unique_lock lock{map_mutex_};
-    if (now - last_cleanup_ < cleanup_interval_) {
+    if (now - last_cleanup_.load(std::memory_order_relaxed) < cleanup_interval_) {
       return;
     }
 
@@ -207,7 +208,7 @@ class SlidingWindowRateLimiter {
       std::lock_guard<std::mutex> lock(pair.second->mutex);
       return pair.second->last_access < cutoff;
     });
-    last_cleanup_ = now;
+    last_cleanup_.store(now, std::memory_order_relaxed);
   }
 
   void maybe_slide_window(WindowState& state) {
@@ -248,7 +249,13 @@ class SlidingWindowRateLimiter {
   const std::chrono::milliseconds cleanup_interval_;
   const std::chrono::milliseconds ttl_;
   const std::optional<size_t> max_keys_;
-  typename Clock::time_point last_cleanup_;
+
+  /// Atomic because the first check in maybe_cleanup() reads it without the lock, to keep the
+  /// common no-op path off map_mutex_ entirely. A plain member there is a data race against the
+  /// locked write, which is what tsan reports — the mutex on one side does not make the pair safe.
+  /// Relaxed suffices: the value only gates how often cleanup runs, and everything cleanup touches
+  /// is under map_mutex_ or the per-key mutex.
+  std::atomic<typename Clock::time_point> last_cleanup_;
 };
 
 }  // namespace futility::rate_limiter
