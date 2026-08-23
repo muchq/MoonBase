@@ -185,11 +185,11 @@ export default function McpView() {
         <p>
           <code>query_chess_games</code> and the filter half of{' '}
           <code>aggregate_chess_games</code> take ChessQL — the same language
-          the <Link to="/query">Query</Link> page uses, where the field and
-          motif reference lives.
+          the <Link to="/query">Query</Link> page uses. The full reference is
+          at <Link to="/chessql">ChessQL</Link>.
         </p>
         <p>
-          The server also publishes the full reference over MCP, as the{' '}
+          The server publishes that same reference over MCP, as the{' '}
           <code>chessql://reference</code> resource: grammar, operator
           precedence, the field and motif rosters, perspective fields and NULL
           semantics. It is a <em>resource</em> rather than an eleventh tool, so

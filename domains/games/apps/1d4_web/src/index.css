@@ -782,3 +782,94 @@ tr.selected td {
   font-size: 0.6875rem;
   color: var(--text-muted);
 }
+
+/* ChessQL reference (#1425)
+
+   Rendered from CHESSQL.md, so the selectors are markdown's output rather
+   than markup this app writes: every heading level, table and fence in that
+   file lands here whether or not the page anticipated it. */
+.chessql-reference {
+  max-width: 60rem;
+  line-height: 1.7;
+}
+
+.chessql-reference h1 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.chessql-reference h2 {
+  font-size: 1.125rem;
+  margin: 2rem 0 0.75rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--accent);
+}
+
+.chessql-reference h3 {
+  font-size: 1rem;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.chessql-reference p,
+.chessql-reference li {
+  color: var(--text-muted);
+}
+
+.chessql-reference ul,
+.chessql-reference ol {
+  padding-left: 1.25rem;
+}
+
+.chessql-reference code {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  color: var(--text);
+}
+
+.chessql-reference pre {
+  padding: 0.875rem 1rem;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.chessql-reference pre code {
+  color: var(--text);
+}
+
+/* Tables are the bulk of the document — the field, perspective and motif
+   rosters. Scrolled rather than wrapped, because a wrapped grammar cell is
+   harder to read than a scrolled one. */
+.chessql-reference .table-scroll {
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+
+.chessql-reference table {
+  min-width: 32rem;
+}
+
+.chessql-reference th,
+.chessql-reference td {
+  text-align: left;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.chessql-reference th {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.chessql-reference blockquote {
+  margin: 0.75rem 0;
+  padding: 0.5rem 1rem;
+  border-left: 2px solid var(--accent-dim);
+  background: var(--bg);
+  color: var(--text-muted);
+}

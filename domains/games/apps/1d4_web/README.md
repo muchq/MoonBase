@@ -60,4 +60,5 @@ This tars `dist/` for CI artifact storage.
 
 - Requires the one_d4 API deployed at `api.1d4.net`.
 - API CORS must allow origin `https://1d4.net`.
+- `/chessql` is `CHESSQL.md` from the one_d4 API, converted to HTML at build time by `vite-plugin-chessql.ts` (#1425). Not a copy — the same file mcpserver serves as `chessql://reference`, so the page inherits `ChessQlReferenceTest`'s pinning of the field and motif tables against the compiler. Converting during the build rather than in the browser keeps `marked` a devDependency; a renderer in the bundle measured 54 kB gzipped against 8 kB for the rendered HTML.
 - The `/mcp` page documents `mcp.1d4.net` but never calls it. `mcp.1d4.net` does allow this origin now, so it could — the list stays checked in at `src/mcpTools.ts` because a build-time contract fails in CI, where a runtime fetch could only ever be wrong in production. Pinned from both sides: `src/__tests__/McpView.test.tsx` here, and mcpserver's `McpToolRosterContractTest`, which asks the running server over `tools/list`.

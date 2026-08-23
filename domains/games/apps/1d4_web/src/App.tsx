@@ -4,6 +4,7 @@ import GamesView from './views/GamesView';
 import IndexView from './views/IndexView';
 import QueryView from './views/QueryView';
 import McpView from './views/McpView';
+import ChessQlView from './views/ChessQlView';
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
           <Route path="/index" element={<IndexView />} />
           <Route path="/query" element={<QueryView />} />
           <Route path="/mcp" element={<McpView />} />
+          <Route path="/chessql" element={<ChessQlView />} />
           <Route path="*" element={<Navigate to="/games" replace />} />
         </Routes>
       </main>
