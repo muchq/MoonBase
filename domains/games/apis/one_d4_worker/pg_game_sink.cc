@@ -97,12 +97,6 @@ std::string OptionalNumber(int64_t value) { return value == 0 ? "" : std::to_str
 
 std::string Bool(bool value) { return value ? "true" : "false"; }
 
-std::string Or(const std::optional<std::string>& value) { return value.value_or(""); }
-
-std::string PinTypeOf(const one_d4::MotifOccurrence& occurrence) {
-  return occurrence.pin_type.has_value() ? std::string(one_d4::ToString(*occurrence.pin_type)) : "";
-}
-
 }  // namespace
 
 absl::Status PgGameSink::Write(absl::Span<const IndexedGame> games) {

@@ -16,30 +16,30 @@ LeaseCore::LeaseCore(std::function<absl::StatusOr<bool>()> renew, absl::Duration
 
 LeaseCore::~LeaseCore() {
   {
-    const absl::MutexLock lock(&mu_);
+    const absl::MutexLock lock(mu_);
     stop_ = true;
   }
   renewer_.join();
 }
 
 bool LeaseCore::Keep() {
-  const absl::MutexLock lock(&mu_);
+  const absl::MutexLock lock(mu_);
   if (lost_) return false;
   return RenewLocked();
 }
 
 bool LeaseCore::OutOfTime() const {
-  const absl::MutexLock lock(&mu_);
+  const absl::MutexLock lock(mu_);
   return absl::Now() >= deadline_;
 }
 
 bool LeaseCore::lost() const {
-  const absl::MutexLock lock(&mu_);
+  const absl::MutexLock lock(mu_);
   return lost_;
 }
 
 bool LeaseCore::Fenced(const std::function<absl::StatusOr<bool>()>& write) {
-  const absl::MutexLock lock(&mu_);
+  const absl::MutexLock lock(mu_);
   if (lost_) return false;
   const absl::StatusOr<bool> recorded = write();
   if (recorded.ok() && *recorded) {
@@ -84,7 +84,7 @@ bool LeaseCore::RenewLocked() {
 }
 
 void LeaseCore::RenewUntilStopped() {
-  const absl::MutexLock lock(&mu_);
+  const absl::MutexLock lock(mu_);
   while (!mu_.AwaitWithTimeout(absl::Condition(&stop_), renew_every_)) {
     if (lost_) return;
     RenewLocked();

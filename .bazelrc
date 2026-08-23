@@ -97,6 +97,11 @@ build:sanitizer --strip=never
 # Scoped to domains/ because external code is not ours to annotate.
 build --per_file_copt=domains/.*@-Werror=thread-safety-analysis
 
+# No warnings in our own C++ (#1408), same scoping and for the same reason:
+# a warning in a dependency is not ours to fix, and one buried in a passing
+# build is one nobody reads.
+build --per_file_copt=domains/.*@-Wall,-Werror
+
 build:sanitizer --copt=-g
 build:sanitizer --copt=-fno-omit-frame-pointer
 build:sanitizer --copt=-fno-optimize-sibling-calls
