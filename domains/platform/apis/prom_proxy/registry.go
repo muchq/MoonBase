@@ -446,6 +446,33 @@ var serviceRegistry = map[string]serviceEntry{
 			// by a rate of zero, and any clamp large enough to avoid a divide-by-zero is
 			// small enough to turn the result into a four-order-of-magnitude spike. A tile
 			// that is wrong exactly when the system is unhealthy is worse than no tile.
+
+			// Cleanup (#1356, #1424). The sweep used to delete in silence, which
+			// made "it stopped running" and "there was nothing to delete"
+			// indistinguishable from here. sweeps is the tile that separates
+			// them: it counts every pass, so a sweep that dies shows up as this
+			// falling to zero while the others merely stay there.
+			counterOver("Cleanup", "sweeps", "",
+				`retention_sweeps_total{service_name=~"one_d4(_worker)?",outcome="ok"}`, burstWindow),
+			// An alarm, not a volume: a sweep that cannot reach the database
+			// leaves rows uncollected and requests unsettled, and neither is
+			// visible in any other tile.
+			counterOver("Cleanup", "sweeps_failed", "",
+				`retention_sweeps_total{service_name=~"one_d4(_worker)?",outcome="error"}`, alarmWindow),
+			counterOver("Cleanup", "rows_deleted", "rows",
+				`retention_rows_deleted_total{service_name=~"one_d4(_worker)?"}`, burstWindow),
+			// Requeued work, which is ordinary — a worker died and another took
+			// its range.
+			counterOver("Cleanup", "requests_requeued", "",
+				`retention_requests_settled_total{service_name=~"one_d4(_worker)?",arm="released"}`, burstWindow),
+			// The two that end a request rather than moving it. Both mean a user
+			// got an answer they did not want, so both read on the alarm window:
+			// poisoned is a range that fails repeatedly, stalled is a fleet that
+			// was not running at all.
+			counterOver("Cleanup", "requests_poisoned", "",
+				`retention_requests_settled_total{service_name=~"one_d4(_worker)?",arm="poisoned"}`, alarmWindow),
+			counterOver("Cleanup", "requests_stalled", "",
+				`retention_requests_settled_total{service_name=~"one_d4(_worker)?",arm="stalled"}`, alarmWindow),
 		},
 		CustomTimeseries: map[string]customTimeseriesDef{
 			"games_indexed":  tsCounter(`games_indexed_total{service_name=~"one_d4(_worker)?"}`),

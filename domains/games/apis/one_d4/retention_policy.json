@@ -1,0 +1,9 @@
+{
+  "period_seconds": 604800,
+  "request_seconds": 2592000,
+  "stale_request_seconds": 3600,
+  "lease_seconds": 300,
+  "lease_renewal_seconds": 75,
+  "max_run_seconds": 21600,
+  "sweep_statement_timeout_seconds": 120
+}

@@ -109,7 +109,7 @@ public class IndexRequestService {
     // and nothing else — and once #1279 took the clock out of that read, what it saved was the
     // settle. A row nobody will ever run still reads as live, so the short-circuit answered every
     // resubmit with it and never reached the reclaim that would have retired it and freed the
-    // range. The submit path is the one prompt reclaimer there is; RetentionWorker is hourly.
+    // range. The submit path is the one prompt reclaimer there is; the worker's sweep is hourly.
     IndexingRequestStore.Claim claim =
         requestStore.createOrAdopt(
             player,

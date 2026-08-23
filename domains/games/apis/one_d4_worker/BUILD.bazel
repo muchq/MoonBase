@@ -85,8 +85,114 @@ cc_test(
     srcs = ["poller_test.cc"],
     deps = [
         ":poller",
+        ":poller_options",
         ":queue",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The startup half of retention: reads and validates the shared policy file.
+# Kept apart from ":retention" because it touches no database, so its test —
+# the one covering a file that is missing or contradicts itself — runs
+# everywhere rather than only where Postgres is up.
+# Turns the shared policy into Poller::Options. Kept out of ":poller" so the
+# policy loader — and the JSON parser behind it — stays out of the compile of
+# everything that polls a queue but never reads a file.
+cc_library(
+    name = "poller_options",
+    srcs = ["poller_options.cc"],
+    hdrs = ["poller_options.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":poller",
+        ":retention_policy",
+    ],
+)
+
+cc_library(
+    name = "sweep_report",
+    hdrs = ["sweep_report.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "retention_policy",
+    srcs = ["retention_policy.cc"],
+    hdrs = ["retention_policy.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_test(
+    name = "retention_policy_test",
+    size = "small",
+    srcs = ["retention_policy_test.cc"],
+    data = ["//domains/games/apis/one_d4:retention_policy_json"],
+    deps = [
+        ":retention_policy",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Compares the path the worker computes at runtime against the paths pkg_tar
+# writes at build time. Depends on the image tar because that is the artifact
+# under test — kept out of retention_policy_test so the fast one stays fast.
+cc_test(
+    name = "retention_policy_packaging_test",
+    size = "small",
+    srcs = ["retention_policy_packaging_test.cc"],
+    data = [":one_d4_worker_tar"],
+    deps = [
+        ":retention_policy",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "retention",
+    srcs = ["retention.cc"],
+    hdrs = ["retention.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":pg_queue",
+        ":retention_policy",
+        ":sweep_report",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "retention_test",
+    size = "small",
+    srcs = ["retention_test.cc"],
+    data = ["//domains/games/apis/one_d4:retention_policy_json"],
+    # Without this the whole suite GTEST_SKIPs: bazel does not forward the
+    # ambient environment into the test sandbox, and CI sets PG_TEST_DB_URL as
+    # a job-level variable rather than passing --test_env. Every sibling here
+    # carries the same line. The "requires-postgres" tag documents the
+    # dependency; it is this that supplies it.
+    env_inherit = ["PG_TEST_DB_URL"],
+    tags = ["requires-postgres"],
+    deps = [
+        ":pg_queue",
+        ":retention",
+        "//domains/platform/libs/pg",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
@@ -276,12 +382,15 @@ cc_test(
         "poller.cc",
         "reanalysis_queue_test.cc",
         "//domains/games/apis/one_d4:migrations_sql",
+        "//domains/games/apis/one_d4:retention_policy_json",
         "//domains/games/apis/one_d4:worker_schema_sources",
     ],
     deps = [
         ":pg_queue",
         ":poller",
+        ":poller_options",
         ":reanalysis_queue",
+        ":retention_policy",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
@@ -463,6 +572,7 @@ cc_library(
     deps = [
         ":index_run",
         ":poller",
+        ":sweep_report",
         "//domains/games/libs/one_d4_motifs:motif",
         "//domains/platform/libs/futility/otel:metrics",
         "@com_google_absl//absl/strings",
@@ -491,6 +601,7 @@ cc_test(
 cc_binary(
     name = "one_d4_worker",
     srcs = ["worker_main.cc"],
+    data = ["//domains/games/apis/one_d4:retention_policy_json"],
     visibility = ["//visibility:public"],
     deps = [
         ":chess_com_archive",
@@ -502,9 +613,11 @@ cc_binary(
         ":pg_queue",
         ":pg_reanalysis",
         ":poller",
+        ":poller_options",
         ":reanalysis_poller",
         ":reanalysis_queue",
         ":reanalysis_run",
+        ":retention",
         ":title_roster",
         ":worker",
         "//domains/games/libs/chess_com_cpp:production_client",

@@ -1,152 +1,117 @@
 package com.muchq.games.one_d4.db;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.muchq.platform.json.JsonUtils;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 
 /**
- * How long indexed data survives before the retention worker deletes it.
+ * How long indexed data survives, and how long a claim on it is good for.
  *
- * <p>This lives next to the stores rather than in the worker because two callers have to agree on
- * it: the worker that does the deleting, and the API that tells clients when a request's data is
- * due to disappear. A request row in {@code indexing_requests} outlives the games it produced, so
- * without a shared constant the reported expiry would silently drift from the actual sweep.
+ * <p>Read from {@code retention_policy.json} on the classpath at class load (#1424). The C++ worker
+ * reads the same file out of its own image at startup, so there is one set of numbers and neither
+ * language holds a copy of them.
+ *
+ * <p>The reasoning — why requests outlive their games, why the lease is a fifth of the staleness
+ * window, what the run ceiling is for, and why the three settle arms run in the order they do —
+ * lives in {@code domains/games/apis/one_d4/README.md} under "Data Retention Policy".
+ *
+ * <p>A missing, unreadable or nonsensical file fails here, during class initialisation. Nothing
+ * else in the object graph touches this class — every reader is a method body — so {@code
+ * IndexerModule.retentionWindows()} is a {@code @Context} bean whose only job is to make that
+ * happen at startup rather than at the first request that needed a window. That is the intended
+ * outcome and the reason it is safe: a service that cannot read its retention windows should not
+ * serve expiry dates it is guessing at, and it certainly should not answer {@code /health} 200
+ * while doing it.
+ *
+ * <p>The file ships inside the deploy jar, so "missing" is a build error rather than something a
+ * deploy can produce.
+ *
+ * <p>Field-level validation matches the C++ loader's exactly — present, integral, positive — so a
+ * file one reader accepts and the other rejects is not a state this can reach. The relationships
+ * <em>between</em> the windows are checked by the C++ loader, which refuses to start on a
+ * violation, and asserted by {@code RetentionPolicyTest}, which fails the build on one; they are
+ * not re-checked here, so a contradictory file that somehow got past both would leave this service
+ * serving expiry dates while the worker refused to sweep. {@code RetentionPolicyTest} also pins
+ * every shipped value to the numbers API.md and the README publish in prose.
  */
 public final class RetentionPolicy {
 
+  private static final JsonNode POLICY = load();
+
   /** Games and indexed periods are deleted once they are older than this. */
-  public static final Duration PERIOD = Duration.ofDays(7);
+  public static final Duration PERIOD = seconds("period_seconds");
+
+  /** Request rows are deleted once they are older than this. Must exceed {@link #PERIOD}. */
+  public static final Duration REQUEST = seconds("request_seconds");
 
   /**
-   * Request rows are deleted once they are older than this — deliberately longer than {@link
-   * #PERIOD}, for two independent reasons.
-   *
-   * <p>The first is a correctness constraint, not a preference: {@code game_features.request_id} is
-   * a foreign key onto {@code indexing_requests(id)}, so a request may not be deleted while any
-   * game still points at it. Outliving the games it produced is what makes the sweep safe.
-   *
-   * <p>The second is that a request row is the only thing left that can explain its own emptiness.
-   * Once its months are swept, the API reports the request as {@code EXPIRED} rather than dropping
-   * it, which answers "what happened to my index?" with "pruned — re-run it" instead of silence.
-   * Deleting the row on the same clock as the data would throw that answer away at the exact moment
-   * it becomes useful, so the gap between the two windows is the window in which the explanation
-   * exists.
+   * How long a request may sit untouched, with no worker holding a live lease anywhere, before it
+   * is retired and the user is told.
    */
-  public static final Duration REQUEST = Duration.ofDays(30);
+  public static final Duration STALE_REQUEST = seconds("stale_request_seconds");
+
+  /** How long a worker's claim on a request is good for without renewal. */
+  public static final Duration LEASE = seconds("lease_seconds");
+
+  /** How often the holder renews — a quarter of {@link #LEASE}, so three misses are survivable. */
+  public static final Duration LEASE_RENEWAL = seconds("lease_renewal_seconds");
 
   /**
-   * How long a request may sit untouched, with no worker running anywhere, before it is retired and
-   * the user is told.
-   *
-   * <p>This used to mean "nobody ever picked this up, so it is orphaned" — a reasonable reading
-   * while dispatch came from a process-local queue, where a row nobody had claimed usually meant a
-   * message that died with its process. Once workers claim from the table (#1279), an unclaimed row
-   * is simply queued, and retiring it on age alone throws away work that was about to run and tells
-   * the user to resubmit into the same queue.
-   *
-   * <p>So the window survives, but qualified: it fires only when no worker anywhere holds a live
-   * lease. That is the difference between a backlog and an outage. A backlog is the system working;
-   * an outage — every instance down, or partitioned from this database — is the one case where
-   * nothing will ever pick the work up, and the user needs an answer rather than an indefinite
-   * PENDING. See {@link IndexingRequestStore#reclaimStale}.
-   *
-   * <p>An hour is generous for detecting an outage and harmless for a healthy fleet, where a queued
-   * request is claimed within seconds and its {@code updated_at} moves. The invariant that {@link
-   * #REQUEST} must exceed {@link #PERIOD} is asserted in {@code RetentionPolicyTest} rather than in
-   * a static initializer here, where a violation would surface as an {@code
-   * ExceptionInInitializerError} during Micronaut startup instead of as a failing test.
+   * How long one claim may go on being renewed before the worker has to let go (#1282). Must exceed
+   * {@link #STALE_REQUEST}.
    */
-  public static final Duration STALE_REQUEST = Duration.ofHours(1);
+  public static final Duration MAX_RUN = seconds("max_run_seconds");
 
   /**
-   * How long a worker's claim on a request is good for without renewal.
-   *
-   * <p>Deliberately far shorter than {@link #STALE_REQUEST}, because it answers a different
-   * question. The hour above asks "did anyone ever pick this up?" — a question about a request
-   * nobody owns. This asks "is the owner still there?", which the owner itself answers by renewing
-   * every {@link #LEASE_RENEWAL}, so it can be decided in minutes rather than an hour.
-   *
-   * <p>A lapsed lease returns the work to the queue rather than ending it: the sweep clears the
-   * owner and any worker may claim it next (#1279). The five minutes still bounds when that
-   * <em>may</em> happen rather than when it does, because reclamation is only as prompt as its
-   * caller — {@code RetentionWorker} runs hourly, and the one faster path is {@code createOrAdopt}
-   * settling the key it is about to claim.
-   *
-   * <p>Five minutes is four renewal intervals: three consecutive misses are survivable and expiry
-   * lands on the fourth. Short enough that a crashed instance does not strand a range for longer
-   * than a user will wait before resubmitting. It is not a timeout on the work — a request can run
-   * for hours, renewing throughout, up to {@link #MAX_RUN} — and a lease that lapses without anyone
-   * taking it is renewed rather than abandoned, so a stalled pool costs a warning and not a run.
-   *
-   * <p>The renewer's interval must stay well below this — an interval at or above the lease means
-   * every lease lapses between beats, which does not fail loudly. It shows up as work being
-   * reclaimed out from under healthy workers. The renewer is the C++ poller ({@code
-   * Poller::Options::renew_every}), and one_d4_worker's schema_contract_test holds its defaults to
-   * this policy.
+   * Statement timeout for the sweep's writes. The hourly sweep is the C++ worker's, but the submit
+   * path still reclaims the one tuple it is about to claim, under the same bound. {@link
+   * StatementTimeouts#RETENTION_SWEEP_SECONDS} is this value, so the two cannot part.
    */
-  public static final Duration LEASE = Duration.ofMinutes(5);
+  public static final Duration SWEEP_STATEMENT_TIMEOUT = seconds("sweep_statement_timeout_seconds");
+
+  private static JsonNode load() {
+    try (InputStream in =
+        RetentionPolicy.class.getClassLoader().getResourceAsStream("retention_policy.json")) {
+      if (in == null) {
+        throw new IllegalStateException(
+            "retention_policy.json is not on the classpath; one_d4 cannot know its retention"
+                + " windows");
+      }
+      return JsonUtils.mapper().readTree(in);
+    } catch (IOException e) {
+      throw new UncheckedIOException("retention_policy.json is unreadable", e);
+    }
+  }
+
+  private static Duration seconds(String key) {
+    return seconds(POLICY, key);
+  }
 
   /**
-   * How often the holder renews. A quarter of {@link #LEASE}, so three consecutive renewals can be
-   * lost — to a paused GC, a saturated pool, a brief database blip — before anyone else may take
-   * the request.
+   * One window, on the same terms the C++ loader reads it: present, integral, positive. Both
+   * readers get the same file, so a file one accepts and the other rejects is the worst outcome
+   * available — the service would serve expiry dates for windows the worker refuses to start on.
+   *
+   * <p>{@code isIntegralNumber} rather than {@code canConvertToLong}, which is a range check: it
+   * answers true for {@code 300.5} and {@code asLong()} then truncates to 300, turning a unit
+   * mistake into a plausible-looking window. Package-private so the failure branches are reachable
+   * from a test without putting a broken file on the classpath.
    */
-  public static final Duration LEASE_RENEWAL = LEASE.dividedBy(4);
+  static Duration seconds(JsonNode policy, String key) {
+    JsonNode value = policy.get(key);
+    if (value == null || !value.isIntegralNumber()) {
+      throw new IllegalStateException("retention_policy.json is missing an integer " + key);
+    }
+    long seconds = value.asLong();
+    if (seconds <= 0) {
+      throw new IllegalStateException(
+          "retention_policy.json has a non-positive " + key + ": " + seconds);
+    }
+    return Duration.ofSeconds(seconds);
+  }
 
-  /**
-   * How long one claim may go on being renewed before the worker has to let go (#1282).
-   *
-   * <p>The third clock, and it answers the question the other two structurally cannot. {@link
-   * #LEASE} asks "is the owner still there?", which the owner answers itself by renewing, and
-   * {@link #STALE_REQUEST} asks "is anyone serving this at all?". A worker wedged mid-run — blocked
-   * forever on a hung socket, a deadlocked pool, an unbounded retry — answers yes to both,
-   * honestly: it is there, and it is serving this. Its heartbeat runs on a separate thread and
-   * keeps renewing whatever the run is doing, so no liveness probe can catch it. What is unknown is
-   * not whether the worker is alive but whether the <em>run</em> is going anywhere, and only
-   * elapsed time can speak to that.
-   *
-   * <p>Past this the heartbeat stops and the run's thread is interrupted. The lease then lapses
-   * within {@link #LEASE} and the ordinary release path applies, so the request goes back to the
-   * queue rather than being failed outright — costing one of {@code MAX_ATTEMPTS} rather than an
-   * answer.
-   *
-   * <p>The two halves recover different things and neither implies the other. Letting the lease
-   * lapse recovers the <em>request</em>: another worker takes the row and gets through it. The
-   * interrupt recovers the <em>worker</em>, whose poller is a single thread — without it the
-   * instance holding a wedged run stops taking work until someone restarts it, so a fleet would
-   * recover its rows one at a time while shedding a worker for each one. It is best-effort by
-   * nature: it ends the run only if whatever the run is blocked on honours an interrupt, which the
-   * JDK {@code HttpClient} sends and body reads this worker actually waits in do (#1282) — a body
-   * read leaves the interrupt status set itself, while a send throws with it cleared and {@code
-   * Jdk11HttpClient} restores it on the way out — and a lock held forever by another thread does
-   * not. The row is recovered either way.
-   *
-   * <p>Neither half bounds writes. A run that crosses the ceiling with a valid lease may finish
-   * what it is already inside; what it may not do is start the next month or renew its way back in.
-   *
-   * <p>Six hours is deliberately far above any legitimate run. A twelve-month range for a prolific
-   * player is the worst case — one archive fetch and a profile lookup per distinct opponent per
-   * month, plus replaying every game — and that is minutes, not hours, against a healthy chess.com.
-   * The cost of being wrong is asymmetric: too high only delays recovering from a wedge, while too
-   * low interrupts real work and spends an attempt doing it, three of which retire the request with
-   * a message blaming the range. So it is set where crossing it is evidence of a fault rather than
-   * of a big request, and crossing it is logged as one.
-   *
-   * <p>Must exceed {@link #STALE_REQUEST} — though not for the reason it first looks like. The
-   * replacement does not inherit an aged row: the heartbeat stamps {@code updated_at} on every
-   * beat, and {@link IndexingRequestStore#releaseOwned} stamps it again on the way out. It is that
-   * a ceiling below the staleness window would cut runs short of the very window the system uses to
-   * decide whether anything is happening at all, which is incoherent — a run still going is the
-   * clearest evidence there is that something is. Asserted in {@code RetentionPolicyTest} rather
-   * than here, where a violation would surface as an {@code ExceptionInInitializerError} during
-   * Micronaut startup.
-   */
-  public static final Duration MAX_RUN = Duration.ofHours(6);
-
-  /**
-   * The C++ worker keeps this same ceiling in {@code Poller::Options::max_run}
-   * (domains/games/apis/one_d4_worker/poller.h). Both poll one table, so the two must stay equal: a
-   * shorter value there hands back ranges this worker considers healthy, spending an attempt each
-   * time, and a longer one leaves a wedge sitting past the point the system has decided is a fault.
-   * Nothing enforces it — changing one means changing both.
-   */
   private RetentionPolicy() {}
 }

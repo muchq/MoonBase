@@ -12,6 +12,7 @@ import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.db.Migration;
 import com.muchq.games.one_d4.db.PostgresSqlDialect;
 import com.muchq.games.one_d4.db.ReanalysisRequestDao;
+import com.muchq.games.one_d4.db.RetentionPolicy;
 import com.muchq.games.one_d4.db.SqlDialect;
 import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
@@ -20,6 +21,7 @@ import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Value;
 import java.time.Clock;
+import java.time.Duration;
 import javax.sql.DataSource;
 import org.jdbi.v3.core.Jdbi;
 import org.jspecify.annotations.Nullable;
@@ -61,6 +63,27 @@ public class IndexerModule {
   @Context
   public Clock clock() {
     return Clock.systemUTC();
+  }
+
+  /**
+   * Reads {@code retention_policy.json} at startup, for the same reason {@link #readJdbcUrl} reads
+   * its variable there: so a broken one is an outage rather than a service that boots.
+   *
+   * <p>{@code RetentionPolicy}'s windows are static finals read from the classpath in its class
+   * initializer, and nothing else in the graph touches the class — every reader is a method body on
+   * a DAO or a resolver. Without this bean a malformed policy would let the container start, answer
+   * {@code /health} 200 (which only pings the database), and then throw {@code
+   * ExceptionInInitializerError} on the first request that needed a window — and {@code
+   * NoClassDefFoundError}, with no cause attached, on every request after it. Touching the class
+   * here turns that into a startup failure with the real message.
+   *
+   * <p>Named, because the value is incidental: what matters is that the class initializes. The C++
+   * worker refuses to start on the same file for the same reason.
+   */
+  @Context
+  @jakarta.inject.Named("retentionWindows")
+  public Duration retentionWindows() {
+    return RetentionPolicy.PERIOD;
   }
 
   @Context

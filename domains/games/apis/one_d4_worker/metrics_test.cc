@@ -180,6 +180,62 @@ TEST(WorkerMetrics, DeclaresItsSeriesBeforeAnythingHappens) {
   EXPECT_TRUE(recorder.Declared(kArchiveFetchesMetric, Cpp("result", "error")));
   EXPECT_TRUE(recorder.Declared(kGamesIndexedMetric, kCpp));
   EXPECT_TRUE(recorder.Declared(kMonthsMetric, Cpp("result", "cached")));
+
+  // The sweep's three series, every label. These matter more than most: the
+  // sweep deletes in silence, so "it stopped running" and "there was nothing
+  // to delete" are the same picture unless the series exist from process
+  // start.
+  for (std::string_view outcome : kSweepOutcomes) {
+    EXPECT_TRUE(recorder.Declared(kRetentionSweepsMetric, Cpp("outcome", std::string(outcome))))
+        << "retention_sweeps has no series for outcome=" << outcome;
+  }
+  for (std::string_view table : kRetentionTables) {
+    EXPECT_TRUE(recorder.Declared(kRetentionRowsDeletedMetric, Cpp("table", std::string(table))))
+        << "retention_rows_deleted has no series for table=" << table;
+  }
+  for (std::string_view arm : kSettleArms) {
+    EXPECT_TRUE(recorder.Declared(kRetentionRequestsSettledMetric, Cpp("arm", std::string(arm))))
+        << "retention_requests_settled has no series for arm=" << arm;
+  }
+}
+
+/// A sweep reports what it did, under the labels prom_proxy's Cleanup tiles
+/// select. Each count distinct, so a report field wired to the wrong label
+/// cannot pass.
+TEST(WorkerMetrics, ASweepRecordsWhatItDidUnderEachLabel) {
+  CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+
+  SweepReport report;
+  report.poisoned = 1;
+  report.stalled = 2;
+  report.released = 3;
+  report.games_deleted = 4;
+  report.periods_deleted = 5;
+  report.requests_deleted = 6;
+  metrics.SweepFinished("ok", report);
+
+  EXPECT_EQ(recorder.CounterTotal(kRetentionSweepsMetric, Cpp("outcome", "ok")), 1);
+  EXPECT_EQ(recorder.CounterTotal(kRetentionRequestsSettledMetric, Cpp("arm", "poisoned")), 1);
+  EXPECT_EQ(recorder.CounterTotal(kRetentionRequestsSettledMetric, Cpp("arm", "stalled")), 2);
+  EXPECT_EQ(recorder.CounterTotal(kRetentionRequestsSettledMetric, Cpp("arm", "released")), 3);
+  EXPECT_EQ(recorder.CounterTotal(kRetentionRowsDeletedMetric, Cpp("table", "game_features")), 4);
+  EXPECT_EQ(recorder.CounterTotal(kRetentionRowsDeletedMetric, Cpp("table", "indexed_periods")), 5);
+  EXPECT_EQ(recorder.CounterTotal(kRetentionRowsDeletedMetric, Cpp("table", "indexing_requests")),
+            6);
+}
+
+/// A failed sweep counts too. Without it an unreachable database looks exactly
+/// like an hour with nothing to delete, which is the case the counter exists
+/// for.
+TEST(WorkerMetrics, AFailedSweepIsCountedUnderItsOwnOutcome) {
+  CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+
+  metrics.SweepFinished("error", SweepReport{});
+
+  EXPECT_EQ(recorder.CounterTotal(kRetentionSweepsMetric, Cpp("outcome", "error")), 1);
+  EXPECT_EQ(recorder.CounterTotal(kRetentionSweepsMetric, Cpp("outcome", "ok")), 0);
 }
 
 // The series names and histogram layouts are a wire contract with the
