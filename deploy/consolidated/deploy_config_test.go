@@ -1758,3 +1758,205 @@ func deployableServices(t *testing.T) map[string]bool {
 	}
 	return deployable
 }
+
+// The Forgejo crawler guards (#1447).
+//
+// Every part of the guard is one edit away from silently doing nothing, and
+// Caddy accepts all of them: a matcher that ORs instead of ANDs either opens
+// the site or closes it to humans, a UA pattern that stops matching restores
+// the starvation, and a guard with no `respond 403` is decoration. Nothing
+// else in the stack reports any of that.
+
+// caddyMatcherBody returns the directives of a named matcher, written either
+// as a one-liner (`@name header_regexp …`) or as a block (`@name { … }`).
+func caddyMatcherBody(t *testing.T, site []string, matcher string) []string {
+	t.Helper()
+	for i, line := range site {
+		if line == matcher+" {" {
+			return caddyBlockAt(site, i)
+		}
+		if strings.HasPrefix(line, matcher+" ") {
+			return []string{strings.TrimSpace(strings.TrimPrefix(line, matcher))}
+		}
+	}
+	t.Fatalf("no %q matcher in the git.muchq.com block. Block was:\n%s",
+		matcher, strings.Join(site, "\n"))
+	return nil
+}
+
+// caddyMatcherRegexp compiles the pattern out of a header_regexp/path_regexp
+// directive, so these tests assert on what Caddy will actually match rather
+// than on the spelling of the line.
+func caddyMatcherRegexp(t *testing.T, directives []string, directive string) *regexp.Regexp {
+	t.Helper()
+	for _, line := range directives {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != directive {
+			continue
+		}
+		pattern := fields[len(fields)-1]
+		compiled, err := regexp.Compile(pattern)
+		if err != nil {
+			t.Fatalf("%s pattern %q does not compile: %v", directive, pattern, err)
+		}
+		return compiled
+	}
+	t.Fatalf("no %s directive among %q", directive, directives)
+	return nil
+}
+
+// Pinned verbatim: a pattern that stops matching this string is the starvation
+// again, and it would look like a passing suite.
+const metaCrawlerUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+	"(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 (compatible; meta-externalagent/1.1 " +
+	"(+https://developers.facebook.com/docs/sharing/webmasters/crawler))"
+
+func TestForgejoBlocksTheCrawlerThatPeggedItByBothUserAgentAndSubnet(t *testing.T) {
+	site := caddySiteBlock(t, "Caddyfile", "git.muchq.com")
+
+	ua := caddyMatcherRegexp(t, caddyMatcherBody(t, site, "@meta_agent"), "header_regexp")
+	if !ua.MatchString(metaCrawlerUserAgent) {
+		t.Errorf("@meta_agent (%s) does not match the User-Agent captured during the "+
+			"incident:\n  %s\nThat string is the whole reason the matcher exists.",
+			ua, metaCrawlerUserAgent)
+	}
+	if ua.MatchString("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+		"(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36") {
+		t.Errorf("@meta_agent (%s) matches a plain browser User-Agent; it would 403 humans.", ua)
+	}
+
+	subnet := caddyMatcherBody(t, site, "@meta_subnet")
+	if len(subnet) != 1 || !strings.HasPrefix(subnet[0], "remote_ip ") ||
+		!strings.Contains(subnet[0], "57.141.0.0/16") {
+		t.Errorf("@meta_subnet does not declare `remote_ip 57.141.0.0/16`, got %q. The crawl "+
+			"came from ~70 addresses in that range, which is why no per-address rate limit "+
+			"saw it.", subnet)
+	}
+
+	// Both, deliberately. Either alone is one field away from useless: the
+	// agent self-identifies today and could stop, and the subnet is Meta's
+	// today and could move. They are redundant now — that is the point.
+	for _, matcher := range []string{"@meta_agent", "@meta_subnet"} {
+		if !forgejoMatcherIsRefused(site, matcher) {
+			t.Errorf("%s is defined but never answered with `respond 403`; the matcher is "+
+				"decoration. Block was:\n%s", matcher, strings.Join(site, "\n"))
+		}
+	}
+}
+
+// forgejoMatcherIsRefused reports whether the block answers the matcher with a
+// 403 rather than proxying it.
+func forgejoMatcherIsRefused(site []string, matcher string) bool {
+	for i, line := range site {
+		if line != "handle "+matcher+" {" {
+			continue
+		}
+		for _, inner := range caddyBlockAt(site, i) {
+			if strings.HasPrefix(inner, "respond 403") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// The expensive-route guard has to AND its two conditions. Split into two
+// matchers it becomes an OR, and an OR is wrong in both directions at once:
+// every crawler loses the cheap pages it is welcome to read, and — far worse —
+// every human loses /commit/ and /blame/, which is most of what the site is
+// for.
+func TestForgejoExpensiveRouteGuardAndsTheUserAgentWithThePath(t *testing.T) {
+	site := caddySiteBlock(t, "Caddyfile", "git.muchq.com")
+	body := caddyMatcherBody(t, site, "@crawler_on_expensive_route")
+
+	directives := map[string]bool{"header_regexp": false, "path_regexp": false}
+	for _, line := range body {
+		if _, ok := directives[firstToken(line)]; ok {
+			directives[firstToken(line)] = true
+		}
+	}
+	for directive, found := range directives {
+		if !found {
+			t.Fatalf("@crawler_on_expensive_route declares no %s. Both conditions must live "+
+				"in the one matcher block, where Caddy ANDs them: separated, a crawler UA "+
+				"alone or a repo path alone would 403. Body was:\n%s",
+				directive, strings.Join(body, "\n"))
+		}
+	}
+}
+
+func TestForgejoClosesTheRoutesThatCostSecondsToCrawlersOnly(t *testing.T) {
+	site := caddySiteBlock(t, "Caddyfile", "git.muchq.com")
+	body := caddyMatcherBody(t, site, "@crawler_on_expensive_route")
+	ua := caddyMatcherRegexp(t, body, "header_regexp")
+	path := caddyMatcherRegexp(t, body, "path_regexp")
+
+	// The six that match invoke git. The ones that must not are a database read
+	// or a file read, and stay open.
+	for _, tc := range []struct {
+		uri     string
+		blocked bool
+		why     string
+	}{
+		{"/andy/moonbase/commit/a01805e2887dc3476740d5d969ca7665e49ab9d7", true, "diffs a commit"},
+		{"/andy/moonbase/compare/ad485f8584a5ed0157d50d40d039f157d86cc0a5...8d723165b58da50d72149a895f0308113ced1a0f", true, "diffs two arbitrary commits"},
+		{"/andy/nbody/src/branch/main/README.md", true, "walks the tree"},
+		{"/andy/smithy-cpp/blame/branch/main/BUILD.bazel", true, "blames every line"},
+		{"/andy/moonbase/commits/branch/main", true, "walks the log"},
+		{"/andy/moonbase/archive/main.tar.gz", true, "built per request"},
+		{"/andy/moonbase/issues/1324", false, "a database read"},
+		{"/andy/moonbase/raw/branch/main/README.md", false, "a file read"},
+		{"/andy/moonbase", false, "the repo home page"},
+		{"/explore/repos", false, "the listing the landing page serves"},
+		{"/robots.txt", false, "the file that tells honest crawlers what to skip"},
+		{"/assets/js/index.js", false, "static assets the browser needs"},
+	} {
+		if got := path.MatchString(tc.uri); got != tc.blocked {
+			t.Errorf("path_regexp matched %q = %v, want %v (%s)", tc.uri, got, tc.blocked, tc.why)
+		}
+	}
+
+	// The UA half stays narrow enough that a browser keeps every route.
+	for _, agent := range []string{
+		metaCrawlerUserAgent,
+		"Mozilla/5.0 (compatible; GPTBot/1.2; +https://openai.com/gptbot)",
+		"Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)",
+		"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+		"Mozilla/5.0 (compatible; DotBot/1.2; +https://opensiteexplorer.org/dotbot)",
+	} {
+		if !ua.MatchString(agent) {
+			t.Errorf("header_regexp (%s) does not match self-identified crawler %q", ua, agent)
+		}
+	}
+	for _, agent := range []string{
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+		"Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
+		"git/2.45.2",
+	} {
+		if ua.MatchString(agent) {
+			t.Errorf("header_regexp (%s) matches %q, which is not a crawler; it would 403 a "+
+				"human or a clone.", ua, agent)
+		}
+	}
+}
+
+// The guards are refusals layered in front of the proxy, not a replacement for
+// it: everything unmatched still has to reach Forgejo.
+func TestForgejoStillProxiesEverythingTheGuardsDoNotRefuse(t *testing.T) {
+	site := caddySiteBlock(t, "Caddyfile", "git.muchq.com")
+
+	for i, line := range site {
+		if line != "handle {" {
+			continue
+		}
+		for _, inner := range caddyBlockAt(site, i) {
+			if inner == "reverse_proxy forgejo:3000" {
+				return
+			}
+		}
+	}
+	t.Fatalf("the git.muchq.com block has no catch-all `handle { reverse_proxy forgejo:3000 }`. "+
+		"With the guards written as handle blocks, an unmatched request falls through to "+
+		"nothing and the site answers 200 with an empty body. Block was:\n%s",
+		strings.Join(site, "\n"))
+}
