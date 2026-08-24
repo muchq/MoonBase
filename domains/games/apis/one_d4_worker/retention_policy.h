@@ -40,7 +40,10 @@ struct RetentionPolicy {
 /// Where the policy sits beside this binary. Derived from argv[0] because
 /// pkg_tar ships data deps into the image's runfiles tree, so the path is
 /// fixed relative to the binary in the container and under bazel test alike.
-/// ONE_D4_RETENTION_POLICY overrides it.
+///
+/// There is no override. A deployment that could point a worker at a
+/// different file would be one whose windows no test has seen and whose Java
+/// service — which has no equivalent — is quoting users different numbers.
 std::string RetentionPolicyPath(std::string_view argv0);
 
 /// Reads and validates the policy.

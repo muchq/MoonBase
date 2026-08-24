@@ -206,23 +206,23 @@ TEST(RetentionPolicy, ExactlyFourRenewalsIsAllowed) {
 /// (/app is the *Java* images' convention, from linux_oci_java's package_dir —
 /// using it here would illustrate a layout this binary never sees.)
 TEST(RetentionPolicy, ThePathIsDerivedFromTheBinary) {
-  ::unsetenv("ONE_D4_RETENTION_POLICY");
   EXPECT_EQ(RetentionPolicyPath("/one_d4_worker"),
             "/one_d4_worker.runfiles/_main/domains/games/apis/one_d4/retention_policy.json");
 }
 
-/// The escape hatch, for running the worker against a different policy without
-/// rebuilding the image.
-TEST(RetentionPolicy, TheEnvironmentOverridesThePath) {
-  ::setenv("ONE_D4_RETENTION_POLICY", "/etc/one_d4/policy.json", /*overwrite=*/1);
-  EXPECT_EQ(RetentionPolicyPath("/one_d4_worker"), "/etc/one_d4/policy.json");
-
-  // Empty is not an override. An unset variable and one exported as "" are the
-  // same intent, and treating "" as a path would send the worker to open it.
-  ::setenv("ONE_D4_RETENTION_POLICY", "", /*overwrite=*/1);
-  EXPECT_EQ(RetentionPolicyPath("/one_d4_worker"),
-            "/one_d4_worker.runfiles/_main/domains/games/apis/one_d4/retention_policy.json");
-  ::unsetenv("ONE_D4_RETENTION_POLICY");
+/// argv[0] is the only input. There was an ONE_D4_RETENTION_POLICY override;
+/// it is gone, and this is what keeps it gone — a deployment that could point
+/// a worker at its own file would be running windows no test has seen, while
+/// the Java service, which never had an equivalent, went on quoting users the
+/// numbers in the shipped one.
+TEST(RetentionPolicy, TheEnvironmentDoesNotChangeThePath) {
+  const std::string expected =
+      "/one_d4_worker.runfiles/_main/domains/games/apis/one_d4/retention_policy.json";
+  for (const char* name : {"ONE_D4_RETENTION_POLICY", "RETENTION_POLICY", "ONE_D4_POLICY"}) {
+    ::setenv(name, "/etc/one_d4/policy.json", /*overwrite=*/1);
+    EXPECT_EQ(RetentionPolicyPath("/one_d4_worker"), expected) << name << " changed the path";
+    ::unsetenv(name);
+  }
 }
 
 }  // namespace
