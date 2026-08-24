@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace iili {
 
@@ -40,7 +41,19 @@ smithy::Outcome<gen::ShortenOutput> SmithyShortenerHandler::Shorten(
 smithy::Outcome<gen::RedirectOutput> SmithyShortenerHandler::Redirect(
     const gen::RedirectInput& input,
     [[maybe_unused]] const smithy::server::RequestContext& context) {
-  absl::StatusOr<std::optional<std::string>> resolved = shortener_->Resolve(input.slug);
+  return Resolve(input.slug);
+}
+
+smithy::Outcome<gen::RedirectHeadOutput> SmithyShortenerHandler::RedirectHead(
+    const gen::RedirectHeadInput& input,
+    [[maybe_unused]] const smithy::server::RequestContext& context) {
+  auto resolved = Resolve(input.slug);
+  if (!resolved) return std::move(resolved).error();
+  return gen::RedirectHeadOutput{.location = std::move(resolved->location)};
+}
+
+smithy::Outcome<gen::RedirectOutput> SmithyShortenerHandler::Resolve(const std::string& slug) {
+  absl::StatusOr<std::optional<std::string>> resolved = shortener_->Resolve(slug);
   if (!resolved.ok()) {
     return ToSmithyError(resolved.status());
   }
@@ -50,17 +63,6 @@ smithy::Outcome<gen::RedirectOutput> SmithyShortenerHandler::Redirect(
   gen::RedirectOutput output;
   output.location = **std::move(resolved);
   return output;
-}
-
-smithy::http::RequestHandler WithHeadAsGet(smithy::http::RequestHandler next) {
-  return [next = std::move(next)](const smithy::http::HttpRequest& request) {
-    if (request.method != "HEAD") return next(request);
-    smithy::http::HttpRequest as_get = request;
-    as_get.method = "GET";
-    smithy::http::HttpResponse response = next(as_get);
-    response.body.clear();
-    return response;
-  };
 }
 
 }  // namespace iili

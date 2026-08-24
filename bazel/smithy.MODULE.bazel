@@ -6,8 +6,13 @@ bazel_dep(name = "smithy_cpp", version = "0.0.0")
 # loudly rather than silently changing the build.
 # Evaluation: https://github.com/muchq/MoonBase/issues/1168
 #
-# Pinned past muchq/smithy-cpp#187 (46bcd4d): modeled 3xx redirects — a
-# typed success carrying Location instead of a GenericError. iili's
+# Carries muchq/smithy-cpp#192 (a01f0d2): the transport frames a HEAD
+# response with the GET's Content-Length and none of its octets. iili models
+# HEAD /iili/v1/r/{slug} on the strength of it (#1433), and HealthEndpoint
+# stopped answering HEAD with Content-Length: 0.
+#
+# Carries muchq/smithy-cpp#187: modeled 3xx redirects — a typed success
+# carrying Location instead of a GenericError. iili's
 # GET /iili/v1/r/{slug} needs it (#1359).
 #
 # Carries muchq/smithy-cpp#173 (4208f791): terminal transitions fire the
@@ -17,9 +22,9 @@ bazel_dep(name = "smithy_cpp", version = "0.0.0")
 # is fixed upstream here.
 archive_override(
     module_name = "smithy_cpp",
-    integrity = "sha256-md1wErYgywVM/dLjnk44sUcHsGjYGqyDT/uGlBR+X+A=",
-    strip_prefix = "smithy-cpp-46bcd4d225b1f030985f6675079d3fa89b5302ed",
+    integrity = "sha256-jhhrKZMIWJk+50BPFQEgjhrvcIDIQvafLFyBih/C26k=",
+    strip_prefix = "smithy-cpp-a01f0d2f570f3dafede5974570ed03a487b56eb2",
     urls = [
-        "https://github.com/muchq/smithy-cpp/archive/46bcd4d225b1f030985f6675079d3fa89b5302ed.tar.gz",
+        "https://github.com/muchq/smithy-cpp/archive/a01f0d2f570f3dafede5974570ed03a487b56eb2.tar.gz",
     ],
 )

@@ -10,6 +10,11 @@ short links resolve on `i.iili.uk`, which Caddy rewrites onto that path.
   required: in the future, ceiling 30d.
 - `GET /iili/v1/r/{slug}` → 302 with `Location`. Expiry enforced in the SQL
   and in the cache entry. Unknown, expired, or non-slug-shaped: one modeled JSON 404. Store failure: 500, not 404.
+- `HEAD /iili/v1/r/{slug}` → the same 302 and `Location`, which is what
+  unfurlers and link checkers lead with. Modeled as its own operation: the
+  router buckets by exact method, so an unmodeled HEAD 405s. The body is the
+  transport's to drop — it sends the `Content-Length` the GET would and none
+  of the octets.
 - `/health` via aura.
 
 The API returns a bare slug; [`iili_web`](../../apps/iili_web) fronts it as

@@ -91,7 +91,7 @@ int main() {
               [rate_limiter](const std::string& client) { return rate_limiter->allow(client); },
           .trusted_proxies = std::move(*trusted_proxies),
           .retry_after = std::chrono::seconds(60)},
-      iili::WithHeadAsGet(server.Handler()));
+      server.Handler());
 
   // Block shutdown signals before the transport spawns its thread pool —
   // and only now, so a hung DB connection during boot is still killable.

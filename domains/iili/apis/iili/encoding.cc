@@ -30,10 +30,8 @@ absl::StatusOr<std::string> EncodeId(int64_t id) {
   } else if (id <= std::numeric_limits<int32_t>::max()) {
     width = 4;
   }
-  std::string slug;
   // WebSafeBase64Escape is base64url with no padding — Go's RawURLEncoding.
-  absl::WebSafeBase64Escape(LittleEndianBytes(static_cast<uint64_t>(id), width), &slug);
-  return slug;
+  return absl::WebSafeBase64Escape(LittleEndianBytes(static_cast<uint64_t>(id), width));
 }
 
 bool IsPossibleSlug(std::string_view slug) {
