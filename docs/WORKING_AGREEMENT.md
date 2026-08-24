@@ -118,37 +118,33 @@ checklist, tick the item once merged.
 scope corrections — back into the issue so it stays the source of truth. File
 follow-ups for what you deliberately left out rather than leaving it implicit.
 
-**Commit messages describe the change, not the process that produced it.**
-State what changed and why a future reader would care — not a narrated account
-of the session: no mutation-check kill lists, no "written before the change and
-observed red", no confession that the review panel didn't run. That material is
-real and belongs somewhere, but the somewhere is the PR description or the
-tests themselves, not a message that ships into permanent history.
-
-The receipt is 4a059fc: four squashed commits, each running several
-paragraphs, re-deriving tradeoffs the diff already shows, quoting
-`scripts/mutation-check` kill output verbatim, and reporting mid-message that
-the review panel hadn't run. None of that is wrong to *know* — the panel
-status belongs in the PR thread (see Review panel, below); the mutation kills
-belong in the PR body per "Answer review questions with tests, not
-paragraphs." A commit message that tries to be the record of everything ends
-up worse at being any one of them: a `git log` reader wants what the commit
-does, not the essay that led there.
-
-Aim for what the diff needs: a one-line summary, and — only if the "why" isn't
-already obvious from the code and tests — a short paragraph. If that paragraph
-keeps growing, that's a sign the *change* should have been split, not that the
-message needs more room.
-
-**Comments are terse and present-tense.** A comment states a constraint the
-code can't show, in a sentence or two. No novels, no archeology: how the old
-implementation did it, what defect a line replaces, or which review added it
-belongs in the PR body or the issue, not the source. Keep the *why* — one
-line of why beats five of history.
+**What goes in commit messages, comments and PR bodies is one set of rules**,
+and they live under "Writing it down" below.
 
 ## Review panel
 
-Before committing anything non-trivial, run a self-review panel:
+Push the work — and open the PR, where one is being opened — then run a
+self-review panel against that head.
+
+Panelling before the first commit hides the step. Its findings get folded into
+the same diff, so nothing in the PR says what the panel caught, what it got
+wrong, or whether it ran at all — the reader is asked to take the claim on
+trust. Opened first, every fix the panel produces is a commit on top of a
+baseline CI has already judged, and the history is the evidence: this was
+found, this changed because of it, this was reported and deliberately not
+acted on.
+
+It also gets the panel better inputs. The agents can read the PR body and the
+CI result rather than a working tree, and a finding can be checked against a
+known-green head instead of against a tree that has never been built anywhere
+but here. Where no PR is being opened, the pushed branch is the baseline and
+the report goes wherever the work is being reported.
+
+None of that licenses pushing a draft for the panel to finish. Push work you
+would defend as it stands; the panel is the second opinion on a finished
+change, not the first pass over an unfinished one.
+
+The panel itself:
 
 - **Four independent agents, four distinct lenses.** Typically correctness
   and control flow; data access, SQL, and resource safety; tests, docs, and
@@ -427,16 +423,29 @@ compared two of them, and two sentinels compare equal. The comment described
 the guarantee the author meant to build rather than the one that shipped, which
 made a vacuous assertion look deliberate. That is worse than no comment.
 
+**Comments are terse and present-tense.** A comment states a constraint the
+code can't show, in a sentence or two. Keep the *why* — one line of why beats
+five of history.
+
 **Commit messages under 100 words, usually well under.** What changed and why,
 in the fewest words that carry it; a one-line subject is often the whole job.
-No account of how the work went and no list of what was checked — the tests are
-that record.
+No narrated account of the session: no mutation-check kill lists, no "written
+before the change and observed red", no confession that the panel didn't run.
+That material is real, and its home is the PR body or the tests.
 
 This is the one that outlives the PR. MoonBase squash-merges with commit
 details, so the branch's commit messages are concatenated into the message on
 `main` — `b65cce2` inlines a single commit, `151db76` carries a `*` per commit.
 A bloated commit message is bloat in `git log` forever. The PR body is not
 included.
+
+The receipt is 4a059fc: four squashed commits, each running several paragraphs,
+re-deriving tradeoffs the diff already shows, quoting `scripts/mutation-check`
+kill output verbatim, and reporting mid-message that the review panel hadn't
+run. A commit message that tries to be the record of everything ends up worse
+at being any one of them: a `git log` reader wants what the commit does, not
+the essay that led there. If the short paragraph keeps growing, that is a sign
+the *change* should have been split, not that the message needs more room.
 
 **Terse PR bodies.** The change, the consequences a reviewer cannot see from
 the diff, and what is deliberately not covered. Nothing else. The body is spent
