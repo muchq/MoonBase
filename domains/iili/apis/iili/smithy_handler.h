@@ -34,15 +34,14 @@ class SmithyShortenerHandler final : public moonbase::iili::IiliHandler {
       const moonbase::iili::RedirectInput& input,
       const smithy::server::RequestContext& context) override;
 
-  /// The HEAD form, answering exactly what Redirect does. The transport drops
-  /// the body and keeps the length, so this side has no framing to do.
+  /// Answers what Redirect answers; the transport does the framing.
   smithy::Outcome<moonbase::iili::RedirectHeadOutput> RedirectHead(
       const moonbase::iili::RedirectHeadInput& input,
       const smithy::server::RequestContext& context) override;
 
  private:
   /// The Location a live slug points at, or the modeled 404. Both redirect
-  /// operations answer from this one lookup.
+  /// operations answer from this.
   smithy::Outcome<std::string> Location(const std::string& slug);
 
   std::shared_ptr<Shortener> shortener_;

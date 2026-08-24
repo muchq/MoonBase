@@ -6,10 +6,9 @@ bazel_dep(name = "smithy_cpp", version = "0.0.0")
 # loudly rather than silently changing the build.
 # Evaluation: https://github.com/muchq/MoonBase/issues/1168
 #
-# Carries muchq/smithy-cpp#192 (a01f0d2): the transport frames a HEAD response
-# with the GET's Content-Length and none of its octets, on both server
-# transports and both clients. iili models HEAD /iili/v1/r/{slug} on the
-# strength of it (#1433).
+# Carries muchq/smithy-cpp#192 (a01f0d2): the transport frames a HEAD with the
+# GET's Content-Length and no octets, on both server transports and both
+# clients. iili models HEAD /iili/v1/r/{slug} on it (#1433).
 #
 # Carries muchq/smithy-cpp#187: modeled 3xx redirects — a typed success
 # carrying Location instead of a GenericError. iili's

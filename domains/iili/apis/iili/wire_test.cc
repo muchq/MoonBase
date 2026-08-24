@@ -149,13 +149,9 @@ TEST_F(WireTest, RedirectIsA302WithLocationAndTheConformancePinnedBody) {
   EXPECT_EQ(response.body, "{}");
 }
 
-// Modeled HEAD (#1433): unfurlers and link checkers lead with it, and the
-// router buckets by exact method, so an unmodeled HEAD 405s.
-//
-// Loopback hands back the handler's response and does no framing, so what a
-// HEAD actually puts on the wire is not observable here — the body below is
-// the one the serializer produced, and the transport is what withholds it.
-// production_chain_test pins the framing on a real socket.
+// Modeled HEAD (#1433): the router buckets by exact method, so an unmodeled
+// HEAD 405s. Loopback does no framing, so the wire shape is not observable
+// here — production_chain_test pins that.
 TEST_F(WireTest, HeadRoutesAndResolvesExactlyAsGetDoes) {
   store_->targets["DAA"] = Target{"https://www.example.com/target", kNow + absl::Hours(1)};
 

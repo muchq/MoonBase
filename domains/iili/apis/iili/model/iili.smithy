@@ -57,12 +57,10 @@ operation Redirect {
     errors: [NotFoundError]
 }
 
-/// The same redirect for a HEAD, which is what unfurlers and link checkers
-/// lead with. It is a modeled operation because the router buckets by exact
-/// method: an unmodeled HEAD 405s. Framing is the transport's — Location and
-/// the length the GET would report, no octets (RFC 9110 §9.3.2) — so nothing
-/// here or in the handler suppresses the body. Clearing it there would answer
-/// Content-Length: 0, which is a different and false claim about the link.
+/// The HEAD form of Redirect, which unfurlers and link checkers lead with.
+/// Modeled because the router buckets by exact method: an unmodeled HEAD
+/// 405s. The transport frames it — Location, the GET's length, no octets
+/// (RFC 9110 §9.3.2) — so nothing here or in the handler drops the body.
 @readonly
 @suppress(["HttpResponseCodeSemantics"])
 @http(method: "HEAD", uri: "/iili/v1/r/{slug}", code: 302)

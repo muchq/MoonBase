@@ -199,8 +199,7 @@ TEST_F(ProductionChainTest, TheTransportAndTheUrlBoundSplitTheOversizedSpace) {
   transport.Stop();
 }
 
-// Raw bytes to the transport and back. SocketHttpClient would not do: it
-// knows a HEAD response has no body and stops after the headers, so it
+// Raw bytes in and out. SocketHttpClient stops after a HEAD's headers, so it
 // reports an empty body whether or not the server sent one.
 std::string RawRoundTrip(int port, const std::string& request_bytes) {
   const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -241,9 +240,8 @@ std::string LowerHeadersOf(const std::string& raw) {
   return headers;
 }
 
-// The declared length, or "<none>" when the header is absent. Two responses
-// that both declare nothing compare equal, so a test asserting HEAD's length
-// against the GET's has to pin the GET to a real number first.
+// The declared length, or "<none>" when absent. Two "<none>" values compare
+// equal, so callers pin the GET to a real number before comparing.
 std::string ContentLengthOf(const std::string& raw) {
   const std::string headers = LowerHeadersOf(raw);
   const auto at = headers.find("content-length: ");
@@ -252,10 +250,8 @@ std::string ContentLengthOf(const std::string& raw) {
   return headers.substr(start, headers.find("\r\n", start) - start);
 }
 
-// BodyOf reports an empty body for a read that never reached the separator,
-// which is indistinguishable from the "no octets" a HEAD is supposed to show.
-// Every raw assertion below goes through this first so a truncated response
-// fails instead of confirming the property under test.
+// BodyOf returns "" for a read that never reached the separator, which looks
+// exactly like a HEAD's absent body. Every raw assertion gates on this.
 ::testing::AssertionResult IsCompleteResponse(const std::string& raw) {
   if (raw.empty()) return ::testing::AssertionFailure() << "empty read";
   if (raw.find("\r\n\r\n") == std::string::npos) {
@@ -264,10 +260,9 @@ std::string ContentLengthOf(const std::string& raw) {
   return ::testing::AssertionSuccess();
 }
 
-// The framing wire_test cannot see (#1433): a HEAD answers the length the GET
-// would and none of its octets. Not Content-Length: 0 — that is what a handler
-// clearing the body to "omit" it produces, and it is a claim about the link
-// rather than about the request.
+// The framing wire_test cannot see (#1433). Not Content-Length: 0 — that is
+// what clearing the body in a handler produces, and it describes the link
+// rather than the request.
 TEST_F(ProductionChainTest, HeadRedirectCarriesTheGetsLengthAndNoBodyOnTheWire) {
   store_->targets["DAA"] = Target{"https://www.example.com/target", kNow + absl::Hours(1)};
 
@@ -284,8 +279,8 @@ TEST_F(ProductionChainTest, HeadRedirectCarriesTheGetsLengthAndNoBodyOnTheWire) 
   ASSERT_TRUE(IsCompleteResponse(head));
   ASSERT_TRUE(IsCompleteResponse(get));
 
-  // The GET first: the length below means nothing unless a body actually
-  // ships and the header describes it. alloy conformance pins this "{}" at 3xx.
+  // The length below means nothing unless a body ships and the header
+  // describes it. alloy conformance pins this "{}" at 3xx.
   EXPECT_EQ(BodyOf(get), "{}") << get;
   EXPECT_EQ(ContentLengthOf(get), std::to_string(BodyOf(get).size())) << get;
 
@@ -300,9 +295,8 @@ TEST_F(ProductionChainTest, HeadRedirectCarriesTheGetsLengthAndNoBodyOnTheWire) 
   transport.Stop();
 }
 
-// The other branch of the generated server: a modeled error serializes its own
-// body, and the method still decides whether the octets ship. A guard that
-// only covered the success path would let the 404 carry one.
+// A modeled error serializes on a different branch of the generated server,
+// so the success test does not cover it.
 TEST_F(ProductionChainTest, HeadOnAnUnknownSlugIsFramedLikeItsGetToo) {
   smithy::http::BeastServerTransport::Options options;
   options.address = "127.0.0.1";
