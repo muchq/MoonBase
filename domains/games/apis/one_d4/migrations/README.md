@@ -1,8 +1,8 @@
 # one_d4 schema migrations
 
 The schema as numbered, idempotent SQL files (#1419). This directory is the
-one copy of the DDL: the Java service applies it at boot, the
-`one_d4_migrate` deploy step applies it before the services start, and
+one copy of the DDL: the `one_d4_migrate` deploy step applies it before the
+services start, the Java service verifies at boot that it did, and
 `one_d4_worker`'s Postgres suites apply it to build the schema they test
 against.
 
@@ -66,6 +66,6 @@ done
 The deploy step (`//domains/games/apis/one_d4:one_d4_migrate`, a one-shot
 compose service) does the same through the Java `Migration` class, so the
 statements production runs are the ones the tests ran. Both `one_d4` and
-`one_d4_worker` gate on it — the service so the two migration runners are
-serialized rather than concurrent, the worker so it can start without the
-Java service at all.
+`one_d4_worker` gate on it — the service because its boot check would
+otherwise run against a schema the one-shot has not finished writing, the
+worker because it can then start without the Java service at all.
