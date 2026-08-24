@@ -41,18 +41,20 @@ smithy::Outcome<gen::ShortenOutput> SmithyShortenerHandler::Shorten(
 smithy::Outcome<gen::RedirectOutput> SmithyShortenerHandler::Redirect(
     const gen::RedirectInput& input,
     [[maybe_unused]] const smithy::server::RequestContext& context) {
-  return Resolve(input.slug);
+  auto location = Location(input.slug);
+  if (!location) return std::move(location).error();
+  return gen::RedirectOutput{.location = *std::move(location)};
 }
 
 smithy::Outcome<gen::RedirectHeadOutput> SmithyShortenerHandler::RedirectHead(
     const gen::RedirectHeadInput& input,
     [[maybe_unused]] const smithy::server::RequestContext& context) {
-  auto resolved = Resolve(input.slug);
-  if (!resolved) return std::move(resolved).error();
-  return gen::RedirectHeadOutput{.location = std::move(resolved->location)};
+  auto location = Location(input.slug);
+  if (!location) return std::move(location).error();
+  return gen::RedirectHeadOutput{.location = *std::move(location)};
 }
 
-smithy::Outcome<gen::RedirectOutput> SmithyShortenerHandler::Resolve(const std::string& slug) {
+smithy::Outcome<std::string> SmithyShortenerHandler::Location(const std::string& slug) {
   absl::StatusOr<std::optional<std::string>> resolved = shortener_->Resolve(slug);
   if (!resolved.ok()) {
     return ToSmithyError(resolved.status());
@@ -60,9 +62,7 @@ smithy::Outcome<gen::RedirectOutput> SmithyShortenerHandler::Resolve(const std::
   if (!resolved->has_value()) {
     return Modeled<gen::NotFoundError>("NotFoundError", "no such link");
   }
-  gen::RedirectOutput output;
-  output.location = **std::move(resolved);
-  return output;
+  return **std::move(resolved);
 }
 
 }  // namespace iili

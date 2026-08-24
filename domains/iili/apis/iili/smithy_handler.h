@@ -41,9 +41,9 @@ class SmithyShortenerHandler final : public moonbase::iili::IiliHandler {
       const smithy::server::RequestContext& context) override;
 
  private:
-  /// Slug to Location, or the modeled 404 — the one resolution both redirect
-  /// operations answer from.
-  smithy::Outcome<moonbase::iili::RedirectOutput> Resolve(const std::string& slug);
+  /// The Location a live slug points at, or the modeled 404. Both redirect
+  /// operations answer from this one lookup.
+  smithy::Outcome<std::string> Location(const std::string& slug);
 
   std::shared_ptr<Shortener> shortener_;
 };

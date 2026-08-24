@@ -58,11 +58,11 @@ operation Redirect {
 }
 
 /// The same redirect for a HEAD, which is what unfurlers and link checkers
-/// lead with. Modeled rather than answered by a middleware that re-dispatches
-/// HEAD as GET: the router buckets by exact method, so an unmodeled HEAD 405s,
-/// and a middleware clearing the body to "omit" it reports Content-Length: 0
-/// instead of the length the GET would. The transport frames this one —
-/// Location and the GET's length, no octets (RFC 9110 §9.3.2).
+/// lead with. It is a modeled operation because the router buckets by exact
+/// method: an unmodeled HEAD 405s. Framing is the transport's — Location and
+/// the length the GET would report, no octets (RFC 9110 §9.3.2) — so nothing
+/// here or in the handler suppresses the body. Clearing it there would answer
+/// Content-Length: 0, which is a different and false claim about the link.
 @readonly
 @suppress(["HttpResponseCodeSemantics"])
 @http(method: "HEAD", uri: "/iili/v1/r/{slug}", code: 302)

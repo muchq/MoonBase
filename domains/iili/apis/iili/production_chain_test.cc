@@ -241,10 +241,20 @@ std::string LowerHeadersOf(const std::string& raw) {
   return headers;
 }
 
-// The framing wire_test cannot see (#1433). A HEAD answers the length the GET
-// would and none of its octets — not Content-Length: 0, which is what a
-// handler clearing the body produces and what iili shipped until the
-// transport learned to frame HEAD itself (muchq/smithy-cpp#192).
+// The declared length, or "<none>" so a missing header reads as itself in a
+// failure rather than as a match.
+std::string ContentLengthOf(const std::string& raw) {
+  const std::string headers = LowerHeadersOf(raw);
+  const auto at = headers.find("content-length: ");
+  if (at == std::string::npos) return "<none>";
+  const auto start = at + std::string("content-length: ").size();
+  return headers.substr(start, headers.find("\r\n", start) - start);
+}
+
+// The framing wire_test cannot see (#1433): a HEAD answers the length the GET
+// would and none of its octets. Not Content-Length: 0 — that is what a handler
+// clearing the body to "omit" it produces, and it is a claim about the link
+// rather than about the request.
 TEST_F(ProductionChainTest, HeadRedirectCarriesTheGetsLengthAndNoBodyOnTheWire) {
   store_->targets["DAA"] = Target{"https://www.example.com/target", kNow + absl::Hours(1)};
 
@@ -261,18 +271,44 @@ TEST_F(ProductionChainTest, HeadRedirectCarriesTheGetsLengthAndNoBodyOnTheWire) 
   ASSERT_FALSE(head.empty());
   ASSERT_FALSE(get.empty());
 
-  // The GET first: the length asserted below is only meaningful against the
-  // body that actually ships. alloy conformance pins this "{}" at 3xx.
+  // The GET first: the length below means nothing unless a body actually
+  // ships. alloy conformance pins this "{}" at 3xx.
   EXPECT_EQ(BodyOf(get), "{}") << get;
-  EXPECT_NE(LowerHeadersOf(get).find("content-length: 2"), std::string::npos) << get;
+  EXPECT_EQ(ContentLengthOf(get), "2") << get;
 
   EXPECT_EQ(BodyOf(head), "") << "HEAD answered with a body: " << head;
-  EXPECT_NE(LowerHeadersOf(head).find("content-length: 2"), std::string::npos)
+  EXPECT_EQ(ContentLengthOf(head), ContentLengthOf(get))
       << "HEAD did not report the GET's length: " << head;
   // What the unfurler came for.
   EXPECT_NE(LowerHeadersOf(head).find("location: https://www.example.com/target"),
             std::string::npos)
       << head;
+
+  transport.Stop();
+}
+
+// The other branch of the generated server: a modeled error serializes its own
+// body, and the method still decides whether the octets ship. A guard that
+// only covered the success path would let the 404 carry one.
+TEST_F(ProductionChainTest, HeadOnAnUnknownSlugIsFramedLikeItsGetToo) {
+  smithy::http::BeastServerTransport::Options options;
+  options.address = "127.0.0.1";
+  options.port = 0;
+  smithy::http::BeastServerTransport transport(options);
+  ASSERT_TRUE(transport.Start(handler_).ok());
+
+  const std::string head = RawRoundTrip(
+      transport.port(), "HEAD /iili/v1/r/zzz HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
+  const std::string get = RawRoundTrip(
+      transport.port(), "GET /iili/v1/r/zzz HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
+  ASSERT_FALSE(head.empty());
+  ASSERT_FALSE(get.empty());
+
+  EXPECT_NE(head.find("404"), std::string::npos) << head;
+  EXPECT_EQ(BodyOf(get), R"({"message":"no such link"})") << get;
+  EXPECT_EQ(BodyOf(head), "") << "HEAD answered with a body: " << head;
+  EXPECT_EQ(ContentLengthOf(head), ContentLengthOf(get))
+      << "HEAD did not report the GET's length: " << head;
 
   transport.Stop();
 }
