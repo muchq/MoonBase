@@ -24,4 +24,16 @@ public interface SqlDialect {
    * differs. See {@code migrations/README.md}.
    */
   String migrationsEngine();
+
+  /**
+   * Whether something has already applied the migrations by the time this service boots. Postgres
+   * has the {@code one_d4_migrate} one-shot in front of it, so boot runs {@link Migration#verify}
+   * and writes no schema; the H2 test path has nothing in front of it and applies them itself.
+   *
+   * <p>Defaults to true so a dialect added for a deployed engine cannot become a second writer of
+   * the schema by omission.
+   */
+  default boolean migratedBeforeBoot() {
+    return true;
+  }
 }

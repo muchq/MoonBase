@@ -8,6 +8,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "domains/games/apis/one_d4_worker/migration_files.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace one_d4_worker {
@@ -24,41 +25,27 @@ namespace {
 /// reached, not what the deployment sets it to.
 constexpr int kMaxAttempts = 3;
 
+/// A schema of this suite's own. Every suite here gets the one database CI
+/// runs and bazel runs them in parallel, so the tables are shared mutable
+/// state otherwise.
+constexpr char kSchema[] = "one_d4_pg_queue_test";
+
+/// search_path on the connection rather than a qualified name on every
+/// statement: PgQueue's SQL is the production SQL, and production does not
+/// qualify.
+std::string Conninfo(const std::string& url) {
+  return absl::StrCat(url, url.find('?') == std::string::npos ? "?" : "&",
+                      "options=-c%20search_path%3D", kSchema);
+}
+
 class PgQueueTest : public testing::Test {
  protected:
   void SetUp() override {
     const char* url = std::getenv("PG_TEST_DB_URL");
     if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
-    conninfo_ = url;
+    conninfo_ = Conninfo(url);
     client_ = std::make_unique<pg::Client>(conninfo_);
-
-    // Column for column what PostgresSqlDialect creates and Migration adds,
-    // types included — schema_contract_test is what keeps this copy honest.
-    // The id being UUID rather than text is the reason that test exists: a
-    // fixture that invents VARCHAR ids passes happily and tells you nothing
-    // about production.
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS indexing_requests").ok());
-    ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE indexing_requests (
-            id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            player         VARCHAR(255) NOT NULL,
-            platform       VARCHAR(50) NOT NULL,
-            start_month    VARCHAR(7) NOT NULL,
-            end_month      VARCHAR(7) NOT NULL,
-            status         VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-            created_at     TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at     TIMESTAMP NOT NULL DEFAULT now(),
-            error_message  TEXT,
-            games_indexed  INT DEFAULT 0,
-            exclude_bullet BOOLEAN NOT NULL DEFAULT FALSE,
-            owner_id       VARCHAR(128),
-            lease_expires_at TIMESTAMP,
-            skip_cache     BOOLEAN DEFAULT FALSE,
-            attempts       INT DEFAULT 0,
-            dedupe_key     VARCHAR(600)
-        ))")
-                    .ok());
+    ASSERT_TRUE(ResetToMigratedSchema(*client_, kSchema).ok());
     queue_ = std::make_unique<PgQueue>(*client_, kMaxAttempts);
   }
 

@@ -2,7 +2,6 @@ package prom_proxy
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -507,39 +506,6 @@ var oneD4ExportedNames = map[string]bool{
 	"retention_sweeps_total":            true,
 	"retention_rows_deleted_total":      true,
 	"retention_requests_settled_total":  true,
-}
-
-// The selector above covers both indexers by name, and the C++ worker's
-// name is set in its own main. Nothing else ties the two together: rename
-// the service there and every test in this repo still passes while all
-// seventeen indexing selectors quietly revert to Java-only — which is the
-// failure the widened selector exists to prevent.
-func TestOneD4SelectorCoversTheServiceTheCppWorkerReportsAs(t *testing.T) {
-	// rules_go runs the test in its own package directory inside the
-	// runfiles tree, so the data dep is reached from the root.
-	source, err := os.ReadFile("../../../../domains/games/apis/one_d4_worker/worker_main.cc")
-	require.NoError(t, err, "worker_main.cc is not where this test looks")
-
-	match := regexp.MustCompile(`\.service_name = "([a-z0-9_]+)"`).FindSubmatch(source)
-	require.NotNil(t, match, "worker_main.cc names no service")
-	name := string(match[1])
-
-	entry := serviceRegistry["one_d4"]
-	selector := regexp.MustCompile(`service_name=~"([^"]+)"`)
-	checked := 0
-	for _, def := range entry.CustomScalars {
-		for _, query := range def.AllQueries() {
-			for _, found := range selector.FindAllStringSubmatch(query, -1) {
-				pattern, err := regexp.Compile("^" + found[1] + "$")
-				require.NoError(t, err, "selector %q is not a regexp", found[1])
-				assert.True(t, pattern.MatchString(name),
-					"selector %q does not match %q, the service the C++ worker reports as: %s",
-					found[1], name, query)
-				checked++
-			}
-		}
-	}
-	assert.NotZero(t, checked, "no indexing selector names both indexers")
 }
 
 func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {

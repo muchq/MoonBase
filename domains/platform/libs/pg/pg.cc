@@ -100,6 +100,22 @@ absl::StatusOr<Result> Client::Exec(const std::string& sql,
   return ExecLocked(sql, params);
 }
 
+absl::Status Client::ExecScript(const std::string& sql) {
+  const std::lock_guard<std::mutex> lock(mu_);
+  if (absl::Status connected = EnsureConnectedLocked(); !connected.ok()) return connected;
+  pg_result* raw = PQexec(conn_, sql.c_str());
+  // Owns the handle, so the returns below still clear it.
+  Result result(raw);
+  const ExecStatusType status = raw == nullptr ? PGRES_FATAL_ERROR : PQresultStatus(raw);
+  if (status == PGRES_TUPLES_OK || status == PGRES_COMMAND_OK) return absl::OkStatus();
+  if (status == PGRES_EMPTY_QUERY) {
+    return absl::InvalidArgumentError("postgres script contained no statements");
+  }
+  return absl::InternalError(absl::StrCat(
+      "postgres script failed: ",
+      TrimmedError(raw == nullptr ? PQerrorMessage(conn_) : PQresultErrorMessage(raw))));
+}
+
 absl::StatusOr<Result> Transaction::Exec(const std::string& sql,
                                          const std::vector<std::string>& params) {
   // No lock: InTransaction holds it for the whole callback.

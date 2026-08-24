@@ -9,6 +9,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
+#include "domains/games/apis/one_d4_worker/migration_files.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace one_d4_worker {
@@ -48,36 +49,8 @@ class ReanalysisQueueTest : public testing::Test {
   void SetUp() override {
     const char* url = std::getenv("PG_TEST_DB_URL");
     if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
-    {
-      pg::Client bootstrap(url);
-      ASSERT_TRUE(bootstrap.Exec(absl::StrCat("CREATE SCHEMA IF NOT EXISTS ", kSchema)).ok());
-    }
     client_ = std::make_unique<pg::Client>(Conninfo(url));
-
-    // Column for column what PostgresSqlDialect creates —
-    // schema_contract_test is what keeps this copy honest.
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS reanalysis_requests").ok());
-    ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE reanalysis_requests (
-            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            status           VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-            created_at       TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at       TIMESTAMP NOT NULL DEFAULT now(),
-            owner_id         VARCHAR(128),
-            lease_expires_at TIMESTAMP,
-            attempts         INT NOT NULL DEFAULT 0,
-            error_message    TEXT,
-            cursor_game_url  VARCHAR(1024),
-            games_processed  INT NOT NULL DEFAULT 0,
-            games_failed     INT NOT NULL DEFAULT 0
-        ))")
-                    .ok());
-    ASSERT_TRUE(client_
-                    ->Exec("CREATE UNIQUE INDEX idx_reanalysis_requests_single_live ON "
-                           "reanalysis_requests ((true)) WHERE status IN ('PENDING', "
-                           "'PROCESSING')")
-                    .ok());
+    ASSERT_TRUE(ResetToMigratedSchema(*client_, kSchema).ok());
     queue_ = std::make_unique<PgReanalysisQueue>(*client_, kMaxAttempts);
   }
 

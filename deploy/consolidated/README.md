@@ -273,9 +273,9 @@ applies the numbered `.sql` files in
 [`one_d4/migrations/`](../../domains/games/apis/one_d4/migrations/) and
 exits. Both `one_d4` and `one_d4_worker` gate on it with
 `service_completed_successfully` — the worker so it no longer waits for the
-Java service to boot, the service so its own boot-time migration (which
-still runs, until #1426 demotes it to a verifier) is serialized behind this
-one rather than racing it.
+Java service to boot, the service so the schema exists by the time its boot
+check runs. This one-shot is the only thing that writes that schema; one_d4
+verifies at boot and crash-loops rather than repairing what it finds.
 
 Two things about `shared_postgres` are load-bearing and easy to undo by
 accident:

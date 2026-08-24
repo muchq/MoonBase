@@ -14,6 +14,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
+#include "domains/games/apis/one_d4_worker/migration_files.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace one_d4_worker {
@@ -30,9 +31,9 @@ using ::testing::ElementsAre;
 constexpr char kRequest[] = "00000000-0000-4000-8000-000000000001";
 constexpr char kOwner[] = "worker-1";
 
-/// This suite's own schema, so its DDL cannot race pg_queue_test's: both
-/// drop and recreate indexing_requests, and bazel runs them at the same
-/// time against one database.
+/// A schema of this suite's own. Every suite here gets the one database CI
+/// runs and bazel runs them in parallel, so the tables are shared mutable
+/// state otherwise.
 constexpr char kSchema[] = "one_d4_game_sink_test";
 
 /// The connection options carried in the conninfo rather than set with a
@@ -54,92 +55,9 @@ class PgGameSinkTest : public testing::Test {
   void SetUp() override {
     const char* url = std::getenv("PG_TEST_DB_URL");
     if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
-    {
-      pg::Client bootstrap(url);
-      ASSERT_TRUE(bootstrap.Exec(absl::StrCat("CREATE SCHEMA IF NOT EXISTS ", kSchema)).ok());
-    }
     conninfo_ = Conninfo(url);
     client_ = std::make_unique<pg::Client>(conninfo_);
-
-    // Column for column what PostgresSqlDialect creates and Migration adds.
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS indexed_periods").ok());
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS motif_occurrences").ok());
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS game_features").ok());
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS indexing_requests").ok());
-    ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE indexing_requests (
-            id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            player         VARCHAR(255) NOT NULL,
-            platform       VARCHAR(50) NOT NULL,
-            start_month    VARCHAR(7) NOT NULL,
-            end_month      VARCHAR(7) NOT NULL,
-            status         VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-            created_at     TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at     TIMESTAMP NOT NULL DEFAULT now(),
-            owner_id       VARCHAR(128),
-            lease_expires_at TIMESTAMP
-        ))")
-                    .ok());
-    ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE game_features (
-            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            request_id    UUID NOT NULL REFERENCES indexing_requests(id),
-            game_url      VARCHAR(1024) NOT NULL UNIQUE,
-            platform      VARCHAR(50) NOT NULL,
-            white_username VARCHAR(255),
-            black_username VARCHAR(255),
-            white_elo     INT,
-            black_elo     INT,
-            white_title   VARCHAR(10),
-            black_title   VARCHAR(10),
-            time_class    VARCHAR(50),
-            eco           VARCHAR(10),
-            opening_name  VARCHAR(255),
-            opening_family VARCHAR(255),
-            result        VARCHAR(20),
-            played_at     TIMESTAMP,
-            num_moves     INT,
-            indexed_at    TIMESTAMP NOT NULL DEFAULT now(),
-            pgn           TEXT
-        ))")
-                    .ok());
-    ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE motif_occurrences (
-            id           VARCHAR(36) NOT NULL PRIMARY KEY,
-            game_url     VARCHAR(1024) NOT NULL
-                         REFERENCES game_features(game_url) ON DELETE CASCADE,
-            motif        VARCHAR(50) NOT NULL,
-            ply          INT NOT NULL,
-            side         VARCHAR(5) NOT NULL,
-            move_number  INT NOT NULL,
-            description  TEXT,
-            moved_piece  VARCHAR(20),
-            attacker     VARCHAR(20),
-            target       VARCHAR(20),
-            is_discovered BOOLEAN NOT NULL DEFAULT FALSE,
-            is_mate       BOOLEAN NOT NULL DEFAULT FALSE,
-            pin_type      VARCHAR(8)
-        ))")
-                    .ok());
-
-    ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE indexed_periods (
-            id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            player         VARCHAR(255) NOT NULL,
-            platform       VARCHAR(50) NOT NULL,
-            year_month     VARCHAR(7) NOT NULL,
-            fetched_at     TIMESTAMP NOT NULL,
-            is_complete    BOOLEAN NOT NULL,
-            games_count    INT NOT NULL,
-            exclude_bullet BOOLEAN NOT NULL DEFAULT FALSE,
-            CONSTRAINT indexed_periods_unique
-                UNIQUE (player, platform, year_month, exclude_bullet)
-        ))")
-                    .ok());
+    ASSERT_TRUE(ResetToMigratedSchema(*client_, kSchema).ok());
 
     ASSERT_TRUE(client_
                     ->Exec("INSERT INTO indexing_requests (id, player, platform, start_month,"

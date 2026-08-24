@@ -93,6 +93,15 @@ class Client {
   /// deleted reports zero rows).
   absl::StatusOr<Result> Exec(const std::string& sql, const std::vector<std::string>& params = {});
 
+  /// Runs a script of one or more statements, as `psql -f` would: the
+  /// simple query protocol, so no parameters and no rows come back.
+  /// Postgres wraps a multi-statement script in one implicit transaction,
+  /// so a statement that fails takes the whole script down with it and
+  /// leaves nothing behind — which is why this does not retry the way
+  /// Exec does. A script with no statements in it is an error, not a
+  /// no-op: it is what an empty or all-comments file looks like from here.
+  absl::Status ExecScript(const std::string& sql);
+
   /// Runs `body` between BEGIN and COMMIT, holding the connection for
   /// the whole callback so no other caller can interleave a statement.
   /// A non-ok return from `body`, a failed transaction statement, or a

@@ -13,6 +13,7 @@
 #include "absl/strings/str_format.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
+#include "domains/games/apis/one_d4_worker/migration_files.h"
 
 namespace one_d4_worker {
 namespace {
@@ -26,9 +27,13 @@ using ::testing::IsEmpty;
 
 std::string Url(int n) { return absl::StrFormat("https://chess.com/game/%04d", n); }
 
-/// This suite's own schema. It drops and recreates three tables two other
-/// suites also use, and bazel runs them at the same time against one
-/// database — see pg_game_sink_test, which hit this first.
+/// The indexing request every game here belongs to. game_features.request_id
+/// is NOT NULL onto it; nothing in this pass reads the request itself.
+constexpr char kRequest[] = "00000000-0000-4000-8000-000000000001";
+
+/// A schema of this suite's own. Every suite here gets the one database CI
+/// runs and bazel runs them in parallel, so the tables are shared mutable
+/// state otherwise.
 constexpr char kSchema[] = "one_d4_pg_reanalysis_test";
 
 /// Not UTC, deliberately: the fence compares lease_expires_at to NOW(), and
@@ -45,72 +50,22 @@ class PgReanalysisTest : public testing::Test {
   void SetUp() override {
     const char* url = std::getenv("PG_TEST_DB_URL");
     if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
-    {
-      pg::Client bootstrap(url);
-      ASSERT_TRUE(bootstrap.Exec(absl::StrCat("CREATE SCHEMA IF NOT EXISTS ", kSchema)).ok());
-    }
     conninfo_ = Conninfo(url);
     client_ = std::make_unique<pg::Client>(conninfo_);
-
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS motif_occurrences").ok());
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS game_features").ok());
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS reanalysis_requests").ok());
-
-    // Only the columns this pass reads or writes — schema_contract_test
-    // keeps the shape honest against the Java DDL.
+    ASSERT_TRUE(ResetToMigratedSchema(*client_, kSchema).ok());
     ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE game_features (
-            id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            game_url      VARCHAR(1024) NOT NULL UNIQUE,
-            pgn           TEXT
-        ))")
-                    .ok());
-    ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE motif_occurrences (
-            id            VARCHAR(36) PRIMARY KEY,
-            game_url      VARCHAR(1024) NOT NULL,
-            motif         VARCHAR(50) NOT NULL,
-            ply           INT NOT NULL,
-            side          VARCHAR(5) NOT NULL,
-            move_number   INT NOT NULL,
-            description   TEXT,
-            moved_piece   VARCHAR(20),
-            attacker      VARCHAR(20),
-            target        VARCHAR(20),
-            is_discovered BOOLEAN NOT NULL DEFAULT FALSE,
-            is_mate       BOOLEAN NOT NULL DEFAULT FALSE,
-            pin_type      VARCHAR(8)
-        ))")
-                    .ok());
-    ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE reanalysis_requests (
-            id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            status           VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-            created_at       TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at       TIMESTAMP NOT NULL DEFAULT now(),
-            owner_id         VARCHAR(128),
-            lease_expires_at TIMESTAMP,
-            attempts         INT NOT NULL DEFAULT 0,
-            error_message    TEXT,
-            cursor_game_url  VARCHAR(1024),
-            games_processed  INT NOT NULL DEFAULT 0,
-            games_failed     INT NOT NULL DEFAULT 0
-        ))")
-                    .ok());
-    ASSERT_TRUE(client_
-                    ->Exec("CREATE UNIQUE INDEX idx_reanalysis_requests_single_live ON "
-                           "reanalysis_requests ((true)) WHERE status IN ('PENDING', "
-                           "'PROCESSING')")
+                    ->Exec("INSERT INTO indexing_requests (id, player, platform, start_month,"
+                           " end_month) VALUES ($1, 'alice', 'chess.com', '2026-01', '2026-01')",
+                           {kRequest})
                     .ok());
   }
 
   void AddGame(const std::string& url, const std::string& pgn) {
-    ASSERT_TRUE(
-        client_->Exec("INSERT INTO game_features (game_url, pgn) VALUES ($1, $2)", {url, pgn})
-            .ok());
+    ASSERT_TRUE(client_
+                    ->Exec("INSERT INTO game_features (request_id, game_url, platform, pgn)"
+                           " VALUES ($1, $2, 'chess.com', $3)",
+                           {kRequest, url, pgn})
+                    .ok());
   }
 
   void AddOccurrence(const std::string& url, const std::string& motif) {
@@ -207,8 +162,11 @@ TEST_F(PgReanalysisTest, AnEmptyCorpusPagesToNothing) {
 }
 
 TEST_F(PgReanalysisTest, ANullPgnComesBackEmptyRatherThanMissing) {
-  ASSERT_TRUE(
-      client_->Exec("INSERT INTO game_features (game_url, pgn) VALUES ($1, NULL)", {Url(0)}).ok());
+  ASSERT_TRUE(client_
+                  ->Exec("INSERT INTO game_features (request_id, game_url, platform, pgn)"
+                         " VALUES ($1, $2, 'chess.com', NULL)",
+                         {kRequest, Url(0)})
+                  .ok());
   PgGameCorpus corpus(*client_);
 
   auto page = corpus.After("", 10);

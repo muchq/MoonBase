@@ -128,10 +128,15 @@ public class IndexerModule {
     return configuredUrl == null || configuredUrl.isBlank() ? readJdbcUrl() : configuredUrl.strip();
   }
 
+  /**
+   * The schema is {@code one_d4_migrate}'s to write (#1426); boot's job is to refuse to serve
+   * against one that step did not finish. The H2 test path has no such step and applies the
+   * migrations itself.
+   */
   @Context
   public Migration migration(DataSource dataSource, SqlDialect dialect) {
     Migration migration = new Migration(dataSource, dialect);
-    migration.run();
+    migration.atBoot();
     return migration;
   }
 

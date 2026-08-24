@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 #include "absl/status/status.h"
@@ -185,6 +186,93 @@ TEST_F(PgTransactionTest, OtherCallersCannotInterleaveOnTheSameConnection) {
   EXPECT_TRUE(inside);
   outsider.join();
   EXPECT_EQ(Count(), 2) << "the outsider's write lands once the transaction releases";
+}
+
+// The .sql files one_d4's migrations ship as, run the way psql runs them.
+class PgScriptTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    const char* url = std::getenv("PG_TEST_DB_URL");
+    if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
+    client_ = std::make_unique<pg::Client>(url);
+    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS pg_script_test").ok());
+  }
+
+  std::unique_ptr<pg::Client> client_;
+};
+
+// Why this is a second method rather than a use of Exec: Exec binds
+// parameters, which puts it on the extended protocol, and that protocol
+// carries one statement per message however few parameters are passed.
+TEST_F(PgScriptTest, ExecRefusesTheScriptExecScriptRuns) {
+  const std::string script =
+      "CREATE TABLE pg_script_test (n integer); INSERT INTO pg_script_test VALUES (1);";
+  EXPECT_FALSE(client_->Exec(script).ok());
+  EXPECT_TRUE(client_->ExecScript(script).ok());
+}
+
+TEST_F(PgScriptTest, RunsEveryStatementInTheScript) {
+  ASSERT_TRUE(client_
+                  ->ExecScript(R"(
+      CREATE TABLE pg_script_test (n integer);
+      INSERT INTO pg_script_test VALUES (1);
+      INSERT INTO pg_script_test VALUES (2);
+  )")
+                  .ok());
+
+  const auto rows = client_->Exec("SELECT n FROM pg_script_test ORDER BY n");
+  ASSERT_TRUE(rows.ok()) << rows.status();
+  EXPECT_EQ(rows->rows(), 2);
+}
+
+// Statement-at-a-time is what Exec offers, and a script is not that: the
+// implicit transaction Postgres wraps around a multi-statement script means
+// the earlier statements do not survive a later failure.
+TEST_F(PgScriptTest, LeavesNothingBehindWhenAStatementFails) {
+  const absl::Status status = client_->ExecScript(R"(
+      CREATE TABLE pg_script_test (n integer);
+      INSERT INTO pg_script_test VALUES (1);
+      INSERT INTO pg_script_test VALUES ('not a number');
+  )");
+  EXPECT_FALSE(status.ok());
+
+  const auto exists = client_->Exec("SELECT to_regclass('pg_script_test')");
+  ASSERT_TRUE(exists.ok()) << exists.status();
+  EXPECT_EQ(exists->Get(0, 0), std::nullopt) << "the failed script left its table behind";
+}
+
+// Dollar-quoted bodies carry semicolons, so a script split on ';' by hand
+// would send half a DO block. libpq is what parses this one.
+TEST_F(PgScriptTest, RunsADollarQuotedBlockWholeAndItsErrorsAreHandled) {
+  ASSERT_TRUE(client_
+                  ->ExecScript(R"(
+      CREATE TABLE pg_script_test (n integer);
+      DO $$ BEGIN
+        ALTER TABLE pg_script_test ADD CONSTRAINT pg_script_test_n_unique UNIQUE (n);
+      EXCEPTION WHEN duplicate_table OR duplicate_object THEN NULL;
+      END $$;
+      DO $$ BEGIN
+        ALTER TABLE pg_script_test ADD CONSTRAINT pg_script_test_n_unique UNIQUE (n);
+      EXCEPTION WHEN duplicate_table OR duplicate_object THEN NULL;
+      END $$;
+  )")
+                  .ok());
+
+  const auto constraints =
+      client_->Exec("SELECT conname FROM pg_constraint WHERE conname = 'pg_script_test_n_unique'");
+  ASSERT_TRUE(constraints.ok()) << constraints.status();
+  EXPECT_EQ(constraints->rows(), 1);
+}
+
+TEST_F(PgScriptTest, RefusesAScriptWithNoStatementsInIt) {
+  // What an empty or all-comments file reaches here as. Reporting success
+  // would make a migration that never ran indistinguishable from one that did.
+  EXPECT_EQ(client_->ExecScript("-- nothing to do\n").code(), absl::StatusCode::kInvalidArgument);
+}
+
+TEST(PgScriptOfflineTest, ExecScriptOnUnreachableServerReturnsUnavailable) {
+  pg::Client client("postgresql://127.0.0.1:1/nope?connect_timeout=2");
+  EXPECT_EQ(client.ExecScript("SELECT 1; SELECT 2;").code(), absl::StatusCode::kUnavailable);
 }
 
 }  // namespace

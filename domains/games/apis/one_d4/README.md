@@ -111,17 +111,25 @@ docker run -d --name one_d4_dev -p 5432:5432 \
 INDEXER_DB_URL="jdbc:postgresql://localhost:5432/indexer" \
   INDEXER_DB_USERNAME=indexer \
   INDEXER_DB_PASSWORD=indexer \
+  bazel run //domains/games/apis/one_d4:one_d4_migrate
+
+INDEXER_DB_URL="jdbc:postgresql://localhost:5432/indexer" \
+  INDEXER_DB_USERNAME=indexer \
+  INDEXER_DB_PASSWORD=indexer \
   bazel run //domains/games/apis/one_d4:one_d4
 ```
 
 `postgres:18` is the image the deploy runs (`shared_postgres` in `compose.yaml`), so local
-dev and production speak the same dialect. Migrations run at startup against an empty
-database, so nothing else is needed to bring one up.
+dev and production speak the same dialect.
 
-The schema itself is the numbered `.sql` files in [`migrations/`](migrations/) (#1419) —
-`Migration` applies them at boot, and the deploy runs the same files first as the
-`one_d4_migrate` one-shot (`compose.yaml`), which is what lets `one_d4_worker` start
-without waiting for this service. `migrations/README.md` has the authoring rules.
+The migrate step is not optional: the service creates no schema of its own. It checks at
+boot that the migrations were applied and refuses to serve otherwise (#1426), naming what
+is missing. Re-run it after pulling a new `V<NNN>` step.
+
+The schema itself is the numbered `.sql` files in [`migrations/`](migrations/) (#1419).
+`one_d4_migrate` is the same one-shot the deploy runs before the services start
+(`compose.yaml`), which is what lets `one_d4_worker` start without waiting for this
+service. `migrations/README.md` has the authoring rules.
 
 Credentials in the URL still work, but only if the password survives URL decoding —
 pgjdbc decodes query values, so `+` becomes a space, `&` truncates the rest, and a bare
