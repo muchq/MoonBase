@@ -582,14 +582,26 @@ cc_test(
     name = "metrics_test",
     size = "small",
     srcs = ["metrics_test.cc"],
-    data = [
-        "metrics.cc",
-    ],
     deps = [
         ":metrics",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "@com_google_absl//absl/strings",
         "@googletest//:gtest_main",
+    ],
+)
+
+# Sets the global meter provider, so it runs in a binary of its own.
+cc_test(
+    name = "metrics_export_test",
+    size = "small",
+    srcs = ["metrics_export_test.cc"],
+    deps = [
+        ":metrics",
+        "//domains/platform/libs/futility/otel:collect_on_demand_reader",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@opentelemetry-cpp//sdk/src/metrics",
     ],
 )
 

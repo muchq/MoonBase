@@ -48,16 +48,6 @@ public class RetentionPolicyTest {
     assertThat(RetentionPolicy.MAX_ATTEMPTS).as("README: three claims, then poisoned").isEqualTo(3);
   }
 
-  /**
-   * The budget both processes enforce. {@code IndexingRequestStore.MAX_ATTEMPTS} is this constant
-   * rather than a copy of it, and the C++ queues are handed the same field, so there is nothing
-   * left for a test to compare — this pins the shipped number, not the agreement.
-   */
-  @Test
-  public void theAttemptBudgetIsTheOneTheStoreEnforces() {
-    assertThat(IndexingRequestStore.MAX_ATTEMPTS).isEqualTo(RetentionPolicy.MAX_ATTEMPTS);
-  }
-
   /** The count reader's own guards, on the same terms the window reader's are checked. */
   @Test
   public void anAttemptBudgetThatIsAbsentOrNotAPositiveIntegerIsRejected() {
