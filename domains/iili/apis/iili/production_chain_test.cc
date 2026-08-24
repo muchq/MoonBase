@@ -241,14 +241,27 @@ std::string LowerHeadersOf(const std::string& raw) {
   return headers;
 }
 
-// The declared length, or "<none>" so a missing header reads as itself in a
-// failure rather than as a match.
+// The declared length, or "<none>" when the header is absent. Two responses
+// that both declare nothing compare equal, so a test asserting HEAD's length
+// against the GET's has to pin the GET to a real number first.
 std::string ContentLengthOf(const std::string& raw) {
   const std::string headers = LowerHeadersOf(raw);
   const auto at = headers.find("content-length: ");
   if (at == std::string::npos) return "<none>";
   const auto start = at + std::string("content-length: ").size();
   return headers.substr(start, headers.find("\r\n", start) - start);
+}
+
+// BodyOf reports an empty body for a read that never reached the separator,
+// which is indistinguishable from the "no octets" a HEAD is supposed to show.
+// Every raw assertion below goes through this first so a truncated response
+// fails instead of confirming the property under test.
+::testing::AssertionResult IsCompleteResponse(const std::string& raw) {
+  if (raw.empty()) return ::testing::AssertionFailure() << "empty read";
+  if (raw.find("\r\n\r\n") == std::string::npos) {
+    return ::testing::AssertionFailure() << "no header/body separator in: " << raw;
+  }
+  return ::testing::AssertionSuccess();
 }
 
 // The framing wire_test cannot see (#1433): a HEAD answers the length the GET
@@ -268,13 +281,13 @@ TEST_F(ProductionChainTest, HeadRedirectCarriesTheGetsLengthAndNoBodyOnTheWire) 
       transport.port(), "HEAD /iili/v1/r/DAA HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
   const std::string get = RawRoundTrip(
       transport.port(), "GET /iili/v1/r/DAA HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
-  ASSERT_FALSE(head.empty());
-  ASSERT_FALSE(get.empty());
+  ASSERT_TRUE(IsCompleteResponse(head));
+  ASSERT_TRUE(IsCompleteResponse(get));
 
   // The GET first: the length below means nothing unless a body actually
-  // ships. alloy conformance pins this "{}" at 3xx.
+  // ships and the header describes it. alloy conformance pins this "{}" at 3xx.
   EXPECT_EQ(BodyOf(get), "{}") << get;
-  EXPECT_EQ(ContentLengthOf(get), "2") << get;
+  EXPECT_EQ(ContentLengthOf(get), std::to_string(BodyOf(get).size())) << get;
 
   EXPECT_EQ(BodyOf(head), "") << "HEAD answered with a body: " << head;
   EXPECT_EQ(ContentLengthOf(head), ContentLengthOf(get))
@@ -301,11 +314,12 @@ TEST_F(ProductionChainTest, HeadOnAnUnknownSlugIsFramedLikeItsGetToo) {
       transport.port(), "HEAD /iili/v1/r/zzz HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
   const std::string get = RawRoundTrip(
       transport.port(), "GET /iili/v1/r/zzz HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
-  ASSERT_FALSE(head.empty());
-  ASSERT_FALSE(get.empty());
+  ASSERT_TRUE(IsCompleteResponse(head));
+  ASSERT_TRUE(IsCompleteResponse(get));
 
   EXPECT_NE(head.find("404"), std::string::npos) << head;
   EXPECT_EQ(BodyOf(get), R"({"message":"no such link"})") << get;
+  EXPECT_EQ(ContentLengthOf(get), std::to_string(BodyOf(get).size())) << get;
   EXPECT_EQ(BodyOf(head), "") << "HEAD answered with a body: " << head;
   EXPECT_EQ(ContentLengthOf(head), ContentLengthOf(get))
       << "HEAD did not report the GET's length: " << head;
