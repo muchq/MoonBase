@@ -394,6 +394,45 @@ your changes stashed, then say so in the PR body.
   per-service design docs and the PR body; put the *why* in one of them rather
   than nowhere.
 
+## Writing it down
+
+**No archeology in comments.** A comment describes the code as it is, not how
+it got there. No "used to", no "previously", no retelling of the bug that
+prompted the line. Git has the history, and a comment narrating a deleted
+alternative ages into a lie the moment someone edits around it.
+
+A live trap is not archeology. "`empty_body`, not a cleared `string_body`"
+earns its place because clearing the body is the obvious wrong turn and the
+failure is a silent hang — that warns about the code in front of you rather
+than recounting a previous attempt.
+
+**A comment must not claim a property the code doesn't have.** In #1445,
+`ContentLengthOf` returned a `"<none>"` sentinel and its comment said a missing
+header "reads as itself in a failure rather than as a match". The only caller
+compared two of them, and two sentinels compare equal. The comment described
+the guarantee the author meant to build rather than the one that shipped, which
+made a vacuous assertion look deliberate. That is worse than no comment.
+
+**Commit messages under 100 words, usually well under.** What changed and why,
+in the fewest words that carry it; a one-line subject is often the whole job.
+No account of how the work went and no list of what was checked — the tests are
+that record.
+
+This is the one that outlives the PR. MoonBase squash-merges with commit
+details, so the branch's commit messages are concatenated into the message on
+`main` — `b65cce2` inlines a single commit, `151db76` carries a `*` per commit.
+A bloated commit message is bloat in `git log` forever. The PR body is not
+included.
+
+**Terse PR bodies.** The change, the consequences a reviewer cannot see from
+the diff, and what is deliberately not covered. Nothing else. The body is spent
+entirely on reviewer attention, which is the scarcest thing in the process.
+
+**No journaling in any artifact.** "My first attempt", "this turned out to be",
+"I then found" — none of that belongs in code, commit messages, or PR bodies.
+A finding from a review lives in the review thread; the artifact carries only
+the conclusion.
+
 ## Dependencies and infrastructure
 
 **Re-check assumed limitations instead of repeating them.** A limitation
