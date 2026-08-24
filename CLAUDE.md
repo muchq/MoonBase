@@ -14,8 +14,10 @@ The three rules that change behavior most:
 - **A test beats an argument.** If a behavior is worth reasoning about, the
   deliverable is a CI test, not a paragraph. When a reviewer asks "what happens
   if X?", write the test named after X.
-- **Run the review panel before committing anything non-trivial** — three
-  independent agents on three distinct lenses, each refuting its own findings.
+- **Push — and open the PR where one is being opened — then run the review
+  panel** against that head: four independent agents on four distinct lenses,
+  each refuting its own findings. Landing first makes the panel's work visible
+  as commits on a judged baseline rather than invisible inside the first diff.
   If it didn't run, say so rather than letting the reader assume it did.
 - **Write the conclusion, not the journey.** Comments state the live rule and
   never narrate deleted code. Commit messages stay under 100 words and usually

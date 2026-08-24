@@ -247,6 +247,11 @@ The numbers below are `retention_policy.json`, which is where they live — not 
 file off its classpath at class load, so neither holds a copy that could drift from the other. A
 window is changed by editing the file.
 
+`max_attempts` rides in the same file for the same reason (#1401), though it is a count and part
+of the claim protocol rather than a retention window: the service and both of the worker's queues
+are handed it, and the poisoned-request sentence each stores quotes it, so a number any of them
+held privately could contradict what another enforces.
+
 That makes a malformed file a startup failure rather than a compile error, and both sides refuse to
 run on one: each checks every window is present, integral and positive, the worker exits 1 and the
 service fails class initialisation — eagerly, from a `@Context` bean, so it is a failed startup and
@@ -318,7 +323,7 @@ holds `attempts` flat when the same owner re-claims — deliberately, so a run c
 own retries — and the worker that just gave up a wedged run is the same process whose poller sees
 the row next. Left owned, it would re-claim its own abandoned request every five minutes, take a
 fresh ceiling, and wedge again on a counter that never moved, with each lap's live lease vouching
-for the whole fleet. So the interrupt path clears `owner_id` without returning the attempt: three
+for the whole fleet. So the interrupt path clears `owner_id` without returning the attempt: enough
 wedges retire the request and tell the user, rather than looping on it forever.
 
 None of that covers a worker that is *leaving on purpose* either, and it can't: every arm above

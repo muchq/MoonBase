@@ -68,12 +68,10 @@ class ReanalysisQueue {
 /// ReanalysisQueue over Postgres.
 class PgReanalysisQueue : public ReanalysisQueue {
  public:
-  /// After this many attempts a pass stops being claimable. Same budget as
-  /// PgQueue::kMaxAttempts, for the same reason: a job that kills its worker
-  /// three times will kill the fourth.
-  static constexpr int kMaxAttempts = 3;
-
-  explicit PgReanalysisQueue(pg::Client& client) : client_(client) {}
+  /// The same `max_attempts` PgQueue gets, from the same file, for the same
+  /// reason: a job that kills its worker every time will kill the next one.
+  PgReanalysisQueue(pg::Client& client, int max_attempts)
+      : client_(client), max_attempts_(max_attempts) {}
 
   absl::StatusOr<std::optional<ReanalysisJob>> ClaimNext(std::string_view owner,
                                                          absl::Duration lease) override;
@@ -87,12 +85,14 @@ class PgReanalysisQueue : public ReanalysisQueue {
 
  private:
   pg::Client& client_;
+  int max_attempts_;
 };
 
 /// A queue with a connection of its own, for the reanalysis thread. Same
 /// reason NewOwnedPgQueue exists: one pg::Client is one connection
 /// serialised by a mutex.
-std::unique_ptr<ReanalysisQueue> NewOwnedReanalysisQueue(const std::string& db_url);
+std::unique_ptr<ReanalysisQueue> NewOwnedReanalysisQueue(const std::string& db_url,
+                                                         int max_attempts);
 
 }  // namespace one_d4_worker
 

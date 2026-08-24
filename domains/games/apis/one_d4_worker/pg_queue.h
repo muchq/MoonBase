@@ -16,11 +16,10 @@ namespace one_d4_worker {
 /// IndexQueue over the `indexing_requests` table the Java worker shares.
 class PgQueue : public IndexQueue {
  public:
-  /// After this many attempts a request stops being claimable. Mirrors
-  /// IndexingRequestStore.MAX_ATTEMPTS; PgQueueSchemaTest pins the pair.
-  static constexpr int kMaxAttempts = 3;
-
-  explicit PgQueue(pg::Client& client) : client_(client) {}
+  /// `max_attempts` from retention_policy.json, which the Java service reads
+  /// as IndexingRequestStore.MAX_ATTEMPTS. Passed in rather than held as a
+  /// constant so the two cannot hold different numbers.
+  PgQueue(pg::Client& client, int max_attempts) : client_(client), max_attempts_(max_attempts) {}
 
   absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
                                                     absl::Duration lease) override;
@@ -34,6 +33,7 @@ class PgQueue : public IndexQueue {
 
  private:
   pg::Client& client_;
+  int max_attempts_;
 };
 
 /// A queue with a connection of its own, for one indexing thread.
@@ -43,7 +43,7 @@ class PgQueue : public IndexQueue {
 /// FOR UPDATE on the same row the heartbeat updates — holds the mutex
 /// while it waits, and stalls every other thread's claims, heartbeats and
 /// terminal writes behind it.
-std::unique_ptr<IndexQueue> NewOwnedPgQueue(const std::string& db_url);
+std::unique_ptr<IndexQueue> NewOwnedPgQueue(const std::string& db_url, int max_attempts);
 
 }  // namespace one_d4_worker
 

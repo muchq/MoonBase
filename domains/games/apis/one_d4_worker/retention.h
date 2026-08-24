@@ -34,9 +34,11 @@ namespace one_d4_worker {
 absl::Status Sweep(pg::Client& client, const RetentionPolicy& policy, absl::Time now,
                    SweepReport& report);
 
-/// The sentence a poisoned request carries. Matches the Java service's, which
-/// stored rows already have.
-extern const char kPoisonedMessage[];
+/// The sentence a poisoned request carries, which embeds the attempt budget.
+/// Matches the Java service's, which stored rows already have — both build it
+/// from `max_attempts` in retention_policy.json, so neither can quote a number
+/// the other does not enforce.
+std::string PoisonedMessage(int max_attempts);
 
 /// The sentence a stalled request carries, likewise.
 extern const char kStalledMessage[];

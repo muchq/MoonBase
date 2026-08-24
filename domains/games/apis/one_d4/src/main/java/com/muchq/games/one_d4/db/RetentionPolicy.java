@@ -72,6 +72,15 @@ public final class RetentionPolicy {
    */
   public static final Duration SWEEP_STATEMENT_TIMEOUT = seconds("sweep_statement_timeout_seconds");
 
+  /**
+   * How many times a request may be claimed before it stops being claimable. Part of the claim
+   * protocol rather than of retention, and read from the same file for the same reason the lease
+   * vocabulary is: this service and both of the C++ worker's queues decide when to give up, and two
+   * of them holding different numbers would retry a poisoned request forever or abandon a healthy
+   * one early.
+   */
+  public static final int MAX_ATTEMPTS = count("max_attempts");
+
   private static JsonNode load() {
     try (InputStream in =
         RetentionPolicy.class.getClassLoader().getResourceAsStream("retention_policy.json")) {
@@ -88,6 +97,10 @@ public final class RetentionPolicy {
 
   private static Duration seconds(String key) {
     return seconds(POLICY, key);
+  }
+
+  private static int count(String key) {
+    return count(POLICY, key);
   }
 
   /**
@@ -111,6 +124,23 @@ public final class RetentionPolicy {
           "retention_policy.json has a non-positive " + key + ": " + seconds);
     }
     return Duration.ofSeconds(seconds);
+  }
+
+  /**
+   * A count rather than a window, on the same terms: present, integral, positive. Package-private
+   * for the same reason {@link #seconds(JsonNode, String)} is.
+   */
+  static int count(JsonNode policy, String key) {
+    JsonNode value = policy.get(key);
+    if (value == null || !value.isIntegralNumber()) {
+      throw new IllegalStateException("retention_policy.json is missing an integer " + key);
+    }
+    long count = value.asLong();
+    if (count <= 0) {
+      throw new IllegalStateException(
+          "retention_policy.json has a non-positive " + key + ": " + count);
+    }
+    return Math.toIntExact(count);
   }
 
   private RetentionPolicy() {}

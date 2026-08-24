@@ -45,7 +45,7 @@ absl::StatusOr<std::optional<ReanalysisJob>> PgReanalysisQueue::ClaimNext(std::s
            AND (owner_id IS NULL
                 OR lease_expires_at IS NULL OR lease_expires_at <= NOW())
          RETURNING id)",
-      {std::to_string(kMaxAttempts)});
+      {std::to_string(max_attempts_)});
   if (!retired.ok()) return retired.status();
 
   // One conditional UPDATE, so two workers racing for the same row cannot
@@ -72,7 +72,7 @@ absl::StatusOr<std::optional<ReanalysisJob>> PgReanalysisQueue::ClaimNext(std::s
              FOR UPDATE SKIP LOCKED
              LIMIT 1)
          RETURNING id, cursor_game_url, games_processed, games_failed, attempts)",
-      {std::string(owner), Seconds(lease), std::to_string(kMaxAttempts)});
+      {std::string(owner), Seconds(lease), std::to_string(max_attempts_)});
   if (!claimed.ok()) return claimed.status();
   if (claimed->rows() == 0) return std::nullopt;
 
@@ -182,7 +182,8 @@ namespace {
 /// PgReanalysisQueue plus the connection it claims over.
 class OwnedReanalysisQueue : public ReanalysisQueue {
  public:
-  explicit OwnedReanalysisQueue(const std::string& db_url) : client_(db_url), queue_(client_) {}
+  OwnedReanalysisQueue(const std::string& db_url, int max_attempts)
+      : client_(db_url), queue_(client_, max_attempts) {}
 
   absl::StatusOr<std::optional<ReanalysisJob>> ClaimNext(std::string_view owner,
                                                          absl::Duration lease) override {
@@ -211,8 +212,9 @@ class OwnedReanalysisQueue : public ReanalysisQueue {
 
 }  // namespace
 
-std::unique_ptr<ReanalysisQueue> NewOwnedReanalysisQueue(const std::string& db_url) {
-  return std::make_unique<OwnedReanalysisQueue>(db_url);
+std::unique_ptr<ReanalysisQueue> NewOwnedReanalysisQueue(const std::string& db_url,
+                                                         int max_attempts) {
+  return std::make_unique<OwnedReanalysisQueue>(db_url, max_attempts);
 }
 
 }  // namespace one_d4_worker

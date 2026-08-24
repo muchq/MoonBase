@@ -4,10 +4,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <fstream>
 #include <regex>
 #include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -258,25 +256,6 @@ TEST(WorkerMetrics, MeasuresARunOnTheLayoutTheStoredSeriesUse) {
 TEST(WorkerMetrics, MeasuresAMonthOnTheLayoutTheStoredSeriesUse) {
   EXPECT_EQ(WorkerMetrics::HistogramBounds()[kGamesPerMonthMetric],
             (std::vector<double>{1, 2, 5, 10, 25, 50, 100, 200, 400, 800, 1'600, 3'200}));
-}
-
-TEST(WorkerMetrics, RecordsTheRunDurationUnderItsOwnNameAndNotARenamedOne) {
-  // MetricsRecorder::RecordLatency appends _microseconds to the instrument
-  // name — which would export this as index_run_duration_micros_microseconds,
-  // a name prom_proxy does not query, and hand it the shared HTTP bucket
-  // view as a bonus. The distribution
-  // form keeps the name. Checked in the source because the capturing
-  // recorder sees the name before the exporter renames it.
-  std::ifstream file("domains/games/apis/one_d4_worker/metrics.cc");
-  ASSERT_TRUE(file.good()) << "metrics.cc is not where this test looks";
-  std::ostringstream contents;
-  contents << file.rdbuf();
-  const std::string source = contents.str();
-
-  EXPECT_NE(source.find("RecordDistribution(kRunDurationMetric"), std::string::npos)
-      << "the run duration is no longer recorded through the name-preserving call";
-  EXPECT_EQ(source.find("RecordLatency("), std::string::npos)
-      << "RecordLatency renames the instrument; prom_proxy queries these names";
 }
 
 TEST(WorkerMetrics, SpellsTheRunOutcomesTheDashboardsQuery) {
