@@ -58,7 +58,7 @@ java_library(
 
 # The schema itself (#1419): numbered idempotent .sql files, manifest-ordered.
 # One copy of the DDL, three readers — Migration at boot (both engines), the
-# one_d4_migrate deploy step, and one_d4_worker's schema_contract_test via
+# one_d4_migrate deploy step, and one_d4_worker's Postgres suites via
 # :migrations_sql. Each file is named exactly once, in one of the three
 # groups below; the shipping and test targets compose the groups, so a new
 # step is a line in manifest.txt plus a line in one group.
@@ -129,9 +129,10 @@ java_library(
     visibility = ["//visibility:public"],
 )
 
-# Every migration file plus the manifest, as plain files: data for
-# one_d4_worker's schema_contract_test, which scrapes the Postgres DDL and
-# checks that no .sql file is unreachable from the manifest.
+# Every migration file plus the manifest, as plain files: what
+# one_d4_worker's Postgres suites run to build the schema they test against,
+# and what schema_contract_test walks to check that no .sql file is
+# unreachable from the manifest.
 filegroup(
     name = "migrations_sql",
     testonly = True,
@@ -377,12 +378,6 @@ filegroup(
     srcs = ["src/test/resources/motif_parity_golden.tsv"],
     visibility = ["//domains/games:__subpackages__"],
 )
-
-# The DDL itself lives in :migrations_sql (#1419); what schema_contract_test
-# still scrapes from Java source is the attempt budget, and nothing else. The
-# lease and retention windows reach it as data, from :retention_policy_json
-# (#1424), so RetentionPolicy.java does not belong here — listing a source
-# nothing opens would re-run the contract test on every edit to it.
 
 # The retention windows, as data rather than as a constant in either language (#1424).
 #

@@ -6,9 +6,12 @@
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
+#include "domains/games/apis/one_d4_worker/migration_files.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace one_d4_worker {
@@ -18,22 +21,10 @@ namespace {
 // anywhere holds a live lease", "a request outlives the games pointing at it"
 // — so they are tested against a real Postgres. The CI job supplies one, and
 // without PG_TEST_DB_URL these skip.
-//
-// The four tables the sweep touches, declared with the columns it keys on and
-// not the rest — game_features has fifteen more in production that no arm here
-// reads. So this is not a mirror of the migrations and schema_contract_test
-// does not compare it against them the way it does pg_queue_test's. What it
-// does pin is the part that would silently invalidate these tests:
-// TheMigrationSchemaHasTheColumnsTheSweepKeysOn checks that every column named
-// below still exists and that every timestamp compared against is still a
-// naive TIMESTAMP.
 
-/// A schema of this suite's own, as pg_game_sink_test does. Every suite here
-/// gets the one database CI runs, and bazel runs the targets in parallel, so
-/// the public schema is shared mutable state: this suite's game_features
-/// carries a foreign key onto indexing_requests, which is enough to make
-/// pg_queue_test's `DROP TABLE indexing_requests` fail outright — a real
-/// failure in a suite that changed nothing, blaming a table it does not own.
+/// A schema of this suite's own. Every suite here gets the one database CI
+/// runs and bazel runs them in parallel, so the tables are shared mutable
+/// state otherwise.
 constexpr char kSchema[] = "one_d4_retention_test";
 
 /// search_path on the connection rather than a qualified name on every
@@ -49,62 +40,8 @@ class RetentionTest : public testing::Test {
   void SetUp() override {
     const char* url = std::getenv("PG_TEST_DB_URL");
     if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
-    {
-      pg::Client bootstrap(url);
-      ASSERT_TRUE(bootstrap.Exec(absl::StrCat("CREATE SCHEMA IF NOT EXISTS ", kSchema)).ok());
-    }
     client_ = std::make_unique<pg::Client>(Conninfo(url));
-
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS motif_occurrences").ok());
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS game_features").ok());
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS indexed_periods").ok());
-    ASSERT_TRUE(client_->Exec("DROP TABLE IF EXISTS indexing_requests").ok());
-    ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE indexing_requests (
-            id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            player         VARCHAR(255) NOT NULL,
-            platform       VARCHAR(50) NOT NULL,
-            start_month    VARCHAR(7) NOT NULL,
-            end_month      VARCHAR(7) NOT NULL,
-            status         VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-            created_at     TIMESTAMP NOT NULL DEFAULT now(),
-            updated_at     TIMESTAMP NOT NULL DEFAULT now(),
-            error_message  TEXT,
-            games_indexed  INT DEFAULT 0,
-            exclude_bullet BOOLEAN NOT NULL DEFAULT FALSE,
-            owner_id       VARCHAR(128),
-            lease_expires_at TIMESTAMP,
-            skip_cache     BOOLEAN DEFAULT FALSE,
-            attempts       INT DEFAULT 0,
-            dedupe_key     VARCHAR(600)
-        ))")
-                    .ok());
-    ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE game_features (
-            game_url   VARCHAR(1024) PRIMARY KEY,
-            request_id UUID REFERENCES indexing_requests(id),
-            indexed_at TIMESTAMP NOT NULL DEFAULT now()
-        ))")
-                    .ok());
-    // The cascade is why the sweep does not delete motifs itself, and why the
-    // metric has no label for them.
-    ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE motif_occurrences (
-            id        SERIAL PRIMARY KEY,
-            game_url  VARCHAR(1024) NOT NULL
-                        REFERENCES game_features(game_url) ON DELETE CASCADE
-        ))")
-                    .ok());
-    ASSERT_TRUE(client_
-                    ->Exec(R"(
-        CREATE TABLE indexed_periods (
-            id         SERIAL PRIMARY KEY,
-            fetched_at TIMESTAMP NOT NULL DEFAULT now()
-        ))")
-                    .ok());
+    ASSERT_TRUE(ResetToMigratedSchema(*client_, kSchema).ok());
   }
 
   /// A request, with everything the arms key on stated explicitly.
@@ -172,29 +109,27 @@ class RetentionTest : public testing::Test {
   }
 };
 
-/// The isolation itself, because nothing else here would notice losing it.
-/// Without the search_path this suite builds its tables in public, where
-/// game_features' foreign key onto indexing_requests makes pg_queue_test's
-/// unqualified `DROP TABLE indexing_requests` fail — in a suite that changed
-/// nothing, naming a table it does not own. These targets share the one
-/// database CI runs and bazel schedules them in parallel, so the only version
-/// of that bug that shows up locally is the one that already shipped.
-TEST_F(RetentionTest, RunsInItsOwnSchemaRatherThanPublic) {
-  const auto schema = client_->Exec("SELECT current_schema()");
-  ASSERT_TRUE(schema.ok()) << schema.status();
-  EXPECT_EQ(schema->Get(0, 0).value_or("(null)"), kSchema);
-
-  // And the unqualified name production uses resolves here, which
-  // current_schema() alone does not say — a search_path naming a schema that
-  // does not exist falls through to public with no error. Sibling suites keep
-  // an indexing_requests of their own, so the question is never "does this
-  // table exist" but "which one does Sweep's SQL reach".
-  const auto resolved = client_->Exec(
-      "SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace"
-      " WHERE c.oid = to_regclass('indexing_requests')");
-  ASSERT_TRUE(resolved.ok()) << resolved.status();
-  ASSERT_EQ(resolved->rows(), 1) << "unqualified indexing_requests resolves to nothing";
-  EXPECT_EQ(resolved->Get(0, 0).value_or("(null)"), kSchema);
+// The sweep binds naive UTC literals to every timestamp it compares. A column
+// migrated to TIMESTAMPTZ would be compared through the session's timezone
+// instead and cut a different set of rows — identically to this one under the
+// UTC stamps below, so it is asked of the schema rather than of a result.
+TEST_F(RetentionTest, TheTimestampsTheSweepComparesAreNaive) {
+  for (const auto& [table, column] :
+       std::vector<std::pair<std::string, std::string>>{{"indexing_requests", "updated_at"},
+                                                        {"indexing_requests", "created_at"},
+                                                        {"indexing_requests", "lease_expires_at"},
+                                                        {"game_features", "indexed_at"},
+                                                        {"indexed_periods", "fetched_at"}}) {
+    const auto declared = client_->Exec(
+        "SELECT data_type FROM information_schema.columns WHERE table_schema = $1"
+        " AND table_name = $2 AND column_name = $3",
+        {kSchema, table, column});
+    ASSERT_TRUE(declared.ok()) << declared.status();
+    ASSERT_EQ(declared->rows(), 1)
+        << table << "." << column << " is gone, and the sweep keys on it";
+    EXPECT_EQ(declared->Get(0, 0).value_or("(null)"), "timestamp without time zone")
+        << table << "." << column << " is not a naive TIMESTAMP, but the sweep binds one";
+  }
 }
 
 TEST_F(RetentionTest, ReleasesALapsedClaimWithoutFailingIt) {
@@ -319,15 +254,22 @@ TEST_F(RetentionTest, ReleasingDoesNotHideStalenessFromTheSameSweep) {
 TEST_F(RetentionTest, DeletesGamesAndPeriodsPastTheWindowAndCascadesMotifs) {
   Request("owner", "COMPLETE", kNow, "", absl::InfinitePast(), 0, kNow);
   ASSERT_TRUE(client_
-                  ->Exec(R"(INSERT INTO game_features (game_url, request_id, indexed_at)
-                            VALUES ('old', $1::uuid, $2::timestamp), ('new', $1::uuid, $3::timestamp))",
+                  ->Exec(R"(INSERT INTO game_features (game_url, platform, request_id, indexed_at)
+                            VALUES ('old', 'chess.com', $1::uuid, $2::timestamp),
+                                   ('new', 'chess.com', $1::uuid, $3::timestamp))",
                          {Id("owner"), Stamp(kNow - absl::Hours(24 * 8)), Stamp(kNow)})
                   .ok());
   ASSERT_TRUE(
-      client_->Exec("INSERT INTO motif_occurrences (game_url) VALUES ('old'), ('new')").ok());
+      client_
+          ->Exec("INSERT INTO motif_occurrences (id, game_url, motif, ply, side, move_number)"
+                 " VALUES (gen_random_uuid()::text, 'old', 'fork', 1, 'WHITE', 1),"
+                 "        (gen_random_uuid()::text, 'new', 'fork', 1, 'WHITE', 1)")
+          .ok());
   ASSERT_TRUE(client_
-                  ->Exec(R"(INSERT INTO indexed_periods (fetched_at)
-                            VALUES ($1::timestamp), ($2::timestamp))",
+                  ->Exec(R"(INSERT INTO indexed_periods
+                              (player, platform, year_month, is_complete, games_count, fetched_at)
+                            VALUES ('alice', 'chess.com', '2026-01', TRUE, 1, $1::timestamp),
+                                   ('bob', 'chess.com', '2026-01', TRUE, 1, $2::timestamp))",
                          {Stamp(kNow - absl::Hours(24 * 8)), Stamp(kNow)})
                   .ok());
 
@@ -348,8 +290,8 @@ TEST_F(RetentionTest, KeepsARequestWhileAnyGameStillPointsAtIt) {
   Request("referenced", "COMPLETE", kNow - absl::Hours(24 * 31), "", absl::InfinitePast(), 0,
           kNow - absl::Hours(24 * 31));
   ASSERT_TRUE(client_
-                  ->Exec(R"(INSERT INTO game_features (game_url, request_id, indexed_at)
-                            VALUES ('fresh', $1::uuid, $2::timestamp))",
+                  ->Exec(R"(INSERT INTO game_features (game_url, platform, request_id, indexed_at)
+                            VALUES ('fresh', 'chess.com', $1::uuid, $2::timestamp))",
                          {Id("referenced"), Stamp(kNow)})
                   .ok());
 
@@ -366,8 +308,8 @@ TEST_F(RetentionTest, ARequestAndItsGamesClearInOnePass) {
   Request("aged", "COMPLETE", kNow - absl::Hours(24 * 31), "", absl::InfinitePast(), 0,
           kNow - absl::Hours(24 * 31));
   ASSERT_TRUE(client_
-                  ->Exec(R"(INSERT INTO game_features (game_url, request_id, indexed_at)
-                            VALUES ('stale', $1::uuid, $2::timestamp))",
+                  ->Exec(R"(INSERT INTO game_features (game_url, platform, request_id, indexed_at)
+                            VALUES ('stale', 'chess.com', $1::uuid, $2::timestamp))",
                          {Id("aged"), Stamp(kNow - absl::Hours(24 * 31))})
                   .ok());
 
