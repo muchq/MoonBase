@@ -14,9 +14,23 @@ where MoonBase's tooling differs the MoonBase command is the one named.
 
 ## Shipping a change
 
-**One item, one PR.** Take the highest-value open item, finish it, ship it,
-then take the next. Don't batch unrelated fixes. A dependency bump and a
-feature do not belong in the same PR.
+**One item, one PR — a default, not a law.** Take the highest-value open item,
+finish it, ship it, then take the next. What the rule protects is a reviewer's
+ability to hold the whole change at once, so judge a candidate against that
+rather than against a file count. It binds hardest on genuinely independent
+work: two features, or a refactor riding along with a fix.
+
+A causal chain is one item. A dependency bump, the change it unblocks, and the
+fallout it forces cannot land separately, so they ship together. #1445 bumped
+the smithy-cpp pin, modeled the HEAD operation the bump made possible, deleted
+the middleware that had stood in for it, and fixed an abseil deprecation the
+bump surfaced — the pin alone fails `-Werror` on `domains/`, and the model
+change alone leaves the transport putting a body on a HEAD.
+
+Work too small to be worth splitting is fine too: a one-line doc fix noticed in
+passing does not need its own branch, review and CI cycle. And when you carry a
+genuine second item because splitting would cost more than it saves, name it in
+the PR body so the reviewer can ask for it to come out.
 
 **Fold review feedback into the PR it came from.** When a review turns up
 something small — a doc line that now contradicts itself, an assertion that
@@ -25,7 +39,7 @@ for a twenty-line fix costs more to write, triage, schedule and re-explain than
 the fix does, and it lands on a reader who no longer has any of the context
 that made the finding obvious.
 
-This is in tension with "one item, one PR", and the tension resolves toward
+This looks like a tension with "one item, one PR", and it resolves toward
 folding, because the two rules are protecting against different costs and only
 one of them is expensive here. Batching unrelated work makes a PR hard to
 review; that is what the first rule is for. But a finding that came *out of*
@@ -393,6 +407,45 @@ your changes stashed, then say so in the PR body.
 - MoonBase has no ADRs and no CHANGELOG. The nearest equivalents are the
   per-service design docs and the PR body; put the *why* in one of them rather
   than nowhere.
+
+## Writing it down
+
+**No archeology in comments.** A comment describes the code as it is, not how
+it got there. No "used to", no "previously", no retelling of the bug that
+prompted the line. Git has the history, and a comment narrating a deleted
+alternative ages into a lie the moment someone edits around it.
+
+A live trap is not archeology. "`empty_body`, not a cleared `string_body`"
+earns its place because clearing the body is the obvious wrong turn and the
+failure is a silent hang — that warns about the code in front of you rather
+than recounting a previous attempt.
+
+**A comment must not claim a property the code doesn't have.** In #1445,
+`ContentLengthOf` returned a `"<none>"` sentinel and its comment said a missing
+header "reads as itself in a failure rather than as a match". The only caller
+compared two of them, and two sentinels compare equal. The comment described
+the guarantee the author meant to build rather than the one that shipped, which
+made a vacuous assertion look deliberate. That is worse than no comment.
+
+**Commit messages under 100 words, usually well under.** What changed and why,
+in the fewest words that carry it; a one-line subject is often the whole job.
+No account of how the work went and no list of what was checked — the tests are
+that record.
+
+This is the one that outlives the PR. MoonBase squash-merges with commit
+details, so the branch's commit messages are concatenated into the message on
+`main` — `b65cce2` inlines a single commit, `151db76` carries a `*` per commit.
+A bloated commit message is bloat in `git log` forever. The PR body is not
+included.
+
+**Terse PR bodies.** The change, the consequences a reviewer cannot see from
+the diff, and what is deliberately not covered. Nothing else. The body is spent
+entirely on reviewer attention, which is the scarcest thing in the process.
+
+**No journaling in any artifact.** "My first attempt", "this turned out to be",
+"I then found" — none of that belongs in code, commit messages, or PR bodies.
+A finding from a review lives in the review thread; the artifact carries only
+the conclusion.
 
 ## Dependencies and infrastructure
 

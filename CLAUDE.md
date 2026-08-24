@@ -9,7 +9,7 @@ Sources live under `domains/<domain>/{libs,apis,apps}`.
 picked up, reviewed, verified, and shipped here. It is the governing process
 document; the highlights below are pointers, not a substitute.
 
-The two rules that change behavior most:
+The three rules that change behavior most:
 
 - **A test beats an argument.** If a behavior is worth reasoning about, the
   deliverable is a CI test, not a paragraph. When a reviewer asks "what happens
@@ -17,6 +17,10 @@ The two rules that change behavior most:
 - **Run the review panel before committing anything non-trivial** — three
   independent agents on three distinct lenses, each refuting its own findings.
   If it didn't run, say so rather than letting the reader assume it did.
+- **Write the conclusion, not the journey.** Comments state the live rule and
+  never narrate deleted code. Commit messages stay under 100 words and usually
+  well under — squash-merge concatenates them onto `main`, so they outlive the
+  PR. PR bodies are terse.
 
 Other docs: [`docs/TESTING.md`](docs/TESTING.md) (mutation checking and the
 traps that only surface in CI), [`docs/BUILD_AND_IDE.md`](docs/BUILD_AND_IDE.md),

@@ -34,7 +34,7 @@ class WireTest : public testing::Test {
     server_ = std::make_unique<moonbase::iili::IiliServer>(
         std::make_shared<SmithyShortenerHandler>(shortener_));
     loopback_ = std::make_shared<smithy::http::Loopback>();
-    const auto started = loopback_->Start(WithHeadAsGet(server_->Handler()));
+    const auto started = loopback_->Start(server_->Handler());
     EXPECT_TRUE(started.ok());
   }
 
@@ -149,21 +149,27 @@ TEST_F(WireTest, RedirectIsA302WithLocationAndTheConformancePinnedBody) {
   EXPECT_EQ(response.body, "{}");
 }
 
-// #1433: unfurlers and link checkers lead with HEAD, which the router would
-// 405 on its own.
-TEST_F(WireTest, HeadGetsTheSameRedirectAsGetWithNoBody) {
+// Modeled HEAD (#1433): the router buckets by exact method, so an unmodeled
+// HEAD 405s. Loopback does no framing, so the wire shape is not observable
+// here — production_chain_test pins that.
+TEST_F(WireTest, HeadRoutesAndResolvesExactlyAsGetDoes) {
   store_->targets["DAA"] = Target{"https://www.example.com/target", kNow + absl::Hours(1)};
 
-  const auto response = Send("HEAD", "/iili/v1/r/DAA", "");
-  EXPECT_EQ(response.status, 302);
-  EXPECT_EQ(response.headers.Get("Location").value_or(""), "https://www.example.com/target");
-  EXPECT_EQ(response.body, "");
+  const auto head = Send("HEAD", "/iili/v1/r/DAA", "");
+  const auto get = Send("GET", "/iili/v1/r/DAA", "");
+  EXPECT_EQ(head.status, 302);
+  EXPECT_EQ(head.status, get.status);
+  EXPECT_EQ(head.headers.Get("Location").value_or(""), "https://www.example.com/target");
+  EXPECT_EQ(head.headers.Get("Location"), get.headers.Get("Location"));
+  EXPECT_EQ(head.body, get.body);
 }
 
-TEST_F(WireTest, HeadOnAnUnknownSlugIsTheSame404StatusAsGet) {
-  const auto response = Send("HEAD", "/iili/v1/r/zzz", "");
-  EXPECT_EQ(response.status, 404);
-  EXPECT_EQ(response.body, "");
+TEST_F(WireTest, HeadOnAnUnknownSlugIsTheSame404AsGet) {
+  const auto head = Send("HEAD", "/iili/v1/r/zzz", "");
+  const auto get = Send("GET", "/iili/v1/r/zzz", "");
+  EXPECT_EQ(head.status, 404);
+  EXPECT_EQ(head.status, get.status);
+  EXPECT_EQ(head.body, get.body);
 }
 
 // Unknown and expired collapse into one exact 404 body: the reader can't

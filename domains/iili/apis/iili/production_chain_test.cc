@@ -2,10 +2,15 @@
 // under an exhausted budget, and the transport-vs-model size seam. aura's
 // middleware_test owns the chain's semantics.
 
+#include <arpa/inet.h>
 #include <gtest/gtest.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -71,7 +76,7 @@ class ProductionChainTest : public ::testing::Test {
             .allow_request =
                 [limiter = limiter_](const std::string& client) { return limiter->allow(client); },
             .retry_after = std::chrono::seconds(60)},
-        WithHeadAsGet(server_.Handler()));
+        server_.Handler());
     loopback_ = std::make_shared<smithy::http::Loopback>();
     const auto started = loopback_->Start(handler_);
     EXPECT_TRUE(started.ok());
@@ -190,6 +195,128 @@ TEST_F(ProductionChainTest, TheTransportAndTheUrlBoundSplitTheOversizedSpace) {
   const auto completes = sink_->completes();
   ASSERT_EQ(completes.size(), completes_before + 1);
   EXPECT_EQ(completes.back(), (std::pair<std::string, int>{aura::kUnmatchedRoute, 413}));
+
+  transport.Stop();
+}
+
+// Raw bytes in and out. SocketHttpClient stops after a HEAD's headers, so it
+// reports an empty body whether or not the server sent one.
+std::string RawRoundTrip(int port, const std::string& request_bytes) {
+  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) return {};
+  timeval timeout{.tv_sec = 10, .tv_usec = 0};
+  (void)::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(static_cast<std::uint16_t>(port));
+  if (::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) != 1 ||
+      ::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+    ::close(fd);
+    return {};
+  }
+  (void)::send(fd, request_bytes.data(), request_bytes.size(), 0);
+  std::string received;
+  char scratch[1024];
+  for (;;) {
+    const auto n = ::recv(fd, scratch, sizeof(scratch), 0);
+    if (n <= 0) break;
+    received.append(scratch, static_cast<std::size_t>(n));
+  }
+  ::close(fd);
+  return received;
+}
+
+std::string BodyOf(const std::string& raw) {
+  const auto end = raw.find("\r\n\r\n");
+  return end == std::string::npos ? std::string() : raw.substr(end + 4);
+}
+
+std::string LowerHeadersOf(const std::string& raw) {
+  const auto end = raw.find("\r\n\r\n");
+  std::string headers = end == std::string::npos ? raw : raw.substr(0, end);
+  for (char& c : headers) {
+    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+  }
+  return headers;
+}
+
+// The declared length, or "<none>" when absent. Two "<none>" values compare
+// equal, so callers pin the GET to a real number before comparing.
+std::string ContentLengthOf(const std::string& raw) {
+  const std::string headers = LowerHeadersOf(raw);
+  const auto at = headers.find("content-length: ");
+  if (at == std::string::npos) return "<none>";
+  const auto start = at + std::string("content-length: ").size();
+  return headers.substr(start, headers.find("\r\n", start) - start);
+}
+
+// BodyOf returns "" for a read that never reached the separator, which looks
+// exactly like a HEAD's absent body. Every raw assertion gates on this.
+::testing::AssertionResult IsCompleteResponse(const std::string& raw) {
+  if (raw.empty()) return ::testing::AssertionFailure() << "empty read";
+  if (raw.find("\r\n\r\n") == std::string::npos) {
+    return ::testing::AssertionFailure() << "no header/body separator in: " << raw;
+  }
+  return ::testing::AssertionSuccess();
+}
+
+// The framing wire_test cannot see (#1433). Not Content-Length: 0 — that is
+// what clearing the body in a handler produces, and it describes the link
+// rather than the request.
+TEST_F(ProductionChainTest, HeadRedirectCarriesTheGetsLengthAndNoBodyOnTheWire) {
+  store_->targets["DAA"] = Target{"https://www.example.com/target", kNow + absl::Hours(1)};
+
+  smithy::http::BeastServerTransport::Options options;
+  options.address = "127.0.0.1";
+  options.port = 0;
+  smithy::http::BeastServerTransport transport(options);
+  ASSERT_TRUE(transport.Start(handler_).ok());
+
+  const std::string head = RawRoundTrip(
+      transport.port(), "HEAD /iili/v1/r/DAA HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
+  const std::string get = RawRoundTrip(
+      transport.port(), "GET /iili/v1/r/DAA HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
+  ASSERT_TRUE(IsCompleteResponse(head));
+  ASSERT_TRUE(IsCompleteResponse(get));
+
+  // The length below means nothing unless a body ships and the header
+  // describes it. alloy conformance pins this "{}" at 3xx.
+  EXPECT_EQ(BodyOf(get), "{}") << get;
+  EXPECT_EQ(ContentLengthOf(get), std::to_string(BodyOf(get).size())) << get;
+
+  EXPECT_EQ(BodyOf(head), "") << "HEAD answered with a body: " << head;
+  EXPECT_EQ(ContentLengthOf(head), ContentLengthOf(get))
+      << "HEAD did not report the GET's length: " << head;
+  // What the unfurler came for.
+  EXPECT_NE(LowerHeadersOf(head).find("location: https://www.example.com/target"),
+            std::string::npos)
+      << head;
+
+  transport.Stop();
+}
+
+// A modeled error serializes on a different branch of the generated server,
+// so the success test does not cover it.
+TEST_F(ProductionChainTest, HeadOnAnUnknownSlugIsFramedLikeItsGetToo) {
+  smithy::http::BeastServerTransport::Options options;
+  options.address = "127.0.0.1";
+  options.port = 0;
+  smithy::http::BeastServerTransport transport(options);
+  ASSERT_TRUE(transport.Start(handler_).ok());
+
+  const std::string head = RawRoundTrip(
+      transport.port(), "HEAD /iili/v1/r/zzz HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
+  const std::string get = RawRoundTrip(
+      transport.port(), "GET /iili/v1/r/zzz HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n");
+  ASSERT_TRUE(IsCompleteResponse(head));
+  ASSERT_TRUE(IsCompleteResponse(get));
+
+  EXPECT_NE(head.find("404"), std::string::npos) << head;
+  EXPECT_EQ(BodyOf(get), R"({"message":"no such link"})") << get;
+  EXPECT_EQ(ContentLengthOf(get), std::to_string(BodyOf(get).size())) << get;
+  EXPECT_EQ(BodyOf(head), "") << "HEAD answered with a body: " << head;
+  EXPECT_EQ(ContentLengthOf(head), ContentLengthOf(get))
+      << "HEAD did not report the GET's length: " << head;
 
   transport.Stop();
 }

@@ -7,7 +7,7 @@ namespace moonbase.iili
 /// as InvalidRequestError from the service.
 service Iili {
     version: "2026-08-21"
-    operations: [Shorten, Redirect]
+    operations: [Shorten, Redirect, RedirectHead]
 }
 
 /// 201 with the slug alone: the caller builds the short link, so the
@@ -42,6 +42,29 @@ operation Shorten {
 @suppress(["HttpResponseCodeSemantics"])
 @http(method: "GET", uri: "/iili/v1/r/{slug}", code: 302)
 operation Redirect {
+    input := {
+        @required
+        @httpLabel
+        slug: String
+    }
+
+    output := {
+        @required
+        @httpHeader("Location")
+        location: String
+    }
+
+    errors: [NotFoundError]
+}
+
+/// The HEAD form of Redirect, which unfurlers and link checkers lead with.
+/// Modeled because the router buckets by exact method: an unmodeled HEAD
+/// 405s. The transport frames it — Location, the GET's length, no octets
+/// (RFC 9110 §9.3.2) — so nothing here or in the handler drops the body.
+@readonly
+@suppress(["HttpResponseCodeSemantics"])
+@http(method: "HEAD", uri: "/iili/v1/r/{slug}", code: 302)
+operation RedirectHead {
     input := {
         @required
         @httpLabel

@@ -34,15 +34,18 @@ class SmithyShortenerHandler final : public moonbase::iili::IiliHandler {
       const moonbase::iili::RedirectInput& input,
       const smithy::server::RequestContext& context) override;
 
+  /// Answers what Redirect answers; the transport does the framing.
+  smithy::Outcome<moonbase::iili::RedirectHeadOutput> RedirectHead(
+      const moonbase::iili::RedirectHeadInput& input,
+      const smithy::server::RequestContext& context) override;
+
  private:
+  /// The Location a live slug points at, or the modeled 404. Both redirect
+  /// operations answer from this.
+  smithy::Outcome<std::string> Location(const std::string& slug);
+
   std::shared_ptr<Shortener> shortener_;
 };
-
-/// Answers HEAD from the GET routes (#1433). The router buckets by exact
-/// method, so an unmodeled HEAD 405s; unfurlers lead with it. The body is
-/// dropped on the way out — content on a HEAD response desynchronizes a
-/// keep-alive connection.
-smithy::http::RequestHandler WithHeadAsGet(smithy::http::RequestHandler next);
 
 }  // namespace iili
 
