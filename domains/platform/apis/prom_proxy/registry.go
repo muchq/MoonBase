@@ -390,10 +390,13 @@ var serviceRegistry = map[string]serviceEntry{
 	// Counts, outcomes and motif names only — the emitter never labels by
 	// player or by game, so no series here is per-user.
 	//
-	// The indexing series come from one_d4_worker. The
-	// service_name=~"one_d4(_worker)?" selectors also match stored series
-	// recorded under service_name="one_d4"; both names are one timeline, and
-	// narrowing the selector would cut every chart off where they meet.
+	// The indexing series come from one_d4_worker, the name worker_main.cc
+	// reports as. The service_name=~"one_d4(_worker)?" selectors also match
+	// stored series recorded under service_name="one_d4"; both names are one
+	// timeline, and narrowing the selector would cut every chart off where
+	// they meet. Nothing enforces the match with the worker: renaming the
+	// service there leaves every test in this repo green and every indexing
+	// chart Java-only.
 	// The probes tile stays scoped to one_d4: the worker serves no HTTP.
 	"one_d4": {
 		CustomScalars: []customScalarDef{

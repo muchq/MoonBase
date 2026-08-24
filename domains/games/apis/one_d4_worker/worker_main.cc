@@ -98,6 +98,10 @@ int main(int /*argc*/, char** argv) {
   }
 
   futility::otel::OtelConfig otel_config{
+      // prom_proxy's indexing selectors are service_name=~"one_d4(_worker)?"
+      // (domains/platform/apis/prom_proxy/registry.go). Nothing enforces the
+      // match: renaming this leaves every test green and every indexing chart
+      // Java-only.
       .service_name = "one_d4_worker",
       .service_version = "1.0.0",
       // An index run takes minutes and a month holds hundreds of games.

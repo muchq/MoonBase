@@ -664,15 +664,6 @@ cc_binary(
 
 linux_amd64_oci_binary(bin_name = "one_d4_worker")
 
-# The service name this worker reports as. prom_proxy's indexing selectors
-# have to cover it, and nothing else ties the two together.
-filegroup(
-    name = "worker_service_name",
-    testonly = True,
-    srcs = ["worker_main.cc"],
-    visibility = ["//domains/platform:__subpackages__"],
-)
-
 # The ceiling is a relationship between the run's checkpoints and the
 # lease's renewal, so it is tested through the real lease rather than a
 # LeaseKeeper that answers as told — a fake that decides both cannot show
