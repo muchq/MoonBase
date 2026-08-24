@@ -1393,18 +1393,16 @@ func TestTheWorkerGatesOnTheMigrateStepNotTheJavaService(t *testing.T) {
 	}
 }
 
-// The Java service gates on the same one-shot — not for the schema (it still
-// applies the migrations at boot until #1426), but for serialization: released
-// together, the two runners execute identical DDL concurrently, and
-// CREATE TABLE/INDEX IF NOT EXISTS is idempotent yet not concurrency-safe on
-// Postgres. The loser of that race under restart:"no" is one_d4_migrate, and
-// its failure gates one_d4_worker off until the next deploy.
+// The Java service gates on the same one-shot, and now needs to: since #1426 its
+// boot checks the migrations were applied rather than applying them, and refuses
+// to serve otherwise. Released together without the gate it crash-loops against a
+// schema the one-shot has not finished writing.
 func TestTheJavaServiceAlsoGatesOnTheMigrateStep(t *testing.T) {
 	if !gatesOnCompletedMigrate(t, "one_d4") {
 		t.Errorf("one_d4 does not gate on one_d4_migrate with "+
-			"service_completed_successfully (depends_on: %v) — its boot-time migration then "+
-			"runs concurrently with the one-shot's, and the one-shot losing that race blocks "+
-			"the worker.", dependsOn(t, "one_d4"))
+			"service_completed_successfully (depends_on: %v) — its boot-time schema check then "+
+			"races the one-shot, and fails against the tables it has not created yet.",
+			dependsOn(t, "one_d4"))
 	}
 }
 

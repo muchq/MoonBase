@@ -25,10 +25,14 @@ notes in `V009__dedupe_key.sql` for why that is load-bearing).
 - **Idempotent, always.** Every statement must be safe to re-run:
   `IF NOT EXISTS`, `IF EXISTS`, `DO $$ ... EXCEPTION` blocks, guarded
   UPDATEs. There is no tracking table; re-running everything *is* the
-  mechanism, and the Java service re-runs it on every boot (#1426 tracks
-  demoting that boot-time run to a verifier — and it is where the tracking
-  table question reopens, if boot time ever grows with the step count or a
-  step arrives that cannot be written idempotently).
+  mechanism, and it is what lets the deploy step run on every deploy. What
+  would end that: boot/deploy time growing with the step count, or a step
+  that cannot be written idempotently (a backfill too expensive to guard).
+  Neither exists yet.
+
+  Idempotence is also what `Migration.verify()` leans on — it applies the
+  steps to an empty scratch schema and compares, so a step that only works
+  against a populated database breaks boot verification, not just re-runs.
 - **Append, don't edit.** A schema change is a new `V<NNN>` step: the next
   number, a line in `manifest.txt`, and the file named in *each* applicable
   `BUILD.bazel` list — `:migrations` (pg + shared, ships with the service),

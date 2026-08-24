@@ -401,11 +401,11 @@ services:
 
   # The schema step (#1419): applies one_d4's migrations/ .sql files and
   # exits, before anything that needs the tables. Idempotent — safe on every
-  # deploy, like golf_hub_db_init above. The Java service still runs the
-  # same migrations at boot, after this (#1426 is the demotion to a
-  # verifier); what the step already buys is one_d4_worker starting without
-  # waiting for the Java service (#1418 measured that coupling as an
-  # error-loop until one_d4 came up).
+  # deploy, like golf_hub_db_init above. The only writer of that schema:
+  # one_d4 checks its work at boot rather than repeating it (#1426), and
+  # one_d4_worker creates nothing, so it starts without waiting for the Java
+  # service (#1418 measured that coupling as an error-loop until one_d4
+  # came up).
   one_d4_migrate:
     image: ghcr.io/muchq/one_d4_migrate:${ONE_D4_MIGRATE_SHA:-${DEPLOY_SHA:-latest}}
     labels:
@@ -454,12 +454,10 @@ services:
           - one-d4
     depends_on:
       # The migrate gate is a strict superset of the old shared_postgres one
-      # (the one-shot itself waits for Postgres), and it serializes the two
-      # migration runners: this service still applies the same files at boot
-      # (#1426 is the demotion to a verifier), and released together the two
-      # would race — CREATE TABLE/INDEX IF NOT EXISTS is idempotent but not
-      # concurrency-safe, and the one-shot losing that race gates the worker
-      # off until the next deploy.
+      # (the one-shot itself waits for Postgres). This service verifies at
+      # boot that the migrations were applied and refuses to serve otherwise,
+      # so releasing the two together without the gate crash-loops it against
+      # a schema the one-shot has not finished writing.
       one_d4_migrate:
         condition: service_completed_successfully
     deploy:

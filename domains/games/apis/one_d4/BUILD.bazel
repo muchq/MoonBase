@@ -644,6 +644,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/db/PostgresAggregateCompatTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresConcurrentWriteTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresMigrationRunnerTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/PostgresMigrationVerifyTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresPlayerIndexTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresReadTimeoutTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresRetentionIndexTest.java",

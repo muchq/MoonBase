@@ -40,4 +40,10 @@ public final class H2SqlDialect implements SqlDialect {
   public String migrationsEngine() {
     return "h2";
   }
+
+  /** No deploy step runs ahead of an in-memory database, so the H2 path migrates at boot. */
+  @Override
+  public boolean migratedBeforeBoot() {
+    return false;
+  }
 }

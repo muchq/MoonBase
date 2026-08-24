@@ -10,9 +10,9 @@ import org.slf4j.LoggerFactory;
  * a one-shot compose service before {@code one_d4_worker} and {@code one_d4} start, so the C++
  * poller never races the Java service for a schema neither of them has created yet.
  *
- * <p>Same statements, same order, same code as the service's own boot-time {@link Migration} — the
- * two paths run in sequence (the compose gate serializes them) until #1426 demotes the boot-time
- * run to a verifier.
+ * <p>The only writer of the deployed schema. Both gated services boot behind it: one_d4_worker
+ * because it creates nothing, one_d4 because its boot checks this step finished ({@link
+ * Migration#verify}) rather than applying anything itself.
  *
  * <p>Reads {@code $INDEXER_DB_URL} (plus {@code $INDEXER_DB_USERNAME}/{@code $INDEXER_DB_PASSWORD})
  * exactly as the service does, and like the service it has no fallback: a migrate step that
