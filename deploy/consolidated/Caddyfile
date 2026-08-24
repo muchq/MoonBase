@@ -196,7 +196,51 @@ consolidated.cmptr.info {
 }
 
 git.muchq.com {
-	reverse_proxy forgejo:3000
+	# Forgejo runs under a 0.5-CPU cap and the git-backed pages fork real work
+	# per request, so a crawler walking them starves the site (#1447).
+	#
+	# robots.txt is not the lever: Forgejo serves one disallowing /*/*/src/ and
+	# /user/, and meta-externalagent requests both anyway.
+	#
+	# UA and subnet are both pinned, and the redundancy is the point -- the agent
+	# self-identifies today and may stop, the range is Meta's today and may move.
+	# Spread across a /16, it also defeats any per-address rate limit.
+	#
+	# Only HTTP. Git over SSH reaches forgejo on host port 222, not through Caddy.
+	@meta_agent header_regexp User-Agent (?i)meta-externalagent
+	@meta_subnet remote_ip 57.141.0.0/16
+
+	# Both conditions live in one matcher block, where Caddy ANDs them. Split
+	# into two matchers they become an OR, which is wrong in both directions at
+	# once: crawlers lose the cheap pages they are welcome to, and humans lose
+	# /commit/ and /blame/.
+	#
+	# The six routes are the ones that invoke git. /issues/ and /raw/ stay open
+	# deliberately -- a database read and a file read, an order of magnitude
+	# cheaper, and worth more as indexable pages than as saved CPU.
+	@crawler_on_expensive_route {
+		header_regexp User-Agent (?i)(bot|crawler|spider|scrap|slurp|archiver|externalagent|semrush|ahrefs|dataforseo)
+		path_regexp ^/[^/]+/[^/]+/(commit|commits|compare|blame|src|archive)(/|$)
+	}
+
+	# handle blocks, not bare respond/reverse_proxy: these are mutually exclusive
+	# and run in written order, so the guards' precedence is this file's order
+	# rather than Caddy's directive order.
+	handle @meta_agent {
+		respond 403
+	}
+
+	handle @meta_subnet {
+		respond 403
+	}
+
+	handle @crawler_on_expensive_route {
+		respond 403
+	}
+
+	handle {
+		reverse_proxy forgejo:3000
+	}
 
 	log {
 		output file /var/log/caddy/access.log {
