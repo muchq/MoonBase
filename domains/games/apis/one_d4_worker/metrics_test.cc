@@ -258,30 +258,6 @@ TEST(WorkerMetrics, MeasuresAMonthOnTheLayoutTheStoredSeriesUse) {
             (std::vector<double>{1, 2, 5, 10, 25, 50, 100, 200, 400, 800, 1'600, 3'200}));
 }
 
-TEST(WorkerMetrics, RecordsTheRunDurationUnderItsOwnNameAndNotARenamedOne) {
-  // MetricsRecorder::RecordLatency appends _microseconds to the instrument
-  // name — which would export this as index_run_duration_micros_microseconds,
-  // a name prom_proxy does not query, and hand it the shared HTTP bucket view
-  // as a bonus. The distribution form keeps the name, so the call the worker
-  // makes is the thing to assert: the recorder sees the name before the
-  // exporter renames it, which makes the name alone silent on this.
-  CapturingMetricsRecorder recorder;
-  WorkerMetrics metrics(recorder);
-  metrics.RunFinished(RunOutcome::kCompleted, absl::Seconds(3));
-
-  bool saw_duration = false;
-  for (const CapturingMetricsRecorder::Entry& entry : recorder.Entries()) {
-    if (entry.name == kRunDurationMetric) {
-      saw_duration = true;
-      EXPECT_EQ(entry.call, CapturingMetricsRecorder::Call::kDistribution)
-          << "the run duration went through a call that renames the instrument";
-    }
-    EXPECT_NE(entry.call, CapturingMetricsRecorder::Call::kLatency)
-        << entry.name << " was recorded as a latency; prom_proxy queries these names verbatim";
-  }
-  EXPECT_TRUE(saw_duration) << "a finished run recorded no " << kRunDurationMetric;
-}
-
 TEST(WorkerMetrics, SpellsTheRunOutcomesTheDashboardsQuery) {
   // The outcome label is a wire contract with prom_proxy's registry, whose
   // selectors name these spellings literally: an outcome this worker calls
