@@ -29,6 +29,20 @@ absl::StatusOr<absl::Duration> Seconds(const nlohmann::json& policy, std::string
   return absl::Seconds(seconds);
 }
 
+/// A count rather than a window, read on the same terms: present, integral
+/// and positive, or the load fails.
+absl::StatusOr<int> PositiveCount(const nlohmann::json& policy, std::string_view key) {
+  const auto it = policy.find(key);
+  if (it == policy.end() || !it->is_number_integer()) {
+    return absl::InvalidArgumentError(absl::StrCat("retention policy is missing an integer ", key));
+  }
+  const int64_t count = it->get<int64_t>();
+  if (count <= 0) {
+    return absl::InvalidArgumentError(absl::StrCat(key, " must be positive, got ", count));
+  }
+  return static_cast<int>(count);
+}
+
 }  // namespace
 
 std::string RetentionPolicyPath(std::string_view argv0) {
@@ -68,6 +82,10 @@ absl::StatusOr<RetentionPolicy> LoadRetentionPolicy(const std::string& path) {
     if (!value.ok()) return value.status();
     *field = *value;
   }
+
+  const absl::StatusOr<int> attempts = PositiveCount(parsed, "max_attempts");
+  if (!attempts.ok()) return attempts.status();
+  policy.max_attempts = *attempts;
 
   // The relationships, checked here rather than left to the file's author.
   // Each is a correctness constraint the README argues for, and a policy that

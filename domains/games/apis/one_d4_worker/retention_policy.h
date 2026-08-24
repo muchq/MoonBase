@@ -31,6 +31,13 @@ struct RetentionPolicy {
   absl::Duration lease_renewal;
   absl::Duration max_run;
 
+  /// How many times a request may be claimed before it stops being claimable.
+  /// Part of the claim protocol rather than of retention, and here for the
+  /// same reason the lease vocabulary is: both queues and the Java service
+  /// decide when to give up, and two of them holding different numbers would
+  /// retry a poisoned request forever or abandon a healthy one early.
+  int max_attempts;
+
   /// Bounds each of the sweep's statements. The sweep holds no lease and
   /// nothing interrupts it, and every arm is idempotent, so a truncated pass
   /// costs an hour rather than correctness.

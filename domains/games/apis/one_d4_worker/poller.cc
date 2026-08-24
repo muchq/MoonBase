@@ -17,9 +17,10 @@
 namespace one_d4_worker {
 namespace {
 
-/// What a failed run stores in `indexing_requests.error_message`, which
-/// the API returns. Verbatim from the Java worker, so the two report a
-/// failure the same way.
+/// What a failed run stores in `indexing_requests.error_message`, which the
+/// API hands back. A contract with the caller rather than a debugging aid:
+/// one fixed sentence, never the cause. Stored rows already carry this exact
+/// string, so a caller matching on it keeps matching.
 constexpr char kInternalFailure[] = "Indexing failed due to an internal error";
 
 /// A token no other claimant will present: 128 random bits.

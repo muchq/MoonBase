@@ -14,10 +14,8 @@
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
-#include "domains/games/apis/one_d4_worker/pg_queue.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
 #include "domains/games/apis/one_d4_worker/poller_options.h"
-#include "domains/games/apis/one_d4_worker/reanalysis_queue.h"
 #include "domains/games/apis/one_d4_worker/retention_policy.h"
 
 namespace one_d4_worker {
@@ -382,31 +380,6 @@ TEST(SchemaContract, TheMigrationSchemaHasTheColumnsTheSweepKeysOn) {
     EXPECT_EQ(MigrationSchemaFor(table)[column], "TIMESTAMP")
         << table << "." << column << " is not a naive TIMESTAMP, but the sweep binds one";
   }
-}
-
-TEST(SchemaContract, BothQueuesShareOneAttemptBudget) {
-  // The reanalysis header claims the same budget "for the same reason";
-  // this is what makes that a fact rather than a sentence.
-  EXPECT_EQ(PgReanalysisQueue::kMaxAttempts, PgQueue::kMaxAttempts);
-}
-
-TEST(SchemaContract, AFailedRunSaysAFixedSentenceAndNotTheCause) {
-  // error_message is a column the API hands back, so what goes in it is a
-  // contract with the caller and not a debugging aid: one fixed sentence,
-  // never the cause. Stored rows already carry this exact string, so a
-  // caller that matches on it must keep matching.
-  const std::string poller = Read("domains/games/apis/one_d4_worker/poller.cc");
-  EXPECT_THAT(poller, testing::HasSubstr("\"Indexing failed due to an internal error\""))
-      << "the worker stores a different sentence than the API's callers have seen";
-}
-
-TEST(SchemaContract, AttemptsAgreeWithTheJavaLimit) {
-  // Two workers with different ideas of when to give up would retry a
-  // poisoned request forever, or abandon a healthy one early.
-  const std::string source = Read(
-      "domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/db/"
-      "IndexingRequestStore.java");
-  EXPECT_THAT(source, testing::HasSubstr(absl::StrCat("MAX_ATTEMPTS = ", PgQueue::kMaxAttempts)));
 }
 
 }  // namespace

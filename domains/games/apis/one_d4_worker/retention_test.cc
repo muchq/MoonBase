@@ -9,7 +9,6 @@
 
 #include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
-#include "domains/games/apis/one_d4_worker/pg_queue.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace one_d4_worker {
@@ -235,7 +234,7 @@ TEST_F(RetentionTest, RetiresARequestWhoseAttemptsAreSpent) {
   ASSERT_TRUE(swept.ok()) << swept;
   EXPECT_EQ(report.poisoned, 1);
   EXPECT_EQ(Status(id), "FAILED");
-  EXPECT_EQ(Error(id), kPoisonedMessage);
+  EXPECT_EQ(Error(id), PoisonedMessage(policy_.max_attempts));
   // The key is surrendered, so the next submit for the same range starts a new
   // request rather than colliding with a dead one.
   EXPECT_EQ(DedupeKey(id), "");
@@ -254,7 +253,7 @@ TEST_F(RetentionTest, ARowAtTheAttemptLimitIsPoisonedRatherThanReleased) {
   EXPECT_EQ(report.poisoned, 1);
   EXPECT_EQ(report.released, 0);
   EXPECT_EQ(report.stalled, 0);
-  EXPECT_EQ(Error(id), kPoisonedMessage);
+  EXPECT_EQ(Error(id), PoisonedMessage(policy_.max_attempts));
 }
 
 TEST_F(RetentionTest, RetiresAStalledRequestWhenNoWorkerHoldsALease) {
@@ -396,7 +395,7 @@ TEST_F(RetentionTest, NeverDeletesALiveRequestHoweverOld) {
 /// A delete that fails does not undo the settling that ran before it.
 ///
 /// The two phases are separate transactions for exactly this. A poisoned row
-/// that fails to reach FAILED keeps attempts >= kMaxAttempts, and ClaimNext
+/// that fails to reach FAILED keeps attempts >= max_attempts, and ClaimNext
 /// excludes those, so no worker will ever take it and the user is never told
 /// why — it sits invisible until some later sweep gets all the way through.
 /// The deletes are idempotent, so losing them costs an hour instead.
@@ -408,7 +407,7 @@ TEST_F(RetentionTest, AFailedDeleteKeepsTheSettlingThatAlreadyRan) {
   const std::string spent = Request("spent", "PENDING", now - absl::Hours(2));
   ASSERT_TRUE(client_
                   ->Exec("UPDATE indexing_requests SET attempts = $2::int WHERE id = $1::uuid",
-                         {spent, std::to_string(PgQueue::kMaxAttempts)})
+                         {spent, std::to_string(policy_.max_attempts)})
                   .ok());
 
   ASSERT_TRUE(client_->Exec("DROP TABLE indexed_periods").ok());

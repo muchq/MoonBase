@@ -40,6 +40,9 @@ std::string Conninfo(const std::string& url) {
                       "%20-c%20timezone%3DAmerica/New_York");
 }
 
+/// This fixture's own budget, for the same reason pg_queue_test has one.
+constexpr int kMaxAttempts = 3;
+
 class ReanalysisQueueTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -75,7 +78,7 @@ class ReanalysisQueueTest : public testing::Test {
                            "reanalysis_requests ((true)) WHERE status IN ('PENDING', "
                            "'PROCESSING')")
                     .ok());
-    queue_ = std::make_unique<PgReanalysisQueue>(*client_);
+    queue_ = std::make_unique<PgReanalysisQueue>(*client_, kMaxAttempts);
   }
 
   /// Enqueues a pending pass and returns its id.
@@ -288,7 +291,7 @@ TEST_F(ReanalysisQueueTest, HandBackAndReleaseLeaveTheCursorForTheNextOwner) {
 
 TEST_F(ReanalysisQueueTest, StopsClaimingAfterTheAttemptBudget) {
   const std::string id = Enqueue();
-  for (int i = 0; i < PgReanalysisQueue::kMaxAttempts; ++i) {
+  for (int i = 0; i < kMaxAttempts; ++i) {
     auto claimed = queue_->ClaimNext("worker-" + std::to_string(i), kLease);
     ASSERT_TRUE(claimed.ok());
     ASSERT_TRUE(claimed->has_value()) << "attempt " << i;
@@ -328,7 +331,7 @@ TEST_F(ReanalysisQueueTest, HeartbeatHoldsTheLeaseAndSaysWhenItIsLost) {
 TEST_F(ReanalysisQueueTest, AQueueThatOwnsItsConnectionClaimsAndFencesLikeAnyOther) {
   const std::string id = Enqueue();
   const std::unique_ptr<ReanalysisQueue> owned =
-      NewOwnedReanalysisQueue(Conninfo(std::getenv("PG_TEST_DB_URL")));
+      NewOwnedReanalysisQueue(Conninfo(std::getenv("PG_TEST_DB_URL")), kMaxAttempts);
 
   auto claimed = owned->ClaimNext("worker-a", kLease);
   ASSERT_TRUE(claimed.ok());
@@ -352,7 +355,7 @@ TEST_F(ReanalysisQueueTest, AQueueThatOwnsItsConnectionClaimsAndFencesLikeAnyOth
 TEST_F(ReanalysisQueueTest, AnOwnedQueueHandsBackAndReleasesUnderTheRightOwnerToo) {
   const std::string id = Enqueue();
   const std::unique_ptr<ReanalysisQueue> owned =
-      NewOwnedReanalysisQueue(Conninfo(std::getenv("PG_TEST_DB_URL")));
+      NewOwnedReanalysisQueue(Conninfo(std::getenv("PG_TEST_DB_URL")), kMaxAttempts);
   ASSERT_TRUE(owned->ClaimNext("worker-a", kLease).ok());
 
   EXPECT_FALSE(*owned->HandBack({.id = id, .owner = "worker-b"}));
@@ -368,7 +371,7 @@ TEST_F(ReanalysisQueueTest, AnOwnedQueueHandsBackAndReleasesUnderTheRightOwnerTo
 TEST_F(ReanalysisQueueTest, AnOwnedQueueFailsUnderTheRightOwner) {
   const std::string id = Enqueue();
   const std::unique_ptr<ReanalysisQueue> owned =
-      NewOwnedReanalysisQueue(Conninfo(std::getenv("PG_TEST_DB_URL")));
+      NewOwnedReanalysisQueue(Conninfo(std::getenv("PG_TEST_DB_URL")), kMaxAttempts);
   ASSERT_TRUE(owned->ClaimNext("worker-a", kLease).ok());
 
   EXPECT_FALSE(*owned->Fail({.id = id, .owner = "worker-b"}, "not mine"));

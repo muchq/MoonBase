@@ -12,16 +12,17 @@ public interface IndexingRequestStore {
    * How many times a request may be claimed before it is presumed to be killing its workers.
    *
    * <p>Counted on claim rather than on failure, which is the conservative direction: a worker the
-   * request kills before it can report anything still moves the counter. Three tolerates a
-   * transient fault — a restart, a rolling deploy, one bad node — and is few enough that a genuine
-   * poison pill does not tour the fleet.
+   * request kills before it can report anything still moves the counter. The budget is small enough
+   * that a genuine poison pill does not tour the fleet, and large enough to absorb a transient
+   * fault — a restart, a rolling deploy, one bad node. The number itself is {@code max_attempts} in
+   * {@code retention_policy.json}, which the C++ worker's queues read too.
    *
    * <p>On the interface rather than the DAO because it is part of the contract, not an
    * implementation detail: {@link #findExistingRequest} and {@link #reclaimStale} are both defined
    * in terms of it, so a fake that picks its own number models a different system than the one it
    * stands in for.
    */
-  int MAX_ATTEMPTS = 3;
+  int MAX_ATTEMPTS = RetentionPolicy.MAX_ATTEMPTS;
 
   /**
    * Atomically claims the live slot for this (player, platform, startMonth, endMonth,

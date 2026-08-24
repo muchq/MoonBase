@@ -26,9 +26,11 @@ constexpr char kUnheld[] =
 
 }  // namespace
 
-const char kPoisonedMessage[] =
-    "Abandoned: this request was attempted 3 times and each worker stopped before finishing it. "
-    "Something about this range fails repeatedly rather than transiently.";
+std::string PoisonedMessage(int max_attempts) {
+  return absl::StrCat("Abandoned: this request was attempted ", max_attempts,
+                      " times and each worker stopped before finishing it. Something about this "
+                      "range fails repeatedly rather than transiently.");
+}
 
 const char kStalledMessage[] =
     "Abandoned: no indexing worker has picked this up, and none is running anywhere. Re-submit "
@@ -38,7 +40,7 @@ absl::Status Sweep(pg::Client& client, const RetentionPolicy& policy, absl::Time
                    SweepReport& report) {
   const std::string at = Stamp(now);
   const std::string stale_cutoff = Stamp(now - policy.stale_request);
-  const std::string attempts = std::to_string(PgQueue::kMaxAttempts);
+  const std::string attempts = std::to_string(policy.max_attempts);
 
   // Settling is one transaction; the deletes are another, and the boundary is
   // load bearing. The three arms have to agree — a released row that the
@@ -48,7 +50,7 @@ absl::Status Sweep(pg::Client& client, const RetentionPolicy& policy, absl::Time
   // The deletes must not be able to undo them. A delete that trips the
   // statement timeout or waits on a lock would otherwise roll back the settles
   // with it, and a poisoned row that fails to reach FAILED is worse than
-  // unsettled: it keeps attempts >= kMaxAttempts, which ClaimNext excludes, so
+  // unsettled: it keeps attempts >= max_attempts, which ClaimNext excludes, so
   // no worker will take it and the user is never told. It would sit invisible
   // until some later sweep got all the way through.
   //
@@ -79,7 +81,7 @@ absl::Status Sweep(pg::Client& client, const RetentionPolicy& policy, absl::Time
            AND attempts >= $3::int
            AND )",
                                          kUnheld, " RETURNING id"),
-                            {at, kPoisonedMessage, attempts});
+                            {at, PoisonedMessage(policy.max_attempts), attempts});
     if (!poisoned.ok()) return poisoned.status();
     report.poisoned = poisoned->rows();
 

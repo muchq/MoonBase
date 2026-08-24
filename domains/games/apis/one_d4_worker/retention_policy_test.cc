@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <string>
 
 #include "absl/status/status.h"
@@ -30,16 +31,15 @@ std::string PolicyFile(const std::string& name, const std::string& contents) {
 /// about. Every other window stays valid, which matters: the invariants are
 /// checked as a set, and a hand-written minimal file would trip whichever one
 /// it happened to violate first rather than the one under test.
+///
+/// Read from the shipped file rather than transcribed, so a key added there
+/// is covered here without anyone remembering to copy it across.
 std::string PolicyWith(const std::string& key, const std::string& value) {
-  std::string doc = R"({
-    "period_seconds": 604800,
-    "request_seconds": 2592000,
-    "stale_request_seconds": 3600,
-    "lease_seconds": 300,
-    "lease_renewal_seconds": 75,
-    "max_run_seconds": 21600,
-    "sweep_statement_timeout_seconds": 120
-  })";
+  std::ifstream shipped(kShippedPolicy);
+  EXPECT_TRUE(shipped.good()) << "cannot read " << kShippedPolicy;
+  std::ostringstream buffer;
+  buffer << shipped.rdbuf();
+  std::string doc = buffer.str();
   const std::string needle = absl::StrCat("\"", key, "\": ");
   const size_t at = doc.find(needle);
   EXPECT_NE(at, std::string::npos) << key << " is not a key of the shipped policy";
@@ -78,6 +78,7 @@ TEST(RetentionPolicy, TheShippedPolicyLoads) {
   EXPECT_EQ(policy->lease, absl::Minutes(5));
   EXPECT_EQ(policy->lease_renewal, absl::Seconds(75));
   EXPECT_EQ(policy->max_run, absl::Hours(6));
+  EXPECT_EQ(policy->max_attempts, 3);
   EXPECT_EQ(policy->statement_timeout, absl::Seconds(120));
 }
 
@@ -109,9 +110,9 @@ TEST(RetentionPolicy, ADocumentThatIsNotAnObjectIsRejected) {
 }
 
 TEST(RetentionPolicy, EveryWindowIsRequired) {
-  for (const char* key :
-       {"period_seconds", "request_seconds", "stale_request_seconds", "lease_seconds",
-        "lease_renewal_seconds", "max_run_seconds", "sweep_statement_timeout_seconds"}) {
+  for (const char* key : {"period_seconds", "request_seconds", "stale_request_seconds",
+                          "lease_seconds", "lease_renewal_seconds", "max_run_seconds",
+                          "max_attempts", "sweep_statement_timeout_seconds"}) {
     // Both shapes, because they take different branches of the same check and
     // a key deleted outright is the likelier edit. Nulling one leaves it
     // present and non-integral; dropping it leaves the lookup finding nothing,
@@ -147,6 +148,18 @@ TEST(RetentionPolicy, ANonPositiveWindowIsRejected) {
     const auto policy =
         LoadRetentionPolicy(PolicyFile("nonpositive", PolicyWith("period_seconds", value)));
     ASSERT_FALSE(policy.ok()) << value << " was accepted as a window";
+    EXPECT_EQ(policy.status().code(), absl::StatusCode::kInvalidArgument);
+  }
+}
+
+/// The attempt budget is a count rather than a window, and reaches the struct
+/// through a different reader, so the same two rejections are checked on it
+/// directly. A budget of zero makes every request unclaimable on arrival.
+TEST(RetentionPolicy, ABadAttemptBudgetIsRejected) {
+  for (const char* value : {"\"3\"", "3.5", "true", "0", "-1"}) {
+    const auto policy =
+        LoadRetentionPolicy(PolicyFile("attempts", PolicyWith("max_attempts", value)));
+    ASSERT_FALSE(policy.ok()) << value << " was accepted as an attempt budget";
     EXPECT_EQ(policy.status().code(), absl::StatusCode::kInvalidArgument);
   }
 }

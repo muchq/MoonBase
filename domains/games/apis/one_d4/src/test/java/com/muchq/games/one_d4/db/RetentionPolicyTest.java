@@ -45,6 +45,41 @@ public class RetentionPolicyTest {
     assertThat(RetentionPolicy.MAX_RUN)
         .as("README: a 6 hour ceiling on renewal")
         .isEqualTo(Duration.ofHours(6));
+    assertThat(RetentionPolicy.MAX_ATTEMPTS).as("README: three claims, then poisoned").isEqualTo(3);
+  }
+
+  /**
+   * The budget both processes enforce. {@code IndexingRequestStore.MAX_ATTEMPTS} is this constant
+   * rather than a copy of it, and the C++ queues are handed the same field, so there is nothing
+   * left for a test to compare — this pins the shipped number, not the agreement.
+   */
+  @Test
+  public void theAttemptBudgetIsTheOneTheStoreEnforces() {
+    assertThat(IndexingRequestStore.MAX_ATTEMPTS).isEqualTo(RetentionPolicy.MAX_ATTEMPTS);
+  }
+
+  /** The count reader's own guards, on the same terms the window reader's are checked. */
+  @Test
+  public void anAttemptBudgetThatIsAbsentOrNotAPositiveIntegerIsRejected() {
+    assertThatThrownBy(() -> RetentionPolicy.count(policy("{}"), "max_attempts"))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("max_attempts");
+
+    for (String value : new String[] {"3.5", "\"3\"", "true", "null", "0", "-1"}) {
+      assertThatThrownBy(
+              () ->
+                  RetentionPolicy.count(
+                      policy("{\"max_attempts\": " + value + "}"), "max_attempts"))
+          .as("%s was accepted as an attempt budget", value)
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessageContaining("max_attempts");
+    }
+  }
+
+  /** The accepting path, so the guards above are not passing by rejecting everything. */
+  @Test
+  public void anIntegerAttemptBudgetIsRead() {
+    assertThat(RetentionPolicy.count(policy("{\"max_attempts\": 3}"), "max_attempts")).isEqualTo(3);
   }
 
   /**

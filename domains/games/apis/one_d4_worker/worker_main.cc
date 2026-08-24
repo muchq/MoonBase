@@ -185,8 +185,10 @@ int main(int /*argc*/, char** argv) {
   pool_options.idle_wait = idle_wait;
   // A queue connection per thread as well as per run. See index_pool.h.
   one_d4_worker::IndexPool pool(
-      [&bounded_db_url] { return one_d4_worker::NewOwnedPgQueue(bounded_db_url); }, run,
-      poller_options, metrics, pool_options);
+      [&bounded_db_url, attempts = policy->max_attempts] {
+        return one_d4_worker::NewOwnedPgQueue(bounded_db_url, attempts);
+      },
+      run, poller_options, metrics, pool_options);
   LOG(INFO) << "Indexing up to " << pool_options.slots << " requests at once";
 
   const auto sleep = [](absl::Duration wait) { absl::SleepFor(wait); };
@@ -207,7 +209,9 @@ int main(int /*argc*/, char** argv) {
   };
   std::thread reanalysis([&] {
     one_d4_worker::PollReanalysisUntilStopped(
-        [&bounded_db_url] { return one_d4_worker::NewOwnedReanalysisQueue(bounded_db_url); },
+        [&bounded_db_url, attempts = policy->max_attempts] {
+          return one_d4_worker::NewOwnedReanalysisQueue(bounded_db_url, attempts);
+        },
         [&bounded_db_url, &stopping](const one_d4_worker::ReanalysisClaim& claim,
                                      one_d4_worker::ReanalysisLease& lease)
             -> absl::StatusOr<one_d4_worker::ReanalysisReport> {

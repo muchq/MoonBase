@@ -383,14 +383,6 @@ filegroup(
 # lease and retention windows reach it as data, from :retention_policy_json
 # (#1424), so RetentionPolicy.java does not belong here — listing a source
 # nothing opens would re-run the contract test on every edit to it.
-filegroup(
-    name = "worker_schema_sources",
-    testonly = True,
-    srcs = [
-        "src/main/java/com/muchq/games/one_d4/db/IndexingRequestStore.java",
-    ],
-    visibility = ["//domains/games:__subpackages__"],
-)
 
 # The retention windows, as data rather than as a constant in either language (#1424).
 #

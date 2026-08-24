@@ -4,10 +4,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <fstream>
 #include <regex>
 #include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -263,20 +261,25 @@ TEST(WorkerMetrics, MeasuresAMonthOnTheLayoutTheStoredSeriesUse) {
 TEST(WorkerMetrics, RecordsTheRunDurationUnderItsOwnNameAndNotARenamedOne) {
   // MetricsRecorder::RecordLatency appends _microseconds to the instrument
   // name — which would export this as index_run_duration_micros_microseconds,
-  // a name prom_proxy does not query, and hand it the shared HTTP bucket
-  // view as a bonus. The distribution
-  // form keeps the name. Checked in the source because the capturing
-  // recorder sees the name before the exporter renames it.
-  std::ifstream file("domains/games/apis/one_d4_worker/metrics.cc");
-  ASSERT_TRUE(file.good()) << "metrics.cc is not where this test looks";
-  std::ostringstream contents;
-  contents << file.rdbuf();
-  const std::string source = contents.str();
+  // a name prom_proxy does not query, and hand it the shared HTTP bucket view
+  // as a bonus. The distribution form keeps the name, so the call the worker
+  // makes is the thing to assert: the recorder sees the name before the
+  // exporter renames it, which makes the name alone silent on this.
+  CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  metrics.RunFinished(RunOutcome::kCompleted, absl::Seconds(3));
 
-  EXPECT_NE(source.find("RecordDistribution(kRunDurationMetric"), std::string::npos)
-      << "the run duration is no longer recorded through the name-preserving call";
-  EXPECT_EQ(source.find("RecordLatency("), std::string::npos)
-      << "RecordLatency renames the instrument; prom_proxy queries these names";
+  bool saw_duration = false;
+  for (const CapturingMetricsRecorder::Entry& entry : recorder.Entries()) {
+    if (entry.name == kRunDurationMetric) {
+      saw_duration = true;
+      EXPECT_EQ(entry.call, CapturingMetricsRecorder::Call::kDistribution)
+          << "the run duration went through a call that renames the instrument";
+    }
+    EXPECT_NE(entry.call, CapturingMetricsRecorder::Call::kLatency)
+        << entry.name << " was recorded as a latency; prom_proxy queries these names verbatim";
+  }
+  EXPECT_TRUE(saw_duration) << "a finished run recorded no " << kRunDurationMetric;
 }
 
 TEST(WorkerMetrics, SpellsTheRunOutcomesTheDashboardsQuery) {

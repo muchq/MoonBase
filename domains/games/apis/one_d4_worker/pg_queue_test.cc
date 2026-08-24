@@ -19,6 +19,11 @@ namespace {
 // about concurrent SQL, so they are tested against a real Postgres — the
 // CI job supplies one, and without PG_TEST_DB_URL these skip.
 
+/// The budget this fixture runs the queue with. A number of its own rather
+/// than the shipped one: these tests pin what happens when the budget is
+/// reached, not what the deployment sets it to.
+constexpr int kMaxAttempts = 3;
+
 class PgQueueTest : public testing::Test {
  protected:
   void SetUp() override {
@@ -54,7 +59,7 @@ class PgQueueTest : public testing::Test {
             dedupe_key     VARCHAR(600)
         ))")
                     .ok());
-    queue_ = std::make_unique<PgQueue>(*client_);
+    queue_ = std::make_unique<PgQueue>(*client_, kMaxAttempts);
   }
 
   /// A stable UUID per test-local name, because the real id column is one.
@@ -212,7 +217,7 @@ TEST_F(PgQueueTest, AQueueThatOwnsItsConnectionClaimsOverIt) {
   // What every indexing thread gets, so that a heartbeat blocked behind
   // one thread's flush does not stall every other thread's writes.
   Insert(Id(1), "hikaru");
-  const std::unique_ptr<IndexQueue> owned = NewOwnedPgQueue(conninfo_);
+  const std::unique_ptr<IndexQueue> owned = NewOwnedPgQueue(conninfo_, kMaxAttempts);
 
   const auto claimed = owned->ClaimNext("worker-1/0/1", absl::Minutes(5));
 
@@ -226,7 +231,7 @@ TEST_F(PgQueueTest, AnotherRunReclaimingAnExpiredRowSpendsAnAttempt) {
   // The pair below is why a run claims under its own id and not the
   // process's. Sharing one would mean a wedged run's row is reclaimed for
   // free by the next run, so a request that wedges every run it touches
-  // never reaches kMaxAttempts and nothing retires it — while it sits at
+  // never reaches the budget and nothing retires it — while it sits at
   // the head of created_at ASC.
   Insert(Id(1), "hikaru");
   ASSERT_TRUE(queue_->ClaimNext("worker-1/1", absl::Seconds(-1)).ok());
@@ -321,7 +326,7 @@ TEST_F(PgQueueTest, StopsClaimingAfterTooManyAttempts) {
   Insert(Id(1), "hikaru");
   ASSERT_TRUE(client_
                   ->Exec("UPDATE indexing_requests SET attempts = $1 WHERE id = $2",
-                         {std::to_string(PgQueue::kMaxAttempts), Id(1)})
+                         {std::to_string(kMaxAttempts), Id(1)})
                   .ok());
 
   const auto claimed = queue_->ClaimNext("worker-1", absl::Minutes(5));

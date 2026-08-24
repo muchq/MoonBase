@@ -67,7 +67,7 @@ absl::StatusOr<std::optional<IndexJob>> PgQueue::ClaimNext(std::string_view owne
              LIMIT 1)
          RETURNING id, player, platform, start_month, end_month, exclude_bullet, skip_cache,
                    attempts)",
-      {std::string(owner), Seconds(lease), std::to_string(kMaxAttempts)});
+      {std::string(owner), Seconds(lease), std::to_string(max_attempts_)});
   if (!claimed.ok()) return claimed.status();
   if (claimed->rows() == 0) return std::nullopt;
 
@@ -169,7 +169,8 @@ namespace {
 /// PgQueue plus the connection it claims over.
 class OwnedPgQueue : public IndexQueue {
  public:
-  explicit OwnedPgQueue(const std::string& db_url) : client_(db_url), queue_(client_) {}
+  OwnedPgQueue(const std::string& db_url, int max_attempts)
+      : client_(db_url), queue_(client_, max_attempts) {}
 
   absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
                                                     absl::Duration lease) override {
@@ -197,8 +198,8 @@ class OwnedPgQueue : public IndexQueue {
 
 }  // namespace
 
-std::unique_ptr<IndexQueue> NewOwnedPgQueue(const std::string& db_url) {
-  return std::make_unique<OwnedPgQueue>(db_url);
+std::unique_ptr<IndexQueue> NewOwnedPgQueue(const std::string& db_url, int max_attempts) {
+  return std::make_unique<OwnedPgQueue>(db_url, max_attempts);
 }
 
 }  // namespace one_d4_worker

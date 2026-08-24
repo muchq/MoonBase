@@ -30,30 +30,36 @@ class CapturingMetricsRecorder final : public MetricsRecorder {
   explicit CapturingMetricsRecorder(const std::string& service_name = "test")
       : MetricsRecorder(service_name) {}
 
+  /// Which record method produced an entry. The exporter renames some
+  /// instruments — RecordLatency appends _microseconds — so a name is not
+  /// enough to say what a service will publish; the call is.
+  enum class Call { kCounter, kLatency, kDistribution, kGauge, kDeclaration };
+
   struct Entry {
     std::string name;
     double value;
     std::map<std::string, std::string> attributes;
+    Call call = Call::kCounter;
   };
 
   void RecordCounter(const std::string& name, int64_t value,
                      const std::map<std::string, std::string>& attributes) override {
-    Add(name, static_cast<double>(value), attributes);
+    Add(name, static_cast<double>(value), attributes, Call::kCounter);
     MetricsRecorder::RecordCounter(name, value, attributes);
   }
   void RecordLatency(const std::string& name, std::chrono::microseconds duration,
                      const std::map<std::string, std::string>& attributes) override {
-    Add(name, static_cast<double>(duration.count()), attributes);
+    Add(name, static_cast<double>(duration.count()), attributes, Call::kLatency);
     MetricsRecorder::RecordLatency(name, duration, attributes);
   }
   void RecordDistribution(const std::string& name, double value,
                           const std::map<std::string, std::string>& attributes) override {
-    Add(name, value, attributes);
+    Add(name, value, attributes, Call::kDistribution);
     MetricsRecorder::RecordDistribution(name, value, attributes);
   }
   void RecordGauge(const std::string& name, double value,
                    const std::map<std::string, std::string>& attributes) override {
-    Add(name, value, attributes);
+    Add(name, value, attributes, Call::kGauge);
     MetricsRecorder::RecordGauge(name, value, attributes);
   }
 
@@ -68,7 +74,7 @@ class CapturingMetricsRecorder final : public MetricsRecorder {
                       const std::map<std::string, std::string>& attributes = {}) override {
     {
       const std::lock_guard<std::mutex> lock(mu_);
-      declared_.push_back({name, 0, attributes});
+      declared_.push_back({name, 0, attributes, Call::kDeclaration});
     }
     MetricsRecorder::DeclareCounter(name, attributes);
   }
@@ -123,9 +129,9 @@ class CapturingMetricsRecorder final : public MetricsRecorder {
 
  private:
   void Add(const std::string& name, double value,
-           const std::map<std::string, std::string>& attributes) {
+           const std::map<std::string, std::string>& attributes, Call call) {
     const std::lock_guard<std::mutex> lock(mu_);
-    entries_.push_back({name, value, attributes});
+    entries_.push_back({name, value, attributes, call});
   }
 
   mutable std::mutex mu_;
