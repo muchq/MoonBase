@@ -324,14 +324,15 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("Activity", "rejections", "", `stream_rejections_total`),
 			counter("Activity", "rate_limited", "", `stream_rate_limited_total`),
 			// Room chat (#1226): outcome counts and stages only — the emitter
-			// never labels by room, player, or text. catch_up_rows is a
-			// per-drain distribution, so its windowed average is how far
-			// behind a wake found an instance (the lag signal), which is a
-			// mean rather than a count and so has no rate form.
+			// never labels by room, player, or text. catch_up_rows_avg is rows
+			// per drain — how far behind a wake found an instance (the lag
+			// signal) — computed from two counters the hub declares at zero
+			// (#1384): the delivered rows over the drains that delivered them.
+			// A mean rather than a count, so it has no rate form.
 			counter("Chat", "messages", "", `chat_appends_total{result="stored"}`),
 			counter("Chat", "delivered_rows", "rows", `chat_rows_delivered_total`),
 			scalar("Chat", "catch_up_rows_avg_5m", "rows",
-				`sum(rate(chat_catch_up_rows_sum[5m]))/sum(rate(chat_catch_up_rows_count[5m]))`),
+				`sum(rate(chat_rows_delivered_total[5m]))/sum(rate(chat_catch_up_drains_total[5m]))`),
 			counter("Chat", "history_replays", "", `chat_history_replays_total`),
 			counterOver("Chat", "failures", "", `chat_failures_total`, alarmWindow),
 		},
@@ -358,17 +359,26 @@ var serviceRegistry = map[string]serviceEntry{
 			"chat_message":       tsCounter(`chat_appends_total{result="stored"}`),
 			"chat_delivery":      tsCounter(`chat_rows_delivered_total`),
 			"chat_failure":       tsCounter(`chat_failures_total`),
-			"chat_catch_up_rows": tsFixed(`sum(rate(chat_catch_up_rows_sum[5m]))/sum(rate(chat_catch_up_rows_count[5m]))`),
+			"chat_catch_up_rows": tsFixed(`sum(rate(chat_rows_delivered_total[5m]))/sum(rate(chat_catch_up_drains_total[5m]))`),
 		},
 	},
 	"microgpt-serve": {
+		// The inference means read counters, not histogram halves (#1384):
+		// microgpt_inference_ms_total is the rail's cumulative duration,
+		// declared at zero alongside the request and token counts, so the
+		// first request after a deploy moves every one of these. Mean request
+		// duration divides it by the request count; tokens per second of
+		// inference divides the token count by it — the ratio-of-rates form,
+		// total tokens over total model time in the window.
 		CustomScalars: []customScalarDef{
 			probesTile("microgpt-serve"),
 			counter("Requests by endpoint", "generate", "", `microgpt_requests_total{endpoint="generate"}`),
 			counter("Requests by endpoint", "chat", "", `microgpt_requests_total{endpoint="chat"}`),
 			counter("Inference", "tokens_generated", "tokens", `microgpt_tokens_generated_total`),
 			scalar("Inference", "avg_duration_ms", "ms",
-				`sum(rate(microgpt_request_duration_ms_sum[5m]))/sum(rate(microgpt_request_duration_ms_count[5m]))`),
+				`sum(rate(microgpt_inference_ms_total[5m]))/sum(rate(microgpt_requests_total[5m]))`),
+			scalar("Inference", "tokens_per_sec_5m", "tok/s",
+				`sum(rate(microgpt_tokens_generated_total[5m]))/sum(rate(microgpt_inference_ms_total[5m]))*1000`),
 			counter("Inference", "conversations", "", `microgpt_conversations_total`),
 		},
 		// "tokens" replaces the old "tokens_per_second" key: that name baked
@@ -377,7 +387,7 @@ var serviceRegistry = map[string]serviceEntry{
 		// old key (grep confirms this is the only place it appeared).
 		CustomTimeseries: map[string]customTimeseriesDef{
 			"tokens":          tsCounter(`microgpt_tokens_generated_total`),
-			"avg_duration_ms": tsFixed(`sum(rate(microgpt_request_duration_ms_sum[5m]))/sum(rate(microgpt_request_duration_ms_count[5m]))`),
+			"avg_duration_ms": tsFixed(`sum(rate(microgpt_inference_ms_total[5m]))/sum(rate(microgpt_requests_total[5m]))`),
 		},
 	},
 	// The Java services (#1212): yodel's standard instruments, plus the

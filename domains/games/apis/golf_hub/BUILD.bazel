@@ -392,6 +392,9 @@ cc_test(
         "hub_e2e_test.cc",
         "stream_test_fixture.h",
     ],
+    # StreamSeriesMatchTheModelUnions reads the model to pin the declared
+    # stream_commands/stream_events rosters against its union cases.
+    data = ["model/golf_hub.smithy"],
     deps = [
         ":golf_hub_smithy_client",
         ":golf_hub_smithy_server",

@@ -473,6 +473,179 @@ func TestRegistry_MicrogptTokensReplacesTokensPerSecond(t *testing.T) {
 		panels["tokens_rate"])
 }
 
+// Every custom query a service entry can produce, keyed for failure messages —
+// the collection step the per-service instrument audits share.
+func labelledCustomQueries(entry serviceEntry) map[string][]string {
+	labelled := map[string][]string{}
+	for _, def := range entry.CustomScalars {
+		labelled["scalar "+def.Label] = def.AllQueries()
+	}
+	for key, query := range expandCustomTimeseries(entry.CustomTimeseries, "5m") {
+		labelled["timeseries "+key] = []string{query}
+	}
+	return labelled
+}
+
+// What golf_hub exports, as the collector's Prometheus exporter names it:
+// _total for a counter, _gauge for futility's up-down gauge. The emitting end
+// is pinned in hub_e2e_test — BuildingAHandlerDeclaresEveryCounterSeriesAtZero
+// holds the declaration roster and every suite's TearDown sweep refuses an
+// undeclared emit — so this set meeting that roster is what ties each tile to
+// a series that exists from process start, at zero (#1384).
+var golfHubSelectorPattern = regexp.MustCompile(`\b((?:stream_|chat_|restored_)[a-z_]*)(\{[^}]*\})?`)
+
+var golfHubExportedNames = map[string]bool{
+	"chat_appends_total":              true,
+	"chat_catch_up_drains_total":      true,
+	"chat_failures_total":             true,
+	"chat_history_replays_total":      true,
+	"chat_rows_delivered_total":       true,
+	"restored_seats_reaped_total":     true,
+	"stream_admissions_refused_total": true,
+	"stream_commands_total":           true,
+	"stream_disconnects_total":        true,
+	"stream_events_total":             true,
+	"stream_rate_limited_total":       true,
+	"stream_rejections_total":         true,
+	"stream_seats_expired_total":      true,
+	"stream_sessions_active_gauge":    true,
+	"stream_sessions_total":           true,
+}
+
+// The one_d4 audit's shape (see TestOneD4QueriesNameRealInstrumentsAndScopeThem
+// for why a joined-blob Contains pins nothing): each selector matched and
+// checked on its own, the name set closed in both directions. No service_name
+// scoping here — golf_hub's custom names have a single emitter, and none of
+// these selectors has ever been scoped.
+func TestGolfHubQueriesNameRealInstruments(t *testing.T) {
+	entry := serviceRegistry["golf_hub"]
+	require.NotEmpty(t, entry.CustomScalars)
+	require.NotEmpty(t, entry.CustomTimeseries)
+
+	seen := map[string]int{}
+	joined := ""
+	for what, queries := range labelledCustomQueries(entry) {
+		for _, query := range queries {
+			joined += query + "\n"
+			// The probes tile reads the standard http_server family on the
+			// /health route; everything else must name a hub instrument.
+			if strings.Contains(query, `route="/health"`) {
+				assert.Contains(t, query, `service_name="golf_hub"`,
+					"%s reads the standard family unscoped: %s", what, query)
+				continue
+			}
+			matches := golfHubSelectorPattern.FindAllStringSubmatch(query, -1)
+			assert.NotEmpty(t, matches, "%s queries no golf_hub instrument: %s", what, query)
+			for _, match := range matches {
+				seen[match[1]]++
+				assert.True(t, golfHubExportedNames[match[1]],
+					"%s reads %q, which golf_hub does not export", what, match[1])
+			}
+		}
+	}
+
+	// Closed the other way too: an instrument nothing charts is one the hub
+	// pays to declare, emit, and store while nobody reads it.
+	for name := range golfHubExportedNames {
+		assert.NotZero(t, seen[name], "nothing in the golf_hub entry reads %s", name)
+	}
+
+	// Label values are the handler's declared vocabulary. A typo selects
+	// nothing rather than erroring, so the tile would read zero forever.
+	for _, match := range regexp.MustCompile(`result="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
+		assert.Contains(t, []string{"stored", "rejected", "unavailable"}, match[1],
+			"golf_hub declares no chat_appends result=%q", match[1])
+	}
+	for _, match := range regexp.MustCompile(`resumed="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
+		assert.Contains(t, []string{"true", "false"}, match[1],
+			"golf_hub declares no stream_sessions resumed=%q", match[1])
+	}
+}
+
+// What microgpt-serve exports — counters only, by design: the rail replaced
+// its histograms with zero-declarable counters (#1384), so any _sum/_count
+// name reappearing here means a query reverted to reading a histogram that no
+// longer exists. The emitting end is pinned by AppMetrics' own tests
+// (metrics.rs), which sweep the whole export and refuse any non-counter
+// aggregation.
+var microgptSelectorPattern = regexp.MustCompile(`\b(microgpt_[a-z_]*)(\{[^}]*\})?`)
+
+var microgptExportedNames = map[string]bool{
+	"microgpt_conversations_total":    true,
+	"microgpt_inference_ms_total":     true,
+	"microgpt_requests_total":         true,
+	"microgpt_tokens_generated_total": true,
+}
+
+func TestMicrogptQueriesNameRealInstruments(t *testing.T) {
+	entry := serviceRegistry["microgpt-serve"]
+	require.NotEmpty(t, entry.CustomScalars)
+	require.NotEmpty(t, entry.CustomTimeseries)
+
+	seen := map[string]int{}
+	joined := ""
+	for what, queries := range labelledCustomQueries(entry) {
+		for _, query := range queries {
+			joined += query + "\n"
+			if strings.Contains(query, `route="/health"`) {
+				assert.Contains(t, query, `service_name="microgpt-serve"`,
+					"%s reads the standard family unscoped: %s", what, query)
+				continue
+			}
+			matches := microgptSelectorPattern.FindAllStringSubmatch(query, -1)
+			assert.NotEmpty(t, matches, "%s queries no microgpt instrument: %s", what, query)
+			for _, match := range matches {
+				seen[match[1]]++
+				assert.True(t, microgptExportedNames[match[1]],
+					"%s reads %q, which microgpt-serve does not export", what, match[1])
+			}
+		}
+	}
+	for name := range microgptExportedNames {
+		assert.NotZero(t, seen[name], "nothing in the microgpt-serve entry reads %s", name)
+	}
+
+	// The endpoint label's closed vocabulary, mirrored from ENDPOINTS in
+	// metrics.rs.
+	for _, match := range regexp.MustCompile(`endpoint="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
+		assert.Contains(t, []string{"generate", "chat"}, match[1],
+			"microgpt-serve declares no endpoint=%q", match[1])
+	}
+}
+
+// The windowed means and the throughput tile are ratios of counters their
+// emitters declare at zero (#1384) — not the _sum/_count halves of a
+// histogram, which cannot exist before its first observation and so leave the
+// first drain or request after every deploy invisible. Golden, because the
+// numerator/denominator pairing is the meaning: rows over the drains that
+// delivered them, milliseconds over the requests that spent them, tokens over
+// the milliseconds that generated them.
+func TestRegistry_CatchUpAndInferenceMeansAreCounterRatios(t *testing.T) {
+	scalarByLabel := func(service string) map[string]string {
+		out := map[string]string{}
+		for _, def := range serviceRegistry[service].CustomScalars {
+			out[def.Label] = def.Query
+		}
+		return out
+	}
+
+	catchUp := `sum(rate(chat_rows_delivered_total[5m]))/sum(rate(chat_catch_up_drains_total[5m]))`
+	assert.Equal(t, catchUp, scalarByLabel("golf_hub")["catch_up_rows_avg_5m"])
+	assert.Equal(t, catchUp, serviceRegistry["golf_hub"].CustomTimeseries["chat_catch_up_rows"].Query,
+		"the tile and the chart must describe the same signal")
+
+	avgDuration := `sum(rate(microgpt_inference_ms_total[5m]))/sum(rate(microgpt_requests_total[5m]))`
+	assert.Equal(t, avgDuration, scalarByLabel("microgpt-serve")["avg_duration_ms"])
+	assert.Equal(t, avgDuration,
+		serviceRegistry["microgpt-serve"].CustomTimeseries["avg_duration_ms"].Query,
+		"the tile and the chart must describe the same signal")
+
+	assert.Equal(t,
+		`sum(rate(microgpt_tokens_generated_total[5m]))/sum(rate(microgpt_inference_ms_total[5m]))*1000`,
+		scalarByLabel("microgpt-serve")["tokens_per_sec_5m"],
+		"tokens per second of inference: total tokens over total model milliseconds, times 1000")
+}
+
 // Every selector in the one_d4 set, checked one at a time.
 //
 // The first version of this joined every query into one blob and ran
@@ -503,9 +676,9 @@ var oneD4ExportedNames = map[string]bool{
 	"index_games_per_month_count":     true,
 	// The hourly sweep (#1424). Emitted from the same worker, so the same
 	// service_name selector covers them.
-	"retention_sweeps_total":            true,
-	"retention_rows_deleted_total":      true,
-	"retention_requests_settled_total":  true,
+	"retention_sweeps_total":           true,
+	"retention_rows_deleted_total":     true,
+	"retention_requests_settled_total": true,
 }
 
 func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {

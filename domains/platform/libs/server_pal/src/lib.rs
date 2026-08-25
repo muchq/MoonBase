@@ -743,9 +743,9 @@ mod latency_bucket_tests {
         assert!(wants_latency_buckets("trace_request_duration_microseconds"));
 
         // Distributions keep their bare names. Against bounds starting at 100µs
-        // every one of these — spheres, lights, rows — collapses into bucket 0.
+        // every one of these — spheres, games, requests — collapses into bucket 0.
         assert!(!wants_latency_buckets("scene_sphere_count"));
-        assert!(!wants_latency_buckets("chat_catch_up_rows"));
+        assert!(!wants_latency_buckets("index_games_per_month"));
         assert!(!wants_latency_buckets("http_server_requests_total"));
 
         // Suffix, not substring. Both of these contain the token and neither

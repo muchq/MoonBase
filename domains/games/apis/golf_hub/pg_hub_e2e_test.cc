@@ -154,26 +154,30 @@ class PgGolfHubFixture : public GolfHubStreamFixture {
   // the members unwind (listener before handler, by declaration order).
   struct Instance {
     std::shared_ptr<HubHandler> handler;
+    std::shared_ptr<CapturingMetricsRecorder> metrics;
     std::shared_ptr<HubStore> store;
     std::unique_ptr<moonbase::golf::GolfHubServer> server;
     std::unique_ptr<moonbase::golf::GolfHubClient> client;
     std::unique_ptr<pg::Listener> listener;
     std::vector<std::shared_ptr<smithy::http::WebSocket>> sessions;
+    // The emit→declare sweep for this instance's own recorder — the fixture's
+    // TearDown only covers the primary's (#1327).
     ~Instance() {
       for (auto& session : sessions) session->Close();
       if (handler != nullptr) handler->AttachListener(nullptr);
+      ExpectOnlyDeclaredCounterSeries(*metrics);
     }
   };
 
   std::unique_ptr<Instance> BuildInstance() {
     auto instance = std::make_unique<Instance>();
     instance->store = MakeStore();
-    instance->handler = std::make_shared<HubHandler>(
-        MakeVault(), std::make_shared<cards::NoShuffleDealer>(),
-        std::make_shared<RemoteIdGenerator>(),
-        /*grace_period=*/std::chrono::seconds(60),
-        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), instance->store,
-        MakeChatStore(), UnlimitedRateLimits());
+    instance->metrics = MakeCapturingMetricsRecorder();
+    instance->handler =
+        std::make_shared<HubHandler>(MakeVault(), std::make_shared<cards::NoShuffleDealer>(),
+                                     std::make_shared<RemoteIdGenerator>(),
+                                     /*grace_period=*/std::chrono::seconds(60), instance->metrics,
+                                     instance->store, MakeChatStore(), UnlimitedRateLimits());
     const absl::Status restored = instance->handler->RestoreFromStore();
     EXPECT_TRUE(restored.ok()) << restored;
     instance->listener = MakeListener(instance->handler);

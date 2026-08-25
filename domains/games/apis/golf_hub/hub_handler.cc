@@ -187,23 +187,22 @@ HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards
 // assemble a series out of two nested loops first.
 //
 // hub_e2e_test pins one of the two directions. ExpectOnlyDeclaredCounterSeries
-// runs in every stream test's TearDown, so a series emitted but not declared
-// fails — including from the tests that refuse admissions, trip the rate
-// limiter or drop a stream, which is where most of these fire. The other
-// direction, a value declared here that nothing ever emits, has no such guard:
-// it costs a permanently flat line on a dashboard, and the only thing in its
-// way is the literal copy of this list in
-// BuildingAHandlerDeclaresEveryCounterSeriesAtZero, which has to be edited too.
-//
-// Not declared: chat_catch_up_rows, a distribution. It has the same
-// first-observation gap and futility offers no DeclareDistribution to close it
-// — the same carve-out microgpt_serve's AppMetrics::declare() makes for its
-// histograms, and for the same reason.
+// runs in every stream test's TearDown — and in every SecondInstance's
+// destructor — so a series emitted but not declared fails, including from the
+// tests that refuse admissions, trip the rate limiter or drop a stream, which
+// is where most of these fire. The other direction, a value declared here that
+// nothing ever emits, has no such guard: it costs a permanently flat line on a
+// dashboard, and the only thing in its way is the literal copy of this list in
+// BuildingAHandlerDeclaresEveryCounterSeriesAtZero, which has to be edited too
+// — except for the stream_commands/stream_events blocks, whose values are the
+// model's union cases and are pinned both ways against golf_hub.smithy by
+// StreamSeriesMatchTheModelUnions.
 const std::vector<HubHandler::CounterSeries>& HubHandler::DeclaredCounterSeries() {
   static const auto* kSeries = new std::vector<CounterSeries>{
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
+      {"chat_catch_up_drains", {}},
       {"chat_failures", {{"stage", "cursor_seed"}}},
       {"chat_failures", {{"stage", "catch_up"}}},
       {"chat_failures", {{"stage", "history_load"}}},
@@ -212,15 +211,74 @@ const std::vector<HubHandler::CounterSeries>& HubHandler::DeclaredCounterSeries(
       {"restored_seats_reaped", {}},
       {"stream_admissions_refused", {{"reason", "bad_ticket"}}},
       {"stream_admissions_refused", {{"reason", "seat_conflict"}}},
+      // The GolfCommands union in model order, golf.<move> for the envelope —
+      // CountCommand's naming, spelled out (see the model-pin note above).
+      {"stream_commands", {{"command", "createRoom"}}},
+      {"stream_commands", {{"command", "joinRoom"}}},
+      {"stream_commands", {{"command", "leaveRoom"}}},
+      {"stream_commands", {{"command", "getRoomState"}}},
+      {"stream_commands", {{"command", "chat"}}},
+      {"stream_commands", {{"command", "golf.createGame"}}},
+      {"stream_commands", {{"command", "golf.joinGame"}}},
+      {"stream_commands", {{"command", "golf.startGame"}}},
+      {"stream_commands", {{"command", "golf.leaveGame"}}},
+      {"stream_commands", {{"command", "golf.peekCard"}}},
+      {"stream_commands", {{"command", "golf.drawCard"}}},
+      {"stream_commands", {{"command", "golf.takeFromDiscard"}}},
+      {"stream_commands", {{"command", "golf.swapCard"}}},
+      {"stream_commands", {{"command", "golf.discardDrawn"}}},
+      {"stream_commands", {{"command", "golf.knock"}}},
+      {"stream_commands", {{"command", "golf.hideCards"}}},
       {"stream_disconnects", {{"kind", "clean"}}},
       {"stream_disconnects", {{"kind", "abrupt"}}},
+      // The GolfEvents union in model order, golf.<update> for the envelope —
+      // Send's naming.
+      {"stream_events", {{"event", "sessionReady"}}},
+      {"stream_events", {{"event", "roomState"}}},
+      {"stream_events", {{"event", "roomLeft"}}},
+      {"stream_events", {{"event", "roomChat"}}},
+      {"stream_events", {{"event", "roomChatHistory"}}},
+      {"stream_events", {{"event", "commandRejected"}}},
+      {"stream_events", {{"event", "golf.gameJoined"}}},
+      {"stream_events", {{"event", "golf.gameState"}}},
+      {"stream_events", {{"event", "golf.gameCreated"}}},
+      {"stream_events", {{"event", "golf.gameStarted"}}},
+      {"stream_events", {{"event", "golf.turnChanged"}}},
+      {"stream_events", {{"event", "golf.playerKnocked"}}},
+      {"stream_events", {{"event", "golf.gameEnded"}}},
+      {"stream_events", {{"event", "golf.gameLeft"}}},
       {"stream_rate_limited", {{"kind", "chat"}}},
       {"stream_rate_limited", {{"kind", "command"}}},
+      // One entry per RejectKind, in enum order.
+      {"stream_rejections", {{"kind", "rate_limited"}}},
+      {"stream_rejections", {{"kind", "invalid"}}},
+      {"stream_rejections", {{"kind", "state"}}},
+      {"stream_rejections", {{"kind", "rules"}}},
+      {"stream_rejections", {{"kind", "unavailable"}}},
+      {"stream_rejections", {{"kind", "unknown"}}},
       {"stream_seats_expired", {}},
       {"stream_sessions", {{"resumed", "true"}}},
       {"stream_sessions", {{"resumed", "false"}}},
   };
   return *kSeries;
+}
+
+const char* HubHandler::RejectKindName(RejectKind kind) {
+  switch (kind) {
+    case RejectKind::kRateLimited:
+      return "rate_limited";
+    case RejectKind::kInvalid:
+      return "invalid";
+    case RejectKind::kState:
+      return "state";
+    case RejectKind::kRules:
+      return "rules";
+    case RejectKind::kUnavailable:
+      return "unavailable";
+    case RejectKind::kUnknown:
+      return "unknown";
+  }
+  return "unknown";
 }
 
 void HubHandler::DeclareMetrics() {
@@ -783,12 +841,12 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::golf::PlayInput input
       // buckets already bound the damage, and closing floods just
       // converts them into reconnect load.
       Count("stream_rate_limited", {{"kind", "command"}});
-      Reject(player_id, "slow down");
+      Reject(player_id, RejectKind::kRateLimited, "slow down");
       continue;
     }
     if ((*received)->as_chat_or_null() != nullptr && !chat_budget.Admit(now)) {
       Count("stream_rate_limited", {{"kind", "chat"}});
-      Reject(player_id, "slow down");
+      Reject(player_id, RejectKind::kRateLimited, "slow down");
       continue;
     }
     HandleCommand(player_id, **received);
@@ -819,7 +877,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
       }
     }
     if (room_id.empty()) {
-      Reject(player_id, "already in a room");
+      Reject(player_id, RejectKind::kState, "already in a room");
     } else {
       Deliver(outbox);
     }
@@ -828,7 +886,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
 
   if (const auto* join = command.as_joinRoom_or_null()) {
     if (HasEmbeddedNul(join->roomId)) {
-      Reject(player_id, "invalid room id");
+      Reject(player_id, RejectKind::kInvalid, "invalid room id");
       return;
     }
     Outbox outbox;
@@ -859,7 +917,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
       // history and live delivery, which the model declares legal.
       SendChatHistory(join->roomId, player_id);
     } else {
-      Reject(player_id, "room unavailable or already in a room");
+      Reject(player_id, RejectKind::kState, "room unavailable or already in a room");
     }
     return;
   }
@@ -883,7 +941,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
     if (left) {
       Deliver(outbox);
     } else {
-      Reject(player_id, "not in a room");
+      Reject(player_id, RejectKind::kState, "not in a room");
     }
     return;
   }
@@ -903,7 +961,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
     if (snapshot.has_value()) {
       Send(player_id, std::move(*snapshot));
     } else {
-      Reject(player_id, "not in a room");
+      Reject(player_id, RejectKind::kState, "not in a room");
     }
     return;
   }
@@ -912,7 +970,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
     // One validation rule for the protocol edge and the stores, so a
     // client is told no for exactly the text a store would refuse.
     if (const absl::Status valid = ValidateChatText(chat->text); !valid.ok()) {
-      Reject(player_id, std::string(valid.message()));
+      Reject(player_id, RejectKind::kInvalid, std::string(valid.message()));
       return;
     }
 
@@ -928,7 +986,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
       }
     }
     if (room_id.empty()) {
-      Reject(player_id, "not in a room");
+      Reject(player_id, RejectKind::kState, "not in a room");
       return;
     }
 
@@ -939,7 +997,8 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
       // rather than shown a message no one else will ever receive.
       const bool stale = appended.status().code() == absl::StatusCode::kFailedPrecondition;
       Count("chat_appends", {{"result", stale ? "rejected" : "unavailable"}});
-      Reject(player_id, stale ? "not in a room" : "chat is unavailable");
+      Reject(player_id, stale ? RejectKind::kState : RejectKind::kUnavailable,
+             stale ? "not in a room" : "chat is unavailable");
       return;
     }
     Count("chat_appends", {{"result", "stored"}});
@@ -958,7 +1017,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
     return;
   }
 
-  Reject(player_id, "unknown command");
+  Reject(player_id, RejectKind::kUnknown, "unknown command");
 }
 
 void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) {
@@ -987,7 +1046,7 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
     if (in_game) {
       Deliver(outbox);
     } else {
-      Reject(player_id, "not in a game");
+      Reject(player_id, RejectKind::kState, "not in a game");
     }
     return;
   }
@@ -995,7 +1054,7 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
   if (const auto* peek = move.as_peekCard_or_null()) {
     const auto position = golf::positionFromIndex(peek->cardIndex);
     if (!position.has_value()) {
-      Reject(player_id, "invalid card index");
+      Reject(player_id, RejectKind::kInvalid, "invalid card index");
       return;
     }
     EngineMove(
@@ -1027,7 +1086,7 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
   if (const auto* take = move.as_takeFromDiscard_or_null()) {
     const auto position = golf::positionFromIndex(take->cardIndex);
     if (!position.has_value()) {
-      Reject(player_id, "invalid card index");
+      Reject(player_id, RejectKind::kInvalid, "invalid card index");
       return;
     }
     EngineMove(
@@ -1042,7 +1101,7 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
   if (const auto* swap = move.as_swapCard_or_null()) {
     const auto position = golf::positionFromIndex(swap->cardIndex);
     if (!position.has_value()) {
-      Reject(player_id, "invalid card index");
+      Reject(player_id, RejectKind::kInvalid, "invalid card index");
       return;
     }
     EngineMove(
@@ -1069,12 +1128,15 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
     return;
   }
 
-  Reject(player_id, "unknown move");
+  Reject(player_id, RejectKind::kUnknown, "unknown move");
 }
 
 void HubHandler::CreateGameMove(const std::string& player_id) {
   Outbox outbox;
   std::string reason;
+  // Most refusals in these flows are the world being in the wrong shape for
+  // the command; the branches that mean something else re-set this.
+  RejectKind kind = RejectKind::kState;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     Room* room = FindRoomLocked(player_id);
@@ -1100,6 +1162,7 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
         }
         if (commit == Commit::kUnavailable) {
           room->games.erase(game_id);
+          kind = RejectKind::kUnavailable;
           reason = "storage unavailable; try again";
           break;
         }
@@ -1118,12 +1181,13 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
         break;
       }
       if (reason.empty() && !player_game_.contains(player_id)) {
+        kind = RejectKind::kUnavailable;
         reason = "could not allocate a game code; try again";
       }
     }
   }
   if (!reason.empty()) {
-    Reject(player_id, std::move(reason));
+    Reject(player_id, kind, std::move(reason));
   } else {
     Deliver(outbox);
   }
@@ -1131,11 +1195,12 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
 
 void HubHandler::JoinGameMove(const std::string& player_id, const std::string& game_id) {
   if (HasEmbeddedNul(game_id)) {
-    Reject(player_id, "invalid game id");
+    Reject(player_id, RejectKind::kInvalid, "invalid game id");
     return;
   }
   Outbox outbox;
   std::string reason;
+  RejectKind kind = RejectKind::kState;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     Room* room = FindRoomLocked(player_id);
@@ -1174,6 +1239,7 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
             break;
           }
           if (commit == Commit::kUnavailable) {
+            kind = RejectKind::kUnavailable;
             reason = "storage unavailable; try again";
             break;
           }
@@ -1198,7 +1264,7 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
     }
   }
   if (!reason.empty()) {
-    Reject(player_id, std::move(reason));
+    Reject(player_id, kind, std::move(reason));
   } else {
     Deliver(outbox);
   }
@@ -1207,6 +1273,7 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
 void HubHandler::StartGameMove(const std::string& player_id) {
   Outbox outbox;
   std::string reason;
+  RejectKind kind = RejectKind::kState;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     auto ref = FindGameLocked(player_id);
@@ -1227,6 +1294,7 @@ void HubHandler::StartGameMove(const std::string& player_id) {
         dealer_->ShuffleDeck(deck);
         auto dealt = golf::dealGolfGame(ref->game_id, ref->entry->roster, std::move(deck));
         if (!dealt.ok()) {
+          kind = RejectKind::kRules;
           reason = std::string(dealt.status().message());
           break;
         }
@@ -1240,6 +1308,7 @@ void HubHandler::StartGameMove(const std::string& player_id) {
           break;
         }
         if (commit == Commit::kUnavailable) {
+          kind = RejectKind::kUnavailable;
           reason = "storage unavailable; try again";
           break;
         }
@@ -1256,7 +1325,7 @@ void HubHandler::StartGameMove(const std::string& player_id) {
     }
   }
   if (!reason.empty()) {
-    Reject(player_id, std::move(reason));
+    Reject(player_id, kind, std::move(reason));
   } else {
     Deliver(outbox);
   }
@@ -1266,6 +1335,7 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
   Outbox outbox;
   Writes writes;
   std::string reason;
+  RejectKind kind = RejectKind::kState;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     auto ref = FindGameLocked(player_id);
@@ -1287,6 +1357,8 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
         }
         auto next = move(state, seat);
         if (!next.ok()) {
+          // The engine said no: a rules refusal, not a desync.
+          kind = RejectKind::kRules;
           reason = std::string(next.status().message());
           break;
         }
@@ -1309,6 +1381,7 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
           break;
         }
         if (commit == Commit::kUnavailable) {
+          kind = RejectKind::kUnavailable;
           reason = "storage unavailable; try again";
           break;
         }
@@ -1354,7 +1427,7 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
     EnqueueWritesLocked(writes);
   }
   if (!reason.empty()) {
-    Reject(player_id, std::move(reason));
+    Reject(player_id, kind, std::move(reason));
   } else {
     Deliver(outbox);
   }
@@ -1530,8 +1603,12 @@ void HubHandler::BroadcastRoom(const std::string& room_id) {
   Deliver(outbox);
 }
 
-void HubHandler::Reject(const std::string& player_id, std::string reason) {
-  Count("stream_rejections", {{"reason", reason}});
+void HubHandler::Reject(const std::string& player_id, RejectKind kind, std::string reason) {
+  // The bounded kind is the metric; the free text goes only to the player.
+  // Reasons come from ~30 literals here and the cards engine's status
+  // messages, exactly the label set that cannot be declared and so would
+  // reopen #1323 for the rejection someone is actually looking for.
+  Count("stream_rejections", {{"kind", RejectKindName(kind)}});
   moonbase::golf::CommandRejected rejected;
   rejected.reason = std::move(reason);
   Send(player_id, GolfEvents::FromCommandrejected(std::move(rejected)));
@@ -1598,11 +1675,11 @@ void HubHandler::PumpChat(const std::string& room_id) {
   }
 
   bool more = true;
-  // Rows this drain staged, across pages and again-loops. Recorded as
-  // one distribution observation per drain when the drain ends: the
-  // count is delivery volume, and the size of any one observation is
-  // how far behind its wake found this instance — the lag signal the
-  // dashboard wants, with no room id attached.
+  // Rows this drain staged, across pages and again-loops. Counted when the
+  // drain ends as one drain plus its rows — two counters rather than a
+  // histogram, because a counter can be declared at zero and a histogram
+  // cannot without biasing its mean (#1384). The dashboard's lag signal,
+  // rows per drain, is the rate ratio of the two, with no room id attached.
   int64_t drained = 0;
   while (more) {
     int64_t after = 0;
@@ -1635,7 +1712,7 @@ void HubHandler::PumpChat(const std::string& room_id) {
           continue;
         }
         cursor->second.pumping = false;
-        break;  // ends the drain; the per-drain observation below still records
+        break;  // ends the drain; the per-drain counters below still record
       }
       for (const ChatRow& row : *rows) {
         if (row.message_id <= cursor->second.delivered) continue;
@@ -1655,7 +1732,9 @@ void HubHandler::PumpChat(const std::string& room_id) {
   }
   if (metrics_ != nullptr) {
     if (drained > 0) metrics_->RecordCounter("chat_rows_delivered", drained);
-    metrics_->RecordDistribution("chat_catch_up_rows", static_cast<double>(drained));
+    // Every drain, including one that found nothing: the zero drains are
+    // what keep the windowed rows-per-drain average honest.
+    metrics_->RecordCounter("chat_catch_up_drains");
   }
 }
 

@@ -1,4 +1,4 @@
-use opentelemetry::metrics::{Counter, Histogram, Meter};
+use opentelemetry::metrics::{Counter, Meter};
 use opentelemetry::{KeyValue, global};
 
 /// The `endpoint` label values the emit sites use — the whole set, because a
@@ -11,8 +11,7 @@ pub struct AppMetrics {
     pub requests_total: Counter<u64>,
     pub tokens_generated_total: Counter<u64>,
     pub conversations_total: Counter<u64>,
-    pub request_duration_ms: Histogram<f64>,
-    pub tokens_per_second: Histogram<f64>,
+    pub inference_ms_total: Counter<f64>,
 }
 
 impl AppMetrics {
@@ -36,72 +35,55 @@ impl AppMetrics {
                 .u64_counter("microgpt_conversations")
                 .with_description("Total chat conversations handled")
                 .build(),
-            request_duration_ms: meter
-                .f64_histogram("microgpt_request_duration_ms")
-                .with_description("Inference request duration in milliseconds")
-                .with_unit("ms")
-                .build(),
-            tokens_per_second: meter
-                .f64_histogram("microgpt_tokens_per_second")
-                .with_description("Tokens generated per second per request")
+            // A counter of milliseconds, not a histogram of durations (#1384):
+            // every consumer of the old microgpt_request_duration_ms histogram
+            // read only its _sum and _count, and a histogram cannot be put on
+            // the wire at zero without biasing exactly that ratio — record(0.0)
+            // adds an observation. Two zero-declarable counters carry the same
+            // answer: mean duration is rate(inference_ms)/rate(requests), and
+            // tokens per second of inference is rate(tokens)/rate(inference_ms).
+            inference_ms_total: meter
+                .f64_counter("microgpt_inference_ms")
+                .with_description("Cumulative inference time in milliseconds by endpoint")
                 .build(),
         };
         metrics.declare();
         metrics
     }
 
-    /// Puts every counter series on the wire at 0 before anything is served
-    /// (#1323). Building the instrument is not enough: the SDK exports nothing
-    /// for an instrument that has taken no measurement, so without this each
-    /// series is born carrying its first request's value and `increase()` has
-    /// no earlier sample to measure it against — the first generate after every
+    /// Puts every series on the wire at 0 before anything is served (#1323).
+    /// Building the instrument is not enough: the SDK exports nothing for an
+    /// instrument that has taken no measurement, so without this each series
+    /// is born carrying its first request's value and `increase()` has no
+    /// earlier sample to measure it against — the first generate after every
     /// deploy is uncounted, forever.
     ///
-    /// Adding zero is what materializes the series. Zero is a measurement.
-    ///
-    /// The two histograms are deliberately left alone. `record(0.0)` is not a
-    /// declaration, it is a real observation: it would leave `_sum` where it is
-    /// and add one to `_count`, so `avg_duration_ms` — which the dashboard
-    /// computes as `rate(_sum)/rate(_count)` — would read low for the window
-    /// containing process start. The Java rail can baseline a distribution
-    /// because `CustomMetrics.defineDistributionSeries` creates an empty
-    /// series with a count of 0; the OTel Histogram API has no equivalent, so
-    /// this rail declares counters only and the histograms keep the
-    /// first-observation gap.
+    /// Adding zero is what materializes the series. Zero is a measurement,
+    /// and for a counter it is also the identity — which is why this rail
+    /// carries counters only (see inference_ms_total above).
     fn declare(&self) {
         self.conversations_total.add(0, &[]);
         for endpoint in ENDPOINTS {
             let attrs = [KeyValue::new("endpoint", endpoint)];
             self.requests_total.add(0, &attrs);
             self.tokens_generated_total.add(0, &attrs);
+            self.inference_ms_total.add(0.0, &attrs);
         }
     }
 
     pub fn record_generate(&self, tokens: u64, duration_ms: f64) {
         let attrs = [KeyValue::new("endpoint", "generate")];
-        let tps = if duration_ms > 0.0 {
-            tokens as f64 / (duration_ms / 1000.0)
-        } else {
-            0.0
-        };
         self.requests_total.add(1, &attrs);
         self.tokens_generated_total.add(tokens, &attrs);
-        self.request_duration_ms.record(duration_ms, &attrs);
-        self.tokens_per_second.record(tps, &attrs);
+        self.inference_ms_total.add(duration_ms, &attrs);
     }
 
     pub fn record_chat(&self, tokens: u64, duration_ms: f64) {
         let attrs = [KeyValue::new("endpoint", "chat")];
-        let tps = if duration_ms > 0.0 {
-            tokens as f64 / (duration_ms / 1000.0)
-        } else {
-            0.0
-        };
         self.requests_total.add(1, &attrs);
         self.conversations_total.add(1, &[]);
         self.tokens_generated_total.add(tokens, &attrs);
-        self.request_duration_ms.record(duration_ms, &attrs);
-        self.tokens_per_second.record(tps, &attrs);
+        self.inference_ms_total.add(duration_ms, &attrs);
     }
 }
 
@@ -142,82 +124,138 @@ mod tests {
             .expect("nothing was exported")
     }
 
-    /// `name{endpoint="..."}` and its value, for EVERY u64 counter series the
-    /// export carries — not a lookup by name. Sweeping the whole export is what
-    /// makes an unexpected series fail: a by-name reader can only check the
-    /// instruments the test already thought to ask about, so a counter added
-    /// with no entry in `declare()` would slip past it exactly the way this
-    /// whole change exists to prevent.
+    /// `name{endpoint="..."}` and its value, for EVERY counter series the
+    /// export carries — u64 and f64 sums alike, not a lookup by name. Sweeping
+    /// the whole export is what makes an unexpected series fail: a by-name
+    /// reader can only check the instruments the test already thought to ask
+    /// about, so a counter added with no entry in `declare()` would slip past
+    /// it exactly the way this whole change exists to prevent.
     ///
     /// A series missing entirely simply does not appear — the SDK exports
     /// nothing for an instrument that has taken no measurement, which is the
     /// bug being pinned.
-    fn counter_series(rm: &ResourceMetrics) -> Vec<(String, u64)> {
+    fn counter_series(rm: &ResourceMetrics) -> Vec<(String, f64)> {
         let mut out = vec![];
         for scope in rm.scope_metrics() {
             for metric in scope.metrics() {
-                if let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() {
-                    for dp in sum.data_points() {
-                        let label = match dp.attributes().find(|kv| kv.key.as_str() == "endpoint") {
-                            Some(kv) => format!("{}{{endpoint=\"{}\"}}", metric.name(), kv.value),
-                            None => metric.name().to_string(),
-                        };
-                        out.push((label, dp.value()));
+                let mut push = |attrs: Vec<(String, String)>, value: f64| {
+                    let label = match attrs.iter().find(|(key, _)| key == "endpoint") {
+                        Some((_, endpoint)) => {
+                            format!("{}{{endpoint=\"{}\"}}", metric.name(), endpoint)
+                        }
+                        None => metric.name().to_string(),
+                    };
+                    out.push((label, value));
+                };
+                match metric.data() {
+                    AggregatedMetrics::U64(MetricData::Sum(sum)) => {
+                        for dp in sum.data_points() {
+                            let attrs = dp
+                                .attributes()
+                                .map(|kv| (kv.key.to_string(), kv.value.to_string()))
+                                .collect();
+                            push(attrs, dp.value() as f64);
+                        }
                     }
+                    AggregatedMetrics::F64(MetricData::Sum(sum)) => {
+                        for dp in sum.data_points() {
+                            let attrs = dp
+                                .attributes()
+                                .map(|kv| (kv.key.to_string(), kv.value.to_string()))
+                                .collect();
+                            push(attrs, dp.value());
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
-        out.sort();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
         out
     }
 
-    /// The five series `declare()` is expected to produce, each at `value`.
-    fn expected(value: u64) -> Vec<(String, u64)> {
+    /// The seven series `declare()` is expected to produce: the five counts at
+    /// `count` and the two duration sums at `generate_ms`/`chat_ms`.
+    fn expected(count: f64, generate_ms: f64, chat_ms: f64) -> Vec<(String, f64)> {
         let mut out = vec![
-            ("microgpt_conversations".to_string(), value),
-            (r#"microgpt_requests{endpoint="chat"}"#.to_string(), value),
+            ("microgpt_conversations".to_string(), count),
+            (r#"microgpt_inference_ms{endpoint="chat"}"#.to_string(), chat_ms),
+            (
+                r#"microgpt_inference_ms{endpoint="generate"}"#.to_string(),
+                generate_ms,
+            ),
+            (r#"microgpt_requests{endpoint="chat"}"#.to_string(), count),
             (
                 r#"microgpt_requests{endpoint="generate"}"#.to_string(),
-                value,
+                count,
             ),
             (
                 r#"microgpt_tokens_generated{endpoint="chat"}"#.to_string(),
-                value,
+                count,
             ),
             (
                 r#"microgpt_tokens_generated{endpoint="generate"}"#.to_string(),
-                value,
+                count,
             ),
         ];
-        out.sort();
+        out.sort_by(|a, b| a.0.cmp(&b.0));
         out
     }
 
-    /// The zero baseline (#1323). Every counter series must be on the wire at 0
-    /// from construction, before a single request — otherwise it is born
-    /// carrying its first request's value and increase() shows nothing for that
+    /// The zero baseline (#1323). Every series must be on the wire at 0 from
+    /// construction, before a single request — otherwise it is born carrying
+    /// its first request's value and increase() shows nothing for that
     /// request, ever.
     ///
-    /// Compared as a whole set, so this fails on a missing series, an extra one,
-    /// and a nonzero one alike.
+    /// Compared as a whole set, so this fails on a missing series, an extra
+    /// one, and a nonzero one alike.
     #[test]
     fn building_the_metrics_declares_every_counter_series_at_zero() {
         let rig = rig();
-        assert_eq!(counter_series(&exported(&rig)), expected(0));
+        assert_eq!(counter_series(&exported(&rig)), expected(0.0, 0.0, 0.0));
     }
 
-    /// The declared set and the emit sites have to agree, or a declared endpoint
-    /// nobody serves is a permanently flat line and a served one nobody declared
-    /// loses its first request. Serving both endpoints once must land on exactly
-    /// the declared series and nothing else.
+    /// The declared set and the emit sites have to agree, or a declared
+    /// endpoint nobody serves is a permanently flat line and a served one
+    /// nobody declared loses its first request. Serving both endpoints once
+    /// must land on exactly the declared series and nothing else.
     #[test]
     fn recording_adds_no_series_the_declaration_did_not_cover() {
         let rig = rig();
         rig.metrics.record_generate(1, 100.0);
         rig.metrics.record_chat(1, 50.0);
 
-        // One request each, one token each, one conversation — so every series
-        // reads 1 and a single expectation covers them all.
-        assert_eq!(counter_series(&exported(&rig)), expected(1));
+        // One request each, one token each, one conversation, and each
+        // endpoint's milliseconds — every series lands on a declared name.
+        assert_eq!(
+            counter_series(&exported(&rig)),
+            expected(1.0, 100.0, 50.0)
+        );
+    }
+
+    /// The whole rail is counters (#1384): a histogram cannot be declared at
+    /// zero — record(0.0) is an observation that biases rate(_sum)/rate(_count)
+    /// — so nothing here may export one. The two counter tests above are this
+    /// test's positive control: the export is provably non-empty, so an empty
+    /// histogram list means "none exist", not "nothing was read".
+    #[test]
+    fn nothing_exports_with_a_first_observation_gap() {
+        let rig = rig();
+        rig.metrics.record_generate(1, 100.0);
+        rig.metrics.record_chat(1, 50.0);
+        let rm = exported(&rig);
+        for scope in rm.scope_metrics() {
+            for metric in scope.metrics() {
+                assert!(
+                    matches!(
+                        metric.data(),
+                        AggregatedMetrics::U64(MetricData::Sum(_))
+                            | AggregatedMetrics::F64(MetricData::Sum(_))
+                    ),
+                    "{} exports a non-counter aggregation, which cannot carry a zero baseline",
+                    metric.name()
+                );
+            }
+        }
     }
 }
