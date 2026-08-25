@@ -125,10 +125,10 @@ const printCheck = (expectedText: string) => (actual: unknown, ctx: { args: unkn
   let reparsed: unknown = null;
   try {
     reparsed = parseExpr(tokenizeExpr(actual));
-  } catch {
+  } catch (e) {
     return {
       pass: false,
-      message: 'Your output does not parse as an Expr at all.',
+      message: `Your output does not parse as an Expr: ${e instanceof Error ? e.message : String(e)}`,
       expectedText,
       actualText: actual,
     };

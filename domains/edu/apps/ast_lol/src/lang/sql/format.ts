@@ -8,17 +8,22 @@ import type { Select, SelectColumn, SqlExpr, TableRef } from './types';
  * - keywords uppercase; single spaces; `AS` for both column and table
  *   aliases; `ASC` omitted (it is the default); strings re-escape quotes
  *   by doubling.
- * - expressions carry the fewest parentheses that reparse to the same
- *   tree, under one uniform rule: parenthesize a child whose precedence
- *   is below what its position requires. Prefix operators require their
- *   operand's own level, so `NOT (NOT x)` and `-(-x)` keep parens — the
- *   latter also dodging `--`, which would lex as a comment.
+ * - expressions carry the fewest parentheses the uniform rule admits:
+ *   parenthesize a child whose precedence is below what its position
+ *   requires. Prefix operators require one level above their own, so
+ *   `NOT (NOT x)` and `-(-x)` keep parens (the parser would accept the
+ *   first bare; the second also dodges `--`, which would lex as a
+ *   comment).
  * - a query renders flat when it fits the width; otherwise clause-per-line
  *   with two-space indents: long SELECT / ORDER BY lists break one item
  *   per line (trailing commas), and a WHERE / ON predicate that overflows
  *   splits its top-level AND/OR chain with the operator leading each
- *   continuation line. Expressions themselves never wrap — a single
- *   expression wider than the limit is accepted as unavoidable overflow.
+ *   continuation line. A split operand keeps the parentheses its position
+ *   requires — the same uniform rule, applied at the seam, so the lines
+ *   rejoin to the identical tree. Expressions themselves never wrap: a
+ *   line holding one unsplittable unit (an expression, a chain operand, a
+ *   list item) may exceed the width as unavoidable overflow. A string
+ *   literal containing a raw newline necessarily spans physical lines.
  */
 
 const PREC: Record<string, number> = {
@@ -60,6 +65,25 @@ function wrap(child: SqlExpr, min: number): string {
   return prec(child) < min ? `(${s})` : s;
 }
 
+/**
+ * Numbers as plain digits: String() switches to exponent notation at the
+ * extremes (1e-7, 1e+23), which the tokenizer cannot read back.
+ */
+export function plainNumber(v: number): string {
+  const s = String(v);
+  const m = /^(-?)(\d+)(?:\.(\d+))?e([+-]\d+)$/.exec(s);
+  if (m === null) return s;
+  const sign = m[1];
+  const int = m[2];
+  const frac = m[3] ?? '';
+  const exp = Number(m[4]);
+  const digits = int + frac;
+  const point = int.length + exp;
+  if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${'0'.repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+}
+
 /** Minimal-parens flat rendering of an AstQL expression. */
 export function printSqlExpr(e: SqlExpr): string {
   switch (e.type) {
@@ -68,17 +92,17 @@ export function printSqlExpr(e: SqlExpr): string {
       if (v === null) return 'NULL';
       if (v === true) return 'TRUE';
       if (v === false) return 'FALSE';
-      if (typeof v === 'number') return String(v);
+      if (typeof v === 'number') return plainNumber(v);
       return `'${v.replaceAll("'", "''")}'`;
     }
     case 'Column':
       return e.table === null ? e.name : `${e.table}.${e.name}`;
     case 'Not':
       // The operand parses at comparison strength, so anything looser —
-      // AND, OR, another NOT — needs parens to reparse identically.
-      return `NOT ${wrap(e.operand, IS_PREC)}`;
+      // AND, OR, another NOT — gets parens under the uniform rule.
+      return `NOT ${wrap(e.operand, NOT_PREC + 1)}`;
     case 'Unary':
-      return `-${wrap(e.operand, ATOM_PREC)}`;
+      return `-${wrap(e.operand, NEGATE_PREC + 1)}`;
     case 'IsNull':
       return `${wrap(e.operand, IS_PREC)} IS ${e.negated ? 'NOT ' : ''}NULL`;
     case 'Binary': {
@@ -113,7 +137,7 @@ export function formatSelectFlat(select: Select): string {
   if (select.orderBy.length > 0) {
     parts.push(`ORDER BY ${select.orderBy.map(orderKey).join(', ')}`);
   }
-  if (select.limit !== null) parts.push(`LIMIT ${select.limit}`);
+  if (select.limit !== null) parts.push(`LIMIT ${plainNumber(select.limit)}`);
   return parts.join(' ');
 }
 
@@ -153,9 +177,12 @@ export function formatSelect(select: Select, width: number): string {
     if (expr.type === 'Binary' && (expr.op === 'AND' || expr.op === 'OR')) {
       const op = expr.op;
       const parts = chainOf(expr, op);
-      lines.push(`${head} ${printSqlExpr(parts[0])}`);
+      // A split operand sits in an operator position and keeps the parens
+      // that position requires — bare printSqlExpr here would let
+      // `p AND (q OR r)` rejoin as a different tree.
+      lines.push(`${head} ${wrap(parts[0], PREC[op])}`);
       for (const part of parts.slice(1)) {
-        lines.push(`  ${op} ${printSqlExpr(part)}`);
+        lines.push(`  ${op} ${wrap(part, PREC[op] + 1)}`);
       }
       return;
     }
@@ -174,6 +201,6 @@ export function formatSelect(select: Select, width: number): string {
   }
   if (select.where !== null) predicate('WHERE', select.where);
   if (select.orderBy.length > 0) list('ORDER BY', select.orderBy.map(orderKey));
-  if (select.limit !== null) lines.push(`LIMIT ${select.limit}`);
+  if (select.limit !== null) lines.push(`LIMIT ${plainNumber(select.limit)}`);
   return lines.join('\n');
 }

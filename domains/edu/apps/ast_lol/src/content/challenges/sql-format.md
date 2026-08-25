@@ -19,8 +19,8 @@ SELECT u.name AS who, o.total FROM users AS u JOIN orders AS o ON u.id = o.user_
 When the flat form exceeds `width`, every clause starts its own line, and each clause decides again at its own scale:
 
 - **SELECT / ORDER BY lists**: the whole clause inline if it fits; else the keyword alone on its line, then one item per line indented 2 spaces, **trailing commas** on all but the last.
-- **WHERE / JOIN … ON predicates**: inline if the clause line fits; else split the **top-level chain of the loosest `AND`/`OR`**: the first operand stays on the clause line (`WHERE c1` / `JOIN t AS a ON c1`), each remaining operand on its own line indented 2, **operator leading** (`  AND c2`). Nested groups — an `AND` inside an `OR` chain, or a parenthesized group — stay inline and move as units.
-- **Unavoidable overflow**: a single expression wider than the limit stays inline. Expressions never wrap internally.
+- **WHERE / JOIN … ON predicates**: inline if the clause line fits; else split the **top-level chain of the loosest `AND`/`OR`**: the first operand stays on the clause line (`WHERE c1` / `JOIN t AS a ON c1`), each remaining operand on its own line indented 2, **operator leading** (`  AND c2`). Nested groups — an `AND` inside an `OR` chain, or a parenthesized group — stay inline and move as units, and a split operand **keeps the parens its position requires** (first operand: the chain operator's level; the rest: one tighter), so the lines always rejoin to the identical tree.
+- **Unavoidable overflow**: expressions never wrap internally, so any line holding one unsplittable unit — a whole over-wide predicate, a chain operand after its head or operator, a list item — may exceed the width.
 - `FROM` and `LIMIT` are always their own single lines; `SELECT *` never breaks. Join lines with `'\n'`.
 
 ### Grading

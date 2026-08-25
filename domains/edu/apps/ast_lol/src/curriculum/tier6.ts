@@ -49,6 +49,63 @@ const layoutLesson: LessonDef = {
 };
 
 /**
+ * The expression printer as a revealable solution — a single source: it is
+ * the `sql-expr-print` challenge's solution AND the capstone's provided
+ * prelude, so the revealed answer and the provided code cannot drift. (If
+ * they could, a perfect capstone layout would fail on expression bytes.)
+ */
+const PRINT_EXPR_SOLUTION = `// String() switches to exponent notation at the extremes (1e-7, 1e+23),
+// which the tokenizer cannot read back — expand to plain digits.
+function plainNumber(v) {
+  const s = String(v);
+  const m = /^(-?)(\\d+)(?:\\.(\\d+))?e([+-]\\d+)$/.exec(s);
+  if (m === null) return s;
+  const digits = m[2] + (m[3] || '');
+  const point = m[2].length + Number(m[4]);
+  if (point <= 0) return m[1] + '0.' + '0'.repeat(-point) + digits;
+  if (point >= digits.length) return m[1] + digits + '0'.repeat(point - digits.length);
+  return m[1] + digits.slice(0, point) + '.' + digits.slice(point);
+}
+
+function printExpr(expr) {
+  const PREC = { OR: 1, AND: 2, '=': 4, '<>': 4, '<': 4, '<=': 4, '>': 4, '>=': 4,
+    '+': 5, '-': 5, '*': 6, '/': 6 };
+  function prec(e) {
+    if (e.type === 'Binary') return PREC[e.op];
+    if (e.type === 'Not') return 3;
+    if (e.type === 'IsNull') return 4;
+    if (e.type === 'Unary') return 7;
+    return 8;
+  }
+  function wrap(child, min) {
+    const s = printExpr(child);
+    return prec(child) < min ? '(' + s + ')' : s;
+  }
+  switch (expr.type) {
+    case 'Lit': {
+      const v = expr.value;
+      if (v === null) return 'NULL';
+      if (v === true) return 'TRUE';
+      if (v === false) return 'FALSE';
+      if (typeof v === 'number') return plainNumber(v);
+      return "'" + v.replaceAll("'", "''") + "'";
+    }
+    case 'Column':
+      return expr.table === null ? expr.name : expr.table + '.' + expr.name;
+    case 'Not':
+      return 'NOT ' + wrap(expr.operand, 4);
+    case 'Unary':
+      return '-' + wrap(expr.operand, 8);
+    case 'IsNull':
+      return wrap(expr.operand, 4) + ' IS ' + (expr.negated ? 'NOT ' : '') + 'NULL';
+    case 'Binary': {
+      const p = PREC[expr.op];
+      return wrap(expr.left, p) + ' ' + expr.op + ' ' + wrap(expr.right, p + 1);
+    }
+  }
+}`;
+
+/**
  * Exact-match grading with reparse-explained failures: a wrong string is
  * diagnosed as "different tree" (parens) or "right tree, wrong formatting"
  * (style), the same two-layer trick the Expr printer used.
@@ -104,7 +161,9 @@ const sqlExprPrint: ChallengeDef = {
   starter: `// Render an AstQL expression as canonical source text.
 // Style: uppercase keywords (AND OR NOT IS NULL TRUE FALSE), single
 // spaces around binary operators, unary minus tight, strings in single
-// quotes with ' doubled to ''.
+// quotes with ' doubled to ''. Numbers print as plain digits: where
+// String(v) gives exponent notation (String(0.0000001) is '1e-7' — text
+// the tokenizer cannot read back), expand it yourself.
 // Parenthesize under ONE uniform rule: wrap a child whose precedence is
 // below what its position requires. Levels:
 //   OR 1  AND 2  NOT 3  comparisons & IS [NOT] NULL 4  + - 5  * / 6
@@ -118,43 +177,7 @@ const sqlExprPrint: ChallengeDef = {
 function printExpr(expr) {
   // TODO
 }`,
-  solution: `function printExpr(expr) {
-  const PREC = { OR: 1, AND: 2, '=': 4, '<>': 4, '<': 4, '<=': 4, '>': 4, '>=': 4,
-    '+': 5, '-': 5, '*': 6, '/': 6 };
-  function prec(e) {
-    if (e.type === 'Binary') return PREC[e.op];
-    if (e.type === 'Not') return 3;
-    if (e.type === 'IsNull') return 4;
-    if (e.type === 'Unary') return 7;
-    return 8;
-  }
-  function wrap(child, min) {
-    const s = printExpr(child);
-    return prec(child) < min ? '(' + s + ')' : s;
-  }
-  switch (expr.type) {
-    case 'Lit': {
-      const v = expr.value;
-      if (v === null) return 'NULL';
-      if (v === true) return 'TRUE';
-      if (v === false) return 'FALSE';
-      if (typeof v === 'number') return String(v);
-      return "'" + v.replaceAll("'", "''") + "'";
-    }
-    case 'Column':
-      return expr.table === null ? expr.name : expr.table + '.' + expr.name;
-    case 'Not':
-      return 'NOT ' + wrap(expr.operand, 4);
-    case 'Unary':
-      return '-' + wrap(expr.operand, 8);
-    case 'IsNull':
-      return wrap(expr.operand, 4) + ' IS ' + (expr.negated ? 'NOT ' : '') + 'NULL';
-    case 'Binary': {
-      const p = PREC[expr.op];
-      return wrap(expr.left, p) + ' ' + expr.op + ' ' + wrap(expr.right, p + 1);
-    }
-  }
-}`,
+  solution: PRINT_EXPR_SOLUTION,
   tests: [
     printTest('a = 1 AND b = 2 OR c = 3', 'the logical ladder stays bare'),
     printTest(
@@ -194,6 +217,11 @@ function printExpr(expr) {
     printTest("name = 'o''brien'", 'strings re-escape their quotes', "Emit ' as '' — the tokenizer decoded it; you re-encode it."),
     printTest('u.city = NULL AND ok = TRUE', 'literals print as keywords'),
     printTest('-price < -5 - 3', 'unary minus over atoms stays tight and bare'),
+    printTest(
+      'a = 0.0000001 OR price > 100000000000000000000000',
+      'extreme numbers print as plain digits, never exponent notation',
+      "String(0.0000001) is '1e-7' — text the tokenizer cannot read back. Expand the exponent form into digits.",
+    ),
   ],
   custom: {
     describe:
@@ -205,45 +233,11 @@ function printExpr(expr) {
 };
 
 /** Provided to the formatter capstone: the expression printer built in the previous challenge. */
-const PRINT_EXPR_PRELUDE = `// ---- provided: expression printing (built in the previous challenge) ----
-// printExpr(expr) -> canonical flat text with minimal parentheses.
-function printExpr(expr) {
-  const PREC = { OR: 1, AND: 2, '=': 4, '<>': 4, '<': 4, '<=': 4, '>': 4, '>=': 4,
-    '+': 5, '-': 5, '*': 6, '/': 6 };
-  function prec(e) {
-    if (e.type === 'Binary') return PREC[e.op];
-    if (e.type === 'Not') return 3;
-    if (e.type === 'IsNull') return 4;
-    if (e.type === 'Unary') return 7;
-    return 8;
-  }
-  function wrap(child, min) {
-    const s = printExpr(child);
-    return prec(child) < min ? '(' + s + ')' : s;
-  }
-  switch (expr.type) {
-    case 'Lit': {
-      const v = expr.value;
-      if (v === null) return 'NULL';
-      if (v === true) return 'TRUE';
-      if (v === false) return 'FALSE';
-      if (typeof v === 'number') return String(v);
-      return "'" + v.replaceAll("'", "''") + "'";
-    }
-    case 'Column':
-      return expr.table === null ? expr.name : expr.table + '.' + expr.name;
-    case 'Not':
-      return 'NOT ' + wrap(expr.operand, 4);
-    case 'Unary':
-      return '-' + wrap(expr.operand, 8);
-    case 'IsNull':
-      return wrap(expr.operand, 4) + ' IS ' + (expr.negated ? 'NOT ' : '') + 'NULL';
-    case 'Binary': {
-      const p = PREC[expr.op];
-      return wrap(expr.left, p) + ' ' + expr.op + ' ' + wrap(expr.right, p + 1);
-    }
-  }
-}
+const PRINT_EXPR_PRELUDE = `// ---- provided: from the previous challenge ----
+// printExpr(expr)  -> canonical flat text with minimal parentheses.
+// plainNumber(v)   -> a number as plain digits (String() goes exponential
+//                     at the extremes; the tokenizer cannot read '1e+23').
+${PRINT_EXPR_SOLUTION}
 // ---- end provided ----`;
 
 /**
@@ -295,6 +289,10 @@ const formatCheck: CheckFn = (actual, ctx) => {
       };
     }
   }
+  // Unreachable when both sides are newline-joined text (split/join is a
+  // bijection), kept as the total-function fallback; a raw newline inside
+  // a string literal can desynchronize the per-line diff above, but exact
+  // match has already short-circuited for correct submissions.
   return { pass: false, message: 'Outputs differ.', expectedText: expected, actualText: actual };
 };
 
@@ -329,12 +327,16 @@ const sqlFormat: ChallengeDef = {
 //   - WHERE and JOIN ... ON predicates: inline if the clause line fits,
 //     else split the TOP-LEVEL chain of the loosest AND/OR operator:
 //     first operand stays on the clause line, each remaining operand on
-//     its own line, indented 2, with the operator leading. Nested
-//     groups (an AND inside an OR chain) stay inline.
+//     its own line, indented 2, with the operator leading. A split
+//     operand keeps the parens its position requires (first operand:
+//     the chain operator's level; the rest: one tighter) — an OR group
+//     inside a broken AND chain keeps its parens, so the lines rejoin
+//     to the identical tree. Nested groups stay inline as units.
 //   - A single expression wider than the limit is unavoidable overflow:
 //     leave it inline.
-//   - FROM and LIMIT always fit on their own lines. 'SELECT *' never
-//     breaks. Join lines with '\\n'.
+//   - FROM and LIMIT always fit on their own lines (render the LIMIT
+//     count with the provided plainNumber). 'SELECT *' never breaks.
+//     Join lines with '\\n'.
 function format(select, width) {
   // TODO
 }`,
@@ -357,7 +359,7 @@ function format(select, width) {
     }
     if (select.where !== null) parts.push('WHERE ' + printExpr(select.where));
     if (select.orderBy.length > 0) parts.push('ORDER BY ' + select.orderBy.map(orderKey).join(', '));
-    if (select.limit !== null) parts.push('LIMIT ' + select.limit);
+    if (select.limit !== null) parts.push('LIMIT ' + plainNumber(select.limit));
     return parts.join(' ');
   }
   const whole = flat();
@@ -378,14 +380,24 @@ function format(select, width) {
     }
     return [expr];
   }
+  function chainPart(part, min) {
+    // A split operand keeps the parens its position requires. Only AND/OR
+    // tops can bind looser than a chain position, so a three-way level
+    // check is the whole rule here.
+    const level = part.type === 'Binary' && part.op === 'OR' ? 1
+      : part.type === 'Binary' && part.op === 'AND' ? 2 : 3;
+    const s = printExpr(part);
+    return level < min ? '(' + s + ')' : s;
+  }
   function predicate(head, expr) {
     const inline = head + ' ' + printExpr(expr);
     if (inline.length <= width) { lines.push(inline); return; }
     if (expr.type === 'Binary' && (expr.op === 'AND' || expr.op === 'OR')) {
       const parts = chainOf(expr, expr.op);
-      lines.push(head + ' ' + printExpr(parts[0]));
+      const level = expr.op === 'OR' ? 1 : 2;
+      lines.push(head + ' ' + chainPart(parts[0], level));
       for (const part of parts.slice(1)) {
-        lines.push('  ' + expr.op + ' ' + printExpr(part));
+        lines.push('  ' + expr.op + ' ' + chainPart(part, level + 1));
       }
       return;
     }
@@ -397,7 +409,7 @@ function format(select, width) {
   for (const join of select.joins) predicate('JOIN ' + tableRef(join) + ' ON', join.on);
   if (select.where !== null) predicate('WHERE', select.where);
   if (select.orderBy.length > 0) list('ORDER BY', select.orderBy.map(orderKey));
-  if (select.limit !== null) lines.push('LIMIT ' + select.limit);
+  if (select.limit !== null) lines.push('LIMIT ' + plainNumber(select.limit));
   return lines.join('\\n');
 }`,
   check: formatCheck,

@@ -39,7 +39,7 @@ course's core pedagogical move is *same technique, higher stakes*:
 | "unsafe rewrite" | fold guard rail (1/0) | 3VL-safe boolean algebra |
 | printing | `expr-print` (minimal parens) | `sql-expr-print`, `sql-format` (width-aware) |
 
-**AstQL** (Tiers 3–5) is the destination the user asked for: SQL parsing and
+**AstQL** (Tiers 3–6) is the destination the user asked for: SQL parsing and
 basic optimization. The subset is chosen so every included feature does
 curricular work: joins exist because pushdown and pruning are join stories;
 `NULL` exists because 3VL is *the* semantic surprise of SQL; `ORDER BY`/`LIMIT`
@@ -76,7 +76,8 @@ Each challenge is selected to force exactly one new competence, sized between
   under a hard reparse-identity obligation). Prescriptive like the other skill
   challenges: a formatter's whole value is that its style is a spec, so exact
   match *is* the semantic grading here, with reparse-diagnosed failures as
-  the debugging layer.
+  the debugging layer. It is the one capstone graded prescriptively — the
+  optimizer's grader deliberately checks behavior and cost, never shape.
 
 The capstone battery (8 queries) is chosen adversarially: seven queries each
 fail some partial optimizer — cross-side conjuncts that must not move, a

@@ -9,9 +9,9 @@ That tree is the *abstract syntax tree*: the structure of a program with the inc
 The course builds two languages:
 
 1. **Expr** (Tiers 1–2) — arithmetic expressions with variables: `-(x + 1) * y ^ 2`. Small enough to hold in your head, rich enough to force the real issues: precedence, associativity, error reporting, traversal, meaning-preserving rewrites.
-2. **AstQL** (Tiers 3–5) — a SQL subset: `SELECT`, `JOIN … ON`, `WHERE`, `ORDER BY`, `LIMIT`. Real enough to be worth optimizing. You will tokenize it, Pratt-parse it, resolve names against a catalog, lower it to relational-algebra plans, execute those plans with proper `NULL` semantics — and then make them measurably cheaper.
+2. **AstQL** (Tiers 3–6) — a SQL subset: `SELECT`, `JOIN … ON`, `WHERE`, `ORDER BY`, `LIMIT`. Real enough to be worth optimizing. You will tokenize it, Pratt-parse it, resolve names against a catalog, lower it to relational-algebra plans, execute those plans with proper `NULL` semantics — and then make them measurably cheaper.
 
-The course ends in **two capstone tracks**, one for each of the flagship AST applications above:
+The course ends in **two capstone tracks** — one for each bookend of that opening list of tools:
 
 - **The optimizer** (Tiers 4–5) — resolve names, build logical plans, execute them with honest `NULL` semantics, then make them cheaper: predicate simplification, filter pushdown, and column pruning, graded on the two things a real optimizer is graded on — **it must not change the answer**, and **it must beat a cost budget** measured by an instrumented executor.
 - **The formatter** (Tier 6) — the other classic. A width-aware SQL formatter in the Prettier tradition: flat when the query fits, canonical multi-line layout when it doesn't, graded on exact output — with a grader that **reparses your text** to show which tree it actually encodes when you're off.

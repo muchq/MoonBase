@@ -17,7 +17,7 @@ const tier0: Tier = {
       lesson: {
         id: 'welcome',
         title: 'Why ASTs',
-        summary: 'The course map: from arithmetic expressions to SQL plans and a working optimizer.',
+        summary: 'The course map: from arithmetic expressions to two capstones — a SQL optimizer and a code formatter.',
         reading: [
           {
             title: 'AST Explorer',

@@ -35,3 +35,5 @@ FROM ident [AS ident | ident]
 - The statement parser never inspects expression tokens — call `parseExprFrom`, trust `end`, and look at what comes next. If you're peeking past operators by hand, stop.
 - Bare table aliases: after the table name, an `ident` token is an alias; a keyword is not. That single check handles `users u JOIN …` correctly.
 - `JOIN` without `ON` should error *at the token where `ON` belonged* — the kitchen-sink test's expected pane is a good reference for every field at once.
+
+After this challenge the course forks: Tier 4 continues toward the optimizer, and Tier 6's formatter track opens here too — either order works.

@@ -50,7 +50,7 @@ npm run dev        # Vite dev server with Cloudflare Workers runtime
 ## Test & typecheck
 
 ```bash
-npm test           # Vitest (298 tests)
+npm test           # Vitest
 npm run typecheck  # tsc --noEmit
 ```
 

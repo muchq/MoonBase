@@ -1,11 +1,11 @@
-Write `printExpr(expr)` — canonical flat text for an AstQL expression, with **minimal parentheses**.
+Write `printExpr(expr)` — canonical flat text for an AstQL expression, with **minimal parentheses under the uniform rule** (the rule keeps a couple of pairs, like `NOT (NOT a)`, that the parser would technically accept bare — uniformity beats cleverness in a spec).
 
 ### Style
 
 - Keywords uppercase: `AND OR NOT IS NULL TRUE FALSE`.
 - Single spaces around binary operators; unary minus tight; `t.name` for qualified columns.
 - Strings in single quotes with `'` doubled: the value `o'brien` prints as `'o''brien'`.
-- Numbers via `String(value)`; `NULL`/`TRUE`/`FALSE` as keywords.
+- Numbers as plain digits: `String(value)`, except where that yields exponent notation (`String(0.0000001)` is `'1e-7'` — text the tokenizer cannot read back); expand those into digits. `NULL`/`TRUE`/`FALSE` as keywords.
 
 ### The uniform paren rule
 

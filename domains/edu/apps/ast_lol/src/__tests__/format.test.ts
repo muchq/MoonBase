@@ -153,11 +153,82 @@ describe('formatSelect', () => {
     ]);
   });
 
-  it('every broken form reparses to the same AST', () => {
-    for (const width of [20, 30, 40, 60, 100]) {
-      const select = parseSql(query);
-      const formatted = formatSelect(select, width);
-      expect(parseSql(formatted.replaceAll('\n', ' ')), `width ${width}`).toEqual(select);
+  it('a split operand keeps the parens its position requires', () => {
+    // Bare reprinting here once rejoined OR groups into the AND chain —
+    // a different query. Two lenses of the review panel found it; this
+    // literal is the regression pin.
+    expect(
+      formatSelect(
+        parseSql(
+          'SELECT o.id FROM orders o WHERE o.total > 100 AND (o.year = 2024 OR o.year = 2025) AND o.quantity <> 1',
+        ),
+        45,
+      ),
+    ).toBe(
+      [
+        'SELECT o.id',
+        'FROM orders AS o',
+        'WHERE o.total > 100',
+        '  AND (o.year = 2024 OR o.year = 2025)',
+        '  AND o.quantity <> 1',
+      ].join('\n'),
+    );
+  });
+
+  it('a right-nested same-operator group keeps its parens too', () => {
+    expect(
+      formatSelect(parseSql("SELECT name FROM users WHERE city = 'a' AND (city = 'b' AND city = 'c')"), 30),
+    ).toBe(
+      ['SELECT name', 'FROM users', "WHERE city = 'a'", "  AND (city = 'b' AND city = 'c')"].join(
+        '\n',
+      ),
+    );
+  });
+
+  it('SELECT * with stacked joins breaks without touching the star', () => {
+    expect(
+      formatSelect(
+        parseSql(
+          'SELECT * FROM users u JOIN orders o ON u.id = o.user_id JOIN products p ON o.product_id = p.id',
+        ),
+        40,
+      ),
+    ).toBe(
+      [
+        'SELECT *',
+        'FROM users AS u',
+        'JOIN orders AS o ON u.id = o.user_id',
+        'JOIN products AS p ON o.product_id = p.id',
+      ].join('\n'),
+    );
+  });
+
+  it('extreme numbers render as plain digits everywhere, LIMIT included', () => {
+    const q = 'SELECT id FROM orders WHERE total > 100000000000000000000000 AND quantity <> 0.0000001 LIMIT 100000000000000000000000';
+    const flat = formatSelectFlat(parseSql(q));
+    expect(flat).toBe(
+      'SELECT id FROM orders WHERE total > 100000000000000000000000 AND quantity <> 0.0000001 LIMIT 100000000000000000000000',
+    );
+    expect(parseSql(flat)).toEqual(parseSql(q));
+  });
+
+  it('a raw newline inside a string literal spans lines but still reparses', () => {
+    const select = parseSql("SELECT 'a\nb' FROM users");
+    const flat = formatSelectFlat(select);
+    expect(flat).toContain('\n');
+    expect(parseSql(flat)).toEqual(select);
+  });
+
+  it('every broken form of every corpus query reparses to the same AST', () => {
+    const corpus = JSON.parse(
+      readFileSync(join(process.cwd(), 'src/__tests__/corpus/sql-corpus.json'), 'utf-8'),
+    ) as string[];
+    for (const q of [...corpus, query]) {
+      const select = parseSql(q);
+      for (const width of [10, 25, 40, 60, 100]) {
+        const formatted = formatSelect(select, width);
+        expect(parseSql(formatted.replaceAll('\n', ' ')), `${q} @ ${width}`).toEqual(select);
+      }
     }
   });
 });
