@@ -106,6 +106,73 @@ describe('runGrader', () => {
     }
   });
 
+  it('does not blame a test that finished just under the wire, and keeps custom flags', async () => {
+    vi.useFakeTimers();
+    try {
+      const worker = new FakeWorker((requestId, emit) => {
+        emit({ type: 'test-start', requestId, id: 'builtin-0', name: 'finished' });
+        emit({
+          type: 'test-result',
+          requestId,
+          result: { id: 'builtin-0', name: 'finished', custom: false, status: 'pass', logs: [] },
+        });
+        emit({ type: 'test-start', requestId, id: 'custom-1', name: 'mine, spins' });
+        // custom-1 never reports; done never arrives.
+      });
+      const promise = runGrader(
+        'x',
+        { language: 'javascript', code: '' },
+        [],
+        [
+          { id: 'builtin-0', name: 'finished', custom: false },
+          { id: 'custom-1', name: 'mine, spins', custom: true },
+          { id: 'custom-2', name: 'mine, never started', custom: true },
+        ],
+        { createWorker: () => worker as unknown as Worker, timeoutMs: 100 },
+      );
+      await vi.advanceTimersByTimeAsync(150);
+      const result = await promise;
+      const ids = result.tests.map((t) => t.id);
+      expect(new Set(ids).size, 'no id may appear twice').toBe(ids.length);
+      expect(result.tests.map((t) => [t.id, t.status, t.custom])).toEqual([
+        ['builtin-0', 'pass', false],
+        ['custom-1', 'timeout', true],
+        ['custom-2', 'skipped', true],
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a run whose every started test reported never synthesizes a timeout row', async () => {
+    vi.useFakeTimers();
+    try {
+      const worker = new FakeWorker((requestId, emit) => {
+        emit({ type: 'test-start', requestId, id: 'builtin-0', name: 'only' });
+        emit({
+          type: 'test-result',
+          requestId,
+          result: { id: 'builtin-0', name: 'only', custom: false, status: 'pass', logs: [] },
+        });
+        // The worker hangs after the last result, before done.
+      });
+      const promise = runGrader(
+        'x',
+        { language: 'javascript', code: '' },
+        [],
+        [{ id: 'builtin-0', name: 'only' }],
+        { createWorker: () => worker as unknown as Worker, timeoutMs: 100 },
+      );
+      await vi.advanceTimersByTimeAsync(150);
+      const result = await promise;
+      expect(result.tests).toHaveLength(1);
+      expect(result.tests[0]).toMatchObject({ id: 'builtin-0', status: 'pass' });
+      expect(result.status).toBe('timeout');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('surfaces a fatal worker error as a compile-style error', async () => {
     const worker = new FakeWorker((requestId, emit) => {
       emit({ type: 'fatal', requestId, error: 'kaboom' });

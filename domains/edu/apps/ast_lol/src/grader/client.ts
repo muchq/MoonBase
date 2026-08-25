@@ -31,11 +31,12 @@ export function runGrader(
   challengeId: string,
   submission: Submission,
   customTests: CustomTestSpec[],
-  plannedTests: { id: string; name: string }[],
+  plannedTests: { id: string; name: string; custom?: boolean }[],
   options: GraderClientOptions = {},
 ): Promise<GradeReport> {
   const { timeoutMs = DEFAULT_TIMEOUT_MS, onProgress, createWorker = defaultWorker } = options;
   const requestId = Date.now() + Math.random();
+  const plannedById = new Map(plannedTests.map((p) => [p.id, p]));
 
   return new Promise((resolve) => {
     let worker: Worker;
@@ -64,23 +65,27 @@ export function runGrader(
 
     const timer = setTimeout(() => {
       const tests: TestResult[] = [...completed];
-      if (running !== null) {
+      const done = new Set(tests.map((t) => t.id));
+      // A test is blamed for the timeout only if it started and never
+      // reported — one that finished just under the wire (its result in,
+      // the done message still queued behind this timer) stays passed.
+      if (running !== null && !done.has(running.id)) {
         tests.push({
           id: running.id,
           name: running.name,
-          custom: false,
+          custom: plannedById.get(running.id)?.custom ?? false,
           status: 'timeout',
           message: `Still running after ${timeoutMs}ms — check this test's input for an infinite loop in your code.`,
           logs: [],
         });
+        done.add(running.id);
       }
-      const done = new Set(tests.map((t) => t.id));
       for (const planned of plannedTests) {
         if (!done.has(planned.id)) {
           tests.push({
             id: planned.id,
             name: planned.name,
-            custom: false,
+            custom: planned.custom ?? false,
             status: 'skipped',
             message: 'Not run: an earlier test exceeded the time budget.',
             logs: [],
@@ -100,6 +105,7 @@ export function runGrader(
           return;
         case 'test-result':
           completed.push(event.result);
+          if (running !== null && running.id === event.result.id) running = null;
           return;
         case 'done':
           finish(event.report);

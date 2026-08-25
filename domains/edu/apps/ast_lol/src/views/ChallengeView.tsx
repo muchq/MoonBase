@@ -11,6 +11,7 @@ import { runGrader, type RunningTest } from '../grader/client';
 import type { GradeReport } from '../grader/types';
 import {
   clearDraft,
+  getProgress,
   markCompleted,
   saveDraft,
   setCustomTests,
@@ -26,10 +27,17 @@ function Workspace({ challenge }: { challenge: ChallengeDef }) {
   const customTests = progress.customTests[challenge.id] ?? [];
   const runningRef = useRef(false);
 
-  // Drafts persist per challenge, debounced against typing speed.
+  // Drafts persist per challenge, debounced against typing speed. Editing
+  // back to the exact starter clears the draft — otherwise the stale draft
+  // would resurrect on the next visit.
   useEffect(() => {
-    if (code === challenge.starter) return;
-    const t = setTimeout(() => saveDraft(challenge.id, code), 400);
+    const t = setTimeout(() => {
+      if (code === challenge.starter) {
+        if (getProgress().drafts[challenge.id] !== undefined) clearDraft(challenge.id);
+      } else {
+        saveDraft(challenge.id, code);
+      }
+    }, 400);
     return () => clearTimeout(t);
   }, [challenge.id, challenge.starter, code]);
 
@@ -37,8 +45,8 @@ function Workspace({ challenge }: { challenge: ChallengeDef }) {
     if (runningRef.current) return;
     runningRef.current = true;
     const planned = [
-      ...challenge.tests.map((t, i) => ({ id: `builtin-${i}`, name: t.name })),
-      ...customTests.map((t) => ({ id: t.id, name: t.name })),
+      ...challenge.tests.map((t, i) => ({ id: `builtin-${i}`, name: t.name, custom: false })),
+      ...customTests.map((t) => ({ id: t.id, name: t.name, custom: true })),
     ];
     setRunning({ id: 'starting', name: 'compiling…' });
     setReport(null);

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import App from '../App';
@@ -169,6 +169,20 @@ describe('ChallengeView', () => {
     const provided = screen.getByText(/Provided code/);
     expect(provided).toBeInTheDocument();
     expect(screen.getByText(/function parseExprFrom/)).toBeInTheDocument();
+  });
+
+  it('editing back to the exact starter clears the draft without Reset', async () => {
+    at('/challenge/expr-vars');
+    const starter = challengeById('expr-vars')!.starter;
+    const editor = screen.getByLabelText('code editor') as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: 'function collectVars() { return []; }' } });
+    await waitFor(() => expect(getProgress().drafts['expr-vars']).toBeDefined(), {
+      timeout: 1500,
+    });
+    fireEvent.change(editor, { target: { value: starter } });
+    await waitFor(() => expect(getProgress().drafts['expr-vars']).toBeUndefined(), {
+      timeout: 1500,
+    });
   });
 
   it('resets to starter and clears the draft', async () => {
