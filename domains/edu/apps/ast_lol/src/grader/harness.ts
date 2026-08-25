@@ -95,6 +95,11 @@ export function compileSubmission(submission: Submission, entry: string, prelude
   const codeLines = submission.code.split('\n').length;
   let fn: unknown;
   try {
+    // Deliberate dynamic evaluation — it is the product. The code is the
+    // learner's own submission, run in their own browser (in a worker, off
+    // the main thread); there is no server, no other user's data, and no
+    // privilege boundary between author and executor. CodeQL flags this
+    // as js/code-injection by pattern; the finding is by design here.
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
     const factory = new Function('console', parts.join('\n'));
     fn = factory(makeConsole(() => sink));
@@ -324,6 +329,9 @@ export function gradeSubmission(
     let args: unknown[];
     try {
       if (challenge.custom === null) throw new Error('custom tests are not enabled here');
+      // Deliberate dynamic evaluation, same trust model as the submission
+      // itself: the learner's own test input, evaluated in their own
+      // browser's worker. By design, not an injection surface.
       // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const values = new Function(`"use strict"; return [\n${custom.source}\n];`)() as unknown[];
       args = challenge.custom.toArgs(values);
