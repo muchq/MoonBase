@@ -651,7 +651,7 @@ func TestMicrogptQueriesNameRealInstruments(t *testing.T) {
 // drains included — dropping them would inflate the average exactly when the
 // hub is keeping up), milliseconds over the requests that spent them, tokens
 // over the milliseconds that generated them.
-func TestRegistry_CatchUpAndInferenceMeansAreCounterRatios(t *testing.T) {
+func TestRegistry_WindowedMeansAreCounterRatios(t *testing.T) {
 	scalarByLabel := func(service string) map[string]string {
 		out := map[string]string{}
 		for _, def := range serviceRegistry[service].CustomScalars {
@@ -680,6 +680,29 @@ func TestRegistry_CatchUpAndInferenceMeansAreCounterRatios(t *testing.T) {
 		`sum(rate(microgpt_tokens_generated_total[5m]))/sum(rate(microgpt_inference_ms_total[5m]))*1000`,
 		scalarByLabel("microgpt-serve")["tokens_per_sec_5m"],
 		"tokens per second of inference: total tokens over total model milliseconds, times 1000")
+
+	// one_d4 (#1452): run micros over the runs that spent them — completed
+	// only, on both factors — and games over the months that measured them.
+	assert.Equal(t,
+		`sum(rate(index_run_duration_micros_total{service_name=~"one_d4(_worker)?",outcome="completed"}[1h]))/sum(rate(index_runs_total{service_name=~"one_d4(_worker)?",outcome="completed"}[1h]))/1000000`,
+		scalarByLabel("one_d4")["avg_run_seconds_1h"])
+	assert.Equal(t,
+		`sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?"}[1h]))/sum(rate(index_months_total{service_name=~"one_d4(_worker)?",result=~"indexed|degraded"}[1h]))`,
+		scalarByLabel("one_d4")["avg_games_per_month_1h"])
+
+	// portrait (#1452): per-scene sums over the trace_scenes denominator —
+	// requested sums across cache_hit, rendered selects the misses on both
+	// factors, or a hit-heavy hour inflates the render-cost reading.
+	assert.Equal(t, `sum(rate(scene_spheres_total[1h]))/sum(rate(trace_scenes_total[1h]))`,
+		scalarByLabel("portrait")["avg_spheres_requested_1h"])
+	assert.Equal(t,
+		`sum(rate(scene_spheres_total{cache_hit="false"}[1h]))/sum(rate(trace_scenes_total{cache_hit="false"}[1h]))`,
+		scalarByLabel("portrait")["avg_spheres_rendered_1h"])
+	assert.Equal(t, `sum(rate(scene_lights_total[1h]))/sum(rate(trace_scenes_total[1h]))`,
+		scalarByLabel("portrait")["avg_lights_requested_1h"])
+	assert.Equal(t,
+		`sum(rate(scene_lights_total{cache_hit="false"}[1h]))/sum(rate(trace_scenes_total{cache_hit="false"}[1h]))`,
+		scalarByLabel("portrait")["avg_lights_rendered_1h"])
 }
 
 // The mean charts track the chart's own step the way avg_duration_us does,
@@ -695,6 +718,14 @@ func TestRegistry_MeanChartsWidenWithTheStep(t *testing.T) {
 	assert.Equal(t,
 		`sum(rate(microgpt_inference_ms_total[1h0m15s]))/sum(rate(microgpt_requests_total[1h0m15s]))`,
 		expandCustomTimeseries(serviceRegistry["microgpt-serve"].CustomTimeseries, "1h")["avg_duration_ms"])
+	// The scaled form widens both factors and keeps its conversion outside
+	// the windows.
+	assert.Equal(t,
+		`sum(rate(index_run_duration_micros_total{service_name=~"one_d4(_worker)?",outcome="completed"}[1h0m15s]))/sum(rate(index_runs_total{service_name=~"one_d4(_worker)?",outcome="completed"}[1h0m15s]))/1000`,
+		expandCustomTimeseries(serviceRegistry["one_d4"].CustomTimeseries, "1h")["run_duration_avg_ms"])
+	assert.Equal(t,
+		`sum(rate(scene_spheres_total{cache_hit="false"}[1h0m15s]))/sum(rate(trace_scenes_total{cache_hit="false"}[1h0m15s]))`,
+		expandCustomTimeseries(serviceRegistry["portrait"].CustomTimeseries, "1h")["scene_spheres_rendered"])
 }
 
 // Every selector in the one_d4 set, checked one at a time.
@@ -710,21 +741,19 @@ func TestRegistry_MeanChartsWidenWithTheStep(t *testing.T) {
 // So this borrows the shape TestRegistry_PortraitCacheQueriesUseTheStandardFamily
 // already uses: match each selector, assert on that selector, and close the set of
 // names so a new instrument has to be declared here too.
-var oneD4SelectorPattern = regexp.MustCompile(`\b((?:games_indexed|index_runs|index_months|chess_com_archive_fetches|motif_occurrences|index_run_duration_micros|index_games_per_month|retention_sweeps|retention_rows_deleted|retention_requests_settled)[a-z_]*)(\{[^}]*\})?`)
+var oneD4SelectorPattern = regexp.MustCompile(`\b((?:games_indexed|index_runs|index_months|chess_com_archive_fetches|motif_occurrences|index_run_duration_micros|retention_sweeps|retention_rows_deleted|retention_requests_settled)[a-z_]*)(\{[^}]*\})?`)
 
-// What one_d4_worker emits, plus the suffixes the collector's Prometheus
-// exporter appends: _total for a cumulative monotonic sum, _sum/_count for
-// a histogram. The recording end is the worker's own metrics_test.
+// What one_d4_worker emits, plus the _total suffix the collector's Prometheus
+// exporter appends to a cumulative monotonic sum — counters only, since #1452
+// replaced the worker's two histograms with counter ratios. The recording end
+// is the worker's own metrics_test.
 var oneD4ExportedNames = map[string]bool{
 	"games_indexed_total":             true,
 	"index_runs_total":                true,
 	"index_months_total":              true,
 	"chess_com_archive_fetches_total": true,
 	"motif_occurrences_total":         true,
-	"index_run_duration_micros_sum":   true,
-	"index_run_duration_micros_count": true,
-	"index_games_per_month_sum":       true,
-	"index_games_per_month_count":     true,
+	"index_run_duration_micros_total": true,
 	// The hourly sweep (#1424). Emitted from the same worker, so the same
 	// service_name selector covers them.
 	"retention_sweeps_total":           true,
@@ -814,7 +843,7 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 			"no worker emits a sweep outcome=%q", match[1])
 	}
 
-	// The duration histogram carries the same outcome label the run counter does, and both
+	// The duration counter carries the same outcome label the run counter does, and both
 	// averages over it have to say which outcome they mean. Unscoped, a single run cut loose
 	// at the six-hour MAX_RUN ceiling swamps every ordinary run in the window — the average
 	// reads worst at the moment it is being used to judge how bad things are.
@@ -872,12 +901,12 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 // is the only place the unit is ever stated, and it is stated in a different file
 // from the arithmetic that has to match it.
 //
-// The worker records this histogram in microseconds, the unit yodel's standard
-// latency series use — right for an HTTP request, six orders of magnitude off for
-// an index run — so every reader converts. The failure this pins is silent in both
-// directions: a chart titled "Run Duration Avg Ms" plotting 120000000 for a
-// two-minute run reads as a broken service rather than a missing divisor, and a
-// divisor added without renaming the key mislabels a correct number.
+// The worker accumulates run microseconds (the unit the stored series carry),
+// six orders of magnitude off for an index run — so every reader converts. The
+// failure this pins is silent in both directions: a chart titled "Run Duration
+// Avg Ms" plotting 120000000 for a two-minute run reads as a broken service
+// rather than a missing divisor, and a divisor added without renaming the key
+// mislabels a correct number.
 func TestOneD4RunDurationQueriesConvertToTheUnitTheyClaim(t *testing.T) {
 	entry := serviceRegistry["one_d4"]
 	// Divisor taking the recorded microseconds to the named unit.
@@ -902,7 +931,7 @@ func TestOneD4RunDurationQueriesConvertToTheUnitTheyClaim(t *testing.T) {
 	}
 	// Guards the guard: over an empty set the loop below asserts nothing, which is
 	// also what deleting both readers looks like.
-	require.NotEmpty(t, claimed, "nothing in the one_d4 entry reads the run duration histogram")
+	require.NotEmpty(t, claimed, "nothing in the one_d4 entry reads the run duration counter")
 
 	for query, unit := range claimed {
 		want, known := perUnit[unit]

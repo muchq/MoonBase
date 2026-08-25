@@ -53,7 +53,7 @@ TEST(WorkerMetrics, LabelsEverySeriesWithTheWorkerThatWroteIt) {
   }
 }
 
-TEST(WorkerMetrics, CountsARunByItsOutcome) {
+TEST(WorkerMetrics, CountsARunByItsOutcomeAndAccumulatesItsMicros) {
   CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
 
@@ -62,10 +62,17 @@ TEST(WorkerMetrics, CountsARunByItsOutcome) {
   EXPECT_EQ(recorder.CounterTotal(kRunsMetric, Cpp("outcome", "lease_lost")), 1);
   EXPECT_EQ(recorder.CounterTotal(kRunsMetric, Cpp("outcome", "completed")), 0)
       << "a run that lost its range is not a run that completed";
-  EXPECT_EQ(recorder.ObservationCount(kRunDurationMetric, Cpp("outcome", "lease_lost")), 1);
+  // The duration rides a counter with the run counter as its denominator
+  // (#1452): one run, three million microseconds, same outcome label — the
+  // pairing that makes rate(micros)/rate(runs) the mean run length.
+  EXPECT_EQ(recorder.CounterTotal(kRunDurationMetric, Cpp("outcome", "lease_lost")), 3'000'000);
+  EXPECT_EQ(recorder.CounterTotal(kRunDurationMetric, Cpp("outcome", "completed")), 0);
 }
 
-TEST(WorkerMetrics, CountsAMonthsGamesAndItsShape) {
+TEST(WorkerMetrics, CountsAMonthsGamesUnderTheResultThatMeasuredThem) {
+  // The mean the dashboard reads is rate(games_indexed)/rate(index_months
+  // over the measured results) (#1452): the games land bare, the month
+  // lands under its result, and the two must move together.
   CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
 
@@ -73,20 +80,20 @@ TEST(WorkerMetrics, CountsAMonthsGamesAndItsShape) {
 
   EXPECT_EQ(recorder.CounterTotal(kMonthsMetric, Cpp("result", "indexed")), 1);
   EXPECT_EQ(recorder.CounterTotal(kGamesIndexedMetric, kCpp), 12);
-  EXPECT_EQ(recorder.ObservationCount(kGamesPerMonthMetric, kCpp), 1);
 }
 
-TEST(WorkerMetrics, LeavesQuietMonthsOutOfTheMonthSizeDistribution) {
+TEST(WorkerMetrics, LeavesQuietMonthsOutOfTheGamesNumerator) {
   // A decade-long backfill of a three-year player is mostly empty
-  // archives. Feeding those zeros in makes the average archive look a
-  // third its real size; the empty months are counted on their own.
+  // archives. The mean's denominator selects the measured results only,
+  // and an empty month must not slip games into the numerator either —
+  // no sample at all, not a zero-valued one.
   CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
 
   metrics.MonthFinished("empty", 0);
 
   EXPECT_EQ(recorder.CounterTotal(kMonthsMetric, Cpp("result", "empty")), 1);
-  EXPECT_EQ(recorder.ObservationCount(kGamesPerMonthMetric, kCpp), 0);
+  EXPECT_EQ(recorder.ObservationCount(kGamesIndexedMetric, kCpp), 0);
 }
 
 TEST(WorkerMetrics, DoesNotCountACachedMonthsGamesAgain) {
@@ -98,8 +105,7 @@ TEST(WorkerMetrics, DoesNotCountACachedMonthsGamesAgain) {
   metrics.MonthFinished("cached", 17);
 
   EXPECT_EQ(recorder.CounterTotal(kMonthsMetric, Cpp("result", "cached")), 1);
-  EXPECT_EQ(recorder.CounterTotal(kGamesIndexedMetric, kCpp), 0);
-  EXPECT_EQ(recorder.ObservationCount(kGamesPerMonthMetric, kCpp), 0);
+  EXPECT_EQ(recorder.ObservationCount(kGamesIndexedMetric, kCpp), 0);
 }
 
 TEST(WorkerMetrics, CountsOccurrencesByMotif) {
@@ -170,6 +176,10 @@ TEST(WorkerMetrics, DeclaresItsSeriesBeforeAnythingHappens) {
   EXPECT_EQ(recorder.CounterTotal(kArchiveFetchesMetric, Cpp("result", "error")), 0);
   EXPECT_TRUE(recorder.Declared(kRunsMetric, Cpp("outcome", "completed")));
   EXPECT_TRUE(recorder.Declared(kRunsMetric, Cpp("outcome", "lease_lost")));
+  // The duration counter beside each run outcome (#1452): declared together
+  // or the mean's numerator is born carrying the first run's minutes.
+  EXPECT_TRUE(recorder.Declared(kRunDurationMetric, Cpp("outcome", "completed")));
+  EXPECT_TRUE(recorder.Declared(kRunDurationMetric, Cpp("outcome", "lease_lost")));
   EXPECT_TRUE(recorder.Declared(kMonthsMetric, Cpp("result", "empty")));
   EXPECT_TRUE(recorder.Declared(kReanalysisPassesMetric, Cpp("outcome", "completed")));
   EXPECT_TRUE(recorder.Declared(kReanalysisPassesMetric, Cpp("outcome", "lease_lost")));
@@ -234,28 +244,6 @@ TEST(WorkerMetrics, AFailedSweepIsCountedUnderItsOwnOutcome) {
 
   EXPECT_EQ(recorder.CounterTotal(kRetentionSweepsMetric, Cpp("outcome", "error")), 1);
   EXPECT_EQ(recorder.CounterTotal(kRetentionSweepsMetric, Cpp("outcome", "ok")), 0);
-}
-
-// The series names and histogram layouts are a wire contract with the
-// stored series and with prom_proxy's queries, pinned here on the
-// recording side.
-
-TEST(WorkerMetrics, MeasuresARunOnTheLayoutTheStoredSeriesUse) {
-  // One name, one histogram, one layout: stored samples already sit in
-  // these buckets, and a quantile across two layouts compares nothing.
-  // The sharpest wrong answer is shrinking toward the SDK default, whose
-  // top finite bound is 10ms — every run lands in +Inf and the p95 reads
-  // a flat 10ms forever, green all the way down. Exact vector, edited
-  // deliberately or not at all.
-  EXPECT_EQ(WorkerMetrics::HistogramBounds()[kRunDurationMetric],
-            (std::vector<double>{1'000, 10'000, 100'000, 1'000'000, 5'000'000, 30'000'000,
-                                 60'000'000, 300'000'000, 900'000'000, 1'800'000'000, 3'600'000'000,
-                                 10'800'000'000, 21'600'000'000}));
-}
-
-TEST(WorkerMetrics, MeasuresAMonthOnTheLayoutTheStoredSeriesUse) {
-  EXPECT_EQ(WorkerMetrics::HistogramBounds()[kGamesPerMonthMetric],
-            (std::vector<double>{1, 2, 5, 10, 25, 50, 100, 200, 400, 800, 1'600, 3'200}));
 }
 
 TEST(WorkerMetrics, SpellsTheRunOutcomesTheDashboardsQuery) {

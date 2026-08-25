@@ -212,6 +212,9 @@ type customTimeseriesDef struct {
 	Counter         string
 	MeanNumerator   string
 	MeanDenominator string
+	// Appended verbatim after a mean's ratio — a unit conversion like
+	// "/1000", never a selector.
+	MeanScale string
 }
 
 func (d customTimeseriesDef) toggleable() bool { return d.Counter != "" }
@@ -228,8 +231,8 @@ func (d customTimeseriesDef) toggleable() bool { return d.Counter != "" }
 func (d customTimeseriesDef) panels(key, step string) map[string]string {
 	if d.MeanNumerator != "" {
 		w := latencyWindow(step)
-		return map[string]string{key: fmt.Sprintf("sum(rate(%s[%s]))/sum(rate(%s[%s]))",
-			d.MeanNumerator, w, d.MeanDenominator, w)}
+		return map[string]string{key: fmt.Sprintf("sum(rate(%s[%s]))/sum(rate(%s[%s]))%s",
+			d.MeanNumerator, w, d.MeanDenominator, w, d.MeanScale)}
 	}
 	if !d.toggleable() {
 		return map[string]string{key: d.Query}
@@ -256,6 +259,13 @@ func tsFixed(query string) customTimeseriesDef {
 // over latencyWindow(step).
 func tsMean(numerator, denominator string) customTimeseriesDef {
 	return customTimeseriesDef{MeanNumerator: numerator, MeanDenominator: denominator}
+}
+
+// tsMeanScaled is tsMean with a unit conversion appended to the ratio, for a
+// chart whose key names a different unit than the counters carry.
+func tsMeanScaled(numerator, denominator, scale string) customTimeseriesDef {
+	return customTimeseriesDef{
+		MeanNumerator: numerator, MeanDenominator: denominator, MeanScale: scale}
 }
 
 // expandCustomTimeseries flattens a service's Trends descriptors into the
@@ -308,18 +318,19 @@ func cacheOps(service, cache string) string {
 // The panel used to show only the second under a name that read like the
 // first.
 //
-// Series recorded before that change carry no cache_hit label at all, so they
-// contribute to the requested figures and are invisible to the rendered ones
-// until they age out of the window.
+// Counter ratios, not histogram halves (#1452): scene_spheres/scene_lights
+// accumulate per-scene totals and trace_scenes counts the scenes, all
+// declared at zero by the tracer, so the first render after a deploy moves
+// every one of these.
 const (
-	portraitSpheresRequested = `sum(rate(scene_sphere_count_sum[1h]))/` +
-		`sum(rate(scene_sphere_count_count[1h]))`
-	portraitSpheresRendered = `sum(rate(scene_sphere_count_sum{cache_hit="false"}[1h]))/` +
-		`sum(rate(scene_sphere_count_count{cache_hit="false"}[1h]))`
-	portraitLightsRequested = `sum(rate(scene_light_count_sum[1h]))/` +
-		`sum(rate(scene_light_count_count[1h]))`
-	portraitLightsRendered = `sum(rate(scene_light_count_sum{cache_hit="false"}[1h]))/` +
-		`sum(rate(scene_light_count_count{cache_hit="false"}[1h]))`
+	portraitSpheresRequested = `sum(rate(scene_spheres_total[1h]))/` +
+		`sum(rate(trace_scenes_total[1h]))`
+	portraitSpheresRendered = `sum(rate(scene_spheres_total{cache_hit="false"}[1h]))/` +
+		`sum(rate(trace_scenes_total{cache_hit="false"}[1h]))`
+	portraitLightsRequested = `sum(rate(scene_lights_total[1h]))/` +
+		`sum(rate(trace_scenes_total[1h]))`
+	portraitLightsRendered = `sum(rate(scene_lights_total{cache_hit="false"}[1h]))/` +
+		`sum(rate(trace_scenes_total{cache_hit="false"}[1h]))`
 )
 
 // Catalog order doubles as the UI's tab order.
@@ -456,16 +467,20 @@ var serviceRegistry = map[string]serviceEntry{
 			// reads that way if the two share a window, hence the same one.
 			counterOver("Indexing", "runs_lease_lost", "",
 				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="lease_lost"}`, alarmWindow),
-			// Windowed averages over the histograms: rate(sum)/rate(count) is the
-			// mean per run in the window, the same shape portrait uses. Means, so
-			// no rate form.
-			// Completed runs only. The histogram is labelled by outcome, and an interrupted
-			// run is one that sat at the MAX_RUN ceiling — pooling those in makes the average
-			// spike at exactly the moment someone is reading it to size a real run.
+			// Windowed means as counter ratios (#1452): the worker records
+			// cumulative run microseconds 1:1 beside the run counter, and its
+			// games land beside the months that measured them, so each mean
+			// divides two series declared at zero. Means, so no rate form.
+			// Completed runs only: an interrupted run is one that sat at the
+			// MAX_RUN ceiling — pooling those in makes the average spike at
+			// exactly the moment someone is reading it to size a real run.
 			scalar("Indexing", "avg_run_seconds_1h", "s",
-				`sum(rate(index_run_duration_micros_sum{service_name=~"one_d4(_worker)?",outcome="completed"}[1h]))/sum(rate(index_run_duration_micros_count{service_name=~"one_d4(_worker)?",outcome="completed"}[1h]))/1000000`),
+				`sum(rate(index_run_duration_micros_total{service_name=~"one_d4(_worker)?",outcome="completed"}[1h]))/sum(rate(index_runs_total{service_name=~"one_d4(_worker)?",outcome="completed"}[1h]))/1000000`),
+			// The measured results only — an empty or cached month feeds the
+			// numerator nothing, so counting it in the denominator would make
+			// a decade-long backfill read as tiny archives.
 			scalar("Indexing", "avg_games_per_month_1h", "games",
-				`sum(rate(index_games_per_month_sum{service_name=~"one_d4(_worker)?"}[1h]))/sum(rate(index_games_per_month_count{service_name=~"one_d4(_worker)?"}[1h]))`),
+				`sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?"}[1h]))/sum(rate(index_months_total{service_name=~"one_d4(_worker)?",result=~"indexed|degraded"}[1h]))`),
 			counterOver("Indexing", "empty_months", "",
 				`index_months_total{service_name=~"one_d4(_worker)?",result="empty"}`, burstWindow),
 			counterOver("Indexing", "cached_months", "",
@@ -525,11 +540,13 @@ var serviceRegistry = map[string]serviceEntry{
 			// Converted to milliseconds. A Trends series carries no unit in the payload —
 			// the chart title is the key title-cased, and nothing else on it says what the
 			// numbers are — so the key names the unit and the query has to match it. The
-			// histogram is recorded in microseconds because that is the unit yodel's
-			// standard latency series use, which suits an HTTP request and not an index
-			// run: unconverted, a two-minute run plots as 120000000.
-			"run_duration_avg_ms": tsFixed(`sum(rate(index_run_duration_micros_sum{service_name=~"one_d4(_worker)?",outcome="completed"}[5m]))/sum(rate(index_run_duration_micros_count{service_name=~"one_d4(_worker)?",outcome="completed"}[5m]))/1000`),
-			"motif":               tsCounter(`motif_occurrences_total{service_name=~"one_d4(_worker)?"}`),
+			// counter accumulates microseconds because the stored series do: unconverted,
+			// a two-minute run plots as 120000000.
+			"run_duration_avg_ms": tsMeanScaled(
+				`index_run_duration_micros_total{service_name=~"one_d4(_worker)?",outcome="completed"}`,
+				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="completed"}`,
+				"/1000"),
+			"motif": tsCounter(`motif_occurrences_total{service_name=~"one_d4(_worker)?"}`),
 		},
 	},
 	// The C++ analyze service (#1389 phase 6): aura's standard instruments
@@ -575,10 +592,10 @@ var serviceRegistry = map[string]serviceEntry{
 			probesTile("portrait"),
 			scalar("Render cache", "hit_rate_percent", "%", cacheHitPercent("portrait", "trace")),
 			counter("Render cache", "operations", "", cacheOps("portrait", "trace")),
-			// Windowed averages over RecordDistribution histograms:
-			// rate(sum)/rate(count) = mean per observation in the window.
-			// Requested is every accepted request; rendered is the cache
-			// misses the tracer actually drew.
+			// Windowed means as counter ratios (#1452): per-scene sums over
+			// the trace_scenes denominator, all declared at zero by the
+			// tracer. Requested is every accepted request; rendered is the
+			// cache misses the tracer actually drew.
 			scalar("Scene complexity", "avg_spheres_requested_1h", "spheres", portraitSpheresRequested),
 			scalar("Scene complexity", "avg_spheres_rendered_1h", "spheres", portraitSpheresRendered),
 			scalar("Scene complexity", "avg_lights_requested_1h", "lights", portraitLightsRequested),
@@ -593,10 +610,12 @@ var serviceRegistry = map[string]serviceEntry{
 		CustomTimeseries: map[string]customTimeseriesDef{
 			"cache_hit_rate":          tsFixed(cacheHitPercent("portrait", "trace")),
 			"cache_operations":        tsCounter(cacheOps("portrait", "trace")),
-			"scene_spheres_requested": tsFixed(`sum(rate(scene_sphere_count_sum[5m]))/sum(rate(scene_sphere_count_count[5m]))`),
-			"scene_spheres_rendered":  tsFixed(`sum(rate(scene_sphere_count_sum{cache_hit="false"}[5m]))/sum(rate(scene_sphere_count_count{cache_hit="false"}[5m]))`),
-			"scene_lights_requested":  tsFixed(`sum(rate(scene_light_count_sum[5m]))/sum(rate(scene_light_count_count[5m]))`),
-			"scene_lights_rendered":   tsFixed(`sum(rate(scene_light_count_sum{cache_hit="false"}[5m]))/sum(rate(scene_light_count_count{cache_hit="false"}[5m]))`),
+			"scene_spheres_requested": tsMean(`scene_spheres_total`, `trace_scenes_total`),
+			"scene_spheres_rendered": tsMean(`scene_spheres_total{cache_hit="false"}`,
+				`trace_scenes_total{cache_hit="false"}`),
+			"scene_lights_requested": tsMean(`scene_lights_total`, `trace_scenes_total`),
+			"scene_lights_rendered": tsMean(`scene_lights_total{cache_hit="false"}`,
+				`trace_scenes_total{cache_hit="false"}`),
 		},
 	},
 }

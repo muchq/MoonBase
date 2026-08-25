@@ -103,10 +103,7 @@ int main(int /*argc*/, char** argv) {
       // match: renaming this leaves every test green and every indexing chart
       // Java-only.
       .service_name = "one_d4_worker",
-      .service_version = "1.0.0",
-      // An index run takes minutes and a month holds hundreds of games.
-      // On the SDK defaults both histograms are one overflow bucket.
-      .histogram_bounds = one_d4_worker::WorkerMetrics::HistogramBounds()};
+      .service_version = "1.0.0"};
   futility::otel::OtelProvider otel_provider(otel_config);
   futility::otel::MetricsRecorder recorder("one_d4_worker");
   one_d4_worker::WorkerMetrics metrics(recorder);

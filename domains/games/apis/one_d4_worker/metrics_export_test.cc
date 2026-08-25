@@ -3,9 +3,8 @@
 // metrics_test asserts through CapturingMetricsRecorder, which sees the name
 // the caller passed. The SDK does not always export that name — RecordLatency
 // appends _microseconds — so the double cannot answer what prom_proxy will
-// find, and the registered histogram bounds are keyed on the exported name.
-// This runs WorkerMetrics through the real MetricsRecorder and asks the
-// exporter.
+// find. This runs WorkerMetrics through the real MetricsRecorder and asks
+// the exporter.
 
 #include <chrono>
 #include <memory>
@@ -66,7 +65,7 @@ class MetricsExportTest : public ::testing::Test {
   std::shared_ptr<metrics_sdk::MeterProvider> provider_;
 };
 
-TEST_F(MetricsExportTest, TheRunDurationIsExportedUnderTheNameItsBucketsAreRegisteredFor) {
+TEST_F(MetricsExportTest, TheRunDurationIsExportedUnderTheNameProm_ProxyQueries) {
   futility::otel::MetricsRecorder recorder("one_d4_worker");
   WorkerMetrics metrics(recorder);
   metrics.RunFinished(RunOutcome::kCompleted, absl::Seconds(3));
@@ -74,10 +73,36 @@ TEST_F(MetricsExportTest, TheRunDurationIsExportedUnderTheNameItsBucketsAreRegis
   const std::set<std::string> exported = ExportedNames();
   EXPECT_TRUE(exported.count(kRunDurationMetric) == 1)
       << "the run duration is not exported as " << kRunDurationMetric
-      << ", so HistogramBounds registers buckets for an instrument nobody writes";
+      << "; prom_proxy queries it as " << kRunDurationMetric << "_total";
   EXPECT_TRUE(exported.count(std::string(kRunDurationMetric) + "_microseconds") == 0)
       << "the run duration is exported under a renamed instrument; prom_proxy queries "
-      << kRunDurationMetric << " and the registered buckets key on it";
+      << kRunDurationMetric;
+}
+
+TEST_F(MetricsExportTest, NothingExportsWithAFirstObservationGap) {
+  // This worker is counters only (#1452): a histogram cannot be declared at
+  // zero without biasing the mean its tiles read, so any histogram in the
+  // export is a series that goes dark until its first real observation.
+  futility::otel::MetricsRecorder recorder("one_d4_worker");
+  WorkerMetrics metrics(recorder);
+  metrics.Declare();
+  metrics.RunFinished(RunOutcome::kCompleted, absl::Seconds(3));
+  metrics.MonthFinished("indexed", 12);
+
+  int swept = 0;
+  reader_->Collect([&](metrics_sdk::ResourceMetrics& metrics_data) {
+    for (const auto& scope : metrics_data.scope_metric_data_) {
+      for (const auto& metric : scope.metric_data_) {
+        ++swept;
+        EXPECT_NE(metric.instrument_descriptor.type_, metrics_sdk::InstrumentType::kHistogram)
+            << metric.instrument_descriptor.name_
+            << " is a histogram, which cannot carry a zero baseline (#1384)";
+      }
+    }
+    return true;
+  });
+  // The sweep's own control: an empty export proves nothing.
+  EXPECT_GE(swept, 3);
 }
 
 }  // namespace

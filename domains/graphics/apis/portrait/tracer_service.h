@@ -47,6 +47,13 @@ class TracerService {
       for (const char* error : {"validation_failed", "out_of_memory", "rendering_failed"}) {
         metrics_->DeclareCounter("trace_requests_failed", {{"error", error}});
       }
+      // The scene-complexity family (#1452): sums and their per-scene
+      // denominator, per cache path — see recordSceneComplexity.
+      for (const char* cache_hit : {"true", "false"}) {
+        metrics_->DeclareCounter("scene_spheres", {{"cache_hit", cache_hit}});
+        metrics_->DeclareCounter("scene_lights", {{"cache_hit", cache_hit}});
+        metrics_->DeclareCounter("trace_scenes", {{"cache_hit", cache_hit}});
+      }
     }
   }
   virtual ~TracerService() = default;

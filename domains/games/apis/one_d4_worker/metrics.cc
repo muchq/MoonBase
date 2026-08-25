@@ -30,6 +30,7 @@ void WorkerMetrics::Declare() {
   metrics_.DeclareCounter(kGamesIndexedMetric, Bare());
   for (std::string_view outcome : kRunOutcomes) {
     metrics_.DeclareCounter(kRunsMetric, With("outcome", std::string(outcome)));
+    metrics_.DeclareCounter(kRunDurationMetric, With("outcome", std::string(outcome)));
   }
   for (std::string_view result : kMonthResults) {
     metrics_.DeclareCounter(kMonthsMetric, With("result", std::string(result)));
@@ -93,22 +94,10 @@ void WorkerMetrics::PassFinished(RunOutcome outcome, int games_processed, int ga
   }
 }
 
-std::map<std::string, std::vector<double>> WorkerMetrics::HistogramBounds() {
-  return {
-      {kRunDurationMetric, {std::begin(kRunDurationBounds), std::end(kRunDurationBounds)}},
-      {kGamesPerMonthMetric, {std::begin(kGamesPerMonthBounds), std::end(kGamesPerMonthBounds)}}};
-}
-
 void WorkerMetrics::RunFinished(RunOutcome outcome, absl::Duration elapsed) {
   const Labels labels = With("outcome", std::string(ToString(outcome)));
   metrics_.RecordCounter(kRunsMetric, 1, labels);
-  // RecordDistribution, not RecordLatency: RecordLatency appends
-  // _microseconds to the instrument name, which would export this as
-  // index_run_duration_micros_microseconds — a name the Java worker does
-  // not write and prom_proxy does not query — and hand it the shared HTTP
-  // bucket view, whose top finite bound is ten seconds.
-  metrics_.RecordDistribution(kRunDurationMetric,
-                              static_cast<double>(absl::ToInt64Microseconds(elapsed)), labels);
+  metrics_.RecordCounter(kRunDurationMetric, absl::ToInt64Microseconds(elapsed), labels);
 }
 
 void WorkerMetrics::ArchiveFetched(std::string_view result) {
@@ -117,21 +106,22 @@ void WorkerMetrics::ArchiveFetched(std::string_view result) {
 
 void WorkerMetrics::MonthFinished(std::string_view result, int games) {
   metrics_.RecordCounter(kMonthsMetric, 1, With("result", std::string(result)));
+  // The games-per-month mean is rate(games_indexed)/rate(index_months over
+  // the measured results) (#1452), so which results reach the games counter
+  // below is the mean's numerator contract.
   if (result == "empty") {
     // A decade-long backfill of a three-year player is mostly empty
     // archives, and feeding those zeros in makes the average archive look
-    // a third its real size. The empty months are counted above.
+    // a third its real size. The empty months are counted above, and the
+    // mean's denominator selects the measured results only.
     return;
   }
   if (result == "cached") {
     // Nothing was indexed and no archive was read. Counting the row's
-    // games again here would double every re-run of a range, and feeding
-    // its size into the month distribution would weight a month by how
-    // many times it has been asked for.
+    // games again here would double every re-run of a range.
     return;
   }
   metrics_.RecordCounter(kGamesIndexedMetric, games, Bare());
-  metrics_.RecordDistribution(kGamesPerMonthMetric, games, Bare());
 }
 
 void WorkerMetrics::GameIndexed(const IndexedGame& game) {
