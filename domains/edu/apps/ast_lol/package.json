@@ -1,0 +1,43 @@
+{
+  "name": "ast-lol",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.0.0",
+    "@codemirror/lang-javascript": "^6.0.0",
+    "@codemirror/language": "^6.0.0",
+    "@codemirror/state": "^6.0.0",
+    "@codemirror/view": "^6.0.0",
+    "@lezer/highlight": "^1.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router": "^8.3.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.51.3",
+    "@tailwindcss/vite": "^4.0.0",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/user-event": "^14.0.0",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^6.0.0",
+    "jsdom": "^30.0.1",
+    "marked": "^18.0.10",
+    "marked-gfm-heading-id": "^4.1.4",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.0",
+    "vitest": "^4.0.18"
+  }
+}

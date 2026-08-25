@@ -381,6 +381,34 @@ jobs:
         working-directory: domains/iili/apps/iili_web
         run: npm run build
 
+  # ast_lol uses npm/Vite; always run typecheck, tests, and build on every PR.
+  test-ast-lol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: domains/edu/apps/ast_lol/package-lock.json
+
+      - name: Install dependencies
+        working-directory: domains/edu/apps/ast_lol
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: domains/edu/apps/ast_lol
+        run: npm run typecheck
+
+      - name: Run tests
+        working-directory: domains/edu/apps/ast_lol
+        run: npm test
+
+      - name: Build
+        working-directory: domains/edu/apps/ast_lol
+        run: npm run build
+
   # iOS targets can't build on Ubuntu; run Swift tests on macOS when relevant files change.
   test-ios:
     runs-on: macos-26

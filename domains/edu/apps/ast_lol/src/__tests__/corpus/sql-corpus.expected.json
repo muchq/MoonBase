@@ -1,0 +1,856 @@
+[
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": null,
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": null,
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": [
+      {
+        "expr": {
+          "type": "Column",
+          "table": null,
+          "name": "id"
+        },
+        "alias": null
+      },
+      {
+        "expr": {
+          "type": "Column",
+          "table": null,
+          "name": "name"
+        },
+        "alias": null
+      }
+    ],
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": null,
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": [
+      {
+        "expr": {
+          "type": "Column",
+          "table": null,
+          "name": "name"
+        },
+        "alias": "who"
+      }
+    ],
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": null,
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": [
+      {
+        "expr": {
+          "type": "Column",
+          "table": "u",
+          "name": "name"
+        },
+        "alias": null
+      }
+    ],
+    "from": {
+      "table": "users",
+      "alias": "u"
+    },
+    "joins": [],
+    "where": null,
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": [
+      {
+        "expr": {
+          "type": "Column",
+          "table": "u",
+          "name": "name"
+        },
+        "alias": null
+      }
+    ],
+    "from": {
+      "table": "users",
+      "alias": "u"
+    },
+    "joins": [],
+    "where": null,
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "Binary",
+      "op": "=",
+      "left": {
+        "type": "Column",
+        "table": null,
+        "name": "city"
+      },
+      "right": {
+        "type": "Lit",
+        "value": "seattle"
+      }
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "Binary",
+      "op": "=",
+      "left": {
+        "type": "Column",
+        "table": null,
+        "name": "city"
+      },
+      "right": {
+        "type": "Lit",
+        "value": "o'brien's town"
+      }
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "IsNull",
+      "operand": {
+        "type": "Column",
+        "table": null,
+        "name": "city"
+      },
+      "negated": false
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "IsNull",
+      "operand": {
+        "type": "Column",
+        "table": null,
+        "name": "city"
+      },
+      "negated": true
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "Binary",
+      "op": "AND",
+      "left": {
+        "type": "Not",
+        "operand": {
+          "type": "Binary",
+          "op": "=",
+          "left": {
+            "type": "Column",
+            "table": null,
+            "name": "city"
+          },
+          "right": {
+            "type": "Lit",
+            "value": "boston"
+          }
+        }
+      },
+      "right": {
+        "type": "Binary",
+        "op": ">",
+        "left": {
+          "type": "Column",
+          "table": null,
+          "name": "signup_year"
+        },
+        "right": {
+          "type": "Lit",
+          "value": 2020
+        }
+      }
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "Binary",
+      "op": "OR",
+      "left": {
+        "type": "Binary",
+        "op": "AND",
+        "left": {
+          "type": "Binary",
+          "op": ">",
+          "left": {
+            "type": "Column",
+            "table": null,
+            "name": "signup_year"
+          },
+          "right": {
+            "type": "Lit",
+            "value": 2018
+          }
+        },
+        "right": {
+          "type": "Binary",
+          "op": "=",
+          "left": {
+            "type": "Column",
+            "table": null,
+            "name": "city"
+          },
+          "right": {
+            "type": "Lit",
+            "value": "london"
+          }
+        }
+      },
+      "right": {
+        "type": "IsNull",
+        "operand": {
+          "type": "Column",
+          "table": null,
+          "name": "city"
+        },
+        "negated": false
+      }
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "orders",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "Binary",
+      "op": ">=",
+      "left": {
+        "type": "Binary",
+        "op": "/",
+        "left": {
+          "type": "Column",
+          "table": null,
+          "name": "total"
+        },
+        "right": {
+          "type": "Column",
+          "table": null,
+          "name": "quantity"
+        }
+      },
+      "right": {
+        "type": "Binary",
+        "op": "+",
+        "left": {
+          "type": "Lit",
+          "value": 10
+        },
+        "right": {
+          "type": "Binary",
+          "op": "*",
+          "left": {
+            "type": "Lit",
+            "value": 2
+          },
+          "right": {
+            "type": "Lit",
+            "value": 3
+          }
+        }
+      }
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "orders",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "Binary",
+      "op": "<",
+      "left": {
+        "type": "Unary",
+        "op": "-",
+        "operand": {
+          "type": "Column",
+          "table": null,
+          "name": "total"
+        }
+      },
+      "right": {
+        "type": "Unary",
+        "op": "-",
+        "operand": {
+          "type": "Lit",
+          "value": 100
+        }
+      }
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "orders",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "Binary",
+      "op": "AND",
+      "left": {
+        "type": "Binary",
+        "op": "OR",
+        "left": {
+          "type": "Binary",
+          "op": "=",
+          "left": {
+            "type": "Column",
+            "table": null,
+            "name": "year"
+          },
+          "right": {
+            "type": "Lit",
+            "value": 2024
+          }
+        },
+        "right": {
+          "type": "Binary",
+          "op": "=",
+          "left": {
+            "type": "Column",
+            "table": null,
+            "name": "year"
+          },
+          "right": {
+            "type": "Lit",
+            "value": 2025
+          }
+        }
+      },
+      "right": {
+        "type": "IsNull",
+        "operand": {
+          "type": "Column",
+          "table": null,
+          "name": "total"
+        },
+        "negated": true
+      }
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": [
+      {
+        "expr": {
+          "type": "Binary",
+          "op": "*",
+          "left": {
+            "type": "Column",
+            "table": null,
+            "name": "quantity"
+          },
+          "right": {
+            "type": "Lit",
+            "value": 2
+          }
+        },
+        "alias": "double_qty"
+      }
+    ],
+    "from": {
+      "table": "orders",
+      "alias": null
+    },
+    "joins": [],
+    "where": null,
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": null,
+    "orderBy": [
+      {
+        "expr": {
+          "type": "Column",
+          "table": null,
+          "name": "name"
+        },
+        "dir": "ASC"
+      }
+    ],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": null,
+    "orderBy": [
+      {
+        "expr": {
+          "type": "Column",
+          "table": null,
+          "name": "signup_year"
+        },
+        "dir": "DESC"
+      },
+      {
+        "expr": {
+          "type": "Column",
+          "table": null,
+          "name": "name"
+        },
+        "dir": "ASC"
+      }
+    ],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": null,
+    "orderBy": [],
+    "limit": 3
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": null,
+    "orderBy": [
+      {
+        "expr": {
+          "type": "Column",
+          "table": null,
+          "name": "id"
+        },
+        "dir": "DESC"
+      }
+    ],
+    "limit": 1
+  },
+  {
+    "type": "Select",
+    "columns": [
+      {
+        "expr": {
+          "type": "Column",
+          "table": "u",
+          "name": "name"
+        },
+        "alias": null
+      },
+      {
+        "expr": {
+          "type": "Column",
+          "table": "o",
+          "name": "total"
+        },
+        "alias": null
+      }
+    ],
+    "from": {
+      "table": "users",
+      "alias": "u"
+    },
+    "joins": [
+      {
+        "table": "orders",
+        "alias": "o",
+        "on": {
+          "type": "Binary",
+          "op": "=",
+          "left": {
+            "type": "Column",
+            "table": "u",
+            "name": "id"
+          },
+          "right": {
+            "type": "Column",
+            "table": "o",
+            "name": "user_id"
+          }
+        }
+      }
+    ],
+    "where": null,
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": [
+      {
+        "expr": {
+          "type": "Column",
+          "table": "u",
+          "name": "name"
+        },
+        "alias": null
+      }
+    ],
+    "from": {
+      "table": "users",
+      "alias": "u"
+    },
+    "joins": [
+      {
+        "table": "orders",
+        "alias": "o",
+        "on": {
+          "type": "Binary",
+          "op": "=",
+          "left": {
+            "type": "Column",
+            "table": "u",
+            "name": "id"
+          },
+          "right": {
+            "type": "Column",
+            "table": "o",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "table": "products",
+        "alias": "p",
+        "on": {
+          "type": "Binary",
+          "op": "=",
+          "left": {
+            "type": "Column",
+            "table": "o",
+            "name": "product_id"
+          },
+          "right": {
+            "type": "Column",
+            "table": "p",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "where": {
+      "type": "Binary",
+      "op": "=",
+      "left": {
+        "type": "Column",
+        "table": "p",
+        "name": "category"
+      },
+      "right": {
+        "type": "Lit",
+        "value": "hardware"
+      }
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": [
+      {
+        "expr": {
+          "type": "Column",
+          "table": "u",
+          "name": "name"
+        },
+        "alias": null
+      }
+    ],
+    "from": {
+      "table": "users",
+      "alias": "u"
+    },
+    "joins": [
+      {
+        "table": "orders",
+        "alias": "o",
+        "on": {
+          "type": "Binary",
+          "op": "AND",
+          "left": {
+            "type": "Binary",
+            "op": "=",
+            "left": {
+              "type": "Column",
+              "table": "u",
+              "name": "id"
+            },
+            "right": {
+              "type": "Column",
+              "table": "o",
+              "name": "user_id"
+            }
+          },
+          "right": {
+            "type": "Binary",
+            "op": ">=",
+            "left": {
+              "type": "Column",
+              "table": "o",
+              "name": "year"
+            },
+            "right": {
+              "type": "Lit",
+              "value": 2024
+            }
+          }
+        }
+      }
+    ],
+    "where": null,
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": [
+      {
+        "expr": {
+          "type": "Column",
+          "table": null,
+          "name": "name"
+        },
+        "alias": null
+      }
+    ],
+    "from": {
+      "table": "users",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "Binary",
+      "op": "=",
+      "left": {
+        "type": "Column",
+        "table": null,
+        "name": "id"
+      },
+      "right": {
+        "type": "Lit",
+        "value": 1
+      }
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "orders",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "Binary",
+      "op": "=",
+      "left": {
+        "type": "Column",
+        "table": null,
+        "name": "total"
+      },
+      "right": {
+        "type": "Lit",
+        "value": null
+      }
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "orders",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "Lit",
+      "value": true
+    },
+    "orderBy": [],
+    "limit": null
+  },
+  {
+    "type": "Select",
+    "columns": "*",
+    "from": {
+      "table": "orders",
+      "alias": null
+    },
+    "joins": [],
+    "where": {
+      "type": "Binary",
+      "op": "AND",
+      "left": {
+        "type": "Binary",
+        "op": "AND",
+        "left": {
+          "type": "Binary",
+          "op": "<>",
+          "left": {
+            "type": "Column",
+            "table": null,
+            "name": "quantity"
+          },
+          "right": {
+            "type": "Lit",
+            "value": 3
+          }
+        },
+        "right": {
+          "type": "Binary",
+          "op": "<=",
+          "left": {
+            "type": "Column",
+            "table": null,
+            "name": "quantity"
+          },
+          "right": {
+            "type": "Lit",
+            "value": 20
+          }
+        }
+      },
+      "right": {
+        "type": "Binary",
+        "op": ">=",
+        "left": {
+          "type": "Column",
+          "table": null,
+          "name": "quantity"
+        },
+        "right": {
+          "type": "Lit",
+          "value": 1
+        }
+      }
+    },
+    "orderBy": [],
+    "limit": null
+  }
+]

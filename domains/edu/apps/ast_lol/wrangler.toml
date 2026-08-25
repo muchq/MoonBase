@@ -1,0 +1,17 @@
+name = "ast-lol"
+main = "worker/index.js"
+# @cloudflare/vite-plugin's dev/preview runner reaches the worker over RPC,
+# which workerd only enables from this date on. The worker itself just proxies
+# to env.ASSETS, so none of the behaviour gated behind the bump applies to it.
+compatibility_date = "2024-04-03"
+
+# Domain: ast.lol
+# routes = [{ pattern = "ast.lol", zone_name = "ast.lol" }]
+
+[assets]
+directory = "dist/client"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# Default html_handling would 307 paths that shadow real files; let every
+# non-asset path fall through to the single-page-application fallback instead.
+html_handling = "none"
