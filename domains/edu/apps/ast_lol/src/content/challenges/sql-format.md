@@ -32,4 +32,4 @@ Exact match against the reference formatter across a battery of queries and widt
 - Build `flat()` first and get the canonical-style tests green before touching layout — layout bugs on top of rendering bugs are unreadable.
 - The two helpers that carry the whole thing: `list(head, items)` and `predicate(head, expr)`, each doing its own fits-inline check against `width`.
 - Chain splitting flattens only the *same* operator as the root, left-associated: `chainOf(expr, expr.op)`. Splitting mixed operators changes meaning.
-- Add custom tests with your own queries at several widths — watching one query pass through 300 → 60 → 28 is the fastest way to internalize the cascade.
+- Add custom tests with your own queries at several widths — watching one query pass through 300 → 60 → 28 is the fastest way to internalize the cascade. When a width breaks your layout, keep that query-and-width pair as a test: layout regressions love to come back while you fix the next clause.

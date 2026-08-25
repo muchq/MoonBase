@@ -19,5 +19,5 @@ Eight queries. Seven are budgeted below their naive cost: the classic two-sided 
 
 - **Equivalence failures**: the message names the database and the first differing row path. Wrong rows after pushdown almost always mean a cross-side conjunct moved; test q4 exists for exactly this.
 - **Budget failures** print your plan's per-operator bill. Read it like a profiler — one Join dwarfing everything means its inputs are unfiltered (pushdown not reaching) or unpruned (wide rows).
-- Add your own queries as custom tests — anything against the shop catalog gets budgeted against the reference optimizer automatically.
+- Add your own queries as custom tests — anything against the shop catalog gets budgeted against the reference optimizer automatically. A query that once broke your optimizer is the most valuable test you own: pin it, and it stays fixed while you tune the next rewrite.
 - Timeout is 10s; if you hit it, look for a rewrite loop that re-wraps the same Filter forever.

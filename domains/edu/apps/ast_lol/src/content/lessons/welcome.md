@@ -28,8 +28,10 @@ Every challenge gives you a function contract and a bank of named tests. Your co
 - `console.log` output is captured **per test**;
 - runtime errors are mapped back to **line numbers in your code**;
 - tests carry **hints** written against the classic mistakes;
-- you can **add your own test cases**: type an input, and the reference solution computes the expected answer for it.
+- you can **add your own test cases**: type an input, and the reference solution computes the expected answer for it. They are saved with the challenge and re-run on every submission.
 
 Solutions are plain JavaScript, checked as you submit. A "reveal solution" button exists on every challenge — the reference implementations are meant to be read, ideally after your own attempt goes green.
 
 If you get stuck: read the failing test's name and hint first, then `console.log` the structure you are building. Tree bugs are almost always visible in the first place the shapes diverge.
+
+One habit to carry through the whole course: when an input catches a bug, don't discard it after the fix — add it as a custom test. A fixed bug with a test on it stays fixed while you rework everything around it; the industry calls this the **Beyoncé rule** — *if you liked it, you should have put a test on it.*

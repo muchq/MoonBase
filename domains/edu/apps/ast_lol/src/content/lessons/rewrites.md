@@ -10,7 +10,7 @@ The parser used precedence to decide where invisible parentheses go; the printer
 
 So `Add(1, Mul(2,3))` prints `1 + 2 * 3` (child tighter: bare), but `Mul(Add(1,2), 3)` prints `(1 + 2) * 3` (child looser: wrapped). The equal-precedence half is where the interesting cases live: `Sub(1, Sub(2,3))` must print `1 - (2 - 3)`, because bare `1 - 2 - 3` reparses left-leaning. For right-associative `^`, the same rule mirrors: parens on the *left* at equal precedence.
 
-The grader for the printer challenge exploits the contract directly: when your string is wrong, it reparses your output and shows you **which tree your text actually encodes**. That is the round-trip property used as a debugging tool — worth internalizing, because "print, reparse, compare" is also how you test real printers.
+The grader for the printer challenge exploits the contract directly: when your string is wrong, it reparses your output and shows you **which tree your text actually encodes**. That is the round-trip property used as a debugging tool — worth internalizing, because "print, reparse, compare" is also how you test real printers. And when a paren case surprises you, add it as a custom test before you fix it: the failing input *is* the specification of the bug, and keeping it in the bank is what makes the fix permanent.
 
 ## Folding, bottom-up
 
