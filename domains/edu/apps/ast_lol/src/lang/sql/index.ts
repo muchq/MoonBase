@@ -16,3 +16,4 @@ export {
   optimizePlan,
 } from './optimize';
 export { shopCatalog, demoDb, benchDb } from './db';
+export { printSqlExpr, formatSelectFlat, formatSelect } from './format';

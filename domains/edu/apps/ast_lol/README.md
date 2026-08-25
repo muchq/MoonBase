@@ -8,18 +8,23 @@ grader runs the user's JavaScript in a browser Web Worker; nothing is uploaded.
 
 ## Shape of the thing
 
-- **Curriculum** (`src/curriculum/`) — 6 tiers, 13 lessons, 16 challenges.
+- **Curriculum** (`src/curriculum/`) — 7 tiers, 14 lessons, 18 challenges.
   Tiers 1–2 build a toy expression language (tokenize → parse → evaluate →
   traverse → print → fold); tiers 3–5 build AstQL, the course's SQL subset
   (tokenize → Pratt-parse → resolve → plan → execute → optimize), ending in a
-  capstone optimizer graded on result equivalence *and* a cost budget.
+  capstone optimizer graded on result equivalence *and* a cost budget. Tier 6
+  is a **parallel capstone track** needing only Tier 3: a width-aware SQL
+  formatter in the Prettier tradition, graded on exact canonical output with
+  failures diagnosed by reparsing the learner's text.
   Each challenge carries a test bank with per-test debugging hints, a starter,
   and a reference solution that doubles as the grading oracle.
 - **Reference implementations** (`src/lang/`) — the TypeScript
   implementations of both languages. Challenge test banks build their inputs
   and pinned expectations from these, so the curriculum cannot drift from the
   library that grades it. `sql/execute.ts` carries the instrumented cost model
-  (cells entering each operator) the optimizer tier is budgeted against.
+  (cells entering each operator) the optimizer tier is budgeted against, and
+  `sql/format.ts` the canonical formatter the formatter track is graded
+  against.
 - **Grader** (`src/grader/`) — a pure synchronous harness (`harness.ts`) that
   runs both under vitest and inside a module Web Worker (`worker.ts`), with a
   main-thread client (`client.ts`) enforcing time budgets by worker
@@ -45,7 +50,7 @@ npm run dev        # Vite dev server with Cloudflare Workers runtime
 ## Test & typecheck
 
 ```bash
-npm test           # Vitest (259 tests)
+npm test           # Vitest (298 tests)
 npm run typecheck  # tsc --noEmit
 ```
 

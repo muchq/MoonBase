@@ -43,8 +43,9 @@ export default function HomeView() {
         <h2>Abstract syntax trees, for working programmers</h2>
         <p>
           Parse, transform, and optimize — from arithmetic expressions to SQL query plans, with an
-          auto-grader that runs entirely in your browser. Sixteen challenges build on each other
-          toward a working query optimizer with a real cost model. No compiler background assumed.
+          auto-grader that runs entirely in your browser. Eighteen challenges build on each other
+          toward two capstones: a query optimizer with a real cost model, and a width-aware code
+          formatter. No compiler background assumed.
         </p>
         {firstOpen !== undefined && (
           <Link className="step-card" to={stepPath(firstOpen)} style={{ maxWidth: '24rem' }}>
