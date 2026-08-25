@@ -202,11 +202,16 @@ func (d customScalarDef) UnitFor(view MetricView) string {
 // counter-derived one sets Counter instead: the bare selector, wrapped into
 // two panels rather than one whose meaning depends on ?view= — see the
 // request_rate/request_count comment on standardTimeseriesQueries for why.
-// The map key is the panel's base name; panels() appends _rate/_count to it,
-// so a toggleable entry never has to spell either suffix twice.
+// A counter-ratio mean sets MeanNumerator/MeanDenominator instead of Query,
+// so its rate() window can track the chart's step the way the standard
+// latency charts do. The map key is the panel's base name; panels() appends
+// _rate/_count to it, so a toggleable entry never has to spell either suffix
+// twice.
 type customTimeseriesDef struct {
-	Query   string
-	Counter string
+	Query           string
+	Counter         string
+	MeanNumerator   string
+	MeanDenominator string
 }
 
 func (d customTimeseriesDef) toggleable() bool { return d.Counter != "" }
@@ -216,8 +221,16 @@ func (d customTimeseriesDef) toggleable() bool { return d.Counter != "" }
 // counter-derived one. step is the chart's own bucket width, the same
 // per-point windowing request_count uses and for the same reason: increase()
 // over a fixed window wider than the gap between points would make adjacent
-// buckets overlap and double-count.
+// buckets overlap and double-count. A mean chart windows by latencyWindow
+// like avg_duration_us, and for the same reason: a fixed 5m rate() inside a
+// 7d chart's 1h step reads five minutes of every hour and draws zero for the
+// other fifty-five.
 func (d customTimeseriesDef) panels(key, step string) map[string]string {
+	if d.MeanNumerator != "" {
+		w := latencyWindow(step)
+		return map[string]string{key: fmt.Sprintf("sum(rate(%s[%s]))/sum(rate(%s[%s]))",
+			d.MeanNumerator, w, d.MeanDenominator, w)}
+	}
 	if !d.toggleable() {
 		return map[string]string{key: d.Query}
 	}
@@ -236,6 +249,13 @@ func tsCounter(selector string) customTimeseriesDef {
 // tsFixed declares a Trends chart with one form and no toggle.
 func tsFixed(query string) customTimeseriesDef {
 	return customTimeseriesDef{Query: query}
+}
+
+// tsMean declares a fixed-form windowed-mean chart over two counters the
+// emitter declares at zero (#1384): rate(numerator)/rate(denominator), both
+// over latencyWindow(step).
+func tsMean(numerator, denominator string) customTimeseriesDef {
+	return customTimeseriesDef{MeanNumerator: numerator, MeanDenominator: denominator}
 }
 
 // expandCustomTimeseries flattens a service's Trends descriptors into the
@@ -327,8 +347,10 @@ var serviceRegistry = map[string]serviceEntry{
 			// never labels by room, player, or text. catch_up_rows_avg is rows
 			// per drain — how far behind a wake found an instance (the lag
 			// signal) — computed from two counters the hub declares at zero
-			// (#1384): the delivered rows over the drains that delivered them.
-			// A mean rather than a count, so it has no rate form.
+			// (#1384): the delivered rows over every drain, empty drains
+			// included. The zero-row drains are in the denominator on purpose;
+			// dropping them would inflate the average exactly when the hub is
+			// keeping up. A mean rather than a count, so it has no rate form.
 			counter("Chat", "messages", "", `chat_appends_total{result="stored"}`),
 			counter("Chat", "delivered_rows", "rows", `chat_rows_delivered_total`),
 			scalar("Chat", "catch_up_rows_avg_5m", "rows",
@@ -359,7 +381,7 @@ var serviceRegistry = map[string]serviceEntry{
 			"chat_message":       tsCounter(`chat_appends_total{result="stored"}`),
 			"chat_delivery":      tsCounter(`chat_rows_delivered_total`),
 			"chat_failure":       tsCounter(`chat_failures_total`),
-			"chat_catch_up_rows": tsFixed(`sum(rate(chat_rows_delivered_total[5m]))/sum(rate(chat_catch_up_drains_total[5m]))`),
+			"chat_catch_up_rows": tsMean(`chat_rows_delivered_total`, `chat_catch_up_drains_total`),
 		},
 	},
 	"microgpt-serve": {
@@ -387,7 +409,7 @@ var serviceRegistry = map[string]serviceEntry{
 		// old key (grep confirms this is the only place it appeared).
 		CustomTimeseries: map[string]customTimeseriesDef{
 			"tokens":          tsCounter(`microgpt_tokens_generated_total`),
-			"avg_duration_ms": tsFixed(`sum(rate(microgpt_inference_ms_total[5m]))/sum(rate(microgpt_requests_total[5m]))`),
+			"avg_duration_ms": tsMean(`microgpt_inference_ms_total`, `microgpt_requests_total`),
 		},
 	},
 	// The Java services (#1212): yodel's standard instruments, plus the

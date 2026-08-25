@@ -124,46 +124,48 @@ mod tests {
             .expect("nothing was exported")
     }
 
-    /// `name{endpoint="..."}` and its value, for EVERY counter series the
-    /// export carries — u64 and f64 sums alike, not a lookup by name. Sweeping
-    /// the whole export is what makes an unexpected series fail: a by-name
-    /// reader can only check the instruments the test already thought to ask
-    /// about, so a counter added with no entry in `declare()` would slip past
-    /// it exactly the way this whole change exists to prevent.
+    /// `name{k="v",...}` (every attribute, sorted) and its value, for EVERY
+    /// counter series the export carries — u64, i64, and f64 sums alike, not
+    /// a lookup by name. Sweeping the whole export with full label sets is
+    /// what makes an unexpected series fail: a by-name reader can only check
+    /// the instruments the test already thought to ask about, so a counter —
+    /// or a label — added with no entry in `declare()` would slip past it
+    /// exactly the way this whole change exists to prevent.
     ///
     /// A series missing entirely simply does not appear — the SDK exports
     /// nothing for an instrument that has taken no measurement, which is the
     /// bug being pinned.
     fn counter_series(rm: &ResourceMetrics) -> Vec<(String, f64)> {
+        fn label<'a>(
+            name: &str,
+            attrs: impl Iterator<Item = &'a opentelemetry::KeyValue>,
+        ) -> String {
+            let mut pairs: Vec<String> = attrs
+                .map(|kv| format!("{}=\"{}\"", kv.key, kv.value))
+                .collect();
+            if pairs.is_empty() {
+                return name.to_string();
+            }
+            pairs.sort();
+            format!("{}{{{}}}", name, pairs.join(","))
+        }
         let mut out = vec![];
         for scope in rm.scope_metrics() {
             for metric in scope.metrics() {
-                let mut push = |attrs: Vec<(String, String)>, value: f64| {
-                    let label = match attrs.iter().find(|(key, _)| key == "endpoint") {
-                        Some((_, endpoint)) => {
-                            format!("{}{{endpoint=\"{}\"}}", metric.name(), endpoint)
-                        }
-                        None => metric.name().to_string(),
-                    };
-                    out.push((label, value));
-                };
                 match metric.data() {
                     AggregatedMetrics::U64(MetricData::Sum(sum)) => {
                         for dp in sum.data_points() {
-                            let attrs = dp
-                                .attributes()
-                                .map(|kv| (kv.key.to_string(), kv.value.to_string()))
-                                .collect();
-                            push(attrs, dp.value() as f64);
+                            out.push((label(metric.name(), dp.attributes()), dp.value() as f64));
+                        }
+                    }
+                    AggregatedMetrics::I64(MetricData::Sum(sum)) => {
+                        for dp in sum.data_points() {
+                            out.push((label(metric.name(), dp.attributes()), dp.value() as f64));
                         }
                     }
                     AggregatedMetrics::F64(MetricData::Sum(sum)) => {
                         for dp in sum.data_points() {
-                            let attrs = dp
-                                .attributes()
-                                .map(|kv| (kv.key.to_string(), kv.value.to_string()))
-                                .collect();
-                            push(attrs, dp.value());
+                            out.push((label(metric.name(), dp.attributes()), dp.value()));
                         }
                     }
                     _ => {}
@@ -179,7 +181,10 @@ mod tests {
     fn expected(count: f64, generate_ms: f64, chat_ms: f64) -> Vec<(String, f64)> {
         let mut out = vec![
             ("microgpt_conversations".to_string(), count),
-            (r#"microgpt_inference_ms{endpoint="chat"}"#.to_string(), chat_ms),
+            (
+                r#"microgpt_inference_ms{endpoint="chat"}"#.to_string(),
+                chat_ms,
+            ),
             (
                 r#"microgpt_inference_ms{endpoint="generate"}"#.to_string(),
                 generate_ms,
@@ -227,35 +232,64 @@ mod tests {
 
         // One request each, one token each, one conversation, and each
         // endpoint's milliseconds — every series lands on a declared name.
-        assert_eq!(
-            counter_series(&exported(&rig)),
-            expected(1.0, 100.0, 50.0)
-        );
+        assert_eq!(counter_series(&exported(&rig)), expected(1.0, 100.0, 50.0));
     }
 
-    /// The whole rail is counters (#1384): a histogram cannot be declared at
-    /// zero — record(0.0) is an observation that biases rate(_sum)/rate(_count)
-    /// — so nothing here may export one. The two counter tests above are this
-    /// test's positive control: the export is provably non-empty, so an empty
-    /// histogram list means "none exist", not "nothing was read".
+    /// AppMetrics is sums only (#1384): a histogram cannot be declared at
+    /// zero — record(0.0) is an observation that biases rate(_sum)/rate(_count).
+    /// Scope: this rig's isolated provider sees only AppMetrics' meter;
+    /// server_pal's standard http_server duration histogram lives on the
+    /// global provider and is out of frame, deliberately.
     #[test]
     fn nothing_exports_with_a_first_observation_gap() {
         let rig = rig();
         rig.metrics.record_generate(1, 100.0);
         rig.metrics.record_chat(1, 50.0);
         let rm = exported(&rig);
+        // Self-carried positive control: an export that swept nothing proves
+        // nothing.
+        let mut swept = 0;
         for scope in rm.scope_metrics() {
             for metric in scope.metrics() {
+                swept += 1;
                 assert!(
                     matches!(
                         metric.data(),
                         AggregatedMetrics::U64(MetricData::Sum(_))
+                            | AggregatedMetrics::I64(MetricData::Sum(_))
                             | AggregatedMetrics::F64(MetricData::Sum(_))
                     ),
-                    "{} exports a non-counter aggregation, which cannot carry a zero baseline",
+                    "{}: this rail declares sums only; anything else needs an \
+                     explicit decision about its zero baseline (#1384)",
                     metric.name()
                 );
             }
         }
+        assert!(swept >= 4, "swept only {swept} instruments");
+    }
+
+    /// No instrument declares a unit (#1294): the collector's Prometheus
+    /// exporter folds a non-empty unit into the metric *name* —
+    /// microgpt_inference_ms would become microgpt_inference_ms_milliseconds —
+    /// and prom_proxy selects by literal name, so the tile reads zero forever
+    /// with nothing erroring anywhere. The old duration histogram declared
+    /// "ms" and its dashboard tile was dead for exactly this reason.
+    #[test]
+    fn no_instrument_declares_a_unit() {
+        let rig = rig();
+        let rm = exported(&rig);
+        let mut swept = 0;
+        for scope in rm.scope_metrics() {
+            for metric in scope.metrics() {
+                swept += 1;
+                assert_eq!(
+                    metric.unit(),
+                    "",
+                    "{} declares a unit; the collector folds it into the name (#1294)",
+                    metric.name()
+                );
+            }
+        }
+        assert!(swept >= 4, "swept only {swept} instruments");
     }
 }

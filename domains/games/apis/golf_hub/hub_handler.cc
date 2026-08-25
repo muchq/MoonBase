@@ -536,7 +536,7 @@ void HubHandler::CatchUpRoom(const std::string& room_id, bool project_always) {
   Deliver(outbox);
 }
 
-void HubHandler::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
+bool HubHandler::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
   // The flush means this read can never be older than our own truth;
   // holding mu_ across it means nothing local moves in between. The
   // writer thread needs no lock we hold, so it drains freely. Join uses
@@ -546,9 +546,10 @@ void HubHandler::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
   if (!rows.ok()) {
     // A missed wake is fine by protocol: the next read heals.
     LOG(WARNING) << "room " << room_id << " refresh failed: " << rows.status();
-    return;
+    return false;
   }
   ReconcileRoomLocked(room_id, *rows, outbox, /*project_always=*/true);
+  return true;
 }
 
 bool HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
@@ -892,12 +893,18 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
     Outbox outbox;
     Writes writes;
     bool joined = false;
+    // The store answering "no such room" is the client's problem; the store
+    // not answering is ours, and the two must not share a rejection kind — a
+    // storage outage otherwise reads as a spike of desynced clients.
+    bool store_answered = true;
     {
       const std::lock_guard<std::mutex> lock(mu_);
       if (!player_room_.contains(player_id)) {
         // The room may live on another instance (#1194 step 3): one
         // synchronous read materializes it here before refusing.
-        if (!rooms_.contains(join->roomId)) RefreshRoomLocked(join->roomId, outbox);
+        if (!rooms_.contains(join->roomId)) {
+          store_answered = RefreshRoomLocked(join->roomId, outbox);
+        }
         const auto room = rooms_.find(join->roomId);
         if (room != rooms_.end()) {
           const auto [member, inserted] = room->second.members.emplace(player_id, Member{});
@@ -917,7 +924,8 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
       // history and live delivery, which the model declares legal.
       SendChatHistory(join->roomId, player_id);
     } else {
-      Reject(player_id, RejectKind::kState, "room unavailable or already in a room");
+      Reject(player_id, store_answered ? RejectKind::kState : RejectKind::kUnavailable,
+             "room unavailable or already in a room");
     }
     return;
   }
@@ -1133,17 +1141,14 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
 
 void HubHandler::CreateGameMove(const std::string& player_id) {
   Outbox outbox;
-  std::string reason;
-  // Most refusals in these flows are the world being in the wrong shape for
-  // the command; the branches that mean something else re-set this.
-  RejectKind kind = RejectKind::kState;
+  std::optional<Refusal> refusal;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     Room* room = FindRoomLocked(player_id);
     if (room == nullptr) {
-      reason = "not in a room";
+      refusal = Refusal{RejectKind::kState, "not in a room"};
     } else if (player_game_.contains(player_id)) {
-      reason = "leave your current game first";
+      refusal = Refusal{RejectKind::kState, "leave your current game first"};
     } else {
       const std::string room_id = player_room_.at(player_id);
       for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
@@ -1162,8 +1167,7 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
         }
         if (commit == Commit::kUnavailable) {
           room->games.erase(game_id);
-          kind = RejectKind::kUnavailable;
-          reason = "storage unavailable; try again";
+          refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
           break;
         }
         player_game_[player_id] = game_id;
@@ -1180,14 +1184,13 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
         StageRoomStateLocked(room_id, outbox);
         break;
       }
-      if (reason.empty() && !player_game_.contains(player_id)) {
-        kind = RejectKind::kUnavailable;
-        reason = "could not allocate a game code; try again";
+      if (!refusal.has_value() && !player_game_.contains(player_id)) {
+        refusal = Refusal{RejectKind::kUnavailable, "could not allocate a game code; try again"};
       }
     }
   }
-  if (!reason.empty()) {
-    Reject(player_id, kind, std::move(reason));
+  if (refusal.has_value()) {
+    Reject(player_id, std::move(*refusal));
   } else {
     Deliver(outbox);
   }
@@ -1199,33 +1202,37 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
     return;
   }
   Outbox outbox;
-  std::string reason;
-  RejectKind kind = RejectKind::kState;
+  std::optional<Refusal> refusal;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     Room* room = FindRoomLocked(player_id);
     if (room == nullptr) {
-      reason = "not in a room";
+      refusal = Refusal{RejectKind::kState, "not in a room"};
     } else if (player_game_.contains(player_id)) {
-      reason = "leave your current game first";
+      refusal = Refusal{RejectKind::kState, "leave your current game first"};
     } else {
       const std::string room_id = player_room_.at(player_id);
+      bool store_answered = true;
       if (!room->games.contains(game_id)) {
         // Another instance may have created it since our last wake.
-        RefreshRoomLocked(room_id, outbox);
+        store_answered = RefreshRoomLocked(room_id, outbox);
         room = FindRoomLocked(player_id);  // the refresh can drop us or the room
       }
       if (room == nullptr || !room->games.contains(game_id)) {
-        reason = "game not found";
+        // An unanswered refresh is an outage, not a missing game — see
+        // RefreshRoomLocked. The commit path below reports its own outages.
+        refusal = store_answered
+                      ? Refusal{RejectKind::kState, "game not found"}
+                      : Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
       } else {
         for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
           GameEntry& entry = room->games.at(game_id);
           if (entry.started()) {
-            reason = "game already started";
+            refusal = Refusal{RejectKind::kState, "game already started"};
             break;
           }
           if (entry.roster.size() >= kMaxSeats) {
-            reason = "game is full";
+            refusal = Refusal{RejectKind::kState, "game is full"};
             break;
           }
           std::vector<std::string> roster = entry.roster;
@@ -1235,12 +1242,11 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
           if (commit == Commit::kRebased) continue;
           if (commit == Commit::kGone) {
             room->games.erase(game_id);
-            reason = "game not found";
+            refusal = Refusal{RejectKind::kState, "game not found"};
             break;
           }
           if (commit == Commit::kUnavailable) {
-            kind = RejectKind::kUnavailable;
-            reason = "storage unavailable; try again";
+            refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
             break;
           }
           player_game_[player_id] = game_id;
@@ -1257,14 +1263,14 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
           StageRoomStateLocked(room_id, outbox);
           break;
         }
-        if (reason.empty() && !player_game_.contains(player_id)) {
-          reason = "game changed; try again";
+        if (!refusal.has_value() && !player_game_.contains(player_id)) {
+          refusal = Refusal{RejectKind::kState, "game changed; try again"};
         }
       }
     }
   }
-  if (!reason.empty()) {
-    Reject(player_id, kind, std::move(reason));
+  if (refusal.has_value()) {
+    Reject(player_id, std::move(*refusal));
   } else {
     Deliver(outbox);
   }
@@ -1272,30 +1278,28 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
 
 void HubHandler::StartGameMove(const std::string& player_id) {
   Outbox outbox;
-  std::string reason;
-  RejectKind kind = RejectKind::kState;
+  std::optional<Refusal> refusal;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     auto ref = FindGameLocked(player_id);
     if (!ref.has_value()) {
-      reason = "not in a game";
+      refusal = Refusal{RejectKind::kState, "not in a game"};
     } else {
       bool started = false;
-      for (int attempt = 0; attempt < kMaxCommitAttempts && reason.empty(); ++attempt) {
+      for (int attempt = 0; attempt < kMaxCommitAttempts && !refusal.has_value(); ++attempt) {
         if (ref->entry->started()) {
-          reason = "game already started";
+          refusal = Refusal{RejectKind::kState, "game already started"};
           break;
         }
         if (ref->entry->roster.size() < 2) {
-          reason = "need at least 2 players to start";
+          refusal = Refusal{RejectKind::kState, "need at least 2 players to start"};
           break;
         }
         std::deque<cards::Card> deck = dealer_->DealNewUnshuffledDeck();
         dealer_->ShuffleDeck(deck);
         auto dealt = golf::dealGolfGame(ref->game_id, ref->entry->roster, std::move(deck));
         if (!dealt.ok()) {
-          kind = RejectKind::kRules;
-          reason = std::string(dealt.status().message());
+          refusal = Refusal{RejectKind::kRules, std::string(dealt.status().message())};
           break;
         }
         const Commit commit = CommitEntryLocked(ref->room_id, ref->game_id, *ref->entry,
@@ -1304,12 +1308,11 @@ void HubHandler::StartGameMove(const std::string& player_id) {
         if (commit == Commit::kGone) {
           DropGameLocked(*ref);
           StageRoomStateLocked(ref->room_id, outbox);
-          reason = "game no longer exists";
+          refusal = Refusal{RejectKind::kState, "game no longer exists"};
           break;
         }
         if (commit == Commit::kUnavailable) {
-          kind = RejectKind::kUnavailable;
-          reason = "storage unavailable; try again";
+          refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
           break;
         }
         started = true;
@@ -1321,11 +1324,13 @@ void HubHandler::StartGameMove(const std::string& player_id) {
         StageRoomStateLocked(ref->room_id, outbox);
         break;
       }
-      if (reason.empty() && !started) reason = "game changed; try again";
+      if (!refusal.has_value() && !started) {
+        refusal = Refusal{RejectKind::kState, "game changed; try again"};
+      }
     }
   }
-  if (!reason.empty()) {
-    Reject(player_id, kind, std::move(reason));
+  if (refusal.has_value()) {
+    Reject(player_id, std::move(*refusal));
   } else {
     Deliver(outbox);
   }
@@ -1334,32 +1339,30 @@ void HubHandler::StartGameMove(const std::string& player_id) {
 void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects) {
   Outbox outbox;
   Writes writes;
-  std::string reason;
-  RejectKind kind = RejectKind::kState;
+  std::optional<Refusal> refusal;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     auto ref = FindGameLocked(player_id);
     if (!ref.has_value()) {
-      reason = "not in a game";
+      refusal = Refusal{RejectKind::kState, "not in a game"};
     } else if (!ref->entry->started()) {
-      reason = "game not started";
+      refusal = Refusal{RejectKind::kState, "game not started"};
     } else {
       bool landed = false;
       // The issue's move loop: pure transition off the entry, then the
       // conditional commit; a miss adopts the stored truth and replays
       // the transition against it.
-      for (int attempt = 0; attempt < kMaxCommitAttempts && reason.empty(); ++attempt) {
+      for (int attempt = 0; attempt < kMaxCommitAttempts && !refusal.has_value(); ++attempt) {
         const golf::GameState& state = *ref->entry->state;
         const int seat = state.playerIndex(player_id);
         if (seat < 0) {
-          reason = "not seated in this game";
+          refusal = Refusal{RejectKind::kState, "not seated in this game"};
           break;
         }
         auto next = move(state, seat);
         if (!next.ok()) {
           // The engine said no: a rules refusal, not a desync.
-          kind = RejectKind::kRules;
-          reason = std::string(next.status().message());
+          refusal = Refusal{RejectKind::kRules, std::string(next.status().message())};
           break;
         }
         const bool was_countdown = state.revealCountdownActive();
@@ -1377,12 +1380,11 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
         if (commit == Commit::kGone) {
           DropGameLocked(*ref);
           StageRoomStateLocked(ref->room_id, outbox);
-          reason = "game no longer exists";
+          refusal = Refusal{RejectKind::kState, "game no longer exists"};
           break;
         }
         if (commit == Commit::kUnavailable) {
-          kind = RejectKind::kUnavailable;
-          reason = "storage unavailable; try again";
+          refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
           break;
         }
         landed = true;
@@ -1422,12 +1424,14 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
         }
         break;
       }
-      if (reason.empty() && !landed) reason = "game changed; try again";
+      if (!refusal.has_value() && !landed) {
+        refusal = Refusal{RejectKind::kState, "game changed; try again"};
+      }
     }
     EnqueueWritesLocked(writes);
   }
-  if (!reason.empty()) {
-    Reject(player_id, kind, std::move(reason));
+  if (refusal.has_value()) {
+    Reject(player_id, std::move(*refusal));
   } else {
     Deliver(outbox);
   }
@@ -1601,6 +1605,10 @@ void HubHandler::BroadcastRoom(const std::string& room_id) {
     StageRoomStateLocked(room_id, outbox);
   }
   Deliver(outbox);
+}
+
+void HubHandler::Reject(const std::string& player_id, Refusal refusal) {
+  Reject(player_id, refusal.kind, std::move(refusal.reason));
 }
 
 void HubHandler::Reject(const std::string& player_id, RejectKind kind, std::string reason) {

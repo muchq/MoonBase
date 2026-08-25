@@ -166,13 +166,12 @@ func cacheSelectorsIn(query string) []cacheSelector {
 // Every expression a service's entry can produce, scalars in both views plus
 // the timeseries. Counter-derived tiles keep their expression in Counter
 // rather than Query, so a scan of Query alone would silently skip them.
+// The flat form of labelledCustomQueries, for callers that treat the
+// queries as a set.
 func allQueriesFor(entry serviceEntry) []string {
 	var queries []string
-	for _, def := range entry.CustomScalars {
-		queries = append(queries, def.AllQueries()...)
-	}
-	for _, query := range expandCustomTimeseries(entry.CustomTimeseries, "5m") {
-		queries = append(queries, query)
+	for _, labelled := range labelledCustomQueries(entry) {
+		queries = append(queries, labelled...)
 	}
 	return queries
 }
@@ -474,11 +473,13 @@ func TestRegistry_MicrogptTokensReplacesTokensPerSecond(t *testing.T) {
 }
 
 // Every custom query a service entry can produce, keyed for failure messages —
-// the collection step the per-service instrument audits share.
+// the collection step the per-service instrument audits share. Keyed by group
+// AND label: two tiles may share a label across groups, and a map collision
+// here would silently drop one of them from whichever audit iterates this.
 func labelledCustomQueries(entry serviceEntry) map[string][]string {
 	labelled := map[string][]string{}
 	for _, def := range entry.CustomScalars {
-		labelled["scalar "+def.Label] = def.AllQueries()
+		labelled["scalar "+def.Group+"/"+def.Label] = def.AllQueries()
 	}
 	for key, query := range expandCustomTimeseries(entry.CustomTimeseries, "5m") {
 		labelled["timeseries "+key] = []string{query}
@@ -486,12 +487,21 @@ func labelledCustomQueries(entry serviceEntry) map[string][]string {
 	return labelled
 }
 
+// Any series-shaped token: a name carrying one of the exporter's suffixes.
+// The prefix patterns below find the selectors an audit examines closely; this
+// one exists for the opposite direction — a token the prefix pattern does NOT
+// match (a typo'd or dropped prefix in one factor of a ratio) would otherwise
+// pass unexamined as long as some other factor matched.
+var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|count|bucket)\b`)
+
 // What golf_hub exports, as the collector's Prometheus exporter names it:
-// _total for a counter, _gauge for futility's up-down gauge. The emitting end
-// is pinned in hub_e2e_test — BuildingAHandlerDeclaresEveryCounterSeriesAtZero
-// holds the declaration roster and every suite's TearDown sweep refuses an
-// undeclared emit — so this set meeting that roster is what ties each tile to
-// a series that exists from process start, at zero (#1384).
+// _total for a counter, _gauge for futility's up-down gauge.
+//
+// A hand-kept copy, verified against HubHandler::DeclaredCounterSeries() by a
+// person, not a test — the roster lives in C++ and this file in Go with no
+// shared artifact to pin them together (that is #1308's scope). What these
+// audits do close, on their own side: every tile reads only names in this
+// set, and every name in this set is read by some tile.
 var golfHubSelectorPattern = regexp.MustCompile(`\b((?:stream_|chat_|restored_)[a-z_]*)(\{[^}]*\})?`)
 
 var golfHubExportedNames = map[string]bool{
@@ -527,6 +537,17 @@ func TestGolfHubQueriesNameRealInstruments(t *testing.T) {
 	for what, queries := range labelledCustomQueries(entry) {
 		for _, query := range queries {
 			joined += query + "\n"
+			// Closed over every series-shaped token first, so a factor whose
+			// prefix was dropped or typo'd cannot pass on the strength of the
+			// factors the prefix pattern does find. http_server_* is the
+			// probes tile's standard family.
+			for _, name := range promSeriesToken.FindAllString(query, -1) {
+				if strings.HasPrefix(name, "http_server_") {
+					continue
+				}
+				assert.True(t, golfHubExportedNames[name],
+					"%s reads %q, which golf_hub does not export", what, name)
+			}
 			// The probes tile reads the standard http_server family on the
 			// /health route; everything else must name a hub instrument.
 			if strings.Contains(query, `route="/health"`) {
@@ -601,6 +622,15 @@ func TestMicrogptQueriesNameRealInstruments(t *testing.T) {
 			}
 		}
 	}
+	// Every series-shaped token too — a ratio whose one factor lost the
+	// microgpt_ prefix would otherwise pass on the strength of the other.
+	for _, name := range promSeriesToken.FindAllString(joined, -1) {
+		if strings.HasPrefix(name, "http_server_") {
+			continue
+		}
+		assert.True(t, microgptExportedNames[name],
+			"a query reads %q, which microgpt-serve does not export", name)
+	}
 	for name := range microgptExportedNames {
 		assert.NotZero(t, seen[name], "nothing in the microgpt-serve entry reads %s", name)
 	}
@@ -617,9 +647,10 @@ func TestMicrogptQueriesNameRealInstruments(t *testing.T) {
 // emitters declare at zero (#1384) — not the _sum/_count halves of a
 // histogram, which cannot exist before its first observation and so leave the
 // first drain or request after every deploy invisible. Golden, because the
-// numerator/denominator pairing is the meaning: rows over the drains that
-// delivered them, milliseconds over the requests that spent them, tokens over
-// the milliseconds that generated them.
+// numerator/denominator pairing is the meaning: rows over every drain (empty
+// drains included — dropping them would inflate the average exactly when the
+// hub is keeping up), milliseconds over the requests that spent them, tokens
+// over the milliseconds that generated them.
 func TestRegistry_CatchUpAndInferenceMeansAreCounterRatios(t *testing.T) {
 	scalarByLabel := func(service string) map[string]string {
 		out := map[string]string{}
@@ -628,22 +659,42 @@ func TestRegistry_CatchUpAndInferenceMeansAreCounterRatios(t *testing.T) {
 		}
 		return out
 	}
+	// A mean chart at a sub-5m step, where latencyWindow floors to the same
+	// 5m the scalar tile uses — the step at which tile and chart must agree
+	// exactly.
+	chartAt30s := func(service, key string) string {
+		return expandCustomTimeseries(serviceRegistry[service].CustomTimeseries, "30s")[key]
+	}
 
 	catchUp := `sum(rate(chat_rows_delivered_total[5m]))/sum(rate(chat_catch_up_drains_total[5m]))`
 	assert.Equal(t, catchUp, scalarByLabel("golf_hub")["catch_up_rows_avg_5m"])
-	assert.Equal(t, catchUp, serviceRegistry["golf_hub"].CustomTimeseries["chat_catch_up_rows"].Query,
+	assert.Equal(t, catchUp, chartAt30s("golf_hub", "chat_catch_up_rows"),
 		"the tile and the chart must describe the same signal")
 
 	avgDuration := `sum(rate(microgpt_inference_ms_total[5m]))/sum(rate(microgpt_requests_total[5m]))`
 	assert.Equal(t, avgDuration, scalarByLabel("microgpt-serve")["avg_duration_ms"])
-	assert.Equal(t, avgDuration,
-		serviceRegistry["microgpt-serve"].CustomTimeseries["avg_duration_ms"].Query,
+	assert.Equal(t, avgDuration, chartAt30s("microgpt-serve", "avg_duration_ms"),
 		"the tile and the chart must describe the same signal")
 
 	assert.Equal(t,
 		`sum(rate(microgpt_tokens_generated_total[5m]))/sum(rate(microgpt_inference_ms_total[5m]))*1000`,
 		scalarByLabel("microgpt-serve")["tokens_per_sec_5m"],
 		"tokens per second of inference: total tokens over total model milliseconds, times 1000")
+}
+
+// The mean charts track the chart's own step the way avg_duration_us does,
+// and for the same reason: a fixed 5m rate() window inside a 7d chart's 1h
+// step reads five minutes of every hour and draws a confident zero for the
+// other fifty-five — the posterize blind spot latencyWindow exists to close.
+// Both factors must widen together or the ratio mixes windows.
+func TestRegistry_MeanChartsWidenWithTheStep(t *testing.T) {
+	widened := expandCustomTimeseries(serviceRegistry["golf_hub"].CustomTimeseries, "1h")
+	assert.Equal(t,
+		`sum(rate(chat_rows_delivered_total[1h0m15s]))/sum(rate(chat_catch_up_drains_total[1h0m15s]))`,
+		widened["chat_catch_up_rows"])
+	assert.Equal(t,
+		`sum(rate(microgpt_inference_ms_total[1h0m15s]))/sum(rate(microgpt_requests_total[1h0m15s]))`,
+		expandCustomTimeseries(serviceRegistry["microgpt-serve"].CustomTimeseries, "1h")["avg_duration_ms"])
 }
 
 // Every selector in the one_d4 set, checked one at a time.
@@ -686,17 +737,11 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 	require.NotEmpty(t, entry.CustomScalars)
 	require.NotEmpty(t, entry.CustomTimeseries, "the timeseries panels are part of this entry")
 
-	labelled := map[string][]string{}
-	for _, def := range entry.CustomScalars {
-		// Both views of a toggleable tile. They share a selector, so a scope
-		// or name error appears in both — but reading them from AllQueries is
-		// what keeps the counter tiles in scope at all.
-		labelled["scalar "+def.Label] = def.AllQueries()
-	}
-	// Both panels of a toggleable timeseries entry, for the same reason.
-	for key, query := range expandCustomTimeseries(entry.CustomTimeseries, "5m") {
-		labelled["timeseries "+key] = []string{query}
-	}
+	// Both views of a toggleable tile and both panels of a toggleable
+	// timeseries entry: they share a selector, so a scope or name error
+	// appears in both — but reading them all is what keeps the counter
+	// tiles in scope at all.
+	labelled := labelledCustomQueries(entry)
 
 	seen := map[string]int{}
 	for what, queries := range labelled {

@@ -1586,7 +1586,7 @@ TEST_F(GolfHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) {
 // ExpectOnlyDeclaredCounterSeries, so every test in this suite checks it against
 // whatever paths that test happens to drive: the bad-ticket admission, the rate
 // limiter, the chat store failures, and the disconnects the closes produce. One
-// scripted session would have covered four of the eighteen.
+// scripted session would have covered a small fraction of the roster.
 
 // The union cases of `union <name>` in the model source, in declaration order.
 // Enough smithy to read this one file: members are `name: Target` lines between
@@ -1685,20 +1685,31 @@ TEST_F(GolfHubStreamFixture, RejectionsCountTheBoundedKindNeverTheReason) {
   const std::string state_reason = state_rejected->as_commandRejected_or_null()->reason;
   EXPECT_EQ(state_reason, "already in a room");
 
-  // invalid: a card index no hand has.
+  // invalid: a card index no hand has — through peekCard, and through
+  // takeFromDiscard, which no other test in the tree sends at all, so its
+  // declared stream_commands series meets an emit here.
   moonbase::golf::PeekCard peek;
   peek.cardIndex = 99;
   ASSERT_TRUE(table->alice.stream.Send(Move(moonbase::golf::GolfMove::FromPeekcard(peek))).ok());
+  auto invalid_rejected = ReceiveCase(table->alice.stream, "commandRejected");
+  ASSERT_TRUE(invalid_rejected.has_value());
+  const std::string invalid_reason = invalid_rejected->as_commandRejected_or_null()->reason;
+  moonbase::golf::TakeFromDiscard take;
+  take.cardIndex = 99;
+  ASSERT_TRUE(
+      table->alice.stream.Send(Move(moonbase::golf::GolfMove::FromTakefromdiscard(take))).ok());
   ASSERT_TRUE(ReceiveCase(table->alice.stream, "commandRejected").has_value());
 
   // rules: a valid index, but the engine refuses a swap with no drawn card.
   moonbase::golf::SwapCard swap;
   swap.cardIndex = 0;
   ASSERT_TRUE(table->alice.stream.Send(Move(moonbase::golf::GolfMove::FromSwapcard(swap))).ok());
-  ASSERT_TRUE(ReceiveCase(table->alice.stream, "commandRejected").has_value());
+  auto rules_rejected = ReceiveCase(table->alice.stream, "commandRejected");
+  ASSERT_TRUE(rules_rejected.has_value());
+  const std::string rules_reason = rules_rejected->as_commandRejected_or_null()->reason;
 
   EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "state"}}), 1);
-  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "invalid"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "invalid"}}), 2);
   EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "rules"}}), 1);
   // The kinds nothing here triggered, so a mapping change cannot hide as a
   // different kind absorbing the count.
@@ -1707,17 +1718,95 @@ TEST_F(GolfHubStreamFixture, RejectionsCountTheBoundedKindNeverTheReason) {
   EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "unknown"}}), 0);
 
   // The reason text stayed off the wire's metrics entirely: every rejection
-  // entry carries the kind label alone, and no label anywhere carries the
-  // human-readable reason the client was sent.
+  // entry carries the kind label alone, and no label anywhere carries any of
+  // the human-readable reasons the client was sent.
   for (const auto& entry : metrics_->Entries()) {
     if (entry.name == "stream_rejections") {
       ASSERT_EQ(entry.attributes.size(), 1u);
       ASSERT_EQ(entry.attributes.count("kind"), 1u);
     }
     for (const auto& [key, value] : entry.attributes) {
-      EXPECT_EQ(value.find(state_reason), std::string::npos) << entry.name << " " << key;
+      for (const std::string& reason : {state_reason, invalid_reason, rules_reason}) {
+        EXPECT_EQ(value.find(reason), std::string::npos) << entry.name << " " << key;
+      }
     }
   }
+}
+
+// Forwards everything except LoadRoom, which always fails as if the database
+// were unreachable — the join paths' refresh read, which MemoryHubStore can
+// never fail on its own.
+class FailingLoadRoomHubStore final : public HubStore {
+ public:
+  explicit FailingLoadRoomHubStore(std::shared_ptr<HubStore> delegate)
+      : delegate_(std::move(delegate)) {}
+
+  void Enqueue(std::vector<Op> ops) override { delegate_->Enqueue(std::move(ops)); }
+  void Flush() override { delegate_->Flush(); }
+  absl::StatusOr<Snapshot> LoadSnapshot() override { return delegate_->LoadSnapshot(); }
+  absl::StatusOr<bool> CommitGameSave(const GameRow& row,
+                                      const std::string& notify_payload) override {
+    return delegate_->CommitGameSave(row, notify_payload);
+  }
+  absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& deltas,
+                                        const std::string& notify_payload) override {
+    return delegate_->CommitGameFinish(row, deltas, notify_payload);
+  }
+  absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
+                                                  const std::string& game_id) override {
+    return delegate_->LoadGame(room_id, game_id);
+  }
+  absl::StatusOr<RoomRows> LoadRoom([[maybe_unused]] const std::string& room_id) override {
+    return absl::UnavailableError("hub store unreachable");
+  }
+
+ private:
+  std::shared_ptr<HubStore> delegate_;
+};
+
+// The store answering "no such room" and the store not answering are
+// different rejection kinds: the first is the client's state, the second is
+// this hub's outage, and folding them (the pre-#1384 shape) makes a Postgres
+// outage read as a spike of desynced clients. The healthy-store halves are
+// the positive controls proving the kUnavailable reads come from the outage
+// and not from the join shapes themselves.
+TEST_F(GolfHubStreamFixture, AStoreOutageOnTheJoinPathsCountsAsUnavailable) {
+  // Control: the same two refusals against the fixture's healthy store.
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  moonbase::golf::JoinRoom join;
+  join.roomId = "no-such-room";
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "commandRejected").has_value());
+  ASSERT_FALSE(CreateRoomFor(*alice).empty());
+  moonbase::golf::JoinGame join_game;
+  join_game.gameId = "no-such-game";
+  ASSERT_TRUE(alice->stream.Send(Move(moonbase::golf::GolfMove::FromJoingame(join_game))).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "commandRejected").has_value());
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "state"}}), 2);
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "unavailable"}}), 0);
+
+  // The outage: the same two shapes through a store whose refresh read fails.
+  auto capture = MakeCapturingMetricsRecorder();
+  auto instance = BuildSecondInstance(vault_, std::make_shared<FailingLoadRoomHubStore>(store_),
+                                      chat_store_, capture);
+  ASSERT_NE(instance, nullptr);
+  auto bob = OpenSeatVia(*instance->client);
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  auto room_refused = ReceiveCase(bob->stream, "commandRejected");
+  ASSERT_TRUE(room_refused.has_value());
+  EXPECT_EQ(room_refused->as_commandRejected_or_null()->reason,
+            "room unavailable or already in a room");
+  ASSERT_FALSE(CreateRoomFor(*bob).empty());
+  ASSERT_TRUE(bob->stream.Send(Move(moonbase::golf::GolfMove::FromJoingame(join_game))).ok());
+  auto game_refused = ReceiveCase(bob->stream, "commandRejected");
+  ASSERT_TRUE(game_refused.has_value());
+  EXPECT_EQ(game_refused->as_commandRejected_or_null()->reason, "storage unavailable; try again");
+  EXPECT_EQ(capture->CounterTotal("stream_rejections", {{"kind", "unavailable"}}), 2);
+  EXPECT_EQ(capture->CounterTotal("stream_rejections", {{"kind", "state"}}), 0);
 }
 
 TEST_F(GolfHubStreamFixture, AnUnreachableStoreCountsTheAppendAsUnavailable) {

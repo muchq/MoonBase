@@ -98,7 +98,9 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// of golf_hub.smithy's unions, so their block is a copy of the model.
   /// StreamSeriesMatchTheModelUnions parses the .smithy file and fails on
   /// any drift, in either direction — that test is what makes a hand-kept
-  /// copy safe to keep.
+  /// copy tolerable. The generated unions already hold this list (the
+  /// kNames array behind case_name()); a smithy-cpp accessor exposing it
+  /// would let this block be derived and the parser test deleted.
   ///
   /// stream_rejections carries the bounded `kind` (see RejectKind), never
   /// the free-text reason: the reason strings are ~30 literals spread across
@@ -339,7 +341,16 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// model case shipped without one.
   enum class RejectKind { kRateLimited, kInvalid, kState, kRules, kUnavailable, kUnknown };
   static const char* RejectKindName(RejectKind kind);
+
+  /// A refusal in flight: the flows that work under mu_ and Reject after
+  /// releasing it stage one of these, so a kind can never be assigned
+  /// without its reason or vice versa — half a refusal does not compile.
+  struct Refusal {
+    RejectKind kind;
+    std::string reason;
+  };
   void Reject(const std::string& player_id, RejectKind kind, std::string reason);
+  void Reject(const std::string& player_id, Refusal refusal);
   void OnExpired(const std::string& player_id);
   /// The reap decision both expiry paths share: one fresh read of the
   /// member's room, then LeaveEverywhere unless the row says connected —
@@ -398,7 +409,11 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// older than local truth), re-read the room's rows, reconcile, and
   /// re-project views to local members. Also the join path's fallback —
   /// it materializes a room another instance created. Callers hold mu_.
-  void RefreshRoomLocked(const std::string& room_id, Outbox& outbox);
+  ///
+  /// Returns whether the store answered the read — false is an outage, not
+  /// an absent room, and the join paths label their refusal kUnavailable on
+  /// it rather than blaming the client's state.
+  bool RefreshRoomLocked(const std::string& room_id, Outbox& outbox);
   /// Returns whether local membership/games changed. When
   /// `project_always` is false, skips re-project on a no-op catch-up.
   bool ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
