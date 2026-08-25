@@ -374,6 +374,40 @@ describe('executePlan', () => {
   });
 });
 
+describe('AND/OR/NOT operand coercion', () => {
+  const evalSql = (source: string) =>
+    executePlan(planOf(`SELECT ${source} AS v FROM users LIMIT 1`), demoDb)[0].v;
+
+  it('non-true, non-null operands count as false — consistently in every branch', () => {
+    // A number next to NULL: strictly false wins over unknown, so the
+    // answer is false, not null. The inconsistent version ("not false" in
+    // one branch, "not true" in another) broke TRUE AND x → x.
+    expect(evalSql('5 AND NULL')).toBe(false);
+    expect(evalSql('5 AND TRUE')).toBe(false);
+    expect(evalSql('5 OR FALSE')).toBe(false);
+    expect(evalSql('5 OR TRUE')).toBe(true);
+    expect(evalSql('NOT 5')).toBe(true);
+    expect(evalSql('NULL OR 5')).toBe(null);
+  });
+
+  it('logical results are always true, false, or null — never a passed-through value', () => {
+    expect(evalSql('TRUE AND 5')).toBe(false);
+    expect(evalSql('FALSE OR 5')).toBe(false);
+  });
+});
+
+describe('duplicate Project output names', () => {
+  it('last column wins — the documented v1 simplification', () => {
+    const rows = executePlan(
+      planOf('SELECT u.id, o.id, o.total FROM users u JOIN orders o ON u.id = o.user_id LIMIT 1'),
+      demoDb,
+    );
+    // Both projections are named `id`; JS object semantics keep the later
+    // one (the order's). Qualify with AS to keep both.
+    expect(rows).toEqual([{ id: 1, total: 240 }]);
+  });
+});
+
 describe('executeWithStats', () => {
   it('charges cells entering each operator', () => {
     const { rows, cost, operators } = executeWithStats(

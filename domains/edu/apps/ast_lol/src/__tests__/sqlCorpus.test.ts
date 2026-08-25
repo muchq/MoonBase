@@ -21,7 +21,7 @@ const EXPECTED_PATH = join(process.cwd(), 'src/__tests__/corpus/sql-corpus.expec
 describe('sql parser corpus', () => {
   const actual = corpus.map((query) => parseSelect(tokenizeSql(query)));
 
-  if (process.env.UPDATE_SQL_CORPUS) {
+  if (process.env.UPDATE_SQL_CORPUS === '1') {
     it('regenerates the expected file', () => {
       writeFileSync(EXPECTED_PATH, `${JSON.stringify(actual, null, 2)}\n`);
       expect(actual.length).toBe(corpus.length);

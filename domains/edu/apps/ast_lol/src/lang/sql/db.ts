@@ -44,15 +44,20 @@ export const demoDb: Database = {
 };
 
 /**
- * Deterministic 32-bit LCG (Numerical Recipes constants) so benchDb is
- * identical on every load, in every engine — cost budgets in challenge
- * test names depend on that.
+ * Deterministic 32-bit generator (mulberry32) so benchDb is identical on
+ * every load, in every engine — cost budgets in challenge test names
+ * depend on that. Mulberry32 rather than a raw LCG: an LCG's low bit
+ * strictly alternates, and every record here draws a fixed number of
+ * values, so `% n` with even n would silently confine whole columns to
+ * half their domain.
  */
 function makeRng(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-    return state;
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(state ^ (state >>> 15), state | 1);
+    t = (t + Math.imul(t ^ (t >>> 7), t | 61)) ^ t;
+    return (t ^ (t >>> 14)) >>> 0;
   };
 }
 
@@ -82,14 +87,14 @@ function buildBenchDb(): Database {
   }));
   const orders = Array.from({ length: 600 }, (_, i) => {
     const quantity = int(1, 20);
-    const price = products[int(0, products.length - 1)].price;
+    const product_id = int(1, products.length);
     return {
       id: i + 1,
       user_id: int(1, users.length),
-      product_id: int(1, products.length),
+      product_id,
       quantity,
       // A few totals are null, so 3VL shows up in bench results too.
-      total: rng() % 19 === 0 ? null : quantity * price,
+      total: rng() % 19 === 0 ? null : quantity * products[product_id - 1].price,
       year: int(2020, 2025),
     };
   });

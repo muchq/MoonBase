@@ -66,10 +66,13 @@ Each challenge is selected to force exactly one new competence, sized between
 - Tier 5 — the payoff: three rewrites in ascending difficulty, then the
   capstone composing them under a cost budget.
 
-The capstone battery (8 queries) is chosen adversarially: one query per way a
-partial optimizer fails — cross-side conjuncts that must not move, a
-contradiction that must collapse, `ORDER BY` columns that must survive
-pruning, and null-salted data so 3VL violations change results.
+The capstone battery (8 queries) is chosen adversarially: seven queries each
+fail some partial optimizer — cross-side conjuncts that must not move, a
+contradiction whose collapse feeds pruning, `ORDER BY` columns that must
+survive pruning, null-salted data so 3VL violations change results — plus one
+guard query the cost model cannot reward, pinning that an optimizer does no
+harm where there is nothing to win. Budgets are literals pinned to the
+formula by CI, so nothing executes plans at module load.
 
 ## Grading philosophy
 

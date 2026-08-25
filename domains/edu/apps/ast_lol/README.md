@@ -45,14 +45,17 @@ npm run dev        # Vite dev server with Cloudflare Workers runtime
 ## Test & typecheck
 
 ```bash
-npm test           # Vitest (224 tests)
+npm test           # Vitest (259 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
 CI-relevant invariants the suite pins: every reference solution passes its own
-test bank, every starter fails it, every custom-test placeholder grades green
-through the oracle, every lesson/challenge id has a rendered document (and no
-orphans), lesson reading links are https, and the SQL parser replays a frozen
+test bank, every starter fails it, every custom-test placeholder builds an
+input the reference solution accepts, every lesson/challenge id has a rendered
+document (and no orphans), lesson reading links are https, the capstone's
+hardcoded cost budgets match the reference pipeline (and sit strictly below
+the naive cost, so a no-op optimizer cannot pass a reduce query), the bench
+database covers its full value domains, and the SQL parser replays a frozen
 corpus (`src/__tests__/corpus/`; regenerate deliberately with
 `UPDATE_SQL_CORPUS=1 npm test` and review the diff as a spec change).
 

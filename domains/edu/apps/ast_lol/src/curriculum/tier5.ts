@@ -96,75 +96,17 @@ function planBindings(plan) {
 }
 // ---- end provided ----`;
 
-/** Rows-preserved + cost-reduced check, with the per-operator bill on failure. */
-function equivalenceAndCostCheck(opts: { label: string; mustReduce: boolean }): CheckFn {
-  return (actual, ctx) => {
-    const naive = ctx.args[0] as Plan;
-    const plan = actual as Plan;
-    const problems = validatePlan(plan, shopCatalog);
-    if (problems.length > 0) {
-      return {
-        pass: false,
-        message: `Your plan is not well-formed: ${problems.join('; ')}.`,
-      };
-    }
-    const expectedRows = executePlan(naive, benchDb);
-    let stats;
-    try {
-      stats = executeWithStats(plan, benchDb);
-    } catch (e) {
-      return {
-        pass: false,
-        message: `Executing your plan failed: ${e instanceof Error ? e.message : show(e)}`,
-      };
-    }
-    const diff = firstDiff(expectedRows, stats.rows);
-    if (diff !== null) {
-      return {
-        pass: false,
-        message: `Your plan changes the result on the bench database: first difference at rows${diff.path} (${diff.reason}). An optimizer's first obligation is equivalence.`,
-        expectedText: showPretty(expectedRows.slice(0, 5)) + '\n… (first rows shown)',
-        actualText: showPretty(stats.rows.slice(0, 5)) + '\n… (first rows shown)',
-      };
-    }
-    const naiveCost = executeWithStats(naive, benchDb).cost;
-    const bill = stats.operators.map((op) => `${op.label}: ${op.cells}`).join('  ·  ');
-    if (opts.mustReduce && stats.cost >= naiveCost) {
-      return {
-        pass: false,
-        message: `Rows are right, but nothing got cheaper: your plan processes ${stats.cost} cells on the bench database; the naive plan processes ${naiveCost}. ${opts.label} Your plan's bill — ${bill}`,
-      };
-    }
-    return { pass: true };
-  };
-}
-
-const sqlSimplify: ChallengeDef = {
-  id: 'sql-simplify',
-  title: 'Simplify predicates',
-  summary: 'Constant folding with three-valued caution: TRUE AND p, FALSE absorption, strict nulls.',
-  signature: 'simplifyPlan(plan) → Plan',
-  entry: 'simplifyPlan',
-  difficulty: 3,
-  starter: `// Simplify every predicate expression in the plan — Filter predicates
-// and Join ON conditions — bottom-up:
-//   1. Strict ops (+ - * / and the comparisons): both sides Lit -> fold
-//      to a Lit using the executor's semantics (x/0 -> null, mismatched
-//      types compare to null). EITHER side Lit null -> Lit null (strict
-//      ops are null-in, null-out).
-//   2. AND: a Lit false side -> Lit false (even if the other side is
-//      null — Kleene). A Lit true side -> the other side. Both Lit ->
-//      fold.
-//   3. OR: mirror image (true absorbs, false drops out).
-//   4. NOT / unary - / IS [NOT] NULL over a Lit -> fold.
-// Then: a Filter whose predicate became Lit true disappears; a Filter
-// that became Lit false or Lit null STAYS (it keeps zero rows — there is
-// no empty-relation node to replace it with).
-// Rebuild, never mutate.
-function simplifyPlan(plan) {
-  // TODO: an expression simplifier + a plan walker around it.
-}`,
-  solution: `function simplifyPlan(plan) {
+/**
+ * The three optimizer passes as revealable solutions. Single sources: each
+ * is its own challenge's solution, and the capstone's solution is their
+ * literal composition — the same move its statement asks the learner to
+ * make.
+ */
+const SIMPLIFY_SOLUTION = `function simplifyPlan(plan) {
+  // AND/OR/NOT operand coercion: true, null, or (anything else) false.
+  function truth(v) {
+    return v === true ? true : v === null ? null : false;
+  }
   function evalConst(expr) {
     switch (expr.type) {
       case 'Lit': return expr.value;
@@ -173,8 +115,8 @@ function simplifyPlan(plan) {
         return typeof v === 'number' ? -v : null;
       }
       case 'Not': {
-        const v = evalConst(expr.operand);
-        return v === null ? null : v !== true;
+        const v = truth(evalConst(expr.operand));
+        return v === null ? null : !v;
       }
       case 'IsNull': {
         const v = evalConst(expr.operand);
@@ -184,14 +126,20 @@ function simplifyPlan(plan) {
         const l = evalConst(expr.left);
         const r = evalConst(expr.right);
         switch (expr.op) {
-          case 'AND':
-            if (l === false || r === false) return false;
-            if (l === null || r === null) return null;
-            return l === true && r === true;
-          case 'OR':
-            if (l === true || r === true) return true;
-            if (l === null || r === null) return null;
+          case 'AND': {
+            const lt = truth(l);
+            const rt = truth(r);
+            if (lt === false || rt === false) return false;
+            if (lt === null || rt === null) return null;
+            return true;
+          }
+          case 'OR': {
+            const lt = truth(l);
+            const rt = truth(r);
+            if (lt === true || rt === true) return true;
+            if (lt === null || rt === null) return null;
             return false;
+          }
           case '+': case '-': case '*': case '/': {
             if (typeof l !== 'number' || typeof r !== 'number') return null;
             if (expr.op === '+') return l + r;
@@ -286,7 +234,195 @@ function simplifyPlan(plan) {
     }
   }
   return walk(plan);
+}`;
+
+const PUSHDOWN_SOLUTION = `function pushDown(plan) {
+  function conjunctsOf(expr) {
+    if (expr.type === 'Binary' && expr.op === 'AND') {
+      return conjunctsOf(expr.left).concat(conjunctsOf(expr.right));
+    }
+    return [expr];
+  }
+  function andAll(list) {
+    return list.reduce(function (left, right) {
+      return { type: 'Binary', op: 'AND', left: left, right: right };
+    });
+  }
+  function subset(a, b) {
+    for (const x of a) if (!b.has(x)) return false;
+    return true;
+  }
+  switch (plan.type) {
+    case 'Scan':
+      return plan;
+    case 'Join':
+      return { type: 'Join', left: pushDown(plan.left), right: pushDown(plan.right), on: plan.on };
+    case 'Filter': {
+      if (plan.input.type !== 'Join') {
+        return { type: 'Filter', input: pushDown(plan.input), predicate: plan.predicate };
+      }
+      const join = plan.input;
+      const leftBindings = planBindings(join.left);
+      const rightBindings = planBindings(join.right);
+      const toLeft = [];
+      const toRight = [];
+      const staying = [];
+      for (const conjunct of conjunctsOf(plan.predicate)) {
+        const bindings = exprBindings(conjunct);
+        if (bindings.size === 0) staying.push(conjunct);
+        else if (subset(bindings, leftBindings)) toLeft.push(conjunct);
+        else if (subset(bindings, rightBindings)) toRight.push(conjunct);
+        else staying.push(conjunct);
+      }
+      let left = join.left;
+      if (toLeft.length > 0) left = { type: 'Filter', input: left, predicate: andAll(toLeft) };
+      let right = join.right;
+      if (toRight.length > 0) right = { type: 'Filter', input: right, predicate: andAll(toRight) };
+      const rebuilt = { type: 'Join', left: pushDown(left), right: pushDown(right), on: join.on };
+      if (staying.length === 0) return rebuilt;
+      return { type: 'Filter', input: rebuilt, predicate: andAll(staying) };
+    }
+    case 'Sort':
+      return { type: 'Sort', input: pushDown(plan.input), keys: plan.keys };
+    case 'Limit':
+      return { type: 'Limit', input: pushDown(plan.input), count: plan.count };
+    case 'Project':
+      return { type: 'Project', input: pushDown(plan.input), columns: plan.columns };
+  }
+}`;
+
+const PRUNE_SOLUTION = `function prune(plan) {
+  const needed = new Set();
+  (function collect(node) {
+    switch (node.type) {
+      case 'Scan':
+        return;
+      case 'Join':
+        for (const ref of exprRefs(node.on)) needed.add(ref);
+        collect(node.left);
+        collect(node.right);
+        return;
+      case 'Filter':
+        for (const ref of exprRefs(node.predicate)) needed.add(ref);
+        collect(node.input);
+        return;
+      case 'Sort':
+        for (const key of node.keys) for (const ref of exprRefs(key.expr)) needed.add(ref);
+        collect(node.input);
+        return;
+      case 'Limit':
+        collect(node.input);
+        return;
+      case 'Project':
+        for (const col of node.columns) for (const ref of exprRefs(col.expr)) needed.add(ref);
+        collect(node.input);
+        return;
+    }
+  })(plan);
+  function rewrite(node, underJoin) {
+    switch (node.type) {
+      case 'Scan': {
+        if (!underJoin) return node;
+        const keep = node.columns.filter(function (c) {
+          return needed.has(node.binding + '.' + c);
+        });
+        if (keep.length === node.columns.length) return node;
+        return {
+          type: 'Project',
+          input: node,
+          columns: keep.map(function (name) {
+            return { expr: { type: 'Column', table: node.binding, name: name },
+              name: node.binding + '.' + name };
+          }),
+        };
+      }
+      case 'Join':
+        return { type: 'Join', left: rewrite(node.left, true),
+          right: rewrite(node.right, true), on: node.on };
+      case 'Filter':
+        return { type: 'Filter', input: rewrite(node.input, underJoin),
+          predicate: node.predicate };
+      case 'Sort':
+        return { type: 'Sort', input: rewrite(node.input, underJoin), keys: node.keys };
+      case 'Limit':
+        return { type: 'Limit', input: rewrite(node.input, underJoin), count: node.count };
+      case 'Project':
+        return { type: 'Project', input: rewrite(node.input, underJoin), columns: node.columns };
+    }
+  }
+  return rewrite(plan, false);
+}`;
+
+
+/** Rows-preserved + cost-reduced check, with the per-operator bill on failure. */
+function equivalenceAndCostCheck(opts: { label: string; mustReduce: boolean }): CheckFn {
+  return (actual, ctx) => {
+    const naive = ctx.args[0] as Plan;
+    const plan = actual as Plan;
+    const problems = validatePlan(plan, shopCatalog);
+    if (problems.length > 0) {
+      return {
+        pass: false,
+        message: `Your plan is not well-formed: ${problems.join('; ')}.`,
+      };
+    }
+    const expectedRows = executePlan(naive, benchDb);
+    let stats;
+    try {
+      stats = executeWithStats(plan, benchDb);
+    } catch (e) {
+      return {
+        pass: false,
+        message: `Executing your plan failed: ${e instanceof Error ? e.message : show(e)}`,
+      };
+    }
+    const diff = firstDiff(expectedRows, stats.rows);
+    if (diff !== null) {
+      return {
+        pass: false,
+        message: `Your plan changes the result on the bench database: first difference at rows${diff.path} (${diff.reason}). An optimizer's first obligation is equivalence.`,
+        expectedText: showPretty(expectedRows.slice(0, 5)) + '\n… (first rows shown)',
+        actualText: showPretty(stats.rows.slice(0, 5)) + '\n… (first rows shown)',
+      };
+    }
+    const naiveCost = executeWithStats(naive, benchDb).cost;
+    const bill = stats.operators.map((op) => `${op.label}: ${op.cells}`).join('  ·  ');
+    if (opts.mustReduce && stats.cost >= naiveCost) {
+      return {
+        pass: false,
+        message: `Rows are right, but nothing got cheaper: your plan processes ${stats.cost} cells on the bench database; the naive plan processes ${naiveCost}. ${opts.label} Your plan's bill — ${bill}`,
+      };
+    }
+    return { pass: true };
+  };
+}
+
+const sqlSimplify: ChallengeDef = {
+  id: 'sql-simplify',
+  title: 'Simplify predicates',
+  summary: 'Constant folding with three-valued caution: TRUE AND p, FALSE absorption, strict nulls.',
+  signature: 'simplifyPlan(plan) → Plan',
+  entry: 'simplifyPlan',
+  difficulty: 3,
+  starter: `// Simplify every predicate expression in the plan — Filter predicates
+// and Join ON conditions — bottom-up:
+//   1. Strict ops (+ - * / and the comparisons): both sides Lit -> fold
+//      to a Lit using the executor's semantics (x/0 -> null, mismatched
+//      types compare to null). EITHER side Lit null -> Lit null (strict
+//      ops are null-in, null-out).
+//   2. AND: a Lit false side -> Lit false (even if the other side is
+//      null — Kleene). A Lit true side -> the other side. Both Lit ->
+//      fold.
+//   3. OR: mirror image (true absorbs, false drops out).
+//   4. NOT / unary - / IS [NOT] NULL over a Lit -> fold.
+// Then: a Filter whose predicate became Lit true disappears; a Filter
+// that became Lit false or Lit null STAYS (it keeps zero rows — there is
+// no empty-relation node to replace it with).
+// Rebuild, never mutate.
+function simplifyPlan(plan) {
+  // TODO: an expression simplifier + a plan walker around it.
 }`,
+  solution: SIMPLIFY_SOLUTION,
   tests: [
     {
       name: 'TRUE AND p drops to p, and the Filter survives',
@@ -378,60 +514,7 @@ const sqlPushdown: ChallengeDef = {
 function pushDown(plan) {
   // TODO
 }`,
-  solution: `function pushDown(plan) {
-  function conjunctsOf(expr) {
-    if (expr.type === 'Binary' && expr.op === 'AND') {
-      return conjunctsOf(expr.left).concat(conjunctsOf(expr.right));
-    }
-    return [expr];
-  }
-  function andAll(list) {
-    return list.reduce(function (left, right) {
-      return { type: 'Binary', op: 'AND', left: left, right: right };
-    });
-  }
-  function subset(a, b) {
-    for (const x of a) if (!b.has(x)) return false;
-    return true;
-  }
-  switch (plan.type) {
-    case 'Scan':
-      return plan;
-    case 'Join':
-      return { type: 'Join', left: pushDown(plan.left), right: pushDown(plan.right), on: plan.on };
-    case 'Filter': {
-      if (plan.input.type !== 'Join') {
-        return { type: 'Filter', input: pushDown(plan.input), predicate: plan.predicate };
-      }
-      const join = plan.input;
-      const leftBindings = planBindings(join.left);
-      const rightBindings = planBindings(join.right);
-      const toLeft = [];
-      const toRight = [];
-      const staying = [];
-      for (const conjunct of conjunctsOf(plan.predicate)) {
-        const bindings = exprBindings(conjunct);
-        if (bindings.size === 0) staying.push(conjunct);
-        else if (subset(bindings, leftBindings)) toLeft.push(conjunct);
-        else if (subset(bindings, rightBindings)) toRight.push(conjunct);
-        else staying.push(conjunct);
-      }
-      let left = join.left;
-      if (toLeft.length > 0) left = { type: 'Filter', input: left, predicate: andAll(toLeft) };
-      let right = join.right;
-      if (toRight.length > 0) right = { type: 'Filter', input: right, predicate: andAll(toRight) };
-      const rebuilt = { type: 'Join', left: pushDown(left), right: pushDown(right), on: join.on };
-      if (staying.length === 0) return rebuilt;
-      return { type: 'Filter', input: rebuilt, predicate: andAll(staying) };
-    }
-    case 'Sort':
-      return { type: 'Sort', input: pushDown(plan.input), keys: plan.keys };
-    case 'Limit':
-      return { type: 'Limit', input: pushDown(plan.input), count: plan.count };
-    case 'Project':
-      return { type: 'Project', input: pushDown(plan.input), columns: plan.columns };
-  }
-}`,
+  solution: PUSHDOWN_SOLUTION,
   tests: [
     {
       name: 'single-side conjuncts drop below the join; the cross-side one stays',
@@ -557,67 +640,7 @@ const sqlPrune: ChallengeDef = {
 function prune(plan) {
   // TODO
 }`,
-  solution: `function prune(plan) {
-  const needed = new Set();
-  (function collect(node) {
-    switch (node.type) {
-      case 'Scan':
-        return;
-      case 'Join':
-        for (const ref of exprRefs(node.on)) needed.add(ref);
-        collect(node.left);
-        collect(node.right);
-        return;
-      case 'Filter':
-        for (const ref of exprRefs(node.predicate)) needed.add(ref);
-        collect(node.input);
-        return;
-      case 'Sort':
-        for (const key of node.keys) for (const ref of exprRefs(key.expr)) needed.add(ref);
-        collect(node.input);
-        return;
-      case 'Limit':
-        collect(node.input);
-        return;
-      case 'Project':
-        for (const col of node.columns) for (const ref of exprRefs(col.expr)) needed.add(ref);
-        collect(node.input);
-        return;
-    }
-  })(plan);
-  function rewrite(node, underJoin) {
-    switch (node.type) {
-      case 'Scan': {
-        if (!underJoin) return node;
-        const keep = node.columns.filter(function (c) {
-          return needed.has(node.binding + '.' + c);
-        });
-        if (keep.length === node.columns.length) return node;
-        return {
-          type: 'Project',
-          input: node,
-          columns: keep.map(function (name) {
-            return { expr: { type: 'Column', table: node.binding, name: name },
-              name: node.binding + '.' + name };
-          }),
-        };
-      }
-      case 'Join':
-        return { type: 'Join', left: rewrite(node.left, true),
-          right: rewrite(node.right, true), on: node.on };
-      case 'Filter':
-        return { type: 'Filter', input: rewrite(node.input, underJoin),
-          predicate: node.predicate };
-      case 'Sort':
-        return { type: 'Sort', input: rewrite(node.input, underJoin), keys: node.keys };
-      case 'Limit':
-        return { type: 'Limit', input: rewrite(node.input, underJoin), count: node.count };
-      case 'Project':
-        return { type: 'Project', input: rewrite(node.input, underJoin), columns: node.columns };
-    }
-  }
-  return rewrite(plan, false);
-}`,
+  solution: PRUNE_SOLUTION,
   tests: [
     {
       name: 'each joined scan keeps only what the plan above it touches',
@@ -692,54 +715,97 @@ function prune(plan) {
   },
 };
 
-/** The capstone battery: queries whose naive plans leave real money on the table. */
-const CAPSTONE_QUERIES: { q: string; hint?: string }[] = [
+export interface CapstoneQuery {
+  q: string;
+  hint: string;
+  /**
+   * 'reduce': the pipeline genuinely cuts cost, and the budget is
+   * ceil(refCost × CAPSTONE_HEADROOM) — strictly below the naive cost.
+   * 'guard': nothing in the pipeline can make this plan cheaper under the
+   * cost model, so the budget is the naive cost itself and the test pins
+   * equivalence plus no-regression.
+   */
+  mode: 'reduce' | 'guard';
+  /** Bench-database cost budget, literal so no plan executes at module load. */
+  budget: number;
+  /** Naive-plan bench cost shown in the test name. */
+  naive: number;
+}
+
+/**
+ * 25% headroom over the reference pipeline: room for a different but
+ * honest optimizer, none for skipping a whole technique.
+ */
+export const CAPSTONE_HEADROOM = 1.25;
+
+/**
+ * The capstone battery: six queries whose naive plans leave real money on
+ * the table, plus a guard the meter cannot reward. The budget and naive
+ * literals are pinned against the formula by curriculum.test.ts — a change
+ * to the databases, the cost model, or the reference pipeline fails there
+ * with the fresh numbers to paste in.
+ */
+export const CAPSTONE_QUERIES: CapstoneQuery[] = [
   {
     q: 'SELECT name FROM users WHERE TRUE AND signup_year > 2020',
-    hint: 'Simplification alone: TRUE AND p, then the Filter stays put (no join to push through).',
+    hint: 'Nothing here can get cheaper: no join to push through or prune under, and Filter is charged on its input either way. The meter only pins that your optimizer does no harm — equivalence still must hold.',
+    mode: 'guard',
+    budget: 1144,
+    naive: 1144,
   },
   {
     q: "SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id WHERE u.city = 'seattle' AND o.year = 2024",
     hint: 'The bread-and-butter case: one conjunct to each side, then prune both scans.',
+    mode: 'reduce',
+    budget: 18983,
+    naive: 730180,
   },
   {
     q: "SELECT u.name FROM users u JOIN orders o ON u.id = o.user_id JOIN products p ON o.product_id = p.id WHERE p.category = 'hardware' AND u.city = 'london' AND o.quantity > 1",
     hint: 'Three tables, three destinations — the cascade through stacked joins has to work.',
+    mode: 'reduce',
+    budget: 109205,
+    naive: 985062,
   },
   {
     q: "SELECT u.name FROM users u JOIN orders o ON u.id = o.user_id WHERE o.total > 100 AND u.signup_year < o.year",
     hint: 'One conjunct pushes; the cross-side comparison must stay at the join and still hold.',
+    mode: 'reduce',
+    budget: 535230,
+    naive: 733790,
   },
   {
     q: 'SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id WHERE 1 = 2 AND o.year = 2024',
-    hint: 'Simplify first: the whole predicate collapses to FALSE, and almost everything downstream is free.',
+    hint: 'Simplify first: the predicate collapses to FALSE — and its column references vanish with it, so pruning cuts deeper below the join.',
+    mode: 'reduce',
+    budget: 373200,
+    naive: 730080,
   },
   {
     q: "SELECT u.name FROM users u JOIN orders o ON u.id = o.user_id WHERE o.year >= 2024 ORDER BY u.name LIMIT 5",
     hint: 'Sort and Limit stay above; pushdown and pruning work below them.',
+    mode: 'reduce',
+    budget: 121725,
+    naive: 733860,
   },
   {
     q: "SELECT p.name, o.quantity FROM products p JOIN orders o ON p.id = o.product_id WHERE p.price > 200 AND o.year = 2025 ORDER BY o.quantity DESC",
     hint: 'Both sides filter and both sides prune; the ORDER BY column must survive pruning.',
+    mode: 'reduce',
+    budget: 23303,
+    naive: 190680,
   },
   {
     q: "SELECT u.city, o.total FROM users u JOIN orders o ON u.id = o.user_id WHERE u.city IS NOT NULL AND o.total IS NOT NULL AND o.total / o.quantity > 20",
     hint: 'IS NOT NULL predicates push like any other single-side conjunct; the division is per-row work you cannot remove, only shrink.',
+    mode: 'reduce',
+    budget: 367263,
+    naive: 734730,
   },
 ];
 
-function capstoneBudget(q: string): { budget: number; naiveCost: number; refCost: number } {
-  const naive = planOf(q);
-  const naiveCost = executeWithStats(naive, benchDb).cost;
-  const refCost = executeWithStats(optimizePlan(naive), benchDb).cost;
-  // 25% headroom over the reference pipeline: room for a different but
-  // honest optimizer, none for skipping a whole technique.
-  return { budget: Math.ceil(refCost * 1.25), naiveCost, refCost };
-}
-
-const capstoneCheck: CheckFn = (actual, ctx) => {
-  const naive = ctx.args[0] as Plan;
-  const plan = actual as Plan;
+/** Validity + row equality on both databases; null when the plans agree. */
+function equivalenceFailure(plan: Plan, naive: Plan): ReturnType<CheckFn> | null {
   const problems = validatePlan(plan, shopCatalog);
   if (problems.length > 0) {
     return { pass: false, message: `Your plan is not well-formed: ${problems.join('; ')}.` };
@@ -766,18 +832,40 @@ const capstoneCheck: CheckFn = (actual, ctx) => {
       };
     }
   }
+  return null;
+}
+
+function overBudget(plan: Plan, budget: number, context: string): ReturnType<CheckFn> | null {
   const stats = executeWithStats(plan, benchDb);
+  if (stats.cost <= budget) return null;
+  const bill = stats.operators.map((op) => `${op.label}: ${op.cells}`).join('  ·  ');
+  return {
+    pass: false,
+    message: `Correct rows, but over budget: your plan processes ${stats.cost} cells on the bench database; the budget is ${budget} (${context}). Your plan's bill — ${bill}`,
+  };
+}
+
+/** Per-battery-test check with the budget baked in: nothing recomputed from the reference pipeline at grade time. */
+const capstoneCheckWith =
+  ({ budget, naive: naiveCost }: CapstoneQuery): CheckFn =>
+  (actual, ctx) =>
+    equivalenceFailure(actual as Plan, ctx.args[0] as Plan) ??
+    overBudget(actual as Plan, budget, `naive: ${naiveCost}`) ?? { pass: true };
+
+/** Challenge-wide check for user-authored queries: the budget comes from running the reference pipeline. */
+const capstoneCheck: CheckFn = (actual, ctx) => {
+  const naive = ctx.args[0] as Plan;
+  const failure = equivalenceFailure(actual as Plan, naive);
+  if (failure !== null) return failure;
   const naiveCost = executeWithStats(naive, benchDb).cost;
   const refCost = executeWithStats(optimizePlan(naive), benchDb).cost;
-  const budget = Math.ceil(refCost * 1.25);
-  if (stats.cost > budget) {
-    const bill = stats.operators.map((op) => `${op.label}: ${op.cells}`).join('  ·  ');
-    return {
-      pass: false,
-      message: `Correct rows, but over budget: your plan processes ${stats.cost} cells on the bench database; the budget is ${budget} (naive: ${naiveCost}, reference optimizer: ${refCost}). Your plan's bill — ${bill}`,
-    };
-  }
-  return { pass: true };
+  // A custom query the pipeline cannot improve still must not get worse.
+  const budget = Math.min(Math.ceil(refCost * CAPSTONE_HEADROOM), Math.max(naiveCost, refCost));
+  return (
+    overBudget(actual as Plan, budget, `naive: ${naiveCost}, reference optimizer: ${refCost}`) ?? {
+      pass: true,
+    }
+  );
 };
 
 const sqlOptimize: ChallengeDef = {
@@ -801,255 +889,25 @@ const sqlOptimize: ChallengeDef = {
 function optimize(plan) {
   // TODO
 }`,
-  solution: `function optimize(plan) {
-${'  '}// simplify -> push down -> prune, exactly as built in the three
-${'  '}// previous challenges.
-  function evalConst(expr) {
-    switch (expr.type) {
-      case 'Lit': return expr.value;
-      case 'Unary': {
-        const v = evalConst(expr.operand);
-        return typeof v === 'number' ? -v : null;
-      }
-      case 'Not': {
-        const v = evalConst(expr.operand);
-        return v === null ? null : v !== true;
-      }
-      case 'IsNull': {
-        const v = evalConst(expr.operand);
-        return (v === null) !== expr.negated;
-      }
-      case 'Binary': {
-        const l = evalConst(expr.left);
-        const r = evalConst(expr.right);
-        switch (expr.op) {
-          case 'AND':
-            if (l === false || r === false) return false;
-            if (l === null || r === null) return null;
-            return l === true && r === true;
-          case 'OR':
-            if (l === true || r === true) return true;
-            if (l === null || r === null) return null;
-            return false;
-          case '+': case '-': case '*': case '/': {
-            if (typeof l !== 'number' || typeof r !== 'number') return null;
-            if (expr.op === '+') return l + r;
-            if (expr.op === '-') return l - r;
-            if (expr.op === '*') return l * r;
-            return r === 0 ? null : l / r;
-          }
-          default: {
-            if (l === null || r === null) return null;
-            if (typeof l !== typeof r) return null;
-            if (expr.op === '=') return l === r;
-            if (expr.op === '<>') return l !== r;
-            if (expr.op === '<') return l < r;
-            if (expr.op === '<=') return l <= r;
-            if (expr.op === '>') return l > r;
-            return l >= r;
-          }
-        }
-      }
-    }
-  }
-  function isLit(e) { return e.type === 'Lit'; }
-  function simplifyExprNode(expr) {
-    switch (expr.type) {
-      case 'Lit':
-      case 'Column':
-        return expr;
-      case 'Not': {
-        const operand = simplifyExprNode(expr.operand);
-        const node = { type: 'Not', operand: operand };
-        return isLit(operand) ? { type: 'Lit', value: evalConst(node) } : node;
-      }
-      case 'Unary': {
-        const operand = simplifyExprNode(expr.operand);
-        const node = { type: 'Unary', op: '-', operand: operand };
-        return isLit(operand) ? { type: 'Lit', value: evalConst(node) } : node;
-      }
-      case 'IsNull': {
-        const operand = simplifyExprNode(expr.operand);
-        const node = { type: 'IsNull', operand: operand, negated: expr.negated };
-        return isLit(operand) ? { type: 'Lit', value: evalConst(node) } : node;
-      }
-      case 'Binary': {
-        const left = simplifyExprNode(expr.left);
-        const right = simplifyExprNode(expr.right);
-        const node = { type: 'Binary', op: expr.op, left: left, right: right };
-        if (expr.op === 'AND') {
-          if ((isLit(left) && left.value === false) || (isLit(right) && right.value === false)) {
-            return { type: 'Lit', value: false };
-          }
-          if (isLit(left) && left.value === true) return right;
-          if (isLit(right) && right.value === true) return left;
-          if (isLit(left) && isLit(right)) return { type: 'Lit', value: evalConst(node) };
-          return node;
-        }
-        if (expr.op === 'OR') {
-          if ((isLit(left) && left.value === true) || (isLit(right) && right.value === true)) {
-            return { type: 'Lit', value: true };
-          }
-          if (isLit(left) && left.value === false) return right;
-          if (isLit(right) && right.value === false) return left;
-          if (isLit(left) && isLit(right)) return { type: 'Lit', value: evalConst(node) };
-          return node;
-        }
-        if ((isLit(left) && left.value === null) || (isLit(right) && right.value === null)) {
-          return { type: 'Lit', value: null };
-        }
-        if (isLit(left) && isLit(right)) return { type: 'Lit', value: evalConst(node) };
-        return node;
-      }
-    }
-  }
-  function simplifyPlan(node) {
-    switch (node.type) {
-      case 'Scan':
-        return node;
-      case 'Join':
-        return { type: 'Join', left: simplifyPlan(node.left), right: simplifyPlan(node.right),
-          on: simplifyExprNode(node.on) };
-      case 'Filter': {
-        const input = simplifyPlan(node.input);
-        const predicate = simplifyExprNode(node.predicate);
-        if (predicate.type === 'Lit' && predicate.value === true) return input;
-        return { type: 'Filter', input: input, predicate: predicate };
-      }
-      case 'Sort':
-        return { type: 'Sort', input: simplifyPlan(node.input), keys: node.keys };
-      case 'Limit':
-        return { type: 'Limit', input: simplifyPlan(node.input), count: node.count };
-      case 'Project':
-        return { type: 'Project', input: simplifyPlan(node.input), columns: node.columns };
-    }
-  }
-  function conjunctsOf(expr) {
-    if (expr.type === 'Binary' && expr.op === 'AND') {
-      return conjunctsOf(expr.left).concat(conjunctsOf(expr.right));
-    }
-    return [expr];
-  }
-  function andAll(list) {
-    return list.reduce(function (left, right) {
-      return { type: 'Binary', op: 'AND', left: left, right: right };
-    });
-  }
-  function subset(a, b) {
-    for (const x of a) if (!b.has(x)) return false;
-    return true;
-  }
-  function pushDown(node) {
-    switch (node.type) {
-      case 'Scan':
-        return node;
-      case 'Join':
-        return { type: 'Join', left: pushDown(node.left), right: pushDown(node.right), on: node.on };
-      case 'Filter': {
-        if (node.input.type !== 'Join') {
-          return { type: 'Filter', input: pushDown(node.input), predicate: node.predicate };
-        }
-        const join = node.input;
-        const leftBindings = planBindings(join.left);
-        const rightBindings = planBindings(join.right);
-        const toLeft = [];
-        const toRight = [];
-        const staying = [];
-        for (const conjunct of conjunctsOf(node.predicate)) {
-          const bindings = exprBindings(conjunct);
-          if (bindings.size === 0) staying.push(conjunct);
-          else if (subset(bindings, leftBindings)) toLeft.push(conjunct);
-          else if (subset(bindings, rightBindings)) toRight.push(conjunct);
-          else staying.push(conjunct);
-        }
-        let left = join.left;
-        if (toLeft.length > 0) left = { type: 'Filter', input: left, predicate: andAll(toLeft) };
-        let right = join.right;
-        if (toRight.length > 0) right = { type: 'Filter', input: right, predicate: andAll(toRight) };
-        const rebuilt = { type: 'Join', left: pushDown(left), right: pushDown(right), on: join.on };
-        if (staying.length === 0) return rebuilt;
-        return { type: 'Filter', input: rebuilt, predicate: andAll(staying) };
-      }
-      case 'Sort':
-        return { type: 'Sort', input: pushDown(node.input), keys: node.keys };
-      case 'Limit':
-        return { type: 'Limit', input: pushDown(node.input), count: node.count };
-      case 'Project':
-        return { type: 'Project', input: pushDown(node.input), columns: node.columns };
-    }
-  }
-  function prune(root) {
-    const needed = new Set();
-    (function collect(node) {
-      switch (node.type) {
-        case 'Scan':
-          return;
-        case 'Join':
-          for (const ref of exprRefs(node.on)) needed.add(ref);
-          collect(node.left);
-          collect(node.right);
-          return;
-        case 'Filter':
-          for (const ref of exprRefs(node.predicate)) needed.add(ref);
-          collect(node.input);
-          return;
-        case 'Sort':
-          for (const key of node.keys) for (const ref of exprRefs(key.expr)) needed.add(ref);
-          collect(node.input);
-          return;
-        case 'Limit':
-          collect(node.input);
-          return;
-        case 'Project':
-          for (const col of node.columns) for (const ref of exprRefs(col.expr)) needed.add(ref);
-          collect(node.input);
-          return;
-      }
-    })(root);
-    function rewrite(node, underJoin) {
-      switch (node.type) {
-        case 'Scan': {
-          if (!underJoin) return node;
-          const keep = node.columns.filter(function (c) {
-            return needed.has(node.binding + '.' + c);
-          });
-          if (keep.length === node.columns.length) return node;
-          return {
-            type: 'Project',
-            input: node,
-            columns: keep.map(function (name) {
-              return { expr: { type: 'Column', table: node.binding, name: name },
-                name: node.binding + '.' + name };
-            }),
-          };
-        }
-        case 'Join':
-          return { type: 'Join', left: rewrite(node.left, true),
-            right: rewrite(node.right, true), on: node.on };
-        case 'Filter':
-          return { type: 'Filter', input: rewrite(node.input, underJoin),
-            predicate: node.predicate };
-        case 'Sort':
-          return { type: 'Sort', input: rewrite(node.input, underJoin), keys: node.keys };
-        case 'Limit':
-          return { type: 'Limit', input: rewrite(node.input, underJoin), count: node.count };
-        case 'Project':
-          return { type: 'Project', input: rewrite(node.input, underJoin), columns: node.columns };
-      }
-    }
-    return rewrite(root, false);
-  }
+  solution: [
+    SIMPLIFY_SOLUTION,
+    PUSHDOWN_SOLUTION,
+    PRUNE_SOLUTION,
+    `function optimize(plan) {
+  // The passes compose; pruning last, so it sees the pushed filters.
   return prune(pushDown(simplifyPlan(plan)));
 }`,
+  ].join('\n\n'),
   check: capstoneCheck,
-  tests: CAPSTONE_QUERIES.map(({ q, hint }, i) => {
-    const { budget, naiveCost } = capstoneBudget(q);
-    return {
-      name: `q${i + 1}: ${q} — same rows, ≤ ${budget} cells (naive: ${naiveCost})`,
-      args: [planOf(q)] as unknown[],
-      hint,
-    };
-  }),
+  tests: CAPSTONE_QUERIES.map((entry, i) => ({
+    name:
+      entry.mode === 'reduce'
+        ? `q${i + 1}: ${entry.q} — same rows, ≤ ${entry.budget} cells (naive: ${entry.naive})`
+        : `q${i + 1}: ${entry.q} — same rows, no cost regression (naive: ${entry.naive})`,
+    args: [planOf(entry.q)] as unknown[],
+    hint: entry.hint,
+    check: capstoneCheckWith(entry),
+  })),
   custom: {
     describe:
       'An AstQL query (shop catalog); its naive plan is built for you, and your optimizer is graded on equivalence and cost against the reference pipeline.',

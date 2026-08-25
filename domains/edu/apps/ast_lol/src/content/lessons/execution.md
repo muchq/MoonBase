@@ -23,6 +23,8 @@ An executor makes the plan's dataflow literal. In this course each operator is a
 | `x / 0` | `null` | AstQL's choice — SQL flavor, unlike Expr's `Infinity` |
 | `city IS NULL` | `true`/`false` | the *only* operators that answer definitely |
 
+One more rule keeps the algebra honest: **`AND`/`OR`/`NOT` coerce each operand first** — `true` stays `true`, `null` stays `null`, and anything else counts as `false` — and they always return `true`, `false`, or `null`. The point is *consistency*: a value must not read as "not false" in one branch and "not true" in another, or Tier 5's `TRUE AND p → p` rewrite would quietly change answers for ill-typed predicates. (Real SQL dialects dodge this with a type checker that rejects `WHERE 5 AND x` outright; AstQL, having none, defines the case instead. Feeding a logical result into *arithmetic* stays outside the contract.)
+
 Then one rule turns logic into rows: **Filter and Join keep a row only when the predicate is exactly `true`.** `null` is dropped like `false`. This is why `WHERE city = 'london'` and `WHERE city <> 'london'` can *both* omit the person with an unrecorded city — the single most-reported "SQL bug" that isn't one.
 
 Two implementation warnings, both covered by tests with hints: `null AND false` must be `false`, so a lazy short-circuit that returns `null` on any null operand is wrong. And sorting: **nulls order last regardless of direction** — implement `DESC` by flipping the comparison of *non-null* keys, not by negating a comparator that has already placed nulls.

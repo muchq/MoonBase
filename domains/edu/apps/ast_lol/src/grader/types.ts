@@ -77,7 +77,11 @@ export interface GradableChallenge {
   /** Reference solution source; the grading oracle and the revealable answer. */
   solution: string;
   tests: TestSpec[];
-  /** Challenge-wide semantic check, applied where a test doesn't bring its own. */
+  /**
+   * Challenge-wide semantic check, applied where a test doesn't bring its
+   * own `check`. A check — test- or challenge-level — takes precedence over
+   * a test's `expected`.
+   */
   check?: CheckFn;
   /**
    * Custom-test adapter: maps the values a user typed into entry args.

@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { challenges, lessons, orderedSteps, stepId } from '../curriculum/registry';
-import { gradeSubmission } from '../grader/harness';
+import { CAPSTONE_HEADROOM, CAPSTONE_QUERIES } from '../curriculum/tier5';
+import { compileSubmission, gradeSubmission } from '../grader/harness';
+import {
+  benchDb,
+  buildPlan,
+  executePlan,
+  executeWithStats,
+  optimizePlan,
+  parseSelect,
+  resolve,
+  shopCatalog,
+  tokenizeSql,
+  type Plan,
+} from '../lang/sql';
 
 /**
  * The curriculum's grading contract, proven in CI:
@@ -70,4 +83,62 @@ describe('custom-test placeholders', () => {
       expect(custom, JSON.stringify(custom, null, 2)).toMatchObject({ status: 'pass' });
     },
   );
+
+  // The green run above cannot fail on oracle-graded challenges (the graded
+  // submission IS the oracle), so also pin the half that matters: the
+  // placeholder builds a real input, and the reference solution *returns*
+  // for it rather than throwing — a first experience that works.
+  it.each(challenges.map((c) => [c.id, c] as const))(
+    '%s placeholder builds an input the reference solution accepts',
+    (_id, c) => {
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval
+      const values = new Function(`"use strict"; return [\n${c.custom!.placeholder}\n];`)() as unknown[];
+      const args = c.custom!.toArgs(values);
+      const oracle = compileSubmission(
+        { language: 'javascript', code: c.solution },
+        c.entry,
+        c.prelude ?? '',
+      );
+      expect(oracle.call, c.id).not.toBeNull();
+      expect(() => oracle.call!(...structuredClone(args)), c.id).not.toThrow();
+    },
+  );
+});
+
+describe('capstone battery', () => {
+  const planOf = (q: string): Plan => {
+    const r = resolve(parseSelect(tokenizeSql(q)), shopCatalog);
+    expect(r.errors).toEqual([]);
+    return buildPlan(r.select!, shopCatalog);
+  };
+
+  it.each(CAPSTONE_QUERIES.map((e, i) => [`q${i + 1}`, e] as const))(
+    '%s: pinned budget and naive cost match the formula',
+    (_label, entry) => {
+      const naive = planOf(entry.q);
+      const naiveCost = executeWithStats(naive, benchDb).cost;
+      const refCost = executeWithStats(optimizePlan(naive), benchDb).cost;
+      expect(entry.naive, 'naive cost drifted — paste the fresh number').toBe(naiveCost);
+      if (entry.mode === 'reduce') {
+        expect(entry.budget).toBe(Math.ceil(refCost * CAPSTONE_HEADROOM));
+        // A budget at or above the naive cost would let a no-op optimizer pass.
+        expect(entry.budget).toBeLessThan(naiveCost);
+      } else {
+        expect(refCost, 'a guard query must be unimprovable by the pipeline').toBe(naiveCost);
+        expect(entry.budget).toBe(naiveCost);
+      }
+    },
+  );
+
+  it('every query except the deliberate contradiction returns rows on the bench database', () => {
+    for (const entry of CAPSTONE_QUERIES) {
+      const rows = executePlan(planOf(entry.q), benchDb).length;
+      if (entry.q.includes('1 = 2')) {
+        expect(rows, entry.q).toBe(0);
+      } else {
+        // Equivalence over an empty result proves nothing.
+        expect(rows, entry.q).toBeGreaterThan(0);
+      }
+    }
+  });
 });

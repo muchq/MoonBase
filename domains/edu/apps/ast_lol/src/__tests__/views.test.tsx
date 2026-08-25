@@ -54,7 +54,9 @@ describe('HomeView', () => {
     markCompleted('welcome');
     at('/');
     expect(screen.getAllByLabelText('completed').length).toBe(1);
-    expect(screen.getByText('continue')).toBeInTheDocument();
+    // The chip must point at the first *incomplete* step, not the one just done.
+    const chip = screen.getByText('continue');
+    expect(chip.closest('a')).toHaveAttribute('href', '/lesson/tokens');
   });
 
   it('shows solved count in the header', () => {

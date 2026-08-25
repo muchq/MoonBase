@@ -284,16 +284,36 @@ export function gradeSubmission(
   const headerLines = 1 + (prelude === '' ? 0 : prelude.split('\n').length);
 
   const results: TestResult[] = [];
+  const emit = (result: TestResult) => {
+    results.push(result);
+    callbacks.onTestResult?.(result);
+  };
+  const inputError = (id: string, custom: boolean, name: string, e: unknown): TestResult => ({
+    id,
+    name,
+    custom,
+    status: 'error',
+    message: `Could not build this test's input: ${e instanceof Error ? e.message : show(e)}`,
+    logs: [],
+  });
+
   const run = (id: string, custom: boolean, spec: TestSpec, args: unknown[]) => {
     callbacks.onTestStart?.(id, spec.name);
+    // Validate cloneability up front: a clone failure inside the grading
+    // try would read as "both the submission and the oracle threw the same
+    // error" and pass every submission.
+    try {
+      structuredClone(args);
+    } catch (e) {
+      emit(inputError(id, custom, spec.name, e));
+      return;
+    }
     const logs: string[] = [];
     compiled.setSink(logs);
     const outcome = runEntry(compiled.call!, args);
     compiled.setSink(null);
     const graded = gradeOutcome(spec, outcome, args, oracle, codeLines, headerLines);
-    const result: TestResult = { id, custom, logs, ...graded };
-    results.push(result);
-    callbacks.onTestResult?.(result);
+    emit({ id, custom, logs, ...graded });
   };
 
   challenge.tests.forEach((spec, i) => {
@@ -301,7 +321,6 @@ export function gradeSubmission(
   });
 
   for (const custom of customTests) {
-    callbacks.onTestStart?.(custom.id, custom.name);
     let args: unknown[];
     try {
       if (challenge.custom === null) throw new Error('custom tests are not enabled here');
@@ -309,33 +328,11 @@ export function gradeSubmission(
       const values = new Function(`"use strict"; return [\n${custom.source}\n];`)() as unknown[];
       args = challenge.custom.toArgs(values);
     } catch (e) {
-      const result: TestResult = {
-        id: custom.id,
-        name: custom.name,
-        custom: true,
-        status: 'error',
-        message: `Could not build this test's input: ${e instanceof Error ? e.message : show(e)}`,
-        logs: [],
-      };
-      results.push(result);
-      callbacks.onTestResult?.(result);
+      callbacks.onTestStart?.(custom.id, custom.name);
+      emit(inputError(custom.id, true, custom.name, e));
       continue;
     }
-    const logs: string[] = [];
-    compiled.setSink(logs);
-    const outcome = runEntry(compiled.call!, args);
-    compiled.setSink(null);
-    const graded = gradeOutcome(
-      { name: custom.name, check: challenge.check, hint: undefined },
-      outcome,
-      args,
-      oracle,
-      codeLines,
-      headerLines,
-    );
-    const result: TestResult = { id: custom.id, custom: true, logs, ...graded };
-    results.push(result);
-    callbacks.onTestResult?.(result);
+    run(custom.id, true, { name: custom.name, args, check: challenge.check }, args);
   }
 
   const allPass = results.every((r) => r.status === 'pass');

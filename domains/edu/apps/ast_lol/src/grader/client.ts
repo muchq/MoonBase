@@ -38,7 +38,18 @@ export function runGrader(
   const requestId = Date.now() + Math.random();
 
   return new Promise((resolve) => {
-    const worker = createWorker();
+    let worker: Worker;
+    try {
+      worker = createWorker();
+    } catch (e) {
+      resolve({
+        challengeId,
+        status: 'error',
+        compileError: `The grader could not start: ${e instanceof Error ? e.message : String(e)}`,
+        tests: [],
+      });
+      return;
+    }
     const completed: TestResult[] = [];
     let running: RunningTest | null = null;
     let settled = false;

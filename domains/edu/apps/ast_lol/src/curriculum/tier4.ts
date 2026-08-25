@@ -445,11 +445,14 @@ const sqlExecute: ChallengeDef = {
 //   /            -> like + - *, and x / 0 is null  (SQL flavor, not JS!)
 //   = <> < <= > >= -> null if either side is null OR types differ;
 //                     otherwise plain JS comparison
+//   AND/OR/NOT coerce each operand first — true stays true, null stays
+//   null, anything else counts as false — and always return true, false,
+//   or null. Then, over the coerced values:
 //   AND  -> false if either side is false; else null if either is null;
 //           else true                                (Kleene)
 //   OR   -> true if either side is true; else null if either is null;
 //           else false
-//   NOT  -> null stays null; else !v (treat non-true as false)
+//   NOT  -> null stays null; else the flipped boolean
 //   -x   -> null unless x is a number
 //   x IS [NOT] NULL -> always true or false, never null
 //
@@ -467,6 +470,10 @@ function execute(plan, db) {
   // TODO
 }`,
   solution: `function execute(plan, db) {
+  // AND/OR/NOT operand coercion: true, null, or (anything else) false.
+  function truth(v) {
+    return v === true ? true : v === null ? null : false;
+  }
   function evalExpr(expr, row) {
     switch (expr.type) {
       case 'Lit':
@@ -480,8 +487,8 @@ function execute(plan, db) {
         return typeof v === 'number' ? -v : null;
       }
       case 'Not': {
-        const v = evalExpr(expr.operand, row);
-        return v === null ? null : v !== true;
+        const v = truth(evalExpr(expr.operand, row));
+        return v === null ? null : !v;
       }
       case 'IsNull': {
         const v = evalExpr(expr.operand, row);
@@ -491,14 +498,20 @@ function execute(plan, db) {
         const l = evalExpr(expr.left, row);
         const r = evalExpr(expr.right, row);
         switch (expr.op) {
-          case 'AND':
-            if (l === false || r === false) return false;
-            if (l === null || r === null) return null;
-            return l === true && r === true;
-          case 'OR':
-            if (l === true || r === true) return true;
-            if (l === null || r === null) return null;
+          case 'AND': {
+            const lt = truth(l);
+            const rt = truth(r);
+            if (lt === false || rt === false) return false;
+            if (lt === null || rt === null) return null;
+            return true;
+          }
+          case 'OR': {
+            const lt = truth(l);
+            const rt = truth(r);
+            if (lt === true || rt === true) return true;
+            if (lt === null || rt === null) return null;
             return false;
+          }
           case '+': case '-': case '*': case '/': {
             if (typeof l !== 'number' || typeof r !== 'number') return null;
             if (expr.op === '+') return l + r;

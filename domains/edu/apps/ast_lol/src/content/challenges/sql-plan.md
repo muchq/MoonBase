@@ -28,4 +28,5 @@ Absent clauses contribute no node.
 
 - This is intentionally mechanical — resist optimizing anything here. The optimizer tier depends on planners being dumb and predictable.
 - The `colN` counter is positional: `SELECT price * 2, price AS doubled` names them `col1`, `doubled` — not `col1`, `col2`.
+- Output names may collide (`SELECT u.id, o.id …`, or `*` over a join where every table has `id`). The planner does not deduplicate: rows are objects, so at execution the **last** column with a name wins. A deliberate v1 simplification — alias with `AS` to keep both.
 - If the join test fails, check nesting direction: `Join(Join(Scan users, Scan orders), Scan products)`, never the mirror.

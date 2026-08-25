@@ -66,7 +66,9 @@ describe('show / showPretty', () => {
 });
 
 describe('gradeSubmission', () => {
-  it('reports a compile error for a syntax error, with a line number', () => {
+  // Line numbers are attached to runtime errors only: V8 reports Function-
+  // constructor syntax errors without a stack position to map.
+  it('reports a compile error for a syntax error', () => {
     const report = gradeSubmission(challenge({}), js('function f(x) {\n  return x +;\n}'));
     expect(report.status).toBe('error');
     expect(report.compileError).toContain('SyntaxError');
@@ -205,6 +207,27 @@ describe('gradeSubmission', () => {
     const custom = bad.tests.find((t) => t.id === 'u1');
     expect(custom?.status).toBe('fail');
     expect(custom?.message).toContain('expected 42, got 43');
+  });
+
+  it('reports uncloneable custom-test args as an input error, never a pass', () => {
+    // A clone failure inside the grading try would look like "submission
+    // and oracle threw the same error" and pass ANY submission.
+    const c = challenge({
+      custom: {
+        describe: 'an env',
+        placeholder: '{}',
+        toArgs: (values) => [1, values[0]],
+      },
+    });
+    const report = gradeSubmission(
+      c,
+      js('function f() { return "wrong"; }'),
+      [{ id: 'u1', name: 'function in env', source: '{ x: () => 1 }' }],
+    );
+    const custom = report.tests.find((t) => t.id === 'u1');
+    expect(custom?.status).toBe('error');
+    expect(custom?.message).toContain("Could not build this test's input");
+    expect(report.status).not.toBe('pass');
   });
 
   it('reports an unbuildable custom input as that test erroring, not the run dying', () => {

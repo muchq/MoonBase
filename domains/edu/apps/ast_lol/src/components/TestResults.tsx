@@ -64,8 +64,8 @@ export default function TestResults({ report, running }: TestResultsProps) {
       <div className="panel">
         <div className="panel-header">
           <span>
-            Run your code to see results — every failure shows the first structural difference,
-            your console output, and a hint.
+            Run your code to see results — failures show where expected and actual first
+            diverge, plus your console output, and the classic mistakes carry hints.
           </span>
         </div>
       </div>

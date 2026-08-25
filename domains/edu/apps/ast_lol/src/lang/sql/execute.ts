@@ -11,7 +11,16 @@ import type { Database, ExecStats, OperatorStats, Plan, Row, SqlExpr, SqlValue }
  * semantics), AND/OR are Kleene, and Filter/Join keep a row only when the
  * predicate is exactly true. Sort is stable, and null keys order last
  * regardless of direction.
+ *
+ * AND/OR/NOT coerce each operand first — true stays true, null stays null,
+ * anything else counts as false — and always return true/false/null. The
+ * coercion must be *consistent* (a value may not read as "not false" in one
+ * branch and "not true" in another): the simplifier's identities
+ * (TRUE AND x → x) are only meaning-preserving because of it.
  */
+
+/** AND/OR/NOT operand coercion: true, null, or (anything else) false. */
+const truth = (v: SqlValue): boolean | null => (v === true ? true : v === null ? null : false);
 export function evalRowExpr(expr: SqlExpr, row: Row): SqlValue {
   switch (expr.type) {
     case 'Lit':
@@ -26,8 +35,8 @@ export function evalRowExpr(expr: SqlExpr, row: Row): SqlValue {
       return v === null || typeof v !== 'number' ? null : -v;
     }
     case 'Not': {
-      const v = evalRowExpr(expr.operand, row);
-      return v === null ? null : v !== true;
+      const v = truth(evalRowExpr(expr.operand, row));
+      return v === null ? null : !v;
     }
     case 'IsNull': {
       const v = evalRowExpr(expr.operand, row);
@@ -37,14 +46,20 @@ export function evalRowExpr(expr: SqlExpr, row: Row): SqlValue {
       const l = evalRowExpr(expr.left, row);
       const r = evalRowExpr(expr.right, row);
       switch (expr.op) {
-        case 'AND':
-          if (l === false || r === false) return false;
-          if (l === null || r === null) return null;
-          return l === true && r === true;
-        case 'OR':
-          if (l === true || r === true) return true;
-          if (l === null || r === null) return null;
+        case 'AND': {
+          const lt = truth(l);
+          const rt = truth(r);
+          if (lt === false || rt === false) return false;
+          if (lt === null || rt === null) return null;
+          return true;
+        }
+        case 'OR': {
+          const lt = truth(l);
+          const rt = truth(r);
+          if (lt === true || rt === true) return true;
+          if (lt === null || rt === null) return null;
           return false;
+        }
         case '+':
         case '-':
         case '*':

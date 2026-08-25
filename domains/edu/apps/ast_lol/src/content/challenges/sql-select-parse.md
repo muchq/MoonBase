@@ -1,6 +1,6 @@
 Write `parseSelect(tokens)` — the full AstQL statement parser.
 
-Your Pratt parser is **provided** as `parseExprFrom(tokens, i) → { expr, end }` (see the provided-code panel): it parses the longest expression starting at `i` and reports the first index it did not consume. It stops on its own at commas, closing parens, and keywords.
+Your Pratt parser is **provided** as `parseExprFrom(tokens, i) → { expr, end }` (see the provided-code panel): it parses the longest expression starting at `i` and reports the first index it did not consume. It stops on its own at commas, closing parens, and clause keywords like `FROM` or `WHERE` — operator keywords (`AND`, `OR`, `NOT`, `IS`) it consumes itself.
 
 ### Output shape
 

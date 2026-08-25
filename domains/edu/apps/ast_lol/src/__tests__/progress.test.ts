@@ -11,7 +11,7 @@ import {
 beforeEach(() => resetProgressForTests());
 
 describe('progress store', () => {
-  it('starts empty and round-trips through localStorage', () => {
+  it('starts empty and resets cleanly', () => {
     expect(getProgress().completed).toEqual({});
     markCompleted('expr-tokenize');
     saveDraft('expr-tokenize', 'function tokenize() {}');

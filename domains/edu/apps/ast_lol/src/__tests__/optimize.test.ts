@@ -125,7 +125,10 @@ describe('pushDownFilters', () => {
     const naive = planOf(query);
     const pushed = pushDownFilters(naive);
     expect(validatePlan(pushed, shopCatalog)).toEqual([]);
-    expect(executePlan(pushed, benchDb)).toEqual(executePlan(naive, benchDb));
+    const rows = executePlan(naive, benchDb);
+    // Equivalence over an empty result would prove nothing.
+    expect(rows.length).toBeGreaterThan(0);
+    expect(executePlan(pushed, benchDb)).toEqual(rows);
     expect(executeWithStats(pushed, benchDb).cost).toBeLessThan(
       executeWithStats(naive, benchDb).cost,
     );
@@ -190,7 +193,9 @@ describe('pruneColumns', () => {
     const naive = planOf(query);
     const pruned = pruneColumns(naive);
     expect(validatePlan(pruned, shopCatalog)).toEqual([]);
-    expect(executePlan(pruned, benchDb)).toEqual(executePlan(naive, benchDb));
+    const rows = executePlan(naive, benchDb);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(executePlan(pruned, benchDb)).toEqual(rows);
     expect(executeWithStats(pruned, benchDb).cost).toBeLessThan(
       executeWithStats(naive, benchDb).cost,
     );
@@ -230,6 +235,55 @@ describe('optimizePlan', () => {
     const naiveCost = executeWithStats(naive, benchDb).cost;
     const optimizedCost = executeWithStats(optimized, benchDb).cost;
     expect(optimizedCost * 5).toBeLessThan(naiveCost);
+  });
+});
+
+describe('optimizer soundness under ill-typed logical operands', () => {
+  // TRUE AND x → x is only meaning-preserving because the executor coerces
+  // AND/OR/NOT operands consistently (non-true, non-null counts as false).
+  // This query made the pre-coercion engine diverge: for the null city,
+  // city = 'x' is null, and the inner AND folded differently than it ran.
+  it.each([
+    "SELECT name FROM users WHERE NOT ((TRUE AND signup_year) AND (city = 'x'))",
+    'SELECT name FROM users WHERE signup_year AND TRUE',
+    'SELECT name FROM users WHERE FALSE OR signup_year',
+    'SELECT name FROM users WHERE 1 = 1 AND signup_year',
+  ])('%s: optimized plan returns identical rows', (query) => {
+    const naive = planOf(query);
+    const optimized = optimizePlan(naive);
+    expect(validatePlan(optimized, shopCatalog)).toEqual([]);
+    expect(executePlan(optimized, demoDb)).toEqual(executePlan(naive, demoDb));
+  });
+});
+
+describe('the bench database', () => {
+  it('covers the full domains its generator promises', () => {
+    const distinct = (rows: Record<string, unknown>[], key: string) =>
+      new Set(rows.map((r) => r[key]));
+    // The original LCG's low bit alternated, silently confining these
+    // columns to half their domains (and emptying two capstone queries).
+    expect(distinct(benchDb.products, 'category')).toEqual(
+      new Set(['hardware', 'software', 'consumable', 'furniture']),
+    );
+    expect(distinct(benchDb.orders, 'year')).toEqual(
+      new Set([2020, 2021, 2022, 2023, 2024, 2025]),
+    );
+    const quantities = distinct(benchDb.orders, 'quantity');
+    expect([...quantities].some((q) => (q as number) % 2 === 0)).toBe(true);
+    expect([...quantities].some((q) => (q as number) % 2 === 1)).toBe(true);
+    const productIds = distinct(benchDb.orders, 'product_id');
+    expect([...productIds].some((p) => (p as number) % 2 === 0)).toBe(true);
+    expect([...productIds].some((p) => (p as number) % 2 === 1)).toBe(true);
+    expect(benchDb.users.filter((u) => u.city === null).length).toBeGreaterThan(0);
+    expect(benchDb.orders.filter((o) => o.total === null).length).toBeGreaterThan(0);
+  });
+
+  it('non-null totals derive from the ordered product', () => {
+    for (const order of benchDb.orders) {
+      if (order.total === null) continue;
+      const product = benchDb.products[(order.product_id as number) - 1];
+      expect(order.total).toBe((order.quantity as number) * (product.price as number));
+    }
   });
 });
 

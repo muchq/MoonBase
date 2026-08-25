@@ -51,12 +51,24 @@ function Workspace({ challenge }: { challenge: ChallengeDef }) {
         timeoutMs: challenge.timeoutMs,
         onProgress: (current) => setRunning(current),
       },
-    ).then((result) => {
-      runningRef.current = false;
-      setRunning(null);
-      setReport(result);
-      if (result.status === 'pass') markCompleted(challenge.id);
-    });
+    ).then(
+      (result) => {
+        runningRef.current = false;
+        setRunning(null);
+        setReport(result);
+        if (result.status === 'pass') markCompleted(challenge.id);
+      },
+      (e: unknown) => {
+        runningRef.current = false;
+        setRunning(null);
+        setReport({
+          challengeId: challenge.id,
+          status: 'error',
+          compileError: `The grader failed unexpectedly: ${e instanceof Error ? e.message : String(e)}`,
+          tests: [],
+        });
+      },
+    );
   }, [challenge, code, customTests]);
 
   const reset = () => {

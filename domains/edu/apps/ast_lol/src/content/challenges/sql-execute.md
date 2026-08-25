@@ -10,9 +10,10 @@ Write `execute(plan, db)` — run a logical plan over an in-memory database and 
 | `+ - *` | `null` unless both sides are numbers |
 | `/` | as above, and division by zero → `null` (not `Infinity` — this is AstQL) |
 | `= <> < <= > >=` | `null` if either side is `null` **or** types differ; else JS comparison |
-| `AND` | `false` if either side is `false`; else `null` if either is `null`; else `true` |
-| `OR` | `true` if either side is `true`; else `null` if either is `null`; else `false` |
-| `NOT` | `null` stays `null`; otherwise `v !== true` |
+| `AND`/`OR`/`NOT` | first **coerce** each operand: `true` → `true`, `null` → `null`, anything else → `false`; results are always `true`/`false`/`null` |
+| `AND` | `false` if either coerced side is `false`; else `null` if either is `null`; else `true` |
+| `OR` | `true` if either coerced side is `true`; else `null` if either is `null`; else `false` |
+| `NOT` | `null` stays `null`; otherwise the flipped boolean |
 | `-x` | `null` unless `x` is a number |
 | `IS [NOT] NULL` | always `true` or `false` |
 

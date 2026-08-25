@@ -13,7 +13,7 @@ Your three previous solutions compose directly — paste them in and wire them t
 
 ### The battery
 
-Eight queries, each budgeted individually: single-table simplification, the classic two-sided pushdown, a three-table cascade, a cross-side conjunct that must stay put, a `WHERE 1 = 2` that collapses nearly everything, `ORDER BY`/`LIMIT` interplay, and `IS NOT NULL` predicates over data salted with nulls. Each test's hint names the technique it's probing.
+Eight queries. Seven are budgeted below their naive cost: the classic two-sided pushdown, a three-table cascade, a cross-side conjunct that must stay put, a `WHERE 1 = 2` whose collapse lets pruning cut deeper, `ORDER BY`/`LIMIT` interplay, and `IS NOT NULL` predicates over data salted with nulls. The first is a **guard**: a single-table plan the cost model cannot reward — your optimizer must return an equivalent plan without making it *worse*. Each test's hint names the technique it's probing.
 
 ### Debugging notes
 
