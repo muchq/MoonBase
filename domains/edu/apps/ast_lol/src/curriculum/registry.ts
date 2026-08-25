@@ -3,6 +3,7 @@ import { tier2 } from './tier2';
 import { tier3 } from './tier3';
 import { tier4 } from './tier4';
 import { tier5 } from './tier5';
+import { tier6 } from './tier6';
 import type { ChallengeDef, LessonDef, Step, Tier } from './types';
 
 const tier0: Tier = {
@@ -16,7 +17,7 @@ const tier0: Tier = {
       lesson: {
         id: 'welcome',
         title: 'Why ASTs',
-        summary: 'The course map: from arithmetic expressions to SQL plans and a working optimizer.',
+        summary: 'The course map: from arithmetic expressions to two capstones — a SQL optimizer and a code formatter.',
         reading: [
           {
             title: 'AST Explorer',
@@ -38,7 +39,7 @@ const tier0: Tier = {
   ],
 };
 
-export const tiers: Tier[] = [tier0, tier1, tier2, tier3, tier4, tier5];
+export const tiers: Tier[] = [tier0, tier1, tier2, tier3, tier4, tier5, tier6];
 
 export const orderedSteps: Step[] = tiers.flatMap((t) => t.steps);
 

@@ -12,9 +12,11 @@ Deliberately deferred from v1, roughly in value order.
 - **Code splitting.** The main bundle is ~272 kB gzipped; CodeMirror and the
   curriculum could load per-route (`import()` in the challenge view) if
   first-paint on slow connections starts to matter.
-- **Tier 6 candidates.** Join reordering against the cost model (the natural
-  next optimizer rule); `GROUP BY` + aggregate pushdown; an index-aware Scan
-  with a chooser. Each fits the existing plan algebra.
+- **Further capstone candidates.** Join reordering against the cost model
+  (the natural next optimizer rule); `GROUP BY` + aggregate pushdown; an
+  index-aware Scan with a chooser; comment-preserving formatting (the classic
+  hard part the Tier 6 formatter deliberately omits — AstQL discards comments
+  at the tokenizer). Each fits the existing algebra.
 - **Shareable progress.** Progress is localStorage-only by design (no
   backend). An export/import blob would let people move browsers without
   adding infrastructure.

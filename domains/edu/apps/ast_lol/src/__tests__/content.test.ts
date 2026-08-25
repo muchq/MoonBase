@@ -27,4 +27,8 @@ describe('course content', () => {
       expect(challengeHtml[challenge.id], challenge.id).toContain('Debugging');
     }
   });
+
+  it('the welcome lesson teaches the Beyoncé rule by name', () => {
+    expect(lessonHtml['welcome']).toContain('Beyoncé rule');
+  });
 });

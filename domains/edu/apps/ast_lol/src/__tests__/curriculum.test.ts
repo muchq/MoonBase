@@ -30,9 +30,9 @@ describe('curriculum registry', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('has the promised shape: 16 challenges, 13 lessons', () => {
-    expect(challenges.length).toBe(16);
-    expect(lessons.length).toBe(13);
+  it('has the promised shape: 18 challenges, 14 lessons', () => {
+    expect(challenges.length).toBe(18);
+    expect(lessons.length).toBe(14);
   });
 
   it('every lesson links further reading over https', () => {

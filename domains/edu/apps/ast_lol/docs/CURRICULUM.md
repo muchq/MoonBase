@@ -37,8 +37,9 @@ course's core pedagogical move is *same technique, higher stakes*:
 | traversal | `expr-vars` | binding/column collection in the optimizer |
 | rebuild transforms | `expr-fold` | `sql-simplify` / pushdown / prune |
 | "unsafe rewrite" | fold guard rail (1/0) | 3VL-safe boolean algebra |
+| printing | `expr-print` (minimal parens) | `sql-expr-print`, `sql-format` (width-aware) |
 
-**AstQL** (Tiers 3–5) is the destination the user asked for: SQL parsing and
+**AstQL** (Tiers 3–6) is the destination the user asked for: SQL parsing and
 basic optimization. The subset is chosen so every included feature does
 curricular work: joins exist because pushdown and pruning are join stories;
 `NULL` exists because 3VL is *the* semantic surprise of SQL; `ORDER BY`/`LIMIT`
@@ -65,6 +66,18 @@ Each challenge is selected to force exactly one new competence, sized between
   all bite.
 - Tier 5 — the payoff: three rewrites in ascending difficulty, then the
   capstone composing them under a cost budget.
+- Tier 6 — a **parallel capstone track**: the code formatter, the other
+  flagship AST application. It needs only Tier 3 (a formatter never asks what
+  the tree *means*), so it forks rather than stacks — take it before, after,
+  or instead of Tiers 4–5. One skill-builder (`sql-expr-print`: Tier 2's
+  minimal-parens printing scaled to SQL's precedence system, `NOT`/`IS NULL`
+  included, plus the `--`-comment trap) and one capstone (`sql-format`: the
+  greedy fit-or-break layout cascade at three scales — query, clause, chain —
+  under a hard reparse-identity obligation). Prescriptive like the other skill
+  challenges: a formatter's whole value is that its style is a spec, so exact
+  match *is* the semantic grading here, with reparse-diagnosed failures as
+  the debugging layer. It is the one capstone graded prescriptively — the
+  optimizer's grader deliberately checks behavior and cost, never shape.
 
 The capstone battery (8 queries) is chosen adversarially: seven queries each
 fail some partial optimizer — cross-side conjuncts that must not move, a
