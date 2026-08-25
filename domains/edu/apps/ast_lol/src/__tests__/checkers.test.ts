@@ -89,6 +89,15 @@ describe('sql-format diagnostics', () => {
     expect(r.message).toMatch(/Same query, different layout: first difference at line 1/);
     expect(r.message).toMatch(/chars against a width of 40\./);
   });
+
+  it('a raw newline inside a string literal still gets the layout diagnosis, not a wrong-query one', () => {
+    const q = "SELECT 'a\nb' AS x FROM users WHERE city = 'z'";
+    const misindented = formatSelect(parseSql(q), 20).replace('FROM', ' FROM');
+    const r = checkFormat(misindented, q, 20);
+    expect(r.pass).toBe(false);
+    expect(r.message).toMatch(/Same query, different layout/);
+    expect(r.message).not.toMatch(/different query/);
+  });
 });
 
 describe('sql-format custom-test adapter', () => {

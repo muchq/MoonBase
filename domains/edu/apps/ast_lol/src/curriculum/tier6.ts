@@ -253,9 +253,12 @@ const formatCheck: CheckFn = (actual, ctx) => {
   }
   if (actual === expected) return { pass: true };
 
+  // The tokenizer reads newlines as whitespace (and keeps them inside string
+  // literals), so the multi-line output reparses as-is — collapsing newlines
+  // first would corrupt newline-bearing literals into a wrong-query diagnosis.
   let reparsed: Select | null = null;
   try {
-    reparsed = parseSelect(tokenizeSql(actual.replaceAll('\n', ' ')));
+    reparsed = parseSelect(tokenizeSql(actual));
   } catch (e) {
     return {
       pass: false,
@@ -289,10 +292,8 @@ const formatCheck: CheckFn = (actual, ctx) => {
       };
     }
   }
-  // Unreachable when both sides are newline-joined text (split/join is a
-  // bijection), kept as the total-function fallback; a raw newline inside
-  // a string literal can desynchronize the per-line diff above, but exact
-  // match has already short-circuited for correct submissions.
+  // Unreachable when the strings differ (splitting on '\n' is injective, so
+  // some line must differ), kept as the total-function fallback.
   return { pass: false, message: 'Outputs differ.', expectedText: expected, actualText: actual };
 };
 
