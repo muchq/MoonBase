@@ -33,6 +33,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -48,6 +49,7 @@
 #include "domains/games/apis/golf_hub/rate_limiter.h"
 #include "domains/games/apis/golf_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
+#include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "moonbase/golf/server.h"
 #include "smithy/core/blob.h"
@@ -79,6 +81,24 @@ RateLimits UnlimitedRateLimits() {
   limits.chat_burst = 1e9;
   limits.chat_refill_per_sec = 1e9;
   return limits;
+}
+
+// The emit→declare sweep every suite runs (#1327), inlined rather than taken
+// from stream_test_fixture.h: that header pulls the generated client, and
+// running without it is this file's whole point. This suite matters to the
+// sweep precisely because it feeds the handler raw frames — the one path
+// where a decode could hand CountCommand a command the model-pinned roster
+// does not name (#1323).
+void ExpectOnlyDeclaredCounterSeries(const futility::otel::CapturingMetricsRecorder& recorder) {
+  const auto& declared = HubHandler::DeclaredCounterSeries();
+  for (const auto& entry : recorder.Entries()) {
+    if (entry.name == "stream_sessions_active") continue;  // the gauge
+    const bool found = std::any_of(declared.begin(), declared.end(), [&](const auto& series) {
+      return series.name == entry.name && series.attributes == entry.attributes;
+    });
+    EXPECT_TRUE(found) << entry.name
+                       << " is emitted but not declared, so it loses its first event (#1323)";
+  }
 }
 
 // A command frame exactly as the browser client mints it (the envelope
@@ -128,8 +148,7 @@ class GolfHubWireTest : public ::testing::Test {
         std::make_shared<InMemoryTicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
                                               /*resume_ttl=*/std::chrono::seconds(60)),
         std::make_shared<cards::NoShuffleDealer>(), std::make_shared<SequentialIdGenerator>(),
-        /*grace_period=*/std::chrono::seconds(60),
-        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
+        /*grace_period=*/std::chrono::seconds(60), metrics_,
         /*store=*/nullptr, /*chat_store=*/nullptr, UnlimitedRateLimits());
     ASSERT_TRUE(handler_->RestoreFromStore().ok());
     server_ = std::make_unique<moonbase::golf::GolfHubServer>(handler_);
@@ -139,6 +158,8 @@ class GolfHubWireTest : public ::testing::Test {
   void TearDown() override {
     // Idempotent; unblocks any session a failed test body left parked.
     for (auto& session : sessions_) session->Close();
+    // After the closes, so the disconnect counters are in the capture.
+    ExpectOnlyDeclaredCounterSeries(*metrics_);
   }
 
   // A raw POST /games/v2/session, exactly the fetch() the web client makes.
@@ -200,6 +221,8 @@ class GolfHubWireTest : public ::testing::Test {
     return socket;
   }
 
+  std::shared_ptr<futility::otel::CapturingMetricsRecorder> metrics_ =
+      std::make_shared<futility::otel::CapturingMetricsRecorder>("golf_hub_test");
   std::shared_ptr<HubHandler> handler_;
   std::unique_ptr<moonbase::golf::GolfHubServer> server_;
   std::shared_ptr<smithy::http::Loopback> loopback_ = std::make_shared<smithy::http::Loopback>();

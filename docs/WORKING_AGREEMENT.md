@@ -377,6 +377,17 @@ what it does **not** cover: Rust, Go, and TypeScript have no formatting gate in
 CI at all, despite `rustfmt.toml` and `clippy.toml` existing. Don't claim
 otherwise.
 
+**CI is cheaper than model tokens.** The table is what CI will run, not a
+gate an agent session must reproduce end to end before pushing. Run the fast
+checks — the formatters, the tests beside the change if the toolchain is
+warm — and push; a cold sandbox Bazel build of half the repo costs more
+session time than the CI cycle it duplicates, and the branch is where CI's
+answer lands anyway. This tunes economics, not honesty: say exactly what ran
+locally and what is riding on CI (the PR body or the push comment is the
+place), treat the red result as work now, and never claim a step ran when it
+didn't. It also doesn't license pushing what nothing checked — a change that
+never compiled anywhere is a guess, not a candidate.
+
 New source files must be added to the relevant `srcs` in `BUILD.bazel` by name.
 Two subtrees glob instead — `domains/chat/libs/yochat_lib` and
 `domains/games/apps/wordchains_ios` — but everywhere else a file that isn't

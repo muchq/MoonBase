@@ -53,11 +53,11 @@ namespace golf_hub {
 /// land and no identical-bytes path can leak it.
 ///
 /// Chat observability (#1226): chat_appends{result}, chat_rows_delivered,
-/// chat_catch_up_rows (a per-drain distribution — one observation's size
-/// is how far behind its wake found this instance, the lag signal),
-/// chat_history_replays, and chat_failures{stage}. Counts and stages
-/// only: room ids, player ids, and message text never reach a metric
-/// name or label, and the e2e suite sweeps for exactly that.
+/// chat_catch_up_drains (one per drain, empty drains included, so
+/// rate(rows)/rate(drains) is how far behind a wake found this instance —
+/// the lag signal), chat_history_replays, and chat_failures{stage}. Counts
+/// and stages only: room ids, player ids, and message text never reach a
+/// metric name or label, and the e2e suite sweeps for exactly that.
 ///
 /// With a store attached, instances are interchangeable (#1194 step 3):
 /// the database is every game's authority. A move loads nothing extra —
@@ -85,7 +85,8 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   };
 
   /// Every counter series this handler baselines at construction, listing
-  /// each label value its emit sites actually use.
+  /// each label value its emit sites actually use — every counter this
+  /// handler emits is on it, with no carve-outs (#1384, #1327).
   ///
   /// The label values are here rather than inferred because a series is
   /// name *and* attributes: declaring a bare `chat_appends` when every emit
@@ -93,24 +94,17 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// increments, and leaves the three real series to be born carrying their
   /// first event's value — which is the bug (#1323), not a fix for it.
   ///
-  /// Three counters are deliberately absent, and the reason is maintenance
-  /// rather than cardinality — all three label sets are bounded, and declaring
-  /// every one of them would cost around thirty series, which is nothing.
+  /// stream_commands{command} and stream_events{event} take the case names
+  /// of golf_hub.smithy's unions, so their block is a copy of the model.
+  /// StreamSeriesMatchTheModelUnions parses the .smithy file and fails on
+  /// any drift, in either direction — that test is what makes a hand-kept
+  /// copy tolerable. The generated unions already hold this list (the
+  /// kNames array behind case_name()); a smithy-cpp accessor exposing it
+  /// would let this block be derived and the parser test deleted.
   ///
-  /// stream_commands{command} and stream_events{event} take a generated
-  /// union's case names, so a list here would be a hand-kept copy of
-  /// golf_hub.smithy. They also fire on every message in any live session,
-  /// which is the case a missing first event costs least.
-  ///
-  /// stream_rejections{reason} is the uncomfortable one. Its reasons *are*
-  /// literals — every Reject() call site passes one, and the rest come from the
-  /// cards engine's status messages — but they are ~30 strings spread across
-  /// this file and another library, so a list here would rot on the first new
-  /// rejection. It is also the opposite of cheap to lose: a well-behaved
-  /// session emits none, so the first rejection after a deploy is exactly the
-  /// event someone goes looking for, and the Activity/rejections tile computes
-  /// increase() over it. The fix is a bounded `kind` alongside the free text
-  /// rather than a longer list; until then this counter keeps the #1323 bug.
+  /// stream_rejections carries the bounded `kind` (see RejectKind), never
+  /// the free-text reason: the reason strings are ~30 literals spread across
+  /// this file and the cards engine, exactly the label set that rots.
   ///
   /// Exposed so the tests can assert the emit sites declare nothing this list
   /// does not name.
@@ -332,7 +326,31 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   void LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writes& writes);
   void LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writes& writes);
   void BroadcastRoom(const std::string& room_id);
-  void Reject(const std::string& player_id, std::string reason);
+
+  /// The bounded label on stream_rejections{kind}, closed so every series can
+  /// be declared at zero (#1327, #1384). The free-text reason goes to the
+  /// client alone; a rejection's dashboard identity is which of these it was.
+  ///
+  /// The partition is by who has to act on a spike: kRateLimited — the client
+  /// is flooding; kInvalid — the client sent malformed input; kState — a
+  /// well-formed command the current room/game state refuses (out of sync,
+  /// full, already started, lost a commit race); kRules — the golf engine
+  /// refused the move; kUnavailable — this hub could not do it (storage down,
+  /// allocation exhausted); kUnknown — a union case with no handler branch,
+  /// which the wire decoder makes unreachable today, so anything here means a
+  /// model case shipped without one.
+  enum class RejectKind { kRateLimited, kInvalid, kState, kRules, kUnavailable, kUnknown };
+  static const char* RejectKindName(RejectKind kind);
+
+  /// A refusal in flight: the flows that work under mu_ and Reject after
+  /// releasing it stage one of these, so a kind can never be assigned
+  /// without its reason or vice versa — half a refusal does not compile.
+  struct Refusal {
+    RejectKind kind;
+    std::string reason;
+  };
+  void Reject(const std::string& player_id, RejectKind kind, std::string reason);
+  void Reject(const std::string& player_id, Refusal refusal);
   void OnExpired(const std::string& player_id);
   /// The reap decision both expiry paths share: one fresh read of the
   /// member's room, then LeaveEverywhere unless the row says connected —
@@ -391,7 +409,11 @@ class HubHandler final : public moonbase::golf::GolfHubAsyncHandler {
   /// older than local truth), re-read the room's rows, reconcile, and
   /// re-project views to local members. Also the join path's fallback —
   /// it materializes a room another instance created. Callers hold mu_.
-  void RefreshRoomLocked(const std::string& room_id, Outbox& outbox);
+  ///
+  /// Returns whether the store answered the read — false is an outage, not
+  /// an absent room, and the join paths label their refusal kUnavailable on
+  /// it rather than blaming the client's state.
+  bool RefreshRoomLocked(const std::string& room_id, Outbox& outbox);
   /// Returns whether local membership/games changed. When
   /// `project_always` is false, skips re-project on a no-op catch-up.
   bool ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,

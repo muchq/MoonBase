@@ -10,11 +10,13 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -112,12 +114,18 @@ TEST(WinnersAmong, OrdinaryFinishMatchesTheEngineKnockerTiesIncluded) {
 // the guard is rewired.
 struct SecondInstance {
   std::shared_ptr<HubHandler> handler;
+  std::shared_ptr<CapturingMetricsRecorder> metrics;
   std::unique_ptr<moonbase::golf::GolfHubServer> server;
   std::unique_ptr<moonbase::golf::GolfHubClient> client;
   std::vector<std::shared_ptr<smithy::http::WebSocket>> sessions;
 
+  // The sweep the fixture's TearDown runs for its own recorder, run here for
+  // this instance's — paths that only ever fire on a second instance (the
+  // store-level chat rejections, some chat_failures stages) otherwise sit
+  // outside the emit→declare check entirely (#1327).
   ~SecondInstance() {
     for (auto& session : sessions) session->Close();
+    ExpectOnlyDeclaredCounterSeries(*metrics);
   }
 };
 
@@ -211,13 +219,13 @@ class NotAMemberChatStore final : public ChatStore {
 std::unique_ptr<SecondInstance> BuildSecondInstance(
     std::shared_ptr<TicketVault> vault, std::shared_ptr<HubStore> store,
     std::shared_ptr<ChatStore> chat_store,
-    std::shared_ptr<futility::otel::MetricsRecorder> metrics =
-        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
+    std::shared_ptr<CapturingMetricsRecorder> metrics = MakeCapturingMetricsRecorder(),
     std::chrono::seconds grace = std::chrono::seconds(60)) {
   auto instance = std::make_unique<SecondInstance>();
+  instance->metrics = std::move(metrics);
   instance->handler =
       std::make_shared<HubHandler>(std::move(vault), std::make_shared<cards::NoShuffleDealer>(),
-                                   std::make_shared<RemoteIdGenerator>(), grace, std::move(metrics),
+                                   std::make_shared<RemoteIdGenerator>(), grace, instance->metrics,
                                    std::move(store), std::move(chat_store), UnlimitedRateLimits());
   EXPECT_TRUE(instance->handler->RestoreFromStore().ok());
   instance->server = std::make_unique<moonbase::golf::GolfHubServer>(instance->handler);
@@ -1017,10 +1025,8 @@ TEST_F(GolfHubStreamFixture, BootGraceReapsParkedGhostAndSparesLiveSeats) {
   // generation stays parked, saying no goodbyes. Two seconds of boot
   // grace — enough headroom for carol's loopback resume, short enough
   // for a test.
-  auto instance =
-      BuildSecondInstance(vault_, store_, chat_store_,
-                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
-                          /*grace=*/std::chrono::seconds(2));
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_, MakeCapturingMetricsRecorder(),
+                                      /*grace=*/std::chrono::seconds(2));
   ASSERT_NE(instance, nullptr);
   auto carol_back = OpenSeatVia(*instance->client, carol->resume_token);
   ASSERT_TRUE(carol_back.has_value());
@@ -1066,10 +1072,8 @@ TEST_F(GolfHubStreamFixture, ShareLinkJoinSucceedsOnceBootGraceClearsStaleMember
     return disconnected == 2;
   });
 
-  auto instance =
-      BuildSecondInstance(vault_, store_, chat_store_,
-                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
-                          /*grace=*/std::chrono::seconds(2));
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_, MakeCapturingMetricsRecorder(),
+                                      /*grace=*/std::chrono::seconds(2));
   ASSERT_NE(instance, nullptr);
   // The share link's room, created on the new instance while the old
   // memberships age out.
@@ -1157,10 +1161,8 @@ TEST_F(GolfHubStreamFixture, BootGraceNeverClaimsASeatRestoredConnected) {
   });
 
   // The sibling boots while alice is live: her row reads connected.
-  auto instance =
-      BuildSecondInstance(vault_, store_, chat_store_,
-                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
-                          /*grace=*/std::chrono::seconds(1));
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_, MakeCapturingMetricsRecorder(),
+                                      /*grace=*/std::chrono::seconds(1));
   ASSERT_NE(instance, nullptr);
   // She parks inside the sibling's boot window; this generation's
   // registry arms her grace (60s here — far past the test). Await the
@@ -1223,10 +1225,8 @@ TEST_F(GolfHubStreamFixture, BootGraceCedesASeatObservedConnectedMidWindow) {
   });
 
   // The sibling boots with bob and carol both parked — both cohort.
-  auto instance =
-      BuildSecondInstance(vault_, store_, chat_store_,
-                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
-                          /*grace=*/std::chrono::seconds(2));
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_, MakeCapturingMetricsRecorder(),
+                                      /*grace=*/std::chrono::seconds(2));
   ASSERT_NE(instance, nullptr);
 
   // bob resumes on this generation: his row flips to connected, and the
@@ -1300,10 +1300,8 @@ TEST_F(GolfHubStreamFixture, BootGraceDrainSparesARowThatTurnedConnectedUnobserv
   });
 
   // The sibling boots with bob and carol both parked — both cohort.
-  auto instance =
-      BuildSecondInstance(vault_, store_, chat_store_,
-                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"),
-                          /*grace=*/std::chrono::seconds(2));
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_, MakeCapturingMetricsRecorder(),
+                                      /*grace=*/std::chrono::seconds(2));
   ASSERT_NE(instance, nullptr);
   // bob resumes on this generation. Deliberately no OnChannelActive on
   // the sibling: it never observes the connected pulse, so bob stays in
@@ -1340,9 +1338,7 @@ TEST_F(GolfHubStreamFixture, RestoreFromStoreRefusesASecondCall) {
   ASSERT_FALSE(CreateRoomFor(*alice).empty());
   store_->Flush();
 
-  auto instance =
-      BuildSecondInstance(vault_, store_, chat_store_,
-                          std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"));
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_, MakeCapturingMetricsRecorder());
   ASSERT_NE(instance, nullptr);
   const absl::Status again = instance->handler->RestoreFromStore();
   EXPECT_EQ(again.code(), absl::StatusCode::kFailedPrecondition) << again;
@@ -1466,12 +1462,8 @@ TEST_F(GolfHubStreamFixture, ChatMetricsCountOutcomesWithoutIdentifiers) {
   // history replay (bob's join; createRoom sends none).
   EXPECT_EQ(metrics_->CounterTotal("chat_appends", {{"result", "stored"}}), 1);
   EXPECT_EQ(metrics_->CounterTotal("chat_rows_delivered"), 1);
+  EXPECT_EQ(metrics_->CounterTotal("chat_catch_up_drains"), 1);
   EXPECT_EQ(metrics_->CounterTotal("chat_history_replays"), 1);
-  bool saw_drain = false;
-  for (const auto& entry : metrics_->Entries()) {
-    if (entry.name == "chat_catch_up_rows" && entry.value == 1.0) saw_drain = true;
-  }
-  EXPECT_TRUE(saw_drain) << "the drain's row count feeds the lag distribution";
 
   // The sweep: nothing recorded anywhere carries the identifiers.
   for (const auto& entry : metrics_->Entries()) {
@@ -1513,6 +1505,7 @@ TEST_F(GolfHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) {
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
+      {"chat_catch_up_drains", {}},
       {"chat_failures", {{"stage", "cursor_seed"}}},
       {"chat_failures", {{"stage", "catch_up"}}},
       {"chat_failures", {{"stage", "history_load"}}},
@@ -1521,10 +1514,46 @@ TEST_F(GolfHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) {
       {"restored_seats_reaped", {}},
       {"stream_admissions_refused", {{"reason", "bad_ticket"}}},
       {"stream_admissions_refused", {{"reason", "seat_conflict"}}},
+      {"stream_commands", {{"command", "createRoom"}}},
+      {"stream_commands", {{"command", "joinRoom"}}},
+      {"stream_commands", {{"command", "leaveRoom"}}},
+      {"stream_commands", {{"command", "getRoomState"}}},
+      {"stream_commands", {{"command", "chat"}}},
+      {"stream_commands", {{"command", "golf.createGame"}}},
+      {"stream_commands", {{"command", "golf.joinGame"}}},
+      {"stream_commands", {{"command", "golf.startGame"}}},
+      {"stream_commands", {{"command", "golf.leaveGame"}}},
+      {"stream_commands", {{"command", "golf.peekCard"}}},
+      {"stream_commands", {{"command", "golf.drawCard"}}},
+      {"stream_commands", {{"command", "golf.takeFromDiscard"}}},
+      {"stream_commands", {{"command", "golf.swapCard"}}},
+      {"stream_commands", {{"command", "golf.discardDrawn"}}},
+      {"stream_commands", {{"command", "golf.knock"}}},
+      {"stream_commands", {{"command", "golf.hideCards"}}},
       {"stream_disconnects", {{"kind", "clean"}}},
       {"stream_disconnects", {{"kind", "abrupt"}}},
+      {"stream_events", {{"event", "sessionReady"}}},
+      {"stream_events", {{"event", "roomState"}}},
+      {"stream_events", {{"event", "roomLeft"}}},
+      {"stream_events", {{"event", "roomChat"}}},
+      {"stream_events", {{"event", "roomChatHistory"}}},
+      {"stream_events", {{"event", "commandRejected"}}},
+      {"stream_events", {{"event", "golf.gameJoined"}}},
+      {"stream_events", {{"event", "golf.gameState"}}},
+      {"stream_events", {{"event", "golf.gameCreated"}}},
+      {"stream_events", {{"event", "golf.gameStarted"}}},
+      {"stream_events", {{"event", "golf.turnChanged"}}},
+      {"stream_events", {{"event", "golf.playerKnocked"}}},
+      {"stream_events", {{"event", "golf.gameEnded"}}},
+      {"stream_events", {{"event", "golf.gameLeft"}}},
       {"stream_rate_limited", {{"kind", "chat"}}},
       {"stream_rate_limited", {{"kind", "command"}}},
+      {"stream_rejections", {{"kind", "rate_limited"}}},
+      {"stream_rejections", {{"kind", "invalid"}}},
+      {"stream_rejections", {{"kind", "state"}}},
+      {"stream_rejections", {{"kind", "rules"}}},
+      {"stream_rejections", {{"kind", "unavailable"}}},
+      {"stream_rejections", {{"kind", "unknown"}}},
       {"stream_seats_expired", {}},
       {"stream_sessions", {{"resumed", "true"}}},
       {"stream_sessions", {{"resumed", "false"}}},
@@ -1557,7 +1586,228 @@ TEST_F(GolfHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) {
 // ExpectOnlyDeclaredCounterSeries, so every test in this suite checks it against
 // whatever paths that test happens to drive: the bad-ticket admission, the rate
 // limiter, the chat store failures, and the disconnects the closes produce. One
-// scripted session would have covered four of the eighteen.
+// scripted session would have covered a small fraction of the roster.
+
+// The union cases of `union <name>` in the model source, in declaration order.
+// Enough smithy to read this one file: members are `name: Target` lines between
+// the union's braces, and nothing else in those blocks parses as one.
+std::vector<std::string> ModelUnionCases(const std::string& model, const std::string& union_name) {
+  std::vector<std::string> cases;
+  const std::string header = "union " + union_name + " {";
+  const auto start = model.find(header);
+  if (start == std::string::npos) return cases;
+  const auto end = model.find('}', start);
+  if (end == std::string::npos) return cases;
+  std::istringstream block(model.substr(start + header.size(), end - start - header.size()));
+  std::string line;
+  while (std::getline(block, line)) {
+    const auto colon = line.find(':');
+    if (colon == std::string::npos) continue;
+    auto name = line.substr(0, colon);
+    name.erase(0, name.find_first_not_of(" \t"));
+    name.erase(name.find_last_not_of(" \t") + 1);
+    if (name.empty() || name.find(' ') != std::string::npos || name.front() == '/') continue;
+    cases.push_back(name);
+  }
+  return cases;
+}
+
+// The label values DeclaredCounterSeries() carries for one stream counter.
+std::set<std::string> DeclaredLabelValues(const std::string& counter, const std::string& label) {
+  std::set<std::string> values;
+  for (const auto& series : HubHandler::DeclaredCounterSeries()) {
+    if (series.name != counter) continue;
+    const auto value = series.attributes.find(label);
+    if (value != series.attributes.end()) values.insert(value->second);
+  }
+  return values;
+}
+
+// The stream_commands/stream_events declarations are a hand copy of the model's
+// union cases, and this test is what makes a hand copy safe to keep: it reads
+// golf_hub.smithy and fails on drift in either direction — a case added to the
+// model without a declaration loses its first event after every deploy (#1323),
+// and a declaration for a case the model no longer has is a permanently flat
+// line on a dashboard. CountCommand and Send name series exactly this way:
+// the outer case name, or golf.<inner case> through the envelope.
+TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
+  std::ifstream file("domains/games/apis/golf_hub/model/golf_hub.smithy");
+  ASSERT_TRUE(file.is_open()) << "model file missing from runfiles";
+  std::stringstream buffer;
+  buffer << file.rdbuf();
+  const std::string model = buffer.str();
+
+  const auto outer_commands = ModelUnionCases(model, "GolfCommands");
+  const auto moves = ModelUnionCases(model, "GolfMove");
+  const auto outer_events = ModelUnionCases(model, "GolfEvents");
+  const auto updates = ModelUnionCases(model, "GolfUpdate");
+
+  // Controls before the comparison: a parser that quietly matched nothing
+  // must fail here, not produce two empty sets that agree.
+  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "createRoom"),
+            outer_commands.end());
+  ASSERT_NE(std::find(moves.begin(), moves.end(), "knock"), moves.end());
+  ASSERT_NE(std::find(outer_events.begin(), outer_events.end(), "sessionReady"),
+            outer_events.end());
+  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
+
+  std::set<std::string> expected_commands;
+  for (const auto& name : outer_commands) {
+    if (name != "golf") expected_commands.insert(name);
+  }
+  for (const auto& name : moves) expected_commands.insert("golf." + name);
+
+  std::set<std::string> expected_events;
+  for (const auto& name : outer_events) {
+    if (name != "golf") expected_events.insert(name);
+  }
+  for (const auto& name : updates) expected_events.insert("golf." + name);
+
+  EXPECT_EQ(DeclaredLabelValues("stream_commands", "command"), expected_commands);
+  EXPECT_EQ(DeclaredLabelValues("stream_events", "event"), expected_events);
+}
+
+// The bounded kind is the whole dashboard identity of a rejection (#1327,
+// #1384): each refusal lands on exactly one declared kind series, and the
+// free-text reason reaches the rejected player but never a metric label —
+// those strings are unbounded, and one in a label reopens the undeclarable
+// hole the kind exists to close. TearDown's sweep enforces the closed set for
+// every test; this one pins which kind each refusal shape maps to.
+TEST_F(GolfHubStreamFixture, RejectionsCountTheBoundedKindNeverTheReason) {
+  auto table = SeatedTable();
+  ASSERT_TRUE(table.has_value());
+
+  // state: well-formed, but alice is already in a room.
+  ASSERT_TRUE(
+      table->alice.stream.Send(GolfCommands::FromCreateroom(moonbase::golf::CreateRoom{})).ok());
+  auto state_rejected = ReceiveCase(table->alice.stream, "commandRejected");
+  ASSERT_TRUE(state_rejected.has_value());
+  const std::string state_reason = state_rejected->as_commandRejected_or_null()->reason;
+  EXPECT_EQ(state_reason, "already in a room");
+
+  // invalid: a card index no hand has — through peekCard, and through
+  // takeFromDiscard, which no other test in the tree sends at all, so its
+  // declared stream_commands series meets an emit here.
+  moonbase::golf::PeekCard peek;
+  peek.cardIndex = 99;
+  ASSERT_TRUE(table->alice.stream.Send(Move(moonbase::golf::GolfMove::FromPeekcard(peek))).ok());
+  auto invalid_rejected = ReceiveCase(table->alice.stream, "commandRejected");
+  ASSERT_TRUE(invalid_rejected.has_value());
+  const std::string invalid_reason = invalid_rejected->as_commandRejected_or_null()->reason;
+  moonbase::golf::TakeFromDiscard take;
+  take.cardIndex = 99;
+  ASSERT_TRUE(
+      table->alice.stream.Send(Move(moonbase::golf::GolfMove::FromTakefromdiscard(take))).ok());
+  ASSERT_TRUE(ReceiveCase(table->alice.stream, "commandRejected").has_value());
+
+  // rules: a valid index, but the engine refuses a swap with no drawn card.
+  moonbase::golf::SwapCard swap;
+  swap.cardIndex = 0;
+  ASSERT_TRUE(table->alice.stream.Send(Move(moonbase::golf::GolfMove::FromSwapcard(swap))).ok());
+  auto rules_rejected = ReceiveCase(table->alice.stream, "commandRejected");
+  ASSERT_TRUE(rules_rejected.has_value());
+  const std::string rules_reason = rules_rejected->as_commandRejected_or_null()->reason;
+
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "state"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "invalid"}}), 2);
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "rules"}}), 1);
+  // The kinds nothing here triggered, so a mapping change cannot hide as a
+  // different kind absorbing the count.
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "rate_limited"}}), 0);
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "unavailable"}}), 0);
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "unknown"}}), 0);
+
+  // The reason text stayed off the wire's metrics entirely: every rejection
+  // entry carries the kind label alone, and no label anywhere carries any of
+  // the human-readable reasons the client was sent.
+  for (const auto& entry : metrics_->Entries()) {
+    if (entry.name == "stream_rejections") {
+      ASSERT_EQ(entry.attributes.size(), 1u);
+      ASSERT_EQ(entry.attributes.count("kind"), 1u);
+    }
+    for (const auto& [key, value] : entry.attributes) {
+      for (const std::string& reason : {state_reason, invalid_reason, rules_reason}) {
+        EXPECT_EQ(value.find(reason), std::string::npos) << entry.name << " " << key;
+      }
+    }
+  }
+}
+
+// Forwards everything except LoadRoom, which always fails as if the database
+// were unreachable — the join paths' refresh read, which MemoryHubStore can
+// never fail on its own.
+class FailingLoadRoomHubStore final : public HubStore {
+ public:
+  explicit FailingLoadRoomHubStore(std::shared_ptr<HubStore> delegate)
+      : delegate_(std::move(delegate)) {}
+
+  void Enqueue(std::vector<Op> ops) override { delegate_->Enqueue(std::move(ops)); }
+  void Flush() override { delegate_->Flush(); }
+  absl::StatusOr<Snapshot> LoadSnapshot() override { return delegate_->LoadSnapshot(); }
+  absl::StatusOr<bool> CommitGameSave(const GameRow& row,
+                                      const std::string& notify_payload) override {
+    return delegate_->CommitGameSave(row, notify_payload);
+  }
+  absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& deltas,
+                                        const std::string& notify_payload) override {
+    return delegate_->CommitGameFinish(row, deltas, notify_payload);
+  }
+  absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
+                                                  const std::string& game_id) override {
+    return delegate_->LoadGame(room_id, game_id);
+  }
+  absl::StatusOr<RoomRows> LoadRoom([[maybe_unused]] const std::string& room_id) override {
+    return absl::UnavailableError("hub store unreachable");
+  }
+
+ private:
+  std::shared_ptr<HubStore> delegate_;
+};
+
+// The store answering "no such room" and the store not answering are
+// different rejection kinds: the first is the client's state, the second is
+// this hub's outage, and folding them (the pre-#1384 shape) makes a Postgres
+// outage read as a spike of desynced clients. The healthy-store halves are
+// the positive controls proving the kUnavailable reads come from the outage
+// and not from the join shapes themselves.
+TEST_F(GolfHubStreamFixture, AStoreOutageOnTheJoinPathsCountsAsUnavailable) {
+  // Control: the same two refusals against the fixture's healthy store.
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  moonbase::golf::JoinRoom join;
+  join.roomId = "no-such-room";
+  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "commandRejected").has_value());
+  ASSERT_FALSE(CreateRoomFor(*alice).empty());
+  moonbase::golf::JoinGame join_game;
+  join_game.gameId = "no-such-game";
+  ASSERT_TRUE(alice->stream.Send(Move(moonbase::golf::GolfMove::FromJoingame(join_game))).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "commandRejected").has_value());
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "state"}}), 2);
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "unavailable"}}), 0);
+
+  // The outage: the same two shapes through a store whose refresh read fails.
+  auto capture = MakeCapturingMetricsRecorder();
+  auto instance = BuildSecondInstance(vault_, std::make_shared<FailingLoadRoomHubStore>(store_),
+                                      chat_store_, capture);
+  ASSERT_NE(instance, nullptr);
+  auto bob = OpenSeatVia(*instance->client);
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  auto room_refused = ReceiveCase(bob->stream, "commandRejected");
+  ASSERT_TRUE(room_refused.has_value());
+  EXPECT_EQ(room_refused->as_commandRejected_or_null()->reason,
+            "room unavailable or already in a room");
+  ASSERT_FALSE(CreateRoomFor(*bob).empty());
+  ASSERT_TRUE(bob->stream.Send(Move(moonbase::golf::GolfMove::FromJoingame(join_game))).ok());
+  auto game_refused = ReceiveCase(bob->stream, "commandRejected");
+  ASSERT_TRUE(game_refused.has_value());
+  EXPECT_EQ(game_refused->as_commandRejected_or_null()->reason, "storage unavailable; try again");
+  EXPECT_EQ(capture->CounterTotal("stream_rejections", {{"kind", "unavailable"}}), 2);
+  EXPECT_EQ(capture->CounterTotal("stream_rejections", {{"kind", "state"}}), 0);
+}
 
 TEST_F(GolfHubStreamFixture, AnUnreachableStoreCountsTheAppendAsUnavailable) {
   auto capture = MakeCapturingMetricsRecorder();
@@ -1580,6 +1830,7 @@ TEST_F(GolfHubStreamFixture, AnUnreachableStoreCountsTheAppendAsUnavailable) {
   EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "unavailable"}}), 1);
   EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "stored"}}), 0);
   EXPECT_EQ(capture->CounterTotal("chat_rows_delivered"), 0);
+  EXPECT_EQ(capture->CounterTotal("stream_rejections", {{"kind", "unavailable"}}), 1);
 }
 
 // The rejected side of the same counter: the store says the sender's
@@ -1608,14 +1859,14 @@ TEST_F(GolfHubStreamFixture, AStaleMembershipCountsTheAppendAsRejected) {
   EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "rejected"}}), 1);
   EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "unavailable"}}), 0);
   EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "stored"}}), 0);
+  EXPECT_EQ(capture->CounterTotal("stream_rejections", {{"kind", "state"}}), 1);
 }
 
 // Drain metrics at batch grain: one wake that finds two committed rows
-// delivers them as one drain — the counter grows by the batch and the
-// distribution takes a single observation of the batch size, which is
-// what makes an observation's size read as "rows behind at the wake".
-// A redundant wake then records the zero that keeps the dashboard's
-// windowed average honest, and delivers nothing.
+// delivers them as one drain — rows grow by the batch while drains grow by
+// one, which is what makes rate(rows)/rate(drains) read as "rows behind at
+// the wake". A redundant wake then counts the drain that delivered nothing,
+// which is what keeps that windowed average honest.
 TEST_F(GolfHubStreamFixture, DrainMetricsCountBatchesAndZeroWakes) {
   auto alice = OpenSeat();
   auto bob = OpenSeat();
@@ -1636,15 +1887,8 @@ TEST_F(GolfHubStreamFixture, DrainMetricsCountBatchesAndZeroWakes) {
   ASSERT_TRUE(chat_store_->Append(room_id, alice->player_id, "first behind", "remote").ok());
   ASSERT_TRUE(chat_store_->Append(room_id, alice->player_id, "second behind", "remote").ok());
 
-  const auto observations = [&] {
-    std::vector<double> values;
-    for (const auto& entry : metrics_->Entries()) {
-      if (entry.name == "chat_catch_up_rows") values.push_back(entry.value);
-    }
-    return values;
-  };
   const double delivered_before = metrics_->CounterTotal("chat_rows_delivered");
-  const std::size_t drains_before = observations().size();
+  const double drains_before = metrics_->CounterTotal("chat_catch_up_drains");
 
   handler_->OnNotify(ChatChannel(room_id), "remote-instance");
   for (auto* seat : {&*alice, &*bob}) {
@@ -1652,17 +1896,14 @@ TEST_F(GolfHubStreamFixture, DrainMetricsCountBatchesAndZeroWakes) {
     ASSERT_TRUE(ReceiveCase(seat->stream, "roomChat").has_value());
   }
   EXPECT_EQ(metrics_->CounterTotal("chat_rows_delivered") - delivered_before, 2);
-  auto after_drain = observations();
-  ASSERT_EQ(after_drain.size(), drains_before + 1);
-  EXPECT_EQ(after_drain.back(), 2.0);
+  EXPECT_EQ(metrics_->CounterTotal("chat_catch_up_drains") - drains_before, 1);
 
-  // Redundant wake: nothing new, one zero observation, nothing counted
-  // as delivered. OnNotify pumps synchronously, so no waiting.
+  // Redundant wake: one more drain, nothing counted as delivered — the
+  // batch-of-zero the windowed average needs. OnNotify pumps synchronously,
+  // so no waiting.
   handler_->OnNotify(ChatChannel(room_id), "remote-instance");
   EXPECT_EQ(metrics_->CounterTotal("chat_rows_delivered") - delivered_before, 2);
-  auto after_redundant = observations();
-  ASSERT_EQ(after_redundant.size(), drains_before + 2);
-  EXPECT_EQ(after_redundant.back(), 0.0);
+  EXPECT_EQ(metrics_->CounterTotal("chat_catch_up_drains") - drains_before, 2);
 }
 
 // The membership guard, exercised through the handler that owns it
@@ -2167,6 +2408,7 @@ TEST_F(RateLimitedStreamFixture, AChatFloodStoresTheBurstAndRejectsTheRest) {
   EXPECT_EQ(metrics_->CounterTotal("chat_appends", {{"result", "stored"}}), 2);
   EXPECT_EQ(metrics_->CounterTotal("stream_rate_limited", {{"kind", "chat"}}), 1);
   EXPECT_EQ(metrics_->CounterTotal("stream_rate_limited", {{"kind", "command"}}), 0);
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "rate_limited"}}), 1);
 }
 
 // The command budget guards everything, including frames that only ever
@@ -2196,6 +2438,7 @@ TEST_F(RateLimitedStreamFixture, ACommandFloodIsRefusedAfterTheBurst) {
   ASSERT_NE(limited->as_commandRejected_or_null(), nullptr);
   EXPECT_EQ(limited->as_commandRejected_or_null()->reason, "slow down");
   EXPECT_EQ(metrics_->CounterTotal("stream_rate_limited", {{"kind", "command"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("stream_rejections", {{"kind", "rate_limited"}}), 1);
 }
 
 }  // namespace

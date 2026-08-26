@@ -117,12 +117,16 @@ class HubChatRaceFixture : public GolfHubStreamFixture {
  protected:
   struct Instance {
     std::shared_ptr<HubHandler> handler;
+    std::shared_ptr<CapturingMetricsRecorder> metrics;
     std::unique_ptr<moonbase::golf::GolfHubServer> server;
     std::unique_ptr<moonbase::golf::GolfHubClient> client;
     std::vector<std::shared_ptr<smithy::http::WebSocket>> sessions;
 
+    // The emit→declare sweep for this instance's own recorder — the fixture's
+    // TearDown only covers the primary's (#1327).
     ~Instance() {
       for (auto& session : sessions) session->Close();
+      ExpectOnlyDeclaredCounterSeries(*metrics);
     }
   };
 
@@ -151,11 +155,10 @@ class HubChatRaceFixture : public GolfHubStreamFixture {
   // and both stores. Restores on build, like main would.
   std::unique_ptr<Instance> BuildInstance() {
     auto instance = std::make_unique<Instance>();
+    instance->metrics = MakeCapturingMetricsRecorder();
     instance->handler = std::make_shared<HubHandler>(
         vault_, std::make_shared<cards::NoShuffleDealer>(), std::make_shared<RemoteIdGenerator>(),
-        std::chrono::seconds(60),
-        std::make_shared<futility::otel::MetricsRecorder>("golf_hub_test"), store_, chat_store_,
-        UnlimitedRateLimits());
+        std::chrono::seconds(60), instance->metrics, store_, chat_store_, UnlimitedRateLimits());
     EXPECT_TRUE(instance->handler->RestoreFromStore().ok());
     instance->server = std::make_unique<moonbase::golf::GolfHubServer>(instance->handler);
 

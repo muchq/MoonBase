@@ -118,20 +118,20 @@ absl::StatusOr<TraceResponse> TracerService::trace(TraceRequest& trace_request) 
 }
 
 void TracerService::recordSceneComplexity(const Scene& scene, bool cache_hit) {
-  // Distributions, not gauges: RecordGauge is an up-down delta; absolute
-  // per-request counts belong in a histogram.
+  // Three counters, not two histograms (#1452): the only consumers are the
+  // dashboard's mean-spheres/mean-lights tiles, and a histogram cannot be
+  // declared at zero without biasing exactly that mean — so the sums ride
+  // counters and trace_scenes carries their shared denominator, one per
+  // observed scene. All declared at zero in the constructor.
   //
-  // The label matches the one RecordLatency already puts on
-  // trace_request_duration, so the two read the same way and a query can join
-  // them. Unlabelled, these series were a mean over renders that the dashboard
-  // presented as a mean over requests; with it, prom_proxy asks for offered
-  // load by summing across the label and for render cost by selecting
+  // The label matches the one RecordLatency puts on trace_request_duration,
+  // so the families read the same way. prom_proxy asks for offered load by
+  // summing across the label and for render cost by selecting
   // cache_hit="false" (#1287).
   const std::map<std::string, std::string> labels{{"cache_hit", cache_hit ? "true" : "false"}};
-  metrics_->RecordDistribution("scene_sphere_count", static_cast<double>(scene.spheres.size()),
-                               labels);
-  metrics_->RecordDistribution("scene_light_count", static_cast<double>(scene.lights.size()),
-                               labels);
+  metrics_->RecordCounter("scene_spheres", static_cast<int64_t>(scene.spheres.size()), labels);
+  metrics_->RecordCounter("scene_lights", static_cast<int64_t>(scene.lights.size()), labels);
+  metrics_->RecordCounter("trace_scenes", 1, labels);
 }
 
 Image<RGB_Double> TracerService::do_trace(Scene& scene, Perspective& perspective,

@@ -465,9 +465,16 @@ TEST_F(TracerServiceTest, ConstructionDeclaresEveryCounterAtZero) {
     EXPECT_EQ(metrics->CounterTotal("trace_requests_failed", {{"error", error}}), 0)
         << "failure label " << error;
   }
+  // The scene-complexity family (#1452): the sums and their per-scene
+  // denominator, on both cache paths.
+  for (const char* cache_hit : {"true", "false"}) {
+    EXPECT_TRUE(metrics->Declared("scene_spheres", {{"cache_hit", cache_hit}})) << cache_hit;
+    EXPECT_TRUE(metrics->Declared("scene_lights", {{"cache_hit", cache_hit}})) << cache_hit;
+    EXPECT_TRUE(metrics->Declared("trace_scenes", {{"cache_hit", cache_hit}})) << cache_hit;
+  }
   // Presence, not just zero reads: CounterTotal sums an empty match to 0, so
   // every assertion above passes against a service that declared nothing.
-  EXPECT_EQ(metrics->Entries().size(), 5U);
+  EXPECT_EQ(metrics->Entries().size(), 11U);
 }
 
 // The cache lookup copies the stored PNG, so the cheap path allocates too.
@@ -597,17 +604,6 @@ std::map<std::string, std::string> SceneLabels(bool cache_hit) {
   return {{"cache_hit", cache_hit ? "true" : "false"}};
 }
 
-/// How many observations of `name` landed under exactly these labels — the
-/// count, where CounterTotal gives the sum. A mean needs both.
-int ObservationCount(const futility::otel::CapturingMetricsRecorder& metrics,
-                     const std::string& name, const std::map<std::string, std::string>& labels) {
-  int found = 0;
-  for (const futility::otel::CapturingMetricsRecorder::Entry& entry : metrics.Entries()) {
-    if (entry.name == name && entry.attributes == labels) ++found;
-  }
-  return found;
-}
-
 TEST_F(TracerServiceTest, SceneComplexityIsRecordedOnTheCacheHitPathToo) {
   auto metrics = std::make_shared<futility::otel::CapturingMetricsRecorder>(kService);
   TracerService service(10, metrics);
@@ -616,14 +612,15 @@ TEST_F(TracerServiceTest, SceneComplexityIsRecordedOnTheCacheHitPathToo) {
   ASSERT_TRUE(service.trace(request).ok());
   ASSERT_TRUE(service.trace(request).ok());
 
-  EXPECT_EQ(ObservationCount(*metrics, "scene_sphere_count", SceneLabels(false)), 1);
-  EXPECT_EQ(ObservationCount(*metrics, "scene_sphere_count", SceneLabels(true)), 1)
+  // One scene observed per path: trace_scenes is the denominator of the
+  // dashboard's mean, so a path that skipped it would skew every reading.
+  EXPECT_EQ(metrics->CounterTotal("trace_scenes", SceneLabels(false)), 1);
+  EXPECT_EQ(metrics->CounterTotal("trace_scenes", SceneLabels(true)), 1)
       << "the cached request never reached the recorder";
-  EXPECT_EQ(ObservationCount(*metrics, "scene_light_count", SceneLabels(true)), 1);
 
   // basic_scene_ is one sphere and two lights, on both paths.
-  EXPECT_EQ(metrics->CounterTotal("scene_sphere_count", SceneLabels(true)), 1);
-  EXPECT_EQ(metrics->CounterTotal("scene_light_count", SceneLabels(true)), 2);
+  EXPECT_EQ(metrics->CounterTotal("scene_spheres", SceneLabels(true)), 1);
+  EXPECT_EQ(metrics->CounterTotal("scene_lights", SceneLabels(true)), 2);
 }
 
 /**
@@ -661,12 +658,11 @@ TEST_F(TracerServiceTest, ComplexityDistinguishesOfferedLoadFromRenderCost) {
   TraceRequest heavy{heavy_scene, basic_perspective_, basic_output_};
   ASSERT_TRUE(service.trace(heavy).ok());  // miss
 
-  const double rendered_spheres = metrics->CounterTotal("scene_sphere_count", SceneLabels(false));
-  const int renders = ObservationCount(*metrics, "scene_sphere_count", SceneLabels(false));
+  const double rendered_spheres = metrics->CounterTotal("scene_spheres", SceneLabels(false));
+  const double renders = metrics->CounterTotal("trace_scenes", SceneLabels(false));
   const double requested_spheres =
-      rendered_spheres + metrics->CounterTotal("scene_sphere_count", SceneLabels(true));
-  const int requests =
-      renders + ObservationCount(*metrics, "scene_sphere_count", SceneLabels(true));
+      rendered_spheres + metrics->CounterTotal("scene_spheres", SceneLabels(true));
+  const double requests = renders + metrics->CounterTotal("trace_scenes", SceneLabels(true));
 
   EXPECT_EQ(renders, 2);
   EXPECT_EQ(requests, 4);

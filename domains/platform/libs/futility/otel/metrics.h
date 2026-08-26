@@ -98,9 +98,12 @@ class MetricsRecorder {
   /// its instruments the same way.
   ///
   /// Declare the label sets whose values are known up front — outcomes,
-  /// error kinds, states. A label whose values come from client input or a
-  /// generated union has no series to declare, and declaring one per possible
-  /// value is how a metric becomes a cardinality problem.
+  /// error kinds, states. A label carrying client input has no series to
+  /// declare (and is a cardinality problem besides); map it to a bounded
+  /// kind and declare that instead. A label whose values are a generated
+  /// union's case names *is* declarable — the set is the schema's — as long
+  /// as a test pins the declared roster to the schema in both directions
+  /// (golf_hub's StreamSeriesMatchTheModelUnions is the worked example).
   ///
   /// Idempotent, and harmless once events have arrived: adding zero to a
   /// counter leaves its total alone.
@@ -127,6 +130,14 @@ class MetricsRecorder {
   /// complexity). The histogram keeps the name as given; query the
   /// windowed average as rate(<name>_sum)/rate(<name>_count). Not for
   /// point-in-time levels — that is RecordGauge's delta form.
+  ///
+  /// A histogram cannot be declared at zero — recording 0 is an observation
+  /// that biases exactly that average — so its series carry a
+  /// first-observation gap until real data arrives (#1384). If the mean is
+  /// the only consumer, prefer two counters (the sum and the event count),
+  /// which DeclareCounter can baseline: golf_hub's chat_catch_up_drains
+  /// replaced a distribution this way. Reach for a histogram when buckets
+  /// or percentiles are actually read.
   ///
   /// @param metric_name The metric name (e.g., "scene_sphere_count").
   /// @param value The observed value.
