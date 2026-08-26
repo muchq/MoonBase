@@ -643,6 +643,62 @@ func TestMicrogptQueriesNameRealInstruments(t *testing.T) {
 	}
 }
 
+// What portrait exports: aura's standard cache family plus the scene
+// complexity counters #1452 put in place of the two scene histograms. The
+// recording end is TracerServiceTest, whose construction test holds the
+// declaration roster.
+//
+// Portrait had no closed-set audit before this — its scene series were pinned
+// only by the golden in TestRegistry_WindowedMeansAreCounterRatios, and a
+// query and its golden are edited together, so nothing independent checked
+// the names. #1452 gave portrait two-factor ratios, which is the shape where
+// that matters: a fumbled numerator rides through on a matching denominator.
+var portraitExportedNames = map[string]bool{
+	"cache_hits_total":    true,
+	"cache_misses_total":  true,
+	"scene_spheres_total": true,
+	"scene_lights_total":  true,
+	"trace_scenes_total":  true,
+}
+
+func TestPortraitQueriesNameRealInstruments(t *testing.T) {
+	entry := serviceRegistry["portrait"]
+	require.NotEmpty(t, entry.CustomScalars)
+	require.NotEmpty(t, entry.CustomTimeseries)
+
+	seen := map[string]int{}
+	joined := ""
+	for what, queries := range labelledCustomQueries(entry) {
+		for _, query := range queries {
+			joined += query + "\n"
+			for _, name := range promSeriesToken.FindAllString(query, -1) {
+				if strings.HasPrefix(name, "http_server_") {
+					continue
+				}
+				seen[name]++
+				assert.True(t, portraitExportedNames[name],
+					"%s reads %q, which portrait does not export", what, name)
+			}
+			if strings.Contains(query, `route="/health"`) {
+				assert.Contains(t, query, `service_name="portrait"`,
+					"%s reads the standard family unscoped: %s", what, query)
+			}
+		}
+	}
+	for name := range portraitExportedNames {
+		assert.NotZero(t, seen[name], "nothing in the portrait entry reads %s", name)
+	}
+
+	// The cache_hit vocabulary the tracer records, mirrored from
+	// recordSceneComplexity. Only "false" is ever selected — rendered cost;
+	// requested load sums across the label — so a typo'd value would read
+	// zero forever rather than erroring.
+	for _, match := range regexp.MustCompile(`cache_hit="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
+		assert.Contains(t, []string{"true", "false"}, match[1],
+			"portrait records no cache_hit=%q", match[1])
+	}
+}
+
 // The windowed means and the throughput tile are ratios of counters their
 // emitters declare at zero (#1384) — not the _sum/_count halves of a
 // histogram, which cannot exist before its first observation and so leave the
