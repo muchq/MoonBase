@@ -775,6 +775,21 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 	seen := map[string]int{}
 	for what, queries := range labelled {
 		for _, query := range queries {
+			// Closed over every series-shaped token first, the way the
+			// golf_hub and microgpt audits are: oneD4SelectorPattern only
+			// sees names carrying one of its prefixes, so in a ratio a
+			// numerator that lost or fumbled its prefix rides through on the
+			// denominator that still matches. The golden in
+			// TestRegistry_WindowedMeansAreCounterRatios pins today's mean
+			// strings, but a query and its golden are edited together — this
+			// is the check that does not move with them.
+			for _, name := range promSeriesToken.FindAllString(query, -1) {
+				if strings.HasPrefix(name, "http_server_") {
+					continue
+				}
+				assert.True(t, oneD4ExportedNames[name],
+					"%s reads %q, which one_d4_worker does not export", what, name)
+			}
 			// The probes tile (#1303) is the one entry that reads the standard
 			// http_server family rather than a worker instrument: it
 			// shows the /health traffic probeFilter subtracts from every
