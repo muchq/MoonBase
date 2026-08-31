@@ -167,9 +167,9 @@ const (
 
 // ---------------------------------------------------------------- listing
 
-// The listing's query count must not scale with the container count: at 18
-// containers the per-container version issued ~181 instant queries per poll,
-// enough to hold Prometheus at ~6% CPU from one open dashboard tab.
+// The listing's query count must not scale with the container count: ten
+// queries per container is ~181 instant queries per dashboard poll at host
+// scale, enough to hold Prometheus at ~6% CPU from one open tab.
 func TestGetContainers_OneQueryPerMetricNotPerContainer(t *testing.T) {
 	mock := containerFixture()
 	handler := NewMetricsHandler(mock)
@@ -177,7 +177,62 @@ func TestGetContainers_OneQueryPerMetricNotPerContainer(t *testing.T) {
 	handler.GetContainers(w, httptest.NewRequest(http.MethodGet, "/metrics/v1/containers", nil))
 
 	require.Equal(t, http.StatusOK, w.Code)
-	assert.Len(t, mock.instantQueries, 11, "one listing query plus one per metric, regardless of container count")
+	assert.ElementsMatch(t, []string{
+		listQuery,
+		groupedCPUQuery,
+		groupedThrottledQuery,
+		groupedMemUsageQuery,
+		groupedMemLimitQuery,
+		groupedNetRxQuery,
+		groupedNetTxQuery,
+		groupedRestartsQuery,
+		groupedUptimeQuery,
+		groupedLastSeenQuery,
+		groupedOOMQuery,
+	}, mock.instantQueries, "one listing query plus one per metric, regardless of container count")
+}
+
+// Content coverage for every grouped template: each metric seeded with a
+// distinct value must land in its ContainerStats field, and no query may miss
+// the fixture — a template typo reads as no-data, never as a borrowed value.
+func TestGetContainers_AllMetricsFlowThrough(t *testing.T) {
+	name := "ubuntu-mithril-1"
+	mock := &mockPrometheusClient{queryResponses: map[string]*QueryResponse{
+		listQuery:             vectorResponse(listResult(name, "mithril", "ghcr.io/muchq/mithril:abc123", 100)),
+		groupedCPUQuery:       vectorResponse(vectorResult(name, "12.5")),
+		groupedThrottledQuery: vectorResponse(vectorResult(name, "0.25")),
+		groupedMemUsageQuery:  vectorResponse(vectorResult(name, "256")),
+		groupedMemLimitQuery:  vectorResponse(vectorResult(name, "1024")),
+		groupedNetRxQuery:     vectorResponse(vectorResult(name, "1000")),
+		groupedNetTxQuery:     vectorResponse(vectorResult(name, "2000")),
+		groupedRestartsQuery:  vectorResponse(vectorResult(name, "1")),
+		groupedUptimeQuery:    vectorResponse(vectorResult(name, "3600")),
+		groupedLastSeenQuery:  vectorResponse(vectorResult(name, "15")),
+		groupedOOMQuery:       vectorResponse(vectorResult(name, "3")),
+	}}
+	handler := NewMetricsHandler(mock)
+	w := httptest.NewRecorder()
+	handler.GetContainers(w, httptest.NewRequest(http.MethodGet, "/metrics/v1/containers", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, mock.misses, "every query the listing issues has a fixture entry")
+	var response ContainerMetrics
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Containers, 1)
+	c := response.Containers[0]
+	assert.Equal(t, 12.5, c.CPUUsagePercent)
+	assert.Equal(t, 0.25, c.CPUThrottledSeconds)
+	assert.Equal(t, 256.0, c.MemoryUsageBytes)
+	assert.Equal(t, 1024.0, c.MemoryLimitBytes)
+	assert.Equal(t, 25.0, c.MemoryUsagePercent, "derived from usage/limit")
+	assert.Equal(t, 1000.0, c.NetworkRxBytes)
+	assert.Equal(t, 2000.0, c.NetworkTxBytes)
+	assert.Equal(t, 1.0, c.RestartsLastHour)
+	assert.Equal(t, 3600.0, c.UptimeSeconds)
+	assert.Equal(t, 15.0, c.LastSeenAgoSeconds)
+	assert.Equal(t, 3.0, c.OOMEventsLastHour)
+	assert.True(t, c.Reporting)
+	assert.False(t, c.CrashLooping)
 }
 
 func TestGetContainers(t *testing.T) {
@@ -351,6 +406,32 @@ func TestGetContainerDetail_Payload(t *testing.T) {
 	assert.False(t, got.Container.CrashLooping)
 	assert.Equal(t, "2-alpine", got.Container.Version)
 	assert.Zero(t, got.Container.RestartsLastHour)
+}
+
+// The detail endpoint must scope every query to the one resolved container —
+// a host-wide `name!=""` here would quietly restore per-request fan-out.
+func TestGetContainerDetail_ScopedQueriesOnly(t *testing.T) {
+	mock := containerFixture()
+	handler := NewMetricsHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/metrics/v1/container/posterize", nil)
+	req.SetPathValue("name", "posterize")
+	w := httptest.NewRecorder()
+	handler.GetContainerDetail(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.ElementsMatch(t, []string{
+		listQuery,
+		`sum by (name) (rate(container_cpu_usage_seconds_total{name="ubuntu-posterize-1"}[5m]))*100`,
+		`sum by (name) (rate(container_cpu_cfs_throttled_seconds_total{name="ubuntu-posterize-1"}[5m]))`,
+		`max by (name) (container_memory_usage_bytes{name="ubuntu-posterize-1"})`,
+		`max by (name) (container_spec_memory_limit_bytes{name="ubuntu-posterize-1"})`,
+		`sum by (name) (rate(container_network_receive_bytes_total{name="ubuntu-posterize-1"}[5m]))`,
+		`sum by (name) (rate(container_network_transmit_bytes_total{name="ubuntu-posterize-1"}[5m]))`,
+		`max by (name) (changes(container_start_time_seconds{name="ubuntu-posterize-1"}[1h]))`,
+		`time()-max by (name) (container_start_time_seconds{name="ubuntu-posterize-1"})`,
+		`time()-max by (name) (container_last_seen{name="ubuntu-posterize-1"})`,
+		`sum by (name) (increase(container_oom_events_total{name="ubuntu-posterize-1"}[1h]))`,
+	}, mock.instantQueries)
 }
 
 // A single-resource lookup can't degrade to an empty answer: without the

@@ -383,14 +383,17 @@ type containerScalars struct {
 
 // fetchContainerScalars answers every per-container metric for the containers
 // the selector matches — `name!=""` for the whole host, `name="x"` for one.
-// One query per metric either way: the listing used to issue ten queries per
-// container, which at host scale was ~181 per dashboard poll and held
-// Prometheus at ~6% CPU for as long as a tab stayed open.
+// One query per metric either way: the query count must not scale with the
+// container count, because the listing is polled by dashboards and per-container
+// fan-out at host scale keeps Prometheus busy for as long as a tab stays open.
 func (h *MetricsHandler) fetchContainerScalars(ctx context.Context, selector string) containerScalars {
 	q := func(template string) map[string]float64 {
 		return h.queryVector(ctx, fmt.Sprintf(template, selector))
 	}
 	return containerScalars{
+		// A redeploy leaves the replaced container's series inside the [5m]
+		// rate window, so these sums briefly count both incarnations —
+		// bounded and self-healing, where picking one series is a coin flip.
 		cpu:       q(`sum by (name) (rate(container_cpu_usage_seconds_total{%s}[5m]))*100`),
 		throttled: q(`sum by (name) (rate(container_cpu_cfs_throttled_seconds_total{%s}[5m]))`),
 		memUsage:  q(`max by (name) (container_memory_usage_bytes{%s})`),
