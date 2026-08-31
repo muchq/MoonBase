@@ -254,6 +254,7 @@ java_test_suite(
         # McpToolCallLoggingTest reads tool-call events off a ListAppender.
         artifact("ch.qos.logback:logback-classic"),
         artifact("ch.qos.logback:logback-core"),
+        artifact("org.slf4j:slf4j-api"),
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-http-server-netty"),
@@ -262,7 +263,6 @@ java_test_suite(
         artifact("org.jspecify:jspecify"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
-        artifact("org.slf4j:slf4j-api"),
     ],
 )
 
