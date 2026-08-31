@@ -23,6 +23,10 @@ public class AnalyzePositionTool {
               + " motifs with per-move occurrence details.")
   public CallToolResult analyzePosition(
       @ToolArg(description = "A PGN string of the game to analyze") String pgn) {
+    return ToolCallLog.logged("analyze_position", () -> doAnalyzePosition(pgn));
+  }
+
+  private CallToolResult doAnalyzePosition(String pgn) {
     if (pgn.isBlank()) {
       return ToolResults.error("pgn is required");
     }

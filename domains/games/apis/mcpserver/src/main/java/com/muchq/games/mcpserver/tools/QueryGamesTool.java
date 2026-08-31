@@ -64,6 +64,15 @@ public class QueryGamesTool {
               name = "include_pgn",
               description = "Include the full PGN of each game (large). Default false")
           Boolean includePgn) {
+    return ToolCallLog.logged(
+        "query_chess_games", () -> doQueryChessGames(query, player, limit, includePgn));
+  }
+
+  private CallToolResult doQueryChessGames(
+      String query,
+      @Nullable String player,
+      @Nullable Integer limit,
+      @Nullable Boolean includePgn) {
     if (query.isBlank()) {
       return ToolResults.error("query is required");
     }

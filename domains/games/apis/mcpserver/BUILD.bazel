@@ -16,6 +16,7 @@ java_library(
         "src/main/java/com/muchq/games/mcpserver/tools/OneD4Client.java",
         "src/main/java/com/muchq/games/mcpserver/tools/QueryGamesTool.java",
         "src/main/java/com/muchq/games/mcpserver/tools/ServerTimeTool.java",
+        "src/main/java/com/muchq/games/mcpserver/tools/ToolCallLog.java",
         "src/main/java/com/muchq/games/mcpserver/tools/ToolDescriptions.java",
         "src/main/java/com/muchq/games/mcpserver/tools/ToolJson.java",
         "src/main/java/com/muchq/games/mcpserver/tools/ToolResults.java",
@@ -168,6 +169,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/mcpserver/tools/IndexerFacadeHttpTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/OneD4ClientTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ServerTimeToolTest.java",
+        "src/test/java/com/muchq/games/mcpserver/tools/ToolCallLogTest.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ToolResultText.java",
         "src/test/java/com/muchq/games/mcpserver/tools/ToolResultsTest.java",
     ],
@@ -182,6 +184,10 @@ java_test_suite(
         "//domains/platform/libs/http_client:jdk11",
         "//domains/platform/libs/json",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
+        # ToolCallLogTest reads events off a ListAppender, which is logback's, not slf4j's.
+        artifact("ch.qos.logback:logback-classic"),
+        artifact("ch.qos.logback:logback-core"),
+        artifact("org.slf4j:slf4j-api"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
@@ -220,6 +226,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/mcpserver/McpAuthenticationTest.java",
         "src/test/java/com/muchq/games/mcpserver/McpProtocolTest.java",
         "src/test/java/com/muchq/games/mcpserver/McpResourceContractTest.java",
+        "src/test/java/com/muchq/games/mcpserver/McpToolCallLoggingTest.java",
         "src/test/java/com/muchq/games/mcpserver/McpToolRosterContractTest.java",
         "src/test/java/com/muchq/games/mcpserver/McpToolVocabularyTest.java",
     ],
@@ -244,6 +251,9 @@ java_test_suite(
         # through :dto and HTTP (#1332).
         "//domains/games/libs/chessql:compiler",
         "//domains/platform/libs/json",
+        # McpToolCallLoggingTest reads tool-call events off a ListAppender.
+        artifact("ch.qos.logback:logback-classic"),
+        artifact("ch.qos.logback:logback-core"),
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-http-server-netty"),
@@ -252,6 +262,7 @@ java_test_suite(
         artifact("org.jspecify:jspecify"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
+        artifact("org.slf4j:slf4j-api"),
     ],
 )
 
