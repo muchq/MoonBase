@@ -373,71 +373,112 @@ func (h *MetricsHandler) listContainers(ctx context.Context) ([]containerRef, er
 	return refs, nil
 }
 
-// containerStats runs the per-container queries for one container, so a
-// single-container request doesn't fan out across the whole stack.
-func (h *MetricsHandler) containerStats(ctx context.Context, ref containerRef) ContainerStats {
+// containerScalars holds the ten per-container metrics, each indexed by
+// container name. Absence from a map means the query failed or cAdvisor has no
+// sample — never zero.
+type containerScalars struct {
+	cpu, throttled, memUsage, memLimit, netRx, netTx map[string]float64
+	restarts, uptime, lastSeen, oom                  map[string]float64
+}
+
+// fetchContainerScalars answers every per-container metric for the containers
+// the selector matches — `name!=""` for the whole host, `name="x"` for one.
+// One query per metric either way: the listing used to issue ten queries per
+// container, which at host scale was ~181 per dashboard poll and held
+// Prometheus at ~6% CPU for as long as a tab stayed open.
+func (h *MetricsHandler) fetchContainerScalars(ctx context.Context, selector string) containerScalars {
+	q := func(template string) map[string]float64 {
+		return h.queryVector(ctx, fmt.Sprintf(template, selector))
+	}
+	return containerScalars{
+		cpu:       q(`sum by (name) (rate(container_cpu_usage_seconds_total{%s}[5m]))*100`),
+		throttled: q(`sum by (name) (rate(container_cpu_cfs_throttled_seconds_total{%s}[5m]))`),
+		memUsage:  q(`max by (name) (container_memory_usage_bytes{%s})`),
+		memLimit:  q(`max by (name) (container_spec_memory_limit_bytes{%s})`),
+		netRx:     q(`sum by (name) (rate(container_network_receive_bytes_total{%s}[5m]))`),
+		netTx:     q(`sum by (name) (rate(container_network_transmit_bytes_total{%s}[5m]))`),
+		// cAdvisor exposes no restart counter, so count the steps in the
+		// container's start time: each restart re-stamps it.
+		restarts: q(`max by (name) (changes(container_start_time_seconds{%s}[1h]))`),
+		uptime:   q(`time()-max by (name) (container_start_time_seconds{%s})`),
+		// How stale cAdvisor's view of a container is. Unlike uptime, this
+		// keeps answering after a container stops — the series lingers until
+		// retention drops it — which is what lets a dead container stay on
+		// the page instead of vanishing from it.
+		lastSeen: q(`time()-max by (name) (container_last_seen{%s})`),
+		oom:      q(`sum by (name) (increase(container_oom_events_total{%s}[1h]))`),
+	}
+}
+
+// queryVector runs one instant query and indexes the result by container name.
+// An error degrades to an empty map, which downstream reads as "no data" —
+// the same no-verdict contract a failed per-container query had.
+func (h *MetricsHandler) queryVector(ctx context.Context, query string) map[string]float64 {
+	resp, err := h.promClient.Query(ctx, query)
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]float64, len(resp.Data.Result))
+	for i := range resp.Data.Result {
+		result := &resp.Data.Result[i]
+		name := result.Metric["name"]
+		if name == "" {
+			continue
+		}
+		val, err := extractFloatValue(result)
+		if err != nil {
+			continue
+		}
+		out[name] = val
+	}
+	return out
+}
+
+func (s containerScalars) stats(ref containerRef) ContainerStats {
 	stats := ContainerStats{
 		Name:    ref.name,
 		Service: ref.service,
 		Image:   ref.image,
 		Version: imageTag(ref.image),
 	}
-	name := ref.name
-
-	scalar := func(query string) (float64, bool) {
-		resp, err := h.promClient.Query(ctx, query)
-		if err != nil || len(resp.Data.Result) == 0 {
-			return 0, false
-		}
-		val, err := extractFloatValue(&resp.Data.Result[0])
-		if err != nil {
-			return 0, false
-		}
-		return val, true
+	get := func(m map[string]float64) (float64, bool) {
+		val, ok := m[ref.name]
+		return val, ok
 	}
 
-	if val, ok := scalar(fmt.Sprintf(`rate(container_cpu_usage_seconds_total{name="%s"}[5m])*100`, name)); ok {
+	if val, ok := get(s.cpu); ok {
 		stats.CPUUsagePercent = val
 	}
-	if val, ok := scalar(fmt.Sprintf(`rate(container_cpu_cfs_throttled_seconds_total{name="%s"}[5m])`, name)); ok {
+	if val, ok := get(s.throttled); ok {
 		stats.CPUThrottledSeconds = val
 	}
-	if val, ok := scalar(fmt.Sprintf(`container_memory_usage_bytes{name="%s"}`, name)); ok {
+	if val, ok := get(s.memUsage); ok {
 		stats.MemoryUsageBytes = val
 	}
-	if val, ok := scalar(fmt.Sprintf(`container_spec_memory_limit_bytes{name="%s"}`, name)); ok {
+	if val, ok := get(s.memLimit); ok {
 		stats.MemoryLimitBytes = val
 		if stats.MemoryUsageBytes > 0 && val > 0 {
 			stats.MemoryUsagePercent = (stats.MemoryUsageBytes / val) * 100
 		}
 	}
-	if val, ok := scalar(fmt.Sprintf(`sum(rate(container_network_receive_bytes_total{name="%s"}[5m]))`, name)); ok {
+	if val, ok := get(s.netRx); ok {
 		stats.NetworkRxBytes = val
 	}
-	if val, ok := scalar(fmt.Sprintf(`sum(rate(container_network_transmit_bytes_total{name="%s"}[5m]))`, name)); ok {
+	if val, ok := get(s.netTx); ok {
 		stats.NetworkTxBytes = val
 	}
-
-	// cAdvisor exposes no restart counter, so count the steps in the
-	// container's start time: each restart re-stamps it.
-	if val, ok := scalar(fmt.Sprintf(`changes(container_start_time_seconds{name="%s"}[1h])`, name)); ok {
+	if val, ok := get(s.restarts); ok {
 		stats.RestartsLastHour = val
 	}
-	uptime, reporting := scalar(fmt.Sprintf(`time()-container_start_time_seconds{name="%s"}`, name))
+	uptime, reporting := get(s.uptime)
 	stats.UptimeSeconds = uptime
-
-	// How stale cAdvisor's view of this container is. Unlike uptime, this keeps
-	// answering after a container stops — the series lingers until retention
-	// drops it — which is what lets a dead container stay on the page instead
-	// of vanishing from it.
-	if val, ok := scalar(fmt.Sprintf(`time()-container_last_seen{name="%s"}`, name)); ok {
+	if val, ok := get(s.lastSeen); ok {
 		stats.LastSeenAgoSeconds = val
 	}
-
 	// Only where cAdvisor ships the counter; a build without it leaves zero,
 	// which reads the same as no kills. Not part of the reporting signal for
 	// that reason.
-	if val, ok := scalar(fmt.Sprintf(`increase(container_oom_events_total{name="%s"}[1h])`, name)); ok {
+	if val, ok := get(s.oom); ok {
 		stats.OOMEventsLastHour = val
 	}
 
@@ -450,18 +491,25 @@ func (h *MetricsHandler) containerStats(ctx context.Context, ref containerRef) C
 	return stats
 }
 
+// containerStats runs the per-container queries for one container, so a
+// single-container request doesn't fan out across the whole stack.
+func (h *MetricsHandler) containerStats(ctx context.Context, ref containerRef) ContainerStats {
+	return h.fetchContainerScalars(ctx, fmt.Sprintf(`name=%q`, ref.name)).stats(ref)
+}
+
 func (h *MetricsHandler) fetchContainerMetrics(ctx context.Context) (*ContainerMetrics, error) {
 	refs, err := h.listContainers(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	scalars := h.fetchContainerScalars(ctx, `name!=""`)
 	metrics := &ContainerMetrics{
 		Timestamp:  time.Now().UTC(),
 		Containers: []ContainerStats{},
 	}
 	for _, ref := range refs {
-		metrics.Containers = append(metrics.Containers, h.containerStats(ctx, ref))
+		metrics.Containers = append(metrics.Containers, scalars.stats(ref))
 	}
 	return metrics, nil
 }
