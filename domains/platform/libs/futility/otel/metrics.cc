@@ -11,20 +11,30 @@ namespace futility::otel {
 
 namespace {
 
-// Every instrument records the same way: bare when there are no
-// attributes, through a KeyValueIterableView otherwise. `record` is
-// called with the label arguments to forward to Add/Record.
+// Every instrument records the same way: the caller's attributes plus a
+// service_name stamped on every point. prom_proxy scopes every custom-metric
+// query with service_name=~"...", and the collector's prometheus exporter
+// does not turn the OTLP resource into point labels, so a point without the
+// attribute is invisible to every dashboard tile that queries it. The
+// recorder is the one writer of the label: a caller-supplied value is
+// discarded. `record` is called with the label arguments to forward to
+// Add/Record.
 template <typename Record>
-void RecordWithAttributes(const std::map<std::string, std::string>& attributes, Record&& record) {
+void RecordWithAttributes(const std::string& service_name,
+                          const std::map<std::string, std::string>& attributes, Record&& record) {
   auto context = opentelemetry::context::Context{};
-  if (attributes.empty()) {
-    record(context);
-  } else {
-    std::vector<std::pair<std::string, std::string>> attr_vec(attributes.begin(), attributes.end());
-    auto kv_iterable = opentelemetry::common::KeyValueIterableView<
-        std::vector<std::pair<std::string, std::string>>>(attr_vec);
-    record(kv_iterable, context);
+  std::vector<std::pair<std::string, std::string>> attr_vec;
+  attr_vec.reserve(attributes.size() + 1);
+  for (const auto& [key, value] : attributes) {
+    if (key != "service_name") {
+      attr_vec.emplace_back(key, value);
+    }
   }
+  attr_vec.emplace_back("service_name", service_name);
+  auto kv_iterable =
+      opentelemetry::common::KeyValueIterableView<std::vector<std::pair<std::string, std::string>>>(
+          attr_vec);
+  record(kv_iterable, context);
 }
 
 }  // namespace
@@ -54,7 +64,7 @@ void MetricsRecorder::RecordCounter(const std::string& metric_name, int64_t valu
     return meter_->CreateUInt64Counter(metric_name, DescriptionFor(metric_name));
   });
   if (counter != nullptr) {
-    RecordWithAttributes(attributes, [&](auto&&... labels) {
+    RecordWithAttributes(service_name_, attributes, [&](auto&&... labels) {
       counter->Add(static_cast<uint64_t>(value), std::forward<decltype(labels)>(labels)...);
     });
   }
@@ -80,7 +90,7 @@ void MetricsRecorder::RecordLatency(const std::string& metric_name,
     return meter_->CreateUInt64Histogram(instrument_name, DescriptionFor(instrument_name));
   });
   if (histogram != nullptr) {
-    RecordWithAttributes(attributes, [&](auto&&... labels) {
+    RecordWithAttributes(service_name_, attributes, [&](auto&&... labels) {
       histogram->Record(static_cast<uint64_t>(duration.count()),
                         std::forward<decltype(labels)>(labels)...);
     });
@@ -98,7 +108,7 @@ void MetricsRecorder::RecordDistribution(const std::string& metric_name, double 
     return meter_->CreateUInt64Histogram(metric_name, DescriptionFor(metric_name));
   });
   if (histogram != nullptr) {
-    RecordWithAttributes(attributes, [&](auto&&... labels) {
+    RecordWithAttributes(service_name_, attributes, [&](auto&&... labels) {
       histogram->Record(static_cast<uint64_t>(value), std::forward<decltype(labels)>(labels)...);
     });
   }
@@ -115,7 +125,7 @@ void MetricsRecorder::RecordGauge(const std::string& metric_name, double value,
     return meter_->CreateInt64UpDownCounter(instrument_name, DescriptionFor(instrument_name));
   });
   if (gauge != nullptr) {
-    RecordWithAttributes(attributes, [&](auto&&... labels) {
+    RecordWithAttributes(service_name_, attributes, [&](auto&&... labels) {
       gauge->Add(static_cast<int64_t>(value), std::forward<decltype(labels)>(labels)...);
     });
   }

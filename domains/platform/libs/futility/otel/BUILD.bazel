@@ -133,6 +133,17 @@ cc_test(
 )
 
 cc_test(
+    name = "metrics_service_name_test",
+    size = "small",
+    srcs = ["metrics_service_name_test.cc"],
+    deps = [
+        ":collect_on_demand_reader",
+        ":metrics",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "metrics_declaration_test",
     size = "small",
     srcs = ["metrics_declaration_test.cc"],

@@ -17,6 +17,7 @@
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "gtest/gtest.h"
 #include "opentelemetry/metrics/provider.h"
+#include "opentelemetry/nostd/variant.h"
 #include "opentelemetry/sdk/metrics/meter_provider_factory.h"
 
 namespace one_d4_worker {
@@ -77,6 +78,38 @@ TEST_F(MetricsExportTest, TheRunDurationIsExportedUnderTheNameProm_ProxyQueries)
   EXPECT_TRUE(exported.count(std::string(kRunDurationMetric) + "_microseconds") == 0)
       << "the run duration is exported under a renamed instrument; prom_proxy queries "
       << kRunDurationMetric;
+}
+
+TEST_F(MetricsExportTest, EveryPointCarriesTheServiceNameProm_ProxyScopesBy) {
+  // prom_proxy selects every one_d4 tile with service_name=~"one_d4(_worker)?"
+  // (domains/platform/apis/prom_proxy/registry.go). The collector does not
+  // turn the OTLP resource into point labels, so a point missing this
+  // attribute renders every Cleanup, Motifs, and Indexing tile as zero.
+  futility::otel::MetricsRecorder recorder("one_d4_worker");
+  WorkerMetrics metrics(recorder);
+  metrics.Declare();
+
+  int swept = 0;
+  reader_->Collect([&](metrics_sdk::ResourceMetrics& metrics_data) {
+    for (const auto& scope : metrics_data.scope_metric_data_) {
+      for (const auto& metric : scope.metric_data_) {
+        for (const auto& point : metric.point_data_attr_) {
+          ++swept;
+          auto it = point.attributes.find("service_name");
+          if (it == point.attributes.end()) {
+            ADD_FAILURE() << metric.instrument_descriptor.name_ << " has no service_name";
+            continue;
+          }
+          const auto* value = opentelemetry::nostd::get_if<std::string>(&it->second);
+          EXPECT_TRUE(value != nullptr && *value == "one_d4_worker")
+              << metric.instrument_descriptor.name_;
+        }
+      }
+    }
+    return true;
+  });
+  // The sweep's own control: an empty export proves nothing.
+  EXPECT_GE(swept, 3);
 }
 
 TEST_F(MetricsExportTest, NothingExportsWithAFirstObservationGap) {
