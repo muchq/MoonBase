@@ -1960,3 +1960,56 @@ func TestForgejoStillProxiesEverythingTheGuardsDoNotRefuse(t *testing.T) {
 		"nothing and the site answers 200 with an empty body. Block was:\n%s",
 		strings.Join(site, "\n"))
 }
+
+// Container stdout is a disk-fill risk on a single host: docker's json-file
+// driver keeps everything by default, and nothing rotates it. Every service
+// caps its logs by merging the shared x-default-logging anchor (#1456). The
+// healthcheck guard forbids anchors because it must read commands as text;
+// this block carries no command, so the shared anchor is the point rather
+// than a hole — one place to change the cap, and this test only requires
+// that each service declares the key.
+func TestEveryServiceCapsItsContainerLogs(t *testing.T) {
+	services := composeServiceLines(t, "compose.yaml")
+	if len(services) < 10 {
+		t.Fatalf("parsed only %d services out of compose.yaml; the parser has gone stale", len(services))
+	}
+	for service, lines := range services {
+		found := false
+		for _, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "logging:") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s declares no logging cap; its stdout grows until the disk fills. "+
+				"Add `logging: *default-logging` (#1456).", service)
+		}
+	}
+}
+
+// The shipper reads Caddy's rolled access logs off the same host path Caddy
+// writes them to, and deletes what it has uploaded — so the mount must be the
+// host bind, and must not be read-only (#1457). Profile-gated: the service
+// needs S3 credentials in ~/.env, so it stays out of a default `up -d` until
+// the operator opts in.
+func TestLogShipperReadsTheCaddyLogMountAndIsProfileGated(t *testing.T) {
+	block := serviceBlock(t, "compose.yaml", "log_shipper")
+
+	if !strings.Contains(block, "ghcr.io/muchq/log_shipper") {
+		t.Fatalf("did not find log_shipper's image in its compose block; this test is no longer "+
+			"reading the service it claims to. Block was:\n%s", block)
+	}
+	if !strings.Contains(block, "- /var/log/caddy:/var/log/caddy") {
+		t.Errorf("log_shipper does not bind-mount /var/log/caddy; it has nothing to ship. "+
+			"Block was:\n%s", block)
+	}
+	if strings.Contains(block, "/var/log/caddy:/var/log/caddy:ro") {
+		t.Errorf("log_shipper mounts the log dir read-only; it deletes rolled files after "+
+			"upload, so a read-only mount fills the disk Caddy's roll_keep was tuned against.")
+	}
+	if !strings.Contains(block, "profiles:") {
+		t.Errorf("log_shipper is not profile-gated; a default `docker compose up -d` would "+
+			"start it with no S3 credentials and it would crash-loop. Block was:\n%s", block)
+	}
+}

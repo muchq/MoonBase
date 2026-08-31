@@ -1,7 +1,9 @@
 <configuration scan="true" scanPeriod="30 seconds">
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
     <encoder>
-      <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+      <!-- Full ISO date, not bare time-of-day: these lines get shipped and
+           read offline, where HH:mm:ss alone cannot even be ordered (#1456). -->
+      <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
     </encoder>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
       <level>INFO</level>
