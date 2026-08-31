@@ -1969,6 +1969,25 @@ func TestForgejoStillProxiesEverythingTheGuardsDoNotRefuse(t *testing.T) {
 // than a hole — one place to change the cap, and this test only requires
 // that each service declares the key.
 func TestEveryServiceCapsItsContainerLogs(t *testing.T) {
+	// The per-service key without the cap is the same unbounded state
+	// wearing a seatbelt: the anchor itself must bound size and count, or
+	// deleting two lines from it silently reverts all 18 services at once.
+	anchor := false
+	for _, line := range activeLines(t, "compose.yaml") {
+		if line == "x-default-logging: &default-logging" {
+			anchor = true
+		}
+	}
+	if !anchor {
+		t.Fatal("compose.yaml no longer defines the x-default-logging anchor")
+	}
+	for _, bound := range []string{"max-size:", "max-file:"} {
+		if !hasLinePrefix(activeLines(t, "compose.yaml"), bound) {
+			t.Errorf("the logging anchor sets no %s — every container is back to unbounded "+
+				"json-file logs, which is the disk-fill #1456 exists to close", bound)
+		}
+	}
+
 	services := composeServiceLines(t, "compose.yaml")
 	if len(services) < 10 {
 		t.Fatalf("parsed only %d services out of compose.yaml; the parser has gone stale", len(services))
@@ -2005,7 +2024,7 @@ func TestLogShipperReadsTheCaddyLogMountAndIsProfileGated(t *testing.T) {
 			"Block was:\n%s", block)
 	}
 	if strings.Contains(block, "/var/log/caddy:/var/log/caddy:ro") {
-		t.Errorf("log_shipper mounts the log dir read-only; it deletes rolled files after "+
+		t.Errorf("log_shipper mounts the log dir read-only; it deletes rolled files after " +
 			"upload, so a read-only mount fills the disk Caddy's roll_keep was tuned against.")
 	}
 	if !strings.Contains(block, "profiles:") {

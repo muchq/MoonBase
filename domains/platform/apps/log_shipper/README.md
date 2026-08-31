@@ -53,5 +53,8 @@ docker compose --profile stats up -d
 ```
 
 The mount is read-write on purpose — deletion after upload is what keeps
-the host disk bounded once shipping owns retention (Caddy's `roll_keep`
-then only matters while the shipper is down).
+the host disk bounded once shipping owns retention. Caddy's `roll_keep`
+still matters whenever the shipper is down **or failing**: after five
+further rolls Caddy deletes the oldest unshipped file, and that deletion
+is silent. A persistently failing upload logs an error every pass; that
+log is the only warning before data ages out.

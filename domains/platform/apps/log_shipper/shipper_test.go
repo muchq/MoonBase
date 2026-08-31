@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type fakeUploader struct {
@@ -19,11 +20,18 @@ func newFakeUploader() *fakeUploader {
 	return &fakeUploader{puts: map[string][]byte{}, fail: map[string]error{}}
 }
 
-func (f *fakeUploader) Put(key string, body []byte) error {
+func (f *fakeUploader) Put(key string, body io.ReadSeeker, size int64) error {
 	if err := f.fail[key]; err != nil {
 		return err
 	}
-	f.puts[key] = body
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	if int64(len(data)) != size {
+		return errors.New("declared size does not match the body")
+	}
+	f.puts[key] = data
 	return nil
 }
 
@@ -150,4 +158,50 @@ func keys(m map[string][]byte) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// Caddy compresses a finished roll in place: while the compressor runs, the
+// complete .log and a truncated .gz coexist and would ship to the SAME key,
+// the corrupt one second — silently replacing the good object before both
+// files are deleted. A .gz whose .log sibling still exists is therefore not
+// finished, and is not touched.
+func TestAGzWhoseLogSiblingStillExistsIsSkipped(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "access-2026-08-30T16-00-00.000.log", "complete")
+	writeFile(t, dir, "access-2026-08-30T16-00-00.000.log.gz", "truncated garbage")
+	uploader := newFakeUploader()
+
+	shipped, err := (&Shipper{Dir: dir, Source: "caddy", Uploader: uploader}).ShipOnce()
+
+	if err != nil || shipped != 1 {
+		t.Fatalf("ShipOnce = (%d, %v), want only the .log to ship", shipped, err)
+	}
+	key := "logs/source=caddy/dt=2026-08-30/access-2026-08-30T16-00-00.000.log.gz"
+	if got := gunzip(t, uploader.puts[key]); got != "complete" {
+		t.Errorf("the key holds %q; the mid-compression .gz must never reach it", got)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "access-2026-08-30T16-00-00.000.log.gz")); statErr != nil {
+		t.Errorf("the in-progress .gz was touched: %v", statErr)
+	}
+}
+
+// A file younger than MinAge may still be being written; it waits for the
+// next pass.
+func TestAFileYoungerThanMinAgeIsLeftForTheNextPass(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "access-2026-08-30T17-00-00.000.log", "fresh")
+	uploader := newFakeUploader()
+
+	s := &Shipper{Dir: dir, Source: "caddy", Uploader: uploader, MinAge: time.Minute}
+	shipped, err := s.ShipOnce()
+
+	if err != nil || shipped != 0 {
+		t.Fatalf("ShipOnce = (%d, %v), want the fresh file skipped", shipped, err)
+	}
+	if err := os.Chtimes(path, time.Now(), time.Now().Add(-2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if shipped, err = s.ShipOnce(); err != nil || shipped != 1 {
+		t.Errorf("ShipOnce after aging = (%d, %v), want it shipped", shipped, err)
+	}
 }

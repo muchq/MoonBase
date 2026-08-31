@@ -17,6 +17,15 @@ import (
 	"time"
 )
 
+// The two date renderings the protocol uses. Shared constants rather than
+// repeated literals: the x-amz-date header, the signed x-amz-date value,
+// the string to sign and the credential scope must agree byte-for-byte, or
+// every request is a SignatureDoesNotMatch.
+const (
+	amzDateFormat = "20060102T150405Z"
+	amzDateOnly   = "20060102"
+)
+
 // canonicalURI encodes the request path the way S3's own signer does before
 // comparing: every byte percent-encoded except unreserved characters and
 // '/'. Go's URL escaping leaves sub-delims like '=' literal, and the
@@ -40,7 +49,7 @@ func canonicalRequest(method, path, host, payloadHash string, when time.Time, ex
 	headers := map[string]string{
 		"host":                 host,
 		"x-amz-content-sha256": payloadHash,
-		"x-amz-date":           when.Format("20060102T150405Z"),
+		"x-amz-date":           when.Format(amzDateFormat),
 	}
 	for name, value := range extra {
 		headers[strings.ToLower(name)] = strings.TrimSpace(value)
@@ -68,13 +77,13 @@ func canonicalRequest(method, path, host, payloadHash string, when time.Time, ex
 func stringToSign(when time.Time, region, canonical string) string {
 	hash := sha256.Sum256([]byte(canonical))
 	return "AWS4-HMAC-SHA256\n" +
-		when.Format("20060102T150405Z") + "\n" +
+		when.Format(amzDateFormat) + "\n" +
 		credentialScope(when, region) + "\n" +
 		hex.EncodeToString(hash[:])
 }
 
 func credentialScope(when time.Time, region string) string {
-	return when.Format("20060102") + "/" + region + "/s3/aws4_request"
+	return when.Format(amzDateOnly) + "/" + region + "/s3/aws4_request"
 }
 
 func hmacSHA256(key, data []byte) []byte {
@@ -84,7 +93,7 @@ func hmacSHA256(key, data []byte) []byte {
 }
 
 func signature(secretKey string, when time.Time, region, toSign string) string {
-	key := hmacSHA256([]byte("AWS4"+secretKey), []byte(when.Format("20060102")))
+	key := hmacSHA256([]byte("AWS4"+secretKey), []byte(when.Format(amzDateOnly)))
 	key = hmacSHA256(key, []byte(region))
 	key = hmacSHA256(key, []byte("s3"))
 	key = hmacSHA256(key, []byte("aws4_request"))

@@ -45,6 +45,9 @@ func main() {
 	s := &shipper.Shipper{
 		Dir:    requireEnv(logger, "LOG_DIR"),
 		Source: source,
+		// Caddy's roller writes rolled files in place; two minutes of
+		// quiet is the proxy for "nobody is still writing this".
+		MinAge: 2 * time.Minute,
 		Uploader: &shipper.S3{
 			Bucket: requireEnv(logger, "S3_BUCKET"),
 			Region: requireEnv(logger, "S3_REGION"),

@@ -1,6 +1,7 @@
 package log_shipper
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -77,5 +78,26 @@ func TestAuthorizationHeaderCarriesScopeSignedHeadersAndSignature(t *testing.T) 
 		"Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41"
 	if header != want {
 		t.Errorf("authorization header diverges from the published example:\ngot:  %s\nwant: %s", header, want)
+	}
+}
+
+// The golden vectors above are GETs, so nothing there stops the method line
+// from being hardcoded — a mutation under which every production PUT is a
+// SignatureDoesNotMatch while the whole suite stays green. Pinned directly:
+// the canonical request opens with the method it was given, and an extra
+// header lands lowercased, trimmed, and in sorted order.
+func TestCanonicalRequestCarriesTheMethodAndExtraHeaders(t *testing.T) {
+	canonical, signedHeaders := canonicalRequest(
+		"PUT", "/k", "bucket.s3.us-east-1.amazonaws.com", emptyPayloadHash,
+		exampleTime, map[string]string{"X-Amz-Storage-Class": " REDUCED_REDUNDANCY "})
+
+	if !strings.HasPrefix(canonical, "PUT\n") {
+		t.Errorf("canonical request does not open with the request method:\n%s", canonical)
+	}
+	if want := "host;x-amz-content-sha256;x-amz-date;x-amz-storage-class"; signedHeaders != want {
+		t.Errorf("signed headers = %s, want %s", signedHeaders, want)
+	}
+	if !strings.Contains(canonical, "x-amz-storage-class:REDUCED_REDUNDANCY\n") {
+		t.Errorf("extra header is not lowercased and trimmed in the canonical form:\n%s", canonical)
 	}
 }
