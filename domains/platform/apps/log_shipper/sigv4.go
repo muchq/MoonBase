@@ -1,8 +1,8 @@
 // AWS Signature Version 4 for exactly one operation: a header-signed S3
-// PUT. Hand-rolled on the same reasoning as smithy-cpp's Prometheus
-// exposition — the SDK is ~20 modules for what is four HMACs and some
-// canonicalization, and this is the repo's first AWS call, so the SDK tree
-// would be bought for one request shape. The derivation is pinned against
+// PUT. Hand-rolled on the usual dep-light reasoning — the SDK is ~20
+// modules for what is four HMACs and some canonicalization, and this is
+// the repo's first AWS call, so the SDK tree would be bought for one
+// request shape. The derivation is pinned against
 // AWS's published worked example in sigv4_test.go, intermediate values
 // included, so any drift names the stage that drifted.
 package log_shipper

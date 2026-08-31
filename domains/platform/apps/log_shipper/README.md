@@ -8,8 +8,10 @@ hourly fee that batch stats have no use for.
 ## What it does
 
 Every `SHIP_INTERVAL` (default `1h`), scan `LOG_DIR` for files Caddy's
-roller has finished with — `access-<timestamp>.log`, `.log.gz` when Caddy
-compressed it — gzip the ones that need it, and PUT each to
+roller has rolled — `access-<timestamp>.log`, `.log.gz` when Caddy has
+compressed it (a plain `.log` may still be awaiting Caddy's compressor,
+which is why a `.gz` with a `.log` sibling is skipped and nothing younger
+than `MinAge` ships) — gzip the ones that need it, and PUT each to
 
 ```
 s3://$S3_BUCKET/logs/source=$LOG_SOURCE/dt=YYYY-MM-DD/<filename>.gz

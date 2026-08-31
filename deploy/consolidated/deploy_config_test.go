@@ -2025,7 +2025,8 @@ func TestLogShipperReadsTheCaddyLogMountAndIsProfileGated(t *testing.T) {
 	}
 	if strings.Contains(block, "/var/log/caddy:/var/log/caddy:ro") {
 		t.Errorf("log_shipper mounts the log dir read-only; it deletes rolled files after " +
-			"upload, so a read-only mount fills the disk Caddy's roll_keep was tuned against.")
+			"upload, so read-only, every pass fails the delete and re-uploads the same " +
+			"rolls forever, and retention silently falls back to Caddy's roll_keep.")
 	}
 	if !strings.Contains(block, "profiles:") {
 		t.Errorf("log_shipper is not profile-gated; a default `docker compose up -d` would "+
