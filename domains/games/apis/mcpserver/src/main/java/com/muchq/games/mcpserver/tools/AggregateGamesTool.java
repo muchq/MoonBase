@@ -108,6 +108,18 @@ public class AggregateGamesTool {
                       + " totalGames/totalGroups and truncated are computed over the groups that"
                       + " qualified, so they still describe the answer being returned")
           Integer minGames) {
+    return ToolCallLog.logged(
+        "aggregate_chess_games",
+        () -> doAggregateChessGames(query, groupBy, player, limit, orderBy, minGames));
+  }
+
+  private CallToolResult doAggregateChessGames(
+      String query,
+      List<?> groupBy,
+      @Nullable String player,
+      @Nullable Integer limit,
+      @Nullable String orderBy,
+      @Nullable Integer minGames) {
     if (query.isBlank()) {
       return ToolResults.error("query is required");
     }

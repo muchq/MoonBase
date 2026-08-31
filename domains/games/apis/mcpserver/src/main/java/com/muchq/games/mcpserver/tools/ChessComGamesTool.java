@@ -76,6 +76,37 @@ public class ChessComGamesTool {
               description = "Max games to return after filtering. Default 100, max " + MAX_LIMIT)
           Integer limit,
       @Nullable @ToolArg(description = "Games to skip after filtering. Default 0") Integer offset) {
+    return ToolCallLog.logged(
+        "chess_com_games",
+        () ->
+            doChessComGames(
+                username,
+                year,
+                month,
+                timeClass,
+                color,
+                rated,
+                rules,
+                opponent,
+                includePgn,
+                includeTcn,
+                limit,
+                offset));
+  }
+
+  private CallToolResult doChessComGames(
+      String username,
+      String year,
+      String month,
+      @Nullable String timeClass,
+      @Nullable String color,
+      @Nullable Boolean rated,
+      @Nullable String rules,
+      @Nullable String opponent,
+      @Nullable Boolean includePgn,
+      @Nullable Boolean includeTcn,
+      @Nullable Integer limit,
+      @Nullable Integer offset) {
 
     if (username.isBlank()) {
       return ToolResults.error("username is required");

@@ -46,6 +46,10 @@ public class ChessComPlayersTool {
               + " profile; unknown usernames are listed under not_found.")
   public CallToolResult chessComPlayers(
       @ToolArg(description = "The chess.com usernames to look up (max 50)") List<?> usernames) {
+    return ToolCallLog.logged("chess_com_players", () -> doChessComPlayers(usernames));
+  }
+
+  private CallToolResult doChessComPlayers(List<?> usernames) {
     if (usernames.isEmpty()) {
       return ToolResults.error("usernames must be a non-empty array of strings");
     }

@@ -245,6 +245,16 @@ Environment variables:
   `http://one-d4-v2:8090`). Hyphenated for the same `java.net.URI` reason; one_d4_v2
   publishes `one-d4-v2` as its alias.
 
+## Logging
+
+Every tool call logs one line — name, duration, outcome — on the
+`com.muchq.games.mcpserver.tools.ToolCallLog` logger: INFO for a success, WARN
+when the tool answered `isError: true`, ERROR with the stack when an exception
+escaped the tool (the framework's JSON-RPC error mapping still applies).
+Arguments are not logged. A call the framework rejects before the tool method
+runs — a missing required argument, an unbindable type — leaves no line on this
+logger; the SDK's `ToolInputValidator` logs its own WARN for those.
+
 The MCP transport itself is configured in the shared `application.yml`
 (`domains/platform/resources`) under `micronaut.mcp.server`: `transport: HTTP`,
 `endpoint: /mcp`, and `info.name` / `info.version`. `transport` has no usable default —

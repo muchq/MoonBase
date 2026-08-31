@@ -20,13 +20,17 @@ public class ChessComStatsTool {
       description = "Returns the requested user's chess.com player stats")
   public CallToolResult chessComStats(
       @ToolArg(description = "The player's chess.com username") String username) {
-    if (username.isBlank()) {
-      return ToolResults.error("username is required");
-    }
-    var statsMaybe = chessClient.fetchStats(username);
-    if (statsMaybe.isEmpty()) {
-      return ToolResults.error("player not found");
-    }
-    return ToolResults.ok(statsMaybe.get());
+    return ToolCallLog.logged(
+        "chess_com_stats",
+        () -> {
+          if (username.isBlank()) {
+            return ToolResults.error("username is required");
+          }
+          var statsMaybe = chessClient.fetchStats(username);
+          if (statsMaybe.isEmpty()) {
+            return ToolResults.error("player not found");
+          }
+          return ToolResults.ok(statsMaybe.get());
+        });
   }
 }

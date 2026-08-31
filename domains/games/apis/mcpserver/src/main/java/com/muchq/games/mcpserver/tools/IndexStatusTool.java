@@ -26,6 +26,10 @@ public class IndexStatusTool {
   public CallToolResult indexStatus(
       @ToolArg(name = "request_id", description = "The UUID of the indexing request")
           String requestId) {
+    return ToolCallLog.logged("index_status", () -> doIndexStatus(requestId));
+  }
+
+  private CallToolResult doIndexStatus(String requestId) {
     if (requestId.isBlank()) {
       return ToolResults.error("request_id is required");
     }

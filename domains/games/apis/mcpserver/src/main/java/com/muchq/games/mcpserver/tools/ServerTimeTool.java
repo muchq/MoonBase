@@ -22,6 +22,7 @@ public class ServerTimeTool {
     // ok() would render it as one. This tool has nothing to reject, and returns the protocol type
     // only so that every tool in this package speaks it — the alternative leaves a String-returning
     // tool as a template for the next one, which is how the isError gap in #1331 spread to ten.
-    return ToolResults.text(String.valueOf(Instant.now(clock).toEpochMilli()));
+    return ToolCallLog.logged(
+        "server_time", () -> ToolResults.text(String.valueOf(Instant.now(clock).toEpochMilli())));
   }
 }

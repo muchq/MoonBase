@@ -47,6 +47,19 @@ public class IndexGamesTool {
                       + " nothing is refetched, so wait for it to finish and submit again."
                       + " Default false")
           Boolean skipCache) {
+    return ToolCallLog.logged(
+        "index_chess_games",
+        () ->
+            doIndexChessGames(username, platform, startMonth, endMonth, excludeBullet, skipCache));
+  }
+
+  private CallToolResult doIndexChessGames(
+      String username,
+      String platform,
+      String startMonth,
+      String endMonth,
+      @Nullable Boolean excludeBullet,
+      @Nullable Boolean skipCache) {
     try {
       IndexResponse result =
           facade.index(
