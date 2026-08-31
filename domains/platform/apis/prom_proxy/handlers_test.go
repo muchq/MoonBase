@@ -261,9 +261,12 @@ type mockPrometheusClient struct {
 	// Queries with no fixture entry, so a test can prove nothing was
 	// silently answered with an empty result.
 	misses []string
+	// Every instant query issued, so a test can bound the fan-out.
+	instantQueries []string
 }
 
 func (m *mockPrometheusClient) Query(ctx context.Context, query string) (*QueryResponse, error) {
+	m.instantQueries = append(m.instantQueries, query)
 	if m.queryResponses != nil {
 		if resp, ok := m.queryResponses[query]; ok {
 			return resp, nil
@@ -360,10 +363,14 @@ func TestFetchContainerMetrics_SurfacesCrashLoop(t *testing.T) {
 				},
 			},
 		},
-		`changes(container_start_time_seconds{name="posterize"}[1h])`: scalarResponse("47"),
-		`time()-container_start_time_seconds{name="posterize"}`:       scalarResponse("8"),
-		`changes(container_start_time_seconds{name="golf_hub"}[1h])`:  scalarResponse("0"),
-		`time()-container_start_time_seconds{name="golf_hub"}`:        scalarResponse("86400"),
+		groupedRestartsQuery: vectorResponse(
+			vectorResult("posterize", "47"),
+			vectorResult("golf_hub", "0"),
+		),
+		groupedUptimeQuery: vectorResponse(
+			vectorResult("posterize", "8"),
+			vectorResult("golf_hub", "86400"),
+		),
 	}}
 	handler := NewMetricsHandler(mock)
 

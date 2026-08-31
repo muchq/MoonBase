@@ -108,7 +108,7 @@ func listResult(name, service, image string, lastSeen float64) Result {
 	}
 }
 
-func listResponse(results ...Result) *QueryResponse {
+func vectorResponse(results ...Result) *QueryResponse {
 	return &QueryResponse{
 		Status: "success",
 		Data: struct {
@@ -124,19 +124,116 @@ func listResponse(results ...Result) *QueryResponse {
 // container cAdvisor isn't reporting on.
 func containerFixture() *mockPrometheusClient {
 	return &mockPrometheusClient{queryResponses: map[string]*QueryResponse{
-		listQuery: listResponse(
+		listQuery: vectorResponse(
 			listResult("ubuntu-posterize-1", "posterize", "ghcr.io/muchq/posterize:abc123", 100),
 			listResult("ubuntu-golf_hub-1", "golf_hub", "ghcr.io/muchq/golf_hub:abc123", 100),
 			listResult("ubuntu-caddy-1", "caddy", "caddy:2-alpine", 100),
 		),
-		`changes(container_start_time_seconds{name="ubuntu-posterize-1"}[1h])`: scalarResponse("47"),
-		`time()-container_start_time_seconds{name="ubuntu-posterize-1"}`:       scalarResponse("8"),
-		`changes(container_start_time_seconds{name="ubuntu-golf_hub-1"}[1h])`:  scalarResponse("0"),
-		`time()-container_start_time_seconds{name="ubuntu-golf_hub-1"}`:        scalarResponse("86400"),
+		groupedRestartsQuery: vectorResponse(
+			vectorResult("ubuntu-posterize-1", "47"),
+			vectorResult("ubuntu-golf_hub-1", "0"),
+		),
+		groupedUptimeQuery: vectorResponse(
+			vectorResult("ubuntu-posterize-1", "8"),
+			vectorResult("ubuntu-golf_hub-1", "86400"),
+		),
+		// The same answers scoped to one container, for the detail endpoint.
+		`max by (name) (changes(container_start_time_seconds{name="ubuntu-posterize-1"}[1h]))`: vectorResponse(vectorResult("ubuntu-posterize-1", "47")),
+		`time()-max by (name) (container_start_time_seconds{name="ubuntu-posterize-1"})`:       vectorResponse(vectorResult("ubuntu-posterize-1", "8")),
 	}}
 }
 
+func vectorResult(name, value string) Result {
+	return Result{
+		Metric: map[string]string{"name": name},
+		Value:  []interface{}{1609459200.0, value},
+	}
+}
+
+// The grouped per-metric queries the listing issues — one query per metric,
+// covering every container at once.
+const (
+	groupedCPUQuery       = `sum by (name) (rate(container_cpu_usage_seconds_total{name!=""}[5m]))*100`
+	groupedThrottledQuery = `sum by (name) (rate(container_cpu_cfs_throttled_seconds_total{name!=""}[5m]))`
+	groupedMemUsageQuery  = `max by (name) (container_memory_usage_bytes{name!=""})`
+	groupedMemLimitQuery  = `max by (name) (container_spec_memory_limit_bytes{name!=""})`
+	groupedNetRxQuery     = `sum by (name) (rate(container_network_receive_bytes_total{name!=""}[5m]))`
+	groupedNetTxQuery     = `sum by (name) (rate(container_network_transmit_bytes_total{name!=""}[5m]))`
+	groupedRestartsQuery  = `max by (name) (changes(container_start_time_seconds{name!=""}[1h]))`
+	groupedUptimeQuery    = `time()-max by (name) (container_start_time_seconds{name!=""})`
+	groupedLastSeenQuery  = `time()-max by (name) (container_last_seen{name!=""})`
+	groupedOOMQuery       = `sum by (name) (increase(container_oom_events_total{name!=""}[1h]))`
+)
+
 // ---------------------------------------------------------------- listing
+
+// The listing's query count must not scale with the container count: ten
+// queries per container is ~181 instant queries per dashboard poll at host
+// scale, enough to hold Prometheus at ~6% CPU from one open tab.
+func TestGetContainers_OneQueryPerMetricNotPerContainer(t *testing.T) {
+	mock := containerFixture()
+	handler := NewMetricsHandler(mock)
+	w := httptest.NewRecorder()
+	handler.GetContainers(w, httptest.NewRequest(http.MethodGet, "/metrics/v1/containers", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.ElementsMatch(t, []string{
+		listQuery,
+		groupedCPUQuery,
+		groupedThrottledQuery,
+		groupedMemUsageQuery,
+		groupedMemLimitQuery,
+		groupedNetRxQuery,
+		groupedNetTxQuery,
+		groupedRestartsQuery,
+		groupedUptimeQuery,
+		groupedLastSeenQuery,
+		groupedOOMQuery,
+	}, mock.instantQueries, "one listing query plus one per metric, regardless of container count")
+}
+
+// Content coverage for every grouped template: each metric seeded with a
+// distinct value must land in its ContainerStats field, and no query may miss
+// the fixture — a template typo reads as no-data, never as a borrowed value.
+func TestGetContainers_AllMetricsFlowThrough(t *testing.T) {
+	name := "ubuntu-mithril-1"
+	mock := &mockPrometheusClient{queryResponses: map[string]*QueryResponse{
+		listQuery:             vectorResponse(listResult(name, "mithril", "ghcr.io/muchq/mithril:abc123", 100)),
+		groupedCPUQuery:       vectorResponse(vectorResult(name, "12.5")),
+		groupedThrottledQuery: vectorResponse(vectorResult(name, "0.25")),
+		groupedMemUsageQuery:  vectorResponse(vectorResult(name, "256")),
+		groupedMemLimitQuery:  vectorResponse(vectorResult(name, "1024")),
+		groupedNetRxQuery:     vectorResponse(vectorResult(name, "1000")),
+		groupedNetTxQuery:     vectorResponse(vectorResult(name, "2000")),
+		groupedRestartsQuery:  vectorResponse(vectorResult(name, "1")),
+		groupedUptimeQuery:    vectorResponse(vectorResult(name, "3600")),
+		groupedLastSeenQuery:  vectorResponse(vectorResult(name, "15")),
+		groupedOOMQuery:       vectorResponse(vectorResult(name, "3")),
+	}}
+	handler := NewMetricsHandler(mock)
+	w := httptest.NewRecorder()
+	handler.GetContainers(w, httptest.NewRequest(http.MethodGet, "/metrics/v1/containers", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Empty(t, mock.misses, "every query the listing issues has a fixture entry")
+	var response ContainerMetrics
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Containers, 1)
+	c := response.Containers[0]
+	assert.Equal(t, 12.5, c.CPUUsagePercent)
+	assert.Equal(t, 0.25, c.CPUThrottledSeconds)
+	assert.Equal(t, 256.0, c.MemoryUsageBytes)
+	assert.Equal(t, 1024.0, c.MemoryLimitBytes)
+	assert.Equal(t, 25.0, c.MemoryUsagePercent, "derived from usage/limit")
+	assert.Equal(t, 1000.0, c.NetworkRxBytes)
+	assert.Equal(t, 2000.0, c.NetworkTxBytes)
+	assert.Equal(t, 1.0, c.RestartsLastHour)
+	assert.Equal(t, 3600.0, c.UptimeSeconds)
+	assert.Equal(t, 15.0, c.LastSeenAgoSeconds)
+	assert.Equal(t, 3.0, c.OOMEventsLastHour)
+	assert.True(t, c.Reporting)
+	assert.False(t, c.CrashLooping)
+}
 
 func TestGetContainers(t *testing.T) {
 	handler := NewMetricsHandler(containerFixture())
@@ -184,7 +281,7 @@ func TestGetContainers_DeduplicatesByName(t *testing.T) {
 	mock := containerFixture()
 	// Newest first, so "keep the last row" would pick the stale one — the
 	// order that makes this assertion discriminating.
-	mock.queryResponses[listQuery] = listResponse(
+	mock.queryResponses[listQuery] = vectorResponse(
 		listResult("ubuntu-mithril-1", "mithril", "ghcr.io/muchq/mithril:NEWSHA", 200),
 		listResult("ubuntu-mithril-1", "mithril", "ghcr.io/muchq/mithril:OLDSHA", 100),
 	)
@@ -204,7 +301,7 @@ func TestGetContainers_DeduplicatesByName(t *testing.T) {
 // resolve one and 404 the other, so the service comes from the label.
 func TestGetContainers_ServiceFromComposeLabel(t *testing.T) {
 	mock := containerFixture()
-	mock.queryResponses[listQuery] = listResponse(
+	mock.queryResponses[listQuery] = vectorResponse(
 		listResult("local_docker-mithril-1", "mithril", "ghcr.io/muchq/mithril:abc123", 100),
 	)
 	handler := NewMetricsHandler(mock)
@@ -220,7 +317,7 @@ func TestGetContainers_ServiceFromComposeLabel(t *testing.T) {
 // Falls back to parsing when cAdvisor isn't storing container labels.
 func TestGetContainers_ServiceFallsBackToName(t *testing.T) {
 	mock := containerFixture()
-	mock.queryResponses[listQuery] = listResponse(
+	mock.queryResponses[listQuery] = vectorResponse(
 		Result{
 			Metric: map[string]string{"name": "ubuntu-mithril-1", "image": "ghcr.io/muchq/mithril:abc123"},
 			Value:  []interface{}{1609459200.0, "100"},
@@ -309,6 +406,32 @@ func TestGetContainerDetail_Payload(t *testing.T) {
 	assert.False(t, got.Container.CrashLooping)
 	assert.Equal(t, "2-alpine", got.Container.Version)
 	assert.Zero(t, got.Container.RestartsLastHour)
+}
+
+// The detail endpoint must scope every query to the one resolved container —
+// a host-wide `name!=""` here would quietly restore per-request fan-out.
+func TestGetContainerDetail_ScopedQueriesOnly(t *testing.T) {
+	mock := containerFixture()
+	handler := NewMetricsHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/metrics/v1/container/posterize", nil)
+	req.SetPathValue("name", "posterize")
+	w := httptest.NewRecorder()
+	handler.GetContainerDetail(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.ElementsMatch(t, []string{
+		listQuery,
+		`sum by (name) (rate(container_cpu_usage_seconds_total{name="ubuntu-posterize-1"}[5m]))*100`,
+		`sum by (name) (rate(container_cpu_cfs_throttled_seconds_total{name="ubuntu-posterize-1"}[5m]))`,
+		`max by (name) (container_memory_usage_bytes{name="ubuntu-posterize-1"})`,
+		`max by (name) (container_spec_memory_limit_bytes{name="ubuntu-posterize-1"})`,
+		`sum by (name) (rate(container_network_receive_bytes_total{name="ubuntu-posterize-1"}[5m]))`,
+		`sum by (name) (rate(container_network_transmit_bytes_total{name="ubuntu-posterize-1"}[5m]))`,
+		`max by (name) (changes(container_start_time_seconds{name="ubuntu-posterize-1"}[1h]))`,
+		`time()-max by (name) (container_start_time_seconds{name="ubuntu-posterize-1"})`,
+		`time()-max by (name) (container_last_seen{name="ubuntu-posterize-1"})`,
+		`sum by (name) (increase(container_oom_events_total{name="ubuntu-posterize-1"}[1h]))`,
+	}, mock.instantQueries)
 }
 
 // A single-resource lookup can't degrade to an empty answer: without the
@@ -451,11 +574,11 @@ func TestGetContainerTimeSeries_PrometheusDown(t *testing.T) {
 // half the data is worse than saying we don't know.
 func TestGetContainers_PartialDataIsNotAVerdict(t *testing.T) {
 	mock := containerFixture()
-	mock.queryResponses[listQuery] = listResponse(
+	mock.queryResponses[listQuery] = vectorResponse(
 		listResult("ubuntu-mithril-1", "mithril", "ghcr.io/muchq/mithril:abc123", 100),
 	)
-	mock.queryResponses[`changes(container_start_time_seconds{name="ubuntu-mithril-1"}[1h])`] = scalarResponse("47")
-	// uptime deliberately absent
+	mock.queryResponses[groupedRestartsQuery] = vectorResponse(vectorResult("ubuntu-mithril-1", "47"))
+	// mithril deliberately absent from the uptime vector
 
 	handler := NewMetricsHandler(mock)
 	w := httptest.NewRecorder()
@@ -476,10 +599,10 @@ func TestGetContainers_PartialDataIsNotAVerdict(t *testing.T) {
 // say because there is no current run to measure.
 func TestGetContainers_LastSeenAge(t *testing.T) {
 	mock := containerFixture()
-	mock.queryResponses[listQuery] = listResponse(
+	mock.queryResponses[listQuery] = vectorResponse(
 		listResult("ubuntu-mithril-1", "mithril", "ghcr.io/muchq/mithril:abc123", 100),
 	)
-	mock.queryResponses[`time()-container_last_seen{name="ubuntu-mithril-1"}`] = scalarResponse("240")
+	mock.queryResponses[groupedLastSeenQuery] = vectorResponse(vectorResult("ubuntu-mithril-1", "240"))
 
 	handler := NewMetricsHandler(mock)
 	w := httptest.NewRecorder()
@@ -494,11 +617,11 @@ func TestGetContainers_LastSeenAge(t *testing.T) {
 
 func TestGetContainers_OOMEvents(t *testing.T) {
 	mock := containerFixture()
-	mock.queryResponses[listQuery] = listResponse(
+	mock.queryResponses[listQuery] = vectorResponse(
 		listResult("ubuntu-mithril-1", "mithril", "ghcr.io/muchq/mithril:abc123", 100),
 	)
-	mock.queryResponses[`time()-container_start_time_seconds{name="ubuntu-mithril-1"}`] = scalarResponse("3600")
-	mock.queryResponses[`increase(container_oom_events_total{name="ubuntu-mithril-1"}[1h])`] = scalarResponse("2")
+	mock.queryResponses[groupedUptimeQuery] = vectorResponse(vectorResult("ubuntu-mithril-1", "3600"))
+	mock.queryResponses[groupedOOMQuery] = vectorResponse(vectorResult("ubuntu-mithril-1", "2"))
 
 	handler := NewMetricsHandler(mock)
 	w := httptest.NewRecorder()
@@ -516,11 +639,11 @@ func TestGetContainers_OOMEvents(t *testing.T) {
 // which is the field that does carry a verdict about visibility.
 func TestGetContainers_OOMCounterAbsentIsNotAVerdict(t *testing.T) {
 	mock := containerFixture()
-	mock.queryResponses[listQuery] = listResponse(
+	mock.queryResponses[listQuery] = vectorResponse(
 		listResult("ubuntu-mithril-1", "mithril", "ghcr.io/muchq/mithril:abc123", 100),
 	)
-	mock.queryResponses[`time()-container_start_time_seconds{name="ubuntu-mithril-1"}`] = scalarResponse("3600")
-	// OOM query deliberately absent
+	mock.queryResponses[groupedUptimeQuery] = vectorResponse(vectorResult("ubuntu-mithril-1", "3600"))
+	// mithril deliberately absent from the OOM vector
 
 	handler := NewMetricsHandler(mock)
 	w := httptest.NewRecorder()
