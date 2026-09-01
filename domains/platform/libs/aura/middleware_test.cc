@@ -159,12 +159,18 @@ class AuraMiddlewareTest : public ::testing::Test {
   // Sends one request through the chain and returns the access-log line it
   // produced.
   std::string AccessLogLineFor(const std::vector<std::pair<std::string, std::string>>& headers) {
+    return AccessLogLineForRequest("POST", "/echo", "hello", headers, 200);
+  }
+
+  std::string AccessLogLineForRequest(
+      const std::string& method, const std::string& target, const std::string& body,
+      const std::vector<std::pair<std::string, std::string>>& headers, int expected_status) {
     std::string line;
     absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
-    EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_, testing::HasSubstr("trace_id=")))
+    EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_, testing::HasSubstr("\"trace_id\":")))
         .WillOnce(testing::SaveArg<2>(&line));
     log.StartCapturingLogs();
-    EXPECT_EQ(Send("POST", "/echo", "hello", "", headers).status, 200);
+    EXPECT_EQ(Send(method, target, body, "", headers).status, expected_status);
     log.StopCapturingLogs();
     return line;
   }
@@ -349,16 +355,16 @@ TEST(AuraChainWithoutLimiterTest, NoGuardWhenAllowRequestUnset) {
   EXPECT_EQ(sink->completes().size(), 20u);
 }
 
-// The access-log line's trace_id= field carries the W3C trace id parsed
+// The access-log line's "trace_id" field carries the W3C trace id parsed
 // from the traceparent the transport guard mints or joins at ingress. The
 // mint/join/replace mechanics themselves are upstream-tested (smithy-cpp
 // ADR-0011); these tests pin what aura logs.
 std::string TraceIdIn(const std::string& log_line) {
-  constexpr char kKey[] = "trace_id=";
+  constexpr char kKey[] = "\"trace_id\":\"";
   const auto pos = log_line.find(kKey);
   if (pos == std::string::npos) return "";
   const auto start = pos + sizeof(kKey) - 1;
-  return log_line.substr(start, log_line.find(' ', start) - start);
+  return log_line.substr(start, log_line.find('"', start) - start);
 }
 
 bool IsLowercaseHex32(const std::string& value) {
@@ -367,6 +373,78 @@ bool IsLowercaseHex32(const std::string& value) {
     if (!(('0' <= c && c <= '9') || ('a' <= c && c <= 'f'))) return false;
   }
   return true;
+}
+
+// One JSON object per request, speaking the metrics vocabulary
+// (http_method, route, status — #1459/#1365): a reader who sees a spike on
+// a route="Echo" panel pastes the same word into a log query. The route is
+// the bounded label, never the raw path; the raw path rides separately in
+// "target".
+TEST_F(AuraMiddlewareTest, AccessLogIsOneJsonObjectInTheMetricsVocabulary) {
+  const std::string line = AccessLogLineFor({{"X-Forwarded-For", "203.0.113.9"}});
+
+  EXPECT_TRUE(line.front() == '{' && line.back() == '}') << line;
+  for (const char* field : {
+           R"("log":"access")",
+           R"("service_name":")",
+           R"("http_method":"POST")",
+           R"("route":"Echo")",
+           R"("target":"/echo")",
+           R"("status":200)",
+           R"("duration_us":)",
+           R"("response_bytes":4)",
+           R"("trace_id":")",
+           R"("x_forwarded_for":"203.0.113.9")",
+       }) {
+    EXPECT_THAT(line, testing::HasSubstr(field));
+  }
+}
+
+// Sends one request through a fresh chain over the given handler and
+// returns the access-log line. The fixture's chain echoes 200 with an
+// operation for every path, so the unrouted shapes need their own handler.
+std::string AccessLogLineThrough(smithy::http::RequestHandler handler, const std::string& target,
+                                 int expected_status) {
+  auto chain = aura::ProductionChain(
+      aura::ChainOptions{.metrics = std::make_shared<RecordingSink>()}, std::move(handler));
+  auto loopback = std::make_shared<smithy::http::Loopback>();
+  EXPECT_TRUE(loopback->Start(chain).ok());
+
+  smithy::http::HttpRequest request;
+  request.method = "POST";
+  request.target = target;
+  request.peer_address = "192.0.2.200";
+
+  std::string line;
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_, testing::HasSubstr("\"trace_id\":")))
+      .WillOnce(testing::SaveArg<2>(&line));
+  log.StartCapturingLogs();
+  const auto response = loopback->Send(request);
+  EXPECT_TRUE(response.ok());
+  if (response.ok()) EXPECT_EQ(response->status, expected_status);
+  log.StopCapturingLogs();
+  return line;
+}
+
+// The route field is the same bounded vocabulary the metrics speak: an
+// unrouted request logs the sentinel, not its path — the path is in
+// "target", where an unbounded value is a field, not a label.
+TEST(AccessLogJsonTest, RouteFallsBackToTheSharedSentinel) {
+  const std::string line = AccessLogLineThrough(UnroutedHandler(404), "/no/such/path", 404);
+  EXPECT_THAT(line, testing::HasSubstr(R"("route":"unmatched")"));
+  EXPECT_THAT(line, testing::HasSubstr(R"("target":"/no/such/path")"));
+}
+
+// The target is attacker-controlled and reaches the line verbatim, so JSON
+// escaping is security-adjacent (smithy-cpp #203): an unescaped quote or a
+// raw control byte terminates the record early and lets the rest of the URI
+// masquerade as its own log entry.
+TEST(AccessLogJsonTest, QuotesAndControlBytesInTheTargetAreEscaped) {
+  const std::string line = AccessLogLineThrough(UnroutedHandler(404), "/e\"cho\x01?a=\\b", 404);
+
+  EXPECT_THAT(line, testing::HasSubstr(R"("target":"/e\"cho\u0001?a=\\b")"));
+  EXPECT_THAT(line, testing::Not(testing::HasSubstr("\x01")));
 }
 
 TEST_F(AuraMiddlewareTest, AccessLogJoinsInboundTraceIdentity) {
