@@ -10,7 +10,8 @@ import (
 // emit one JSON object per request, and a reader who pivots from a
 // dashboard to a log query must find the same words on both — including
 // the label names the metric contract already pins (http_method, route,
-// service_name). Like the sentinel test above, this pins only the
+// service_name). Like the sentinel test in http_instrument_labels_test.go,
+// this pins only the
 // cross-language spelling; that the fields actually reach the wire is each
 // rail's own behavioral test (aura's middleware_test reads the served line
 // off a mock log sink, server_pal's access_log tests parse the subscriber's
@@ -18,7 +19,8 @@ import (
 //
 // The Java rail is deliberately absent: one_d4 and mcpserver emit JSON app
 // logs (logback's JsonEncoder, pinned by LogbackConfigTest) but no
-// per-request access line — Caddy fronts every route they serve.
+// per-request access line — Caddy's log covers their external traffic, and
+// compose-internal calls (mcpserver -> one_d4) are the accepted gap.
 var requestLogFields = []string{
 	"service_name",
 	"http_method",

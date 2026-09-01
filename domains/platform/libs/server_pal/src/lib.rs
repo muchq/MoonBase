@@ -146,8 +146,8 @@ fn trace_id_of(traceparent: Option<&str>) -> &str {
 /// instruments carry, so a dashboard-to-logs pivot is a copy-paste; the raw
 /// path-and-query rides in "target" where an unbounded value is data, not a
 /// label. duration_us matches the histogram's unit. x_forwarded_for is the
-/// raw header, which since ADR-0012 is NOT the identity the rate limiter
-/// keys on.
+/// raw header, not the limiter's key — this rail's governor keys on the
+/// socket peer address (see RateLimit).
 async fn access_log_middleware(req: Request, next: Next) -> Response {
     let start = std::time::Instant::now();
     let http_method = bounded_method_label(req.method());

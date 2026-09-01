@@ -74,11 +74,12 @@ std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
 ///     histogram at completion, labeled with the bounded route — the matched
 ///     Smithy operation name from the generated router, kHealthRoute for the
 ///     endpoint ProductionChain composes, kUnmatchedRoute for everything else
-///   - one access-log line per request, with trace_id carrying the W3C
-///     trace id parsed from the request's traceparent (minted or joined at
-///     transport ingress, smithy-cpp ADR-0011):
-///     [METHOD URI]: X-Forwarded-For=<ip> trace_id=<32hex> status=<code>
-///     res.body.bytes=<n> duration_ms=<ms>
+///   - one access-log line per request: a single JSON object in the
+///     metrics vocabulary (#1459) — service_name, http_method, route,
+///     target, status, duration_us, response_bytes, trace_id (the W3C id
+///     minted or joined at transport ingress, smithy-cpp ADR-0011) and
+///     x_forwarded_for. Field spelling is pinned cross-rail by
+///     //domains/platform/libs/otel_contract.
 smithy::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> metrics);
 
 /// The production middleware chain around a generated server's handler,

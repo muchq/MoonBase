@@ -97,9 +97,9 @@ std::string KindName(smithy::http::BeastServerTransport::ConnectionEvent::Kind k
   return "unknown(" + std::to_string(static_cast<int>(kind)) + ")";
 }
 
-// JSON string escaping for the access-log line. Stricter than the
-// Prometheus label escaping in futility: every control byte below 0x20
-// becomes \uXXXX, because the target reaches the line verbatim and is
+// JSON string escaping for the access-log line. Every byte below 0x20 is
+// escaped (\uXXXX, or the short form for \n \r \t), because the target
+// reaches the line verbatim and is
 // attacker-controlled — a raw control byte or an unescaped quote terminates
 // the record early and lets the rest of the URI masquerade as its own log
 // entry (smithy-cpp #203).
@@ -173,7 +173,10 @@ smithy::server::Middleware AccessLog() {
           smithy::http::ParseTraceparent(request.headers.Get("traceparent").value_or(""))
               .value_or(smithy::http::TraceContext{})
               .trace_id;
-      // The log's identity field, same source as the metrics resource.
+      // The log's identity, from the compose contract (OTEL_SERVICE_NAME).
+      // Note the C++ metrics resource does NOT read this variable — each
+      // service compiles its name into OtelConfig — so the two agree by
+      // convention, not construction.
       static const std::string service_name = []() {
         const char* name = std::getenv("OTEL_SERVICE_NAME");
         return std::string(name == nullptr ? "" : name);
