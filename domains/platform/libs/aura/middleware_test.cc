@@ -11,8 +11,10 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <functional>
 #include <memory>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <utility>
 #include <vector>
@@ -96,6 +98,27 @@ smithy::http::RequestHandler UnroutedHandler(int status) {
   };
 }
 
+// Runs `send` under a mock log and returns the one access-log line it wrote.
+std::string CaptureAccessLogLine(const std::function<void()>& send) {
+  std::string line;
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_, testing::HasSubstr("\"trace_id\":")))
+      .WillOnce(testing::SaveArg<2>(&line));
+  log.StartCapturingLogs();
+  send();
+  log.StopCapturingLogs();
+  return line;
+}
+
+// The line must be one parseable JSON object, not merely quote-balanced —
+// substring checks cannot see structural invalidity, which is exactly what
+// a hostile target tries to cause.
+nlohmann::json ParsedAccessLine(const std::string& line) {
+  nlohmann::json parsed = nlohmann::json::parse(line, nullptr, /*allow_exceptions=*/false);
+  EXPECT_FALSE(parsed.is_discarded()) << "not valid JSON: " << line;
+  return parsed;
+}
+
 // The production chain via the shared builder, with a small rate-limit
 // budget so tests can exhaust it quickly. The rate limiter keys on the
 // ADR-0012 derived client address anchored at peer_address, which Loopback
@@ -159,20 +182,8 @@ class AuraMiddlewareTest : public ::testing::Test {
   // Sends one request through the chain and returns the access-log line it
   // produced.
   std::string AccessLogLineFor(const std::vector<std::pair<std::string, std::string>>& headers) {
-    return AccessLogLineForRequest("POST", "/echo", "hello", headers, 200);
-  }
-
-  std::string AccessLogLineForRequest(
-      const std::string& method, const std::string& target, const std::string& body,
-      const std::vector<std::pair<std::string, std::string>>& headers, int expected_status) {
-    std::string line;
-    absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
-    EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_, testing::HasSubstr("\"trace_id\":")))
-        .WillOnce(testing::SaveArg<2>(&line));
-    log.StartCapturingLogs();
-    EXPECT_EQ(Send(method, target, body, "", headers).status, expected_status);
-    log.StopCapturingLogs();
-    return line;
+    return CaptureAccessLogLine(
+        [&] { EXPECT_EQ(Send("POST", "/echo", "hello", "", headers).status, 200); });
   }
 
   std::shared_ptr<RecordingSink> sink_;
@@ -381,23 +392,21 @@ bool IsLowercaseHex32(const std::string& value) {
 // the bounded label, never the raw path; the raw path rides separately in
 // "target".
 TEST_F(AuraMiddlewareTest, AccessLogIsOneJsonObjectInTheMetricsVocabulary) {
-  const std::string line = AccessLogLineFor({{"X-Forwarded-For", "203.0.113.9"}});
+  const nlohmann::json line =
+      ParsedAccessLine(AccessLogLineFor({{"X-Forwarded-For", "203.0.113.9"}}));
 
-  EXPECT_TRUE(line.front() == '{' && line.back() == '}') << line;
-  for (const char* field : {
-           R"("log":"access")",
-           R"("service_name":")",
-           R"("http_method":"POST")",
-           R"("route":"Echo")",
-           R"("target":"/echo")",
-           R"("status":200)",
-           R"("duration_us":)",
-           R"("response_bytes":4)",
-           R"("trace_id":")",
-           R"("x_forwarded_for":"203.0.113.9")",
-       }) {
-    EXPECT_THAT(line, testing::HasSubstr(field));
-  }
+  EXPECT_EQ(line["event"], "access");
+  // The value, not just the key: the BUILD target sets OTEL_SERVICE_NAME, so
+  // an env-key typo in the reader cannot pass as an empty-but-present field.
+  EXPECT_EQ(line["service_name"], "aura-under-test");
+  EXPECT_EQ(line["http_method"], "POST");
+  EXPECT_EQ(line["route"], "Echo");
+  EXPECT_EQ(line["target"], "/echo");
+  EXPECT_EQ(line["status"], 200);
+  EXPECT_TRUE(line["duration_us"].is_number()) << line.dump();
+  EXPECT_EQ(line["response_bytes"], 4);
+  EXPECT_TRUE(line["trace_id"].is_string()) << line.dump();
+  EXPECT_EQ(line["x_forwarded_for"], "203.0.113.9");
 }
 
 // Sends one request through a fresh chain over the given handler and
@@ -415,25 +424,24 @@ std::string AccessLogLineThrough(smithy::http::RequestHandler handler, const std
   request.target = target;
   request.peer_address = "192.0.2.200";
 
-  std::string line;
-  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
-  EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, testing::_, testing::HasSubstr("\"trace_id\":")))
-      .WillOnce(testing::SaveArg<2>(&line));
-  log.StartCapturingLogs();
-  const auto response = loopback->Send(request);
-  EXPECT_TRUE(response.ok());
-  if (response.ok()) EXPECT_EQ(response->status, expected_status);
-  log.StopCapturingLogs();
-  return line;
+  return CaptureAccessLogLine([&] {
+    const auto response = loopback->Send(request);
+    EXPECT_TRUE(response.ok());
+    if (response.ok()) EXPECT_EQ(response->status, expected_status);
+  });
 }
 
 // The route field is the same bounded vocabulary the metrics speak: an
 // unrouted request logs the sentinel, not its path — the path is in
 // "target", where an unbounded value is a field, not a label.
 TEST(AccessLogJsonTest, RouteFallsBackToTheSharedSentinel) {
-  const std::string line = AccessLogLineThrough(UnroutedHandler(404), "/no/such/path", 404);
-  EXPECT_THAT(line, testing::HasSubstr(R"("route":"unmatched")"));
-  EXPECT_THAT(line, testing::HasSubstr(R"("target":"/no/such/path")"));
+  const nlohmann::json line =
+      ParsedAccessLine(AccessLogLineThrough(UnroutedHandler(404), "/no/such/path", 404));
+  EXPECT_EQ(line["route"], "unmatched");
+  EXPECT_EQ(line["target"], "/no/such/path");
+  // No X-Forwarded-For on this request: the field must read absent-as-empty,
+  // never a fabricated value.
+  EXPECT_EQ(line["x_forwarded_for"], "");
 }
 
 // The target is attacker-controlled and reaches the line verbatim, so JSON
@@ -441,10 +449,35 @@ TEST(AccessLogJsonTest, RouteFallsBackToTheSharedSentinel) {
 // raw control byte terminates the record early and lets the rest of the URI
 // masquerade as its own log entry.
 TEST(AccessLogJsonTest, QuotesAndControlBytesInTheTargetAreEscaped) {
-  const std::string line = AccessLogLineThrough(UnroutedHandler(404), "/e\"cho\x01?a=\\b", 404);
+  const std::string raw =
+      AccessLogLineThrough(UnroutedHandler(404), "/e\"cho\x01?a=\\b&z=\x1f", 404);
 
-  EXPECT_THAT(line, testing::HasSubstr(R"("target":"/e\"cho\u0001?a=\\b")"));
-  EXPECT_THAT(line, testing::Not(testing::HasSubstr("\x01")));
+  EXPECT_THAT(raw, testing::HasSubstr(R"("target":"/e\"cho\u0001?a=\\b&z=\u001f")"));
+  EXPECT_THAT(raw, testing::Not(testing::HasSubstr("\x01")));
+  EXPECT_THAT(raw, testing::Not(testing::HasSubstr("\x1f")));
+  EXPECT_EQ(ParsedAccessLine(raw)["target"], "/e\"cho\u0001?a=\\b&z=\u001f");
+}
+
+// Beast admits bytes 0x80-0xFF in a request-target, so a stray non-UTF-8
+// byte reaches the escaper — passed through raw it would make the line
+// invalid UTF-8, and RFC 8259 parsers reject the whole record. Well-formed
+// multi-byte sequences pass untouched; anything else becomes U+FFFD.
+TEST(AccessLogJsonTest, InvalidUtf8IsReplacedAndValidUtf8Survives) {
+  const nlohmann::json line =
+      ParsedAccessLine(AccessLogLineThrough(UnroutedHandler(404), "/caf\xC3\xA9/\xFFx/\xC3", 404));
+
+  EXPECT_EQ(line["target"], "/caf\xC3\xA9/\xEF\xBF\xBDx/\xEF\xBF\xBD");
+}
+
+// absl truncates a LOG message at 15000 bytes, and a truncated record is
+// unparseable — so the caller-controlled fields are capped far below it and
+// a hostile 8KB target still yields one valid record.
+TEST(AccessLogJsonTest, AHugeTargetIsCappedAndTheLineStaysParseable) {
+  const std::string huge = "/" + std::string(8000, '"');
+  const nlohmann::json line =
+      ParsedAccessLine(AccessLogLineThrough(UnroutedHandler(404), huge, 404));
+
+  EXPECT_EQ(line["target"].get<std::string>().size(), 2048u);
 }
 
 TEST_F(AuraMiddlewareTest, AccessLogJoinsInboundTraceIdentity) {

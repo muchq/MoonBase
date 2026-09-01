@@ -1,9 +1,11 @@
 package otel_contract
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // The request-log field vocabulary (#1459): the C++ and Rust rails each
@@ -32,21 +34,34 @@ var requestLogFields = []string{
 	"x_forwarded_for",
 }
 
+// response_bytes is deliberately not in the list: the C++ rail emits it and
+// the Rust rail cannot without wrapping the response body to count it, so a
+// cross-service response_bytes query covers the C++ services only.
+
 func TestRequestLogFieldSpellingAgreesAcrossRails(t *testing.T) {
-	emitters := []struct {
-		path   string
-		marker string
-	}{
-		{path: "../aura/middleware.cc", marker: "AppendJsonField"},
-		{path: "../server_pal/src/lib.rs", marker: "access_log_middleware"},
+	// C++: every emitted key is a quoted string literal handed to
+	// AppendJsonField / AppendJsonNumber, so the pin matches `"key"` — a
+	// bare identifier elsewhere in the file cannot satisfy it.
+	aura := string(codeLines(t, "../aura/middleware.cc", "AppendJsonField"))
+	for _, field := range requestLogFields {
+		assert.Contains(t, aura, `"`+field+`"`,
+			"aura's access line no longer emits a %q key; the two rails' lines no "+
+				"longer speak one vocabulary and a cross-service log query silently "+
+				"misses this rail", field)
 	}
-	for _, emitter := range emitters {
-		source := string(codeLines(t, emitter.path, emitter.marker))
-		for _, field := range requestLogFields {
-			assert.Contains(t, source, field,
-				"%s does not name request-log field %q; the two rails' lines no longer "+
-					"speak one vocabulary and a cross-service log query silently misses "+
-					"this rail", emitter.path, field)
-		}
+
+	// Rust: the emitted keys are the field names inside the one
+	// tracing::info! block, so the pin reads only that block — a local
+	// variable elsewhere cannot satisfy it.
+	rust := string(codeLines(t, "../server_pal/src/lib.rs", "access_log_middleware"))
+	start := strings.Index(rust, "tracing::info!(")
+	require.GreaterOrEqual(t, start, 0, "no tracing::info! block in access_log_middleware")
+	end := strings.Index(rust[start:], ");")
+	require.GreaterOrEqual(t, end, 0)
+	event := rust[start : start+end]
+	for _, field := range requestLogFields {
+		assert.Contains(t, event, field,
+			"server_pal's access event no longer carries a %q field; a cross-service "+
+				"log query silently misses this rail", field)
 	}
 }

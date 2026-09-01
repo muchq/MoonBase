@@ -101,11 +101,13 @@ fn latency_bucket_view(instrument: &Instrument) -> Option<Stream> {
     )
 }
 
-/// Installs the process-wide log subscriber: one flattened JSON object per
-/// event on stdout (#1459). Replaces the bare `tracing_subscriber::fmt::init()`
-/// the binaries used to call, under which the request log below would render
-/// as human-format text — machine-readable everywhere or nowhere.
-pub fn init_logging() {
+/// The one subscriber configuration, shared by `init_logging` and the tests
+/// that parse its output — so `flatten_event` and friends are pinned in the
+/// thing that ships, not in a test-local copy.
+fn log_subscriber_builder() -> tracing_subscriber::fmt::SubscriberBuilder<
+    tracing_subscriber::fmt::format::JsonFields,
+    tracing_subscriber::fmt::format::Format<tracing_subscriber::fmt::format::Json>,
+> {
     tracing_subscriber::fmt()
         .json()
         .flatten_event(true)
@@ -115,7 +117,41 @@ pub fn init_logging() {
         // with the access log's target field and win; the module path earns
         // no place on a request line.
         .with_target(false)
+}
+
+/// Installs the process-wide log subscriber: one flattened JSON object per
+/// event on stdout (#1459). Replaces the bare `tracing_subscriber::fmt::init()`
+/// the binaries used to call, under which the request log below would render
+/// as human-format text — machine-readable everywhere or nowhere.
+///
+/// `RUST_LOG` still works: the free `fmt::init()` parsed it into a `Targets`
+/// filter even without the env-filter feature, and dropping that would turn
+/// an operator's `RUST_LOG=debug` into a silent no-op. Same shape here.
+pub fn init_logging() {
+    use tracing_subscriber::{filter::Targets, layer::SubscriberExt, util::SubscriberInitExt};
+    let targets = match env::var("RUST_LOG") {
+        Ok(var) => var.parse::<Targets>().unwrap_or_else(|e| {
+            eprintln!("Ignoring RUST_LOG={var:?}: {e}");
+            Targets::new().with_default(tracing::level_filters::LevelFilter::INFO)
+        }),
+        Err(_) => Targets::new().with_default(tracing::level_filters::LevelFilter::INFO),
+    };
+    log_subscriber_builder()
+        .with_max_level(tracing::level_filters::LevelFilter::TRACE)
+        .finish()
+        .with(targets)
         .init();
+}
+
+/// The bounded route label: the matched template axum stamped after
+/// routing, or the shared sentinel. One derivation for the instruments and
+/// the access log, so "same vocabulary as the metrics" holds by
+/// construction.
+fn route_label(req: &Request) -> String {
+    req.extensions()
+        .get::<MatchedPath>()
+        .map(|p| p.as_str().to_string())
+        .unwrap_or_else(|| UNMATCHED_ROUTE.to_string())
 }
 
 /// The log's identity field, same source as the metrics resource.
@@ -128,10 +164,8 @@ fn service_name_from_env() -> &'static str {
 /// The full mint/join semantics live on the C++ rail (smithy-cpp ADR-0011);
 /// here the header is Caddy's or the caller's to send, so parse-don't-trust
 /// is the whole contract.
-fn trace_id_of(traceparent: Option<&str>) -> &str {
-    let Some(header) = traceparent else { return "" };
-    let mut parts = header.split('-');
-    let (Some(_version), Some(trace_id)) = (parts.next(), parts.next()) else {
+fn trace_id_of(traceparent: &str) -> &str {
+    let Some(trace_id) = traceparent.split('-').nth(1) else {
         return "";
     };
     if trace_id.len() == 32 && trace_id.bytes().all(|b| b.is_ascii_hexdigit()) {
@@ -151,18 +185,15 @@ fn trace_id_of(traceparent: Option<&str>) -> &str {
 async fn access_log_middleware(req: Request, next: Next) -> Response {
     let start = std::time::Instant::now();
     let http_method = bounded_method_label(req.method());
-    let route = req
-        .extensions()
-        .get::<MatchedPath>()
-        .map(|p| p.as_str().to_string())
-        .unwrap_or_else(|| UNMATCHED_ROUTE.to_string());
+    let route = route_label(&req);
     let target = req.uri().to_string();
+    // Lossy, not blanked: a deliberately malformed forwarded-for chain is
+    // forensic content, and "" would read as the header being absent.
     let x_forwarded_for = req
         .headers()
         .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_string();
+        .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+        .unwrap_or_default();
     let traceparent = req
         .headers()
         .get("traceparent")
@@ -173,14 +204,17 @@ async fn access_log_middleware(req: Request, next: Next) -> Response {
     let resp = next.run(req).await;
 
     tracing::info!(
-        log = "access",
+        // "event", not "log": docker's json-file driver wraps container
+        // stdout in an object whose payload key is "log", and a flattening
+        // consumer would collide the two.
+        event = "access",
         service_name = service_name_from_env(),
         http_method,
         route,
         target,
         status = resp.status().as_u16(),
         duration_us = start.elapsed().as_micros() as u64,
-        trace_id = trace_id_of(Some(traceparent.as_str())),
+        trace_id = trace_id_of(&traceparent),
         x_forwarded_for,
         "request"
     );
@@ -401,14 +435,8 @@ async fn http_metrics_middleware(
     let method = bounded_method_label(req.method());
     // Router::layer middleware runs after routing, so the matched route
     // template ("/widgets/{id}", never the raw path) is already in the
-    // request extensions here. The fallback leaves it absent, and mapping
-    // that to a fixed sentinel is what keeps the label bounded: a scanner's
-    // paths all collapse into one series instead of minting one each.
-    let route = req
-        .extensions()
-        .get::<MatchedPath>()
-        .map(|p| p.as_str().to_string())
-        .unwrap_or_else(|| UNMATCHED_ROUTE.to_string());
+    // request extensions here (see route_label).
+    let route = route_label(&req);
 
     let gauge_attrs = [
         KeyValue::new("http_method", method.clone()),
@@ -511,6 +539,9 @@ pub struct RouterBuilder<S: Clone + Send + Sync + 'static> {
 /// stack than the traffic it reports on.
 fn common_layers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> {
     router
+        // Kept alongside the access log: TraceLayer's DefaultOnFailure logs
+        // failures at ERROR, which the INFO access line does not replace for
+        // alerting.
         .layer(TraceLayer::new_for_http())
         .layer(DefaultBodyLimit::disable())
         .layer(RequestBodyLimitLayer::new(4 * 1024 * 1024))
@@ -824,12 +855,17 @@ mod tests {
     }
 
     async fn access_line_for(path: &str, expected_status: StatusCode) -> serde_json::Value {
+        access_line(path, expected_status, true).await
+    }
+
+    async fn access_line(
+        path: &str,
+        expected_status: StatusCode,
+        with_headers: bool,
+    ) -> serde_json::Value {
         let buf: Arc<std::sync::Mutex<Vec<u8>>> = Arc::default();
         let writer_buf = buf.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .json()
-            .flatten_event(true)
-            .with_target(false)
+        let subscriber = log_subscriber_builder()
             .with_writer(move || SharedWriter(writer_buf.clone()))
             .finish();
         let _guard = tracing::subscriber::set_default(subscriber);
@@ -840,21 +876,23 @@ mod tests {
             .build()
             .with_state(NoState);
         let mut req = make_request(path);
-        req.headers_mut()
-            .insert("x-forwarded-for", "203.0.113.9".parse().unwrap());
-        req.headers_mut().insert(
-            "traceparent",
-            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
-                .parse()
-                .unwrap(),
-        );
+        if with_headers {
+            req.headers_mut()
+                .insert("x-forwarded-for", "203.0.113.9".parse().unwrap());
+            req.headers_mut().insert(
+                "traceparent",
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+                    .parse()
+                    .unwrap(),
+            );
+        }
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), expected_status);
 
         let output = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
         let line = output
             .lines()
-            .find(|l| l.contains("\"log\":\"access\""))
+            .find(|l| l.contains("\"event\":\"access\""))
             .unwrap_or_else(|| panic!("no access line in: {output}"))
             .to_string();
         serde_json::from_str(&line).expect("the access line must be one parseable JSON object")
@@ -876,7 +914,23 @@ mod tests {
         assert!(v["duration_us"].is_number(), "duration_us: {v}");
         assert_eq!(v["trace_id"], "4bf92f3577b34da6a3ce929d0e0e4736");
         assert_eq!(v["x_forwarded_for"], "203.0.113.9");
-        assert!(v["service_name"].is_string(), "service_name: {v}");
+        // The value, not just the key. The bazel target sets
+        // OTEL_SERVICE_NAME=server-pal-under-test, so under CI an env-key
+        // typo in the reader cannot pass; a bare `cargo test` has it unset
+        // and the field must then be "".
+        assert_eq!(
+            v["service_name"],
+            env::var("OTEL_SERVICE_NAME").unwrap_or_default()
+        );
+    }
+
+    /// Absent headers read as empty fields — never a fabricated value, and
+    /// never a missing key.
+    #[tokio::test]
+    async fn absent_headers_log_as_empty_fields() {
+        let v = access_line("/no/such/path", StatusCode::NOT_FOUND, false).await;
+        assert_eq!(v["x_forwarded_for"], "");
+        assert_eq!(v["trace_id"], "");
     }
 
     /// Unrouted requests log the shared sentinel, the same spelling the
@@ -889,6 +943,34 @@ mod tests {
         assert_eq!(v["route"], UNMATCHED_ROUTE);
         assert_eq!(v["status"], 404);
         assert_eq!(v["target"], "/no/such/path");
+    }
+
+    /// The probe path is deliberately access-logged (the layer sits outside
+    /// the health/limited split); a layer move that silences — or floods —
+    /// it should fail a test, not surprise an operator.
+    #[tokio::test]
+    async fn access_log_covers_the_health_route() {
+        let v = access_line_for("/health", StatusCode::OK).await;
+        assert_eq!(v["route"], "/health");
+        assert_eq!(v["status"], 200);
+    }
+
+    /// Parse-don't-trust is the whole contract, so the rejection branches
+    /// are pinned, not just the happy path.
+    #[test]
+    fn trace_id_of_rejects_malformed_traceparents() {
+        assert_eq!(
+            trace_id_of("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"),
+            "4bf92f3577b34da6a3ce929d0e0e4736"
+        );
+        assert_eq!(trace_id_of(""), "");
+        assert_eq!(trace_id_of("no-dashes-here"), "");
+        assert_eq!(
+            trace_id_of("00-4bf92f3577b34da6a3ce929d0e0e4736ff-x-01"),
+            ""
+        );
+        assert_eq!(trace_id_of("00-4BF92F3577B34DA6A3CE929D0E0E473G-x-01"), "");
+        assert_eq!(trace_id_of("00"), "");
     }
 }
 

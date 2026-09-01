@@ -76,12 +76,16 @@ cc_test(
     name = "middleware_test",
     size = "small",
     srcs = ["middleware_test.cc"],
+    # The vocabulary test asserts the service_name VALUE, so an env-key typo
+    # in the reader cannot pass as an empty-but-present field.
+    env = {"OTEL_SERVICE_NAME": "aura-under-test"},
     deps = [
         ":aura",
         "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
         "@com_google_absl//absl/base:log_severity",
         "@com_google_absl//absl/log:scoped_mock_log",
         "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
         "@smithy_cpp//runtime:http",
         "@smithy_cpp//runtime:http_beast",
         "@smithy_cpp//runtime:server",

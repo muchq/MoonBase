@@ -25,7 +25,9 @@ without `scripts/make-git-overrides.sh`.
     (`futility/otel:http_metrics`) plus one access-log line per request —
     a single JSON object carrying the metrics vocabulary plus the raw
     target and the W3C `trace_id` from the request's traceparent
-    (smithy-cpp ADR-0011). The route label is bounded (#1305): the matched Smithy
+    (smithy-cpp ADR-0011). The object rides inside absl's stderr record,
+    so the shipped line is `I0831 ... middleware.cc:NNN] {...}` — a
+    consumer strips the prefix up to `] ` before parsing. The route label is bounded (#1305): the matched Smithy
     operation name the generated router stamps on its responses,
     `kHealthRoute` for the health endpoint, or the `kUnmatchedRoute`
     sentinel — never the raw request path. The method label is bounded the
