@@ -14,6 +14,8 @@ const sampleLines = `{"status":200,"request":{"host":"api.1d4.net","method":"POS
 not json at all
 {"status":418,"request":{"method":"GET","uri":"/hostless","headers":{}}}
 {"status":200,"request":{"host":"api.muchq.com","method":"WEIRD","uri":"/x","headers":{}}}
+{"status":404,"request":{"host":"api.muchq.com","method":"GET","uri":"/wp-login.php","headers":{"User-Agent":["python-requests/2.32.0"]}}}
+{"status":404,"request":{"host":"api.muchq.com","method":"GET","uri":"/.env","headers":{"User-Agent":["Mozilla/5.0 (compatible; GPTBot/1.2)"]}}}
 `
 
 func TestConsumeAggregatesRequestsSlugsAndSkipsCorruptLines(t *testing.T) {
@@ -44,6 +46,33 @@ func TestConsumeAggregatesRequestsSlugsAndSkipsCorruptLines(t *testing.T) {
 	}
 	if got := rollup.Slugs[SlugKey{"2026-08-30", "gone", 404}]; got != 1 {
 		t.Errorf("gone-slug 404s = %d, want 1", got)
+	}
+	// Agents are also counted by name, so "did meta back off after the 403"
+	// is a per-agent query rather than a re-aggregation.
+	if got := rollup.Agents[AgentKey{"2026-08-30", "git.muchq.com", AgentAIScraper, "meta-externalagent", 403}]; got != 1 {
+		t.Errorf("meta 403s = %d, want 1", got)
+	}
+	if got := rollup.Agents[AgentKey{"2026-08-30", "api.muchq.com", AgentAIScraper, "gptbot", 404}]; got != 1 {
+		t.Errorf("gptbot 404s = %d, want 1", got)
+	}
+	if got := rollup.Agents[AgentKey{"2026-08-30", "i.iili.uk", AgentBot, "curl", 302}]; got != 1 {
+		t.Errorf("curl redirects = %d, want 1", got)
+	}
+	if got := rollup.Agents[AgentKey{"2026-08-30", "api.1d4.net", AgentBrowser, "", 200}]; got != 2 {
+		t.Errorf("browser rows = %d, want 2 under one unnamed browser row", got)
+	}
+	if got := rollup.Agents[AgentKey{"2026-08-30", "i.iili.uk", AgentOther, "(empty)", 404}]; got != 1 {
+		t.Errorf("empty-UA rows = %d, want 1", got)
+	}
+	// Probe rows exist only for paths that match a scanner family.
+	if got := rollup.Probes[ProbeKey{"2026-08-30", "api.muchq.com", ProbeWordpress, 404}]; got != 1 {
+		t.Errorf("wordpress probes = %d, want 1", got)
+	}
+	if got := rollup.Probes[ProbeKey{"2026-08-30", "api.muchq.com", ProbeEnv, 404}]; got != 1 {
+		t.Errorf("env probes = %d, want 1", got)
+	}
+	if len(rollup.Probes) != 2 {
+		t.Errorf("probe rows = %v; ordinary routes must not mint any", rollup.Probes)
 	}
 }
 

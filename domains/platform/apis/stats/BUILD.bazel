@@ -20,6 +20,8 @@ go_library(
 
 # store_test.go skips without STATS_TEST_DB_URL, like the repo's other
 # Postgres-gated suites — a local green run may have exercised no SQL.
+# CI supplies it from the postgres service; without env_inherit the
+# sandbox strips it and the suite skips there too.
 go_test(
     name = "stats_test",
     size = "small",
@@ -31,6 +33,7 @@ go_test(
         "store_test.go",
     ],
     embed = [":stats_lib"],
+    env_inherit = ["STATS_TEST_DB_URL"],
 )
 
 go_binary(

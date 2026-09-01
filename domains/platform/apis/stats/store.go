@@ -32,6 +32,42 @@ var schema = []string{
 		requests bigint NOT NULL,
 		PRIMARY KEY (dt, slug, status)
 	)`,
+	`CREATE TABLE IF NOT EXISTS agent_stats (
+		dt date NOT NULL,
+		host text NOT NULL,
+		agent_class text NOT NULL,
+		agent text NOT NULL,
+		status int NOT NULL,
+		requests bigint NOT NULL,
+		PRIMARY KEY (dt, host, agent_class, agent, status)
+	)`,
+	`CREATE TABLE IF NOT EXISTS probe_stats (
+		dt date NOT NULL,
+		host text NOT NULL,
+		probe text NOT NULL,
+		status int NOT NULL,
+		requests bigint NOT NULL,
+		PRIMARY KEY (dt, host, probe, status)
+	)`,
+	`CREATE TABLE IF NOT EXISTS stats_meta (
+		key text PRIMARY KEY,
+		value text NOT NULL
+	)`,
+}
+
+// RollupVersion is the shape of what Consume computes. Bump it when a
+// rollup gains a table or a classifier changes meaning: at boot a store
+// whose recorded version differs drops every aggregate and every
+// processed marker in one transaction, and the next pass recomputes all
+// of it from the raw lines in S3. That is what "a schema change is a
+// re-aggregation" costs — one full pass — and what makes it never data
+// loss. Version 2 added agent_stats and probe_stats.
+const RollupVersion = "2"
+
+// The tables a re-aggregation rebuilds; every aggregate table belongs
+// here, or a version bump leaves it double-counted.
+var rollupTables = []string{
+	"processed_log_objects", "request_stats", "iili_slug_stats", "agent_stats", "probe_stats",
 }
 
 type Store struct {
@@ -49,7 +85,43 @@ func NewStore(ctx context.Context, databaseURL string) (*Store, error) {
 			return nil, fmt.Errorf("applying schema: %w", err)
 		}
 	}
-	return &Store{pool: pool}, nil
+	store := &Store{pool: pool}
+	if err := store.reaggregateOnVersionChange(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+func (s *Store) reaggregateOnVersionChange(ctx context.Context) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var recorded string
+	err = tx.QueryRow(ctx,
+		`SELECT value FROM stats_meta WHERE key = 'rollup_version' FOR UPDATE`).Scan(&recorded)
+	if err != nil && err != pgx.ErrNoRows {
+		return fmt.Errorf("reading rollup version: %w", err)
+	}
+	if recorded == RollupVersion {
+		return nil
+	}
+	// A fresh database has no aggregates to drop and no version; an old
+	// one has both. TRUNCATE is one statement either way.
+	for _, table := range rollupTables {
+		if _, err := tx.Exec(ctx, "TRUNCATE "+table); err != nil {
+			return fmt.Errorf("resetting %s for re-aggregation: %w", table, err)
+		}
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO stats_meta (key, value) VALUES ('rollup_version', $1)
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, RollupVersion); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Store) Close() { s.pool.Close() }
@@ -118,6 +190,26 @@ func (s *Store) ApplyRollup(ctx context.Context, key string, rollup *Rollup) err
 			return err
 		}
 	}
+	for k, count := range rollup.Agents {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO agent_stats (dt, host, agent_class, agent, status, requests)
+			 VALUES ($1, $2, $3, $4, $5, $6)
+			 ON CONFLICT (dt, host, agent_class, agent, status)
+			 DO UPDATE SET requests = agent_stats.requests + EXCLUDED.requests`,
+			k.Date, k.Host, k.AgentClass, k.Agent, k.Status, count); err != nil {
+			return err
+		}
+	}
+	for k, count := range rollup.Probes {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO probe_stats (dt, host, probe, status, requests)
+			 VALUES ($1, $2, $3, $4, $5)
+			 ON CONFLICT (dt, host, probe, status)
+			 DO UPDATE SET requests = probe_stats.requests + EXCLUDED.requests`,
+			k.Date, k.Host, k.Probe, k.Status, count); err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
 }
 
@@ -132,6 +224,26 @@ type SummaryRow struct {
 type SlugRow struct {
 	Slug     string `json:"slug"`
 	Requests int64  `json:"requests"`
+}
+
+// AgentRow is one day of one named agent on one host. Blocked is the 403
+// count — the signal for whether a scraper backs off after being refused.
+type AgentRow struct {
+	Date       string `json:"date"`
+	Host       string `json:"host"`
+	AgentClass string `json:"agent_class"`
+	Agent      string `json:"agent"`
+	Requests   int64  `json:"requests"`
+	Blocked    int64  `json:"blocked"`
+}
+
+// ProbeRow is one scanner family on one host over the window. Served is
+// the sub-400 count: a probe that got an answer is the row to look at.
+type ProbeRow struct {
+	Host     string `json:"host"`
+	Probe    string `json:"probe"`
+	Requests int64  `json:"requests"`
+	Served   int64  `json:"served"`
 }
 
 func (s *Store) Summary(ctx context.Context, days int) ([]SummaryRow, error) {
@@ -174,5 +286,50 @@ func (s *Store) TopSlugs(ctx context.Context, days, limit int) ([]SlugRow, error
 		out = append(out, row)
 		return nil
 	})
+	return out, err
+}
+
+func (s *Store) Agents(ctx context.Context, days int) ([]AgentRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT dt::text, host, agent_class, agent,
+		        SUM(requests) AS requests,
+		        COALESCE(SUM(requests) FILTER (WHERE status = 403), 0) AS blocked
+		 FROM agent_stats
+		 WHERE dt >= current_date - $1::int
+		 GROUP BY dt, host, agent_class, agent
+		 ORDER BY dt DESC, host, agent_class, requests DESC, agent`, days)
+	if err != nil {
+		return nil, err
+	}
+	var out []AgentRow
+	var row AgentRow
+	_, err = pgx.ForEachRow(rows,
+		[]any{&row.Date, &row.Host, &row.AgentClass, &row.Agent, &row.Requests, &row.Blocked},
+		func() error {
+			out = append(out, row)
+			return nil
+		})
+	return out, err
+}
+
+func (s *Store) Probes(ctx context.Context, days int) ([]ProbeRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT host, probe,
+		        SUM(requests) AS requests,
+		        COALESCE(SUM(requests) FILTER (WHERE status < 400), 0) AS served
+		 FROM probe_stats
+		 WHERE dt >= current_date - $1::int
+		 GROUP BY host, probe
+		 ORDER BY requests DESC, host, probe`, days)
+	if err != nil {
+		return nil, err
+	}
+	var out []ProbeRow
+	var row ProbeRow
+	_, err = pgx.ForEachRow(rows, []any{&row.Host, &row.Probe, &row.Requests, &row.Served},
+		func() error {
+			out = append(out, row)
+			return nil
+		})
 	return out, err
 }

@@ -175,6 +175,7 @@ jobs:
     env:
       GOLF_HUB_TEST_DB_URL: postgresql://moonbase_test:moonbase_test@postgres:5432/moonbase_test
       PG_TEST_DB_URL: postgresql://moonbase_test:moonbase_test@postgres:5432/moonbase_test
+      STATS_TEST_DB_URL: postgresql://moonbase_test:moonbase_test@postgres:5432/moonbase_test
 
     steps:
       - uses: actions/checkout@v7

@@ -16,18 +16,43 @@ conflict arm makes a duplicate application a no-op — so counts survive
 crashes without double-counting. Per-object failures are logged and
 retried next pass.
 
-Aggregates are bounded on purpose: hosts are Caddy's vhosts, methods
-collapse through the nine-verb rule the metrics rails use, user agents
-collapse to four classes (`ai_scraper`, `bot`, `browser`, `other`), and
-iili slugs are the one caller-shaped key — one path segment, max 64
-bytes, only on the redirect routes. The raw lines stay in S3, so a
-better classifier is a re-aggregation, not lost data.
+Aggregates are bounded per row, on purpose: hosts are Caddy's vhosts,
+methods collapse through the nine-verb rule the metrics rails use, and
+user agents collapse to four classes (`ai_scraper`, `bot`, `browser`,
+`other`). Two rollups carry a name alongside those (#1458): the agent
+rollup names each row by the marker that classified it (AI scrapers and
+named bots) or by the UA's first product token, max 32 bytes, for the
+anonymous tail — browsers are one unnamed bucket, since every browser's
+token is `mozilla`; and the probe rollup counts requests whose path
+matched one of the scanner families in `classify.go` (`wordpress`, `env`,
+`git`, `php`, ...), minting nothing for ordinary routes. iili slugs are
+the other caller-shaped key — one path segment, max 64 bytes, only on
+the redirect routes. Row width is what's bounded; row count is what
+Postgres is for, which is the division of labor #1460 drew against the
+tsdb.
+
+The raw lines stay in S3, so a better classifier is a re-aggregation,
+not lost data — and re-aggregation is a mechanism, not a runbook: the
+store records `RollupVersion`, and a boot that finds a different one
+drops every aggregate and processed marker in one transaction, so the
+next pass recomputes everything from S3. Bump the constant when a rollup
+gains a table or a classifier changes meaning.
+
+What stays ad hoc: IP-range clusters (a /24 key is caller-shaped and
+unbounded) and geography (nothing in the repo maps addresses to
+countries). Both are one query over the raw partitions in S3, which keep
+`request.remote_ip` and `request.client_ip` per line.
 
 ## The API
 
 - `GET /stats/v1/summary?days=7` — per day/host/agent-class request and
   error counts
 - `GET /stats/v1/iili/top?days=30&limit=20` — most-followed short links
+- `GET /stats/v1/agents?days=30` — per day/host/class/agent request and
+  403 counts: which scrapers and bots hit which host, and whether they
+  back off after being refused
+- `GET /stats/v1/probes?days=30` — per host/scanner-family request counts
+  and how many were served (status < 400): the rows worth looking at
 - `GET /health`
 
 Public through Caddy at `api.muchq.com/stats/v1/*`; the reasons for 500s

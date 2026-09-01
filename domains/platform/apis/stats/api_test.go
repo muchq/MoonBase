@@ -15,6 +15,8 @@ import (
 type fakeReader struct {
 	summary   []SummaryRow
 	slugs     []SlugRow
+	agents    []AgentRow
+	probes    []ProbeRow
 	lastDays  int
 	lastLimit int
 	fail      bool
@@ -34,6 +36,22 @@ func (f *fakeReader) TopSlugs(_ context.Context, days, limit int) ([]SlugRow, er
 	}
 	f.lastDays, f.lastLimit = days, limit
 	return f.slugs, nil
+}
+
+func (f *fakeReader) Agents(_ context.Context, days int) ([]AgentRow, error) {
+	if f.fail {
+		return nil, errors.New("db is having a day")
+	}
+	f.lastDays = days
+	return f.agents, nil
+}
+
+func (f *fakeReader) Probes(_ context.Context, days int) ([]ProbeRow, error) {
+	if f.fail {
+		return nil, errors.New("db is having a day")
+	}
+	f.lastDays = days
+	return f.probes, nil
 }
 
 func handlersWith(reader *fakeReader) *Handlers {
@@ -98,5 +116,47 @@ func TestAStoreFailureIs500WithoutTheReasonOnTheWire(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), "db is having a day") {
 		t.Error("the failure reason leaked to a public endpoint")
+	}
+}
+
+func TestAgentsAndProbesShareTheWindowRules(t *testing.T) {
+	reader := &fakeReader{
+		agents: []AgentRow{{Date: "2026-08-30", Host: "git.muchq.com", AgentClass: AgentAIScraper, Agent: "meta-externalagent", Requests: 9, Blocked: 9}},
+		probes: []ProbeRow{{Host: "api.muchq.com", Probe: ProbeWordpress, Requests: 4, Served: 0}},
+	}
+	handlers := handlersWith(reader)
+
+	_, body := get(t, handlers.GetAgents, "/stats/v1/agents")
+	if reader.lastDays != 30 {
+		t.Errorf("default agents window = %d, want 30", reader.lastDays)
+	}
+	row := body["rows"].([]any)[0].(map[string]any)
+	if row["agent"] != "meta-externalagent" || row["agent_class"] != AgentAIScraper || row["blocked"] != float64(9) {
+		t.Errorf("agent row = %v", row)
+	}
+
+	_, body = get(t, handlers.GetProbes, "/stats/v1/probes?days=99999")
+	if reader.lastDays != 365 {
+		t.Errorf("probe window clamped to %d, want 365", reader.lastDays)
+	}
+	row = body["rows"].([]any)[0].(map[string]any)
+	if row["probe"] != ProbeWordpress || row["served"] != float64(0) {
+		t.Errorf("probe row = %v", row)
+	}
+
+	// Empty is [], not null, on both — the dashboard maps them.
+	_, body = get(t, handlersWith(&fakeReader{}).GetAgents, "/stats/v1/agents")
+	if body["rows"] == nil {
+		t.Error("agents rows serialized as null; want []")
+	}
+	_, body = get(t, handlersWith(&fakeReader{}).GetProbes, "/stats/v1/probes")
+	if body["rows"] == nil {
+		t.Error("probes rows serialized as null; want []")
+	}
+	failing := handlersWith(&fakeReader{fail: true})
+	for name, handler := range map[string]http.HandlerFunc{"agents": failing.GetAgents, "probes": failing.GetProbes} {
+		if recorder, _ := get(t, handler, "/x"); recorder.Code != http.StatusInternalServerError {
+			t.Errorf("%s on a failing store = %d, want 500", name, recorder.Code)
+		}
 	}
 }

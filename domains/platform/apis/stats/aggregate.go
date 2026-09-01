@@ -28,6 +28,28 @@ type SlugKey struct {
 	Status int
 }
 
+// AgentKey is one row of the per-day agent rollup: the class from the
+// four-value vocabulary plus the bounded name AgentOf pairs with it, so a
+// host's traffic can be opened up into which scrapers, which bots, and
+// what the unclassified tail actually sends.
+type AgentKey struct {
+	Date       string
+	Host       string
+	AgentClass string
+	Agent      string
+	Status     int
+}
+
+// ProbeKey is one row of the scanner rollup. Rows exist only for requests
+// whose path matched a family in ProbeOf, so the key is bounded by that
+// vocabulary and ordinary traffic mints nothing here.
+type ProbeKey struct {
+	Date   string
+	Host   string
+	Probe  string
+	Status int
+}
+
 // Rollup is one processed object's aggregates, accumulated in memory and
 // applied to the store in a single transaction with the processed marker —
 // so a crash between the two reprocesses the object rather than losing or
@@ -35,10 +57,17 @@ type SlugKey struct {
 type Rollup struct {
 	Requests map[RequestKey]int64
 	Slugs    map[SlugKey]int64
+	Agents   map[AgentKey]int64
+	Probes   map[ProbeKey]int64
 }
 
 func NewRollup() *Rollup {
-	return &Rollup{Requests: map[RequestKey]int64{}, Slugs: map[SlugKey]int64{}}
+	return &Rollup{
+		Requests: map[RequestKey]int64{},
+		Slugs:    map[SlugKey]int64{},
+		Agents:   map[AgentKey]int64{},
+		Probes:   map[ProbeKey]int64{},
+	}
 }
 
 // caddyLine is the slice of Caddy's JSON access log this pipeline reads.
@@ -95,13 +124,24 @@ func (r *Rollup) Consume(reader io.Reader, date string) (skipped int, err error)
 			continue
 		}
 		method := boundedMethod(parsed.Request.Method)
+		agentClass, agent := AgentOf(parsed.userAgent())
 		r.Requests[RequestKey{
 			Date:       date,
 			Host:       parsed.Request.Host,
 			Status:     parsed.Status,
 			Method:     method,
-			AgentClass: AgentClassOf(parsed.userAgent()),
+			AgentClass: agentClass,
 		}]++
+		r.Agents[AgentKey{
+			Date:       date,
+			Host:       parsed.Request.Host,
+			AgentClass: agentClass,
+			Agent:      agent,
+			Status:     parsed.Status,
+		}]++
+		if probe := ProbeOf(parsed.Request.URI); probe != "" {
+			r.Probes[ProbeKey{Date: date, Host: parsed.Request.Host, Probe: probe, Status: parsed.Status}]++
+		}
 		if slug := SlugOf(parsed.Request.Host, parsed.Request.Method, parsed.Request.URI); slug != "" {
 			r.Slugs[SlugKey{Date: date, Slug: slug, Status: parsed.Status}]++
 		}

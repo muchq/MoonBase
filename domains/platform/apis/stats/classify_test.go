@@ -57,3 +57,107 @@ func TestSlugExtractionIsBoundedAndRouteScoped(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentNamesAreBoundedPerClass(t *testing.T) {
+	cases := []struct {
+		ua        string
+		wantClass string
+		wantName  string
+	}{
+		// AI scrapers name themselves by marker, whatever else the UA says.
+		{"Mozilla/5.0 AppleWebKit/537.36; compatible; GPTBot/1.2; +https://openai.com/gptbot", AgentAIScraper, "gptbot"},
+		{"meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)", AgentAIScraper, "meta-externalagent"},
+		// Named bots by marker; anonymous tooling by its product token.
+		{"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", AgentBot, "googlebot"},
+		{"Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)", AgentBot, "ahrefsbot"},
+		{"curl/8.6.0", AgentBot, "curl"},
+		{"python-requests/2.32.0", AgentBot, "python-requests"},
+		{"Go-http-client/2.0", AgentBot, "go-http-client"},
+		{"Mozilla/5.0 (compatible; SomeNewBot/1.0)", AgentBot, "mozilla"},
+		// Browsers are one bucket: the token would be "mozilla" for all of them.
+		{"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36", AgentBrowser, ""},
+		// "other" keeps its product token so the unclassified tail is readable.
+		{"", AgentOther, "(empty)"},
+		{"definitely-not-a-browser", AgentOther, "definitely-not-a-browser"},
+		{"Weird Client 3.0", AgentOther, "weird"},
+		{"<script>alert(1)</script>", AgentOther, "script"},
+		{strings.Repeat("a", 200) + "/1.0", AgentOther, strings.Repeat("a", 32)},
+		{"/////", AgentOther, "(empty)"},
+	}
+	for _, c := range cases {
+		class, name := AgentOf(c.ua)
+		if class != c.wantClass || name != c.wantName {
+			t.Errorf("AgentOf(%q) = (%s, %q), want (%s, %q)", c.ua, class, name, c.wantClass, c.wantName)
+		}
+	}
+	// Every marker names itself, so the agent column's vocabulary for the
+	// two marker classes is exactly the lists and cannot drift from them.
+	for _, marker := range aiScraperMarkers {
+		ua := "Mozilla/5.0 (compatible; " + strings.ToUpper(marker) + "/1.0)"
+		if class, name := AgentOf(ua); class != AgentAIScraper || name != marker {
+			t.Errorf("AgentOf(%q) = (%s, %q), want (%s, %q)", ua, class, name, AgentAIScraper, marker)
+		}
+	}
+	for _, marker := range namedBotMarkers {
+		ua := "Mozilla/5.0 (compatible; " + strings.ToUpper(marker) + "/1.0)"
+		if class, name := AgentOf(ua); class != AgentBot || name != marker {
+			t.Errorf("AgentOf(%q) = (%s, %q), want (%s, %q)", ua, class, name, AgentBot, marker)
+		}
+	}
+}
+
+func TestProbeFamiliesAreBoundedAndRouteScoped(t *testing.T) {
+	cases := []struct {
+		uri  string
+		want string
+	}{
+		{"/wp-login.php", ProbeWordpress},
+		{"/wp-admin/", ProbeWordpress},
+		{"/xmlrpc.php", ProbeWordpress},
+		{"/blog/wp-includes/wlwmanifest.xml", ProbeWordpress},
+		{"/.env", ProbeEnv},
+		{"/.env.production?x=1", ProbeEnv},
+		{"/api/.env.bak", ProbeEnv},
+		{"/.envrc", ProbeEnv},
+		{"/.git/config", ProbeGit},
+		{"/.git/HEAD", ProbeGit},
+		{"/phpmyadmin/index.php", ProbePhpmyadmin},
+		{"/PMA/", ProbePhpmyadmin},
+		{"/adminer.php", ProbePhpmyadmin},
+		{"/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php", ProbePhp},
+		{"/index.php?s=/Index/think/app/invokefunction", ProbePhp},
+		{"/.aws/credentials", ProbeSecrets},
+		{"/.ssh/id_rsa", ProbeSecrets},
+		{"/.htpasswd", ProbeSecrets},
+		{"/backup.sql", ProbeBackup},
+		{"/site.tar.gz", ProbeBackup},
+		{"/db.zip", ProbeBackup},
+		{"/../../etc/passwd", ProbeTraversal},
+		{"/cgi-bin/%2e%2e/%2e%2e/bin/sh", ProbeTraversal},
+		{"/cgi-bin/luci", ProbeCgi},
+		{"/manager/html", ProbeJava},
+		{"/actuator/health", ProbeJava},
+		{"/solr/admin/info/system", ProbeJava},
+		{"/boaform/admin/formLogin", ProbeRouter},
+		{"/HNAP1/", ProbeRouter},
+		{"/GponForm/diag_Form", ProbeRouter},
+		{"/WP-LOGIN.PHP", ProbeWordpress}, // case-insensitive
+
+		// Real routes on these hosts are not probes, however they are spelled.
+		{"/", ""},
+		{"/mcp", ""},
+		{"/iili/v1/r/abc", ""},
+		{"/stats/v1/summary?days=7", ""},
+		{"/.well-known/acme-challenge/token", ""},
+		{"/muchq/moonbase/src/branch/main/README.md", ""},
+		{"/index.html", ""},
+		{"/admin/reanalyze", ""}, // one_d4's real admin route; "admin" is not a family
+		{"/environment", ""},
+		{"/gitignore", ""},
+	}
+	for _, c := range cases {
+		if got := ProbeOf(c.uri); got != c.want {
+			t.Errorf("ProbeOf(%q) = %q, want %q", c.uri, got, c.want)
+		}
+	}
+}

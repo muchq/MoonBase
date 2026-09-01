@@ -82,6 +82,8 @@ func main() {
 	router.HandleFunc("GET /health", handlers.Health)
 	router.HandleFunc("GET /stats/v1/summary", handlers.GetSummary)
 	router.HandleFunc("GET /stats/v1/iili/top", handlers.GetTopSlugs)
+	router.HandleFunc("GET /stats/v1/agents", handlers.GetAgents)
+	router.HandleFunc("GET /stats/v1/probes", handlers.GetProbes)
 
 	logger.Info("stats started", "port", port, "interval", interval.String())
 	if err := http.ListenAndServe(":"+port, router); err != nil {

@@ -89,3 +89,60 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 		t.Errorf("test-slug missing from top slugs: %v", slugs)
 	}
 }
+
+func TestAVersionBumpDropsAggregatesAndMarkersForReaggregation(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	date := time.Now().UTC().Format("2006-01-02")
+	key := fmt.Sprintf("logs/source=caddy/dt=%s/version-%d.log.gz", date, time.Now().UnixNano())
+	rollup := NewRollup()
+	rollup.Requests[RequestKey{date, "version-host.example", 200, "GET", AgentBrowser}] = 1
+	if err := store.ApplyRollup(ctx, key, rollup); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pretend those aggregates came from an older rollup shape.
+	if _, err := store.pool.Exec(ctx,
+		`UPDATE stats_meta SET value = 'stale' WHERE key = 'rollup_version'`); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewStore(ctx, os.Getenv("STATS_TEST_DB_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(reopened.Close)
+
+	// The marker is gone, so the next pass recomputes the object; the
+	// aggregates it produced are gone with it, so it is not double-counted.
+	if pending, err := reopened.Unprocessed(ctx, []string{key}); err != nil || len(pending) != 1 {
+		t.Errorf("Unprocessed after a version bump = (%v, %v), want the key pending again", pending, err)
+	}
+	summary, err := reopened.Summary(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range summary {
+		if row.Host == "version-host.example" {
+			t.Errorf("aggregates survived the version bump: %+v", row)
+		}
+	}
+	var recorded string
+	if err := reopened.pool.QueryRow(ctx,
+		`SELECT value FROM stats_meta WHERE key = 'rollup_version'`).Scan(&recorded); err != nil || recorded != RollupVersion {
+		t.Errorf("recorded version = (%q, %v), want %q", recorded, err, RollupVersion)
+	}
+
+	// Reopening at the same version is a no-op: the store must not wipe
+	// itself on every boot.
+	if err := reopened.ApplyRollup(ctx, key, rollup); err != nil {
+		t.Fatal(err)
+	}
+	again, err := NewStore(ctx, os.Getenv("STATS_TEST_DB_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(again.Close)
+	if pending, err := again.Unprocessed(ctx, []string{key}); err != nil || len(pending) != 0 {
+		t.Errorf("Unprocessed after a same-version reopen = (%v, %v), want none", pending, err)
+	}
+}
