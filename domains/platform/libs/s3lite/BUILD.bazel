@@ -1,0 +1,26 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+# A header-signed S3 client for exactly three operations — PutObject,
+# GetObject, ListObjectsV2 — with SigV4 hand-rolled on the usual dep-light
+# reasoning: the SDK is ~20 modules for four HMACs and some
+# canonicalization. The derivation is pinned against AWS's published worked
+# example in sigv4_test.go.
+go_library(
+    name = "s3lite",
+    srcs = [
+        "s3.go",
+        "sigv4.go",
+    ],
+    importpath = "github.com/muchq/moonbase/domains/platform/libs/s3lite",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "s3lite_test",
+    size = "small",
+    srcs = [
+        "s3_test.go",
+        "sigv4_test.go",
+    ],
+    embed = [":s3lite"],
+)

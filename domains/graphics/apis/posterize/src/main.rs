@@ -9,7 +9,7 @@ use tracing::{Level, event};
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    server_pal::init_logging();
     // Keeps the exporter alive for the process lifetime; without this the
     // http_server_* instruments record into the no-op global meter.
     let _otel_provider = server_pal::init_otel();

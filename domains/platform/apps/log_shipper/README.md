@@ -37,7 +37,7 @@ and anything that is not a rolled log are never touched.
 | --- | --- |
 | `S3_BUCKET` | Destination bucket (required) |
 | `S3_REGION` | Bucket's region (required) |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | An IAM user whose policy is `s3:PutObject` on the bucket's `logs/*` prefix and nothing else (required) |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | The stats IAM user: `s3:PutObject` for this shipper, plus `s3:GetObject`/`s3:ListBucket` for the aggregator, all scoped to the bucket's `logs/*` prefix (required) |
 | `LOG_DIR` | Directory Caddy rolls into (`/var/log/caddy` in compose) |
 | `LOG_SOURCE` | Partition label, default `caddy` |
 | `SHIP_INTERVAL` | Go duration between passes, default `1h` |
@@ -50,9 +50,13 @@ design. Once the bucket and the put-only IAM user exist and
 `STATS_AWS_ACCESS_KEY_ID`, `STATS_AWS_SECRET_ACCESS_KEY`, `STATS_S3_BUCKET`
 and `STATS_S3_REGION` are in `~/.env` on the host:
 
-```bash
-docker compose --profile stats up -d
 ```
+COMPOSE_PROFILES=stats
+```
+
+in `~/.env` (the permanent opt-in — deploy.sh's unflagged `up -d` then
+includes the profile on every deploy; a one-off `docker compose --profile
+stats up -d` works but stops being updated by later deploys).
 
 The mount is read-write on purpose — deletion after upload is what keeps
 the host disk bounded once shipping owns retention. Caddy's `roll_keep`

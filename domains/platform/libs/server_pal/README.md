@@ -5,7 +5,12 @@ Opinionated Axum router builder with batteries included.
 ## Features
 
 - Per-IP rate limiting via `tower_governor` (default: 100 req/s, burst 200)
-- Request logging via `tower_http::trace`
+- One JSON access-log line per request (#1459) — the metrics vocabulary
+  (`http_method`, `route`, `service_name`) plus `target`, `status`,
+  `duration_us`, `trace_id` and the raw `x_forwarded_for`. Binaries call
+  `server_pal::init_logging()` to install the JSON subscriber; `RUST_LOG`
+  still filters. (`tower_http::trace` stays in the stack for its ERROR
+  event on failures.)
 - Request body size limit (4MB)
 - Response compression
 - `Accept: application/json` header validation
@@ -63,8 +68,11 @@ The default limit is **100 req/s, burst 200**. Override with `.rate_limit()`:
 .rate_limit(None)
 ```
 
-Requests over the limit receive `429 Too Many Requests`. Rate-limited requests
-are rejected before `TraceLayer`, so they won't appear in request logs.
+Requests over the limit receive `429 Too Many Requests`, and the access log
+records them — it sits outside the governor for exactly that reason. A
+request the client abandons mid-flight is counted by the instruments (the
+metrics guard fires on drop) but never logged: the access line is written
+after the handler returns.
 
 `per_second` is a rate — requests per second — and `burst` is how many may
 arrive at once before that rate binds. `tower_governor`'s own builder takes a

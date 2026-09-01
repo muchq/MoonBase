@@ -1,10 +1,11 @@
-package log_shipper
+package s3lite
 
 import (
 	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -85,7 +86,7 @@ func TestTheSignatureCoversTheRequestActuallySent(t *testing.T) {
 
 	recomputed := authorizationHeader(
 		"AKID", "secret", signingClock().UTC(), "us-east-1",
-		got.Method, got.URL.Path, got.Host, got.Header.Get("x-amz-content-sha256"), nil)
+		got.Method, got.URL.Path, got.URL.RawQuery, got.Host, got.Header.Get("x-amz-content-sha256"), nil)
 	if auth := got.Header.Get("Authorization"); auth != recomputed {
 		t.Errorf("Authorization does not cover the request as sent:\nsent:       %s\nrecomputed: %s",
 			auth, recomputed)
@@ -121,7 +122,7 @@ func TestProductionUsesTheVirtualHostedURLAndSignsIt(t *testing.T) {
 	}
 	recomputed := authorizationHeader(
 		"AKID", "secret", signingClock().UTC(), "us-east-1",
-		http.MethodPut, got.URL.Path, got.URL.Host, got.Header.Get("x-amz-content-sha256"), nil)
+		http.MethodPut, got.URL.Path, "", got.URL.Host, got.Header.Get("x-amz-content-sha256"), nil)
 	if auth := got.Header.Get("Authorization"); auth != recomputed {
 		t.Errorf("Authorization does not cover the virtual-hosted request:\nsent:       %s\nrecomputed: %s",
 			auth, recomputed)
@@ -174,6 +175,69 @@ func TestARegionRedirectIsReportedWithItsLocationNotFollowed(t *testing.T) {
 	for _, want := range []string{"307", "eu-west-1"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q; the operator needs the region, not a bare 403", err, want)
+		}
+	}
+}
+
+func TestGetStreamsTheObjectAndSignsTheRequest(t *testing.T) {
+	var got *http.Request
+	s3 := testS3(t, func(w http.ResponseWriter, r *http.Request) {
+		got = r
+		w.Write([]byte("object bytes"))
+	})
+
+	body, err := s3.Get("logs/source=caddy/dt=2026-08-31/x.log.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer body.Close()
+	contents, _ := io.ReadAll(body)
+	if string(contents) != "object bytes" {
+		t.Errorf("body = %q", contents)
+	}
+	recomputed := authorizationHeader(
+		"AKID", "secret", signingClock().UTC(), "us-east-1",
+		got.Method, got.URL.Path, got.URL.RawQuery, got.Host,
+		got.Header.Get("x-amz-content-sha256"), nil)
+	if auth := got.Header.Get("Authorization"); auth != recomputed {
+		t.Errorf("Authorization does not cover the GET as sent:\nsent:       %s\nrecomputed: %s",
+			auth, recomputed)
+	}
+}
+
+func TestListPaginatesWithStartAfterAndSignsTheQuery(t *testing.T) {
+	var queries []string
+	var auths []bool
+	s3 := testS3(t, func(w http.ResponseWriter, r *http.Request) {
+		queries = append(queries, r.URL.RawQuery)
+		recomputed := authorizationHeader(
+			"AKID", "secret", signingClock().UTC(), "us-east-1",
+			r.Method, r.URL.Path, r.URL.RawQuery, r.Host,
+			r.Header.Get("x-amz-content-sha256"), nil)
+		auths = append(auths, r.Header.Get("Authorization") == recomputed)
+		if len(queries) == 1 {
+			w.Write([]byte(`<ListBucketResult><IsTruncated>true</IsTruncated>` +
+				`<Contents><Key>logs/a</Key></Contents><Contents><Key>logs/b</Key></Contents>` +
+				`</ListBucketResult>`))
+			return
+		}
+		w.Write([]byte(`<ListBucketResult><IsTruncated>false</IsTruncated>` +
+			`<Contents><Key>logs/c</Key></Contents></ListBucketResult>`))
+	})
+
+	keys, err := s3.List("logs/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"logs/a", "logs/b", "logs/c"}; !slices.Equal(keys, want) {
+		t.Errorf("keys = %v, want %v", keys, want)
+	}
+	if len(queries) != 2 || !strings.Contains(queries[1], "start-after=logs%2Fb") {
+		t.Errorf("pagination queries = %v, want a start-after continuation", queries)
+	}
+	for i, ok := range auths {
+		if !ok {
+			t.Errorf("request %d's Authorization does not cover the query it sent", i)
 		}
 	}
 }

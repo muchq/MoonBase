@@ -68,6 +68,7 @@ def _create_oci_image(bin_name, binary_target, binary_path):
 
     container_structure_test(
         name = bin_name + "_image_test",
+        size = "small",
         configs = ["//bazel/rules:oci_image_test.yaml"],
         image = ":" + image_name,
         tags = ["manual"],
@@ -135,6 +136,7 @@ def linux_oci_java(bin_name):
 
     container_structure_test(
         name = bin_name + "_image_test",
+        size = "small",
         configs = ["//bazel/rules:java_image_test.yaml"],
         image = ":" + image_name,
         tags = ["manual"],

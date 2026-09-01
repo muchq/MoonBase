@@ -4,7 +4,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 use server_pal::{listen_addr_pal, router_builder, serve};
 use std::sync::Arc;
 use tracing::{Level, event};
-use tracing_subscriber;
 use wordchains::{Graph, bfs_for_target, initialize_graph};
 
 fn validate_word<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -60,7 +59,7 @@ async fn wordchain_post(
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    server_pal::init_logging();
     // Keeps the exporter alive for the process lifetime; without this the
     // http_server_* instruments record into the no-op global meter.
     let _otel_provider = server_pal::init_otel();

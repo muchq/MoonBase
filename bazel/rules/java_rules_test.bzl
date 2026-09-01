@@ -315,6 +315,7 @@ def java_rules_test_suite(name):
 
     java_test_suite(
         name = name + "_suite_fixture",
+        size = "small",
         srcs = [
             "testdata/SuiteProbeHelper.java",
             "testdata/SuiteProbeTest.java",
@@ -346,6 +347,7 @@ def java_rules_test_suite(name):
             test_name = "{}_{}_{}".format(name, fixture_label, guard_label)
             guard(
                 name = test_name,
+                size = "small",
                 target_under_test = fixture,
             )
             tests.append(test_name)
@@ -353,6 +355,7 @@ def java_rules_test_suite(name):
         micronaut_name = "{}_{}_micronaut".format(name, fixture_label)
         micronaut_test(
             name = micronaut_name,
+            size = "small",
             target_under_test = fixture,
             expected = micronaut,
         )

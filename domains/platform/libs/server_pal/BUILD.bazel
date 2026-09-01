@@ -28,5 +28,8 @@ rust_test(
     name = "server_pal_test",
     size = "small",
     crate = ":server_pal",
+    # The vocabulary test asserts the service_name VALUE, so an env-key typo
+    # in the reader cannot pass as an empty-but-present field.
+    env = {"OTEL_SERVICE_NAME": "server-pal-under-test"},
     deps = all_crate_deps(normal_dev = True),
 )

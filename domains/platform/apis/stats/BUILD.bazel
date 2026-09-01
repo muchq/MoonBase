@@ -1,0 +1,47 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("//bazel/rules:oci.bzl", "linux_oci_go")
+
+go_library(
+    name = "stats_lib",
+    srcs = [
+        "aggregate.go",
+        "api.go",
+        "classify.go",
+        "loop.go",
+        "store.go",
+    ],
+    importpath = "github.com/muchq/moonbase/domains/platform/apis/stats",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_jackc_pgx_v5//:pgx",
+        "@com_github_jackc_pgx_v5//pgxpool",
+    ],
+)
+
+# store_test.go skips without STATS_TEST_DB_URL, like the repo's other
+# Postgres-gated suites — a local green run may have exercised no SQL.
+go_test(
+    name = "stats_test",
+    size = "small",
+    srcs = [
+        "aggregate_test.go",
+        "api_test.go",
+        "classify_test.go",
+        "loop_test.go",
+        "store_test.go",
+    ],
+    embed = [":stats_lib"],
+)
+
+go_binary(
+    name = "stats",
+    srcs = ["main/main.go"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":stats_lib",
+        "//domains/platform/libs/mucks",
+        "//domains/platform/libs/s3lite",
+    ],
+)
+
+linux_oci_go(bin_name = "stats")

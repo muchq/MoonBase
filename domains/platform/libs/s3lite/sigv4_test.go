@@ -1,4 +1,4 @@
-package log_shipper
+package s3lite
 
 import (
 	"strings"
@@ -14,8 +14,6 @@ import (
 const (
 	exampleAccessKey = "AKIAIOSFODNN7EXAMPLE"
 	exampleSecretKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-	// SHA256 of the empty payload.
-	emptyPayloadHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 )
 
 var exampleTime = time.Date(2013, 5, 24, 0, 0, 0, 0, time.UTC)
@@ -69,7 +67,7 @@ func TestCanonicalURIEncodesEqualsButNotSlashes(t *testing.T) {
 func TestAuthorizationHeaderCarriesScopeSignedHeadersAndSignature(t *testing.T) {
 	header := authorizationHeader(
 		exampleAccessKey, exampleSecretKey, exampleTime, "us-east-1",
-		"GET", "/test.txt", "examplebucket.s3.amazonaws.com", emptyPayloadHash,
+		"GET", "/test.txt", "", "examplebucket.s3.amazonaws.com", emptyPayloadHash,
 		map[string]string{"range": "bytes=0-9"})
 
 	want := "AWS4-HMAC-SHA256 " +
@@ -88,7 +86,7 @@ func TestAuthorizationHeaderCarriesScopeSignedHeadersAndSignature(t *testing.T) 
 // header lands lowercased, trimmed, and in sorted order.
 func TestCanonicalRequestCarriesTheMethodAndExtraHeaders(t *testing.T) {
 	canonical, signedHeaders := canonicalRequest(
-		"PUT", "/k", "bucket.s3.us-east-1.amazonaws.com", emptyPayloadHash,
+		"PUT", "/k", "", "bucket.s3.us-east-1.amazonaws.com", emptyPayloadHash,
 		exampleTime, map[string]string{"X-Amz-Storage-Class": " REDUCED_REDUNDANCY "})
 
 	if !strings.HasPrefix(canonical, "PUT\n") {
@@ -99,5 +97,20 @@ func TestCanonicalRequestCarriesTheMethodAndExtraHeaders(t *testing.T) {
 	}
 	if !strings.Contains(canonical, "x-amz-storage-class:REDUCED_REDUNDANCY\n") {
 		t.Errorf("extra header is not lowercased and trimmed in the canonical form:\n%s", canonical)
+	}
+}
+
+// Query parameters are sorted by encoded name and use AWS's strict
+// encoding — Go's QueryEscape would emit '+' for space and escape '~',
+// both SignatureDoesNotMatch on the wire.
+func TestCanonicalQuerySortsAndStrictlyEncodes(t *testing.T) {
+	got := canonicalQuery(map[string]string{
+		"prefix":      "logs/source=caddy/",
+		"list-type":   "2",
+		"start-after": "logs/a b~c",
+	})
+	want := "list-type=2&prefix=logs%2Fsource%3Dcaddy%2F&start-after=logs%2Fa%20b~c"
+	if got != want {
+		t.Errorf("canonicalQuery = %s, want %s", got, want)
 	}
 }

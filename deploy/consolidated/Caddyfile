@@ -59,6 +59,11 @@ api.muchq.com {
 		path /v2/analyze
 	}
 
+	@get_stats {
+		method GET
+		path /stats/v1/*
+	}
+
 	@post_iili_shorten {
 		method POST
 		path /iili/v1/shorten
@@ -157,6 +162,8 @@ api.muchq.com {
 
 	# Same pattern (#1359): iili serves /iili/v1/* unrewritten.
 	reverse_proxy @post_iili_shorten iili:8091
+	# stats (#1460): read-only aggregates, unrewritten like the rest.
+	reverse_proxy @get_stats stats:8092
 	reverse_proxy @get_iili_redirect iili:8091
 
 	log {

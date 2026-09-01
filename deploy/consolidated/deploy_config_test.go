@@ -1025,6 +1025,8 @@ var publicRoutes = []struct {
 	// iili (#1359): the redirect matcher is the product.
 	{"@post_iili_shorten", []string{"method POST", "path /iili/v1/shorten"}, "iili:8091"},
 	{"@get_iili_redirect", []string{"method GET", "path /iili/v1/r/*"}, "iili:8091"},
+	// stats (#1460): read-only aggregates, GET-only on purpose.
+	{"@get_stats", []string{"method GET", "path /stats/v1/*"}, "stats:8092"},
 }
 
 func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {
@@ -2031,5 +2033,22 @@ func TestLogShipperReadsTheCaddyLogMountAndIsProfileGated(t *testing.T) {
 	if !strings.Contains(block, "profiles:") {
 		t.Errorf("log_shipper is not profile-gated; a default `docker compose up -d` would "+
 			"start it with no S3 credentials and it would crash-loop. Block was:\n%s", block)
+	}
+}
+
+// The stats pair is profile-gated together: the aggregator needs the same
+// S3 credentials the shipper does, so a default `up -d` must start
+// neither the service nor its db-init — half the pair running is a
+// crash-loop or a database nothing writes to.
+func TestTheStatsPairIsProfileGatedTogether(t *testing.T) {
+	for _, service := range []string{"stats", "stats_db_init"} {
+		block := serviceBlock(t, "compose.yaml", service)
+		if !strings.Contains(block, "profiles:") {
+			t.Errorf("%s is not profile-gated; a default `up -d` starts it without "+
+				"S3 credentials (#1460). Block was:\n%s", service, block)
+		}
+	}
+	if !strings.Contains(serviceBlock(t, "compose.yaml", "stats"), "postgresql://stats:") {
+		t.Errorf("stats names no stats database URL; the aggregates have nowhere to land")
 	}
 }

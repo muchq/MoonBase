@@ -1,5 +1,6 @@
 #include "domains/platform/libs/aura/middleware.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <stdexcept>
@@ -97,15 +98,112 @@ std::string KindName(smithy::http::BeastServerTransport::ConnectionEvent::Kind k
   return "unknown(" + std::to_string(static_cast<int>(kind)) + ")";
 }
 
-// One access-log line per request. Kept separate from Observe because the
-// log line needs X-Forwarded-For and the response body size, which
-// RequestObservation doesn't carry; it measures its own duration for the
-// log line only. The trace_id= field is the W3C trace id parsed from the
-// request's traceparent — the transport guard mints or joins it at ingress
-// (smithy-cpp ADR-0011), so on transport-served requests it always parses.
-// Empty only for hand-driven handler chains in tests.
+// JSON string escaping for the access-log line. Every byte below 0x20 is
+// escaped (\uXXXX, or the short form for \n \r \t) and invalid UTF-8 is
+// replaced with U+FFFD, because the target reaches the line verbatim and is
+// attacker-controlled - a raw control byte or an unescaped quote terminates
+// the record early and lets the rest of the URI masquerade as its own log
+// entry (smithy-cpp #203), and a stray non-UTF-8 byte (legal in a request
+// target per Beast's parser) would make the one record describing that
+// request the record strict JSON parsers reject.
+void AppendJsonEscaped(std::string& out, std::string_view value) {
+  static constexpr char kHex[] = "0123456789abcdef";
+  static constexpr char kReplacement[] = "\xEF\xBF\xBD";  // U+FFFD
+  for (size_t i = 0; i < value.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(value[i]);
+    switch (c) {
+      case '"':
+        out += "\\\"";
+        continue;
+      case '\\':
+        out += "\\\\";
+        continue;
+      case '\n':
+        out += "\\n";
+        continue;
+      case '\r':
+        out += "\\r";
+        continue;
+      case '\t':
+        out += "\\t";
+        continue;
+    }
+    if (c < 0x20) {
+      out += "\\u00";
+      out += kHex[(c >> 4) & 0xF];
+      out += kHex[c & 0xF];
+      continue;
+    }
+    if (c < 0x80) {
+      out += static_cast<char>(c);
+      continue;
+    }
+    // Multi-byte lead: accept a well-formed sequence whole, replace anything
+    // else. Truncated sequences and stray continuation bytes both land here.
+    const int continuations = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC2 ? 1 : -1;
+    bool valid = continuations > 0 && i + continuations < value.size();
+    for (int k = 1; valid && k <= continuations; ++k) {
+      valid = (static_cast<unsigned char>(value[i + k]) & 0xC0) == 0x80;
+    }
+    if (valid) {
+      out.append(value.substr(i, continuations + 1));
+      i += continuations;
+    } else {
+      out += kReplacement;
+    }
+  }
+}
+
+void AppendJsonField(std::string& out, std::string_view name, std::string_view value) {
+  out += ",\"";
+  out += name;
+  out += "\":\"";
+  AppendJsonEscaped(out, value);
+  out += '"';
+}
+
+void AppendJsonNumber(std::string& out, std::string_view name, long long value) {
+  out += ",\"";
+  out += name;
+  out += "\":";
+  out += std::to_string(value);
+}
+
+// absl truncates a LOG message at its 15000-byte buffer, and a truncated
+// record is unparseable JSON - so the two unbounded, caller-controlled
+// fields are capped well under it. 2KB of target is more than any
+// legitimate route needs and enough of a hostile one to be diagnosable.
+std::string_view Capped(std::string_view value, size_t cap) {
+  return value.substr(0, std::min(value.size(), cap));
+}
+
+// The log's identity, from the compose contract (OTEL_SERVICE_NAME).
+// Note the C++ metrics resource does NOT read this variable - each
+// service compiles its name into OtelConfig - so the two agree by
+// convention, not construction.
+const std::string& ServiceNameFromEnv() {
+  static const std::string name = []() {
+    const char* value = std::getenv("OTEL_SERVICE_NAME");
+    return std::string(value == nullptr ? "" : value);
+  }();
+  return name;
+}
+
+// One access-log line per request: a single JSON object in the metrics
+// vocabulary (#1459) — http_method and route are the bounded labels the
+// instruments carry, so a dashboard-to-logs pivot is a copy-paste; the raw
+// target rides in its own field where an unbounded value is data, not a
+// label. duration_us matches the histogram's unit.
 //
-// X-Forwarded-For= is the raw header, which since ADR-0012 is NOT the
+// Kept separate from Observe because the line needs X-Forwarded-For and the
+// response body size, which RequestObservation doesn't carry; it measures
+// its own duration for the line only. The trace_id field is the W3C trace
+// id parsed from the request's traceparent — the transport guard mints or
+// joins it at ingress (smithy-cpp ADR-0011), so on transport-served
+// requests it always parses. Empty only for hand-driven handler chains in
+// tests.
+//
+// x_forwarded_for is the raw header, which since ADR-0012 is NOT the
 // identity the rate limiter keys on — a 429's actual bucket (the derived
 // client address) is not on this line.
 smithy::server::Middleware AccessLog() {
@@ -116,17 +214,25 @@ smithy::server::Middleware AccessLog() {
 
       smithy::http::HttpResponse response = next(request);
 
-      const auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+      const auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start);
       const std::string trace_id =
           smithy::http::ParseTraceparent(request.headers.Get("traceparent").value_or(""))
               .value_or(smithy::http::TraceContext{})
               .trace_id;
-      LOG(INFO) << "[" << request.method << " " << request.target
-                << "]: X-Forwarded-For=" << request.headers.Get("X-Forwarded-For").value_or("")
-                << " trace_id=" << trace_id << " status=" << response.status
-                << " res.body.bytes=" << response.body.size()
-                << " duration_ms=" << duration_ms.count();
+      std::string line = R"({"event":"access")";
+      AppendJsonField(line, "service_name", ServiceNameFromEnv());
+      AppendJsonField(line, "http_method", MethodLabelOf(request.method));
+      AppendJsonField(line, "route", RouteLabelOf(response.operation, request.target));
+      AppendJsonField(line, "target", Capped(request.target, 2048));
+      AppendJsonNumber(line, "status", response.status);
+      AppendJsonNumber(line, "duration_us", duration_us.count());
+      AppendJsonNumber(line, "response_bytes", static_cast<long long>(response.body.size()));
+      AppendJsonField(line, "trace_id", trace_id);
+      AppendJsonField(line, "x_forwarded_for",
+                      Capped(request.headers.Get("X-Forwarded-For").value_or(""), 256));
+      line += '}';
+      LOG(INFO) << line;
       return response;
     };
   };
