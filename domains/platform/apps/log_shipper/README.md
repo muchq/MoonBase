@@ -37,7 +37,7 @@ and anything that is not a rolled log are never touched.
 | --- | --- |
 | `S3_BUCKET` | Destination bucket (required) |
 | `S3_REGION` | Bucket's region (required) |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | An IAM user whose policy is `s3:PutObject` on the bucket's `logs/*` prefix and nothing else (required) |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | The stats IAM user: `s3:PutObject` for this shipper, plus `s3:GetObject`/`s3:ListBucket` for the aggregator, all scoped to the bucket's `logs/*` prefix (required) |
 | `LOG_DIR` | Directory Caddy rolls into (`/var/log/caddy` in compose) |
 | `LOG_SOURCE` | Partition label, default `caddy` |
 | `SHIP_INTERVAL` | Go duration between passes, default `1h` |

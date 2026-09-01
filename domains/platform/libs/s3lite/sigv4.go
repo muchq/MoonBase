@@ -5,7 +5,7 @@
 // request shape. The derivation is pinned against
 // AWS's published worked example in sigv4_test.go, intermediate values
 // included, so any drift names the stage that drifted.
-package log_shipper
+package s3lite
 
 import (
 	"crypto/hmac"
@@ -45,7 +45,35 @@ func canonicalURI(path string) string {
 	return b.String()
 }
 
-func canonicalRequest(method, path, host, payloadHash string, when time.Time, extra map[string]string) (string, string) {
+// canonicalQuery renders query parameters the way S3's signer expects:
+// each name and value URI-encoded with the strict rules, pairs sorted by
+// encoded name. An empty map is the empty string.
+func canonicalQuery(params map[string]string) string {
+	encoded := make([]string, 0, len(params))
+	for name, value := range params {
+		encoded = append(encoded, uriEncode(name)+"="+uriEncode(value))
+	}
+	sort.Strings(encoded)
+	return strings.Join(encoded, "&")
+}
+
+// uriEncode is AWS's own encoding: unreserved characters only, uppercase
+// hex, space as %20 — Go's url.QueryEscape differs on '+' and '~'.
+func uriEncode(value string) string {
+	var b strings.Builder
+	for _, c := range []byte(value) {
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9',
+			c == '-', c == '.', c == '_', c == '~':
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
+}
+
+func canonicalRequest(method, path, query, host, payloadHash string, when time.Time, extra map[string]string) (string, string) {
 	headers := map[string]string{
 		"host":                 host,
 		"x-amz-content-sha256": payloadHash,
@@ -64,7 +92,7 @@ func canonicalRequest(method, path, host, payloadHash string, when time.Time, ex
 	var b strings.Builder
 	b.WriteString(method + "\n")
 	b.WriteString(canonicalURI(path) + "\n")
-	b.WriteString("\n") // no query string on a plain PUT
+	b.WriteString(query + "\n")
 	for _, name := range names {
 		b.WriteString(name + ":" + headers[name] + "\n")
 	}
@@ -101,8 +129,8 @@ func signature(secretKey string, when time.Time, region, toSign string) string {
 }
 
 func authorizationHeader(accessKey, secretKey string, when time.Time, region,
-	method, path, host, payloadHash string, extra map[string]string) string {
-	canonical, signedHeaders := canonicalRequest(method, path, host, payloadHash, when, extra)
+	method, path, query, host, payloadHash string, extra map[string]string) string {
+	canonical, signedHeaders := canonicalRequest(method, path, query, host, payloadHash, when, extra)
 	sig := signature(secretKey, when, region, stringToSign(when, region, canonical))
 	return "AWS4-HMAC-SHA256 " +
 		"Credential=" + accessKey + "/" + credentialScope(when, region) + "," +

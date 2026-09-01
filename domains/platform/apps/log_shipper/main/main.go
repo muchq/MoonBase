@@ -14,6 +14,7 @@ import (
 	"time"
 
 	shipper "github.com/muchq/moonbase/domains/platform/apps/log_shipper"
+	"github.com/muchq/moonbase/domains/platform/libs/s3lite"
 )
 
 func requireEnv(logger *slog.Logger, name string) string {
@@ -48,10 +49,10 @@ func main() {
 		// Caddy's roller writes rolled files in place; two minutes of
 		// quiet is the proxy for "nobody is still writing this".
 		MinAge: 2 * time.Minute,
-		Uploader: &shipper.S3{
+		Uploader: &s3lite.S3{
 			Bucket: requireEnv(logger, "S3_BUCKET"),
 			Region: requireEnv(logger, "S3_REGION"),
-			Creds: shipper.Credentials{
+			Creds: s3lite.Credentials{
 				AccessKeyID:     requireEnv(logger, "AWS_ACCESS_KEY_ID"),
 				SecretAccessKey: requireEnv(logger, "AWS_SECRET_ACCESS_KEY"),
 			},

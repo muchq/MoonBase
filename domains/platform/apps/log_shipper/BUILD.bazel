@@ -4,9 +4,7 @@ load("//bazel/rules:oci.bzl", "linux_oci_go")
 go_library(
     name = "log_shipper_lib",
     srcs = [
-        "s3.go",
         "shipper.go",
-        "sigv4.go",
     ],
     importpath = "github.com/muchq/moonbase/domains/platform/apps/log_shipper",
     visibility = ["//visibility:public"],
@@ -16,9 +14,7 @@ go_test(
     name = "log_shipper_test",
     size = "small",
     srcs = [
-        "s3_test.go",
         "shipper_test.go",
-        "sigv4_test.go",
     ],
     embed = [":log_shipper_lib"],
 )
@@ -27,7 +23,10 @@ go_binary(
     name = "log_shipper",
     srcs = ["main/main.go"],
     visibility = ["//visibility:public"],
-    deps = [":log_shipper_lib"],
+    deps = [
+        ":log_shipper_lib",
+        "//domains/platform/libs/s3lite",
+    ],
 )
 
 linux_oci_go(bin_name = "log_shipper")
