@@ -25,7 +25,7 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt::init();
+    server_pal::init_logging();
 
     // Must be initialised before AppMetrics::new() so the global provider is
     // in place when OTel instruments are created.

@@ -101,6 +101,92 @@ fn latency_bucket_view(instrument: &Instrument) -> Option<Stream> {
     )
 }
 
+/// Installs the process-wide log subscriber: one flattened JSON object per
+/// event on stdout (#1459). Replaces the bare `tracing_subscriber::fmt::init()`
+/// the binaries used to call, under which the request log below would render
+/// as human-format text — machine-readable everywhere or nowhere.
+pub fn init_logging() {
+    tracing_subscriber::fmt()
+        .json()
+        .flatten_event(true)
+        .with_current_span(false)
+        .with_span_list(false)
+        // The formatter's own "target" (the Rust module path) would collide
+        // with the access log's target field and win; the module path earns
+        // no place on a request line.
+        .with_target(false)
+        .init();
+}
+
+/// The log's identity field, same source as the metrics resource.
+fn service_name_from_env() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(|| env::var("OTEL_SERVICE_NAME").unwrap_or_default())
+}
+
+/// The W3C trace id off a traceparent header, or "" when absent/malformed.
+/// The full mint/join semantics live on the C++ rail (smithy-cpp ADR-0011);
+/// here the header is Caddy's or the caller's to send, so parse-don't-trust
+/// is the whole contract.
+fn trace_id_of(traceparent: Option<&str>) -> &str {
+    let Some(header) = traceparent else { return "" };
+    let mut parts = header.split('-');
+    let (Some(_version), Some(trace_id)) = (parts.next(), parts.next()) else {
+        return "";
+    };
+    if trace_id.len() == 32 && trace_id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        trace_id
+    } else {
+        ""
+    }
+}
+
+/// One access-log line per request: a single JSON event in the metrics
+/// vocabulary (#1459) — http_method and route are the bounded labels the
+/// instruments carry, so a dashboard-to-logs pivot is a copy-paste; the raw
+/// path-and-query rides in "target" where an unbounded value is data, not a
+/// label. duration_us matches the histogram's unit. x_forwarded_for is the
+/// raw header, which since ADR-0012 is NOT the identity the rate limiter
+/// keys on.
+async fn access_log_middleware(req: Request, next: Next) -> Response {
+    let start = std::time::Instant::now();
+    let http_method = bounded_method_label(req.method());
+    let route = req
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|p| p.as_str().to_string())
+        .unwrap_or_else(|| UNMATCHED_ROUTE.to_string());
+    let target = req.uri().to_string();
+    let x_forwarded_for = req
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let traceparent = req
+        .headers()
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+
+    let resp = next.run(req).await;
+
+    tracing::info!(
+        log = "access",
+        service_name = service_name_from_env(),
+        http_method,
+        route,
+        target,
+        status = resp.status().as_u16(),
+        duration_us = start.elapsed().as_micros() as u64,
+        trace_id = trace_id_of(Some(traceparent.as_str())),
+        x_forwarded_for,
+        "request"
+    );
+    resp
+}
+
 /// Initialise the global OTel meter provider when
 /// OTEL_EXPORTER_OTLP_ENDPOINT is set; a no-op None otherwise. Callers
 /// keep the returned provider alive for the process lifetime — dropping
@@ -508,13 +594,16 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
         let health = common_layers(Router::new().route("/health", get(|| async { "Ok" })));
 
         // HTTP metrics middleware sits outside rate-limiting so rate-limited
-        // requests (429) are also counted as failures.
+        // requests (429) are also counted as failures; the access log sits
+        // beside it for the same reason — a 429 is a request the log must
+        // show, and Router::layer runs after routing so both see MatchedPath.
         health
             .merge(limited)
             .layer(axum::middleware::from_fn_with_state(
                 cell,
                 http_metrics_middleware,
             ))
+            .layer(axum::middleware::from_fn(access_log_middleware))
     }
 }
 
@@ -718,6 +807,88 @@ mod tests {
 
         let resp = app.oneshot(make_request("/wp-login.php")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    /// Collects the JSON subscriber's output so a test can read the line
+    /// the access log wrote.
+    #[derive(Clone)]
+    struct SharedWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for SharedWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    async fn access_line_for(path: &str, expected_status: StatusCode) -> serde_json::Value {
+        let buf: Arc<std::sync::Mutex<Vec<u8>>> = Arc::default();
+        let writer_buf = buf.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .json()
+            .flatten_event(true)
+            .with_target(false)
+            .with_writer(move || SharedWriter(writer_buf.clone()))
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let app = router_builder::<NoState>()
+            .route("/widgets/{id}", get(|| async { "w" }))
+            .rate_limit(None)
+            .build()
+            .with_state(NoState);
+        let mut req = make_request(path);
+        req.headers_mut()
+            .insert("x-forwarded-for", "203.0.113.9".parse().unwrap());
+        req.headers_mut().insert(
+            "traceparent",
+            "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+                .parse()
+                .unwrap(),
+        );
+        let resp = app.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), expected_status);
+
+        let output = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+        let line = output
+            .lines()
+            .find(|l| l.contains("\"log\":\"access\""))
+            .unwrap_or_else(|| panic!("no access line in: {output}"))
+            .to_string();
+        serde_json::from_str(&line).expect("the access line must be one parseable JSON object")
+    }
+
+    /// One JSON object per request, speaking the metrics vocabulary
+    /// (http_method, route, service_name — #1459): a spike on a
+    /// route="/widgets/{id}" panel pastes into a log query unchanged. The
+    /// route is the matched template, never the raw path; the raw path rides
+    /// in "target".
+    #[tokio::test]
+    async fn access_log_is_one_json_object_in_the_metrics_vocabulary() {
+        let v = access_line_for("/widgets/7?q=1", StatusCode::OK).await;
+
+        assert_eq!(v["http_method"], "GET");
+        assert_eq!(v["route"], "/widgets/{id}");
+        assert_eq!(v["target"], "/widgets/7?q=1");
+        assert_eq!(v["status"], 200);
+        assert!(v["duration_us"].is_number(), "duration_us: {v}");
+        assert_eq!(v["trace_id"], "4bf92f3577b34da6a3ce929d0e0e4736");
+        assert_eq!(v["x_forwarded_for"], "203.0.113.9");
+        assert!(v["service_name"].is_string(), "service_name: {v}");
+    }
+
+    /// Unrouted requests log the shared sentinel, the same spelling the
+    /// instruments use and otel_contract pins across rails — the raw path
+    /// stays in "target" where an unbounded value is data, not a label.
+    #[tokio::test]
+    async fn access_log_route_falls_back_to_the_shared_sentinel() {
+        let v = access_line_for("/no/such/path", StatusCode::NOT_FOUND).await;
+
+        assert_eq!(v["route"], UNMATCHED_ROUTE);
+        assert_eq!(v["status"], 404);
+        assert_eq!(v["target"], "/no/such/path");
     }
 }
 
