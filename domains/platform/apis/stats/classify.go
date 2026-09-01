@@ -45,44 +45,52 @@ var aiScraperMarkers = []string{
 	"youbot",
 }
 
-// Bots worth a row of their own. Search engines, SEO crawlers, link
-// unfurlers, internet scanners, and the HTTP libraries scanners drive —
-// the marker doubles as the agent name, so the vocabulary is this list.
+// Bots worth a row of their own: search engines, SEO crawlers, link
+// unfurlers, internet scanners, and the HTTP libraries scanners drive. The
+// marker doubles as the agent name, so the vocabulary is this list. First
+// match wins, so a marker another agent's UA quotes must come after it —
+// Telegram's UA reads "TelegramBot (like TwitterBot)".
 var namedBotMarkers = []string{
 	"googlebot", "bingbot", "yandexbot", "duckduckbot", "baiduspider", "applebot",
 	"ahrefsbot", "semrushbot", "mj12bot", "dotbot", "petalbot", "dataforseobot",
-	"facebookexternalhit", "twitterbot", "linkedinbot", "slackbot", "discordbot",
-	"telegrambot", "whatsapp", "uptimerobot",
+	"facebookexternalhit", "telegrambot", "twitterbot", "linkedinbot", "slackbot",
+	"discordbot", "whatsapp", "uptimerobot",
 	"censysinspect", "zgrab", "nuclei", "masscan",
 	"python-requests", "go-http-client", "okhttp", "curl", "wget", "scrapy",
 }
 
+// Generic shapes that mark a bot without naming one. Anything also in
+// namedBotMarkers is matched there first and does not belong here.
 var botMarkers = []string{
-	"bot", "spider", "crawl", "curl", "wget", "python-requests", "python/",
-	"go-http-client", "libwww", "httpclient", "okhttp", "scrapy", "java/",
-	"apache-httpclient", "phantom", "headless", "scanner", "nmap", "zgrab",
-	"masscan", "nuclei", "censys",
+	"bot", "spider", "crawl", "python/", "libwww", "httpclient", "java/",
+	"apache-httpclient", "phantom", "headless", "scanner", "nmap", "censys",
 }
 
-// AgentClassOf buckets a User-Agent header.
-func AgentClassOf(userAgent string) string {
-	class, _ := AgentOf(userAgent)
-	return class
-}
+// markerNames is every name AgentOf can return from a marker list, so the
+// rollup can tell a bounded name from a caller-shaped product token.
+var markerNames = func() map[string]bool {
+	names := map[string]bool{}
+	for _, marker := range aiScraperMarkers {
+		names[marker] = true
+	}
+	for _, marker := range namedBotMarkers {
+		names[marker] = true
+	}
+	return names
+}()
 
 // AgentOf buckets a User-Agent header and names the agent within the
 // bucket, bounded per class: AI scrapers and named bots name themselves by
 // the marker that matched, so those columns' vocabularies are exactly the
 // lists above; anonymous bots and the unclassified tail keep their product
 // token (one run of [a-z0-9._-], max 32 bytes) so a new crawler is readable
-// before it has a marker; browsers are one unnamed bucket, because every
-// browser's token is "mozilla". Order matters: AI scrapers self-identify
-// with names that also match the generic bot markers.
+// before it has a marker — except that a browser-shaped token is "mozilla"
+// for every one of them, so a generic bot with that token is named by the
+// marker it tripped ("headless", "bot") instead. Browsers are one unnamed
+// bucket. Order matters: AI scrapers self-identify with names that also
+// match the generic bot markers.
 func AgentOf(userAgent string) (class, name string) {
 	ua := strings.ToLower(userAgent)
-	if ua == "" {
-		return AgentOther, emptyToken
-	}
 	for _, marker := range aiScraperMarkers {
 		if strings.Contains(ua, marker) {
 			return AgentAIScraper, marker
@@ -95,7 +103,10 @@ func AgentOf(userAgent string) (class, name string) {
 	}
 	for _, marker := range botMarkers {
 		if strings.Contains(ua, marker) {
-			return AgentBot, productToken(ua)
+			if token := productToken(ua); token != "mozilla" {
+				return AgentBot, token
+			}
+			return AgentBot, marker
 		}
 	}
 	if strings.HasPrefix(ua, "mozilla/") {
@@ -111,7 +122,8 @@ const (
 
 // productToken is the first run of [a-z0-9._-] in a lowercased UA — the
 // product name of "product/version (comment)" — truncated to a bound so a
-// scanner spraying UAs cannot mint wide rows, only many.
+// scanner spraying UAs cannot mint wide rows, only many (and Rollup caps
+// how many).
 func productToken(lowerUA string) string {
 	start := -1
 	for i := 0; i < len(lowerUA); i++ {
@@ -145,8 +157,10 @@ func clampToken(token string) string {
 // The bounded scanner-path vocabulary. A family is a shape scanners probe
 // for on any host — WordPress logins, dotfiles, PHP endpoints on hosts that
 // serve no PHP — and a request either matches one family or is not a
-// probe. There is deliberately no "admin" family: /admin/ is a real one_d4
-// route, and a family that counts real traffic is worse than none.
+// probe. A family that also matches real traffic is worse than none, which
+// is why there is no "admin" family (/admin/ is a one_d4 route) and why
+// backup files match only at the root: Forgejo serves repository archives
+// and raw files with the same extensions, several segments deep.
 const (
 	ProbeTraversal  = "traversal"
 	ProbeWordpress  = "wordpress"
@@ -175,7 +189,7 @@ var probeFamilies = []struct {
 	{ProbeSecrets, regexp.MustCompile(`/\.aws/|/\.ssh/|id_rsa|\.htpasswd|\.htaccess|\.bash_history|/\.docker/`)},
 	{ProbePhpmyadmin, regexp.MustCompile(`phpmyadmin|myadmin|/pma/|adminer`)},
 	{ProbePhp, regexp.MustCompile(`\.php($|/)`)},
-	{ProbeBackup, regexp.MustCompile(`\.(sql|bak|zip|tar|tar\.gz|tgz|rar|7z|old|orig|swp)$`)},
+	{ProbeBackup, regexp.MustCompile(`^/[^/]+\.(sql|bak|zip|tar|tar\.gz|tgz|rar|7z|old|orig|swp)$`)},
 	{ProbeCgi, regexp.MustCompile(`/cgi-bin/`)},
 	{ProbeJava, regexp.MustCompile(`/actuator|/solr/|/jenkins|/manager/html|jmx-console`)},
 	{ProbeRouter, regexp.MustCompile(`/boaform/|/hnap1|/gponform/|/goform/|/tmui/`)},
@@ -199,21 +213,23 @@ func ProbeOf(uri string) string {
 }
 
 // SlugOf extracts the iili short-link slug from a request, or "" when the
-// request is not a redirect lookup. Two shapes reach iili: the public
-// i.iili.uk/r/{slug} host and the api.muchq.com/iili/v1/r/{slug} route.
+// request is not a redirect lookup. Two shapes reach iili, and only two:
+// the public i.iili.uk/r/{slug} host (GET and HEAD) and the GET-only
+// api.muchq.com/iili/v1/r/{slug} route. The same path on another vhost, or
+// a HEAD on the api one, never reaches iili — Caddy answers it itself — so
+// it is not a follow.
 func SlugOf(host, method, uri string) string {
-	if method != "GET" && method != "HEAD" {
-		return ""
-	}
 	path := uri
 	if q := strings.IndexByte(path, '?'); q >= 0 {
 		path = path[:q]
 	}
 	var rest string
 	switch {
-	case strings.HasPrefix(host, "i.iili.uk") && strings.HasPrefix(path, "/r/"):
+	case strings.HasPrefix(host, "i.iili.uk") && (method == "GET" || method == "HEAD") &&
+		strings.HasPrefix(path, "/r/"):
 		rest = path[len("/r/"):]
-	case strings.HasPrefix(path, "/iili/v1/r/"):
+	case strings.HasPrefix(host, "api.muchq.com") && method == "GET" &&
+		strings.HasPrefix(path, "/iili/v1/r/"):
 		rest = path[len("/iili/v1/r/"):]
 	default:
 		return ""

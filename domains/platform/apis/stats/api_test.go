@@ -38,11 +38,11 @@ func (f *fakeReader) TopSlugs(_ context.Context, days, limit int) ([]SlugRow, er
 	return f.slugs, nil
 }
 
-func (f *fakeReader) Agents(_ context.Context, days int) ([]AgentRow, error) {
+func (f *fakeReader) Agents(_ context.Context, days, limit int) ([]AgentRow, error) {
 	if f.fail {
 		return nil, errors.New("db is having a day")
 	}
-	f.lastDays = days
+	f.lastDays, f.lastLimit = days, limit
 	return f.agents, nil
 }
 
@@ -109,6 +109,24 @@ func TestTopSlugsPassesWindowAndLimit(t *testing.T) {
 	}
 }
 
+func TestNonPositiveAndOversizedParametersClampRatherThan400(t *testing.T) {
+	reader := &fakeReader{}
+	handlers := handlersWith(reader)
+
+	for _, raw := range []string{"0", "-5"} {
+		if recorder, _ := get(t, handlers.GetSummary, "/stats/v1/summary?days="+raw); recorder.Code != http.StatusOK {
+			t.Errorf("days=%s answered %d, want 200", raw, recorder.Code)
+		}
+		if reader.lastDays != 1 {
+			t.Errorf("days=%s clamped to %d, want 1", raw, reader.lastDays)
+		}
+	}
+	get(t, handlers.GetTopSlugs, "/stats/v1/iili/top?limit=99999")
+	if reader.lastLimit != 200 {
+		t.Errorf("slug limit clamped to %d, want 200", reader.lastLimit)
+	}
+}
+
 func TestAStoreFailureIs500WithoutTheReasonOnTheWire(t *testing.T) {
 	recorder, _ := get(t, handlersWith(&fakeReader{fail: true}).GetSummary, "/stats/v1/summary")
 	if recorder.Code != http.StatusInternalServerError {
@@ -127,14 +145,23 @@ func TestAgentsAndProbesShareTheWindowRules(t *testing.T) {
 	handlers := handlersWith(reader)
 
 	_, body := get(t, handlers.GetAgents, "/stats/v1/agents")
-	if reader.lastDays != 30 {
-		t.Errorf("default agents window = %d, want 30", reader.lastDays)
+	if reader.lastDays != 30 || reader.lastLimit != 500 {
+		t.Errorf("default agents (days, limit) = (%d, %d), want (30, 500)", reader.lastDays, reader.lastLimit)
 	}
 	row := body["rows"].([]any)[0].(map[string]any)
 	if row["agent"] != "meta-externalagent" || row["agent_class"] != AgentAIScraper || row["blocked"] != float64(9) {
 		t.Errorf("agent row = %v", row)
 	}
 
+	get(t, handlers.GetAgents, "/stats/v1/agents?days=99999&limit=99999")
+	if reader.lastDays != 365 || reader.lastLimit != 2000 {
+		t.Errorf("clamped agents (days, limit) = (%d, %d), want (365, 2000)", reader.lastDays, reader.lastLimit)
+	}
+
+	get(t, handlers.GetProbes, "/stats/v1/probes")
+	if reader.lastDays != 30 {
+		t.Errorf("default probes window = %d, want 30", reader.lastDays)
+	}
 	_, body = get(t, handlers.GetProbes, "/stats/v1/probes?days=99999")
 	if reader.lastDays != 365 {
 		t.Errorf("probe window clamped to %d, want 365", reader.lastDays)

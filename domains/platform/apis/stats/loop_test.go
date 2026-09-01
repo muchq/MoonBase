@@ -98,7 +98,7 @@ func TestRunOnceAggregatesNewObjectsAndSkipsProcessedAndForeignKeys(t *testing.T
 		t.Fatal("the new object was not applied")
 	}
 	// The partition date keys the rollup — the object's own dt=, not today.
-	if got := rollup.Requests[RequestKey{"2026-08-31", "api.1d4.net", 200, "GET", AgentOther}]; got != 1 {
+	if got := rollup.Requests[RequestKey{"2026-08-31", "api.1d4.net", 200, "GET", AgentOther, "(empty)"}]; got != 1 {
 		t.Errorf("rollup rows = %v", rollup.Requests)
 	}
 }

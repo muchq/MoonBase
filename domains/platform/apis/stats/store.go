@@ -2,7 +2,9 @@ package stats
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,8 +24,9 @@ var schema = []string{
 		status int NOT NULL,
 		http_method text NOT NULL,
 		agent_class text NOT NULL,
+		agent text NOT NULL,
 		requests bigint NOT NULL,
-		PRIMARY KEY (dt, host, status, http_method, agent_class)
+		PRIMARY KEY (dt, host, status, http_method, agent_class, agent)
 	)`,
 	`CREATE TABLE IF NOT EXISTS iili_slug_stats (
 		dt date NOT NULL,
@@ -31,15 +34,6 @@ var schema = []string{
 		status int NOT NULL,
 		requests bigint NOT NULL,
 		PRIMARY KEY (dt, slug, status)
-	)`,
-	`CREATE TABLE IF NOT EXISTS agent_stats (
-		dt date NOT NULL,
-		host text NOT NULL,
-		agent_class text NOT NULL,
-		agent text NOT NULL,
-		status int NOT NULL,
-		requests bigint NOT NULL,
-		PRIMARY KEY (dt, host, agent_class, agent, status)
 	)`,
 	`CREATE TABLE IF NOT EXISTS probe_stats (
 		dt date NOT NULL,
@@ -49,26 +43,37 @@ var schema = []string{
 		requests bigint NOT NULL,
 		PRIMARY KEY (dt, host, probe, status)
 	)`,
-	`CREATE TABLE IF NOT EXISTS stats_meta (
-		key text PRIMARY KEY,
-		value text NOT NULL
-	)`,
 }
 
-// RollupVersion is the shape of what Consume computes. Bump it when a
-// rollup gains a table or a classifier changes meaning: at boot a store
-// whose recorded version differs drops every aggregate and every
-// processed marker in one transaction, and the next pass recomputes all
-// of it from the raw lines in S3. That is what "a schema change is a
-// re-aggregation" costs — one full pass — and what makes it never data
-// loss. Version 2 added agent_stats and probe_stats.
+// RollupVersion is the meaning of what Consume computes. Bump it when a
+// classifier changes what a row means; a change to the tables themselves
+// needs no bump, because the recorded version also carries a hash of the
+// schema DDL. Either way, at boot a store whose recorded version differs
+// drops every aggregate table and every processed marker in one
+// transaction, recreates them from the schema above, and the next pass
+// recomputes all of it from the raw lines in S3. That is what "a schema
+// change is a re-aggregation" costs — one full pass, during which the
+// served counts climb back up from zero — and what makes it never data
+// loss. Version 2 named agents and added probe_stats.
 const RollupVersion = "2"
 
-// The tables a re-aggregation rebuilds; every aggregate table belongs
-// here, or a version bump leaves it double-counted.
-var rollupTables = []string{
-	"processed_log_objects", "request_stats", "iili_slug_stats", "agent_stats", "probe_stats",
+func rollupVersionFor(meaning string, ddl []string) string {
+	sum := sha256.Sum256([]byte(strings.Join(ddl, "\n")))
+	return fmt.Sprintf("%s-%x", meaning, sum[:8])
 }
+
+func currentRollupVersion() string { return rollupVersionFor(RollupVersion, schema) }
+
+// The tables a re-aggregation rebuilds; every aggregate table in schema
+// belongs here, or a version bump leaves it double-counted.
+var rollupTables = []string{
+	"processed_log_objects", "request_stats", "iili_slug_stats", "probe_stats",
+}
+
+const metaSchema = `CREATE TABLE IF NOT EXISTS stats_meta (
+	key text PRIMARY KEY,
+	value text NOT NULL
+)`
 
 type Store struct {
 	pool *pgxpool.Pool
@@ -79,21 +84,31 @@ func NewStore(ctx context.Context, databaseURL string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	store := &Store{pool: pool}
+	if _, err := pool.Exec(ctx, metaSchema); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("applying schema: %w", err)
+	}
+	if err := store.dropAggregatesOnVersionChange(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
 	for _, ddl := range schema {
 		if _, err := pool.Exec(ctx, ddl); err != nil {
 			pool.Close()
 			return nil, fmt.Errorf("applying schema: %w", err)
 		}
 	}
-	store := &Store{pool: pool}
-	if err := store.reaggregateOnVersionChange(ctx); err != nil {
-		pool.Close()
-		return nil, err
-	}
 	return store, nil
 }
 
-func (s *Store) reaggregateOnVersionChange(ctx context.Context) error {
+// dropAggregatesOnVersionChange runs before the schema so that a version
+// bump which changed a table's columns recreates it: DROP rather than
+// TRUNCATE is what makes a column change and a new table the same
+// operation. The version row lands in the same transaction, so a crash
+// in between leaves either the old tables at the old version or no
+// tables at the new one — never new-version tables holding old rows.
+func (s *Store) dropAggregatesOnVersionChange(ctx context.Context) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -106,19 +121,17 @@ func (s *Store) reaggregateOnVersionChange(ctx context.Context) error {
 	if err != nil && err != pgx.ErrNoRows {
 		return fmt.Errorf("reading rollup version: %w", err)
 	}
-	if recorded == RollupVersion {
+	if recorded == currentRollupVersion() {
 		return nil
 	}
-	// A fresh database has no aggregates to drop and no version; an old
-	// one has both. TRUNCATE is one statement either way.
 	for _, table := range rollupTables {
-		if _, err := tx.Exec(ctx, "TRUNCATE "+table); err != nil {
-			return fmt.Errorf("resetting %s for re-aggregation: %w", table, err)
+		if _, err := tx.Exec(ctx, "DROP TABLE IF EXISTS "+table); err != nil {
+			return fmt.Errorf("dropping %s for re-aggregation: %w", table, err)
 		}
 	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO stats_meta (key, value) VALUES ('rollup_version', $1)
-		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, RollupVersion); err != nil {
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, currentRollupVersion()); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -172,11 +185,11 @@ func (s *Store) ApplyRollup(ctx context.Context, key string, rollup *Rollup) err
 	}
 	for k, count := range rollup.Requests {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO request_stats (dt, host, status, http_method, agent_class, requests)
-			 VALUES ($1, $2, $3, $4, $5, $6)
-			 ON CONFLICT (dt, host, status, http_method, agent_class)
+			`INSERT INTO request_stats (dt, host, status, http_method, agent_class, agent, requests)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)
+			 ON CONFLICT (dt, host, status, http_method, agent_class, agent)
 			 DO UPDATE SET requests = request_stats.requests + EXCLUDED.requests`,
-			k.Date, k.Host, k.Status, k.Method, k.AgentClass, count); err != nil {
+			k.Date, k.Host, k.Status, k.Method, k.AgentClass, k.Agent, count); err != nil {
 			return err
 		}
 	}
@@ -187,16 +200,6 @@ func (s *Store) ApplyRollup(ctx context.Context, key string, rollup *Rollup) err
 			 ON CONFLICT (dt, slug, status)
 			 DO UPDATE SET requests = iili_slug_stats.requests + EXCLUDED.requests`,
 			k.Date, k.Slug, k.Status, count); err != nil {
-			return err
-		}
-	}
-	for k, count := range rollup.Agents {
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO agent_stats (dt, host, agent_class, agent, status, requests)
-			 VALUES ($1, $2, $3, $4, $5, $6)
-			 ON CONFLICT (dt, host, agent_class, agent, status)
-			 DO UPDATE SET requests = agent_stats.requests + EXCLUDED.requests`,
-			k.Date, k.Host, k.AgentClass, k.Agent, k.Status, count); err != nil {
 			return err
 		}
 	}
@@ -228,6 +231,9 @@ type SlugRow struct {
 
 // AgentRow is one day of one named agent on one host. Blocked is the 403
 // count — the signal for whether a scraper backs off after being refused.
+// The agent column is the one caller-shaped key in request_stats, so the
+// query takes a limit and hands back the busiest rows first: the tail a
+// UA-rotating scanner leaves is exactly the part that never makes the cut.
 type AgentRow struct {
 	Date       string `json:"date"`
 	Host       string `json:"host"`
@@ -289,15 +295,16 @@ func (s *Store) TopSlugs(ctx context.Context, days, limit int) ([]SlugRow, error
 	return out, err
 }
 
-func (s *Store) Agents(ctx context.Context, days int) ([]AgentRow, error) {
+func (s *Store) Agents(ctx context.Context, days, limit int) ([]AgentRow, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT dt::text, host, agent_class, agent,
 		        SUM(requests) AS requests,
 		        COALESCE(SUM(requests) FILTER (WHERE status = 403), 0) AS blocked
-		 FROM agent_stats
+		 FROM request_stats
 		 WHERE dt >= current_date - $1::int
 		 GROUP BY dt, host, agent_class, agent
-		 ORDER BY dt DESC, host, agent_class, requests DESC, agent`, days)
+		 ORDER BY requests DESC, dt DESC, host, agent_class, agent
+		 LIMIT $2`, days, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -7,16 +7,20 @@ import (
 	"io"
 )
 
-// RequestKey is one row of the per-day request rollup: everything bounded,
-// nothing caller-controlled — host is one of Caddy's configured vhosts,
-// the method collapses through the same nine-verb rule the metrics rails
-// use, and the agent class is the four-value vocabulary in classify.go.
+// RequestKey is one row of the per-day request rollup. Host is one of
+// Caddy's configured vhosts, the method collapses through the same
+// nine-verb rule the metrics rails use, the agent class is the four-value
+// vocabulary in classify.go, and the agent is the bounded name AgentOf
+// pairs with it — so a host's traffic can be opened up into which
+// scrapers, which bots, and what the unclassified tail actually sends,
+// from the same rows the class totals come from.
 type RequestKey struct {
 	Date       string
 	Host       string
 	Status     int
 	Method     string
 	AgentClass string
+	Agent      string
 }
 
 // SlugKey is one row of the iili redirect rollup. The slug is
@@ -26,18 +30,6 @@ type SlugKey struct {
 	Date   string
 	Slug   string
 	Status int
-}
-
-// AgentKey is one row of the per-day agent rollup: the class from the
-// four-value vocabulary plus the bounded name AgentOf pairs with it, so a
-// host's traffic can be opened up into which scrapers, which bots, and
-// what the unclassified tail actually sends.
-type AgentKey struct {
-	Date       string
-	Host       string
-	AgentClass string
-	Agent      string
-	Status     int
 }
 
 // ProbeKey is one row of the scanner rollup. Rows exist only for requests
@@ -50,6 +42,18 @@ type ProbeKey struct {
 	Status int
 }
 
+// The most distinct product-token agent names one object may mint. Marker
+// names are bounded by their lists; tokens are whatever the anonymous tail
+// sends, and a scanner rotating its User-Agent per request would otherwise
+// turn one log object into one row per request — held in memory here and
+// then written one statement at a time. Past the cap the tail collapses
+// into one row named overflowAgent, so the counts stay right and the
+// object stays applicable.
+const (
+	maxTailAgentsPerObject = 500
+	overflowAgent          = "(more)"
+)
+
 // Rollup is one processed object's aggregates, accumulated in memory and
 // applied to the store in a single transaction with the processed marker —
 // so a crash between the two reprocesses the object rather than losing or
@@ -57,17 +61,34 @@ type ProbeKey struct {
 type Rollup struct {
 	Requests map[RequestKey]int64
 	Slugs    map[SlugKey]int64
-	Agents   map[AgentKey]int64
 	Probes   map[ProbeKey]int64
+
+	tailAgents map[string]bool
 }
 
 func NewRollup() *Rollup {
 	return &Rollup{
-		Requests: map[RequestKey]int64{},
-		Slugs:    map[SlugKey]int64{},
-		Agents:   map[AgentKey]int64{},
-		Probes:   map[ProbeKey]int64{},
+		Requests:   map[RequestKey]int64{},
+		Slugs:      map[SlugKey]int64{},
+		Probes:     map[ProbeKey]int64{},
+		tailAgents: map[string]bool{},
 	}
+}
+
+// boundedAgent applies the per-object cap to names that came from a
+// product token rather than a marker list. Browsers have no name to cap.
+func (r *Rollup) boundedAgent(class, agent string) string {
+	if class == AgentBrowser || markerNames[agent] {
+		return agent
+	}
+	if r.tailAgents[agent] {
+		return agent
+	}
+	if len(r.tailAgents) >= maxTailAgentsPerObject {
+		return overflowAgent
+	}
+	r.tailAgents[agent] = true
+	return agent
 }
 
 // caddyLine is the slice of Caddy's JSON access log this pipeline reads.
@@ -131,13 +152,7 @@ func (r *Rollup) Consume(reader io.Reader, date string) (skipped int, err error)
 			Status:     parsed.Status,
 			Method:     method,
 			AgentClass: agentClass,
-		}]++
-		r.Agents[AgentKey{
-			Date:       date,
-			Host:       parsed.Request.Host,
-			AgentClass: agentClass,
-			Agent:      agent,
-			Status:     parsed.Status,
+			Agent:      r.boundedAgent(agentClass, agent),
 		}]++
 		if probe := ProbeOf(parsed.Request.URI); probe != "" {
 			r.Probes[ProbeKey{Date: date, Host: parsed.Request.Host, Probe: probe, Status: parsed.Status}]++

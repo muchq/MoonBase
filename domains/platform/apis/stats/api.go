@@ -13,7 +13,7 @@ import (
 type Reader interface {
 	Summary(ctx context.Context, days int) ([]SummaryRow, error)
 	TopSlugs(ctx context.Context, days, limit int) ([]SlugRow, error)
-	Agents(ctx context.Context, days int) ([]AgentRow, error)
+	Agents(ctx context.Context, days, limit int) ([]AgentRow, error)
 	Probes(ctx context.Context, days int) ([]ProbeRow, error)
 }
 
@@ -71,7 +71,8 @@ func (h *Handlers) GetTopSlugs(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handlers) GetAgents(w http.ResponseWriter, r *http.Request) {
 	days := queryInt(r, "days", 30, 365)
-	rows, err := h.reader.Agents(r.Context(), days)
+	limit := queryInt(r, "limit", 500, 2000)
+	rows, err := h.reader.Agents(r.Context(), days, limit)
 	if err != nil {
 		h.serverError(w, "agents", err)
 		return
