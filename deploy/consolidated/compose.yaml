@@ -1,7 +1,18 @@
+# One cap for every container's stdout: the json-file driver keeps
+# everything by default and nothing rotates it, so an unbounded logger is a
+# disk-fill on this single host (#1456). Merged per service rather than set
+# host-wide so the file is the whole truth of the deployment.
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
 services:
   caddy:
     image: caddy:2-alpine
     restart: always
+    logging: *default-logging
     ports:
       - "80:80"
       - "443:443"
@@ -38,6 +49,7 @@ services:
     labels:
       com.muchq.description: "Websocket backend for v1 games"
     restart: always
+    logging: *default-logging
     ports:
       - "8080:8080"
     volumes:
@@ -57,6 +69,7 @@ services:
     labels:
       com.muchq.description: "Golf v2 hub on smithy event streams (/games/v2/*)"
     restart: always
+    logging: *default-logging
     ports:
       - "8089:8089"
     environment:
@@ -101,6 +114,7 @@ services:
     labels:
       com.muchq.description: "Ray-traced scene renderer"
     restart: always
+    logging: *default-logging
     ports:
       - "8081:8081"
     environment:
@@ -138,6 +152,7 @@ services:
     labels:
       com.muchq.description: "Metrics API behind the dashboard"
     restart: always
+    logging: *default-logging
     ports:
       - "8082:8082"
     environment:
@@ -158,6 +173,7 @@ services:
     labels:
       com.muchq.description: "Word-ladder solver (wordchains)"
     restart: always
+    logging: *default-logging
     ports:
       - "8083:8083"
     environment:
@@ -187,6 +203,7 @@ services:
     labels:
       com.muchq.description: "Image blur and edge detection"
     restart: always
+    logging: *default-logging
     ports:
       - "8084:8084"
     environment:
@@ -216,6 +233,7 @@ services:
     labels:
       com.muchq.description: "one_d4 v2 API: /v2/analyze on the C++ detectors (#1389 phase 6)"
     restart: always
+    logging: *default-logging
     ports:
       - "8090:8090"
     environment:
@@ -249,6 +267,7 @@ services:
     labels:
       com.muchq.description: "URL shortener v2 API (C++)"
     restart: always
+    logging: *default-logging
     ports:
       - "8091:8091"
     environment:
@@ -280,6 +299,7 @@ services:
     labels:
       com.muchq.description: "Model Context Protocol server"
     restart: always
+    logging: *default-logging
     ports:
       - "8086:8080"
     environment:
@@ -326,6 +346,7 @@ services:
     labels:
       com.muchq.description: "Shared PostgreSQL for MoonBase services"
     restart: always
+    logging: *default-logging
     environment:
       - POSTGRES_DB=one_d4
       - POSTGRES_USER=one_d4
@@ -353,6 +374,7 @@ services:
   golf_hub_db_init:
     image: postgres:18
     restart: "no"
+    logging: *default-logging
     environment:
       PGHOST: shared_postgres
       PGUSER: one_d4
@@ -379,6 +401,7 @@ services:
   iili_db_init:
     image: postgres:18
     restart: "no"
+    logging: *default-logging
     environment:
       PGHOST: shared_postgres
       PGUSER: one_d4
@@ -411,6 +434,7 @@ services:
     labels:
       com.muchq.description: "one_d4 schema migrations (one-shot)"
     restart: "no"
+    logging: *default-logging
     environment:
       # socketTimeout: DataSourceFactory's 150s default was sized for the
       # retention sweep, but this step is the one that builds indexes — a
@@ -432,6 +456,7 @@ services:
     labels:
       com.muchq.description: "Chess corpus API: index submits, ChessQL queries (indexing runs in one_d4_worker)"
     restart: always
+    logging: *default-logging
     ports:
       - "8088:8080"
     environment:
@@ -491,6 +516,7 @@ services:
     labels:
       com.muchq.description: "Chess index worker (C++)"
     restart: always
+    logging: *default-logging
     environment:
       - ONE_D4_DB_URL=postgresql://one_d4:${ONE_D4_DB_PASSWORD}@shared_postgres:5432/one_d4
       # Requests indexed at once. A run is mostly waiting on chess.com and
@@ -531,6 +557,7 @@ services:
     labels:
       com.muchq.description: "microgpt text generation API"
     restart: always
+    logging: *default-logging
     ports:
       - "8087:8087"
     environment:
@@ -559,9 +586,39 @@ services:
       retries: 3
       start_period: 15s
 
+  log_shipper:
+    image: ghcr.io/muchq/log_shipper:${LOG_SHIPPER_SHA:-${DEPLOY_SHA:-latest}}
+    labels:
+      com.muchq.description: "Caddy access-log to S3 shipper (Go)"
+    restart: always
+    logging: *default-logging
+    # Started only with `--profile stats`: it needs real S3 credentials in
+    # ~/.env, and without them a default `up -d` would crash-loop it (#1457).
+    profiles:
+      - stats
+    environment:
+      - AWS_ACCESS_KEY_ID=${STATS_AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${STATS_AWS_SECRET_ACCESS_KEY}
+      - S3_BUCKET=${STATS_S3_BUCKET}
+      - S3_REGION=${STATS_S3_REGION:-us-east-1}
+      - LOG_DIR=/var/log/caddy
+      - LOG_SOURCE=caddy
+    volumes:
+      # Read-write on purpose: rolled files are deleted after upload, which
+      # is what keeps the host disk bounded once shipping owns retention.
+      - /var/log/caddy:/var/log/caddy
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
   forgejo:
     image: codeberg.org/forgejo/forgejo:16
     restart: always
+    logging: *default-logging
     ports:
       - "222:22"
       - "3000:3000"

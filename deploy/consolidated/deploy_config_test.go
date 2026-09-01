@@ -1960,3 +1960,76 @@ func TestForgejoStillProxiesEverythingTheGuardsDoNotRefuse(t *testing.T) {
 		"nothing and the site answers 200 with an empty body. Block was:\n%s",
 		strings.Join(site, "\n"))
 }
+
+// Container stdout is a disk-fill risk on a single host: docker's json-file
+// driver keeps everything by default, and nothing rotates it. Every service
+// caps its logs by merging the shared x-default-logging anchor (#1456). The
+// healthcheck guard forbids anchors because it must read commands as text;
+// this block carries no command, so the shared anchor is the point rather
+// than a hole — one place to change the cap, and this test only requires
+// that each service declares the key.
+func TestEveryServiceCapsItsContainerLogs(t *testing.T) {
+	// The per-service key without the cap is the same unbounded state
+	// wearing a seatbelt: the anchor itself must bound size and count, or
+	// deleting two lines from it silently reverts all 18 services at once.
+	anchor := false
+	for _, line := range activeLines(t, "compose.yaml") {
+		if line == "x-default-logging: &default-logging" {
+			anchor = true
+		}
+	}
+	if !anchor {
+		t.Fatal("compose.yaml no longer defines the x-default-logging anchor")
+	}
+	for _, bound := range []string{"max-size:", "max-file:"} {
+		if !hasLinePrefix(activeLines(t, "compose.yaml"), bound) {
+			t.Errorf("the logging anchor sets no %s — every container is back to unbounded "+
+				"json-file logs, which is the disk-fill #1456 exists to close", bound)
+		}
+	}
+
+	services := composeServiceLines(t, "compose.yaml")
+	if len(services) < 10 {
+		t.Fatalf("parsed only %d services out of compose.yaml; the parser has gone stale", len(services))
+	}
+	for service, lines := range services {
+		found := false
+		for _, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "logging:") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s declares no logging cap; its stdout grows until the disk fills. "+
+				"Add `logging: *default-logging` (#1456).", service)
+		}
+	}
+}
+
+// The shipper reads Caddy's rolled access logs off the same host path Caddy
+// writes them to, and deletes what it has uploaded — so the mount must be the
+// host bind, and must not be read-only (#1457). Profile-gated: the service
+// needs S3 credentials in ~/.env, so it stays out of a default `up -d` until
+// the operator opts in.
+func TestLogShipperReadsTheCaddyLogMountAndIsProfileGated(t *testing.T) {
+	block := serviceBlock(t, "compose.yaml", "log_shipper")
+
+	if !strings.Contains(block, "ghcr.io/muchq/log_shipper") {
+		t.Fatalf("did not find log_shipper's image in its compose block; this test is no longer "+
+			"reading the service it claims to. Block was:\n%s", block)
+	}
+	if !strings.Contains(block, "- /var/log/caddy:/var/log/caddy") {
+		t.Errorf("log_shipper does not bind-mount /var/log/caddy; it has nothing to ship. "+
+			"Block was:\n%s", block)
+	}
+	if strings.Contains(block, "/var/log/caddy:/var/log/caddy:ro") {
+		t.Errorf("log_shipper mounts the log dir read-only; it deletes rolled files after " +
+			"upload, so read-only, every pass fails the delete and re-uploads the same " +
+			"rolls forever, and retention silently falls back to Caddy's roll_keep.")
+	}
+	if !strings.Contains(block, "profiles:") {
+		t.Errorf("log_shipper is not profile-gated; a default `docker compose up -d` would "+
+			"start it with no S3 credentials and it would crash-loop. Block was:\n%s", block)
+	}
+}
