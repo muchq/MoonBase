@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -39,21 +41,24 @@ type Shipper struct {
 }
 
 // A rolled log as Caddy's roller names it, optionally .gz when Caddy
-// compressed it. Caddy ≥2.10 rolls with timberjack, which appends the roll
-// reason after the timestamp: base-<timestamp>-size.log, -time, or any
-// sanitized word via RotateWithReason — so the trailing segment is one
-// optional \w+ rather than an enumeration. Older lumberjack names carry no
-// reason and still match. The date group is the partition key — the roll
-// time, which is when the last line in the file was written.
+// compressed it. Caddy ≥2.11 rolls with timberjack, which always appends a
+// roll reason after the timestamp (base-<timestamp>-size.log): size, time,
+// or initial from Caddy itself, and the library sanitizes caller-chosen
+// reasons to word characters — so the trailing segment is one optional \w+
+// rather than an enumeration. Older lumberjack names carry no reason and
+// still match. The date group is the partition key — the roll time, which
+// is when the last line in the file was written.
 var rolledLog = regexp.MustCompile(`^.+-(\d{4}-\d{2}-\d{2})T[\d.\-]+(?:-\w+)?\.log(\.gz)?$`)
 
 // ShipOnce uploads every rolled file currently in Dir and deletes what it
 // uploaded. Per-file failures do not stop the rest; they are joined into
 // the returned error with the count of files that did ship. skipped counts
-// every regular file deliberately left in place — the live log, names the
-// roller pattern does not recognize, mid-compression siblings, files
-// younger than MinAge — so a pass that ships nothing from a non-empty
-// directory is distinguishable from an empty one in the pass log.
+// every regular file left in place without an upload attempt — the live
+// log, names the roller pattern does not recognize, mid-compression
+// siblings, files younger than MinAge or already deleted when stat'd (any
+// other stat failure joins the returned error) — so a pass that ships
+// nothing from a non-empty directory is distinguishable from an empty one
+// in the pass log.
 func (s *Shipper) ShipOnce() (shipped, skipped int, err error) {
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
@@ -66,6 +71,19 @@ func (s *Shipper) ShipOnce() (shipped, skipped int, err error) {
 	var errs []error
 	for _, entry := range entries {
 		if entry.IsDir() {
+			continue
+		}
+		// .shipping-*.gztmp is this program's own temp file (gzipToTemp).
+		// One orphaned by a crash mid-pass would otherwise sit in the
+		// skipped count on every pass forever, drifting the baseline the
+		// README's monitoring signal assumes. A quiet one is junk by
+		// definition: the only writer is this loop, later in this pass.
+		if strings.HasPrefix(entry.Name(), ".shipping-") && strings.HasSuffix(entry.Name(), ".gztmp") {
+			if info, err := entry.Info(); err == nil && time.Since(info.ModTime()) >= s.MinAge {
+				if err := os.Remove(filepath.Join(s.Dir, entry.Name())); err != nil {
+					errs = append(errs, fmt.Errorf("%s: %w", entry.Name(), err))
+				}
+			}
 			continue
 		}
 		match := rolledLog.FindStringSubmatch(entry.Name())
@@ -84,7 +102,20 @@ func (s *Shipper) ShipOnce() (shipped, skipped int, err error) {
 		}
 		if s.MinAge > 0 {
 			info, err := entry.Info()
-			if err != nil || time.Since(info.ModTime()) < s.MinAge {
+			if err != nil {
+				// Gone between ReadDir and here means Caddy's compressor or
+				// roll_keep pruning got it first — nothing to ship. Any
+				// other stat failure (a permission drift on the mount) must
+				// reach the error log, or every pass would read as
+				// unrecognized names.
+				if errors.Is(err, fs.ErrNotExist) {
+					skipped++
+				} else {
+					errs = append(errs, fmt.Errorf("%s: stat: %w", entry.Name(), err))
+				}
+				continue
+			}
+			if time.Since(info.ModTime()) < s.MinAge {
 				skipped++
 				continue
 			}

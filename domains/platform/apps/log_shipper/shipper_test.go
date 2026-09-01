@@ -44,6 +44,19 @@ func writeFile(t *testing.T, dir, name, contents string) string {
 	return path
 }
 
+func gzipped(t *testing.T, contents string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	w := gzip.NewWriter(&buf)
+	if _, err := w.Write([]byte(contents)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
 func gunzip(t *testing.T, data []byte) string {
 	t.Helper()
 	r, err := gzip.NewReader(bytes.NewReader(data))
@@ -84,15 +97,7 @@ func TestShipsARolledFileUnderItsDatePartitionAndDeletesIt(t *testing.T) {
 // uploaded byte-for-byte, not gzipped a second time.
 func TestAnAlreadyGzippedRollIsUploadedAsIs(t *testing.T) {
 	dir := t.TempDir()
-	var buf bytes.Buffer
-	w := gzip.NewWriter(&buf)
-	if _, err := w.Write([]byte(`{"ts":2}`)); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, dir, "access-2026-08-30T13-00-00.000.log.gz", buf.String())
+	writeFile(t, dir, "access-2026-08-30T13-00-00.000.log.gz", gzipped(t, `{"ts":2}`))
 	uploader := newFakeUploader()
 
 	if _, _, err := (&Shipper{Dir: dir, Source: "caddy", Uploader: uploader}).ShipOnce(); err != nil {
@@ -106,9 +111,9 @@ func TestAnAlreadyGzippedRollIsUploadedAsIs(t *testing.T) {
 
 // The live file is the one Caddy still writes; touching it loses lines.
 // Anything else that is not a rolled log (a stray file, a directory) is not
-// this program's to delete. Every file left behind is counted, so a pass
-// that recognizes nothing in a non-empty directory is visible in the logs
-// rather than indistinguishable from an empty one.
+// this program's to delete. Every file left without an upload attempt is
+// counted, so a pass that recognizes nothing in a non-empty directory is
+// visible in the logs rather than indistinguishable from an empty one.
 func TestTheLiveLogAndUnrecognizedFilesAreLeftAloneButCounted(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "access.log", "live")
@@ -133,29 +138,26 @@ func TestTheLiveLogAndUnrecognizedFilesAreLeftAloneButCounted(t *testing.T) {
 	}
 }
 
-// Caddy ≥2.10 rolls with timberjack, which always appends the roll reason
+// Caddy ≥2.11 rolls with timberjack, which always appends the roll reason
 // to the backup name: access-<timestamp>-size.log, -time, or a custom
-// sanitized word. These are the names production actually writes — v2.11.4
-// shipped nothing for 18 hours because the pattern only knew the old
-// lumberjack shape.
+// sanitized word. These are the names production actually writes.
 func TestARollWithARotationReasonSuffixShips(t *testing.T) {
 	dir := t.TempDir()
-	var buf bytes.Buffer
-	w := gzip.NewWriter(&buf)
-	if _, err := w.Write([]byte(`{"ts":3}`)); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, dir, "access-2026-08-31T18-14-52.509-size.log.gz", buf.String())
+	writeFile(t, dir, "access-2026-08-31T18-14-52.509-size.log.gz", gzipped(t, `{"ts":3}`))
 	writeFile(t, dir, "access-2026-09-01T00-00-00.000-time.log", `{"ts":4}`)
+	// The reason is any \w word, not an enumeration — sanitized custom
+	// reasons reach filenames via RotateWithReason.
+	writeFile(t, dir, "access-2026-08-31T19-00-00.000-sig_hup1.log", `{"ts":5}`)
+	// Roll-shaped but not a roll: a matched name gets DELETED after upload,
+	// so the boundary must not widen past one reason word.
+	writeFile(t, dir, "access-2026-08-31T18-14-52.509-size.extra.log", "not ours")
 	uploader := newFakeUploader()
 
 	shipped, skipped, err := (&Shipper{Dir: dir, Source: "caddy", Uploader: uploader}).ShipOnce()
 
-	if err != nil || shipped != 2 || skipped != 0 {
-		t.Fatalf("ShipOnce = (%d, %d, %v), want both reason-suffixed rolls shipped", shipped, skipped, err)
+	if err != nil || shipped != 3 || skipped != 1 {
+		t.Fatalf("ShipOnce = (%d, %d, %v), want the three reason-suffixed rolls shipped and the near-miss skipped",
+			shipped, skipped, err)
 	}
 	sized := "logs/source=caddy/dt=2026-08-31/access-2026-08-31T18-14-52.509-size.log.gz"
 	if got := gunzip(t, uploader.puts[sized]); got != `{"ts":3}` {
@@ -164,6 +166,13 @@ func TestARollWithARotationReasonSuffixShips(t *testing.T) {
 	timed := "logs/source=caddy/dt=2026-09-01/access-2026-09-01T00-00-00.000-time.log.gz"
 	if got := gunzip(t, uploader.puts[timed]); got != `{"ts":4}` {
 		t.Errorf("time-triggered roll uploaded as %q; got keys %v", got, keys(uploader.puts))
+	}
+	custom := "logs/source=caddy/dt=2026-08-31/access-2026-08-31T19-00-00.000-sig_hup1.log.gz"
+	if got := gunzip(t, uploader.puts[custom]); got != `{"ts":5}` {
+		t.Errorf("custom-reason roll uploaded as %q; got keys %v", got, keys(uploader.puts))
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "access-2026-08-31T18-14-52.509-size.extra.log")); statErr != nil {
+		t.Errorf("the near-miss file was touched: %v", statErr)
 	}
 }
 
@@ -178,10 +187,15 @@ func TestAFailedUploadKeepsTheFileAndTheRestStillShip(t *testing.T) {
 	uploader.fail["logs/source=caddy/dt=2026-08-30/access-2026-08-30T14-00-00.000.log.gz"] =
 		errors.New("s3 said 500")
 
-	shipped, _, err := (&Shipper{Dir: dir, Source: "caddy", Uploader: uploader}).ShipOnce()
+	shipped, skipped, err := (&Shipper{Dir: dir, Source: "caddy", Uploader: uploader}).ShipOnce()
 
 	if shipped != 1 {
 		t.Errorf("shipped = %d, want the non-failing file to have gone through", shipped)
+	}
+	// A failure is not a skip: skipped is the operator's unrecognized-name
+	// signal, and failures already surface through the returned error.
+	if skipped != 0 {
+		t.Errorf("skipped = %d, want 0; a failed upload is reported by the error, not the skip count", skipped)
 	}
 	if err == nil {
 		t.Error("ShipOnce reported success while an upload failed")
@@ -222,6 +236,70 @@ func TestAGzWhoseLogSiblingStillExistsIsSkipped(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(dir, "access-2026-08-30T16-00-00.000.log.gz")); statErr != nil {
 		t.Errorf("the in-progress .gz was touched: %v", statErr)
+	}
+}
+
+// .shipping-*.gztmp is this program's own temp file, orphaned only by a
+// crash mid-pass. Left alone it would inflate the skipped count on every
+// pass forever, drifting the baseline the README's monitoring signal
+// assumes; a quiet one is junk and gets removed.
+func TestAnOrphanedTempFileIsSweptAndNotCounted(t *testing.T) {
+	dir := t.TempDir()
+	orphan := writeFile(t, dir, ".shipping-42.gztmp", "half a gzip")
+	uploader := newFakeUploader()
+
+	shipped, skipped, err := (&Shipper{Dir: dir, Source: "caddy", Uploader: uploader}).ShipOnce()
+
+	if err != nil || shipped != 0 || skipped != 0 {
+		t.Fatalf("ShipOnce = (%d, %d, %v), want the orphan in neither count", shipped, skipped, err)
+	}
+	if _, statErr := os.Stat(orphan); !errors.Is(statErr, os.ErrNotExist) {
+		t.Error("the orphaned temp file was not swept")
+	}
+}
+
+// A temp file younger than MinAge may belong to a pass that is still
+// running in another process lifetime (a restart mid-gzip); it is left for
+// a later pass to sweep.
+func TestAFreshTempFileIsNotSwept(t *testing.T) {
+	dir := t.TempDir()
+	fresh := writeFile(t, dir, ".shipping-43.gztmp", "still growing")
+	uploader := newFakeUploader()
+
+	_, skipped, err := (&Shipper{Dir: dir, Source: "caddy", Uploader: uploader, MinAge: time.Minute}).ShipOnce()
+
+	if err != nil || skipped != 0 {
+		t.Fatalf("ShipOnce = (_, %d, %v), want the fresh temp uncounted and no error", skipped, err)
+	}
+	if _, statErr := os.Stat(fresh); statErr != nil {
+		t.Errorf("the fresh temp file was touched: %v", statErr)
+	}
+}
+
+// A stat failure that is not "file already gone" must surface in the
+// returned error. Counting it as skipped would make a permission drift on
+// the mount read exactly like unrecognized roll names, steering diagnosis
+// the wrong way.
+func TestAStatFailureIsAnErrorNotASkip(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "access-2026-08-30T18-00-00.000-size.log", "data")
+	if err := os.Chmod(dir, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+	uploader := newFakeUploader()
+
+	s := &Shipper{Dir: dir, Source: "caddy", Uploader: uploader, MinAge: time.Minute}
+	shipped, skipped, err := s.ShipOnce()
+
+	if shipped != 0 || skipped != 0 {
+		t.Errorf("ShipOnce counts = (%d, %d), want the unstattable file in neither bucket", shipped, skipped)
+	}
+	if err == nil {
+		t.Error("a stat failure other than not-exist was silently absorbed")
 	}
 }
 

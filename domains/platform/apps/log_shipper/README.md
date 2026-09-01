@@ -8,7 +8,7 @@ hourly fee that batch stats have no use for.
 ## What it does
 
 Every `SHIP_INTERVAL` (default `1h`), scan `LOG_DIR` for files Caddy's
-roller has rolled — `access-<timestamp>-<reason>.log` under Caddy ≥2.10
+roller has rolled — `access-<timestamp>-<reason>.log` under Caddy ≥2.11
 (timberjack appends the roll reason, e.g. `-size`), `access-<timestamp>.log`
 before that, `.log.gz` when Caddy has compressed it (a plain `.log` may
 still be awaiting Caddy's compressor, which is why a `.gz` with a `.log`
@@ -68,4 +68,5 @@ is silent. A persistently failing upload logs an error every pass. Every
 pass — including an idle one — also logs `shipped` and `skipped` counts;
 `skipped` staying above 1 (the live log) while `shipped` stays 0 means
 rolled files are sitting unrecognized, which is how a roller filename
-format change shows up.
+format change shows up. (Caddy ≥2.11 can also roll-compress with zstd;
+a `.zst` never matches the pattern and would sit in that count.)
