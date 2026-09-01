@@ -1,4 +1,4 @@
-load("//bazel/rules:java.bzl", "artifact", "java_library")
+load("//bazel/rules:java.bzl", "artifact", "java_library", "java_test_suite")
 
 java_library(
     name = "logging",
@@ -10,5 +10,25 @@ java_library(
         artifact("ch.qos.logback:logback-classic"),
         artifact("io.sentry:sentry-logback"),
         artifact("org.slf4j:slf4j-api"),
+    ],
+)
+
+java_test_suite(
+    name = "logging_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/platform/logging/LogbackConfigTest.java",
+    ],
+    runtime_deps = [
+        # The config under test rides this library's classpath, and so does
+        # the SentryAppender class it names.
+        ":logging",
+    ],
+    deps = [
+        artifact("ch.qos.logback:logback-classic"),
+        artifact("ch.qos.logback:logback-core"),
+        artifact("com.fasterxml.jackson.core:jackson-databind"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.assertj:assertj-core"),
     ],
 )

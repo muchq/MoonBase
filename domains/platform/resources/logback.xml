@@ -1,11 +1,10 @@
 <configuration scan="true" scanPeriod="30 seconds">
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-    <encoder>
-      <!-- Full ISO date, not bare time-of-day: these lines get read offline
-           (and are slated for the stats pipeline, #1365), where HH:mm:ss
-           alone cannot even be ordered (#1456). -->
-      <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
-    </encoder>
+    <!-- One JSON object per line, logback's own encoder — no new
+         dependency. The stats pipeline parses these offline (#1459), and
+         the epoch-millis timestamp is absolute, which the old date-less
+         pattern was not (#1456). LogbackConfigTest pins the shape. -->
+    <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
       <level>INFO</level>
     </filter>
