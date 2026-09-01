@@ -8,10 +8,12 @@ hourly fee that batch stats have no use for.
 ## What it does
 
 Every `SHIP_INTERVAL` (default `1h`), scan `LOG_DIR` for files Caddy's
-roller has rolled — `access-<timestamp>.log`, `.log.gz` when Caddy has
-compressed it (a plain `.log` may still be awaiting Caddy's compressor,
-which is why a `.gz` with a `.log` sibling is skipped and nothing younger
-than `MinAge` ships) — gzip the ones that need it, and PUT each to
+roller has rolled — `access-<timestamp>-<reason>.log` under Caddy ≥2.11
+(timberjack appends the roll reason, e.g. `-size`), `access-<timestamp>.log`
+before that, `.log.gz` when Caddy has compressed it (a plain `.log` may
+still be awaiting Caddy's compressor, which is why a `.gz` with a `.log`
+sibling is skipped and nothing younger than `MinAge` ships) — gzip the ones
+that need it, and PUT each to
 
 ```
 s3://$S3_BUCKET/logs/source=$LOG_SOURCE/dt=YYYY-MM-DD/<filename>.gz
@@ -62,5 +64,9 @@ The mount is read-write on purpose — deletion after upload is what keeps
 the host disk bounded once shipping owns retention. Caddy's `roll_keep`
 still matters whenever the shipper is down **or failing**: after five
 further rolls Caddy deletes the oldest unshipped file, and that deletion
-is silent. A persistently failing upload logs an error every pass; that
-log is the only warning before data ages out.
+is silent. A persistently failing upload logs an error every pass. Every
+pass — including an idle one — also logs `shipped` and `skipped` counts;
+`skipped` staying above 1 (the live log) while `shipped` stays 0 means
+rolled files are sitting unrecognized, which is how a roller filename
+format change shows up. (Caddy ≥2.11 can also roll-compress with zstd;
+a `.zst` never matches the pattern and would sit in that count.)
