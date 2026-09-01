@@ -38,24 +38,31 @@ type Shipper struct {
 	MinAge time.Duration
 }
 
-// A rolled log as Caddy's roller names it: base-<timestamp>.log, optionally
-// .gz when Caddy compressed it. The date group is the partition key — the
-// roll time, which is when the last line in the file was written.
-var rolledLog = regexp.MustCompile(`^.+-(\d{4}-\d{2}-\d{2})T[\d.\-]+\.log(\.gz)?$`)
+// A rolled log as Caddy's roller names it, optionally .gz when Caddy
+// compressed it. Caddy ≥2.10 rolls with timberjack, which appends the roll
+// reason after the timestamp: base-<timestamp>-size.log, -time, or any
+// sanitized word via RotateWithReason — so the trailing segment is one
+// optional \w+ rather than an enumeration. Older lumberjack names carry no
+// reason and still match. The date group is the partition key — the roll
+// time, which is when the last line in the file was written.
+var rolledLog = regexp.MustCompile(`^.+-(\d{4}-\d{2}-\d{2})T[\d.\-]+(?:-\w+)?\.log(\.gz)?$`)
 
 // ShipOnce uploads every rolled file currently in Dir and deletes what it
 // uploaded. Per-file failures do not stop the rest; they are joined into
-// the returned error with the count of files that did ship.
-func (s *Shipper) ShipOnce() (int, error) {
+// the returned error with the count of files that did ship. skipped counts
+// every regular file deliberately left in place — the live log, names the
+// roller pattern does not recognize, mid-compression siblings, files
+// younger than MinAge — so a pass that ships nothing from a non-empty
+// directory is distinguishable from an empty one in the pass log.
+func (s *Shipper) ShipOnce() (shipped, skipped int, err error) {
 	entries, err := os.ReadDir(s.Dir)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	present := map[string]bool{}
 	for _, entry := range entries {
 		present[entry.Name()] = true
 	}
-	shipped := 0
 	var errs []error
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -63,6 +70,7 @@ func (s *Shipper) ShipOnce() (int, error) {
 		}
 		match := rolledLog.FindStringSubmatch(entry.Name())
 		if match == nil {
+			skipped++
 			continue
 		}
 		alreadyGzipped := match[2] == ".gz"
@@ -71,11 +79,13 @@ func (s *Shipper) ShipOnce() (int, error) {
 		// would ship to the same key — the corrupt one last. A .gz whose
 		// .log sibling is still present is by definition unfinished.
 		if alreadyGzipped && present[entry.Name()[:len(entry.Name())-len(".gz")]] {
+			skipped++
 			continue
 		}
 		if s.MinAge > 0 {
 			info, err := entry.Info()
 			if err != nil || time.Since(info.ModTime()) < s.MinAge {
+				skipped++
 				continue
 			}
 		}
@@ -85,7 +95,7 @@ func (s *Shipper) ShipOnce() (int, error) {
 		}
 		shipped++
 	}
-	return shipped, errors.Join(errs...)
+	return shipped, skipped, errors.Join(errs...)
 }
 
 func (s *Shipper) shipFile(name, date string, alreadyGzipped bool) error {
