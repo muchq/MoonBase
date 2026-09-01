@@ -208,6 +208,23 @@ a role and database holding live rows is an operation, not a rename. Keep it URL
 `@ / ? # %` or quotes): it rides in a libpq URL and a single-quoted SQL literal. Compose
 refuses to start the service if it's unset.
 
+### The stats profile
+
+`log_shipper`, `stats` and `stats_db_init` sit behind the `stats` compose profile: they fail
+fast without the `STATS_*` credentials, so a fresh host must not start them by default. This
+host opts in permanently with one more `~/.env` line:
+
+```
+COMPOSE_PROFILES=stats
+```
+
+deploy.sh runs compose in `~`, where compose reads that file, so every normal deploy includes
+the trio. Alongside it live `STATS_AWS_ACCESS_KEY_ID`, `STATS_AWS_SECRET_ACCESS_KEY`,
+`STATS_S3_BUCKET`, `STATS_S3_REGION`, and `STATS_DB_PASSWORD` (same URL-safe rules as the
+other database passwords: it rides in a libpq URL and a single-quoted SQL literal). Without
+the `COMPOSE_PROFILES` line the containers keep running after a deploy but silently stop
+being updated — compose ignores profile-gated services on an unflagged `up -d`.
+
 Keeping a URL here rather than in a host file is what makes the hostname visible to this repo:
 `deploy_config_test.go` fails if a database host is not a Postgres service this file publishes, so
 the instance can be renamed (#1225) by editing one file instead of by keeping the old name

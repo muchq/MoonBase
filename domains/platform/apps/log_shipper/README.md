@@ -50,9 +50,13 @@ design. Once the bucket and the put-only IAM user exist and
 `STATS_AWS_ACCESS_KEY_ID`, `STATS_AWS_SECRET_ACCESS_KEY`, `STATS_S3_BUCKET`
 and `STATS_S3_REGION` are in `~/.env` on the host:
 
-```bash
-docker compose --profile stats up -d
 ```
+COMPOSE_PROFILES=stats
+```
+
+in `~/.env` (the permanent opt-in — deploy.sh's unflagged `up -d` then
+includes the profile on every deploy; a one-off `docker compose --profile
+stats up -d` works but stops being updated by later deploys).
 
 The mount is read-write on purpose — deletion after upload is what keeps
 the host disk bounded once shipping owns retention. Caddy's `roll_keep`
