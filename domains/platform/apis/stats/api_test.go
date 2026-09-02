@@ -17,6 +17,8 @@ type fakeReader struct {
 	slugs     []SlugRow
 	agents    []AgentRow
 	probes    []ProbeRow
+	queries   []QueryRow
+	terms     []TermRow
 	lastDays  int
 	lastLimit int
 	fail      bool
@@ -52,6 +54,22 @@ func (f *fakeReader) Probes(_ context.Context, days int) ([]ProbeRow, error) {
 	}
 	f.lastDays = days
 	return f.probes, nil
+}
+
+func (f *fakeReader) Queries(_ context.Context, days int) ([]QueryRow, error) {
+	if f.fail {
+		return nil, errors.New("db is having a day")
+	}
+	f.lastDays = days
+	return f.queries, nil
+}
+
+func (f *fakeReader) QueryTerms(_ context.Context, days, limit int) ([]TermRow, error) {
+	if f.fail {
+		return nil, errors.New("db is having a day")
+	}
+	f.lastDays, f.lastLimit = days, limit
+	return f.terms, nil
 }
 
 func handlersWith(reader *fakeReader) *Handlers {
@@ -182,6 +200,48 @@ func TestAgentsAndProbesShareTheWindowRules(t *testing.T) {
 	}
 	failing := handlersWith(&fakeReader{fail: true})
 	for name, handler := range map[string]http.HandlerFunc{"agents": failing.GetAgents, "probes": failing.GetProbes} {
+		if recorder, _ := get(t, handler, "/x"); recorder.Code != http.StatusInternalServerError {
+			t.Errorf("%s on a failing store = %d, want 500", name, recorder.Code)
+		}
+	}
+}
+
+func TestOneD4QueryEndpointsShareTheWindowRules(t *testing.T) {
+	reader := &fakeReader{
+		queries: []QueryRow{{Date: "2026-09-01", Entry: "query", Source: "ui", Outcome: "ok", Cache: "live", Requests: 4}},
+		terms:   []TermRow{{Entry: "query", Kind: KindField, Term: "white.elo", Requests: 9}},
+	}
+	handlers := handlersWith(reader)
+
+	_, body := get(t, handlers.GetQueries, "/stats/v1/one_d4/queries")
+	if reader.lastDays != 30 {
+		t.Errorf("default queries window = %d, want 30", reader.lastDays)
+	}
+	row := body["rows"].([]any)[0].(map[string]any)
+	if row["cache"] != "live" || row["requests"] != float64(4) {
+		t.Errorf("query row = %v", row)
+	}
+
+	_, body = get(t, handlers.GetQueryTerms, "/stats/v1/one_d4/terms")
+	if reader.lastDays != 30 || reader.lastLimit != 200 {
+		t.Errorf("default terms (days, limit) = (%d, %d), want (30, 200)", reader.lastDays, reader.lastLimit)
+	}
+	row = body["rows"].([]any)[0].(map[string]any)
+	if row["kind"] != "field" || row["term"] != "white.elo" {
+		t.Errorf("term row = %v", row)
+	}
+	get(t, handlers.GetQueryTerms, "/stats/v1/one_d4/terms?days=99999&limit=99999")
+	if reader.lastDays != 365 || reader.lastLimit != 1000 {
+		t.Errorf("clamped terms (days, limit) = (%d, %d), want (365, 1000)", reader.lastDays, reader.lastLimit)
+	}
+
+	for name, handler := range map[string]http.HandlerFunc{"queries": handlersWith(&fakeReader{}).GetQueries, "terms": handlersWith(&fakeReader{}).GetQueryTerms} {
+		if _, body := get(t, handler, "/x"); body["rows"] == nil {
+			t.Errorf("%s rows serialized as null; want []", name)
+		}
+	}
+	failing := handlersWith(&fakeReader{fail: true})
+	for name, handler := range map[string]http.HandlerFunc{"queries": failing.GetQueries, "terms": failing.GetQueryTerms} {
 		if recorder, _ := get(t, handler, "/x"); recorder.Code != http.StatusInternalServerError {
 			t.Errorf("%s on a failing store = %d, want 500", name, recorder.Code)
 		}

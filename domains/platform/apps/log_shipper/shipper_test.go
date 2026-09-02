@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -176,9 +177,69 @@ func TestARollWithARotationReasonSuffixShips(t *testing.T) {
 	}
 }
 
+// logback rolls one_d4's query events as query_events-<date>T<hour>.log.gz
+// (the shared logback.xml); the name is shaped like Caddy's rolls on purpose,
+// so the same shipper moves them under the hour's date.
+func TestALogbackHourlyRollShipsUnderItsDate(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "query_events-2026-09-01T14.log.gz", gzipped(t, `{"message":"query_event"}`))
+	writeFile(t, dir, "query_events.log", "live\n")
+	uploader := newFakeUploader()
+
+	shipped, skipped, err := (&Shipper{Dir: dir, Source: "one_d4", Uploader: uploader}).ShipOnce()
+
+	if err != nil || shipped != 1 || skipped != 1 {
+		t.Fatalf("ShipOnce = (%d, %d, %v); want the roll shipped and the live file skipped",
+			shipped, skipped, err)
+	}
+	key := "logs/source=one_d4/dt=2026-09-01/query_events-2026-09-01T14.log.gz"
+	if got := gunzip(t, uploader.puts[key]); got != `{"message":"query_event"}` {
+		t.Errorf("uploaded under %v, want %s with the roll's contents", keys(uploader.puts), key)
+	}
+}
+
 // A failed upload must leave the file for the next pass — deletion is only
 // ever the consequence of a 200 — and must not stop the other files from
 // shipping.
+// A JVM killed while logback compresses leaves the renamed roll behind as
+// <roll>.log<nanos>.tmp: complete, uncompressed, and named by nothing
+// else's cleanup. It ships under the roll's own name, gzipped here.
+func TestALogbackRollLeftMidCompressionShipsUnderTheRollName(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "query_events-2026-09-01T15.log1756739000000000000.tmp", `{"message":"query_event"}`)
+	uploader := newFakeUploader()
+
+	shipped, _, err := (&Shipper{Dir: dir, Source: "one_d4", Uploader: uploader}).ShipOnce()
+
+	if err != nil || shipped != 1 {
+		t.Fatalf("ShipOnce = (%d, %v), want the stranded roll shipped", shipped, err)
+	}
+	key := "logs/source=one_d4/dt=2026-09-01/query_events-2026-09-01T15.log.gz"
+	if got := gunzip(t, uploader.puts[key]); got != `{"message":"query_event"}` {
+		t.Errorf("uploaded under %v, want %s", keys(uploader.puts), key)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the stranded roll is still on disk; it would sit in the skipped count forever")
+	}
+}
+
+// One source failing must not cost the others their pass.
+func TestShipAllContinuesPastAFailingSource(t *testing.T) {
+	good := t.TempDir()
+	writeFile(t, good, "access-2026-08-30T12-00-00.000.log", `{"ts":1}`)
+	uploader := newFakeUploader()
+	shippers := []*Shipper{
+		{Dir: filepath.Join(t.TempDir(), "missing"), Source: "caddy", Uploader: uploader},
+		{Dir: good, Source: "one_d4", Uploader: uploader},
+	}
+
+	ShipAll(shippers, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	if _, ok := uploader.puts["logs/source=one_d4/dt=2026-08-30/access-2026-08-30T12-00-00.000.log.gz"]; !ok {
+		t.Errorf("the healthy source did not ship after the broken one; uploads = %v", keys(uploader.puts))
+	}
+}
+
 func TestAFailedUploadKeepsTheFileAndTheRestStillShip(t *testing.T) {
 	dir := t.TempDir()
 	failing := writeFile(t, dir, "access-2026-08-30T14-00-00.000.log", "a")
@@ -321,5 +382,22 @@ func TestAFileYoungerThanMinAgeIsLeftForTheNextPass(t *testing.T) {
 	}
 	if shipped, _, err = s.ShipOnce(); err != nil || shipped != 1 {
 		t.Errorf("ShipOnce after aging = (%d, %v), want it shipped", shipped, err)
+	}
+}
+
+func TestSourcesParseAsLabelledDirectoriesAndRejectTheAmbiguous(t *testing.T) {
+	sources, err := ParseSources(" caddy=/var/log/caddy, one_d4=/var/log/one_d4 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Source{{"caddy", "/var/log/caddy"}, {"one_d4", "/var/log/one_d4"}}
+	if len(sources) != 2 || sources[0] != want[0] || sources[1] != want[1] {
+		t.Errorf("ParseSources = %v, want %v", sources, want)
+	}
+	for _, bad := range []string{"", "/var/log/caddy", "caddy=", "=/var/log/caddy",
+		"caddy=/a,caddy=/b", "caddy=/a,other=/a", "a/b=/var/log/x"} {
+		if _, err := ParseSources(bad); err == nil {
+			t.Errorf("ParseSources(%q) accepted; a wrong partition label is a silent misfile", bad)
+		}
 	}
 }

@@ -51,6 +51,10 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	rollup.Slugs[SlugKey{date, host + "-slug", 302}] = 3
 	rollup.Probes[ProbeKey{date, host, ProbeEnv, 404}] = 4
 	rollup.Probes[ProbeKey{date, host, ProbeEnv, 200}] = 1
+	// The query rollup has no host; the store applies any entry, so this run's
+	// unique host serves as one and keeps the rows tellable and the counts exact.
+	rollup.Queries[QueryKey{date, host, "ui", "ok", "live"}] = 2
+	rollup.Terms[TermKey{date, host, KindField, "white.elo"}] = 2
 
 	if pending, err := store.Unprocessed(ctx, []string{key}); err != nil || len(pending) != 1 {
 		t.Fatalf("Unprocessed = (%v, %v), want the fresh key pending", pending, err)
@@ -138,6 +142,56 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	if env == nil || env.Requests != 5 || env.Served != 1 {
 		t.Errorf("env probe row = %+v; want 5 across statuses with the one 200 served", env)
 	}
+
+	if row := queryRowFor(t, store, host); row == nil || row.Requests != 2 || row.Cache != "live" {
+		t.Errorf("query row = %+v, want exactly the 2 applied once", row)
+	}
+	if row := termRowFor(t, store, host); row == nil || row.Requests != 2 || row.Kind != KindField {
+		t.Errorf("term row = %+v, want exactly the 2 applied once", row)
+	}
+
+	// A second object sharing the keys accumulates: that is the production path, one
+	// hourly roll after another into the same day's rows.
+	second := NewRollup()
+	second.Queries[QueryKey{date, host, "ui", "ok", "live"}] = 3
+	second.Terms[TermKey{date, host, KindField, "white.elo"}] = 1
+	if err := store.ApplyRollup(ctx, key+".second", second); err != nil {
+		t.Fatal(err)
+	}
+	if row := queryRowFor(t, store, host); row == nil || row.Requests != 5 {
+		t.Errorf("query row after a second object = %+v, want 5", row)
+	}
+	if row := termRowFor(t, store, host); row == nil || row.Requests != 3 {
+		t.Errorf("term row after a second object = %+v, want 3", row)
+	}
+}
+
+func queryRowFor(t *testing.T, store *Store, entry string) *QueryRow {
+	t.Helper()
+	rows, err := store.Queries(context.Background(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range rows {
+		if rows[i].Entry == entry {
+			return &rows[i]
+		}
+	}
+	return nil
+}
+
+func termRowFor(t *testing.T, store *Store, entry string) *TermRow {
+	t.Helper()
+	rows, err := store.QueryTerms(context.Background(), 2, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range rows {
+		if rows[i].Entry == entry {
+			return &rows[i]
+		}
+	}
+	return nil
 }
 
 func TestAgentsHonoursTheLimitBusiestFirst(t *testing.T) {
@@ -174,6 +228,8 @@ func TestAVersionBumpDropsAggregatesAndMarkersForReaggregation(t *testing.T) {
 	rollup.Requests[RequestKey{date, host, 200, "GET", AgentBot, "curl"}] = 1
 	rollup.Slugs[SlugKey{date, host + "-slug", 302}] = 1
 	rollup.Probes[ProbeKey{date, host, ProbeGit, 404}] = 1
+	rollup.Queries[QueryKey{date, host, "ui", "ok", "live"}] = 1
+	rollup.Terms[TermKey{date, host, KindField, "eco"}] = 1
 	if err := store.ApplyRollup(ctx, key, rollup); err != nil {
 		t.Fatal(err)
 	}
@@ -229,6 +285,12 @@ func TestAVersionBumpDropsAggregatesAndMarkersForReaggregation(t *testing.T) {
 		if row.Host == host {
 			t.Errorf("probe aggregates survived the version bump: %+v", row)
 		}
+	}
+	if row := queryRowFor(t, reopened, host); row != nil {
+		t.Errorf("query aggregates survived the version bump: %+v", row)
+	}
+	if row := termRowFor(t, reopened, host); row != nil {
+		t.Errorf("term aggregates survived the version bump: %+v", row)
 	}
 	var recorded string
 	if err := reopened.pool.QueryRow(ctx,

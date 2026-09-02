@@ -15,6 +15,8 @@ type Reader interface {
 	TopSlugs(ctx context.Context, days, limit int) ([]SlugRow, error)
 	Agents(ctx context.Context, days, limit int) ([]AgentRow, error)
 	Probes(ctx context.Context, days int) ([]ProbeRow, error)
+	Queries(ctx context.Context, days int) ([]QueryRow, error)
+	QueryTerms(ctx context.Context, days, limit int) ([]TermRow, error)
 }
 
 type Handlers struct {
@@ -85,6 +87,27 @@ func (h *Handlers) GetProbes(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.reader.Probes(r.Context(), days)
 	if err != nil {
 		h.serverError(w, "probes", err)
+		return
+	}
+	writeJSON(w, map[string]any{"days": days, "rows": emptyIfNil(rows)})
+}
+
+func (h *Handlers) GetQueries(w http.ResponseWriter, r *http.Request) {
+	days := queryInt(r, "days", 30, 365)
+	rows, err := h.reader.Queries(r.Context(), days)
+	if err != nil {
+		h.serverError(w, "queries", err)
+		return
+	}
+	writeJSON(w, map[string]any{"days": days, "rows": emptyIfNil(rows)})
+}
+
+func (h *Handlers) GetQueryTerms(w http.ResponseWriter, r *http.Request) {
+	days := queryInt(r, "days", 30, 365)
+	limit := queryInt(r, "limit", 200, 1000)
+	rows, err := h.reader.QueryTerms(r.Context(), days, limit)
+	if err != nil {
+		h.serverError(w, "query terms", err)
 		return
 	}
 	writeJSON(w, map[string]any{"days": days, "rows": emptyIfNil(rows)})

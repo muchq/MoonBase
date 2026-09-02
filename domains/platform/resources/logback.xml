@@ -19,6 +19,27 @@
     </filter>
   </appender>
 
+  <!-- one_d4's query events (#1465), on a file of their own for the stats
+       pipeline: log_shipper ships whatever this directory rolls, so the file
+       holds those lines only. Rolled hourly under the same name shape as
+       Caddy's rolls, name-date'T'hour.log.gz, which is what the shipper
+       recognizes; the date in the name is the hour's, so the shipper's
+       partition is right. Every Java service loads this config; the directory
+       is the deployment's to set, and the default is a scratch path for the
+       services that never log the event. -->
+  <appender name="QUERY_EVENTS" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${QUERY_EVENT_LOG_DIR:-/tmp/query_events}/query_events.log</file>
+    <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+      <fileNamePattern>${QUERY_EVENT_LOG_DIR:-/tmp/query_events}/query_events-%d{yyyy-MM-dd'T'HH}.log.gz</fileNamePattern>
+      <maxHistory>48</maxHistory>
+    </rollingPolicy>
+    <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
+  </appender>
+
+  <logger name="com.muchq.games.one_d4.query_event" level="INFO">
+    <appender-ref ref="QUERY_EVENTS"/>
+  </logger>
+
   <logger name="com.zaxxer.hikari" level="INFO"/>
 
   <root level="TRACE">

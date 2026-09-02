@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -24,9 +25,27 @@ type Applier interface {
 	ApplyRollup(ctx context.Context, key string, rollup *Rollup) error
 }
 
-// The shipper's layout: logs/source=caddy/dt=YYYY-MM-DD/<file>. The date
-// group is the partition the rollup is keyed by.
-var objectKey = regexp.MustCompile(`^logs/source=caddy/dt=(\d{4}-\d{2}-\d{2})/`)
+// The shipper's layout: logs/source=<source>/dt=YYYY-MM-DD/<file>. The
+// source names its parser in sources; the date is the partition the
+// rollup is keyed by.
+var objectKey = regexp.MustCompile(`^logs/source=([a-z0-9_]+)/dt=(\d{4}-\d{2}-\d{2})/`)
+
+// The sources aggregated, each under its own prefix, and how each is
+// read: Caddy's access logs and one_d4's query events (#1465). Adding a
+// source is one entry here and nothing else.
+var sources = map[string]func(*Rollup, io.Reader, string) (int, error){
+	"caddy":  (*Rollup).Consume,
+	"one_d4": (*Rollup).ConsumeQueryEvents,
+}
+
+func sourcePrefixes() []string {
+	var prefixes []string
+	for source := range sources {
+		prefixes = append(prefixes, "logs/source="+source+"/")
+	}
+	sort.Strings(prefixes)
+	return prefixes
+}
 
 type Aggregator struct {
 	Objects ObjectStore
@@ -34,19 +53,21 @@ type Aggregator struct {
 	Logger  *slog.Logger
 }
 
-// RunOnce aggregates every not-yet-processed object under the caddy
-// prefix. Per-object failures are logged and skipped — the object stays
+// RunOnce aggregates every not-yet-processed object under the source
+// prefixes. Per-object failures are logged and skipped — the object stays
 // unprocessed and the next pass retries it — so one corrupt or half-
 // shipped object cannot wedge the loop.
 func (a *Aggregator) RunOnce(ctx context.Context) (processed int, err error) {
-	keys, err := a.Objects.List("logs/source=caddy/")
-	if err != nil {
-		return 0, fmt.Errorf("listing log objects: %w", err)
-	}
 	var candidates []string
-	for _, key := range keys {
-		if objectKey.MatchString(key) {
-			candidates = append(candidates, key)
+	for _, prefix := range sourcePrefixes() {
+		keys, err := a.Objects.List(prefix)
+		if err != nil {
+			return 0, fmt.Errorf("listing log objects under %s: %w", prefix, err)
+		}
+		for _, key := range keys {
+			if objectKey.MatchString(key) {
+				candidates = append(candidates, key)
+			}
 		}
 	}
 	if len(candidates) == 0 {
@@ -68,7 +89,8 @@ func (a *Aggregator) RunOnce(ctx context.Context) (processed int, err error) {
 }
 
 func (a *Aggregator) processObject(ctx context.Context, key string) error {
-	date := objectKey.FindStringSubmatch(key)[1]
+	match := objectKey.FindStringSubmatch(key)
+	source, date := match[1], match[2]
 	body, err := a.Objects.Get(key)
 	if err != nil {
 		return err
@@ -85,8 +107,12 @@ func (a *Aggregator) processObject(ctx context.Context, key string) error {
 		reader = gz
 	}
 
+	consume, ok := sources[source]
+	if !ok {
+		return fmt.Errorf("no parser for source %q", source)
+	}
 	rollup := NewRollup()
-	skipped, err := rollup.Consume(reader, date)
+	skipped, err := consume(rollup, reader, date)
 	if err != nil {
 		return err
 	}

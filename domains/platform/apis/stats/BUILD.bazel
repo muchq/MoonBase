@@ -1,6 +1,9 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("//bazel/rules:oci.bzl", "linux_oci_go")
 
+# otel_contract pins the query-event vocabulary here against QueryEvent.java.
+exports_files(["queries.go"])
+
 go_library(
     name = "stats_lib",
     srcs = [
@@ -8,6 +11,7 @@ go_library(
         "api.go",
         "classify.go",
         "loop.go",
+        "queries.go",
         "store.go",
     ],
     importpath = "github.com/muchq/moonbase/domains/platform/apis/stats",
@@ -30,6 +34,7 @@ go_test(
         "api_test.go",
         "classify_test.go",
         "loop_test.go",
+        "queries_test.go",
         "store_test.go",
     ],
     embed = [":stats_lib"],

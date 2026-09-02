@@ -10,6 +10,7 @@ go_test(
         "http_instrument_descriptions_test.go",
         "http_instrument_labels_test.go",
         "http_latency_buckets_test.go",
+        "query_event_vocabulary_test.go",
         "request_log_fields_test.go",
     ],
     # Read as text rather than linked. There is no build configuration in which
@@ -18,6 +19,8 @@ go_test(
     # named-constant declarations are pinned this way; label sets and units
     # are pinned per rail against real exported payloads instead.
     data = [
+        "//domains/games/apis/one_d4:src/main/java/com/muchq/games/one_d4/api/QueryEvent.java",
+        "//domains/platform/apis/stats:queries.go",
         "//domains/platform/libs/aura:middleware.cc",
         "//domains/platform/libs/aura:middleware.h",
         "//domains/platform/libs/futility/otel:http_instrument_descriptions.h",
