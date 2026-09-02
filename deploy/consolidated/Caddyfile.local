@@ -1,4 +1,26 @@
+# Refusals every site imports first (#1458). TLM-Audit-Scanner walks each vhost
+# for exposed credentials (.env, .aws, .git-credentials, cloud keys) from two
+# Techoff SRV addresses and ignores robots.txt; the stats page counted nine
+# thousand of its requests in a day across five hosts, none refused. UA and
+# addresses both, as the git.muchq.com guards are: the agent may stop naming
+# itself and the addresses may move. Two matchers, two handles: a matcher
+# block ANDs its conditions, and this must be an OR.
+(refuse_scanners) {
+	@scanner_agent header_regexp User-Agent (?i)tlm-audit-scanner
+	@scanner_address remote_ip 195.178.110.199 45.148.10.67
+
+	handle @scanner_agent {
+		respond 403
+	}
+
+	handle @scanner_address {
+		respond 403
+	}
+}
+
 :2015 {
+	import refuse_scanners
+
 	@post_portrait {
 		method POST
 		path /portrait/v1/trace

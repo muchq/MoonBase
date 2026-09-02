@@ -2179,3 +2179,96 @@ func TestOneD4KnowsTheUiOriginCaddyGrants(t *testing.T) {
 		}
 	}
 }
+
+// TLM-Audit-Scanner (#1458) walks every vhost for exposed credentials and
+// ignores robots.txt. The refusal is a snippet each site imports first, so a
+// new site block cannot forget it and no site answers the scanner before the
+// import runs; UA and address both, for the same reason the Forgejo guards
+// carry both.
+func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
+	lines := directiveLines(t, "Caddyfile")
+
+	var snippet []string
+	depth := 0
+	var sites []string
+	for i, line := range lines {
+		opened := strings.Count(line, "{") - strings.Count(line, "}")
+		if depth == 0 && opened == 1 {
+			if line == "(refuse_scanners) {" {
+				snippet = caddyBlockAt(lines, i)
+			} else {
+				sites = append(sites, line)
+				block := caddyBlockAt(lines, i)
+				if len(block) == 0 || block[0] != "import refuse_scanners" {
+					t.Errorf("%s does not import refuse_scanners as its first directive; the scanner is "+
+						"answered before it is refused. Block began:\n%s", line, strings.Join(firstN(block, 3), "\n"))
+				}
+			}
+		}
+		depth += opened
+	}
+	if snippet == nil {
+		t.Fatal("no (refuse_scanners) snippet in the Caddyfile")
+	}
+	if len(sites) < 5 {
+		t.Fatalf("found only %d site blocks; the walk over the file is wrong", len(sites))
+	}
+
+	var agent *regexp.Regexp
+	addresses := ""
+	for _, line := range snippet {
+		if strings.HasPrefix(line, "@scanner_agent header_regexp User-Agent ") {
+			agent = regexp.MustCompile(strings.TrimPrefix(line, "@scanner_agent header_regexp User-Agent "))
+		}
+		if strings.HasPrefix(line, "@scanner_address remote_ip ") {
+			addresses = strings.TrimPrefix(line, "@scanner_address remote_ip ")
+		}
+	}
+	if agent == nil {
+		t.Fatal("refuse_scanners has no @scanner_agent User-Agent matcher")
+	}
+	for _, ua := range []string{"TLM-Audit-Scanner/1.0", "tlm-audit-scanner"} {
+		if !agent.MatchString(ua) {
+			t.Errorf("the User-Agent regexp (%s) does not match %q", agent, ua)
+		}
+	}
+	for _, ua := range []string{
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+		"git/2.45.2",
+		"mcpserver",
+		"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+	} {
+		if agent.MatchString(ua) {
+			t.Errorf("the User-Agent regexp (%s) matches %q, which is not the scanner", agent, ua)
+		}
+	}
+	// The two Techoff SRV addresses the report names; the agent guard is the
+	// one that survives a move, so both are pinned rather than the range.
+	for _, ip := range []string{"195.178.110.199", "45.148.10.67"} {
+		if !strings.Contains(addresses, ip) {
+			t.Errorf("refuse_scanners does not refuse %s", ip)
+		}
+	}
+	for _, matcher := range []string{"@scanner_agent", "@scanner_address"} {
+		found := false
+		for i, line := range snippet {
+			if line == "handle "+matcher+" {" {
+				for _, inner := range caddyBlockAt(snippet, i) {
+					if inner == "respond 403" {
+						found = true
+					}
+				}
+			}
+		}
+		if !found {
+			t.Errorf("refuse_scanners has no `handle %s { respond 403 }`; a matcher with no handle refuses nothing", matcher)
+		}
+	}
+}
+
+func firstN(lines []string, n int) []string {
+	if len(lines) < n {
+		return lines
+	}
+	return lines[:n]
+}

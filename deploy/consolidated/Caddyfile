@@ -1,4 +1,26 @@
+# Refusals every site imports first (#1458). TLM-Audit-Scanner walks each vhost
+# for exposed credentials (.env, .aws, .git-credentials, cloud keys) from two
+# Techoff SRV addresses and ignores robots.txt; the stats page counted nine
+# thousand of its requests in a day across five hosts, none refused. UA and
+# addresses both, as the git.muchq.com guards are: the agent may stop naming
+# itself and the addresses may move. Two matchers, two handles: a matcher
+# block ANDs its conditions, and this must be an OR.
+(refuse_scanners) {
+	@scanner_agent header_regexp User-Agent (?i)tlm-audit-scanner
+	@scanner_address remote_ip 195.178.110.199 45.148.10.67
+
+	handle @scanner_agent {
+		respond 403
+	}
+
+	handle @scanner_address {
+		respond 403
+	}
+}
+
 api.muchq.com {
+	import refuse_scanners
+
 	@post_portrait {
 		method POST
 		path /portrait/v1/trace
@@ -220,6 +242,8 @@ api.muchq.com {
 # iili.uk. The public /r/{slug} is rewritten onto iili's modeled
 # /iili/v1/r/{slug} — the deliberate exception to "gateway == model path".
 i.iili.uk {
+	import refuse_scanners
+
 	@getredir {
 		method GET HEAD
 		path /r/*
@@ -240,10 +264,14 @@ i.iili.uk {
 }
 
 consolidated.cmptr.info {
+	import refuse_scanners
+
 	respond "Consolidating..."
 }
 
 git.muchq.com {
+	import refuse_scanners
+
 	# Forgejo runs under a 0.5-CPU cap and the git-backed pages fork real work
 	# per request, so a crawler walking them starves the site (#1447).
 	#
@@ -300,6 +328,8 @@ git.muchq.com {
 }
 
 gpt.muchq.com {
+	import refuse_scanners
+
 	@post_generate {
 		method POST
 		path /microgpt/v1/generate
@@ -359,6 +389,8 @@ gpt.muchq.com {
 }
 
 api.1d4.net {
+	import refuse_scanners
+
 	@post_index {
 		method POST
 		path /v1/index
@@ -430,6 +462,8 @@ api.1d4.net {
 }
 
 mcp.1d4.net {
+	import refuse_scanners
+
 	# Every method on /mcp reaches the server, not just POST. Streamable HTTP
 	# clients probe GET for the optional server->client SSE stream and may send
 	# DELETE to end a session; micronaut-mcp offers neither and answers 405,
