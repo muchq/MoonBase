@@ -38,11 +38,18 @@ http_file(
 
 # DB-IP's free IP-to-country table (CC BY 4.0; muchq.com/stats carries the
 # attribution), bundled into the stats image (#1467). DB-IP publishes a new
-# file each month under a dated URL and keeps the old ones up, so a refresh
-# is a pin bump here and nothing on the host.
+# file each month under a dated URL, so a refresh is a pin bump here and
+# nothing on the host: download the month's file, upload it as a release
+# asset named for the month (`gh release create dbip-country-lite-YYYY-MM
+# <file> --target main`), and replace the month, the sha256, and both URLs.
+# The release is the fallback (#1478): Bazel tries the URLs in order, and
+# the pin keeps both honest.
 http_file(
     name = "dbip_country_lite",
     downloaded_file_path = "dbip-country-lite.csv.gz",
     sha256 = "a32bb3c384bd3de60ad9024596aa5b395a6dd5beaa27a7223407cc2edc681d0b",
-    urls = ["https://download.db-ip.com/free/dbip-country-lite-2026-09.csv.gz"],
+    urls = [
+        "https://download.db-ip.com/free/dbip-country-lite-2026-09.csv.gz",
+        "https://github.com/muchq/MoonBase/releases/download/dbip-country-lite-2026-09/dbip-country-lite-2026-09.csv.gz",
+    ],
 )

@@ -62,9 +62,10 @@ and the two-letter code, with request, 403, and probe counts — where the
 scrapers, bots, and scanners come from. The database is DB-IP's free
 country CSV (CC BY 4.0; muchq.com's stats page carries the attribution),
 pinned by URL and sha256 as `@dbip_country_lite` in
-`bazel/tools.MODULE.bazel` and bundled into the image at
-`/geo/dbip-country-lite.csv.gz`; a new month is a pin bump, nothing on
-the host. The service loads it at boot into a sorted range table and
+`bazel/tools.MODULE.bazel` — DB-IP's own URL first, a release asset on
+this repository as the fallback — and bundled into the image at
+`/geo/dbip-country-lite.csv.gz`; a new month is a pin bump (the steps are
+on the pin), nothing on the host. The service loads it at boot into a sorted range table and
 binary-searches it, no library. Overlapping rows lose to the range they
 sit in, and the `ZZ` rows DB-IP uses for reserved and private space are
 not placements. An address outside every range files under `--`, and so
