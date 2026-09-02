@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { UserEvent } from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -141,15 +141,51 @@ describe('IndexView', () => {
 
     await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
     // Scoped to the table: the explanatory note below it also says "Pruned".
-    const table = within(screen.getByRole('table'));
+    let table = within(screen.getByRole('table'));
     expect(table.getByText('Indexed')).toBeInTheDocument();
     expect(table.getByText('3d left')).toBeInTheDocument();
+    // The pruned request is hidden until asked for; the count says how many.
+    expect(table.queryByText('Pruned')).not.toBeInTheDocument();
+    expect(screen.queryByText('gone')).not.toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Show 1 pruned' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
+    table = within(screen.getByRole('table'));
     expect(table.getByText('Pruned')).toBeInTheDocument();
+    expect(screen.getByText('gone')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide pruned' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Hide pruned' }));
+    expect(screen.queryByText('gone')).not.toBeInTheDocument();
 
     const silentRow = screen.getByText('silent').closest('tr') as HTMLTableRowElement;
     // Data column is 5th; Error is 6th and also renders a dash, so index precisely.
     expect(silentRow.cells[4]).toHaveTextContent('—');
     expect(silentRow.cells[4].querySelector('.data-badge')).toBeNull();
+  });
+
+  it('offers no toggle when nothing is pruned, and says so when everything is', async () => {
+    setup();
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /pruned/ })).not.toBeInTheDocument();
+
+    cleanup();
+    vi.mocked(api.listIndexRequests).mockResolvedValue([
+      {
+        ...completedRequest,
+        id: 'gone',
+        player: 'gone',
+        data: { status: 'EXPIRED', monthsAvailable: 0, monthsTotal: 3 },
+      },
+    ]);
+    setup();
+    await waitFor(() =>
+      expect(screen.getByText('Every recent request has been pruned.')).toBeInTheDocument()
+    );
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    // The note still explains what pruned means, since the toggle is the only trace.
+    expect(screen.getByText(/kept for 7 days/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show 1 pruned' }));
+    expect(screen.getByRole('table')).toBeInTheDocument();
   });
 
   it('explains both retention windows so a pruned row is not a mystery', async () => {
