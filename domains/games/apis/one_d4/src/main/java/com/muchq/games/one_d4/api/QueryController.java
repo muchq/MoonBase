@@ -38,8 +38,8 @@ public class QueryController {
       QueryRequest request,
       @HeaderParam("User-Agent") @Nullable String userAgent,
       @HeaderParam("Origin") @Nullable String origin) {
-    // The query event replaces the old access-style line that logged the raw query text: the
-    // shape is what the stats pipeline needs, and the text is the caller's (#1465).
+    // The query event is the request's only log line: the shape is what the stats pipeline
+    // needs, and the text is the caller's (#1465).
     return events.observe(
         QueryEvent.ENTRY_QUERY,
         userAgent,

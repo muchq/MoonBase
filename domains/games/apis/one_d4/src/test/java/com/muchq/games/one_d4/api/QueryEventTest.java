@@ -245,7 +245,7 @@ public class QueryEventTest {
     assertThat(theOneEvent()).containsEntry("player", "false").containsEntry("cache", "snapshot");
   }
 
-  /** The old access line logged the query text; nothing may, on any logger. */
+  /** The query text is the caller's; no logger carries it. */
   @Test
   public void theQueryTextIsLoggedNowhere() {
     queryController.query(
