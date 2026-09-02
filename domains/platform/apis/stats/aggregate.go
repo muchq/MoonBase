@@ -59,11 +59,15 @@ const (
 // so a crash between the two reprocesses the object rather than losing or
 // double-counting it.
 type Rollup struct {
-	Requests map[RequestKey]int64
-	Slugs    map[SlugKey]int64
-	Probes   map[ProbeKey]int64
-	Queries  map[QueryKey]int64
-	Terms    map[TermKey]int64
+	Requests  map[RequestKey]int64
+	Slugs     map[SlugKey]int64
+	Probes    map[ProbeKey]int64
+	Queries   map[QueryKey]int64
+	Terms     map[TermKey]int64
+	Countries map[GeoKey]GeoStat
+
+	// Geo places client addresses; NoLocator when no database is loaded.
+	Geo Locator
 
 	tailAgents map[string]bool
 }
@@ -75,6 +79,8 @@ func NewRollup() *Rollup {
 		Probes:     map[ProbeKey]int64{},
 		Queries:    map[QueryKey]int64{},
 		Terms:      map[TermKey]int64{},
+		Countries:  map[GeoKey]GeoStat{},
+		Geo:        NoLocator{},
 		tailAgents: map[string]bool{},
 	}
 }
@@ -100,11 +106,22 @@ func (r *Rollup) boundedAgent(class, agent string) string {
 type caddyLine struct {
 	Status  int `json:"status"`
 	Request struct {
-		Host    string              `json:"host"`
-		Method  string              `json:"method"`
-		URI     string              `json:"uri"`
-		Headers map[string][]string `json:"headers"`
+		Host     string              `json:"host"`
+		Method   string              `json:"method"`
+		URI      string              `json:"uri"`
+		ClientIP string              `json:"client_ip"`
+		RemoteIP string              `json:"remote_ip"`
+		Headers  map[string][]string `json:"headers"`
 	} `json:"request"`
+}
+
+// Caddy is the edge, so client_ip and remote_ip agree; older lines carry
+// only remote_ip.
+func (l *caddyLine) clientIP() string {
+	if l.Request.ClientIP != "" {
+		return l.Request.ClientIP
+	}
+	return l.Request.RemoteIP
 }
 
 func (l *caddyLine) userAgent() string {
@@ -158,9 +175,11 @@ func (r *Rollup) Consume(reader io.Reader, date string) (skipped int, err error)
 			AgentClass: agentClass,
 			Agent:      r.boundedAgent(agentClass, agent),
 		}]++
-		if probe := ProbeOf(parsed.Request.URI); probe != "" {
+		probe := ProbeOf(parsed.Request.URI)
+		if probe != "" {
 			r.Probes[ProbeKey{Date: date, Host: parsed.Request.Host, Probe: probe, Status: parsed.Status}]++
 		}
+		r.addGeo(date, parsed.Request.Host, agentClass, parsed.clientIP(), parsed.Status, probe != "")
 		if slug := SlugOf(parsed.Request.Host, parsed.Request.Method, parsed.Request.URI); slug != "" {
 			r.Slugs[SlugKey{Date: date, Slug: slug, Status: parsed.Status}]++
 		}

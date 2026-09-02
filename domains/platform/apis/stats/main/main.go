@@ -49,19 +49,37 @@ func main() {
 	}
 	defer store.Close()
 
-	aggregator := &stats.Aggregator{
-		Objects: &s3lite.S3{
-			Bucket: requireEnv(logger, "S3_BUCKET"),
-			Region: requireEnv(logger, "S3_REGION"),
-			Creds: s3lite.Credentials{
-				AccessKeyID:     requireEnv(logger, "AWS_ACCESS_KEY_ID"),
-				SecretAccessKey: requireEnv(logger, "AWS_SECRET_ACCESS_KEY"),
-			},
-			Client: &http.Client{Timeout: 5 * time.Minute},
-			Now:    time.Now,
+	objects := &s3lite.S3{
+		Bucket: requireEnv(logger, "S3_BUCKET"),
+		Region: requireEnv(logger, "S3_REGION"),
+		Creds: s3lite.Credentials{
+			AccessKeyID:     requireEnv(logger, "AWS_ACCESS_KEY_ID"),
+			SecretAccessKey: requireEnv(logger, "AWS_SECRET_ACCESS_KEY"),
 		},
-		Store:  store,
-		Logger: logger,
+		Client: &http.Client{Timeout: 5 * time.Minute},
+		Now:    time.Now,
+	}
+	// The geo database is optional and, when named, required to load: a
+	// configured key that fails is a deployment fault, not a reason to
+	// silently file every address under "--".
+	var geo stats.Locator = stats.NoLocator{}
+	if key := os.Getenv("GEO_DB_KEY"); key != "" {
+		loaded, skipped, err := stats.LoadGeo(objects, key)
+		if err != nil {
+			logger.Error("cannot load the geo database", "key", key, "error", err)
+			os.Exit(1)
+		}
+		logger.Info("geo database loaded", "key", key, "skipped_lines", skipped)
+		geo = loaded
+	} else {
+		logger.Warn("GEO_DB_KEY is not set; geo rows will all read " + stats.UnknownCountry)
+	}
+
+	aggregator := &stats.Aggregator{
+		Objects: objects,
+		Store:   store,
+		Logger:  logger,
+		Geo:     geo,
 	}
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -86,6 +104,7 @@ func main() {
 	router.HandleFunc("GET /stats/v1/probes", handlers.GetProbes)
 	router.HandleFunc("GET /stats/v1/one_d4/queries", handlers.GetQueries)
 	router.HandleFunc("GET /stats/v1/one_d4/terms", handlers.GetQueryTerms)
+	router.HandleFunc("GET /stats/v1/countries", handlers.GetCountries)
 
 	logger.Info("stats started", "port", port, "interval", interval.String())
 	if err := http.ListenAndServe(":"+port, router); err != nil {

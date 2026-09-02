@@ -17,6 +17,7 @@ type Reader interface {
 	Probes(ctx context.Context, days int) ([]ProbeRow, error)
 	Queries(ctx context.Context, days int) ([]QueryRow, error)
 	QueryTerms(ctx context.Context, days, limit int) ([]TermRow, error)
+	Countries(ctx context.Context, days, limit int) ([]CountryRow, error)
 }
 
 type Handlers struct {
@@ -108,6 +109,17 @@ func (h *Handlers) GetQueryTerms(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.reader.QueryTerms(r.Context(), days, limit)
 	if err != nil {
 		h.serverError(w, "query terms", err)
+		return
+	}
+	writeJSON(w, map[string]any{"days": days, "rows": emptyIfNil(rows)})
+}
+
+func (h *Handlers) GetCountries(w http.ResponseWriter, r *http.Request) {
+	days := queryInt(r, "days", 30, 365)
+	limit := queryInt(r, "limit", 2000, 5000)
+	rows, err := h.reader.Countries(r.Context(), days, limit)
+	if err != nil {
+		h.serverError(w, "countries", err)
 		return
 	}
 	writeJSON(w, map[string]any{"days": days, "rows": emptyIfNil(rows)})

@@ -51,6 +51,8 @@ type Aggregator struct {
 	Objects ObjectStore
 	Store   Applier
 	Logger  *slog.Logger
+	// Geo places client addresses for the geo rollup; nil means none loaded.
+	Geo Locator
 }
 
 // RunOnce aggregates every not-yet-processed object under the source
@@ -112,6 +114,9 @@ func (a *Aggregator) processObject(ctx context.Context, key string) error {
 		return fmt.Errorf("no parser for source %q", source)
 	}
 	rollup := NewRollup()
+	if a.Geo != nil {
+		rollup.Geo = a.Geo
+	}
 	skipped, err := consume(rollup, reader, date)
 	if err != nil {
 		return err

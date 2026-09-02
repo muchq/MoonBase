@@ -112,6 +112,65 @@ func TestConsumeCapsTheAnonymousAgentTailPerObject(t *testing.T) {
 	}
 }
 
+type fakeLocator map[string]string
+
+func (f fakeLocator) Country(ip string) string { return f[ip] }
+
+func TestConsumeRollsUpWhereEachClassCameFromWithBlocksAndProbes(t *testing.T) {
+	lines := strings.Join([]string{
+		`{"status":200,"request":{"host":"h","method":"GET","uri":"/","client_ip":"1.0.0.7","headers":{"User-Agent":["Mozilla/5.0 (Macintosh) Chrome/126.0"]}}}`,
+		`{"status":403,"request":{"host":"h","method":"GET","uri":"/x","client_ip":"57.141.3.4","headers":{"User-Agent":["meta-externalagent/1.1"]}}}`,
+		`{"status":404,"request":{"host":"h","method":"GET","uri":"/.env","client_ip":"195.178.110.199","headers":{"User-Agent":["TLM-Audit-Scanner/1.0"]}}}`,
+		`{"status":404,"request":{"host":"h","method":"GET","uri":"/wp-login.php","client_ip":"195.178.110.199","headers":{"User-Agent":["TLM-Audit-Scanner/1.0"]}}}`,
+		// Older lines carry remote_ip only; an address the locator does not know is "--".
+		`{"status":200,"request":{"host":"h","method":"GET","uri":"/","remote_ip":"10.1.2.3","headers":{"User-Agent":["curl/8.6.0"]}}}`,
+	}, "\n")
+	rollup := NewRollup()
+	rollup.Geo = fakeLocator{"1.0.0.7": "AU", "57.141.3.4": "US", "195.178.110.199": "GB"}
+
+	if _, err := rollup.Consume(strings.NewReader(lines), "2026-08-30"); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[GeoKey]GeoStat{
+		{"2026-08-30", "h", AgentBrowser, "AU"}:   {1, 0, 0},
+		{"2026-08-30", "h", AgentAIScraper, "US"}: {1, 1, 0},
+		{"2026-08-30", "h", AgentBot, "GB"}:       {2, 0, 2},
+		{"2026-08-30", "h", AgentBot, "--"}:       {1, 0, 0},
+	}
+	if len(rollup.Countries) != len(want) {
+		t.Errorf("geo rows = %v, want %v", rollup.Countries, want)
+	}
+	for key, stat := range want {
+		if rollup.Countries[key] != stat {
+			t.Errorf("geo %+v = %+v, want %+v", key, rollup.Countries[key], stat)
+		}
+	}
+}
+
+// Without a database every row is "--"; the class split still holds, so the
+// table is honest rather than empty.
+func TestConsumeWithoutAGeoDatabaseFilesEverythingUnderUnknown(t *testing.T) {
+	rollup := NewRollup()
+	if _, err := rollup.Consume(strings.NewReader(sampleLines), "2026-08-30"); err != nil {
+		t.Fatal(err)
+	}
+	var total int64
+	for key, stat := range rollup.Countries {
+		if key.Country != UnknownCountry {
+			t.Errorf("row %+v placed without a database", key)
+		}
+		total += stat.Requests
+	}
+	var requests int64
+	for _, count := range rollup.Requests {
+		requests += count
+	}
+	if total != requests {
+		t.Errorf("geo rows count %d requests, the request rollup %d; every request is somewhere", total, requests)
+	}
+}
+
 func TestConsumeSurvivesOversizedLines(t *testing.T) {
 	huge := `{"status":200,"request":{"host":"x","method":"GET","uri":"/` +
 		strings.Repeat("a", 2*1024*1024) + `","headers":{}}}`

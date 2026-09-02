@@ -220,7 +220,9 @@ COMPOSE_PROFILES=stats
 
 deploy.sh runs compose in `~`, where compose reads that file, so every normal deploy includes
 the trio. Alongside it live `STATS_AWS_ACCESS_KEY_ID`, `STATS_AWS_SECRET_ACCESS_KEY`,
-`STATS_S3_BUCKET`, `STATS_S3_REGION`, and `STATS_DB_PASSWORD` (same URL-safe rules as the
+`STATS_S3_BUCKET`, `STATS_S3_REGION`, optionally `STATS_GEO_DB_KEY` (the key of
+DB-IP's country CSV in that bucket; unset, the geo rows all read `--`), and
+`STATS_DB_PASSWORD` (same URL-safe rules as the
 other database passwords: it rides in a libpq URL and a single-quoted SQL literal). Without
 the `COMPOSE_PROFILES` line the containers keep running after a deploy but silently stop
 being updated — compose ignores profile-gated services on an unflagged `up -d`.

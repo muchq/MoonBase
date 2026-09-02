@@ -56,9 +56,20 @@ The pass runs while the API serves, so for its length the counts climb
 back up from zero — minutes at this scale, and the log says when it is
 done.
 
-What stays ad hoc: IP-range clusters (a /24 key is caller-shaped and
-unbounded) and geography (nothing in the repo maps addresses to
-countries). Both are one query over the raw partitions in S3, which keep
+The geo rollup (#1467) places each request's `client_ip` in a country
+and keys `geo_stats` on day, host, agent class, and the two-letter code,
+with request, 403, and probe counts — where the scrapers, bots, and
+scanners come from. The database is DB-IP's free country CSV
+(`dbip-country-lite-YYYY-MM.csv.gz`, CC BY 4.0, attribution on the
+dashboard), uploaded by the operator to the stats bucket under the key
+`GEO_DB_KEY` names; the service loads it at boot into a sorted range
+table and binary-searches it, no library. An address outside every range,
+or no database at all, files under `--`. A new monthly file is a restart.
+Rows aggregated before the database was uploaded stay `--` until a
+re-aggregation (bump `RollupVersion`).
+
+What stays ad hoc: IP-range clusters — a /24 key is caller-shaped and
+unbounded — which is one query over the raw partitions in S3, keeping
 `request.remote_ip` and `request.client_ip` per line.
 
 ## The API
@@ -77,6 +88,8 @@ countries). Both are one query over the raw partitions in S3, which keep
   Rows from before #1468 landed on `api.muchq.com` and `gpt.muchq.com`
   overcount served, and the summary's error count there rose with the
   change, because scanner traffic now gets the 404 it always deserved.
+- `GET /stats/v1/countries?days=30&limit=2000` — per host/class/country
+  request, 403, and probe counts, busiest first
 - `GET /stats/v1/one_d4/queries?days=30` — one_d4 queries per
   day/entry/source/outcome/cache
 - `GET /stats/v1/one_d4/terms?days=30&limit=200` — which fields, motifs,
@@ -89,7 +102,7 @@ stay in the log, not on the wire.
 ## Configuration
 
 `STATS_DB_URL` (postgres), `S3_BUCKET`, `S3_REGION`, `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY` — the same stats IAM user the shipper writes with,
+`AWS_SECRET_ACCESS_KEY`, and optionally `GEO_DB_KEY` — the same stats IAM user the shipper writes with,
 which therefore needs `s3:GetObject` and `s3:ListBucket` on the `logs/*`
 prefix as well as `s3:PutObject`. `AGGREGATE_INTERVAL` and `PORT`
 (default 8092) are optional.
