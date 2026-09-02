@@ -131,6 +131,12 @@ export async function getQueryStats(): Promise<QueryStats> {
   return request(`/stats/v1/one_d4/queries?days=${STATS_WINDOW_DAYS}`);
 }
 
+// The endpoint's ceiling. The vocabulary — fields, motifs, order-by motifs,
+// group-by columns, per entry point — is a few hundred rows at most, so the
+// ceiling reads all of it; a smaller limit could let a busy kind crowd a rare
+// one out of the page.
+const TERM_LIMIT = 1000;
+
 export async function getQueryTerms(): Promise<QueryTerms> {
-  return request(`/stats/v1/one_d4/terms?days=${STATS_WINDOW_DAYS}&limit=200`);
+  return request(`/stats/v1/one_d4/terms?days=${STATS_WINDOW_DAYS}&limit=${TERM_LIMIT}`);
 }

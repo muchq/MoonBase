@@ -56,7 +56,7 @@ describe('api', () => {
       await getQueryTerms();
       expect(mock.mock.calls.map((call) => call[0])).toEqual([
         'https://api.1d4.net/stats/v1/one_d4/queries?days=30',
-        'https://api.1d4.net/stats/v1/one_d4/terms?days=30&limit=200',
+        'https://api.1d4.net/stats/v1/one_d4/terms?days=30&limit=1000',
       ]);
     });
   });
