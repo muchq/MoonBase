@@ -29,7 +29,8 @@ public class QueryControllerTest {
     ticker = new MutableTicker();
     QueryExecutor executor = new QueryExecutor(store, new SqlCompiler());
     cache = new FirstPageCache(ticker, FirstPageCache.MAX_AGE, executor);
-    controller = new QueryController(executor, new QueryRequestValidator(), cache);
+    controller =
+        new QueryController(executor, new QueryRequestValidator(), cache, TestQueryEvents.create());
   }
 
   private static QueryRequest defaultRequest() {
@@ -86,7 +87,7 @@ public class QueryControllerTest {
                         false,
                         null)))));
 
-    QueryResponse response = controller.query(new QueryRequest("motif(pin)", 10, 0));
+    QueryResponse response = controller.query(new QueryRequest("motif(pin)", 10, 0), null, null);
 
     assertThat(response.games()).hasSize(1);
     GameFeatureRow row = response.games().get(0);
@@ -117,7 +118,8 @@ public class QueryControllerTest {
     store.setQueryResult(List.of(createGameFeature(gameUrl)));
     store.setOccurrencesResult(Map.of(gameUrl, Map.of()));
 
-    QueryResponse response = controller.query(new QueryRequest("white_elo >= 2000", 10, 0));
+    QueryResponse response =
+        controller.query(new QueryRequest("white_elo >= 2000", 10, 0), null, null);
 
     assertThat(response.games()).hasSize(1);
     assertThat(response.games().get(0).occurrences()).isEmpty();
@@ -128,7 +130,7 @@ public class QueryControllerTest {
     store.setQueryResult(List.of());
     store.setOccurrencesResult(Map.of());
 
-    QueryResponse response = controller.query(new QueryRequest("motif(fork)", 10, 0));
+    QueryResponse response = controller.query(new QueryRequest("motif(fork)", 10, 0), null, null);
 
     assertThat(response.games()).isEmpty();
     assertThat(response.count()).isEqualTo(0);
@@ -136,7 +138,8 @@ public class QueryControllerTest {
 
   @Test
   public void query_perspectiveFieldWithoutPlayer_throws() {
-    assertThatThrownBy(() -> controller.query(new QueryRequest("outcome = \"win\"", 10, 0)))
+    assertThatThrownBy(
+            () -> controller.query(new QueryRequest("outcome = \"win\"", 10, 0), null, null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("requires a player");
   }
@@ -147,7 +150,7 @@ public class QueryControllerTest {
     store.setOccurrencesResult(Map.of());
 
     QueryResponse response =
-        controller.query(new QueryRequest("outcome = \"win\"", 10, 0, "hikaru"));
+        controller.query(new QueryRequest("outcome = \"win\"", 10, 0, "hikaru"), null, null);
 
     assertThat(response.count()).isZero();
   }
@@ -158,8 +161,8 @@ public class QueryControllerTest {
     store.setQueryResult(List.of(createGameFeature(gameUrl)));
     store.setOccurrencesResult(Map.of(gameUrl, Map.of()));
 
-    QueryResponse first = controller.query(defaultRequest());
-    QueryResponse second = controller.query(defaultRequest());
+    QueryResponse first = controller.query(defaultRequest(), null, null);
+    QueryResponse second = controller.query(defaultRequest(), null, null);
 
     assertThat(store.queryCount()).isEqualTo(1);
     assertThat(second).isEqualTo(first);
@@ -171,13 +174,13 @@ public class QueryControllerTest {
     store.setQueryResult(List.of());
     store.setOccurrencesResult(Map.of());
 
-    controller.query(defaultRequest());
+    controller.query(defaultRequest(), null, null);
     ticker.advance(FirstPageCache.MAX_AGE.plusSeconds(1));
-    controller.query(defaultRequest());
+    controller.query(defaultRequest(), null, null);
 
     assertThat(store.queryCount()).isEqualTo(2);
     // The fall-through re-warmed the cache: a third request inside the window is served from it.
-    controller.query(defaultRequest());
+    controller.query(defaultRequest(), null, null);
     assertThat(store.queryCount()).isEqualTo(2);
   }
 
@@ -187,20 +190,20 @@ public class QueryControllerTest {
     store.setQueryResult(List.of(createGameFeature(cachedUrl)));
     store.setOccurrencesResult(Map.of());
 
-    controller.query(defaultRequest());
+    controller.query(defaultRequest(), null, null);
     assertThat(store.queryCount()).isEqualTo(1);
 
     // Same query, different page / page size / player: each is a different result set.
     store.setQueryResult(List.of(createGameFeature("https://chess.com/game/other")));
-    controller.query(new QueryRequest(FirstPageCache.DEFAULT_QUERY, 25, 25, null));
-    controller.query(new QueryRequest(FirstPageCache.DEFAULT_QUERY, 50, 0, null));
-    controller.query(new QueryRequest(FirstPageCache.DEFAULT_QUERY, 25, 0, "hikaru"));
-    controller.query(new QueryRequest("white_elo >= 2000", 25, 0, null));
+    controller.query(new QueryRequest(FirstPageCache.DEFAULT_QUERY, 25, 25, null), null, null);
+    controller.query(new QueryRequest(FirstPageCache.DEFAULT_QUERY, 50, 0, null), null, null);
+    controller.query(new QueryRequest(FirstPageCache.DEFAULT_QUERY, 25, 0, "hikaru"), null, null);
+    controller.query(new QueryRequest("white_elo >= 2000", 25, 0, null), null, null);
     assertThat(store.queryCount()).isEqualTo(5);
 
     // The negative half: none of those bypass responses may have been written into the cache.
     // The default request must still see the originally warmed page, served without a 6th query.
-    QueryResponse defaultAgain = controller.query(defaultRequest());
+    QueryResponse defaultAgain = controller.query(defaultRequest(), null, null);
     assertThat(store.queryCount()).isEqualTo(5);
     assertThat(defaultAgain.games().get(0).gameUrl()).isEqualTo(cachedUrl);
   }
@@ -210,7 +213,7 @@ public class QueryControllerTest {
     store.setQueryResult(List.of());
     store.setOccurrencesResult(Map.of());
 
-    controller.query(new QueryRequest("white_elo >= 2000", 10, 7, null));
+    controller.query(new QueryRequest("white_elo >= 2000", 10, 7, null), null, null);
 
     assertThat(store.lastLimit()).isEqualTo(10);
     assertThat(store.lastOffset()).isEqualTo(7);
@@ -221,8 +224,9 @@ public class QueryControllerTest {
     store.setQueryResult(List.of());
     store.setOccurrencesResult(Map.of());
 
-    controller.query(defaultRequest());
-    controller.query(new QueryRequest("  " + FirstPageCache.DEFAULT_QUERY + " ", 25, 0, null));
+    controller.query(defaultRequest(), null, null);
+    controller.query(
+        new QueryRequest("  " + FirstPageCache.DEFAULT_QUERY + " ", 25, 0, null), null, null);
 
     assertThat(store.queryCount()).isEqualTo(1);
   }
@@ -238,24 +242,25 @@ public class QueryControllerTest {
   public void query_readFailureSurfacesAsAnErrorNotAnEmptyPage() {
     store.failQueriesWith(new RuntimeException("statement cancelled at the read timeout"));
 
-    assertThatThrownBy(() -> controller.query(new QueryRequest("white_elo >= 2000", 25, 0, null)))
+    assertThatThrownBy(
+            () -> controller.query(new QueryRequest("white_elo >= 2000", 25, 0, null), null, null))
         .as("live path")
         .hasMessageContaining("statement cancelled");
-    assertThatThrownBy(() -> controller.query(defaultRequest()))
+    assertThatThrownBy(() -> controller.query(defaultRequest(), null, null))
         .as("cold-cache loader path")
         .hasMessageContaining("statement cancelled");
   }
 
   @Test
   public void query_blankQuery_throws() {
-    assertThatThrownBy(() -> controller.query(new QueryRequest("  ", 10, 0)))
+    assertThatThrownBy(() -> controller.query(new QueryRequest("  ", 10, 0), null, null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("query is required");
   }
 
   @Test
   public void query_nullQuery_throws() {
-    assertThatThrownBy(() -> controller.query(new QueryRequest(null, 10, 0)))
+    assertThatThrownBy(() -> controller.query(new QueryRequest(null, 10, 0), null, null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("query is required");
   }

@@ -44,6 +44,12 @@ public class OneD4Client {
    */
   static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(30);
 
+  /**
+   * How one_d4 tells an MCP-originated query from the web app and from direct API callers in its
+   * query events (#1465): the product token its QueryEvent looks for. Keep the two spellings equal.
+   */
+  static final String USER_AGENT = "mcpserver";
+
   private final HttpClient httpClient;
   private final ObjectMapper mapper;
   private final String baseUrl;
@@ -158,6 +164,7 @@ public class OneD4Client {
                 .setMethod(HttpRequest.Method.POST)
                 .setContentType(HttpRequest.ContentType.JSON)
                 .setAccept(HttpRequest.ContentType.JSON)
+                .addHeader("User-Agent", USER_AGENT)
                 .setTimeout(timeout)
                 .setBody(json),
             base,
@@ -173,6 +180,7 @@ public class OneD4Client {
             .setUrl(baseUrl + path)
             .setMethod(HttpRequest.Method.GET)
             .setAccept(HttpRequest.ContentType.JSON)
+            .addHeader("User-Agent", USER_AGENT)
             .setTimeout(timeout),
         baseUrl,
         description);

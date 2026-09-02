@@ -797,7 +797,7 @@ func TestRegistry_MeanChartsWidenWithTheStep(t *testing.T) {
 // So this borrows the shape TestRegistry_PortraitCacheQueriesUseTheStandardFamily
 // already uses: match each selector, assert on that selector, and close the set of
 // names so a new instrument has to be declared here too.
-var oneD4SelectorPattern = regexp.MustCompile(`\b((?:games_indexed|index_runs|index_months|chess_com_archive_fetches|motif_occurrences|index_run_duration_micros|retention_sweeps|retention_rows_deleted|retention_requests_settled)[a-z_]*)(\{[^}]*\})?`)
+var oneD4SelectorPattern = regexp.MustCompile(`\b((?:games_indexed|index_runs|index_months|chess_com_archive_fetches|motif_occurrences|index_run_duration_micros|retention_sweeps|retention_rows_deleted|retention_requests_settled|one_d4_queries)[a-z_]*)(\{[^}]*\})?`)
 
 // What one_d4_worker emits, plus the _total suffix the collector's Prometheus
 // exporter appends to a cumulative monotonic sum — counters only, since #1452
@@ -815,6 +815,9 @@ var oneD4ExportedNames = map[string]bool{
 	"retention_sweeps_total":           true,
 	"retention_rows_deleted_total":     true,
 	"retention_requests_settled_total": true,
+	// The query events' counter (#1465) is the one name the Java service
+	// emits itself (QueryEvents); the recording end is QueryEventTest.
+	"one_d4_queries_total": true,
 }
 
 func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {

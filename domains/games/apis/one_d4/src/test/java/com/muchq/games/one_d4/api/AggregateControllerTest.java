@@ -24,7 +24,8 @@ public class AggregateControllerTest {
 
   private final RecordingStore store = new RecordingStore();
   private final AggregateController controller =
-      new AggregateController(store, new SqlCompiler(), new AggregateRequestValidator());
+      new AggregateController(
+          store, new SqlCompiler(), new AggregateRequestValidator(), TestQueryEvents.create());
 
   @Test
   public void aggregate_compilesQueryAndMapsGroups() {
@@ -42,7 +43,9 @@ public class AggregateControllerTest {
                 "white.username = \"hikaru\" AND time.class = \"blitz\"",
                 List.of("opening.family"),
                 "count",
-                2));
+                2),
+            null,
+            null);
 
     assertThat(response.count()).isEqualTo(2);
     assertThat(response.groups().get(0).group())
@@ -89,14 +92,18 @@ public class AggregateControllerTest {
 
     AggregateResponse underLimit =
         controller.aggregate(
-            new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 20));
+            new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 20),
+            null,
+            null);
 
     assertThat(store.totalsCalls).isZero();
     assertThat(store.lastTotalsCompiled).isNull();
 
     AggregateResponse atLimit =
         controller.aggregate(
-            new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 2));
+            new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 2),
+            null,
+            null);
 
     assertThat(store.totalsCalls).isEqualTo(1);
     assertThat(store.lastTotalsCompiled).isNotNull();
@@ -114,7 +121,9 @@ public class AggregateControllerTest {
 
     AggregateResponse response =
         controller.aggregate(
-            new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 1));
+            new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 1),
+            null,
+            null);
 
     assertThat(response.count()).isEqualTo(1);
     assertThat(response.totalGames()).isEqualTo(104);
@@ -133,7 +142,9 @@ public class AggregateControllerTest {
     AggregateResponse response =
         controller.aggregate(
             new AggregateRequest(
-                "time.class = \"blitz\"", List.of("me.color", "outcome"), "count", 20, "hikaru"));
+                "time.class = \"blitz\"", List.of("me.color", "outcome"), "count", 20, "hikaru"),
+            null,
+            null);
 
     assertThat(response.count()).isEqualTo(2);
     assertThat(response.groups().get(0).group()).containsEntry("me_color", "white");
@@ -156,7 +167,9 @@ public class AggregateControllerTest {
     assertThatThrownBy(
             () ->
                 controller.aggregate(
-                    new AggregateRequest("white.elo > 1", List.of("me.color"), null, 20)))
+                    new AggregateRequest("white.elo > 1", List.of("me.color"), null, 20),
+                    null,
+                    null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("requires a player");
     assertThat(store.lastCompiled).isNull();
@@ -174,7 +187,9 @@ public class AggregateControllerTest {
     AggregateResponse response =
         controller.aggregate(
             new AggregateRequest(
-                "time.class = \"bullet\"", List.of("opponent.elo(200)"), "count", 20, "hikaru"));
+                "time.class = \"bullet\"", List.of("opponent.elo(200)"), "count", 20, "hikaru"),
+            null,
+            null);
 
     assertThat(response.groups().get(0).group()).containsEntry("opponent_elo", 2400);
     assertThat(response.groups().get(1).group()).containsEntry("opponent_elo", null);
@@ -189,8 +204,9 @@ public class AggregateControllerTest {
     assertThatThrownBy(
             () ->
                 controller.aggregate(
-                    new AggregateRequest(
-                        "white.elo > 1", List.of("me.elo(0)"), null, 20, "hikaru")))
+                    new AggregateRequest("white.elo > 1", List.of("me.elo(0)"), null, 20, "hikaru"),
+                    null,
+                    null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Bucket width must be a positive integer");
     assertThat(store.lastCompiled).isNull();
@@ -206,7 +222,9 @@ public class AggregateControllerTest {
     AggregateResponse response =
         controller.aggregate(
             new AggregateRequest(
-                "time.class = \"bullet\"", List.of("opponent.title"), "count", 20, "hikaru"));
+                "time.class = \"bullet\"", List.of("opponent.title"), "count", 20, "hikaru"),
+            null,
+            null);
 
     assertThat(response.groups()).hasSize(2);
     assertThat(response.groups().get(0).group()).containsEntry("opponent_title", "GM");
@@ -226,7 +244,9 @@ public class AggregateControllerTest {
     AggregateResponse response =
         controller.aggregate(
             new AggregateRequest(
-                "outcome = \"win\"", List.of("opening_family"), "count", 20, "hikaru"));
+                "outcome = \"win\"", List.of("opening_family"), "count", 20, "hikaru"),
+            null,
+            null);
 
     assertThat(response.count()).isEqualTo(1);
     CompiledQuery compiled = (CompiledQuery) store.lastCompiled;
@@ -240,7 +260,9 @@ public class AggregateControllerTest {
     assertThatThrownBy(
             () ->
                 controller.aggregate(
-                    new AggregateRequest("outcome = \"win\"", List.of("opening_family"), null, 20)))
+                    new AggregateRequest("outcome = \"win\"", List.of("opening_family"), null, 20),
+                    null,
+                    null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("requires a player");
     assertThat(store.lastCompiled).isNull();
@@ -259,7 +281,9 @@ public class AggregateControllerTest {
             () ->
                 controller.aggregate(
                     new AggregateRequest(
-                        "num.moves >= 0", List.of("opening_family"), "count", 20, "hikaru")))
+                        "num.moves >= 0", List.of("opening_family"), "count", 20, "hikaru"),
+                    null,
+                    null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("would not scope this aggregate");
     assertThat(store.lastCompiled)
@@ -279,12 +303,16 @@ public class AggregateControllerTest {
             List.of("opening_family"),
             "count",
             20,
-            "hikaru"));
+            "hikaru"),
+        null,
+        null);
     assertThat(store.lastCompiled).as("explicit username filter").isNotNull();
 
     store.lastCompiled = null;
     controller.aggregate(
-        new AggregateRequest("num.moves >= 0", List.of("me.color"), "count", 20, "hikaru"));
+        new AggregateRequest("num.moves >= 0", List.of("me.color"), "count", 20, "hikaru"),
+        null,
+        null);
     assertThat(store.lastCompiled).as("perspective field in groupBy").isNotNull();
   }
 
@@ -299,7 +327,7 @@ public class AggregateControllerTest {
     store.rows = List.of(new AggregateRow(Map.of("opening_family", "Caro Kann Defense"), 3));
 
     controller.aggregate(
-        new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 20));
+        new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 20), null, null);
 
     assertThat(store.lastOutcomeMetrics).isFalse();
     assertThat(((CompiledQuery) store.lastCompiled).selectSql()).doesNotContain("AS wins");
@@ -316,7 +344,9 @@ public class AggregateControllerTest {
             List.of("opening_family"),
             "score",
             20,
-            "hikaru"));
+            "hikaru"),
+        null,
+        null);
 
     assertThat(((CompiledQuery) store.lastCompiled).selectSql())
         .contains(") agg ORDER BY (wins * 2 + draws) * 1.0 / group_count DESC");
@@ -330,7 +360,9 @@ public class AggregateControllerTest {
     store.totals = new GameFeatureStore.AggregateTotals(3, 1);
 
     controller.aggregate(
-        new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 1, null, 5));
+        new AggregateRequest("white.elo >= 1", List.of("opening_family"), "count", 1, null, 5),
+        null,
+        null);
 
     assertThat(((CompiledQuery) store.lastCompiled).selectSql()).contains("HAVING COUNT(*) >= ?");
     assertThat(((CompiledQuery) store.lastCompiled).parameters()).containsExactly(1, 5);
@@ -344,7 +376,7 @@ public class AggregateControllerTest {
     assertThatThrownBy(
             () ->
                 controller.aggregate(
-                    new AggregateRequest("white.elo > 1", List.of("eco"), "elo", 20)))
+                    new AggregateRequest("white.elo > 1", List.of("eco"), "elo", 20), null, null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("orderBy");
     assertThat(store.lastCompiled).isNull();
@@ -360,7 +392,7 @@ public class AggregateControllerTest {
     assertThatThrownBy(
             () ->
                 controller.aggregate(
-                    new AggregateRequest("white.elo > 1", List.of("eco"), "score", 20)))
+                    new AggregateRequest("white.elo > 1", List.of("eco"), "score", 20), null, null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("requires a player");
     assertThat(store.lastCompiled).isNull();
@@ -369,7 +401,9 @@ public class AggregateControllerTest {
   @Test
   public void aggregate_invalidRequestRejectedBeforeStoreCall() {
     assertThatThrownBy(
-            () -> controller.aggregate(new AggregateRequest("white.elo > 1", List.of(), null, 20)))
+            () ->
+                controller.aggregate(
+                    new AggregateRequest("white.elo > 1", List.of(), null, 20), null, null))
         .isInstanceOf(IllegalArgumentException.class);
     assertThat(store.lastCompiled).isNull();
   }
@@ -379,7 +413,7 @@ public class AggregateControllerTest {
     assertThatThrownBy(
             () ->
                 controller.aggregate(
-                    new AggregateRequest("white.elo > 1", List.of("pgn"), null, 20)))
+                    new AggregateRequest("white.elo > 1", List.of("pgn"), null, 20), null, null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Unknown field");
     assertThat(store.lastCompiled).isNull();

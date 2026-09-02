@@ -41,6 +41,13 @@ public class LogbackConfigTest {
       logger.info("hello structured world");
       logger.info("widget {} failed after {} tries", "w-7", 3);
       logger.error("boom", new IllegalStateException("connection refused"));
+      logger
+          .atInfo()
+          .addKeyValue("event", "query")
+          .addKeyValue("duration_us", 1234L)
+          .addKeyValue("fields", "eco,white.elo")
+          .addKeyValue("motifs", java.util.List.of("fork"))
+          .log("query_event");
     } finally {
       System.setOut(original);
       context.stop();
@@ -71,9 +78,8 @@ public class LogbackConfigTest {
     // The parameterized case is what services actually write, and
     // JsonEncoder's contract there is NOT "message is the rendered text":
     // the raw template rides in "message" and the values in "arguments".
-    // The stats pipeline reads queries out of exactly this shape — one_d4's
-    // QueryController logs `query={}` and the query text is arguments[0] —
-    // so the semantic is pinned, not discovered.
+    // Anything reading these lines offline has to know that, so the
+    // semantic is pinned, not discovered.
     JsonNode parameterized = lineContaining(captured.toString(UTF_8), "widget {} failed");
     assertThat(parameterized.get("message").asText()).isEqualTo("widget {} failed after {} tries");
     assertThat(parameterized.get("arguments").get(0).asText()).isEqualTo("w-7");
@@ -84,6 +90,19 @@ public class LogbackConfigTest {
     JsonNode error = lineContaining(captured.toString(UTF_8), "boom");
     assertThat(error.get("level").asText()).isEqualTo("ERROR");
     assertThat(error.get("throwable").toString()).contains("connection refused");
+
+    // Key-value pairs from the fluent API — how one_d4's query event carries
+    // its fields (#1465) — land as a list of one-entry objects, every value
+    // rendered as a string: a long, a comma-joined string (what one_d4
+    // sends), and a List (which it deliberately does not, since this is
+    // what a List looks like) all arrive the same way. The stats pipeline
+    // reads exactly this shape, and selects the lines by loggerName.
+    JsonNode kvp = lineContaining(captured.toString(UTF_8), "query_event");
+    assertThat(kvp.get("kvpList").toString())
+        .isEqualTo(
+            "[{\"event\":\"query\"},{\"duration_us\":\"1234\"},"
+                + "{\"fields\":\"eco,white.elo\"},{\"motifs\":\"[fork]\"}]");
+    assertThat(kvp.get("loggerName").asText()).isEqualTo("com.muchq.some.Service");
   }
 
   private JsonNode lineContaining(String output, String needle) throws Exception {
