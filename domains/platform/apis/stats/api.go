@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+
+	"github.com/muchq/moonbase/domains/platform/libs/mucks"
 )
 
 // Reader is what the HTTP handlers need from the store — an interface so
@@ -27,6 +29,21 @@ type Handlers struct {
 
 func NewHandlers(reader Reader, logger *slog.Logger) *Handlers {
 	return &Handlers{reader: reader, logger: logger}
+}
+
+// NewRouter is the service's whole HTTP surface, the one main serves and
+// the end-to-end test drives; a route added here is on both.
+func NewRouter(h *Handlers) http.Handler {
+	router := mucks.NewJsonMucks()
+	router.HandleFunc("GET /health", h.Health)
+	router.HandleFunc("GET /stats/v1/summary", h.GetSummary)
+	router.HandleFunc("GET /stats/v1/iili/top", h.GetTopSlugs)
+	router.HandleFunc("GET /stats/v1/agents", h.GetAgents)
+	router.HandleFunc("GET /stats/v1/probes", h.GetProbes)
+	router.HandleFunc("GET /stats/v1/one_d4/queries", h.GetQueries)
+	router.HandleFunc("GET /stats/v1/one_d4/terms", h.GetQueryTerms)
+	router.HandleFunc("GET /stats/v1/countries", h.GetCountries)
+	return router
 }
 
 func (h *Handlers) Health(w http.ResponseWriter, _ *http.Request) {

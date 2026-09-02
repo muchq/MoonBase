@@ -1,4 +1,5 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 load("//bazel/rules:oci.bzl", "linux_oci_go")
 
 # otel_contract pins the query-event vocabulary here against QueryEvent.java.
@@ -18,6 +19,7 @@ go_library(
     importpath = "github.com/muchq/moonbase/domains/platform/apis/stats",
     visibility = ["//visibility:public"],
     deps = [
+        "//domains/platform/libs/mucks",
         "@com_github_jackc_pgx_v5//:pgx",
         "@com_github_jackc_pgx_v5//pgxpool",
     ],
@@ -34,6 +36,7 @@ go_test(
         "aggregate_test.go",
         "api_test.go",
         "classify_test.go",
+        "fixtures_test.go",
         "geo_test.go",
         "loop_test.go",
         "queries_test.go",
@@ -53,9 +56,45 @@ go_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":stats_lib",
-        "//domains/platform/libs/mucks",
         "//domains/platform/libs/s3lite",
     ],
 )
 
-linux_oci_go(bin_name = "stats")
+# The IP-to-country table rides in the image at /geo (#1467); main.go's
+# GEO_DB_PATH default points at it, and geo_vendor_test pins the two.
+pkg_tar(
+    name = "geo_layer",
+    srcs = ["@dbip_country_lite//file"],
+    package_dir = "/geo",
+)
+
+# Integration: the pinned vendor file through the real parser, the layer's
+# path against the binary's default, and the whole service end to end —
+# shipped objects in a memory bucket, the real loop, the real store on the
+# CI postgres, the real router over HTTP. Its own target: the data is a
+# few MB the unit suite has no use for, and the database is shared.
+go_test(
+    name = "stats_integration_test",
+    size = "small",
+    srcs = [
+        "e2e_test.go",
+        "fixtures_test.go",
+        "geo_vendor_test.go",
+    ],
+    data = [
+        ":geo_layer",
+        "@dbip_country_lite//file",
+    ],
+    embed = [":stats_lib"],
+    env = {
+        "DBIP_COUNTRY_LITE": "$(rootpath @dbip_country_lite//file)",
+        "GEO_LAYER_TAR": "$(rootpath :geo_layer)",
+    },
+    env_inherit = ["STATS_TEST_DB_URL"],
+    tags = ["exclusive"],
+)
+
+linux_oci_go(
+    bin_name = "stats",
+    extra_tars = [":geo_layer"],
+)

@@ -662,9 +662,6 @@ services:
       - AWS_SECRET_ACCESS_KEY=${STATS_AWS_SECRET_ACCESS_KEY}
       - S3_BUCKET=${STATS_S3_BUCKET}
       - S3_REGION=${STATS_S3_REGION:-us-east-1}
-      # DB-IP's country CSV in the same bucket (#1467); empty means every
-      # geo row reads "--", and so does a key that will not load.
-      - GEO_DB_KEY=${STATS_GEO_DB_KEY:-}
       - PORT=8092
     networks:
       - app_network
