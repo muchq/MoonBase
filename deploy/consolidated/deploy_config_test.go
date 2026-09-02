@@ -1822,8 +1822,23 @@ const metaCrawlerUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
 	"(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 (compatible; meta-externalagent/1.1 " +
 	"(+https://developers.facebook.com/docs/sharing/webmasters/crawler))"
 
-func TestForgejoBlocksTheCrawlerThatPeggedItByBothUserAgentAndSubnet(t *testing.T) {
-	site := caddySiteBlock(t, "Caddyfile", "git.muchq.com")
+// caddySnippet returns the lines inside the named top-level snippet.
+func caddySnippet(t *testing.T, name, snippet string) []string {
+	t.Helper()
+	lines := directiveLines(t, name)
+	for i, line := range lines {
+		if line == "("+snippet+") {" {
+			return caddyBlockAt(lines, i)
+		}
+	}
+	t.Fatalf("no (%s) snippet in %s", snippet, name)
+	return nil
+}
+
+// The guard began on git.muchq.com and now lives in the snippet every site
+// imports: nothing this crawler fetches here is welcome anywhere.
+func TestEveryHostBlocksTheCrawlerThatPeggedForgejoByBothUserAgentAndSubnet(t *testing.T) {
+	site := caddySnippet(t, "Caddyfile", "refuse_bots")
 
 	ua := caddyMatcherRegexp(t, caddyMatcherBody(t, site, "@meta_agent"), "header_regexp")
 	if !ua.MatchString(metaCrawlerUserAgent) {
@@ -1851,6 +1866,12 @@ func TestForgejoBlocksTheCrawlerThatPeggedItByBothUserAgentAndSubnet(t *testing.
 		if !forgejoMatcherIsRefused(site, matcher) {
 			t.Errorf("%s is defined but never answered with `respond 403`; the matcher is "+
 				"decoration. Block was:\n%s", matcher, strings.Join(site, "\n"))
+		}
+	}
+	// And gone from the git block itself, or the two copies drift apart.
+	for _, line := range caddySiteBlock(t, "Caddyfile", "git.muchq.com") {
+		if strings.HasPrefix(line, "@meta_") {
+			t.Errorf("git.muchq.com still declares %q; the guard lives in refuse_bots now", line)
 		}
 	}
 }
@@ -2181,10 +2202,10 @@ func TestOneD4KnowsTheUiOriginCaddyGrants(t *testing.T) {
 }
 
 // TLM-Audit-Scanner (#1458) walks every vhost for exposed credentials and
-// ignores robots.txt. The refusal is a snippet each site imports first, so a
-// new site block cannot forget it and no site answers the scanner before the
-// import runs; UA and address both, for the same reason the Forgejo guards
-// carry both.
+// ignores robots.txt. The refusals are a snippet each site imports first, so a
+// new site block cannot forget it and no site answers a refused guest before
+// the import runs; UA and address both, for the same reason the meta guard
+// carries both.
 func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
 	lines := directiveLines(t, "Caddyfile")
 
@@ -2194,13 +2215,13 @@ func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
 	for i, line := range lines {
 		opened := strings.Count(line, "{") - strings.Count(line, "}")
 		if depth == 0 && opened == 1 {
-			if line == "(refuse_scanners) {" {
+			if line == "(refuse_bots) {" {
 				snippet = caddyBlockAt(lines, i)
 			} else {
 				sites = append(sites, line)
 				block := caddyBlockAt(lines, i)
-				if len(block) == 0 || block[0] != "import refuse_scanners" {
-					t.Errorf("%s does not import refuse_scanners as its first directive; the scanner is "+
+				if len(block) == 0 || block[0] != "import refuse_bots" {
+					t.Errorf("%s does not import refuse_bots as its first directive; the scanner is "+
 						"answered before it is refused. Block began:\n%s", line, strings.Join(firstN(block, 3), "\n"))
 				}
 			}
@@ -2208,7 +2229,7 @@ func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
 		depth += opened
 	}
 	if snippet == nil {
-		t.Fatal("no (refuse_scanners) snippet in the Caddyfile")
+		t.Fatal("no (refuse_bots) snippet in the Caddyfile")
 	}
 	if len(sites) < 5 {
 		t.Fatalf("found only %d site blocks; the walk over the file is wrong", len(sites))
@@ -2225,7 +2246,7 @@ func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
 		}
 	}
 	if agent == nil {
-		t.Fatal("refuse_scanners has no @scanner_agent User-Agent matcher")
+		t.Fatal("refuse_bots has no @scanner_agent User-Agent matcher")
 	}
 	for _, ua := range []string{"TLM-Audit-Scanner/1.0", "tlm-audit-scanner"} {
 		if !agent.MatchString(ua) {
@@ -2246,7 +2267,7 @@ func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
 	// one that survives a move, so both are pinned rather than the range.
 	for _, ip := range []string{"195.178.110.199", "45.148.10.67"} {
 		if !strings.Contains(addresses, ip) {
-			t.Errorf("refuse_scanners does not refuse %s", ip)
+			t.Errorf("refuse_bots does not refuse %s", ip)
 		}
 	}
 	for _, matcher := range []string{"@scanner_agent", "@scanner_address"} {
@@ -2261,7 +2282,7 @@ func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("refuse_scanners has no `handle %s { respond 403 }`; a matcher with no handle refuses nothing", matcher)
+			t.Errorf("refuse_bots has no `handle %s { respond 403 }`; a matcher with no handle refuses nothing", matcher)
 		}
 	}
 }

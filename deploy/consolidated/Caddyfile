@@ -1,13 +1,30 @@
-# Refusals every site imports first (#1458). TLM-Audit-Scanner walks each vhost
-# for exposed credentials (.env, .aws, .git-credentials, cloud keys) from two
-# Techoff SRV addresses and ignores robots.txt; the stats page counted nine
-# thousand of its requests in a day across five hosts, none refused. UA and
-# addresses both, as the git.muchq.com guards are: the agent may stop naming
-# itself and the addresses may move. Two matchers, two handles: a matcher
-# block ANDs its conditions, and this must be an OR.
-(refuse_scanners) {
+# Refusals every site imports first. Two guests, refused everywhere by both
+# User-Agent and address, the redundancy being the point: an agent may stop
+# naming itself and a range may move.
+#
+# meta-externalagent (#1447) walked git.muchq.com's git-backed pages from ~70
+# addresses across 57.141.0.0/16 and starved Forgejo; the guard began there and
+# now covers every host, since nothing it crawls here is welcome. robots.txt is
+# not the lever -- it requests what Forgejo's disallows anyway. TLM-Audit-Scanner
+# (#1458) walks each vhost for exposed credentials (.env, .aws, .git-credentials,
+# cloud keys) from two Techoff SRV addresses and ignores robots.txt; the stats
+# page counted nine thousand of its requests in a day, none refused.
+#
+# One matcher per condition and one handle per matcher: a matcher block ANDs
+# its conditions, and these must be an OR.
+(refuse_bots) {
+	@meta_agent header_regexp User-Agent (?i)meta-externalagent
+	@meta_subnet remote_ip 57.141.0.0/16
 	@scanner_agent header_regexp User-Agent (?i)tlm-audit-scanner
 	@scanner_address remote_ip 195.178.110.199 45.148.10.67
+
+	handle @meta_agent {
+		respond 403
+	}
+
+	handle @meta_subnet {
+		respond 403
+	}
 
 	handle @scanner_agent {
 		respond 403
@@ -19,7 +36,7 @@
 }
 
 api.muchq.com {
-	import refuse_scanners
+	import refuse_bots
 
 	@post_portrait {
 		method POST
@@ -242,7 +259,7 @@ api.muchq.com {
 # iili.uk. The public /r/{slug} is rewritten onto iili's modeled
 # /iili/v1/r/{slug} — the deliberate exception to "gateway == model path".
 i.iili.uk {
-	import refuse_scanners
+	import refuse_bots
 
 	@getredir {
 		method GET HEAD
@@ -264,28 +281,21 @@ i.iili.uk {
 }
 
 consolidated.cmptr.info {
-	import refuse_scanners
+	import refuse_bots
 
 	respond "Consolidating..."
 }
 
 git.muchq.com {
-	import refuse_scanners
+	import refuse_bots
 
 	# Forgejo runs under a 0.5-CPU cap and the git-backed pages fork real work
-	# per request, so a crawler walking them starves the site (#1447).
-	#
-	# robots.txt is not the lever: Forgejo serves one disallowing /*/*/src/ and
-	# /user/, and meta-externalagent requests both anyway.
-	#
-	# UA and subnet are both pinned, and the redundancy is the point -- the agent
-	# self-identifies today and may stop, the range is Meta's today and may move.
-	# Spread across a /16, it also defeats any per-address rate limit.
+	# per request, so a crawler walking them starves the site (#1447). The
+	# crawler that did is refused outright by refuse_bots above; this guard is
+	# for the rest of them, on the routes that cost.
 	#
 	# Only HTTP. Git over SSH reaches forgejo on host port 222, not through Caddy.
-	@meta_agent header_regexp User-Agent (?i)meta-externalagent
-	@meta_subnet remote_ip 57.141.0.0/16
-
+	#
 	# Both conditions live in one matcher block, where Caddy ANDs them. Split
 	# into two matchers they become an OR, which is wrong in both directions at
 	# once: crawlers lose the cheap pages they are welcome to, and humans lose
@@ -302,14 +312,6 @@ git.muchq.com {
 	# handle blocks, not bare respond/reverse_proxy: these are mutually exclusive
 	# and run in written order, so the guards' precedence is this file's order
 	# rather than Caddy's directive order.
-	handle @meta_agent {
-		respond 403
-	}
-
-	handle @meta_subnet {
-		respond 403
-	}
-
 	handle @crawler_on_expensive_route {
 		respond 403
 	}
@@ -328,7 +330,7 @@ git.muchq.com {
 }
 
 gpt.muchq.com {
-	import refuse_scanners
+	import refuse_bots
 
 	@post_generate {
 		method POST
@@ -389,7 +391,7 @@ gpt.muchq.com {
 }
 
 api.1d4.net {
-	import refuse_scanners
+	import refuse_bots
 
 	@post_index {
 		method POST
@@ -462,7 +464,7 @@ api.1d4.net {
 }
 
 mcp.1d4.net {
-	import refuse_scanners
+	import refuse_bots
 
 	# Every method on /mcp reaches the server, not just POST. Streamable HTTP
 	# clients probe GET for the optional server->client SSE stream and may send
