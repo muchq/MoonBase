@@ -287,6 +287,14 @@ Two things to know before editing it:
 Only HTTP is affected. Git over SSH reaches Forgejo on host port 222 without
 passing through Caddy.
 
+## api.1d4.net carries the stats tab's reads
+
+`api.1d4.net` proxies `GET /stats/v1/one_d4/*` to the stats service, a
+muchq.com service, because the 1d4 web app runs on `https://1d4.net` and
+that host is the only one granting it CORS. Nothing else of the stats API
+is reachable there; `publicRoutes` in `deploy_config_test.go` pins the
+matcher.
+
 ## Gateway hosts answer unmatched paths with 404
 
 `api.muchq.com` and `gpt.muchq.com` route only the matchers they declare and

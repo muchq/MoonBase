@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   createIndex,
+  getQueryStats,
+  getQueryTerms,
   listIndexRequests,
   query,
   retryUnlessClientError,
@@ -40,6 +42,22 @@ describe('api', () => {
       );
       const call = mock.mock.calls[0][1] as RequestInit;
       expect(JSON.parse(call.body as string)).toEqual(body);
+    });
+  });
+
+  // The stats tab reads through api.1d4.net because that host's CORS grant
+  // covers 1d4.net; Caddy proxies exactly GET /stats/v1/one_d4/* there, so
+  // the path is a contract with the Caddyfile (deploy_config_test pins the
+  // other side).
+  describe('query stats', () => {
+    it('sends GET to /stats/v1/one_d4/queries and /terms for the window', async () => {
+      const mock = mockFetch({ days: 30, rows: [] });
+      await getQueryStats();
+      await getQueryTerms();
+      expect(mock.mock.calls.map((call) => call[0])).toEqual([
+        'https://api.1d4.net/stats/v1/one_d4/queries?days=30',
+        'https://api.1d4.net/stats/v1/one_d4/terms?days=30&limit=200',
+      ]);
     });
   });
 

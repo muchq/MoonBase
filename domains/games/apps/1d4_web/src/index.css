@@ -886,7 +886,18 @@ tr.selected td {
   font-size: 0.95rem;
 }
 
-.stats-terms .request-status-table td:last-child {
+.stats-terms-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.stats-terms-table td {
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.stats-terms-table td:last-child {
   text-align: right;
   white-space: nowrap;
 }
