@@ -122,6 +122,8 @@ func TestConsumeRollsUpWhereEachClassCameFromWithBlocksAndProbes(t *testing.T) {
 		`{"status":403,"request":{"host":"h","method":"GET","uri":"/x","client_ip":"57.141.3.4","headers":{"User-Agent":["meta-externalagent/1.1"]}}}`,
 		`{"status":404,"request":{"host":"h","method":"GET","uri":"/.env","client_ip":"195.178.110.199","headers":{"User-Agent":["TLM-Audit-Scanner/1.0"]}}}`,
 		`{"status":404,"request":{"host":"h","method":"GET","uri":"/wp-login.php","client_ip":"195.178.110.199","headers":{"User-Agent":["TLM-Audit-Scanner/1.0"]}}}`,
+		// Refused and a probe at once: the production shape once refuse_bots answers a scanner.
+		`{"status":403,"request":{"host":"h","method":"GET","uri":"/.git/config","client_ip":"195.178.110.199","headers":{"User-Agent":["TLM-Audit-Scanner/1.0"]}}}`,
 		// Older lines carry remote_ip only; an address the locator does not know is "--".
 		`{"status":200,"request":{"host":"h","method":"GET","uri":"/","remote_ip":"10.1.2.3","headers":{"User-Agent":["curl/8.6.0"]}}}`,
 	}, "\n")
@@ -135,7 +137,7 @@ func TestConsumeRollsUpWhereEachClassCameFromWithBlocksAndProbes(t *testing.T) {
 	want := map[GeoKey]GeoStat{
 		{"2026-08-30", "h", AgentBrowser, "AU"}:   {1, 0, 0},
 		{"2026-08-30", "h", AgentAIScraper, "US"}: {1, 1, 0},
-		{"2026-08-30", "h", AgentBot, "GB"}:       {2, 0, 2},
+		{"2026-08-30", "h", AgentBot, "GB"}:       {3, 1, 3},
 		{"2026-08-30", "h", AgentBot, "--"}:       {1, 0, 0},
 	}
 	if len(rollup.Countries) != len(want) {

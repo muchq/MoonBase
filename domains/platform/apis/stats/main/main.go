@@ -59,20 +59,19 @@ func main() {
 		Client: &http.Client{Timeout: 5 * time.Minute},
 		Now:    time.Now,
 	}
-	// The geo database is optional and, when named, required to load: a
-	// configured key that fails is a deployment fault, not a reason to
-	// silently file every address under "--".
-	var geo stats.Locator = stats.NoLocator{}
-	if key := os.Getenv("GEO_DB_KEY"); key != "" {
-		loaded, skipped, err := stats.LoadGeo(objects, key)
-		if err != nil {
-			logger.Error("cannot load the geo database", "key", key, "error", err)
-			os.Exit(1)
-		}
-		logger.Info("geo database loaded", "key", key, "skipped_lines", skipped)
-		geo = loaded
-	} else {
+	// The geo database is optional. A key that will not load is logged and
+	// the service runs without it — every geo row reads "--" — rather than
+	// crash-looping the other endpoints behind a bucket hiccup or a typo.
+	geoKey := os.Getenv("GEO_DB_KEY")
+	geo, skipped, err := stats.Locate(objects, geoKey, 5, func() { time.Sleep(10 * time.Second) })
+	switch {
+	case err != nil:
+		logger.Error("cannot load the geo database; geo rows will all read "+stats.UnknownCountry,
+			"key", geoKey, "error", err)
+	case geoKey == "":
 		logger.Warn("GEO_DB_KEY is not set; geo rows will all read " + stats.UnknownCountry)
+	default:
+		logger.Info("geo database loaded", "key", geoKey, "skipped_lines", skipped)
 	}
 
 	aggregator := &stats.Aggregator{

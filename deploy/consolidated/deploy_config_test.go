@@ -2116,6 +2116,11 @@ func TestTheStatsPairIsProfileGatedTogether(t *testing.T) {
 	if !strings.Contains(serviceBlock(t, "compose.yaml", "stats"), "postgresql://stats:") {
 		t.Errorf("stats names no stats database URL; the aggregates have nowhere to land")
 	}
+	// The geo database key rides the stats block (#1467); dropping it is an
+	// all-"--" table with nothing else to say so.
+	if !strings.Contains(serviceBlock(t, "compose.yaml", "stats"), "GEO_DB_KEY=") {
+		t.Errorf("the stats service does not pass GEO_DB_KEY; the geo rollup has no database to load")
+	}
 }
 
 // catchAllIsLastHandle reports whether the site block ends its handle

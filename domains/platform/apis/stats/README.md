@@ -56,15 +56,18 @@ The pass runs while the API serves, so for its length the counts climb
 back up from zero — minutes at this scale, and the log says when it is
 done.
 
-The geo rollup (#1467) places each request's `client_ip` in a country
-and keys `geo_stats` on day, host, agent class, and the two-letter code,
-with request, 403, and probe counts — where the scrapers, bots, and
-scanners come from. The database is DB-IP's free country CSV
-(`dbip-country-lite-YYYY-MM.csv.gz`, CC BY 4.0, attribution on the
-dashboard), uploaded by the operator to the stats bucket under the key
-`GEO_DB_KEY` names; the service loads it at boot into a sorted range
-table and binary-searches it, no library. An address outside every range,
-or no database at all, files under `--`. A new monthly file is a restart.
+The geo rollup (#1467) places each request's `client_ip` (`remote_ip` on
+older lines) in a country and keys `geo_stats` on day, host, agent class,
+and the two-letter code, with request, 403, and probe counts — where the
+scrapers, bots, and scanners come from. The database is DB-IP's free
+country CSV (`dbip-country-lite-YYYY-MM.csv.gz`, CC BY 4.0; muchq.com's
+stats page carries the attribution), uploaded by the operator to the stats
+bucket under the key `GEO_DB_KEY` names; the service loads it at boot
+into a sorted range table and binary-searches it, no library. Overlapping
+rows lose to the range they sit in. An address outside every range, or no
+database at all, files under `--`. A key that will not load, after a few
+retries for a bucket still waking up, is an error in the log and an
+all-`--` table, never a boot failure. A new monthly file is a restart.
 Rows aggregated before the database was uploaded stay `--` until a
 re-aggregation (bump `RollupVersion`).
 
@@ -104,7 +107,8 @@ stay in the log, not on the wire.
 `STATS_DB_URL` (postgres), `S3_BUCKET`, `S3_REGION`, `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY`, and optionally `GEO_DB_KEY` — the same stats IAM user the shipper writes with,
 which therefore needs `s3:GetObject` and `s3:ListBucket` on the `logs/*`
-prefix as well as `s3:PutObject`. `AGGREGATE_INTERVAL` and `PORT`
+prefix as well as `s3:PutObject`, and `s3:GetObject` on the geo key's
+prefix (`geo/*` in the deployment). `AGGREGATE_INTERVAL` and `PORT`
 (default 8092) are optional.
 
 The store integration test needs `STATS_TEST_DB_URL` and skips without it,

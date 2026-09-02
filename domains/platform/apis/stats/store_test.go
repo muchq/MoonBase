@@ -151,6 +151,9 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	if row := countryRowFor(t, store, host, "GB"); row == nil || *row != (CountryRow{host, AgentBot, "GB", 5, 1, 4}) {
 		t.Errorf("country row = %+v, want exactly the rollup applied once", row)
 	}
+	if row := countryRowFor(t, store, host, UnknownCountry); row == nil || *row != (CountryRow{host, AgentBot, "--", 2, 0, 0}) {
+		t.Errorf("unplaced row = %+v, want it stored and read back like any country", row)
+	}
 	if row := termRowFor(t, store, host); row == nil || row.Requests != 2 || row.Kind != KindField {
 		t.Errorf("term row = %+v, want exactly the 2 applied once", row)
 	}

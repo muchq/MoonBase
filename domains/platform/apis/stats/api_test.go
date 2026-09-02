@@ -259,7 +259,7 @@ func TestOneD4QueryEndpointsShareTheWindowRules(t *testing.T) {
 
 func TestCountriesShareTheWindowRules(t *testing.T) {
 	reader := &fakeReader{countries: []CountryRow{
-		{Host: "git.muchq.com", AgentClass: AgentAIScraper, Country: "US", Requests: 9, Blocked: 9, Probes: 0},
+		{Host: "git.muchq.com", AgentClass: AgentAIScraper, Country: "US", Requests: 9, Blocked: 4, Probes: 2},
 	}}
 	handlers := handlersWith(reader)
 
@@ -268,7 +268,7 @@ func TestCountriesShareTheWindowRules(t *testing.T) {
 		t.Errorf("default countries (days, limit) = (%d, %d), want (30, 2000)", reader.lastDays, reader.lastLimit)
 	}
 	row := body["rows"].([]any)[0].(map[string]any)
-	if row["country"] != "US" || row["blocked"] != float64(9) || row["probes"] != float64(0) {
+	if row["country"] != "US" || row["requests"] != float64(9) || row["blocked"] != float64(4) || row["probes"] != float64(2) {
 		t.Errorf("country row = %v", row)
 	}
 	get(t, handlers.GetCountries, "/stats/v1/countries?days=99999&limit=99999")

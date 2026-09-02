@@ -40,14 +40,18 @@ type ipRange struct {
 	country    string
 }
 
-// ParseDBIP reads the CSV. Lines that do not parse are counted and
-// skipped rather than failing the load — one bad row in a vendor file
-// must not switch geo off — but a file with no usable rows is an error,
-// since that is a wrong object, not a bad line.
+// ParseDBIP reads the CSV. Rows that do not parse, and rows that overlap
+// an earlier one, are counted and skipped rather than failing the load —
+// one bad row in a vendor file must not switch geo off — but a file with
+// no usable rows is an error, since that is a wrong object, not a bad
+// line. Country codes are interned: the reader allocates a string per
+// record, and a two-byte code must not keep its whole line alive.
 func ParseDBIP(r io.Reader) (*Geo, int, error) {
 	reader := csv.NewReader(bufio.NewReader(r))
 	reader.FieldsPerRecord = -1
 	reader.ReuseRecord = true
+	reader.LazyQuotes = true
+	codes := map[string]string{}
 	var ranges []ipRange
 	skipped := 0
 	for {
@@ -65,17 +69,39 @@ func ParseDBIP(r io.Reader) (*Geo, int, error) {
 		start, err1 := netip.ParseAddr(strings.TrimSpace(record[0]))
 		end, err2 := netip.ParseAddr(strings.TrimSpace(record[1]))
 		country := strings.ToUpper(strings.TrimSpace(record[2]))
-		if err1 != nil || err2 != nil || len(country) != 2 || start.Is4() != end.Is4() || end.Less(start) {
+		if err1 != nil || err2 != nil || len(country) != 2 {
 			skipped++
 			continue
 		}
-		ranges = append(ranges, ipRange{start: start.Unmap(), end: end.Unmap(), country: country})
+		// Compared as stored: a v4-mapped v6 end against a v6 start is an
+		// inverted range once both are unmapped, whatever they looked like.
+		start, end = start.Unmap(), end.Unmap()
+		if start.Is4() != end.Is4() || end.Less(start) {
+			skipped++
+			continue
+		}
+		interned, ok := codes[country]
+		if !ok {
+			interned = strings.Clone(country)
+			codes[country] = interned
+		}
+		ranges = append(ranges, ipRange{start: start, end: end, country: interned})
 	}
-	if len(ranges) == 0 {
+	sort.SliceStable(ranges, func(i, j int) bool { return ranges[i].start.Less(ranges[j].start) })
+	// The lookup reads one predecessor, so ranges must not overlap; a row
+	// that starts inside the one before it is dropped and counted.
+	kept := ranges[:0]
+	for _, candidate := range ranges {
+		if len(kept) > 0 && !kept[len(kept)-1].end.Less(candidate.start) {
+			skipped++
+			continue
+		}
+		kept = append(kept, candidate)
+	}
+	if len(kept) == 0 {
 		return nil, skipped, fmt.Errorf("geo csv holds no usable ranges (%d lines skipped)", skipped)
 	}
-	sort.Slice(ranges, func(i, j int) bool { return ranges[i].start.Less(ranges[j].start) })
-	return &Geo{ranges: ranges}, skipped, nil
+	return &Geo{ranges: kept}, skipped, nil
 }
 
 // Country finds the range holding ip. Addresses come from Caddy's log as
@@ -102,7 +128,7 @@ func (g *Geo) Country(ip string) string {
 
 // LoadGeo reads the CSV object (gzipped when the key says so) from the
 // bucket the logs live in. The key is the operator's: DB-IP publishes a
-// new file monthly under CC BY 4.0, and the dashboard carries the
+// new file monthly under CC BY 4.0, and muchq.com/stats carries the
 // attribution.
 func LoadGeo(objects ObjectStore, key string) (*Geo, int, error) {
 	body, err := objects.Get(key)
@@ -120,6 +146,31 @@ func LoadGeo(objects ObjectStore, key string) (*Geo, int, error) {
 		reader = gz
 	}
 	return ParseDBIP(reader)
+}
+
+// Locate is the boot path: no key means no database, and a key that
+// fails is retried — a bucket that is briefly unreachable while the
+// container starts must not take every endpoint down with it — then
+// reported for the caller to carry on without. It never fails a boot:
+// an all-"--" table with an error in the log is the visible outcome, and
+// a crash loop would hide every other table behind it.
+func Locate(objects ObjectStore, key string, attempts int, wait func()) (Locator, int, error) {
+	if key == "" {
+		return NoLocator{}, 0, nil
+	}
+	var err error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if attempt > 0 {
+			wait()
+		}
+		var geo *Geo
+		var skipped int
+		geo, skipped, err = LoadGeo(objects, key)
+		if err == nil {
+			return geo, skipped, nil
+		}
+	}
+	return NoLocator{}, 0, err
 }
 
 // GeoKey is one row of the per-day geo rollup: where a host's traffic of
