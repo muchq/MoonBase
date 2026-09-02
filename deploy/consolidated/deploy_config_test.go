@@ -1027,6 +1027,10 @@ var publicRoutes = []struct {
 	{"@get_iili_redirect", []string{"method GET", "path /iili/v1/r/*"}, "iili:8091"},
 	// stats (#1460): read-only aggregates, GET-only on purpose.
 	{"@get_stats", []string{"method GET", "path /stats/v1/*"}, "stats:8092"},
+	// The 1d4.net stats tab (#1465) reads its own service's aggregates on
+	// api.1d4.net, the host whose CORS grant covers the app — only the
+	// one_d4 prefix, since the rest of the stats API is muchq.com's.
+	{"@get_one_d4_stats", []string{"method GET", "path /stats/v1/one_d4/*"}, "stats:8092"},
 }
 
 func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {

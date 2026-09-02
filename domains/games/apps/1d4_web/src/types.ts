@@ -65,3 +65,34 @@ export interface QueryResponse {
   games: GameRow[];
   count: number;
 }
+
+// Query stats (MoonBase#1465), from the stats service's one_d4 endpoints,
+// routed through api.1d4.net. One row per day, entry point, source, outcome,
+// and cache disposition; counts only.
+export interface QueryStatRow {
+  date: string;
+  entry: string;
+  source: string;
+  outcome: string;
+  cache: string;
+  requests: number;
+}
+
+export interface QueryStats {
+  days: number;
+  rows: QueryStatRow[];
+}
+
+// Which fields, motifs, order-by motifs, and group-by columns queries used
+// over the window, busiest first.
+export interface QueryTermRow {
+  entry: string;
+  kind: string;
+  term: string;
+  requests: number;
+}
+
+export interface QueryTerms {
+  days: number;
+  rows: QueryTermRow[];
+}

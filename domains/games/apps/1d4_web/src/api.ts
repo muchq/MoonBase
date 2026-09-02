@@ -1,8 +1,22 @@
 import { QueryClient } from '@tanstack/react-query';
-import type { GameRow, IndexRequest, OccurrenceRow, QueryResponse } from './types';
+import type {
+  GameRow,
+  IndexRequest,
+  OccurrenceRow,
+  QueryResponse,
+  QueryStats,
+  QueryTerms,
+} from './types';
 
 // re-export so consumers can import from one place
-export type { GameRow, IndexRequest, OccurrenceRow, QueryResponse };
+export type {
+  GameRow,
+  IndexRequest,
+  OccurrenceRow,
+  QueryResponse,
+  QueryStats,
+  QueryTerms,
+};
 
 const API_BASE = 'https://api.1d4.net';
 
@@ -109,4 +123,20 @@ export async function query(body: {
   offset: number;
 }): Promise<QueryResponse> {
   return request('/v1/query', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export const STATS_WINDOW_DAYS = 30;
+
+export async function getQueryStats(): Promise<QueryStats> {
+  return request(`/stats/v1/one_d4/queries?days=${STATS_WINDOW_DAYS}`);
+}
+
+// The endpoint's ceiling. The vocabulary — fields, motifs, order-by motifs,
+// group-by columns, per entry point — is a few hundred rows at most, so the
+// ceiling reads all of it; a smaller limit could let a busy kind crowd a rare
+// one out of the page.
+const TERM_LIMIT = 1000;
+
+export async function getQueryTerms(): Promise<QueryTerms> {
+  return request(`/stats/v1/one_d4/terms?days=${STATS_WINDOW_DAYS}&limit=${TERM_LIMIT}`);
 }

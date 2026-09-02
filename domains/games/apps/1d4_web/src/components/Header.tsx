@@ -32,6 +32,12 @@ export default function Header() {
         >
           MCP
         </NavLink>
+        <NavLink
+          to="/stats"
+          className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
+        >
+          Stats
+        </NavLink>
       </nav>
     </header>
   );

@@ -418,6 +418,13 @@ api.1d4.net {
 		path /health
 	}
 
+	# The 1d4.net stats tab (#1465) reads its own service's aggregates here,
+	# under this host's CORS grant; the stats service serves the same paths.
+	@get_one_d4_stats {
+		method GET
+		path /stats/v1/one_d4/*
+	}
+
 	@options {
 		method OPTIONS
 	}
@@ -453,6 +460,10 @@ api.1d4.net {
 
 	handle @get_health {
 		reverse_proxy one_d4:8080
+	}
+
+	handle @get_one_d4_stats {
+		reverse_proxy stats:8092
 	}
 
 	handle {

@@ -8,6 +8,7 @@ React + TypeScript frontend for the [one_d4](https://github.com/muchq/MoonBase/t
 - **Index** — Enqueue index requests (username, platform, start/end month). Auto-polls `GET /v1/index` while any request is pending/processing.
 - **Query** — ChessQL query input with syntax help and example chips; results table and limit selector.
 - **MCP** — Documentation for the MCP server at `mcp.1d4.net`: the tool roster, the index-before-you-query ordering, how to connect, and a worked example. Static documentation, not an interactive client: `mcp.1d4.net` allows this origin, so the browser could call it, but the roster is checked in so drift fails in CI rather than in production.
+- **Stats** — How the query surface gets used: queries and aggregates per day by source (web, MCP, direct API), outcome, and snapshot-vs-live, and which fields, motifs, and group-by columns people reach for. Read from the platform stats service through `api.1d4.net`, the host whose CORS grant covers this app.
 
 ## Develop locally
 
@@ -61,4 +62,5 @@ This tars `dist/` for CI artifact storage.
 - Requires the one_d4 API deployed at `api.1d4.net`.
 - API CORS must allow origin `https://1d4.net`.
 - `/chessql` renders `CHESSQL.md` from the one_d4 API, converted to HTML at build time by `vite-plugin-chessql.ts` (#1425). Not a copy of the vocabulary — the same source file mcpserver reads for `chessql://reference`, so `ChessQlReferenceTest`'s pinning of the field, perspective and motif tables against the compiler reaches this page too. Not the same artifact, though: MCP serves markdown from the API jar, this is HTML snapshotted into the Worker bundle, so a doc edit reaches each when that side next ships. Converting during the build rather than in the browser keeps `marked` a devDependency — a renderer in the bundle measured 54 kB gzipped against 8 kB for the HTML it would produce. `marked-gfm-heading-id` is there because the doc links to its own sections and marked emits no heading ids on its own.
+- `/stats` reads the stats service's `/stats/v1/one_d4/*` endpoints through `api.1d4.net`, not `api.muchq.com`: the browser is on `https://1d4.net`, and only `api.1d4.net` grants that origin. Caddy proxies the GETs to the stats container; when the stats profile is not running the tab reports the gateway's error rather than a blank page.
 - The `/mcp` page documents `mcp.1d4.net` but never calls it. `mcp.1d4.net` does allow this origin now, so it could — the list stays checked in at `src/mcpTools.ts` because a build-time contract fails in CI, where a runtime fetch could only ever be wrong in production. Pinned from both sides: `src/__tests__/McpView.test.tsx` here, and mcpserver's `McpToolRosterContractTest`, which asks the running server over `tools/list`.

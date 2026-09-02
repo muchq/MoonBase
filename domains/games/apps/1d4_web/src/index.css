@@ -873,3 +873,31 @@ tr.selected td {
   background: var(--bg);
   color: var(--text-muted);
 }
+
+/* Stats view: the term tables sit side by side and wrap on narrow screens. */
+.stats-terms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem 2rem;
+}
+
+.stats-terms-kind h3 {
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+}
+
+.stats-terms-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.stats-terms-table td {
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.stats-terms-table td:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
