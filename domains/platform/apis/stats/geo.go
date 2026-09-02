@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"os"
 	"sort"
 	"strings"
 )
@@ -126,21 +127,20 @@ func (g *Geo) Country(ip string) string {
 	return candidate.country
 }
 
-// LoadGeo reads the CSV object (gzipped when the key says so) from the
-// bucket the logs live in. The key is the operator's: DB-IP publishes a
-// new file monthly under CC BY 4.0, and muchq.com/stats carries the
-// attribution.
-func LoadGeo(objects ObjectStore, key string) (*Geo, int, error) {
-	body, err := objects.Get(key)
+// LoadGeoFile reads the CSV from disk, gunzipping when the name says so.
+// The file rides in the image: DB-IP publishes a new one monthly under
+// CC BY 4.0, and muchq.com/stats carries the attribution.
+func LoadGeoFile(path string) (*Geo, int, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, 0, fmt.Errorf("fetching geo database %s: %w", key, err)
+		return nil, 0, fmt.Errorf("opening geo database: %w", err)
 	}
-	defer body.Close()
-	var reader io.Reader = body
-	if strings.HasSuffix(key, ".gz") {
-		gz, err := gzip.NewReader(body)
+	defer file.Close()
+	var reader io.Reader = file
+	if strings.HasSuffix(path, ".gz") {
+		gz, err := gzip.NewReader(file)
 		if err != nil {
-			return nil, 0, fmt.Errorf("geo database %s is not gzip: %w", key, err)
+			return nil, 0, fmt.Errorf("geo database %s is not gzip: %w", path, err)
 		}
 		defer gz.Close()
 		reader = gz
@@ -148,29 +148,19 @@ func LoadGeo(objects ObjectStore, key string) (*Geo, int, error) {
 	return ParseDBIP(reader)
 }
 
-// Locate is the boot path: no key means no database, and a key that
-// fails is retried — a bucket that is briefly unreachable while the
-// container starts must not take every endpoint down with it — then
-// reported for the caller to carry on without. It never fails a boot:
-// an all-"--" table with an error in the log is the visible outcome, and
-// a crash loop would hide every other table behind it.
-func Locate(objects ObjectStore, key string, attempts int, wait func()) (Locator, int, error) {
-	if key == "" {
+// Locate is the boot path: an empty path means no database, and a file
+// that will not load is reported for the caller to run without — an
+// all-"--" table with an error in the log, never a boot failure that
+// hides every other table behind it.
+func Locate(path string) (Locator, int, error) {
+	if path == "" {
 		return NoLocator{}, 0, nil
 	}
-	var err error
-	for attempt := 0; attempt < attempts; attempt++ {
-		if attempt > 0 {
-			wait()
-		}
-		var geo *Geo
-		var skipped int
-		geo, skipped, err = LoadGeo(objects, key)
-		if err == nil {
-			return geo, skipped, nil
-		}
+	geo, skipped, err := LoadGeoFile(path)
+	if err != nil {
+		return NoLocator{}, 0, err
 	}
-	return NoLocator{}, 0, err
+	return geo, skipped, nil
 }
 
 // GeoKey is one row of the per-day geo rollup: where a host's traffic of

@@ -60,15 +60,16 @@ The geo rollup (#1467) places each request's `client_ip` (`remote_ip` on
 older lines) in a country and keys `geo_stats` on day, host, agent class,
 and the two-letter code, with request, 403, and probe counts — where the
 scrapers, bots, and scanners come from. The database is DB-IP's free
-country CSV (`dbip-country-lite-YYYY-MM.csv.gz`, CC BY 4.0; muchq.com's
-stats page carries the attribution), uploaded by the operator to the stats
-bucket under the key `GEO_DB_KEY` names; the service loads it at boot
-into a sorted range table and binary-searches it, no library. Overlapping
-rows lose to the range they sit in. An address outside every range, or no
-database at all, files under `--`. A key that will not load, after a few
-retries for a bucket still waking up, is an error in the log and an
-all-`--` table, never a boot failure. A new monthly file is a restart.
-Rows aggregated before the database was uploaded stay `--` until a
+country CSV (CC BY 4.0; muchq.com's stats page carries the attribution),
+pinned by URL and sha256 as `@dbip_country_lite` in
+`bazel/tools.MODULE.bazel` and bundled into the image at
+`/geo/dbip-country-lite.csv.gz`; a new month is a pin bump, nothing on
+the host. The service loads it at boot into a sorted range table and
+binary-searches it, no library. Overlapping rows lose to the range they
+sit in. An address outside every range files under `--`, and so does
+everything when the file will not load — an error in the log, never a
+boot failure. `GEO_DB_PATH` points at another file, or empty switches geo
+off. Rows aggregated before a database was available stay `--` until a
 re-aggregation (bump `RollupVersion`).
 
 What stays ad hoc: IP-range clusters — a /24 key is caller-shaped and
@@ -105,11 +106,10 @@ stay in the log, not on the wire.
 ## Configuration
 
 `STATS_DB_URL` (postgres), `S3_BUCKET`, `S3_REGION`, `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY`, and optionally `GEO_DB_KEY` — the same stats IAM user the shipper writes with,
+`AWS_SECRET_ACCESS_KEY` — the same stats IAM user the shipper writes with,
 which therefore needs `s3:GetObject` and `s3:ListBucket` on the `logs/*`
-prefix as well as `s3:PutObject`, and `s3:GetObject` on the geo key's
-prefix (`geo/*` in the deployment). `AGGREGATE_INTERVAL` and `PORT`
-(default 8092) are optional.
+prefix as well as `s3:PutObject`. `AGGREGATE_INTERVAL`, `PORT`
+(default 8092), and `GEO_DB_PATH` are optional.
 
 The store integration test needs `STATS_TEST_DB_URL` and skips without it,
 like the repo's other Postgres-gated suites.

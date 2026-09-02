@@ -41,7 +41,7 @@ and anything that is not a rolled log are never touched.
 | --- | --- |
 | `S3_BUCKET` | Destination bucket (required) |
 | `S3_REGION` | Bucket's region (required) |
-| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | The stats IAM user: `s3:PutObject` for this shipper, plus `s3:GetObject`/`s3:ListBucket` for the aggregator, all scoped to the bucket's `logs/*` prefix, plus `s3:GetObject` on the geo database's prefix (required) |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | The stats IAM user: `s3:PutObject` for this shipper, plus `s3:GetObject`/`s3:ListBucket` for the aggregator, all scoped to the bucket's `logs/*` prefix (required) |
 | `LOG_DIRS` | `label=dir` pairs, comma-separated: each directory ships under `logs/source=<label>/` (`caddy=/var/log/caddy,one_d4=/var/log/one_d4` in compose) |
 | `SHIP_INTERVAL` | Go duration between passes, default `1h` |
 
