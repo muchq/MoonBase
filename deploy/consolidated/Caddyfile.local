@@ -1,14 +1,13 @@
-# Refusals every site imports first. Two guests, refused everywhere by both
-# User-Agent and address, the redundancy being the point: an agent may stop
-# naming itself and a range may move.
+# Refusals every site imports above its own handles. Two guests, refused on
+# every host by both User-Agent and address, the redundancy being the point: an
+# agent may stop naming itself and a range may move.
 #
-# meta-externalagent (#1447) walked git.muchq.com's git-backed pages from ~70
-# addresses across 57.141.0.0/16 and starved Forgejo; the guard began there and
-# now covers every host, since nothing it crawls here is welcome. robots.txt is
-# not the lever -- it requests what Forgejo's disallows anyway. TLM-Audit-Scanner
-# (#1458) walks each vhost for exposed credentials (.env, .aws, .git-credentials,
-# cloud keys) from two Techoff SRV addresses and ignores robots.txt; the stats
-# page counted nine thousand of its requests in a day, none refused.
+# meta-externalagent (#1447) crawls from ~70 addresses across 57.141.0.0/16
+# and starves Forgejo's git-backed pages; nothing it fetches here is welcome,
+# and robots.txt is not the lever -- it requests what Forgejo's disallows.
+# TLM-Audit-Scanner (#1458) walks each vhost for exposed credentials (.env,
+# .aws, .git-credentials, cloud keys) from two Techoff SRV addresses and
+# ignores robots.txt.
 #
 # One matcher per condition and one handle per matcher: a matcher block ANDs
 # its conditions, and these must be an OR.

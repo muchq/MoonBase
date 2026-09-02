@@ -1835,8 +1835,8 @@ func caddySnippet(t *testing.T, name, snippet string) []string {
 	return nil
 }
 
-// The guard began on git.muchq.com and now lives in the snippet every site
-// imports: nothing this crawler fetches here is welcome anywhere.
+// Nothing this crawler fetches here is welcome on any host, so the guard lives
+// in the snippet every site imports.
 func TestEveryHostBlocksTheCrawlerThatPeggedForgejoByBothUserAgentAndSubnet(t *testing.T) {
 	site := caddySnippet(t, "Caddyfile", "refuse_bots")
 
@@ -1875,10 +1875,10 @@ func TestEveryHostBlocksTheCrawlerThatPeggedForgejoByBothUserAgentAndSubnet(t *t
 				"decoration. Block was:\n%s", matcher, strings.Join(site, "\n"))
 		}
 	}
-	// And gone from the git block itself, or the two copies drift apart.
+	// One copy: a site block declaring its own @meta_ matcher would drift from the snippet.
 	for _, line := range caddySiteBlock(t, "Caddyfile", "git.muchq.com") {
 		if strings.HasPrefix(line, "@meta_") {
-			t.Errorf("git.muchq.com still declares %q; the guard lives in refuse_bots now", line)
+			t.Errorf("git.muchq.com declares %q; the guard lives in refuse_bots", line)
 		}
 	}
 }

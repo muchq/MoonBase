@@ -254,21 +254,22 @@ All services run on the `muchq_network` Docker bridge network.
 ## Refused guests, on every host
 
 The `refuse_bots` snippet at the top of the Caddyfile answers 403 to two
-visitors by User-Agent and by address, and every site block imports it as its
-first directive so a new block cannot forget it: `meta-externalagent` and its
-`57.141.0.0/16` range (#1447), and `TLM-Audit-Scanner` from its two Techoff
-SRV addresses (#1458, the first finding the stats page fed back into Caddy).
+visitors by User-Agent and by address, and every site block imports it above
+its own handle blocks so a new block cannot forget it: `meta-externalagent`
+and its `57.141.0.0/16` range (#1447), and `TLM-Audit-Scanner` from its two
+Techoff SRV addresses (#1458). The range stays open to the two short-link
+redirect paths, which Meta's link unfurler fetches from the same addresses.
 The redundancy is on purpose: an agent may stop naming itself and a range may
-move. `deploy_config_test.go` pins the matchers, the 403s, and the import
-position. Add the next one there, not in a site block.
+move. `deploy_config_test.go` pins the matchers, the 403s, the exemption, and
+the import position. Add the next one there, not in a site block.
 
 ## Crawler guards on git.muchq.com
 
 Forgejo runs under a 0.5-CPU cap, and the git-backed pages (`/commit/`,
 `/compare/`, `/blame/`, `/commits/`, `/src/`, `/archive/`) fork git per
-request, so a crawler walking them starves the site (#1447). The crawler that
-did is refused everywhere by `refuse_bots`; the `git.muchq.com` block also
-answers 403 to any self-identified crawler on those six routes. `/issues/` and
+request, so a crawler walking them starves the site (#1447). Beyond the guests
+`refuse_bots` refuses everywhere, the `git.muchq.com` block answers 403 to any
+self-identified crawler on those six routes. `/issues/` and
 `/raw/` stay open — a database read and a file read, and worth more as
 indexable pages than as saved CPU.
 
