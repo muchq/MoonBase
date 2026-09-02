@@ -14,7 +14,13 @@
 # its conditions, and these must be an OR.
 (refuse_bots) {
 	@meta_agent header_regexp User-Agent (?i)meta-externalagent
-	@meta_subnet remote_ip 57.141.0.0/16
+	# The range is shared with Meta's link unfurler, which fetches a short link
+	# once when someone pastes it into a Meta app; those two redirect paths stay
+	# open to the range so previews keep working, and everything else is refused.
+	@meta_subnet {
+		remote_ip 57.141.0.0/16
+		not path /r/* /iili/v1/r/*
+	}
 	@scanner_agent header_regexp User-Agent (?i)tlm-audit-scanner
 	@scanner_address remote_ip 195.178.110.199 45.148.10.67
 

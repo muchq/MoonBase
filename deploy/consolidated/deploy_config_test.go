@@ -1852,11 +1852,18 @@ func TestEveryHostBlocksTheCrawlerThatPeggedForgejoByBothUserAgentAndSubnet(t *t
 	}
 
 	subnet := caddyMatcherBody(t, site, "@meta_subnet")
-	if len(subnet) != 1 || !strings.HasPrefix(subnet[0], "remote_ip ") ||
-		!strings.Contains(subnet[0], "57.141.0.0/16") {
+	joined := strings.Join(subnet, "\n")
+	if !strings.Contains(joined, "remote_ip 57.141.0.0/16") {
 		t.Errorf("@meta_subnet does not declare `remote_ip 57.141.0.0/16`, got %q. The crawl "+
 			"came from ~70 addresses in that range, which is why no per-address rate limit "+
 			"saw it.", subnet)
+	}
+	// The range is Meta's link unfurler's too. Refused everywhere except the
+	// short-link redirects, or pasting an iili link into a Meta app shows no
+	// preview; the exemption is the two paths and nothing wider.
+	if !strings.Contains(joined, "not path /r/* /iili/v1/r/*") {
+		t.Errorf("@meta_subnet does not exempt the short-link redirects, got %q; Meta's link "+
+			"unfurler shares the range.", subnet)
 	}
 
 	// Both, deliberately. Either alone is one field away from useless: the
@@ -2215,14 +2222,31 @@ func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
 	for i, line := range lines {
 		opened := strings.Count(line, "{") - strings.Count(line, "}")
 		if depth == 0 && opened == 1 {
-			if line == "(refuse_bots) {" {
+			switch {
+			case line == "(refuse_bots) {":
 				snippet = caddyBlockAt(lines, i)
-			} else {
+			case line == "{" || strings.HasPrefix(line, "("):
+				// Global options and other snippets are not sites.
+			default:
 				sites = append(sites, line)
-				block := caddyBlockAt(lines, i)
-				if len(block) == 0 || block[0] != "import refuse_bots" {
-					t.Errorf("%s does not import refuse_bots as its first directive; the scanner is "+
-						"answered before it is refused. Block began:\n%s", line, strings.Join(firstN(block, 3), "\n"))
+				// Handle blocks run in written order, so the import has to sit above every
+				// handle the site declares; directives Caddy orders ahead of handle (header,
+				// rewrite, redir) may precede it, and a refusal still carries the site's
+				// CORS headers, which is right.
+				importAt, firstHandleAt := -1, -1
+				for j, inner := range caddyBlockAt(lines, i) {
+					if inner == "import refuse_bots" && importAt < 0 {
+						importAt = j
+					}
+					if strings.HasPrefix(inner, "handle") && firstHandleAt < 0 {
+						firstHandleAt = j
+					}
+				}
+				if importAt < 0 {
+					t.Errorf("%s does not import refuse_bots; a refused guest is answered there.", line)
+				} else if firstHandleAt >= 0 && firstHandleAt < importAt {
+					t.Errorf("%s imports refuse_bots below its own handle blocks; a refused guest "+
+						"matching an earlier handle is answered before it is refused.", line)
 				}
 			}
 		}
@@ -2233,6 +2257,12 @@ func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
 	}
 	if len(sites) < 5 {
 		t.Fatalf("found only %d site blocks; the walk over the file is wrong", len(sites))
+	}
+	// The local file carries a copy of the snippet, and the local probe is only
+	// evidence about production while the two are the same text.
+	if local := caddySnippet(t, "Caddyfile.local", "refuse_bots"); strings.Join(local, "\n") != strings.Join(snippet, "\n") {
+		t.Errorf("Caddyfile.local's refuse_bots differs from the Caddyfile's:\n%s\n-- vs --\n%s",
+			strings.Join(local, "\n"), strings.Join(snippet, "\n"))
 	}
 
 	var agent *regexp.Regexp
@@ -2285,11 +2315,4 @@ func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
 			t.Errorf("refuse_bots has no `handle %s { respond 403 }`; a matcher with no handle refuses nothing", matcher)
 		}
 	}
-}
-
-func firstN(lines []string, n int) []string {
-	if len(lines) < n {
-		return lines
-	}
-	return lines[:n]
 }
