@@ -60,10 +60,13 @@ countries). Both are one query over the raw partitions in S3, which keep
   request and 403 counts, busiest rows first: which scrapers and bots hit
   which host, and whether they back off after being refused
 - `GET /stats/v1/probes?days=30` — per host/scanner-family request counts
-  and how many were served (status < 400). On vhosts whose Caddy block
-  has no catch-all 404 (`api.muchq.com`, `gpt.muchq.com`), an unmatched
-  path is answered with an empty 200 and so reads as served; the 1d4 and
-  iili vhosts do have one, and there the column means what it says
+  and how many were served (status < 400). Every vhost answers an
+  unmatched path with a 404 (#1468), so a served probe is a real answer —
+  with two shapes that still read as served on any path: OPTIONS
+  preflights on the gateway hosts, and any method on the websocket routes.
+  Rows from before #1468 landed on `api.muchq.com` and `gpt.muchq.com`
+  overcount served, and the summary's error count there rose with the
+  change, because scanner traffic now gets the 404 it always deserved.
 - `GET /health`
 
 Public through Caddy at `api.muchq.com/stats/v1/*`; the reasons for 500s

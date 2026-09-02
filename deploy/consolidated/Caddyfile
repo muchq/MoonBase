@@ -198,6 +198,11 @@ api.muchq.com {
 
 	# Nothing else is routed: an unmatched path (or a HEAD on a GET-only
 	# matcher) is a 404, not the empty 200 a fall-through answers with (#1468).
+	# Two things still answer sub-400 on any path: the preflight handler
+	# above, which matches OPTIONS regardless of path, and the websocket
+	# matchers, which carry no method. Last on purpose — handle blocks run
+	# in written order, and one placed earlier would shadow every route
+	# below it; deploy_config_test.go pins the position.
 	handle {
 		respond 404
 	}
@@ -335,6 +340,11 @@ gpt.muchq.com {
 
 	# Nothing else is routed: an unmatched path (or a HEAD on a GET-only
 	# matcher) is a 404, not the empty 200 a fall-through answers with (#1468).
+	# Two things still answer sub-400 on any path: the preflight handler
+	# above, which matches OPTIONS regardless of path, and the websocket
+	# matchers, which carry no method. Last on purpose — handle blocks run
+	# in written order, and one placed earlier would shadow every route
+	# below it; deploy_config_test.go pins the position.
 	handle {
 		respond 404
 	}
