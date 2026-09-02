@@ -30,7 +30,9 @@ export default function IndexView() {
   const [endMonth, setEndMonth] = useState(thisMonth);
   const [excludeBullet, setExcludeBullet] = useState(true);
 
-  const { data: requests = [] } = useQuery<IndexRequest[]>({
+  const [showPruned, setShowPruned] = useState(false);
+
+  const { data: allRequests = [] } = useQuery<IndexRequest[]>({
     queryKey: ['indexRequests'],
     queryFn: listIndexRequests,
     refetchInterval: (query) =>
@@ -40,6 +42,12 @@ export default function IndexView() {
         ? 3000
         : false,
   });
+
+  // A pruned request has nothing left to show but its own row; after a week
+  // they are most of the list. Hidden by default, one click away, counted
+  // so the click is not a leap of faith.
+  const pruned = allRequests.filter((r) => r.data?.status === 'EXPIRED');
+  const requests = showPruned ? allRequests : allRequests.filter((r) => r.data?.status !== 'EXPIRED');
 
   const mutation = useMutation({
     mutationFn: (body: Parameters<typeof createIndex>[0]) => createIndex(body),
@@ -159,8 +167,22 @@ export default function IndexView() {
 
       <div className="panel">
         <h2>Request status</h2>
+        {pruned.length > 0 && (
+          <button
+            type="button"
+            className="btn row-toggle"
+            aria-pressed={showPruned}
+            onClick={() => setShowPruned((v) => !v)}
+          >
+            {showPruned ? 'Hide pruned' : `Show ${pruned.length} pruned`}
+          </button>
+        )}
         {requests.length === 0 ? (
-          <p className="empty">No recent requests. Submit a request above.</p>
+          <p className="empty">
+            {allRequests.length === 0
+              ? 'No recent requests. Submit a request above.'
+              : 'Every recent request has been pruned.'}
+          </p>
         ) : (
           <div className="table-wrap">
             <table className="request-status-table">
@@ -205,11 +227,12 @@ export default function IndexView() {
             </table>
           </div>
         )}
-        {requests.length > 0 && (
+        {allRequests.length > 0 && (
           <p className="panel-note">
-            Indexed games are kept for 7 days, then deleted. A request stays in this list
-            after that, marked <strong>Pruned</strong> — re-run it to index the games again.
-            The request itself is removed after 30 days.
+            Indexed games are kept for 7 days, then deleted. A request whose games are gone
+            is marked <strong>Pruned</strong> and hidden here — show it to see what it
+            covered, and re-run it to index the games again. The request itself is removed
+            after 30 days.
           </p>
         )}
       </div>
