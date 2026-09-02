@@ -62,15 +62,39 @@
 		respond 204
 	}
 
-	reverse_proxy @ws_thoughts localhost:8080
-	reverse_proxy @ws_golf localhost:8080
-	reverse_proxy @post_golf_v2_session localhost:8089
-	reverse_proxy @ws_golf_v2 localhost:8089
-	reverse_proxy @post_portrait localhost:8081
-	reverse_proxy @get_metrics localhost:8082
-	reverse_proxy @post_mithril localhost:8083
-	reverse_proxy @post_posterize_blur localhost:8084
-	reverse_proxy @post_posterize_edges localhost:8084
+	handle @ws_thoughts {
+		reverse_proxy localhost:8080
+	}
+	handle @ws_golf {
+		reverse_proxy localhost:8080
+	}
+	handle @post_golf_v2_session {
+		reverse_proxy localhost:8089
+	}
+	handle @ws_golf_v2 {
+		reverse_proxy localhost:8089
+	}
+	handle @post_portrait {
+		reverse_proxy localhost:8081
+	}
+	handle @get_metrics {
+		reverse_proxy localhost:8082
+	}
+	handle @post_mithril {
+		reverse_proxy localhost:8083
+	}
+	handle @post_posterize_blur {
+		reverse_proxy localhost:8084
+	}
+	handle @post_posterize_edges {
+		reverse_proxy localhost:8084
+	}
+
+	# Nothing else is routed: an unmatched path (or a HEAD on a GET-only
+	# matcher) is a 404, not the empty 200 a fall-through answers with (#1468).
+	handle {
+		respond 404
+	}
 
 	log {
 		output stdout

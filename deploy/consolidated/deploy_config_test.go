@@ -1039,7 +1039,7 @@ func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {
 			}
 			inMatcher := false
 			proxied := false
-			for _, line := range lines {
+			for i, line := range lines {
 				switch {
 				case line == route.matcher+" {":
 					inMatcher = true
@@ -1057,6 +1057,19 @@ func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {
 					if wantLine := "reverse_proxy " + route.matcher + " " + route.upstream; line != wantLine {
 						t.Errorf("%s goes somewhere other than %s (%q).",
 							route.matcher, route.upstream, line)
+					}
+				case line == "handle "+route.matcher+" {":
+					// The handle form (#1468): the matcher's block is the route.
+					for _, inner := range caddyBlockAt(lines, i) {
+						switch {
+						case inner == "reverse_proxy "+route.upstream:
+							proxied = true
+						case strings.HasPrefix(inner, "reverse_proxy "):
+							t.Errorf("%s goes somewhere other than %s (%q).", route.matcher, route.upstream, inner)
+						case strings.HasPrefix(inner, "rewrite") || strings.HasPrefix(inner, "uri "):
+							t.Errorf("Caddy rewrites %s (%q); the service serves the gateway path itself.",
+								route.matcher, inner)
+						}
 					}
 				case (strings.HasPrefix(line, "rewrite") || strings.HasPrefix(line, "uri strip_prefix")) &&
 					(strings.Contains(line, route.matcher) || namesARoutePath(line, route.directives)):
@@ -2050,5 +2063,45 @@ func TestTheStatsPairIsProfileGatedTogether(t *testing.T) {
 	}
 	if !strings.Contains(serviceBlock(t, "compose.yaml", "stats"), "postgresql://stats:") {
 		t.Errorf("stats names no stats database URL; the aggregates have nowhere to land")
+	}
+}
+
+// api.muchq.com and gpt.muchq.com answer only the routes they declare; an
+// unmatched path, or a HEAD on a GET-only matcher, is a 404 — not the empty
+// 200 Caddy hands out when nothing handles a request (#1468). The stats
+// pipeline's probe table counts sub-400 answers as "served", so on these
+// hosts every scanner probe read as answered. The catch-all has to be a
+// handle block, and every proxied route has to be one too: Caddy orders
+// handle before reverse_proxy, so a bare `reverse_proxy @matcher` beside a
+// catch-all handle is never reached.
+func TestGatewayHostsAnswerUnmatchedPathsWith404(t *testing.T) {
+	for _, tc := range []struct{ file, host string }{
+		{"Caddyfile", "api.muchq.com"},
+		{"Caddyfile", "gpt.muchq.com"},
+		{"Caddyfile.local", ":2015"},
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			site := caddySiteBlock(t, tc.file, tc.host)
+			catchAll := false
+			for i, line := range site {
+				if strings.HasPrefix(line, "reverse_proxy @") {
+					t.Errorf("bare %q would be shadowed by the catch-all handle; wrap it in "+
+						"`handle @matcher { reverse_proxy upstream }`.", line)
+				}
+				if line != "handle {" {
+					continue
+				}
+				for _, inner := range caddyBlockAt(site, i) {
+					if inner == "respond 404" {
+						catchAll = true
+					}
+				}
+			}
+			if !catchAll {
+				t.Errorf("no catch-all `handle { respond 404 }` in the %s block; an unmatched "+
+					"request is answered 200 with an empty body. Block was:\n%s",
+					tc.host, strings.Join(site, "\n"))
+			}
+		})
 	}
 }
