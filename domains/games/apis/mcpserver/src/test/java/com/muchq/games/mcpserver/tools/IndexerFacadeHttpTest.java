@@ -40,6 +40,7 @@ public class IndexerFacadeHttpTest {
   private HttpServer server;
   private String baseUrl;
   private final List<String> requestLog = new ArrayList<>();
+  private final List<String> userAgents = new ArrayList<>();
   private final Map<String, Handler> routes = new java.util.HashMap<>();
 
   interface Handler {
@@ -54,6 +55,7 @@ public class IndexerFacadeHttpTest {
         exchange -> {
           String key = exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath();
           requestLog.add(key);
+          userAgents.add(exchange.getRequestHeaders().getFirst("User-Agent"));
           Handler handler = routes.get(key);
           if (handler == null) {
             respond(exchange, 404, "{\"error\":\"no route for " + key + "\"}");
@@ -634,6 +636,21 @@ public class IndexerFacadeHttpTest {
 
     assertThat(facade().query("motif(pin)", null, 10)).isEmpty();
     assertThat(facade().aggregate("white.elo > 1", List.of("eco"), null, 20).groups()).isEmpty();
+  }
+
+  /**
+   * one_d4 attributes query events to mcpserver by this product token (#1465); without it every MCP
+   * query would be booked as a direct API call. The JDK client would otherwise send its own.
+   */
+  @Test
+  public void everyCallIdentifiesItselfAsMcpserver() {
+    route("POST /v1/query", 200, "{\"games\":[],\"count\":0}");
+    route("GET /v1/index/abc", 200, "{\"requestId\":\"abc\",\"status\":\"COMPLETED\"}");
+
+    facade().query("motif(pin)", null, 10);
+
+    assertThat(userAgents).isNotEmpty().allMatch(agent -> agent.equals(OneD4Client.USER_AGENT));
+    assertThat(OneD4Client.USER_AGENT).isEqualTo("mcpserver");
   }
 
   /** A base URL with a trailing slash must not produce //v1/query. */

@@ -234,8 +234,10 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/HealthController.java",
         "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryController.java",
+        "src/main/java/com/muchq/games/one_d4/api/QueryEvent.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryExecutor.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryRequestValidator.java",
+        "src/main/java/com/muchq/games/one_d4/api/QueryShape.java",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -249,6 +251,7 @@ java_library(
         "//domains/games/libs/chessql:parser",
         artifact("com.github.ben-manes.caffeine:caffeine"),
         artifact("io.micronaut:micronaut-context"),
+        artifact("io.micronaut:micronaut-core"),
         artifact("io.micronaut:micronaut-http"),
         artifact("io.micronaut:micronaut-http-server"),
         artifact("io.micronaut:micronaut-inject"),
@@ -457,7 +460,9 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/IndexControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/MutableTicker.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryControllerTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/QueryEventTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryRequestValidatorTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/QueryShapeTest.java",
         "src/test/java/com/muchq/games/one_d4/api/dto/DtoJsonCompatTest.java",
     ],
     deps = [
@@ -793,6 +798,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/IndexResponseWireTest.java",
         "src/test/java/com/muchq/games/one_d4/api/NegatedFilterHttpTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryErrorWireTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/QueryEventWireTest.java",
     ],
     runtime_deps = [
         "//domains/platform/libs/logging",
@@ -833,5 +839,9 @@ java_test_suite(
         artifact("org.jdbi:jdbi3-core"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
+        # QueryEventWireTest reads the query event off the logger the server writes to.
+        artifact("ch.qos.logback:logback-classic"),
+        artifact("ch.qos.logback:logback-core"),
+        artifact("org.slf4j:slf4j-api"),
     ],
 )

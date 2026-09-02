@@ -357,6 +357,27 @@ it first via `POST /v1/index`.
 
 ---
 
+## Query events
+
+Every `POST /v1/query` and `POST /v1/aggregate` writes one structured log line
+on the logger `com.muchq.games.one_d4.query_event` with message `query_event`,
+for the stats pipeline (#1465). Its fields are key-value pairs, and none of
+them is caller-authored: the query text, the player, and comparison values
+stay out.
+
+| field | values |
+|---|---|
+| `entry` | `query` or `aggregate` |
+| `source` | `mcp` (User-Agent `mcpserver`), `ui` (Origin `https://1d4.net`), else `api` |
+| `fields`, `motifs` | comma-joined, sorted names from the query's grammar |
+| `order_by` | the ORDER BY motif, or empty |
+| `player` | whether a perspective player was given |
+| `limit`, `offset` / `group_by`, `order`, `min_games` | the request's bounds, per entry |
+| `cache` | `snapshot` or `live` (query only) |
+| `rows` | rows returned, on success |
+| `outcome` | `ok`, `invalid` (400-class), or `failed` |
+| `duration_us` | wall time in the handler |
+
 ## Example Session
 
 ```bash
