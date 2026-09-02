@@ -112,5 +112,14 @@ which therefore needs `s3:GetObject` and `s3:ListBucket` on the `logs/*`
 prefix as well as `s3:PutObject`. `AGGREGATE_INTERVAL`, `PORT`
 (default 8092), and `GEO_DB_PATH` are optional.
 
-The store integration test needs `STATS_TEST_DB_URL` and skips without it,
-like the repo's other Postgres-gated suites.
+## Tests
+
+Unit tests per layer, and two gated suites. `stats_test` holds the store
+tests, which need `STATS_TEST_DB_URL` and skip without it, like the repo's
+other Postgres-gated suites. `stats_integration_test` is the end-to-end
+pattern: `e2e_test.go` puts shipped objects in a memory bucket, runs the
+real loop with the real vendor geo file into the real store, and reads
+every endpoint through `NewRouter` over HTTP — the same objects production
+wires together. A new endpoint or source gets a few lines there, not a new
+harness. Locally, a throwaway `postgres:18` in Docker on port 55432 and
+`STATS_TEST_DB_URL=postgresql://t:t@localhost:55432/t` run both.

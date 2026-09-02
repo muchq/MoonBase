@@ -19,6 +19,7 @@ go_library(
     importpath = "github.com/muchq/moonbase/domains/platform/apis/stats",
     visibility = ["//visibility:public"],
     deps = [
+        "//domains/platform/libs/mucks",
         "@com_github_jackc_pgx_v5//:pgx",
         "@com_github_jackc_pgx_v5//pgxpool",
     ],
@@ -35,6 +36,7 @@ go_test(
         "aggregate_test.go",
         "api_test.go",
         "classify_test.go",
+        "fixtures_test.go",
         "geo_test.go",
         "loop_test.go",
         "queries_test.go",
@@ -54,7 +56,6 @@ go_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":stats_lib",
-        "//domains/platform/libs/mucks",
         "//domains/platform/libs/s3lite",
     ],
 )
@@ -67,13 +68,19 @@ pkg_tar(
     package_dir = "/geo",
 )
 
-# The pinned vendor file through the real parser, and the layer's path
-# against the binary's default. Its own target: the data is a few MB the
-# unit suite has no use for.
+# Integration: the pinned vendor file through the real parser, the layer's
+# path against the binary's default, and the whole service end to end —
+# shipped objects in a memory bucket, the real loop, the real store on the
+# CI postgres, the real router over HTTP. Its own target: the data is a
+# few MB the unit suite has no use for, and the database is shared.
 go_test(
-    name = "geo_vendor_test",
+    name = "stats_integration_test",
     size = "small",
-    srcs = ["geo_vendor_test.go"],
+    srcs = [
+        "e2e_test.go",
+        "fixtures_test.go",
+        "geo_vendor_test.go",
+    ],
     data = [
         ":geo_layer",
         "@dbip_country_lite//file",
@@ -83,6 +90,8 @@ go_test(
         "DBIP_COUNTRY_LITE": "$(rootpath @dbip_country_lite//file)",
         "GEO_LAYER_TAR": "$(rootpath :geo_layer)",
     },
+    env_inherit = ["STATS_TEST_DB_URL"],
+    tags = ["exclusive"],
 )
 
 linux_oci_go(
