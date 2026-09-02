@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -18,7 +19,9 @@ type fakeObjects struct {
 func (f *fakeObjects) List(prefix string) ([]string, error) {
 	var keys []string
 	for k := range f.objects {
-		keys = append(keys, k)
+		if strings.HasPrefix(k, prefix) {
+			keys = append(keys, k)
+		}
 	}
 	return keys, nil
 }
@@ -100,6 +103,33 @@ func TestRunOnceAggregatesNewObjectsAndSkipsProcessedAndForeignKeys(t *testing.T
 	// The partition date keys the rollup — the object's own dt=, not today.
 	if got := rollup.Requests[RequestKey{"2026-08-31", "api.1d4.net", 200, "GET", AgentOther, "(empty)"}]; got != 1 {
 		t.Errorf("rollup rows = %v", rollup.Requests)
+	}
+}
+
+func TestRunOnceReadsOneD4ObjectsAsQueryEvents(t *testing.T) {
+	objects := &fakeObjects{objects: map[string][]byte{
+		"logs/source=one_d4/dt=2026-09-01/query_events-2026-09-01T14.log.gz": gzipped(t,
+			eventLine("entry", "query", "source", "ui", "outcome", "ok", "cache", "live", "duration_us", "100")),
+		// A caddy-shaped line under the one_d4 prefix is not an event; the object still applies.
+		"logs/source=one_d4/dt=2026-09-01/stray.log.gz": gzipped(t, oneLine),
+	}}
+	store := newFakeApplier()
+
+	processed, err := testAggregator(objects, store).RunOnce(context.Background())
+
+	if err != nil || processed != 2 {
+		t.Fatalf("RunOnce = (%d, %v), want both one_d4 objects", processed, err)
+	}
+	rollup := store.applied["logs/source=one_d4/dt=2026-09-01/query_events-2026-09-01T14.log.gz"]
+	if got := rollup.Queries[QueryKey{"2026-09-01", "query", "ui", "ok", "live"}]; got != (QueryStat{1, 100}) {
+		t.Errorf("query rows = %v", rollup.Queries)
+	}
+	if len(rollup.Requests) != 0 {
+		t.Errorf("a one_d4 object minted request rows: %v", rollup.Requests)
+	}
+	stray := store.applied["logs/source=one_d4/dt=2026-09-01/stray.log.gz"]
+	if len(stray.Queries) != 0 || len(stray.Requests) != 0 {
+		t.Errorf("the stray object minted rows: %v %v", stray.Queries, stray.Requests)
 	}
 }
 

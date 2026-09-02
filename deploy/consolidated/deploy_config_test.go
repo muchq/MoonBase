@@ -2065,6 +2065,34 @@ func TestLogShipperReadsTheCaddyLogMountAndIsProfileGated(t *testing.T) {
 	}
 }
 
+// one_d4 rolls its query events into a host directory and the shipper moves
+// them under their own partition (#1465): both containers bind the same
+// directory, and the shipper names it with its label.
+func TestOneD4QueryEventsAreRolledWhereTheShipperReads(t *testing.T) {
+	oneD4 := serviceBlock(t, "compose.yaml", "one_d4")
+	if !strings.Contains(oneD4, "QUERY_EVENT_LOG_DIR=/var/log/one_d4") {
+		t.Errorf("one_d4 does not set QUERY_EVENT_LOG_DIR; the query events roll into the "+
+			"container's scratch default and never leave it. Block was:\n%s", oneD4)
+	}
+	if !strings.Contains(oneD4, "- /var/log/one_d4:/var/log/one_d4") {
+		t.Errorf("one_d4 does not bind-mount /var/log/one_d4; its rolls die with the container. "+
+			"Block was:\n%s", oneD4)
+	}
+
+	shipper := serviceBlock(t, "compose.yaml", "log_shipper")
+	if !strings.Contains(shipper, "one_d4=/var/log/one_d4") {
+		t.Errorf("log_shipper's LOG_DIRS does not name one_d4=/var/log/one_d4; the rolls pile "+
+			"up unshipped. Block was:\n%s", shipper)
+	}
+	if !strings.Contains(shipper, "- /var/log/one_d4:/var/log/one_d4") {
+		t.Errorf("log_shipper does not bind-mount /var/log/one_d4. Block was:\n%s", shipper)
+	}
+	if strings.Contains(shipper, "/var/log/one_d4:/var/log/one_d4:ro") {
+		t.Errorf("log_shipper mounts one_d4's log dir read-only; it deletes rolled files after " +
+			"upload, so every pass would re-upload the same rolls forever.")
+	}
+}
+
 // The stats pair is profile-gated together: the aggregator needs the same
 // S3 credentials the shipper does, so a default `up -d` must start
 // neither the service nor its db-init — half the pair running is a

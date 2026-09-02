@@ -7,8 +7,8 @@ hourly fee that batch stats have no use for.
 
 ## What it does
 
-Every `SHIP_INTERVAL` (default `1h`), scan `LOG_DIR` for files Caddy's
-roller has rolled — `access-<timestamp>-<reason>.log` under Caddy ≥2.11
+Every `SHIP_INTERVAL` (default `1h`), scan each directory in `LOG_DIRS`
+for files Caddy's roller has rolled — `access-<timestamp>-<reason>.log` under Caddy ≥2.11
 (timberjack appends the roll reason, e.g. `-size`), `access-<timestamp>.log`
 before that, `.log.gz` when Caddy has compressed it (a plain `.log` may
 still be awaiting Caddy's compressor, which is why a `.gz` with a `.log`
@@ -16,8 +16,12 @@ sibling is skipped and nothing younger than `MinAge` ships) — gzip the ones
 that need it, and PUT each to
 
 ```
-s3://$S3_BUCKET/logs/source=$LOG_SOURCE/dt=YYYY-MM-DD/<filename>.gz
+s3://$S3_BUCKET/logs/source=<label>/dt=YYYY-MM-DD/<filename>.gz
 ```
+
+one_d4's query events (#1465) ship the same way: logback rolls them as
+`query_events-<date>T<hour>.log.gz`, the same name shape, from the
+directory the `one_d4` label points at.
 
 partitioned so DuckDB / Athena / Spark read it directly. The date is the
 roll timestamp in the filename. A file is deleted only after its upload
@@ -40,8 +44,7 @@ and anything that is not a rolled log are never touched.
 | `S3_BUCKET` | Destination bucket (required) |
 | `S3_REGION` | Bucket's region (required) |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | The stats IAM user: `s3:PutObject` for this shipper, plus `s3:GetObject`/`s3:ListBucket` for the aggregator, all scoped to the bucket's `logs/*` prefix (required) |
-| `LOG_DIR` | Directory Caddy rolls into (`/var/log/caddy` in compose) |
-| `LOG_SOURCE` | Partition label, default `caddy` |
+| `LOG_DIRS` | `label=dir` pairs, comma-separated: each directory ships under `logs/source=<label>/` (`caddy=/var/log/caddy,one_d4=/var/log/one_d4` in compose) |
 | `SHIP_INTERVAL` | Go duration between passes, default `1h` |
 
 ## Deploying

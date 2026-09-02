@@ -469,6 +469,10 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=one_d4
       - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4,service.version=${ONE_D4_SHA:-${DEPLOY_SHA:-latest}}
+      # Query events (#1465) roll into this directory; log_shipper_one_d4 ships them.
+      - QUERY_EVENT_LOG_DIR=/var/log/one_d4
+    volumes:
+      - /var/log/one_d4:/var/log/one_d4
     networks:
       # one-d4 for Java callers: java.net.URI gives a hostname containing an
       # underscore a null host, so no request built from one can be sent.
@@ -601,12 +605,13 @@ services:
       - AWS_SECRET_ACCESS_KEY=${STATS_AWS_SECRET_ACCESS_KEY}
       - S3_BUCKET=${STATS_S3_BUCKET}
       - S3_REGION=${STATS_S3_REGION:-us-east-1}
-      - LOG_DIR=/var/log/caddy
-      - LOG_SOURCE=caddy
+      # Each directory ships under its own partition (#1465).
+      - LOG_DIRS=caddy=/var/log/caddy,one_d4=/var/log/one_d4
     volumes:
       # Read-write on purpose: rolled files are deleted after upload, which
       # is what keeps the host disk bounded once shipping owns retention.
       - /var/log/caddy:/var/log/caddy
+      - /var/log/one_d4:/var/log/one_d4
     networks:
       - app_network
     deploy:

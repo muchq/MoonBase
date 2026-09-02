@@ -40,6 +40,44 @@ type Shipper struct {
 	MinAge time.Duration
 }
 
+// A Source is one directory of rolls and the partition label they ship
+// under: logs/source=<Label>/. One shipper process serves several, since a
+// pass is per directory and the credentials are the same.
+type Source struct {
+	Label string
+	Dir   string
+}
+
+// ParseSources reads the LOG_DIRS setting, "label=dir,label=dir". Labels
+// are partition names, so they are one word each and distinct.
+func ParseSources(spec string) ([]Source, error) {
+	var sources []Source
+	seen := map[string]bool{}
+	for _, item := range strings.Split(spec, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		label, dir, ok := strings.Cut(item, "=")
+		label, dir = strings.TrimSpace(label), strings.TrimSpace(dir)
+		if !ok || label == "" || dir == "" {
+			return nil, fmt.Errorf("LOG_DIRS entry %q is not label=dir", item)
+		}
+		if strings.ContainsAny(label, "/= ") {
+			return nil, fmt.Errorf("LOG_DIRS label %q is not a partition name", label)
+		}
+		if seen[label] {
+			return nil, fmt.Errorf("LOG_DIRS names source %q twice", label)
+		}
+		seen[label] = true
+		sources = append(sources, Source{Label: label, Dir: dir})
+	}
+	if len(sources) == 0 {
+		return nil, errors.New("LOG_DIRS names no directory")
+	}
+	return sources, nil
+}
+
 // A rolled log as Caddy's roller names it, optionally .gz when Caddy
 // compressed it. Caddy ≥2.11 rolls with timberjack, which always appends a
 // roll reason after the timestamp (base-<timestamp>-size.log): size, time,

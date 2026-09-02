@@ -179,6 +179,27 @@ func TestARollWithARotationReasonSuffixShips(t *testing.T) {
 // A failed upload must leave the file for the next pass — deletion is only
 // ever the consequence of a 200 — and must not stop the other files from
 // shipping.
+// logback rolls one_d4's query events as query_events-<date>T<hour>.log.gz
+// (the shared logback.xml); the name is shaped like Caddy's rolls on purpose,
+// so the same shipper moves them under the hour's date.
+func TestALogbackHourlyRollShipsUnderItsDate(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "query_events-2026-09-01T14.log.gz", gzipped(t, `{"message":"query_event"}`))
+	writeFile(t, dir, "query_events.log", "live\n")
+	uploader := newFakeUploader()
+
+	shipped, skipped, err := (&Shipper{Dir: dir, Source: "one_d4", Uploader: uploader}).ShipOnce()
+
+	if err != nil || shipped != 1 || skipped != 1 {
+		t.Fatalf("ShipOnce = (%d, %d, %v); want the roll shipped and the live file skipped",
+			shipped, skipped, err)
+	}
+	key := "logs/source=one_d4/dt=2026-09-01/query_events-2026-09-01T14.log.gz"
+	if got := gunzip(t, uploader.puts[key]); got != `{"message":"query_event"}` {
+		t.Errorf("uploaded under %v, want %s with the roll's contents", keys(uploader.puts), key)
+	}
+}
+
 func TestAFailedUploadKeepsTheFileAndTheRestStillShip(t *testing.T) {
 	dir := t.TempDir()
 	failing := writeFile(t, dir, "access-2026-08-30T14-00-00.000.log", "a")
@@ -321,5 +342,22 @@ func TestAFileYoungerThanMinAgeIsLeftForTheNextPass(t *testing.T) {
 	}
 	if shipped, _, err = s.ShipOnce(); err != nil || shipped != 1 {
 		t.Errorf("ShipOnce after aging = (%d, %v), want it shipped", shipped, err)
+	}
+}
+
+func TestSourcesParseAsLabelledDirectoriesAndRejectTheAmbiguous(t *testing.T) {
+	sources, err := ParseSources(" caddy=/var/log/caddy, one_d4=/var/log/one_d4 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Source{{"caddy", "/var/log/caddy"}, {"one_d4", "/var/log/one_d4"}}
+	if len(sources) != 2 || sources[0] != want[0] || sources[1] != want[1] {
+		t.Errorf("ParseSources = %v, want %v", sources, want)
+	}
+	for _, bad := range []string{"", "/var/log/caddy", "caddy=", "=/var/log/caddy",
+		"caddy=/a,caddy=/b", "a/b=/var/log/x"} {
+		if _, err := ParseSources(bad); err == nil {
+			t.Errorf("ParseSources(%q) accepted; a wrong partition label is a silent misfile", bad)
+		}
 	}
 }

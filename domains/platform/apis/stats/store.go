@@ -43,6 +43,24 @@ var schema = []string{
 		requests bigint NOT NULL,
 		PRIMARY KEY (dt, host, probe, status)
 	)`,
+	`CREATE TABLE IF NOT EXISTS query_stats (
+		dt date NOT NULL,
+		entry text NOT NULL,
+		source text NOT NULL,
+		outcome text NOT NULL,
+		cache text NOT NULL,
+		requests bigint NOT NULL,
+		duration_us bigint NOT NULL,
+		PRIMARY KEY (dt, entry, source, outcome, cache)
+	)`,
+	`CREATE TABLE IF NOT EXISTS query_term_stats (
+		dt date NOT NULL,
+		entry text NOT NULL,
+		kind text NOT NULL,
+		term text NOT NULL,
+		requests bigint NOT NULL,
+		PRIMARY KEY (dt, entry, kind, term)
+	)`,
 }
 
 // RollupVersion is the meaning of what Consume computes. Bump it when a
@@ -68,6 +86,7 @@ func currentRollupVersion() string { return rollupVersionFor(RollupVersion, sche
 // belongs here, or a version bump leaves it double-counted.
 var rollupTables = []string{
 	"processed_log_objects", "request_stats", "iili_slug_stats", "probe_stats",
+	"query_stats", "query_term_stats",
 }
 
 const metaSchema = `CREATE TABLE IF NOT EXISTS stats_meta (
@@ -213,6 +232,27 @@ func (s *Store) ApplyRollup(ctx context.Context, key string, rollup *Rollup) err
 			return err
 		}
 	}
+	for k, stat := range rollup.Queries {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO query_stats (dt, entry, source, outcome, cache, requests, duration_us)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)
+			 ON CONFLICT (dt, entry, source, outcome, cache)
+			 DO UPDATE SET requests = query_stats.requests + EXCLUDED.requests,
+			               duration_us = query_stats.duration_us + EXCLUDED.duration_us`,
+			k.Date, k.Entry, k.Source, k.Outcome, k.Cache, stat.Requests, stat.DurationUs); err != nil {
+			return err
+		}
+	}
+	for k, count := range rollup.Terms {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO query_term_stats (dt, entry, kind, term, requests)
+			 VALUES ($1, $2, $3, $4, $5)
+			 ON CONFLICT (dt, entry, kind, term)
+			 DO UPDATE SET requests = query_term_stats.requests + EXCLUDED.requests`,
+			k.Date, k.Entry, k.Kind, k.Term, count); err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
 }
 
@@ -334,6 +374,68 @@ func (s *Store) Probes(ctx context.Context, days int) ([]ProbeRow, error) {
 	var out []ProbeRow
 	var row ProbeRow
 	_, err = pgx.ForEachRow(rows, []any{&row.Host, &row.Probe, &row.Requests, &row.Served},
+		func() error {
+			out = append(out, row)
+			return nil
+		})
+	return out, err
+}
+
+// QueryRow is one day of one_d4 queries by entry, source, outcome, and
+// cache, with the mean handler time over them.
+type QueryRow struct {
+	Date          string `json:"date"`
+	Entry         string `json:"entry"`
+	Source        string `json:"source"`
+	Outcome       string `json:"outcome"`
+	Cache         string `json:"cache"`
+	Requests      int64  `json:"requests"`
+	AvgDurationUs int64  `json:"avg_duration_us"`
+}
+
+// TermRow is one field, motif, order-by motif, or group-by term and how
+// many queries of that entry used it over the window.
+type TermRow struct {
+	Entry    string `json:"entry"`
+	Kind     string `json:"kind"`
+	Term     string `json:"term"`
+	Requests int64  `json:"requests"`
+}
+
+func (s *Store) Queries(ctx context.Context, days int) ([]QueryRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT dt::text, entry, source, outcome, cache, requests, duration_us / requests
+		 FROM query_stats
+		 WHERE dt >= current_date - $1::int
+		 ORDER BY dt DESC, entry, source, outcome, cache`, days)
+	if err != nil {
+		return nil, err
+	}
+	var out []QueryRow
+	var row QueryRow
+	_, err = pgx.ForEachRow(rows,
+		[]any{&row.Date, &row.Entry, &row.Source, &row.Outcome, &row.Cache, &row.Requests, &row.AvgDurationUs},
+		func() error {
+			out = append(out, row)
+			return nil
+		})
+	return out, err
+}
+
+func (s *Store) QueryTerms(ctx context.Context, days, limit int) ([]TermRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT entry, kind, term, SUM(requests) AS requests
+		 FROM query_term_stats
+		 WHERE dt >= current_date - $1::int
+		 GROUP BY entry, kind, term
+		 ORDER BY requests DESC, entry, kind, term
+		 LIMIT $2`, days, limit)
+	if err != nil {
+		return nil, err
+	}
+	var out []TermRow
+	var row TermRow
+	_, err = pgx.ForEachRow(rows, []any{&row.Entry, &row.Kind, &row.Term, &row.Requests},
 		func() error {
 			out = append(out, row)
 			return nil

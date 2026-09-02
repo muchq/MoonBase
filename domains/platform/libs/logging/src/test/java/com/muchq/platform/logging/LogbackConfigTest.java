@@ -113,4 +113,50 @@ public class LogbackConfigTest {
     }
     throw new AssertionError("no line containing " + needle);
   }
+
+  /**
+   * one_d4's query events (#1465) also go to a file of their own, rolled under the name shape
+   * log_shipper recognizes; the directory is the deployment's to set. The console keeps a copy.
+   */
+  @Test
+  public void theQueryEventLoggerWritesItsOwnRolledFile() throws Exception {
+    java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("query_events");
+    ByteArrayOutputStream captured = new ByteArrayOutputStream();
+    PrintStream original = System.out;
+    LoggerContext context = new LoggerContext();
+    System.setProperty("QUERY_EVENT_LOG_DIR", dir.toString());
+    try {
+      System.setOut(new PrintStream(captured, true, UTF_8));
+      context.setMDCAdapter(new ch.qos.logback.classic.util.LogbackMDCAdapter());
+      JoranConfigurator configurator = new JoranConfigurator();
+      configurator.setContext(context);
+      configurator.doConfigure(getClass().getClassLoader().getResource("logback.xml"));
+      context
+          .getLogger("com.muchq.games.one_d4.query_event")
+          .atInfo()
+          .addKeyValue("entry", "query")
+          .addKeyValue("source", "ui")
+          .log("query_event");
+      context.getLogger("com.muchq.some.Service").info("not a query event");
+    } finally {
+      System.setOut(original);
+      System.clearProperty("QUERY_EVENT_LOG_DIR");
+      context.stop();
+    }
+
+    String file = java.nio.file.Files.readString(dir.resolve("query_events.log"), UTF_8);
+    assertThat(file.strip().split("\n")).as("only the event logger's lines").hasSize(1);
+    JsonNode event = new ObjectMapper().readTree(file.strip());
+    assertThat(event.get("loggerName").asText()).isEqualTo("com.muchq.games.one_d4.query_event");
+    assertThat(event.get("kvpList").toString())
+        .isEqualTo("[{\"entry\":\"query\"},{\"source\":\"ui\"}]");
+    assertThat(captured.toString(UTF_8)).as("the console keeps a copy").contains("query_event");
+
+    // The roll name is what log_shipper's pattern accepts (shipper.go), with the hour's date
+    // as the partition; pinned here as text because the two ends live in different languages.
+    String config =
+        new String(
+            getClass().getClassLoader().getResourceAsStream("logback.xml").readAllBytes(), UTF_8);
+    assertThat(config).contains("query_events-%d{yyyy-MM-dd'T'HH}.log.gz");
+  }
 }

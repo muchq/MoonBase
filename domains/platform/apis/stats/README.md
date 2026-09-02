@@ -7,11 +7,12 @@ passes.
 
 ## The loop
 
-Every `AGGREGATE_INTERVAL` (default `15m`): list
-`s3://$S3_BUCKET/logs/source=caddy/`, and for every object no successful
-pass has marked processed, stream it (gunzip included), roll up its lines
-in memory, and apply the rollup plus the processed marker in one
-transaction. A crash between the two re-processes the object; the marker's
+Every `AGGREGATE_INTERVAL` (default `15m`): list the two source prefixes,
+`s3://$S3_BUCKET/logs/source=caddy/` (Caddy's access logs) and
+`logs/source=one_d4/` (one_d4's query events, #1465), and for every object
+no successful pass has marked processed, stream it (gunzip included), roll
+up its lines with the parser its source names, and apply the rollup plus
+the processed marker in one transaction. A crash between the two re-processes the object; the marker's
 conflict arm makes a duplicate application a no-op — so counts survive
 crashes without double-counting. Per-object failures are logged and
 retried next pass.
@@ -34,6 +35,15 @@ serves real archives and `.sql` files under deeper paths. iili slugs are
 one path segment, max 64 bytes, only on the two routes that reach iili.
 Row width is what's bounded; row count is what Postgres is for, which is
 the division of labor #1460 drew against the tsdb.
+
+The query rollup reads one_d4's `query_event` lines (their shape is in
+one_d4's API.md) into two tables: `query_stats`, keyed by day, entry,
+source, outcome, and cache — all one_d4's own vocabulary, checked here so
+a line from a build speaking a new word is skipped rather than minting a
+row — with request counts and summed handler time; and `query_term_stats`,
+which fields, motifs, order-by motifs, and group-by terms queries used.
+Group-by terms carry a caller-chosen bucket width and are capped per
+object like agent names.
 
 The raw lines stay in S3, so a better classifier is a re-aggregation,
 not lost data — and re-aggregation is a mechanism, not a runbook. The
@@ -67,6 +77,10 @@ countries). Both are one query over the raw partitions in S3, which keep
   Rows from before #1468 landed on `api.muchq.com` and `gpt.muchq.com`
   overcount served, and the summary's error count there rose with the
   change, because scanner traffic now gets the 404 it always deserved.
+- `GET /stats/v1/one_d4/queries?days=30` — one_d4 queries per
+  day/entry/source/outcome/cache with the mean handler time
+- `GET /stats/v1/one_d4/terms?days=30&limit=200` — which fields, motifs,
+  and group-by terms queries used, busiest first
 - `GET /health`
 
 Public through Caddy at `api.muchq.com/stats/v1/*`; the reasons for 500s

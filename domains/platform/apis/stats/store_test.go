@@ -51,6 +51,10 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	rollup.Slugs[SlugKey{date, host + "-slug", 302}] = 3
 	rollup.Probes[ProbeKey{date, host, ProbeEnv, 404}] = 4
 	rollup.Probes[ProbeKey{date, host, ProbeEnv, 200}] = 1
+	// The query rollup has no host; a per-run term keeps this run's rows tellable.
+	term := host + ".field"
+	rollup.Queries[QueryKey{date, "query", "ui", "ok", "live"}] = QueryStat{2, 3000}
+	rollup.Terms[TermKey{date, "query", KindField, term}] = 2
 
 	if pending, err := store.Unprocessed(ctx, []string{key}); err != nil || len(pending) != 1 {
 		t.Fatalf("Unprocessed = (%v, %v), want the fresh key pending", pending, err)
@@ -137,6 +141,36 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	}
 	if env == nil || env.Requests != 5 || env.Served != 1 {
 		t.Errorf("env probe row = %+v; want 5 across statuses with the one 200 served", env)
+	}
+
+	queries, err := store.Queries(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var live *QueryRow
+	for i := range queries {
+		if queries[i].Date == date && queries[i].Entry == "query" && queries[i].Source == "ui" &&
+			queries[i].Outcome == "ok" && queries[i].Cache == "live" {
+			live = &queries[i]
+		}
+	}
+	// Other runs share this key, so the counts are lower bounds; the mean is a division.
+	if live == nil || live.Requests < 2 || live.AvgDurationUs <= 0 {
+		t.Errorf("live ui query row = %+v; want the rollup applied once with a mean over it", live)
+	}
+
+	terms, err := store.QueryTerms(ctx, 2, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mine *TermRow
+	for i := range terms {
+		if terms[i].Term == term {
+			mine = &terms[i]
+		}
+	}
+	if mine == nil || mine.Requests != 2 || mine.Kind != KindField || mine.Entry != "query" {
+		t.Errorf("term row = %+v, want exactly the 2 applied once", mine)
 	}
 }
 
