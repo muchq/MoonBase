@@ -109,9 +109,8 @@ public class QueryEventWireTest {
     assertThat(post("text/plain", A_QUERY).statusCode()).isEqualTo(415);
     assertThat(captured.list).isEmpty();
 
-    // Malformed JSON is answered before binding too (today as a 500, which is its own problem,
-    // not this one's); either way no handler ran and no event may say one did.
-    assertThat(post("application/json", "{\"query\":").statusCode()).isGreaterThanOrEqualTo(400);
+    // Malformed JSON is answered before binding too; no handler ran and no event may say one did.
+    assertThat(post("application/json", "{\"query\":").statusCode()).isEqualTo(400);
     assertThat(captured.list).isEmpty();
   }
 }
