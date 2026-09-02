@@ -59,19 +59,23 @@ func main() {
 		Client: &http.Client{Timeout: 5 * time.Minute},
 		Now:    time.Now,
 	}
-	// The geo database is optional. A key that will not load is logged and
-	// the service runs without it — every geo row reads "--" — rather than
-	// crash-looping the other endpoints behind a bucket hiccup or a typo.
-	geoKey := os.Getenv("GEO_DB_KEY")
-	geo, skipped, err := stats.Locate(objects, geoKey, 5, func() { time.Sleep(10 * time.Second) })
+	// The geo database rides in the image; GEO_DB_PATH points elsewhere or,
+	// empty, switches geo off. A file that will not load is logged and the
+	// service runs without it — every geo row reads "--" — rather than
+	// failing a boot the other endpoints do not depend on.
+	geoPath, geoSet := os.LookupEnv("GEO_DB_PATH")
+	if !geoSet {
+		geoPath = "/geo/dbip-country-lite.csv.gz"
+	}
+	geo, skipped, err := stats.Locate(geoPath)
 	switch {
 	case err != nil:
 		logger.Error("cannot load the geo database; geo rows will all read "+stats.UnknownCountry,
-			"key", geoKey, "error", err)
-	case geoKey == "":
-		logger.Warn("GEO_DB_KEY is not set; geo rows will all read " + stats.UnknownCountry)
+			"path", geoPath, "error", err)
+	case geoPath == "":
+		logger.Warn("GEO_DB_PATH is empty; geo rows will all read " + stats.UnknownCountry)
 	default:
-		logger.Info("geo database loaded", "key", geoKey, "skipped_lines", skipped)
+		logger.Info("geo database loaded", "path", geoPath, "skipped_lines", skipped)
 	}
 
 	aggregator := &stats.Aggregator{

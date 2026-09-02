@@ -32,7 +32,7 @@ def _push_and_load(image_name, bin_name):
         repo_tags = ["ghcr.io/muchq/" + bin_name + ":latest"],
     )
 
-def _create_oci_image(bin_name, binary_target, binary_path):
+def _create_oci_image(bin_name, binary_target, binary_path, extra_tars = []):
     """
     create oci image, push, and load targets for a binary
 
@@ -40,6 +40,7 @@ def _create_oci_image(bin_name, binary_target, binary_path):
       bin_name: the binary name for the image
       binary_target: the bazel target containing the binary
       binary_path: the path to remap the binary to in the container
+      extra_tars: further layers for the image
     """
     tar_name = bin_name + "_tar"
     image_name = bin_name + "_image"
@@ -61,7 +62,7 @@ def _create_oci_image(bin_name, binary_target, binary_path):
         tars = [
             "//bazel/rules:ca_certificates_layer",
             ":" + tar_name,
-        ],
+        ] + extra_tars,
     )
 
     _push_and_load(image_name = image_name, bin_name = bin_name)
@@ -74,12 +75,13 @@ def _create_oci_image(bin_name, binary_target, binary_path):
         tags = ["manual"],
     )
 
-def linux_oci_go(bin_name):
+def linux_oci_go(bin_name, extra_tars = []):
     """
     generate linux oci container for go binaries
 
     Args:
       bin_name: the binary target name to be wrapper
+      extra_tars: further layers for the image, e.g. a data file the binary reads
     """
 
     linux_amd_target_name = bin_name + "_linux_amd64"
@@ -91,7 +93,7 @@ def linux_oci_go(bin_name):
         visibility = ["//visibility:public"],
     )
 
-    _create_oci_image(bin_name, linux_amd_target_name, "/" + bin_name)
+    _create_oci_image(bin_name, linux_amd_target_name, "/" + bin_name, extra_tars)
 
 def linux_amd64_oci_binary(bin_name):
     """

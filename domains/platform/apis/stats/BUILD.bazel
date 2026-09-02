@@ -1,4 +1,5 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 load("//bazel/rules:oci.bzl", "linux_oci_go")
 
 # otel_contract pins the query-event vocabulary here against QueryEvent.java.
@@ -58,4 +59,15 @@ go_binary(
     ],
 )
 
-linux_oci_go(bin_name = "stats")
+# The IP-to-country table rides in the image at /geo (#1467); main.go's
+# GEO_DB_PATH default points at it.
+pkg_tar(
+    name = "geo_layer",
+    srcs = ["@dbip_country_lite//file"],
+    package_dir = "/geo",
+)
+
+linux_oci_go(
+    bin_name = "stats",
+    extra_tars = [":geo_layer"],
+)

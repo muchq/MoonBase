@@ -3,7 +3,8 @@ package stats
 import (
 	"bytes"
 	"compress/gzip"
-	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -99,7 +100,7 @@ func TestAGeoFileWithNoUsableRowsIsAnError(t *testing.T) {
 	}
 }
 
-func TestLoadGeoReadsAGzippedObjectAndReportsAMissingOne(t *testing.T) {
+func TestLoadGeoFileReadsGzippedOrPlainAndReportsAMissingOne(t *testing.T) {
 	var buf bytes.Buffer
 	w := gzip.NewWriter(&buf)
 	if _, err := w.Write([]byte(dbipSample)); err != nil {
@@ -108,25 +109,52 @@ func TestLoadGeoReadsAGzippedObjectAndReportsAMissingOne(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	objects := &fakeObjects{objects: map[string][]byte{
-		"geo/dbip-country-lite.csv.gz": buf.Bytes(),
-		"geo/plain.csv":                []byte(dbipSample),
-	}, fail: map[string]error{"geo/missing.csv": errors.New("404")}}
+	dir := t.TempDir()
+	for name, contents := range map[string][]byte{
+		"dbip-country-lite.csv.gz": buf.Bytes(),
+		"plain.csv":                []byte(dbipSample),
+		"notgzip.csv.gz":           []byte("not gzip"),
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), contents, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 
-	for _, key := range []string{"geo/dbip-country-lite.csv.gz", "geo/plain.csv"} {
-		geo, skipped, err := LoadGeo(objects, key)
+	for _, name := range []string{"dbip-country-lite.csv.gz", "plain.csv"} {
+		geo, skipped, err := LoadGeoFile(filepath.Join(dir, name))
 		if err != nil {
-			t.Fatalf("%s: %v", key, err)
+			t.Fatalf("%s: %v", name, err)
 		}
 		if geo.Country("57.141.3.4") != "US" || skipped != 6 {
-			t.Errorf("%s loaded but places nothing, or lost the skip count (%d)", key, skipped)
+			t.Errorf("%s loaded but places nothing, or lost the skip count (%d)", name, skipped)
 		}
 	}
-	if _, _, err := LoadGeo(objects, "geo/missing.csv"); err == nil {
+	if _, _, err := LoadGeoFile(filepath.Join(dir, "missing.csv")); err == nil {
 		t.Error("a missing database loaded without complaint")
 	}
-	if _, _, err := LoadGeo(&fakeObjects{objects: map[string][]byte{"geo/x.gz": []byte("not gzip")}}, "geo/x.gz"); err == nil {
+	if _, _, err := LoadGeoFile(filepath.Join(dir, "notgzip.csv.gz")); err == nil {
 		t.Error("a .gz that is not gzip loaded without complaint")
+	}
+}
+
+func TestLocateNeverFailsABoot(t *testing.T) {
+	geo, _, err := Locate("")
+	if _, none := geo.(NoLocator); !none || err != nil {
+		t.Errorf("Locate with no path = (%T, %v), want NoLocator and no error", geo, err)
+	}
+
+	path := filepath.Join(t.TempDir(), "plain.csv")
+	if err := os.WriteFile(path, []byte(dbipSample), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	geo, _, err = Locate(path)
+	if err != nil || geo.Country("57.141.3.4") != "US" {
+		t.Errorf("Locate(%s) = (%v, %v); want the database", path, geo, err)
+	}
+
+	geo, _, err = Locate(filepath.Join(t.TempDir(), "missing.csv"))
+	if _, none := geo.(NoLocator); !none || err == nil {
+		t.Errorf("Locate with a file that is not there = (%T, %v); want NoLocator and the error to log", geo, err)
 	}
 }
 
@@ -135,32 +163,5 @@ func TestAStrayQuoteIsOneSkippedRowNotAFailedLoad(t *testing.T) {
 	geo, skipped, err := ParseDBIP(strings.NewReader("1.0.0.0,1.0.0.255,AU\n\"1.0.1.0,1.0.1.255,\"C\"N\n"))
 	if err != nil || skipped != 1 || geo.Country("1.0.0.7") != "AU" {
 		t.Errorf("ParseDBIP = (%v, %d, %v); want the good row kept and the bad one counted", geo != nil, skipped, err)
-	}
-}
-
-func TestLocateNeverFailsABootAndRetriesABucketThatIsNotThereYet(t *testing.T) {
-	geo, _, err := Locate(&fakeObjects{}, "", 3, func() {})
-	if _, none := geo.(NoLocator); !none || err != nil {
-		t.Errorf("Locate with no key = (%T, %v), want NoLocator and no error", geo, err)
-	}
-
-	objects := &fakeObjects{objects: map[string][]byte{"geo/plain.csv": []byte(dbipSample)},
-		fail: map[string]error{"geo/plain.csv": errors.New("503 slow down")}}
-	waits := 0
-	// The bucket answers on the third try.
-	geo, _, err = Locate(objects, "geo/plain.csv", 5, func() {
-		waits++
-		if waits == 2 {
-			delete(objects.fail, "geo/plain.csv")
-		}
-	})
-	if err != nil || geo.Country("57.141.3.4") != "US" || waits != 2 {
-		t.Errorf("Locate after a flaky bucket = (%v, %v, %d waits); want the database on the third try", geo, err, waits)
-	}
-
-	geo, _, err = Locate(&fakeObjects{fail: map[string]error{"geo/missing.csv": errors.New("404")}},
-		"geo/missing.csv", 3, func() {})
-	if _, none := geo.(NoLocator); !none || err == nil {
-		t.Errorf("Locate with a key that never loads = (%T, %v); want NoLocator and the error to log", geo, err)
 	}
 }
