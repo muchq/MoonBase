@@ -8,11 +8,13 @@ import io.micronaut.http.annotation.Controller;
 import io.micronaut.http.annotation.Error;
 import io.micronaut.http.server.exceptions.NotFoundException;
 import io.micronaut.http.server.exceptions.UnsupportedMediaException;
+import io.micronaut.json.JsonSyntaxException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.DatabindException;
 
 @Controller
 public class ErrorHandler {
@@ -43,6 +45,23 @@ public class ErrorHandler {
   public HttpResponse<Map<String, Object>> handleRouteMiss(
       HttpRequest<?> request, NotFoundException ex) {
     return HttpResponse.notFound(Map.of("error", "Not found"));
+  }
+
+  // A body that is not JSON is the caller's mistake, like a query that does not parse: 400
+  // with the same envelope, not a 500 with a stack trace and a Sentry event per typo.
+  @Error(global = true, exception = JsonSyntaxException.class)
+  public HttpResponse<Map<String, Object>> handleBadJson(
+      HttpRequest<?> request, JsonSyntaxException ex) {
+    return HttpResponse.badRequest(Map.of("error", "Request body is not valid JSON"));
+  }
+
+  // Valid JSON that does not fit the request — a string where a number goes — reaches the
+  // handler as Jackson's own exception rather than Micronaut's; the caller's mistake all the same.
+  @Error(global = true, exception = DatabindException.class)
+  public HttpResponse<Map<String, Object>> handleUnbindableBody(
+      HttpRequest<?> request, DatabindException ex) {
+    return HttpResponse.badRequest(
+        Map.of("error", "Request body does not match the request shape"));
   }
 
   @Error(global = true, exception = UnsupportedMediaException.class)

@@ -54,7 +54,10 @@ public class QueryErrorWireTest {
 
   private HttpResponse<String> postQuery(String chessql) throws Exception {
     String escaped = chessql.replace("\\", "\\\\").replace("\"", "\\\"");
-    String body = "{\"query\":\"" + escaped + "\",\"limit\":10,\"offset\":0}";
+    return postBody("{\"query\":\"" + escaped + "\",\"limit\":10,\"offset\":0}");
+  }
+
+  private HttpResponse<String> postBody(String body) throws Exception {
     HttpRequest request =
         HttpRequest.newBuilder()
             .uri(URI.create(baseUrl + "/v1/query"))
@@ -112,5 +115,30 @@ public class QueryErrorWireTest {
     assertThat(response.statusCode()).isEqualTo(400);
     JsonNode envelope = MAPPER.readTree(response.body());
     assertThat(envelope.get("error").asText()).contains("double quotes").contains("B\"90");
+  }
+
+  /**
+   * A body that is not JSON at all is the caller's mistake, and comes back in the same envelope a
+   * bad query does — not a 500, which pages for every client typo (#1472). The message is fixed
+   * rather than the parser's: byte offsets and "REDACTED" source markers are not something a caller
+   * can act on.
+   */
+  @Test
+  public void malformedJson_returns400WithTheErrorEnvelope() throws Exception {
+    HttpResponse<String> response = postBody("{\"query\":");
+
+    assertThat(response.statusCode()).isEqualTo(400);
+    assertThat(MAPPER.readTree(response.body()).get("error").asText())
+        .isEqualTo("Request body is not valid JSON");
+  }
+
+  /** Valid JSON of the wrong shape is the same class of mistake, and the same 400. */
+  @Test
+  public void aWronglyTypedField_returns400WithTheErrorEnvelope() throws Exception {
+    HttpResponse<String> response = postBody("{\"query\":\"motif(pin)\",\"limit\":\"ten\"}");
+
+    assertThat(response.statusCode()).isEqualTo(400);
+    assertThat(MAPPER.readTree(response.body()).get("error").asText())
+        .isEqualTo("Request body does not match the request shape");
   }
 }
