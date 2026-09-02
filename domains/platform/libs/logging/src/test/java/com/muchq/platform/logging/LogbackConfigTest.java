@@ -152,11 +152,24 @@ public class LogbackConfigTest {
         .isEqualTo("[{\"entry\":\"query\"},{\"source\":\"ui\"}]");
     assertThat(captured.toString(UTF_8)).as("the console keeps a copy").contains("query_event");
 
-    // The roll name is what log_shipper's pattern accepts (shipper.go), with the hour's date
-    // as the partition; pinned here as text because the two ends live in different languages.
+    // The roll name, rendered by logback's own pattern engine for a fixed hour, is the literal
+    // log_shipper's test ships (TestALogbackHourlyRollShipsUnderItsDate): the two ends live in
+    // different languages, so the shared spelling is the contract.
     String config =
         new String(
             getClass().getClassLoader().getResourceAsStream("logback.xml").readAllBytes(), UTF_8);
-    assertThat(config).contains("query_events-%d{yyyy-MM-dd'T'HH}.log.gz");
+    java.util.regex.Matcher pattern =
+        java.util.regex.Pattern.compile("<fileNamePattern>[^<]*/([^<]*)</fileNamePattern>")
+            .matcher(config);
+    assertThat(pattern.find()).isTrue();
+    LoggerContext renderer = new LoggerContext();
+    String rendered =
+        new ch.qos.logback.core.rolling.helper.FileNamePattern(pattern.group(1), renderer)
+            .convert(
+                java.util.Date.from(
+                    java.time.ZonedDateTime.of(
+                            2026, 9, 1, 14, 30, 0, 0, java.time.ZoneId.systemDefault())
+                        .toInstant()));
+    assertThat(rendered).isEqualTo("query_events-2026-09-01T14.log.gz");
   }
 }

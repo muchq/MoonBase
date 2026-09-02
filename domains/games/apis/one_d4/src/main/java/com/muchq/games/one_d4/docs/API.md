@@ -374,7 +374,7 @@ text, the player, and comparison values stay out.
 | `fields`, `motifs` | comma-joined, sorted names the compiler knows, in canonical dotted spelling; unknown names are dropped |
 | `order_by` | the ORDER BY motif, or empty |
 | `player` | whether a non-blank perspective player was given |
-| `limit`, `offset` / `group_by`, `order`, `min_games` | the request's bounds, per entry. Per-line detail; `offset` and the bucket widths inside `group_by` are caller-shaped and are never rollup keys |
+| `limit`, `offset` / `group_by`, `order`, `min_games` | the request's bounds, per entry; `group_by` is the compiler's resolved column names, without bucket widths. `limit` and `offset` are per-line detail, never rollup keys |
 | `cache` | `snapshot` (served through the first-page snapshot, warm or loading) or `live`; query only |
 | `rows` | rows returned, on success |
 | `outcome` | `ok`, `invalid` (the 400 classes), or `failed` (anything else, 404s included) |

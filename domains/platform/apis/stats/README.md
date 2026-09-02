@@ -12,10 +12,10 @@ Every `AGGREGATE_INTERVAL` (default `15m`): list the two source prefixes,
 `logs/source=one_d4/` (one_d4's query events, #1465), and for every object
 no successful pass has marked processed, stream it (gunzip included), roll
 up its lines with the parser its source names, and apply the rollup plus
-the processed marker in one transaction. A crash between the two re-processes the object; the marker's
-conflict arm makes a duplicate application a no-op — so counts survive
-crashes without double-counting. Per-object failures are logged and
-retried next pass.
+the processed marker in one transaction. A crash between the two
+re-processes the object; the marker's conflict arm makes a duplicate
+application a no-op — so counts survive crashes without double-counting.
+Per-object failures are logged and retried next pass.
 
 Aggregates are bounded per row, on purpose: hosts are Caddy's vhosts,
 methods collapse through the nine-verb rule the metrics rails use, and
@@ -38,12 +38,12 @@ the division of labor #1460 drew against the tsdb.
 
 The query rollup reads one_d4's `query_event` lines (their shape is in
 one_d4's API.md) into two tables: `query_stats`, keyed by day, entry,
-source, outcome, and cache — all one_d4's own vocabulary, checked here so
-a line from a build speaking a new word is skipped rather than minting a
-row — with request counts and summed handler time; and `query_term_stats`,
-which fields, motifs, order-by motifs, and group-by terms queries used.
-Group-by terms carry a caller-chosen bucket width and are capped per
-object like agent names.
+source, outcome, and cache — one_d4's own vocabulary, pinned against it
+in `otel_contract`, with a word this build does not know collapsing to
+`other` so the request still counts and the drift shows as a row; and
+`query_term_stats`, which fields, motifs, order-by motifs, and group-by
+columns queries used, all the compiler's names. Latency is not here: the
+tsdb holds one_d4's query histogram (#1460).
 
 The raw lines stay in S3, so a better classifier is a re-aggregation,
 not lost data — and re-aggregation is a mechanism, not a runbook. The
@@ -78,7 +78,7 @@ countries). Both are one query over the raw partitions in S3, which keep
   overcount served, and the summary's error count there rose with the
   change, because scanner traffic now gets the 404 it always deserved.
 - `GET /stats/v1/one_d4/queries?days=30` — one_d4 queries per
-  day/entry/source/outcome/cache with the mean handler time
+  day/entry/source/outcome/cache
 - `GET /stats/v1/one_d4/terms?days=30&limit=200` — which fields, motifs,
   and group-by terms queries used, busiest first
 - `GET /health`

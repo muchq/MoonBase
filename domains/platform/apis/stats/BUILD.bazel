@@ -1,6 +1,9 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("//bazel/rules:oci.bzl", "linux_oci_go")
 
+# otel_contract pins the query-event vocabulary here against QueryEvent.java.
+exports_files(["queries.go"])
+
 go_library(
     name = "stats_lib",
     srcs = [

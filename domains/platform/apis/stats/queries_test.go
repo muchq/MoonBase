@@ -21,21 +21,19 @@ func eventLine(pairs ...string) string {
 func TestConsumeQueryEventsRollsUpTheBoundedPartAndTheTerms(t *testing.T) {
 	lines := strings.Join([]string{
 		eventLine("entry", "query", "source", "ui", "fields", "white.elo,eco", "motifs", "fork",
-			"order_by", "fork", "player", "false", "limit", "10", "offset", "0", "cache", "live",
+			"order_by", "pin", "player", "false", "limit", "10", "offset", "0", "cache", "live",
 			"rows", "3", "outcome", "ok", "duration_us", "1500"),
 		eventLine("entry", "query", "source", "ui", "fields", "white.elo", "motifs", "",
 			"order_by", "", "player", "true", "limit", "10", "offset", "0", "cache", "live",
 			"rows", "0", "outcome", "ok", "duration_us", "500"),
 		eventLine("entry", "query", "source", "mcp", "outcome", "invalid", "duration_us", "20"),
 		eventLine("entry", "aggregate", "source", "api", "fields", "outcome", "motifs", "",
-			"order_by", "", "player", "true", "group_by", "eco,opponent.elo(200)", "order", "score",
+			"order_by", "", "player", "true", "group_by", "eco,opening_family", "order", "score",
 			"min_games", "5", "limit", "20", "rows", "2", "outcome", "ok", "duration_us", "9000"),
-		// Not events: another logger, another message, garbage, a value off the vocabulary.
+		// Not events: another logger, another message, garbage.
 		`{"loggerName":"com.muchq.games.one_d4.api.ErrorHandler","message":"Unhandled","kvpList":[]}`,
-		`{"loggerName":"com.muchq.games.one_d4.query_event","message":"something else","kvpList":[{"entry":"query"},{"source":"ui"},{"outcome":"ok"},{"duration_us":"1"}]}`,
+		`{"loggerName":"com.muchq.games.one_d4.query_event","message":"something else","kvpList":[{"entry":"query"},{"source":"ui"},{"outcome":"ok"},{"cache":"live"}]}`,
 		`not json`,
-		eventLine("entry", "delete", "source", "ui", "outcome", "ok", "duration_us", "1"),
-		eventLine("entry", "query", "source", "browser", "outcome", "ok", "duration_us", "1"),
 	}, "\n")
 	rollup := NewRollup()
 
@@ -44,31 +42,31 @@ func TestConsumeQueryEventsRollsUpTheBoundedPartAndTheTerms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if skipped != 5 {
-		t.Errorf("skipped = %d, want the five non-events", skipped)
+	if skipped != 3 {
+		t.Errorf("skipped = %d, want the three non-events", skipped)
 	}
-	if got := rollup.Queries[QueryKey{"2026-09-01", "query", "ui", "ok", "live"}]; got != (QueryStat{2, 2000}) {
-		t.Errorf("live ui queries = %+v, want 2 requests summing 2000us", got)
+	if got := rollup.Queries[QueryKey{"2026-09-01", "query", "ui", "ok", "live"}]; got != 2 {
+		t.Errorf("live ui queries = %d, want 2", got)
 	}
 	// An invalid query never reached the cache decision; its cache is "none".
-	if got := rollup.Queries[QueryKey{"2026-09-01", "query", "mcp", "invalid", "none"}]; got != (QueryStat{1, 20}) {
-		t.Errorf("invalid mcp query = %+v", got)
+	if got := rollup.Queries[QueryKey{"2026-09-01", "query", "mcp", "invalid", "none"}]; got != 1 {
+		t.Errorf("invalid mcp query = %d", got)
 	}
-	if got := rollup.Queries[QueryKey{"2026-09-01", "aggregate", "api", "ok", "none"}]; got != (QueryStat{1, 9000}) {
-		t.Errorf("aggregate = %+v", got)
+	if got := rollup.Queries[QueryKey{"2026-09-01", "aggregate", "api", "ok", "none"}]; got != 1 {
+		t.Errorf("aggregate = %d", got)
 	}
 	if len(rollup.Queries) != 3 {
-		t.Errorf("query rows = %v; off-vocabulary lines must not mint rows", rollup.Queries)
+		t.Errorf("query rows = %v", rollup.Queries)
 	}
 
 	want := map[TermKey]int64{
-		{"2026-09-01", "query", KindField, "white.elo"}:               2,
-		{"2026-09-01", "query", KindField, "eco"}:                     1,
-		{"2026-09-01", "query", KindMotif, "fork"}:                    1,
-		{"2026-09-01", "query", KindOrderBy, "fork"}:                  1,
-		{"2026-09-01", "aggregate", KindField, "outcome"}:             1,
-		{"2026-09-01", "aggregate", KindGroupBy, "eco"}:               1,
-		{"2026-09-01", "aggregate", KindGroupBy, "opponent.elo(200)"}: 1,
+		{"2026-09-01", "query", KindField, "white.elo"}:            2,
+		{"2026-09-01", "query", KindField, "eco"}:                  1,
+		{"2026-09-01", "query", KindMotif, "fork"}:                 1,
+		{"2026-09-01", "query", KindOrderBy, "pin"}:                1,
+		{"2026-09-01", "aggregate", KindField, "outcome"}:          1,
+		{"2026-09-01", "aggregate", KindGroupBy, "eco"}:            1,
+		{"2026-09-01", "aggregate", KindGroupBy, "opening_family"}: 1,
 	}
 	if len(rollup.Terms) != len(want) {
 		t.Errorf("terms = %v, want %v", rollup.Terms, want)
@@ -80,33 +78,38 @@ func TestConsumeQueryEventsRollsUpTheBoundedPartAndTheTerms(t *testing.T) {
 	}
 }
 
-func TestConsumeQueryEventsCapsGroupByTermsPerObjectAndTheirLength(t *testing.T) {
-	var lines strings.Builder
-	for i := 0; i < maxGroupByTerms+50; i++ {
-		lines.WriteString(eventLine("entry", "aggregate", "source", "api", "outcome", "ok",
-			"duration_us", "1", "group_by", fmt.Sprintf("opponent.elo(%d)", i)) + "\n")
-	}
-	lines.WriteString(eventLine("entry", "query", "source", "api", "outcome", "ok", "duration_us", "1",
-		"fields", strings.Repeat("x", 200)) + "\n")
+// A word this build does not know is still a request: it collapses to
+// "other" per column, so a one_d4 that learns a new outcome shows up as an
+// "other" row rather than as fewer queries. Terms still count under the
+// collapsed entry.
+func TestConsumeQueryEventsCollapsesUnknownWordsToOtherAndKeepsCounting(t *testing.T) {
+	lines := strings.Join([]string{
+		eventLine("entry", "delete", "source", "ui", "outcome", "ok", "cache", "live", "fields", "eco"),
+		eventLine("entry", "query", "source", "browser", "outcome", "ok", "cache", "live"),
+		eventLine("entry", "query", "source", "ui", "outcome", "teapot", "cache", "live"),
+		eventLine("entry", "query", "source", "ui", "outcome", "ok", "cache", "warm"),
+	}, "\n")
 	rollup := NewRollup()
 
-	if _, err := rollup.ConsumeQueryEvents(strings.NewReader(lines.String()), "2026-09-01"); err != nil {
-		t.Fatal(err)
-	}
+	skipped, err := rollup.ConsumeQueryEvents(strings.NewReader(lines), "2026-09-01")
 
-	groupBy := 0
-	for key, count := range rollup.Terms {
-		if key.Kind == KindGroupBy {
-			groupBy++
-			if key.Term == overflowTerm && count != 50 {
-				t.Errorf("overflow row = %d, want the 50 past the cap", count)
-			}
-		}
-		if len(key.Term) > maxTermLength {
-			t.Errorf("term %q is longer than the cap", key.Term)
+	if err != nil || skipped != 0 {
+		t.Fatalf("ConsumeQueryEvents = (%d, %v); unknown words are counted, not skipped", skipped, err)
+	}
+	for _, key := range []QueryKey{
+		{"2026-09-01", "other", "ui", "ok", "live"},
+		{"2026-09-01", "query", "other", "ok", "live"},
+		{"2026-09-01", "query", "ui", "other", "live"},
+		{"2026-09-01", "query", "ui", "ok", "other"},
+	} {
+		if rollup.Queries[key] != 1 {
+			t.Errorf("row %+v = %d, want 1", key, rollup.Queries[key])
 		}
 	}
-	if groupBy != maxGroupByTerms+1 {
-		t.Errorf("distinct group-by terms = %d, want the cap plus the overflow row", groupBy)
+	if len(rollup.Queries) != 4 {
+		t.Errorf("query rows = %v", rollup.Queries)
+	}
+	if rollup.Terms[TermKey{"2026-09-01", "other", KindField, "eco"}] != 1 {
+		t.Errorf("terms = %v; the collapsed entry still carries its terms", rollup.Terms)
 	}
 }

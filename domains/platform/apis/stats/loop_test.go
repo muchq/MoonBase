@@ -121,7 +121,7 @@ func TestRunOnceReadsOneD4ObjectsAsQueryEvents(t *testing.T) {
 		t.Fatalf("RunOnce = (%d, %v), want both one_d4 objects", processed, err)
 	}
 	rollup := store.applied["logs/source=one_d4/dt=2026-09-01/query_events-2026-09-01T14.log.gz"]
-	if got := rollup.Queries[QueryKey{"2026-09-01", "query", "ui", "ok", "live"}]; got != (QueryStat{1, 100}) {
+	if got := rollup.Queries[QueryKey{"2026-09-01", "query", "ui", "ok", "live"}]; got != 1 {
 		t.Errorf("query rows = %v", rollup.Queries)
 	}
 	if len(rollup.Requests) != 0 {

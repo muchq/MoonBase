@@ -1,7 +1,9 @@
 # log_shipper
 
-Moves Caddy's rolled access logs to S3 on an interval (#1457) — the first
-stage of the stats pipeline (#1365). No streaming infra on purpose: at this
+Moves rolled logs to S3 on an interval — Caddy's access logs (#1457) and
+one_d4's query events (#1465), which logback rolls as
+`query_events-<date>T<hour>.log.gz`, the same name shape — the first stage
+of the stats pipeline (#1365). No streaming infra on purpose: at this
 volume a cron-shaped upload is the whole job, and Kinesis carries a fixed
 hourly fee that batch stats have no use for.
 
@@ -18,10 +20,6 @@ that need it, and PUT each to
 ```
 s3://$S3_BUCKET/logs/source=<label>/dt=YYYY-MM-DD/<filename>.gz
 ```
-
-one_d4's query events (#1465) ship the same way: logback rolls them as
-`query_events-<date>T<hour>.log.gz`, the same name shape, from the
-directory the `one_d4` label points at.
 
 partitioned so DuckDB / Athena / Spark read it directly. The date is the
 roll timestamp in the filename. A file is deleted only after its upload

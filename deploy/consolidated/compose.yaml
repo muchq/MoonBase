@@ -469,7 +469,7 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=one_d4
       - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4,service.version=${ONE_D4_SHA:-${DEPLOY_SHA:-latest}}
-      # Query events (#1465) roll into this directory; log_shipper_one_d4 ships them.
+      # Query events (#1465) roll into this directory; log_shipper ships them.
       - QUERY_EVENT_LOG_DIR=/var/log/one_d4
     volumes:
       - /var/log/one_d4:/var/log/one_d4
@@ -593,7 +593,7 @@ services:
   log_shipper:
     image: ghcr.io/muchq/log_shipper:${LOG_SHIPPER_SHA:-${DEPLOY_SHA:-latest}}
     labels:
-      com.muchq.description: "Caddy access-log to S3 shipper (Go)"
+      com.muchq.description: "Rolled-log to S3 shipper: Caddy access logs, one_d4 query events (Go)"
     restart: always
     logging: *default-logging
     # Started only with `--profile stats`: it needs real S3 credentials in

@@ -2054,6 +2054,10 @@ func TestLogShipperReadsTheCaddyLogMountAndIsProfileGated(t *testing.T) {
 		t.Errorf("log_shipper does not bind-mount /var/log/caddy; it has nothing to ship. "+
 			"Block was:\n%s", block)
 	}
+	if !strings.Contains(block, "caddy=/var/log/caddy") {
+		t.Errorf("log_shipper's LOG_DIRS does not name caddy=/var/log/caddy; the access logs "+
+			"stop shipping while the mount looks fine. Block was:\n%s", block)
+	}
 	if strings.Contains(block, "/var/log/caddy:/var/log/caddy:ro") {
 		t.Errorf("log_shipper mounts the log dir read-only; it deletes rolled files after " +
 			"upload, so read-only, every pass fails the delete and re-uploads the same " +

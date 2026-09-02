@@ -58,12 +58,12 @@ public class AggregateController {
     AggregateSpec spec = validator.validate(request);
     ParsedQuery parsed = Parser.parse(request.query());
     List<String> groupColumns = sqlCompiler.resolveGroupByColumns(request.groupBy());
-    // Logged only now: the compiler has accepted every group-by name, so they are its
-    // vocabulary (plus a bucket width) rather than whatever the caller sent.
+    // The resolved columns, not the request's spelling: the compiler's vocabulary, with the
+    // caller's bucket width and alias spellings folded away.
     event
         .shape(parsed)
         .put("player", QueryEvent.hasPlayer(request.player()))
-        .put("group_by", request.groupBy())
+        .put("group_by", groupColumns)
         .put("order", spec.order().wireName())
         .put("min_games", spec.minGames())
         .put("limit", request.limit());

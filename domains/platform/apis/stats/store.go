@@ -50,7 +50,6 @@ var schema = []string{
 		outcome text NOT NULL,
 		cache text NOT NULL,
 		requests bigint NOT NULL,
-		duration_us bigint NOT NULL,
 		PRIMARY KEY (dt, entry, source, outcome, cache)
 	)`,
 	`CREATE TABLE IF NOT EXISTS query_term_stats (
@@ -232,14 +231,13 @@ func (s *Store) ApplyRollup(ctx context.Context, key string, rollup *Rollup) err
 			return err
 		}
 	}
-	for k, stat := range rollup.Queries {
+	for k, count := range rollup.Queries {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO query_stats (dt, entry, source, outcome, cache, requests, duration_us)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7)
+			`INSERT INTO query_stats (dt, entry, source, outcome, cache, requests)
+			 VALUES ($1, $2, $3, $4, $5, $6)
 			 ON CONFLICT (dt, entry, source, outcome, cache)
-			 DO UPDATE SET requests = query_stats.requests + EXCLUDED.requests,
-			               duration_us = query_stats.duration_us + EXCLUDED.duration_us`,
-			k.Date, k.Entry, k.Source, k.Outcome, k.Cache, stat.Requests, stat.DurationUs); err != nil {
+			 DO UPDATE SET requests = query_stats.requests + EXCLUDED.requests`,
+			k.Date, k.Entry, k.Source, k.Outcome, k.Cache, count); err != nil {
 			return err
 		}
 	}
@@ -382,15 +380,14 @@ func (s *Store) Probes(ctx context.Context, days int) ([]ProbeRow, error) {
 }
 
 // QueryRow is one day of one_d4 queries by entry, source, outcome, and
-// cache, with the mean handler time over them.
+// cache. Latency is not here: the tsdb holds the histogram (#1460).
 type QueryRow struct {
-	Date          string `json:"date"`
-	Entry         string `json:"entry"`
-	Source        string `json:"source"`
-	Outcome       string `json:"outcome"`
-	Cache         string `json:"cache"`
-	Requests      int64  `json:"requests"`
-	AvgDurationUs int64  `json:"avg_duration_us"`
+	Date     string `json:"date"`
+	Entry    string `json:"entry"`
+	Source   string `json:"source"`
+	Outcome  string `json:"outcome"`
+	Cache    string `json:"cache"`
+	Requests int64  `json:"requests"`
 }
 
 // TermRow is one field, motif, order-by motif, or group-by term and how
@@ -404,7 +401,7 @@ type TermRow struct {
 
 func (s *Store) Queries(ctx context.Context, days int) ([]QueryRow, error) {
 	rows, err := s.pool.Query(ctx,
-		`SELECT dt::text, entry, source, outcome, cache, requests, duration_us / requests
+		`SELECT dt::text, entry, source, outcome, cache, requests
 		 FROM query_stats
 		 WHERE dt >= current_date - $1::int
 		 ORDER BY dt DESC, entry, source, outcome, cache`, days)
@@ -414,7 +411,7 @@ func (s *Store) Queries(ctx context.Context, days int) ([]QueryRow, error) {
 	var out []QueryRow
 	var row QueryRow
 	_, err = pgx.ForEachRow(rows,
-		[]any{&row.Date, &row.Entry, &row.Source, &row.Outcome, &row.Cache, &row.Requests, &row.AvgDurationUs},
+		[]any{&row.Date, &row.Entry, &row.Source, &row.Outcome, &row.Cache, &row.Requests},
 		func() error {
 			out = append(out, row)
 			return nil

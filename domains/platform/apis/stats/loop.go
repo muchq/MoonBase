@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -25,13 +26,26 @@ type Applier interface {
 }
 
 // The shipper's layout: logs/source=<source>/dt=YYYY-MM-DD/<file>. The
-// source decides which parser reads the object; the date is the partition
-// the rollup is keyed by.
-var objectKey = regexp.MustCompile(`^logs/source=(caddy|one_d4)/dt=(\d{4}-\d{2}-\d{2})/`)
+// source names its parser in sources; the date is the partition the
+// rollup is keyed by.
+var objectKey = regexp.MustCompile(`^logs/source=([a-z0-9_]+)/dt=(\d{4}-\d{2}-\d{2})/`)
 
-// The sources aggregated, each under its own prefix: Caddy's access logs
-// and one_d4's query events (#1465).
-var sourcePrefixes = []string{"logs/source=caddy/", "logs/source=one_d4/"}
+// The sources aggregated, each under its own prefix, and how each is
+// read: Caddy's access logs and one_d4's query events (#1465). Adding a
+// source is one entry here and nothing else.
+var sources = map[string]func(*Rollup, io.Reader, string) (int, error){
+	"caddy":  (*Rollup).Consume,
+	"one_d4": (*Rollup).ConsumeQueryEvents,
+}
+
+func sourcePrefixes() []string {
+	var prefixes []string
+	for source := range sources {
+		prefixes = append(prefixes, "logs/source="+source+"/")
+	}
+	sort.Strings(prefixes)
+	return prefixes
+}
 
 type Aggregator struct {
 	Objects ObjectStore
@@ -45,7 +59,7 @@ type Aggregator struct {
 // shipped object cannot wedge the loop.
 func (a *Aggregator) RunOnce(ctx context.Context) (processed int, err error) {
 	var candidates []string
-	for _, prefix := range sourcePrefixes {
+	for _, prefix := range sourcePrefixes() {
 		keys, err := a.Objects.List(prefix)
 		if err != nil {
 			return 0, fmt.Errorf("listing log objects under %s: %w", prefix, err)
@@ -93,13 +107,12 @@ func (a *Aggregator) processObject(ctx context.Context, key string) error {
 		reader = gz
 	}
 
-	rollup := NewRollup()
-	var skipped int
-	if source == "one_d4" {
-		skipped, err = rollup.ConsumeQueryEvents(reader, date)
-	} else {
-		skipped, err = rollup.Consume(reader, date)
+	consume, ok := sources[source]
+	if !ok {
+		return fmt.Errorf("no parser for source %q", source)
 	}
+	rollup := NewRollup()
+	skipped, err := consume(rollup, reader, date)
 	if err != nil {
 		return err
 	}

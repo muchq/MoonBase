@@ -62,22 +62,20 @@ type Rollup struct {
 	Requests map[RequestKey]int64
 	Slugs    map[SlugKey]int64
 	Probes   map[ProbeKey]int64
-	Queries  map[QueryKey]QueryStat
+	Queries  map[QueryKey]int64
 	Terms    map[TermKey]int64
 
-	tailAgents   map[string]bool
-	groupByTerms map[string]bool
+	tailAgents map[string]bool
 }
 
 func NewRollup() *Rollup {
 	return &Rollup{
-		Requests:     map[RequestKey]int64{},
-		Slugs:        map[SlugKey]int64{},
-		Probes:       map[ProbeKey]int64{},
-		Queries:      map[QueryKey]QueryStat{},
-		Terms:        map[TermKey]int64{},
-		tailAgents:   map[string]bool{},
-		groupByTerms: map[string]bool{},
+		Requests:   map[RequestKey]int64{},
+		Slugs:      map[SlugKey]int64{},
+		Probes:     map[ProbeKey]int64{},
+		Queries:    map[QueryKey]int64{},
+		Terms:      map[TermKey]int64{},
+		tailAgents: map[string]bool{},
 	}
 }
 

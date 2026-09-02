@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -69,7 +70,10 @@ func ParseSources(spec string) ([]Source, error) {
 		if seen[label] {
 			return nil, fmt.Errorf("LOG_DIRS names source %q twice", label)
 		}
-		seen[label] = true
+		if seen[dir] {
+			return nil, fmt.Errorf("LOG_DIRS names directory %q twice; the first label would take every file", dir)
+		}
+		seen[label], seen[dir] = true, true
 		sources = append(sources, Source{Label: label, Dir: dir})
 	}
 	if len(sources) == 0 {
@@ -86,7 +90,14 @@ func ParseSources(spec string) ([]Source, error) {
 // rather than an enumeration. Older lumberjack names carry no reason and
 // still match. The date group is the partition key — the roll time, which
 // is when the last line in the file was written.
-var rolledLog = regexp.MustCompile(`^.+-(\d{4}-\d{2}-\d{2})T[\d.\-]+(?:-\w+)?\.log(\.gz)?$`)
+//
+// logback (one_d4's query events) rolls to the same shape, through an
+// intermediate: the live file is renamed to <roll>.log<nanos>.tmp and
+// compressed asynchronously to <roll>.log.gz, the .tmp going away after.
+// A JVM killed mid-compression leaves the .tmp behind, uncompressed and
+// complete; it ships under the roll's own name once it has been quiet.
+// Groups: the roll name up to .log, the date, the .tmp suffix, the .gz.
+var rolledLog = regexp.MustCompile(`^(.+-(\d{4}-\d{2}-\d{2})T[\d.\-]+(?:-\w+)?\.log)(\d+\.tmp)?(\.gz)?$`)
 
 // ShipOnce uploads every rolled file currently in Dir and deletes what it
 // uploaded. Per-file failures do not stop the rest; they are joined into
@@ -129,7 +140,7 @@ func (s *Shipper) ShipOnce() (shipped, skipped int, err error) {
 			skipped++
 			continue
 		}
-		alreadyGzipped := match[2] == ".gz"
+		alreadyGzipped := match[4] == ".gz"
 		// Caddy compresses a finished roll in place: while its compressor
 		// runs, the complete .log and a truncated .gz coexist, and both
 		// would ship to the same key — the corrupt one last. A .gz whose
@@ -158,7 +169,7 @@ func (s *Shipper) ShipOnce() (shipped, skipped int, err error) {
 				continue
 			}
 		}
-		if err := s.shipFile(entry.Name(), match[1], alreadyGzipped); err != nil {
+		if err := s.shipFile(entry.Name(), match[1], match[2], alreadyGzipped); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", entry.Name(), err))
 			continue
 		}
@@ -167,9 +178,11 @@ func (s *Shipper) ShipOnce() (shipped, skipped int, err error) {
 	return shipped, skipped, errors.Join(errs...)
 }
 
-func (s *Shipper) shipFile(name, date string, alreadyGzipped bool) error {
+// shipFile uploads one file under the roll's name — the file's own, less
+// any intermediate suffix — and deletes it on success.
+func (s *Shipper) shipFile(name, rollName, date string, alreadyGzipped bool) error {
 	path := filepath.Join(s.Dir, name)
-	key := "logs/source=" + s.Source + "/dt=" + date + "/" + name
+	key := "logs/source=" + s.Source + "/dt=" + date + "/" + rollName
 	uploadPath := path
 	if !alreadyGzipped {
 		// Compressed to a temp file, not a buffer: the input can be a
@@ -182,6 +195,8 @@ func (s *Shipper) shipFile(name, date string, alreadyGzipped bool) error {
 		}
 		defer os.Remove(tmp)
 		uploadPath = tmp
+	}
+	if !strings.HasSuffix(key, ".gz") {
 		key += ".gz"
 	}
 	file, err := os.Open(uploadPath)
@@ -217,4 +232,22 @@ func (s *Shipper) gzipToTemp(path string) (string, error) {
 		return "", err
 	}
 	return tmp.Name(), nil
+}
+
+// ShipAll runs one pass over every source. A source whose pass fails —
+// its directory missing, an upload refused — is logged and the rest still
+// ship; the next pass retries it. Every pass is logged, even an idle one:
+// a skipped count that never drains past the live log while shipped stays
+// zero is the signature of a roll-name format the pattern no longer matches.
+func ShipAll(shippers []*Shipper, logger *slog.Logger) {
+	for _, s := range shippers {
+		shipped, skipped, err := s.ShipOnce()
+		if err != nil {
+			logger.Error("shipping pass finished with failures", "source", s.Source,
+				"shipped", shipped, "skipped", skipped, "error", err)
+			continue
+		}
+		logger.Info("shipping pass complete", "source", s.Source,
+			"shipped", shipped, "skipped", skipped)
+	}
 }

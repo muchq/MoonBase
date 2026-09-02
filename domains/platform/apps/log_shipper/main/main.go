@@ -73,19 +73,7 @@ func main() {
 
 	logger.Info("log_shipper started", "sources", sources, "interval", interval.String())
 	for {
-		for _, s := range shippers {
-			shipped, skipped, err := s.ShipOnce()
-			if err != nil {
-				logger.Error("shipping pass finished with failures", "source", s.Source,
-					"shipped", shipped, "skipped", skipped, "error", err)
-			} else {
-				// Logged every pass, even an idle one: a skipped count that never
-				// drains past the live log while shipped stays zero is the
-				// signature of a roll-name format the pattern no longer matches.
-				logger.Info("shipping pass complete", "source", s.Source,
-					"shipped", shipped, "skipped", skipped)
-			}
-		}
+		shipper.ShipAll(shippers, logger)
 		select {
 		case <-ticker.C:
 		case sig := <-stop:

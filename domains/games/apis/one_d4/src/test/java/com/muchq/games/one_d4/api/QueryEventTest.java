@@ -356,7 +356,8 @@ public class QueryEventTest {
         .containsEntry("source", "mcp")
         .containsEntry("fields", "outcome,white.elo")
         .containsEntry("player", "true")
-        .containsEntry("group_by", "eco,opening.family")
+        // The compiler's resolved column names, not the request's spelling.
+        .containsEntry("group_by", "eco,opening_family")
         .containsEntry("order", "score")
         .containsEntry("min_games", "5")
         .containsEntry("limit", "2")

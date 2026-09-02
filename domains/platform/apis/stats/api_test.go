@@ -208,7 +208,7 @@ func TestAgentsAndProbesShareTheWindowRules(t *testing.T) {
 
 func TestOneD4QueryEndpointsShareTheWindowRules(t *testing.T) {
 	reader := &fakeReader{
-		queries: []QueryRow{{Date: "2026-09-01", Entry: "query", Source: "ui", Outcome: "ok", Cache: "live", Requests: 4, AvgDurationUs: 1200}},
+		queries: []QueryRow{{Date: "2026-09-01", Entry: "query", Source: "ui", Outcome: "ok", Cache: "live", Requests: 4}},
 		terms:   []TermRow{{Entry: "query", Kind: KindField, Term: "white.elo", Requests: 9}},
 	}
 	handlers := handlersWith(reader)
@@ -218,7 +218,7 @@ func TestOneD4QueryEndpointsShareTheWindowRules(t *testing.T) {
 		t.Errorf("default queries window = %d, want 30", reader.lastDays)
 	}
 	row := body["rows"].([]any)[0].(map[string]any)
-	if row["cache"] != "live" || row["avg_duration_us"] != float64(1200) {
+	if row["cache"] != "live" || row["requests"] != float64(4) {
 		t.Errorf("query row = %v", row)
 	}
 
