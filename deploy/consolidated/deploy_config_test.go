@@ -2348,3 +2348,31 @@ func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
 		}
 	}
 }
+
+// The 1d4.net stats tab reads the stats service's one_d4 aggregates through
+// api.1d4.net (#1465): that host grants CORS to https://1d4.net and
+// api.muchq.com does not, so the route has to be here, GET-only, on exactly
+// the one_d4 prefix, and unrewritten — the stats service serves the same
+// path.
+func TestApiOneD4RoutesItsOwnStatsToTheStatsService(t *testing.T) {
+	site := caddySiteBlock(t, "Caddyfile", "api.1d4.net")
+	matcher := caddyMatcherBody(t, site, "@get_one_d4_stats")
+	if strings.Join(matcher, "\n") != "method GET\npath /stats/v1/one_d4/*" {
+		t.Errorf("@get_one_d4_stats is %q; want GET on /stats/v1/one_d4/* and nothing wider", matcher)
+	}
+	for i, line := range site {
+		if line != "handle @get_one_d4_stats {" {
+			continue
+		}
+		for _, inner := range caddyBlockAt(site, i) {
+			if strings.HasPrefix(inner, "rewrite") || strings.HasPrefix(inner, "uri ") {
+				t.Errorf("@get_one_d4_stats rewrites the path (%q); the stats service serves it as is", inner)
+			}
+			if inner == "reverse_proxy stats:8092" {
+				return
+			}
+		}
+	}
+	t.Fatalf("api.1d4.net has no `handle @get_one_d4_stats { reverse_proxy stats:8092 }`. Block was:\n%s",
+		strings.Join(site, "\n"))
+}
