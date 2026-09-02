@@ -1822,8 +1822,23 @@ const metaCrawlerUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
 	"(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 (compatible; meta-externalagent/1.1 " +
 	"(+https://developers.facebook.com/docs/sharing/webmasters/crawler))"
 
-func TestForgejoBlocksTheCrawlerThatPeggedItByBothUserAgentAndSubnet(t *testing.T) {
-	site := caddySiteBlock(t, "Caddyfile", "git.muchq.com")
+// caddySnippet returns the lines inside the named top-level snippet.
+func caddySnippet(t *testing.T, name, snippet string) []string {
+	t.Helper()
+	lines := directiveLines(t, name)
+	for i, line := range lines {
+		if line == "("+snippet+") {" {
+			return caddyBlockAt(lines, i)
+		}
+	}
+	t.Fatalf("no (%s) snippet in %s", snippet, name)
+	return nil
+}
+
+// Nothing this crawler fetches here is welcome on any host, so the guard lives
+// in the snippet every site imports.
+func TestEveryHostBlocksTheCrawlerThatPeggedForgejoByBothUserAgentAndSubnet(t *testing.T) {
+	site := caddySnippet(t, "Caddyfile", "refuse_bots")
 
 	ua := caddyMatcherRegexp(t, caddyMatcherBody(t, site, "@meta_agent"), "header_regexp")
 	if !ua.MatchString(metaCrawlerUserAgent) {
@@ -1837,11 +1852,18 @@ func TestForgejoBlocksTheCrawlerThatPeggedItByBothUserAgentAndSubnet(t *testing.
 	}
 
 	subnet := caddyMatcherBody(t, site, "@meta_subnet")
-	if len(subnet) != 1 || !strings.HasPrefix(subnet[0], "remote_ip ") ||
-		!strings.Contains(subnet[0], "57.141.0.0/16") {
+	joined := strings.Join(subnet, "\n")
+	if !strings.Contains(joined, "remote_ip 57.141.0.0/16") {
 		t.Errorf("@meta_subnet does not declare `remote_ip 57.141.0.0/16`, got %q. The crawl "+
 			"came from ~70 addresses in that range, which is why no per-address rate limit "+
 			"saw it.", subnet)
+	}
+	// The range is Meta's link unfurler's too. Refused everywhere except the
+	// short-link redirects, or pasting an iili link into a Meta app shows no
+	// preview; the exemption is the two paths and nothing wider.
+	if !strings.Contains(joined, "not path /r/* /iili/v1/r/*") {
+		t.Errorf("@meta_subnet does not exempt the short-link redirects, got %q; Meta's link "+
+			"unfurler shares the range.", subnet)
 	}
 
 	// Both, deliberately. Either alone is one field away from useless: the
@@ -1851,6 +1873,12 @@ func TestForgejoBlocksTheCrawlerThatPeggedItByBothUserAgentAndSubnet(t *testing.
 		if !forgejoMatcherIsRefused(site, matcher) {
 			t.Errorf("%s is defined but never answered with `respond 403`; the matcher is "+
 				"decoration. Block was:\n%s", matcher, strings.Join(site, "\n"))
+		}
+	}
+	// One copy: a site block declaring its own @meta_ matcher would drift from the snippet.
+	for _, line := range caddySiteBlock(t, "Caddyfile", "git.muchq.com") {
+		if strings.HasPrefix(line, "@meta_") {
+			t.Errorf("git.muchq.com declares %q; the guard lives in refuse_bots", line)
 		}
 	}
 }
@@ -2176,6 +2204,115 @@ func TestOneD4KnowsTheUiOriginCaddyGrants(t *testing.T) {
 		if !strings.Contains(string(source), `"`+origin+`"`) {
 			t.Errorf("Caddy grants origin %s but QueryEvent.UI_ORIGINS does not list it; its queries "+
 				"would be counted as direct API calls.", origin)
+		}
+	}
+}
+
+// TLM-Audit-Scanner (#1458) walks every vhost for exposed credentials and
+// ignores robots.txt. The refusals are a snippet each site imports first, so a
+// new site block cannot forget it and no site answers a refused guest before
+// the import runs; UA and address both, for the same reason the meta guard
+// carries both.
+func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
+	lines := directiveLines(t, "Caddyfile")
+
+	var snippet []string
+	depth := 0
+	var sites []string
+	for i, line := range lines {
+		opened := strings.Count(line, "{") - strings.Count(line, "}")
+		if depth == 0 && opened == 1 {
+			switch {
+			case line == "(refuse_bots) {":
+				snippet = caddyBlockAt(lines, i)
+			case line == "{" || strings.HasPrefix(line, "("):
+				// Global options and other snippets are not sites.
+			default:
+				sites = append(sites, line)
+				// Handle blocks run in written order, so the import has to sit above every
+				// handle the site declares; directives Caddy orders ahead of handle (header,
+				// rewrite, redir) may precede it, and a refusal still carries the site's
+				// CORS headers, which is right.
+				importAt, firstHandleAt := -1, -1
+				for j, inner := range caddyBlockAt(lines, i) {
+					if inner == "import refuse_bots" && importAt < 0 {
+						importAt = j
+					}
+					if strings.HasPrefix(inner, "handle") && firstHandleAt < 0 {
+						firstHandleAt = j
+					}
+				}
+				if importAt < 0 {
+					t.Errorf("%s does not import refuse_bots; a refused guest is answered there.", line)
+				} else if firstHandleAt >= 0 && firstHandleAt < importAt {
+					t.Errorf("%s imports refuse_bots below its own handle blocks; a refused guest "+
+						"matching an earlier handle is answered before it is refused.", line)
+				}
+			}
+		}
+		depth += opened
+	}
+	if snippet == nil {
+		t.Fatal("no (refuse_bots) snippet in the Caddyfile")
+	}
+	if len(sites) < 5 {
+		t.Fatalf("found only %d site blocks; the walk over the file is wrong", len(sites))
+	}
+	// The local file carries a copy of the snippet, and the local probe is only
+	// evidence about production while the two are the same text.
+	if local := caddySnippet(t, "Caddyfile.local", "refuse_bots"); strings.Join(local, "\n") != strings.Join(snippet, "\n") {
+		t.Errorf("Caddyfile.local's refuse_bots differs from the Caddyfile's:\n%s\n-- vs --\n%s",
+			strings.Join(local, "\n"), strings.Join(snippet, "\n"))
+	}
+
+	var agent *regexp.Regexp
+	addresses := ""
+	for _, line := range snippet {
+		if strings.HasPrefix(line, "@scanner_agent header_regexp User-Agent ") {
+			agent = regexp.MustCompile(strings.TrimPrefix(line, "@scanner_agent header_regexp User-Agent "))
+		}
+		if strings.HasPrefix(line, "@scanner_address remote_ip ") {
+			addresses = strings.TrimPrefix(line, "@scanner_address remote_ip ")
+		}
+	}
+	if agent == nil {
+		t.Fatal("refuse_bots has no @scanner_agent User-Agent matcher")
+	}
+	for _, ua := range []string{"TLM-Audit-Scanner/1.0", "tlm-audit-scanner"} {
+		if !agent.MatchString(ua) {
+			t.Errorf("the User-Agent regexp (%s) does not match %q", agent, ua)
+		}
+	}
+	for _, ua := range []string{
+		"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+		"git/2.45.2",
+		"mcpserver",
+		"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+	} {
+		if agent.MatchString(ua) {
+			t.Errorf("the User-Agent regexp (%s) matches %q, which is not the scanner", agent, ua)
+		}
+	}
+	// The two Techoff SRV addresses the report names; the agent guard is the
+	// one that survives a move, so both are pinned rather than the range.
+	for _, ip := range []string{"195.178.110.199", "45.148.10.67"} {
+		if !strings.Contains(addresses, ip) {
+			t.Errorf("refuse_bots does not refuse %s", ip)
+		}
+	}
+	for _, matcher := range []string{"@scanner_agent", "@scanner_address"} {
+		found := false
+		for i, line := range snippet {
+			if line == "handle "+matcher+" {" {
+				for _, inner := range caddyBlockAt(snippet, i) {
+					if inner == "respond 403" {
+						found = true
+					}
+				}
+			}
+		}
+		if !found {
+			t.Errorf("refuse_bots has no `handle %s { respond 403 }`; a matcher with no handle refuses nothing", matcher)
 		}
 	}
 }

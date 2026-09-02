@@ -1,4 +1,48 @@
+# Refusals every site imports above its own handles. Two guests, refused on
+# every host by both User-Agent and address, the redundancy being the point: an
+# agent may stop naming itself and a range may move.
+#
+# meta-externalagent (#1447) crawls from ~70 addresses across 57.141.0.0/16
+# and starves Forgejo's git-backed pages; nothing it fetches here is welcome,
+# and robots.txt is not the lever -- it requests what Forgejo's disallows.
+# TLM-Audit-Scanner (#1458) walks each vhost for exposed credentials (.env,
+# .aws, .git-credentials, cloud keys) from two Techoff SRV addresses and
+# ignores robots.txt.
+#
+# One matcher per condition and one handle per matcher: a matcher block ANDs
+# its conditions, and these must be an OR.
+(refuse_bots) {
+	@meta_agent header_regexp User-Agent (?i)meta-externalagent
+	# The range is shared with Meta's link unfurler, which fetches a short link
+	# once when someone pastes it into a Meta app; those two redirect paths stay
+	# open to the range so previews keep working, and everything else is refused.
+	@meta_subnet {
+		remote_ip 57.141.0.0/16
+		not path /r/* /iili/v1/r/*
+	}
+	@scanner_agent header_regexp User-Agent (?i)tlm-audit-scanner
+	@scanner_address remote_ip 195.178.110.199 45.148.10.67
+
+	handle @meta_agent {
+		respond 403
+	}
+
+	handle @meta_subnet {
+		respond 403
+	}
+
+	handle @scanner_agent {
+		respond 403
+	}
+
+	handle @scanner_address {
+		respond 403
+	}
+}
+
 :2015 {
+	import refuse_bots
+
 	@post_portrait {
 		method POST
 		path /portrait/v1/trace

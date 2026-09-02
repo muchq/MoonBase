@@ -251,23 +251,33 @@ When verifying a deploy, read the **body** of `/health` — it answers 200 with
 
 All services run on the `muchq_network` Docker bridge network.
 
+## Refused guests, on every host
+
+The `refuse_bots` snippet at the top of the Caddyfile answers 403 to two
+visitors by User-Agent and by address, and every site block imports it above
+its own handle blocks so a new block cannot forget it: `meta-externalagent`
+and its `57.141.0.0/16` range (#1447), and `TLM-Audit-Scanner` from its two
+Techoff SRV addresses (#1458). The range stays open to the two short-link
+redirect paths, which Meta's link unfurler fetches from the same addresses.
+The redundancy is on purpose: an agent may stop naming itself and a range may
+move. `deploy_config_test.go` pins the matchers, the 403s, the exemption, and
+the import position. Add the next one there, not in a site block.
+
 ## Crawler guards on git.muchq.com
 
 Forgejo runs under a 0.5-CPU cap, and the git-backed pages (`/commit/`,
 `/compare/`, `/blame/`, `/commits/`, `/src/`, `/archive/`) fork git per
-request, so a crawler walking them starves the site (#1447). The
-`git.muchq.com` block answers 403 to the `meta-externalagent` User-Agent, to
-`57.141.0.0/16`, and to any self-identified crawler on those six routes.
-`/issues/` and `/raw/` stay open — a database read and a file read, and worth
-more as indexable pages than as saved CPU.
+request, so a crawler walking them starves the site (#1447). Beyond the guests
+`refuse_bots` refuses everywhere, the `git.muchq.com` block answers 403 to any
+self-identified crawler on those six routes. `/issues/` and
+`/raw/` stay open — a database read and a file read, and worth more as
+indexable pages than as saved CPU.
 
-Three things to know before editing it:
+Two things to know before editing it:
 
 - **robots.txt is not the lever.** Forgejo already serves one disallowing
   `/*/*/src/` and `/user/`, and the crawler requests both anyway. That is why
   the guard is in Caddy.
-- **The User-Agent and subnet guards are redundant on purpose.** The agent
-  self-identifies today and may stop; the range is Meta's today and may move.
 - **The expensive-route matcher ANDs its User-Agent and path conditions** in
   one matcher block. Split into two it becomes an OR, wrong in both directions
   at once: crawlers lose the cheap pages they are welcome to, and humans lose
