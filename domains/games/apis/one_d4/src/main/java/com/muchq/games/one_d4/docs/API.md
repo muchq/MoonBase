@@ -359,24 +359,34 @@ it first via `POST /v1/index`.
 
 ## Query events
 
-Every `POST /v1/query` and `POST /v1/aggregate` writes one structured log line
-on the logger `com.muchq.games.one_d4.query_event` with message `query_event`,
-for the stats pipeline (#1465). Its fields are key-value pairs, and none of
-them is caller-authored: the query text, the player, and comparison values
-stay out.
+Every `POST /v1/query` and `POST /v1/aggregate` that reaches its handler writes
+one structured log line on the logger `com.muchq.games.one_d4.query_event`
+with message `query_event`, for the stats pipeline (#1465). Requests Micronaut
+rejects before the handler — a wrong `Content-Type` (415), a body that does
+not bind (400) — write none. The fields are key-value pairs, every value a
+string in the shipped JSON, and none of them is caller-authored: the query
+text, the player, and comparison values stay out.
 
 | field | values |
 |---|---|
 | `entry` | `query` or `aggregate` |
-| `source` | `mcp` (User-Agent `mcpserver`), `ui` (Origin `https://1d4.net`), else `api` |
-| `fields`, `motifs` | comma-joined, sorted names from the query's grammar |
+| `source` | `mcp` (User-Agent starting `mcpserver`), `ui` (Origin `https://1d4.net`, or the vite dev origin), else `api` |
+| `fields`, `motifs` | comma-joined, sorted names the compiler knows, in canonical dotted spelling; unknown names are dropped |
 | `order_by` | the ORDER BY motif, or empty |
-| `player` | whether a perspective player was given |
-| `limit`, `offset` / `group_by`, `order`, `min_games` | the request's bounds, per entry |
-| `cache` | `snapshot` or `live` (query only) |
+| `player` | whether a non-blank perspective player was given |
+| `limit`, `offset` / `group_by`, `order`, `min_games` | the request's bounds, per entry. Per-line detail; `offset` and the bucket widths inside `group_by` are caller-shaped and are never rollup keys |
+| `cache` | `snapshot` (served through the first-page snapshot, warm or loading) or `live`; query only |
 | `rows` | rows returned, on success |
-| `outcome` | `ok`, `invalid` (400-class), or `failed` |
-| `duration_us` | wall time in the handler |
+| `outcome` | `ok`, `invalid` (the 400 classes), or `failed` (anything else, 404s included) |
+| `duration_us` | wall time in the handler, before the response is serialized |
+
+The shape fields and `group_by` are absent on the `invalid` path when the
+request failed before they were known. The bounded part — entry, source,
+outcome, cache — is also counted as `one_d4_queries_total`, with handler time
+in `one_d4_query_duration_micros`, for the metrics dashboard; the log line is
+for what only it can carry.
+
+---
 
 ## Example Session
 

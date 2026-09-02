@@ -11,6 +11,8 @@ go_test(
         "Caddyfile",
         "Caddyfile.local",
         "compose.yaml",
+        # TestOneD4KnowsTheUiOriginCaddyGrants ties the CORS origin to the one one_d4 reads.
+        "//domains/games/apis/one_d4:src/main/java/com/muchq/games/one_d4/api/QueryEvent.java",
         # Run, not read, by TestTheServicesListingMatchesWhatCanBeDeployed: the
         # --services listing is awk and sed, and asserting on their text is not
         # asserting on their output. The script self-locates and reads

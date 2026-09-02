@@ -64,21 +64,24 @@ public class QueryEventWireTest {
     return (Logger) LoggerFactory.getLogger(QueryEvent.LOGGER);
   }
 
-  private String sourceOfARequestWith(String... headers) throws Exception {
+  private HttpResponse<String> post(String contentType, String body, String... headers)
+      throws Exception {
     captured.list.clear();
     HttpRequest.Builder request =
         HttpRequest.newBuilder()
             .uri(URI.create("http://localhost:" + server.getPort() + "/v1/query"))
-            .header("Content-Type", "application/json")
-            .POST(
-                HttpRequest.BodyPublishers.ofString(
-                    "{\"query\":\"num.moves >= 0\",\"limit\":10,\"offset\":0}",
-                    StandardCharsets.UTF_8));
+            .header("Content-Type", contentType)
+            .POST(HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));
     for (int i = 0; i < headers.length; i += 2) {
       request.header(headers[i], headers[i + 1]);
     }
-    HttpResponse<String> response =
-        client.send(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    return client.send(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+  }
+
+  private static final String A_QUERY = "{\"query\":\"num.moves >= 0\",\"limit\":10,\"offset\":0}";
+
+  private String sourceOfARequestWith(String... headers) throws Exception {
+    HttpResponse<String> response = post("application/json", A_QUERY, headers);
     assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
     assertThat(captured.list).hasSize(1);
     for (KeyValuePair pair : captured.list.get(0).getKeyValuePairs()) {
@@ -95,5 +98,20 @@ public class QueryEventWireTest {
     assertThat(sourceOfARequestWith("User-Agent", "mcpserver")).isEqualTo("mcp");
     assertThat(sourceOfARequestWith("Origin", "https://1d4.net")).isEqualTo("ui");
     assertThat(sourceOfARequestWith("User-Agent", "curl/8.6.0")).isEqualTo("api");
+  }
+
+  /**
+   * A request Micronaut turns away before the handler writes no event: the count is of queries the
+   * service saw, and API.md says so.
+   */
+  @Test
+  public void requestsRejectedBeforeTheHandlerWriteNoEvent() throws Exception {
+    assertThat(post("text/plain", A_QUERY).statusCode()).isEqualTo(415);
+    assertThat(captured.list).isEmpty();
+
+    // Malformed JSON is answered before binding too (today as a 500, which is its own problem,
+    // not this one's); either way no handler ran and no event may say one did.
+    assertThat(post("application/json", "{\"query\":").statusCode()).isGreaterThanOrEqualTo(400);
+    assertThat(captured.list).isEmpty();
   }
 }

@@ -18,12 +18,17 @@ public class QueryController {
   private final QueryExecutor queryExecutor;
   private final QueryRequestValidator validator;
   private final FirstPageCache firstPageCache;
+  private final QueryEvents events;
 
   public QueryController(
-      QueryExecutor queryExecutor, QueryRequestValidator validator, FirstPageCache firstPageCache) {
+      QueryExecutor queryExecutor,
+      QueryRequestValidator validator,
+      FirstPageCache firstPageCache,
+      QueryEvents events) {
     this.queryExecutor = queryExecutor;
     this.validator = validator;
     this.firstPageCache = firstPageCache;
+    this.events = events;
   }
 
   @POST
@@ -35,31 +40,31 @@ public class QueryController {
       @HeaderParam("Origin") @Nullable String origin) {
     // The query event replaces the old access-style line that logged the raw query text: the
     // shape is what the stats pipeline needs, and the text is the caller's (#1465).
-    QueryEvent event = QueryEvent.start(QueryEvent.ENTRY_QUERY, userAgent, origin);
-    try {
-      validator.validate(request);
-      event
-          .shape(Parser.parse(request.query()))
-          .put("player", request.player() != null)
-          .put("limit", request.limit())
-          .put("offset", request.offset());
+    return events.observe(
+        QueryEvent.ENTRY_QUERY,
+        userAgent,
+        origin,
+        event -> {
+          validator.validate(request);
+          event
+              .shape(Parser.parse(request.query()))
+              .put("player", QueryEvent.hasPlayer(request.player()))
+              .put("limit", request.limit())
+              .put("offset", request.offset());
 
-      // A default request is answered from (or, on a cold/expired miss, loads) the shared
-      // snapshot; matches() guarantees the loader computes exactly this request. Everything else
-      // runs live.
-      QueryResponse response;
-      if (firstPageCache.matches(request)) {
-        event.put("cache", QueryEvent.CACHE_SNAPSHOT);
-        response = firstPageCache.get();
-      } else {
-        event.put("cache", QueryEvent.CACHE_LIVE);
-        response = queryExecutor.execute(request);
-      }
-      event.put("rows", response.count()).finish(QueryEvent.OUTCOME_OK);
-      return response;
-    } catch (RuntimeException e) {
-      event.finish(QueryEvent.outcomeOf(e));
-      throw e;
-    }
+          // A default request is answered from (or, on a cold/expired miss, loads) the shared
+          // snapshot; matches() guarantees the loader computes exactly this request. Everything
+          // else runs live.
+          QueryResponse response;
+          if (firstPageCache.matches(request)) {
+            event.cache(QueryEvent.CACHE_SNAPSHOT);
+            response = firstPageCache.get();
+          } else {
+            event.cache(QueryEvent.CACHE_LIVE);
+            response = queryExecutor.execute(request);
+          }
+          event.put("rows", response.count());
+          return response;
+        });
   }
 }

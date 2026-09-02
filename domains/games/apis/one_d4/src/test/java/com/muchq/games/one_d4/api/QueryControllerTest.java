@@ -29,7 +29,8 @@ public class QueryControllerTest {
     ticker = new MutableTicker();
     QueryExecutor executor = new QueryExecutor(store, new SqlCompiler());
     cache = new FirstPageCache(ticker, FirstPageCache.MAX_AGE, executor);
-    controller = new QueryController(executor, new QueryRequestValidator(), cache);
+    controller =
+        new QueryController(executor, new QueryRequestValidator(), cache, TestQueryEvents.create());
   }
 
   private static QueryRequest defaultRequest() {

@@ -30,14 +30,17 @@ public class AggregateController {
   private final GameFeatureStore gameFeatureStore;
   private final SqlCompiler sqlCompiler;
   private final AggregateRequestValidator validator;
+  private final QueryEvents events;
 
   public AggregateController(
       GameFeatureStore gameFeatureStore,
       SqlCompiler sqlCompiler,
-      AggregateRequestValidator validator) {
+      AggregateRequestValidator validator,
+      QueryEvents events) {
     this.gameFeatureStore = gameFeatureStore;
     this.sqlCompiler = sqlCompiler;
     this.validator = validator;
+    this.events = events;
   }
 
   @POST
@@ -47,29 +50,23 @@ public class AggregateController {
       AggregateRequest request,
       @HeaderParam("User-Agent") @Nullable String userAgent,
       @HeaderParam("Origin") @Nullable String origin) {
-    QueryEvent event = QueryEvent.start(QueryEvent.ENTRY_AGGREGATE, userAgent, origin);
-    try {
-      AggregateResponse response = aggregate(request, event);
-      event.put("rows", response.count()).finish(QueryEvent.OUTCOME_OK);
-      return response;
-    } catch (RuntimeException e) {
-      event.finish(QueryEvent.outcomeOf(e));
-      throw e;
-    }
+    return events.observe(
+        QueryEvent.ENTRY_AGGREGATE, userAgent, origin, event -> aggregate(request, event));
   }
 
   private AggregateResponse aggregate(AggregateRequest request, QueryEvent event) {
     AggregateSpec spec = validator.validate(request);
     ParsedQuery parsed = Parser.parse(request.query());
+    List<String> groupColumns = sqlCompiler.resolveGroupByColumns(request.groupBy());
+    // Logged only now: the compiler has accepted every group-by name, so they are its
+    // vocabulary (plus a bucket width) rather than whatever the caller sent.
     event
         .shape(parsed)
-        .put("player", request.player() != null)
+        .put("player", QueryEvent.hasPlayer(request.player()))
         .put("group_by", request.groupBy())
         .put("order", spec.order().wireName())
         .put("min_games", spec.minGames())
         .put("limit", request.limit());
-
-    List<String> groupColumns = sqlCompiler.resolveGroupByColumns(request.groupBy());
     CompiledQuery compiled = sqlCompiler.compileAggregate(parsed, spec);
 
     // The spec decides both what the SELECT list carries and what the store reads back, so the
@@ -77,6 +74,7 @@ public class AggregateController {
     List<AggregateRow> groups =
         gameFeatureStore.aggregate(
             compiled, groupColumns, spec.hasOutcomeMetrics(), request.limit());
+    event.put("rows", groups.size());
 
     // Fewer groups came back than the limit allowed, so nothing was cut off and the totals are
     // already in hand: every matching group is present, and their counts sum to every matching

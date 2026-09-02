@@ -2152,3 +2152,30 @@ func TestLocalGatewayRoutesReachTheirPorts(t *testing.T) {
 		}
 	}
 }
+
+// one_d4 books a query as the web app's by the Origin the browser attaches,
+// and the only Origin the api.1d4.net block lets through CORS is the one it
+// grants Access-Control-Allow-Origin to. The two are spelled in two files;
+// the day the app moves origin, every UI query would silently read as `api`.
+func TestOneD4KnowsTheUiOriginCaddyGrants(t *testing.T) {
+	site := caddySiteBlock(t, "Caddyfile", "api.1d4.net")
+	var granted []string
+	for _, line := range site {
+		if strings.HasPrefix(line, "Access-Control-Allow-Origin ") {
+			granted = append(granted, strings.Trim(strings.TrimPrefix(line, "Access-Control-Allow-Origin "), `"`))
+		}
+	}
+	if len(granted) == 0 {
+		t.Fatal("api.1d4.net grants no Access-Control-Allow-Origin; the web app cannot call it")
+	}
+	source, err := os.ReadFile("../../domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/api/QueryEvent.java")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, origin := range granted {
+		if !strings.Contains(string(source), `"`+origin+`"`) {
+			t.Errorf("Caddy grants origin %s but QueryEvent.UI_ORIGINS does not list it; its queries "+
+				"would be counted as direct API calls.", origin)
+		}
+	}
+}

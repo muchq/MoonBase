@@ -1,6 +1,9 @@
 load("//bazel/rules:java.bzl", "artifact", "java_binary", "java_library", "java_test_suite")
 load("//bazel/rules:oci.bzl", "linux_oci_java")
 
+# deploy_config_test.go reads the UI origins one_d4 recognizes against the Caddyfile's CORS grant.
+exports_files(["src/main/java/com/muchq/games/one_d4/api/QueryEvent.java"])
+
 # The row model the query side reads and the DAOs write. Motif's enum
 # constants travel through the database, which is why the package name
 # cannot move cheaply.
@@ -235,6 +238,7 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/api/IndexController.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryController.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryEvent.java",
+        "src/main/java/com/muchq/games/one_d4/api/QueryEvents.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryExecutor.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryRequestValidator.java",
         "src/main/java/com/muchq/games/one_d4/api/QueryShape.java",
@@ -249,6 +253,7 @@ java_library(
         "//domains/games/libs/chessql:ast",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
+        "//domains/platform/libs/yodel",
         artifact("com.github.ben-manes.caffeine:caffeine"),
         artifact("io.micronaut:micronaut-context"),
         artifact("io.micronaut:micronaut-core"),
@@ -463,6 +468,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/QueryEventTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryShapeTest.java",
+        "src/test/java/com/muchq/games/one_d4/api/TestQueryEvents.java",
         "src/test/java/com/muchq/games/one_d4/api/dto/DtoJsonCompatTest.java",
     ],
     deps = [
@@ -475,6 +481,7 @@ java_test_suite(
         ":service",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
+        "//domains/platform/libs/yodel",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("com.github.ben-manes.caffeine:caffeine"),
         artifact("io.micronaut:micronaut-context"),

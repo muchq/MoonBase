@@ -644,12 +644,16 @@ public class IndexerFacadeHttpTest {
    */
   @Test
   public void everyCallIdentifiesItselfAsMcpserver() {
+    UUID id = UUID.randomUUID();
     route("POST /v1/query", 200, "{\"games\":[],\"count\":0}");
-    route("GET /v1/index/abc", 200, "{\"requestId\":\"abc\",\"status\":\"COMPLETED\"}");
+    route("GET /v1/index/" + id, 200, indexJson(id, "COMPLETED", 1));
 
     facade().query("motif(pin)", null, 10);
+    facade().status(id);
 
-    assertThat(userAgents).isNotEmpty().allMatch(agent -> agent.equals(OneD4Client.USER_AGENT));
+    assertThat(userAgents)
+        .hasSize(2)
+        .allMatch(agent -> agent.equals(OneD4Client.USER_AGENT), "both verbs send the token");
     assertThat(OneD4Client.USER_AGENT).isEqualTo("mcpserver");
   }
 

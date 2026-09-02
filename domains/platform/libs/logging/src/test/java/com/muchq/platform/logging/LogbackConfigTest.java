@@ -45,7 +45,8 @@ public class LogbackConfigTest {
           .atInfo()
           .addKeyValue("event", "query")
           .addKeyValue("duration_us", 1234L)
-          .addKeyValue("fields", java.util.List.of("eco", "white.elo"))
+          .addKeyValue("fields", "eco,white.elo")
+          .addKeyValue("motifs", java.util.List.of("fork"))
           .log("query_event");
     } finally {
       System.setOut(original);
@@ -92,12 +93,16 @@ public class LogbackConfigTest {
 
     // Key-value pairs from the fluent API — how one_d4's query event carries
     // its fields (#1465) — land as a list of one-entry objects, every value
-    // rendered as a string. The stats pipeline reads exactly this shape.
+    // rendered as a string: a long, a comma-joined string (what one_d4
+    // sends), and a List (which it deliberately does not, since this is
+    // what a List looks like) all arrive the same way. The stats pipeline
+    // reads exactly this shape, and selects the lines by loggerName.
     JsonNode kvp = lineContaining(captured.toString(UTF_8), "query_event");
     assertThat(kvp.get("kvpList").toString())
         .isEqualTo(
             "[{\"event\":\"query\"},{\"duration_us\":\"1234\"},"
-                + "{\"fields\":\"[eco, white.elo]\"}]");
+                + "{\"fields\":\"eco,white.elo\"},{\"motifs\":\"[fork]\"}]");
+    assertThat(kvp.get("loggerName").asText()).isEqualTo("com.muchq.some.Service");
   }
 
   private JsonNode lineContaining(String output, String needle) throws Exception {

@@ -24,7 +24,8 @@ public class AggregateControllerTest {
 
   private final RecordingStore store = new RecordingStore();
   private final AggregateController controller =
-      new AggregateController(store, new SqlCompiler(), new AggregateRequestValidator());
+      new AggregateController(
+          store, new SqlCompiler(), new AggregateRequestValidator(), TestQueryEvents.create());
 
   @Test
   public void aggregate_compilesQueryAndMapsGroups() {

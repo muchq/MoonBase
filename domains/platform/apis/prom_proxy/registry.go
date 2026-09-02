@@ -447,6 +447,13 @@ var serviceRegistry = map[string]serviceEntry{
 			// routes there. The deploy config test and one_d4's
 			// HealthProbeRouteLabelTest pin the two ways a zero here can lie.
 			probesTile("one_d4"),
+			// Query events (#1465): the bounded half rides here, the shape in the
+			// logs. Emitted by the Java service, so the shared selector's worker
+			// half matches nothing today; kept for the day it does.
+			counter("Queries", "served", "",
+				`one_d4_queries_total{service_name=~"one_d4(_worker)?",outcome="ok"}`),
+			counterOver("Queries", "failed", "",
+				`one_d4_queries_total{service_name=~"one_d4(_worker)?",outcome="failed"}`, alarmWindow),
 			counterOver("Indexing", "games_indexed", "games",
 				`games_indexed_total{service_name=~"one_d4(_worker)?"}`, burstWindow),
 			counterOver("Indexing", "runs_completed", "",
