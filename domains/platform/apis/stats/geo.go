@@ -19,6 +19,13 @@ type Locator interface {
 	Country(ip string) string
 }
 
+// DefaultGeoDBPath is where the image lays the DB-IP file (BUILD.bazel's
+// geo_layer); geo_layer_test pins the two against each other.
+const DefaultGeoDBPath = "/geo/dbip-country-lite.csv.gz"
+
+// unplacedCode is what DB-IP writes for space it does not place.
+const unplacedCode = "ZZ"
+
 // UnknownCountry is the geo row for an address no locator placed: a private
 // range, a malformed field, or no database loaded at all.
 const UnknownCountry = "--"
@@ -72,6 +79,12 @@ func ParseDBIP(r io.Reader) (*Geo, int, error) {
 		country := strings.ToUpper(strings.TrimSpace(record[2]))
 		if err1 != nil || err2 != nil || len(country) != 2 {
 			skipped++
+			continue
+		}
+		// DB-IP files reserved and private space under ZZ, ISO's "unknown";
+		// those rows are not a placement, and reading them as one would give
+		// every RFC 1918 address a country of its own.
+		if country == unplacedCode {
 			continue
 		}
 		// Compared as stored: a v4-mapped v6 end against a v6 start is an

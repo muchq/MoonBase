@@ -60,11 +60,29 @@ go_binary(
 )
 
 # The IP-to-country table rides in the image at /geo (#1467); main.go's
-# GEO_DB_PATH default points at it.
+# GEO_DB_PATH default points at it, and geo_vendor_test pins the two.
 pkg_tar(
     name = "geo_layer",
     srcs = ["@dbip_country_lite//file"],
     package_dir = "/geo",
+)
+
+# The pinned vendor file through the real parser, and the layer's path
+# against the binary's default. Its own target: the data is a few MB the
+# unit suite has no use for.
+go_test(
+    name = "geo_vendor_test",
+    size = "small",
+    srcs = ["geo_vendor_test.go"],
+    data = [
+        ":geo_layer",
+        "@dbip_country_lite//file",
+    ],
+    embed = [":stats_lib"],
+    env = {
+        "DBIP_COUNTRY_LITE": "$(rootpath @dbip_country_lite//file)",
+        "GEO_LAYER_TAR": "$(rootpath :geo_layer)",
+    },
 )
 
 linux_oci_go(

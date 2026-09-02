@@ -65,7 +65,7 @@ func main() {
 	// failing a boot the other endpoints do not depend on.
 	geoPath, geoSet := os.LookupEnv("GEO_DB_PATH")
 	if !geoSet {
-		geoPath = "/geo/dbip-country-lite.csv.gz"
+		geoPath = stats.DefaultGeoDBPath
 	}
 	geo, skipped, err := stats.Locate(geoPath)
 	switch {

@@ -66,8 +66,9 @@ pinned by URL and sha256 as `@dbip_country_lite` in
 `/geo/dbip-country-lite.csv.gz`; a new month is a pin bump, nothing on
 the host. The service loads it at boot into a sorted range table and
 binary-searches it, no library. Overlapping rows lose to the range they
-sit in. An address outside every range files under `--`, and so does
-everything when the file will not load — an error in the log, never a
+sit in, and the `ZZ` rows DB-IP uses for reserved and private space are
+not placements. An address outside every range files under `--`, and so
+does everything when the file will not load — an error in the log, never a
 boot failure. `GEO_DB_PATH` points at another file, or empty switches geo
 off. Rows aggregated before a database was available stay `--` until a
 re-aggregation (bump `RollupVersion`).
