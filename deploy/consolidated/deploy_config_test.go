@@ -1039,7 +1039,7 @@ func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {
 			}
 			inMatcher := false
 			proxied := false
-			for _, line := range lines {
+			for i, line := range lines {
 				switch {
 				case line == route.matcher+" {":
 					inMatcher = true
@@ -1052,11 +1052,20 @@ func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {
 						t.Errorf("%s carries %q beyond its decided directives — a broader "+
 							"matcher exposes more than the decision covered.", route.matcher, line)
 					}
-				case strings.HasPrefix(line, "reverse_proxy "+route.matcher):
-					proxied = true
-					if wantLine := "reverse_proxy " + route.matcher + " " + route.upstream; line != wantLine {
-						t.Errorf("%s goes somewhere other than %s (%q).",
-							route.matcher, route.upstream, line)
+				case line == "handle "+route.matcher+" {":
+					// The route is the matcher's handle block (#1468); a bare
+					// `reverse_proxy @matcher` would be shadowed by the catch-all,
+					// and TestGatewayHostsAnswerUnmatchedPathsWith404 rejects one.
+					for _, inner := range caddyBlockAt(lines, i) {
+						switch {
+						case inner == "reverse_proxy "+route.upstream:
+							proxied = true
+						case strings.HasPrefix(inner, "reverse_proxy "):
+							t.Errorf("%s goes somewhere other than %s (%q).", route.matcher, route.upstream, inner)
+						case strings.HasPrefix(inner, "rewrite") || strings.HasPrefix(inner, "uri "):
+							t.Errorf("Caddy rewrites %s (%q); the service serves the gateway path itself.",
+								route.matcher, inner)
+						}
 					}
 				case (strings.HasPrefix(line, "rewrite") || strings.HasPrefix(line, "uri strip_prefix")) &&
 					(strings.Contains(line, route.matcher) || namesARoutePath(line, route.directives)):
@@ -1947,20 +1956,12 @@ func TestForgejoClosesTheRoutesThatCostSecondsToCrawlersOnly(t *testing.T) {
 func TestForgejoStillProxiesEverythingTheGuardsDoNotRefuse(t *testing.T) {
 	site := caddySiteBlock(t, "Caddyfile", "git.muchq.com")
 
-	for i, line := range site {
-		if line != "handle {" {
-			continue
-		}
-		for _, inner := range caddyBlockAt(site, i) {
-			if inner == "reverse_proxy forgejo:3000" {
-				return
-			}
-		}
+	if ok, problem := catchAllIsLastHandle(site, "reverse_proxy forgejo:3000"); !ok {
+		t.Fatalf("%s in the git.muchq.com block. With the guards written as handle blocks, "+
+			"an unmatched request falls through to nothing and the site answers 200 with an "+
+			"empty body — or, placed above a guard, the catch-all disables the 403. Block was:\n%s",
+			problem, strings.Join(site, "\n"))
 	}
-	t.Fatalf("the git.muchq.com block has no catch-all `handle { reverse_proxy forgejo:3000 }`. "+
-		"With the guards written as handle blocks, an unmatched request falls through to "+
-		"nothing and the site answers 200 with an empty body. Block was:\n%s",
-		strings.Join(site, "\n"))
 }
 
 // Container stdout is a disk-fill risk on a single host: docker's json-file
@@ -2050,5 +2051,104 @@ func TestTheStatsPairIsProfileGatedTogether(t *testing.T) {
 	}
 	if !strings.Contains(serviceBlock(t, "compose.yaml", "stats"), "postgresql://stats:") {
 		t.Errorf("stats names no stats database URL; the aggregates have nowhere to land")
+	}
+}
+
+// catchAllIsLastHandle reports whether the site block ends its handle
+// chain with `handle { <terminal> }`. Handle blocks are mutually exclusive
+// and run in written order, so a catch-all anywhere but last shadows every
+// handle after it; the position is the correctness argument, not a style.
+func catchAllIsLastHandle(site []string, terminal string) (found bool, problem string) {
+	lastHandle, catchAll := -1, -1
+	for i, line := range site {
+		if line == "handle {" || strings.HasPrefix(line, "handle @") {
+			lastHandle = i
+		}
+		if line != "handle {" {
+			continue
+		}
+		for _, inner := range caddyBlockAt(site, i) {
+			if inner == terminal && catchAll < 0 {
+				catchAll = i // the first one is the one that shadows
+			}
+		}
+	}
+	switch {
+	case catchAll < 0:
+		return false, "no catch-all `handle { " + terminal + " }`"
+	case catchAll != lastHandle:
+		return false, "the catch-all is not the last handle; the handles after it are shadowed"
+	}
+	return true, ""
+}
+
+// The local gateway's routes, matcher to upstream, so a transposed port in
+// a rewrite of the block does not ship.
+var localRoutes = map[string]string{
+	"@ws_thoughts":          "localhost:8080",
+	"@ws_golf":              "localhost:8080",
+	"@post_golf_v2_session": "localhost:8089",
+	"@ws_golf_v2":           "localhost:8089",
+	"@post_portrait":        "localhost:8081",
+	"@get_metrics":          "localhost:8082",
+	"@post_mithril":         "localhost:8083",
+	"@post_posterize_blur":  "localhost:8084",
+	"@post_posterize_edges": "localhost:8084",
+}
+
+// api.muchq.com and gpt.muchq.com answer only the routes they declare; an
+// unmatched path, or a HEAD on a GET-only matcher, is a 404 — not the empty
+// 200 Caddy hands out when nothing handles a request (#1468). The stats
+// pipeline's probe table counts sub-400 answers as "served", so on these
+// hosts every scanner probe read as answered. The catch-all has to be a
+// handle block, and every proxied route has to be one too: Caddy orders
+// handle before reverse_proxy, so a bare `reverse_proxy @matcher` beside a
+// catch-all handle is never reached.
+func TestGatewayHostsAnswerUnmatchedPathsWith404(t *testing.T) {
+	for _, tc := range []struct{ file, host string }{
+		{"Caddyfile", "api.muchq.com"},
+		{"Caddyfile", "gpt.muchq.com"},
+		{"Caddyfile.local", ":2015"},
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			site := caddySiteBlock(t, tc.file, tc.host)
+			for _, line := range site {
+				if strings.HasPrefix(line, "reverse_proxy @") {
+					t.Errorf("bare %q would be shadowed by the catch-all handle; wrap it in "+
+						"`handle @matcher { reverse_proxy upstream }`.", line)
+				}
+			}
+			if ok, problem := catchAllIsLastHandle(site, "respond 404"); !ok {
+				t.Errorf("%s in the %s block; an unmatched request is answered 200 with an "+
+					"empty body, or a real route is. Block was:\n%s",
+					problem, tc.host, strings.Join(site, "\n"))
+			}
+		})
+	}
+}
+
+func TestLocalGatewayRoutesReachTheirPorts(t *testing.T) {
+	site := caddySiteBlock(t, "Caddyfile.local", ":2015")
+	seen := map[string]bool{}
+	for i, line := range site {
+		if !strings.HasPrefix(line, "handle @") {
+			continue
+		}
+		matcher := strings.TrimSuffix(strings.TrimPrefix(line, "handle "), " {")
+		upstream, routed := localRoutes[matcher]
+		if !routed {
+			continue // @options and anything else that is not a proxy
+		}
+		seen[matcher] = true
+		for _, inner := range caddyBlockAt(site, i) {
+			if strings.HasPrefix(inner, "reverse_proxy ") && inner != "reverse_proxy "+upstream {
+				t.Errorf("%s reaches %q locally, want %s", matcher, inner, upstream)
+			}
+		}
+	}
+	for matcher := range localRoutes {
+		if !seen[matcher] {
+			t.Errorf("the local gateway has no handle block for %s", matcher)
+		}
 	}
 }

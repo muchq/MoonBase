@@ -277,6 +277,22 @@ Three things to know before editing it:
 Only HTTP is affected. Git over SSH reaches Forgejo on host port 222 without
 passing through Caddy.
 
+## Gateway hosts answer unmatched paths with 404
+
+`api.muchq.com` and `gpt.muchq.com` route only the matchers they declare and
+end in `handle { respond 404 }` (#1468). Before that, an unmatched path — or
+a HEAD on a GET-only matcher — fell through to an empty 200, which the stats
+pipeline's probe table then counted as a served answer to a scanner.
+
+The shape is load-bearing: Caddy orders `handle` before `reverse_proxy`, so a
+catch-all handle beside a bare `reverse_proxy @matcher` shadows it. Every
+proxied route in those blocks is therefore a `handle @matcher { reverse_proxy
+… }`, and the catch-all is the last handle in the block, because handle
+blocks run in written order. `deploy_config_test.go` fails on a bare matched
+proxy in either block, on a missing catch-all, and on a catch-all that is not
+last. The preflight handler (any OPTIONS) and the websocket matchers (any
+method) still answer on any path; that is by design, not fall-through.
+
 ## The shared database
 
 `shared_postgres` is the one Postgres instance on the host. `one_d4`,

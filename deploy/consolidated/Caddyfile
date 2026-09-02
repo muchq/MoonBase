@@ -128,17 +128,39 @@ api.muchq.com {
 		respond 204
 	}
 
-	reverse_proxy @ws_thoughts games_ws_backend:8080
-	reverse_proxy @ws_golf games_ws_backend:8080
-	reverse_proxy @post_golf_v2_session golf_hub:8089
-	reverse_proxy @ws_golf_v2 golf_hub:8089
-	reverse_proxy @post_portrait portrait:8081
-	reverse_proxy @get_metrics prom_proxy:8082
-	reverse_proxy @post_mithril mithril:8083
-	reverse_proxy @post_posterize_blur posterize:8084
-	reverse_proxy @post_posterize_edges posterize:8084
-	reverse_proxy @post_generate microgpt-serve:8087
-	reverse_proxy @post_chat microgpt-serve:8087
+	handle @ws_thoughts {
+		reverse_proxy games_ws_backend:8080
+	}
+	handle @ws_golf {
+		reverse_proxy games_ws_backend:8080
+	}
+	handle @post_golf_v2_session {
+		reverse_proxy golf_hub:8089
+	}
+	handle @ws_golf_v2 {
+		reverse_proxy golf_hub:8089
+	}
+	handle @post_portrait {
+		reverse_proxy portrait:8081
+	}
+	handle @get_metrics {
+		reverse_proxy prom_proxy:8082
+	}
+	handle @post_mithril {
+		reverse_proxy mithril:8083
+	}
+	handle @post_posterize_blur {
+		reverse_proxy posterize:8084
+	}
+	handle @post_posterize_edges {
+		reverse_proxy posterize:8084
+	}
+	handle @post_generate {
+		reverse_proxy microgpt-serve:8087
+	}
+	handle @post_chat {
+		reverse_proxy microgpt-serve:8087
+	}
 
 	handle @get_1d4_health {
 		rewrite * /health
@@ -158,13 +180,32 @@ api.muchq.com {
 	}
 	# No rewrite: one_d4_v2 serves the gateway path itself, so the route a
 	# client sees and the route the model declares are one string.
-	reverse_proxy @post_v2_analyze one_d4_v2:8090
+	handle @post_v2_analyze {
+		reverse_proxy one_d4_v2:8090
+	}
 
 	# Same pattern (#1359): iili serves /iili/v1/* unrewritten.
-	reverse_proxy @post_iili_shorten iili:8091
+	handle @post_iili_shorten {
+		reverse_proxy iili:8091
+	}
 	# stats (#1460): read-only aggregates, unrewritten like the rest.
-	reverse_proxy @get_stats stats:8092
-	reverse_proxy @get_iili_redirect iili:8091
+	handle @get_stats {
+		reverse_proxy stats:8092
+	}
+	handle @get_iili_redirect {
+		reverse_proxy iili:8091
+	}
+
+	# Nothing else is routed: an unmatched path (or a HEAD on a GET-only
+	# matcher) is a 404, not the empty 200 a fall-through answers with (#1468).
+	# Two things still answer sub-400 on any path: the preflight handler
+	# above, which matches OPTIONS regardless of path, and the websocket
+	# matchers, which carry no method. Last on purpose — handle blocks run
+	# in written order, and one placed earlier would shadow every route
+	# below it; deploy_config_test.go pins the position.
+	handle {
+		respond 404
+	}
 
 	log {
 		output file /var/log/caddy/access.log {
@@ -290,8 +331,23 @@ gpt.muchq.com {
 		respond 204
 	}
 
-	reverse_proxy @post_generate microgpt-serve:8087
-	reverse_proxy @post_chat microgpt-serve:8087
+	handle @post_generate {
+		reverse_proxy microgpt-serve:8087
+	}
+	handle @post_chat {
+		reverse_proxy microgpt-serve:8087
+	}
+
+	# Nothing else is routed: an unmatched path (or a HEAD on a GET-only
+	# matcher) is a 404, not the empty 200 a fall-through answers with (#1468).
+	# Two things still answer sub-400 on any path: the preflight handler
+	# above, which matches OPTIONS regardless of path, and the websocket
+	# matchers, which carry no method. Last on purpose — handle blocks run
+	# in written order, and one placed earlier would shadow every route
+	# below it; deploy_config_test.go pins the position.
+	handle {
+		respond 404
+	}
 
 	log {
 		output file /var/log/caddy/access.log {
