@@ -106,6 +106,25 @@ func TestRunOnceAggregatesNewObjectsAndSkipsProcessedAndForeignKeys(t *testing.T
 	}
 }
 
+func TestRunOnceHandsTheAggregatorsLocatorToEveryRollup(t *testing.T) {
+	objects := &fakeObjects{objects: map[string][]byte{
+		"logs/source=caddy/dt=2026-08-30/a.log.gz": gzipped(t,
+			`{"status":200,"request":{"host":"h","method":"GET","uri":"/","client_ip":"1.0.0.7","headers":{}}}`),
+	}}
+	store := newFakeApplier()
+	agg := testAggregator(objects, store)
+	agg.Geo = fakeLocator{"1.0.0.7": "AU"}
+
+	if _, err := agg.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	rollup := store.applied["logs/source=caddy/dt=2026-08-30/a.log.gz"]
+	if rollup.Countries[GeoKey{"2026-08-30", "h", AgentOther, "AU"}].Requests != 1 {
+		t.Errorf("geo rows = %v; the locator did not reach the rollup", rollup.Countries)
+	}
+}
+
 func TestRunOnceReadsOneD4ObjectsAsQueryEvents(t *testing.T) {
 	objects := &fakeObjects{objects: map[string][]byte{
 		"logs/source=one_d4/dt=2026-09-01/query_events-2026-09-01T14.log.gz": gzipped(t,

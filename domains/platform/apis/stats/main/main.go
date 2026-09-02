@@ -49,19 +49,36 @@ func main() {
 	}
 	defer store.Close()
 
-	aggregator := &stats.Aggregator{
-		Objects: &s3lite.S3{
-			Bucket: requireEnv(logger, "S3_BUCKET"),
-			Region: requireEnv(logger, "S3_REGION"),
-			Creds: s3lite.Credentials{
-				AccessKeyID:     requireEnv(logger, "AWS_ACCESS_KEY_ID"),
-				SecretAccessKey: requireEnv(logger, "AWS_SECRET_ACCESS_KEY"),
-			},
-			Client: &http.Client{Timeout: 5 * time.Minute},
-			Now:    time.Now,
+	objects := &s3lite.S3{
+		Bucket: requireEnv(logger, "S3_BUCKET"),
+		Region: requireEnv(logger, "S3_REGION"),
+		Creds: s3lite.Credentials{
+			AccessKeyID:     requireEnv(logger, "AWS_ACCESS_KEY_ID"),
+			SecretAccessKey: requireEnv(logger, "AWS_SECRET_ACCESS_KEY"),
 		},
-		Store:  store,
-		Logger: logger,
+		Client: &http.Client{Timeout: 5 * time.Minute},
+		Now:    time.Now,
+	}
+	// The geo database is optional. A key that will not load is logged and
+	// the service runs without it — every geo row reads "--" — rather than
+	// crash-looping the other endpoints behind a bucket hiccup or a typo.
+	geoKey := os.Getenv("GEO_DB_KEY")
+	geo, skipped, err := stats.Locate(objects, geoKey, 5, func() { time.Sleep(10 * time.Second) })
+	switch {
+	case err != nil:
+		logger.Error("cannot load the geo database; geo rows will all read "+stats.UnknownCountry,
+			"key", geoKey, "error", err)
+	case geoKey == "":
+		logger.Warn("GEO_DB_KEY is not set; geo rows will all read " + stats.UnknownCountry)
+	default:
+		logger.Info("geo database loaded", "key", geoKey, "skipped_lines", skipped)
+	}
+
+	aggregator := &stats.Aggregator{
+		Objects: objects,
+		Store:   store,
+		Logger:  logger,
+		Geo:     geo,
 	}
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -86,6 +103,7 @@ func main() {
 	router.HandleFunc("GET /stats/v1/probes", handlers.GetProbes)
 	router.HandleFunc("GET /stats/v1/one_d4/queries", handlers.GetQueries)
 	router.HandleFunc("GET /stats/v1/one_d4/terms", handlers.GetQueryTerms)
+	router.HandleFunc("GET /stats/v1/countries", handlers.GetCountries)
 
 	logger.Info("stats started", "port", port, "interval", interval.String())
 	if err := http.ListenAndServe(":"+port, router); err != nil {

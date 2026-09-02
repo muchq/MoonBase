@@ -19,6 +19,7 @@ type fakeReader struct {
 	probes    []ProbeRow
 	queries   []QueryRow
 	terms     []TermRow
+	countries []CountryRow
 	lastDays  int
 	lastLimit int
 	fail      bool
@@ -70,6 +71,14 @@ func (f *fakeReader) QueryTerms(_ context.Context, days, limit int) ([]TermRow, 
 	}
 	f.lastDays, f.lastLimit = days, limit
 	return f.terms, nil
+}
+
+func (f *fakeReader) Countries(_ context.Context, days, limit int) ([]CountryRow, error) {
+	if f.fail {
+		return nil, errors.New("db is having a day")
+	}
+	f.lastDays, f.lastLimit = days, limit
+	return f.countries, nil
 }
 
 func handlersWith(reader *fakeReader) *Handlers {
@@ -245,5 +254,31 @@ func TestOneD4QueryEndpointsShareTheWindowRules(t *testing.T) {
 		if recorder, _ := get(t, handler, "/x"); recorder.Code != http.StatusInternalServerError {
 			t.Errorf("%s on a failing store = %d, want 500", name, recorder.Code)
 		}
+	}
+}
+
+func TestCountriesShareTheWindowRules(t *testing.T) {
+	reader := &fakeReader{countries: []CountryRow{
+		{Host: "git.muchq.com", AgentClass: AgentAIScraper, Country: "US", Requests: 9, Blocked: 4, Probes: 2},
+	}}
+	handlers := handlersWith(reader)
+
+	_, body := get(t, handlers.GetCountries, "/stats/v1/countries")
+	if reader.lastDays != 30 || reader.lastLimit != 2000 {
+		t.Errorf("default countries (days, limit) = (%d, %d), want (30, 2000)", reader.lastDays, reader.lastLimit)
+	}
+	row := body["rows"].([]any)[0].(map[string]any)
+	if row["country"] != "US" || row["requests"] != float64(9) || row["blocked"] != float64(4) || row["probes"] != float64(2) {
+		t.Errorf("country row = %v", row)
+	}
+	get(t, handlers.GetCountries, "/stats/v1/countries?days=99999&limit=99999")
+	if reader.lastDays != 365 || reader.lastLimit != 5000 {
+		t.Errorf("clamped countries (days, limit) = (%d, %d), want (365, 5000)", reader.lastDays, reader.lastLimit)
+	}
+	if _, body := get(t, handlersWith(&fakeReader{}).GetCountries, "/x"); body["rows"] == nil {
+		t.Error("countries rows serialized as null; want []")
+	}
+	if recorder, _ := get(t, handlersWith(&fakeReader{fail: true}).GetCountries, "/x"); recorder.Code != http.StatusInternalServerError {
+		t.Errorf("countries on a failing store = %d, want 500", recorder.Code)
 	}
 }

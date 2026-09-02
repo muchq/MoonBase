@@ -52,6 +52,16 @@ var schema = []string{
 		requests bigint NOT NULL,
 		PRIMARY KEY (dt, entry, source, outcome, cache)
 	)`,
+	`CREATE TABLE IF NOT EXISTS geo_stats (
+		dt date NOT NULL,
+		host text NOT NULL,
+		agent_class text NOT NULL,
+		country text NOT NULL,
+		requests bigint NOT NULL,
+		blocked bigint NOT NULL,
+		probes bigint NOT NULL,
+		PRIMARY KEY (dt, host, agent_class, country)
+	)`,
 	`CREATE TABLE IF NOT EXISTS query_term_stats (
 		dt date NOT NULL,
 		entry text NOT NULL,
@@ -85,7 +95,7 @@ func currentRollupVersion() string { return rollupVersionFor(RollupVersion, sche
 // belongs here, or a version bump leaves it double-counted.
 var rollupTables = []string{
 	"processed_log_objects", "request_stats", "iili_slug_stats", "probe_stats",
-	"query_stats", "query_term_stats",
+	"query_stats", "query_term_stats", "geo_stats",
 }
 
 const metaSchema = `CREATE TABLE IF NOT EXISTS stats_meta (
@@ -238,6 +248,18 @@ func (s *Store) ApplyRollup(ctx context.Context, key string, rollup *Rollup) err
 			 ON CONFLICT (dt, entry, source, outcome, cache)
 			 DO UPDATE SET requests = query_stats.requests + EXCLUDED.requests`,
 			k.Date, k.Entry, k.Source, k.Outcome, k.Cache, count); err != nil {
+			return err
+		}
+	}
+	for k, stat := range rollup.Countries {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO geo_stats (dt, host, agent_class, country, requests, blocked, probes)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)
+			 ON CONFLICT (dt, host, agent_class, country)
+			 DO UPDATE SET requests = geo_stats.requests + EXCLUDED.requests,
+			               blocked = geo_stats.blocked + EXCLUDED.blocked,
+			               probes = geo_stats.probes + EXCLUDED.probes`,
+			k.Date, k.Host, k.AgentClass, k.Country, stat.Requests, stat.Blocked, stat.Probes); err != nil {
 			return err
 		}
 	}
@@ -433,6 +455,40 @@ func (s *Store) QueryTerms(ctx context.Context, days, limit int) ([]TermRow, err
 	var out []TermRow
 	var row TermRow
 	_, err = pgx.ForEachRow(rows, []any{&row.Entry, &row.Kind, &row.Term, &row.Requests},
+		func() error {
+			out = append(out, row)
+			return nil
+		})
+	return out, err
+}
+
+// CountryRow is one host's traffic of one class from one country over the
+// window: requests, how many were refused, and how many were probes.
+type CountryRow struct {
+	Host       string `json:"host"`
+	AgentClass string `json:"agent_class"`
+	Country    string `json:"country"`
+	Requests   int64  `json:"requests"`
+	Blocked    int64  `json:"blocked"`
+	Probes     int64  `json:"probes"`
+}
+
+func (s *Store) Countries(ctx context.Context, days, limit int) ([]CountryRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT host, agent_class, country,
+		        SUM(requests) AS requests, SUM(blocked) AS blocked, SUM(probes) AS probes
+		 FROM geo_stats
+		 WHERE dt >= current_date - $1::int
+		 GROUP BY host, agent_class, country
+		 ORDER BY requests DESC, host, agent_class, country
+		 LIMIT $2`, days, limit)
+	if err != nil {
+		return nil, err
+	}
+	var out []CountryRow
+	var row CountryRow
+	_, err = pgx.ForEachRow(rows,
+		[]any{&row.Host, &row.AgentClass, &row.Country, &row.Requests, &row.Blocked, &row.Probes},
 		func() error {
 			out = append(out, row)
 			return nil

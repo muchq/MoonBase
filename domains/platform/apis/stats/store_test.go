@@ -55,6 +55,8 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	// unique host serves as one and keeps the rows tellable and the counts exact.
 	rollup.Queries[QueryKey{date, host, "ui", "ok", "live"}] = 2
 	rollup.Terms[TermKey{date, host, KindField, "white.elo"}] = 2
+	rollup.Countries[GeoKey{date, host, AgentBot, "GB"}] = GeoStat{5, 1, 4}
+	rollup.Countries[GeoKey{date, host, AgentBot, "--"}] = GeoStat{2, 0, 0}
 
 	if pending, err := store.Unprocessed(ctx, []string{key}); err != nil || len(pending) != 1 {
 		t.Fatalf("Unprocessed = (%v, %v), want the fresh key pending", pending, err)
@@ -146,6 +148,12 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	if row := queryRowFor(t, store, host); row == nil || row.Requests != 2 || row.Cache != "live" {
 		t.Errorf("query row = %+v, want exactly the 2 applied once", row)
 	}
+	if row := countryRowFor(t, store, host, "GB"); row == nil || *row != (CountryRow{host, AgentBot, "GB", 5, 1, 4}) {
+		t.Errorf("country row = %+v, want exactly the rollup applied once", row)
+	}
+	if row := countryRowFor(t, store, host, UnknownCountry); row == nil || *row != (CountryRow{host, AgentBot, "--", 2, 0, 0}) {
+		t.Errorf("unplaced row = %+v, want it stored and read back like any country", row)
+	}
 	if row := termRowFor(t, store, host); row == nil || row.Requests != 2 || row.Kind != KindField {
 		t.Errorf("term row = %+v, want exactly the 2 applied once", row)
 	}
@@ -155,8 +163,12 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	second := NewRollup()
 	second.Queries[QueryKey{date, host, "ui", "ok", "live"}] = 3
 	second.Terms[TermKey{date, host, KindField, "white.elo"}] = 1
+	second.Countries[GeoKey{date, host, AgentBot, "GB"}] = GeoStat{1, 1, 0}
 	if err := store.ApplyRollup(ctx, key+".second", second); err != nil {
 		t.Fatal(err)
+	}
+	if row := countryRowFor(t, store, host, "GB"); row == nil || *row != (CountryRow{host, AgentBot, "GB", 6, 2, 4}) {
+		t.Errorf("country row after a second object = %+v, want the three columns summed", row)
 	}
 	if row := queryRowFor(t, store, host); row == nil || row.Requests != 5 {
 		t.Errorf("query row after a second object = %+v, want 5", row)
@@ -164,6 +176,20 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	if row := termRowFor(t, store, host); row == nil || row.Requests != 3 {
 		t.Errorf("term row after a second object = %+v, want 3", row)
 	}
+}
+
+func countryRowFor(t *testing.T, store *Store, host, country string) *CountryRow {
+	t.Helper()
+	rows, err := store.Countries(context.Background(), 2, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range rows {
+		if rows[i].Host == host && rows[i].Country == country {
+			return &rows[i]
+		}
+	}
+	return nil
 }
 
 func queryRowFor(t *testing.T, store *Store, entry string) *QueryRow {
@@ -230,6 +256,7 @@ func TestAVersionBumpDropsAggregatesAndMarkersForReaggregation(t *testing.T) {
 	rollup.Probes[ProbeKey{date, host, ProbeGit, 404}] = 1
 	rollup.Queries[QueryKey{date, host, "ui", "ok", "live"}] = 1
 	rollup.Terms[TermKey{date, host, KindField, "eco"}] = 1
+	rollup.Countries[GeoKey{date, host, AgentBot, "GB"}] = GeoStat{1, 0, 0}
 	if err := store.ApplyRollup(ctx, key, rollup); err != nil {
 		t.Fatal(err)
 	}
@@ -291,6 +318,9 @@ func TestAVersionBumpDropsAggregatesAndMarkersForReaggregation(t *testing.T) {
 	}
 	if row := termRowFor(t, reopened, host); row != nil {
 		t.Errorf("term aggregates survived the version bump: %+v", row)
+	}
+	if row := countryRowFor(t, reopened, host, "GB"); row != nil {
+		t.Errorf("geo aggregates survived the version bump: %+v", row)
 	}
 	var recorded string
 	if err := reopened.pool.QueryRow(ctx,
