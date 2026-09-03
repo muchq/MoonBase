@@ -82,7 +82,7 @@ services:
       # deploys. golf_hub_db_init provisions the role + database. The
       # database keeps its golf_hub name from before the service became the
       # games hub: renaming a role and database holding live rows is an
-      # operation, not a rename (the iili precedent below).
+      # operation, not a rename (the iili precedent below; #1487 tracks it).
       GAMES_HUB_DB_URL: postgresql://golf_hub:${GOLF_HUB_DB_PASSWORD}@shared_postgres:5432/golf_hub
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: games_hub

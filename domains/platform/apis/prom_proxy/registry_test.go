@@ -503,9 +503,9 @@ var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|c
 // shared artifact to pin them together (that is #1308's scope). What these
 // audits do close, on their own side: every tile reads only names in this
 // set, and every name in this set is read by some tile.
-var golfHubSelectorPattern = regexp.MustCompile(`\b((?:stream_|chat_|restored_|thoughts_)[a-z_]*)(\{[^}]*\})?`)
+var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:stream_|chat_|restored_|thoughts_)[a-z_]*)(\{[^}]*\})?`)
 
-var golfHubExportedNames = map[string]bool{
+var gamesHubExportedNames = map[string]bool{
 	"chat_appends_total":              true,
 	"chat_catch_up_drains_total":      true,
 	"chat_failures_total":             true,
@@ -537,7 +537,7 @@ var golfHubExportedNames = map[string]bool{
 // checked on its own, the name set closed in both directions. No service_name
 // scoping here — games_hub's custom names have a single emitter, and none of
 // these selectors has ever been scoped.
-func TestGolfHubQueriesNameRealInstruments(t *testing.T) {
+func TestGamesHubQueriesNameRealInstruments(t *testing.T) {
 	entry := serviceRegistry["games_hub"]
 	require.NotEmpty(t, entry.CustomScalars)
 	require.NotEmpty(t, entry.CustomTimeseries)
@@ -555,7 +555,7 @@ func TestGolfHubQueriesNameRealInstruments(t *testing.T) {
 				if strings.HasPrefix(name, "http_server_") {
 					continue
 				}
-				assert.True(t, golfHubExportedNames[name],
+				assert.True(t, gamesHubExportedNames[name],
 					"%s reads %q, which games_hub does not export", what, name)
 			}
 			// The probes tile reads the standard http_server family on the
@@ -565,11 +565,11 @@ func TestGolfHubQueriesNameRealInstruments(t *testing.T) {
 					"%s reads the standard family unscoped: %s", what, query)
 				continue
 			}
-			matches := golfHubSelectorPattern.FindAllStringSubmatch(query, -1)
+			matches := gamesHubSelectorPattern.FindAllStringSubmatch(query, -1)
 			assert.NotEmpty(t, matches, "%s queries no games_hub instrument: %s", what, query)
 			for _, match := range matches {
 				seen[match[1]]++
-				assert.True(t, golfHubExportedNames[match[1]],
+				assert.True(t, gamesHubExportedNames[match[1]],
 					"%s reads %q, which games_hub does not export", what, match[1])
 			}
 		}
@@ -577,7 +577,7 @@ func TestGolfHubQueriesNameRealInstruments(t *testing.T) {
 
 	// Closed the other way too: an instrument nothing charts is one the hub
 	// pays to declare, emit, and store while nobody reads it.
-	for name := range golfHubExportedNames {
+	for name := range gamesHubExportedNames {
 		assert.NotZero(t, seen[name], "nothing in the games_hub entry reads %s", name)
 	}
 

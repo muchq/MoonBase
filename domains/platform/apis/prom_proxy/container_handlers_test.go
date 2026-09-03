@@ -259,9 +259,9 @@ func TestGetContainers(t *testing.T) {
 	assert.Equal(t, "abc123", posterize.Version, "running revision from the image tag")
 	assert.Equal(t, "posterize", posterize.Service, "clients link to the service page with this")
 
-	golfHub := byName["ubuntu-games_hub-1"]
-	assert.False(t, golfHub.CrashLooping, "healthy peer unaffected")
-	assert.Equal(t, 86400.0, golfHub.UptimeSeconds)
+	gamesHub := byName["ubuntu-games_hub-1"]
+	assert.False(t, gamesHub.CrashLooping, "healthy peer unaffected")
+	assert.Equal(t, 86400.0, gamesHub.UptimeSeconds)
 
 	// Infrastructure containers emit no app metrics, so this listing is the
 	// only place they appear at all.

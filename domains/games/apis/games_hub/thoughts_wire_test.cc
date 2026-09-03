@@ -20,7 +20,6 @@
 
 #include <memory>
 #include <nlohmann/json.hpp>
-#include <set>
 #include <string>
 
 #include "domains/games/apis/games_hub/wire_test_fixture.h"
@@ -57,9 +56,9 @@ TEST_F(ThoughtsWireTest, DialPinsSessionReadyBytes) {
 }
 
 // Consumer: the client's join and the world it draws. The first joiner
-// hears an empty worldState; the second hears the first as a WorldPlayer
-// (the sorted key set the client destructures), and the first hears the
-// second arrive as a playerJoined carrying the same shape under "player".
+// hears an empty worldState; the second hears the first as a WorldPlayer,
+// and the first hears the second arrive as a playerJoined carrying the
+// same shape under "player".
 TEST_F(ThoughtsWireTest, JoinPinsWorldStateAndPlayerJoinedBytes) {
   json first_session;
   auto first = DialReady(first_session);
@@ -72,11 +71,9 @@ TEST_F(ThoughtsWireTest, JoinPinsWorldStateAndPlayerJoinedBytes) {
       second
           ->Send(CommandFrame("join", R"({"position":[20,0,15],"color":[0.3,0.9,0.4],"shape":1})"))
           .ok());
-  const std::string world = EventPayload(NextFrame(*second), "worldState");
-  EXPECT_EQ(world, R"({"players":[{"color":[0.8,0.2,0.6],"playerId":"player-1",)"
-                   R"("position":[10.0,0.0,-5.0],"shape":0}]})");
-  EXPECT_EQ(KeysOf(json::parse(world)["players"][0]),
-            (std::set<std::string>{"color", "playerId", "position", "shape"}));
+  EXPECT_EQ(EventPayload(NextFrame(*second), "worldState"),
+            R"({"players":[{"color":[0.8,0.2,0.6],"playerId":"player-1",)"
+            R"("position":[10.0,0.0,-5.0],"shape":0}]})");
 
   EXPECT_EQ(EventPayload(NextFrame(*first), "playerJoined"),
             R"({"player":{"color":[0.3,0.9,0.4],"playerId":"player-2",)"

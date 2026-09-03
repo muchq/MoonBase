@@ -76,7 +76,7 @@ public class IndexerModuleTest {
   @Test
   public void pgjdbcRejectsTheLibpqUrlShapeGolfHubUses() throws Exception {
     assertThat(new org.postgresql.Driver().acceptsURL("postgresql://one_d4_postgres:5432/one_d4"))
-        .as("golf_hub's C++ form is not a JDBC URL and must not be mistaken for one")
+        .as("games_hub's C++ form is not a JDBC URL and must not be mistaken for one")
         .isFalse();
   }
 

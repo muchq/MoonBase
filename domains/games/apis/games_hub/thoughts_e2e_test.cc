@@ -133,6 +133,11 @@ TEST_F(GamesHubStreamFixture, MovesAndShapesReachTheOthersAndNeverEchoAndStick) 
   const auto& alice_now = world->as_worldState_or_null()->players[0];
   EXPECT_EQ(alice_now.position, (std::vector<double>{15, 0, -8}));
   EXPECT_EQ(alice_now.shape, 1);
+
+  // thoughts_events counts deliveries, not commands: alice's join reached
+  // one session, carol's reached two.
+  EXPECT_EQ(metrics_->CounterTotal("thoughts_events", {{"event", "playerJoined"}}), 3);
+  EXPECT_EQ(metrics_->CounterTotal("thoughts_events", {{"event", "playerMoved"}}), 1);
 }
 
 TEST_F(GamesHubStreamFixture, LeavingTellsTheOthersAndKeepsTheSessionForARejoin) {
@@ -270,13 +275,18 @@ TEST_F(GamesHubStreamFixture, MoveShapeAndLeaveNeedAJoinAndAJoinNeedsALeave) {
 }
 
 TEST_F(GamesHubStreamFixture, AThoughtsStreamNeedsAFreshTicketAndRefusesASecondSeat) {
-  moonbase::games::ThinkInput bogus;
-  bogus.ticket = "t-bogus";
-  auto refused = client_->Think(bogus);
-  ASSERT_TRUE(refused.ok()) << refused.error().message();
-  auto first = refused->Receive();
-  ASSERT_FALSE(first.ok());
-  EXPECT_EQ(first.error().code(), "Unauthenticated") << first.error().message();
+  // An unspendable ticket and a NUL-bearing one (the protocol boundary
+  // golf's ProtocolBoundaryFixture pins) are refused alike, before any
+  // event.
+  for (const std::string& ticket : {std::string("t-bogus"), std::string("t-\0bogus", 8)}) {
+    moonbase::games::ThinkInput bogus;
+    bogus.ticket = ticket;
+    auto refused = client_->Think(bogus);
+    ASSERT_TRUE(refused.ok()) << refused.error().message();
+    auto first = refused->Receive();
+    ASSERT_FALSE(first.ok());
+    EXPECT_EQ(first.error().code(), "Unauthenticated") << first.error().message();
+  }
 
   auto alice = OpenThoughtsSeat();
   ASSERT_TRUE(alice.has_value());
@@ -293,7 +303,7 @@ TEST_F(GamesHubStreamFixture, AThoughtsStreamNeedsAFreshTicketAndRefusesASecondS
   auto event = conflicted->Receive();
   ASSERT_FALSE(event.ok());
   EXPECT_EQ(event.error().code(), "SeatConflict");
-  EXPECT_EQ(metrics_->CounterTotal("thoughts_admissions_refused", {{"reason", "bad_ticket"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("thoughts_admissions_refused", {{"reason", "bad_ticket"}}), 2);
   EXPECT_EQ(metrics_->CounterTotal("thoughts_admissions_refused", {{"reason", "seat_conflict"}}),
             1);
 }

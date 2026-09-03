@@ -93,8 +93,8 @@ class ThoughtsHub {
   /// The world: joined players by id. A live session without an entry
   /// here has connected and not joined (or has left).
   std::map<std::string, moonbase::games::WorldPlayer> world_;
-  // Declared last: destroyed first, joining registry threads before the
-  // map they could touch goes away.
+  // Declared last: destroyed first, so no session it still holds can reach
+  // the map above during teardown.
   Registry registry_;
 };
 

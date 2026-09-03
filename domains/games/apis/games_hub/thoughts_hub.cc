@@ -137,13 +137,17 @@ smithy::eventstream::StreamTask ThoughtsHub::Think(
   while (true) {
     auto received = co_await stream.Receive();
     if (!received.ok() || !received->has_value()) {
-      // Any close is a leave: the seat is removed, not parked, and whoever
-      // remains hears playerLeft. Remove first so the departed session is
-      // not among the "others" the leave fans out to.
+      // Any close is a leave: whoever remains hears playerLeft, and the seat
+      // is removed rather than parked. The world entry goes first, while
+      // this seat still blocks admission of the same player: once Remove
+      // returns, a reconnect can be admitted, and its join must find the
+      // world already empty of its predecessor rather than be refused as
+      // "already in the world" — or worse, be erased by the old frame's
+      // leave.
+      Leave(player_id);
       registry_.Remove(player_id);
       TrackActive(-1);
       Count("thoughts_disconnects", {{"kind", received.ok() ? "clean" : "abrupt"}});
-      Leave(player_id);
       co_return smithy::Unit{};
     }
     if (!budget.Admit(std::chrono::steady_clock::now())) {
@@ -174,24 +178,34 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
     entry.position = join->position;
     entry.color = join->color;
     entry.shape = join->shape;
-    moonbase::games::WorldState snapshot;
     bool already_joined = false;
     {
       const std::lock_guard<std::mutex> lock(mu_);
       if (world_.contains(player_id)) {
         already_joined = true;
       } else {
+        moonbase::games::WorldState snapshot;
         for (const auto& [id, other] : world_) snapshot.players.push_back(other);
         world_.emplace(player_id, entry);
+        // Queued to the joiner while mu_ is still held, deliberately: every
+        // other player's mutation takes mu_ before it fans out, so with the
+        // snapshot queued inside this hold, any playerLeft or playerMoved
+        // that reaches the joiner was either already applied to the
+        // snapshot or lands behind it. Queued after the unlock, a leave
+        // could slip its playerLeft in ahead of a snapshot that still lists
+        // the leaver — a ghost nothing later removes. Only the joiner's own
+        // queue is touched here, so no other session's close path can be
+        // completed inline under this lock.
+        Send(player_id, ThoughtsEvents::FromWorldstate(std::move(snapshot)));
       }
     }
     if (already_joined) {
       Reject(player_id, RejectKind::kState, "already in the world; leave first");
       return;
     }
-    // The joiner's snapshot before anyone hears of them, so a client can
-    // draw the world once and then apply events to it.
-    Send(player_id, ThoughtsEvents::FromWorldstate(std::move(snapshot)));
+    // Then the others hear of the joiner. Outside mu_: a fan-out can close a
+    // slow session, and on the in-memory wire that completes its Receive —
+    // and so its Leave — inline on this thread.
     moonbase::games::PlayerJoined joined;
     joined.player = std::move(entry);
     SendToOthers(player_id, ThoughtsEvents::FromPlayerjoined(std::move(joined)));

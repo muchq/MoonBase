@@ -11,7 +11,7 @@
 ///  - TokenBucket (this): one bucket, no lock, caller-supplied clock
 ///    readings — for budgets owned by exactly one execution context,
 ///    like a per-session stream budget living in its coroutine frame
-///    (golf_hub, MoonBase#1240), where frames are handled sequentially
+///    (games_hub, MoonBase#1240), where frames are handled sequentially
 ///    and a mutex or clock call per admit would be pure overhead. The
 ///    injected time is also what makes refill behavior testable with
 ///    fabricated clocks instead of sleeps.

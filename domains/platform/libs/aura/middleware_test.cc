@@ -345,7 +345,7 @@ TEST_F(AuraMiddlewareTest, HealthIsNeverRateLimited) {
   }
 }
 
-// Services without a limiter (e.g. golf_hub) leave allow_request unset; the
+// Services without a limiter (e.g. games_hub) leave allow_request unset; the
 // guard is skipped entirely and nothing ever 429s.
 TEST(AuraChainWithoutLimiterTest, NoGuardWhenAllowRequestUnset) {
   auto sink = std::make_shared<RecordingSink>();

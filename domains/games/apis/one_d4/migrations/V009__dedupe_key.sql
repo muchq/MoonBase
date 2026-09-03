@@ -8,7 +8,7 @@
 --
 -- A Postgres partial unique index would express this more directly, but H2
 -- does not support one, and H2 is what the default CI suite runs — the
--- pg-backed suites skip silently without GOLF_HUB_TEST_DB_URL /
+-- pg-backed suites skip silently without GAMES_HUB_TEST_DB_URL /
 -- PG_TEST_DB_URL. A PG-only constraint would leave the race guard
 -- effectively untested on every ordinary PR. One nullable column costs a
 -- little schema surface and buys the same invariant, enforced identically

@@ -22,9 +22,13 @@ auth ahead of the 101. One session identity opens either game's stream.
   `commandRejected` shape with golf.
 
 A new game is one new stream operation on the service and one new model
-file. Codegen flattens every namespace into `moonbase::games`, so shape
-names must be unique across the three files (a collision gets the foreign
-namespace's name appended, which nothing here wants).
+file. A game that wants rooms and chat copies golf's shape — the room-layer
+cases plus one game envelope member per union — not thoughts' flat unions,
+which opted out of the room layer and would have to be restructured, not
+extended, to join it. Codegen flattens every namespace into
+`moonbase::games`, so shape names must be unique across the three files (a
+collision gets the foreign namespace's name appended, which nothing here
+wants).
 
 ## Thoughts
 
