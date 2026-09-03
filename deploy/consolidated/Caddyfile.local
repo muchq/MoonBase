@@ -72,10 +72,6 @@
 		path /games/v1/thoughts-ws
 	}
 
-	@ws_golf {
-		path /games/v1/golf-ws
-	}
-
 	@post_golf_v2_session {
 		method POST
 		path /games/v2/session
@@ -107,9 +103,6 @@
 	}
 
 	handle @ws_thoughts {
-		reverse_proxy localhost:8080
-	}
-	handle @ws_golf {
 		reverse_proxy localhost:8080
 	}
 	handle @post_golf_v2_session {

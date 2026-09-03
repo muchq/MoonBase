@@ -4,9 +4,8 @@ A real-time multiplayer, multitenant WebSocket game server.
 
 ## Overview
 
-This server hosts multiple game backends on a single process, each on its own WebSocket endpoint:
+This server hosts game backends on a single process, each on its own WebSocket endpoint:
 
-- **[Golf](golf/)** (`/games/v1/golf-ws`) — a 4-card golf card game with rooms, JWT authentication, and session reconnection
 - **[Thoughts](thoughts/)** (`/games/v1/thoughts-ws`) — a chill 3D multiplayer vibe, playable at [muchq.com/thoughts](https://muchq.com/thoughts)
 
 ## Architecture
@@ -15,7 +14,6 @@ This server hosts multiple game backends on a single process, each on its own We
 main.go
 ├── hub/             # Shared WebSocket hub: client lifecycle, ping/pong, origin checks
 ├── players/         # Player ID generators (whimsical for prod, deterministic for tests)
-├── golf/            # Golf game hub + game logic + JWT auth
 └── thoughts/        # Thoughts game hub + game logic
 ```
 
@@ -36,7 +34,7 @@ Games receive raw messages via `GameMessage`, manage their own state, and send r
 
 ### Client Identity
 
-Each WebSocket connection gets a UUID (`hub.Client.ID`) assigned at upgrade time. Games build their own identity layer on top — golf uses JWT-based player sessions that persist across reconnections.
+Each WebSocket connection gets a UUID (`hub.Client.ID`) assigned at upgrade time. Games build their own identity layer on top.
 
 ## Running
 
@@ -69,5 +67,4 @@ deploy/consolidated/deploy.sh
 ## Security
 
 - **Origin validation**: Production only allows `muchq.com`, `www.muchq.com`, and `thoughts.muchq.com` over HTTPS
-- **JWT authentication** (golf): HMAC-SHA256 tokens with algorithm validation to prevent confusion attacks
 - **Server-assigned IDs**: Player IDs are generated server-side, never accepted from clients

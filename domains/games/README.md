@@ -8,7 +8,7 @@ Game engines, services, and libraries.
 
 ## APIs
 
-- [**Golf Hub**](apis/golf_hub): smithy-cpp event-stream backend for the golf card game (v2).
+- [**Golf Hub**](apis/golf_hub): smithy-cpp event-stream backend for the golf card game.
 - [**Games WS Backend**](apis/games_ws_backend): WebSocket-based backend for real-time multiplayer games.
 - [**Mithril**](apis/mithril): Rust-based game service.
 - [**1d4.net**](apis/one_d4): Chess analysis service.
