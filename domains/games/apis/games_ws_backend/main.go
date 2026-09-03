@@ -7,9 +7,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/muchq/moonbase/domains/games/apis/games_ws_backend/golf"
 	"github.com/muchq/moonbase/domains/games/apis/games_ws_backend/hub"
-	"github.com/muchq/moonbase/domains/games/apis/games_ws_backend/players"
 	"github.com/muchq/moonbase/domains/games/apis/games_ws_backend/thoughts"
 )
 
@@ -41,13 +39,6 @@ func main() {
 	go thoughtsHub.Run()
 	http.HandleFunc("/games/v1/thoughts-ws", func(w http.ResponseWriter, r *http.Request) {
 		hub.ServeWs(thoughtsHub, w, r)
-	})
-
-	// Serve golf backend
-	golfHub := golf.NewGolfHub(&players.WhimsicalIDGenerator{})
-	go golfHub.Run()
-	http.HandleFunc("/games/v1/golf-ws", func(w http.ResponseWriter, r *http.Request) {
-		hub.ServeWs(golfHub, w, r)
 	})
 
 	slog.Info("Server listening", "addr", *addr)

@@ -113,8 +113,8 @@ To ship a change without restarting the whole stack:
 
 ```
 SERVICE             DESCRIPTION
-games_ws_backend    Websocket backend for v1 games
-golf_hub            Golf v2 hub on smithy event streams (/games/v2/*)
+games_ws_backend    Websocket backend for thoughts
+golf_hub            Golf hub on smithy event streams (/games/v2/*)
 mcpserver           Model Context Protocol server
 ...
 ```
