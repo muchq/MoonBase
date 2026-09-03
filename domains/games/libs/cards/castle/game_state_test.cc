@@ -51,9 +51,11 @@ TEST(Deal, NineCardsASeatFromTheBackOfTheDeckIntoSetup) {
     EXPECT_FALSE(p.isReady());
   }
   // The unshuffled deck ends in the four aces, then kings: seat a's
-  // face-down row is dealt first, from the back.
+  // face-down row is dealt first, from the back, then face-up, then hand.
   EXPECT_EQ(game->getPlayer(0).getFaceDown().at(0), c(Rank::Ace, Suit::Spades));
+  EXPECT_EQ(game->getPlayer(0).getFaceUp().at(0), c(Rank::Ace, Suit::Clubs));
   EXPECT_EQ(game->getPlayer(0).getHand().at(0), c(Rank::King, Suit::Diamonds));
+  EXPECT_EQ(game->getPlayer(1).getFaceDown().at(0), c(Rank::Queen, Suit::Hearts));
   EXPECT_EQ(game->playerIndex("b"), 1);
   EXPECT_EQ(game->playerIndex("zed"), -1);
 }
@@ -141,8 +143,27 @@ TEST(Play, ACardGoesOnAPileTopOfItsRankOrLower) {
   EXPECT_EQ(next->getPlayer(0).getHand(), (vector<Card>{c(Rank::Five), c(Rank::Nine)}));
   EXPECT_EQ(next->getWhoseTurn(), 1);
   EXPECT_EQ(next->getPhase(), Phase::Playing);
-  EXPECT_FALSE(next->playFromHand(0, {0}).ok());  // not a's turn
-  EXPECT_FALSE(next->playFromHand(5, {0}).ok());  // no such seat
+}
+
+TEST(Play, OnlyTheSeatWhoseTurnItIsMayMove) {
+  const GameState g = playing({seat("a", {c(Rank::Five)}), seat("b", {c(Rank::Nine)})}, {}, {}, 1);
+  EXPECT_FALSE(g.playFromHand(0, {0}).ok());
+  EXPECT_FALSE(g.pickUp(0).ok());
+  EXPECT_TRUE(g.playFromHand(1, {0}).ok());
+}
+
+TEST(Play, ASeatOutsideTheTableIsRejectedEverywhere) {
+  const GameState g = playing({seat("a", {c(Rank::Five)}), seat("b", {c(Rank::Nine)})});
+  for (int bad : {-1, 2, 5}) {
+    EXPECT_FALSE(g.playFromHand(bad, {0}).ok());
+    EXPECT_FALSE(g.playFaceUp(bad, {0}).ok());
+    EXPECT_FALSE(g.playFaceDown(bad, 0).ok());
+    EXPECT_FALSE(g.pickUp(bad).ok());
+    EXPECT_FALSE(g.ready(bad).ok());
+    EXPECT_FALSE(g.swapForSetup(bad, 0, 0).ok());
+    EXPECT_FALSE(g.removePlayer(bad).ok());
+    EXPECT_FALSE(g.hasLegalPlay(bad));
+  }
 }
 
 TEST(Play, ATwoResetsThePileAndATenBurnsIt) {

@@ -57,6 +57,22 @@ vector<Player> withoutSeat(const vector<Player>& roster, int seat) {
   return out;
 }
 
+// The seat holding the lowest ordinary card in hand; specials do not
+// count, and a table with none goes to seat 0.
+int openingSeat(const vector<Player>& roster) {
+  int seat = 0;
+  int lowest = rankValue(Rank::Ace) + 1;
+  for (size_t i = 0; i < roster.size(); i++) {
+    for (const Card& card : roster.at(i).getHand()) {
+      if (!isSpecial(card.getRank()) && rankValue(card.getRank()) < lowest) {
+        lowest = rankValue(card.getRank());
+        seat = static_cast<int>(i);
+      }
+    }
+  }
+  return seat;
+}
+
 int seatsHoldingCards(const vector<Player>& roster) {
   return static_cast<int>(
       std::count_if(roster.begin(), roster.end(), [](const Player& p) { return !p.isOut(); }));
@@ -97,7 +113,7 @@ StatusOr<GameState> dealCastleGame(const string& game_id, const vector<string>& 
 
 absl::Status GameState::ensureSeat(int player) const {
   if (player < 0 || player >= static_cast<int>(players.size())) {
-    return FailedPreconditionError("no such player");
+    return InvalidArgumentError("no such player");
   }
   return absl::OkStatus();
 }
@@ -150,29 +166,10 @@ StatusOr<GameState> GameState::ready(int player) const {
   vector<Player> newPlayers = replaceSeat(players, player, players.at(player).withReady());
   const bool everyoneReady = std::all_of(newPlayers.begin(), newPlayers.end(),
                                          [](const Player& p) { return p.isReady(); });
-  GameState next{drawPile, pile,     std::move(newPlayers), kNoTurn, Phase::Setup, finished,
-                 gameId,   versionId};
-  if (!everyoneReady) {
-    return next;
-  }
-  return GameState{next.drawPile,  next.pile,     next.players, next.openingSeat(),
-                   Phase::Playing, next.finished, next.gameId,  next.versionId};
-}
-
-// The seat holding the lowest ordinary card in hand; specials do not
-// count, and a table with none goes to seat 0.
-int GameState::openingSeat() const {
-  int seat = 0;
-  int lowest = rankValue(Rank::Ace) + 1;
-  for (size_t i = 0; i < players.size(); i++) {
-    for (const Card& card : players.at(i).getHand()) {
-      if (!isSpecial(card.getRank()) && rankValue(card.getRank()) < lowest) {
-        lowest = rankValue(card.getRank());
-        seat = static_cast<int>(i);
-      }
-    }
-  }
-  return seat;
+  const int turn = everyoneReady ? openingSeat(newPlayers) : kNoTurn;
+  const Phase newPhase = everyoneReady ? Phase::Playing : Phase::Setup;
+  return GameState{drawPile, pile,     std::move(newPlayers), turn, newPhase, finished,
+                   gameId,   versionId};
 }
 
 std::optional<Card> GameState::pileTop() const {
@@ -192,7 +189,7 @@ bool GameState::isPlayable(Rank rank) const {
 }
 
 bool GameState::hasLegalPlay(int player) const {
-  if (ensureSeat(player).ok() == false) {
+  if (!ensureSeat(player).ok()) {
     return false;
   }
   const Player& seat = players.at(player);
@@ -280,8 +277,8 @@ StatusOr<GameState> GameState::playFaceDown(int player, int index) const {
   vector<Card> taken = pile;
   taken.push_back(card);
   vector<Player> newPlayers = replaceSeat(players, player, remaining->withHandAdded(taken));
-  return GameState{drawPile, {},       newPlayers, nextSeat(player, newPlayers),
-                   phase,    finished, gameId,     versionId};
+  const int next = nextSeat(player, newPlayers);
+  return GameState{drawPile, {}, std::move(newPlayers), next, phase, finished, gameId, versionId};
 }
 
 StatusOr<GameState> GameState::pickUp(int player) const {
@@ -298,8 +295,8 @@ StatusOr<GameState> GameState::pickUp(int player) const {
     return FailedPreconditionError("a playable card must be played");
   }
   vector<Player> newPlayers = replaceSeat(players, player, players.at(player).withHandAdded(pile));
-  return GameState{drawPile, {},       newPlayers, nextSeat(player, newPlayers),
-                   phase,    finished, gameId,     versionId};
+  const int next = nextSeat(player, newPlayers);
+  return GameState{drawPile, {}, std::move(newPlayers), next, phase, finished, gameId, versionId};
 }
 
 GameState GameState::settle(int player, deque<Card> newDrawPile, vector<Card> newPile,
@@ -354,8 +351,8 @@ StatusOr<GameState> GameState::removePlayer(int player) const {
   }
   vector<Player> newPlayers = withoutSeat(players, player);
   if (newPlayers.size() < static_cast<size_t>(kMinPlayers)) {
-    return GameState{drawPile,         pile,     newPlayers, kNoTurn,
-                     Phase::Abandoned, finished, gameId,     versionId};
+    return GameState{drawPile, pile,     std::move(newPlayers), kNoTurn, Phase::Abandoned, finished,
+                     gameId,   versionId};
   }
   int newTurn = whoseTurn;
   if (phase == Phase::Playing) {
@@ -371,13 +368,12 @@ StatusOr<GameState> GameState::removePlayer(int player) const {
   Phase newPhase = phase;
   if (phase == Phase::Setup && std::all_of(newPlayers.begin(), newPlayers.end(),
                                            [](const Player& p) { return p.isReady(); })) {
-    GameState pending{drawPile,     pile,     newPlayers, kNoTurn,
-                      Phase::Setup, finished, gameId,     versionId};
-    newTurn = pending.openingSeat();
+    newTurn = openingSeat(newPlayers);
     newPhase = Phase::Playing;
   }
   if (phase == Phase::Playing && seatsHoldingCards(newPlayers) <= 1) {
-    return GameState{drawPile, pile, newPlayers, kNoTurn, Phase::Over, finished, gameId, versionId};
+    return GameState{drawPile, pile,     std::move(newPlayers), kNoTurn, Phase::Over, finished,
+                     gameId,   versionId};
   }
   return GameState{drawPile, pile,     std::move(newPlayers), newTurn, newPhase, finished,
                    gameId,   versionId};

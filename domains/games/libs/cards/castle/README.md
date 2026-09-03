@@ -2,7 +2,7 @@
 
 The rules engine for Castle (the shedding game also played as Palace):
 immutable `Player` and `GameState` value types in the style of
-[`../golf`](../golf), for the games hub to host as its second game.
+[`../golf`](../golf), for the games hub.
 
 The rules the engine plays are the contract, stated on `GameState` in
 `game_state.h` and pinned one by one in `game_state_test.cc`: three

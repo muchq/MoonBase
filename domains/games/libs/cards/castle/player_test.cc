@@ -18,16 +18,23 @@ Card c(Rank rank, Suit suit = Suit::Clubs) { return Card{suit, rank}; }
 TEST(Player, TheActiveRowIsHandThenFaceUpThenFaceDown) {
   const Player full{"a", {c(Rank::Three)}, {c(Rank::Four)}, {c(Rank::Five)}};
   EXPECT_EQ(full.source(), Source::Hand);
-  EXPECT_EQ(full.cardsLeft(), 3);
-  EXPECT_FALSE(full.isOut());
-
   const Player noHand{"a", {}, {c(Rank::Four)}, {c(Rank::Five)}};
   EXPECT_EQ(noHand.source(), Source::FaceUp);
-  EXPECT_EQ(&noHand.row(Source::FaceUp), &noHand.getFaceUp());
-
   const Player castleOnly{"a", {}, {}, {c(Rank::Five)}};
   EXPECT_EQ(castleOnly.source(), Source::FaceDown);
+}
 
+TEST(Player, RowNamesEachOfTheThreeRows) {
+  const Player p{"a", {c(Rank::Three)}, {c(Rank::Four)}, {c(Rank::Five)}};
+  EXPECT_EQ(p.row(Source::Hand), (std::vector<Card>{c(Rank::Three)}));
+  EXPECT_EQ(p.row(Source::FaceUp), (std::vector<Card>{c(Rank::Four)}));
+  EXPECT_EQ(p.row(Source::FaceDown), (std::vector<Card>{c(Rank::Five)}));
+}
+
+TEST(Player, ASeatIsOutWhenEveryRowIsEmpty) {
+  const Player full{"a", {c(Rank::Three)}, {c(Rank::Four)}, {c(Rank::Five)}};
+  EXPECT_EQ(full.cardsLeft(), 3);
+  EXPECT_FALSE(full.isOut());
   const Player out{"a", {}, {}, {}};
   EXPECT_TRUE(out.isOut());
   EXPECT_EQ(out.cardsLeft(), 0);

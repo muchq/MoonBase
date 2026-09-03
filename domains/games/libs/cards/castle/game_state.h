@@ -23,8 +23,8 @@ using std::string;
 ///     cards, three face-up cards on top of them, and three in hand.
 ///   - Setup: each player may swap hand cards with their own face-up
 ///     cards, then declares ready. Play opens when every seat is ready;
-///     the seat holding the lowest ordinary card (three low, ace high;
-///     twos and tens are specials and do not count) goes first, the
+///     the seat holding the lowest ordinary card in hand (three low, ace
+///     high; twos and tens are specials and do not count) goes first, the
 ///     earliest seat on a tie.
 ///   - A turn plays one or more cards of a single rank from the seat's
 ///     active row (hand while it has cards, then the face-up row, then
@@ -44,8 +44,8 @@ class GameState;
 enum class Phase { Setup, Playing, Over, Abandoned };
 
 /// Deals a fresh game from an already-shuffled deck (drawn from the
-/// back), in the setup phase. Nine cards a seat; the rest is the draw
-/// pile.
+/// back), in the setup phase. Nine cards a seat — face-down row, then
+/// face-up row, then hand; the rest is the draw pile.
 [[nodiscard]] absl::StatusOr<GameState> dealCastleGame(const string& game_id,
                                                        const std::vector<string>& player_ids,
                                                        std::deque<Card> shuffled_deck);
@@ -123,7 +123,6 @@ class GameState {
                                  std::vector<Card> newPile, std::vector<Player> newPlayers,
                                  bool burned) const;
   [[nodiscard]] int nextSeat(int from, const std::vector<Player>& roster) const;
-  [[nodiscard]] int openingSeat() const;
 
   const std::deque<Card> drawPile;
   const std::vector<Card> pile;  // back is the top

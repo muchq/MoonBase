@@ -1,7 +1,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 
-# The castle rules engine: immutable GameState/Player value types, the
-# next tenant of the games hub after golf.
+# The castle rules engine: immutable GameState/Player value types for
+# the games hub.
 
 cc_library(
     name = "player",
@@ -34,6 +34,7 @@ cc_test(
     srcs = ["player_test.cc"],
     deps = [
         ":player",
+        "//domains/games/libs/cards",
         "@googletest//:gtest_main",
     ],
 )
