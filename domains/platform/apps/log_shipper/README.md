@@ -22,7 +22,10 @@ s3://$S3_BUCKET/logs/source=<label>/dt=YYYY-MM-DD/<filename>.gz
 ```
 
 partitioned so DuckDB / Athena / Spark read it directly. The date is the
-roll timestamp in the filename. A file is deleted only after its upload
+roll timestamp in the filename; a roll spans whatever period it took to
+fill, and the stats aggregator dates each line by the line's own
+timestamp, so the partition is a listing key, not the line's day. A file
+is deleted only after its upload
 returned 200; a failed file stays for the next pass. The live `access.log`
 and anything that is not a rolled log are never touched.
 

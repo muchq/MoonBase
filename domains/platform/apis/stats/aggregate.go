@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
+	"time"
 )
 
 // RequestKey is one row of the per-day request rollup. Host is one of
@@ -104,7 +106,8 @@ func (r *Rollup) boundedAgent(class, agent string) string {
 // caddyLine is the slice of Caddy's JSON access log this pipeline reads.
 // Everything else in the line is ignored on decode.
 type caddyLine struct {
-	Status  int `json:"status"`
+	Ts      float64 `json:"ts"` // epoch seconds, Caddy's default log timestamp
+	Status  int     `json:"status"`
 	Request struct {
 		Host     string              `json:"host"`
 		Method   string              `json:"method"`
@@ -113,6 +116,16 @@ type caddyLine struct {
 		RemoteIP string              `json:"remote_ip"`
 		Headers  map[string][]string `json:"headers"`
 	} `json:"request"`
+}
+
+// The day a line belongs to: its own timestamp, in UTC. A line without
+// one takes the object's date, since a roll carries nothing else.
+func (l *caddyLine) date(objectDate string) string {
+	if l.Ts <= 0 {
+		return objectDate
+	}
+	seconds, fraction := math.Modf(l.Ts)
+	return time.Unix(int64(seconds), int64(fraction*1e9)).UTC().Format("2006-01-02")
 }
 
 // Caddy is the edge, so client_ip and remote_ip agree; older lines carry
@@ -148,11 +161,13 @@ func boundedMethod(method string) string {
 }
 
 // Consume aggregates one object's worth of Caddy JSON lines into the
-// rollup. date is the object's dt= partition — the roll date — not
-// anything parsed out of the lines. Unparseable lines are counted and
-// skipped: one corrupt line must not discard the other hundred thousand,
-// but a wholly corrupt object should be loud, so the count comes back.
-func (r *Rollup) Consume(reader io.Reader, date string) (skipped int, err error) {
+// rollup. Each line is dated by its own timestamp: Caddy rolls by size,
+// so one object spans whatever days it took to fill. objectDate — the
+// dt= partition, the roll date — is the fallback for a line without one.
+// Unparseable lines are counted and skipped: one corrupt line must not
+// discard the other hundred thousand, but a wholly corrupt object should
+// be loud, so the count comes back.
+func (r *Rollup) Consume(reader io.Reader, objectDate string) (skipped int, err error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -165,6 +180,7 @@ func (r *Rollup) Consume(reader io.Reader, date string) (skipped int, err error)
 			skipped++
 			continue
 		}
+		date := parsed.date(objectDate)
 		method := boundedMethod(parsed.Request.Method)
 		agentClass, agent := AgentOf(parsed.userAgent())
 		r.Requests[RequestKey{
