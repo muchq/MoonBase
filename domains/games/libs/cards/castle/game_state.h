@@ -19,13 +19,14 @@ using std::string;
 /// get rid of every card; whoever is left holding cards loses.
 ///
 /// The rules this engine plays:
-///   - 2-4 players, one 52-card deck. Each seat is dealt three face-down
-///     cards, three face-up cards on top of them, and three in hand.
+///   - 2-4 players, one deck. Each seat is dealt three face-down cards,
+///     three face-up cards on top of them, and three in hand.
 ///   - Setup: each player may swap hand cards with their own face-up
 ///     cards, then declares ready. Play opens when every seat is ready;
 ///     the seat holding the lowest ordinary card in hand (three low, ace
-///     high; twos and tens are specials and do not count) goes first, the
-///     earliest seat on a tie.
+///     high; twos and tens are specials and do not count; face-up rows
+///     do not count) goes first, the earliest seat on a tie, seat 0 when
+///     no hand holds an ordinary card.
 ///   - A turn plays one or more cards of a single rank from the seat's
 ///     active row (hand while it has cards, then the face-up row, then
 ///     the face-down row one card at a time, blind) onto the pile. A card
@@ -33,12 +34,16 @@ using std::string;
 ///     when its rank is at least the top's (a two on top takes anything).
 ///     A hand play draws back up to three while the draw pile lasts.
 ///   - A ten, or four of a kind on top of the pile, burns the pile: it
-///     leaves the game and the same seat plays again.
+///     leaves the game and the same seat plays again — unless the burn
+///     shed the seat's last card, when the turn passes. A burn is a play
+///     like any other: the cards must be playable on the pile as it
+///     stands, and a run of four is broken by a card of another rank.
 ///   - A seat with no playable card in hand or in the face-up row must
 ///     pick up the pile. A face-down card that turns out unplayable goes
 ///     into the hand with the pile.
-///   - A seat that sheds its last card is out; its finish order is kept.
-///     The game is over when one seat still holds cards — the loser.
+///   - A seat that sheds its last card is out; its finish order is kept,
+///     and stays kept if the seat later leaves the table. The game is
+///     over when one seat still holds cards — the loser.
 class GameState;
 
 enum class Phase { Setup, Playing, Over, Abandoned };
@@ -84,8 +89,9 @@ class GameState {
   [[nodiscard]] absl::StatusOr<GameState> pickUp(int player) const;
 
   /// A seat abandoned mid-game: it disappears with its cards, indices
-  /// compact, and a turn it held passes on. Below two seats the game is
-  /// over by abandonment, with no loser.
+  /// compact, and a turn it held passes on. Below two seats, or below two
+  /// seats holding cards, the game is over by abandonment: the finish
+  /// order stands and nobody loses, since no play ended it.
   [[nodiscard]] absl::StatusOr<GameState> removePlayer(int player) const;
 
   // Queries.

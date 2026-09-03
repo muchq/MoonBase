@@ -372,7 +372,7 @@ StatusOr<GameState> GameState::removePlayer(int player) const {
     newPhase = Phase::Playing;
   }
   if (phase == Phase::Playing && seatsHoldingCards(newPlayers) <= 1) {
-    return GameState{drawPile, pile,     std::move(newPlayers), kNoTurn, Phase::Over, finished,
+    return GameState{drawPile, pile,     std::move(newPlayers), kNoTurn, Phase::Abandoned, finished,
                      gameId,   versionId};
   }
   return GameState{drawPile, pile,     std::move(newPlayers), newTurn, newPhase, finished,
