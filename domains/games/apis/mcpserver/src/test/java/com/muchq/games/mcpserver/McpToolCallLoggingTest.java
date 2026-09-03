@@ -22,6 +22,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.KeyValuePair;
 
 /**
  * A tool call leaves a server-side line: name, duration, outcome. Asserted through the real server
@@ -119,10 +120,19 @@ public class McpToolCallLoggingTest {
     assertThat(appender.list).hasSize(1);
     ILoggingEvent event = appender.list.get(0);
     assertThat(event.getLevel()).isEqualTo(Level.INFO);
-    assertThat(event.getFormattedMessage())
-        .contains("tool=server_time")
-        .contains("ms=")
-        .contains("outcome=ok");
+    assertThat(event.getMessage()).isEqualTo("tool_call");
+    assertThat(kv(event, "tool")).isEqualTo("server_time");
+    assertThat(kv(event, "outcome")).isEqualTo("ok");
+    assertThat(kv(event, "ms")).isInstanceOf(Long.class);
+  }
+
+  private static Object kv(ILoggingEvent event, String key) {
+    for (KeyValuePair pair : java.util.Objects.requireNonNull(event.getKeyValuePairs())) {
+      if (pair.key.equals(key)) {
+        return pair.value;
+      }
+    }
+    throw new AssertionError("no key-value pair " + key + " on " + event);
   }
 
   @Test
@@ -137,10 +147,9 @@ public class McpToolCallLoggingTest {
     assertThat(appender.list).hasSize(1);
     ILoggingEvent event = appender.list.get(0);
     assertThat(event.getLevel()).isEqualTo(Level.WARN);
-    assertThat(event.getFormattedMessage())
-        .contains("tool=chess_com_games")
-        .contains("outcome=error");
-    assertThat(event.getFormattedMessage())
+    assertThat(kv(event, "tool")).isEqualTo("chess_com_games");
+    assertThat(kv(event, "outcome")).isEqualTo("error");
+    assertThat(event.getFormattedMessage() + event.getKeyValuePairs())
         .as("arguments are caller data and stay out of the log — README's stated contract")
         .doesNotContain("sentinel-username-x9");
   }
@@ -175,7 +184,8 @@ public class McpToolCallLoggingTest {
 
       assertThat(appender.list).as("%s must log exactly one line per call", name).hasSize(1);
       ILoggingEvent event = appender.list.get(0);
-      assertThat(event.getFormattedMessage()).contains("tool=" + name).contains("ms=");
+      assertThat(kv(event, "tool")).isEqualTo(name);
+      assertThat(kv(event, "ms")).isInstanceOf(Long.class);
       // server_time is the one tool that succeeds without the network; everything else is a
       // rejection or an unreachable-one_d4 report, both on the isError channel.
       Level expected = "server_time".equals(name) ? Level.INFO : Level.WARN;

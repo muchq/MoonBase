@@ -8,10 +8,12 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
+import java.util.Objects;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import org.slf4j.event.KeyValuePair;
 
 public class ToolCallLogTest {
 
@@ -31,6 +33,15 @@ public class ToolCallLogTest {
     logger.detachAppender(appender);
   }
 
+  static Object kv(ILoggingEvent event, String key) {
+    for (KeyValuePair pair : Objects.requireNonNull(event.getKeyValuePairs())) {
+      if (pair.key.equals(key)) {
+        return pair.value;
+      }
+    }
+    throw new AssertionError("no key-value pair " + key + " on " + event);
+  }
+
   @Test
   public void aSuccessfulCallIsLoggedAtInfoAndItsResultReturnedUntouched() {
     CallToolResult result = ToolResults.text("payload");
@@ -41,7 +52,10 @@ public class ToolCallLogTest {
     assertThat(appender.list).hasSize(1);
     ILoggingEvent event = appender.list.get(0);
     assertThat(event.getLevel()).isEqualTo(Level.INFO);
-    assertThat(event.getFormattedMessage()).contains("tool=server_time").contains("ms=");
+    assertThat(event.getMessage()).isEqualTo("tool_call");
+    assertThat(kv(event, "tool")).isEqualTo("server_time");
+    assertThat(kv(event, "outcome")).isEqualTo("ok");
+    assertThat(kv(event, "ms")).isInstanceOf(Long.class);
   }
 
   @Test
@@ -51,7 +65,8 @@ public class ToolCallLogTest {
     assertThat(appender.list).hasSize(1);
     ILoggingEvent event = appender.list.get(0);
     assertThat(event.getLevel()).isEqualTo(Level.WARN);
-    assertThat(event.getFormattedMessage()).contains("tool=chess_com_games");
+    assertThat(kv(event, "tool")).isEqualTo("chess_com_games");
+    assertThat(kv(event, "outcome")).isEqualTo("error");
   }
 
   @Test
@@ -70,7 +85,8 @@ public class ToolCallLogTest {
     assertThat(appender.list).hasSize(1);
     ILoggingEvent event = appender.list.get(0);
     assertThat(event.getLevel()).isEqualTo(Level.ERROR);
-    assertThat(event.getFormattedMessage()).contains("tool=index_chess_games");
+    assertThat(kv(event, "tool")).isEqualTo("index_chess_games");
+    assertThat(kv(event, "outcome")).isEqualTo("threw");
     assertThat(event.getThrowableProxy().getMessage()).isEqualTo("connection refused");
   }
 
@@ -91,8 +107,6 @@ public class ToolCallLogTest {
           return ToolResults.text("x");
         });
 
-    String message = appender.list.get(0).getFormattedMessage();
-    long ms = Long.parseLong(message.replaceAll(".*ms=(\\d+).*", "$1"));
-    assertThat(ms).isGreaterThanOrEqualTo(30);
+    assertThat((Long) kv(appender.list.get(0), "ms")).isGreaterThanOrEqualTo(30);
   }
 }

@@ -3,8 +3,13 @@
     <!-- One JSON object per line, logback's own encoder — no new
          dependency. The stats pipeline parses these offline (#1459), and
          the epoch-millis timestamp is absolute, which the old date-less
-         pattern was not (#1456). LogbackConfigTest pins the shape. -->
-    <encoder class="ch.qos.logback.classic.encoder.JsonEncoder"/>
+         pattern was not (#1456). "message" is the raw template and
+         "arguments" the values, for machine readers; "formattedMessage"
+         is the rendered line, for eyes on docker logs. LogbackConfigTest
+         pins the shape. -->
+    <encoder class="ch.qos.logback.classic.encoder.JsonEncoder">
+      <withFormattedMessage>true</withFormattedMessage>
+    </encoder>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
       <level>INFO</level>
     </filter>
