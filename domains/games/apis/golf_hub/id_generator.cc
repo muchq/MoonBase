@@ -11,7 +11,7 @@ namespace golf_hub {
 
 namespace {
 
-// The Go hub's word lists (players.WhimsicalIDGenerator), verbatim.
+// The same word lists as games_ws_backend's players.WhimsicalIDGenerator.
 constexpr std::string_view kAdjectives[] = {"bouncy",  "giggly", "sparkly", "fuzzy",   "wiggly",
                                             "snuggly", "dreamy", "bubbly",  "twinkly", "jolly",
                                             "quirky",  "peppy",  "zesty",   "frisky",  "silly",

@@ -179,8 +179,8 @@ int main() {
                             server.Handler());
 
   // Gate chain: origin allowlist (browser CSWSH defense; unset
-  // ALLOWED_ORIGINS admits all origins — dev parity with the Go hub's
-  // DEV_MODE) -> ticket freshness -> the stream router's own refusals.
+  // ALLOWED_ORIGINS admits all origins, for local dev) -> ticket
+  // freshness -> the stream router's own refusals.
   const std::vector<std::string> allowed_origins = futility::env::ReadList("ALLOWED_ORIGINS");
   auto origin_gate = allowed_origins.empty()
                          ? std::function<std::optional<smithy::http::HttpResponse>(

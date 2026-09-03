@@ -46,9 +46,9 @@ lobby-safe summaries only.
   token into their seat. Memory stays authoritative single-instance;
   fan-out is still process-local (step 3). Unset falls back to
   all-in-memory — dev mode and the test harness.
-- Player ids are whimsical (`bouncy-coral-quokka-x9k2`, the Go
-  generator's word lists) and double as display names. Room and game ids
-  are 6-char uppercase codes for permalink compatibility.
+- Player ids are whimsical (`bouncy-coral-quokka-x9k2`) and double as
+  display names. Room and game ids
+  are 6-char uppercase codes that ride in permalinks.
 - Observability: unary requests ride the shared aura chain (#1185); the
   stream side counts admissions, live sessions, disconnects, grace
   expiries, and the command/event flow (`stream_*`).

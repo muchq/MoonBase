@@ -47,7 +47,7 @@ services:
   games_ws_backend:
     image: ghcr.io/muchq/games_ws_backend:${GAMES_WS_BACKEND_SHA:-${DEPLOY_SHA:-latest}}
     labels:
-      com.muchq.description: "Websocket backend for v1 games"
+      com.muchq.description: "Websocket backend for thoughts"
     restart: always
     logging: *default-logging
     ports:
@@ -62,12 +62,11 @@ services:
           cpus: '0.25'
           memory: 256M
 
-  # The smithy event-stream golf service (/games/v2/*, MoonBase#1187);
-  # serves the v2 beta while games_ws_backend keeps serving v1.
+  # The smithy event-stream golf service (/games/v2/*).
   golf_hub:
     image: ghcr.io/muchq/golf_hub:${GOLF_HUB_SHA:-${DEPLOY_SHA:-latest}}
     labels:
-      com.muchq.description: "Golf v2 hub on smithy event streams (/games/v2/*)"
+      com.muchq.description: "Golf hub on smithy event streams (/games/v2/*)"
     restart: always
     logging: *default-logging
     ports:
@@ -75,7 +74,7 @@ services:
     environment:
       PORT: "8089"
       # CSWSH defense: the play socket admits only the deployed UI's
-      # origins (parity with the Go hub's allowlist).
+      # origins.
       ALLOWED_ORIGINS: https://muchq.com,https://www.muchq.com
       TRUSTED_PROXY_CIDRS: *caddy_ip
       # Credentials live in the hub's own database on the shared postgres

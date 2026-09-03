@@ -1,10 +1,10 @@
 # Game Server
 
-A real-time multiplayer, multitenant WebSocket game server.
+A real-time multiplayer WebSocket game server.
 
 ## Overview
 
-This server hosts game backends on a single process, each on its own WebSocket endpoint:
+Each game backend is registered on its own WebSocket endpoint:
 
 - **[Thoughts](thoughts/)** (`/games/v1/thoughts-ws`) — a chill 3D multiplayer vibe, playable at [muchq.com/thoughts](https://muchq.com/thoughts)
 

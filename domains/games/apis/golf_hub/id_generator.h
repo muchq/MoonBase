@@ -5,10 +5,9 @@
 
 namespace golf_hub {
 
-/// The hub's identifier seam, mirroring the Go hub's PlayerIDGenerator
-/// and the cards library's Dealer: production randomness behind a small
-/// interface so tests can script every id (including forcing the
-/// game-code collision path).
+/// The hub's identifier seam, in the shape of the cards library's Dealer: production randomness
+/// behind a small interface so tests can script every id (including forcing the game-code collision
+/// path).
 class IdGenerator {
  public:
   virtual ~IdGenerator() = default;
@@ -21,14 +20,13 @@ class IdGenerator {
   /// the id must survive a permalink and a "type this code" exchange.
   virtual std::string RoomId() = 0;
 
-  /// A 6-char uppercase alphanumeric game code — the Go hub's format,
-  /// kept for permalink compatibility.
+  /// A 6-char uppercase alphanumeric game code, on the same terms as the
+  /// room code: it rides in permalinks.
   virtual std::string GameCode() = 0;
 };
 
 /// Production ids: whimsical player names ("bouncy-coral-quokka-x9k2",
-/// the Go hub's word lists, so beta players never see opaque ids),
-/// short codes for rooms and games.
+/// so players never see opaque ids), short codes for rooms and games.
 class WhimsicalIdGenerator final : public IdGenerator {
  public:
   std::string PlayerId() override;
