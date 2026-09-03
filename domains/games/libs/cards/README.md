@@ -9,6 +9,7 @@ This module provides a set of classes and utilities for building card games.
 
 - Top level module contains core components for building card games.
 - [golf](./golf) is a mostly complete implementation of the game Golf.
+- [castle](./castle) is the rules engine for Castle (Palace).
 
 ## Building
 
