@@ -99,7 +99,7 @@ func TestPortraitHasNoHealthcheckOnTheTraceRoute(t *testing.T) {
 // probe is what keeps the series alive from boot. A healthcheck quietly
 // deleted here would regress that without failing anything else.
 var servicesWithSteadyProbes = []string{
-	"golf_hub",
+	"games_hub",
 	"mcpserver",
 	"microgpt-serve",
 	"mithril",
@@ -1185,13 +1185,13 @@ func namesARoutePath(line string, directives []string) bool {
 
 // Every database host this file hands a service, as service -> hosts.
 //
-// Two spellings of environment (one_d4's `- KEY=value` list, golf_hub's
+// Two spellings of environment (one_d4's `- KEY=value` list, games_hub's
 // `KEY: value` mapping), two URL shapes (JDBC, which pgjdbc parses itself, and
-// libpq, which golf_hub's C++ uses) and the bare `PGHOST:` form
+// libpq, which games_hub's C++ uses) and the bare `PGHOST:` form
 // golf_hub_db_init uses instead of a URL. That last one is not decoration: it is
-// the only database host here that is not part of a URL, and golf_hub gates on
+// the only database host here that is not part of a URL, and games_hub gates on
 // golf_hub_db_init with service_completed_successfully, so a host it cannot
-// resolve stops golf_hub from starting at all.
+// resolve stops games_hub from starting at all.
 //
 // A slice per service, not one host: last-match-wins would make a second URL in
 // the same service an order-dependent silent skip.
@@ -1265,7 +1265,7 @@ func TestEveryDatabaseUrlNamesAHostThisComposeFilePublishes(t *testing.T) {
 	// scan stopped seeing something and the rest of this proves little.
 	if len(hosts) < 4 {
 		t.Fatalf("found database hosts for only %d services (%v); expected at least one_d4, "+
-			"golf_hub and golf_hub_db_init. This test is reading less than it claims.",
+			"games_hub and golf_hub_db_init. This test is reading less than it claims.",
 			len(hosts), hosts)
 	}
 
@@ -1371,7 +1371,7 @@ func oneD4Env(t *testing.T, key string) string {
 	return ""
 }
 
-// one_d4 is the only Java consumer of the shared instance — golf_hub reaches it
+// one_d4 is the only Java consumer of the shared instance — games_hub reaches it
 // from C++ through libpq — so it is the only one whose URL has to be a JDBC URL
 // rather than a libpq one. The two are not interchangeable: pgjdbc rejects a URL
 // without the jdbc: prefix outright, and DataSourceFactory hands whatever it is
@@ -1384,7 +1384,7 @@ func TestOneD4sDatabaseUrlIsAJdbcUrl(t *testing.T) {
 			"so the container would fail to start.")
 	}
 	if !strings.HasPrefix(url, "jdbc:postgresql://") {
-		t.Errorf("INDEXER_DB_URL=%q is not a JDBC URL. golf_hub's libpq form (postgresql://...) "+
+		t.Errorf("INDEXER_DB_URL=%q is not a JDBC URL. games_hub's libpq form (postgresql://...) "+
 			"is what this would most likely be copied from, and pgjdbc rejects it.", url)
 	}
 }
@@ -2153,6 +2153,7 @@ var localRoutes = map[string]string{
 	"@ws_thoughts":          "localhost:8080",
 	"@post_golf_v2_session": "localhost:8089",
 	"@ws_golf_v2":           "localhost:8089",
+	"@ws_thoughts_v2":       "localhost:8089",
 	"@post_portrait":        "localhost:8081",
 	"@get_metrics":          "localhost:8082",
 	"@post_mithril":         "localhost:8083",

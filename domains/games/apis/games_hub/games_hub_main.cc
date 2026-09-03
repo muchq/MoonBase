@@ -1,0 +1,248 @@
+// The games hub server (#79): sessions, rooms, chat, and the golf game
+// layer on smithy-cpp's streaming stack — generated async
+// handlers (ADR-0021), SessionRegistry fan-out with reconnect grace
+// (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018).
+//
+//   bazel run //domains/games/apis/games_hub
+//   curl -X POST localhost:8080/games/v2/session -H 'content-type: application/json' -d '{}'
+//   # browser: new WebSocket("ws://localhost:8080/games/v2/golf/play?ticket=<t>",
+//   #                        "smithy.eventstream.v1+json")
+//   #          ...or /games/v2/thoughts/play?ticket=<t> on the same ticket shape
+//   kill -TERM <pid>   # drains sessions, then exits 0
+
+#include <chrono>
+#include <csignal>
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "absl/log/globals.h"
+#include "absl/log/initialize.h"
+#include "absl/log/log.h"
+#include "domains/games/apis/games_hub/hub_handler.h"
+#include "domains/games/apis/games_hub/hub_store.h"
+#include "domains/games/apis/games_hub/id_generator.h"
+#include "domains/games/apis/games_hub/migrations.h"
+#include "domains/games/apis/games_hub/pg_chat_store.h"
+#include "domains/games/apis/games_hub/pg_hub_store.h"
+#include "domains/games/apis/games_hub/pg_ticket_vault.h"
+#include "domains/games/apis/games_hub/protocol_input.h"
+#include "domains/games/apis/games_hub/ticket_vault.h"
+#include "domains/games/libs/cards/dealer.h"
+#include "domains/platform/libs/aura/middleware.h"
+#include "domains/platform/libs/futility/env/env.h"
+#include "domains/platform/libs/futility/otel/http_metrics.h"
+#include "domains/platform/libs/futility/otel/metrics.h"
+#include "domains/platform/libs/futility/otel/otel_provider.h"
+#include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
+#include "domains/platform/libs/pg/listener.h"
+#include "domains/platform/libs/pg/pg.h"
+#include "moonbase/games/server.h"
+#include "smithy/http/beast_transport.h"
+#include "smithy/http/message.h"
+#include "smithy/server/origin_gate.h"
+
+namespace {
+
+// The ticket query member, pre-101 (ADR-0018's blessed pattern): presence
+// and vault freshness checked at the gate; the handler's SpendTicket stays
+// the single-use authority.
+std::optional<std::string> ExtractQueryParam(std::string_view target, std::string_view name) {
+  const auto question = target.find('?');
+  if (question == std::string_view::npos) return std::nullopt;
+  std::string_view query = target.substr(question + 1);
+  while (!query.empty()) {
+    const auto amp = query.find('&');
+    const std::string_view pair = query.substr(0, amp);
+    query = amp == std::string_view::npos ? std::string_view{} : query.substr(amp + 1);
+    const auto eq = pair.find('=');
+    if (eq != std::string_view::npos && pair.substr(0, eq) == name) {
+      return std::string(pair.substr(eq + 1));
+    }
+  }
+  return std::nullopt;
+}
+
+}  // namespace
+
+int main() {
+  absl::InitializeLog();
+  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfo);
+
+  // OTel setup: OTLP push, service "games_hub".
+  futility::otel::OtelConfig otel_config{.service_name = "games_hub", .service_version = "1.0.0"};
+  futility::otel::OtelProvider otel_provider(otel_config);
+
+  // Persistence when GAMES_HUB_DB_URL is set (#1194): credentials (step 1)
+  // and the rooms/games write-through + boot restore (step 2) — tickets,
+  // resume tokens, rooms, and live games survive deploys. Unset falls
+  // back to all-in-memory — dev parity, same pattern as ALLOWED_ORIGINS
+  // below. The vault and the store get their own connections so a slow
+  // write-through never queues behind a credential check.
+  constexpr auto kTicketTtl = std::chrono::seconds(30);
+  constexpr auto kResumeTtl = std::chrono::hours(24);
+  std::shared_ptr<games_hub::TicketVault> vault;
+  std::shared_ptr<games_hub::HubStore> store;
+  std::shared_ptr<games_hub::ChatStore> chat_store;
+  const char* db_url = std::getenv("GAMES_HUB_DB_URL");
+  if (db_url != nullptr && *db_url != '\0') {
+    auto db = std::make_shared<pg::Client>(db_url);
+    if (absl::Status migrated = games_hub::RunMigrations(*db); !migrated.ok()) {
+      LOG(ERROR) << "Failed to migrate the hub database: " << migrated;
+      return 1;
+    }
+    vault = std::make_shared<games_hub::PgTicketVault>(std::move(db), kTicketTtl, kResumeTtl);
+    store = std::make_shared<games_hub::PgHubStore>(std::make_shared<pg::Client>(db_url));
+    // Chat gets its own connection too (#1226): appends are synchronous
+    // in the command path and must not queue behind the write-through.
+    chat_store = std::make_shared<games_hub::PgChatStore>(std::make_shared<pg::Client>(db_url));
+    LOG(INFO) << "Persistence: postgres (credentials + rooms/games write-through + chat)";
+  } else {
+    vault = std::make_shared<games_hub::InMemoryTicketVault>(kTicketTtl, kResumeTtl);
+    store = std::make_shared<games_hub::MemoryHubStore>();
+    // chat_store stays null: the handler builds its own MemoryChatStore
+    // wired to its membership guard.
+    LOG(INFO) << "Persistence: in-memory (GAMES_HUB_DB_URL unset; restarts forget everything)";
+  }
+  // Stream-side instruments (sessions, commands, events) ride the same
+  // meter the aura chain's unary instruments use.
+  auto handler = std::make_shared<games_hub::HubHandler>(
+      vault, std::make_shared<cards::Dealer>(), std::make_shared<games_hub::WhimsicalIdGenerator>(),
+      /*grace_period=*/std::chrono::minutes(5),
+      std::make_shared<futility::otel::MetricsRecorder>("games_hub"), store, chat_store);
+  // Same policy as the migration above: a database we can't read at boot
+  // is a reason to let the supervisor retry, not to serve amnesiac.
+  if (absl::Status restored = handler->RestoreFromStore(); !restored.ok()) {
+    LOG(ERROR) << "Failed to restore hub state: " << restored;
+    return 1;
+  }
+  // The fan-out's LISTEN side (#1194 step 3): commits on other instances
+  // wake this one to re-read and re-broadcast. Declared after handler so
+  // it is destroyed (thread joined) first; the detach at shutdown keeps
+  // the handler's teardown from touching it.
+  std::unique_ptr<pg::Listener> listener;
+  if (db_url != nullptr && *db_url != '\0') {
+    listener = std::make_unique<pg::Listener>(
+        db_url,
+        [&handler](const std::string& channel, const std::string& payload) {
+          handler->OnNotify(channel, payload);
+        },
+        [&handler](const std::string& channel) { handler->OnChannelActive(channel); });
+    handler->AttachListener(listener.get());
+  }
+
+  // Block shutdown signals before the transport spawns its thread pool.
+  sigset_t shutdown_signals;
+  sigemptyset(&shutdown_signals);
+  sigaddset(&shutdown_signals, SIGINT);
+  sigaddset(&shutdown_signals, SIGTERM);
+  pthread_sigmask(SIG_BLOCK, &shutdown_signals, nullptr);
+
+  moonbase::games::GamesHubServer server(handler);
+
+  // Unary neighbors (GetSession, health) on the shared aura chain:
+  // http_server_* instruments + access log outermost, then health, then
+  // the per-client guard.
+  auto metrics =
+      aura::MakeHttpMetricsSink(std::make_shared<futility::otel::HttpMetricsManager>("games_hub"));
+
+  // The unary half of #1240: the stream budgets cannot see GetSession,
+  // and every mint writes a ticket row — the flood a reconnect loop or
+  // a scripted client would otherwise run for free. Keyed by the
+  // ADR-0012 client address; 20/min absorbs a full reconnect cycle
+  // (10 attempts, 2s apart) with headroom, same shape as portrait's.
+  futility::rate_limiter::SlidingWindowRateLimiterConfig session_limiter_config{
+      .max_requests_per_key = 20,
+      .window_size = std::chrono::seconds(60),
+      .ttl = std::chrono::minutes(5),
+      .cleanup_interval = std::chrono::seconds(30),
+      .max_keys = 1000};
+  auto session_limiter =
+      std::make_shared<futility::rate_limiter::SlidingWindowRateLimiter<std::string>>(
+          session_limiter_config);
+
+  // The reverse-proxy trust boundary (smithy-cpp ADR-0012):
+  // deploy/consolidated/compose.yaml pins Caddy's address into
+  // TRUSTED_PROXY_CIDRS. A refused value already logged why.
+  auto trusted_proxies = aura::TrustedProxiesFromEnv();
+  if (!trusted_proxies.has_value()) return 1;
+
+  auto unary =
+      aura::ProductionChain(aura::ChainOptions{.metrics = metrics,
+                                               .allow_request =
+                                                   [session_limiter](const std::string& client) {
+                                                     return session_limiter->allow(client);
+                                                   },
+                                               .trusted_proxies = std::move(*trusted_proxies)},
+                            server.Handler());
+
+  // Gate chain: origin allowlist (browser CSWSH defense; unset
+  // ALLOWED_ORIGINS admits all origins, for local dev) -> ticket
+  // freshness -> the stream router's own refusals.
+  const std::vector<std::string> allowed_origins = futility::env::ReadList("ALLOWED_ORIGINS");
+  auto origin_gate = allowed_origins.empty()
+                         ? std::function<std::optional<smithy::http::HttpResponse>(
+                               const smithy::http::HttpRequest&)>()
+                         : smithy::server::RequireOrigin(allowed_origins);
+  auto router_gate = server.StreamRouter()->Gate();
+  smithy::http::BeastServerTransport::Options options;
+  options.websocket_gate =
+      [origin_gate = std::move(origin_gate), router_gate = std::move(router_gate), vault](
+          const smithy::http::HttpRequest& request) -> std::optional<smithy::http::HttpResponse> {
+    if (origin_gate) {
+      if (auto refusal = origin_gate(request)) return refusal;
+    }
+    const auto ticket = ExtractQueryParam(request.target, "ticket");
+    if (!ticket.has_value() || games_hub::HasEmbeddedNul(*ticket) || !vault->PeekTicket(*ticket)) {
+      smithy::http::HttpResponse refusal;
+      refusal.status = 401;
+      refusal.headers.Set("content-type", "application/json");
+      refusal.body = R"({"message":"mint a ticket via POST /games/v2/session"})";
+      return refusal;
+    }
+    return router_gate(request);
+  };
+  options.on_websocket_session = server.StreamRouter()->ServeSession();
+  options.websocket_accept_json_frames = true;  // the browser wire (ADR-0018)
+
+  options.address = "0.0.0.0";
+  options.port = futility::env::ReadPort(8080);
+  // Sessions hold no threads (ADR-0021); this pool serves launch points
+  // and unary requests only.
+  options.handler_threads = 4;
+  // GetSession bodies are tiny; nothing here needs big payloads.
+  options.max_body_bytes = std::size_t{64} * 1024;
+  // 413/431s the transport writes itself land in the same instruments;
+  // connections it terminates without a response get a WARNING line
+  // (ADR-0013).
+  options.on_rejected = aura::RejectionMetrics(metrics);
+  options.on_connection_event = aura::ConnectionEventLog();
+  smithy::http::BeastServerTransport transport(options);
+
+  smithy::Outcome<smithy::Unit> started = transport.Start(unary);
+  if (!started.ok()) {
+    LOG(ERROR) << "Failed to start games hub on " << options.address << ":" << options.port << ": "
+               << started.error().message();
+    return 1;
+  }
+
+  LOG(INFO) << "Games hub running on http://" << options.address << ":" << transport.port();
+  LOG(INFO) << "  POST http://localhost:" << transport.port() << "/games/v2/session";
+  LOG(INFO) << "  WS   ws://localhost:" << transport.port()
+            << "/games/v2/golf/play?ticket=<ticket>";
+  LOG(INFO) << "  WS   ws://localhost:" << transport.port()
+            << "/games/v2/thoughts/play?ticket=<ticket>";
+
+  int signal_number = 0;
+  sigwait(&shutdown_signals, &signal_number);
+  LOG(INFO) << "Signal " << signal_number << " received; draining sessions";
+  handler->AttachListener(nullptr);
+  listener.reset();
+  handler->registry().Drain(std::chrono::seconds(5));
+  handler->thoughts().registry().Drain(std::chrono::seconds(5));
+  transport.Stop();
+  return 0;
+}

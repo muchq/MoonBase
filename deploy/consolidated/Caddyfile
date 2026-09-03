@@ -131,6 +131,10 @@ api.muchq.com {
 		path /games/v2/golf/play
 	}
 
+	@ws_thoughts_v2 {
+		path /games/v2/thoughts/play
+	}
+
 	@options {
 		method OPTIONS
 	}
@@ -172,10 +176,13 @@ api.muchq.com {
 		reverse_proxy games_ws_backend:8080
 	}
 	handle @post_golf_v2_session {
-		reverse_proxy golf_hub:8089
+		reverse_proxy games_hub:8089
 	}
 	handle @ws_golf_v2 {
-		reverse_proxy golf_hub:8089
+		reverse_proxy games_hub:8089
+	}
+	handle @ws_thoughts_v2 {
+		reverse_proxy games_hub:8089
 	}
 	handle @post_portrait {
 		reverse_proxy portrait:8081

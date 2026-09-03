@@ -105,7 +105,7 @@ if (!limiter.allow(1)) {
 
 `token_bucket.h` is the third shape: one bucket, no lock, and the caller
 supplies every clock reading. It exists for budgets owned by exactly one
-execution context — the motivating case is golf_hub's per-session stream
+execution context — the motivating case is games_hub's per-session stream
 budgets (MoonBase#1240), which live in the session's coroutine frame where
 frames are handled sequentially and a mutex or clock call per admit would
 be pure overhead. Injected time is also what makes refill behavior

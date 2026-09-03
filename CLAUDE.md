@@ -61,7 +61,7 @@ Bazel formatting do.
   compile under Bazel and its tests don't run — while `go test ./...` or
   `npm test` still passes locally, because neither reads `BUILD.bazel`.
 - **Postgres-gated suites skip silently** without `PG_TEST_DB_URL` /
-  `GOLF_HUB_TEST_DB_URL`. CI supplies them from a `postgres:18` service; a
+  `GAMES_HUB_TEST_DB_URL`. CI supplies them from a `postgres:18` service; a
   local green run may have exercised no SQL at all.
 - **C++ warnings are errors for `domains/` (#1408)** — `.bazelrc` sets
   `--per_file_copt=^domains/.*@-Wall,-Werror`. The anchor is load-bearing:

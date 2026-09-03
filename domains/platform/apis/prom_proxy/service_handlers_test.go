@@ -53,7 +53,7 @@ func TestMetricsHandler_GetServiceCatalog(t *testing.T) {
 		name      string
 		hasCustom bool
 	}{
-		{"golf_hub", true},
+		{"games_hub", true},
 		{"mcpserver", true},
 		{"microgpt-serve", true},
 		{"mithril", true},
@@ -78,11 +78,11 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	// or custom descriptor fails loudly. One custom query is deliberately
 	// omitted from the mock — its descriptor must still appear, zeroed.
 	responses := map[string]*QueryResponse{}
-	standard := standardScalarQueries("golf_hub")
+	standard := standardScalarQueries("games_hub")
 	for i, q := range standard {
 		responses[q.Query] = scalarResponse(fmt.Sprintf("%d", 100+i))
 	}
-	entry := serviceRegistry["golf_hub"]
+	entry := serviceRegistry["games_hub"]
 	omitted := entry.CustomScalars[len(entry.CustomScalars)-1]
 	for i, def := range entry.CustomScalars {
 		if def == omitted {
@@ -93,8 +93,8 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 
 	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryResponses: responses}}
 
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub", nil)
-	req.SetPathValue("name", "golf_hub")
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil)
+	req.SetPathValue("name", "games_hub")
 	w := httptest.NewRecorder()
 
 	handler.GetServiceMetrics(w, req)
@@ -103,7 +103,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 
 	var response ServiceMetricsResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
-	assert.Equal(t, "golf_hub", response.Service)
+	assert.Equal(t, "games_hub", response.Service)
 	assert.WithinDuration(t, time.Now(), response.Timestamp, 5*time.Second)
 
 	// Standard fields in declaration order of standardScalarQueries.
@@ -121,15 +121,17 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, string(DefaultView), response.View)
 
 	// Custom groups keep registry order and every descriptor is present.
-	require.Len(t, response.Custom, 4)
+	require.Len(t, response.Custom, 5)
 	assert.Equal(t, "Probes", response.Custom[0].Title)
 	assert.Equal(t, "Sessions", response.Custom[1].Title)
 	assert.Equal(t, "Activity", response.Custom[2].Title)
 	assert.Equal(t, "Chat", response.Custom[3].Title)
+	assert.Equal(t, "Thoughts", response.Custom[4].Title)
 	assert.Len(t, response.Custom[0].Metrics, 1)
 	assert.Len(t, response.Custom[1].Metrics, 7)
 	assert.Len(t, response.Custom[2].Metrics, 4)
-	require.Len(t, response.Custom[3].Metrics, 5)
+	assert.Len(t, response.Custom[3].Metrics, 5)
+	require.Len(t, response.Custom[4].Metrics, 8)
 
 	assert.Equal(t, CustomMetricValue{Label: "health_checks", Value: 200.0, Toggleable: true},
 		response.Custom[0].Metrics[0])
@@ -143,8 +145,12 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	// Chat starts at CustomScalars index 12, so its first value is 200+12.
 	assert.Equal(t, CustomMetricValue{Label: "messages", Value: 212.0, Toggleable: true},
 		response.Custom[3].Metrics[0])
+	// Thoughts starts at index 17 (#79); its labels carry the prefix so a
+	// tile's label names it across the whole service, not just its group.
+	assert.Equal(t, CustomMetricValue{Label: "thoughts_active", Value: 217.0, Unit: "sessions"},
+		response.Custom[4].Metrics[0])
 	// The omitted query's descriptor survives with a zero value.
-	last := response.Custom[3].Metrics[4]
+	last := response.Custom[4].Metrics[7]
 	assert.Equal(t, omitted.Label, last.Label)
 	assert.Equal(t, 0.0, last.Value)
 }
@@ -232,8 +238,8 @@ func TestMetricsHandler_GetServiceMetrics_UnknownService(t *testing.T) {
 func TestMetricsHandler_GetServiceMetricsTimeSeries_InvalidRange(t *testing.T) {
 	handler := &MetricsHandler{}
 
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/bogus", nil)
-	req.SetPathValue("name", "golf_hub")
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/bogus", nil)
+	req.SetPathValue("name", "games_hub")
 	req.SetPathValue("range", "bogus")
 	w := httptest.NewRecorder()
 
@@ -251,8 +257,8 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 		promClient: &mockPrometheusClient{queryRangeResponse: rangeResponse("series")},
 	}
 
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/30m", nil)
-	req.SetPathValue("name", "golf_hub")
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/30m", nil)
+	req.SetPathValue("name", "games_hub")
 	req.SetPathValue("range", "30m")
 	w := httptest.NewRecorder()
 
@@ -274,9 +280,9 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 		assert.GreaterOrEqual(t, series.MetricName, previous)
 		previous = series.MetricName
 	}
-	// The seven standard series plus golf's nineteen custom panels: three
-	// fixed-form charts, and eight toggleable ones each expanding to a
-	// _rate/_count pair.
+	// The seven standard series plus the hub's twenty-six custom panels:
+	// four fixed-form charts, and eleven toggleable ones each expanding to
+	// a _rate/_count pair (golf's stream_* and chat_* and thoughts' own).
 	expected := []string{
 		"request_rate", "request_count", "error_rate_percent", "error_count",
 		"avg_duration_us", "p95_duration_us", "active_requests",
@@ -289,6 +295,10 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 		"chat_message_rate", "chat_message_count",
 		"chat_delivery_rate", "chat_delivery_count",
 		"chat_failure_rate", "chat_failure_count",
+		"thoughts_active",
+		"thoughts_command_rate", "thoughts_command_count",
+		"thoughts_event_rate", "thoughts_event_count",
+		"thoughts_rejection_rate", "thoughts_rejection_count",
 	}
 	assert.Len(t, names, len(expected))
 	for _, name := range expected {
@@ -333,7 +343,7 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_P95LatencyWidensWithTheRange
 }
 
 func TestMetricsHandler_GetServiceMetricsTimeSeries_RequestCountBucketsByTheRangesStep(t *testing.T) {
-	countQuery := `sum(increase(http_server_requests_total{service_name="golf_hub",route!="/health"}[1h]))`
+	countQuery := `sum(increase(http_server_requests_total{service_name="games_hub",route!="/health"}[1h]))`
 	handler := &MetricsHandler{
 		promClient: &mockPrometheusClient{
 			queryRangeResponses: map[string]*QueryResponse{
@@ -346,8 +356,8 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_RequestCountBucketsByTheRang
 	// request_count's window has to match — a mismatch here means the mock's
 	// exact-string lookup misses and the series comes back empty, catching a
 	// step that was hardcoded instead of threaded through.
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/7d", nil)
-	req.SetPathValue("name", "golf_hub")
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/7d", nil)
+	req.SetPathValue("name", "games_hub")
 	req.SetPathValue("range", "7d")
 	w := httptest.NewRecorder()
 
@@ -373,7 +383,7 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_RequestCountBucketsByTheRang
 // a copy-paste that left it reading the wrong counter would still pass a
 // test that only checked the window.
 func TestMetricsHandler_GetServiceMetricsTimeSeries_ErrorCountBucketsByTheRangesStep(t *testing.T) {
-	countQuery := `sum(increase(http_server_requests_failure_total{service_name="golf_hub",route!="/health"}[1h]))`
+	countQuery := `sum(increase(http_server_requests_failure_total{service_name="games_hub",route!="/health"}[1h]))`
 	handler := &MetricsHandler{
 		promClient: &mockPrometheusClient{
 			queryRangeResponses: map[string]*QueryResponse{
@@ -382,8 +392,8 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_ErrorCountBucketsByTheRanges
 		},
 	}
 
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/7d", nil)
-	req.SetPathValue("name", "golf_hub")
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/7d", nil)
+	req.SetPathValue("name", "games_hub")
 	req.SetPathValue("range", "7d")
 	w := httptest.NewRecorder()
 
@@ -411,8 +421,8 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_IgnoresViewParam(t *testing.
 		promClient: &mockPrometheusClient{queryRangeResponse: rangeResponse("series")},
 	}
 
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/1d?view=cumulative", nil)
-	req.SetPathValue("name", "golf_hub")
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/1d?view=cumulative", nil)
+	req.SetPathValue("name", "games_hub")
 	req.SetPathValue("range", "1d")
 	w := httptest.NewRecorder()
 
@@ -442,8 +452,8 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_CustomCounterPanelBucketsByS
 		},
 	}
 
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub/timeseries/7d", nil)
-	req.SetPathValue("name", "golf_hub")
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/7d", nil)
+	req.SetPathValue("name", "games_hub")
 	req.SetPathValue("range", "7d")
 	w := httptest.NewRecorder()
 
@@ -566,15 +576,15 @@ func TestMetricsHandler_GetHostMetricsTimeSeries(t *testing.T) {
 // --- The count/rate toggle (#1287) ------------------------------------------
 
 func TestMetricsHandler_GetServiceMetrics_RateViewSelectsTheRateForm(t *testing.T) {
-	entry := serviceRegistry["golf_hub"]
+	entry := serviceRegistry["games_hub"]
 	responses := map[string]*QueryResponse{}
 	for i, def := range entry.CustomScalars {
 		responses[def.QueryFor(ViewRate)] = scalarResponse(fmt.Sprintf("%d", 300+i))
 	}
 
 	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryResponses: responses}}
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub?view=rate", nil)
-	req.SetPathValue("name", "golf_hub")
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub?view=rate", nil)
+	req.SetPathValue("name", "games_hub")
 	w := httptest.NewRecorder()
 
 	handler.GetServiceMetrics(w, req)
@@ -609,8 +619,8 @@ func TestMetricsHandler_GetServiceMetrics_RateViewSelectsTheRateForm(t *testing.
 func TestMetricsHandler_GetServiceMetrics_InvalidViewIsRejected(t *testing.T) {
 	handler := &MetricsHandler{}
 
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub?view=cumulative", nil)
-	req.SetPathValue("name", "golf_hub")
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub?view=cumulative", nil)
+	req.SetPathValue("name", "games_hub")
 	w := httptest.NewRecorder()
 
 	handler.GetServiceMetrics(w, req)
@@ -635,15 +645,15 @@ func TestMetricsHandler_GetServiceMetrics_InvalidViewIsRejected(t *testing.T) {
 // The same reasoning already covers requests_total's *value*; these are the
 // keys it applies to.
 func TestMetricsHandler_GetServiceMetrics_JsonKeysAreStable(t *testing.T) {
-	entry := serviceRegistry["golf_hub"]
+	entry := serviceRegistry["games_hub"]
 	responses := map[string]*QueryResponse{}
 	for i, def := range entry.CustomScalars {
 		responses[def.QueryFor(DefaultView)] = scalarResponse(fmt.Sprintf("%d", 400+i))
 	}
 
 	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryResponses: responses}}
-	req := httptest.NewRequest("GET", "/metrics/v1/service/golf_hub", nil)
-	req.SetPathValue("name", "golf_hub")
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil)
+	req.SetPathValue("name", "games_hub")
 	w := httptest.NewRecorder()
 
 	handler.GetServiceMetrics(w, req)
@@ -666,14 +676,14 @@ func TestMetricsHandler_GetServiceMetrics_JsonKeysAreStable(t *testing.T) {
 	}
 
 	counter, ok := tiles["commands"]
-	require.True(t, ok, "golf_hub lost its commands tile")
+	require.True(t, ok, "games_hub lost its commands tile")
 	assert.Equal(t, true, counter["toggleable"],
 		`a counter tile must carry "toggleable": true for the UI to offer the switch`)
 
 	// And the negative half: omitempty means a fixed-form tile has no key at
 	// all, which is what tells the UI not to draw a toggle it cannot honour.
 	gauge, ok := tiles["active"]
-	require.True(t, ok, "golf_hub lost its active tile")
+	require.True(t, ok, "games_hub lost its active tile")
 	_, present := gauge["toggleable"]
 	assert.False(t, present,
 		"a fixed-form tile must omit the key entirely, not send false: %v", gauge)

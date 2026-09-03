@@ -64,7 +64,7 @@ options.on_rejected = aura::RejectionMetrics(metrics);
 options.on_connection_event = aura::ConnectionEventLog();
 ```
 
-Consumers: `//domains/graphics/apis/portrait`, `//domains/games/apis/golf_hub`.
+Consumers: `//domains/graphics/apis/portrait`, `//domains/games/apis/games_hub`.
 `HttpMetricsSink` is a virtual seam — tests inject a recording sink instead
 of the OTel-backed one.
 

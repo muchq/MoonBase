@@ -29,7 +29,7 @@ func imageTag(image string) string {
 	return image[colon+1:]
 }
 
-// Compose names containers <project>-<service>-<index>, e.g. ubuntu-golf_hub-1.
+// Compose names containers <project>-<service>-<index>, e.g. ubuntu-games_hub-1.
 // Strip both ends so a container can be addressed by the service it backs.
 func containerDisplayName(name string) string {
 	trimmed := strings.TrimPrefix(name, "ubuntu-")

@@ -62,7 +62,7 @@ service_table() {
   ' "$COMPOSE_FILE"
 }
 
-# golf_hub -> GOLF_HUB_SHA, microgpt-serve -> MICROGPT_SERVE_SHA.
+# games_hub -> GAMES_HUB_SHA, microgpt-serve -> MICROGPT_SERVE_SHA.
 # tr rather than ${name^^}: macOS still ships bash 3.2, which has neither
 # case-conversion expansions nor associative arrays.
 sha_var_for() {
