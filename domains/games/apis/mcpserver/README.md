@@ -247,8 +247,9 @@ Environment variables:
 
 ## Logging
 
-Every tool call logs one line — name, duration, outcome — on the
-`com.muchq.games.mcpserver.tools.ToolCallLog` logger: INFO for a success, WARN
+Every tool call logs one line on the `com.muchq.games.mcpserver.tools.ToolCallLog`
+logger: message `tool_call`, with `tool`, `ms`, and `outcome` as key-value pairs
+(the `kvpList` of the JSON line, the shape the stats pipeline reads): INFO for a success, WARN
 when the tool answered `isError: true`, ERROR with the stack when an exception
 escaped the tool (the framework's JSON-RPC error mapping still applies).
 Arguments are not logged. A call the framework rejects before the tool method

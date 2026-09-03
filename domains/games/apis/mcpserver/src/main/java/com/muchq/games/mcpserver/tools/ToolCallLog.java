@@ -4,11 +4,14 @@ import io.modelcontextprotocol.spec.McpSchema.CallToolResult;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.spi.LoggingEventBuilder;
 
 /**
- * One log line per tool call: name, duration, outcome. Every {@code @Tool} method wraps its body in
- * {@link #logged}, which is the only server-side trace a call leaves — micronaut-mcp's dispatch
- * (ToolRegistry) is final with private handlers, so there is no framework seam to hang this on.
+ * One log line per tool call, message {@code tool_call} with key-value pairs {@code tool}, {@code
+ * ms}, and {@code outcome}, so the line aggregates without parsing its text. Every {@code @Tool}
+ * method wraps its body in {@link #logged}, which is the only server-side trace a call leaves —
+ * micronaut-mcp's dispatch (ToolRegistry) is final with private handlers, so there is no framework
+ * seam to hang this on.
  *
  * <p>Outcomes map to levels: a successful result is INFO, a result the tool flagged {@code isError}
  * is WARN, and an exception that escapes the tool is ERROR with the stack — then rethrown, so the
@@ -27,21 +30,31 @@ final class ToolCallLog {
 
   private ToolCallLog() {}
 
+  static final String MESSAGE = "tool_call";
+
   static CallToolResult logged(String tool, Supplier<CallToolResult> call) {
     long start = System.nanoTime();
     CallToolResult result;
     try {
       result = call.get();
     } catch (RuntimeException | Error e) {
-      LOG.error("tool={} ms={} outcome=threw", tool, elapsedMs(start), e);
+      line(LOG.atError().setCause(e), tool, elapsedMs(start), "threw");
       throw e;
     }
     if (Boolean.TRUE.equals(result.isError())) {
-      LOG.warn("tool={} ms={} outcome=error", tool, elapsedMs(start));
+      line(LOG.atWarn(), tool, elapsedMs(start), "error");
     } else {
-      LOG.info("tool={} ms={} outcome=ok", tool, elapsedMs(start));
+      line(LOG.atInfo(), tool, elapsedMs(start), "ok");
     }
     return result;
+  }
+
+  private static void line(LoggingEventBuilder builder, String tool, long ms, String outcome) {
+    builder
+        .addKeyValue("tool", tool)
+        .addKeyValue("ms", ms)
+        .addKeyValue("outcome", outcome)
+        .log(MESSAGE);
   }
 
   private static long elapsedMs(long startNanos) {

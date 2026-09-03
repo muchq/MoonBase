@@ -75,15 +75,16 @@ public class LogbackConfigTest {
             Instant.parse("2026-01-01T00:00:00Z").toEpochMilli(),
             Instant.parse("2100-01-01T00:00:00Z").toEpochMilli());
 
-    // The parameterized case is what services actually write, and
-    // JsonEncoder's contract there is NOT "message is the rendered text":
-    // the raw template rides in "message" and the values in "arguments".
-    // Anything reading these lines offline has to know that, so the
-    // semantic is pinned, not discovered.
+    // The parameterized case is what services actually write. "message"
+    // is the raw template and "arguments" the values — what machine
+    // readers key on — and "formattedMessage" is the rendered line, for
+    // anyone reading the stream by eye.
     JsonNode parameterized = lineContaining(captured.toString(UTF_8), "widget {} failed");
     assertThat(parameterized.get("message").asText()).isEqualTo("widget {} failed after {} tries");
     assertThat(parameterized.get("arguments").get(0).asText()).isEqualTo("w-7");
     assertThat(parameterized.get("arguments").get(1).asText()).isEqualTo("3");
+    assertThat(parameterized.get("formattedMessage").asText())
+        .isEqualTo("widget w-7 failed after 3 tries");
 
     // An ERROR with a throwable — the line Sentry and any alerting reads —
     // stays one parseable object with the exception structured inside it.
