@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 // QueryKey is one row of the per-day one_d4 query rollup (#1465): the
@@ -55,9 +56,19 @@ var (
 // logger and message that mark a query event, and the key-value pairs,
 // which logback renders as a list of one-entry objects with string values.
 type queryEventLine struct {
+	Timestamp  int64               `json:"timestamp"` // epoch millis, logback's JsonEncoder
 	LoggerName string              `json:"loggerName"`
 	Message    string              `json:"message"`
 	KvpList    []map[string]string `json:"kvpList"`
+}
+
+// The day a line belongs to: its own timestamp, in UTC, or the object's
+// date for a line without one.
+func (l *queryEventLine) date(objectDate string) string {
+	if l.Timestamp <= 0 {
+		return objectDate
+	}
+	return time.UnixMilli(l.Timestamp).UTC().Format("2006-01-02")
 }
 
 func (l *queryEventLine) fields() map[string]string {
@@ -78,9 +89,10 @@ func known(vocabulary map[string]bool, value string) string {
 }
 
 // ConsumeQueryEvents aggregates one object's worth of one_d4 query-event
-// lines into the rollup under the given partition date. Lines that are not
-// query events are skipped and counted — same contract as Consume.
-func (r *Rollup) ConsumeQueryEvents(reader io.Reader, date string) (skipped int, err error) {
+// lines into the rollup, each line under its own day, objectDate for a
+// line without a timestamp. Lines that are not query events are skipped
+// and counted — same contract as Consume.
+func (r *Rollup) ConsumeQueryEvents(reader io.Reader, objectDate string) (skipped int, err error) {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -94,6 +106,7 @@ func (r *Rollup) ConsumeQueryEvents(reader io.Reader, date string) (skipped int,
 			skipped++
 			continue
 		}
+		date := parsed.date(objectDate)
 		fields := parsed.fields()
 		cache := fields["cache"]
 		if cache == "" {

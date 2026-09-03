@@ -100,3 +100,22 @@ func TestConsumeQueryEventsCollapsesUnknownWordsToOtherAndKeepsCounting(t *testi
 		t.Errorf("terms = %v; the collapsed entry still carries its terms", rollup.Terms)
 	}
 }
+
+// Logback names a roll for the hour it covers, so the object date is
+// usually right; the line's own timestamp (epoch millis) wins anyway,
+// and a line without one takes the object's.
+func TestConsumeQueryEventsDatesEachLineByItsOwnTimestamp(t *testing.T) {
+	stamped := `{"timestamp":1788220800500,"level":"INFO","loggerName":"com.muchq.games.one_d4.query_event","message":"query_event","kvpList":[{"entry":"query"},{"source":"ui"},{"outcome":"ok"},{"cache":"live"}]}`
+	unstamped := eventLine("entry", "query", "source", "ui", "outcome", "ok", "cache", "live")
+	rollup := NewRollup()
+	if _, err := rollup.ConsumeQueryEvents(strings.NewReader(stamped+"\n"+unstamped+"\n"), "2026-09-03"); err != nil {
+		t.Fatal(err)
+	}
+	dates := map[string]int64{}
+	for key, count := range rollup.Queries {
+		dates[key.Date] += count
+	}
+	if dates["2026-09-01"] != 1 || dates["2026-09-03"] != 1 || len(dates) != 2 {
+		t.Errorf("queries by date = %v, want one on 2026-09-01 and one on 2026-09-03", dates)
+	}
+}

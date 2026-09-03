@@ -15,7 +15,11 @@ up its lines with the parser its source names, and apply the rollup plus
 the processed marker in one transaction. A crash between the two
 re-processes the object; the marker's conflict arm makes a duplicate
 application a no-op — so counts survive crashes without double-counting.
-Per-object failures are logged and retried next pass.
+Per-object failures are logged and retried next pass. Rows are dated by
+each line's own timestamp (Caddy's `ts`, logback's `timestamp`), not the
+object's partition: Caddy rolls by size, so an object spans whatever days
+it took to fill. That roll size (`roll_size` in the Caddyfile) is the
+pipeline's latency, and `deploy_config_test` bounds it.
 
 Aggregates are bounded per row, on purpose: hosts are Caddy's vhosts,
 methods collapse through the nine-verb rule the metrics rails use, and

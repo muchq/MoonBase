@@ -81,8 +81,9 @@ var schema = []string{
 // recomputes all of it from the raw lines in S3. That is what "a schema
 // change is a re-aggregation" costs — one full pass, during which the
 // served counts climb back up from zero — and what makes it never data
-// loss. Version 2 named agents and added probe_stats.
-const RollupVersion = "2"
+// loss. Version 2 named agents and added probe_stats; version 3 dates
+// every row by its line's own timestamp rather than the object's.
+const RollupVersion = "3"
 
 func rollupVersionFor(meaning string, ddl []string) string {
 	sum := sha256.Sum256([]byte(strings.Join(ddl, "\n")))

@@ -185,3 +185,35 @@ func TestConsumeSurvivesOversizedLines(t *testing.T) {
 		t.Error("a line over the scanner's cap must surface as an error")
 	}
 }
+
+// Caddy rolls by size, so one object spans whatever days it took to
+// fill: each line lands on its own day, and only a line with no
+// timestamp takes the object's.
+func TestConsumeDatesEachLineByItsOwnTimestamp(t *testing.T) {
+	lines := `{"ts":1788220800.5,"status":200,"request":{"host":"api.muchq.com","method":"GET","uri":"/a","headers":{}}}
+{"ts":1788393599.9,"status":200,"request":{"host":"api.muchq.com","method":"GET","uri":"/b","headers":{}}}
+{"ts":1788393600.0,"status":200,"request":{"host":"api.muchq.com","method":"GET","uri":"/c","headers":{}}}
+{"status":200,"request":{"host":"api.muchq.com","method":"GET","uri":"/d","headers":{}}}
+`
+	rollup := NewRollup()
+	if _, err := rollup.Consume(strings.NewReader(lines), "2026-09-03"); err != nil {
+		t.Fatal(err)
+	}
+	byDate := map[string]int64{}
+	for key, count := range rollup.Requests {
+		byDate[key.Date] += count
+	}
+	want := map[string]int64{
+		"2026-09-01": 1, // 1788220800 is 2026-09-01T00:00:00Z
+		"2026-09-02": 1, // the last second of the 2nd
+		"2026-09-03": 2, // midnight on the 3rd, and the line with no ts
+	}
+	if fmt.Sprint(byDate) != fmt.Sprint(want) {
+		t.Errorf("requests by date = %v, want %v", byDate, want)
+	}
+	for key := range rollup.Countries {
+		if key.Date == "" {
+			t.Errorf("geo row with no date: %v", key)
+		}
+	}
+}

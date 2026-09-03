@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -2348,6 +2349,26 @@ func TestEverySiteRefusesTheCredentialScanner(t *testing.T) {
 		}
 		if !found {
 			t.Errorf("refuse_bots has no `handle %s { respond 403 }`; a matcher with no handle refuses nothing", matcher)
+		}
+	}
+}
+
+// Caddy rolls the access log by size only, and the stats pipeline ships
+// rolled files: the roll size is the pipeline's latency. Bounded so a
+// "make it roll less" edit does not quietly turn the by-day stats into a
+// by-fortnight report.
+func TestCaddyAccessLogRollsSmallEnoughToShipDaily(t *testing.T) {
+	caddyfile := readConfig(t, "Caddyfile")
+	rolls := regexp.MustCompile(`(?m)^\s*roll_size\s+(\d+)\s*([kmg]i?b)\s*$`).FindAllStringSubmatch(caddyfile, -1)
+	if len(rolls) == 0 {
+		t.Fatal("no roll_size in the Caddyfile: Caddy's default is 100 MiB, weeks of traffic between rolls")
+	}
+	unit := map[string]int64{"kb": 1 << 10, "kib": 1 << 10, "mb": 1 << 20, "mib": 1 << 20, "gb": 1 << 30, "gib": 1 << 30}
+	for _, roll := range rolls {
+		n, _ := strconv.ParseInt(roll[1], 10, 64)
+		if size := n * unit[strings.ToLower(roll[2])]; size > 16<<20 {
+			t.Errorf("roll_size %s %s: over 16 MiB the access log takes days to roll at current "+
+				"traffic, and nothing ships until it does", roll[1], roll[2])
 		}
 	}
 }

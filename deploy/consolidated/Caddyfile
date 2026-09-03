@@ -246,7 +246,7 @@ api.muchq.com {
 
 	log {
 		output file /var/log/caddy/access.log {
-			roll_size 1gb
+			roll_size 4mb
 			roll_keep 5
 			roll_keep_for 90d
 		}
@@ -271,7 +271,7 @@ i.iili.uk {
 
 	log {
 		output file /var/log/caddy/access.log {
-			roll_size 1gb
+			roll_size 4mb
 			roll_keep 5
 			roll_keep_for 90d
 		}
@@ -320,7 +320,7 @@ git.muchq.com {
 
 	log {
 		output file /var/log/caddy/access.log {
-			roll_size 1gb
+			roll_size 4mb
 			roll_keep 5
 			roll_keep_for 90d
 		}
@@ -381,7 +381,7 @@ gpt.muchq.com {
 
 	log {
 		output file /var/log/caddy/access.log {
-			roll_size 1gb
+			roll_size 4mb
 			roll_keep 5
 			roll_keep_for 90d
 		}
@@ -465,7 +465,7 @@ api.1d4.net {
 
 	log {
 		output file /var/log/caddy/access.log {
-			roll_size 1gb
+			roll_size 4mb
 			roll_keep 5
 			roll_keep_for 90d
 		}
@@ -524,7 +524,7 @@ mcp.1d4.net {
 
 	log {
 		output file /var/log/caddy/access.log {
-			roll_size 1gb
+			roll_size 4mb
 			roll_keep 5
 			roll_keep_for 90d
 		}
