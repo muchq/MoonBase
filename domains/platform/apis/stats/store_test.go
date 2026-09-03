@@ -354,7 +354,7 @@ func TestTheRecordedVersionFollowsTheSchemaText(t *testing.T) {
 	if rollupVersionFor(RollupVersion, changed) == rollupVersionFor(RollupVersion, schema) {
 		t.Error("a DDL change left the rollup version unchanged")
 	}
-	if rollupVersionFor("3", schema) == rollupVersionFor(RollupVersion, schema) {
+	if rollupVersionFor(RollupVersion+".next", schema) == rollupVersionFor(RollupVersion, schema) {
 		t.Error("a meaning bump left the rollup version unchanged")
 	}
 }
