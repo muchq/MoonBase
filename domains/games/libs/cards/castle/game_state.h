@@ -29,21 +29,25 @@ using std::string;
 ///     no hand holds an ordinary card.
 ///   - A turn plays one or more cards of a single rank from the seat's
 ///     active row (hand while it has cards, then the face-up row, then
-///     the face-down row one card at a time, blind) onto the pile. A card
-///     is playable when the pile is empty, when it is a two or a ten, or
-///     when its rank is at least the top's (a two on top takes anything).
-///     A hand play draws back up to three while the draw pile lasts.
+///     the face-down row one card at a time, blind) onto the pile. The
+///     run on top sets the price: after n cards of rank k, a play is n or
+///     more cards of rank k or higher (a two on top takes anything), or
+///     exactly the 4-n cards of rank k that complete its four of a kind.
+///     A two or a ten plays alone on anything; anything plays on an empty
+///     pile. A hand play draws back up to three while the draw pile
+///     lasts.
 ///   - A ten, or four of a kind on top of the pile, burns the pile: it
-///     leaves the game and the same seat plays again — unless the burn
-///     shed the seat's last card, when the turn passes. A burn is a play
-///     like any other: the cards must be playable on the pile as it
-///     stands, and a run of four is broken by a card of another rank.
-///   - A seat with no playable card in hand or in the face-up row must
-///     pick up the pile. A face-down card that turns out unplayable goes
-///     into the hand with the pile.
-///   - A seat that sheds its last card is out; its finish order is kept,
-///     and stays kept if the seat later leaves the table. The game is
-///     over when one seat still holds cards — the loser.
+///     leaves the game and the same seat plays again from whichever row
+///     is then in play — unless the burn shed the seat's last card, which
+///     ends the game. A burn is a play like any other: the cards must be
+///     playable on the pile as it stands, and a run of four is broken by
+///     a card of another rank.
+///   - A seat with no legal play in hand or in the face-up row must pick
+///     up the pile. A face-down card that turns out unplayable goes into
+///     the hand with the pile.
+///   - The first seat to shed its last card wins, and that ends the
+///     game; its finish order is kept if the seat later leaves the table.
+///     Only a two-seat game names a loser.
 class GameState;
 
 enum class Phase { Setup, Playing, Over, Abandoned };
@@ -98,14 +102,22 @@ class GameState {
   [[nodiscard]] bool isOver() const { return phase == Phase::Over || phase == Phase::Abandoned; }
   [[nodiscard]] Phase getPhase() const { return phase; }
   [[nodiscard]] std::optional<Card> pileTop() const;
-  /// Whether a card of this rank may go on the pile as it stands.
-  [[nodiscard]] bool isPlayable(Rank rank) const;
-  /// Whether the seat's active row holds a playable card. Always false
-  /// for a face-down row: those are played blind.
+  /// How many cards of one rank sit on top of the pile: the count the
+  /// next play must match. Zero on an empty pile.
+  [[nodiscard]] int runOnTop() const;
+  /// Whether `count` cards of this rank may go on the pile as it stands:
+  /// a special always; on an empty pile anything; otherwise the count on
+  /// top or more of that rank or higher, or exactly what completes the
+  /// four of a kind of the top's own rank.
+  [[nodiscard]] bool isPlayable(Rank rank, int count = 1) const;
+  /// Whether the seat's active row holds a legal play. Always false for
+  /// a face-down row: those are played blind.
   [[nodiscard]] bool hasLegalPlay(int player) const;
   /// Seats that went out, first out first.
   [[nodiscard]] const std::vector<string>& getFinished() const { return finished; }
-  /// The seat left holding cards once the game is over by play.
+  /// The one seat left holding cards once the game is over by play — a
+  /// two-seat game's loser; a bigger table ends with a winner and no
+  /// loser.
   [[nodiscard]] std::optional<string> loser() const;
 
   [[nodiscard]] GameState withIdAndVersion(const string& game_id, const string& version_id) const;

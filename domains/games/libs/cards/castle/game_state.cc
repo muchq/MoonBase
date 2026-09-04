@@ -179,13 +179,31 @@ std::optional<Card> GameState::pileTop() const {
   return pile.back();
 }
 
-bool GameState::isPlayable(Rank rank) const {
+int GameState::runOnTop() const {
+  int run = 0;
+  for (auto it = pile.rbegin(); it != pile.rend() && it->getRank() == pile.back().getRank(); ++it) {
+    run++;
+  }
+  return run;
+}
+
+bool GameState::isPlayable(Rank rank, int count) const {
+  if (count < 1) {
+    return false;
+  }
   if (isSpecial(rank) || pile.empty()) {
+    return true;
+  }
+  const Rank top = pile.back().getRank();
+  const int run = runOnTop();
+  // Fewer of the top's own rank are legal only as the completion of its
+  // four of a kind, which burns.
+  if (rank == top && count == 4 - run) {
     return true;
   }
   // A two on top takes anything, which the rank order already says: two
   // is the lowest rank.
-  return rankValue(rank) >= rankValue(pile.back().getRank());
+  return rankValue(rank) >= rankValue(top) && count >= run;
 }
 
 bool GameState::hasLegalPlay(int player) const {
@@ -197,8 +215,17 @@ bool GameState::hasLegalPlay(int player) const {
     return false;
   }
   const vector<Card>& row = seat.row(seat.source());
-  return std::any_of(row.begin(), row.end(),
-                     [this](const Card& card) { return isPlayable(card.getRank()); });
+  // Some count of some rank the row holds meets the pile.
+  return std::any_of(row.begin(), row.end(), [&](const Card& card) {
+    const int held = static_cast<int>(std::count_if(
+        row.begin(), row.end(), [&](const Card& c) { return c.getRank() == card.getRank(); }));
+    for (int count = 1; count <= held; count++) {
+      if (isPlayable(card.getRank(), count)) {
+        return true;
+      }
+    }
+    return false;
+  });
 }
 
 StatusOr<GameState> GameState::playFromHand(int player, const vector<int>& indexes) const {
@@ -230,8 +257,8 @@ StatusOr<GameState> GameState::play(int player, Source source, const vector<int>
                   [rank](const Card& card) { return card.getRank() != rank; })) {
     return InvalidArgumentError("one rank per play");
   }
-  if (!isPlayable(rank)) {
-    return FailedPreconditionError("that rank cannot go on the pile");
+  if (!isPlayable(rank, static_cast<int>(played.size()))) {
+    return FailedPreconditionError("that play cannot go on the pile");
   }
 
   deque<Card> newDrawPile = drawPile;
@@ -309,7 +336,9 @@ GameState GameState::settle(int player, deque<Card> newDrawPile, vector<Card> ne
   if (wentOut) {
     newFinished.push_back(newPlayers.at(player).getId());
   }
-  if (seatsHoldingCards(newPlayers) <= 1) {
+  // The first seat out wins and the game is over; a table that somehow
+  // opened with one holder ends the same way.
+  if (wentOut || seatsHoldingCards(newPlayers) <= 1) {
     return GameState{std::move(newDrawPile),
                      std::move(newPile),
                      std::move(newPlayers),
@@ -380,7 +409,7 @@ StatusOr<GameState> GameState::removePlayer(int player) const {
 }
 
 std::optional<string> GameState::loser() const {
-  if (phase != Phase::Over) {
+  if (phase != Phase::Over || seatsHoldingCards(players) != 1) {
     return std::nullopt;
   }
   for (const Player& p : players) {

@@ -391,8 +391,10 @@ TEST(Play, ATenAsTheLastFaceDownCardBurnsAndGoesOut) {
   ASSERT_TRUE(out.ok());
   EXPECT_TRUE(out->getPile().empty());
   EXPECT_EQ(out->getFinished(), (vector<string>{"a"}));
-  EXPECT_EQ(out->getWhoseTurn(), 1);  // out on a burn: the turn passes
-  EXPECT_EQ(out->getPhase(), Phase::Playing);
+  // Out on a burn: no second play for the burner, the game is over.
+  EXPECT_EQ(out->getWhoseTurn(), GameState::kNoTurn);
+  EXPECT_EQ(out->getPhase(), Phase::Over);
+  EXPECT_EQ(out->loser(), std::nullopt);  // two seats still hold cards
 }
 
 // The run on top sets the price: the last play was n cards of rank k,
