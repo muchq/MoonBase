@@ -148,9 +148,9 @@ StatusOr<GameState> GameState::swapForSetup(int player, int handIndex, int faceU
   if (!swapped.ok()) {
     return swapped.status();
   }
-  return GameState{drawPile,  pile,     replaceSeat(players, player, *swapped),
-                   whoseTurn, phase,    finished,
-                   gameId,    versionId};
+  return GameState{drawPile,  pile,      replaceSeat(players, player, *swapped),
+                   whoseTurn, phase,     finished,
+                   gameId,    versionId, lastPlay};
 }
 
 StatusOr<GameState> GameState::ready(int player) const {
@@ -168,8 +168,8 @@ StatusOr<GameState> GameState::ready(int player) const {
                                          [](const Player& p) { return p.isReady(); });
   const int turn = everyoneReady ? openingSeat(newPlayers) : kNoTurn;
   const Phase newPhase = everyoneReady ? Phase::Playing : Phase::Setup;
-  return GameState{drawPile, pile,     std::move(newPlayers), turn, newPhase, finished,
-                   gameId,   versionId};
+  return GameState{drawPile,  pile,    std::move(newPlayers), turn, newPhase, finished, gameId,
+                   versionId, lastPlay};
 }
 
 std::optional<Card> GameState::pileTop() const {
@@ -281,7 +281,8 @@ StatusOr<GameState> GameState::play(int player, Source source, const vector<int>
     run++;
   }
   const bool burned = rank == Rank::Ten || run >= 4;
-  return settle(player, std::move(newDrawPile), std::move(newPile), std::move(newPlayers), burned);
+  return settle(player, std::move(newDrawPile), std::move(newPile), std::move(newPlayers),
+                LastPlay{seat.getId(), played, burned});
 }
 
 StatusOr<GameState> GameState::playFaceDown(int player, int index) const {
@@ -305,7 +306,9 @@ StatusOr<GameState> GameState::playFaceDown(int player, int index) const {
   taken.push_back(card);
   vector<Player> newPlayers = replaceSeat(players, player, remaining->withHandAdded(taken));
   const int next = nextSeat(player, newPlayers);
-  return GameState{drawPile, {}, std::move(newPlayers), next, phase, finished, gameId, versionId};
+  return GameState{drawPile, {},        std::move(newPlayers),
+                   next,     phase,     finished,
+                   gameId,   versionId, LastPlay{seat.getId(), {card}, false, true}};
 }
 
 StatusOr<GameState> GameState::pickUp(int player) const {
@@ -323,11 +326,14 @@ StatusOr<GameState> GameState::pickUp(int player) const {
   }
   vector<Player> newPlayers = replaceSeat(players, player, players.at(player).withHandAdded(pile));
   const int next = nextSeat(player, newPlayers);
-  return GameState{drawPile, {}, std::move(newPlayers), next, phase, finished, gameId, versionId};
+  return GameState{drawPile, {},        std::move(newPlayers),
+                   next,     phase,     finished,
+                   gameId,   versionId, LastPlay{players.at(player).getId(), {}, false, true}};
 }
 
 GameState GameState::settle(int player, deque<Card> newDrawPile, vector<Card> newPile,
-                            vector<Player> newPlayers, bool burned) const {
+                            vector<Player> newPlayers, LastPlay play) const {
+  const bool burned = play.burned;
   if (burned) {
     newPile.clear();
   }
@@ -345,7 +351,8 @@ GameState GameState::settle(int player, deque<Card> newDrawPile, vector<Card> ne
                      Phase::Over,
                      std::move(newFinished),
                      gameId,
-                     versionId};
+                     versionId,
+                     std::move(play)};
   }
   const int next = burned && !wentOut ? player : nextSeat(player, newPlayers);
   return GameState{std::move(newDrawPile),
@@ -355,7 +362,8 @@ GameState GameState::settle(int player, deque<Card> newDrawPile, vector<Card> ne
                    phase,
                    std::move(newFinished),
                    gameId,
-                   versionId};
+                   versionId,
+                   std::move(play)};
 }
 
 // The next seat after `from` that still holds cards.
@@ -379,8 +387,9 @@ StatusOr<GameState> GameState::removePlayer(int player) const {
   }
   vector<Player> newPlayers = withoutSeat(players, player);
   if (newPlayers.size() < static_cast<size_t>(kMinPlayers)) {
-    return GameState{drawPile, pile,     std::move(newPlayers), kNoTurn, Phase::Abandoned, finished,
-                     gameId,   versionId};
+    return GameState{
+        drawPile,  pile,    std::move(newPlayers), kNoTurn, Phase::Abandoned, finished, gameId,
+        versionId, lastPlay};
   }
   int newTurn = whoseTurn;
   if (phase == Phase::Playing) {
@@ -399,8 +408,8 @@ StatusOr<GameState> GameState::removePlayer(int player) const {
     newTurn = openingSeat(newPlayers);
     newPhase = Phase::Playing;
   }
-  return GameState{drawPile, pile,     std::move(newPlayers), newTurn, newPhase, finished,
-                   gameId,   versionId};
+  return GameState{drawPile,  pile,    std::move(newPlayers), newTurn, newPhase, finished, gameId,
+                   versionId, lastPlay};
 }
 
 std::optional<string> GameState::loser() const {
@@ -416,7 +425,8 @@ std::optional<string> GameState::loser() const {
 }
 
 GameState GameState::withIdAndVersion(const string& game_id, const string& version_id) const {
-  return GameState{drawPile, pile, players, whoseTurn, phase, finished, game_id, version_id};
+  return GameState{drawPile, pile,    players,    whoseTurn, phase,
+                   finished, game_id, version_id, lastPlay};
 }
 
 int GameState::playerIndex(const string& id) const {

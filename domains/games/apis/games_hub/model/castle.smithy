@@ -106,8 +106,8 @@ structure CastleGameState {
 
 /// The finish order: the first seat out wins and ends the game, so it
 /// holds one name. A two-seat game names the other seat as the loser; a
-/// bigger table ends with a winner and no loser, as does an abandoned
-/// game (which lists whoever finished before it ended).
+/// bigger table ends with a winner and no loser. An abandoned game has
+/// neither: nobody went out, and the order is empty.
 structure CastleGameEnded {
     @required
     finished: PlayerIds
@@ -116,10 +116,12 @@ structure CastleGameEnded {
 }
 
 /// One player's redacted view: own hand faces, everyone's face-up rows,
-/// face-down rows as counts, the pile top and the draw-pile count. Every
-/// hand is revealed once the game ends. An ended view is always followed
-/// by gameEnded, which says who lost (or that nobody did); the view alone
-/// cannot tell an abandoned table from a finished one.
+/// face-down rows as counts, the pile top with the run on it and the
+/// draw-pile count, and the pile's last move — the one way to see a
+/// burn or a pick-up, which leave the pile empty. Every hand is revealed
+/// once the game ends. An ended view is always followed by gameEnded,
+/// which says who lost (or that nobody did); the view alone cannot tell
+/// an abandoned table from a finished one.
 structure CastleView {
     @required
     gameId: String
@@ -141,9 +143,40 @@ structure CastleView {
 
     pileTop: Card
 
+    /// How many cards of the top's rank sit on the pile: the count the
+    /// next play must match, or the four of a kind it must complete.
+    /// Zero on an empty pile.
+    @required
+    pileRun: Integer
+
     /// First out first; complete only once the game ends.
     @required
     finished: PlayerIds
+
+    /// The pile's most recent move, until the next replaces it. Absent
+    /// before the first.
+    lastPlay: CastleLastPlay
+}
+
+/// A move on the pile: a play, a pick-up, or a blind flip that failed
+/// and took the pile with the card it turned over.
+structure CastleLastPlay {
+    /// Who moved. May name a seat that has since left the game.
+    @required
+    playerId: String
+
+    /// What went down: the cards played, the card a failed flip turned
+    /// over, or nothing for a pick-up by choice.
+    @required
+    cards: Cards
+
+    /// The play burned the pile: a ten, or the four of a kind it completed.
+    @required
+    burned: Boolean
+
+    /// The mover took the pile into their hand, with `cards` if any.
+    @required
+    pickedUp: Boolean
 }
 
 list CastlePlayers {
@@ -174,6 +207,14 @@ structure CastlePlayer {
     /// Shed every card: finished, and out of the turn order.
     @required
     out: Boolean
+
+    /// It is this seat's turn and its row in play holds a legal play on
+    /// the pile as it stands; false off turn and for every other seat. A
+    /// seat on turn without one must pick up — unless its row in play is
+    /// face down, where this is always false and the move is a blind
+    /// flip.
+    @required
+    canPlay: Boolean
 }
 
 list Cards {

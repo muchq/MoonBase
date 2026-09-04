@@ -22,11 +22,19 @@ namespace castle {
 ///   {"v":1, "drawPile":[int...], "pile":[int...], "whoseTurn":int,
 ///    "phase":"setup"|"playing"|"over"|"abandoned", "finished":[str...],
 ///    "players":[{"id":str, "hand":[int...], "faceUp":[int...],
-///                "faceDown":[int...], "ready":bool}...]}
+///                "faceDown":[int...], "ready":bool}...],
+///    "lastPlay":{"player":str, "cards":[int...], "burned":bool,
+///                "pickedUp":bool}}
+/// lastPlay is absent until the first move, so rows written before the
+/// field read unchanged. Its cards are empty only for a pick-up by
+/// choice, and a pick-up never burns.
 ///
 /// Keys emit alphabetically (nlohmann's sorted-map default), so
 /// re-serializing a deserialized state reproduces the bytes. Unknown
-/// fields are ignored; game legality stays the engine's business. A
+/// fields are ignored — so a binary from before lastPlay reads a newer
+/// row, drops the field, and writes it back without: a rollback loses
+/// the last move silently and nothing else. Game legality stays the
+/// engine's business. A
 /// player id that is not valid UTF-8, or carries a NUL byte (which
 /// postgres jsonb refuses), serializes with U+FFFD replacement.
 [[nodiscard]] std::string serializeGameState(const GameState& state);

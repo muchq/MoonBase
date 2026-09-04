@@ -145,7 +145,7 @@ std::string serializeGameState(const GameState& state) {
   for (const Player& player : state.getPlayers()) players.push_back(playerToJson(player));
   json finished = json::array();
   for (const std::string& player_id : state.getFinished()) finished.push_back(sanitized(player_id));
-  const json serialized{
+  json serialized{
       {"v", kSchemaVersion},
       {"drawPile", cardsToJson(state.getDrawPile())},
       {"pile", cardsToJson(state.getPile())},
@@ -154,6 +154,16 @@ std::string serializeGameState(const GameState& state) {
       {"finished", std::move(finished)},
       {"players", std::move(players)},
   };
+  // Absent rather than null until the first move: rows from before the
+  // field read the same way.
+  if (const auto& play = state.getLastPlay(); play.has_value()) {
+    serialized["lastPlay"] = json{
+        {"player", sanitized(play->playerId)},
+        {"cards", cardsToJson(play->cards)},
+        {"burned", play->burned},
+        {"pickedUp", play->pickedUp},
+    };
+  }
   return serialized.dump(/*indent=*/-1, /*indent_char=*/' ', /*ensure_ascii=*/false,
                          json::error_handler_t::replace);
 }
@@ -202,6 +212,24 @@ absl::StatusOr<GameState> deserializeGameState(const std::string& serialized) {
                      static_cast<int64_t>(players.size()) - 1);
   if (!whose_turn.ok()) return whose_turn.status();
 
+  std::optional<LastPlay> last_play;
+  if (parsed.contains("lastPlay")) {
+    const json& play = parsed["lastPlay"];
+    if (!play.is_object()) return absl::InvalidArgumentError("expected object field 'lastPlay'");
+    auto player = readString(play, "player");
+    if (!player.ok()) return player.status();
+    auto cards = readCardCodes(play, "cards", 4);
+    if (!cards.ok()) return cards.status();
+    auto burned = readBool(play, "burned");
+    if (!burned.ok()) return burned.status();
+    auto picked_up = readBool(play, "pickedUp");
+    if (!picked_up.ok()) return picked_up.status();
+    // Only a pick-up by choice puts nothing down, and a pick-up never burns.
+    if (cards->empty() && !*picked_up) return absl::InvalidArgumentError("a play holds cards");
+    if (*burned && *picked_up) return absl::InvalidArgumentError("a pick-up does not burn");
+    last_play = LastPlay{*std::move(player), *std::move(cards), *burned, *picked_up};
+  }
+
   return GameState{std::deque<Card>(draw_pile->begin(), draw_pile->end()),
                    *std::move(pile),
                    std::move(players),
@@ -209,7 +237,8 @@ absl::StatusOr<GameState> deserializeGameState(const std::string& serialized) {
                    *phase,
                    std::move(finished),
                    /*_gameId=*/"",
-                   /*_versionId=*/""};
+                   /*_versionId=*/"",
+                   std::move(last_play)};
 }
 
 }  // namespace castle

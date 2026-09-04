@@ -163,24 +163,111 @@ void ExpectNoEvent(Stream& stream,
                                                         : std::string("a close"));
 }
 
-// Same, but tunnels into the golf envelope: returns the first GolfUpdate
-// of the wanted case, skipping room noise and other updates in between.
-inline std::optional<moonbase::games::GolfUpdate> ReceiveGolf(
-    moonbase::games::PlayClientStream& stream, const std::string& wanted,
-    std::chrono::milliseconds budget = kReceiveBudget) {
+// Same, but tunnels into a game's envelope: the first update of the
+// wanted case, skipping room noise and other updates in between. `pick`
+// takes an event and returns that game's envelope, or null.
+template <typename Pick>
+auto ReceiveEnvelope(moonbase::games::PlayClientStream& stream, const std::string& wanted,
+                     const char* game, Pick&& pick, std::chrono::milliseconds budget)
+    -> std::optional<
+        std::decay_t<decltype(pick(std::declval<const moonbase::games::GolfEvents&>())->update)>> {
   const auto deadline = std::chrono::steady_clock::now() + budget;
   for (int i = 0; i < 16; ++i) {
     auto received = ReceiveWithin(stream, deadline);
     if (!received.ok()) {
-      ADD_FAILURE() << "gave up waiting for golf " << wanted << ": " << received.error().message();
+      ADD_FAILURE() << "gave up waiting for " << game << " " << wanted << ": "
+                    << received.error().message();
       return std::nullopt;
     }
     if (!received->has_value()) return std::nullopt;
-    const auto* envelope = (*received)->as_golf_or_null();
+    const auto* envelope = pick(**received);
     if (envelope == nullptr) continue;
     if (wanted == envelope->update.case_name()) return envelope->update;
   }
   return std::nullopt;
+}
+
+inline std::optional<moonbase::games::GolfUpdate> ReceiveGolf(
+    moonbase::games::PlayClientStream& stream, const std::string& wanted,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  return ReceiveEnvelope(
+      stream, wanted, "golf",
+      [](const moonbase::games::GolfEvents& event) { return event.as_golf_or_null(); }, budget);
+}
+
+inline std::optional<moonbase::games::CastleUpdate> ReceiveCastle(
+    moonbase::games::PlayClientStream& stream, const std::string& wanted,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  return ReceiveEnvelope(
+      stream, wanted, "castle",
+      [](const moonbase::games::GolfEvents& event) { return event.as_castle_or_null(); }, budget);
+}
+
+// Receives until a fetched value satisfies the predicate — flows that
+// converge on content, not frame counts, because a wake re-projects
+// everything and the frame count is timing-dependent. `fetch` receives
+// one candidate (nullopt ends the wait); `waiting_for` names the
+// condition and which seat cares, so a lost wake fails with a diagnosis
+// instead of `[ RUN ]` and silence (#1276).
+template <typename Fetch, typename Predicate>
+auto AwaitMatching(Fetch&& fetch, Predicate&& predicate, const std::string& waiting_for,
+                   std::chrono::milliseconds budget = kReceiveBudget) -> decltype(fetch(budget)) {
+  const auto deadline = std::chrono::steady_clock::now() + budget;
+  for (int i = 0; i < 32; ++i) {
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - std::chrono::steady_clock::now());
+    if (remaining <= std::chrono::milliseconds::zero()) {
+      ADD_FAILURE() << "gave up waiting for " << waiting_for;
+      return std::nullopt;
+    }
+    auto candidate = fetch(remaining);
+    if (!candidate.has_value()) {
+      ADD_FAILURE() << "gave up waiting for " << waiting_for;
+      return std::nullopt;
+    }
+    if (predicate(*candidate)) return candidate;
+  }
+  ADD_FAILURE() << "gave up waiting for " << waiting_for << " (frame budget)";
+  return std::nullopt;
+}
+
+template <typename Predicate>
+std::optional<moonbase::games::RoomState> AwaitRoomState(
+    moonbase::games::PlayClientStream& stream, Predicate&& predicate,
+    const std::string& waiting_for, std::chrono::milliseconds budget = kReceiveBudget) {
+  return AwaitMatching(
+      [&](std::chrono::milliseconds remaining) -> std::optional<moonbase::games::RoomState> {
+        auto event = ReceiveCase(stream, "roomState", remaining);
+        if (!event.has_value()) return std::nullopt;
+        return *event->as_roomState_or_null();
+      },
+      predicate, waiting_for, budget);
+}
+
+template <typename Predicate>
+std::optional<moonbase::games::GameView> AwaitGameView(
+    moonbase::games::PlayClientStream& stream, Predicate&& predicate,
+    const std::string& waiting_for, std::chrono::milliseconds budget = kReceiveBudget) {
+  return AwaitMatching(
+      [&](std::chrono::milliseconds remaining) -> std::optional<moonbase::games::GameView> {
+        auto update = ReceiveGolf(stream, "gameState", remaining);
+        if (!update.has_value()) return std::nullopt;
+        return update->as_gameState_or_null()->view;
+      },
+      predicate, waiting_for, budget);
+}
+
+template <typename Predicate>
+std::optional<moonbase::games::CastleView> AwaitCastleView(
+    moonbase::games::PlayClientStream& stream, Predicate&& predicate,
+    const std::string& waiting_for, std::chrono::milliseconds budget = kReceiveBudget) {
+  return AwaitMatching(
+      [&](std::chrono::milliseconds remaining) -> std::optional<moonbase::games::CastleView> {
+        auto update = ReceiveCastle(stream, "gameState", remaining);
+        if (!update.has_value()) return std::nullopt;
+        return update->as_gameState_or_null()->view;
+      },
+      predicate, waiting_for, budget);
 }
 
 // Effectively-unlimited stream budgets (#1240) for suites whose flows
@@ -248,6 +335,13 @@ inline moonbase::games::GolfCommands Move(moonbase::games::GolfMove move) {
   moonbase::games::GolfCommand command;
   command.move = std::move(move);
   return moonbase::games::GolfCommands::FromGolf(std::move(command));
+}
+
+// The castle twin of Move: a CastleMove in its envelope on the room stream.
+inline moonbase::games::GolfCommands Castle(moonbase::games::CastleMove move) {
+  moonbase::games::CastleCommand command;
+  command.move = std::move(move);
+  return moonbase::games::GolfCommands::FromCastle(std::move(command));
 }
 
 // Captures every metric the hub records so tests can assert what is
@@ -449,6 +543,34 @@ class GamesHubStreamFixture : public testing::Test {
     return created->as_roomState_or_null()->roomId;
   }
 
+  // `count` seats in one room, the first its creator, each having heard
+  // its own roomState. Empty on failure, with the failing step's
+  // ADD_FAILURE recorded where possible.
+  struct Room {
+    std::vector<Seat> seats;
+    std::string room_id;
+  };
+  std::optional<Room> SeatedRoom(int count) {
+    Room room;
+    for (int i = 0; i < count; ++i) {
+      auto seat = OpenSeat();
+      if (!seat.has_value()) return std::nullopt;
+      if (!ReceiveCase(seat->stream, "sessionReady").has_value()) return std::nullopt;
+      room.seats.push_back(std::move(*seat));
+    }
+    room.room_id = CreateRoomFor(room.seats.front());
+    if (room.room_id.empty()) return std::nullopt;
+    moonbase::games::JoinRoom join_room;
+    join_room.roomId = room.room_id;
+    for (std::size_t i = 1; i < room.seats.size(); ++i) {
+      if (!room.seats[i].stream.Send(moonbase::games::GolfCommands::FromJoinroom(join_room)).ok()) {
+        return std::nullopt;
+      }
+      if (!ReceiveCase(room.seats[i].stream, "roomState").has_value()) return std::nullopt;
+    }
+    return room;
+  }
+
   // Room with two seats in a started game: with the NoShuffleDealer the
   // first seat holds the aces and the second the kings, Q♠ seeding the
   // discard. Returns nullopt (with an ADD_FAILURE already recorded by the
@@ -460,49 +582,87 @@ class GamesHubStreamFixture : public testing::Test {
     std::string game_id;
   };
   std::optional<Table> SeatedTable() {
-    auto alice = OpenSeat();
-    auto bob = OpenSeat();
-    if (!alice.has_value() || !bob.has_value()) return std::nullopt;
-    if (!ReceiveCase(alice->stream, "sessionReady").has_value()) return std::nullopt;
-    if (!ReceiveCase(bob->stream, "sessionReady").has_value()) return std::nullopt;
+    auto room = SeatedRoom(2);
+    if (!room.has_value()) return std::nullopt;
+    Seat& alice = room->seats[0];
+    Seat& bob = room->seats[1];
 
-    if (!alice->stream
-             .Send(moonbase::games::GolfCommands::FromCreateroom(moonbase::games::CreateRoom{}))
-             .ok()) {
-      return std::nullopt;
-    }
-    auto created = ReceiveCase(alice->stream, "roomState");
-    if (!created.has_value()) return std::nullopt;
-    const std::string room_id = created->as_roomState_or_null()->roomId;
-    moonbase::games::JoinRoom join_room;
-    join_room.roomId = room_id;
-    if (!bob->stream.Send(moonbase::games::GolfCommands::FromJoinroom(join_room)).ok())
-      return std::nullopt;
-    if (!ReceiveCase(bob->stream, "roomState").has_value()) return std::nullopt;
-
-    if (!alice->stream
+    if (!alice.stream
              .Send(Move(moonbase::games::GolfMove::FromCreategame(moonbase::games::CreateGame{})))
              .ok()) {
       return std::nullopt;
     }
-    auto joined = ReceiveGolf(alice->stream, "gameJoined");
+    auto joined = ReceiveGolf(alice.stream, "gameJoined");
     if (!joined.has_value()) return std::nullopt;
     const std::string game_id = joined->as_gameJoined_or_null()->view.gameId;
 
     moonbase::games::JoinGame join_game;
     join_game.gameId = game_id;
-    if (!bob->stream.Send(Move(moonbase::games::GolfMove::FromJoingame(join_game))).ok())
+    if (!bob.stream.Send(Move(moonbase::games::GolfMove::FromJoingame(join_game))).ok())
       return std::nullopt;
-    if (!ReceiveGolf(bob->stream, "gameJoined").has_value()) return std::nullopt;
+    if (!ReceiveGolf(bob.stream, "gameJoined").has_value()) return std::nullopt;
 
-    if (!alice->stream
+    if (!alice.stream
              .Send(Move(moonbase::games::GolfMove::FromStartgame(moonbase::games::StartGame{})))
              .ok()) {
       return std::nullopt;
     }
-    if (!ReceiveGolf(alice->stream, "gameStarted").has_value()) return std::nullopt;
-    if (!ReceiveGolf(bob->stream, "gameStarted").has_value()) return std::nullopt;
-    return Table{std::move(*alice), std::move(*bob), room_id, game_id};
+    if (!ReceiveGolf(alice.stream, "gameStarted").has_value()) return std::nullopt;
+    if (!ReceiveGolf(bob.stream, "gameStarted").has_value()) return std::nullopt;
+    return Table{std::move(alice), std::move(bob), room->room_id, game_id};
+  }
+
+  // A started castle table of `count` seats, the first its creator; each
+  // seat has heard gameStarted and still has its setup view to read.
+  // With the NoShuffleDealer seat 0 holds the aces face down, A♣ K♠ K♥
+  // face up and K♦ K♣ Q♠ in hand; seat 1 the queens, jacks and J♣ 10♠
+  // 10♥; the rest follow down the deck.
+  struct CastleTable {
+    std::vector<Seat> seats;
+    std::string room_id;
+    std::string game_id;
+    std::vector<std::string> ids() const {
+      std::vector<std::string> ids;
+      for (const Seat& seat : seats) ids.push_back(seat.player_id);
+      return ids;
+    }
+  };
+  std::optional<CastleTable> MultiSeatCastleTable(int count) {
+    using moonbase::games::CastleMove;
+    auto room = SeatedRoom(count);
+    if (!room.has_value()) return std::nullopt;
+    CastleTable table{std::move(room->seats), room->room_id, ""};
+    Seat& host = table.seats.front();
+    if (!host.stream.Send(Castle(CastleMove::FromCreategame(moonbase::games::CreateGame{}))).ok()) {
+      return std::nullopt;
+    }
+    auto created = ReceiveCastle(host.stream, "gameJoined");
+    if (!created.has_value()) return std::nullopt;
+    table.game_id = created->as_gameJoined_or_null()->view.gameId;
+    moonbase::games::JoinGame join_game;
+    join_game.gameId = table.game_id;
+    for (std::size_t i = 1; i < table.seats.size(); ++i) {
+      if (!table.seats[i].stream.Send(Castle(CastleMove::FromJoingame(join_game))).ok()) {
+        return std::nullopt;
+      }
+      if (!ReceiveCastle(table.seats[i].stream, "gameJoined").has_value()) return std::nullopt;
+    }
+    if (!host.stream.Send(Castle(CastleMove::FromStartgame(moonbase::games::StartGame{}))).ok()) {
+      return std::nullopt;
+    }
+    for (Seat& seat : table.seats) {
+      if (!ReceiveCastle(seat.stream, "gameStarted").has_value()) return std::nullopt;
+    }
+    return table;
+  }
+
+  // The castle table's twin of SeatedTable: MultiSeatCastleTable(2) in
+  // alice-and-bob form.
+  std::optional<Table> SeatedCastleTable() {
+    auto table = MultiSeatCastleTable(2);
+    if (!table.has_value()) return std::nullopt;
+    return Table{std::move(table->seats[0]), std::move(table->seats[1]), table->room_id,
+                 table->game_id};
   }
 
   std::shared_ptr<TicketVault> vault_;
