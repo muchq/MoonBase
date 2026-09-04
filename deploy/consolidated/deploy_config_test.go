@@ -2242,7 +2242,6 @@ func catchAllIsLastHandle(site []string, terminal string) (found bool, problem s
 // The local gateway's routes, matcher to upstream, so a transposed port in
 // a rewrite of the block does not ship.
 var localRoutes = map[string]string{
-	"@ws_thoughts":          "localhost:8080",
 	"@post_golf_v2_session": "localhost:8089",
 	"@ws_golf_v2":           "localhost:8089",
 	"@ws_thoughts_v2":       "localhost:8089",

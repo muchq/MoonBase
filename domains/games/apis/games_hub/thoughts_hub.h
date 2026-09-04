@@ -47,8 +47,8 @@ struct ThoughtsTestHooks {
 /// no persistence, no reconnect grace — presence is the whole game, so a
 /// dropped socket is a player gone.
 ///
-/// The world's rules are the Go server's (games_ws_backend/thoughts, kept
-/// verbatim so the UI's own bounds keep matching): position is [x, 0, z]
+/// The world's rules are the retired Go server's (kept verbatim so the
+/// UI's own bounds keep matching): position is [x, 0, z]
 /// with x and z within ±kWorldHalfExtent, color is three components in
 /// 0..1, shape is 0, 1 or 2. A command that breaks one is refused in-band
 /// (commandRejected) and changes nothing, as is move/shape before join.

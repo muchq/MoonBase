@@ -12,7 +12,6 @@ Use the provided script to run all services and Caddy in one command:
 ```
 
 This will start:
-- games_ws_backend on port 8080
 - portrait on port 8081
 - mithril on port 8083
 - posterize on port 8084

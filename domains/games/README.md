@@ -9,7 +9,6 @@ Game engines, services, and libraries.
 ## APIs
 
 - [**Games Hub**](apis/games_hub): smithy-cpp event-stream backend for golf and thoughts (#79).
-- [**Games WS Backend**](apis/games_ws_backend): WebSocket-based backend for real-time multiplayer games.
 - [**Mithril**](apis/mithril): Rust-based game service.
 - [**1d4.net**](apis/one_d4): Chess analysis service.
 - [**MCPServer**](apis/mcpserver): Multi-protocol game server.

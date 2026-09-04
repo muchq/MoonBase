@@ -11,7 +11,8 @@ namespace games_hub {
 
 namespace {
 
-// The same word lists as games_ws_backend's players.WhimsicalIDGenerator.
+// The word lists the retired Go server (#1187, #79) minted ids from; kept so
+// ids look the same across the move.
 constexpr std::string_view kAdjectives[] = {"bouncy",  "giggly", "sparkly", "fuzzy",   "wiggly",
                                             "snuggly", "dreamy", "bubbly",  "twinkly", "jolly",
                                             "quirky",  "peppy",  "zesty",   "frisky",  "silly",

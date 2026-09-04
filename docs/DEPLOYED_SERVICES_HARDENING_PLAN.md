@@ -5,7 +5,6 @@ This plan targets the services deployed in `deploy/consolidated/compose.yaml`, w
 ## Scope
 
 Services in the consolidated deploy:
-- `games_ws_backend` (Go)
 - `portrait` (C++)
 - `prom_proxy` (Go)
 - `mithril` (Rust)
@@ -13,12 +12,6 @@ Services in the consolidated deploy:
 - `mcpserver` (Java)
 
 ## Phase 1: Timeouts and Limits
-
-### games_ws_backend (Go)
-- Add HTTP server timeouts (`ReadTimeout`, `WriteTimeout`, `IdleTimeout`, `ReadHeaderTimeout`).
-- Add WebSocket message rate limiting and per-connection limits.
-- Add WS read/write deadlines tuned for production.
-- Make allowed origins configurable (env/config), defaulting to current list.
 
 ### prom_proxy (Go)
 - Add HTTP server timeouts.
@@ -69,10 +62,6 @@ Services in the consolidated deploy:
 ### mcpserver
 - Integration tests for Micronaut filter-based rate limiting.
 - Stress tests for concurrent MCP connections.
-
-### games_ws_backend
-- Hub tests for origin validation and WS size limits.
-- Integration tests for rate limiting and abusive patterns.
 
 ### prom_proxy
 - Tests for query caps (range/step validation).

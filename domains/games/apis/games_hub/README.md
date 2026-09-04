@@ -86,5 +86,4 @@ lobby-safe summaries only.
 - `ALLOWED_ORIGINS` unset admits all origins (local dev); production
   sets the allowlist.
 - Deployed behind Caddy at `/games/v2/*` (`deploy/consolidated`); the
-  muchq.com golf UI's only backend, and the thoughts UI's once it moves
-  off the v1 Go server (`games_ws_backend`).
+  muchq.com golf and thoughts UIs' only backend.
