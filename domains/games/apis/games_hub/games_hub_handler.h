@@ -15,8 +15,15 @@ namespace games_hub {
 
 /// The generated service's one handler (#79): session identity here, and
 /// each game's stream forwarded whole to its hub. The games share the
-/// vault (one ticket opens either stream) and nothing else; adding a game
-/// is one forwarding override and one member.
+/// vault (one ticket opens either stream) and nothing else.
+///
+/// What a new game costs depends on its shape. A thoughts-shaped game — a
+/// flat stream with its own registry and no rooms — is one forwarding
+/// override and one member. A room-shaped game (castle, #77) wants the
+/// room layer #1187 built: rooms, chat, grace, the store, per-viewer
+/// redaction. That layer lives in GolfHub today, so such a game extends
+/// the room host rather than cloning ThoughtsHub, and the README says
+/// which union shape it copies.
 class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
  public:
   /// Every counter series either hub declares — what a sweep over a

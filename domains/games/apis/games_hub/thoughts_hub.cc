@@ -50,8 +50,12 @@ std::optional<std::string> ShapeProblem(std::int32_t shape) {
 
 ThoughtsHub::ThoughtsHub(std::shared_ptr<TicketVault> vault,
                          std::shared_ptr<futility::otel::MetricsRecorder> metrics,
-                         ThoughtsLimits limits)
-    : vault_(std::move(vault)), metrics_(std::move(metrics)), limits_(limits), registry_([] {
+                         ThoughtsLimits limits, ThoughtsTestHooks hooks)
+    : vault_(std::move(vault)),
+      metrics_(std::move(metrics)),
+      limits_(limits),
+      hooks_(std::move(hooks)),
+      registry_([] {
         Registry::Options options;
         options.async_delivery = true;  // chains, not writer threads (ADR-0019)
         // No grace: a closed socket leaves the world. The registry then
@@ -145,6 +149,7 @@ smithy::eventstream::StreamTask ThoughtsHub::Think(
       // "already in the world" — or worse, be erased by the old frame's
       // leave.
       Leave(player_id);
+      if (hooks_.before_seat_release) hooks_.before_seat_release(player_id);
       registry_.Remove(player_id);
       TrackActive(-1);
       Count("thoughts_disconnects", {{"kind", received.ok() ? "clean" : "abrupt"}});
@@ -197,6 +202,7 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
         // queue is touched here, so no other session's close path can be
         // completed inline under this lock.
         Send(player_id, ThoughtsEvents::FromWorldstate(std::move(snapshot)));
+        if (hooks_.after_snapshot_queued) hooks_.after_snapshot_queued();
       }
     }
     if (already_joined) {

@@ -1176,6 +1176,22 @@ func TestNoDeployConfigNamesR3dr(t *testing.T) {
 	}
 }
 
+// The games hub's database, role, init step and host key are games_hub now
+// (#79); any golf_hub left in the deploy surface is a missed rename. Golf the
+// game keeps its routes, so only the joined spelling is refused.
+func TestNoDeployConfigNamesGolfHub(t *testing.T) {
+	files := []string{"compose.yaml", "Caddyfile", "Caddyfile.local", "deploy.sh",
+		"local_deploy.sh", "initialize_host.sh"}
+	for _, name := range files {
+		for i, line := range strings.Split(readConfig(t, name), "\n") {
+			if strings.Contains(strings.ToLower(line), "golf_hub") {
+				t.Errorf("%s:%d names golf_hub (%q); the service is games_hub", name, i+1,
+					strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
 // Whether a Caddy line mentions one of the route's path directives (glob
 // suffix trimmed).
 func namesARoutePath(line string, directives []string) bool {
@@ -1429,9 +1445,16 @@ func TestTheJavaServiceAlsoGatesOnTheMigrateStep(t *testing.T) {
 }
 
 // Whether service's depends_on carries one_d4_migrate with
+// condition: service_completed_successfully.
+func gatesOnCompletedMigrate(t *testing.T, service string) bool {
+	t.Helper()
+	return gatesOnCompleted(t, service, "one_d4_migrate")
+}
+
+// Whether service's depends_on carries `oneShot` with
 // condition: service_completed_successfully (read by adjacency, since
 // dependsOn deliberately strips conditions).
-func gatesOnCompletedMigrate(t *testing.T, service string) bool {
+func gatesOnCompleted(t *testing.T, service, oneShot string) bool {
 	t.Helper()
 	previous := ""
 	for _, line := range composeServiceLines(t, "compose.yaml")[service] {
@@ -1439,12 +1462,75 @@ func gatesOnCompletedMigrate(t *testing.T, service string) bool {
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		if previous == "one_d4_migrate:" && trimmed == "condition: service_completed_successfully" {
+		if previous == oneShot+":" && trimmed == "condition: service_completed_successfully" {
 			return true
 		}
 		previous = trimmed
 	}
 	return false
+}
+
+// games_hub's boot runs its migrations against the database games_hub_db_init
+// provisions, so it gates on that one-shot the way one_d4 gates on its
+// migrate step: without the condition it races the provisioning and
+// crash-loops on a role that does not exist yet.
+func TestGamesHubGatesOnDbInitCompletedSuccessfully(t *testing.T) {
+	if !gatesOnCompleted(t, "games_hub", "games_hub_db_init") {
+		t.Errorf("games_hub does not gate on games_hub_db_init with "+
+			"service_completed_successfully (depends_on: %v).", dependsOn(t, "games_hub"))
+	}
+}
+
+// The init step is a one-shot: under `restart: always` it would exit 0 and be
+// brought straight back forever, and service_completed_successfully never
+// fires for a container that keeps restarting — games_hub would never start.
+func TestGamesHubDbInitIsAOneShot(t *testing.T) {
+	lines := composeServiceLines(t, "compose.yaml")["games_hub_db_init"]
+	if len(lines) == 0 {
+		t.Fatal("no games_hub_db_init service in compose.yaml — games_hub's depends_on gate " +
+			"has nothing to wait for.")
+	}
+	restart := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "restart:") {
+			restart = strings.TrimSpace(strings.TrimPrefix(trimmed, "restart:"))
+		}
+	}
+	if restart != `"no"` {
+		t.Errorf("games_hub_db_init restart policy is %q, want \"no\": a one-shot under any "+
+			"other policy is a restart loop that never completes.", restart)
+	}
+}
+
+// The hub's password is read only from the host's ~/.env and interpolated into
+// a libpq URL and a psql literal. Unset, a bare ${GAMES_HUB_DB_PASSWORD} would
+// interpolate empty: the init step would provision the role with an empty
+// password and the hub would connect with one, healthy-looking and open to any
+// peer on app_network. The :?unset guard makes compose refuse to start
+// instead, the shape iili's R3DR_V2_DB_PASSWORD already has.
+func TestGamesHubDbPasswordIsRequiredLikeIili(t *testing.T) {
+	uses := 0
+	for i, line := range strings.Split(readConfig(t, "compose.yaml"), "\n") {
+		if hash := strings.Index(line, "#"); hash >= 0 {
+			line = line[:hash]
+		}
+		// $${...} is the container shell's expansion of the already-guarded
+		// environment entry, not a compose interpolation.
+		line = strings.ReplaceAll(line, "$${GAMES_HUB_DB_PASSWORD", "")
+		if !strings.Contains(line, "${GAMES_HUB_DB_PASSWORD") {
+			continue
+		}
+		uses++
+		if !strings.Contains(line, "${GAMES_HUB_DB_PASSWORD:?unset}") {
+			t.Errorf("compose.yaml:%d interpolates GAMES_HUB_DB_PASSWORD without :?unset: %q",
+				i+1, strings.TrimSpace(line))
+		}
+	}
+	if uses < 2 {
+		t.Fatalf("GAMES_HUB_DB_PASSWORD is interpolated %d times; expected the hub's URL and "+
+			"the init step's environment, so this test is reading less than it claims.", uses)
+	}
 }
 
 // A one-shot under `restart: always` is a restart loop: the container exits 0

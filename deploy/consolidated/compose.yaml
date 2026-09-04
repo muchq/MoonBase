@@ -80,7 +80,7 @@ services:
       # Credentials live in the hub's own database on the shared postgres
       # instance (MoonBase#1194 step 1): tickets and resume tokens survive
       # deploys. games_hub_db_init provisions the role + database.
-      GAMES_HUB_DB_URL: postgresql://games_hub:${GAMES_HUB_DB_PASSWORD}@shared_postgres:5432/games_hub
+      GAMES_HUB_DB_URL: postgresql://games_hub:${GAMES_HUB_DB_PASSWORD:?unset}@shared_postgres:5432/games_hub
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: games_hub
       OTEL_RESOURCE_ATTRIBUTES: service.name=games_hub,service.version=${GAMES_HUB_SHA:-${DEPLOY_SHA:-latest}}
@@ -379,7 +379,7 @@ services:
       PGUSER: one_d4
       PGDATABASE: one_d4
       PGPASSWORD: ${ONE_D4_DB_PASSWORD}
-      GAMES_HUB_DB_PASSWORD: ${GAMES_HUB_DB_PASSWORD}
+      GAMES_HUB_DB_PASSWORD: ${GAMES_HUB_DB_PASSWORD:?unset}
     entrypoint: ["/bin/bash", "-ec"]
     command:
       - |

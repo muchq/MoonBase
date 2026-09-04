@@ -7,11 +7,14 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -382,6 +385,170 @@ TEST_F(ThoughtsRateLimitedFixture, AMoveFloodIsRefusedAfterTheBurst) {
   auto joined = NextEvent(alice->stream);
   ASSERT_TRUE(joined.has_value());
   EXPECT_NE(joined->as_playerJoined_or_null(), nullptr);
+}
+
+// The two orderings the world lock is for, each driven at the hub's
+// scheduling seam so the interleaving is the test's, not the scheduler's.
+//
+// The in-memory wire completes a session's parked Receive inline on the
+// thread that sent the frame (or closed the socket), so the acting session's
+// command — and the hook it parks in — runs on whichever thread triggered
+// it. Each trigger therefore gets its own thread, and the test thread stays
+// free to observe and release.
+class ThoughtsRaceFixture : public GamesHubStreamFixture {
+ protected:
+  ThoughtsTestHooks MakeThoughtsHooks() override {
+    ThoughtsTestHooks hooks;
+    hooks.after_snapshot_queued = [this] { Park("snapshot"); };
+    hooks.before_seat_release = [this](const std::string&) { Park("seat"); };
+    return hooks;
+  }
+
+  // A hook that never released would hang the fixture's own closes.
+  void TearDown() override {
+    Disarm();
+    Release();
+    GamesHubStreamFixture::TearDown();
+  }
+
+  void Arm() {
+    const std::lock_guard<std::mutex> lock(park_mu_);
+    armed_ = true;
+    released_ = false;
+  }
+  void Disarm() {
+    const std::lock_guard<std::mutex> lock(park_mu_);
+    armed_ = false;
+  }
+  // Waits until a hook named `stage` is parked (the hub's thread is inside
+  // the seam), or fails after the budget.
+  bool WaitParked(const std::string& stage) {
+    std::unique_lock<std::mutex> lock(park_mu_);
+    return park_cv_.wait_for(lock, kReceiveBudget, [&] { return parked_ == stage; });
+  }
+  void Release() {
+    {
+      const std::lock_guard<std::mutex> lock(park_mu_);
+      parked_.clear();
+      released_ = true;
+    }
+    park_cv_.notify_all();
+  }
+
+ private:
+  void Park(const std::string& stage) {
+    std::unique_lock<std::mutex> lock(park_mu_);
+    if (!armed_) return;  // the seam only parks while a test has armed it
+    parked_ = stage;
+    park_cv_.notify_all();
+    park_cv_.wait(lock, [&] { return released_; });
+  }
+
+  std::mutex park_mu_;
+  std::condition_variable park_cv_;
+  std::string parked_;
+  bool armed_ = false;
+  bool released_ = false;
+};
+
+// A leave that races a join lands behind the joiner's snapshot, never ahead
+// of it: with the snapshot queued under the world lock, the leaver's erase
+// waits, so the joiner sees the leaver in worldState and then hears
+// playerLeft — the order a client can apply. Queued outside the lock, the
+// playerLeft could arrive first, for a player the snapshot then resurrects.
+TEST_F(ThoughtsRaceFixture, ALeaveDuringAJoinLandsBehindTheJoinersSnapshot) {
+  auto alice = OpenThoughtsSeat();
+  auto carol = OpenThoughtsSeat();
+  auto bob = OpenThoughtsSeat();
+  ASSERT_TRUE(alice.has_value() && carol.has_value() && bob.has_value());
+  ASSERT_TRUE(carol->stream.Send(FixtureJoin()).ok());
+  ASSERT_TRUE(NextEvent(carol->stream).has_value());  // worldState
+  ASSERT_TRUE(NextEvent(alice->stream).has_value());  // playerJoined carol
+  ASSERT_TRUE(NextEvent(bob->stream).has_value());
+
+  // Bob joins and parks inside the seam with the lock held and his
+  // snapshot (listing carol) already queued.
+  Arm();
+  bool join_sent = false;
+  std::thread joiner([&] { join_sent = bob->stream.Send(FixtureJoin()).ok(); });
+  ASSERT_TRUE(WaitParked("snapshot"));
+
+  // Carol leaves now. Her erase needs the lock bob holds, so nothing about
+  // her leave can reach anyone yet — alice, who is not in the seam, hears
+  // silence.
+  bool leave_sent = false;
+  std::thread leaver([&] { leave_sent = carol->stream.Send(Leave()).ok(); });
+  ExpectNoEvent(alice->stream);
+  Disarm();
+  Release();
+  joiner.join();
+  leaver.join();
+  EXPECT_TRUE(join_sent);
+  EXPECT_TRUE(leave_sent);
+
+  // Bob: the snapshot with carol in it, then her departure — in that order.
+  auto world = NextEvent(bob->stream);
+  ASSERT_TRUE(world.has_value());
+  ASSERT_NE(world->as_worldState_or_null(), nullptr);
+  ASSERT_EQ(world->as_worldState_or_null()->players.size(), 1u);
+  EXPECT_EQ(world->as_worldState_or_null()->players[0].playerId, carol->player_id);
+  auto left = NextEvent(bob->stream);
+  ASSERT_TRUE(left.has_value());
+  ASSERT_NE(left->as_playerLeft_or_null(), nullptr);
+  EXPECT_EQ(left->as_playerLeft_or_null()->playerId, carol->player_id);
+  // Alice hears both — bob's arrival and carol's departure — whose relative
+  // order is the scheduler's, not the lock's.
+  std::set<std::string> heard;
+  for (int i = 0; i < 2; ++i) {
+    auto event = NextEvent(alice->stream);
+    ASSERT_TRUE(event.has_value());
+    heard.insert(event->case_name());
+  }
+  EXPECT_EQ(heard, (std::set<std::string>{"playerJoined", "playerLeft"}));
+}
+
+// A closed socket erases its world entry and fans out playerLeft while the
+// seat is still held, and only then releases it: a reconnect admitted the
+// instant the seat frees finds the world already clean, instead of being
+// refused as "already in the world" or having its own entry erased by the
+// old frame's leave.
+TEST_F(ThoughtsRaceFixture, AClosedSocketErasesTheWorldBeforeReleasingTheSeat) {
+  auto alice = OpenThoughtsSeat();
+  auto bob = OpenThoughtsSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(FixtureJoin()).ok());
+  ASSERT_TRUE(NextEvent(alice->stream).has_value());
+  ASSERT_TRUE(NextEvent(bob->stream).has_value());
+
+  Arm();
+  std::thread closer([&] { alice->stream.Close(); });
+  ASSERT_TRUE(WaitParked("seat"));
+
+  // Inside the seam: the world has already told bob, and the seat is still
+  // alice's.
+  auto left = NextEvent(bob->stream);
+  ASSERT_TRUE(left.has_value());
+  ASSERT_NE(left->as_playerLeft_or_null(), nullptr);
+  EXPECT_EQ(left->as_playerLeft_or_null()->playerId, alice->player_id);
+  const auto seats = thoughts_->registry().Ids();
+  EXPECT_NE(std::find(seats.begin(), seats.end(), alice->player_id), seats.end())
+      << "the seat was released before the world was cleaned";
+  Disarm();
+  Release();
+  closer.join();
+
+  // Past the seam the seat frees, and the reconnect's join is a fresh
+  // arrival: bob hears one playerJoined, nothing is refused.
+  auto back = OpenThoughtsSeat(alice->resume_token);
+  ASSERT_TRUE(back.has_value());
+  ASSERT_TRUE(back->stream.Send(FixtureJoin()).ok());
+  auto world = NextEvent(back->stream);
+  ASSERT_TRUE(world.has_value());
+  EXPECT_NE(world->as_worldState_or_null(), nullptr);
+  auto rejoined = NextEvent(bob->stream);
+  ASSERT_TRUE(rejoined.has_value());
+  EXPECT_NE(rejoined->as_playerJoined_or_null(), nullptr);
+  ExpectNoEvent(bob->stream);
 }
 
 // The thoughts_commands/thoughts_events declarations are a hand copy of the

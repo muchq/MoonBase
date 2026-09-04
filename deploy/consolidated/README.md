@@ -202,11 +202,12 @@ nothing from the host filesystem.
 games_hub, one_d4 and iili take their database URLs from `compose.yaml`, interpolating a
 password from the host's `~/.env`: `GAMES_HUB_DB_URL` and `IILI_DB_URL` (libpq form, read from
 C++) and `INDEXER_DB_URL` (JDBC form, read by pgjdbc). All point at the `shared_postgres` service.
-**`R3DR_V2_DB_PASSWORD`** in `~/.env` (#1359) is the one place the old name survives: `iili_db_init`
-provisions the `r3dr_v2` role and database with it on every deploy, idempotently, because renaming
-a role and database holding live rows is an operation, not a rename. Keep it URL-safe (no
-`@ / ? # %` or quotes): it rides in a libpq URL and a single-quoted SQL literal. Compose
-refuses to start the service if it's unset.
+**`GAMES_HUB_DB_PASSWORD`** in `~/.env` is what `games_hub_db_init` provisions the `games_hub`
+role and database with, on every deploy, idempotently. **`R3DR_V2_DB_PASSWORD`** (#1359) is the
+one place an old name survives: `iili_db_init` provisions the `r3dr_v2` role and database with
+it, because renaming a role and database holding live rows is an operation, not a rename. Keep
+both URL-safe (no `@ / ? # %` or quotes): each rides in a libpq URL and a single-quoted SQL
+literal. Compose refuses to start the project if either is unset.
 
 ### The stats profile
 

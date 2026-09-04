@@ -284,6 +284,8 @@ class GamesHubStreamFixture : public testing::Test {
   /// by accident; the expiry suites override it down to something a
   /// receive budget can wait out.
   virtual std::chrono::seconds GracePeriod() { return std::chrono::seconds(60); }
+  /// The race suites' scheduling seams; empty unless a suite overrides.
+  virtual ThoughtsTestHooks MakeThoughtsHooks() { return {}; }
   /// The thoughts stream's budget; the thoughts rate-limit suite overrides
   /// with tiny frozen buckets.
   virtual ThoughtsLimits MakeThoughtsLimits() {
@@ -326,7 +328,8 @@ class GamesHubStreamFixture : public testing::Test {
     }
     const absl::Status restored = golf_->RestoreFromStore();
     ASSERT_TRUE(restored.ok()) << restored;
-    thoughts_ = std::make_shared<ThoughtsHub>(vault_, metrics_, MakeThoughtsLimits());
+    thoughts_ =
+        std::make_shared<ThoughtsHub>(vault_, metrics_, MakeThoughtsLimits(), MakeThoughtsHooks());
     handler_ = std::make_shared<GamesHubHandler>(vault_, ids_, golf_, thoughts_);
     server_ = std::make_unique<moonbase::games::GamesHubServer>(handler_);
 
