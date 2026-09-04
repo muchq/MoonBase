@@ -2,6 +2,10 @@ $version: "2.0"
 
 namespace moonbase.golf
 
+use moonbase.castle#CastleCommand
+use moonbase.castle#CastleEvent
+use moonbase.games#Card
+use moonbase.games#CardIndexes
 use moonbase.games#Chat
 use moonbase.games#ChatHistory
 use moonbase.games#ChatMessage
@@ -16,6 +20,7 @@ use moonbase.games#JoinGame
 use moonbase.games#JoinRoom
 use moonbase.games#LeaveGame
 use moonbase.games#LeaveRoom
+use moonbase.games#PlayerIds
 use moonbase.games#RoomLeft
 use moonbase.games#RoomState
 use moonbase.games#SeatConflict
@@ -26,7 +31,8 @@ use moonbase.games#Unauthenticated
 
 // Golf's vocabulary (#79): the Play stream and the moves and updates nested
 // under one `golf` member per direction, so the room layer never changes
-// shape when a game joins the hub.
+// shape when a game joins the hub. Castle (#77) is the second such member:
+// the stream is the room's, and a room hosts tables of either game.
 
 /// The one WebSocket session per player: commands up, events down. The
 /// ticket rides the upgrade GET as a query member (browsers cannot set
@@ -58,6 +64,7 @@ union GolfCommands {
     getRoomState: GetRoomState
     chat: Chat
     golf: GolfCommand
+    castle: CastleCommand
 }
 
 /// The game-specific envelope: exactly one move.
@@ -121,6 +128,7 @@ union GolfEvents {
     roomChatHistory: ChatHistory
     commandRejected: CommandRejected
     golf: GolfEvent
+    castle: CastleEvent
 }
 
 /// The game-specific envelope: exactly one update.
@@ -168,9 +176,6 @@ structure GameEnded {
     finalScores: FinalScores
 }
 
-list PlayerIds {
-    member: String
-}
 
 list FinalScores {
     member: FinalScore
@@ -248,18 +253,4 @@ list CardSlots {
 
 structure CardSlot {
     card: Card
-}
-
-list CardIndexes {
-    member: Integer
-}
-
-/// Ranks A 2..10 J Q K, suits ♠ ♥ ♦ ♣ — the v1 wire's card language,
-/// which the UI already renders.
-structure Card {
-    @required
-    rank: String
-
-    @required
-    suit: String
 }

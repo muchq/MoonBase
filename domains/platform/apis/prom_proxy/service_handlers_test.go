@@ -121,17 +121,19 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, string(DefaultView), response.View)
 
 	// Custom groups keep registry order and every descriptor is present.
-	require.Len(t, response.Custom, 5)
+	require.Len(t, response.Custom, 6)
 	assert.Equal(t, "Probes", response.Custom[0].Title)
 	assert.Equal(t, "Golf sessions", response.Custom[1].Title)
 	assert.Equal(t, "Golf activity", response.Custom[2].Title)
 	assert.Equal(t, "Chat", response.Custom[3].Title)
 	assert.Equal(t, "Thoughts", response.Custom[4].Title)
+	assert.Equal(t, "Castle", response.Custom[5].Title)
 	assert.Len(t, response.Custom[0].Metrics, 1)
 	assert.Len(t, response.Custom[1].Metrics, 7)
 	assert.Len(t, response.Custom[2].Metrics, 4)
 	assert.Len(t, response.Custom[3].Metrics, 5)
 	require.Len(t, response.Custom[4].Metrics, 8)
+	require.Len(t, response.Custom[5].Metrics, 2)
 
 	assert.Equal(t, CustomMetricValue{Label: "health_checks", Value: 200.0, Toggleable: true},
 		response.Custom[0].Metrics[0])
@@ -149,8 +151,11 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	// tile's label names it across the whole service, not just its group.
 	assert.Equal(t, CustomMetricValue{Label: "thoughts_active", Value: 217.0, Unit: "sessions"},
 		response.Custom[4].Metrics[0])
+	// Castle (#77) starts at index 25, after thoughts.
+	assert.Equal(t, CustomMetricValue{Label: "castle_commands", Value: 225.0, Toggleable: true},
+		response.Custom[5].Metrics[0])
 	// The omitted query's descriptor survives with a zero value.
-	last := response.Custom[4].Metrics[7]
+	last := response.Custom[5].Metrics[1]
 	assert.Equal(t, omitted.Label, last.Label)
 	assert.Equal(t, 0.0, last.Value)
 }
@@ -280,9 +285,9 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 		assert.GreaterOrEqual(t, series.MetricName, previous)
 		previous = series.MetricName
 	}
-	// The seven standard series plus the hub's twenty-six custom panels:
-	// four fixed-form charts, and eleven toggleable ones each expanding to
-	// a _rate/_count pair (one prefix per game).
+	// The seven standard series plus the hub's thirty custom panels: four
+	// fixed-form charts, and thirteen toggleable ones each expanding to a
+	// _rate/_count pair (one prefix per game).
 	expected := []string{
 		"request_rate", "request_count", "error_rate_percent", "error_count",
 		"avg_duration_us", "p95_duration_us", "active_requests",
@@ -299,6 +304,8 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 		"thoughts_command_rate", "thoughts_command_count",
 		"thoughts_event_rate", "thoughts_event_count",
 		"thoughts_rejection_rate", "thoughts_rejection_count",
+		"castle_command_rate", "castle_command_count",
+		"castle_event_rate", "castle_event_count",
 	}
 	assert.Len(t, names, len(expected))
 	for _, name := range expected {

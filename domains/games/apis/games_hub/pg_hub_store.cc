@@ -5,6 +5,8 @@
 
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "domains/games/apis/games_hub/hosted_game.h"
+#include "domains/games/libs/cards/castle/game_state_serde.h"
 #include "domains/games/libs/cards/golf/game_state_serde.h"
 
 namespace games_hub {
@@ -32,8 +34,8 @@ constexpr char kDeleteGame[] = "DELETE FROM games WHERE room_id = $1 AND game_id
 // double-fires. rows() of the outer SELECT is the landed/missed probe.
 constexpr char kCommitInsert[] = R"sql(
     WITH save AS (
-      INSERT INTO games (room_id, game_id, roster, state, version)
-      VALUES ($1, $2, $3::jsonb, NULLIF($4, '')::jsonb, $5::bigint)
+      INSERT INTO games (room_id, game_id, roster, state, version, game)
+      VALUES ($1, $2, $3::jsonb, NULLIF($4, '')::jsonb, $5::bigint, $8)
       ON CONFLICT (room_id, game_id) DO NOTHING
       RETURNING version)
     SELECT pg_notify($6, $7) FROM save)sql";
@@ -81,8 +83,11 @@ std::string StatsJson(const std::vector<PgHubStore::StatsDelta>& stats) {
   return rows.dump();
 }
 
+// The state column is encoded by whichever engine the variant holds; the
+// kind column is what the loads read to pick the decoder back.
 std::string StateJson(const PgHubStore::GameRow& row) {
-  return row.state.has_value() ? golf::serializeGameState(*row.state) : "";
+  if (!row.state.has_value()) return "";
+  return std::visit([](const auto& state) { return serializeGameState(state); }, *row.state);
 }
 
 }  // namespace
@@ -162,9 +167,21 @@ void PgHubStore::Apply(const Op& op) {
 
 absl::StatusOr<bool> PgHubStore::CommitGameSave(const GameRow& row,
                                                 const std::string& notify_payload) {
-  auto result = db_->Exec(row.version == 1 ? kCommitInsert : kCommitUpdate,
-                          {row.room_id, row.game_id, RosterJson(row.roster), StateJson(row),
-                           std::to_string(row.version), RoomChannel(row.room_id), notify_payload});
+  // The kind rides only the insert: it is fixed at creation, and the
+  // update never writes it.
+  std::vector<std::string> params = {row.room_id,
+                                     row.game_id,
+                                     RosterJson(row.roster),
+                                     StateJson(row),
+                                     std::to_string(row.version),
+                                     RoomChannel(row.room_id),
+                                     notify_payload};
+  // A started row's kind is its state's: the column and the encoding
+  // cannot disagree.
+  if (row.version == 1) {
+    params.emplace_back(GameKindName(row.state.has_value() ? KindOf(*row.state) : row.kind));
+  }
+  auto result = db_->Exec(row.version == 1 ? kCommitInsert : kCommitUpdate, params);
   if (!result.ok()) return result.status();
   return result->rows() == 1;
 }
@@ -183,14 +200,14 @@ absl::StatusOr<bool> PgHubStore::CommitGameFinish(const GameRow& row,
 absl::StatusOr<std::optional<PgHubStore::GameRow>> PgHubStore::LoadGame(
     const std::string& room_id, const std::string& game_id) {
   auto result = db_->Exec(
-      "SELECT roster::text, COALESCE(state::text, ''), version FROM games"
+      "SELECT roster::text, COALESCE(state::text, ''), version, game FROM games"
       " WHERE room_id = $1 AND game_id = $2",
       {room_id, game_id});
   if (!result.ok()) return result.status();
   if (result->rows() == 0) return std::nullopt;
-  auto row = RowFromColumns(room_id, game_id, result->Get(0, 0).value_or("[]"),
-                            result->Get(0, 1).value_or(""),
-                            std::atoll(result->Get(0, 2).value_or("0").c_str()));
+  auto row = RowFromColumns(
+      room_id, game_id, result->Get(0, 0).value_or("[]"), result->Get(0, 1).value_or(""),
+      std::atoll(result->Get(0, 2).value_or("0").c_str()), result->Get(0, 3).value_or("golf"));
   if (!row.ok()) {
     LOG(ERROR) << "game " << room_id << "/" << game_id
                << " unreadable, treating as gone: " << row.status();
@@ -223,15 +240,15 @@ absl::StatusOr<PgHubStore::RoomRows> PgHubStore::LoadRoom(const std::string& roo
   }
 
   auto games = db_->Exec(
-      "SELECT game_id, roster::text, COALESCE(state::text, ''), version FROM games"
+      "SELECT game_id, roster::text, COALESCE(state::text, ''), version, game FROM games"
       " WHERE room_id = $1",
       {room_id});
   if (!games.ok()) return games.status();
   for (int i = 0; i < games->rows(); ++i) {
     const std::string game_id = games->Get(i, 0).value_or("");
-    auto row = RowFromColumns(room_id, game_id, games->Get(i, 1).value_or("[]"),
-                              games->Get(i, 2).value_or(""),
-                              std::atoll(games->Get(i, 3).value_or("0").c_str()));
+    auto row = RowFromColumns(
+        room_id, game_id, games->Get(i, 1).value_or("[]"), games->Get(i, 2).value_or(""),
+        std::atoll(games->Get(i, 3).value_or("0").c_str()), games->Get(i, 4).value_or("golf"));
     if (!row.ok()) {
       LOG(ERROR) << "dropping game " << room_id << "/" << game_id << ": " << row.status();
       continue;
@@ -265,16 +282,17 @@ absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
   }
 
   auto games = db_->Exec(
-      "SELECT room_id, game_id, roster::text, COALESCE(state::text, ''), version FROM games");
+      "SELECT room_id, game_id, roster::text, COALESCE(state::text, ''), version, game"
+      " FROM games");
   if (!games.ok()) return games.status();
   for (int i = 0; i < games->rows(); ++i) {
     const std::string room_id = games->Get(i, 0).value_or("");
     const std::string game_id = games->Get(i, 1).value_or("");
     // Undecodable rows cost their game, not the boot — the same blast
     // radius whichever column is bad.
-    auto row = RowFromColumns(room_id, game_id, games->Get(i, 2).value_or("[]"),
-                              games->Get(i, 3).value_or(""),
-                              std::atoll(games->Get(i, 4).value_or("0").c_str()));
+    auto row = RowFromColumns(
+        room_id, game_id, games->Get(i, 2).value_or("[]"), games->Get(i, 3).value_or(""),
+        std::atoll(games->Get(i, 4).value_or("0").c_str()), games->Get(i, 5).value_or("golf"));
     if (!row.ok()) {
       LOG(ERROR) << "dropping game " << room_id << "/" << game_id << ": " << row.status();
       continue;
@@ -284,15 +302,16 @@ absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
   return snapshot;
 }
 
-absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(const std::string& room_id,
-                                                               const std::string& game_id,
-                                                               const std::string& roster_json,
-                                                               const std::string& state_json,
-                                                               int64_t version) {
+absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(
+    const std::string& room_id, const std::string& game_id, const std::string& roster_json,
+    const std::string& state_json, int64_t version, const std::string& game) {
   GameRow row;
   row.room_id = room_id;
   row.game_id = game_id;
   row.version = version;
+  const std::optional<GameKind> kind = ParseGameKind(game);
+  if (!kind.has_value()) return absl::DataLossError("unknown game kind: " + game);
+  row.kind = *kind;
   const json roster = json::parse(roster_json, /*cb=*/nullptr, /*allow_exceptions=*/false);
   if (!roster.is_array()) return absl::DataLossError("roster is not an array of player ids");
   for (const json& entry : roster) {
@@ -300,9 +319,15 @@ absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(const std::string
     row.roster.push_back(entry.get<std::string>());
   }
   if (!state_json.empty()) {
-    auto state = golf::deserializeGameState(state_json);
-    if (!state.ok()) return state.status();
-    row.state.emplace(*std::move(state));
+    if (row.kind == GameKind::kCastle) {
+      auto state = castle::deserializeGameState(state_json);
+      if (!state.ok()) return state.status();
+      row.state.emplace(*std::move(state));
+    } else {
+      auto state = golf::deserializeGameState(state_json);
+      if (!state.ok()) return state.status();
+      row.state.emplace(*std::move(state));
+    }
   }
   return row;
 }

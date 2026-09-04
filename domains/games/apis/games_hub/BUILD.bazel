@@ -8,6 +8,7 @@ load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 smithy_cpp_server_library(
     name = "games_hub_smithy_server",
     srcs = [
+        "model/castle.smithy",
         "model/games.smithy",
         "model/golf.smithy",
         "model/thoughts.smithy",
@@ -19,12 +20,25 @@ smithy_cpp_server_library(
 smithy_cpp_client_library(
     name = "games_hub_smithy_client",
     srcs = [
+        "model/castle.smithy",
         "model/games.smithy",
         "model/golf.smithy",
         "model/thoughts.smithy",
     ],
     namespace = "moonbase::games",
     service = "moonbase.games#GamesHub",
+)
+
+# The games a room hosts (#79): the kind a table is created as, and the
+# engine-state variant a started table carries, shared by the hub and
+# its store.
+cc_library(
+    name = "hosted_game",
+    hdrs = ["hosted_game.h"],
+    deps = [
+        "//domains/games/libs/cards/castle:game_state",
+        "//domains/games/libs/cards/golf:game_state",
+    ],
 )
 
 cc_library(
@@ -106,6 +120,7 @@ cc_library(
     srcs = ["hub_store.cc"],
     hdrs = ["hub_store.h"],
     deps = [
+        ":hosted_game",
         "//domains/games/libs/cards/golf:game_state",
         "@com_google_absl//absl/status:statusor",
     ],
@@ -172,7 +187,9 @@ cc_library(
     srcs = ["pg_hub_store.cc"],
     hdrs = ["pg_hub_store.h"],
     deps = [
+        ":hosted_game",
         ":hub_store",
+        "//domains/games/libs/cards/castle:game_state_serde",
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:game_state_serde",
         "//domains/platform/libs/pg",
@@ -235,9 +252,13 @@ cc_test(
     # other mid-flight.
     tags = ["exclusive"],
     deps = [
+        ":hosted_game",
         ":pg_hub_store",
         ":pg_ticket_vault",
         "//domains/games/libs/cards",
+        "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/cards/castle:game_state",
+        "//domains/games/libs/cards/castle:game_state_serde",
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:game_state_serde",
         "//domains/platform/libs/pg",
@@ -322,6 +343,7 @@ cc_library(
     deps = [
         ":chat_store",
         ":games_hub_smithy_server",
+        ":hosted_game",
         ":hub_metrics",
         ":hub_store",
         ":id_generator",
@@ -331,6 +353,8 @@ cc_library(
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:card_mapper",
         "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/cards/castle:game_state",
+        "//domains/games/libs/cards/castle:player",
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:player",
         "//domains/platform/libs/futility/otel:metrics",
@@ -418,6 +442,33 @@ cc_test(
 # fails here even though the typed e2e suites (which regenerate with it)
 # still pass. Non-Beast deps only, so it runs with no sandbox setup at all
 # (behind a blocking proxy, Beast needs scripts/make-git-overrides.sh first).
+# Castle's wire goldens (#77): the castle envelope's command and update
+# bytes and the dealt setup view, pinned as raw strings like golf's.
+cc_test(
+    name = "castle_wire_test",
+    size = "small",
+    srcs = [
+        "castle_wire_test.cc",
+        "wire_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_server",
+        ":golf_hub",
+        ":id_generator",
+        ":rate_limiter",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:eventstream",
+        "@smithy_cpp//runtime:http",
+    ],
+)
+
 cc_test(
     name = "golf_wire_test",
     size = "small",
@@ -443,6 +494,38 @@ cc_test(
     ],
 )
 
+# Castle on the room stream (#77): setup, a whole game against an engine
+# mirror, redaction, mixed tables, and abandonment.
+cc_test(
+    name = "castle_e2e_test",
+    size = "small",
+    srcs = [
+        "castle_e2e_test.cc",
+        "stream_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_client",
+        ":games_hub_smithy_server",
+        ":golf_hub",
+        ":hub_store",
+        ":id_generator",
+        ":thoughts_hub",
+        ":ticket_vault",
+        "//domains/games/libs/cards",
+        "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/cards/castle:game_state",
+        "//domains/games/libs/cards/castle:player",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@googletest//:gtest_main",
+        "@smithy_cpp//runtime:client",
+        "@smithy_cpp//runtime:core",
+        "@smithy_cpp//runtime:http",
+        "@smithy_cpp//runtime:http_beast",
+    ],
+)
+
 cc_test(
     name = "hub_e2e_test",
     size = "small",
@@ -450,9 +533,13 @@ cc_test(
         "hub_e2e_test.cc",
         "stream_test_fixture.h",
     ],
-    # StreamSeriesMatchTheModelUnions reads the model to pin the declared
-    # golf_commands/golf_events rosters against its union cases.
-    data = ["model/golf.smithy"],
+    # StreamSeriesMatchTheModelUnions and CastleSeriesMatchTheModelUnions
+    # read the models to pin the declared golf_*/castle_* rosters against
+    # their union cases.
+    data = [
+        "model/castle.smithy",
+        "model/golf.smithy",
+    ],
     deps = [
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",

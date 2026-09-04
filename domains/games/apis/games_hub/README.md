@@ -1,32 +1,40 @@
 # games_hub — the games hub on smithy-cpp event streams
 
-The backend behind muchq.com/golf and muchq.com/thoughts (#79), on
-smithy-cpp's streaming stack: a modeled protocol with generated async
-handlers (ADR-0021), `SessionRegistry` fan-out with reconnect grace
+The backend behind muchq.com/golf and muchq.com/thoughts (#79), and the
+castle table (#77), on smithy-cpp's streaming stack: a modeled protocol
+with generated async handlers (ADR-0021), `SessionRegistry` fan-out with reconnect grace
 (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018), and ticket
-auth ahead of the 101. One session identity opens either game's stream.
+auth ahead of the 101. One session identity opens either stream.
 
-## The model (three namespaces, per #79)
+## The model (four namespaces, per #79)
 
 - `model/games.smithy` — `moonbase.games`: the service, session identity
   (`POST /games/v2/session`), the two terminal stream errors, and the
   game-agnostic room layer — rooms, chat, player info with room-scoped
-  stats. Nothing here knows which game a room hosts; a future game reuses
-  these shapes verbatim.
+  stats. Apart from `GameSummary.game`, the word that names a table's
+  game for the lobby, nothing here knows which game a table plays.
 - `model/golf.smithy` — `moonbase.golf`: the `Play` stream
   (`/games/v2/golf/play`) and golf's vocabulary nested under one `golf`
-  member in each streaming union.
+  member in each streaming union. The stream is the room's: castle rides
+  it as a second member.
+- `model/castle.smithy` — `moonbase.castle`: castle's vocabulary (#77),
+  the `castle` member of the same unions. A room hosts tables of either
+  game (`GameSummary.game` says which); the shared lifecycle shapes
+  (create/join/start/leave and their announcements) are reused, and each
+  game's join is refused on the other game's table, so nobody is seated
+  at a table whose vocabulary they do not speak. The room-wide
+  `gameCreated` is the one event that crosses: a room hears every table
+  in that table's own envelope.
 - `model/thoughts.smithy` — `moonbase.thoughts`: the `Think` stream
   (`/games/v2/thoughts/play`) with its own command and event unions —
   thoughts has no rooms, so it shares only session identity and the
   `commandRejected` shape with golf.
 
-A new game is one new stream operation on the service and one new model
-file. A game that wants rooms and chat copies golf's shape — the room-layer
-cases plus one game envelope member per union — not thoughts' flat unions,
-which opted out of the room layer and would have to be restructured, not
-extended, to join it. Codegen flattens every namespace into
-`moonbase::games`, so shape names must be unique across the three files (a
+A new game is one new model file. A game that wants rooms and chat is one
+more envelope member on the room stream's unions, the way castle joined —
+not thoughts' flat unions, which opted out of the room layer and would
+have to be restructured, not extended, to join it. Codegen flattens every namespace into
+`moonbase::games`, so shape names must be unique across the four files (a
 collision gets the foreign namespace's name appended, which nothing here
 wants).
 
@@ -41,7 +49,7 @@ shape (0 sphere, 1 cube, 2 pyramid). `join` answers the joiner with a
 out `playerLeft`. Out-of-bounds values and commands before a join are
 refused in-band as `commandRejected`. No persistence and no reconnect
 grace: presence is the whole game. `ThoughtsHub` (`thoughts_hub.cc`)
-carries it, `GolfHub` (`golf_hub.cc`) carries golf, and `GamesHubHandler`
+carries it, `GolfHub` (`golf_hub.cc`) carries the room games, golf and castle, and `GamesHubHandler`
 implements the generated service: it mints sessions itself and forwards
 each stream to its hub. The two hubs share the ticket vault and nothing
 else. Counters carry the `thoughts_` prefix.
@@ -58,6 +66,10 @@ engine is `libs/cards/golf`'s immutable `GameState`, which also carries
 `hideCards` and `removePlayer` for abandoned seats.
 
 ## Redaction
+
+A castle table redacts by `CastleViewLocked`: own hand faces (everyone's
+once the game ends), every face-up row, face-down rows as counts. Golf's
+rules, below, are `ViewLocked`'s.
 
 Every game broadcast is per-recipient (`ViewLocked`): own card faces only
 at the viewer's peeked indexes, the drawn card only to its holder, other
@@ -81,8 +93,9 @@ lobby-safe summaries only.
   are 6-char uppercase codes that ride in permalinks.
 - Observability: unary requests ride the shared aura chain (#1185); the
   stream side counts admissions, live sessions, disconnects, grace
-  expiries, and the command/event flow (`golf_*` for golf, `thoughts_*`
-  for thoughts, `chat_*` for the room layer's chat).
+  expiries, and the command/event flow (`golf_*` for golf and the room
+  layer, `castle_*` for castle's envelope, `thoughts_*` for thoughts,
+  `chat_*` for chat).
 - `ALLOWED_ORIGINS` unset admits all origins (local dev); production
   sets the allowlist.
 - Deployed behind Caddy at `/games/v2/*` (`deploy/consolidated`); the

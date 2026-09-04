@@ -212,7 +212,7 @@ TEST_F(GolfWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
             R"({"cards":[{},{},{},{}],"hasPeeked":false,"playerId":"player-1",)"
             R"("revealedIndexes":[]}]}}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
-            R"({"games":[{"gameId":"GAME01","playerCount":1,"status":"waiting"}],)"
+            R"({"games":[{"game":"golf","gameId":"GAME01","playerCount":1,"status":"waiting"}],)"
             R"("players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
             R"("playerId":"player-1","totalScore":0}],"roomId":"room-1"})");
 
@@ -269,7 +269,7 @@ TEST_F(GolfWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
 
   // The lobby list flips to playing for everyone in the room.
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
-            R"({"games":[{"gameId":"GAME01","playerCount":2,"status":"playing"}],)"
+            R"({"games":[{"game":"golf","gameId":"GAME01","playerCount":2,"status":"playing"}],)"
             R"("players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
             R"("playerId":"player-1","totalScore":0},)"
             R"({"connected":true,"gamesPlayed":0,"gamesWon":0,"playerId":"player-2",)"

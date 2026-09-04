@@ -587,7 +587,7 @@ TEST_F(PgGamesHubFixture, StatsSurviveARestart) {
     auto rows = Rows();
     ASSERT_EQ(rows.games.size(), 1u);
     ASSERT_TRUE(rows.games[0].state.has_value());
-    EXPECT_TRUE(rows.games[0].state->isOver());
+    EXPECT_TRUE(IsOver(*rows.games[0].state));
   }
 
   auto alice_back = OpenSeat(alice_token);
@@ -651,7 +651,7 @@ TEST_F(PgGamesHubFixture, PendingGameLifecycleWritesThrough) {
       } else {
         EXPECT_EQ(row.game_id, table->game_id);
         ASSERT_TRUE(row.state.has_value());
-        EXPECT_TRUE(row.state->isOver());
+        EXPECT_TRUE(IsOver(*row.state));
       }
     }
   }
@@ -665,7 +665,7 @@ TEST_F(PgGamesHubFixture, PendingGameLifecycleWritesThrough) {
   ASSERT_EQ(rows.games.size(), 1u);
   EXPECT_EQ(rows.games[0].game_id, table->game_id);
   ASSERT_TRUE(rows.games[0].state.has_value());
-  EXPECT_TRUE(rows.games[0].state->isOver());
+  EXPECT_TRUE(IsOver(*rows.games[0].state));
   EXPECT_EQ(rows.rooms.size(), 1u);
   EXPECT_EQ(rows.members.size(), 2u);
 }
@@ -844,7 +844,7 @@ TEST_F(PgGamesHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
   auto rows = Rows();
   ASSERT_EQ(rows.games.size(), 1u);
   ASSERT_TRUE(rows.games[0].state.has_value());
-  EXPECT_TRUE(rows.games[0].state->isOver());
+  EXPECT_TRUE(IsOver(*rows.games[0].state));
 
   // Reattach after the terminal write is fully settled. Wait until both
   // instances have issued LISTEN before poking the primary.

@@ -19,11 +19,11 @@ namespace games_hub {
 ///
 /// What a new game costs depends on its shape. A thoughts-shaped game — a
 /// flat stream with its own registry and no rooms — is one forwarding
-/// override and one member. A room-shaped game (castle, #77) wants the
-/// room layer #1187 built: rooms, chat, grace, the store, per-viewer
-/// redaction. That layer lives in GolfHub today, so such a game extends
-/// the room host rather than cloning ThoughtsHub, and the README says
-/// which union shape it copies.
+/// override and one member. A room-shaped game is one more envelope
+/// member on Play — castle (#77) rides GolfHub's room layer (rooms, chat,
+/// grace, the store, per-viewer redaction) that way — so the next such
+/// game extends the room host rather than cloning ThoughtsHub, and the
+/// README says which union shape it copies.
 class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
  public:
   /// Every counter series either hub declares — what a sweep over a

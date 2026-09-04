@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "absl/status/statusor.h"
-#include "domains/games/libs/cards/golf/game_state.h"
+#include "domains/games/apis/games_hub/hosted_game.h"
 
 namespace games_hub {
 
@@ -38,8 +38,11 @@ class HubStore {
     std::string room_id;
     std::string game_id;
     std::vector<std::string> roster;
-    std::optional<golf::GameState> state;
+    std::optional<HostedState> state;
     int64_t version = 0;
+    /// Which game the table plays, fixed at creation; `state` is that
+    /// engine's once started.
+    GameKind kind = GameKind::kGolf;
   };
 
   struct Snapshot {

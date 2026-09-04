@@ -16,3 +16,8 @@ rows once the hand is gone; the first seat out wins and ends the game.
 ```bash
 bazel test //domains/games/libs/cards/castle/...
 ```
+
+`game_state_serde.{h,cc}` is the versioned JSON the games hub stores a
+castle table in — the engine's full truth, draw pile and every hand
+included, so it is server-side only; redaction stays in the hub.
+`game_state_serde_test.cc` pins the schema.
