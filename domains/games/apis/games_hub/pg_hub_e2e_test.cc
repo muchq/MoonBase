@@ -83,6 +83,30 @@ std::optional<moonbase::games::GameView> AwaitGameView(
   return std::nullopt;
 }
 
+template <typename Predicate>
+std::optional<moonbase::games::CastleView> AwaitCastleView(
+    moonbase::games::PlayClientStream& stream, Predicate&& predicate,
+    const std::string& waiting_for, std::chrono::milliseconds budget = kReceiveBudget) {
+  const auto deadline = std::chrono::steady_clock::now() + budget;
+  for (int i = 0; i < 32; ++i) {
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - std::chrono::steady_clock::now());
+    if (remaining <= std::chrono::milliseconds::zero()) {
+      ADD_FAILURE() << "gave up waiting for " << waiting_for;
+      return std::nullopt;
+    }
+    auto update = ReceiveCastle(stream, "gameState", remaining);
+    if (!update.has_value()) {
+      ADD_FAILURE() << "gave up waiting for " << waiting_for;
+      return std::nullopt;
+    }
+    const auto& view = update->as_gameState_or_null()->view;
+    if (predicate(view)) return view;
+  }
+  ADD_FAILURE() << "gave up waiting for " << waiting_for << " (frame budget)";
+  return std::nullopt;
+}
+
 class PgGamesHubFixture : public GamesHubStreamFixture {
  protected:
   void SetUp() override {
@@ -319,42 +343,44 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     }
   };
 
-  std::optional<CrossTable> SeatedCrossTable(Instance& remote) {
-    // Drain any seats we opened if setup fails mid-way — destroying the
-    // client stream while the server still has unread wake frames is the
-    // TearDown hang, and QuiesceOnScopeExit cannot see these locals.
-    struct Seats {
-      std::optional<Seat> alice;
-      std::optional<Seat> bob;
-      ~Seats() {
-        if (alice.has_value()) DrainPending(alice->stream);
-        if (bob.has_value()) DrainPending(bob->stream);
-      }
-    } seats;
+  // Seats opened by cross-table setup, drained if it fails mid-way —
+  // destroying the client stream while the server still has unread wake
+  // frames is the TearDown hang, and QuiesceOnScopeExit cannot see them.
+  struct CrossSeats {
+    std::optional<Seat> alice;
+    std::optional<Seat> bob;
+    ~CrossSeats() {
+      if (alice.has_value()) DrainPending(alice->stream);
+      if (bob.has_value()) DrainPending(bob->stream);
+    }
+  };
 
+  // alice on the primary, bob on `remote`, both in one room whose every
+  // cross-instance step has landed. Empty on failure.
+  std::string SeatedCrossRoom(Instance& remote, CrossSeats& seats) {
     seats.alice = OpenSeat();
-    if (!seats.alice.has_value()) return std::nullopt;
-    if (!ReceiveCase(seats.alice->stream, "sessionReady").has_value()) return std::nullopt;
+    if (!seats.alice.has_value()) return "";
+    if (!ReceiveCase(seats.alice->stream, "sessionReady").has_value()) return "";
     seats.bob = OpenSeatVia(*remote.client);
-    if (!seats.bob.has_value()) return std::nullopt;
-    if (!ReceiveCase(seats.bob->stream, "sessionReady").has_value()) return std::nullopt;
+    if (!seats.bob.has_value()) return "";
+    if (!ReceiveCase(seats.bob->stream, "sessionReady").has_value()) return "";
 
     if (!seats.alice->stream.Send(GolfCommands::FromCreateroom(moonbase::games::CreateRoom{}))
              .ok()) {
-      return std::nullopt;
+      return "";
     }
     auto created = ReceiveCase(seats.alice->stream, "roomState");
-    if (!created.has_value()) return std::nullopt;
+    if (!created.has_value()) return "";
     const std::string room_id = created->as_roomState_or_null()->roomId;
     // The room's row must land before the other instance can look it
     // up, and the primary's LISTEN must be live before bob's join rider
     // fires — otherwise alice never learns of bob.
     store_->Flush();
-    if (!SyncListen(*seats.alice, room_id)) return std::nullopt;
+    if (!SyncListen(*seats.alice, room_id)) return "";
 
     moonbase::games::JoinRoom join_room;
     join_room.roomId = room_id;
-    if (!seats.bob->stream.Send(GolfCommands::FromJoinroom(join_room)).ok()) return std::nullopt;
+    if (!seats.bob->stream.Send(GolfCommands::FromJoinroom(join_room)).ok()) return "";
     // bob's join materializes the room on his instance: his snapshot
     // already shows both members.
     if (!AwaitRoomState(
@@ -362,17 +388,38 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
              [](const moonbase::games::RoomState& room) { return room.players.size() == 2; },
              "bob (remote) roomState with 2 players after join")
              .has_value()) {
-      return std::nullopt;
+      return "";
     }
-    if (!SyncListen(*seats.bob, room_id)) return std::nullopt;
+    if (!SyncListen(*seats.bob, room_id)) return "";
     // The join's wake rider is how alice's instance learns of bob.
     if (!AwaitRoomState(
              seats.alice->stream,
              [](const moonbase::games::RoomState& room) { return room.players.size() == 2; },
              "alice (primary) roomState with 2 players after bob's join wake")
              .has_value()) {
-      return std::nullopt;
+      return "";
     }
+    return room_id;
+  }
+
+  // The create commit's wake carries the lobby game to bob.
+  bool AwaitLobbyGame(Seat& bob, const std::string& game_id) {
+    return AwaitRoomState(
+               bob.stream,
+               [&](const moonbase::games::RoomState& room) {
+                 for (const auto& game : room.games) {
+                   if (game.gameId == game_id) return true;
+                 }
+                 return false;
+               },
+               "bob (remote) roomState carrying alice's created game " + game_id)
+        .has_value();
+  }
+
+  std::optional<CrossTable> SeatedCrossTable(Instance& remote) {
+    CrossSeats seats;
+    const std::string room_id = SeatedCrossRoom(remote, seats);
+    if (room_id.empty()) return std::nullopt;
 
     if (!seats.alice->stream.Send(Move(GolfMove::FromCreategame(moonbase::games::CreateGame{})))
              .ok()) {
@@ -381,19 +428,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     auto game_joined = ReceiveGolf(seats.alice->stream, "gameJoined");
     if (!game_joined.has_value()) return std::nullopt;
     const std::string game_id = game_joined->as_gameJoined_or_null()->view.gameId;
-    // The create commit's wake carries the lobby game to bob.
-    if (!AwaitRoomState(
-             seats.bob->stream,
-             [&](const moonbase::games::RoomState& room) {
-               for (const auto& game : room.games) {
-                 if (game.gameId == game_id) return true;
-               }
-               return false;
-             },
-             "bob (remote) roomState carrying alice's created game " + game_id)
-             .has_value()) {
-      return std::nullopt;
-    }
+    if (!AwaitLobbyGame(*seats.bob, game_id)) return std::nullopt;
 
     moonbase::games::JoinGame join_game;
     join_game.gameId = game_id;
@@ -419,6 +454,54 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
              seats.bob->stream,
              [](const moonbase::games::GameView& view) { return view.phase != "waiting"; },
              "bob (remote) gameView dealt after alice's start wake")
+             .has_value()) {
+      return std::nullopt;
+    }
+    CrossTable table{std::move(*seats.alice), std::move(*seats.bob), room_id, game_id};
+    seats.alice.reset();
+    seats.bob.reset();
+    return table;
+  }
+
+  // The same two seats at a castle table, dealt and in setup.
+  std::optional<CrossTable> SeatedCrossCastleTable(Instance& remote) {
+    using moonbase::games::CastleMove;
+    CrossSeats seats;
+    const std::string room_id = SeatedCrossRoom(remote, seats);
+    if (room_id.empty()) return std::nullopt;
+
+    if (!seats.alice->stream.Send(Castle(CastleMove::FromCreategame(moonbase::games::CreateGame{})))
+             .ok()) {
+      return std::nullopt;
+    }
+    auto game_joined = ReceiveCastle(seats.alice->stream, "gameJoined");
+    if (!game_joined.has_value()) return std::nullopt;
+    const std::string game_id = game_joined->as_gameJoined_or_null()->view.gameId;
+    if (!AwaitLobbyGame(*seats.bob, game_id)) return std::nullopt;
+
+    moonbase::games::JoinGame join_game;
+    join_game.gameId = game_id;
+    if (!seats.bob->stream.Send(Castle(CastleMove::FromJoingame(join_game))).ok()) {
+      return std::nullopt;
+    }
+    if (!ReceiveCastle(seats.bob->stream, "gameJoined").has_value()) return std::nullopt;
+    if (!AwaitCastleView(
+             seats.alice->stream,
+             [](const moonbase::games::CastleView& view) { return view.players.size() == 2; },
+             "alice (primary) castle view with 2 players after bob's seat wake")
+             .has_value()) {
+      return std::nullopt;
+    }
+
+    if (!seats.alice->stream.Send(Castle(CastleMove::FromStartgame(moonbase::games::StartGame{})))
+             .ok()) {
+      return std::nullopt;
+    }
+    if (!ReceiveCastle(seats.alice->stream, "gameStarted").has_value()) return std::nullopt;
+    if (!AwaitCastleView(
+             seats.bob->stream,
+             [](const moonbase::games::CastleView& view) { return view.phase == "setup"; },
+             "bob (remote) castle view dealt after alice's start wake")
              .has_value()) {
       return std::nullopt;
     }
@@ -624,6 +707,199 @@ TEST_F(PgGamesHubFixture, StatsSurviveARestart) {
     EXPECT_EQ(player.totalScore, 0);
     EXPECT_EQ(player.gamesWon, player.playerId == alice_back->player_id ? 1 : 0);
   }
+}
+
+// A castle table is the second engine behind the same rows (#77): its
+// state round-trips through the store on a restart, with the last play,
+// the redaction per viewer, and the turn intact.
+TEST_F(PgGamesHubFixture, CastleTableSurvivesARestart) {
+  using moonbase::games::CastleMove;
+  auto table = SeatedCastleTable();
+  ASSERT_TRUE(table.has_value());
+  Seat& alice = table->alice;
+  Seat& bob = table->bob;
+  ASSERT_TRUE(ReceiveCastle(alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveCastle(bob.stream, "gameState").has_value());
+
+  // Both ready as dealt; bob opens on his jack and plays it.
+  for (Seat* seat : {&alice, &bob}) {
+    ASSERT_TRUE(seat->stream.Send(Castle(CastleMove::FromReady(moonbase::games::Ready{}))).ok());
+  }
+  for (Seat* seat : {&alice, &bob}) {
+    auto turn = ReceiveCastle(seat->stream, "turnChanged");
+    ASSERT_TRUE(turn.has_value());
+    EXPECT_EQ(turn->as_turnChanged_or_null()->playerId, bob.player_id);
+  }
+  moonbase::games::PlayFromHand jack;
+  jack.indexes = {0};
+  ASSERT_TRUE(bob.stream.Send(Castle(CastleMove::FromPlayfromhand(jack))).ok());
+  auto before_update = ReceiveCastle(alice.stream, "gameState");
+  ASSERT_TRUE(before_update.has_value());
+  const moonbase::games::CastleView before = before_update->as_gameState_or_null()->view;
+  ASSERT_EQ(before.pileCount, 1);
+  ASSERT_TRUE(before.lastPlay.has_value());
+  EXPECT_TRUE(before.players[0].canPlay);
+  for (Seat* seat : {&alice, &bob}) {
+    auto turn = ReceiveCastle(seat->stream, "turnChanged");
+    ASSERT_TRUE(turn.has_value());
+    EXPECT_EQ(turn->as_turnChanged_or_null()->playerId, alice.player_id);
+  }
+
+  const int64_t version_before = [&] {
+    auto rows = Rows();
+    EXPECT_EQ(rows.games.size(), 1u);
+    if (!rows.games.empty()) EXPECT_EQ(rows.games[0].kind, GameKind::kCastle);
+    return rows.games.empty() ? 0 : rows.games[0].version;
+  }();
+  ASSERT_GT(version_before, 0);
+
+  const std::string alice_token = alice.resume_token;
+  const std::string bob_token = bob.resume_token;
+  RestartHub();
+
+  auto alice_back = OpenSeat(alice_token);
+  ASSERT_TRUE(alice_back.has_value());
+  EXPECT_EQ(alice_back->player_id, alice.player_id);
+  auto ready = ReceiveCase(alice_back->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  EXPECT_EQ(ready->as_sessionReady_or_null()->roomId.value_or(""), table->room_id);
+  auto resynced = ReceiveCastle(alice_back->stream, "gameJoined");
+  ASSERT_TRUE(resynced.has_value());
+
+  // Not a re-deal: alice's restored view is the one she had, jack on the
+  // pile and all, still her turn, still hers alone to play.
+  const auto& after = resynced->as_gameJoined_or_null()->view;
+  EXPECT_EQ(after.gameId, table->game_id);
+  EXPECT_EQ(after.phase, "playing");
+  EXPECT_EQ(after.currentPlayerId.value_or(""), alice.player_id);
+  EXPECT_EQ(after.drawPileCount, before.drawPileCount);
+  EXPECT_EQ(after.pileCount, before.pileCount);
+  ASSERT_TRUE(after.pileTop.has_value());
+  EXPECT_EQ(after.pileTop->rank + after.pileTop->suit, "J♣");
+  ASSERT_TRUE(after.lastPlay.has_value());
+  EXPECT_EQ(after.lastPlay->playerId, bob.player_id);
+  EXPECT_EQ(after.lastPlay->cards.size(), 1u);
+  EXPECT_FALSE(after.lastPlay->burned);
+  ASSERT_EQ(after.players.size(), 2u);
+  for (std::size_t seat = 0; seat < after.players.size(); ++seat) {
+    EXPECT_EQ(after.players[seat].playerId, before.players[seat].playerId);
+    EXPECT_EQ(after.players[seat].handCount, before.players[seat].handCount);
+    EXPECT_EQ(after.players[seat].faceDownCount, before.players[seat].faceDownCount);
+    ASSERT_EQ(after.players[seat].hand.size(), before.players[seat].hand.size());
+    for (std::size_t i = 0; i < after.players[seat].hand.size(); ++i) {
+      EXPECT_EQ(after.players[seat].hand[i].rank, before.players[seat].hand[i].rank);
+      EXPECT_EQ(after.players[seat].hand[i].suit, before.players[seat].hand[i].suit);
+    }
+    ASSERT_EQ(after.players[seat].faceUp.size(), before.players[seat].faceUp.size());
+    for (std::size_t i = 0; i < after.players[seat].faceUp.size(); ++i) {
+      EXPECT_EQ(after.players[seat].faceUp[i].rank, before.players[seat].faceUp[i].rank);
+      EXPECT_EQ(after.players[seat].faceUp[i].suit, before.players[seat].faceUp[i].suit);
+    }
+    EXPECT_EQ(after.players[seat].canPlay, before.players[seat].canPlay);
+  }
+  EXPECT_EQ(after.players[0].hand.size(), 3u);
+  EXPECT_TRUE(after.players[1].hand.empty());
+
+  auto bob_back = OpenSeat(bob_token);
+  ASSERT_TRUE(bob_back.has_value());
+  ASSERT_TRUE(ReceiveCase(bob_back->stream, "sessionReady").has_value());
+  auto bob_view = ReceiveCastle(bob_back->stream, "gameJoined");
+  ASSERT_TRUE(bob_view.has_value());
+  EXPECT_TRUE(bob_view->as_gameJoined_or_null()->view.players[0].hand.empty());
+  // His own hand, faces and all: the jack went out and a draw came in.
+  EXPECT_EQ(static_cast<int>(bob_view->as_gameJoined_or_null()->view.players[1].hand.size()),
+            before.players[1].handCount);
+  EXPECT_FALSE(bob_view->as_gameJoined_or_null()->view.players[1].canPlay);
+
+  // The restored table is live: alice's queen beats the jack, the move
+  // fans out to the restored bob, and the save continues the version
+  // sequence.
+  moonbase::games::PlayFromHand queen;
+  queen.indexes = {2};
+  ASSERT_TRUE(alice_back->stream.Send(Castle(CastleMove::FromPlayfromhand(queen))).ok());
+  auto next_turn = ReceiveCastle(bob_back->stream, "turnChanged");
+  ASSERT_TRUE(next_turn.has_value());
+  EXPECT_EQ(next_turn->as_turnChanged_or_null()->playerId, bob.player_id);
+  ASSERT_TRUE(ReceiveCastle(alice_back->stream, "turnChanged").has_value());
+
+  auto rows = Rows();
+  ASSERT_EQ(rows.games.size(), 1u);
+  EXPECT_EQ(rows.games[0].version, version_before + 1);
+}
+
+// A castle table shared across two instances: readies and plays from
+// either side land on the other as projected views, one commit each.
+TEST_F(PgGamesHubFixture, TwoInstancesShareOneCastleTable) {
+  using moonbase::games::CastleMove;
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  std::optional<CrossTable> table;
+  QuiesceOnScopeExit quiesce{this, remote.get(), &table};
+  table = SeatedCrossCastleTable(*remote);
+  ASSERT_TRUE(table.has_value());
+  Seat& alice = table->alice;
+  Seat& bob = table->bob;
+
+  const int64_t version_at_start = [&] {
+    auto rows = Rows();
+    EXPECT_EQ(rows.games.size(), 1u);
+    return rows.games.empty() ? 0 : rows.games[0].version;
+  }();
+  ASSERT_GT(version_at_start, 0);
+
+  // alice readies on her instance; bob's projection shows it.
+  ASSERT_TRUE(alice.stream.Send(Castle(CastleMove::FromReady(moonbase::games::Ready{}))).ok());
+  ASSERT_TRUE(AwaitCastleView(
+                  bob.stream,
+                  [](const moonbase::games::CastleView& view) { return view.players[0].ready; },
+                  "bob (remote) castle view with alice ready")
+                  .has_value());
+  // bob readies on his; the table opens on alice's instance with bob on
+  // turn and nothing for her to play yet.
+  ASSERT_TRUE(bob.stream.Send(Castle(CastleMove::FromReady(moonbase::games::Ready{}))).ok());
+  auto opened = AwaitCastleView(
+      alice.stream,
+      [&](const moonbase::games::CastleView& view) {
+        return view.phase == "playing" && view.currentPlayerId == bob.player_id;
+      },
+      "alice (primary) castle view playing with bob on turn");
+  ASSERT_TRUE(opened.has_value());
+  EXPECT_FALSE(opened->players[0].canPlay);
+
+  // bob's jack from his instance lands on alice's as the last play and
+  // her turn; her queen answers and lands on his.
+  moonbase::games::PlayFromHand jack;
+  jack.indexes = {0};
+  ASSERT_TRUE(bob.stream.Send(Castle(CastleMove::FromPlayfromhand(jack))).ok());
+  auto her_turn = AwaitCastleView(
+      alice.stream,
+      [&](const moonbase::games::CastleView& view) {
+        return view.pileCount == 1 && view.currentPlayerId == alice.player_id;
+      },
+      "alice (primary) turn handoff after bob's play wake");
+  ASSERT_TRUE(her_turn.has_value());
+  ASSERT_TRUE(her_turn->lastPlay.has_value());
+  EXPECT_EQ(her_turn->lastPlay->playerId, bob.player_id);
+  EXPECT_TRUE(her_turn->players[0].canPlay);
+  moonbase::games::PlayFromHand queen;
+  queen.indexes = {2};
+  ASSERT_TRUE(alice.stream.Send(Castle(CastleMove::FromPlayfromhand(queen))).ok());
+  auto his_turn = AwaitCastleView(
+      bob.stream,
+      [&](const moonbase::games::CastleView& view) {
+        return view.pileCount == 2 && view.currentPlayerId == bob.player_id;
+      },
+      "bob (remote) turn handoff after alice's play wake");
+  ASSERT_TRUE(his_turn.has_value());
+  EXPECT_EQ(his_turn->lastPlay->playerId, alice.player_id);
+
+  // Two readies and two plays: four landed commits, no gap.
+  remote->store->Flush();
+  auto rows = Rows();
+  ASSERT_EQ(rows.games.size(), 1u);
+  EXPECT_EQ(rows.games[0].kind, GameKind::kCastle);
+  EXPECT_EQ(rows.games[0].version, version_at_start + 4);
 }
 
 TEST_F(PgGamesHubFixture, PendingGameLifecycleWritesThrough) {

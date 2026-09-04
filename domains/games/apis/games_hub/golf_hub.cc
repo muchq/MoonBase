@@ -205,22 +205,14 @@ std::vector<games_hub::HubStore::StatsDelta> StatsDeltas(const golf::GameState& 
   return deltas;
 }
 
-// Castle's finish: the first out still at the table wins — golf's
-// forfeit rule (WinnersAmong): a departed seat cannot win — and everyone
-// who held a seat played. No score: the game has none, so the room's
-// running total stays put.
-std::vector<games_hub::HubStore::StatsDelta> CastleStatsDeltas(
-    const castle::GameState& state, const std::vector<std::string>& roster) {
-  std::string winner;
-  for (const std::string& out : state.getFinished()) {
-    if (std::find(roster.begin(), roster.end(), out) != roster.end()) {
-      winner = out;
-      break;
-    }
-  }
+// Castle's finish: the first out wins and everyone seated played. The
+// engine compacts a leaver out of its seats, so every seat is on the
+// roster; and a finish ends the game, so the winner never left. No
+// score: the game has none, so the room's running total stays put.
+std::vector<games_hub::HubStore::StatsDelta> CastleStatsDeltas(const castle::GameState& state) {
+  const std::string winner = state.getFinished().empty() ? "" : state.getFinished().front();
   std::vector<games_hub::HubStore::StatsDelta> deltas;
   for (const castle::Player& seat : state.getPlayers()) {
-    if (std::find(roster.begin(), roster.end(), seat.getId()) == roster.end()) continue;
     games_hub::HubStore::StatsDelta delta;
     delta.player_id = seat.getId();
     delta.played = 1;
@@ -235,12 +227,12 @@ std::vector<games_hub::HubStore::StatsDelta> StatsDeltasOf(const HostedState& st
   if (const auto* golf_state = std::get_if<golf::GameState>(&state)) {
     return StatsDeltas(*golf_state, roster);
   }
-  return CastleStatsDeltas(std::get<castle::GameState>(state), roster);
+  return CastleStatsDeltas(std::get<castle::GameState>(state));
 }
 
 // The seat a leaver vacates, in whichever engine: compacted while seats
 // remain, or the game resolved (golf keeps every seat for the scorecard;
-// castle abandons once one holder is left).
+// castle abandons below two seats).
 std::optional<HostedState> WithoutSeat(const HostedState& state, const std::string& player_id) {
   return std::visit(
       [&](const auto& engine) -> std::optional<HostedState> {
@@ -1652,7 +1644,7 @@ void GolfHub::CastleEngineMove(const std::string& player_id, const CastleMoveFn&
         const std::string previous_turn = CurrentTurnOf(*ref->entry->state);
         const bool over = next->isOver();
         std::vector<HubStore::StatsDelta> deltas;
-        if (over) deltas = CastleStatsDeltas(*next, ref->entry->roster);
+        if (over) deltas = CastleStatsDeltas(*next);
         const Commit commit =
             CommitEntryLocked(ref->room_id, ref->game_id, *ref->entry, ref->entry->roster,
                               HostedState(*std::move(next)), over ? &deltas : nullptr);
@@ -1844,7 +1836,7 @@ void GolfHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writ
       // waiting on: whoever plays next hears it the way a move says it.
       if (entry.started()) {
         const std::string current_turn = CurrentTurnOf(*entry.state);
-        if (current_turn != previous_turn && !current_turn.empty()) {
+        if (current_turn != previous_turn) {
           moonbase::games::TurnChanged turn;
           turn.playerId = current_turn;
           for (const std::string& recipient : entry.roster) {
@@ -2198,11 +2190,24 @@ moonbase::games::CastleView GolfHub::CastleViewLocked(const std::string& game_id
   view.pileCount = static_cast<int>(state.getPile().size());
   if (const auto top = state.pileTop(); top.has_value()) view.pileTop = WireCard(*top);
   view.finished = state.getFinished();
-  for (const castle::Player& seat : state.getPlayers()) {
+  if (const auto& play = state.getLastPlay(); play.has_value()) {
+    moonbase::games::CastleLastPlay last;
+    last.playerId = play->playerId;
+    for (const cards::Card& card : play->cards) last.cards.push_back(WireCard(card));
+    last.burned = play->burned;
+    view.lastPlay = std::move(last);
+  }
+  for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
+    const castle::Player& seat = state.getPlayer(static_cast<int>(i));
     moonbase::games::CastlePlayer player;
     player.playerId = seat.getId();
     player.ready = seat.isReady();
     player.handCount = static_cast<int>(seat.getHand().size());
+    // The viewer's own seat, on turn: whether a play exists or the pile
+    // is theirs to pick up. Nobody else's hand is the viewer's to read,
+    // and an over game seats nobody on turn.
+    player.canPlay = seat.getId() == viewer_id && state.getWhoseTurn() == static_cast<int>(i) &&
+                     state.hasLegalPlay(static_cast<int>(i));
     // Own hand faces only, everyone's once the game ends; face-down
     // rows are a count for everyone, their holder included.
     if (ended || seat.getId() == viewer_id) {
@@ -2248,8 +2253,8 @@ void GolfHub::StageGameOverLocked(Room& room, const std::string& game_id, Outbox
   if (game == room.games.end() || !game->second.started()) return;
   if (game->second.kind == GameKind::kCastle) {
     // Final views (every hand face up), then the finish order; the
-    // engine names a loser only for a game over by play, so an
-    // abandonment lists whoever went out before it and nobody else.
+    // engine names a loser only for a game over by play, and an
+    // abandonment has no finish order at all — nobody went out.
     const castle::GameState& state = game->second.castle();
     moonbase::games::CastleGameEnded ended;
     ended.finished = state.getFinished();

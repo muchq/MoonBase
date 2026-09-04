@@ -48,7 +48,7 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
             R"({"update":{"gameCreated":{"createdBy":"player-1","gameId":"GAME01"}}})");
   const std::string waiting_one =
       R"("view":{"drawPileCount":0,"finished":[],"gameId":"GAME01","phase":"waiting",)"
-      R"("pileCount":0,"players":[{"faceDownCount":0,"faceUp":[],"hand":[],"handCount":0,)"
+      R"("pileCount":0,"players":[{"canPlay":false,"faceDownCount":0,"faceUp":[],"hand":[],"handCount":0,)"
       R"("out":false,"playerId":"player-1","ready":false}]})";
   EXPECT_EQ(EventPayload(NextFrame(*creator), "castle"),
             R"({"update":{"gameJoined":{)" + waiting_one + R"(}}})");
@@ -68,9 +68,9 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
       joiner->Send(CommandFrame("castle", R"({"move":{"joinGame":{"gameId":"GAME01"}}})")).ok());
   const std::string waiting_pair =
       R"("view":{"drawPileCount":0,"finished":[],"gameId":"GAME01","phase":"waiting",)"
-      R"("pileCount":0,"players":[{"faceDownCount":0,"faceUp":[],"hand":[],"handCount":0,)"
+      R"("pileCount":0,"players":[{"canPlay":false,"faceDownCount":0,"faceUp":[],"hand":[],"handCount":0,)"
       R"("out":false,"playerId":"player-1","ready":false},)"
-      R"({"faceDownCount":0,"faceUp":[],"hand":[],"handCount":0,"out":false,)"
+      R"({"canPlay":false,"faceDownCount":0,"faceUp":[],"hand":[],"handCount":0,"out":false,)"
       R"("playerId":"player-2","ready":false}]})";
   EXPECT_EQ(EventPayload(NextFrame(*joiner), "castle"),
             R"({"update":{"gameJoined":{)" + waiting_pair + R"(}}})");
@@ -84,25 +84,27 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
   ASSERT_TRUE(creator->Send(CommandFrame("castle", R"({"move":{"startGame":{}}})")).ok());
   EXPECT_EQ(EventPayload(NextFrame(*creator), "castle"), R"({"update":{"gameStarted":{}}})");
   const std::string setup_payload = EventPayload(NextFrame(*creator), "castle");
-  EXPECT_EQ(setup_payload,
-            R"({"update":{"gameState":{"view":{"drawPileCount":34,"finished":[],)"
-            R"("gameId":"GAME01","phase":"setup","pileCount":0,"players":[)"
-            R"({"faceDownCount":3,"faceUp":[{"rank":"A","suit":"♣"},{"rank":"K","suit":"♠"},)"
-            R"({"rank":"K","suit":"♥"}],"hand":[{"rank":"K","suit":"♦"},{"rank":"K","suit":"♣"},)"
-            R"({"rank":"Q","suit":"♠"}],"handCount":3,"out":false,"playerId":"player-1",)"
-            R"("ready":false},)"
-            R"({"faceDownCount":3,"faceUp":[{"rank":"J","suit":"♠"},{"rank":"J","suit":"♥"},)"
-            R"({"rank":"J","suit":"♦"}],"hand":[],"handCount":3,"out":false,)"
-            R"("playerId":"player-2","ready":false}]}}}})");
+  EXPECT_EQ(
+      setup_payload,
+      R"({"update":{"gameState":{"view":{"drawPileCount":34,"finished":[],)"
+      R"("gameId":"GAME01","phase":"setup","pileCount":0,"players":[)"
+      R"({"canPlay":false,"faceDownCount":3,"faceUp":[{"rank":"A","suit":"♣"},{"rank":"K","suit":"♠"},)"
+      R"({"rank":"K","suit":"♥"}],"hand":[{"rank":"K","suit":"♦"},{"rank":"K","suit":"♣"},)"
+      R"({"rank":"Q","suit":"♠"}],"handCount":3,"out":false,"playerId":"player-1",)"
+      R"("ready":false},)"
+      R"({"canPlay":false,"faceDownCount":3,"faceUp":[{"rank":"J","suit":"♠"},{"rank":"J","suit":"♥"},)"
+      R"({"rank":"J","suit":"♦"}],"hand":[],"handCount":3,"out":false,)"
+      R"("playerId":"player-2","ready":false}]}}}})");
   const json view = json::parse(setup_payload)["update"]["gameState"]["view"];
   EXPECT_EQ(KeysOf(view), (std::set<std::string>{"drawPileCount", "finished", "gameId", "phase",
                                                  "pileCount", "players"}));
   EXPECT_EQ(KeysOf(view["players"][0]),
-            (std::set<std::string>{"faceDownCount", "faceUp", "hand", "handCount", "out",
+            (std::set<std::string>{"canPlay", "faceDownCount", "faceUp", "hand", "handCount", "out",
                                    "playerId", "ready"}));
-  // Absent optionals (pileTop, currentPlayerId) are omitted keys, not nulls.
+  // Absent optionals (pileTop, currentPlayerId, lastPlay) are omitted keys, not nulls.
   EXPECT_FALSE(view.contains("pileTop"));
   EXPECT_FALSE(view.contains("currentPlayerId"));
+  EXPECT_FALSE(view.contains("lastPlay"));
 
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
             R"({"games":[{"game":"castle","gameId":"GAME01","playerCount":2,"status":"setup"}],)"

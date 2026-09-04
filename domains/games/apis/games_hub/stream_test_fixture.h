@@ -250,6 +250,34 @@ inline moonbase::games::GolfCommands Move(moonbase::games::GolfMove move) {
   return moonbase::games::GolfCommands::FromGolf(std::move(command));
 }
 
+// The castle twin of Move: a CastleMove in its envelope on the room stream.
+inline moonbase::games::GolfCommands Castle(moonbase::games::CastleMove move) {
+  moonbase::games::CastleCommand command;
+  command.move = std::move(move);
+  return moonbase::games::GolfCommands::FromCastle(std::move(command));
+}
+
+// Tunnels into the castle envelope: the first CastleUpdate of the wanted
+// case, skipping room noise and other updates in between.
+inline std::optional<moonbase::games::CastleUpdate> ReceiveCastle(
+    moonbase::games::PlayClientStream& stream, const std::string& wanted,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  const auto deadline = std::chrono::steady_clock::now() + budget;
+  for (int i = 0; i < 16; ++i) {
+    auto received = ReceiveWithin(stream, deadline);
+    if (!received.ok()) {
+      ADD_FAILURE() << "gave up waiting for castle " << wanted << ": "
+                    << received.error().message();
+      return std::nullopt;
+    }
+    if (!received->has_value()) return std::nullopt;
+    const auto* envelope = (*received)->as_castle_or_null();
+    if (envelope == nullptr) continue;
+    if (wanted == envelope->update.case_name()) return envelope->update;
+  }
+  return std::nullopt;
+}
+
 // Captures every metric the hub records so tests can assert what is
 // counted — and, just as important, what never appears in a name or
 // label (room ids, player ids, message text; the model forbids them).
@@ -502,6 +530,47 @@ class GamesHubStreamFixture : public testing::Test {
     }
     if (!ReceiveGolf(alice->stream, "gameStarted").has_value()) return std::nullopt;
     if (!ReceiveGolf(bob->stream, "gameStarted").has_value()) return std::nullopt;
+    return Table{std::move(*alice), std::move(*bob), room_id, game_id};
+  }
+
+  // The castle table's twin of SeatedTable: two seats in one room at a
+  // started castle table, both having heard gameStarted; the setup views
+  // are left for the test. With the NoShuffleDealer alice (seat 0) holds
+  // the aces face down, A♣ K♠ K♥ face up and K♦ K♣ Q♠ in hand; bob the
+  // queens, jacks and J♣ 10♠ 10♥.
+  std::optional<Table> SeatedCastleTable() {
+    using moonbase::games::CastleMove;
+    auto alice = OpenSeat();
+    auto bob = OpenSeat();
+    if (!alice.has_value() || !bob.has_value()) return std::nullopt;
+    if (!ReceiveCase(alice->stream, "sessionReady").has_value()) return std::nullopt;
+    if (!ReceiveCase(bob->stream, "sessionReady").has_value()) return std::nullopt;
+    const std::string room_id = CreateRoomFor(*alice);
+    if (room_id.empty()) return std::nullopt;
+    moonbase::games::JoinRoom join_room;
+    join_room.roomId = room_id;
+    if (!bob->stream.Send(moonbase::games::GolfCommands::FromJoinroom(join_room)).ok()) {
+      return std::nullopt;
+    }
+    if (!ReceiveCase(bob->stream, "roomState").has_value()) return std::nullopt;
+
+    if (!alice->stream.Send(Castle(CastleMove::FromCreategame(moonbase::games::CreateGame{})))
+             .ok()) {
+      return std::nullopt;
+    }
+    auto joined = ReceiveCastle(alice->stream, "gameJoined");
+    if (!joined.has_value()) return std::nullopt;
+    const std::string game_id = joined->as_gameJoined_or_null()->view.gameId;
+    moonbase::games::JoinGame join_game;
+    join_game.gameId = game_id;
+    if (!bob->stream.Send(Castle(CastleMove::FromJoingame(join_game))).ok()) return std::nullopt;
+    if (!ReceiveCastle(bob->stream, "gameJoined").has_value()) return std::nullopt;
+
+    if (!alice->stream.Send(Castle(CastleMove::FromStartgame(moonbase::games::StartGame{}))).ok()) {
+      return std::nullopt;
+    }
+    if (!ReceiveCastle(alice->stream, "gameStarted").has_value()) return std::nullopt;
+    if (!ReceiveCastle(bob->stream, "gameStarted").has_value()) return std::nullopt;
     return Table{std::move(*alice), std::move(*bob), room_id, game_id};
   }
 

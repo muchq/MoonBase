@@ -106,8 +106,8 @@ structure CastleGameState {
 
 /// The finish order: the first seat out wins and ends the game, so it
 /// holds one name. A two-seat game names the other seat as the loser; a
-/// bigger table ends with a winner and no loser, as does an abandoned
-/// game (which lists whoever finished before it ended).
+/// bigger table ends with a winner and no loser. An abandoned game has
+/// neither: nobody went out, and the order is empty.
 structure CastleGameEnded {
     @required
     finished: PlayerIds
@@ -116,10 +116,12 @@ structure CastleGameEnded {
 }
 
 /// One player's redacted view: own hand faces, everyone's face-up rows,
-/// face-down rows as counts, the pile top and the draw-pile count. Every
-/// hand is revealed once the game ends. An ended view is always followed
-/// by gameEnded, which says who lost (or that nobody did); the view alone
-/// cannot tell an abandoned table from a finished one.
+/// face-down rows as counts, the pile top and the draw-pile count, and
+/// the pile's last play — the one way to see a burn, which leaves the
+/// pile empty. Every hand is revealed once the game ends. An ended view
+/// is always followed by gameEnded, which says who lost (or that nobody
+/// did); the view alone cannot tell an abandoned table from a finished
+/// one.
 structure CastleView {
     @required
     gameId: String
@@ -144,6 +146,22 @@ structure CastleView {
     /// First out first; complete only once the game ends.
     @required
     finished: PlayerIds
+
+    /// The pile's most recent play, until a play or pick-up replaces it.
+    /// Absent before the first play and after a pick-up.
+    lastPlay: CastleLastPlay
+}
+
+structure CastleLastPlay {
+    @required
+    playerId: String
+
+    @required
+    cards: Cards
+
+    /// The play burned the pile: a ten, or the four of a kind it completed.
+    @required
+    burned: Boolean
 }
 
 list CastlePlayers {
@@ -174,6 +192,12 @@ structure CastlePlayer {
     /// Shed every card: finished, and out of the turn order.
     @required
     out: Boolean
+
+    /// It is this seat's turn and its row in play holds a legal play on
+    /// the pile as it stands; false off turn, for a blind row, and for
+    /// every other seat. A seat on turn without one must pick up.
+    @required
+    canPlay: Boolean
 }
 
 list Cards {
