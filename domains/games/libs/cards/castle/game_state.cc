@@ -306,7 +306,9 @@ StatusOr<GameState> GameState::playFaceDown(int player, int index) const {
   taken.push_back(card);
   vector<Player> newPlayers = replaceSeat(players, player, remaining->withHandAdded(taken));
   const int next = nextSeat(player, newPlayers);
-  return GameState{drawPile, {}, std::move(newPlayers), next, phase, finished, gameId, versionId};
+  return GameState{drawPile, {},        std::move(newPlayers),
+                   next,     phase,     finished,
+                   gameId,   versionId, LastPlay{seat.getId(), {card}, false, true}};
 }
 
 StatusOr<GameState> GameState::pickUp(int player) const {
@@ -324,7 +326,9 @@ StatusOr<GameState> GameState::pickUp(int player) const {
   }
   vector<Player> newPlayers = replaceSeat(players, player, players.at(player).withHandAdded(pile));
   const int next = nextSeat(player, newPlayers);
-  return GameState{drawPile, {}, std::move(newPlayers), next, phase, finished, gameId, versionId};
+  return GameState{drawPile, {},        std::move(newPlayers),
+                   next,     phase,     finished,
+                   gameId,   versionId, LastPlay{players.at(player).getId(), {}, false, true}};
 }
 
 GameState GameState::settle(int player, deque<Card> newDrawPile, vector<Card> newPile,

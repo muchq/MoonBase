@@ -207,8 +207,10 @@ std::vector<games_hub::HubStore::StatsDelta> StatsDeltas(const golf::GameState& 
 
 // Castle's finish: the first out wins and everyone seated played. The
 // engine compacts a leaver out of its seats, so every seat is on the
-// roster; and a finish ends the game, so the winner never left. No
-// score: the game has none, so the room's running total stays put.
+// roster; and a finish ends the game, so the winner never left. This
+// leans on an over table never being left: StageGameOverLocked erases
+// the entry before anyone could. No score: the game has none, so the
+// room's running total stays put.
 std::vector<games_hub::HubStore::StatsDelta> CastleStatsDeltas(const castle::GameState& state) {
   const std::string winner = state.getFinished().empty() ? "" : state.getFinished().front();
   std::vector<games_hub::HubStore::StatsDelta> deltas;
@@ -2189,12 +2191,14 @@ moonbase::games::CastleView GolfHub::CastleViewLocked(const std::string& game_id
   view.drawPileCount = static_cast<int>(state.getDrawPile().size());
   view.pileCount = static_cast<int>(state.getPile().size());
   if (const auto top = state.pileTop(); top.has_value()) view.pileTop = WireCard(*top);
+  view.pileRun = state.runOnTop();
   view.finished = state.getFinished();
   if (const auto& play = state.getLastPlay(); play.has_value()) {
     moonbase::games::CastleLastPlay last;
     last.playerId = play->playerId;
     for (const cards::Card& card : play->cards) last.cards.push_back(WireCard(card));
     last.burned = play->burned;
+    last.pickedUp = play->pickedUp;
     view.lastPlay = std::move(last);
   }
   for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
@@ -2203,9 +2207,10 @@ moonbase::games::CastleView GolfHub::CastleViewLocked(const std::string& game_id
     player.playerId = seat.getId();
     player.ready = seat.isReady();
     player.handCount = static_cast<int>(seat.getHand().size());
-    // The viewer's own seat, on turn: whether a play exists or the pile
-    // is theirs to pick up. Nobody else's hand is the viewer's to read,
-    // and an over game seats nobody on turn.
+    // The viewer's own seat, on turn: whether a play exists, or else
+    // the pile is theirs to pick up (a blind row flips instead). Nobody
+    // else's hand is the viewer's to read, and an over game seats nobody
+    // on turn.
     player.canPlay = seat.getId() == viewer_id && state.getWhoseTurn() == static_cast<int>(i) &&
                      state.hasLegalPlay(static_cast<int>(i));
     // Own hand faces only, everyone's once the game ends; face-down

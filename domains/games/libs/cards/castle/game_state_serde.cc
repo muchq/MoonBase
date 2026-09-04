@@ -154,13 +154,14 @@ std::string serializeGameState(const GameState& state) {
       {"finished", std::move(finished)},
       {"players", std::move(players)},
   };
-  // Absent rather than null until the first play: rows from before the
+  // Absent rather than null until the first move: rows from before the
   // field read the same way.
   if (const auto& play = state.getLastPlay(); play.has_value()) {
     serialized["lastPlay"] = json{
         {"player", sanitized(play->playerId)},
         {"cards", cardsToJson(play->cards)},
         {"burned", play->burned},
+        {"pickedUp", play->pickedUp},
     };
   }
   return serialized.dump(/*indent=*/-1, /*indent_char=*/' ', /*ensure_ascii=*/false,
@@ -219,10 +220,14 @@ absl::StatusOr<GameState> deserializeGameState(const std::string& serialized) {
     if (!player.ok()) return player.status();
     auto cards = readCardCodes(play, "cards", 4);
     if (!cards.ok()) return cards.status();
-    if (cards->empty()) return absl::InvalidArgumentError("a play holds cards");
     auto burned = readBool(play, "burned");
     if (!burned.ok()) return burned.status();
-    last_play = LastPlay{*std::move(player), *std::move(cards), *burned};
+    auto picked_up = readBool(play, "pickedUp");
+    if (!picked_up.ok()) return picked_up.status();
+    // Only a pick-up by choice puts nothing down, and a pick-up never burns.
+    if (cards->empty() && !*picked_up) return absl::InvalidArgumentError("a play holds cards");
+    if (*burned && *picked_up) return absl::InvalidArgumentError("a pick-up does not burn");
+    last_play = LastPlay{*std::move(player), *std::move(cards), *burned, *picked_up};
   }
 
   return GameState{std::deque<Card>(draw_pile->begin(), draw_pile->end()),

@@ -576,18 +576,33 @@ TEST(Runs, ThePileRemembersItsLastPlayUntilTheNextMove) {
   ASSERT_TRUE(pair->getLastPlay().has_value());
   EXPECT_EQ(*pair->getLastPlay(),
             (LastPlay{"a", {c(Rank::Five), c(Rank::Five, Suit::Hearts)}, false}));
-  auto burn = pair->playFromHand(1, {0});  // a nine: no; a ten would burn
-  EXPECT_FALSE(burn.ok());
   auto tenBurns = g.playFromHand(0, {2});
   ASSERT_TRUE(tenBurns.ok());
   EXPECT_EQ(*tenBurns->getLastPlay(), (LastPlay{"a", {c(Rank::Ten)}, true}));
   EXPECT_TRUE(tenBurns->getPile().empty());
-  // A pick-up clears it: the pile is somebody's hand now.
+  // The four of a kind burns the same way.
+  const GameState threeFives =
+      playing({seat("a", {c(Rank::Five, Suit::Spades)}), seat("b", {c(Rank::Nine)})},
+              {c(Rank::Five), c(Rank::Five, Suit::Hearts), c(Rank::Five, Suit::Diamonds)});
+  auto fourBurns = threeFives.playFromHand(0, {0});
+  ASSERT_TRUE(fourBurns.ok());
+  EXPECT_EQ(*fourBurns->getLastPlay(), (LastPlay{"a", {c(Rank::Five, Suit::Spades)}, true}));
+  EXPECT_TRUE(fourBurns->getPile().empty());
+  // A pick-up is a move on the pile too: nothing went down, and the
+  // pile is somebody's hand now.
   const GameState stuck = playing({seat("a", {c(Rank::Three)}), seat("b", {c(Rank::Nine)})},
                                   {c(Rank::King)}, {}, 0, LastPlay{"b", {c(Rank::King)}, false});
   auto pickedUp = stuck.pickUp(0);
   ASSERT_TRUE(pickedUp.ok());
-  EXPECT_EQ(pickedUp->getLastPlay(), std::nullopt);
+  EXPECT_EQ(*pickedUp->getLastPlay(), (LastPlay{"a", {}, false, true}));
+  // A blind flip that fails shows the card it turned over, then takes
+  // the pile with it: the one move that reveals a card and keeps it.
+  const GameState blind = playing({seat("a", {}, {}, {c(Rank::Three)}), seat("b", {c(Rank::Nine)})},
+                                  {c(Rank::King)}, {}, 0, LastPlay{"b", {c(Rank::King)}, false});
+  auto flipped = blind.playFaceDown(0, 0);
+  ASSERT_TRUE(flipped.ok());
+  EXPECT_EQ(*flipped->getLastPlay(), (LastPlay{"a", {c(Rank::Three)}, false, true}));
+  EXPECT_TRUE(flipped->getPile().empty());
   // A leave keeps it: the pile did not move.
   const GameState three =
       playing({seat("a", {c(Rank::Three)}), seat("b", {c(Rank::Nine)}), seat("c", {c(Rank::Nine)})},
@@ -717,10 +732,13 @@ TEST(Abandonment, TheLastUnreadySeatLeavingOpensPlay) {
 }
 
 TEST(Identity, IdAndVersionRideAlongUnchangedByMoves) {
-  const GameState g = playing({seat("a", {c(Rank::Five)}), seat("b", {c(Rank::Six)})});
+  const GameState g = playing({seat("a", {c(Rank::Five)}), seat("b", {c(Rank::Six)})},
+                              {c(Rank::Four)}, {}, 0, LastPlay{"b", {c(Rank::Four)}, false});
   const GameState stamped = g.withIdAndVersion("g7", "v3");
   EXPECT_EQ(stamped.getGameId(), "g7");
   EXPECT_EQ(stamped.getVersionId(), "v3");
+  // The stamp changes nothing else, the last move included.
+  EXPECT_EQ(stamped.getLastPlay(), g.getLastPlay());
   auto moved = stamped.playFromHand(0, {0});
   ASSERT_TRUE(moved.ok());
   EXPECT_EQ(moved->getGameId(), "g7");

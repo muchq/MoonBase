@@ -53,15 +53,20 @@ class GameState;
 
 enum class Phase { Setup, Playing, Over, Abandoned };
 
-/// What the pile last took: whose cards, which, and whether they burned
-/// it. Kept from a play until the next play or pick-up replaces it, so a
-/// burn — which leaves nothing on the pile to see — is still visible.
+/// The pile's last move: whose, which cards went down, and whether they
+/// burned the pile or the mover picked it up. A pick-up by choice puts
+/// no cards down; a blind flip that fails puts down the card it turned
+/// over, then takes the pile with it. Kept until the next move replaces
+/// it, so what a burn or a pick-up leaves nothing on the pile to show
+/// is still visible. The seat named may since have left the game.
 struct LastPlay {
   string playerId;
   std::vector<Card> cards;
   bool burned = false;
+  bool pickedUp = false;
   bool operator==(const LastPlay& o) const {
-    return playerId == o.playerId && cards == o.cards && burned == o.burned;
+    return playerId == o.playerId && cards == o.cards && burned == o.burned &&
+           pickedUp == o.pickedUp;
   }
 };
 
@@ -129,7 +134,7 @@ class GameState {
   [[nodiscard]] bool hasLegalPlay(int player) const;
   /// Seats that went out, first out first.
   [[nodiscard]] const std::vector<string>& getFinished() const { return finished; }
-  /// The pile's most recent play, until a play or pick-up replaces it.
+  /// The pile's most recent move; absent until the first.
   [[nodiscard]] const std::optional<LastPlay>& getLastPlay() const { return lastPlay; }
   /// The one seat still holding cards once the game is over by play:
   /// always the other seat of a two-seat game, usually nobody at a
