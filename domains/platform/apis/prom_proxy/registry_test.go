@@ -93,6 +93,22 @@ func TestRegistry_CustomTimeseriesPanelKeysAreUniquePerService(t *testing.T) {
 	}
 }
 
+// A tile's label is its identity across the whole service, not just its
+// group: the golf_/thoughts_ prefixes on games_hub exist for this. Two
+// groups sharing a label ship two tiles nobody can tell apart, and every
+// byLabel map in these tests would read whichever came last.
+func TestRegistry_CustomScalarLabelsAreUniquePerService(t *testing.T) {
+	for _, name := range serviceOrder {
+		seen := map[string]string{}
+		for _, def := range serviceRegistry[name].CustomScalars {
+			if prior, dup := seen[def.Label]; dup {
+				t.Errorf("%s: label %q is in both %q and %q", name, def.Label, prior, def.Group)
+			}
+			seen[def.Label] = def.Group
+		}
+	}
+}
+
 // Any reference to a cache metric, with whatever label selector follows it.
 //
 // Deliberately broader than cache_hits_total|cache_misses_total: a selector
@@ -436,11 +452,11 @@ func TestLatencyWindow_PadsStepByOneScrapeIntervalPastFiveMinutes(t *testing.T) 
 // same shape standardRequestRateQuery's sibling gets, so a Trends chart and
 // the Serving chart can't drift onto different conventions.
 func TestCustomTimeseriesDef_ToggleableExpandsToRateAndCountBucketedByStep(t *testing.T) {
-	def := tsCounter(`stream_commands_total`)
+	def := tsCounter(`golf_commands_total`)
 	panels := def.panels("command", "30s")
 	assert.Equal(t, map[string]string{
-		"command_rate":  `sum(rate(stream_commands_total[5m]))`,
-		"command_count": `sum(increase(stream_commands_total[30s]))`,
+		"command_rate":  `sum(rate(golf_commands_total[5m]))`,
+		"command_count": `sum(increase(golf_commands_total[30s]))`,
 	}, panels)
 
 	// The rate form is fixed at the scalar tiles' 5m regardless of step —
@@ -453,9 +469,9 @@ func TestCustomTimeseriesDef_ToggleableExpandsToRateAndCountBucketedByStep(t *te
 // A fixed custom chart keeps its map key unchanged and ignores step
 // entirely — there's no window in it to bucket.
 func TestCustomTimeseriesDef_FixedFormKeepsItsOwnKey(t *testing.T) {
-	def := tsFixed(`sum(stream_sessions_active_gauge)`)
+	def := tsFixed(`sum(golf_sessions_active_gauge)`)
 	panels := def.panels("sessions_active", "30s")
-	assert.Equal(t, map[string]string{"sessions_active": `sum(stream_sessions_active_gauge)`}, panels)
+	assert.Equal(t, map[string]string{"sessions_active": `sum(golf_sessions_active_gauge)`}, panels)
 }
 
 // microgpt-serve's tokens_per_second baked one form into its name the way
@@ -503,24 +519,24 @@ var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|c
 // shared artifact to pin them together (that is #1308's scope). What these
 // audits do close, on their own side: every tile reads only names in this
 // set, and every name in this set is read by some tile.
-var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:stream_|chat_|restored_|thoughts_)[a-z_]*)(\{[^}]*\})?`)
+var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:golf_|chat_|thoughts_)[a-z_]*)(\{[^}]*\})?`)
 
 var gamesHubExportedNames = map[string]bool{
-	"chat_appends_total":              true,
-	"chat_catch_up_drains_total":      true,
-	"chat_failures_total":             true,
-	"chat_history_replays_total":      true,
-	"chat_rows_delivered_total":       true,
-	"restored_seats_reaped_total":     true,
-	"stream_admissions_refused_total": true,
-	"stream_commands_total":           true,
-	"stream_disconnects_total":        true,
-	"stream_events_total":             true,
-	"stream_rate_limited_total":       true,
-	"stream_rejections_total":         true,
-	"stream_seats_expired_total":      true,
-	"stream_sessions_active_gauge":    true,
-	"stream_sessions_total":           true,
+	"chat_appends_total":               true,
+	"chat_catch_up_drains_total":       true,
+	"chat_failures_total":              true,
+	"chat_history_replays_total":       true,
+	"chat_rows_delivered_total":        true,
+	"golf_admissions_refused_total":    true,
+	"golf_commands_total":              true,
+	"golf_disconnects_total":           true,
+	"golf_events_total":                true,
+	"golf_rate_limited_total":          true,
+	"golf_rejections_total":            true,
+	"golf_restored_seats_reaped_total": true,
+	"golf_seats_expired_total":         true,
+	"golf_sessions_active_gauge":       true,
+	"golf_sessions_total":              true,
 	// The thoughts hub (#79), from ThoughtsHub::DeclaredCounterSeries().
 	"thoughts_admissions_refused_total": true,
 	"thoughts_commands_total":           true,
@@ -589,7 +605,7 @@ func TestGamesHubQueriesNameRealInstruments(t *testing.T) {
 	}
 	for _, match := range regexp.MustCompile(`resumed="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
 		assert.Contains(t, []string{"true", "false"}, match[1],
-			"games_hub declares no stream_sessions resumed=%q", match[1])
+			"games_hub declares no golf_sessions resumed=%q", match[1])
 	}
 }
 

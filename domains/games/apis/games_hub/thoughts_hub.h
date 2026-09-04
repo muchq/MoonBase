@@ -47,21 +47,21 @@ struct ThoughtsTestHooks {
 /// no persistence, no reconnect grace — presence is the whole game, so a
 /// dropped socket is a player gone.
 ///
-/// The world's rules are the retired Go server's (kept verbatim so the
-/// UI's own bounds keep matching): position is [x, 0, z]
-/// with x and z within ±kWorldHalfExtent, color is three components in
-/// 0..1, shape is 0, 1 or 2. A command that breaks one is refused in-band
-/// (commandRejected) and changes nothing, as is move/shape before join.
-/// Refused rather than swallowed, which is what the Go server did: a
-/// client could not tell a rejected move from a lost one.
+/// The world's rules match the muchq.com/thoughts UI's own bounds, so
+/// retune them together: position is [x, 0, z] with x and z within
+/// ±kWorldHalfExtent, color is three components in 0..1, shape is 0, 1
+/// or 2. A command that breaks one is refused in-band (commandRejected)
+/// and changes nothing, as is move/shape before join. Refused rather than
+/// swallowed, so a client can tell a rejected move from a lost one.
 ///
 /// Fan-out reaches every live session, joined or not, minus the actor: a
 /// session that has connected but not yet joined is watching the world.
 ///
-/// Counters carry the thoughts_ prefix so golf's stream_* dashboards keep
-/// their meaning; every series is declared at zero at construction (#1323)
-/// and listed in DeclaredCounterSeries(), which GamesHubHandler folds
-/// together with golf's so one sweep covers both hubs.
+/// Series carry the thoughts_ prefix (golf's carry golf_), so the two
+/// hubs never share a name and a dashboard tile means one game. Every
+/// series is declared at zero at construction (#1323) and listed in
+/// DeclaredCounterSeries(), which GamesHubHandler folds together with
+/// golf's so one sweep covers both hubs.
 class ThoughtsHub {
  public:
   using Registry = smithy::server::SessionRegistry<moonbase::games::ThoughtsEvents>;

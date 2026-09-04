@@ -11,8 +11,8 @@ namespace games_hub {
 
 namespace {
 
-// The word lists the retired Go server (#1187, #79) minted ids from; kept so
-// ids look the same across the move.
+// The whimsical vocabulary: ids double as display names, so they read as
+// adjective-animal pairs rather than hashes.
 constexpr std::string_view kAdjectives[] = {"bouncy",  "giggly", "sparkly", "fuzzy",   "wiggly",
                                             "snuggly", "dreamy", "bubbly",  "twinkly", "jolly",
                                             "quirky",  "peppy",  "zesty",   "frisky",  "silly",

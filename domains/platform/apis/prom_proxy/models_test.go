@@ -107,7 +107,7 @@ func TestDataPointStruct(t *testing.T) {
 		Timestamp: now,
 		Value:     42.5,
 	}
-	
+
 	assert.Equal(t, now, dp.Timestamp)
 	assert.Equal(t, 42.5, dp.Value)
 }
@@ -122,7 +122,7 @@ func TestTimeSeriesStruct(t *testing.T) {
 			{Timestamp: now.Add(30 * time.Second), Value: 18.7},
 		},
 	}
-	
+
 	assert.Equal(t, "cpu_utilization", ts.MetricName)
 	assert.Equal(t, "localhost", ts.Labels["instance"])
 	assert.Len(t, ts.Values, 2)
@@ -133,7 +133,7 @@ func TestTimeSeriesStruct(t *testing.T) {
 func TestTimeSeriesResponse(t *testing.T) {
 	startTime := time.Now().Add(-30 * time.Minute)
 	endTime := time.Now()
-	
+
 	response := TimeSeriesResponse{
 		TimeRange: "30m",
 		StartTime: startTime,
@@ -147,7 +147,7 @@ func TestTimeSeriesResponse(t *testing.T) {
 			},
 		},
 	}
-	
+
 	assert.Equal(t, "30m", response.TimeRange)
 	assert.Equal(t, startTime, response.StartTime)
 	assert.Equal(t, endTime, response.EndTime)
@@ -189,7 +189,7 @@ func TestSystemMetricsStruct(t *testing.T) {
 			},
 		},
 	}
-	
+
 	assert.Equal(t, now, metrics.Timestamp)
 	assert.Equal(t, 25.5, metrics.CPU.Utilization)
 	assert.Equal(t, 20.0, metrics.CPU.ByCore["0"])

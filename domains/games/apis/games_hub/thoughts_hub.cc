@@ -320,7 +320,7 @@ void ThoughtsHub::Count(const char* name, const std::map<std::string, std::strin
 }
 
 void ThoughtsHub::TrackActive(int delta) {
-  // Delta form, like stream_sessions_active: the collector sums an up-down
+  // Delta form, like golf_sessions_active: the collector sums an up-down
   // counter into the live-session count.
   if (metrics_) metrics_->RecordGauge("thoughts_sessions_active", delta);
 }
