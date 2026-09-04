@@ -51,6 +51,7 @@ void expectStatesEqual(const GameState& a, const GameState& b) {
   EXPECT_EQ(a.getWhoseTurn(), b.getWhoseTurn());
   EXPECT_EQ(a.getPhase(), b.getPhase());
   EXPECT_EQ(a.getFinished(), b.getFinished());
+  EXPECT_EQ(a.getLastPlay(), b.getLastPlay());
 }
 
 // Serialize -> deserialize -> compare, and serialize again: the second
@@ -85,6 +86,7 @@ TEST(CastleSerde, EveryPhaseRoundTrips) {
   auto played = playing->playFromHand(opener, {0});
   ASSERT_TRUE(played.ok()) << played.status();
   EXPECT_EQ(played->getPile().size(), 1u);
+  ASSERT_TRUE(played->getLastPlay().has_value());
   expectRoundTrips(*played);
 
   auto abandoned = played->removePlayer(opener);
@@ -124,7 +126,8 @@ TEST(CastleSerde, FrozenPayload) {
 // ride the same table of names.
 TEST(CastleSerde, FrozenPlayingPayload) {
   constexpr const char* kRow =
-      R"({"drawPile":[0,1,2,3],"finished":[],"phase":"playing","pile":[45,44],)"
+      R"({"drawPile":[0,1,2,3],"finished":[],"lastPlay":{"burned":false,"cards":[45,44],)"
+      R"("player":"a"},"phase":"playing","pile":[45,44],)"
       R"("players":[{"faceDown":[51],"faceUp":[48,47],"hand":[43],"id":"a","ready":true},)"
       R"({"faceDown":[42,41,40],"faceUp":[39],"hand":[36,35,34],"id":"b","ready":true}],)"
       R"("v":1,"whoseTurn":1})";
@@ -132,7 +135,18 @@ TEST(CastleSerde, FrozenPlayingPayload) {
   ASSERT_TRUE(restored.ok()) << restored.status();
   EXPECT_EQ(restored->getPhase(), Phase::Playing);
   EXPECT_EQ(restored->getWhoseTurn(), 1);
+  ASSERT_TRUE(restored->getLastPlay().has_value());
+  EXPECT_EQ(restored->getLastPlay()->playerId, "a");
+  EXPECT_EQ(restored->getLastPlay()->cards.size(), 2u);
+  EXPECT_FALSE(restored->getLastPlay()->burned);
   EXPECT_EQ(serializeGameState(*restored), kRow);
+  // A row from before the field: no lastPlay, and it stays absent.
+  json without = json::parse(kRow);
+  without.erase("lastPlay");
+  const auto older = deserializeGameState(without.dump());
+  ASSERT_TRUE(older.ok()) << older.status();
+  EXPECT_EQ(older->getLastPlay(), std::nullopt);
+  EXPECT_EQ(serializeGameState(*older), without.dump());
   for (const char* phase : {"over", "abandoned"}) {
     json payload = json::parse(kRow);
     payload["phase"] = phase;
@@ -195,6 +209,21 @@ TEST(CastleSerde, RejectsWhatTheEngineWouldIndexOutOfRange) {
 
   payload = dealtPayload();
   payload["finished"] = json::array({1});
+  expectRejected(payload);
+
+  // A last play is an object with a player, at least one card, and the
+  // burn flag; anything else is a dropped row.
+  payload = dealtPayload();
+  payload["lastPlay"] = 7;
+  expectRejected(payload);
+  payload = dealtPayload();
+  payload["lastPlay"] = json{{"player", "a"}, {"cards", json::array()}, {"burned", false}};
+  expectRejected(payload);
+  payload = dealtPayload();
+  payload["lastPlay"] = json{{"player", "a"}, {"cards", json::array({52})}, {"burned", false}};
+  expectRejected(payload);
+  payload = dealtPayload();
+  payload["lastPlay"] = json{{"player", "a"}, {"cards", json::array({3})}};
   expectRejected(payload);
 
   for (const char* input : {"", "[]", "not json", R"({"v":1})", R"({"v":"1"})"}) {

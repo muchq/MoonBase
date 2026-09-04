@@ -53,6 +53,18 @@ class GameState;
 
 enum class Phase { Setup, Playing, Over, Abandoned };
 
+/// What the pile last took: whose cards, which, and whether they burned
+/// it. Kept from a play until the next play or pick-up replaces it, so a
+/// burn — which leaves nothing on the pile to see — is still visible.
+struct LastPlay {
+  string playerId;
+  std::vector<Card> cards;
+  bool burned = false;
+  bool operator==(const LastPlay& o) const {
+    return playerId == o.playerId && cards == o.cards && burned == o.burned;
+  }
+};
+
 /// Deals a fresh game from an already-shuffled deck (drawn from the
 /// back), in the setup phase. Nine cards a seat — face-down row, then
 /// face-up row, then hand; the rest is the draw pile.
@@ -70,13 +82,14 @@ class GameState {
 
   GameState(std::deque<Card> _drawPile, std::vector<Card> _pile, std::vector<Player> _players,
             int _whoseTurn, Phase _phase, std::vector<string> _finished, string _gameId,
-            string _versionId)
+            string _versionId, std::optional<LastPlay> _lastPlay = std::nullopt)
       : drawPile(std::move(_drawPile)),
         pile(std::move(_pile)),
         players(std::move(_players)),
         whoseTurn(_whoseTurn),
         phase(_phase),
         finished(std::move(_finished)),
+        lastPlay(std::move(_lastPlay)),
         gameId(std::move(_gameId)),
         versionId(std::move(_versionId)) {}
 
@@ -116,6 +129,8 @@ class GameState {
   [[nodiscard]] bool hasLegalPlay(int player) const;
   /// Seats that went out, first out first.
   [[nodiscard]] const std::vector<string>& getFinished() const { return finished; }
+  /// The pile's most recent play, until a play or pick-up replaces it.
+  [[nodiscard]] const std::optional<LastPlay>& getLastPlay() const { return lastPlay; }
   /// The one seat still holding cards once the game is over by play:
   /// always the other seat of a two-seat game, usually nobody at a
   /// bigger table.
@@ -140,7 +155,7 @@ class GameState {
   /// the next turn, and the end of the game.
   [[nodiscard]] GameState settle(int player, std::deque<Card> newDrawPile,
                                  std::vector<Card> newPile, std::vector<Player> newPlayers,
-                                 bool burned) const;
+                                 LastPlay play) const;
   [[nodiscard]] int nextSeat(int from, const std::vector<Player>& roster) const;
 
   const std::deque<Card> drawPile;
@@ -149,6 +164,7 @@ class GameState {
   const int whoseTurn;
   const Phase phase;
   const std::vector<string> finished;
+  const std::optional<LastPlay> lastPlay;
   const string gameId;
   const string versionId;
 };

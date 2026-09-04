@@ -22,7 +22,10 @@ namespace castle {
 ///   {"v":1, "drawPile":[int...], "pile":[int...], "whoseTurn":int,
 ///    "phase":"setup"|"playing"|"over"|"abandoned", "finished":[str...],
 ///    "players":[{"id":str, "hand":[int...], "faceUp":[int...],
-///                "faceDown":[int...], "ready":bool}...]}
+///                "faceDown":[int...], "ready":bool}...],
+///    "lastPlay":{"player":str, "cards":[int...], "burned":bool}}
+/// lastPlay is absent until the first play, so rows written before the
+/// field read unchanged.
 ///
 /// Keys emit alphabetically (nlohmann's sorted-map default), so
 /// re-serializing a deserialized state reproduces the bytes. Unknown

@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <deque>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,9 +28,16 @@ Player seat(const string& id, vector<Card> hand, vector<Card> faceUp = {},
 
 /// A game in play: seats as given, the pile's back on top, seat `turn` to move.
 GameState playing(vector<Player> players, vector<Card> pile = {}, deque<Card> draw = {},
-                  int turn = 0) {
-  return GameState{
-      std::move(draw), std::move(pile), std::move(players), turn, Phase::Playing, {}, "game", "v0"};
+                  int turn = 0, std::optional<LastPlay> lastPlay = std::nullopt) {
+  return GameState{std::move(draw),
+                   std::move(pile),
+                   std::move(players),
+                   turn,
+                   Phase::Playing,
+                   {},
+                   "game",
+                   "v0",
+                   std::move(lastPlay)};
 }
 
 }  // namespace
@@ -552,6 +560,41 @@ TEST(Play, OnlyAHandPlayDrawsBackUp) {
   EXPECT_TRUE(played->getPlayer(0).getHand().empty());
   EXPECT_EQ(played->getPlayer(0).source(), Source::FaceDown);
   EXPECT_EQ(played->getDrawPile().size(), 2u);
+}
+
+// The pile remembers its last play — whose, which cards, and whether it
+// burned — until the next play or a pick-up replaces it, so a burn that
+// leaves nothing on the pile is still visible.
+TEST(Runs, ThePileRemembersItsLastPlayUntilTheNextMove) {
+  const GameState g =
+      playing({seat("a", {c(Rank::Five), c(Rank::Five, Suit::Hearts), c(Rank::Ten)}),
+               seat("b", {c(Rank::Nine), c(Rank::Three)})},
+              {c(Rank::Four)});
+  EXPECT_EQ(g.getLastPlay(), std::nullopt);
+  auto pair = g.playFromHand(0, {0, 1});
+  ASSERT_TRUE(pair.ok());
+  ASSERT_TRUE(pair->getLastPlay().has_value());
+  EXPECT_EQ(*pair->getLastPlay(),
+            (LastPlay{"a", {c(Rank::Five), c(Rank::Five, Suit::Hearts)}, false}));
+  auto burn = pair->playFromHand(1, {0});  // a nine: no; a ten would burn
+  EXPECT_FALSE(burn.ok());
+  auto tenBurns = g.playFromHand(0, {2});
+  ASSERT_TRUE(tenBurns.ok());
+  EXPECT_EQ(*tenBurns->getLastPlay(), (LastPlay{"a", {c(Rank::Ten)}, true}));
+  EXPECT_TRUE(tenBurns->getPile().empty());
+  // A pick-up clears it: the pile is somebody's hand now.
+  const GameState stuck = playing({seat("a", {c(Rank::Three)}), seat("b", {c(Rank::Nine)})},
+                                  {c(Rank::King)}, {}, 0, LastPlay{"b", {c(Rank::King)}, false});
+  auto pickedUp = stuck.pickUp(0);
+  ASSERT_TRUE(pickedUp.ok());
+  EXPECT_EQ(pickedUp->getLastPlay(), std::nullopt);
+  // A leave keeps it: the pile did not move.
+  const GameState three =
+      playing({seat("a", {c(Rank::Three)}), seat("b", {c(Rank::Nine)}), seat("c", {c(Rank::Nine)})},
+              {c(Rank::King)}, {}, 0, LastPlay{"c", {c(Rank::King)}, false});
+  auto left = three.removePlayer(1);
+  ASSERT_TRUE(left.ok());
+  EXPECT_EQ(left->getLastPlay(), three.getLastPlay());
 }
 
 TEST(Ending, TheFirstSeatOutEndsTheGame) {
