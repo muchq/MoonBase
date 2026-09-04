@@ -104,8 +104,10 @@ structure CastleGameState {
     view: CastleView
 }
 
-/// The finish order, first out first; the last holder is the loser. An
-/// abandoned game names whoever finished before it ended and no loser.
+/// The finish order: the first seat out wins and ends the game, so it
+/// holds one name. A two-seat game names the other seat as the loser; a
+/// bigger table ends with a winner and no loser, as does an abandoned
+/// game (which lists whoever finished before it ended).
 structure CastleGameEnded {
     @required
     finished: PlayerIds

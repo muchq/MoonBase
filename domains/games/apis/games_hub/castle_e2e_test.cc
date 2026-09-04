@@ -264,13 +264,17 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
           stream.stream.Send(Castle(CastleMove::FromPickup(moonbase::games::PickUp{}))).ok());
       ASSERT_TRUE(advance(mirror->pickUp(seat)));
     } else {
-      // Every card of the first playable rank in the row in play.
+      // Every card of the first rank in the row whose full count meets
+      // the pile: the run on top sets the count a play must match.
       const std::vector<cards::Card>& row = mover.row(mover.source());
       std::vector<int> indexes;
       for (std::size_t i = 0; i < row.size() && indexes.empty(); ++i) {
-        if (!mirror->isPlayable(row[i].getRank())) continue;
+        std::vector<int> of_rank;
         for (std::size_t j = 0; j < row.size(); ++j) {
-          if (row[j].getRank() == row[i].getRank()) indexes.push_back(static_cast<int>(j));
+          if (row[j].getRank() == row[i].getRank()) of_rank.push_back(static_cast<int>(j));
+        }
+        if (mirror->isPlayable(row[i].getRank(), static_cast<int>(of_rank.size()))) {
+          indexes = of_rank;
         }
       }
       ASSERT_FALSE(indexes.empty());
