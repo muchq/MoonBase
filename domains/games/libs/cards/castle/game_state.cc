@@ -197,13 +197,20 @@ bool GameState::isPlayable(Rank rank, int count) const {
   const Rank top = pile.back().getRank();
   const int run = runOnTop();
   // Fewer of the top's own rank are legal only as the completion of its
-  // four of a kind, which burns.
+  // four of a kind, which clears the pile. The four is counted on the
+  // pile, across plays.
   if (rank == top && count == 4 - run) {
     return true;
   }
+  // Otherwise the count to match is the last play's: a queen on a queen
+  // leaves two on top, and one king still answers. A pile with no play
+  // behind it (a row from before the move was kept) prices by its run.
+  const int price = lastPlay.has_value() && !lastPlay->cards.empty() && !lastPlay->pickedUp
+                        ? static_cast<int>(lastPlay->cards.size())
+                        : run;
   // A two on top takes anything, which the rank order already says: two
   // is the lowest rank.
-  return rankValue(rank) >= rankValue(top) && count >= run;
+  return rankValue(rank) >= rankValue(top) && count >= price;
 }
 
 bool GameState::hasLegalPlay(int player) const {

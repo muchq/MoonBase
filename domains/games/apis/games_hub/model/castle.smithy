@@ -142,8 +142,9 @@ structure CastleView {
     pileCount: Integer
 
     /// The run on top of the pile, top card last: every card of the top's
-    /// rank in a row. Its length is the count the next play must match,
-    /// or the four of a kind it must complete. Empty on an empty pile.
+    /// rank in a row, across plays. What a four of a kind completes, and
+    /// what the table shows; the count the next play must match is the
+    /// last play's (lastPlay.cards). Empty on an empty pile.
     @required
     run: Cards
 

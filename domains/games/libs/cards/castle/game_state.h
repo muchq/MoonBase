@@ -30,10 +30,11 @@ using std::string;
 ///   - A turn plays one or more cards of a single rank from the seat's
 ///     active row (hand while it has cards, then the face-up row, then
 ///     the face-down row one card at a time, blind) onto the pile. The
-///     run on top sets the price: after n cards of rank k, a play is n or
+///     last play sets the price: after n cards of rank k, a play is n or
 ///     more cards of rank k or higher (two is the lowest rank, so a two
-///     on top asks only for its count), or exactly the 4-n cards of rank
-///     k that complete its four of a kind. Twos and tens play on anything
+///     on top asks only for its count). The run on top — every card of
+///     the top's rank in a row, across plays — sets the four: exactly the
+///     cards of rank k that complete its four of a kind also play. Twos and tens play on anything
 ///     in any count; anything plays on an empty pile. A hand play draws
 ///     back up to three while the draw pile lasts; face-up and face-down
 ///     plays never draw. The turn passes to the next seat, wrapping.
@@ -124,13 +125,14 @@ class GameState {
   [[nodiscard]] bool isOver() const { return phase == Phase::Over || phase == Phase::Abandoned; }
   [[nodiscard]] Phase getPhase() const { return phase; }
   [[nodiscard]] std::optional<Card> pileTop() const;
-  /// How many cards of one rank sit on top of the pile: the count the
-  /// next play must match. Zero on an empty pile.
+  /// How many cards of one rank sit on top of the pile, across plays:
+  /// what a four of a kind completes. Zero on an empty pile.
   [[nodiscard]] int runOnTop() const;
   /// Whether `count` cards of this rank may go on the pile as it stands:
-  /// a special always; on an empty pile anything; otherwise the count on
-  /// top or more of that rank or higher, or exactly what completes the
-  /// four of a kind of the top's own rank. No cards is never a play.
+  /// a special always; on an empty pile anything; otherwise the last
+  /// play's count or more of that rank or higher, or exactly what
+  /// completes the four of a kind of the top's own rank on the pile. No
+  /// cards is never a play.
   [[nodiscard]] bool isPlayable(Rank rank, int count = 1) const;
   /// Whether the seat's active row holds a legal play. Always false for
   /// a face-down row: those are played blind.

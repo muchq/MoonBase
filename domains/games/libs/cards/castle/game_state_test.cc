@@ -234,6 +234,33 @@ TEST(Play, TheFourthSevenAcrossThreePlaysClearsThePileAndKeepsTheTurn) {
   EXPECT_EQ(fourth->getPhase(), Phase::Playing);
 }
 
+// The count to beat is the last play's, not the run's: a queen on a
+// queen leaves a run of two, and one king still answers it. The run
+// still decides the four of a kind: two more queens complete it.
+TEST(Runs, TheLastPlaySetsTheCountAndTheRunSetsTheFour) {
+  const GameState g =
+      playing({seat("a", {c(Rank::Queen, Suit::Spades), c(Rank::King), c(Rank::Four)}),
+               seat("b", {c(Rank::Queen, Suit::Hearts), c(Rank::Queen, Suit::Clubs),
+                          c(Rank::Queen, Suit::Diamonds)})});
+  auto one = g.playFromHand(0, {0});
+  ASSERT_TRUE(one.ok()) << one.status();
+  auto two = one->playFromHand(1, {0});
+  ASSERT_TRUE(two.ok()) << two.status();
+  EXPECT_EQ(two->runOnTop(), 2);
+  EXPECT_TRUE(two->isPlayable(Rank::King, 1));
+  EXPECT_FALSE(two->isPlayable(Rank::Four, 1));
+  EXPECT_TRUE(two->hasLegalPlay(0));
+  auto king = two->playFromHand(0, {0});
+  ASSERT_TRUE(king.ok()) << king.status();
+  EXPECT_EQ(king->getWhoseTurn(), 1);
+
+  // On the same two queens, a queen plays by rank and a pair of them is
+  // the four; a single lower card is neither.
+  EXPECT_TRUE(two->isPlayable(Rank::Queen, 1));
+  EXPECT_TRUE(two->isPlayable(Rank::Queen, 2));
+  EXPECT_FALSE(two->isPlayable(Rank::Jack, 2));
+}
+
 TEST(Play, FourOfAKindOnTopBurnsAcrossPlays) {
   const GameState g = playing(
       {seat("a", {c(Rank::Eight), c(Rank::Eight), c(Rank::Four)}), seat("b", {c(Rank::Nine)})},
