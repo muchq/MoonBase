@@ -350,7 +350,10 @@ GameState GameState::settle(int player, deque<Card> newDrawPile, vector<Card> ne
                      versionId,
                      std::move(play)};
   }
-  const int next = burned && !wentOut ? player : nextSeat(player, newPlayers);
+  // A ten or a four of a kind clears the pile and a two resets it; either
+  // way the mover goes again.
+  const bool again = burned || (!play.cards.empty() && play.cards.front().getRank() == Rank::Two);
+  const int next = again ? player : nextSeat(player, newPlayers);
   return GameState{std::move(newDrawPile),
                    std::move(newPile),
                    std::move(newPlayers),

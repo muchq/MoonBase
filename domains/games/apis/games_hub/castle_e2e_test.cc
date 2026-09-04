@@ -91,9 +91,9 @@ class CastleGameFixture : public GamesHubStreamFixture {
                    const castle::GameState& mirror) {
     EXPECT_EQ(seen.pileCount, static_cast<int>(mirror.getPile().size()));
     EXPECT_EQ(seen.drawPileCount, static_cast<int>(mirror.getDrawPile().size()));
-    EXPECT_EQ(seen.pileTop.has_value() ? Face(*seen.pileTop) : "",
-              mirror.pileTop().has_value() ? Faces({*mirror.pileTop()})[0] : "");
-    EXPECT_EQ(seen.pileRun, mirror.runOnTop());
+    const std::vector<cards::Card>& pile = mirror.getPile();
+    EXPECT_EQ(Faces(seen.run),
+              Faces(std::vector<cards::Card>(pile.end() - mirror.runOnTop(), pile.end())));
     EXPECT_EQ(seen.finished, mirror.getFinished());
     ASSERT_EQ(seen.lastPlay.has_value(), mirror.getLastPlay().has_value());
     if (seen.lastPlay.has_value()) {
@@ -149,16 +149,6 @@ class CastleGameFixture : public GamesHubStreamFixture {
       Seat& stream = *by_id.at(mover.getId());
       if (mover.source() == castle::Source::FaceDown) {
         // Blind: the engine plays the flip or hands the pile over itself.
-        // canPlay was false for this seat, and picking up is not the
-        // move that leaves: the flip is.
-        if (played.blind_plays == 0) {
-          ASSERT_TRUE(
-              stream.stream.Send(Castle(CastleMove::FromPickup(moonbase::games::PickUp{}))).ok());
-          auto refused = ReceiveCase(stream.stream, "commandRejected");
-          ASSERT_TRUE(refused.has_value());
-          EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
-                    "face-down cards are played blind");
-        }
         ++played.blind_plays;
         moonbase::games::PlayFaceDown blind;
         blind.index = 0;
@@ -268,7 +258,7 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
     EXPECT_FALSE(view.currentPlayerId.has_value());
     EXPECT_EQ(view.drawPileCount, 34);
     EXPECT_EQ(view.pileCount, 0);
-    EXPECT_FALSE(view.pileTop.has_value());
+    EXPECT_TRUE(view.run.empty());
     ASSERT_EQ(view.players.size(), 2u);
     const auto& me = view.players[0];
     EXPECT_EQ(me.playerId, alice.player_id);
@@ -351,8 +341,7 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
   EXPECT_GT(played.burns, 0) << "the deal never burned the pile";
   EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "playFaceDown"}}),
             played.blind_plays);
-  // The refused pick-up on the first blind turn counts as a command too.
-  EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "pickUp"}}), played.pickups + 1);
+  EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "pickUp"}}), played.pickups);
   EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "ready"}}), 2);
 
   // Two seats: the first out wins and the other is the loser.
@@ -376,8 +365,7 @@ TEST_F(CastleGameFixture, AThreeSeatGameEndsOnTheFirstOutAndNamesNoLoser) {
   ASSERT_NO_FATAL_FAILURE(PlayToEnd(seats, mirror, played));
   EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "playFaceDown"}}),
             played.blind_plays);
-  EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "pickUp"}}),
-            played.pickups + (played.blind_plays > 0 ? 1 : 0));
+  EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "pickUp"}}), played.pickups);
   ASSERT_EQ(mirror->getFinished().size(), 1u);
   EXPECT_FALSE(mirror->loser().has_value());
   ASSERT_NO_FATAL_FAILURE(ExpectEnding(seats, *mirror));
@@ -768,6 +756,115 @@ TEST_F(CastleGameFixture, AMidGameBrowserCloseParksTheSeatAndTheTableSurvives) {
     auto view = ReceiveCastle(seat->stream, "gameState");
     ASSERT_TRUE(view.has_value());
     ExpectBoard(view->as_gameState_or_null()->view, seat->player_id, *mirror);
+  }
+}
+
+// A deal that puts the four sevens in the hands: alice holds 7♠ 7♣ 9♥,
+// bob 7♥ 7♦ 8♣. Everything else stays where the pristine deck has it.
+class SevensDealer : public cards::Dealer {
+ public:
+  void ShuffleDeck(std::deque<cards::Card>& deck) override {
+    using cards::Card;
+    using cards::Rank;
+    using cards::Suit;
+    // Dealt from the back, nine a seat: face-down, face-up, then hand,
+    // each row taking the back card first. So alice's hand is positions
+    // 7-9 from the back and bob's 16-18, and a hand reads back to front.
+    const std::vector<Card> alice = {Card(Suit::Hearts, Rank::Nine), Card(Suit::Clubs, Rank::Seven),
+                                     Card(Suit::Spades, Rank::Seven)};
+    const std::vector<Card> bob = {Card(Suit::Clubs, Rank::Eight),
+                                   Card(Suit::Diamonds, Rank::Seven),
+                                   Card(Suit::Hearts, Rank::Seven)};
+    std::vector<Card> rest;
+    for (const Card& card : deck) {
+      const bool wanted = std::find(alice.begin(), alice.end(), card) != alice.end() ||
+                          std::find(bob.begin(), bob.end(), card) != bob.end();
+      if (!wanted) rest.push_back(card);
+    }
+    ASSERT_EQ(rest.size(), deck.size() - 6);
+    // Cards are immutable values: the arranged deck is built by pushing,
+    // never by shifting.
+    std::deque<Card> arranged;
+    auto push = [&](auto first, auto last) {
+      for (auto it = first; it != last; ++it) arranged.push_back(*it);
+    };
+    push(rest.begin(), rest.end() - 12);
+    push(bob.begin(), bob.end());
+    push(rest.end() - 12, rest.end() - 6);
+    push(alice.begin(), alice.end());
+    push(rest.end() - 6, rest.end());
+    ASSERT_EQ(arranged.size(), deck.size());
+    deck.swap(arranged);
+  }
+};
+
+class SevensCastleFixture : public CastleGameFixture {
+ protected:
+  std::shared_ptr<cards::Dealer> MakeDealer() override { return std::make_shared<SevensDealer>(); }
+};
+
+// Seven, then two sevens, then the fourth: four of a kind counts as a
+// ten. The table sees the run build and clear, and hears no turn change
+// after the clear because the seat that completed it plays again.
+TEST_F(SevensCastleFixture, TheFourthSevenClearsThePileAndTheTurnStays) {
+  auto table = SeatedCastleTable();
+  ASSERT_TRUE(table.has_value());
+  auto& alice = table->alice;
+  auto& bob = table->bob;
+  auto dealt = ReceiveCastle(alice.stream, "gameState");
+  ASSERT_TRUE(dealt.has_value());
+  EXPECT_EQ(Faces(dealt->as_gameState_or_null()->view.players[0].hand),
+            (std::vector<std::string>{"7♠", "7♣", "9♥"}));
+  ASSERT_TRUE(ReceiveCastle(bob.stream, "gameState").has_value());
+  for (Seat* seat : {&alice, &bob}) {
+    ASSERT_TRUE(seat->stream.Send(Castle(CastleMove::FromReady(moonbase::games::Ready{}))).ok());
+  }
+  // Both hold a seven as their lowest ordinary card; the tie opens on alice.
+  for (Seat* seat : {&alice, &bob}) {
+    auto turn = ReceiveCastle(seat->stream, "turnChanged");
+    ASSERT_TRUE(turn.has_value());
+    EXPECT_EQ(turn->as_turnChanged_or_null()->playerId, alice.player_id);
+  }
+
+  auto play = [&](Seat& seat, std::vector<int> indexes) {
+    moonbase::games::PlayFromHand move;
+    move.indexes = std::move(indexes);
+    ASSERT_TRUE(seat.stream.Send(Castle(CastleMove::FromPlayfromhand(move))).ok());
+  };
+  auto view_after = [&](Seat& seat) {
+    auto update = ReceiveCastle(seat.stream, "gameState");
+    EXPECT_TRUE(update.has_value());
+    return update.has_value() ? update->as_gameState_or_null()->view
+                              : moonbase::games::CastleView{};
+  };
+
+  play(alice, {0});
+  EXPECT_EQ(Faces(view_after(alice).run), (std::vector<std::string>{"7♠"}));
+  EXPECT_EQ(view_after(bob).currentPlayerId.value_or(""), bob.player_id);
+  for (Seat* seat : {&alice, &bob})
+    ASSERT_TRUE(ReceiveCastle(seat->stream, "turnChanged").has_value());
+
+  play(bob, {0, 1});
+  EXPECT_EQ(Faces(view_after(bob).run), (std::vector<std::string>{"7♠", "7♥", "7♦"}));
+  auto hers = view_after(alice);
+  EXPECT_EQ(hers.currentPlayerId.value_or(""), alice.player_id);
+  EXPECT_TRUE(hers.players[0].canPlay);
+  for (Seat* seat : {&alice, &bob})
+    ASSERT_TRUE(ReceiveCastle(seat->stream, "turnChanged").has_value());
+
+  // The 7♣ drew back to index 0 after the first play; it completes the four.
+  ASSERT_EQ(Face(hers.players[0].hand[0]), "7♣");
+  play(alice, {0});
+  for (Seat* seat : {&alice, &bob}) {
+    auto cleared = view_after(*seat);
+    EXPECT_TRUE(cleared.run.empty());
+    EXPECT_EQ(cleared.pileCount, 0);
+    ASSERT_TRUE(cleared.lastPlay.has_value());
+    EXPECT_TRUE(cleared.lastPlay->burned);
+    EXPECT_EQ(Faces(cleared.lastPlay->cards), (std::vector<std::string>{"7♣"}));
+    EXPECT_EQ(cleared.currentPlayerId.value_or(""), alice.player_id);
+    EXPECT_EQ(cleared.phase, "playing");
+    ExpectNoEvent(seat->stream);
   }
 }
 

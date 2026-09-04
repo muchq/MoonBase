@@ -698,8 +698,8 @@ TEST_F(PgGamesHubFixture, CastleTableSurvivesARestart) {
   EXPECT_EQ(after.currentPlayerId.value_or(""), alice.player_id);
   EXPECT_EQ(after.drawPileCount, before.drawPileCount);
   EXPECT_EQ(after.pileCount, before.pileCount);
-  ASSERT_TRUE(after.pileTop.has_value());
-  EXPECT_EQ(after.pileTop->rank + after.pileTop->suit, "J♣");
+  ASSERT_EQ(after.run.size(), 1u);
+  EXPECT_EQ(after.run[0].rank + after.run[0].suit, "J♣");
   ASSERT_TRUE(after.lastPlay.has_value());
   EXPECT_EQ(after.lastPlay->playerId, bob.player_id);
   EXPECT_EQ(after.lastPlay->cards.size(), 1u);

@@ -186,7 +186,7 @@ TEST(Play, ASeatOutsideTheTableIsRejectedEverywhere) {
   }
 }
 
-TEST(Play, ATwoResetsThePileAndATenBurnsIt) {
+TEST(Play, ATwoResetsThePileAndATenClearsIt) {
   const GameState g =
       playing({seat("a", {c(Rank::Two), c(Rank::Three), c(Rank::Ten)}), seat("b", {c(Rank::Nine)})},
               {c(Rank::King)});
@@ -194,11 +194,14 @@ TEST(Play, ATwoResetsThePileAndATenBurnsIt) {
   EXPECT_TRUE(g.isPlayable(Rank::Ten));
   EXPECT_FALSE(g.isPlayable(Rank::Three));
 
+  // The two stays on the pile as its new floor, and the resetter plays
+  // again on it.
   auto reset = g.playFromHand(0, {0});
   ASSERT_TRUE(reset.ok());
   EXPECT_EQ(reset->pileTop(), c(Rank::Two));
   EXPECT_TRUE(reset->isPlayable(Rank::Three));
-  EXPECT_EQ(reset->getWhoseTurn(), 1);
+  EXPECT_EQ(reset->getWhoseTurn(), 0);
+  EXPECT_FALSE(reset->getLastPlay()->burned);
 
   auto burn = g.playFromHand(0, {2});
   ASSERT_TRUE(burn.ok());
@@ -207,6 +210,28 @@ TEST(Play, ATwoResetsThePileAndATenBurnsIt) {
   EXPECT_EQ(burn->getWhoseTurn(), 0);  // the burner goes again
   EXPECT_TRUE(burn->isPlayable(Rank::Three));
   EXPECT_FALSE(burn->pickUp(0).ok());  // nothing to pick up
+}
+
+// A seven, then two sevens on it, then the fourth: four of a kind counts
+// as a ten, the pile clears, and the seat that completed it goes again.
+TEST(Play, TheFourthSevenAcrossThreePlaysClearsThePileAndKeepsTheTurn) {
+  const GameState g = playing(
+      {seat("a", {c(Rank::Seven, Suit::Spades), c(Rank::Seven, Suit::Clubs), c(Rank::Nine)}),
+       seat("b", {c(Rank::Seven, Suit::Hearts), c(Rank::Seven, Suit::Diamonds), c(Rank::Eight)})});
+  auto one = g.playFromHand(0, {0});
+  ASSERT_TRUE(one.ok()) << one.status();
+  EXPECT_EQ(one->getWhoseTurn(), 1);
+  auto pair = one->playFromHand(1, {0, 1});
+  ASSERT_TRUE(pair.ok()) << pair.status();
+  EXPECT_EQ(pair->runOnTop(), 3);
+  EXPECT_EQ(pair->getWhoseTurn(), 0);
+  // One seven answers a run of three only as its completion.
+  auto fourth = pair->playFromHand(0, {0});
+  ASSERT_TRUE(fourth.ok()) << fourth.status();
+  EXPECT_TRUE(fourth->getPile().empty());
+  EXPECT_TRUE(fourth->getLastPlay()->burned);
+  EXPECT_EQ(fourth->getWhoseTurn(), 0);
+  EXPECT_EQ(fourth->getPhase(), Phase::Playing);
 }
 
 TEST(Play, FourOfAKindOnTopBurnsAcrossPlays) {
@@ -469,6 +494,7 @@ TEST(Runs, SpecialsIgnoreTheCount) {
   auto reset = g.playFromHand(0, {0});
   ASSERT_TRUE(reset.ok()) << reset.status();
   EXPECT_EQ(reset->pileTop(), c(Rank::Two));
+  EXPECT_EQ(reset->getWhoseTurn(), 0);  // and goes again
   auto burn = g.playFromHand(0, {1});
   ASSERT_TRUE(burn.ok()) << burn.status();
   EXPECT_TRUE(burn->getPile().empty());
@@ -552,7 +578,7 @@ TEST(Runs, SpecialsPlayInAnyCount) {
   auto pair = g.playFromHand(0, {0, 1});
   ASSERT_TRUE(pair.ok()) << pair.status();
   EXPECT_EQ(pair->runOnTop(), 2);
-  EXPECT_EQ(pair->getWhoseTurn(), 1);
+  EXPECT_EQ(pair->getWhoseTurn(), 0);  // a reset, in any count, is the mover's to follow
 }
 
 TEST(Runs, AnEmptyPileHasNoRunAndNoCardsIsNoPlay) {

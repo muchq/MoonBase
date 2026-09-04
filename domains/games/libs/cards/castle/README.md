@@ -9,7 +9,8 @@ The rules the engine plays are the contract, stated on `GameState` in
 face-down, three face-up, three in hand; a setup phase of hand/face-up
 swaps; lowest ordinary card opens; a play matches or beats the count on
 top at its rank or higher, or completes the top's four of a kind; twos
-reset, tens and four of a kind burn and the burner plays its next row;
+reset the pile and tens clear it, four of a kind counts as a ten, and
+either way the same seat plays again;
 the pile may be picked up on any turn instead of playing; face-up then
 face-down rows once the hand is gone; the first seat out wins and ends
 the game.

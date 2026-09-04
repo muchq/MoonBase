@@ -374,6 +374,11 @@ class GamesHubStreamFixture : public testing::Test {
   /// the rate-limit suite wants refusals — it overrides with tiny
   /// buckets whose refills are frozen.
   virtual RateLimits MakeRateLimits() { return UnlimitedRateLimits(); }
+  // The deal: NoShuffleDealer by default, so every card is known; a
+  // suite that needs particular hands arranges the deck itself.
+  virtual std::shared_ptr<cards::Dealer> MakeDealer() {
+    return std::make_shared<cards::NoShuffleDealer>();
+  }
   /// ADR-0020 reconnect grace — long enough that no test sees an expiry
   /// by accident; the expiry suites override it down to something a
   /// receive budget can wait out.
@@ -411,7 +416,7 @@ class GamesHubStreamFixture : public testing::Test {
           [guard](const std::string& room_id, const std::string& player_id,
                   const MemberAction& action) { return (*guard)(room_id, player_id, action); });
     }
-    golf_ = std::make_shared<GolfHub>(vault_, std::make_shared<cards::NoShuffleDealer>(), ids_,
+    golf_ = std::make_shared<GolfHub>(vault_, MakeDealer(), ids_,
                                       /*grace_period=*/GracePeriod(), metrics_, store_, chat_store_,
                                       MakeRateLimits());
     if (default_memory_chat) {
