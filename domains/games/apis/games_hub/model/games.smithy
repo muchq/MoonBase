@@ -123,6 +123,10 @@ structure GameSummary {
     @required
     gameId: String
 
+    /// Which game the table plays: golf | castle.
+    @required
+    game: String
+
     @required
     status: String
 

@@ -13,6 +13,9 @@
 
 #include "domains/games/apis/games_hub/migrations.h"
 #include "domains/games/libs/cards/card.h"
+#include "domains/games/libs/cards/castle/game_state.h"
+#include "domains/games/libs/cards/castle/game_state_serde.h"
+#include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/golf/game_state_serde.h"
 #include "domains/platform/libs/pg/listener.h"
@@ -85,6 +88,49 @@ class PgHubStoreTest : public ::testing::Test {
   std::unique_ptr<PgHubStore> store_;
 };
 
+// A castle table (#77) stores its kind and decodes with castle's serde;
+// an unstarted one carries the kind alone. Rows from before the column
+// read as golf, which the migration's default says.
+TEST_F(PgHubStoreTest, CastleRowsKeepTheirKindAndDecodeWithCastleSerde) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  PgHubStore::GameRow waiting{"R1", "C1", {"alice"}, std::nullopt, 1, games_hub::GameKind::kCastle};
+  ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
+  cards::NoShuffleDealer dealer;
+  auto dealt = castle::dealCastleGame("C2", {"alice", "bob"}, dealer.DealNewUnshuffledDeck());
+  ASSERT_TRUE(dealt.ok()) << dealt.status();
+  PgHubStore::GameRow started{"R1", "C2", {"alice", "bob"}, games_hub::HostedState(*dealt), 1,
+                              games_hub::GameKind::kCastle};
+  ASSERT_TRUE(*store_->CommitGameSave(started, ""));
+
+  auto rows = store_->LoadRoom("R1");
+  ASSERT_TRUE(rows.ok()) << rows.status();
+  ASSERT_EQ(rows->games.size(), 2u);
+  for (const auto& game : rows->games) {
+    EXPECT_EQ(game.kind, games_hub::GameKind::kCastle) << game.game_id;
+    if (game.game_id == "C1") {
+      EXPECT_FALSE(game.state.has_value());
+      continue;
+    }
+    ASSERT_TRUE(game.state.has_value());
+    ASSERT_TRUE(std::holds_alternative<castle::GameState>(*game.state));
+    EXPECT_EQ(castle::serializeGameState(std::get<castle::GameState>(*game.state)),
+              castle::serializeGameState(*dealt));
+  }
+  auto one = store_->LoadGame("R1", "C2");
+  ASSERT_TRUE(one.ok() && one->has_value());
+  EXPECT_EQ((*one)->kind, games_hub::GameKind::kCastle);
+
+  // The kind is fixed at creation: a later save neither needs nor
+  // changes it.
+  PgHubStore::GameRow later{"R1", "C1", {"alice", "bob"}, std::nullopt, 2, games_hub::GameKind::kGolf};
+  ASSERT_TRUE(*store_->CommitGameSave(later, ""));
+  auto reread = store_->LoadGame("R1", "C1");
+  ASSERT_TRUE(reread.ok() && reread->has_value());
+  EXPECT_EQ((*reread)->kind, games_hub::GameKind::kCastle);
+  EXPECT_EQ((*reread)->version, 2);
+}
+
 TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
   PgHubStore::MemberRow alice{"R1", "alice", true, 2, 1, 9};
   PgHubStore::MemberRow bob{"R1", "bob", false, 2, 0, 14};
@@ -110,7 +156,8 @@ TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
       EXPECT_EQ(game.game_id, "G2");
       ASSERT_TRUE(game.state.has_value());
       // Canonical re-serialization is state equality.
-      EXPECT_EQ(golf::serializeGameState(*game.state), golf::serializeGameState(state));
+      EXPECT_EQ(golf::serializeGameState(std::get<golf::GameState>(*game.state)),
+                golf::serializeGameState(state));
       EXPECT_EQ(game.version, 1);
     }
   }
@@ -171,7 +218,8 @@ TEST_F(PgHubStoreTest, CommitNotifiesExactlyTheSavesThatLand) {
   ASSERT_TRUE(rebase->has_value());
   EXPECT_EQ((*rebase)->version, 2);
   ASSERT_TRUE((*rebase)->state.has_value());
-  EXPECT_EQ(golf::serializeGameState(*(*rebase)->state), golf::serializeGameState(state));
+  EXPECT_EQ(golf::serializeGameState(std::get<golf::GameState>(*(*rebase)->state)),
+            golf::serializeGameState(state));
 
   // Delivery keeps send order, so a trailing marker proves the refused
   // commits never notified.

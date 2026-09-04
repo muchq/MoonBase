@@ -16,11 +16,13 @@
 #include <vector>
 
 #include "domains/games/apis/games_hub/chat_store.h"
+#include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/hub_metrics.h"
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/id_generator.h"
 #include "domains/games/apis/games_hub/rate_limiter.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
+#include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
@@ -40,9 +42,11 @@ namespace games_hub {
 [[nodiscard]] std::unordered_set<int> WinnersAmong(const golf::GameState& state,
                                                    const std::vector<std::string>& roster);
 
-/// The golf hub, phase 2 (#1187): seat admission, rooms, chat, and the
-/// game layer on the reshaped libs/cards/golf engine, behind
-/// GamesHubHandler::Play. One SessionRegistry
+/// The room hub, phase 2 (#1187): seat admission, rooms, chat, and the
+/// game layer, behind GamesHubHandler::Play. A room hosts tables of
+/// either game (#79): golf on libs/cards/golf and castle (#77) on
+/// libs/cards/castle, each a member of the stream's unions, each with
+/// its own per-viewer view and its own castle_/golf_ series. One SessionRegistry
 /// keyed by playerId carries all fan-out (async delivery — no writer
 /// threads); rooms are a mutex'd map, membership marked disconnected
 /// during ADR-0020 grace and reaped by on_expired — with one boot-time
@@ -201,12 +205,18 @@ class GolfHub final {
   /// version is the entry's revision: every mutation bumps it through
   /// CommitEntryLocked (store or not), and with a store the commit only
   /// lands when the stored row holds the predecessor — that condition
-  /// is what serializes instances.
+  /// is what serializes instances. kind is fixed at creation and says
+  /// which engine the state is; golf()/castle() are the typed reads.
   struct GameEntry {
+    GameKind kind = GameKind::kGolf;
     std::vector<std::string> roster;
-    std::optional<golf::GameState> state;
+    std::optional<HostedState> state;
     int64_t version = 0;
     [[nodiscard]] bool started() const { return state.has_value(); }
+    [[nodiscard]] const golf::GameState& golf() const { return std::get<golf::GameState>(*state); }
+    [[nodiscard]] const castle::GameState& castle() const {
+      return std::get<castle::GameState>(*state);
+    }
   };
 
   struct Room {
@@ -232,6 +242,8 @@ class GolfHub final {
   using Writes = std::vector<HubStore::Op>;
 
   using MoveFn = std::function<absl::StatusOr<golf::GameState>(const golf::GameState&, int seat)>;
+  using CastleMoveFn =
+      std::function<absl::StatusOr<castle::GameState>(const castle::GameState&, int seat)>;
   /// What a successful engine move announces beyond the state views.
   struct MoveEffects {
     bool announce_turn = false;   // turnChanged when the seat advances
@@ -250,12 +262,19 @@ class GolfHub final {
 
   void HandleCommand(const std::string& player_id, const moonbase::games::GolfCommands& command);
   void HandleMove(const std::string& player_id, const moonbase::games::GolfMove& move);
-  void CreateGameMove(const std::string& player_id);
-  void JoinGameMove(const std::string& player_id, const std::string& game_id);
+  void HandleCastleMove(const std::string& player_id, const moonbase::games::CastleMove& move);
+  /// The lifecycle moves both games share, each told which game's
+  /// envelope asked: a golf join of a castle table is refused, so a
+  /// client only ever hears the vocabulary it speaks.
+  void CreateGameMove(const std::string& player_id, GameKind kind);
+  void JoinGameMove(const std::string& player_id, const std::string& game_id, GameKind kind);
   void StartGameMove(const std::string& player_id);
   /// The shared shape of every in-game engine move: transition, then
   /// stage the fan-out (views, turn change, game end) the result implies.
   void EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects);
+  /// Castle's in-game moves: the same commit loop, and the engine's own
+  /// turn order decides the turnChanged.
+  void CastleEngineMove(const std::string& player_id, const CastleMoveFn& move);
 
   /// Stream-side observability (#1187 phase 4): the aura chain instruments
   /// only unary requests, so admissions, live-session count, disconnects,
@@ -371,7 +390,7 @@ class GolfHub final {
   enum class Commit { kCommitted, kRebased, kGone, kUnavailable };
   Commit CommitEntryLocked(const std::string& room_id, const std::string& game_id, GameEntry& entry,
                            const std::vector<std::string>& roster,
-                           const std::optional<golf::GameState>& state,
+                           const std::optional<HostedState>& state,
                            const std::vector<HubStore::StatsDelta>* finish);
 
   /// Shared chat/room dispatch for OnNotify and OnChannelActive.
@@ -410,6 +429,11 @@ class GolfHub final {
   void StageRoomStateLocked(const std::string& room_id, Outbox& outbox) const;
   moonbase::games::GameView ViewLocked(const std::string& game_id, const GameEntry& entry,
                                        const std::string& viewer_id) const;
+  moonbase::games::CastleView CastleViewLocked(const std::string& game_id, const GameEntry& entry,
+                                               const std::string& viewer_id) const;
+  /// One viewer's gameJoined in the table's own vocabulary.
+  moonbase::games::GolfEvents JoinedEventLocked(const std::string& game_id, const GameEntry& entry,
+                                                const std::string& viewer_id) const;
   void StageGameViewsLocked(const std::string& game_id, const GameEntry& entry,
                             Outbox& outbox) const;
   /// The game-over ceremony: final face-up views, then gameEnded, then

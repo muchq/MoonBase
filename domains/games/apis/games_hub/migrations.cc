@@ -47,6 +47,10 @@ absl::Status RunMigrations(pg::Client& db) {
           version bigint NOT NULL,
           PRIMARY KEY (room_id, game_id)
       ))sql",
+      // Which game a table plays (#77): golf or castle. Rows from before
+      // the column are golf's, which the default says.
+      R"sql(ALTER TABLE games
+          ADD COLUMN IF NOT EXISTS game text NOT NULL DEFAULT 'golf')sql",
       // Room chat (#1226). message_id is the ordering key and the
       // identity is global, not per-room, so one sequence orders every
       // room's history; sent_at is for display. Bodies are bounded here

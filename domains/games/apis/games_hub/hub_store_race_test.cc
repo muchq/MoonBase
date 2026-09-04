@@ -338,7 +338,7 @@ TEST_F(HubStoreRaceFixture, DelayedFinishWakeReadsRetainedTerminalRow) {
   ASSERT_TRUE(terminal.ok());
   ASSERT_TRUE(terminal->has_value());
   ASSERT_TRUE((*terminal)->state.has_value());
-  EXPECT_TRUE((*terminal)->state->isOver());
+  EXPECT_TRUE(IsOver(*(*terminal)->state));
 
   golf_->OnNotify(RoomChannel(room_id), "delayed-finish");
   auto alice_ended = ReceiveWithin<std::optional<moonbase::games::GolfUpdate>>(

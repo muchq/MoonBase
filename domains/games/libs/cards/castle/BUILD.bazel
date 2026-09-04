@@ -51,3 +51,35 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+# Versioned serde of the engine's full truth, the games table's column
+# for a castle row. Server-side only — redaction stays in the hub.
+cc_library(
+    name = "game_state_serde",
+    srcs = ["game_state_serde.cc"],
+    hdrs = ["game_state_serde.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_state",
+        ":player",
+        "//domains/games/libs/cards",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_test(
+    name = "game_state_serde_test",
+    size = "small",
+    srcs = ["game_state_serde_test.cc"],
+    deps = [
+        ":game_state",
+        ":game_state_serde",
+        ":player",
+        "//domains/games/libs/cards",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+    ],
+)

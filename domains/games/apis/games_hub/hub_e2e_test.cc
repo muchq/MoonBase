@@ -1504,6 +1504,23 @@ TEST_F(GamesHubStreamFixture, ChatMetricsCountOutcomesWithoutIdentifiers) {
 // no emit site ever writes, which nothing else in the suite can see.
 TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) {
   const std::vector<GolfHub::CounterSeries> kExpected = {
+      {"castle_commands", {{"command", "createGame"}}},
+      {"castle_commands", {{"command", "joinGame"}}},
+      {"castle_commands", {{"command", "startGame"}}},
+      {"castle_commands", {{"command", "leaveGame"}}},
+      {"castle_commands", {{"command", "swapForSetup"}}},
+      {"castle_commands", {{"command", "ready"}}},
+      {"castle_commands", {{"command", "playFromHand"}}},
+      {"castle_commands", {{"command", "playFaceUp"}}},
+      {"castle_commands", {{"command", "playFaceDown"}}},
+      {"castle_commands", {{"command", "pickUp"}}},
+      {"castle_events", {{"event", "gameJoined"}}},
+      {"castle_events", {{"event", "gameState"}}},
+      {"castle_events", {{"event", "gameCreated"}}},
+      {"castle_events", {{"event", "gameStarted"}}},
+      {"castle_events", {{"event", "turnChanged"}}},
+      {"castle_events", {{"event", "gameEnded"}}},
+      {"castle_events", {{"event", "gameLeft"}}},
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -1619,7 +1636,9 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
 // model without a declaration loses its first event after every deploy (#1323),
 // and a declaration for a case the model no longer has is a permanently flat
 // line on a dashboard. CountCommand and Send name series exactly this way:
-// the outer case name, or golf.<inner case> through the envelope.
+// the outer case name, or golf.<inner case> through the envelope. The castle
+// envelope counts on its own castle_* series (the pin below), so its outer
+// case is not a golf_ label.
 TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
   const std::string model = ReadModel("domains/games/apis/games_hub/model/golf.smithy");
   ASSERT_FALSE(model.empty());
@@ -1628,6 +1647,8 @@ TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
   const auto moves = ModelUnionCases(model, "GolfMove");
   const auto outer_events = ModelUnionCases(model, "GolfEvents");
   const auto updates = ModelUnionCases(model, "GolfUpdate");
+  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "castle"),
+            outer_commands.end());
 
   // Controls before the comparison: a parser that quietly matched nothing
   // must fail here, not produce two empty sets that agree.
@@ -1640,18 +1661,33 @@ TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
 
   std::set<std::string> expected_commands;
   for (const auto& name : outer_commands) {
-    if (name != "golf") expected_commands.insert(name);
+    if (name != "golf" && name != "castle") expected_commands.insert(name);
   }
   for (const auto& name : moves) expected_commands.insert("golf." + name);
 
   std::set<std::string> expected_events;
   for (const auto& name : outer_events) {
-    if (name != "golf") expected_events.insert(name);
+    if (name != "golf" && name != "castle") expected_events.insert(name);
   }
   for (const auto& name : updates) expected_events.insert("golf." + name);
 
   EXPECT_EQ(DeclaredLabelValues("golf_commands", "command"), expected_commands);
   EXPECT_EQ(DeclaredLabelValues("golf_events", "event"), expected_events);
+}
+
+// Castle's envelope (#77) counts its inner case names on castle_commands and
+// castle_events, pinned against castle.smithy the same way.
+TEST(StreamSeriesModelPin, CastleSeriesMatchTheModelUnions) {
+  const std::string model = ReadModel("domains/games/apis/games_hub/model/castle.smithy");
+  ASSERT_FALSE(model.empty());
+  const auto moves = ModelUnionCases(model, "CastleMove");
+  const auto updates = ModelUnionCases(model, "CastleUpdate");
+  ASSERT_NE(std::find(moves.begin(), moves.end(), "pickUp"), moves.end());
+  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
+  EXPECT_EQ(DeclaredLabelValues("castle_commands", "command"),
+            std::set<std::string>(moves.begin(), moves.end()));
+  EXPECT_EQ(DeclaredLabelValues("castle_events", "event"),
+            std::set<std::string>(updates.begin(), updates.end()));
 }
 
 // The bounded kind is the whole dashboard identity of a rejection (#1327,

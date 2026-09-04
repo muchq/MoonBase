@@ -381,6 +381,11 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("Thoughts", "thoughts_rejections", "", `thoughts_rejections_total`),
 			counter("Thoughts", "thoughts_rate_limited", "", `thoughts_rate_limited_total`),
 			counter("Thoughts", "thoughts_disconnects", "", `thoughts_disconnects_total`),
+			// Castle (#77) rides the room stream, so its sessions and
+			// rejections are the golf rows above; only its envelope has
+			// series of its own.
+			counter("Castle", "castle_commands", "", `castle_commands_total`),
+			counter("Castle", "castle_events", "", `castle_events_total`),
 		},
 		// command/event/rejection/disconnect/rate_limited/chat_message/
 		// chat_delivery/chat_failure are all toggleable: each expands to a
@@ -410,6 +415,8 @@ var serviceRegistry = map[string]serviceEntry{
 			"thoughts_command":   tsCounter(`thoughts_commands_total`),
 			"thoughts_event":     tsCounter(`thoughts_events_total`),
 			"thoughts_rejection": tsCounter(`thoughts_rejections_total`),
+			"castle_command":     tsCounter(`castle_commands_total`),
+			"castle_event":       tsCounter(`castle_events_total`),
 		},
 	},
 	"microgpt-serve": {

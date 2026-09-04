@@ -88,7 +88,8 @@ class PgHubStore final : public HubStore {
                                 const std::vector<std::string>& params);
   absl::StatusOr<GameRow> RowFromColumns(const std::string& room_id, const std::string& game_id,
                                          const std::string& roster_json,
-                                         const std::string& state_json, int64_t version);
+                                         const std::string& state_json, int64_t version,
+                                         const std::string& game);
 
   const std::shared_ptr<pg::Client> db_;
   std::mutex mu_;
