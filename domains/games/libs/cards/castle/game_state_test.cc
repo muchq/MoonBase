@@ -395,26 +395,139 @@ TEST(Play, ATenAsTheLastFaceDownCardBurnsAndGoesOut) {
   EXPECT_EQ(out->getPhase(), Phase::Playing);
 }
 
-TEST(Ending, SeatsGoOutInOrderAndTheLastHolderLoses) {
+// The run on top sets the price: the last play was n cards of rank k,
+// so the next is n or more of rank k or higher.
+TEST(Runs, APlayMustMatchOrBeatTheCountOnTop) {
+  const GameState g = playing({seat("a", {c(Rank::Seven), c(Rank::Seven, Suit::Hearts),
+                                          c(Rank::Seven, Suit::Spades), c(Rank::Nine)}),
+                               seat("b", {c(Rank::Nine)})},
+                              {c(Rank::Five), c(Rank::Five, Suit::Hearts)});
+  EXPECT_FALSE(g.playFromHand(0, {0}).ok());  // one seven on a pair of fives
+  EXPECT_FALSE(g.playFromHand(0, {3}).ok());  // one nine, same
+  auto pair = g.playFromHand(0, {0, 1});
+  ASSERT_TRUE(pair.ok()) << pair.status();
+  EXPECT_EQ(pair->getPile().size(), 4u);
+  EXPECT_EQ(pair->getWhoseTurn(), 1);
+  auto triple = g.playFromHand(0, {0, 1, 2});  // more than the count is fine
+  ASSERT_TRUE(triple.ok()) << triple.status();
+  EXPECT_EQ(triple->getPile().size(), 5u);
+}
+
+TEST(Runs, ATripleOnTopNeedsATriple) {
+  const GameState g =
+      playing({seat("a", {c(Rank::Nine), c(Rank::Nine, Suit::Hearts), c(Rank::Nine, Suit::Spades)}),
+               seat("b", {c(Rank::Nine, Suit::Diamonds)})},
+              {c(Rank::Five), c(Rank::Five, Suit::Hearts), c(Rank::Five, Suit::Spades)});
+  EXPECT_FALSE(g.playFromHand(0, {0, 1}).ok());
+  ASSERT_TRUE(g.playFromHand(0, {0, 1, 2}).ok());
+}
+
+// Fewer cards of the top's own rank are legal exactly when they complete
+// the four of a kind, which burns and hands the turn back.
+TEST(Runs, FewerOfTheSameRankCompleteFourAndBurn) {
+  const GameState triple = playing(
+      {seat("a", {c(Rank::Five, Suit::Diamonds), c(Rank::Nine)}), seat("b", {c(Rank::Nine)})},
+      {c(Rank::Five), c(Rank::Five, Suit::Hearts), c(Rank::Five, Suit::Spades)});
+  auto burn = triple.playFromHand(0, {0});
+  ASSERT_TRUE(burn.ok()) << burn.status();
+  EXPECT_TRUE(burn->getPile().empty());
+  EXPECT_EQ(burn->getWhoseTurn(), 0);
+
+  const GameState pair = playing(
+      {seat("a", {c(Rank::Five, Suit::Diamonds), c(Rank::Nine)}), seat("b", {c(Rank::Nine)})},
+      {c(Rank::Five), c(Rank::Five, Suit::Hearts)});
+  EXPECT_FALSE(pair.playFromHand(0, {0}).ok());  // three of a kind is not a completion
+}
+
+TEST(Runs, SpecialsIgnoreTheCount) {
+  const GameState g =
+      playing({seat("a", {c(Rank::Two), c(Rank::Ten), c(Rank::Nine)}), seat("b", {c(Rank::Nine)})},
+              {c(Rank::Five), c(Rank::Five, Suit::Hearts)});
+  auto reset = g.playFromHand(0, {0});
+  ASSERT_TRUE(reset.ok()) << reset.status();
+  EXPECT_EQ(reset->pileTop(), c(Rank::Two));
+  auto burn = g.playFromHand(0, {1});
+  ASSERT_TRUE(burn.ok()) << burn.status();
+  EXPECT_TRUE(burn->getPile().empty());
+}
+
+TEST(Runs, ABlindCardMustMeetTheCountOrCompleteTheFour) {
+  const GameState g = playing({seat("a", {}, {}, {c(Rank::Seven)}), seat("b", {c(Rank::Nine)})},
+                              {c(Rank::Five), c(Rank::Five, Suit::Hearts)});
+  auto pickedUp = g.playFaceDown(0, 0);
+  ASSERT_TRUE(pickedUp.ok()) << pickedUp.status();
+  EXPECT_TRUE(pickedUp->getPile().empty());
+  EXPECT_EQ(pickedUp->getPlayer(0).getHand().size(), 3u);
+  EXPECT_EQ(pickedUp->getWhoseTurn(), 1);
+
+  const GameState completes =
+      playing({seat("a", {}, {}, {c(Rank::Five, Suit::Diamonds), c(Rank::Nine)}),
+               seat("b", {c(Rank::Nine)})},
+              {c(Rank::Five), c(Rank::Five, Suit::Hearts), c(Rank::Five, Suit::Spades)});
+  auto burn = completes.playFaceDown(0, 0);
+  ASSERT_TRUE(burn.ok()) << burn.status();
+  EXPECT_TRUE(burn->getPile().empty());
+  EXPECT_EQ(burn->getWhoseTurn(), 0);
+}
+
+// The burner plays again from whichever row is next: the hand while it
+// has cards, then the face-up row, then blind.
+TEST(Runs, ABurnLetsTheSameSeatPlayItsNextRow) {
+  const GameState g = playing(
+      {seat("a", {c(Rank::Ten)}, {c(Rank::Nine)}, {c(Rank::Four)}), seat("b", {c(Rank::Nine)})},
+      {c(Rank::King)});
+  auto burn = g.playFromHand(0, {0});
+  ASSERT_TRUE(burn.ok()) << burn.status();
+  EXPECT_EQ(burn->getWhoseTurn(), 0);
+  EXPECT_EQ(burn->getPlayer(0).source(), Source::FaceUp);
+  auto faceUp = burn->playFaceUp(0, {0});
+  ASSERT_TRUE(faceUp.ok()) << faceUp.status();
+  EXPECT_EQ(faceUp->getWhoseTurn(), 1);
+  EXPECT_EQ(faceUp->getPlayer(0).source(), Source::FaceDown);
+}
+
+TEST(Runs, NoPlayThatMeetsTheCountMeansPickUp) {
+  const GameState g =
+      playing({seat("a", {c(Rank::King), c(Rank::Ace)}), seat("b", {c(Rank::Nine)})},
+              {c(Rank::Nine), c(Rank::Nine, Suit::Hearts)});
+  EXPECT_FALSE(g.hasLegalPlay(0));
+  EXPECT_FALSE(g.playFromHand(0, {0}).ok());
+  auto pickedUp = g.pickUp(0);
+  ASSERT_TRUE(pickedUp.ok()) << pickedUp.status();
+  EXPECT_EQ(pickedUp->getPlayer(0).getHand().size(), 4u);
+
+  const GameState pairInHand =
+      playing({seat("a", {c(Rank::King), c(Rank::King, Suit::Hearts)}), seat("b", {c(Rank::Nine)})},
+              {c(Rank::Nine), c(Rank::Nine, Suit::Hearts)});
+  EXPECT_TRUE(pairInHand.hasLegalPlay(0));
+  EXPECT_FALSE(pairInHand.pickUp(0).ok());
+}
+
+// The first seat to shed its last card wins, and that ends the game: no
+// play-on to a single loser. Only a two-seat game has a loser to name.
+TEST(Ending, TheFirstSeatOutEndsTheGame) {
   const GameState g = playing({seat("a", {c(Rank::Ace)}), seat("b", {c(Rank::Two)}),
                                seat("c", {c(Rank::Four), c(Rank::Four)})});
   auto aOut = g.playFromHand(0, {0});
   ASSERT_TRUE(aOut.ok());
   EXPECT_EQ(aOut->getFinished(), (vector<string>{"a"}));
-  EXPECT_EQ(aOut->getWhoseTurn(), 1);
-  EXPECT_FALSE(aOut->isOver());
+  EXPECT_EQ(aOut->getPhase(), Phase::Over);
+  EXPECT_TRUE(aOut->isOver());
   EXPECT_EQ(aOut->loser(), std::nullopt);
+  EXPECT_EQ(aOut->getWhoseTurn(), GameState::kNoTurn);
+  EXPECT_FALSE(aOut->playFromHand(1, {0}).ok());
+  EXPECT_FALSE(aOut->pickUp(2).ok());
+  EXPECT_FALSE(aOut->removePlayer(2).ok());
+}
 
-  auto bOut = aOut->playFromHand(1, {0});
-  ASSERT_TRUE(bOut.ok());
-  EXPECT_EQ(bOut->getFinished(), (vector<string>{"a", "b"}));
-  EXPECT_EQ(bOut->getPhase(), Phase::Over);
-  EXPECT_TRUE(bOut->isOver());
-  EXPECT_EQ(bOut->loser(), "c");
-  EXPECT_EQ(bOut->getWhoseTurn(), GameState::kNoTurn);
-  EXPECT_FALSE(bOut->playFromHand(2, {0}).ok());
-  EXPECT_FALSE(bOut->pickUp(2).ok());
-  EXPECT_FALSE(bOut->removePlayer(2).ok());
+TEST(Ending, ABurnThatShedsTheLastCardEndsTheGame) {
+  const GameState g =
+      playing({seat("a", {c(Rank::Ten)}), seat("b", {c(Rank::Two)})}, {c(Rank::King)});
+  auto over = g.playFromHand(0, {0});
+  ASSERT_TRUE(over.ok());
+  EXPECT_EQ(over->getPhase(), Phase::Over);
+  EXPECT_EQ(over->getFinished(), (vector<string>{"a"}));
+  EXPECT_EQ(over->loser(), "b");
 }
 
 TEST(Ending, TwoPlayersEndWithTheFirstOut) {
