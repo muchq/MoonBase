@@ -109,6 +109,8 @@ class GameState {
   [[nodiscard]] absl::StatusOr<GameState> playFaceUp(int player,
                                                      const std::vector<int>& indexes) const;
   [[nodiscard]] absl::StatusOr<GameState> playFaceDown(int player, int index) const;
+  /// Take the pile into the hand, on any turn with a pile: a play in
+  /// the row is no bar, and neither is a blind row.
   [[nodiscard]] absl::StatusOr<GameState> pickUp(int player) const;
 
   /// A seat abandoned mid-game: it disappears with its cards, indices

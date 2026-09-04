@@ -317,9 +317,16 @@ TEST(Play, ASeatWithNoPlayablePickUpTakesThePileWithoutDrawing) {
   EXPECT_EQ(took->getDrawPile(), (deque<Card>{c(Rank::Ace)}));
   EXPECT_EQ(took->getWhoseTurn(), 1);
 
+  // The pile is the mover's to take whether or not a play exists: the
+  // nine could go, and the pile goes into the hand instead.
   const GameState able = playing(
       {seat("a", {c(Rank::Three), c(Rank::Nine)}), seat("b", {c(Rank::Nine)})}, {c(Rank::Seven)});
-  EXPECT_FALSE(able.pickUp(0).ok());  // the nine must be played
+  EXPECT_TRUE(able.hasLegalPlay(0));
+  auto chose = able.pickUp(0);
+  ASSERT_TRUE(chose.ok()) << chose.status();
+  EXPECT_EQ(chose->getPlayer(0).getHand(),
+            (vector<Card>{c(Rank::Three), c(Rank::Nine), c(Rank::Seven)}));
+  EXPECT_EQ(chose->getWhoseTurn(), 1);
   EXPECT_FALSE(able.pickUp(1).ok());  // not b's turn
 }
 
@@ -355,9 +362,15 @@ TEST(Play, FaceDownCardsPlayBlindAndAnUnplayableOneIsPickedUpWithThePile) {
       playing({seat("a", {}, {}, {c(Rank::Three), c(Rank::King)}), seat("b", {c(Rank::Nine)})},
               {c(Rank::Seven)});
   EXPECT_FALSE(g.hasLegalPlay(0));  // blind rows never count as a legal play
-  EXPECT_FALSE(g.pickUp(0).ok());
   EXPECT_FALSE(g.playFaceUp(0, {0}).ok());
   EXPECT_FALSE(g.playFaceDown(0, 2).ok());
+  // Blind or not, the pile can be taken instead: it becomes a hand, and
+  // the face-down row waits again.
+  auto took = g.pickUp(0);
+  ASSERT_TRUE(took.ok()) << took.status();
+  EXPECT_EQ(took->getPlayer(0).getHand(), (vector<Card>{c(Rank::Seven)}));
+  EXPECT_EQ(took->getPlayer(0).getFaceDown().size(), 2u);
+  EXPECT_EQ(took->getWhoseTurn(), 1);
 
   auto lucky = g.playFaceDown(0, 1);
   ASSERT_TRUE(lucky.ok());
@@ -510,7 +523,7 @@ TEST(Runs, NoPlayThatMeetsTheCountMeansPickUp) {
       playing({seat("a", {c(Rank::King), c(Rank::King, Suit::Hearts)}), seat("b", {c(Rank::Nine)})},
               {c(Rank::Nine), c(Rank::Nine, Suit::Hearts)});
   EXPECT_TRUE(pairInHand.hasLegalPlay(0));
-  EXPECT_FALSE(pairInHand.pickUp(0).ok());
+  EXPECT_TRUE(pairInHand.pickUp(0).ok());  // and still free to take the pile
 }
 
 // The first seat to shed its last card wins, and that ends the game: no

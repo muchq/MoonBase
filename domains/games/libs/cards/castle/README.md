@@ -10,8 +10,9 @@ face-down, three face-up, three in hand; a setup phase of hand/face-up
 swaps; lowest ordinary card opens; a play matches or beats the count on
 top at its rank or higher, or completes the top's four of a kind; twos
 reset, tens and four of a kind burn and the burner plays its next row;
-must play if able, otherwise pick up the pile; face-up then face-down
-rows once the hand is gone; the first seat out wins and ends the game.
+the pile may be picked up on any turn instead of playing; face-up then
+face-down rows once the hand is gone; the first seat out wins and ends
+the game.
 
 ```bash
 bazel test //domains/games/libs/cards/castle/...

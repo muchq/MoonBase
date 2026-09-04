@@ -318,12 +318,8 @@ StatusOr<GameState> GameState::pickUp(int player) const {
   if (pile.empty()) {
     return FailedPreconditionError("nothing to pick up");
   }
-  if (players.at(player).source() == Source::FaceDown) {
-    return FailedPreconditionError("face-down cards are played blind");
-  }
-  if (hasLegalPlay(player)) {
-    return FailedPreconditionError("a playable card must be played");
-  }
+  // The pile is the mover's to take on any turn, a legal play or not,
+  // and from any row: taken onto a blind row it becomes a hand.
   vector<Player> newPlayers = replaceSeat(players, player, players.at(player).withHandAdded(pile));
   const int next = nextSeat(player, newPlayers);
   return GameState{drawPile, {},        std::move(newPlayers),
