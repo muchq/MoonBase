@@ -197,13 +197,20 @@ bool GameState::isPlayable(Rank rank, int count) const {
   const Rank top = pile.back().getRank();
   const int run = runOnTop();
   // Fewer of the top's own rank are legal only as the completion of its
-  // four of a kind, which burns.
+  // four of a kind, which clears the pile. The four is counted on the
+  // pile, across plays.
   if (rank == top && count == 4 - run) {
     return true;
   }
+  // Otherwise the count to match is the last play's: a queen on a queen
+  // leaves two on top, and one king still answers. A pile with no play
+  // behind it (a row from before the move was kept) prices by its run.
+  const int price = lastPlay.has_value() && !lastPlay->cards.empty() && !lastPlay->pickedUp
+                        ? static_cast<int>(lastPlay->cards.size())
+                        : run;
   // A two on top takes anything, which the rank order already says: two
   // is the lowest rank.
-  return rankValue(rank) >= rankValue(top) && count >= run;
+  return rankValue(rank) >= rankValue(top) && count >= price;
 }
 
 bool GameState::hasLegalPlay(int player) const {
@@ -318,12 +325,8 @@ StatusOr<GameState> GameState::pickUp(int player) const {
   if (pile.empty()) {
     return FailedPreconditionError("nothing to pick up");
   }
-  if (players.at(player).source() == Source::FaceDown) {
-    return FailedPreconditionError("face-down cards are played blind");
-  }
-  if (hasLegalPlay(player)) {
-    return FailedPreconditionError("a playable card must be played");
-  }
+  // The pile is the mover's to take on any turn, a legal play or not,
+  // and from any row: taken onto a blind row it becomes a hand.
   vector<Player> newPlayers = replaceSeat(players, player, players.at(player).withHandAdded(pile));
   const int next = nextSeat(player, newPlayers);
   return GameState{drawPile, {},        std::move(newPlayers),
@@ -354,7 +357,10 @@ GameState GameState::settle(int player, deque<Card> newDrawPile, vector<Card> ne
                      versionId,
                      std::move(play)};
   }
-  const int next = burned && !wentOut ? player : nextSeat(player, newPlayers);
+  // A ten or a four of a kind clears the pile and a two resets it; either
+  // way the mover goes again.
+  const bool again = burned || (!play.cards.empty() && play.cards.front().getRank() == Rank::Two);
+  const int next = again ? player : nextSeat(player, newPlayers);
   return GameState{std::move(newDrawPile),
                    std::move(newPile),
                    std::move(newPlayers),

@@ -186,7 +186,7 @@ TEST(Play, ASeatOutsideTheTableIsRejectedEverywhere) {
   }
 }
 
-TEST(Play, ATwoResetsThePileAndATenBurnsIt) {
+TEST(Play, ATwoResetsThePileAndATenClearsIt) {
   const GameState g =
       playing({seat("a", {c(Rank::Two), c(Rank::Three), c(Rank::Ten)}), seat("b", {c(Rank::Nine)})},
               {c(Rank::King)});
@@ -194,11 +194,14 @@ TEST(Play, ATwoResetsThePileAndATenBurnsIt) {
   EXPECT_TRUE(g.isPlayable(Rank::Ten));
   EXPECT_FALSE(g.isPlayable(Rank::Three));
 
+  // The two stays on the pile as its new floor, and the resetter plays
+  // again on it.
   auto reset = g.playFromHand(0, {0});
   ASSERT_TRUE(reset.ok());
   EXPECT_EQ(reset->pileTop(), c(Rank::Two));
   EXPECT_TRUE(reset->isPlayable(Rank::Three));
-  EXPECT_EQ(reset->getWhoseTurn(), 1);
+  EXPECT_EQ(reset->getWhoseTurn(), 0);
+  EXPECT_FALSE(reset->getLastPlay()->burned);
 
   auto burn = g.playFromHand(0, {2});
   ASSERT_TRUE(burn.ok());
@@ -207,6 +210,55 @@ TEST(Play, ATwoResetsThePileAndATenBurnsIt) {
   EXPECT_EQ(burn->getWhoseTurn(), 0);  // the burner goes again
   EXPECT_TRUE(burn->isPlayable(Rank::Three));
   EXPECT_FALSE(burn->pickUp(0).ok());  // nothing to pick up
+}
+
+// A seven, then two sevens on it, then the fourth: four of a kind counts
+// as a ten, the pile clears, and the seat that completed it goes again.
+TEST(Play, TheFourthSevenAcrossThreePlaysClearsThePileAndKeepsTheTurn) {
+  const GameState g = playing(
+      {seat("a", {c(Rank::Seven, Suit::Spades), c(Rank::Seven, Suit::Clubs), c(Rank::Nine)}),
+       seat("b", {c(Rank::Seven, Suit::Hearts), c(Rank::Seven, Suit::Diamonds), c(Rank::Eight)})});
+  auto one = g.playFromHand(0, {0});
+  ASSERT_TRUE(one.ok()) << one.status();
+  EXPECT_EQ(one->getWhoseTurn(), 1);
+  auto pair = one->playFromHand(1, {0, 1});
+  ASSERT_TRUE(pair.ok()) << pair.status();
+  EXPECT_EQ(pair->runOnTop(), 3);
+  EXPECT_EQ(pair->getWhoseTurn(), 0);
+  // One seven answers a run of three only as its completion.
+  auto fourth = pair->playFromHand(0, {0});
+  ASSERT_TRUE(fourth.ok()) << fourth.status();
+  EXPECT_TRUE(fourth->getPile().empty());
+  EXPECT_TRUE(fourth->getLastPlay()->burned);
+  EXPECT_EQ(fourth->getWhoseTurn(), 0);
+  EXPECT_EQ(fourth->getPhase(), Phase::Playing);
+}
+
+// The count to beat is the last play's, not the run's: a queen on a
+// queen leaves a run of two, and one king still answers it. The run
+// still decides the four of a kind: two more queens complete it.
+TEST(Runs, TheLastPlaySetsTheCountAndTheRunSetsTheFour) {
+  const GameState g =
+      playing({seat("a", {c(Rank::Queen, Suit::Spades), c(Rank::King), c(Rank::Four)}),
+               seat("b", {c(Rank::Queen, Suit::Hearts), c(Rank::Queen, Suit::Clubs),
+                          c(Rank::Queen, Suit::Diamonds)})});
+  auto one = g.playFromHand(0, {0});
+  ASSERT_TRUE(one.ok()) << one.status();
+  auto two = one->playFromHand(1, {0});
+  ASSERT_TRUE(two.ok()) << two.status();
+  EXPECT_EQ(two->runOnTop(), 2);
+  EXPECT_TRUE(two->isPlayable(Rank::King, 1));
+  EXPECT_FALSE(two->isPlayable(Rank::Four, 1));
+  EXPECT_TRUE(two->hasLegalPlay(0));
+  auto king = two->playFromHand(0, {0});
+  ASSERT_TRUE(king.ok()) << king.status();
+  EXPECT_EQ(king->getWhoseTurn(), 1);
+
+  // On the same two queens, a queen plays by rank and a pair of them is
+  // the four; a single lower card is neither.
+  EXPECT_TRUE(two->isPlayable(Rank::Queen, 1));
+  EXPECT_TRUE(two->isPlayable(Rank::Queen, 2));
+  EXPECT_FALSE(two->isPlayable(Rank::Jack, 2));
 }
 
 TEST(Play, FourOfAKindOnTopBurnsAcrossPlays) {
@@ -317,9 +369,16 @@ TEST(Play, ASeatWithNoPlayablePickUpTakesThePileWithoutDrawing) {
   EXPECT_EQ(took->getDrawPile(), (deque<Card>{c(Rank::Ace)}));
   EXPECT_EQ(took->getWhoseTurn(), 1);
 
+  // The pile is the mover's to take whether or not a play exists: the
+  // nine could go, and the pile goes into the hand instead.
   const GameState able = playing(
       {seat("a", {c(Rank::Three), c(Rank::Nine)}), seat("b", {c(Rank::Nine)})}, {c(Rank::Seven)});
-  EXPECT_FALSE(able.pickUp(0).ok());  // the nine must be played
+  EXPECT_TRUE(able.hasLegalPlay(0));
+  auto chose = able.pickUp(0);
+  ASSERT_TRUE(chose.ok()) << chose.status();
+  EXPECT_EQ(chose->getPlayer(0).getHand(),
+            (vector<Card>{c(Rank::Three), c(Rank::Nine), c(Rank::Seven)}));
+  EXPECT_EQ(chose->getWhoseTurn(), 1);
   EXPECT_FALSE(able.pickUp(1).ok());  // not b's turn
 }
 
@@ -355,9 +414,15 @@ TEST(Play, FaceDownCardsPlayBlindAndAnUnplayableOneIsPickedUpWithThePile) {
       playing({seat("a", {}, {}, {c(Rank::Three), c(Rank::King)}), seat("b", {c(Rank::Nine)})},
               {c(Rank::Seven)});
   EXPECT_FALSE(g.hasLegalPlay(0));  // blind rows never count as a legal play
-  EXPECT_FALSE(g.pickUp(0).ok());
   EXPECT_FALSE(g.playFaceUp(0, {0}).ok());
   EXPECT_FALSE(g.playFaceDown(0, 2).ok());
+  // Blind or not, the pile can be taken instead: it becomes a hand, and
+  // the face-down row waits again.
+  auto took = g.pickUp(0);
+  ASSERT_TRUE(took.ok()) << took.status();
+  EXPECT_EQ(took->getPlayer(0).getHand(), (vector<Card>{c(Rank::Seven)}));
+  EXPECT_EQ(took->getPlayer(0).getFaceDown().size(), 2u);
+  EXPECT_EQ(took->getWhoseTurn(), 1);
 
   auto lucky = g.playFaceDown(0, 1);
   ASSERT_TRUE(lucky.ok());
@@ -456,6 +521,7 @@ TEST(Runs, SpecialsIgnoreTheCount) {
   auto reset = g.playFromHand(0, {0});
   ASSERT_TRUE(reset.ok()) << reset.status();
   EXPECT_EQ(reset->pileTop(), c(Rank::Two));
+  EXPECT_EQ(reset->getWhoseTurn(), 0);  // and goes again
   auto burn = g.playFromHand(0, {1});
   ASSERT_TRUE(burn.ok()) << burn.status();
   EXPECT_TRUE(burn->getPile().empty());
@@ -510,7 +576,7 @@ TEST(Runs, NoPlayThatMeetsTheCountMeansPickUp) {
       playing({seat("a", {c(Rank::King), c(Rank::King, Suit::Hearts)}), seat("b", {c(Rank::Nine)})},
               {c(Rank::Nine), c(Rank::Nine, Suit::Hearts)});
   EXPECT_TRUE(pairInHand.hasLegalPlay(0));
-  EXPECT_FALSE(pairInHand.pickUp(0).ok());
+  EXPECT_TRUE(pairInHand.pickUp(0).ok());  // and still free to take the pile
 }
 
 // The first seat to shed its last card wins, and that ends the game: no
@@ -539,7 +605,7 @@ TEST(Runs, SpecialsPlayInAnyCount) {
   auto pair = g.playFromHand(0, {0, 1});
   ASSERT_TRUE(pair.ok()) << pair.status();
   EXPECT_EQ(pair->runOnTop(), 2);
-  EXPECT_EQ(pair->getWhoseTurn(), 1);
+  EXPECT_EQ(pair->getWhoseTurn(), 0);  // a reset, in any count, is the mover's to follow
 }
 
 TEST(Runs, AnEmptyPileHasNoRunAndNoCardsIsNoPlay) {

@@ -30,22 +30,24 @@ using std::string;
 ///   - A turn plays one or more cards of a single rank from the seat's
 ///     active row (hand while it has cards, then the face-up row, then
 ///     the face-down row one card at a time, blind) onto the pile. The
-///     run on top sets the price: after n cards of rank k, a play is n or
+///     last play sets the price: after n cards of rank k, a play is n or
 ///     more cards of rank k or higher (two is the lowest rank, so a two
-///     on top asks only for its count), or exactly the 4-n cards of rank
-///     k that complete its four of a kind. Twos and tens play on anything
+///     on top asks only for its count). The run on top — every card of
+///     the top's rank in a row, across plays — sets the four: exactly the
+///     cards of rank k that complete its four of a kind also play. Twos and tens play on anything
 ///     in any count; anything plays on an empty pile. A hand play draws
 ///     back up to three while the draw pile lasts; face-up and face-down
 ///     plays never draw. The turn passes to the next seat, wrapping.
-///   - A ten, or four of a kind on top of the pile, burns the pile: it
-///     leaves the game and the same seat plays again from whichever row
-///     is then in play — unless the burn shed the seat's last card, which
-///     ends the game. A burn is a play like any other: the cards must be
-///     playable on the pile as it stands, and a run of four is broken by
-///     a card of another rank.
-///   - A seat with no legal play in hand or in the face-up row must pick
-///     up the pile. A face-down card that turns out unplayable goes into
-///     the hand with the pile.
+///   - Twos reset the pile and tens clear it; four of a kind counts as
+///     a ten. A cleared pile leaves the game; a reset stays as the new
+///     floor. Either way the same seat plays again from whichever row is
+///     then in play — unless the play shed the seat's last card, which
+///     ends the game. A clear is a play like any other: the cards must
+///     be playable on the pile as it stands, and a run of four is broken
+///     by a card of another rank.
+///   - The pile may be picked up on any turn instead of playing, from
+///     any row. A face-down card that turns out unplayable goes into the
+///     hand with the pile.
 ///   - The first seat to shed its last card wins, and that ends the
 ///     game. The loser is the one seat still holding cards, which a
 ///     two-seat game always has and a bigger table usually does not.
@@ -54,10 +56,10 @@ class GameState;
 enum class Phase { Setup, Playing, Over, Abandoned };
 
 /// The pile's last move: whose, which cards went down, and whether they
-/// burned the pile or the mover picked it up. A pick-up by choice puts
+/// cleared the pile or the mover picked it up. A pick-up by choice puts
 /// no cards down; a blind flip that fails puts down the card it turned
 /// over, then takes the pile with it. Kept until the next move replaces
-/// it, so what a burn or a pick-up leaves nothing on the pile to show
+/// it, so what a clear or a pick-up leaves nothing on the pile to show
 /// is still visible. The seat named may since have left the game.
 struct LastPlay {
   string playerId;
@@ -109,6 +111,8 @@ class GameState {
   [[nodiscard]] absl::StatusOr<GameState> playFaceUp(int player,
                                                      const std::vector<int>& indexes) const;
   [[nodiscard]] absl::StatusOr<GameState> playFaceDown(int player, int index) const;
+  /// Take the pile into the hand, on any turn with a pile: a play in
+  /// the row is no bar, and neither is a blind row.
   [[nodiscard]] absl::StatusOr<GameState> pickUp(int player) const;
 
   /// A seat abandoned mid-game: it disappears with its cards, indices
@@ -121,13 +125,14 @@ class GameState {
   [[nodiscard]] bool isOver() const { return phase == Phase::Over || phase == Phase::Abandoned; }
   [[nodiscard]] Phase getPhase() const { return phase; }
   [[nodiscard]] std::optional<Card> pileTop() const;
-  /// How many cards of one rank sit on top of the pile: the count the
-  /// next play must match. Zero on an empty pile.
+  /// How many cards of one rank sit on top of the pile, across plays:
+  /// what a four of a kind completes. Zero on an empty pile.
   [[nodiscard]] int runOnTop() const;
   /// Whether `count` cards of this rank may go on the pile as it stands:
-  /// a special always; on an empty pile anything; otherwise the count on
-  /// top or more of that rank or higher, or exactly what completes the
-  /// four of a kind of the top's own rank. No cards is never a play.
+  /// a special always; on an empty pile anything; otherwise the last
+  /// play's count or more of that rank or higher, or exactly what
+  /// completes the four of a kind of the top's own rank on the pile. No
+  /// cards is never a play.
   [[nodiscard]] bool isPlayable(Rank rank, int count = 1) const;
   /// Whether the seat's active row holds a legal play. Always false for
   /// a face-down row: those are played blind.

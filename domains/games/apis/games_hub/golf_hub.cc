@@ -2190,8 +2190,12 @@ moonbase::games::CastleView GolfHub::CastleViewLocked(const std::string& game_id
   if (!ended && !current.empty()) view.currentPlayerId = current;
   view.drawPileCount = static_cast<int>(state.getDrawPile().size());
   view.pileCount = static_cast<int>(state.getPile().size());
-  if (const auto top = state.pileTop(); top.has_value()) view.pileTop = WireCard(*top);
-  view.pileRun = state.runOnTop();
+  // The run on top, top last: the price of the next play, and the cards
+  // a table shows.
+  const std::vector<cards::Card>& pile = state.getPile();
+  for (std::size_t i = pile.size() - state.runOnTop(); i < pile.size(); ++i) {
+    view.run.push_back(WireCard(pile[i]));
+  }
   view.finished = state.getFinished();
   if (const auto& play = state.getLastPlay(); play.has_value()) {
     moonbase::games::CastleLastPlay last;

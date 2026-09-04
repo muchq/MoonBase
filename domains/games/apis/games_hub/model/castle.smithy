@@ -74,8 +74,8 @@ structure PlayFaceDown {
     index: Integer
 }
 
-/// Take the pile into the hand, when nothing in the row in play can go
-/// on it.
+/// Take the pile into the hand. Any turn with a pile allows it, a legal
+/// play in the row or not; taken onto a blind row it becomes the hand.
 structure PickUp {}
 
 /// The castle envelope on the event stream.
@@ -116,9 +116,9 @@ structure CastleGameEnded {
 }
 
 /// One player's redacted view: own hand faces, everyone's face-up rows,
-/// face-down rows as counts, the pile top with the run on it and the
-/// draw-pile count, and the pile's last move — the one way to see a
-/// burn or a pick-up, which leave the pile empty. Every hand is revealed
+/// face-down rows as counts, the run on the pile and the draw-pile
+/// count, and the pile's last move — the one way to see a
+/// clear or a pick-up, which leave the pile empty. Every hand is revealed
 /// once the game ends. An ended view is always followed by gameEnded,
 /// which says who lost (or that nobody did); the view alone cannot tell
 /// an abandoned table from a finished one.
@@ -141,13 +141,12 @@ structure CastleView {
     @required
     pileCount: Integer
 
-    pileTop: Card
-
-    /// How many cards of the top's rank sit on the pile: the count the
-    /// next play must match, or the four of a kind it must complete.
-    /// Zero on an empty pile.
+    /// The run on top of the pile, top card last: every card of the top's
+    /// rank in a row, across plays. What a four of a kind completes, and
+    /// what the table shows; the count the next play must match is the
+    /// last play's (lastPlay.cards). Empty on an empty pile.
     @required
-    pileRun: Integer
+    run: Cards
 
     /// First out first; complete only once the game ends.
     @required
@@ -170,7 +169,9 @@ structure CastleLastPlay {
     @required
     cards: Cards
 
-    /// The play burned the pile: a ten, or the four of a kind it completed.
+    /// The play cleared the pile: a ten, or the four of a kind it
+    /// completed, which counts as one. A two resets the pile instead
+    /// and stays on it. Either way the mover plays again.
     @required
     burned: Boolean
 
@@ -209,10 +210,8 @@ structure CastlePlayer {
     out: Boolean
 
     /// It is this seat's turn and its row in play holds a legal play on
-    /// the pile as it stands; false off turn and for every other seat. A
-    /// seat on turn without one must pick up — unless its row in play is
-    /// face down, where this is always false and the move is a blind
-    /// flip.
+    /// the pile as it stands; false off turn, for every other seat, and
+    /// always for a blind row. The pile can be picked up either way.
     @required
     canPlay: Boolean
 }

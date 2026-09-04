@@ -48,9 +48,9 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
             R"({"update":{"gameCreated":{"createdBy":"player-1","gameId":"GAME01"}}})");
   const std::string waiting_one =
       R"("view":{"drawPileCount":0,"finished":[],"gameId":"GAME01","phase":"waiting",)"
-      R"("pileCount":0,"pileRun":0,"players":[{"canPlay":false,"faceDownCount":0,"faceUp":[],)"
+      R"("pileCount":0,"players":[{"canPlay":false,"faceDownCount":0,"faceUp":[],)"
       R"("hand":[],"handCount":0,)"
-      R"("out":false,"playerId":"player-1","ready":false}]})";
+      R"("out":false,"playerId":"player-1","ready":false}],"run":[]})";
   EXPECT_EQ(EventPayload(NextFrame(*creator), "castle"),
             R"({"update":{"gameJoined":{)" + waiting_one + R"(}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
@@ -69,11 +69,11 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
       joiner->Send(CommandFrame("castle", R"({"move":{"joinGame":{"gameId":"GAME01"}}})")).ok());
   const std::string waiting_pair =
       R"("view":{"drawPileCount":0,"finished":[],"gameId":"GAME01","phase":"waiting",)"
-      R"("pileCount":0,"pileRun":0,"players":[{"canPlay":false,"faceDownCount":0,"faceUp":[],)"
+      R"("pileCount":0,"players":[{"canPlay":false,"faceDownCount":0,"faceUp":[],)"
       R"("hand":[],"handCount":0,)"
       R"("out":false,"playerId":"player-1","ready":false},)"
       R"({"canPlay":false,"faceDownCount":0,"faceUp":[],"hand":[],"handCount":0,"out":false,)"
-      R"("playerId":"player-2","ready":false}]})";
+      R"("playerId":"player-2","ready":false}],"run":[]})";
   EXPECT_EQ(EventPayload(NextFrame(*joiner), "castle"),
             R"({"update":{"gameJoined":{)" + waiting_pair + R"(}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "castle"),
@@ -89,22 +89,21 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(
       setup_payload,
       R"({"update":{"gameState":{"view":{"drawPileCount":34,"finished":[],)"
-      R"("gameId":"GAME01","phase":"setup","pileCount":0,"pileRun":0,"players":[)"
+      R"("gameId":"GAME01","phase":"setup","pileCount":0,"players":[)"
       R"({"canPlay":false,"faceDownCount":3,"faceUp":[{"rank":"A","suit":"♣"},{"rank":"K","suit":"♠"},)"
       R"({"rank":"K","suit":"♥"}],"hand":[{"rank":"K","suit":"♦"},{"rank":"K","suit":"♣"},)"
       R"({"rank":"Q","suit":"♠"}],"handCount":3,"out":false,"playerId":"player-1",)"
       R"("ready":false},)"
       R"({"canPlay":false,"faceDownCount":3,"faceUp":[{"rank":"J","suit":"♠"},{"rank":"J","suit":"♥"},)"
       R"({"rank":"J","suit":"♦"}],"hand":[],"handCount":3,"out":false,)"
-      R"("playerId":"player-2","ready":false}]}}}})");
+      R"("playerId":"player-2","ready":false}],"run":[]}}}})");
   const json view = json::parse(setup_payload)["update"]["gameState"]["view"];
   EXPECT_EQ(KeysOf(view), (std::set<std::string>{"drawPileCount", "finished", "gameId", "phase",
-                                                 "pileCount", "pileRun", "players"}));
+                                                 "pileCount", "players", "run"}));
   EXPECT_EQ(KeysOf(view["players"][0]),
             (std::set<std::string>{"canPlay", "faceDownCount", "faceUp", "hand", "handCount", "out",
                                    "playerId", "ready"}));
-  // Absent optionals (pileTop, currentPlayerId, lastPlay) are omitted keys, not nulls.
-  EXPECT_FALSE(view.contains("pileTop"));
+  // Absent optionals (currentPlayerId, lastPlay) are omitted keys, not nulls.
   EXPECT_FALSE(view.contains("currentPlayerId"));
   EXPECT_FALSE(view.contains("lastPlay"));
 
@@ -136,15 +135,14 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
       R"({"update":{"gameState":{"view":{"currentPlayerId":"player-1","drawPileCount":33,)"
       R"("finished":[],"gameId":"GAME01",)"
       R"("lastPlay":{"burned":false,"cards":[{"rank":"J","suit":"♣"}],"pickedUp":false,)"
-      R"("playerId":"player-2"},"phase":"playing","pileCount":1,"pileRun":1,)"
-      R"("pileTop":{"rank":"J","suit":"♣"},"players":[)"
+      R"("playerId":"player-2"},"phase":"playing","pileCount":1,"players":[)"
       R"({"canPlay":true,"faceDownCount":3,"faceUp":[{"rank":"A","suit":"♣"},{"rank":"K","suit":"♠"},)"
       R"({"rank":"K","suit":"♥"}],"hand":[{"rank":"K","suit":"♦"},{"rank":"K","suit":"♣"},)"
       R"({"rank":"Q","suit":"♠"}],"handCount":3,"out":false,"playerId":"player-1",)"
       R"("ready":true},)"
       R"({"canPlay":false,"faceDownCount":3,"faceUp":[{"rank":"J","suit":"♠"},{"rank":"J","suit":"♥"},)"
       R"({"rank":"J","suit":"♦"}],"hand":[],"handCount":3,"out":false,)"
-      R"("playerId":"player-2","ready":true}]}}}})");
+      R"("playerId":"player-2","ready":true}],"run":[{"rank":"J","suit":"♣"}]}}}})");
 }
 
 }  // namespace
