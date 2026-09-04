@@ -1194,9 +1194,9 @@ func namesARoutePath(line string, directives []string) bool {
 // Two spellings of environment (one_d4's `- KEY=value` list, games_hub's
 // `KEY: value` mapping), two URL shapes (JDBC, which pgjdbc parses itself, and
 // libpq, which games_hub's C++ uses) and the bare `PGHOST:` form
-// golf_hub_db_init uses instead of a URL. That last one is not decoration: it is
+// games_hub_db_init uses instead of a URL. That last one is not decoration: it is
 // the only database host here that is not part of a URL, and games_hub gates on
-// golf_hub_db_init with service_completed_successfully, so a host it cannot
+// games_hub_db_init with service_completed_successfully, so a host it cannot
 // resolve stops games_hub from starting at all.
 //
 // A slice per service, not one host: last-match-wins would make a second URL in
@@ -1271,7 +1271,7 @@ func TestEveryDatabaseUrlNamesAHostThisComposeFilePublishes(t *testing.T) {
 	// scan stopped seeing something and the rest of this proves little.
 	if len(hosts) < 4 {
 		t.Fatalf("found database hosts for only %d services (%v); expected at least one_d4, "+
-			"games_hub and golf_hub_db_init. This test is reading less than it claims.",
+			"games_hub and games_hub_db_init. This test is reading less than it claims.",
 			len(hosts), hosts)
 	}
 
@@ -1448,7 +1448,7 @@ func gatesOnCompletedMigrate(t *testing.T, service string) bool {
 }
 
 // A one-shot under `restart: always` is a restart loop: the container exits 0
-// and Docker brings it straight back, forever. golf_hub_db_init carries the
+// and Docker brings it straight back, forever. games_hub_db_init carries the
 // same shape; this pins it for the migrate step, whose exit is load-bearing —
 // service_completed_successfully never fires for a container that keeps
 // restarting.

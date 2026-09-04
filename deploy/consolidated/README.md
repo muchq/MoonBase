@@ -315,7 +315,7 @@ method) still answer on any path; that is by design, not fall-through.
 ## The shared database
 
 `shared_postgres` is the one Postgres instance on the host. `one_d4`,
-`games_hub` and `iili` each keep a database on it; `golf_hub_db_init` and
+`games_hub` and `iili` each keep a database on it; `games_hub_db_init` and
 `iili_db_init` provision their roles and databases on every deploy
 (idempotently — the `docker-entrypoint-initdb.d` hook only fires on a
 fresh volume).

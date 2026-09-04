@@ -461,7 +461,7 @@ On the deployed machine the indexer runs against **PostgreSQL** — the `shared_
 sets in `INDEXER_DB_URL` — the only source there is (see above). H2 appears nowhere outside the
 test suite.
 
-The instance is shared: `games_hub` keeps its own database (still named `golf_hub`) on it too, which is why the service is
+The instance is shared: `games_hub` keeps its own database on it too, which is why the service is
 no longer named after one_d4 (MoonBase#1225). The Compose volume key is not the volume's name —
 Compose prefixes it with the project — so renaming `shared_pgdata` in `compose.yaml` alone would
 mount an empty volume rather than move the cluster.
