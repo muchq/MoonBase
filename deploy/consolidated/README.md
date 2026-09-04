@@ -9,7 +9,6 @@ This directory contains the consolidated deployment configuration for multiple s
 individually targetable.
 
 - **api.muchq.com** - API backend services
-  - [`games_ws_backend`](../../domains/games/apis/games_ws_backend) (port 8080, thoughts v1 until the UI moves to v2)
   - [`portrait`](../../domains/graphics/apis/portrait) (port 8081)
   - [`games_hub`](../../domains/games/apis/games_hub) (port 8089, `/games/v2/*`: golf and thoughts)
   - [`prom_proxy`](../../domains/platform/apis/prom_proxy) (port 8082)
@@ -113,7 +112,6 @@ To ship a change without restarting the whole stack:
 
 ```
 SERVICE             DESCRIPTION
-games_ws_backend    Websocket backend for thoughts
 games_hub           Games hub on smithy event streams (/games/v2/*)
 mcpserver           Model Context Protocol server
 ...
@@ -186,7 +184,6 @@ point.
 
 Services require configuration files in their respective `/etc` directories on the host:
 
-- `/etc/games_ws_backend/` - Games backend configuration
 - `/etc/portrait/` - Portrait service configuration
 - `/etc/prom_proxy/` - Prometheus proxy configuration
 - `/etc/mithril/` - Mithril service configuration

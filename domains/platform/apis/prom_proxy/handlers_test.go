@@ -107,7 +107,7 @@ func TestExtractTimeSeries(t *testing.T) {
 			name: "ValidTimeSeries",
 			result: Result{
 				Metric: map[string]string{
-					"__name__":  "cpu_utilization",
+					"__name__": "cpu_utilization",
 					"instance": "localhost:9090",
 				},
 				Values: [][]interface{}{
@@ -118,7 +118,7 @@ func TestExtractTimeSeries(t *testing.T) {
 			},
 			expectedName: "cpu_utilization",
 			expectedLabels: map[string]string{
-				"__name__":  "cpu_utilization",
+				"__name__": "cpu_utilization",
 				"instance": "localhost:9090",
 			},
 			expectedValues: 3,
@@ -149,9 +149,9 @@ func TestExtractTimeSeries(t *testing.T) {
 				},
 				Values: [][]interface{}{
 					{1609459200.0, "25.5"},
-					{1609459230.0}, // Invalid - missing value
+					{1609459230.0},            // Invalid - missing value
 					{"not_timestamp", "26.1"}, // Invalid - non-numeric timestamp
-					{1609459290.0, 27.5}, // Invalid - non-string value
+					{1609459290.0, 27.5},      // Invalid - non-string value
 				},
 			},
 			expectedName: "test_metric",
@@ -206,12 +206,12 @@ func TestExtractTimeSeries(t *testing.T) {
 				assert.Error(t, err)
 				return
 			}
-			
+
 			require.NoError(t, err)
 			assert.Equal(t, tt.expectedName, ts.MetricName)
 			assert.Equal(t, tt.expectedLabels, ts.Labels)
 			assert.Len(t, ts.Values, tt.expectedValues)
-			
+
 			// Verify data point structure for first value if exists
 			if len(ts.Values) > 0 {
 				assert.IsType(t, time.Time{}, ts.Values[0].Timestamp)
@@ -223,23 +223,23 @@ func TestExtractTimeSeries(t *testing.T) {
 
 func TestMetricsHandler_HealthHandler(t *testing.T) {
 	handler := &MetricsHandler{}
-	
+
 	req := httptest.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
-	
+
 	handler.HealthHandler(w, req)
-	
+
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
-	
+
 	var response map[string]string
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	
+
 	assert.Equal(t, "healthy", response["status"])
 	assert.Equal(t, "prometheus-proxy", response["service"])
 	assert.NotEmpty(t, response["timestamp"])
-	
+
 	// Verify timestamp is valid RFC3339 format
 	_, err = time.Parse(time.RFC3339, response["timestamp"])
 	assert.NoError(t, err)
@@ -290,9 +290,9 @@ func (m *mockPrometheusClient) QueryRange(ctx context.Context, query string, sta
 
 func TestNewMetricsHandler(t *testing.T) {
 	mockClient := &mockPrometheusClient{}
-	
+
 	handler := NewMetricsHandler(mockClient)
-	
+
 	assert.NotNil(t, handler)
 	assert.Equal(t, mockClient, handler.promClient)
 }

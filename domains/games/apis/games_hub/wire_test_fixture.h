@@ -74,7 +74,7 @@ inline void ExpectOnlyDeclaredCounterSeriesOnTheWire(
     const futility::otel::CapturingMetricsRecorder& recorder) {
   const auto& declared = GamesHubHandler::DeclaredCounterSeries();
   for (const auto& entry : recorder.Entries()) {
-    if (entry.name == "stream_sessions_active" || entry.name == "thoughts_sessions_active") {
+    if (entry.name == "golf_sessions_active" || entry.name == "thoughts_sessions_active") {
       continue;  // the gauges
     }
     const bool found = std::any_of(declared.begin(), declared.end(), [&](const auto& series) {

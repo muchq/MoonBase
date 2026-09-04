@@ -22,7 +22,6 @@ services:
       - caddy_config:/config
       - /var/log/caddy:/var/log/caddy
     depends_on:
-      - games_ws_backend
       - games_hub
       - microgpt-serve
       - mithril
@@ -42,24 +41,6 @@ services:
       resources:
         limits:
           cpus: '0.5'
-          memory: 256M
-
-  games_ws_backend:
-    image: ghcr.io/muchq/games_ws_backend:${GAMES_WS_BACKEND_SHA:-${DEPLOY_SHA:-latest}}
-    labels:
-      com.muchq.description: "Websocket backend for thoughts"
-    restart: always
-    logging: *default-logging
-    ports:
-      - "8080:8080"
-    volumes:
-      - /etc/games_ws_backend:/etc/games_ws_backend
-    networks:
-      - app_network
-    deploy:
-      resources:
-        limits:
-          cpus: '0.25'
           memory: 256M
 
   # The smithy event-stream games hub (/games/v2/*): golf and thoughts (#79).

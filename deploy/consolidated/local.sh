@@ -2,7 +2,7 @@
 
 trap 'kill $(jobs -p) 2>/dev/null; exit' SIGINT SIGTERM EXIT
 
-PORT=8080 DEV_MODE=1 bazel run //domains/games/apis/games_ws_backend 2>&1 | sed 's/^/[games_ws_backend] /' &
+PORT=8089 bazel run //domains/games/apis/games_hub 2>&1 | sed 's/^/[games_hub] /' &
 PORT=8081 bazel run //domains/graphics/apis/portrait 2>&1 | sed 's/^/[portrait] /' &
 # TODO: add flag for local word graph
 # PORT=8083 bazel run //domains/games/apis/mithril 2>&1 | sed 's/^/[mithril] /' &

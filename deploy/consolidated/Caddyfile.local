@@ -68,10 +68,6 @@
 		path /metrics/v1/*
 	}
 
-	@ws_thoughts {
-		path /games/v1/thoughts-ws
-	}
-
 	@post_golf_v2_session {
 		method POST
 		path /games/v2/session
@@ -106,9 +102,6 @@
 		respond 204
 	}
 
-	handle @ws_thoughts {
-		reverse_proxy localhost:8080
-	}
 	handle @post_golf_v2_session {
 		reverse_proxy localhost:8089
 	}

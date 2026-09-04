@@ -61,7 +61,7 @@ inline std::string SeriesLabel(const CounterSeries& series) {
 // Entry carries no instrument kind, so they are named rather than filtered.
 inline const std::set<std::string>& NonCounterInstruments() {
   static const auto* kNames =
-      new std::set<std::string>{"stream_sessions_active", "thoughts_sessions_active"};
+      new std::set<std::string>{"golf_sessions_active", "thoughts_sessions_active"};
   return *kNames;
 }
 

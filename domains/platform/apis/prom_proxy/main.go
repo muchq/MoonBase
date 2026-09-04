@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/muchq/moonbase/domains/platform/libs/mucks"
 	"github.com/muchq/moonbase/domains/platform/apis/prom_proxy"
+	"github.com/muchq/moonbase/domains/platform/libs/mucks"
 )
 
 func getEnvWithDefault(key, defaultValue string) string {

@@ -1192,6 +1192,26 @@ func TestNoDeployConfigNamesGolfHub(t *testing.T) {
 	}
 }
 
+// The Go websocket backend is retired: golf went to the hub in #1483 and
+// thoughts in #79, so nothing serves /games/v1. A rollback or a paste from
+// an older compose file would route the public internet at an image that no
+// longer builds, and the route pins above only assert the routes they list.
+func TestNoDeployConfigNamesTheGoGamesWsBackend(t *testing.T) {
+	forbidden := []string{"games_ws_backend", "/games/v1/"}
+	files := []string{"compose.yaml", "Caddyfile", "Caddyfile.local", "deploy.sh",
+		"local_deploy.sh", "initialize_host.sh"}
+	for _, name := range files {
+		for i, line := range strings.Split(readConfig(t, name), "\n") {
+			for _, token := range forbidden {
+				if strings.Contains(line, token) {
+					t.Errorf("%s:%d names %q (%q); the games surface is /games/v2/* on games_hub",
+						name, i+1, token, strings.TrimSpace(line))
+				}
+			}
+		}
+	}
+}
+
 // Whether a Caddy line mentions one of the route's path directives (glob
 // suffix trimmed).
 func namesARoutePath(line string, directives []string) bool {
@@ -2242,7 +2262,6 @@ func catchAllIsLastHandle(site []string, terminal string) (found bool, problem s
 // The local gateway's routes, matcher to upstream, so a transposed port in
 // a rewrite of the block does not ship.
 var localRoutes = map[string]string{
-	"@ws_thoughts":          "localhost:8080",
 	"@post_golf_v2_session": "localhost:8089",
 	"@ws_golf_v2":           "localhost:8089",
 	"@ws_thoughts_v2":       "localhost:8089",
@@ -2284,6 +2303,41 @@ func TestGatewayHostsAnswerUnmatchedPathsWith404(t *testing.T) {
 	}
 }
 
+// The local handles that are not proxies. Everything else must be in
+// localRoutes, so a handle left behind by a retired service fails here
+// instead of proxying to a port nothing listens on.
+var localNotProxied = map[string]bool{
+	"@options": true, "@meta_agent": true, "@scanner_agent": true, "@scanner_address": true,
+}
+
+// A matcher defined but never used is dead config; a directive naming an
+// undefined matcher stops Caddy at startup. Both halves of a route move
+// together, in both gateways.
+func TestEveryCaddyMatcherIsDefinedAndUsed(t *testing.T) {
+	for _, name := range []string{"Caddyfile", "Caddyfile.local"} {
+		defined, used := map[string]bool{}, map[string]bool{}
+		for _, line := range directiveLines(t, name) {
+			fields := strings.Fields(line)
+			switch {
+			case strings.HasPrefix(fields[0], "@"):
+				defined[fields[0]] = true
+			case len(fields) > 1 && strings.HasPrefix(fields[1], "@"):
+				used[fields[1]] = true
+			}
+		}
+		for matcher := range defined {
+			if !used[matcher] {
+				t.Errorf("%s defines %s but nothing uses it", name, matcher)
+			}
+		}
+		for matcher := range used {
+			if !defined[matcher] {
+				t.Errorf("%s uses %s without defining it; Caddy will not start", name, matcher)
+			}
+		}
+	}
+}
+
 func TestLocalGatewayRoutesReachTheirPorts(t *testing.T) {
 	site := caddySiteBlock(t, "Caddyfile.local", ":2015")
 	seen := map[string]bool{}
@@ -2294,7 +2348,11 @@ func TestLocalGatewayRoutesReachTheirPorts(t *testing.T) {
 		matcher := strings.TrimSuffix(strings.TrimPrefix(line, "handle "), " {")
 		upstream, routed := localRoutes[matcher]
 		if !routed {
-			continue // @options and anything else that is not a proxy
+			if !localNotProxied[matcher] {
+				t.Errorf("%s is handled locally but not in localRoutes; add its upstream, "+
+					"or list it in localNotProxied", matcher)
+			}
+			continue
 		}
 		seen[matcher] = true
 		for _, inner := range caddyBlockAt(site, i) {

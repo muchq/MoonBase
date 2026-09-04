@@ -58,7 +58,6 @@ fi
 
 # Pull only the published images (skip prom_proxy for now)
 echo "Pulling published images..."
-docker pull ghcr.io/muchq/games_ws_backend:latest || echo "Warning: Failed to pull games_ws_backend"
 docker pull ghcr.io/muchq/portrait:latest || echo "Warning: Failed to pull portrait" 
 docker pull caddy:2-alpine
 docker pull prom/prometheus:v3.5.0

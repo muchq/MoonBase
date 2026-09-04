@@ -92,7 +92,7 @@ class GolfHub final {
   /// increments, and leaves the three real series to be born carrying their
   /// first event's value — which is the bug (#1323), not a fix for it.
   ///
-  /// stream_commands{command} and stream_events{event} take the case names
+  /// golf_commands{command} and golf_events{event} take the case names
   /// of golf.smithy's unions, so their block is a copy of the model.
   /// StreamSeriesMatchTheModelUnions parses the .smithy file and fails on
   /// any drift, in either direction — that test is what makes a hand-kept
@@ -100,7 +100,7 @@ class GolfHub final {
   /// kNames array behind case_name()); a smithy-cpp accessor exposing it
   /// would let this block be derived and the parser test deleted.
   ///
-  /// stream_rejections carries the bounded `kind` (see RejectKind), never
+  /// golf_rejections carries the bounded `kind` (see RejectKind), never
   /// the free-text reason: the reason strings are ~30 literals spread across
   /// this file and the cards engine, exactly the label set that rots.
   ///
@@ -268,7 +268,7 @@ class GolfHub final {
   void DeclareMetrics();
   void TrackActive(int delta);
   void CountCommand(const moonbase::games::GolfCommands& command);
-  /// Every event leaves through here so stream_events sees each send.
+  /// Every event leaves through here so golf_events sees each send.
   void Send(const std::string& player_id, moonbase::games::GolfEvents event);
 
   /// Loads the room's retained history and sends one roomChatHistory to
@@ -320,7 +320,7 @@ class GolfHub final {
   void LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writes& writes);
   void BroadcastRoom(const std::string& room_id);
 
-  /// The bounded label on stream_rejections{kind} (hub_metrics.h).
+  /// The bounded label on golf_rejections{kind} (hub_metrics.h).
   using RejectKind = games_hub::RejectKind;
 
   /// A refusal in flight: the flows that work under mu_ and Reject after

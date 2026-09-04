@@ -451,7 +451,7 @@ cc_test(
         "stream_test_fixture.h",
     ],
     # StreamSeriesMatchTheModelUnions reads the model to pin the declared
-    # stream_commands/stream_events rosters against its union cases.
+    # golf_commands/golf_events rosters against its union cases.
     data = ["model/golf.smithy"],
     deps = [
         ":games_hub_smithy_client",

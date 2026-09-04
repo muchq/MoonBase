@@ -81,10 +81,9 @@ lobby-safe summaries only.
   are 6-char uppercase codes that ride in permalinks.
 - Observability: unary requests ride the shared aura chain (#1185); the
   stream side counts admissions, live sessions, disconnects, grace
-  expiries, and the command/event flow (`stream_*` for golf, `thoughts_*`
-  for thoughts).
+  expiries, and the command/event flow (`golf_*` for golf, `thoughts_*`
+  for thoughts, `chat_*` for the room layer's chat).
 - `ALLOWED_ORIGINS` unset admits all origins (local dev); production
   sets the allowlist.
 - Deployed behind Caddy at `/games/v2/*` (`deploy/consolidated`); the
-  muchq.com golf UI's only backend, and the thoughts UI's once it moves
-  off the v1 Go server (`games_ws_backend`).
+  muchq.com golf and thoughts UIs' only backend.

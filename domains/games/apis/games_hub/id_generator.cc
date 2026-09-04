@@ -11,7 +11,8 @@ namespace games_hub {
 
 namespace {
 
-// The same word lists as games_ws_backend's players.WhimsicalIDGenerator.
+// The whimsical vocabulary: ids double as display names, so they read as
+// adjective-animal pairs rather than hashes.
 constexpr std::string_view kAdjectives[] = {"bouncy",  "giggly", "sparkly", "fuzzy",   "wiggly",
                                             "snuggly", "dreamy", "bubbly",  "twinkly", "jolly",
                                             "quirky",  "peppy",  "zesty",   "frisky",  "silly",
