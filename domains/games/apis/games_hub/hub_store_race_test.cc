@@ -100,7 +100,7 @@ class GatedHubStore final : public HubStore {
 class HubStoreRaceFixture : public GamesHubStreamFixture {
  protected:
   struct Instance {
-    std::shared_ptr<HubHandler> handler;
+    std::shared_ptr<GolfHub> golf;
     std::shared_ptr<CapturingMetricsRecorder> metrics;
     std::unique_ptr<moonbase::games::GamesHubServer> server;
     std::unique_ptr<moonbase::games::GamesHubClient> client;
@@ -119,13 +119,16 @@ class HubStoreRaceFixture : public GamesHubStreamFixture {
   std::unique_ptr<Instance> BuildInstance() {
     auto instance = std::make_unique<Instance>();
     instance->metrics = MakeCapturingMetricsRecorder();
-    instance->handler = std::make_shared<HubHandler>(
-        std::make_shared<InMemoryTicketVault>(std::chrono::seconds(60), std::chrono::seconds(60)),
-        std::make_shared<cards::NoShuffleDealer>(), std::make_shared<RemoteIdGenerator>(),
-        std::chrono::seconds(60), instance->metrics, gated_store_,
-        /*chat_store=*/nullptr, UnlimitedRateLimits());
-    EXPECT_TRUE(instance->handler->RestoreFromStore().ok());
-    instance->server = std::make_unique<moonbase::games::GamesHubServer>(instance->handler);
+    auto vault =
+        std::make_shared<InMemoryTicketVault>(std::chrono::seconds(60), std::chrono::seconds(60));
+    auto ids = std::make_shared<RemoteIdGenerator>();
+    instance->golf = std::make_shared<GolfHub>(
+        vault, std::make_shared<cards::NoShuffleDealer>(), ids, std::chrono::seconds(60),
+        instance->metrics, gated_store_, /*chat_store=*/nullptr, UnlimitedRateLimits());
+    EXPECT_TRUE(instance->golf->RestoreFromStore().ok());
+    instance->server =
+        std::make_unique<moonbase::games::GamesHubServer>(std::make_shared<GamesHubHandler>(
+            vault, ids, instance->golf, std::make_shared<ThoughtsHub>(vault, instance->metrics)));
 
     auto loopback = std::make_shared<smithy::http::Loopback>();
     EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
@@ -205,7 +208,7 @@ TEST_F(HubStoreRaceFixture, ActiveSignalRefreshesHeldRoom) {
 
   // No OnNotify: the active signal alone must carry bob onto alice's
   // projection the way a missed wake would after (re)LISTEN.
-  handler_->OnChannelActive(RoomChannel(room_id));
+  golf_->OnChannelActive(RoomChannel(room_id));
   auto refreshed = ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
       [&] { return ReceiveCase(alice->stream, "roomState"); }, remote.get());
   ASSERT_TRUE(refreshed.has_value());
@@ -228,8 +231,8 @@ TEST_F(HubStoreRaceFixture, ActiveSignalForUnheldRoomIsIgnored) {
   const std::string room_id = created->as_roomState_or_null()->roomId;
 
   // Remote never materialized this room; a phantom channel is not a room.
-  remote->handler->OnChannelActive(RoomChannel(room_id));
-  remote->handler->OnChannelActive(RoomChannel("never-existed"));
+  remote->golf->OnChannelActive(RoomChannel(room_id));
+  remote->golf->OnChannelActive(RoomChannel("never-existed"));
 
   // Primary stays healthy and can still host a join the ordinary way.
   auto bob = OpenSeatVia(*remote->client);
@@ -270,7 +273,7 @@ TEST_F(HubStoreRaceFixture, DelayedFinishWakeReadsRetainedTerminalRow) {
   ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
                   [&] { return ReceiveCase(bob->stream, "roomState"); }, remote.get())
                   .has_value());
-  handler_->OnNotify(RoomChannel(room_id), "remote-join");
+  golf_->OnNotify(RoomChannel(room_id), "remote-join");
   ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
                   [&] { return ReceiveCase(alice->stream, "roomState"); }, remote.get())
                   .has_value());
@@ -281,7 +284,7 @@ TEST_F(HubStoreRaceFixture, DelayedFinishWakeReadsRetainedTerminalRow) {
       [&] { return ReceiveGolf(alice->stream, "gameJoined"); }, remote.get());
   ASSERT_TRUE(joined.has_value());
   const std::string game_id = joined->as_gameJoined_or_null()->view.gameId;
-  remote->handler->OnNotify(RoomChannel(room_id), "primary-create");
+  remote->golf->OnNotify(RoomChannel(room_id), "primary-create");
   ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
                   [&] { return ReceiveCase(bob->stream, "roomState"); }, remote.get())
                   .has_value());
@@ -292,7 +295,7 @@ TEST_F(HubStoreRaceFixture, DelayedFinishWakeReadsRetainedTerminalRow) {
   ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfUpdate>>(
                   [&] { return ReceiveGolf(bob->stream, "gameJoined"); }, remote.get())
                   .has_value());
-  handler_->OnNotify(RoomChannel(room_id), "remote-seat");
+  golf_->OnNotify(RoomChannel(room_id), "remote-seat");
   ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfUpdate>>(
                   [&] { return ReceiveGolf(alice->stream, "gameState"); }, remote.get())
                   .has_value());
@@ -301,13 +304,13 @@ TEST_F(HubStoreRaceFixture, DelayedFinishWakeReadsRetainedTerminalRow) {
   ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfUpdate>>(
                   [&] { return ReceiveGolf(alice->stream, "gameStarted"); }, remote.get())
                   .has_value());
-  remote->handler->OnNotify(RoomChannel(room_id), "primary-start");
+  remote->golf->OnNotify(RoomChannel(room_id), "primary-start");
   ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfUpdate>>(
                   [&] { return ReceiveGolf(bob->stream, "gameState"); }, remote.get())
                   .has_value());
 
   ASSERT_TRUE(alice->stream.Send(Move(GolfMove::FromKnock(moonbase::games::Knock{}))).ok());
-  remote->handler->OnNotify(RoomChannel(room_id), "primary-knock");
+  remote->golf->OnNotify(RoomChannel(room_id), "primary-knock");
   ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfUpdate>>(
                   [&] { return ReceiveGolf(bob->stream, "gameState"); }, remote.get())
                   .has_value());
@@ -337,7 +340,7 @@ TEST_F(HubStoreRaceFixture, DelayedFinishWakeReadsRetainedTerminalRow) {
   ASSERT_TRUE((*terminal)->state.has_value());
   EXPECT_TRUE((*terminal)->state->isOver());
 
-  handler_->OnNotify(RoomChannel(room_id), "delayed-finish");
+  golf_->OnNotify(RoomChannel(room_id), "delayed-finish");
   auto alice_ended = ReceiveWithin<std::optional<moonbase::games::GolfUpdate>>(
       [&] { return ReceiveGolf(alice->stream, "gameEnded"); }, remote.get());
   EXPECT_TRUE(alice_ended.has_value());

@@ -350,11 +350,11 @@ TEST_F(GamesHubStreamFixture, OneTicketOpensOneStreamAndAPlayerMayHoldASeatOnEac
 // hear exactly the one that landed.
 class ThoughtsRateLimitedFixture : public GamesHubStreamFixture {
  protected:
-  std::shared_ptr<ThoughtsHub> MakeThoughtsHub() override {
+  ThoughtsLimits MakeThoughtsLimits() override {
     ThoughtsLimits limits;
     limits.command_burst = 2;
     limits.command_refill_per_sec = 0;
-    return std::make_shared<ThoughtsHub>(vault_, metrics_, limits);
+    return limits;
   }
 };
 

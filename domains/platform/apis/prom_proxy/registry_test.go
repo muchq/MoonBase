@@ -497,7 +497,7 @@ var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|c
 // What games_hub exports, as the collector's Prometheus exporter names it:
 // _total for a counter, _gauge for futility's up-down gauge.
 //
-// A hand-kept copy, verified against HubHandler::DeclaredCounterSeries() (which
+// A hand-kept copy, verified against GamesHubHandler::DeclaredCounterSeries() (which
 // folds in ThoughtsHub's) by a
 // person, not a test — the roster lives in C++ and this file in Go with no
 // shared artifact to pin them together (that is #1308's scope). What these

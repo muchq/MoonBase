@@ -1,4 +1,4 @@
-#include "domains/games/apis/games_hub/hub_handler.h"
+#include "domains/games/apis/games_hub/golf_hub.h"
 
 #include <algorithm>
 #include <deque>
@@ -143,11 +143,11 @@ std::vector<games_hub::HubStore::StatsDelta> StatsDeltas(const golf::GameState& 
 
 }  // namespace
 
-HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Dealer> dealer,
-                       std::shared_ptr<IdGenerator> ids, std::chrono::seconds grace_period,
-                       std::shared_ptr<futility::otel::MetricsRecorder> metrics,
-                       std::shared_ptr<HubStore> store, std::shared_ptr<ChatStore> chat_store,
-                       RateLimits limits, std::shared_ptr<ThoughtsHub> thoughts)
+GolfHub::GolfHub(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Dealer> dealer,
+                 std::shared_ptr<IdGenerator> ids, std::chrono::seconds grace_period,
+                 std::shared_ptr<futility::otel::MetricsRecorder> metrics,
+                 std::shared_ptr<HubStore> store, std::shared_ptr<ChatStore> chat_store,
+                 RateLimits limits)
     : vault_(std::move(vault)),
       dealer_(std::move(dealer)),
       ids_(std::move(ids)),
@@ -163,8 +163,6 @@ HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards
                           return WithMember(room_id, player_id, action);
                         })),
       limits_(limits),
-      thoughts_(thoughts != nullptr ? std::move(thoughts)
-                                    : std::make_shared<ThoughtsHub>(vault_, metrics_)),
       grace_period_(grace_period),
       instance_id_(InstanceId()),
       registry_([this, grace_period] {
@@ -199,7 +197,7 @@ HubHandler::HubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards
 // — except for the stream_commands/stream_events blocks, whose values are the
 // model's union cases and are pinned both ways against golf.smithy by
 // StreamSeriesMatchTheModelUnions.
-const std::vector<HubHandler::CounterSeries>& HubHandler::GolfCounterSeries() {
+const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
   static const auto* kSeries = new std::vector<CounterSeries>{
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
@@ -265,26 +263,14 @@ const std::vector<HubHandler::CounterSeries>& HubHandler::GolfCounterSeries() {
   return *kSeries;
 }
 
-const std::vector<HubHandler::CounterSeries>& HubHandler::DeclaredCounterSeries() {
-  static const auto* kSeries = [] {
-    auto* series = new std::vector<CounterSeries>(GolfCounterSeries());
-    // The thoughts hub's series ride the same recorder, so the same sweep
-    // has to know them; the ThoughtsHub declares them itself.
-    const auto& thoughts = ThoughtsHub::DeclaredCounterSeries();
-    series->insert(series->end(), thoughts.begin(), thoughts.end());
-    return series;
-  }();
-  return *kSeries;
-}
-
-void HubHandler::DeclareMetrics() {
+void GolfHub::DeclareMetrics() {
   if (!metrics_) return;
-  for (const CounterSeries& series : GolfCounterSeries()) {
+  for (const CounterSeries& series : DeclaredCounterSeries()) {
     metrics_->DeclareCounter(series.name, series.attributes);
   }
 }
 
-HubHandler::~HubHandler() {
+GolfHub::~GolfHub() {
   {
     const std::lock_guard<std::mutex> lock(reaper_mu_);
     reaper_stop_ = true;
@@ -293,7 +279,7 @@ HubHandler::~HubHandler() {
   if (boot_reaper_.joinable()) boot_reaper_.join();
 }
 
-absl::Status HubHandler::RestoreFromStore() {
+absl::Status GolfHub::RestoreFromStore() {
   // Once, before serving. A second restore would stack a new cohort
   // behind a reaper that never re-arms — forever-membership again, the
   // exact silent shape #1295 closed — so refuse it loudly instead.
@@ -357,7 +343,7 @@ absl::Status HubHandler::RestoreFromStore() {
   return absl::OkStatus();
 }
 
-void HubHandler::BootReaperMain() {
+void GolfHub::BootReaperMain() {
   {
     std::unique_lock<std::mutex> lock(reaper_mu_);
     reaper_cv_.wait_for(lock, grace_period_, [this] { return reaper_stop_; });
@@ -385,7 +371,7 @@ void HubHandler::BootReaperMain() {
   }
 }
 
-void HubHandler::SeedChatCursorLocked(const std::string& room_id) {
+void GolfHub::SeedChatCursorLocked(const std::string& room_id) {
   auto rows = chat_store_->LoadRecent(room_id, 1);
   ChatCursor cursor;
   if (rows.ok()) {
@@ -400,17 +386,17 @@ void HubHandler::SeedChatCursorLocked(const std::string& room_id) {
   chat_cursors_.try_emplace(room_id, cursor);
 }
 
-void HubHandler::EnqueueWritesLocked(Writes& writes) {
+void GolfHub::EnqueueWritesLocked(Writes& writes) {
   if (!writes.empty()) store_->Enqueue(std::move(writes));
   writes.clear();
 }
 
-void HubHandler::StageLocked(Writes& writes, HubStore::Op op) const {
+void GolfHub::StageLocked(Writes& writes, HubStore::Op op) const {
   writes.push_back(std::move(op));
 }
 
-void HubHandler::StageMemberLocked(const std::string& room_id, const std::string& player_id,
-                                   const Member& member, Writes& writes) const {
+void GolfHub::StageMemberLocked(const std::string& room_id, const std::string& player_id,
+                                const Member& member, Writes& writes) const {
   HubStore::MemberRow row;
   row.room_id = room_id;
   row.player_id = player_id;
@@ -421,15 +407,14 @@ void HubHandler::StageMemberLocked(const std::string& room_id, const std::string
   writes.push_back(HubStore::UpsertMember{std::move(row)});
 }
 
-void HubHandler::StageWakeLocked(const std::string& room_id, Writes& writes) const {
+void GolfHub::StageWakeLocked(const std::string& room_id, Writes& writes) const {
   StageLocked(writes, HubStore::Notify{RoomChannel(room_id), instance_id_});
 }
 
-HubHandler::Commit HubHandler::CommitEntryLocked(const std::string& room_id,
-                                                 const std::string& game_id, GameEntry& entry,
-                                                 const std::vector<std::string>& roster,
-                                                 const std::optional<golf::GameState>& state,
-                                                 const std::vector<HubStore::StatsDelta>* finish) {
+GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std::string& game_id,
+                                           GameEntry& entry, const std::vector<std::string>& roster,
+                                           const std::optional<golf::GameState>& state,
+                                           const std::vector<HubStore::StatsDelta>* finish) {
   const int64_t version = entry.version + 1;
   // The async outbox may still hold rows this commit depends on — the
   // room behind the insert's FK, the membership behind the finish's
@@ -468,7 +453,7 @@ HubHandler::Commit HubHandler::CommitEntryLocked(const std::string& room_id,
   return Commit::kCommitted;
 }
 
-void HubHandler::AttachListener(pg::Listener* listener) {
+void GolfHub::AttachListener(pg::Listener* listener) {
   const std::lock_guard<std::mutex> lock(mu_);
   listener_ = listener;
   if (listener_ == nullptr) return;
@@ -478,16 +463,16 @@ void HubHandler::AttachListener(pg::Listener* listener) {
   }
 }
 
-void HubHandler::OnNotify(const std::string& channel, const std::string& payload) {
+void GolfHub::OnNotify(const std::string& channel, const std::string& payload) {
   WakeChannel(channel, payload, /*from_active=*/false);
 }
 
-void HubHandler::OnChannelActive(const std::string& channel) {
+void GolfHub::OnChannelActive(const std::string& channel) {
   WakeChannel(channel, /*payload=*/"", /*from_active=*/true);
 }
 
-void HubHandler::WakeChannel(const std::string& channel, const std::string& payload,
-                             bool from_active) {
+void GolfHub::WakeChannel(const std::string& channel, const std::string& payload,
+                          bool from_active) {
   constexpr std::string_view kChatPrefix = "chat_";
   if (absl::StartsWith(channel, kChatPrefix)) {
     // Own wakes pump too, deliberately: the cursor makes it a no-op in
@@ -507,7 +492,7 @@ void HubHandler::WakeChannel(const std::string& channel, const std::string& payl
   CatchUpRoom(std::string(channel.substr(kPrefix.size())), /*project_always=*/!from_active);
 }
 
-void HubHandler::CatchUpRoom(const std::string& room_id, bool project_always) {
+void GolfHub::CatchUpRoom(const std::string& room_id, bool project_always) {
   {
     const std::lock_guard<std::mutex> lock(mu_);
     // Only rooms we hold: a stale wake for a dropped room must not
@@ -532,7 +517,7 @@ void HubHandler::CatchUpRoom(const std::string& room_id, bool project_always) {
   Deliver(outbox);
 }
 
-bool HubHandler::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
+bool GolfHub::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
   // The flush means this read can never be older than our own truth;
   // holding mu_ across it means nothing local moves in between. The
   // writer thread needs no lock we hold, so it drains freely. Join uses
@@ -548,8 +533,8 @@ bool HubHandler::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
   return true;
 }
 
-bool HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
-                                     Outbox& outbox, bool project_always) {
+bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
+                                  Outbox& outbox, bool project_always) {
   if (!rows.exists) {
     // Deleted by another instance; nothing local can outrank that.
     const auto room = rooms_.find(room_id);
@@ -691,7 +676,7 @@ bool HubHandler::ReconcileRoomLocked(const std::string& room_id, const HubStore:
   return changed;
 }
 
-void HubHandler::DropGameLocked(const GameRef& ref) {
+void GolfHub::DropGameLocked(const GameRef& ref) {
   for (const std::string& member_id : ref.entry->roster) {
     if (auto it = player_game_.find(member_id);
         it != player_game_.end() && it->second == ref.game_id) {
@@ -701,51 +686,20 @@ void HubHandler::DropGameLocked(const GameRef& ref) {
   ref.room->games.erase(ref.game_id);
 }
 
-void HubHandler::ListenRoomLocked(const std::string& room_id) {
+void GolfHub::ListenRoomLocked(const std::string& room_id) {
   if (listener_ == nullptr) return;
   listener_->Listen(RoomChannel(room_id));
   listener_->Listen(ChatChannel(room_id));
 }
 
-void HubHandler::UnlistenRoomLocked(const std::string& room_id) {
+void GolfHub::UnlistenRoomLocked(const std::string& room_id) {
   if (listener_ == nullptr) return;
   listener_->Unlisten(RoomChannel(room_id));
   listener_->Unlisten(ChatChannel(room_id));
 }
 
-smithy::Outcome<moonbase::games::GetSessionOutput> HubHandler::GetSession(
-    const moonbase::games::GetSessionInput& input,
-    const smithy::server::RequestContext& /*context*/) {
-  std::string player_id;
-  bool token_valid = false;
-  if (input.resumeToken.has_value() && !HasEmbeddedNul(*input.resumeToken)) {
-    if (auto resolved = vault_->ResolveResumeToken(*input.resumeToken)) {
-      player_id = std::move(*resolved);
-      token_valid = true;
-    }
-  }
-  if (player_id.empty()) player_id = ids_->PlayerId();
-
-  // A vault backed by a store can be down; a mint nothing recorded must
-  // not reach the client. Unknown -> a non-leaking 500.
-  absl::StatusOr<std::string> ticket = vault_->IssueTicket(player_id);
-  if (!ticket.ok()) return smithy::Error::Unknown("credential store unavailable");
-
-  moonbase::games::GetSessionOutput output;
-  output.playerId = player_id;
-  output.ticket = *std::move(ticket);
-  if (token_valid) {
-    output.resumeToken = *input.resumeToken;
-  } else {
-    absl::StatusOr<std::string> resume = vault_->IssueResumeToken(player_id);
-    if (!resume.ok()) return smithy::Error::Unknown("credential store unavailable");
-    output.resumeToken = *std::move(resume);
-  }
-  return output;
-}
-
-smithy::eventstream::StreamTask HubHandler::Play(moonbase::games::PlayInput input,
-                                                 moonbase::games::PlayAsyncServerStream& stream) {
+smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
+                                              moonbase::games::PlayAsyncServerStream& stream) {
   if (HasEmbeddedNul(input.ticket)) {
     Count("stream_admissions_refused", {{"reason", "bad_ticket"}});
     co_return smithy::Error::Modeled("Unauthenticated", "ticket expired or already spent");
@@ -850,12 +804,7 @@ smithy::eventstream::StreamTask HubHandler::Play(moonbase::games::PlayInput inpu
   }
 }
 
-smithy::eventstream::StreamTask HubHandler::Think(moonbase::games::ThinkInput input,
-                                                  moonbase::games::ThinkAsyncServerStream& stream) {
-  return thoughts_->Think(std::move(input), stream);
-}
-
-void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands& command) {
+void GolfHub::HandleCommand(const std::string& player_id, const GolfCommands& command) {
   CountCommand(command);
   if (command.as_createRoom_or_null() != nullptr) {
     std::string room_id;
@@ -1029,7 +978,7 @@ void HubHandler::HandleCommand(const std::string& player_id, const GolfCommands&
   Reject(player_id, RejectKind::kUnknown, "unknown command");
 }
 
-void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) {
+void GolfHub::HandleMove(const std::string& player_id, const GolfMove& move) {
   if (move.as_createGame_or_null() != nullptr) {
     CreateGameMove(player_id);
     return;
@@ -1140,7 +1089,7 @@ void HubHandler::HandleMove(const std::string& player_id, const GolfMove& move) 
   Reject(player_id, RejectKind::kUnknown, "unknown move");
 }
 
-void HubHandler::CreateGameMove(const std::string& player_id) {
+void GolfHub::CreateGameMove(const std::string& player_id) {
   Outbox outbox;
   std::optional<Refusal> refusal;
   {
@@ -1197,7 +1146,7 @@ void HubHandler::CreateGameMove(const std::string& player_id) {
   }
 }
 
-void HubHandler::JoinGameMove(const std::string& player_id, const std::string& game_id) {
+void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game_id) {
   if (HasEmbeddedNul(game_id)) {
     Reject(player_id, RejectKind::kInvalid, "invalid game id");
     return;
@@ -1277,7 +1226,7 @@ void HubHandler::JoinGameMove(const std::string& player_id, const std::string& g
   }
 }
 
-void HubHandler::StartGameMove(const std::string& player_id) {
+void GolfHub::StartGameMove(const std::string& player_id) {
   Outbox outbox;
   std::optional<Refusal> refusal;
   {
@@ -1337,7 +1286,7 @@ void HubHandler::StartGameMove(const std::string& player_id) {
   }
 }
 
-void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects) {
+void GolfHub::EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects) {
   Outbox outbox;
   Writes writes;
   std::optional<Refusal> refusal;
@@ -1438,7 +1387,7 @@ void HubHandler::EngineMove(const std::string& player_id, const MoveFn& move, Mo
   }
 }
 
-void HubHandler::SetConnected(const std::string& player_id, bool connected) {
+void GolfHub::SetConnected(const std::string& player_id, bool connected) {
   Writes writes;
   {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -1455,15 +1404,15 @@ void HubHandler::SetConnected(const std::string& player_id, bool connected) {
   }
 }
 
-std::optional<std::string> HubHandler::CurrentRoom(const std::string& player_id) {
+std::optional<std::string> GolfHub::CurrentRoom(const std::string& player_id) {
   const std::lock_guard<std::mutex> lock(mu_);
   const auto it = player_room_.find(player_id);
   if (it == player_room_.end()) return std::nullopt;
   return it->second;
 }
 
-bool HubHandler::WithMember(const std::string& room_id, const std::string& player_id,
-                            const MemberAction& action) {
+bool GolfHub::WithMember(const std::string& room_id, const std::string& player_id,
+                         const MemberAction& action) {
   const std::lock_guard<std::mutex> lock(mu_);
   const auto room = rooms_.find(room_id);
   if (room == rooms_.end()) return false;
@@ -1472,14 +1421,14 @@ bool HubHandler::WithMember(const std::string& room_id, const std::string& playe
   return true;
 }
 
-HubHandler::Room* HubHandler::FindRoomLocked(const std::string& player_id) {
+GolfHub::Room* GolfHub::FindRoomLocked(const std::string& player_id) {
   const auto room_it = player_room_.find(player_id);
   if (room_it == player_room_.end()) return nullptr;
   const auto room = rooms_.find(room_it->second);
   return room != rooms_.end() ? &room->second : nullptr;
 }
 
-std::optional<HubHandler::GameRef> HubHandler::FindGameLocked(const std::string& player_id) {
+std::optional<GolfHub::GameRef> GolfHub::FindGameLocked(const std::string& player_id) {
   const auto room_it = player_room_.find(player_id);
   const auto game_it = player_game_.find(player_id);
   if (room_it == player_room_.end() || game_it == player_game_.end()) return std::nullopt;
@@ -1490,7 +1439,7 @@ std::optional<HubHandler::GameRef> HubHandler::FindGameLocked(const std::string&
   return GameRef{room_it->second, &room->second, game_it->second, &game->second};
 }
 
-void HubHandler::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writes& writes) {
+void GolfHub::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writes& writes) {
   LeaveGameLocked(player_id, outbox, writes);
 
   const auto it = player_room_.find(player_id);
@@ -1521,7 +1470,7 @@ void HubHandler::LeaveEverywhere(const std::string& player_id, Outbox& outbox, W
   StageRoomStateLocked(room_id, outbox);
 }
 
-void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writes& writes) {
+void GolfHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writes& writes) {
   auto ref = FindGameLocked(player_id);
   player_game_.erase(player_id);
   if (!ref.has_value()) return;
@@ -1599,7 +1548,7 @@ void HubHandler::LeaveGameLocked(const std::string& player_id, Outbox& outbox, W
                << ": leave lost every commit race";
 }
 
-void HubHandler::BroadcastRoom(const std::string& room_id) {
+void GolfHub::BroadcastRoom(const std::string& room_id) {
   Outbox outbox;
   {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -1608,11 +1557,11 @@ void HubHandler::BroadcastRoom(const std::string& room_id) {
   Deliver(outbox);
 }
 
-void HubHandler::Reject(const std::string& player_id, Refusal refusal) {
+void GolfHub::Reject(const std::string& player_id, Refusal refusal) {
   Reject(player_id, refusal.kind, std::move(refusal.reason));
 }
 
-void HubHandler::Reject(const std::string& player_id, RejectKind kind, std::string reason) {
+void GolfHub::Reject(const std::string& player_id, RejectKind kind, std::string reason) {
   // The bounded kind is the metric; the free text goes only to the player.
   // Reasons come from ~30 literals here and the cards engine's status
   // messages, exactly the label set that cannot be declared and so would
@@ -1623,14 +1572,14 @@ void HubHandler::Reject(const std::string& player_id, RejectKind kind, std::stri
   Send(player_id, GolfEvents::FromCommandrejected(std::move(rejected)));
 }
 
-void HubHandler::OnExpired(const std::string& player_id) {
+void GolfHub::OnExpired(const std::string& player_id) {
   // Grace ran out (ADR-0020): the seat is gone; free the room and game
   // slots and tell whoever remains. Runs on the registry's expiry thread.
   Count("stream_seats_expired");
   ReapUnlessResumedElsewhere(player_id);
 }
 
-bool HubHandler::ReapUnlessResumedElsewhere(const std::string& player_id) {
+bool GolfHub::ReapUnlessResumedElsewhere(const std::string& player_id) {
   Outbox outbox;
   Writes writes;
   bool reaped = false;
@@ -1661,14 +1610,14 @@ bool HubHandler::ReapUnlessResumedElsewhere(const std::string& player_id) {
   return reaped;
 }
 
-void HubHandler::Deliver(Outbox& outbox) {
+void GolfHub::Deliver(Outbox& outbox) {
   for (auto& [player_id, event] : outbox.events) {
     Send(player_id, std::move(event));
   }
   outbox.events.clear();
 }
 
-void HubHandler::PumpChat(const std::string& room_id) {
+void GolfHub::PumpChat(const std::string& room_id) {
   {
     const std::lock_guard<std::mutex> lock(mu_);
     // No cursor means no room (they live and die together): a stale wake
@@ -1747,7 +1696,7 @@ void HubHandler::PumpChat(const std::string& room_id) {
   }
 }
 
-void HubHandler::SendChatHistory(const std::string& room_id, const std::string& player_id) {
+void GolfHub::SendChatHistory(const std::string& room_id, const std::string& player_id) {
   auto rows = chat_store_->LoadRecent(room_id, kChatHistoryLimit);
   if (!rows.ok()) {
     // The admission already succeeded; chat history is not worth failing
@@ -1769,17 +1718,17 @@ void HubHandler::SendChatHistory(const std::string& room_id, const std::string& 
   Count("chat_history_replays");
 }
 
-void HubHandler::Count(const char* name, const std::map<std::string, std::string>& attributes) {
+void GolfHub::Count(const char* name, const std::map<std::string, std::string>& attributes) {
   if (metrics_) metrics_->RecordCounter(name, 1, attributes);
 }
 
-void HubHandler::TrackActive(int delta) {
+void GolfHub::TrackActive(int delta) {
   // Delta form, matching http_server_requests_active: the collector sums
   // an up-down counter into the live-session count.
   if (metrics_) metrics_->RecordGauge("stream_sessions_active", delta);
 }
 
-void HubHandler::CountCommand(const GolfCommands& command) {
+void GolfHub::CountCommand(const GolfCommands& command) {
   if (!metrics_) return;
   const auto* envelope = command.as_golf_or_null();
   const std::string name = envelope != nullptr ? absl::StrCat("golf.", envelope->move.case_name())
@@ -1787,7 +1736,7 @@ void HubHandler::CountCommand(const GolfCommands& command) {
   metrics_->RecordCounter("stream_commands", 1, {{"command", name}});
 }
 
-void HubHandler::Send(const std::string& player_id, GolfEvents event) {
+void GolfHub::Send(const std::string& player_id, GolfEvents event) {
   if (metrics_) {
     const auto* envelope = event.as_golf_or_null();
     const std::string name = envelope != nullptr
@@ -1798,8 +1747,8 @@ void HubHandler::Send(const std::string& player_id, GolfEvents event) {
   registry_.SendTo(player_id, std::move(event));
 }
 
-moonbase::games::RoomState HubHandler::RoomStateLocked(const std::string& room_id,
-                                                       const Room& room) const {
+moonbase::games::RoomState GolfHub::RoomStateLocked(const std::string& room_id,
+                                                    const Room& room) const {
   moonbase::games::RoomState state;
   state.roomId = room_id;
   for (const auto& [member_id, member] : room.members) {
@@ -1821,7 +1770,7 @@ moonbase::games::RoomState HubHandler::RoomStateLocked(const std::string& room_i
   return state;
 }
 
-void HubHandler::StageRoomStateLocked(const std::string& room_id, Outbox& outbox) const {
+void GolfHub::StageRoomStateLocked(const std::string& room_id, Outbox& outbox) const {
   const auto room = rooms_.find(room_id);
   if (room == rooms_.end()) return;
   const moonbase::games::RoomState state = RoomStateLocked(room_id, room->second);
@@ -1830,8 +1779,8 @@ void HubHandler::StageRoomStateLocked(const std::string& room_id, Outbox& outbox
   }
 }
 
-moonbase::games::GameView HubHandler::ViewLocked(const std::string& game_id, const GameEntry& entry,
-                                                 const std::string& viewer_id) const {
+moonbase::games::GameView GolfHub::ViewLocked(const std::string& game_id, const GameEntry& entry,
+                                              const std::string& viewer_id) const {
   moonbase::games::GameView view;
   view.gameId = game_id;
 
@@ -1892,8 +1841,8 @@ moonbase::games::GameView HubHandler::ViewLocked(const std::string& game_id, con
   return view;
 }
 
-void HubHandler::StageGameViewsLocked(const std::string& game_id, const GameEntry& entry,
-                                      Outbox& outbox) const {
+void GolfHub::StageGameViewsLocked(const std::string& game_id, const GameEntry& entry,
+                                   Outbox& outbox) const {
   for (const std::string& recipient : entry.roster) {
     moonbase::games::GameStateUpdate update;
     update.view = ViewLocked(game_id, entry, recipient);
@@ -1901,7 +1850,7 @@ void HubHandler::StageGameViewsLocked(const std::string& game_id, const GameEntr
   }
 }
 
-void HubHandler::StageGameOverLocked(Room& room, const std::string& game_id, Outbox& outbox) {
+void GolfHub::StageGameOverLocked(Room& room, const std::string& game_id, Outbox& outbox) {
   const auto game = room.games.find(game_id);
   if (game == room.games.end() || !game->second.started()) return;
   const golf::GameState& state = *game->second.state;
@@ -1936,8 +1885,8 @@ void HubHandler::StageGameOverLocked(Room& room, const std::string& game_id, Out
   room.games.erase(game);
 }
 
-void HubHandler::FinalizeGameLocked(const std::string& room_id, Room& room,
-                                    const std::string& game_id, Outbox& outbox) {
+void GolfHub::FinalizeGameLocked(const std::string& room_id, Room& room, const std::string& game_id,
+                                 Outbox& outbox) {
   const auto game = room.games.find(game_id);
   if (game == room.games.end() || !game->second.started()) return;
   const golf::GameState& state = *game->second.state;

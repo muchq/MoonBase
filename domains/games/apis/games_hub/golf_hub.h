@@ -1,5 +1,5 @@
-#ifndef DOMAINS_GAMES_APIS_GAMES_HUB_HUB_HANDLER_H
-#define DOMAINS_GAMES_APIS_GAMES_HUB_HUB_HANDLER_H
+#ifndef DOMAINS_GAMES_APIS_GAMES_HUB_GOLF_HUB_H
+#define DOMAINS_GAMES_APIS_GAMES_HUB_GOLF_HUB_H
 
 #include <chrono>
 #include <condition_variable>
@@ -20,7 +20,6 @@
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/id_generator.h"
 #include "domains/games/apis/games_hub/rate_limiter.h"
-#include "domains/games/apis/games_hub/thoughts_hub.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
@@ -41,8 +40,9 @@ namespace games_hub {
 [[nodiscard]] std::unordered_set<int> WinnersAmong(const golf::GameState& state,
                                                    const std::vector<std::string>& roster);
 
-/// The hub, phase 2 (#1187): session admission, rooms, chat, and the
-/// game layer on the reshaped libs/cards/golf engine. One SessionRegistry
+/// The golf hub, phase 2 (#1187): seat admission, rooms, chat, and the
+/// game layer on the reshaped libs/cards/golf engine, behind
+/// GamesHubHandler::Play. One SessionRegistry
 /// keyed by playerId carries all fan-out (async delivery — no writer
 /// threads); rooms are a mutex'd map, membership marked disconnected
 /// during ADR-0020 grace and reaped by on_expired — with one boot-time
@@ -74,7 +74,7 @@ namespace games_hub {
 /// commits to its own ChatStore before it is echoed, so a message its
 /// sender sees is a message that was stored; cross-instance chat
 /// fan-out and join-time history replay are still to come (#1226).
-class HubHandler final : public moonbase::games::GamesHubAsyncHandler {
+class GolfHub final {
  public:
   using Registry = smithy::server::SessionRegistry<moonbase::games::GolfEvents>;
 
@@ -82,10 +82,9 @@ class HubHandler final : public moonbase::games::GamesHubAsyncHandler {
   /// alias keeps the golf-era spelling every test uses.
   using CounterSeries = games_hub::CounterSeries;
 
-  /// Every counter series this handler baselines at construction, listing
+  /// Every counter series this hub baselines at construction, listing
   /// each label value its emit sites actually use — every counter this
-  /// handler emits is on it, with no carve-outs (#1384, #1327) — plus the
-  /// ThoughtsHub's own list, so one sweep covers both hubs' emit sites.
+  /// hub emits is on it, with no carve-outs (#1384, #1327).
   ///
   /// The label values are here rather than inferred because a series is
   /// name *and* attributes: declaring a bare `chat_appends` when every emit
@@ -123,19 +122,16 @@ class HubHandler final : public moonbase::games::GamesHubAsyncHandler {
   /// transaction and needs nothing from this handler.
   /// `limits` are the per-session stream budgets (#1240); the defaults
   /// serve production and tests inject extremes to pin the behavior.
-  /// A null `thoughts` builds a ThoughtsHub on this handler's vault and
-  /// recorder with default budgets; tests pass one to pin its limits.
-  explicit HubHandler(std::shared_ptr<TicketVault> vault,
-                      std::shared_ptr<cards::Dealer> dealer = std::make_shared<cards::Dealer>(),
-                      std::shared_ptr<IdGenerator> ids = std::make_shared<WhimsicalIdGenerator>(),
-                      std::chrono::seconds grace_period = std::chrono::minutes(5),
-                      std::shared_ptr<futility::otel::MetricsRecorder> metrics = nullptr,
-                      std::shared_ptr<HubStore> store = nullptr,
-                      std::shared_ptr<ChatStore> chat_store = nullptr, RateLimits limits = {},
-                      std::shared_ptr<ThoughtsHub> thoughts = nullptr);
+  explicit GolfHub(std::shared_ptr<TicketVault> vault,
+                   std::shared_ptr<cards::Dealer> dealer = std::make_shared<cards::Dealer>(),
+                   std::shared_ptr<IdGenerator> ids = std::make_shared<WhimsicalIdGenerator>(),
+                   std::chrono::seconds grace_period = std::chrono::minutes(5),
+                   std::shared_ptr<futility::otel::MetricsRecorder> metrics = nullptr,
+                   std::shared_ptr<HubStore> store = nullptr,
+                   std::shared_ptr<ChatStore> chat_store = nullptr, RateLimits limits = {});
 
   /// Joins the boot reaper before the members it walks are torn down.
-  ~HubHandler() override;
+  ~GolfHub();
 
   /// Runs `action` while mu_ holds (room_id, player_id) to be a current
   /// member, or returns false without running it. Membership cannot
@@ -151,25 +147,14 @@ class HubHandler final : public moonbase::games::GamesHubAsyncHandler {
   bool WithMember(const std::string& room_id, const std::string& player_id,
                   const MemberAction& action);
 
-  // Note: operation IO generates as <Op>Input/<Op>Output regardless of
-  // the named shapes bound in the model, and moonbase.games shapes land
-  // in the moonbase::games C++ namespace (codegen flattens the model into
-  // the one namespace the BUILD rule names).
-  smithy::Outcome<moonbase::games::GetSessionOutput> GetSession(
-      const moonbase::games::GetSessionInput& input,
-      const smithy::server::RequestContext& context) override;
-
+  /// The golf stream, on GamesHubHandler::Play's signature: spend the
+  /// ticket, admit the seat, sessionReady and the room resync, then
+  /// commands until the socket closes.
   smithy::eventstream::StreamTask Play(moonbase::games::PlayInput input,
-                                       moonbase::games::PlayAsyncServerStream& stream) override;
-
-  /// The thoughts stream (#79), forwarded whole to the ThoughtsHub: it
-  /// shares this handler's vault and nothing else.
-  smithy::eventstream::StreamTask Think(moonbase::games::ThinkInput input,
-                                        moonbase::games::ThinkAsyncServerStream& stream) override;
+                                       moonbase::games::PlayAsyncServerStream& stream);
 
   /// For main's SIGTERM path: Drain, then transport Stop.
   Registry& registry() { return registry_; }
-  ThoughtsHub& thoughts() { return *thoughts_; }
 
   /// Boot-time restore of the store's snapshot: rooms, members (presence
   /// seeded from their rows), and games. Call before the
@@ -278,11 +263,8 @@ class HubHandler final : public moonbase::games::GamesHubAsyncHandler {
   /// recorder is injected.
   void Count(const char* name, const std::map<std::string, std::string>& attributes = {});
 
-  /// This handler's own series — DeclaredCounterSeries() minus the thoughts
-  /// hub's, which declares its own at its own construction.
-  static const std::vector<CounterSeries>& GolfCounterSeries();
-  /// Declares every series in GolfCounterSeries() at construction so each
-  /// exports a zero baseline before it counts anything.
+  /// Declares every series in DeclaredCounterSeries() at construction so
+  /// each exports a zero baseline before it counts anything.
   void DeclareMetrics();
   void TrackActive(int delta);
   void CountCommand(const moonbase::games::GolfCommands& command);
@@ -447,7 +429,6 @@ class HubHandler final : public moonbase::games::GamesHubAsyncHandler {
   const std::shared_ptr<HubStore> store_;
   const std::shared_ptr<ChatStore> chat_store_;
   const RateLimits limits_;
-  const std::shared_ptr<ThoughtsHub> thoughts_;
   /// ADR-0020 reconnect grace, shared by the registry's per-seat timers
   /// and the boot reaper's one cohort deadline. Zero disables both.
   const std::chrono::seconds grace_period_;
@@ -490,7 +471,7 @@ class HubHandler final : public moonbase::games::GamesHubAsyncHandler {
 
   // Declared last: destroyed first, joining registry threads before the
   // maps its on_expired callback touches go away. (The boot reaper is
-  // joined earlier still, explicitly, in ~HubHandler.)
+  // joined earlier still, explicitly, in ~GolfHub.)
   Registry registry_;
 };
 

@@ -113,7 +113,7 @@ TEST(WinnersAmong, OrdinaryFinishMatchesTheEngineKnockerTiesIncluded) {
 // unguarded and safe; treat this instance as read-only for chat unless
 // the guard is rewired.
 struct SecondInstance {
-  std::shared_ptr<HubHandler> handler;
+  std::shared_ptr<GolfHub> golf;
   std::shared_ptr<CapturingMetricsRecorder> metrics;
   std::unique_ptr<moonbase::games::GamesHubServer> server;
   std::unique_ptr<moonbase::games::GamesHubClient> client;
@@ -223,12 +223,14 @@ std::unique_ptr<SecondInstance> BuildSecondInstance(
     std::chrono::seconds grace = std::chrono::seconds(60)) {
   auto instance = std::make_unique<SecondInstance>();
   instance->metrics = std::move(metrics);
-  instance->handler =
-      std::make_shared<HubHandler>(std::move(vault), std::make_shared<cards::NoShuffleDealer>(),
-                                   std::make_shared<RemoteIdGenerator>(), grace, instance->metrics,
-                                   std::move(store), std::move(chat_store), UnlimitedRateLimits());
-  EXPECT_TRUE(instance->handler->RestoreFromStore().ok());
-  instance->server = std::make_unique<moonbase::games::GamesHubServer>(instance->handler);
+  auto ids = std::make_shared<RemoteIdGenerator>();
+  instance->golf = std::make_shared<GolfHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
+                                             grace, instance->metrics, std::move(store),
+                                             std::move(chat_store), UnlimitedRateLimits());
+  EXPECT_TRUE(instance->golf->RestoreFromStore().ok());
+  instance->server =
+      std::make_unique<moonbase::games::GamesHubServer>(std::make_shared<GamesHubHandler>(
+          vault, ids, instance->golf, std::make_shared<ThoughtsHub>(vault, instance->metrics)));
 
   auto loopback = std::make_shared<smithy::http::Loopback>();
   EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
@@ -957,8 +959,8 @@ TEST_F(GamesHubStreamFixture, BootCatchUpProjectsNothingWhenRowsNeverMoved) {
   // in play. Neither alice nor carol resumed here — their rows are what
   // a crashed instance leaves behind — yet nothing has moved since the
   // restore read these same rows, so both catch-ups must stay quiet.
-  instance->handler->OnChannelActive(RoomChannel(room_id));
-  instance->handler->OnChannelActive(ChatChannel(room_id));
+  instance->golf->OnChannelActive(RoomChannel(room_id));
+  instance->golf->OnChannelActive(ChatChannel(room_id));
   auto leftover = resumed->stream.Receive(std::chrono::milliseconds(50));
   EXPECT_TRUE(!leftover.ok() || !leftover->has_value())
       << "boot catch-up projected a frame though no row moved";
@@ -1235,7 +1237,7 @@ TEST_F(GamesHubStreamFixture, BootGraceCedesASeatObservedConnectedMidWindow) {
   auto bob_back = OpenSeat(bob->resume_token);
   ASSERT_TRUE(bob_back.has_value());
   ASSERT_TRUE(ReceiveCase(bob_back->stream, "sessionReady").has_value());
-  instance->handler->OnChannelActive(RoomChannel(room_id));
+  instance->golf->OnChannelActive(RoomChannel(room_id));
   // He parks again, still inside the sibling's window: this
   // generation's registry owns his fresh grace now.
   bob_back->stream.Close();
@@ -1340,12 +1342,12 @@ TEST_F(GamesHubStreamFixture, RestoreFromStoreRefusesASecondCall) {
 
   auto instance = BuildSecondInstance(vault_, store_, chat_store_, MakeCapturingMetricsRecorder());
   ASSERT_NE(instance, nullptr);
-  const absl::Status again = instance->handler->RestoreFromStore();
+  const absl::Status again = instance->golf->RestoreFromStore();
   EXPECT_EQ(again.code(), absl::StatusCode::kFailedPrecondition) << again;
 
   // The fixture's own hub restored an empty store — no thread armed —
   // and must refuse a second call all the same.
-  const absl::Status empty_again = handler_->RestoreFromStore();
+  const absl::Status empty_again = golf_->RestoreFromStore();
   EXPECT_EQ(empty_again.code(), absl::StatusCode::kFailedPrecondition) << empty_again;
 }
 
@@ -1501,7 +1503,7 @@ TEST_F(GamesHubStreamFixture, ChatMetricsCountOutcomesWithoutIdentifiers) {
 // it is the only guard against the reverse mistake, a series declared here that
 // no emit site ever writes, which nothing else in the suite can see.
 TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) {
-  const std::vector<HubHandler::CounterSeries> kExpected = {
+  const std::vector<GolfHub::CounterSeries> kExpected = {
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -1557,8 +1559,8 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"stream_seats_expired", {}},
       {"stream_sessions", {{"resumed", "true"}}},
       {"stream_sessions", {{"resumed", "false"}}},
-      // The thoughts hub's list (#79), declared by the ThoughtsHub the
-      // handler builds on the same recorder.
+      // The thoughts hub's list (#79), declared by the ThoughtsHub built on
+      // the same recorder.
       {"thoughts_admissions_refused", {{"reason", "bad_ticket"}}},
       {"thoughts_admissions_refused", {{"reason", "seat_conflict"}}},
       {"thoughts_commands", {{"command", "join"}}},
@@ -1588,7 +1590,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
 
   // Count first, so dropping an entry from the handler's list fails here rather
   // than only failing whichever per-series assertion happened to cover it.
-  EXPECT_EQ(HubHandler::DeclaredCounterSeries().size(), kExpected.size());
+  EXPECT_EQ(GamesHubHandler::DeclaredCounterSeries().size(), kExpected.size());
 
   const auto entries = capture->Entries();
   for (const auto& series : kExpected) {
@@ -1875,7 +1877,7 @@ TEST_F(GamesHubStreamFixture, DrainMetricsCountBatchesAndZeroWakes) {
   const double delivered_before = metrics_->CounterTotal("chat_rows_delivered");
   const double drains_before = metrics_->CounterTotal("chat_catch_up_drains");
 
-  handler_->OnNotify(ChatChannel(room_id), "remote-instance");
+  golf_->OnNotify(ChatChannel(room_id), "remote-instance");
   for (auto* seat : {&*alice, &*bob}) {
     ASSERT_TRUE(ReceiveCase(seat->stream, "roomChat").has_value());
     ASSERT_TRUE(ReceiveCase(seat->stream, "roomChat").has_value());
@@ -1886,7 +1888,7 @@ TEST_F(GamesHubStreamFixture, DrainMetricsCountBatchesAndZeroWakes) {
   // Redundant wake: one more drain, nothing counted as delivered — the
   // batch-of-zero the windowed average needs. OnNotify pumps synchronously,
   // so no waiting.
-  handler_->OnNotify(ChatChannel(room_id), "remote-instance");
+  golf_->OnNotify(ChatChannel(room_id), "remote-instance");
   EXPECT_EQ(metrics_->CounterTotal("chat_rows_delivered") - delivered_before, 2);
   EXPECT_EQ(metrics_->CounterTotal("chat_catch_up_drains") - drains_before, 2);
 }
@@ -1914,19 +1916,19 @@ TEST_F(GamesHubStreamFixture, WithMemberRunsOnlyForCurrentMembers) {
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
 
   bool ran = false;
-  EXPECT_TRUE(handler_->WithMember(room_id, alice->player_id, [&] { ran = true; }));
+  EXPECT_TRUE(golf_->WithMember(room_id, alice->player_id, [&] { ran = true; }));
   EXPECT_TRUE(ran);
 
   ran = false;
-  EXPECT_FALSE(handler_->WithMember(room_id, "nobody", [&] { ran = true; }));
-  EXPECT_FALSE(handler_->WithMember("no-such-room", alice->player_id, [&] { ran = true; }));
+  EXPECT_FALSE(golf_->WithMember(room_id, "nobody", [&] { ran = true; }));
+  EXPECT_FALSE(golf_->WithMember("no-such-room", alice->player_id, [&] { ran = true; }));
   EXPECT_FALSE(ran) << "the action must not run when the seat is not there";
 
   // Leaving revokes it, which is what keeps a chat append off a seat
   // that is already gone.
   ASSERT_TRUE(bob->stream.Send(GolfCommands::FromLeaveroom(moonbase::games::LeaveRoom{})).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomLeft").has_value());
-  EXPECT_FALSE(handler_->WithMember(room_id, bob->player_id, [&] { ran = true; }));
+  EXPECT_FALSE(golf_->WithMember(room_id, bob->player_id, [&] { ran = true; }));
   EXPECT_FALSE(ran);
 
   // And a message from the revoked seat is refused rather than echoed.

@@ -22,7 +22,8 @@
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
-#include "domains/games/apis/games_hub/hub_handler.h"
+#include "domains/games/apis/games_hub/games_hub_handler.h"
+#include "domains/games/apis/games_hub/golf_hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/id_generator.h"
 #include "domains/games/apis/games_hub/migrations.h"
@@ -30,6 +31,7 @@
 #include "domains/games/apis/games_hub/pg_hub_store.h"
 #include "domains/games/apis/games_hub/pg_ticket_vault.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
+#include "domains/games/apis/games_hub/thoughts_hub.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/aura/middleware.h"
@@ -107,31 +109,34 @@ int main() {
     // wired to its membership guard.
     LOG(INFO) << "Persistence: in-memory (GAMES_HUB_DB_URL unset; restarts forget everything)";
   }
-  // Stream-side instruments (sessions, commands, events) ride the same
-  // meter the aura chain's unary instruments use.
-  auto handler = std::make_shared<games_hub::HubHandler>(
-      vault, std::make_shared<cards::Dealer>(), std::make_shared<games_hub::WhimsicalIdGenerator>(),
-      /*grace_period=*/std::chrono::minutes(5),
-      std::make_shared<futility::otel::MetricsRecorder>("games_hub"), store, chat_store);
+  // Stream-side instruments (sessions, commands, events) of both hubs ride
+  // the same meter the aura chain's unary instruments use.
+  auto stream_metrics = std::make_shared<futility::otel::MetricsRecorder>("games_hub");
+  auto ids = std::make_shared<games_hub::WhimsicalIdGenerator>();
+  auto golf = std::make_shared<games_hub::GolfHub>(vault, std::make_shared<cards::Dealer>(), ids,
+                                                   /*grace_period=*/std::chrono::minutes(5),
+                                                   stream_metrics, store, chat_store);
+  auto thoughts = std::make_shared<games_hub::ThoughtsHub>(vault, stream_metrics);
+  auto handler = std::make_shared<games_hub::GamesHubHandler>(vault, ids, golf, thoughts);
   // Same policy as the migration above: a database we can't read at boot
   // is a reason to let the supervisor retry, not to serve amnesiac.
-  if (absl::Status restored = handler->RestoreFromStore(); !restored.ok()) {
+  if (absl::Status restored = golf->RestoreFromStore(); !restored.ok()) {
     LOG(ERROR) << "Failed to restore hub state: " << restored;
     return 1;
   }
   // The fan-out's LISTEN side (#1194 step 3): commits on other instances
-  // wake this one to re-read and re-broadcast. Declared after handler so
+  // wake this one to re-read and re-broadcast. Declared after golf so
   // it is destroyed (thread joined) first; the detach at shutdown keeps
-  // the handler's teardown from touching it.
+  // the hub's teardown from touching it.
   std::unique_ptr<pg::Listener> listener;
   if (db_url != nullptr && *db_url != '\0') {
     listener = std::make_unique<pg::Listener>(
         db_url,
-        [&handler](const std::string& channel, const std::string& payload) {
-          handler->OnNotify(channel, payload);
+        [&golf](const std::string& channel, const std::string& payload) {
+          golf->OnNotify(channel, payload);
         },
-        [&handler](const std::string& channel) { handler->OnChannelActive(channel); });
-    handler->AttachListener(listener.get());
+        [&golf](const std::string& channel) { golf->OnChannelActive(channel); });
+    golf->AttachListener(listener.get());
   }
 
   // Block shutdown signals before the transport spawns its thread pool.
@@ -239,10 +244,10 @@ int main() {
   int signal_number = 0;
   sigwait(&shutdown_signals, &signal_number);
   LOG(INFO) << "Signal " << signal_number << " received; draining sessions";
-  handler->AttachListener(nullptr);
+  golf->AttachListener(nullptr);
   listener.reset();
-  handler->registry().Drain(std::chrono::seconds(5));
-  handler->thoughts().registry().Drain(std::chrono::seconds(5));
+  golf->registry().Drain(std::chrono::seconds(5));
+  thoughts->registry().Drain(std::chrono::seconds(5));
   transport.Stop();
   return 0;
 }

@@ -8,7 +8,8 @@ namespace games_hub {
 
 /// One counter series: the name and the exact attributes it is emitted
 /// under. A series is identified by both, which is the whole point of
-/// spelling the attributes out — see HubHandler::DeclaredCounterSeries().
+/// spelling the attributes out — see GolfHub::DeclaredCounterSeries() and
+/// ThoughtsHub::DeclaredCounterSeries().
 struct CounterSeries {
   std::string name;
   std::map<std::string, std::string> attributes;

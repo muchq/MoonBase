@@ -46,15 +46,15 @@ struct ThoughtsLimits {
 ///
 /// Counters carry the thoughts_ prefix so golf's stream_* dashboards keep
 /// their meaning; every series is declared at zero at construction (#1323)
-/// and listed in DeclaredCounterSeries(), which HubHandler folds into its
-/// own list so one sweep covers both hubs.
+/// and listed in DeclaredCounterSeries(), which GamesHubHandler folds
+/// together with golf's so one sweep covers both hubs.
 class ThoughtsHub {
  public:
   using Registry = smithy::server::SessionRegistry<moonbase::games::ThoughtsEvents>;
 
   static constexpr double kWorldHalfExtent = 50.0;
 
-  /// Every counter series this hub emits, on HubHandler's terms: the
+  /// Every counter series this hub emits, on GolfHub's terms: the
   /// thoughts_commands/thoughts_events values are the model's union cases,
   /// pinned both ways against thoughts.smithy by
   /// ThoughtsSeriesMatchTheModelUnions.
@@ -65,7 +65,7 @@ class ThoughtsHub {
                        ThoughtsLimits limits = {});
 
   /// The stream: spend the ticket, admit the seat, sessionReady, then
-  /// commands until the socket closes. HubHandler::Think forwards here.
+  /// commands until the socket closes; GamesHubHandler::Think forwards here.
   smithy::eventstream::StreamTask Think(moonbase::games::ThinkInput input,
                                         moonbase::games::ThinkAsyncServerStream& stream);
 

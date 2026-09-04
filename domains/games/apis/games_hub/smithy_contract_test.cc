@@ -7,7 +7,7 @@
 // What the hub relies on and where:
 //   RequireOrigin           games_hub_main.cc websocket_gate (ADR-0018)
 //   InMemoryWebSocketPair   every hub session test harness
-//   SessionRegistry         hub_handler.cc: ResumeOrAdd admission
+//   SessionRegistry         golf_hub.cc: ResumeOrAdd admission
 //                           (ADR-0022), Detach + grace + on_expired
 //                           (ADR-0020/0021), SendTo fan-out
 //   Encode/DecodeJsonFrame  games_hub_main.cc websocket_accept_json_frames

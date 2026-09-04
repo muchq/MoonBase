@@ -116,7 +116,7 @@ class GatedChatStore final : public ChatStore {
 class HubChatRaceFixture : public GamesHubStreamFixture {
  protected:
   struct Instance {
-    std::shared_ptr<HubHandler> handler;
+    std::shared_ptr<GolfHub> golf;
     std::shared_ptr<CapturingMetricsRecorder> metrics;
     std::unique_ptr<moonbase::games::GamesHubServer> server;
     std::unique_ptr<moonbase::games::GamesHubClient> client;
@@ -138,8 +138,8 @@ class HubChatRaceFixture : public GamesHubStreamFixture {
     auto shared = std::make_shared<MemoryChatStore>([this](const std::string& room_id,
                                                            const std::string& player_id,
                                                            const MemberAction& action) {
-      if (handler_ != nullptr && handler_->WithMember(room_id, player_id, action)) return true;
-      return remote_ != nullptr && remote_->handler->WithMember(room_id, player_id, action);
+      if (golf_ != nullptr && golf_->WithMember(room_id, player_id, action)) return true;
+      return remote_ != nullptr && remote_->golf->WithMember(room_id, player_id, action);
     });
     gated_ = std::make_shared<GatedChatStore>(std::move(shared));
     return gated_;
@@ -156,11 +156,14 @@ class HubChatRaceFixture : public GamesHubStreamFixture {
   std::unique_ptr<Instance> BuildInstance() {
     auto instance = std::make_unique<Instance>();
     instance->metrics = MakeCapturingMetricsRecorder();
-    instance->handler = std::make_shared<HubHandler>(
-        vault_, std::make_shared<cards::NoShuffleDealer>(), std::make_shared<RemoteIdGenerator>(),
-        std::chrono::seconds(60), instance->metrics, store_, chat_store_, UnlimitedRateLimits());
-    EXPECT_TRUE(instance->handler->RestoreFromStore().ok());
-    instance->server = std::make_unique<moonbase::games::GamesHubServer>(instance->handler);
+    auto ids = std::make_shared<RemoteIdGenerator>();
+    instance->golf = std::make_shared<GolfHub>(vault_, std::make_shared<cards::NoShuffleDealer>(),
+                                               ids, std::chrono::seconds(60), instance->metrics,
+                                               store_, chat_store_, UnlimitedRateLimits());
+    EXPECT_TRUE(instance->golf->RestoreFromStore().ok());
+    instance->server =
+        std::make_unique<moonbase::games::GamesHubServer>(std::make_shared<GamesHubHandler>(
+            vault_, ids, instance->golf, std::make_shared<ThoughtsHub>(vault_, instance->metrics)));
 
     auto loopback = std::make_shared<smithy::http::Loopback>();
     EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
@@ -256,7 +259,7 @@ TEST_F(HubChatRaceFixture, RacedRemoteCommitReachesLocalsInIdOrder) {
 
   // The remote hears about alice's row the ordinary way: its wake. The
   // chat pump ignores the payload — even an own-instance payload pumps.
-  remote_->handler->OnNotify(ChatChannel(pair->room_id), "some-instance");
+  remote_->golf->OnNotify(ChatChannel(pair->room_id), "some-instance");
   EXPECT_EQ(ExpectNextChat(pair->bob, "from alice"), alices);
 }
 
@@ -275,7 +278,7 @@ TEST_F(HubChatRaceFixture, OneWakeDrainsEverythingCommittedAcrossPages) {
     ASSERT_GT(ExpectNextChat(pair->alice, absl::StrCat("m", i)), 0);
   }
 
-  remote_->handler->OnNotify(ChatChannel(pair->room_id), "primary");
+  remote_->golf->OnNotify(ChatChannel(pair->room_id), "primary");
   int64_t last = 0;
   for (int i = 1; i <= total; ++i) {
     const int64_t id = ExpectNextChat(pair->bob, absl::StrCat("m", i));
@@ -294,15 +297,15 @@ TEST_F(HubChatRaceFixture, RedundantWakesDeliverNothingNew) {
 
   ASSERT_TRUE(SendChat(pair->alice, "first"));
   ASSERT_GT(ExpectNextChat(pair->alice, "first"), 0);
-  remote_->handler->OnNotify(ChatChannel(pair->room_id), "primary");
+  remote_->golf->OnNotify(ChatChannel(pair->room_id), "primary");
   ASSERT_GT(ExpectNextChat(pair->bob, "first"), 0);
 
-  remote_->handler->OnNotify(ChatChannel(pair->room_id), "primary");  // duplicate
-  handler_->OnNotify(ChatChannel(pair->room_id), "own-commit");       // our own echo
+  remote_->golf->OnNotify(ChatChannel(pair->room_id), "primary");  // duplicate
+  golf_->OnNotify(ChatChannel(pair->room_id), "own-commit");       // our own echo
 
   ASSERT_TRUE(SendChat(pair->alice, "sentinel"));
   ASSERT_GT(ExpectNextChat(pair->alice, "sentinel"), 0);
-  remote_->handler->OnNotify(ChatChannel(pair->room_id), "primary");
+  remote_->golf->OnNotify(ChatChannel(pair->room_id), "primary");
   ASSERT_GT(ExpectNextChat(pair->bob, "sentinel"), 0);
 }
 
@@ -316,7 +319,7 @@ TEST_F(HubChatRaceFixture, ActiveSignalHealsAMissedNotify) {
   ASSERT_TRUE(SendChat(pair->alice, "missed"));
   ASSERT_GT(ExpectNextChat(pair->alice, "missed"), 0);
 
-  remote_->handler->OnChannelActive(ChatChannel(pair->room_id));
+  remote_->golf->OnChannelActive(ChatChannel(pair->room_id));
   ASSERT_GT(ExpectNextChat(pair->bob, "missed"), 0);
 }
 
@@ -332,9 +335,9 @@ TEST_F(HubChatRaceFixture, WakesForUnheldRoomsAreIgnored) {
 
   // The remote never materialized this room, and the last one is not a
   // room at all.
-  remote_->handler->OnNotify(ChatChannel(room_id), "wake");
-  remote_->handler->OnChannelActive(ChatChannel(room_id));
-  remote_->handler->OnNotify(ChatChannel("never-existed"), "wake");
+  remote_->golf->OnNotify(ChatChannel(room_id), "wake");
+  remote_->golf->OnChannelActive(ChatChannel(room_id));
+  remote_->golf->OnNotify(ChatChannel("never-existed"), "wake");
 
   ASSERT_TRUE(SendChat(*alice, "still works"));
   ASSERT_GT(ExpectNextChat(*alice, "still works"), 0);
@@ -385,7 +388,7 @@ TEST_F(HubChatRaceFixture, RestoredInstanceSeedsTheCursorInsteadOfReplayingThePa
   // which is the point: the past is not replayed at anyone.
   auto restored = BuildInstance();
   ASSERT_NE(restored, nullptr);
-  restored->handler->OnNotify(ChatChannel(room_id), "wake");
+  restored->golf->OnNotify(ChatChannel(room_id), "wake");
 
   ASSERT_TRUE(SendChat(*alice, "mid"));
   ASSERT_GT(ExpectNextChat(*alice, "mid"), 0);
@@ -411,7 +414,7 @@ TEST_F(HubChatRaceFixture, RestoredInstanceSeedsTheCursorInsteadOfReplayingThePa
   // One wake after the resume: live delivery starts at the restore's
   // seed, so "mid" overlaps the replay and "old" — behind the cursor —
   // does not repeat.
-  restored->handler->OnNotify(ChatChannel(room_id), "wake");
+  restored->golf->OnNotify(ChatChannel(room_id), "wake");
   const int64_t mid_id = ExpectNextChat(*resumed, "mid");
   const int64_t new_id = ExpectNextChat(*resumed, "new");
   ASSERT_GT(mid_id, 0);
@@ -449,7 +452,7 @@ TEST_F(HubChatRaceFixture, AppendCommittingDuringAnInFlightWakeLoadIsStillDelive
   // Park the wake's load before bob's seat exists on this instance, so
   // the pump's view of the room predates everything that follows.
   gated_->ArmGate();
-  std::thread wake([&] { restored->handler->OnChannelActive(ChatChannel(room_id)); });
+  std::thread wake([&] { restored->golf->OnChannelActive(ChatChannel(room_id)); });
   const bool entered = gated_->WaitForEntry(std::chrono::seconds(5));
   EXPECT_TRUE(entered);
 
@@ -472,7 +475,7 @@ TEST_F(HubChatRaceFixture, AppendCommittingDuringAnInFlightWakeLoadIsStillDelive
   ASSERT_TRUE(SendChat(*alice, "sentinel"));
   ASSERT_GT(ExpectNextChat(*alice, "raced"), 0);  // primary catches up off its own pump
   ASSERT_GT(ExpectNextChat(*alice, "sentinel"), 0);
-  restored->handler->OnNotify(ChatChannel(room_id), "primary");
+  restored->golf->OnNotify(ChatChannel(room_id), "primary");
   ASSERT_GT(ExpectNextChat(*resumed, "sentinel"), 0);
 }
 
@@ -491,11 +494,11 @@ TEST_F(HubChatRaceFixture, WakeCoalescedIntoAFailingLoadStillDelivers) {
 
   gated_->ArmGate();
   gated_->FailOnRelease();
-  std::thread wake([&] { remote_->handler->OnNotify(ChatChannel(pair->room_id), "primary"); });
+  std::thread wake([&] { remote_->golf->OnNotify(ChatChannel(pair->room_id), "primary"); });
   const bool entered = gated_->WaitForEntry(std::chrono::seconds(5));
   EXPECT_TRUE(entered);
   if (entered) {
-    remote_->handler->OnNotify(ChatChannel(pair->room_id), "primary");  // coalesces
+    remote_->golf->OnNotify(ChatChannel(pair->room_id), "primary");  // coalesces
   }
   gated_->Release();
   wake.join();
@@ -513,21 +516,20 @@ TEST_F(HubChatRaceFixture, WakeLandingMidDrainCoalescesIntoOneDelivery) {
 
   ASSERT_TRUE(SendChat(pair->alice, "before"));
   ASSERT_GT(ExpectNextChat(pair->alice, "before"), 0);
-  remote_->handler->OnNotify(ChatChannel(pair->room_id), "primary");
+  remote_->golf->OnNotify(ChatChannel(pair->room_id), "primary");
   ASSERT_GT(ExpectNextChat(pair->bob, "before"), 0);
 
   ASSERT_TRUE(SendChat(pair->alice, "gated"));
   ASSERT_GT(ExpectNextChat(pair->alice, "gated"), 0);
 
   gated_->ArmGate();
-  std::thread first_wake(
-      [&] { remote_->handler->OnNotify(ChatChannel(pair->room_id), "primary"); });
+  std::thread first_wake([&] { remote_->golf->OnNotify(ChatChannel(pair->room_id), "primary"); });
   const bool entered = gated_->WaitForEntry(std::chrono::seconds(5));
   EXPECT_TRUE(entered);
   if (entered) {
     // Lands while the first drain is parked inside LoadAfter: returns
     // immediately, leaving the drainer one more loop to run.
-    remote_->handler->OnNotify(ChatChannel(pair->room_id), "primary");
+    remote_->golf->OnNotify(ChatChannel(pair->room_id), "primary");
   }
   gated_->Release();
   first_wake.join();
@@ -537,7 +539,7 @@ TEST_F(HubChatRaceFixture, WakeLandingMidDrainCoalescesIntoOneDelivery) {
   ASSERT_GT(ExpectNextChat(pair->bob, "gated"), 0);
   ASSERT_TRUE(SendChat(pair->alice, "sentinel"));
   ASSERT_GT(ExpectNextChat(pair->alice, "sentinel"), 0);
-  remote_->handler->OnNotify(ChatChannel(pair->room_id), "primary");
+  remote_->golf->OnNotify(ChatChannel(pair->room_id), "primary");
   ASSERT_GT(ExpectNextChat(pair->bob, "sentinel"), 0);
 }
 

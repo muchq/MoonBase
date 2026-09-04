@@ -313,10 +313,12 @@ cc_library(
     ],
 )
 
+# The golf game: seats, rooms, chat, and the engine, behind the composite
+# handler's Play.
 cc_library(
-    name = "hub_handler",
-    srcs = ["hub_handler.cc"],
-    hdrs = ["hub_handler.h"],
+    name = "golf_hub",
+    srcs = ["golf_hub.cc"],
+    hdrs = ["golf_hub.h"],
     deps = [
         ":chat_store",
         ":games_hub_smithy_server",
@@ -325,7 +327,6 @@ cc_library(
         ":id_generator",
         ":protocol_input",
         ":rate_limiter",
-        ":thoughts_hub",
         ":ticket_vault",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:card_mapper",
@@ -337,6 +338,27 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/strings",
+        "@smithy_cpp//runtime:eventstream",
+        "@smithy_cpp//runtime:server",
+    ],
+)
+
+# The generated service's one handler (#79): session identity, and each
+# game's stream forwarded whole to its hub.
+cc_library(
+    name = "games_hub_handler",
+    srcs = ["games_hub_handler.cc"],
+    hdrs = ["games_hub_handler.h"],
+    deps = [
+        ":games_hub_smithy_server",
+        ":golf_hub",
+        ":hub_metrics",
+        ":id_generator",
+        ":protocol_input",
+        ":thoughts_hub",
+        ":ticket_vault",
+        "@com_google_absl//absl/status:statusor",
+        "@smithy_cpp//runtime:core",
         "@smithy_cpp//runtime:eventstream",
         "@smithy_cpp//runtime:server",
     ],
@@ -363,9 +385,10 @@ cc_test(
     # other mid-flight.
     tags = ["exclusive"],
     deps = [
+        ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":hub_handler",
+        ":golf_hub",
         ":hub_store",
         ":id_generator",
         ":pg_chat_store",
@@ -403,8 +426,9 @@ cc_test(
         "wire_test_fixture.h",
     ],
     deps = [
+        ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":hub_handler",
+        ":golf_hub",
         ":id_generator",
         ":rate_limiter",
         ":ticket_vault",
@@ -432,7 +456,8 @@ cc_test(
     deps = [
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":hub_handler",
+        ":games_hub_handler",
+        ":golf_hub",
         ":hub_store",
         ":id_generator",
         ":thoughts_hub",
@@ -463,9 +488,10 @@ cc_test(
     ],
     deps = [
         ":chat_store",
+        ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":hub_handler",
+        ":golf_hub",
         ":hub_store",
         ":id_generator",
         ":thoughts_hub",
@@ -491,9 +517,10 @@ cc_test(
         "stream_test_fixture.h",
     ],
     deps = [
+        ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":hub_handler",
+        ":golf_hub",
         ":hub_store",
         ":id_generator",
         ":thoughts_hub",
@@ -521,9 +548,10 @@ cc_test(
     ],
     data = ["model/thoughts.smithy"],
     deps = [
+        ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":hub_handler",
+        ":golf_hub",
         ":hub_store",
         ":id_generator",
         ":thoughts_hub",
@@ -549,8 +577,9 @@ cc_test(
         "wire_test_fixture.h",
     ],
     deps = [
+        ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":hub_handler",
+        ":golf_hub",
         ":id_generator",
         ":rate_limiter",
         ":thoughts_hub",
@@ -571,8 +600,9 @@ cc_binary(
     srcs = ["games_hub_main.cc"],
     visibility = ["//visibility:public"],
     deps = [
+        ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":hub_handler",
+        ":golf_hub",
         ":hub_store",
         ":id_generator",
         ":pg_chat_store",

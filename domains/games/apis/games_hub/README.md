@@ -41,8 +41,10 @@ shape (0 sphere, 1 cube, 2 pyramid). `join` answers the joiner with a
 out `playerLeft`. Out-of-bounds values and commands before a join are
 refused in-band as `commandRejected`. No persistence and no reconnect
 grace: presence is the whole game. `ThoughtsHub` (`thoughts_hub.cc`)
-carries it; `HubHandler::Think` forwards to it, sharing only the ticket
-vault. Counters carry the `thoughts_` prefix.
+carries it, `GolfHub` (`golf_hub.cc`) carries golf, and `GamesHubHandler`
+implements the generated service: it mints sessions itself and forwards
+each stream to its hub. The two hubs share the ticket vault and nothing
+else. Counters carry the `thoughts_` prefix.
 
 ## The rules
 

@@ -67,7 +67,7 @@ ThoughtsHub::ThoughtsHub(std::shared_ptr<TicketVault> vault,
 }
 
 // Written out in full so each entry greps against its emit site (the
-// HubHandler::DeclaredCounterSeries convention). thoughts_rejections
+// GolfHub::DeclaredCounterSeries convention). thoughts_rejections
 // declares only the kinds this hub can emit — there is no engine to
 // refuse a move and no store to be unavailable.
 const std::vector<CounterSeries>& ThoughtsHub::DeclaredCounterSeries() {

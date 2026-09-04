@@ -95,13 +95,13 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     ASSERT_TRUE(db.Exec("TRUNCATE rooms CASCADE").ok());
     ASSERT_TRUE(db.Exec("TRUNCATE tickets, resume_tokens").ok());
     GamesHubStreamFixture::SetUp();
-    listener_ = MakeListener(handler_);
+    listener_ = MakeListener(golf_);
   }
 
   // Listeners reference their handler, and handlers hold a raw listener
   // pointer for channel churn — detach before either side dies.
   void TearDown() override {
-    if (handler_ != nullptr) handler_->AttachListener(nullptr);
+    if (golf_ != nullptr) golf_->AttachListener(nullptr);
     listener_.reset();
     GamesHubStreamFixture::TearDown();
   }
@@ -118,17 +118,17 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     return std::make_shared<PgChatStore>(std::make_shared<pg::Client>(url_));
   }
 
-  std::unique_ptr<pg::Listener> MakeListener(const std::shared_ptr<HubHandler>& handler) {
+  std::unique_ptr<pg::Listener> MakeListener(const std::shared_ptr<GolfHub>& golf) {
     auto listener = std::make_unique<pg::Listener>(
         url_,
-        [handler](const std::string& channel, const std::string& payload) {
-          handler->OnNotify(channel, payload);
+        [golf](const std::string& channel, const std::string& payload) {
+          golf->OnNotify(channel, payload);
         },
         // The active signal is the catch-up trigger for chat and rooms:
         // rows committed before a (re)LISTEN landed never notified this
         // instance (#1276).
-        [handler](const std::string& channel) { handler->OnChannelActive(channel); });
-    handler->AttachListener(listener.get());
+        [golf](const std::string& channel) { golf->OnChannelActive(channel); });
+    golf->AttachListener(listener.get());
     return listener;
   }
 
@@ -140,20 +140,20 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
   // path and its store then writes the goodbyes a real crash never
   // would — every DB assertion must come before TearDown.
   void RestartHub() {
-    handler_->AttachListener(nullptr);
+    golf_->AttachListener(nullptr);
     listener_.reset();
     if (store_ != nullptr) store_->Flush();
     retired_.push_back(
-        {std::move(server_), std::move(client_), std::move(handler_), std::move(store_)});
+        {std::move(server_), std::move(client_), std::move(golf_), std::move(store_)});
     BuildHub();
-    listener_ = MakeListener(handler_);
+    listener_ = MakeListener(golf_);
   }
 
   // A second live hub over the same database — the step-3 subject. Its
   // destructor unblocks parked sessions and detaches the listener before
-  // the members unwind (listener before handler, by declaration order).
+  // the members unwind (listener before golf, by declaration order).
   struct Instance {
-    std::shared_ptr<HubHandler> handler;
+    std::shared_ptr<GolfHub> golf;
     std::shared_ptr<CapturingMetricsRecorder> metrics;
     std::shared_ptr<HubStore> store;
     std::unique_ptr<moonbase::games::GamesHubServer> server;
@@ -164,7 +164,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     // TearDown only covers the primary's (#1327).
     ~Instance() {
       for (auto& session : sessions) session->Close();
-      if (handler != nullptr) handler->AttachListener(nullptr);
+      if (golf != nullptr) golf->AttachListener(nullptr);
       ExpectOnlyDeclaredCounterSeries(*metrics);
     }
   };
@@ -173,15 +173,18 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     auto instance = std::make_unique<Instance>();
     instance->store = MakeStore();
     instance->metrics = MakeCapturingMetricsRecorder();
-    instance->handler =
-        std::make_shared<HubHandler>(MakeVault(), std::make_shared<cards::NoShuffleDealer>(),
-                                     std::make_shared<RemoteIdGenerator>(),
-                                     /*grace_period=*/std::chrono::seconds(60), instance->metrics,
-                                     instance->store, MakeChatStore(), UnlimitedRateLimits());
-    const absl::Status restored = instance->handler->RestoreFromStore();
+    auto vault = MakeVault();
+    auto ids = std::make_shared<RemoteIdGenerator>();
+    instance->golf =
+        std::make_shared<GolfHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
+                                  /*grace_period=*/std::chrono::seconds(60), instance->metrics,
+                                  instance->store, MakeChatStore(), UnlimitedRateLimits());
+    const absl::Status restored = instance->golf->RestoreFromStore();
     EXPECT_TRUE(restored.ok()) << restored;
-    instance->listener = MakeListener(instance->handler);
-    instance->server = std::make_unique<moonbase::games::GamesHubServer>(instance->handler);
+    instance->listener = MakeListener(instance->golf);
+    instance->server =
+        std::make_unique<moonbase::games::GamesHubServer>(std::make_shared<GamesHubHandler>(
+            vault, ids, instance->golf, std::make_shared<ThoughtsHub>(vault, instance->metrics)));
 
     auto loopback = std::make_shared<smithy::http::Loopback>();
     EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
@@ -274,9 +277,9 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
   };
 
   void DetachListeners(Instance& remote) {
-    if (handler_ != nullptr) handler_->AttachListener(nullptr);
+    if (golf_ != nullptr) golf_->AttachListener(nullptr);
     listener_.reset();
-    if (remote.handler != nullptr) remote.handler->AttachListener(nullptr);
+    if (remote.golf != nullptr) remote.golf->AttachListener(nullptr);
     remote.listener.reset();
   }
 
@@ -439,7 +442,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
   struct Generation {
     std::unique_ptr<moonbase::games::GamesHubServer> server;
     std::unique_ptr<moonbase::games::GamesHubClient> client;
-    std::shared_ptr<HubHandler> handler;
+    std::shared_ptr<GolfHub> golf;
     std::shared_ptr<HubStore> store;
   };
   std::vector<Generation> retired_;
@@ -825,7 +828,7 @@ TEST_F(PgGamesHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
                   .has_value());
   // Hold Alice's listener behind the finish and the finishing instance's
   // writer drain. This makes the lost-handoff race deterministic.
-  handler_->AttachListener(nullptr);
+  golf_->AttachListener(nullptr);
   listener_.reset();
   // bob's final turn finishes the game on the other instance.
   ASSERT_TRUE(bob.stream.Send(Move(GolfMove::FromDrawcard(moonbase::games::DrawCard{}))).ok());
@@ -845,7 +848,7 @@ TEST_F(PgGamesHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
 
   // Reattach after the terminal write is fully settled. Wait until both
   // instances have issued LISTEN before poking the primary.
-  listener_ = MakeListener(handler_);
+  listener_ = MakeListener(golf_);
   ASSERT_TRUE(WaitForListenerCount(table->room_id, 2));
   pg::Client db(url_);
   ASSERT_TRUE(db.Exec("SELECT pg_notify($1, 'finish-sync')", {RoomChannel(table->room_id)}).ok());
@@ -877,7 +880,7 @@ TEST_F(PgGamesHubFixture, QuiesceDrainsUnreadWakeFrames) {
   ASSERT_TRUE(table.has_value());
 
   // Extra foreign wake leaves a roomState alice has not read.
-  handler_->OnNotify(RoomChannel(table->room_id), "foreign-wake");
+  golf_->OnNotify(RoomChannel(table->room_id), "foreign-wake");
   QuiesceCrossTable(*remote, *table);
   // Disarm the scope guard — listeners are already detached.
   quiesce.fixture = nullptr;

@@ -22,7 +22,7 @@
 // gameEnded) share GameView's pinned shape but keep their byte-level
 // coverage in hub_e2e_test's typed assertions only.
 //
-// The harness is wire_test_fixture.h's: HubHandler behind the generated
+// The harness is wire_test_fixture.h's: GolfHub behind the generated
 // GamesHubServer, unary requests through Loopback, streams through
 // StreamRouter()->ServeSession() over an InMemoryWebSocketPair whose near
 // end this test holds and drives with hand-built frames. Non-Beast, so it
@@ -280,7 +280,7 @@ TEST_F(GolfWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
 // joiner's admission order is part of the contract: roomState first, then
 // exactly one roomChatHistory — sent even when the room has no chat, so
 // the client hears "history loaded, and it is empty" instead of inferring
-// emptiness from silence (hub_handler.cc's documented signal). Live chat
+// emptiness from silence (golf_hub.cc's documented signal). Live chat
 // then carries the server's messageId and clock: the id is the golden
 // byte, the timestamp a seam.
 TEST_F(GolfWireTest, JoinerHearsRoomStateThenEmptyChatHistoryAndChatCarriesServerIds) {

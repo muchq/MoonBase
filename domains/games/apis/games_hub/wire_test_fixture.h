@@ -2,7 +2,7 @@
 #define DOMAINS_GAMES_APIS_GAMES_HUB_WIRE_TEST_FIXTURE_H
 
 // The raw-wire harness the Beyoncé Rule consumer-tier suites share
-// (golf_wire_test, thoughts_wire_test): HubHandler behind the generated
+// (golf_wire_test, thoughts_wire_test): GamesHubHandler behind the generated
 // GamesHubServer, unary requests through Loopback, streams through
 // StreamRouter()->ServeSession() over an InMemoryWebSocketPair whose near
 // end the test holds and drives with hand-built frames. No generated
@@ -26,9 +26,11 @@
 #include <utility>
 #include <vector>
 
-#include "domains/games/apis/games_hub/hub_handler.h"
+#include "domains/games/apis/games_hub/games_hub_handler.h"
+#include "domains/games/apis/games_hub/golf_hub.h"
 #include "domains/games/apis/games_hub/id_generator.h"
 #include "domains/games/apis/games_hub/rate_limiter.h"
+#include "domains/games/apis/games_hub/thoughts_hub.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
@@ -70,7 +72,7 @@ inline RateLimits WireRateLimits() {
 // does not name (#1323).
 inline void ExpectOnlyDeclaredCounterSeriesOnTheWire(
     const futility::otel::CapturingMetricsRecorder& recorder) {
-  const auto& declared = HubHandler::DeclaredCounterSeries();
+  const auto& declared = GamesHubHandler::DeclaredCounterSeries();
   for (const auto& entry : recorder.Entries()) {
     if (entry.name == "stream_sessions_active" || entry.name == "thoughts_sessions_active") {
       continue;  // the gauges
@@ -130,13 +132,15 @@ class HubWireFixture : public ::testing::Test {
     // The hub_e2e recipe: sequential ids make the goldens deterministic
     // (player-1, room-1); null stores select the production memory
     // implementations.
-    handler_ = std::make_shared<HubHandler>(
-        std::make_shared<InMemoryTicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
-                                              /*resume_ttl=*/std::chrono::seconds(60)),
-        std::make_shared<cards::NoShuffleDealer>(), std::make_shared<SequentialIdGenerator>(),
-        /*grace_period=*/std::chrono::seconds(60), metrics_,
-        /*store=*/nullptr, /*chat_store=*/nullptr, WireRateLimits());
-    ASSERT_TRUE(handler_->RestoreFromStore().ok());
+    auto vault = std::make_shared<InMemoryTicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
+                                                       /*resume_ttl=*/std::chrono::seconds(60));
+    auto ids = std::make_shared<SequentialIdGenerator>();
+    golf_ = std::make_shared<GolfHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
+                                      /*grace_period=*/std::chrono::seconds(60), metrics_,
+                                      /*store=*/nullptr, /*chat_store=*/nullptr, WireRateLimits());
+    ASSERT_TRUE(golf_->RestoreFromStore().ok());
+    handler_ = std::make_shared<GamesHubHandler>(vault, ids, golf_,
+                                                 std::make_shared<ThoughtsHub>(vault, metrics_));
     server_ = std::make_unique<moonbase::games::GamesHubServer>(handler_);
     ASSERT_TRUE(loopback_->Start(server_->Handler()).ok());
   }
@@ -211,7 +215,8 @@ class HubWireFixture : public ::testing::Test {
 
   std::shared_ptr<futility::otel::CapturingMetricsRecorder> metrics_ =
       std::make_shared<futility::otel::CapturingMetricsRecorder>("games_hub_test");
-  std::shared_ptr<HubHandler> handler_;
+  std::shared_ptr<GolfHub> golf_;
+  std::shared_ptr<GamesHubHandler> handler_;
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::shared_ptr<smithy::http::Loopback> loopback_ = std::make_shared<smithy::http::Loopback>();
   std::vector<std::shared_ptr<smithy::http::WebSocket>> sessions_;
