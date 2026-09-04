@@ -83,8 +83,8 @@ std::string StatsJson(const std::vector<PgHubStore::StatsDelta>& stats) {
   return rows.dump();
 }
 
-// The column encoding follows the row's kind, and the kind column is
-// what the loads read to pick the decoder.
+// The state column is encoded by whichever engine the variant holds; the
+// kind column is what the loads read to pick the decoder back.
 std::string StateJson(const PgHubStore::GameRow& row) {
   if (!row.state.has_value()) return "";
   return std::visit([](const auto& state) { return serializeGameState(state); }, *row.state);
@@ -168,7 +168,7 @@ void PgHubStore::Apply(const Op& op) {
 absl::StatusOr<bool> PgHubStore::CommitGameSave(const GameRow& row,
                                                 const std::string& notify_payload) {
   // The kind rides only the insert: it is fixed at creation, and the
-  // update's WHERE never touches it.
+  // update never writes it.
   std::vector<std::string> params = {row.room_id,
                                      row.game_id,
                                      RosterJson(row.roster),
@@ -176,7 +176,11 @@ absl::StatusOr<bool> PgHubStore::CommitGameSave(const GameRow& row,
                                      std::to_string(row.version),
                                      RoomChannel(row.room_id),
                                      notify_payload};
-  if (row.version == 1) params.emplace_back(GameKindName(row.kind));
+  // A started row's kind is its state's: the column and the encoding
+  // cannot disagree.
+  if (row.version == 1) {
+    params.emplace_back(GameKindName(row.state.has_value() ? KindOf(*row.state) : row.kind));
+  }
   auto result = db_->Exec(row.version == 1 ? kCommitInsert : kCommitUpdate, params);
   if (!result.ok()) return result.status();
   return result->rows() == 1;

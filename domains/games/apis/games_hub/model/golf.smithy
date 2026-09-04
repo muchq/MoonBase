@@ -4,6 +4,8 @@ namespace moonbase.golf
 
 use moonbase.castle#CastleCommand
 use moonbase.castle#CastleEvent
+use moonbase.games#Card
+use moonbase.games#CardIndexes
 use moonbase.games#Chat
 use moonbase.games#ChatHistory
 use moonbase.games#ChatMessage
@@ -18,6 +20,7 @@ use moonbase.games#JoinGame
 use moonbase.games#JoinRoom
 use moonbase.games#LeaveGame
 use moonbase.games#LeaveRoom
+use moonbase.games#PlayerIds
 use moonbase.games#RoomLeft
 use moonbase.games#RoomState
 use moonbase.games#SeatConflict
@@ -173,9 +176,6 @@ structure GameEnded {
     finalScores: FinalScores
 }
 
-list PlayerIds {
-    member: String
-}
 
 list FinalScores {
     member: FinalScore
@@ -253,18 +253,4 @@ list CardSlots {
 
 structure CardSlot {
     card: Card
-}
-
-list CardIndexes {
-    member: Integer
-}
-
-/// Ranks A 2..10 J Q K, suits ♠ ♥ ♦ ♣ — the v1 wire's card language,
-/// which the UI already renders.
-structure Card {
-    @required
-    rank: String
-
-    @required
-    suit: String
 }

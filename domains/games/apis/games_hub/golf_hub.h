@@ -42,21 +42,24 @@ namespace games_hub {
 [[nodiscard]] std::unordered_set<int> WinnersAmong(const golf::GameState& state,
                                                    const std::vector<std::string>& roster);
 
-/// The room hub, phase 2 (#1187): seat admission, rooms, chat, and the
-/// game layer, behind GamesHubHandler::Play. A room hosts tables of
-/// either game (#79): golf on libs/cards/golf and castle (#77) on
-/// libs/cards/castle, each a member of the stream's unions, each with
-/// its own per-viewer view and its own castle_/golf_ series. One SessionRegistry
+/// GolfHub is the room hub, phase 2 (#1187): seat admission, rooms,
+/// chat, and the game layer, behind GamesHubHandler::Play. The name is
+/// golf's; the room layer and castle (#77) live here too. A room hosts
+/// tables of either game (#79): golf on libs/cards/golf and castle on
+/// libs/cards/castle, each a member of the stream's unions with its own
+/// per-viewer view. Each game's envelope counts on its own castle_/golf_
+/// series; the room layer stays on golf_*. One SessionRegistry
 /// keyed by playerId carries all fan-out (async delivery — no writer
 /// threads); rooms are a mutex'd map, membership marked disconnected
 /// during ADR-0020 grace and reaped by on_expired — with one boot-time
 /// grace for restored members no session ever reclaims (#1295), since
 /// the registry that died with the old process took their timers.
 ///
-/// Redaction discipline: every game broadcast goes through the
-/// per-recipient Broadcast(ids, make) form with views built by ViewLocked
-/// — per-viewer state (own peeks, the held draw) has exactly one place to
-/// land and no identical-bytes path can leak it.
+/// Redaction discipline: every game broadcast is staged per recipient
+/// (StageGameViewsLocked, JoinedEventLocked) with views built by each
+/// game's ViewLocked/CastleViewLocked — per-viewer state (golf's own peeks
+/// and held draw, castle's own hand faces) has exactly one place per game
+/// to land and no identical-bytes path can leak it.
 ///
 /// Chat observability (#1226): chat_appends{result}, chat_rows_delivered,
 /// chat_catch_up_drains (one per drain, empty drains included, so
@@ -263,9 +266,12 @@ class GolfHub final {
   void HandleCommand(const std::string& player_id, const moonbase::games::GolfCommands& command);
   void HandleMove(const std::string& player_id, const moonbase::games::GolfMove& move);
   void HandleCastleMove(const std::string& player_id, const moonbase::games::CastleMove& move);
-  /// The lifecycle moves both games share, each told which game's
-  /// envelope asked: a golf join of a castle table is refused, so a
-  /// client only ever hears the vocabulary it speaks.
+  /// The lifecycle moves both games share. Create and join are told
+  /// which game's envelope asked — a golf join of a castle table is
+  /// refused, so nobody is seated at a table whose vocabulary they do not
+  /// speak; start and leave read the table's kind. The room-wide
+  /// gameCreated is the one event that crosses: a room hears every table
+  /// in that table's own envelope.
   void CreateGameMove(const std::string& player_id, GameKind kind);
   void JoinGameMove(const std::string& player_id, const std::string& game_id, GameKind kind);
   void StartGameMove(const std::string& player_id);

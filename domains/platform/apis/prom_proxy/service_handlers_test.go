@@ -132,7 +132,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Len(t, response.Custom[1].Metrics, 7)
 	assert.Len(t, response.Custom[2].Metrics, 4)
 	assert.Len(t, response.Custom[3].Metrics, 5)
-	assert.Len(t, response.Custom[4].Metrics, 8)
+	require.Len(t, response.Custom[4].Metrics, 8)
 	require.Len(t, response.Custom[5].Metrics, 2)
 
 	assert.Equal(t, CustomMetricValue{Label: "health_checks", Value: 200.0, Toggleable: true},

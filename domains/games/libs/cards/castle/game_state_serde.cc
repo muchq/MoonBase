@@ -194,9 +194,12 @@ absl::StatusOr<GameState> deserializeGameState(const std::string& serialized) {
     players.push_back(*std::move(player));
   }
   if (players.empty()) return absl::InvalidArgumentError("no players");
-  // whoseTurn indexes the roster, or is kNoTurn in setup and at the end.
-  auto whose_turn = readIntInRange(parsed, "whoseTurn", GameState::kNoTurn,
-                                   static_cast<int64_t>(players.size()) - 1);
+  // whoseTurn indexes the roster while play is on; kNoTurn is setup's
+  // and the end's. A playing row with no turn would wedge every seat on
+  // "not your turn", so it is a dropped row, not a table.
+  auto whose_turn =
+      readIntInRange(parsed, "whoseTurn", *phase == Phase::Playing ? 0 : GameState::kNoTurn,
+                     static_cast<int64_t>(players.size()) - 1);
   if (!whose_turn.ok()) return whose_turn.status();
 
   return GameState{std::deque<Card>(draw_pile->begin(), draw_pile->end()),

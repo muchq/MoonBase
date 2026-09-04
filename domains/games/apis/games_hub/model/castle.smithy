@@ -9,10 +9,10 @@ use moonbase.games#GameStarted
 use moonbase.games#JoinGame
 use moonbase.games#LeaveGame
 use moonbase.games#StartGame
+use moonbase.games#Card
+use moonbase.games#CardIndexes
+use moonbase.games#PlayerIds
 use moonbase.games#TurnChanged
-use moonbase.golf#Card
-use moonbase.golf#CardIndexes
-use moonbase.golf#PlayerIds
 
 // Castle's vocabulary (#77): the shedding game also played as Palace, the
 // second game on the room layer. It rides golf's Play stream as one
@@ -115,7 +115,9 @@ structure CastleGameEnded {
 
 /// One player's redacted view: own hand faces, everyone's face-up rows,
 /// face-down rows as counts, the pile top and the draw-pile count. Every
-/// hand is revealed once the game ends.
+/// hand is revealed once the game ends. An ended view is always followed
+/// by gameEnded, which says who lost (or that nobody did); the view alone
+/// cannot tell an abandoned table from a finished one.
 structure CastleView {
     @required
     gameId: String

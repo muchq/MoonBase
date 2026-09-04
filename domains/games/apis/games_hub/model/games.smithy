@@ -7,9 +7,9 @@ use moonbase.golf#Play
 use moonbase.thoughts#Think
 
 /// The games hub (#79): one service, one session identity, one room layer,
-/// and per-game streams — golf's Play, thoughts' Think — each carrying its
-/// own vocabulary. A new game is one new stream operation and one new
-/// model file; the shapes in this namespace never change for it.
+/// and the game streams — the room's Play, thoughts' Think — each carrying
+/// its own vocabulary. A room-shaped game is one more envelope member on
+/// Play (castle, #77); a flat one is a new operation and a new model file.
 @simpleRestJson
 @title("Games Hub")
 service GamesHub {
@@ -26,10 +26,10 @@ operation GetSession {
 }
 
 /// The game-agnostic room layer (MoonBase#79 by way of #1187): session
-/// identity, room lifecycle, and chat. Nothing in this namespace knows
-/// which game a room is hosting — a future game reuses these shapes
-/// verbatim and contributes only its own vocabulary, the way
-/// moonbase.golf does.
+/// identity, room lifecycle, and chat. Apart from GameSummary.game — the
+/// one word that names a table's game for the lobby — nothing in this
+/// namespace knows which game a table plays; a game contributes only its
+/// own vocabulary, the way moonbase.golf and moonbase.castle do.
 
 /// GetSession's input: a resume token exchanges for a fresh ticket and
 /// the same playerId; absent or expired mints a fresh player.
@@ -191,7 +191,8 @@ structure CommandRejected {
 }
 
 /// Game lifecycle within a room — create/join/start/leave and their
-/// announcements carry no game-specific content, so any game reuses them.
+/// announcements carry no game-specific content, so any game reuses them,
+/// as do the card and player-list shapes below.
 /// Creates a game in the current room and seats the creator.
 structure CreateGame {}
 
@@ -244,4 +245,22 @@ structure Unauthenticated {
 @httpError(409)
 structure SeatConflict {
     message: String
+}
+
+/// Ranks A 2..10 J Q K, suits ♠ ♥ ♦ ♣ — the v1 wire's card language,
+/// which the UI already renders.
+structure Card {
+    @required
+    rank: String
+
+    @required
+    suit: String
+}
+
+list CardIndexes {
+    member: Integer
+}
+
+list PlayerIds {
+    member: String
 }

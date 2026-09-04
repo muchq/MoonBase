@@ -119,6 +119,30 @@ TEST(CastleSerde, FrozenPayload) {
   expectStatesEqual(dealt(), *restored);
 }
 
+// The bytes of a playing row: the other spelling a rename of a phase
+// name would orphan. Setup's spelling is pinned above; over/abandoned
+// ride the same table of names.
+TEST(CastleSerde, FrozenPlayingPayload) {
+  constexpr const char* kRow =
+      R"({"drawPile":[0,1,2,3],"finished":[],"phase":"playing","pile":[45,44],)"
+      R"("players":[{"faceDown":[51],"faceUp":[48,47],"hand":[43],"id":"a","ready":true},)"
+      R"({"faceDown":[42,41,40],"faceUp":[39],"hand":[36,35,34],"id":"b","ready":true}],)"
+      R"("v":1,"whoseTurn":1})";
+  const auto restored = deserializeGameState(kRow);
+  ASSERT_TRUE(restored.ok()) << restored.status();
+  EXPECT_EQ(restored->getPhase(), Phase::Playing);
+  EXPECT_EQ(restored->getWhoseTurn(), 1);
+  EXPECT_EQ(serializeGameState(*restored), kRow);
+  for (const char* phase : {"over", "abandoned"}) {
+    json payload = json::parse(kRow);
+    payload["phase"] = phase;
+    payload["whoseTurn"] = -1;
+    const auto ended = deserializeGameState(payload.dump());
+    ASSERT_TRUE(ended.ok()) << phase;
+    EXPECT_TRUE(ended->isOver());
+  }
+}
+
 TEST(CastleSerde, RejectsWhatTheEngineWouldIndexOutOfRange) {
   json payload = dealtPayload();
   payload["v"] = 2;
@@ -129,6 +153,29 @@ TEST(CastleSerde, RejectsWhatTheEngineWouldIndexOutOfRange) {
   expectRejected(payload);
   payload["whoseTurn"] = -2;
   expectRejected(payload);
+  // No turn is setup's and the end's; a playing row must name a seat.
+  payload = dealtPayload();
+  payload["phase"] = "playing";
+  payload["whoseTurn"] = -1;
+  expectRejected(payload);
+
+  // Integers read as int64 before narrowing: 2^32+1 must not wrap to 1.
+  payload = dealtPayload();
+  payload["whoseTurn"] = 4294967297;
+  expectRejected(payload);
+  payload = dealtPayload();
+  payload["players"][0]["hand"][0] = 4294967297;
+  expectRejected(payload);
+
+  // Every player field is required with its type.
+  for (const char* key : {"id", "hand", "faceUp", "faceDown", "ready"}) {
+    payload = dealtPayload();
+    payload["players"][0].erase(key);
+    expectRejected(payload);
+    payload = dealtPayload();
+    payload["players"][0][key] = 7;
+    expectRejected(payload);
+  }
 
   payload = dealtPayload();
   payload["players"][0]["faceUp"].push_back(7);  // four on a three-card row

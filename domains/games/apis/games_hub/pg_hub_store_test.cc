@@ -99,7 +99,11 @@ TEST_F(PgHubStoreTest, CastleRowsKeepTheirKindAndDecodeWithCastleSerde) {
   cards::NoShuffleDealer dealer;
   auto dealt = castle::dealCastleGame("C2", {"alice", "bob"}, dealer.DealNewUnshuffledDeck());
   ASSERT_TRUE(dealt.ok()) << dealt.status();
-  PgHubStore::GameRow started{"R1", "C2", {"alice", "bob"}, games_hub::HostedState(*dealt), 1,
+  PgHubStore::GameRow started{"R1",
+                              "C2",
+                              {"alice", "bob"},
+                              games_hub::HostedState(*dealt),
+                              1,
                               games_hub::GameKind::kCastle};
   ASSERT_TRUE(*store_->CommitGameSave(started, ""));
 
@@ -121,14 +125,48 @@ TEST_F(PgHubStoreTest, CastleRowsKeepTheirKindAndDecodeWithCastleSerde) {
   ASSERT_TRUE(one.ok() && one->has_value());
   EXPECT_EQ((*one)->kind, games_hub::GameKind::kCastle);
 
+  // A started row's column follows its state, so a row built with the
+  // kind left at its default still reads back as the engine it holds.
+  PgHubStore::GameRow mislabeled{"R1", "C3", {"alice", "bob"}, games_hub::HostedState(*dealt), 1};
+  ASSERT_TRUE(*store_->CommitGameSave(mislabeled, ""));
+  auto relabeled = store_->LoadGame("R1", "C3");
+  ASSERT_TRUE(relabeled.ok() && relabeled->has_value());
+  EXPECT_EQ((*relabeled)->kind, games_hub::GameKind::kCastle);
+
   // The kind is fixed at creation: a later save neither needs nor
   // changes it.
-  PgHubStore::GameRow later{"R1", "C1", {"alice", "bob"}, std::nullopt, 2, games_hub::GameKind::kGolf};
+  PgHubStore::GameRow later{"R1",         "C1", {"alice", "bob"},
+                            std::nullopt, 2,    games_hub::GameKind::kGolf};
   ASSERT_TRUE(*store_->CommitGameSave(later, ""));
   auto reread = store_->LoadGame("R1", "C1");
   ASSERT_TRUE(reread.ok() && reread->has_value());
   EXPECT_EQ((*reread)->kind, games_hub::GameKind::kCastle);
   EXPECT_EQ((*reread)->version, 2);
+}
+
+// A row written before the kind column reads as golf (the migration's
+// default), and a kind no engine plays costs that row alone — the same
+// one-bad-row policy as an undecodable state.
+TEST_F(PgHubStoreTest, PreColumnRowsReadAsGolfAndAnUnknownKindDropsTheRow) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  ASSERT_TRUE(db_->Exec("INSERT INTO games (room_id, game_id, roster, state, version)"
+                        " VALUES ('R1', 'OLD', '[\"alice\"]'::jsonb, NULL, 1)")
+                  .ok());
+  auto old = store_->LoadGame("R1", "OLD");
+  ASSERT_TRUE(old.ok() && old->has_value());
+  EXPECT_EQ((*old)->kind, games_hub::GameKind::kGolf);
+
+  ASSERT_TRUE(db_->Exec("UPDATE games SET game = 'bridge' WHERE game_id = 'OLD'").ok());
+  auto gone = store_->LoadGame("R1", "OLD");
+  ASSERT_TRUE(gone.ok());
+  EXPECT_FALSE(gone->has_value());
+  auto rows = store_->LoadRoom("R1");
+  ASSERT_TRUE(rows.ok());
+  EXPECT_TRUE(rows->games.empty());
+  auto snapshot = store_->LoadSnapshot();
+  ASSERT_TRUE(snapshot.ok());
+  EXPECT_TRUE(snapshot->games.empty());
 }
 
 TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {

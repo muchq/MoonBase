@@ -59,6 +59,26 @@ std::optional<CastleUpdate> ReceiveCastle(moonbase::games::PlayClientStream& str
 
 std::string Face(const moonbase::games::Card& card) { return card.rank + card.suit; }
 
+std::vector<std::string> Faces(const std::vector<moonbase::games::Card>& cards) {
+  std::vector<std::string> faces;
+  for (const auto& card : cards) faces.push_back(Face(card));
+  return faces;
+}
+
+// The engine's cards spelled the way the wire spells them, so a view can
+// be compared to the mirror face by face.
+std::vector<std::string> Faces(const std::vector<cards::Card>& cards) {
+  static constexpr const char* kRanks[] = {"2", "3",  "4", "5", "6", "7", "8",
+                                           "9", "10", "J", "Q", "K", "A"};
+  static constexpr const char* kSuits[] = {"♣", "♦", "♥", "♠"};
+  std::vector<std::string> faces;
+  for (const auto& card : cards) {
+    faces.push_back(std::string(kRanks[static_cast<int>(card.getRank())]) +
+                    kSuits[static_cast<int>(card.getSuit())]);
+  }
+  return faces;
+}
+
 class CastleGameFixture : public GamesHubStreamFixture {
  protected:
   // Two seats in one room at a castle table, started: both have heard
@@ -186,18 +206,46 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
   // with const fields, so the mirror moves forward by replacement.
   std::optional<castle::GameState> mirror(MirrorDeal(*table));
   auto advance = [&](absl::StatusOr<castle::GameState> next) {
-    ASSERT_TRUE(next.ok()) << next.status();
+    if (!next.ok()) {
+      ADD_FAILURE() << next.status();
+      return false;
+    }
     mirror.emplace(*std::move(next));
+    return true;
   };
-  advance(mirror->swapForSetup(0, 0, 0));
-  advance(mirror->ready(0));
-  advance(mirror->ready(1));
+  ASSERT_TRUE(advance(mirror->swapForSetup(0, 0, 0)));
+  ASSERT_TRUE(advance(mirror->ready(0)));
+  ASSERT_TRUE(advance(mirror->ready(1)));
   ASSERT_EQ(mirror->getWhoseTurn(), 1);
+
+  // The board, as one chair sees it, against the mirror: every public
+  // fact, and the hand faces only for the viewer's own seat.
+  auto expect_board = [&](const moonbase::games::CastleView& seen, const std::string& viewer) {
+    EXPECT_EQ(seen.pileCount, static_cast<int>(mirror->getPile().size()));
+    EXPECT_EQ(seen.drawPileCount, static_cast<int>(mirror->getDrawPile().size()));
+    EXPECT_EQ(seen.pileTop.has_value() ? Face(*seen.pileTop) : "",
+              mirror->pileTop().has_value() ? Faces({*mirror->pileTop()})[0] : "");
+    EXPECT_EQ(seen.finished, mirror->getFinished());
+    ASSERT_EQ(seen.players.size(), mirror->getPlayers().size());
+    for (std::size_t i = 0; i < seen.players.size(); ++i) {
+      const castle::Player& want = mirror->getPlayer(static_cast<int>(i));
+      EXPECT_EQ(seen.players[i].playerId, want.getId());
+      EXPECT_EQ(seen.players[i].handCount, static_cast<int>(want.getHand().size()));
+      EXPECT_EQ(Faces(seen.players[i].faceUp), Faces(want.getFaceUp()));
+      EXPECT_EQ(seen.players[i].faceDownCount, static_cast<int>(want.getFaceDown().size()));
+      EXPECT_EQ(seen.players[i].ready, want.isReady());
+      EXPECT_EQ(seen.players[i].out, want.isOut());
+      EXPECT_EQ(Faces(seen.players[i].hand),
+                want.getId() == viewer ? Faces(want.getHand()) : std::vector<std::string>{});
+    }
+  };
 
   // Play to the end: each turn the mirror picks a legal play, the hub
   // gets the same command, and the views must agree with the mirror.
   std::map<std::string, Seat*> seats = {{alice.player_id, &alice}, {bob.player_id, &bob}};
   int moves = 0;
+  int blind_plays = 0;
+  int pickups = 0;
   while (!mirror->isOver()) {
     ASSERT_LT(++moves, 400) << "the scripted game never ends";
     const int seat = mirror->getWhoseTurn();
@@ -205,14 +253,16 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
     Seat& stream = *seats.at(mover.getId());
     if (mover.source() == castle::Source::FaceDown) {
       // Blind: the engine plays the flip or hands the pile over itself.
+      ++blind_plays;
       moonbase::games::PlayFaceDown blind;
       blind.index = 0;
       ASSERT_TRUE(stream.stream.Send(Castle(CastleMove::FromPlayfacedown(blind))).ok());
-      advance(mirror->playFaceDown(seat, 0));
+      ASSERT_TRUE(advance(mirror->playFaceDown(seat, 0)));
     } else if (!mirror->hasLegalPlay(seat)) {
+      ++pickups;
       ASSERT_TRUE(
           stream.stream.Send(Castle(CastleMove::FromPickup(moonbase::games::PickUp{}))).ok());
-      advance(mirror->pickUp(seat));
+      ASSERT_TRUE(advance(mirror->pickUp(seat)));
     } else {
       // Every card of the first playable rank in the row in play.
       const std::vector<cards::Card>& row = mover.row(mover.source());
@@ -228,29 +278,40 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
         moonbase::games::PlayFromHand from_hand;
         from_hand.indexes = indexes;
         ASSERT_TRUE(stream.stream.Send(Castle(CastleMove::FromPlayfromhand(from_hand))).ok());
-        advance(mirror->playFromHand(seat, indexes));
+        ASSERT_TRUE(advance(mirror->playFromHand(seat, indexes)));
       } else {
         moonbase::games::PlayFaceUp face_up;
         face_up.indexes = indexes;
         ASSERT_TRUE(stream.stream.Send(Castle(CastleMove::FromPlayfaceup(face_up))).ok());
-        advance(mirror->playFaceUp(seat, indexes));
+        ASSERT_TRUE(advance(mirror->playFaceUp(seat, indexes)));
       }
     }
     if (mirror->isOver()) break;
+    Seat& other = mover.getId() == alice.player_id ? bob : alice;
     auto view = ReceiveCastle(stream.stream, "gameState");
     ASSERT_TRUE(view.has_value()) << "after move " << moves;
-    const auto& seen = view->as_gameState_or_null()->view;
-    EXPECT_EQ(seen.pileCount, static_cast<int>(mirror->getPile().size())) << "move " << moves;
-    EXPECT_EQ(seen.drawPileCount, static_cast<int>(mirror->getDrawPile().size()));
-    EXPECT_EQ(seen.currentPlayerId.value_or(""), mirror->getPlayer(mirror->getWhoseTurn()).getId());
-    // The other chair hears the same state; turn changes reach both.
-    Seat& other = mover.getId() == alice.player_id ? bob : alice;
-    ASSERT_TRUE(ReceiveCastle(other.stream, "gameState").has_value());
+    expect_board(view->as_gameState_or_null()->view, mover.getId());
+    auto other_view = ReceiveCastle(other.stream, "gameState");
+    ASSERT_TRUE(other_view.has_value()) << "after move " << moves;
+    expect_board(other_view->as_gameState_or_null()->view, other.player_id);
+    EXPECT_EQ(view->as_gameState_or_null()->view.currentPlayerId.value_or(""),
+              mirror->getPlayer(mirror->getWhoseTurn()).getId());
     if (mirror->getWhoseTurn() != seat) {
-      ASSERT_TRUE(ReceiveCastle(stream.stream, "turnChanged").has_value());
-      ASSERT_TRUE(ReceiveCastle(other.stream, "turnChanged").has_value());
+      for (Seat* hearer : {&stream, &other}) {
+        auto turn = ReceiveCastle(hearer->stream, "turnChanged");
+        ASSERT_TRUE(turn.has_value()) << "after move " << moves;
+        EXPECT_EQ(turn->as_turnChanged_or_null()->playerId,
+                  mirror->getPlayer(mirror->getWhoseTurn()).getId());
+      }
     }
   }
+  // The deal reached every kind of move, or this game proved less than
+  // it claims: blind flips, forced pick-ups, and the counters that say so.
+  EXPECT_GT(blind_plays, 0) << "the deal never reached blind play";
+  EXPECT_GT(pickups, 0) << "the deal never forced a pick-up";
+  EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "playFaceDown"}}), blind_plays);
+  EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "pickUp"}}), pickups);
+  EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "ready"}}), 2);
 
   // The end: final views with every hand face up, then the finish order
   // and the loser, then the room's stats credit the first out.
@@ -265,8 +326,10 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
     const auto& view = final_view->as_gameState_or_null()->view;
     EXPECT_EQ(view.phase, "ended");
     EXPECT_FALSE(view.currentPlayerId.has_value());
-    for (const auto& player : view.players) {
-      EXPECT_EQ(player.hand.size(), static_cast<std::size_t>(player.handCount)) << player.playerId;
+    // Every hand face up at the end, the loser's included.
+    for (std::size_t i = 0; i < view.players.size(); ++i) {
+      EXPECT_EQ(Faces(view.players[i].hand),
+                Faces(mirror->getPlayer(static_cast<int>(i)).getHand()));
     }
     auto ended = ReceiveCastle(seat->stream, "gameEnded");
     ASSERT_TRUE(ended.has_value());
@@ -281,6 +344,7 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
       EXPECT_EQ(player.totalScore, 0);
     }
   }
+  EXPECT_EQ(metrics_->CounterTotal("castle_events", {{"event", "gameEnded"}}), 2);
 }
 
 TEST_F(CastleGameFixture, TheRoomListsTablesByGameAndAGolfMoveOnACastleTableIsRefused) {
@@ -338,6 +402,11 @@ TEST_F(CastleGameFixture, ATableOfEachGameCanShareARoomAndJoinsAreByGame) {
   ASSERT_TRUE(castle_joined.has_value());
   const std::string castle_id = castle_joined->as_gameJoined_or_null()->view.gameId;
   EXPECT_EQ(castle_joined->as_gameJoined_or_null()->view.phase, "waiting");
+  // The room hears every table in that table's envelope: bob, who only
+  // ever speaks golf, gets a castle gameCreated to list in the lobby.
+  auto announced = ReceiveCastle(bob->stream, "gameCreated");
+  ASSERT_TRUE(announced.has_value());
+  EXPECT_EQ(announced->as_gameCreated_or_null()->gameId, castle_id);
   ASSERT_TRUE(bob->stream.Send(Move(GolfMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
   auto golf_joined = ReceiveGolf(bob->stream, "gameJoined");
   ASSERT_TRUE(golf_joined.has_value());
@@ -392,6 +461,162 @@ TEST_F(CastleGameFixture, LeavingMidGameAbandonsItWithNoLoser) {
     EXPECT_EQ(player.gamesPlayed, player.playerId == table->alice.player_id ? 1 : 0);
     EXPECT_EQ(player.gamesWon, 0);
   }
+}
+
+TEST_F(CastleGameFixture, CastleMovesOnAGolfTableAreRefusedAndEngineRefusalsCountAsRules) {
+  auto golf_table = SeatedTable();
+  ASSERT_TRUE(golf_table.has_value());
+  ASSERT_TRUE(
+      golf_table->alice.stream.Send(Castle(CastleMove::FromPickup(moonbase::games::PickUp{})))
+          .ok());
+  auto wrong_game = ReceiveCase(golf_table->alice.stream, "commandRejected");
+  ASSERT_TRUE(wrong_game.has_value());
+  EXPECT_EQ(wrong_game->as_commandRejected_or_null()->reason, "that table plays golf");
+  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "state"}}), 1);
+
+  // The engine's refusal is a rules refusal on the dashboard, and the
+  // castle move still counted on its own series.
+  auto castle_table = SeatedCastleTable();
+  ASSERT_TRUE(castle_table.has_value());
+  moonbase::games::PlayFromHand play;
+  play.indexes = {0};
+  ASSERT_TRUE(castle_table->alice.stream.Send(Castle(CastleMove::FromPlayfromhand(play))).ok());
+  auto early = ReceiveCase(castle_table->alice.stream, "commandRejected");
+  ASSERT_TRUE(early.has_value());
+  EXPECT_EQ(early->as_commandRejected_or_null()->reason, "still setting up");
+  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "rules"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "state"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "playFromHand"}}), 1);
+}
+
+// Four seats: one leaves during setup and the table opens without them,
+// which the others hear as the turn; one leaves mid-play and the turn
+// stays with its occupant while the seats compact under it.
+TEST_F(CastleGameFixture, ALeaveThatOpensOrMovesTheTurnAnnouncesIt) {
+  auto table = SeatedCastleTable();
+  ASSERT_TRUE(table.has_value());
+  ASSERT_TRUE(ReceiveCastle(table->alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveCastle(table->bob.stream, "gameState").has_value());
+  // A started table admits nobody, so seat the extras before starting:
+  // build a fresh four-seat table instead.
+  auto& alice = table->alice;
+  auto& bob = table->bob;
+  ASSERT_TRUE(
+      alice.stream.Send(Castle(CastleMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  ASSERT_TRUE(ReceiveCastle(alice.stream, "gameLeft").has_value());
+  ASSERT_TRUE(ReceiveCastle(bob.stream, "gameEnded").has_value());
+
+  auto carol = OpenSeat();
+  auto dave = OpenSeat();
+  ASSERT_TRUE(carol.has_value() && dave.has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(dave->stream, "sessionReady").has_value());
+  moonbase::games::JoinRoom join_room;
+  join_room.roomId = table->room_id;
+  for (Seat* seat : {&*carol, &*dave}) {
+    ASSERT_TRUE(seat->stream.Send(GolfCommands::FromJoinroom(join_room)).ok());
+    ASSERT_TRUE(ReceiveCase(seat->stream, "roomState").has_value());
+  }
+  ASSERT_TRUE(
+      alice.stream.Send(Castle(CastleMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveCastle(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  moonbase::games::JoinGame join_game;
+  join_game.gameId = created->as_gameJoined_or_null()->view.gameId;
+  for (Seat* seat : {&bob, &*carol, &*dave}) {
+    ASSERT_TRUE(seat->stream.Send(Castle(CastleMove::FromJoingame(join_game))).ok());
+    ASSERT_TRUE(ReceiveCastle(seat->stream, "gameJoined").has_value());
+  }
+  ASSERT_TRUE(
+      alice.stream.Send(Castle(CastleMove::FromStartgame(moonbase::games::StartGame{}))).ok());
+  for (Seat* seat : {&alice, &bob, &*carol, &*dave}) {
+    ASSERT_TRUE(ReceiveCastle(seat->stream, "gameStarted").has_value());
+  }
+
+  // Everyone but dave readies; dave leaves; the table opens on the
+  // lowest ordinary hand card among the three who stayed.
+  for (Seat* seat : {&alice, &bob, &*carol}) {
+    ASSERT_TRUE(seat->stream.Send(Castle(CastleMove::FromReady(moonbase::games::Ready{}))).ok());
+  }
+  ASSERT_TRUE(
+      dave->stream.Send(Castle(CastleMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  ASSERT_TRUE(ReceiveCastle(dave->stream, "gameLeft").has_value());
+  cards::NoShuffleDealer dealer;
+  auto mirror = castle::dealCastleGame(
+      join_game.gameId, {alice.player_id, bob.player_id, carol->player_id, dave->player_id},
+      dealer.DealNewUnshuffledDeck());
+  ASSERT_TRUE(mirror.ok());
+  std::optional<castle::GameState> opened;
+  for (auto step : {mirror->ready(0)}) {
+    ASSERT_TRUE(step.ok());
+    opened.emplace(*std::move(step));
+  }
+  for (int seat : {1, 2}) {
+    auto step = opened->ready(seat);
+    ASSERT_TRUE(step.ok());
+    opened.emplace(*std::move(step));
+  }
+  {
+    auto step = opened->removePlayer(3);
+    ASSERT_TRUE(step.ok());
+    opened.emplace(*std::move(step));
+  }
+  ASSERT_EQ(opened->getPhase(), castle::Phase::Playing);
+  const std::string opener = opened->getPlayer(opened->getWhoseTurn()).getId();
+  for (Seat* seat : {&alice, &bob, &*carol}) {
+    auto turn = ReceiveCastle(seat->stream, "turnChanged");
+    ASSERT_TRUE(turn.has_value()) << seat->player_id;
+    EXPECT_EQ(turn->as_turnChanged_or_null()->playerId, opener);
+  }
+
+  // A seat that is not on turn leaves mid-play: no turnChanged, the
+  // occupant on turn keeps it, and the views show two seats.
+  Seat* leaver = nullptr;
+  for (Seat* seat : {&alice, &bob, &*carol}) {
+    if (seat->player_id != opener && leaver == nullptr) leaver = seat;
+  }
+  ASSERT_NE(leaver, nullptr);
+  ASSERT_TRUE(
+      leaver->stream.Send(Castle(CastleMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  ASSERT_TRUE(ReceiveCastle(leaver->stream, "gameLeft").has_value());
+  for (Seat* seat : {&alice, &bob, &*carol}) {
+    if (seat == leaver) continue;
+    auto view = ReceiveCastle(seat->stream, "gameState");
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->as_gameState_or_null()->view.players.size(), 2u);
+    EXPECT_EQ(view->as_gameState_or_null()->view.currentPlayerId.value_or(""), opener);
+    auto next = ReceiveCase(seat->stream, "roomState");
+    ASSERT_TRUE(next.has_value());
+  }
+  for (Seat* seat : {&alice, &bob, &*carol}) {
+    if (seat != leaver) ExpectNoEvent(seat->stream);
+  }
+}
+
+TEST_F(CastleGameFixture, AResumedCastleSeatGetsItsOwnViewBack) {
+  auto table = SeatedCastleTable();
+  ASSERT_TRUE(table.has_value());
+  ASSERT_TRUE(ReceiveCastle(table->alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveCastle(table->bob.stream, "gameState").has_value());
+
+  table->alice.stream.Close();
+  ASSERT_TRUE(ReceiveCase(table->bob.stream, "roomState").has_value());
+  auto resumed = OpenSeat(table->alice.resume_token);
+  ASSERT_TRUE(resumed.has_value());
+  EXPECT_EQ(resumed->player_id, table->alice.player_id);
+  auto ready = ReceiveCase(resumed->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  // The seat's own view, in castle's envelope, redacted for its viewer.
+  auto joined = ReceiveCastle(resumed->stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  const auto& view = joined->as_gameJoined_or_null()->view;
+  EXPECT_EQ(view.phase, "setup");
+  ASSERT_EQ(view.players.size(), 2u);
+  EXPECT_EQ(view.players[0].hand.size(), 3u);
+  EXPECT_EQ(Face(view.players[0].hand[0]), "K♦");
+  EXPECT_TRUE(view.players[1].hand.empty());
+  EXPECT_EQ(view.players[1].handCount, 3);
 }
 
 }  // namespace

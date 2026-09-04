@@ -205,11 +205,19 @@ std::vector<games_hub::HubStore::StatsDelta> StatsDeltas(const golf::GameState& 
   return deltas;
 }
 
-// Castle's finish: first out wins, and everyone who held a seat played.
-// No score — the game has none — so the room's running total stays put.
+// Castle's finish: the first out still at the table wins — golf's
+// forfeit rule (WinnersAmong): a departed seat cannot win — and everyone
+// who held a seat played. No score: the game has none, so the room's
+// running total stays put.
 std::vector<games_hub::HubStore::StatsDelta> CastleStatsDeltas(
     const castle::GameState& state, const std::vector<std::string>& roster) {
-  const std::string winner = state.getFinished().empty() ? "" : state.getFinished().front();
+  std::string winner;
+  for (const std::string& out : state.getFinished()) {
+    if (std::find(roster.begin(), roster.end(), out) != roster.end()) {
+      winner = out;
+      break;
+    }
+  }
   std::vector<games_hub::HubStore::StatsDelta> deltas;
   for (const castle::Player& seat : state.getPlayers()) {
     if (std::find(roster.begin(), roster.end(), seat.getId()) == roster.end()) continue;
@@ -760,6 +768,9 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
     GameEntry& entry = game->second;
     if (row.version <= entry.version) continue;  // ours is current
     changed = true;
+    // A code re-minted for a table of the other game: the kind travels
+    // with the state, or the next view would read the wrong engine.
+    entry.kind = row.kind;
     for (const std::string& member_id : entry.roster) {
       // A member the new roster dropped left the game remotely.
       if (std::find(row.roster.begin(), row.roster.end(), member_id) == row.roster.end()) {
@@ -1510,16 +1521,19 @@ void GolfHub::EngineMove(const std::string& player_id, const MoveFn& move, MoveE
     auto ref = FindGameLocked(player_id);
     if (!ref.has_value()) {
       refusal = Refusal{RejectKind::kState, "not in a game"};
-    } else if (ref->entry->kind != GameKind::kGolf) {
-      refusal = Refusal{RejectKind::kState, "that table plays castle"};
     } else if (!ref->entry->started()) {
       refusal = Refusal{RejectKind::kState, "game not started"};
     } else {
       bool landed = false;
       // The issue's move loop: pure transition off the entry, then the
       // conditional commit; a miss adopts the stored truth and replays
-      // the transition against it.
+      // the transition against it. The kind is re-read each attempt: a
+      // rebase adopts whatever the store holds under this code.
       for (int attempt = 0; attempt < kMaxCommitAttempts && !refusal.has_value(); ++attempt) {
+        if (ref->entry->kind != GameKind::kGolf) {
+          refusal = Refusal{RejectKind::kState, "that table plays castle"};
+          break;
+        }
         const golf::GameState& state = ref->entry->golf();
         const int seat = state.playerIndex(player_id);
         if (seat < 0) {
@@ -1613,13 +1627,15 @@ void GolfHub::CastleEngineMove(const std::string& player_id, const CastleMoveFn&
     auto ref = FindGameLocked(player_id);
     if (!ref.has_value()) {
       refusal = Refusal{RejectKind::kState, "not in a game"};
-    } else if (ref->entry->kind != GameKind::kCastle) {
-      refusal = Refusal{RejectKind::kState, "that table plays golf"};
     } else if (!ref->entry->started()) {
       refusal = Refusal{RejectKind::kState, "game not started"};
     } else {
       bool landed = false;
       for (int attempt = 0; attempt < kMaxCommitAttempts && !refusal.has_value(); ++attempt) {
+        if (ref->entry->kind != GameKind::kCastle) {
+          refusal = Refusal{RejectKind::kState, "that table plays golf"};
+          break;
+        }
         const castle::GameState& state = ref->entry->castle();
         const int seat = state.playerIndex(player_id);
         if (seat < 0) {
@@ -1797,6 +1813,7 @@ void GolfHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writ
     // shrunken roster is what records who left — and who can still win.
     const std::optional<HostedState> state =
         entry.started() ? WithoutSeat(*entry.state, player_id) : std::nullopt;
+    const std::string previous_turn = entry.started() ? CurrentTurnOf(*entry.state) : "";
     const bool over = state.has_value() && IsOver(*state);
     std::vector<HubStore::StatsDelta> deltas;
     if (over) deltas = StatsDeltasOf(*state, roster);
@@ -1823,6 +1840,18 @@ void GolfHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writ
       FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox);
     } else {
       StageGameViewsLocked(ref->game_id, entry, outbox);
+      // The leaver may have held the turn, or been the seat setup was
+      // waiting on: whoever plays next hears it the way a move says it.
+      if (entry.started()) {
+        const std::string current_turn = CurrentTurnOf(*entry.state);
+        if (current_turn != previous_turn && !current_turn.empty()) {
+          moonbase::games::TurnChanged turn;
+          turn.playerId = current_turn;
+          for (const std::string& recipient : entry.roster) {
+            outbox.To(recipient, TurnEvent(entry.kind, turn));
+          }
+        }
+      }
       StageRoomStateLocked(ref->room_id, outbox);
     }
     return;
