@@ -334,12 +334,12 @@ const (
 )
 
 // Catalog order doubles as the UI's tab order.
-var serviceOrder = []string{"golf_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "one_d4_v2", "portrait", "posterize", "iili"}
+var serviceOrder = []string{"games_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "one_d4_v2", "portrait", "posterize", "iili"}
 
 var serviceRegistry = map[string]serviceEntry{
-	"golf_hub": {
+	"games_hub": {
 		CustomScalars: []customScalarDef{
-			probesTile("golf_hub"),
+			probesTile("games_hub"),
 			scalar("Sessions", "active", "sessions", `sum(stream_sessions_active_gauge)`),
 			counter("Sessions", "started", "", `stream_sessions_total`),
 			counter("Sessions", "resumed", "", `stream_sessions_total{resumed="true"}`),
@@ -368,6 +368,18 @@ var serviceRegistry = map[string]serviceEntry{
 				`sum(rate(chat_rows_delivered_total[5m]))/sum(rate(chat_catch_up_drains_total[5m]))`),
 			counter("Chat", "history_replays", "", `chat_history_replays_total`),
 			counterOver("Chat", "failures", "", `chat_failures_total`, alarmWindow),
+			// Thoughts (#79): the second hub in the process, on its own
+			// thoughts_* series so the golf rows above keep their meaning.
+			// thoughts_* series, and thoughts_-prefixed labels: a label is a
+			// tile's identity across the whole service, not just its group.
+			scalar("Thoughts", "thoughts_active", "sessions", `sum(thoughts_sessions_active_gauge)`),
+			counter("Thoughts", "thoughts_sessions", "", `thoughts_sessions_total`),
+			counter("Thoughts", "thoughts_refused", "", `thoughts_admissions_refused_total`),
+			counter("Thoughts", "thoughts_commands", "", `thoughts_commands_total`),
+			counter("Thoughts", "thoughts_events", "", `thoughts_events_total`),
+			counter("Thoughts", "thoughts_rejections", "", `thoughts_rejections_total`),
+			counter("Thoughts", "thoughts_rate_limited", "", `thoughts_rate_limited_total`),
+			counter("Thoughts", "thoughts_disconnects", "", `thoughts_disconnects_total`),
 		},
 		// command/event/rejection/disconnect/rate_limited/chat_message/
 		// chat_delivery/chat_failure are all toggleable: each expands to a
@@ -393,6 +405,10 @@ var serviceRegistry = map[string]serviceEntry{
 			"chat_delivery":      tsCounter(`chat_rows_delivered_total`),
 			"chat_failure":       tsCounter(`chat_failures_total`),
 			"chat_catch_up_rows": tsMean(`chat_rows_delivered_total`, `chat_catch_up_drains_total`),
+			"thoughts_active":    tsFixed(`sum(thoughts_sessions_active_gauge)`),
+			"thoughts_command":   tsCounter(`thoughts_commands_total`),
+			"thoughts_event":     tsCounter(`thoughts_events_total`),
+			"thoughts_rejection": tsCounter(`thoughts_rejections_total`),
 		},
 	},
 	"microgpt-serve": {

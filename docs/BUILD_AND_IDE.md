@@ -131,10 +131,10 @@ bundles logs `Entry points unavailable` for every `.cc` file in the repo.
 
 The failure is easy to misread, because IDEA still resolves *some* includes.
 With no model, includes are matched against paths under the content root, so
-`#include "domains/games/apis/golf_hub/hub_store.h"` finds a real file and looks
+`#include "domains/games/apis/games_hub/hub_store.h"` finds a real file and looks
 fine, while anything whose search root only exists in `bazel-out` does not.
 Generated code is the whole of that second category — `#include
-"moonbase/golf/server.h"` resolves only via the `includes` attribute on the
+"moonbase/games/server.h"` resolves only via the `includes` attribute on the
 `cc_library` that wraps the Smithy codegen. The result reads as "generated code
 is invisible" when the truth is that no C++ model exists at all.
 
@@ -154,9 +154,9 @@ import bazel/intellij/clion.bazelproject
 Generated sources need no extra configuration. The aspect reads
 `CcInfo.compilation_context`, so an `includes` attribute on the generating
 `cc_library` becomes a header search root in the IDE; sync materializes the
-generated headers themselves. `golf_hub` is the worked example — the
+generated headers themselves. `games_hub` is the worked example — the
 `smithy_cpp_server_library` macro sets `includes = ["<name>_smithy_gen/include"]`,
-which is what makes `#include "moonbase/golf/server.h"` resolve.
+which is what makes `#include "moonbase/games/server.h"` resolve.
 
 **`.bazelignore` must not list `.clwb`.** The plugin writes its aspect to
 `.clwb/aspects/legacy/` and then passes `--aspects=//.clwb/aspects/legacy:...`.

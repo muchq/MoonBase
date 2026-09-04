@@ -1,6 +1,6 @@
 // Beyoncé Rule for smithy-cpp (if we depend on it, we put a test on it):
 // every upstream behavior the aura serving chain — and through it every
-// C++ service (portrait, golf_hub) — relies on, pinned as a MoonBase-side
+// C++ service (portrait, games_hub) — relies on, pinned as a MoonBase-side
 // contract test. A pin bump that changes any of these fails HERE with a
 // named contract, instead of surfacing as a production surprise or a
 // grep through upstream diffs (the TrustedProxies constructor removal
@@ -236,7 +236,7 @@ TEST(MessageContract, HeadersAreCaseInsensitiveFirstValueWithSetReplaceAddAppend
 
 TEST(MessageContract, PartialAggregateInitializationStaysValid) {
   // Upstream documents this shape as supported and warning-free; handler
-  // code across portrait and golf_hub writes it constantly.
+  // code across portrait and games_hub writes it constantly.
   const HttpResponse response{404, {}, "not found"};
   EXPECT_EQ(response.status, 404);
   EXPECT_EQ(response.body, "not found");

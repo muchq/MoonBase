@@ -8,6 +8,11 @@ Each game backend is registered on its own WebSocket endpoint:
 
 - **[Thoughts](thoughts/)** (`/games/v1/thoughts-ws`) — a chill 3D multiplayer vibe, playable at [muchq.com/thoughts](https://muchq.com/thoughts)
 
+This is the v1 wire. Thoughts v2 is a stream on the smithy-cpp
+[games hub](../games_hub) (`/games/v2/thoughts/play`, per #79), the way golf
+moved in #1187; this server stays up until the UI speaks v2, then retires the
+way the golf hub did (#1483).
+
 ## Architecture
 
 ```

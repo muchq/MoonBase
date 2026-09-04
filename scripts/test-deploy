@@ -275,24 +275,24 @@ check "lists every pinned service" \
 
 echo "status"
 reset_host "DEPLOY_SHA=$SHA" "POSTERIZE_SHA=posterizepin"
-FAKE_PS="golf_hub|ghcr.io/muchq/golf_hub:$SHA|Up 2 hours
+FAKE_PS="games_hub|ghcr.io/muchq/games_hub:$SHA|Up 2 hours
 posterize|ghcr.io/muchq/posterize:posterizepin|Up 5 minutes
 caddy|caddy:2-alpine|Up 2 hours" \
-  FAKE_RESTARTS="golf_hub|0
+  FAKE_RESTARTS="games_hub|0
 posterize|0
 caddy|0" deploy --status
 rc=$?
 check "exits 0 when everything is healthy and matching" test $rc -eq 0
-check "reports the running revision" grep -q "golf_hub .*${SHA:0:7}" "$WORK/out.txt"
+check "reports the running revision" grep -q "games_hub .*${SHA:0:7}" "$WORK/out.txt"
 check "honours a per-service pin" grep -q "posterize .*posterizepin" "$WORK/out.txt"
 check "includes third-party containers" grep -q "caddy .*2-alpine" "$WORK/out.txt"
 
 # A container the deploy didn't recreate keeps its old image while .env claims
 # the new one — the divergence --status exists to surface.
 reset_host "DEPLOY_SHA=$SHA"
-FAKE_PS="golf_hub|ghcr.io/muchq/golf_hub:$SHA|Up 2 hours
+FAKE_PS="games_hub|ghcr.io/muchq/games_hub:$SHA|Up 2 hours
 mithril|ghcr.io/muchq/mithril:$OLD_SHA|Up 3 days" \
-  FAKE_RESTARTS="golf_hub|0
+  FAKE_RESTARTS="games_hub|0
 mithril|0" deploy --status
 rc=$?
 check "fails when a container drifted from .env" test $rc -ne 0
@@ -302,16 +302,16 @@ check "shows what .env expected" grep -q "\.env says ${SHA:0:7}" "$WORK/out.txt"
 # The shape of the incident this all came from: right revision, but the
 # container can't stay up. A climbing restart count is the tell.
 reset_host "DEPLOY_SHA=$SHA"
-FAKE_PS="golf_hub|ghcr.io/muchq/golf_hub:$SHA|Up 2 hours
+FAKE_PS="games_hub|ghcr.io/muchq/games_hub:$SHA|Up 2 hours
 posterize|ghcr.io/muchq/posterize:$SHA|Restarting (101) 8 seconds ago" \
-  FAKE_RESTARTS="golf_hub|0
+  FAKE_RESTARTS="games_hub|0
 posterize|47" deploy --status
 rc=$?
 check "fails when a container is not up" test $rc -ne 0
 check "shows the restart count" grep -qE "posterize .*47" "$WORK/out.txt"
 check "surfaces the exit code from the state" grep -q "Restarting (101)" "$WORK/out.txt"
 check "calls out the crash loop" grep -q "crash loop" "$WORK/out.txt"
-check "reports a healthy peer as 0 restarts" grep -qE "golf_hub .*0 " "$WORK/out.txt"
+check "reports a healthy peer as 0 restarts" grep -qE "games_hub .*0 " "$WORK/out.txt"
 
 echo "portability"
 # deploy.sh runs from a developer machine, and macOS still ships bash 3.2 as

@@ -103,7 +103,7 @@ class MetricsRecorder {
   /// kind and declare that instead. A label whose values are a generated
   /// union's case names *is* declarable — the set is the schema's — as long
   /// as a test pins the declared roster to the schema in both directions
-  /// (golf_hub's StreamSeriesMatchTheModelUnions is the worked example).
+  /// (games_hub's StreamSeriesMatchTheModelUnions is the worked example).
   ///
   /// Idempotent, and harmless once events have arrived: adding zero to a
   /// counter leaves its total alone.
@@ -135,7 +135,7 @@ class MetricsRecorder {
   /// that biases exactly that average — so its series carry a
   /// first-observation gap until real data arrives (#1384). If the mean is
   /// the only consumer, prefer two counters (the sum and the event count),
-  /// which DeclareCounter can baseline: golf_hub's chat_catch_up_drains
+  /// which DeclareCounter can baseline: games_hub's chat_catch_up_drains
   /// replaced a distribution this way. Reach for a histogram when buckets
   /// or percentiles are actually read.
   ///

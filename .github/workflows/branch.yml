@@ -173,7 +173,7 @@ jobs:
           --health-retries 10
 
     env:
-      GOLF_HUB_TEST_DB_URL: postgresql://moonbase_test:moonbase_test@postgres:5432/moonbase_test
+      GAMES_HUB_TEST_DB_URL: postgresql://moonbase_test:moonbase_test@postgres:5432/moonbase_test
       PG_TEST_DB_URL: postgresql://moonbase_test:moonbase_test@postgres:5432/moonbase_test
       STATS_TEST_DB_URL: postgresql://moonbase_test:moonbase_test@postgres:5432/moonbase_test
 
@@ -287,7 +287,7 @@ jobs:
           TARGETS=$(bazel query 'kind(cc_test, //domains/...)
             except attr(env_inherit, "_TEST_DB_URL", kind(cc_test, //domains/...))
             except (
-            //domains/games/apis/golf_hub/... union
+            //domains/games/apis/games_hub/... union
             //domains/games/apis/one_d4_worker:chess_com_archive_test union
             //domains/games/apis/one_d4_worker:metrics_test union
             //domains/platform/libs/aura/... union

@@ -103,7 +103,7 @@ hit them:
 
 | | cost per slot | where it bites |
 |---|---|---|
-| Postgres connections | 2 — one to claim and renew over, one to flush over | `max_connections` is 100 by default, shared with one_d4 and golf_hub |
+| Postgres connections | 2 — one to claim and renew over, one to flush over | `max_connections` is 100 by default, shared with one_d4 and games_hub |
 | chess.com requests | 1 concurrent | a run fetches one month at a time, so `slots × replicas` is the concurrency against a rate-limited API |
 | CPU | fraction of one | PGN replay and motif detection; `cpus: '0.5'` in compose bounds it |
 

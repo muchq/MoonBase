@@ -279,17 +279,17 @@ func mapKeysExcept(m map[string]int, except ...string) []string {
 // A few standard queries pinned as literal strings, so a typo in the
 // shared instrument names can't hide behind the enumeration below.
 func TestStandardQueries_GoldenStrings(t *testing.T) {
-	queries := standardScalarQueries("golf_hub")
+	queries := standardScalarQueries("games_hub")
 	var all []string
 	for _, q := range queries {
 		all = append(all, q.Query)
 	}
 	assert.Contains(t, all,
-		`sum(rate(http_server_requests_total{service_name="golf_hub",route!="/health"}[5m]))`)
+		`sum(rate(http_server_requests_total{service_name="games_hub",route!="/health"}[5m]))`)
 	assert.Contains(t, all,
-		`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="golf_hub",route!="/health"}[5m])))`)
+		`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="games_hub",route!="/health"}[5m])))`)
 	assert.Contains(t, all,
-		`sum(http_server_requests_active_gauge{service_name="golf_hub",route!="/health"})`)
+		`sum(http_server_requests_active_gauge{service_name="games_hub",route!="/health"})`)
 }
 
 // --- The Serving chart's count/rate pair --------------------------------
@@ -306,20 +306,20 @@ func TestStandardQueries_GoldenStrings(t *testing.T) {
 // switching a function name, precisely so neither series' meaning depends on
 // a query parameter — see the same comment for why.
 func TestStandardTimeseriesQueries_RequestRateAndCountAreIndependentSeries(t *testing.T) {
-	queries := standardTimeseriesQueries("golf_hub", "5m")
+	queries := standardTimeseriesQueries("games_hub", "5m")
 	assert.Equal(t,
-		`sum(rate(http_server_requests_total{service_name="golf_hub",route!="/health"}[5m]))`,
+		`sum(rate(http_server_requests_total{service_name="games_hub",route!="/health"}[5m]))`,
 		queries["request_rate"])
 	assert.Equal(t,
-		`sum(increase(http_server_requests_total{service_name="golf_hub",route!="/health"}[5m]))`,
+		`sum(increase(http_server_requests_total{service_name="games_hub",route!="/health"}[5m]))`,
 		queries["request_count"])
 
 	// A different step changes request_count's window but not request_rate's
 	// — that one is fixed at 5m regardless of how far apart the chart's
 	// points are.
-	withStep := standardTimeseriesQueries("golf_hub", "30s")
+	withStep := standardTimeseriesQueries("games_hub", "30s")
 	assert.Equal(t,
-		`sum(increase(http_server_requests_total{service_name="golf_hub",route!="/health"}[30s]))`,
+		`sum(increase(http_server_requests_total{service_name="games_hub",route!="/health"}[30s]))`,
 		withStep["request_count"])
 	assert.Equal(t, queries["request_rate"], withStep["request_rate"])
 }
@@ -329,14 +329,14 @@ func TestStandardTimeseriesQueries_RequestRateAndCountAreIndependentSeries(t *te
 // counter's own count/rate pair, the same relationship request_count has to
 // request_rate, not "the error rate as a count".
 func TestStandardTimeseriesQueries_ErrorCountIsTheFailureCounterNotTheRatio(t *testing.T) {
-	queries := standardTimeseriesQueries("golf_hub", "5m")
+	queries := standardTimeseriesQueries("games_hub", "5m")
 	assert.Equal(t,
-		`sum(increase(http_server_requests_failure_total{service_name="golf_hub",route!="/health"}[5m]))`,
+		`sum(increase(http_server_requests_failure_total{service_name="games_hub",route!="/health"}[5m]))`,
 		queries["error_count"])
 
-	withStep := standardTimeseriesQueries("golf_hub", "30s")
+	withStep := standardTimeseriesQueries("games_hub", "30s")
 	assert.Equal(t,
-		`sum(increase(http_server_requests_failure_total{service_name="golf_hub",route!="/health"}[30s]))`,
+		`sum(increase(http_server_requests_failure_total{service_name="games_hub",route!="/health"}[30s]))`,
 		withStep["error_count"])
 	// error_rate_percent itself never changes: it isn't wrapped in rate()/
 	// increase() over a counter the way request_rate/error_count are, so
@@ -494,17 +494,18 @@ func labelledCustomQueries(entry serviceEntry) map[string][]string {
 // pass unexamined as long as some other factor matched.
 var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|count|bucket)\b`)
 
-// What golf_hub exports, as the collector's Prometheus exporter names it:
+// What games_hub exports, as the collector's Prometheus exporter names it:
 // _total for a counter, _gauge for futility's up-down gauge.
 //
-// A hand-kept copy, verified against HubHandler::DeclaredCounterSeries() by a
+// A hand-kept copy, verified against GamesHubHandler::DeclaredCounterSeries() (which
+// folds in ThoughtsHub's) by a
 // person, not a test — the roster lives in C++ and this file in Go with no
 // shared artifact to pin them together (that is #1308's scope). What these
 // audits do close, on their own side: every tile reads only names in this
 // set, and every name in this set is read by some tile.
-var golfHubSelectorPattern = regexp.MustCompile(`\b((?:stream_|chat_|restored_)[a-z_]*)(\{[^}]*\})?`)
+var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:stream_|chat_|restored_|thoughts_)[a-z_]*)(\{[^}]*\})?`)
 
-var golfHubExportedNames = map[string]bool{
+var gamesHubExportedNames = map[string]bool{
 	"chat_appends_total":              true,
 	"chat_catch_up_drains_total":      true,
 	"chat_failures_total":             true,
@@ -520,15 +521,24 @@ var golfHubExportedNames = map[string]bool{
 	"stream_seats_expired_total":      true,
 	"stream_sessions_active_gauge":    true,
 	"stream_sessions_total":           true,
+	// The thoughts hub (#79), from ThoughtsHub::DeclaredCounterSeries().
+	"thoughts_admissions_refused_total": true,
+	"thoughts_commands_total":           true,
+	"thoughts_disconnects_total":        true,
+	"thoughts_events_total":             true,
+	"thoughts_rate_limited_total":       true,
+	"thoughts_rejections_total":         true,
+	"thoughts_sessions_active_gauge":    true,
+	"thoughts_sessions_total":           true,
 }
 
 // The one_d4 audit's shape (see TestOneD4QueriesNameRealInstrumentsAndScopeThem
 // for why a joined-blob Contains pins nothing): each selector matched and
 // checked on its own, the name set closed in both directions. No service_name
-// scoping here — golf_hub's custom names have a single emitter, and none of
+// scoping here — games_hub's custom names have a single emitter, and none of
 // these selectors has ever been scoped.
-func TestGolfHubQueriesNameRealInstruments(t *testing.T) {
-	entry := serviceRegistry["golf_hub"]
+func TestGamesHubQueriesNameRealInstruments(t *testing.T) {
+	entry := serviceRegistry["games_hub"]
 	require.NotEmpty(t, entry.CustomScalars)
 	require.NotEmpty(t, entry.CustomTimeseries)
 
@@ -545,41 +555,41 @@ func TestGolfHubQueriesNameRealInstruments(t *testing.T) {
 				if strings.HasPrefix(name, "http_server_") {
 					continue
 				}
-				assert.True(t, golfHubExportedNames[name],
-					"%s reads %q, which golf_hub does not export", what, name)
+				assert.True(t, gamesHubExportedNames[name],
+					"%s reads %q, which games_hub does not export", what, name)
 			}
 			// The probes tile reads the standard http_server family on the
 			// /health route; everything else must name a hub instrument.
 			if strings.Contains(query, `route="/health"`) {
-				assert.Contains(t, query, `service_name="golf_hub"`,
+				assert.Contains(t, query, `service_name="games_hub"`,
 					"%s reads the standard family unscoped: %s", what, query)
 				continue
 			}
-			matches := golfHubSelectorPattern.FindAllStringSubmatch(query, -1)
-			assert.NotEmpty(t, matches, "%s queries no golf_hub instrument: %s", what, query)
+			matches := gamesHubSelectorPattern.FindAllStringSubmatch(query, -1)
+			assert.NotEmpty(t, matches, "%s queries no games_hub instrument: %s", what, query)
 			for _, match := range matches {
 				seen[match[1]]++
-				assert.True(t, golfHubExportedNames[match[1]],
-					"%s reads %q, which golf_hub does not export", what, match[1])
+				assert.True(t, gamesHubExportedNames[match[1]],
+					"%s reads %q, which games_hub does not export", what, match[1])
 			}
 		}
 	}
 
 	// Closed the other way too: an instrument nothing charts is one the hub
 	// pays to declare, emit, and store while nobody reads it.
-	for name := range golfHubExportedNames {
-		assert.NotZero(t, seen[name], "nothing in the golf_hub entry reads %s", name)
+	for name := range gamesHubExportedNames {
+		assert.NotZero(t, seen[name], "nothing in the games_hub entry reads %s", name)
 	}
 
 	// Label values are the handler's declared vocabulary. A typo selects
 	// nothing rather than erroring, so the tile would read zero forever.
 	for _, match := range regexp.MustCompile(`result="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
 		assert.Contains(t, []string{"stored", "rejected", "unavailable"}, match[1],
-			"golf_hub declares no chat_appends result=%q", match[1])
+			"games_hub declares no chat_appends result=%q", match[1])
 	}
 	for _, match := range regexp.MustCompile(`resumed="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
 		assert.Contains(t, []string{"true", "false"}, match[1],
-			"golf_hub declares no stream_sessions resumed=%q", match[1])
+			"games_hub declares no stream_sessions resumed=%q", match[1])
 	}
 }
 
@@ -723,8 +733,8 @@ func TestRegistry_WindowedMeansAreCounterRatios(t *testing.T) {
 	}
 
 	catchUp := `sum(rate(chat_rows_delivered_total[5m]))/sum(rate(chat_catch_up_drains_total[5m]))`
-	assert.Equal(t, catchUp, scalarByLabel("golf_hub")["catch_up_rows_avg_5m"])
-	assert.Equal(t, catchUp, chartAt30s("golf_hub", "chat_catch_up_rows"),
+	assert.Equal(t, catchUp, scalarByLabel("games_hub")["catch_up_rows_avg_5m"])
+	assert.Equal(t, catchUp, chartAt30s("games_hub", "chat_catch_up_rows"),
 		"the tile and the chart must describe the same signal")
 
 	avgDuration := `sum(rate(microgpt_inference_ms_total[5m]))/sum(rate(microgpt_requests_total[5m]))`
@@ -767,7 +777,7 @@ func TestRegistry_WindowedMeansAreCounterRatios(t *testing.T) {
 // other fifty-five — the posterize blind spot latencyWindow exists to close.
 // Both factors must widen together or the ratio mixes windows.
 func TestRegistry_MeanChartsWidenWithTheStep(t *testing.T) {
-	widened := expandCustomTimeseries(serviceRegistry["golf_hub"].CustomTimeseries, "1h")
+	widened := expandCustomTimeseries(serviceRegistry["games_hub"].CustomTimeseries, "1h")
 	assert.Equal(t,
 		`sum(rate(chat_rows_delivered_total[1h0m15s]))/sum(rate(chat_catch_up_drains_total[1h0m15s]))`,
 		widened["chat_catch_up_rows"])
@@ -835,7 +845,7 @@ func TestOneD4QueriesNameRealInstrumentsAndScopeThem(t *testing.T) {
 	for what, queries := range labelled {
 		for _, query := range queries {
 			// Closed over every series-shaped token first, the way the
-			// golf_hub and microgpt audits are: oneD4SelectorPattern only
+			// games_hub and microgpt audits are: oneD4SelectorPattern only
 			// sees names carrying one of its prefixes, so in a ratio a
 			// numerator that lost or fumbled its prefix rides through on the
 			// denominator that still matches. The golden in
@@ -1110,7 +1120,7 @@ func TestRegistry_NoTileReadsACounterCumulatively(t *testing.T) {
 // and only this assertion says which of the two it is.
 func TestStandardQueries_RequestsIsWindowedNotCumulative(t *testing.T) {
 	var requests string
-	for _, q := range standardScalarQueries("golf_hub") {
+	for _, q := range standardScalarQueries("games_hub") {
 		var probe StandardMetrics
 		if q.Field(&probe) == &probe.RequestsTotal {
 			requests = q.Query
@@ -1118,7 +1128,7 @@ func TestStandardQueries_RequestsIsWindowedNotCumulative(t *testing.T) {
 	}
 	require.NotEmpty(t, requests, "no query maps to RequestsTotal")
 	assert.Equal(t,
-		`sum(increase(http_server_requests_total{service_name="golf_hub",route!="/health"}[5m]))`,
+		`sum(increase(http_server_requests_total{service_name="games_hub",route!="/health"}[5m]))`,
 		requests)
 }
 
@@ -1147,8 +1157,8 @@ func TestRegistry_AlarmCountersCountOverALongWindow(t *testing.T) {
 			"non-zero when someone reads the dashboard after the failure", alarmWindow)
 
 	alarms := map[string][]string{
-		"one_d4":   {"runs_failed", "runs_interrupted", "runs_lease_lost"},
-		"golf_hub": {"failures"},
+		"one_d4":    {"runs_failed", "runs_interrupted", "runs_lease_lost"},
+		"games_hub": {"failures"},
 	}
 
 	for service, labels := range alarms {

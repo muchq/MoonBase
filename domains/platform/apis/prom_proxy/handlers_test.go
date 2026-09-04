@@ -359,17 +359,17 @@ func TestFetchContainerMetrics_SurfacesCrashLoop(t *testing.T) {
 				ResultType: "vector",
 				Result: []Result{
 					{Metric: map[string]string{"name": "posterize"}, Value: []interface{}{1609459200.0, "1"}},
-					{Metric: map[string]string{"name": "golf_hub"}, Value: []interface{}{1609459200.0, "1"}},
+					{Metric: map[string]string{"name": "games_hub"}, Value: []interface{}{1609459200.0, "1"}},
 				},
 			},
 		},
 		groupedRestartsQuery: vectorResponse(
 			vectorResult("posterize", "47"),
-			vectorResult("golf_hub", "0"),
+			vectorResult("games_hub", "0"),
 		),
 		groupedUptimeQuery: vectorResponse(
 			vectorResult("posterize", "8"),
-			vectorResult("golf_hub", "86400"),
+			vectorResult("games_hub", "86400"),
 		),
 	}}
 	handler := NewMetricsHandler(mock)
@@ -389,6 +389,6 @@ func TestFetchContainerMetrics_SurfacesCrashLoop(t *testing.T) {
 	assert.True(t, byName["posterize"].CrashLooping)
 
 	// A healthy neighbour must not be tarred by it.
-	assert.Equal(t, 0.0, byName["golf_hub"].RestartsLastHour)
-	assert.False(t, byName["golf_hub"].CrashLooping)
+	assert.Equal(t, 0.0, byName["games_hub"].RestartsLastHour)
+	assert.False(t, byName["games_hub"].CrashLooping)
 }

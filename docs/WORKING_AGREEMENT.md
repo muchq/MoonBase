@@ -262,7 +262,7 @@ observable behavior worth keeping gets a test, at every level that fits:
 - **the consumer's boundary** — where the behavior is part of a contract
   someone else depends on, prove it the way they will actually hit it. That
   means raw JSON and raw frames, not a round trip through generated types that
-  regenerate on both sides and hide a rename: `golf_hub_wire_test.cc`,
+  regenerate on both sides and hide a rename: `golf_wire_test.cc`,
   `portrait_smithy_wire_test.cc`, `smithy_contract_test.cc`,
   `DtoJsonCompatTest`, `IndexResponseWireTest`.
 
@@ -351,7 +351,7 @@ same treatment.
 embedded server gets `--runs_per_test=15` or so before it's trusted.
 
 **Watch for tests that skip silently.** The Postgres-gated suites
-(`env_inherit = ["PG_TEST_DB_URL"]`, `["GOLF_HUB_TEST_DB_URL"]`) do nothing
+(`env_inherit = ["PG_TEST_DB_URL"]`, `["GAMES_HUB_TEST_DB_URL"]`) do nothing
 without the env var. CI supplies it from a `postgres:18` service; a local run
 without it is green and has exercised none of the SQL. When you add a gated
 test, say so in the PR body.

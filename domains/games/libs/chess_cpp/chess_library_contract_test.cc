@@ -7,7 +7,7 @@
 // classifies a discovered check" rather than with a corpus diff a thousand
 // plies long.
 //
-// This is the same Beyoncé-rule move as //domains/games/apis/golf_hub's
+// This is the same Beyoncé-rule move as //domains/games/apis/games_hub's
 // smithy contract test: if we like it, we put a test on it.
 //
 // These tests call chess:: directly and deliberately do not go through our

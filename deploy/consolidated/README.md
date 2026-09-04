@@ -9,9 +9,9 @@ This directory contains the consolidated deployment configuration for multiple s
 individually targetable.
 
 - **api.muchq.com** - API backend services
-  - [`games_ws_backend`](../../domains/games/apis/games_ws_backend) (port 8080)
+  - [`games_ws_backend`](../../domains/games/apis/games_ws_backend) (port 8080, thoughts v1 until the UI moves to v2)
   - [`portrait`](../../domains/graphics/apis/portrait) (port 8081)
-  - [`golf_hub`](../../domains/games/apis/golf_hub) (port 8089, `/games/v2/*`)
+  - [`games_hub`](../../domains/games/apis/games_hub) (port 8089, `/games/v2/*`: golf and thoughts)
   - [`prom_proxy`](../../domains/platform/apis/prom_proxy) (port 8082)
   - [`mithril`](../../domains/games/apis/mithril) (port 8083)
   - [`posterize`](../../domains/graphics/apis/posterize) (port 8084)
@@ -114,7 +114,7 @@ To ship a change without restarting the whole stack:
 ```
 SERVICE             DESCRIPTION
 games_ws_backend    Websocket backend for thoughts
-golf_hub            Golf hub on smithy event streams (/games/v2/*)
+games_hub           Games hub on smithy event streams (/games/v2/*)
 mcpserver           Model Context Protocol server
 ...
 ```
@@ -144,7 +144,7 @@ container, not to everything the script touches.
 ```
 SERVICE             VERSION    RESTARTS  STATE
 caddy               2-alpine   0         Up 3 hours
-golf_hub            7faca68    0         Up 3 hours
+games_hub           7faca68    0         Up 3 hours
 mithril             1694f01    0         Up 12 minutes
 posterize           7faca68    47        Restarting (101) 8 seconds ago
 ```
@@ -199,14 +199,15 @@ nothing from the host filesystem.
 
 ### Database URLs
 
-golf_hub, one_d4 and iili take their database URLs from `compose.yaml`, interpolating a
-password from the host's `~/.env`: `GOLF_HUB_DB_URL` and `IILI_DB_URL` (libpq form, read from
+games_hub, one_d4 and iili take their database URLs from `compose.yaml`, interpolating a
+password from the host's `~/.env`: `GAMES_HUB_DB_URL` and `IILI_DB_URL` (libpq form, read from
 C++) and `INDEXER_DB_URL` (JDBC form, read by pgjdbc). All point at the `shared_postgres` service.
-**`R3DR_V2_DB_PASSWORD`** in `~/.env` (#1359) is the one place the old name survives: `iili_db_init`
-provisions the `r3dr_v2` role and database with it on every deploy, idempotently, because renaming
-a role and database holding live rows is an operation, not a rename. Keep it URL-safe (no
-`@ / ? # %` or quotes): it rides in a libpq URL and a single-quoted SQL literal. Compose
-refuses to start the service if it's unset.
+**`GAMES_HUB_DB_PASSWORD`** in `~/.env` is what `games_hub_db_init` provisions the `games_hub`
+role and database with, on every deploy, idempotently. **`R3DR_V2_DB_PASSWORD`** (#1359) is the
+one place an old name survives: `iili_db_init` provisions the `r3dr_v2` role and database with
+it, because renaming a role and database holding live rows is an operation, not a rename. Keep
+both URL-safe (no `@ / ? # %` or quotes): each rides in a libpq URL and a single-quoted SQL
+literal. Compose refuses to start the project if either is unset.
 
 ### The stats profile
 
@@ -236,7 +237,7 @@ query parameters on the URL, because pgjdbc URL-decodes those — see `DataSourc
 
 **Tradeoff, stated rather than absorbed.** A host file can be mode-restricted; an environment
 variable is readable in `docker inspect` output and in `/proc/<pid>/environ` by anyone who can
-reach them. golf_hub already accepts that, so this makes one_d4 consistent with the rest of the
+reach them. games_hub already accepts that, so this makes one_d4 consistent with the rest of the
 stack rather than newly exposed — but the password does move from a root-owned file into container
 metadata, and that is a real change in where it sits.
 
@@ -315,7 +316,7 @@ method) still answer on any path; that is by design, not fall-through.
 ## The shared database
 
 `shared_postgres` is the one Postgres instance on the host. `one_d4`,
-`golf_hub` and `iili` each keep a database on it; `golf_hub_db_init` and
+`games_hub` and `iili` each keep a database on it; `games_hub_db_init` and
 `iili_db_init` provision their roles and databases on every deploy
 (idempotently — the `docker-entrypoint-initdb.d` hook only fires on a
 fresh volume).

@@ -49,7 +49,7 @@ func TestContainerDisplayName(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"compose naming", "ubuntu-golf_hub-1", "golf_hub"},
+		{"compose naming", "ubuntu-games_hub-1", "games_hub"},
 		{"hyphenated service", "ubuntu-microgpt-serve-1", "microgpt-serve"},
 		{"underscored service", "ubuntu-shared_postgres-1", "shared_postgres"},
 		{"infrastructure container", "ubuntu-cadvisor-1", "cadvisor"},
@@ -119,23 +119,23 @@ func vectorResponse(results ...Result) *QueryResponse {
 }
 
 // A host whose posterize is crash-looping on the current revision while
-// golf_hub is healthy — the shape of the incident these endpoints exist for.
+// games_hub is healthy — the shape of the incident these endpoints exist for.
 // caddy is listed but has no per-container samples, standing in for a
 // container cAdvisor isn't reporting on.
 func containerFixture() *mockPrometheusClient {
 	return &mockPrometheusClient{queryResponses: map[string]*QueryResponse{
 		listQuery: vectorResponse(
 			listResult("ubuntu-posterize-1", "posterize", "ghcr.io/muchq/posterize:abc123", 100),
-			listResult("ubuntu-golf_hub-1", "golf_hub", "ghcr.io/muchq/golf_hub:abc123", 100),
+			listResult("ubuntu-games_hub-1", "games_hub", "ghcr.io/muchq/games_hub:abc123", 100),
 			listResult("ubuntu-caddy-1", "caddy", "caddy:2-alpine", 100),
 		),
 		groupedRestartsQuery: vectorResponse(
 			vectorResult("ubuntu-posterize-1", "47"),
-			vectorResult("ubuntu-golf_hub-1", "0"),
+			vectorResult("ubuntu-games_hub-1", "0"),
 		),
 		groupedUptimeQuery: vectorResponse(
 			vectorResult("ubuntu-posterize-1", "8"),
-			vectorResult("ubuntu-golf_hub-1", "86400"),
+			vectorResult("ubuntu-games_hub-1", "86400"),
 		),
 		// The same answers scoped to one container, for the detail endpoint.
 		`max by (name) (changes(container_start_time_seconds{name="ubuntu-posterize-1"}[1h]))`: vectorResponse(vectorResult("ubuntu-posterize-1", "47")),
@@ -259,9 +259,9 @@ func TestGetContainers(t *testing.T) {
 	assert.Equal(t, "abc123", posterize.Version, "running revision from the image tag")
 	assert.Equal(t, "posterize", posterize.Service, "clients link to the service page with this")
 
-	golfHub := byName["ubuntu-golf_hub-1"]
-	assert.False(t, golfHub.CrashLooping, "healthy peer unaffected")
-	assert.Equal(t, 86400.0, golfHub.UptimeSeconds)
+	gamesHub := byName["ubuntu-games_hub-1"]
+	assert.False(t, gamesHub.CrashLooping, "healthy peer unaffected")
+	assert.Equal(t, 86400.0, gamesHub.UptimeSeconds)
 
 	// Infrastructure containers emit no app metrics, so this listing is the
 	// only place they appear at all.

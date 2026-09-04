@@ -23,7 +23,7 @@ services:
       - /var/log/caddy:/var/log/caddy
     depends_on:
       - games_ws_backend
-      - golf_hub
+      - games_hub
       - microgpt-serve
       - mithril
       - one_d4
@@ -62,11 +62,11 @@ services:
           cpus: '0.25'
           memory: 256M
 
-  # The smithy event-stream golf service (/games/v2/*).
-  golf_hub:
-    image: ghcr.io/muchq/golf_hub:${GOLF_HUB_SHA:-${DEPLOY_SHA:-latest}}
+  # The smithy event-stream games hub (/games/v2/*): golf and thoughts (#79).
+  games_hub:
+    image: ghcr.io/muchq/games_hub:${GAMES_HUB_SHA:-${DEPLOY_SHA:-latest}}
     labels:
-      com.muchq.description: "Golf hub on smithy event streams (/games/v2/*)"
+      com.muchq.description: "Games hub on smithy event streams (/games/v2/*)"
     restart: always
     logging: *default-logging
     ports:
@@ -79,15 +79,15 @@ services:
       TRUSTED_PROXY_CIDRS: *caddy_ip
       # Credentials live in the hub's own database on the shared postgres
       # instance (MoonBase#1194 step 1): tickets and resume tokens survive
-      # deploys. golf_hub_db_init provisions the role + database.
-      GOLF_HUB_DB_URL: postgresql://golf_hub:${GOLF_HUB_DB_PASSWORD}@shared_postgres:5432/golf_hub
+      # deploys. games_hub_db_init provisions the role + database.
+      GAMES_HUB_DB_URL: postgresql://games_hub:${GAMES_HUB_DB_PASSWORD:?unset}@shared_postgres:5432/games_hub
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
-      OTEL_SERVICE_NAME: golf_hub
-      OTEL_RESOURCE_ATTRIBUTES: service.name=golf_hub,service.version=${GOLF_HUB_SHA:-${DEPLOY_SHA:-latest}}
+      OTEL_SERVICE_NAME: games_hub
+      OTEL_RESOURCE_ATTRIBUTES: service.name=games_hub,service.version=${GAMES_HUB_SHA:-${DEPLOY_SHA:-latest}}
     networks:
       - app_network
     depends_on:
-      golf_hub_db_init:
+      games_hub_db_init:
         condition: service_completed_successfully
     deploy:
       resources:
@@ -134,7 +134,7 @@ services:
           cpus: '0.5'
           memory: 512M
     healthcheck:
-      # Steady /health probe (#1307); see golf_hub's for the full rationale.
+      # Steady /health probe (#1307); see games_hub's for the full rationale.
       # Deliberately the dedicated health endpoint and never the trace route:
       # a 503 for a render too large to allocate must stay a per-request
       # error, not evidence the container is sick — unhealthy status is what
@@ -190,7 +190,7 @@ services:
           cpus: '0.5'
           memory: 512M
     healthcheck:
-      # Steady /health probe (#1307); see golf_hub's for the full rationale.
+      # Steady /health probe (#1307); see games_hub's for the full rationale.
       test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8083 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
       interval: 30s
       timeout: 5s
@@ -220,7 +220,7 @@ services:
           cpus: '0.5'
           memory: 512M
     healthcheck:
-      # Steady /health probe (#1307); see golf_hub's for the full rationale.
+      # Steady /health probe (#1307); see games_hub's for the full rationale.
       test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8084 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
       interval: 30s
       timeout: 5s
@@ -324,7 +324,7 @@ services:
           cpus: '0.5'
           memory: 512M
     healthcheck:
-      # Steady /health probe (#1307); see golf_hub's for the full rationale.
+      # Steady /health probe (#1307); see games_hub's for the full rationale.
       # Served by mcpserver's HealthController — static liveness, no database
       # check, on the azul base whose bash/head/grep this command relies on
       # (same base as one_d4).
@@ -334,7 +334,7 @@ services:
       retries: 3
       start_period: 15s
 
-  # The one Postgres instance on this host; one_d4 and golf_hub each keep a
+  # The one Postgres instance on this host; one_d4 and games_hub each keep a
   # database on it.
   #
   # The bootstrap database, role and pg_isready user are one_d4 because initdb
@@ -366,11 +366,11 @@ services:
       retries: 5
       start_period: 10s
 
-  # Idempotent one-shot provisioning of golf_hub's own database and role on
+  # Idempotent one-shot provisioning of games_hub's own database and role on
   # the shared postgres instance (MoonBase#1194). Idempotent — safe on every
   # deploy. Runs as the instance's bootstrap superuser. The docker-entrypoint
   # initdb.d hook can't do this: it only fires on a fresh data volume.
-  golf_hub_db_init:
+  games_hub_db_init:
     image: postgres:18
     restart: "no"
     logging: *default-logging
@@ -379,15 +379,15 @@ services:
       PGUSER: one_d4
       PGDATABASE: one_d4
       PGPASSWORD: ${ONE_D4_DB_PASSWORD}
-      GOLF_HUB_DB_PASSWORD: ${GOLF_HUB_DB_PASSWORD}
+      GAMES_HUB_DB_PASSWORD: ${GAMES_HUB_DB_PASSWORD:?unset}
     entrypoint: ["/bin/bash", "-ec"]
     command:
       - |
-        psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'golf_hub'" | grep -q 1 \
-          || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE golf_hub LOGIN"
-        psql -v ON_ERROR_STOP=1 -c "ALTER ROLE golf_hub WITH LOGIN PASSWORD '$${GOLF_HUB_DB_PASSWORD}'"
-        psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = 'golf_hub'" | grep -q 1 \
-          || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE golf_hub OWNER golf_hub"
+        psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'games_hub'" | grep -q 1 \
+          || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE games_hub LOGIN"
+        psql -v ON_ERROR_STOP=1 -c "ALTER ROLE games_hub WITH LOGIN PASSWORD '$${GAMES_HUB_DB_PASSWORD}'"
+        psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = 'games_hub'" | grep -q 1 \
+          || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE games_hub OWNER games_hub"
     networks:
       - app_network
     depends_on:
@@ -423,7 +423,7 @@ services:
 
   # The schema step (#1419): applies one_d4's migrations/ .sql files and
   # exits, before anything that needs the tables. Idempotent — safe on every
-  # deploy, like golf_hub_db_init above. The only writer of that schema:
+  # deploy, like games_hub_db_init above. The only writer of that schema:
   # one_d4 checks its work at boot rather than repeating it (#1426), and
   # one_d4_worker creates nothing, so it starts without waiting for the Java
   # service (#1418 measured that coupling as an error-loop until one_d4
@@ -529,7 +529,7 @@ services:
       #
       # Costs two Postgres connections per slot: one the thread claims and
       # renews over, one the run flushes over. Eight here, against a
-      # default max_connections of 100 that one_d4 and golf_hub also draw
+      # default max_connections of 100 that one_d4 and games_hub also draw
       # on. Neither may be shared — a heartbeat queued behind a flush is a
       # lease lost under a healthy run.
       - ONE_D4_INDEX_SLOTS=4
@@ -579,7 +579,7 @@ services:
           cpus: '0.5'
           memory: 512M
     healthcheck:
-      # Steady /health probe (#1307); see golf_hub's for the full rationale.
+      # Steady /health probe (#1307); see games_hub's for the full rationale.
       # microgpt-serve previously had no healthcheck at all, which is how its
       # dashboard sat empty for hours after a deploy until the first real
       # request arrived.
@@ -670,7 +670,7 @@ services:
       stats_db_init:
         condition: service_completed_successfully
     healthcheck:
-      # Steady /health probe (#1307); see golf_hub's for the full rationale.
+      # Steady /health probe (#1307); see games_hub's for the full rationale.
       test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8092 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
       interval: 30s
       timeout: 5s

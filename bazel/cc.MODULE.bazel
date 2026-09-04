@@ -8,7 +8,7 @@ bazel_dep(name = "nlohmann_json", version = "3.12.0.bcr.1")
 bazel_dep(name = "opentelemetry-cpp", version = "1.27.0")
 bazel_dep(name = "curl", version = "8.12.0.bcr.1")
 
-# libpq for the golf_hub persistence plan (#1194): the BCR's postgres
+# libpq for the games_hub persistence plan (#1194): the BCR's postgres
 # module builds the client library from source (rules_cc_autoconf, no
 # foreign_cc); consumers depend on @postgres//:libpq via the owned
 # wrapper in //domains/platform/libs/pg. Version tracks the deployed

@@ -99,7 +99,7 @@ func TestPortraitHasNoHealthcheckOnTheTraceRoute(t *testing.T) {
 // probe is what keeps the series alive from boot. A healthcheck quietly
 // deleted here would regress that without failing anything else.
 var servicesWithSteadyProbes = []string{
-	"golf_hub",
+	"games_hub",
 	"mcpserver",
 	"microgpt-serve",
 	"mithril",
@@ -1028,6 +1028,12 @@ var publicRoutes = []struct {
 	{"@get_iili_redirect", []string{"method GET", "path /iili/v1/r/*"}, "iili:8091"},
 	// stats (#1460): read-only aggregates, GET-only on purpose.
 	{"@get_stats", []string{"method GET", "path /stats/v1/*"}, "stats:8092"},
+	// games_hub (#79): the session mint and the two game streams. The
+	// websocket matchers carry no method — an upgrade is a GET the browser
+	// makes on its own terms.
+	{"@post_golf_v2_session", []string{"method POST", "path /games/v2/session"}, "games_hub:8089"},
+	{"@ws_golf_v2", []string{"path /games/v2/golf/play"}, "games_hub:8089"},
+	{"@ws_thoughts_v2", []string{"path /games/v2/thoughts/play"}, "games_hub:8089"},
 	// The 1d4.net stats tab (#1465) reads its own service's aggregates on
 	// api.1d4.net, the host whose CORS grant covers the app — only the
 	// one_d4 prefix, since the rest of the stats API is muchq.com's.
@@ -1170,6 +1176,22 @@ func TestNoDeployConfigNamesR3dr(t *testing.T) {
 	}
 }
 
+// The games hub's database, role, init step and host key are games_hub now
+// (#79); any golf_hub left in the deploy surface is a missed rename. Golf the
+// game keeps its routes, so only the joined spelling is refused.
+func TestNoDeployConfigNamesGolfHub(t *testing.T) {
+	files := []string{"compose.yaml", "Caddyfile", "Caddyfile.local", "deploy.sh",
+		"local_deploy.sh", "initialize_host.sh"}
+	for _, name := range files {
+		for i, line := range strings.Split(readConfig(t, name), "\n") {
+			if strings.Contains(strings.ToLower(line), "golf_hub") {
+				t.Errorf("%s:%d names golf_hub (%q); the service is games_hub", name, i+1,
+					strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
 // Whether a Caddy line mentions one of the route's path directives (glob
 // suffix trimmed).
 func namesARoutePath(line string, directives []string) bool {
@@ -1185,13 +1207,13 @@ func namesARoutePath(line string, directives []string) bool {
 
 // Every database host this file hands a service, as service -> hosts.
 //
-// Two spellings of environment (one_d4's `- KEY=value` list, golf_hub's
+// Two spellings of environment (one_d4's `- KEY=value` list, games_hub's
 // `KEY: value` mapping), two URL shapes (JDBC, which pgjdbc parses itself, and
-// libpq, which golf_hub's C++ uses) and the bare `PGHOST:` form
-// golf_hub_db_init uses instead of a URL. That last one is not decoration: it is
-// the only database host here that is not part of a URL, and golf_hub gates on
-// golf_hub_db_init with service_completed_successfully, so a host it cannot
-// resolve stops golf_hub from starting at all.
+// libpq, which games_hub's C++ uses) and the bare `PGHOST:` form
+// games_hub_db_init uses instead of a URL. That last one is not decoration: it is
+// the only database host here that is not part of a URL, and games_hub gates on
+// games_hub_db_init with service_completed_successfully, so a host it cannot
+// resolve stops games_hub from starting at all.
 //
 // A slice per service, not one host: last-match-wins would make a second URL in
 // the same service an order-dependent silent skip.
@@ -1265,7 +1287,7 @@ func TestEveryDatabaseUrlNamesAHostThisComposeFilePublishes(t *testing.T) {
 	// scan stopped seeing something and the rest of this proves little.
 	if len(hosts) < 4 {
 		t.Fatalf("found database hosts for only %d services (%v); expected at least one_d4, "+
-			"golf_hub and golf_hub_db_init. This test is reading less than it claims.",
+			"games_hub and games_hub_db_init. This test is reading less than it claims.",
 			len(hosts), hosts)
 	}
 
@@ -1371,7 +1393,7 @@ func oneD4Env(t *testing.T, key string) string {
 	return ""
 }
 
-// one_d4 is the only Java consumer of the shared instance — golf_hub reaches it
+// one_d4 is the only Java consumer of the shared instance — games_hub reaches it
 // from C++ through libpq — so it is the only one whose URL has to be a JDBC URL
 // rather than a libpq one. The two are not interchangeable: pgjdbc rejects a URL
 // without the jdbc: prefix outright, and DataSourceFactory hands whatever it is
@@ -1384,7 +1406,7 @@ func TestOneD4sDatabaseUrlIsAJdbcUrl(t *testing.T) {
 			"so the container would fail to start.")
 	}
 	if !strings.HasPrefix(url, "jdbc:postgresql://") {
-		t.Errorf("INDEXER_DB_URL=%q is not a JDBC URL. golf_hub's libpq form (postgresql://...) "+
+		t.Errorf("INDEXER_DB_URL=%q is not a JDBC URL. games_hub's libpq form (postgresql://...) "+
 			"is what this would most likely be copied from, and pgjdbc rejects it.", url)
 	}
 }
@@ -1423,9 +1445,16 @@ func TestTheJavaServiceAlsoGatesOnTheMigrateStep(t *testing.T) {
 }
 
 // Whether service's depends_on carries one_d4_migrate with
+// condition: service_completed_successfully.
+func gatesOnCompletedMigrate(t *testing.T, service string) bool {
+	t.Helper()
+	return gatesOnCompleted(t, service, "one_d4_migrate")
+}
+
+// Whether service's depends_on carries `oneShot` with
 // condition: service_completed_successfully (read by adjacency, since
 // dependsOn deliberately strips conditions).
-func gatesOnCompletedMigrate(t *testing.T, service string) bool {
+func gatesOnCompleted(t *testing.T, service, oneShot string) bool {
 	t.Helper()
 	previous := ""
 	for _, line := range composeServiceLines(t, "compose.yaml")[service] {
@@ -1433,7 +1462,7 @@ func gatesOnCompletedMigrate(t *testing.T, service string) bool {
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		if previous == "one_d4_migrate:" && trimmed == "condition: service_completed_successfully" {
+		if previous == oneShot+":" && trimmed == "condition: service_completed_successfully" {
 			return true
 		}
 		previous = trimmed
@@ -1441,8 +1470,71 @@ func gatesOnCompletedMigrate(t *testing.T, service string) bool {
 	return false
 }
 
+// games_hub's boot runs its migrations against the database games_hub_db_init
+// provisions, so it gates on that one-shot the way one_d4 gates on its
+// migrate step: without the condition it races the provisioning and
+// crash-loops on a role that does not exist yet.
+func TestGamesHubGatesOnDbInitCompletedSuccessfully(t *testing.T) {
+	if !gatesOnCompleted(t, "games_hub", "games_hub_db_init") {
+		t.Errorf("games_hub does not gate on games_hub_db_init with "+
+			"service_completed_successfully (depends_on: %v).", dependsOn(t, "games_hub"))
+	}
+}
+
+// The init step is a one-shot: under `restart: always` it would exit 0 and be
+// brought straight back forever, and service_completed_successfully never
+// fires for a container that keeps restarting — games_hub would never start.
+func TestGamesHubDbInitIsAOneShot(t *testing.T) {
+	lines := composeServiceLines(t, "compose.yaml")["games_hub_db_init"]
+	if len(lines) == 0 {
+		t.Fatal("no games_hub_db_init service in compose.yaml — games_hub's depends_on gate " +
+			"has nothing to wait for.")
+	}
+	restart := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "restart:") {
+			restart = strings.TrimSpace(strings.TrimPrefix(trimmed, "restart:"))
+		}
+	}
+	if restart != `"no"` {
+		t.Errorf("games_hub_db_init restart policy is %q, want \"no\": a one-shot under any "+
+			"other policy is a restart loop that never completes.", restart)
+	}
+}
+
+// The hub's password is read only from the host's ~/.env and interpolated into
+// a libpq URL and a psql literal. Unset, a bare ${GAMES_HUB_DB_PASSWORD} would
+// interpolate empty: the init step would provision the role with an empty
+// password and the hub would connect with one, healthy-looking and open to any
+// peer on app_network. The :?unset guard makes compose refuse to start
+// instead, the shape iili's R3DR_V2_DB_PASSWORD already has.
+func TestGamesHubDbPasswordIsRequiredLikeIili(t *testing.T) {
+	uses := 0
+	for i, line := range strings.Split(readConfig(t, "compose.yaml"), "\n") {
+		if hash := strings.Index(line, "#"); hash >= 0 {
+			line = line[:hash]
+		}
+		// $${...} is the container shell's expansion of the already-guarded
+		// environment entry, not a compose interpolation.
+		line = strings.ReplaceAll(line, "$${GAMES_HUB_DB_PASSWORD", "")
+		if !strings.Contains(line, "${GAMES_HUB_DB_PASSWORD") {
+			continue
+		}
+		uses++
+		if !strings.Contains(line, "${GAMES_HUB_DB_PASSWORD:?unset}") {
+			t.Errorf("compose.yaml:%d interpolates GAMES_HUB_DB_PASSWORD without :?unset: %q",
+				i+1, strings.TrimSpace(line))
+		}
+	}
+	if uses < 2 {
+		t.Fatalf("GAMES_HUB_DB_PASSWORD is interpolated %d times; expected the hub's URL and "+
+			"the init step's environment, so this test is reading less than it claims.", uses)
+	}
+}
+
 // A one-shot under `restart: always` is a restart loop: the container exits 0
-// and Docker brings it straight back, forever. golf_hub_db_init carries the
+// and Docker brings it straight back, forever. games_hub_db_init carries the
 // same shape; this pins it for the migrate step, whose exit is load-bearing —
 // service_completed_successfully never fires for a container that keeps
 // restarting.
@@ -2153,6 +2245,7 @@ var localRoutes = map[string]string{
 	"@ws_thoughts":          "localhost:8080",
 	"@post_golf_v2_session": "localhost:8089",
 	"@ws_golf_v2":           "localhost:8089",
+	"@ws_thoughts_v2":       "localhost:8089",
 	"@post_portrait":        "localhost:8081",
 	"@get_metrics":          "localhost:8082",
 	"@post_mithril":         "localhost:8083",
