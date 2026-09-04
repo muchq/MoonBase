@@ -336,9 +336,8 @@ GameState GameState::settle(int player, deque<Card> newDrawPile, vector<Card> ne
   if (wentOut) {
     newFinished.push_back(newPlayers.at(player).getId());
   }
-  // The first seat out wins and the game is over; a table that somehow
-  // opened with one holder ends the same way.
-  if (wentOut || seatsHoldingCards(newPlayers) <= 1) {
+  // The first seat out wins and the game is over.
+  if (wentOut) {
     return GameState{std::move(newDrawPile),
                      std::move(newPile),
                      std::move(newPlayers),
@@ -399,10 +398,6 @@ StatusOr<GameState> GameState::removePlayer(int player) const {
                                            [](const Player& p) { return p.isReady(); })) {
     newTurn = openingSeat(newPlayers);
     newPhase = Phase::Playing;
-  }
-  if (phase == Phase::Playing && seatsHoldingCards(newPlayers) <= 1) {
-    return GameState{drawPile, pile,     std::move(newPlayers), kNoTurn, Phase::Abandoned, finished,
-                     gameId,   versionId};
   }
   return GameState{drawPile, pile,     std::move(newPlayers), newTurn, newPhase, finished,
                    gameId,   versionId};

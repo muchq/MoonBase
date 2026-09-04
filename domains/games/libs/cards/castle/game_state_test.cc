@@ -507,6 +507,53 @@ TEST(Runs, NoPlayThatMeetsTheCountMeansPickUp) {
 
 // The first seat to shed its last card wins, and that ends the game: no
 // play-on to a single loser. Only a two-seat game has a loser to name.
+// A two on top is the lowest rank, so it asks only for its count.
+TEST(Runs, APairOfTwosOnTopStillSetsTheCount) {
+  const GameState g =
+      playing({seat("a", {c(Rank::King), c(Rank::King, Suit::Hearts), c(Rank::Nine)}),
+               seat("b", {c(Rank::Nine)})},
+              {c(Rank::Two), c(Rank::Two, Suit::Hearts)});
+  EXPECT_EQ(g.runOnTop(), 2);
+  EXPECT_FALSE(g.isPlayable(Rank::King));
+  EXPECT_FALSE(g.playFromHand(0, {0}).ok());
+  auto pair = g.playFromHand(0, {0, 1});
+  ASSERT_TRUE(pair.ok()) << pair.status();
+  EXPECT_EQ(pair->getPile().size(), 4u);
+  EXPECT_EQ(pair->getWhoseTurn(), 1);
+}
+
+TEST(Runs, SpecialsPlayInAnyCount) {
+  const GameState g =
+      playing({seat("a", {c(Rank::Two), c(Rank::Two, Suit::Hearts), c(Rank::Nine)}),
+               seat("b", {c(Rank::Nine)})},
+              {c(Rank::Five), c(Rank::Five, Suit::Hearts), c(Rank::Five, Suit::Spades)});
+  EXPECT_TRUE(g.isPlayable(Rank::Two, 2));
+  auto pair = g.playFromHand(0, {0, 1});
+  ASSERT_TRUE(pair.ok()) << pair.status();
+  EXPECT_EQ(pair->runOnTop(), 2);
+  EXPECT_EQ(pair->getWhoseTurn(), 1);
+}
+
+TEST(Runs, AnEmptyPileHasNoRunAndNoCardsIsNoPlay) {
+  const GameState g = playing({seat("a", {c(Rank::Three)}), seat("b", {c(Rank::Nine)})});
+  EXPECT_EQ(g.runOnTop(), 0);
+  EXPECT_EQ(g.pileTop(), std::nullopt);
+  EXPECT_TRUE(g.isPlayable(Rank::Three, 1));
+  EXPECT_FALSE(g.isPlayable(Rank::Three, 0));
+  EXPECT_FALSE(g.isPlayable(Rank::Three, -1));
+}
+
+TEST(Play, OnlyAHandPlayDrawsBackUp) {
+  const GameState g =
+      playing({seat("a", {}, {c(Rank::Nine)}, {c(Rank::Four)}), seat("b", {c(Rank::Nine)})},
+              {c(Rank::Seven)}, {c(Rank::Jack), c(Rank::Queen)});
+  auto played = g.playFaceUp(0, {0});
+  ASSERT_TRUE(played.ok()) << played.status();
+  EXPECT_TRUE(played->getPlayer(0).getHand().empty());
+  EXPECT_EQ(played->getPlayer(0).source(), Source::FaceDown);
+  EXPECT_EQ(played->getDrawPile().size(), 2u);
+}
+
 TEST(Ending, TheFirstSeatOutEndsTheGame) {
   const GameState g = playing({seat("a", {c(Rank::Ace)}), seat("b", {c(Rank::Two)}),
                                seat("c", {c(Rank::Four), c(Rank::Four)})});
@@ -599,19 +646,6 @@ TEST(Abandonment, ALeaversTurnSkipsAnOutSeatThenCompacts) {
   EXPECT_EQ(aLeft->getWhoseTurn(), 1);
 }
 
-TEST(Abandonment, AFinishedSeatThatLeavesStaysInTheFinishOrder) {
-  const GameState g =
-      playing({seat("a", {}), seat("b", {c(Rank::Six)}), seat("c", {c(Rank::Seven)})}, {}, {}, 1);
-  const GameState withA{
-      g.getDrawPile(), g.getPile(), g.getPlayers(), 1, Phase::Playing, {"a"}, "g", "v"};
-  auto aLeft = withA.removePlayer(0);
-  ASSERT_TRUE(aLeft.ok());
-  EXPECT_EQ(aLeft->getFinished(), (vector<string>{"a"}));
-  EXPECT_EQ(aLeft->playerIndex("a"), -1);
-  EXPECT_EQ(aLeft->getPhase(), Phase::Playing);
-  EXPECT_EQ(aLeft->getWhoseTurn(), 0);
-}
-
 TEST(Abandonment, ASeatLeavingATwoSeatSetupAbandonsTheGame) {
   const Player a{"a", {c(Rank::Five)}, {}, {}, false};
   const Player b{"b", {c(Rank::Three)}, {}, {}, true};
@@ -620,24 +654,6 @@ TEST(Abandonment, ASeatLeavingATwoSeatSetupAbandonsTheGame) {
   ASSERT_TRUE(gone.ok());
   EXPECT_EQ(gone->getPhase(), Phase::Abandoned);
   EXPECT_FALSE(gone->ready(0).ok());
-}
-
-TEST(Abandonment, ALeaverWhoseExitLeavesOneHolderAbandonsTheGameKeepingTheFinishOrder) {
-  const GameState g{{},
-                    {},
-                    {seat("a", {}), seat("b", {c(Rank::Six)}), seat("c", {c(Rank::Seven)})},
-                    1,
-                    Phase::Playing,
-                    {"a"},
-                    "g",
-                    "v"};
-  auto gone = g.removePlayer(2);
-  ASSERT_TRUE(gone.ok());
-  EXPECT_EQ(gone->getPhase(), Phase::Abandoned);
-  EXPECT_TRUE(gone->isOver());
-  EXPECT_EQ(gone->loser(), std::nullopt);  // b never lost by play
-  EXPECT_EQ(gone->getFinished(), (vector<string>{"a"}));
-  EXPECT_EQ(gone->getWhoseTurn(), GameState::kNoTurn);
 }
 
 TEST(Abandonment, TheLastUnreadySeatLeavingOpensPlay) {

@@ -31,11 +31,12 @@ using std::string;
 ///     active row (hand while it has cards, then the face-up row, then
 ///     the face-down row one card at a time, blind) onto the pile. The
 ///     run on top sets the price: after n cards of rank k, a play is n or
-///     more cards of rank k or higher (a two on top takes anything), or
-///     exactly the 4-n cards of rank k that complete its four of a kind.
-///     A two or a ten plays alone on anything; anything plays on an empty
-///     pile. A hand play draws back up to three while the draw pile
-///     lasts.
+///     more cards of rank k or higher (two is the lowest rank, so a two
+///     on top asks only for its count), or exactly the 4-n cards of rank
+///     k that complete its four of a kind. Twos and tens play on anything
+///     in any count; anything plays on an empty pile. A hand play draws
+///     back up to three while the draw pile lasts; face-up and face-down
+///     plays never draw. The turn passes to the next seat, wrapping.
 ///   - A ten, or four of a kind on top of the pile, burns the pile: it
 ///     leaves the game and the same seat plays again from whichever row
 ///     is then in play — unless the burn shed the seat's last card, which
@@ -46,8 +47,8 @@ using std::string;
 ///     up the pile. A face-down card that turns out unplayable goes into
 ///     the hand with the pile.
 ///   - The first seat to shed its last card wins, and that ends the
-///     game; its finish order is kept if the seat later leaves the table.
-///     Only a two-seat game names a loser.
+///     game. The loser is the one seat still holding cards, which a
+///     two-seat game always has and a bigger table usually does not.
 class GameState;
 
 enum class Phase { Setup, Playing, Over, Abandoned };
@@ -108,16 +109,16 @@ class GameState {
   /// Whether `count` cards of this rank may go on the pile as it stands:
   /// a special always; on an empty pile anything; otherwise the count on
   /// top or more of that rank or higher, or exactly what completes the
-  /// four of a kind of the top's own rank.
+  /// four of a kind of the top's own rank. No cards is never a play.
   [[nodiscard]] bool isPlayable(Rank rank, int count = 1) const;
   /// Whether the seat's active row holds a legal play. Always false for
   /// a face-down row: those are played blind.
   [[nodiscard]] bool hasLegalPlay(int player) const;
   /// Seats that went out, first out first.
   [[nodiscard]] const std::vector<string>& getFinished() const { return finished; }
-  /// The one seat left holding cards once the game is over by play — a
-  /// two-seat game's loser; a bigger table ends with a winner and no
-  /// loser.
+  /// The one seat still holding cards once the game is over by play:
+  /// always the other seat of a two-seat game, usually nobody at a
+  /// bigger table.
   [[nodiscard]] std::optional<string> loser() const;
 
   [[nodiscard]] GameState withIdAndVersion(const string& game_id, const string& version_id) const;
