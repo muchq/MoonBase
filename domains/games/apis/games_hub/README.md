@@ -99,4 +99,6 @@ lobby-safe summaries only.
 - `ALLOWED_ORIGINS` unset admits all origins (local dev); production
   sets the allowlist.
 - Deployed behind Caddy at `/games/v2/*` (`deploy/consolidated`); the
-  muchq.com golf and thoughts UIs' only backend.
+  muchq.com golf, castle and thoughts UIs' only backend. Castle needs
+  no route of its own: it rides the golf play stream, and the origin
+  gate is per connection, not per game.
