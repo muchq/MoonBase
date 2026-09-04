@@ -6,8 +6,9 @@
 // (which regenerates with it) still passes.
 //
 // The pinned surface, exactly: the Think route; sessionReady; the four
-// command payloads (join, move, shape, leave) as the client mints them;
-// worldState empty and populated (the double spelling included — 10.0, not
+// command payloads (join, move, shape, leave) as the client mints them,
+// and join's roomId key the lobby will mint (#1490); worldState empty and
+// populated (the double spelling included — 10.0, not
 // 10); playerJoined's nested player; playerMoved; shapeChanged; playerLeft;
 // commandRejected; and the terminal Unauthenticated frame. The session
 // mint and resume bodies are golf_wire_test's pins — one route, one set of
@@ -78,6 +79,31 @@ TEST_F(ThoughtsWireTest, JoinPinsWorldStateAndPlayerJoinedBytes) {
   EXPECT_EQ(EventPayload(NextFrame(*first), "playerJoined"),
             R"({"player":{"color":[0.3,0.9,0.4],"playerId":"player-2",)"
             R"("position":[20.0,0.0,15.0],"shape":1}})");
+}
+
+// Consumer: the lobby's join (#1490 phase 4). The roomId key on the join
+// payload names the world; a joiner naming one sees only that world, so
+// the unroomed plaza player above is not in it, and never hears of it.
+TEST_F(ThoughtsWireTest, JoinWithRoomIdPinsTheKeyAndScopesTheWorld) {
+  json plaza_session;
+  auto plaza = DialReady(plaza_session);
+  ASSERT_TRUE(plaza->Send(CommandFrame("join", kJoinPayload)).ok());
+  (void)EventPayload(NextFrame(*plaza), "worldState");
+
+  json roomed_session;
+  auto roomed = DialReady(roomed_session);
+  ASSERT_TRUE(roomed
+                  ->Send(CommandFrame("join", R"({"position":[10,0,-5],"color":[0.8,0.2,0.6],)"
+                                              R"("shape":0,"roomId":"ABC123"})"))
+                  .ok());
+  EXPECT_EQ(EventPayload(NextFrame(*roomed), "worldState"), R"({"players":[]})");
+
+  ASSERT_TRUE(roomed->Send(CommandFrame("leave", "{}")).ok());
+  // The plaza player's next frame is its own later refusal, not any of
+  // the roomed player's traffic.
+  ASSERT_TRUE(plaza->Send(CommandFrame("join", kJoinPayload)).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*plaza), "commandRejected"),
+            R"({"reason":"already in the world; leave first"})");
 }
 
 // Consumer: the client's per-frame traffic. A move and a shape change reach

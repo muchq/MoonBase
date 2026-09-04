@@ -8,10 +8,10 @@ use moonbase.games#SessionReady
 use moonbase.games#Unauthenticated
 
 // Thoughts (#79): the chill 3D vibe at muchq.com/thoughts, on the games
-// hub. One shared world and no rooms: each joined player is a position on
-// the ground plane, a color, and a shape, and every change reaches every
-// other session. The hub relays; it simulates nothing and remembers
-// nothing past the connection.
+// hub. A world per room (#1490): each joined player is a position on the
+// ground plane, a color, and a shape, and every change reaches everyone
+// else in the same world. The hub relays; it simulates nothing and
+// remembers nothing past the connection.
 
 /// The one WebSocket session per player, on the same ticket GetSession
 /// mints for golf. Invalid commands come back as commandRejected events
@@ -43,9 +43,15 @@ union ThoughtsCommands {
     leave: LeaveWorld
 }
 
-/// Enter the world. Refused while already in it: leave first to respawn,
-/// which is also how a color changes.
+/// Enter a world. Refused while already in one: leave first to respawn,
+/// which is also how a color or a room changes.
 structure JoinWorld {
+    /// The room whose world to enter; absent, the public plaza — a
+    /// well-known room, "plaza", so an unroomed join and a join naming it
+    /// land together. Any other id names a world of its own; the room
+    /// layer is not consulted (that is #1490's phase 3).
+    roomId: String
+
     @required
     position: Vec3
 
@@ -82,9 +88,9 @@ union ThoughtsEvents {
     commandRejected: CommandRejected
 }
 
-/// Everyone already in the world, sent once to a joiner — before any other
-/// session hears their playerJoined, and never listing the joiner. Empty
-/// when the world is.
+/// Everyone already in the joined world, sent once to a joiner — before
+/// anyone else hears their playerJoined, and never listing the joiner.
+/// Empty when the world is.
 structure WorldState {
     @required
     players: WorldPlayers
@@ -111,7 +117,8 @@ structure WorldPlayer {
     shape: Integer
 }
 
-/// Fan-out to every other session, joined or not; the actor never hears
+/// Fan-out to everyone else in the actor's world, and nobody outside it:
+/// a session that has not joined hears nothing, and the actor never hears
 /// its own echo.
 structure PlayerJoined {
     @required

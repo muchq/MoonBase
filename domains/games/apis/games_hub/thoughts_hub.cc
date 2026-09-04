@@ -16,7 +16,6 @@ namespace games_hub {
 
 using moonbase::games::ThoughtsCommands;
 using moonbase::games::ThoughtsEvents;
-using moonbase::games::WorldPlayer;
 
 namespace {
 
@@ -43,6 +42,15 @@ std::optional<std::string> ColorProblem(const std::vector<double>& color) {
 
 std::optional<std::string> ShapeProblem(std::int32_t shape) {
   if (shape < 0 || shape > 2) return "shape must be 0 (sphere), 1 (cube) or 2 (pyramid)";
+  return std::nullopt;
+}
+
+// A named room is held to golf's joinRoom rule, and the reason it gives;
+// an absent one is the plaza.
+std::optional<std::string> RoomProblem(const std::optional<std::string>& room_id) {
+  if (room_id.has_value() && (room_id->empty() || HasEmbeddedNul(*room_id))) {
+    return "invalid room id";
+  }
   return std::nullopt;
 }
 
@@ -171,27 +179,30 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
   Count("thoughts_commands", {{"command", std::string(command.case_name())}});
 
   if (const auto* join = command.as_join_or_null()) {
-    for (const auto& problem :
-         {PositionProblem(join->position), ColorProblem(join->color), ShapeProblem(join->shape)}) {
+    for (const auto& problem : {RoomProblem(join->roomId), PositionProblem(join->position),
+                                ColorProblem(join->color), ShapeProblem(join->shape)}) {
       if (problem.has_value()) {
         Reject(player_id, RejectKind::kInvalid, *problem);
         return;
       }
     }
-    WorldPlayer entry;
-    entry.playerId = player_id;
-    entry.position = join->position;
-    entry.color = join->color;
-    entry.shape = join->shape;
+    Standing standing;
+    standing.room_id = join->roomId.value_or(kPlaza);
+    standing.player.playerId = player_id;
+    standing.player.position = join->position;
+    standing.player.color = join->color;
+    standing.player.shape = join->shape;
     bool already_joined = false;
+    std::vector<std::string> others;
     {
       const std::lock_guard<std::mutex> lock(mu_);
       if (world_.contains(player_id)) {
         already_joined = true;
       } else {
         moonbase::games::WorldState snapshot;
-        for (const auto& [id, other] : world_) snapshot.players.push_back(other);
-        world_.emplace(player_id, entry);
+        others = OthersInLocked(standing.room_id, player_id);
+        for (const auto& id : others) snapshot.players.push_back(world_.at(id).player);
+        world_.emplace(player_id, standing);
         // Queued to the joiner while mu_ is still held, deliberately: every
         // other player's mutation takes mu_ before it fans out, so with the
         // snapshot queued inside this hold, any playerLeft or playerMoved
@@ -209,12 +220,10 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
       Reject(player_id, RejectKind::kState, "already in the world; leave first");
       return;
     }
-    // Then the others hear of the joiner. Outside mu_: a fan-out can close a
-    // slow session, and on the in-memory wire that completes its Receive —
-    // and so its Leave — inline on this thread.
+    // Then the rest of the world hears of the joiner.
     moonbase::games::PlayerJoined joined;
-    joined.player = std::move(entry);
-    SendToOthers(player_id, ThoughtsEvents::FromPlayerjoined(std::move(joined)));
+    joined.player = std::move(standing.player);
+    Broadcast(others, ThoughtsEvents::FromPlayerjoined(std::move(joined)));
     return;
   }
 
@@ -224,11 +233,13 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
       return;
     }
     bool in_world = false;
+    std::vector<std::string> others;
     {
       const std::lock_guard<std::mutex> lock(mu_);
       if (const auto it = world_.find(player_id); it != world_.end()) {
-        it->second.position = move->position;
+        it->second.player.position = move->position;
         in_world = true;
+        others = OthersInLocked(it->second.room_id, player_id);
       }
     }
     if (!in_world) {
@@ -238,7 +249,7 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
     moonbase::games::PlayerMoved moved;
     moved.playerId = player_id;
     moved.position = move->position;
-    SendToOthers(player_id, ThoughtsEvents::FromPlayermoved(std::move(moved)));
+    Broadcast(others, ThoughtsEvents::FromPlayermoved(std::move(moved)));
     return;
   }
 
@@ -248,11 +259,13 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
       return;
     }
     bool in_world = false;
+    std::vector<std::string> others;
     {
       const std::lock_guard<std::mutex> lock(mu_);
       if (const auto it = world_.find(player_id); it != world_.end()) {
-        it->second.shape = shape->shape;
+        it->second.player.shape = shape->shape;
         in_world = true;
+        others = OthersInLocked(it->second.room_id, player_id);
       }
     }
     if (!in_world) {
@@ -262,7 +275,7 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
     moonbase::games::ShapeChanged changed;
     changed.playerId = player_id;
     changed.shape = shape->shape;
-    SendToOthers(player_id, ThoughtsEvents::FromShapechanged(std::move(changed)));
+    Broadcast(others, ThoughtsEvents::FromShapechanged(std::move(changed)));
     return;
   }
 
@@ -275,14 +288,27 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
 }
 
 bool ThoughtsHub::Leave(const std::string& player_id) {
+  std::vector<std::string> others;
   {
     const std::lock_guard<std::mutex> lock(mu_);
-    if (world_.erase(player_id) == 0) return false;
+    const auto it = world_.find(player_id);
+    if (it == world_.end()) return false;
+    others = OthersInLocked(it->second.room_id, player_id);
+    world_.erase(it);
   }
   moonbase::games::PlayerLeft left;
   left.playerId = player_id;
-  SendToOthers(player_id, ThoughtsEvents::FromPlayerleft(std::move(left)));
+  Broadcast(others, ThoughtsEvents::FromPlayerleft(std::move(left)));
   return true;
+}
+
+std::vector<std::string> ThoughtsHub::OthersInLocked(const std::string& room_id,
+                                                     const std::string& player_id) const {
+  std::vector<std::string> others;
+  for (const auto& [id, standing] : world_) {
+    if (id != player_id && standing.room_id == room_id) others.push_back(id);
+  }
+  return others;
 }
 
 void ThoughtsHub::Reject(const std::string& player_id, RejectKind kind, std::string reason) {
@@ -300,19 +326,16 @@ void ThoughtsHub::Send(const std::string& player_id, ThoughtsEvents event) {
   registry_.SendTo(player_id, std::move(event));
 }
 
-void ThoughtsHub::SendToOthers(const std::string& sender_id, const ThoughtsEvents& event) {
-  std::vector<std::string> others;
-  for (auto& id : registry_.Ids()) {
-    if (id != sender_id) others.push_back(std::move(id));
-  }
-  if (others.empty()) return;
+void ThoughtsHub::Broadcast(const std::vector<std::string>& recipients,
+                            const ThoughtsEvents& event) {
+  if (recipients.empty()) return;
   if (metrics_) {
     // One per delivery, as Send counts: the series is how many events left
     // the hub, not how many commands produced them.
-    metrics_->RecordCounter("thoughts_events", static_cast<int64_t>(others.size()),
+    metrics_->RecordCounter("thoughts_events", static_cast<int64_t>(recipients.size()),
                             {{"event", std::string(event.case_name())}});
   }
-  registry_.Broadcast(others, event);
+  registry_.Broadcast(recipients, event);
 }
 
 void ThoughtsHub::Count(const char* name, const std::map<std::string, std::string>& attributes) {

@@ -1,7 +1,8 @@
 // The thoughts flows (#79), driven through the generated client over the
-// in-memory pair: join, move, shape, leave, the close-is-a-leave rule, the
-// world's bounds refused in-band, the ticket and seat contracts shared with
-// golf, the stream budget, and the model pin for the thoughts_* series.
+// in-memory pair: join, move, shape, leave, the close-is-a-leave rule, a
+// world per room with the plaza as the default (#1490), the world's bounds
+// refused in-band, the ticket and seat contracts shared with golf, the
+// stream budget, and the model pin for the thoughts_* series.
 
 #include <gtest/gtest.h>
 
@@ -35,6 +36,17 @@ ThoughtsCommands Join(std::vector<double> position, std::vector<double> color, s
   return ThoughtsCommands::FromJoin(std::move(join));
 }
 
+// The same join, into a named room's world.
+ThoughtsCommands JoinIn(std::string room_id, std::vector<double> position,
+                        std::vector<double> color, std::int32_t shape) {
+  moonbase::games::JoinWorld join;
+  join.roomId = std::move(room_id);
+  join.position = std::move(position);
+  join.color = std::move(color);
+  join.shape = shape;
+  return ThoughtsCommands::FromJoin(std::move(join));
+}
+
 ThoughtsCommands MoveTo(std::vector<double> position) {
   moonbase::games::MoveTo move;
   move.position = std::move(position);
@@ -51,6 +63,15 @@ ThoughtsCommands Leave() { return ThoughtsCommands::FromLeave(moonbase::games::L
 
 // The Go server's fixture player: (10, 0, -5), magenta-ish, a sphere.
 ThoughtsCommands FixtureJoin() { return Join({10, 0, -5}, {0.8, 0.2, 0.6}, 0); }
+
+// Puts a seat in the plaza and consumes its worldState, so the seat hears
+// what follows; fails the test if the join is not answered with one.
+void EnterPlaza(moonbase::games::ThinkClientStream& stream) {
+  ASSERT_TRUE(stream.Send(Join({20, 0, 15}, {0.3, 0.9, 0.4}, 1)).ok());
+  auto world = NextEvent(stream);
+  ASSERT_TRUE(world.has_value());
+  ASSERT_NE(world->as_worldState_or_null(), nullptr);
+}
 
 // The reason on the next event, which must be a commandRejected.
 std::string NextRejection(moonbase::games::ThinkClientStream& stream) {
@@ -74,37 +95,115 @@ TEST_F(GamesHubStreamFixture, JoinShowsTheJoinerTheWorldAndTellsEveryoneElse) {
   ASSERT_NE(world->as_worldState_or_null(), nullptr);
   EXPECT_TRUE(world->as_worldState_or_null()->players.empty());
 
-  // Bob has not joined, and still hears the world: a connected session
-  // is watching.
-  auto joined = NextEvent(bob->stream);
-  ASSERT_TRUE(joined.has_value());
-  ASSERT_NE(joined->as_playerJoined_or_null(), nullptr);
-  const auto& player = joined->as_playerJoined_or_null()->player;
-  EXPECT_EQ(player.playerId, alice->player_id);
-  EXPECT_EQ(player.position, (std::vector<double>{10, 0, -5}));
-  EXPECT_EQ(player.color, (std::vector<double>{0.8, 0.2, 0.6}));
-  EXPECT_EQ(player.shape, 0);
+  // Bob has not joined, so he is in no world and hears nothing of alice.
+  ExpectNoEvent(bob->stream);
 
-  // Bob's join: his snapshot lists alice and not himself, and alice hears
-  // him arrive. Neither hears their own join.
+  // Bob's join: his snapshot lists alice — as she stands, in full — and
+  // not himself, and alice hears him arrive. Neither hears their own join.
   ASSERT_TRUE(bob->stream.Send(Join({20, 0, 15}, {0.3, 0.9, 0.4}, 1)).ok());
   auto bobs_world = NextEvent(bob->stream);
   ASSERT_TRUE(bobs_world.has_value());
   ASSERT_NE(bobs_world->as_worldState_or_null(), nullptr);
   ASSERT_EQ(bobs_world->as_worldState_or_null()->players.size(), 1u);
-  EXPECT_EQ(bobs_world->as_worldState_or_null()->players[0].playerId, alice->player_id);
+  const auto& player = bobs_world->as_worldState_or_null()->players[0];
+  EXPECT_EQ(player.playerId, alice->player_id);
+  EXPECT_EQ(player.position, (std::vector<double>{10, 0, -5}));
+  EXPECT_EQ(player.color, (std::vector<double>{0.8, 0.2, 0.6}));
+  EXPECT_EQ(player.shape, 0);
   auto alice_hears = NextEvent(alice->stream);
   ASSERT_TRUE(alice_hears.has_value());
   ASSERT_NE(alice_hears->as_playerJoined_or_null(), nullptr);
-  EXPECT_EQ(alice_hears->as_playerJoined_or_null()->player.playerId, bob->player_id);
+  const auto& arrived = alice_hears->as_playerJoined_or_null()->player;
+  EXPECT_EQ(arrived.playerId, bob->player_id);
+  EXPECT_EQ(arrived.position, (std::vector<double>{20, 0, 15}));
+  EXPECT_EQ(arrived.color, (std::vector<double>{0.3, 0.9, 0.4}));
+  EXPECT_EQ(arrived.shape, 1);
   ExpectNoEvent(alice->stream);
   ExpectNoEvent(bob->stream);
+}
+
+// A world per room: a join naming a room lands in that room's world, and
+// every fan-out — join, move, shape, leave, a closed socket — stops at
+// its edge. The room layer is not consulted: any id names a world.
+TEST_F(GamesHubStreamFixture, AJoinNamingARoomLandsInThatRoomsWorldAndFansOutOnlyThere) {
+  auto alice = OpenThoughtsSeat();
+  auto bob = OpenThoughtsSeat();
+  auto carol = OpenThoughtsSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value() && carol.has_value());
+
+  ASSERT_TRUE(alice->stream.Send(JoinIn("ABC123", {10, 0, -5}, {0.8, 0.2, 0.6}, 0)).ok());
+  ASSERT_NE(NextEvent(alice->stream).value().as_worldState_or_null(), nullptr);
+  ASSERT_TRUE(bob->stream.Send(JoinIn("XYZ789", {1, 0, 1}, {0, 0, 1}, 1)).ok());
+  auto bobs_world = NextEvent(bob->stream);
+  ASSERT_TRUE(bobs_world.has_value());
+  ASSERT_NE(bobs_world->as_worldState_or_null(), nullptr);
+  EXPECT_TRUE(bobs_world->as_worldState_or_null()->players.empty())
+      << "bob's world must not list alice, who is in another room";
+  ExpectNoEvent(alice->stream);
+
+  // Carol joins alice's room: her snapshot is alice alone, alice hears
+  // her, bob hears nothing.
+  ASSERT_TRUE(carol->stream.Send(JoinIn("ABC123", {2, 0, 2}, {0, 1, 0}, 2)).ok());
+  auto carols_world = NextEvent(carol->stream);
+  ASSERT_TRUE(carols_world.has_value());
+  ASSERT_NE(carols_world->as_worldState_or_null(), nullptr);
+  ASSERT_EQ(carols_world->as_worldState_or_null()->players.size(), 1u);
+  EXPECT_EQ(carols_world->as_worldState_or_null()->players[0].playerId, alice->player_id);
+  auto alice_hears = NextEvent(alice->stream);
+  ASSERT_TRUE(alice_hears.has_value());
+  ASSERT_NE(alice_hears->as_playerJoined_or_null(), nullptr);
+  EXPECT_EQ(alice_hears->as_playerJoined_or_null()->player.playerId, carol->player_id);
+  ExpectNoEvent(bob->stream);
+
+  // Moves and shapes stay in the room.
+  ASSERT_TRUE(alice->stream.Send(MoveTo({15, 0, -8})).ok());
+  ASSERT_NE(NextEvent(carol->stream).value().as_playerMoved_or_null(), nullptr);
+  ASSERT_TRUE(alice->stream.Send(Shape(1)).ok());
+  ASSERT_NE(NextEvent(carol->stream).value().as_shapeChanged_or_null(), nullptr);
+  ExpectNoEvent(bob->stream);
+
+  // So do departures, deliberate or by a closed socket.
+  ASSERT_TRUE(alice->stream.Send(Leave()).ok());
+  auto left = NextEvent(carol->stream);
+  ASSERT_TRUE(left.has_value());
+  ASSERT_NE(left->as_playerLeft_or_null(), nullptr);
+  EXPECT_EQ(left->as_playerLeft_or_null()->playerId, alice->player_id);
+  ExpectNoEvent(bob->stream);
+  carol->stream.Close();
+  ExpectNoEvent(bob->stream);
+  // Deliveries counted per room: alice's and bob's joins reached nobody,
+  // carol's reached alice.
+  EXPECT_EQ(metrics_->CounterTotal("thoughts_events", {{"event", "playerJoined"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("thoughts_events", {{"event", "playerLeft"}}), 1);
+}
+
+// The plaza is a well-known room: an unroomed join and one naming "plaza"
+// share a world, so today's muchq.com/thoughts client, which names no
+// room, keeps meeting everyone who lands there.
+TEST_F(GamesHubStreamFixture, AnUnroomedJoinLandsInThePlaza) {
+  auto alice = OpenThoughtsSeat();
+  auto bob = OpenThoughtsSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(FixtureJoin()).ok());
+  ASSERT_NE(NextEvent(alice->stream).value().as_worldState_or_null(), nullptr);
+
+  ASSERT_TRUE(bob->stream.Send(JoinIn("plaza", {1, 0, 1}, {0, 0, 1}, 1)).ok());
+  auto world = NextEvent(bob->stream);
+  ASSERT_TRUE(world.has_value());
+  ASSERT_NE(world->as_worldState_or_null(), nullptr);
+  ASSERT_EQ(world->as_worldState_or_null()->players.size(), 1u);
+  EXPECT_EQ(world->as_worldState_or_null()->players[0].playerId, alice->player_id);
+  auto joined = NextEvent(alice->stream);
+  ASSERT_TRUE(joined.has_value());
+  ASSERT_NE(joined->as_playerJoined_or_null(), nullptr);
+  EXPECT_EQ(joined->as_playerJoined_or_null()->player.playerId, bob->player_id);
 }
 
 TEST_F(GamesHubStreamFixture, MovesAndShapesReachTheOthersAndNeverEchoAndStick) {
   auto alice = OpenThoughtsSeat();
   auto bob = OpenThoughtsSeat();
   ASSERT_TRUE(alice.has_value() && bob.has_value());
+  EnterPlaza(bob->stream);
   ASSERT_TRUE(alice->stream.Send(FixtureJoin()).ok());
   ASSERT_TRUE(NextEvent(alice->stream).has_value());  // worldState
   ASSERT_TRUE(NextEvent(bob->stream).has_value());    // playerJoined
@@ -132,13 +231,17 @@ TEST_F(GamesHubStreamFixture, MovesAndShapesReachTheOthersAndNeverEchoAndStick) 
   auto world = NextEvent(carol->stream);
   ASSERT_TRUE(world.has_value());
   ASSERT_NE(world->as_worldState_or_null(), nullptr);
-  ASSERT_EQ(world->as_worldState_or_null()->players.size(), 1u);
-  const auto& alice_now = world->as_worldState_or_null()->players[0];
-  EXPECT_EQ(alice_now.position, (std::vector<double>{15, 0, -8}));
-  EXPECT_EQ(alice_now.shape, 1);
+  const auto& players = world->as_worldState_or_null()->players;
+  ASSERT_EQ(players.size(), 2u);
+  const auto alice_now = std::find_if(players.begin(), players.end(), [&](const auto& p) {
+    return p.playerId == alice->player_id;
+  });
+  ASSERT_NE(alice_now, players.end());
+  EXPECT_EQ(alice_now->position, (std::vector<double>{15, 0, -8}));
+  EXPECT_EQ(alice_now->shape, 1);
 
   // thoughts_events counts deliveries, not commands: alice's join reached
-  // one session, carol's reached two.
+  // one player, carol's reached two.
   EXPECT_EQ(metrics_->CounterTotal("thoughts_events", {{"event", "playerJoined"}}), 3);
   EXPECT_EQ(metrics_->CounterTotal("thoughts_events", {{"event", "playerMoved"}}), 1);
 }
@@ -147,6 +250,7 @@ TEST_F(GamesHubStreamFixture, LeavingTellsTheOthersAndKeepsTheSessionForARejoin)
   auto alice = OpenThoughtsSeat();
   auto bob = OpenThoughtsSeat();
   ASSERT_TRUE(alice.has_value() && bob.has_value());
+  EnterPlaza(bob->stream);
   ASSERT_TRUE(alice->stream.Send(FixtureJoin()).ok());
   ASSERT_TRUE(NextEvent(alice->stream).has_value());
   ASSERT_TRUE(NextEvent(bob->stream).has_value());
@@ -167,12 +271,21 @@ TEST_F(GamesHubStreamFixture, LeavingTellsTheOthersAndKeepsTheSessionForARejoin)
   ASSERT_TRUE(rejoined.has_value());
   ASSERT_NE(rejoined->as_playerJoined_or_null(), nullptr);
   EXPECT_EQ(rejoined->as_playerJoined_or_null()->player.color, (std::vector<double>{1, 1, 1}));
+
+  // And how a room changes: leave, then join elsewhere. Bob, in the
+  // plaza, hears her go and nothing after.
+  ASSERT_TRUE(alice->stream.Send(Leave()).ok());
+  ASSERT_NE(NextEvent(bob->stream).value().as_playerLeft_or_null(), nullptr);
+  ASSERT_TRUE(alice->stream.Send(JoinIn("ABC123", {0, 0, 0}, {1, 1, 1}, 2)).ok());
+  ASSERT_NE(NextEvent(alice->stream).value().as_worldState_or_null(), nullptr);
+  ExpectNoEvent(bob->stream);
 }
 
 TEST_F(GamesHubStreamFixture, AClosedSocketIsALeaveWithNothingToResume) {
   auto alice = OpenThoughtsSeat();
   auto bob = OpenThoughtsSeat();
   ASSERT_TRUE(alice.has_value() && bob.has_value());
+  EnterPlaza(bob->stream);
   ASSERT_TRUE(alice->stream.Send(FixtureJoin()).ok());
   ASSERT_TRUE(NextEvent(alice->stream).has_value());
   ASSERT_TRUE(NextEvent(bob->stream).has_value());
@@ -196,7 +309,8 @@ TEST_F(GamesHubStreamFixture, AClosedSocketIsALeaveWithNothingToResume) {
   auto world = NextEvent(back->stream);
   ASSERT_TRUE(world.has_value());
   ASSERT_NE(world->as_worldState_or_null(), nullptr);
-  EXPECT_TRUE(world->as_worldState_or_null()->players.empty());
+  ASSERT_EQ(world->as_worldState_or_null()->players.size(), 1u);
+  EXPECT_EQ(world->as_worldState_or_null()->players[0].playerId, bob->player_id);
   auto rejoined = NextEvent(bob->stream);
   ASSERT_TRUE(rejoined.has_value());
   EXPECT_NE(rejoined->as_playerJoined_or_null(), nullptr);
@@ -228,6 +342,10 @@ TEST_F(GamesHubStreamFixture, TheWorldsBoundsAreRefusedInBandAndChangeNothing) {
        "shape must be 0 (sphere), 1 (cube) or 2 (pyramid)"},
       {"fourth shape", Join({10, 0, -5}, {0.8, 0.2, 0.6}, 3),
        "shape must be 0 (sphere), 1 (cube) or 2 (pyramid)"},
+      // A room id, when named, is a room id: golf's joinRoom rules.
+      {"empty room id", JoinIn("", {10, 0, -5}, {0.8, 0.2, 0.6}, 0), "invalid room id"},
+      {"room id with a NUL", JoinIn(std::string("AB\0C", 4), {10, 0, -5}, {0.8, 0.2, 0.6}, 0),
+       "invalid room id"},
   };
   for (const auto& c : refused) {
     ASSERT_TRUE(alice->stream.Send(c.command).ok()) << c.name;
@@ -254,9 +372,9 @@ TEST_F(GamesHubStreamFixture, TheWorldsBoundsAreRefusedInBandAndChangeNothing) {
   EXPECT_EQ(only.playerId, alice->player_id);
   EXPECT_EQ(only.position, (std::vector<double>{50, 0, -50}));
   EXPECT_EQ(only.shape, 2);
-  // Nine invalid joins, one invalid move, one invalid shape: all counted as
-  // the client's malformed input, never as a state refusal.
-  EXPECT_EQ(metrics_->CounterTotal("thoughts_rejections", {{"kind", "invalid"}}), 11);
+  // Eleven invalid joins, one invalid move, one invalid shape: all counted
+  // as the client's malformed input, never as a state refusal.
+  EXPECT_EQ(metrics_->CounterTotal("thoughts_rejections", {{"kind", "invalid"}}), 13);
 }
 
 TEST_F(GamesHubStreamFixture, MoveShapeAndLeaveNeedAJoinAndAJoinNeedsALeave) {
@@ -365,6 +483,7 @@ TEST_F(ThoughtsRateLimitedFixture, AMoveFloodIsRefusedAfterTheBurst) {
   auto alice = OpenThoughtsSeat();
   auto bob = OpenThoughtsSeat();
   ASSERT_TRUE(alice.has_value() && bob.has_value());
+  EnterPlaza(bob->stream);
   ASSERT_TRUE(alice->stream.Send(FixtureJoin()).ok());
   ASSERT_TRUE(NextEvent(alice->stream).has_value());
   ASSERT_TRUE(NextEvent(bob->stream).has_value());
@@ -379,12 +498,11 @@ TEST_F(ThoughtsRateLimitedFixture, AMoveFloodIsRefusedAfterTheBurst) {
   ExpectNoEvent(bob->stream);
   EXPECT_EQ(metrics_->CounterTotal("thoughts_rate_limited", {}), 1);
   EXPECT_EQ(metrics_->CounterTotal("thoughts_rejections", {{"kind", "rate_limited"}}), 1);
-  // The session survived: bob's join still reaches alice.
-  ASSERT_TRUE(bob->stream.Send(FixtureJoin()).ok());
-  ASSERT_TRUE(NextEvent(bob->stream).has_value());
-  auto joined = NextEvent(alice->stream);
-  ASSERT_TRUE(joined.has_value());
-  EXPECT_NE(joined->as_playerJoined_or_null(), nullptr);
+  // The session survived: bob's move still reaches alice.
+  ASSERT_TRUE(bob->stream.Send(MoveTo({3, 0, 3})).ok());
+  auto bob_moved = NextEvent(alice->stream);
+  ASSERT_TRUE(bob_moved.has_value());
+  EXPECT_NE(bob_moved->as_playerMoved_or_null(), nullptr);
 }
 
 // The two orderings the world lock is for, each driven at the hub's
@@ -461,10 +579,11 @@ TEST_F(ThoughtsRaceFixture, ALeaveDuringAJoinLandsBehindTheJoinersSnapshot) {
   auto carol = OpenThoughtsSeat();
   auto bob = OpenThoughtsSeat();
   ASSERT_TRUE(alice.has_value() && carol.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(FixtureJoin()).ok());
+  ASSERT_TRUE(NextEvent(alice->stream).has_value());  // worldState
   ASSERT_TRUE(carol->stream.Send(FixtureJoin()).ok());
   ASSERT_TRUE(NextEvent(carol->stream).has_value());  // worldState
   ASSERT_TRUE(NextEvent(alice->stream).has_value());  // playerJoined carol
-  ASSERT_TRUE(NextEvent(bob->stream).has_value());
 
   // Bob joins and parks inside the seam with the lock held and his
   // snapshot (listing carol) already queued.
@@ -474,8 +593,8 @@ TEST_F(ThoughtsRaceFixture, ALeaveDuringAJoinLandsBehindTheJoinersSnapshot) {
   ASSERT_TRUE(WaitParked("snapshot"));
 
   // Carol leaves now. Her erase needs the lock bob holds, so nothing about
-  // her leave can reach anyone yet — alice, who is not in the seam, hears
-  // silence.
+  // her leave can reach anyone yet — alice, in the world and not in the
+  // seam, hears silence.
   bool leave_sent = false;
   std::thread leaver([&] { leave_sent = carol->stream.Send(Leave()).ok(); });
   ExpectNoEvent(alice->stream);
@@ -490,8 +609,9 @@ TEST_F(ThoughtsRaceFixture, ALeaveDuringAJoinLandsBehindTheJoinersSnapshot) {
   auto world = NextEvent(bob->stream);
   ASSERT_TRUE(world.has_value());
   ASSERT_NE(world->as_worldState_or_null(), nullptr);
-  ASSERT_EQ(world->as_worldState_or_null()->players.size(), 1u);
-  EXPECT_EQ(world->as_worldState_or_null()->players[0].playerId, carol->player_id);
+  std::set<std::string> listed;
+  for (const auto& p : world->as_worldState_or_null()->players) listed.insert(p.playerId);
+  EXPECT_EQ(listed, (std::set<std::string>{alice->player_id, carol->player_id}));
   auto left = NextEvent(bob->stream);
   ASSERT_TRUE(left.has_value());
   ASSERT_NE(left->as_playerLeft_or_null(), nullptr);
@@ -516,6 +636,7 @@ TEST_F(ThoughtsRaceFixture, AClosedSocketErasesTheWorldBeforeReleasingTheSeat) {
   auto alice = OpenThoughtsSeat();
   auto bob = OpenThoughtsSeat();
   ASSERT_TRUE(alice.has_value() && bob.has_value());
+  EnterPlaza(bob->stream);
   ASSERT_TRUE(alice->stream.Send(FixtureJoin()).ok());
   ASSERT_TRUE(NextEvent(alice->stream).has_value());
   ASSERT_TRUE(NextEvent(bob->stream).has_value());
