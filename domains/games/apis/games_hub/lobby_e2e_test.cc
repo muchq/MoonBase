@@ -271,6 +271,42 @@ TEST_F(LobbyFixture, ASiblingsMemberDropLeavesTheWorldToo) {
   EXPECT_EQ(Listed(ReceiveLobby(bob->stream, "worldState")), std::vector<std::string>{});
 }
 
+// A game join whose id is not local refreshes the room first, and that
+// refresh can mirror a sibling's member drop. The join's own answer —
+// here a refusal, the game never existed — does not decide whether the
+// leave the refresh staged reaches the peers.
+TEST_F(LobbyFixture, AWorldLeaveStagedByARefreshOutlivesTheJoinsRefusal) {
+  auto alice = Arrive();
+  auto bob = Arrive();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+  moonbase::games::JoinRoom join_room;
+  join_room.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+  ASSERT_TRUE(alice->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "worldState").has_value());
+  ASSERT_TRUE(bob->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(bob->stream, "worldState").has_value());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "playerJoined").has_value());
+
+  // The sibling's drop, unannounced: alice's join to a game nobody made
+  // is what reads it.
+  store_->Enqueue({HubStore::DeleteMember{room_id, bob->player_id}});
+  moonbase::games::JoinGame join_game;
+  join_game.gameId = "NOSUCH";
+  ASSERT_TRUE(alice->stream.Send(Move(moonbase::games::GolfMove::FromJoingame(join_game))).ok());
+  // The leave first — it is the room's truth, ahead of the join's answer.
+  auto left = ReceiveLobby(alice->stream, "playerLeft");
+  ASSERT_TRUE(left.has_value());
+  EXPECT_EQ(left->as_playerLeft_or_null()->playerId, bob->player_id);
+  EXPECT_EQ(NextRejection(alice->stream), "game not found");
+}
+
 // A room a sibling deleted takes its members' world standing with it.
 TEST_F(LobbyFixture, ASiblingsRoomDeleteLeavesTheWorldToo) {
   auto alice = Arrive();

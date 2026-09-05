@@ -1521,11 +1521,11 @@ void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game
       }
     }
   }
-  if (refusal.has_value()) {
-    Reject(player_id, std::move(*refusal));
-  } else {
-    Deliver(outbox);
-  }
+  // Whatever the refresh staged — a peer's world leave, a re-projected
+  // room — is true either way, and a refused join is not a reason to
+  // drop it.
+  Deliver(outbox);
+  if (refusal.has_value()) Reject(player_id, std::move(*refusal));
 }
 
 void GolfHub::StartGameMove(const std::string& player_id) {
