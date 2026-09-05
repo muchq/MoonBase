@@ -15,6 +15,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -22,6 +23,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -758,6 +760,27 @@ class SeamFixture : public GamesHubStreamFixture {
     }
     park_cv_.notify_all();
   }
+  // A trigger on its own thread. Going out of scope releases the seam and
+  // joins, so an ASSERT that returns early neither destroys a joinable
+  // thread (std::terminate, and the rest of the binary with it) nor
+  // leaves the hub parked; declare it after the seats it touches.
+  class Trigger {
+   public:
+    Trigger(SeamFixture& fixture, std::function<void()> fn)
+        : fixture_(fixture), thread_(std::move(fn)) {}
+    ~Trigger() { Join(); }
+    void Join() {
+      if (!thread_.joinable()) return;
+      fixture_.Disarm();
+      fixture_.Release();
+      thread_.join();
+    }
+
+   private:
+    SeamFixture& fixture_;
+    std::thread thread_;
+  };
+
   // The hook body: parks the calling thread while a test has armed the seam.
   void Park(const std::string& stage) {
     std::unique_lock<std::mutex> lock(park_mu_);

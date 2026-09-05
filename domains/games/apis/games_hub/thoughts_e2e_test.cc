@@ -14,7 +14,6 @@
 #include <optional>
 #include <set>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -551,19 +550,17 @@ TEST_F(ThoughtsRaceFixture, ALeaveDuringAJoinLandsBehindTheJoinersSnapshot) {
   // snapshot (listing carol) already queued.
   Arm();
   bool join_sent = false;
-  std::thread joiner([&] { join_sent = bob->stream.Send(FixtureJoin()).ok(); });
+  Trigger joiner(*this, [&] { join_sent = bob->stream.Send(FixtureJoin()).ok(); });
   ASSERT_TRUE(WaitParked("snapshot"));
 
   // Carol leaves now. Her erase needs the lock bob holds, so nothing about
   // her leave can reach anyone yet — alice, in the world and not in the
   // seam, hears silence.
   bool leave_sent = false;
-  std::thread leaver([&] { leave_sent = carol->stream.Send(Leave()).ok(); });
+  Trigger leaver(*this, [&] { leave_sent = carol->stream.Send(Leave()).ok(); });
   ExpectNoEvent(alice->stream);
-  Disarm();
-  Release();
-  joiner.join();
-  leaver.join();
+  joiner.Join();
+  leaver.Join();
   EXPECT_TRUE(join_sent);
   EXPECT_TRUE(leave_sent);
 
@@ -604,7 +601,7 @@ TEST_F(ThoughtsRaceFixture, AClosedSocketErasesTheWorldBeforeReleasingTheSeat) {
   ASSERT_TRUE(NextEvent(bob->stream).has_value());
 
   Arm();
-  std::thread closer([&] { alice->stream.Close(); });
+  Trigger closer(*this, [&] { alice->stream.Close(); });
   ASSERT_TRUE(WaitParked("seat"));
 
   // Inside the seam: the world has already told bob, and the seat is still
@@ -616,9 +613,7 @@ TEST_F(ThoughtsRaceFixture, AClosedSocketErasesTheWorldBeforeReleasingTheSeat) {
   const auto seats = thoughts_->registry().Ids();
   EXPECT_NE(std::find(seats.begin(), seats.end(), alice->player_id), seats.end())
       << "the seat was released before the world was cleaned";
-  Disarm();
-  Release();
-  closer.join();
+  closer.Join();
 
   // Past the seam the seat frees, and the reconnect's join is a fresh
   // arrival: bob hears one playerJoined, nothing is refused.
@@ -649,18 +644,16 @@ TEST_F(ThoughtsRaceFixture, ARespawnDuringAJoinHearsTheJoinBeforeItsOwnSnapshot)
 
   Arm();
   bool join_sent = false;
-  std::thread joiner([&] { join_sent = alice->stream.Send(FixtureJoin()).ok(); });
+  Trigger joiner(*this, [&] { join_sent = alice->stream.Send(FixtureJoin()).ok(); });
   ASSERT_TRUE(WaitParked("snapshot"));
   bool respawn_sent = false;
-  std::thread respawner([&] {
+  Trigger respawner(*this, [&] {
     respawn_sent = bob->stream.Send(Leave()).ok() &&
                    bob->stream.Send(JoinIn("attic", {0, 0, 0}, {1, 1, 1}, 2)).ok();
   });
   ExpectNoEvent(bob->stream);
-  Disarm();
-  Release();
-  joiner.join();
-  respawner.join();
+  joiner.Join();
+  respawner.Join();
   EXPECT_TRUE(join_sent);
   EXPECT_TRUE(respawn_sent);
 
