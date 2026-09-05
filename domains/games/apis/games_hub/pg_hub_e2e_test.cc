@@ -27,7 +27,7 @@
 
 namespace games_hub {
 
-using moonbase::games::GolfCommands;
+using moonbase::games::GameCommands;
 using moonbase::games::GolfMove;
 
 class PgGamesHubFixture : public GamesHubStreamFixture {
@@ -288,7 +288,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     if (!seats.bob.has_value()) return "";
     if (!ReceiveCase(seats.bob->stream, "sessionReady").has_value()) return "";
 
-    if (!seats.alice->stream.Send(GolfCommands::FromCreateroom(moonbase::games::CreateRoom{}))
+    if (!seats.alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{}))
              .ok()) {
       return "";
     }
@@ -303,7 +303,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
 
     moonbase::games::JoinRoom join_room;
     join_room.roomId = room_id;
-    if (!seats.bob->stream.Send(GolfCommands::FromJoinroom(join_room)).ok()) return "";
+    if (!seats.bob->stream.Send(GameCommands::FromJoinroom(join_room)).ok()) return "";
     // bob's join materializes the room on his instance: his snapshot
     // already shows both members.
     if (!AwaitRoomState(
@@ -570,7 +570,7 @@ TEST_F(PgGamesHubFixture, LiveGameSurvivesARestart) {
   // The restored lobby puts them at the restored table: read off the
   // roster the row carries, not off anything the old process had.
   ASSERT_TRUE(
-      alice_back->stream.Send(GolfCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
+      alice_back->stream.Send(GameCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
           .ok());
   auto lobby = ReceiveCase(alice_back->stream, "roomState");
   ASSERT_TRUE(lobby.has_value());
@@ -627,7 +627,7 @@ TEST_F(PgGamesHubFixture, StatsSurviveARestart) {
   EXPECT_TRUE(replay->as_roomChatHistory_or_null()->messages.empty());
 
   ASSERT_TRUE(
-      alice_back->stream.Send(GolfCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
+      alice_back->stream.Send(GameCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
           .ok());
   // After the resume snapshot and its chat replay, the next frame is the
   // requested lobby itself: no restored game resync or ceremony queued.
@@ -902,7 +902,7 @@ TEST_F(PgGamesHubFixture, CorruptRowsLoseTheGameNotTheLobby) {
   ASSERT_TRUE(ready.has_value());
   ASSERT_TRUE(ready->as_sessionReady_or_null()->roomId.has_value());
   ASSERT_TRUE(
-      alice_back->stream.Send(GolfCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
+      alice_back->stream.Send(GameCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
           .ok());
   auto lobby = ReceiveCase(alice_back->stream, "roomState");
   ASSERT_TRUE(lobby.has_value());
@@ -917,7 +917,7 @@ TEST_F(PgGamesHubFixture, ConnectedFlagFollowsPresence) {
   auto alice = OpenSeat();
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
 
   {
@@ -1177,7 +1177,7 @@ TEST_F(PgGamesHubFixture, ChatCrossesInstancesBothWays) {
   ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
   QuiesceOnScopeExit quiesce{this, remote.get(), /*table=*/nullptr, &*alice, &*bob};
 
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
   auto created = ReceiveCase(alice->stream, "roomState");
   ASSERT_TRUE(created.has_value());
   const std::string room_id = created->as_roomState_or_null()->roomId;
@@ -1188,14 +1188,14 @@ TEST_F(PgGamesHubFixture, ChatCrossesInstancesBothWays) {
 
   moonbase::games::JoinRoom join;
   join.roomId = room_id;
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomChatHistory").has_value());
   remote->store->Flush();
 
   moonbase::games::Chat chat;
   chat.text = "hello from remote";
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromChat(chat)).ok());
   auto bob_echo = ReceiveCase(bob->stream, "roomChat");
   ASSERT_TRUE(bob_echo.has_value());
   auto to_alice = ReceiveCase(alice->stream, "roomChat");
@@ -1204,7 +1204,7 @@ TEST_F(PgGamesHubFixture, ChatCrossesInstancesBothWays) {
   EXPECT_EQ(to_alice->as_roomChat_or_null()->messageId, bob_echo->as_roomChat_or_null()->messageId);
 
   chat.text = "hello from primary";
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromChat(chat)).ok());
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
   auto to_bob = ReceiveCase(bob->stream, "roomChat");
   ASSERT_TRUE(to_bob.has_value());
@@ -1216,7 +1216,7 @@ TEST_F(PgGamesHubFixture, ChatCrossesInstancesBothWays) {
   auto charlie = OpenSeatVia(*remote->client);
   ASSERT_TRUE(charlie.has_value());
   ASSERT_TRUE(ReceiveCase(charlie->stream, "sessionReady").has_value());
-  ASSERT_TRUE(charlie->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(charlie->stream.Send(GameCommands::FromJoinroom(join)).ok());
   ASSERT_TRUE(ReceiveCase(charlie->stream, "roomState").has_value());
   auto replay = ReceiveCase(charlie->stream, "roomChatHistory");
   ASSERT_TRUE(replay.has_value());
@@ -1241,14 +1241,14 @@ TEST_F(PgGamesHubFixture, ChatCommittedDuringListenerOutageArrivesAfterReconnect
   ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
   QuiesceOnScopeExit quiesce{this, remote.get(), /*table=*/nullptr, &*alice, &*bob};
 
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
   auto created = ReceiveCase(alice->stream, "roomState");
   ASSERT_TRUE(created.has_value());
   const std::string room_id = created->as_roomState_or_null()->roomId;
   store_->Flush();
   moonbase::games::JoinRoom join;
   join.roomId = room_id;
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomChatHistory").has_value());
   remote->store->Flush();
@@ -1256,7 +1256,7 @@ TEST_F(PgGamesHubFixture, ChatCommittedDuringListenerOutageArrivesAfterReconnect
   // One exchanged message proves live delivery is up before the outage.
   moonbase::games::Chat chat;
   chat.text = "before";
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromChat(chat)).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomChat").has_value());
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
 
@@ -1271,7 +1271,7 @@ TEST_F(PgGamesHubFixture, ChatCommittedDuringListenerOutageArrivesAfterReconnect
   // but alice's instance can only learn of the row from a wake, and if
   // its notify fired into the gap, only the catch-up read remains.
   chat.text = "during outage";
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromChat(chat)).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomChat").has_value());
   auto healed = ReceiveCase(alice->stream, "roomChat");
   ASSERT_TRUE(healed.has_value());
@@ -1282,15 +1282,15 @@ TEST_F(PgGamesHubFixture, EmptiedRoomVanishesFromTheDatabase) {
   auto alice = OpenSeat();
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
   // A stored message, so the vanishing below has chat to take with it.
   store_->Flush();
   moonbase::games::Chat chat;
   chat.text = "soon gone";
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromChat(chat)).ok());
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromLeaveroom(moonbase::games::LeaveRoom{})).ok());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromLeaveroom(moonbase::games::LeaveRoom{})).ok());
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomLeft").has_value());
 
   auto rows = Rows();

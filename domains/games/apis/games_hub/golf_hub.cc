@@ -26,8 +26,8 @@ namespace games_hub {
 
 using moonbase::games::CastleMove;
 using moonbase::games::CastleUpdate;
-using moonbase::games::GolfCommands;
-using moonbase::games::GolfEvents;
+using moonbase::games::GameCommands;
+using moonbase::games::GameEvents;
 using moonbase::games::GolfMove;
 using moonbase::games::GolfUpdate;
 
@@ -107,33 +107,33 @@ std::string PlayerIdAt(const golf::GameState& state, int seat) {
   return state.getPlayer(seat).getName().value_or("");
 }
 
-GolfEvents GolfUpdateEvent(GolfUpdate update) {
+GameEvents GolfUpdateEvent(GolfUpdate update) {
   moonbase::games::GolfEvent event;
   event.update = std::move(update);
-  return GolfEvents::FromGolf(std::move(event));
+  return GameEvents::FromGolf(std::move(event));
 }
 
-GolfEvents CastleUpdateEvent(CastleUpdate update) {
+GameEvents CastleUpdateEvent(CastleUpdate update) {
   moonbase::games::CastleEvent event;
   event.update = std::move(update);
-  return GolfEvents::FromCastle(std::move(event));
+  return GameEvents::FromCastle(std::move(event));
 }
 
 // The shared lifecycle announcements, in the table's own envelope.
-GolfEvents CreatedEvent(GameKind kind, moonbase::games::GameCreated created) {
+GameEvents CreatedEvent(GameKind kind, moonbase::games::GameCreated created) {
   return kind == GameKind::kCastle ? CastleUpdateEvent(CastleUpdate::FromGamecreated(created))
                                    : GolfUpdateEvent(GolfUpdate::FromGamecreated(created));
 }
-GolfEvents StartedEvent(GameKind kind) {
+GameEvents StartedEvent(GameKind kind) {
   return kind == GameKind::kCastle
              ? CastleUpdateEvent(CastleUpdate::FromGamestarted(moonbase::games::GameStarted{}))
              : GolfUpdateEvent(GolfUpdate::FromGamestarted(moonbase::games::GameStarted{}));
 }
-GolfEvents TurnEvent(GameKind kind, moonbase::games::TurnChanged turn) {
+GameEvents TurnEvent(GameKind kind, moonbase::games::TurnChanged turn) {
   return kind == GameKind::kCastle ? CastleUpdateEvent(CastleUpdate::FromTurnchanged(turn))
                                    : GolfUpdateEvent(GolfUpdate::FromTurnchanged(turn));
 }
-GolfEvents LeftEvent(GameKind kind, moonbase::games::GameLeft left) {
+GameEvents LeftEvent(GameKind kind, moonbase::games::GameLeft left) {
   return kind == GameKind::kCastle ? CastleUpdateEvent(CastleUpdate::FromGameleft(left))
                                    : GolfUpdateEvent(GolfUpdate::FromGameleft(left));
 }
@@ -332,7 +332,7 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"chat_rows_delivered", {}},
       {"golf_admissions_refused", {{"reason", "bad_ticket"}}},
       {"golf_admissions_refused", {{"reason", "seat_conflict"}}},
-      // The GolfCommands union in model order, golf.<move> for the envelope —
+      // The GameCommands union in model order, golf.<move> for the envelope —
       // CountCommand's naming, spelled out (see the model-pin note above).
       {"golf_commands", {{"command", "createRoom"}}},
       {"golf_commands", {{"command", "joinRoom"}}},
@@ -350,9 +350,14 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"golf_commands", {{"command", "golf.discardDrawn"}}},
       {"golf_commands", {{"command", "golf.knock"}}},
       {"golf_commands", {{"command", "golf.hideCards"}}},
+      // The lobby envelope's LobbyAction cases, prefixed like golf's.
+      {"golf_commands", {{"command", "lobby.join"}}},
+      {"golf_commands", {{"command", "lobby.move"}}},
+      {"golf_commands", {{"command", "lobby.shape"}}},
+      {"golf_commands", {{"command", "lobby.leave"}}},
       {"golf_disconnects", {{"kind", "clean"}}},
       {"golf_disconnects", {{"kind", "abrupt"}}},
-      // The GolfEvents union in model order, golf.<update> for the envelope —
+      // The GameEvents union in model order, golf.<update> for the envelope —
       // Send's naming.
       {"golf_events", {{"event", "sessionReady"}}},
       {"golf_events", {{"event", "roomState"}}},
@@ -368,6 +373,12 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"golf_events", {{"event", "golf.playerKnocked"}}},
       {"golf_events", {{"event", "golf.gameEnded"}}},
       {"golf_events", {{"event", "golf.gameLeft"}}},
+      // The lobby envelope's LobbyUpdate cases.
+      {"golf_events", {{"event", "lobby.worldState"}}},
+      {"golf_events", {{"event", "lobby.playerJoined"}}},
+      {"golf_events", {{"event", "lobby.playerMoved"}}},
+      {"golf_events", {{"event", "lobby.shapeChanged"}}},
+      {"golf_events", {{"event", "lobby.playerLeft"}}},
       {"golf_rate_limited", {{"kind", "chat"}}},
       {"golf_rate_limited", {{"kind", "command"}}},
       // One entry per RejectKind, in enum order.
@@ -880,7 +891,7 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
   ready.playerId = player_id;
   ready.resumed = resumed;
   if (room.has_value()) ready.roomId = *room;
-  Send(player_id, GolfEvents::FromSessionready(std::move(ready)));
+  Send(player_id, GameEvents::FromSessionready(std::move(ready)));
   // A resumed seat's room sees the connected flip (and the resumer gets
   // the current snapshot it missed) — then the chat it missed, after its
   // roomState per the documented order, and only to this stream. The
@@ -912,6 +923,14 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
       if (registry_.Detach(player_id)) {
         TrackActive(-1);
         Count("golf_disconnects", {{"kind", received.ok() ? "clean" : "abrupt"}});
+        // The world is presence, not membership: the seat parks, the
+        // player leaves the world now, and rejoins on resume.
+        Outbox left;
+        {
+          const std::lock_guard<std::mutex> lock(mu_);
+          LeaveWorldLocked(player_id, left);
+        }
+        Deliver(left);
         SetConnected(player_id, false);
         if (auto current = CurrentRoom(player_id)) BroadcastRoom(*current);
       }
@@ -936,7 +955,7 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
   }
 }
 
-void GolfHub::HandleCommand(const std::string& player_id, const GolfCommands& command) {
+void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& command) {
   CountCommand(command);
   if (command.as_createRoom_or_null() != nullptr) {
     std::string room_id;
@@ -951,6 +970,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GolfCommands& co
         // Born at zero with its room: it provably has no rows, and the
         // creator's first message must pump from the very beginning.
         chat_cursors_.emplace(room_id, ChatCursor{});
+        LeaveWorldLocked(player_id, outbox);  // out of the plaza's world
         player_room_[player_id] = room_id;
         ListenRoomLocked(room_id);
         StageLocked(writes, HubStore::UpsertRoom{room_id});
@@ -990,6 +1010,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GolfCommands& co
         const auto room = rooms_.find(join->roomId);
         if (room != rooms_.end()) {
           const auto [member, inserted] = room->second.members.emplace(player_id, Member{});
+          LeaveWorldLocked(player_id, outbox);  // out of the plaza's world
           player_room_[player_id] = join->roomId;
           StageMemberLocked(join->roomId, player_id, member->second, writes);
           StageWakeLocked(join->roomId, writes);
@@ -1022,7 +1043,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GolfCommands& co
       if (it != player_room_.end()) {
         moonbase::games::RoomLeft ack;
         ack.roomId = it->second;
-        outbox.To(player_id, GolfEvents::FromRoomleft(std::move(ack)));
+        outbox.To(player_id, GameEvents::FromRoomleft(std::move(ack)));
         LeaveEverywhere(player_id, outbox, writes);
         EnqueueWritesLocked(writes);
         left = true;
@@ -1037,14 +1058,14 @@ void GolfHub::HandleCommand(const std::string& player_id, const GolfCommands& co
   }
 
   if (command.as_getRoomState_or_null() != nullptr) {
-    std::optional<GolfEvents> snapshot;
+    std::optional<GameEvents> snapshot;
     {
       const std::lock_guard<std::mutex> lock(mu_);
       const auto it = player_room_.find(player_id);
       if (it != player_room_.end()) {
         const auto room = rooms_.find(it->second);
         if (room != rooms_.end()) {
-          snapshot = GolfEvents::FromRoomstate(RoomStateLocked(it->second, room->second));
+          snapshot = GameEvents::FromRoomstate(RoomStateLocked(it->second, room->second));
         }
       }
     }
@@ -1112,7 +1133,66 @@ void GolfHub::HandleCommand(const std::string& player_id, const GolfCommands& co
     return;
   }
 
+  if (const auto* lobby = command.as_lobby_or_null()) {
+    HandleLobby(player_id, lobby->action);
+    return;
+  }
+
   Reject(player_id, RejectKind::kUnknown, "unknown command");
+}
+
+void GolfHub::HandleLobby(const std::string& player_id,
+                          const moonbase::games::LobbyAction& action) {
+  std::optional<World::Refusal> refusal;
+  Outbox outbox;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    World::Deliveries deliveries;
+    if (const auto* join = action.as_join_or_null()) {
+      // The world is the session's: a roomId, if the client names one,
+      // can only agree.
+      const std::string world = WorldOfLocked(player_id);
+      if (join->roomId.has_value() && *join->roomId != world) {
+        refusal =
+            World::Refusal{RejectKind::kState, "the world is your room's; join the room first"};
+      } else {
+        refusal = world_.Join(player_id, world, *join, deliveries);
+      }
+    } else if (const auto* move = action.as_move_or_null()) {
+      refusal = world_.Move(player_id, *move, deliveries);
+    } else if (const auto* shape = action.as_shape_or_null()) {
+      refusal = world_.Shape(player_id, *shape, deliveries);
+    } else if (action.as_leave_or_null() != nullptr) {
+      if (!world_.Leave(player_id, deliveries)) {
+        refusal = World::Refusal{RejectKind::kState, "not in the world"};
+      }
+    } else {
+      refusal = World::Refusal{RejectKind::kUnknown, "unknown command"};
+    }
+    StageWorldLocked(deliveries, outbox);
+  }
+  Deliver(outbox);
+  if (refusal.has_value()) Reject(player_id, refusal->kind, std::move(refusal->reason));
+}
+
+std::string GolfHub::WorldOfLocked(const std::string& player_id) const {
+  const auto room = player_room_.find(player_id);
+  return room != player_room_.end() ? room->second : std::string(World::kPlaza);
+}
+
+void GolfHub::StageWorldLocked(World::Deliveries& deliveries, Outbox& outbox) {
+  for (auto& delivery : deliveries) {
+    moonbase::games::LobbyEvent event;
+    event.update = std::move(delivery.update);
+    outbox.To(delivery.to, GameEvents::FromLobby(std::move(event)));
+  }
+  deliveries.clear();
+}
+
+void GolfHub::LeaveWorldLocked(const std::string& player_id, Outbox& outbox) {
+  World::Deliveries deliveries;
+  world_.Leave(player_id, deliveries);
+  StageWorldLocked(deliveries, outbox);
 }
 
 void GolfHub::HandleMove(const std::string& player_id, const GolfMove& move) {
@@ -1748,6 +1828,7 @@ std::optional<GolfHub::GameRef> GolfHub::FindGameLocked(const std::string& playe
 }
 
 void GolfHub::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writes& writes) {
+  LeaveWorldLocked(player_id, outbox);
   LeaveGameLocked(player_id, outbox, writes);
 
   const auto it = player_room_.find(player_id);
@@ -1882,7 +1963,7 @@ void GolfHub::Reject(const std::string& player_id, RejectKind kind, std::string 
   Count("golf_rejections", {{"kind", RejectKindName(kind)}});
   moonbase::games::CommandRejected rejected;
   rejected.reason = std::move(reason);
-  Send(player_id, GolfEvents::FromCommandrejected(std::move(rejected)));
+  Send(player_id, GameEvents::FromCommandrejected(std::move(rejected)));
 }
 
 void GolfHub::OnExpired(const std::string& player_id) {
@@ -1987,7 +2068,7 @@ void GolfHub::PumpChat(const std::string& room_id) {
       }
       for (const ChatRow& row : *rows) {
         if (row.message_id <= cursor->second.delivered) continue;
-        const GolfEvents event = GolfEvents::FromRoomchat(ChatEvent(row));
+        const GameEvents event = GameEvents::FromRoomchat(ChatEvent(row));
         for (const auto& member : room->second.members) outbox.To(member.first, event);
         cursor->second.delivered = row.message_id;
         ++drained;
@@ -2027,7 +2108,7 @@ void GolfHub::SendChatHistory(const std::string& room_id, const std::string& pla
   moonbase::games::ChatHistory history;
   history.messages.reserve(rows->size());
   for (const ChatRow& row : *rows) history.messages.push_back(ChatEvent(row));
-  Send(player_id, GolfEvents::FromRoomchathistory(std::move(history)));
+  Send(player_id, GameEvents::FromRoomchathistory(std::move(history)));
   Count("chat_history_replays");
 }
 
@@ -2043,29 +2124,34 @@ void GolfHub::TrackActive(int delta) {
 
 // Each game's envelope counts on its own series; the room layer's
 // commands and events stay on golf_* (the stream's original name).
-void GolfHub::CountCommand(const GolfCommands& command) {
+void GolfHub::CountCommand(const GameCommands& command) {
   if (!metrics_) return;
   if (const auto* castle_envelope = command.as_castle_or_null()) {
     metrics_->RecordCounter("castle_commands", 1,
                             {{"command", std::string(castle_envelope->move.case_name())}});
     return;
   }
-  const auto* envelope = command.as_golf_or_null();
-  const std::string name = envelope != nullptr ? absl::StrCat("golf.", envelope->move.case_name())
-                                               : std::string(command.case_name());
+  std::string name(command.case_name());
+  if (const auto* envelope = command.as_golf_or_null()) {
+    name = absl::StrCat("golf.", envelope->move.case_name());
+  } else if (const auto* lobby = command.as_lobby_or_null()) {
+    name = absl::StrCat("lobby.", lobby->action.case_name());
+  }
   metrics_->RecordCounter("golf_commands", 1, {{"command", name}});
 }
 
-void GolfHub::Send(const std::string& player_id, GolfEvents event) {
+void GolfHub::Send(const std::string& player_id, GameEvents event) {
   if (metrics_) {
     if (const auto* castle_envelope = event.as_castle_or_null()) {
       metrics_->RecordCounter("castle_events", 1,
                               {{"event", std::string(castle_envelope->update.case_name())}});
     } else {
-      const auto* envelope = event.as_golf_or_null();
-      const std::string name = envelope != nullptr
-                                   ? absl::StrCat("golf.", envelope->update.case_name())
-                                   : std::string(event.case_name());
+      std::string name(event.case_name());
+      if (const auto* envelope = event.as_golf_or_null()) {
+        name = absl::StrCat("golf.", envelope->update.case_name());
+      } else if (const auto* lobby = event.as_lobby_or_null()) {
+        name = absl::StrCat("lobby.", lobby->update.case_name());
+      }
       metrics_->RecordCounter("golf_events", 1, {{"event", name}});
     }
   }
@@ -2113,7 +2199,7 @@ void GolfHub::StageRoomStateLocked(const std::string& room_id, Outbox& outbox) c
   if (room == rooms_.end()) return;
   const moonbase::games::RoomState state = RoomStateLocked(room_id, room->second);
   for (const auto& member : room->second.members) {
-    outbox.To(member.first, GolfEvents::FromRoomstate(state));
+    outbox.To(member.first, GameEvents::FromRoomstate(state));
   }
 }
 
@@ -2247,7 +2333,7 @@ moonbase::games::CastleView GolfHub::CastleViewLocked(const std::string& game_id
   return view;
 }
 
-GolfEvents GolfHub::JoinedEventLocked(const std::string& game_id, const GameEntry& entry,
+GameEvents GolfHub::JoinedEventLocked(const std::string& game_id, const GameEntry& entry,
                                       const std::string& viewer_id) const {
   if (entry.kind == GameKind::kCastle) {
     moonbase::games::CastleGameJoined joined;

@@ -5,9 +5,10 @@
 //
 //   bazel run //domains/games/apis/games_hub
 //   curl -X POST localhost:8080/games/v2/session -H 'content-type: application/json' -d '{}'
-//   # browser: new WebSocket("ws://localhost:8080/games/v2/golf/play?ticket=<t>",
+//   # browser: new WebSocket("ws://localhost:8080/games/v2/play?ticket=<t>",
 //   #                        "smithy.eventstream.v1+json")
-//   #          ...or /games/v2/thoughts/play?ticket=<t> on the same ticket shape
+//   #          ...or the pre-lobby /games/v2/golf/play and
+//   #          /games/v2/thoughts/play on the same ticket shape
 //   kill -TERM <pid>   # drains sessions, then exits 0
 
 #include <chrono>
@@ -236,10 +237,11 @@ int main() {
 
   LOG(INFO) << "Games hub running on http://" << options.address << ":" << transport.port();
   LOG(INFO) << "  POST http://localhost:" << transport.port() << "/games/v2/session";
+  LOG(INFO) << "  WS   ws://localhost:" << transport.port() << "/games/v2/play?ticket=<ticket>";
   LOG(INFO) << "  WS   ws://localhost:" << transport.port()
-            << "/games/v2/golf/play?ticket=<ticket>";
+            << "/games/v2/golf/play?ticket=<ticket> (pre-lobby route)";
   LOG(INFO) << "  WS   ws://localhost:" << transport.port()
-            << "/games/v2/thoughts/play?ticket=<ticket>";
+            << "/games/v2/thoughts/play?ticket=<ticket> (pre-lobby route)";
 
   int signal_number = 0;
   sigwait(&shutdown_signals, &signal_number);

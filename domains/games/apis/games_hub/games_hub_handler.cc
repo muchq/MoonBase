@@ -63,6 +63,13 @@ smithy::eventstream::StreamTask GamesHubHandler::Play(
   return golf_->Play(std::move(input), stream);
 }
 
+smithy::eventstream::StreamTask GamesHubHandler::PlayLegacy(
+    moonbase::games::PlayLegacyInput input, moonbase::games::PlayLegacyAsyncServerStream& stream) {
+  moonbase::games::PlayInput play;
+  play.ticket = std::move(input.ticket);
+  return golf_->Play(std::move(play), stream);
+}
+
 smithy::eventstream::StreamTask GamesHubHandler::Think(
     moonbase::games::ThinkInput input, moonbase::games::ThinkAsyncServerStream& stream) {
   return thoughts_->Think(std::move(input), stream);

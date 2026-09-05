@@ -123,6 +123,10 @@ api.muchq.com {
 		path /games/v2/session
 	}
 
+	@ws_play_v2 {
+		path /games/v2/play
+	}
+
 	@ws_golf_v2 {
 		path /games/v2/golf/play
 	}
@@ -169,6 +173,9 @@ api.muchq.com {
 	}
 
 	handle @post_golf_v2_session {
+		reverse_proxy games_hub:8089
+	}
+	handle @ws_play_v2 {
 		reverse_proxy games_hub:8089
 	}
 	handle @ws_golf_v2 {

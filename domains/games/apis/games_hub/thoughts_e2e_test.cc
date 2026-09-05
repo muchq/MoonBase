@@ -21,6 +21,7 @@
 
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 #include "domains/games/apis/games_hub/thoughts_hub.h"
+#include "domains/games/apis/games_hub/world.h"
 
 namespace games_hub {
 namespace {
@@ -348,7 +349,7 @@ TEST_F(GamesHubStreamFixture, TheWorldsBoundsAreRefusedInBandAndChangeNothing) {
       {"room id with a NUL", JoinIn(std::string("AB\0C", 4), {10, 0, -5}, {0.8, 0.2, 0.6}, 0),
        "invalid room id"},
       {"room id over the bound",
-       JoinIn(std::string(ThoughtsHub::kMaxRoomIdLength + 1, 'A'), {10, 0, -5}, {0.8, 0.2, 0.6}, 0),
+       JoinIn(std::string(World::kMaxRoomIdLength + 1, 'A'), {10, 0, -5}, {0.8, 0.2, 0.6}, 0),
        "invalid room id"},
   };
   for (const auto& c : refused) {
@@ -359,7 +360,7 @@ TEST_F(GamesHubStreamFixture, TheWorldsBoundsAreRefusedInBandAndChangeNothing) {
   // a room id at the bound names a room.
   ASSERT_TRUE(
       alice->stream
-          .Send(JoinIn(std::string(ThoughtsHub::kMaxRoomIdLength, 'A'), {50, 0, -50}, {0, 1, 1}, 2))
+          .Send(JoinIn(std::string(World::kMaxRoomIdLength, 'A'), {50, 0, -50}, {0, 1, 1}, 2))
           .ok());
   ASSERT_NE(NextEvent(alice->stream).value().as_worldState_or_null(), nullptr);
   ASSERT_TRUE(alice->stream.Send(Leave()).ok());

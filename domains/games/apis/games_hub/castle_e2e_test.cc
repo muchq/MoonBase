@@ -27,7 +27,7 @@ namespace {
 
 using moonbase::games::CastleMove;
 using moonbase::games::CastleUpdate;
-using moonbase::games::GolfCommands;
+using moonbase::games::GameCommands;
 using moonbase::games::GolfMove;
 
 std::string Face(const moonbase::games::Card& card) { return card.rank + card.suit; }
@@ -379,7 +379,7 @@ TEST_F(CastleGameFixture, TheRoomListsTablesByGameAndAGolfMoveOnACastleTableIsRe
   ASSERT_TRUE(ReceiveCastle(table->bob.stream, "gameState").has_value());
 
   ASSERT_TRUE(
-      table->alice.stream.Send(GolfCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
+      table->alice.stream.Send(GameCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
           .ok());
   auto room = ReceiveCase(table->alice.stream, "roomState");
   ASSERT_TRUE(room.has_value());
@@ -398,7 +398,7 @@ TEST_F(CastleGameFixture, TheRoomListsTablesByGameAndAGolfMoveOnACastleTableIsRe
   // Nothing reached the table: bob's next event is his own room snapshot,
   // with no castle update in front of it.
   ASSERT_TRUE(
-      table->bob.stream.Send(GolfCommands::FromGetroomstate(moonbase::games::GetRoomState{})).ok());
+      table->bob.stream.Send(GameCommands::FromGetroomstate(moonbase::games::GetRoomState{})).ok());
   for (int i = 0; i < 8; ++i) {
     auto event = NextEvent(table->bob.stream);
     ASSERT_TRUE(event.has_value());
@@ -418,7 +418,7 @@ TEST_F(CastleGameFixture, ATableOfEachGameCanShareARoomAndJoinsAreByGame) {
   ASSERT_FALSE(room_id.empty());
   moonbase::games::JoinRoom join_room;
   join_room.roomId = room_id;
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
 
   ASSERT_TRUE(
@@ -439,7 +439,7 @@ TEST_F(CastleGameFixture, ATableOfEachGameCanShareARoomAndJoinsAreByGame) {
 
   // Both tables in the room's lobby, each named by its game.
   ASSERT_TRUE(
-      bob->stream.Send(GolfCommands::FromGetroomstate(moonbase::games::GetRoomState{})).ok());
+      bob->stream.Send(GameCommands::FromGetroomstate(moonbase::games::GetRoomState{})).ok());
   auto room = ReceiveCase(bob->stream, "roomState");
   ASSERT_TRUE(room.has_value());
   std::map<std::string, std::string> games;
@@ -519,7 +519,7 @@ TEST_F(CastleGameFixture, CastleMovesOnAGolfTableAreRefusedAndEngineRefusalsCoun
   ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
   moonbase::games::JoinRoom join_room;
   join_room.roomId = golf_table->room_id;
-  ASSERT_TRUE(carol->stream.Send(GolfCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(carol->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
   ASSERT_TRUE(ReceiveCase(carol->stream, "roomState").has_value());
   moonbase::games::JoinGame join_game;
   join_game.gameId = golf_table->game_id;

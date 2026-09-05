@@ -12,6 +12,12 @@ use moonbase.games#Unauthenticated
 // ground plane, a color, and a shape, and every change reaches everyone
 // else in the same world. The hub relays; it simulates nothing and
 // remembers nothing past the connection.
+//
+// Two ways in. The `lobby` member of the room's Play stream (games.smithy)
+// is the one the lobby uses: the world is the session's room's, or the
+// plaza's while unroomed, on the same socket as chat and the tables. The
+// Think stream below is the pre-lobby route today's muchq.com/thoughts
+// dials, with its own world; it retires once the site has moved.
 
 /// The one WebSocket session per player, on the same ticket GetSession
 /// mints for golf. Invalid commands come back as commandRejected events
@@ -43,13 +49,41 @@ union ThoughtsCommands {
     leave: LeaveWorld
 }
 
+/// The lobby envelope on the room stream: exactly one action.
+structure LobbyCommand {
+    @required
+    action: LobbyAction
+}
+
+union LobbyAction {
+    join: JoinWorld
+    move: MoveTo
+    shape: ChangeShape
+    leave: LeaveWorld
+}
+
+/// The lobby envelope on the event stream: exactly one update. The
+/// session's own sessionReady and commandRejected are the stream's.
+structure LobbyEvent {
+    @required
+    update: LobbyUpdate
+}
+
+union LobbyUpdate {
+    worldState: WorldState
+    playerJoined: PlayerJoined
+    playerMoved: PlayerMoved
+    shapeChanged: ShapeChanged
+    playerLeft: PlayerLeft
+}
+
 /// Enter a world. Refused while already in one: leave first to respawn,
 /// which is also how a color or a room changes.
 structure JoinWorld {
-    /// The room whose world to enter; absent, the public plaza — a
-    /// well-known room, "plaza", so an unroomed join and a join naming it
-    /// land together. Any other id names a world of its own; the room
-    /// layer is not consulted (that is #1490's phase 3).
+    /// On the room stream the world is the session's: its room's, or the
+    /// plaza's — the well-known room "plaza" — while unroomed; a roomId
+    /// here must name that or is refused. On Think, absent is the plaza
+    /// and any other id names a world of its own.
     roomId: String
 
     @required

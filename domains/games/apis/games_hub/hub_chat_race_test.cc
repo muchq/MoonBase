@@ -35,7 +35,7 @@
 namespace games_hub {
 namespace {
 
-using moonbase::games::GolfCommands;
+using moonbase::games::GameCommands;
 
 class TestGate {
  public:
@@ -207,7 +207,7 @@ class HubChatRaceFixture : public GamesHubStreamFixture {
     if (room_id.empty()) return std::nullopt;
     moonbase::games::JoinRoom join;
     join.roomId = room_id;
-    if (!bob->stream.Send(GolfCommands::FromJoinroom(join)).ok()) return std::nullopt;
+    if (!bob->stream.Send(GameCommands::FromJoinroom(join)).ok()) return std::nullopt;
     if (!ReceiveCase(bob->stream, "roomState").has_value()) return std::nullopt;
     if (!ReceiveCase(bob->stream, "roomChatHistory").has_value()) return std::nullopt;
     return Pair{std::move(*alice), std::move(*bob), room_id};
@@ -216,7 +216,7 @@ class HubChatRaceFixture : public GamesHubStreamFixture {
   bool SendChat(Seat& seat, const std::string& text) {
     moonbase::games::Chat chat;
     chat.text = text;
-    return seat.stream.Send(GolfCommands::FromChat(chat)).ok();
+    return seat.stream.Send(GameCommands::FromChat(chat)).ok();
   }
 
   // Asserts the stream's next frame — not merely a later one — is a
@@ -348,7 +348,7 @@ TEST_F(HubChatRaceFixture, WakesForUnheldRoomsAreIgnored) {
   ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
   moonbase::games::JoinRoom join;
   join.roomId = room_id;
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
   auto replay = ReceiveCase(bob->stream, "roomChatHistory");
   ASSERT_TRUE(replay.has_value());
@@ -374,7 +374,7 @@ TEST_F(HubChatRaceFixture, RestoredInstanceSeedsTheCursorInsteadOfReplayingThePa
   ASSERT_FALSE(room_id.empty());
   moonbase::games::JoinRoom join;
   join.roomId = room_id;
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomChatHistory").has_value());
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
@@ -441,7 +441,7 @@ TEST_F(HubChatRaceFixture, AppendCommittingDuringAnInFlightWakeLoadIsStillDelive
   ASSERT_FALSE(room_id.empty());
   moonbase::games::JoinRoom join;
   join.roomId = room_id;
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomChatHistory").has_value());
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());

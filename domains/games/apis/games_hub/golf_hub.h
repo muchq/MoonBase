@@ -22,6 +22,7 @@
 #include "domains/games/apis/games_hub/id_generator.h"
 #include "domains/games/apis/games_hub/rate_limiter.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
+#include "domains/games/apis/games_hub/world.h"
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
@@ -44,11 +45,20 @@ namespace games_hub {
 
 /// GolfHub is the room hub, phase 2 (#1187): seat admission, rooms,
 /// chat, and the game layer, behind GamesHubHandler::Play. The name is
-/// golf's; the room layer and castle (#77) live here too. A room hosts
-/// tables of either game (#79): golf on libs/cards/golf and castle on
-/// libs/cards/castle, each a member of the stream's unions with its own
-/// per-viewer view. Each game's envelope counts on its own castle_/golf_
-/// series; the room layer stays on golf_*. One SessionRegistry
+/// golf's; the room layer, castle (#77), and the lobby (#1490) live here
+/// too. A room hosts tables of either game (#79): golf on libs/cards/golf
+/// and castle on libs/cards/castle, each a member of the stream's unions
+/// with its own per-viewer view. Each game's envelope counts on its own
+/// castle_/golf_ series; the room layer and the lobby stay on golf_*.
+///
+/// The lobby member is the thoughts World (world.h) keyed by the session's
+/// room: a roomed session stands in its room's world, an unroomed one in
+/// the plaza's. Presence is the socket — a close leaves the world at once
+/// while the seat parks for grace — and the room: joining, creating, or
+/// leaving a room leaves whatever world the session stood in, and the
+/// client joins the new one. The world lives under mu_ with the rooms and
+/// its fan-outs ride the Outbox, so a member hears the world and the room
+/// in the order they changed. One SessionRegistry
 /// keyed by playerId carries all fan-out (async delivery — no writer
 /// threads); rooms are a mutex'd map, membership marked disconnected
 /// during ADR-0020 grace and reaped by on_expired — with one boot-time
@@ -83,7 +93,7 @@ namespace games_hub {
 /// fan-out and join-time history replay are still to come (#1226).
 class GolfHub final {
  public:
-  using Registry = smithy::server::SessionRegistry<moonbase::games::GolfEvents>;
+  using Registry = smithy::server::SessionRegistry<moonbase::games::GameEvents>;
 
   /// One counter series, name and exact attributes (hub_metrics.h); the
   /// alias keeps the golf-era spelling every test uses.
@@ -231,8 +241,8 @@ class GolfHub final {
   /// preserves staged order per recipient — callers stage in the order
   /// clients must observe (e.g. final views before gameEnded).
   struct Outbox {
-    std::vector<std::pair<std::string, moonbase::games::GolfEvents>> events;
-    void To(const std::string& player_id, moonbase::games::GolfEvents event) {
+    std::vector<std::pair<std::string, moonbase::games::GameEvents>> events;
+    void To(const std::string& player_id, moonbase::games::GameEvents event) {
       events.emplace_back(player_id, std::move(event));
     }
   };
@@ -263,9 +273,19 @@ class GolfHub final {
     GameEntry* entry = nullptr;
   };
 
-  void HandleCommand(const std::string& player_id, const moonbase::games::GolfCommands& command);
+  void HandleCommand(const std::string& player_id, const moonbase::games::GameCommands& command);
   void HandleMove(const std::string& player_id, const moonbase::games::GolfMove& move);
   void HandleCastleMove(const std::string& player_id, const moonbase::games::CastleMove& move);
+  /// The lobby member: the session's world is its room's, or the plaza's.
+  void HandleLobby(const std::string& player_id, const moonbase::games::LobbyAction& action);
+  /// The world key a session stands in, or would: its room, else the plaza.
+  std::string WorldOfLocked(const std::string& player_id) const;
+  /// Stages the world's deliveries as lobby events; callers hold mu_.
+  static void StageWorldLocked(World::Deliveries& deliveries, Outbox& outbox);
+  /// Out of whatever world the session stood in, the rest of it told;
+  /// callers hold mu_. Shared by every way of leaving: the close path,
+  /// LeaveEverywhere, and a room change.
+  void LeaveWorldLocked(const std::string& player_id, Outbox& outbox);
   /// The lifecycle moves both games share. Create and join are told
   /// which game's envelope asked — a golf join of a castle table is
   /// refused, so nobody is seated at a table whose vocabulary they do not
@@ -292,9 +312,9 @@ class GolfHub final {
   /// each exports a zero baseline before it counts anything.
   void DeclareMetrics();
   void TrackActive(int delta);
-  void CountCommand(const moonbase::games::GolfCommands& command);
+  void CountCommand(const moonbase::games::GameCommands& command);
   /// Every event leaves through here so golf_events sees each send.
-  void Send(const std::string& player_id, moonbase::games::GolfEvents event);
+  void Send(const std::string& player_id, moonbase::games::GameEvents event);
 
   /// Loads the room's retained history and sends one roomChatHistory to
   /// the just-admitted player — nobody else; the room already has it.
@@ -438,7 +458,7 @@ class GolfHub final {
   moonbase::games::CastleView CastleViewLocked(const std::string& game_id, const GameEntry& entry,
                                                const std::string& viewer_id) const;
   /// One viewer's gameJoined in the table's own vocabulary.
-  moonbase::games::GolfEvents JoinedEventLocked(const std::string& game_id, const GameEntry& entry,
+  moonbase::games::GameEvents JoinedEventLocked(const std::string& game_id, const GameEntry& entry,
                                                 const std::string& viewer_id) const;
   void StageGameViewsLocked(const std::string& game_id, const GameEntry& entry,
                             Outbox& outbox) const;
@@ -468,6 +488,8 @@ class GolfHub final {
   std::mutex mu_;
   pg::Listener* listener_ = nullptr;  // owned by the caller; guarded by mu_
   std::unordered_map<std::string, Room> rooms_;
+  /// The lobby's worlds, one per room and the plaza; guarded by mu_.
+  World world_;
 
   /// Where live chat delivery stands for one held room. `delivered` is
   /// the highest message id every current local member has been staged.
