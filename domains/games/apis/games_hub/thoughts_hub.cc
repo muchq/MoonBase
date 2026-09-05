@@ -45,10 +45,12 @@ std::optional<std::string> ShapeProblem(std::int32_t shape) {
   return std::nullopt;
 }
 
-// A named room is held to golf's joinRoom rule, and the reason it gives;
-// an absent one is the plaza.
+// A named room: golf's NUL rule and its reason, plus an empty id refused
+// and a length bound, because any id here creates a world and golf's
+// store is not behind it to refuse one. An absent room is the plaza.
 std::optional<std::string> RoomProblem(const std::optional<std::string>& room_id) {
-  if (room_id.has_value() && (room_id->empty() || HasEmbeddedNul(*room_id))) {
+  if (room_id.has_value() && (room_id->empty() || room_id->size() > ThoughtsHub::kMaxRoomIdLength ||
+                              HasEmbeddedNul(*room_id))) {
     return "invalid room id";
   }
   return std::nullopt;
@@ -193,37 +195,30 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
     standing.player.color = join->color;
     standing.player.shape = join->shape;
     bool already_joined = false;
-    std::vector<std::string> others;
     {
       const std::lock_guard<std::mutex> lock(mu_);
       if (world_.contains(player_id)) {
         already_joined = true;
       } else {
         moonbase::games::WorldState snapshot;
-        others = OthersInLocked(standing.room_id, player_id);
-        for (const auto& id : others) snapshot.players.push_back(world_.at(id).player);
-        world_.emplace(player_id, standing);
-        // Queued to the joiner while mu_ is still held, deliberately: every
-        // other player's mutation takes mu_ before it fans out, so with the
-        // snapshot queued inside this hold, any playerLeft or playerMoved
-        // that reaches the joiner was either already applied to the
-        // snapshot or lands behind it. Queued after the unlock, a leave
-        // could slip its playerLeft in ahead of a snapshot that still lists
-        // the leaver — a ghost nothing later removes. Only the joiner's own
-        // queue is touched here, so no other session's close path can be
-        // completed inline under this lock.
+        for (const auto& [id, other] : world_) {
+          if (other.room_id == standing.room_id) snapshot.players.push_back(other.player);
+        }
+        // The joiner's snapshot first, then the world hears of them, both
+        // in this hold: every mutation queues its fan-out under mu_, so
+        // whatever reaches the joiner after the snapshot happened after
+        // it, and whoever hears the join has already seen everything the
+        // snapshot did.
         Send(player_id, ThoughtsEvents::FromWorldstate(std::move(snapshot)));
         if (hooks_.after_snapshot_queued) hooks_.after_snapshot_queued();
+        moonbase::games::PlayerJoined joined;
+        joined.player = standing.player;
+        FanOutLocked(standing.room_id, player_id,
+                     ThoughtsEvents::FromPlayerjoined(std::move(joined)));
+        world_.emplace(player_id, std::move(standing));
       }
     }
-    if (already_joined) {
-      Reject(player_id, RejectKind::kState, "already in the world; leave first");
-      return;
-    }
-    // Then the rest of the world hears of the joiner.
-    moonbase::games::PlayerJoined joined;
-    joined.player = std::move(standing.player);
-    Broadcast(others, ThoughtsEvents::FromPlayerjoined(std::move(joined)));
+    if (already_joined) Reject(player_id, RejectKind::kState, "already in the world; leave first");
     return;
   }
 
@@ -232,24 +227,20 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
       Reject(player_id, RejectKind::kInvalid, *problem);
       return;
     }
+    moonbase::games::PlayerMoved moved;
+    moved.playerId = player_id;
+    moved.position = move->position;
     bool in_world = false;
-    std::vector<std::string> others;
     {
       const std::lock_guard<std::mutex> lock(mu_);
       if (const auto it = world_.find(player_id); it != world_.end()) {
         it->second.player.position = move->position;
         in_world = true;
-        others = OthersInLocked(it->second.room_id, player_id);
+        FanOutLocked(it->second.room_id, player_id,
+                     ThoughtsEvents::FromPlayermoved(std::move(moved)));
       }
     }
-    if (!in_world) {
-      Reject(player_id, RejectKind::kState, "join the world first");
-      return;
-    }
-    moonbase::games::PlayerMoved moved;
-    moved.playerId = player_id;
-    moved.position = move->position;
-    Broadcast(others, ThoughtsEvents::FromPlayermoved(std::move(moved)));
+    if (!in_world) Reject(player_id, RejectKind::kState, "join the world first");
     return;
   }
 
@@ -258,24 +249,20 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
       Reject(player_id, RejectKind::kInvalid, *problem);
       return;
     }
+    moonbase::games::ShapeChanged changed;
+    changed.playerId = player_id;
+    changed.shape = shape->shape;
     bool in_world = false;
-    std::vector<std::string> others;
     {
       const std::lock_guard<std::mutex> lock(mu_);
       if (const auto it = world_.find(player_id); it != world_.end()) {
         it->second.player.shape = shape->shape;
         in_world = true;
-        others = OthersInLocked(it->second.room_id, player_id);
+        FanOutLocked(it->second.room_id, player_id,
+                     ThoughtsEvents::FromShapechanged(std::move(changed)));
       }
     }
-    if (!in_world) {
-      Reject(player_id, RejectKind::kState, "join the world first");
-      return;
-    }
-    moonbase::games::ShapeChanged changed;
-    changed.playerId = player_id;
-    changed.shape = shape->shape;
-    Broadcast(others, ThoughtsEvents::FromShapechanged(std::move(changed)));
+    if (!in_world) Reject(player_id, RejectKind::kState, "join the world first");
     return;
   }
 
@@ -288,27 +275,15 @@ void ThoughtsHub::HandleCommand(const std::string& player_id, const ThoughtsComm
 }
 
 bool ThoughtsHub::Leave(const std::string& player_id) {
-  std::vector<std::string> others;
-  {
-    const std::lock_guard<std::mutex> lock(mu_);
-    const auto it = world_.find(player_id);
-    if (it == world_.end()) return false;
-    others = OthersInLocked(it->second.room_id, player_id);
-    world_.erase(it);
-  }
   moonbase::games::PlayerLeft left;
   left.playerId = player_id;
-  Broadcast(others, ThoughtsEvents::FromPlayerleft(std::move(left)));
+  const std::lock_guard<std::mutex> lock(mu_);
+  const auto it = world_.find(player_id);
+  if (it == world_.end()) return false;
+  const std::string room_id = std::move(it->second.room_id);
+  world_.erase(it);
+  FanOutLocked(room_id, player_id, ThoughtsEvents::FromPlayerleft(std::move(left)));
   return true;
-}
-
-std::vector<std::string> ThoughtsHub::OthersInLocked(const std::string& room_id,
-                                                     const std::string& player_id) const {
-  std::vector<std::string> others;
-  for (const auto& [id, standing] : world_) {
-    if (id != player_id && standing.room_id == room_id) others.push_back(id);
-  }
-  return others;
 }
 
 void ThoughtsHub::Reject(const std::string& player_id, RejectKind kind, std::string reason) {
@@ -326,8 +301,12 @@ void ThoughtsHub::Send(const std::string& player_id, ThoughtsEvents event) {
   registry_.SendTo(player_id, std::move(event));
 }
 
-void ThoughtsHub::Broadcast(const std::vector<std::string>& recipients,
-                            const ThoughtsEvents& event) {
+void ThoughtsHub::FanOutLocked(const std::string& room_id, const std::string& actor_id,
+                               const ThoughtsEvents& event) {
+  std::vector<std::string> recipients;
+  for (const auto& [id, standing] : world_) {
+    if (id != actor_id && standing.room_id == room_id) recipients.push_back(id);
+  }
   if (recipients.empty()) return;
   if (metrics_) {
     // One per delivery, as Send counts: the series is how many events left

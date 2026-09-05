@@ -90,7 +90,8 @@ union ThoughtsEvents {
 
 /// Everyone already in the joined world, sent once to a joiner — before
 /// anyone else hears their playerJoined, and never listing the joiner.
-/// Empty when the world is.
+/// Empty when the world is. A full replacement: a client that respawns
+/// draws this world and nothing it drew before.
 structure WorldState {
     @required
     players: WorldPlayers

@@ -52,9 +52,10 @@ the room layer is not consulted. `join` answers the joiner with a
 `shapeChanged`, never echoed and never past the world's edge; `leave` —
 or a closed socket, alike — fans out `playerLeft`. A session that has
 not joined hears nothing. Out-of-bounds values, a bad room id, and
-commands before a join are refused in-band as `commandRejected`. No persistence and no reconnect
-grace: presence is the whole game. `ThoughtsHub` (`thoughts_hub.cc`)
-carries it, `GolfHub` (`golf_hub.cc`) carries the room games, golf and castle, and `GamesHubHandler`
+commands before a join are refused in-band as `commandRejected`. No
+persistence and no reconnect grace: presence is the whole game.
+`ThoughtsHub` (`thoughts_hub.cc`) carries it, `GolfHub` (`golf_hub.cc`)
+carries the room games, golf and castle, and `GamesHubHandler`
 implements the generated service: it mints sessions itself and forwards
 each stream to its hub. The two hubs share the ticket vault and nothing
 else. Counters carry the `thoughts_` prefix.
