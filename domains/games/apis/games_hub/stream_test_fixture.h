@@ -13,7 +13,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <condition_variable>
 #include <fstream>
 #include <functional>
 #include <map>
@@ -32,7 +31,6 @@
 #include "domains/games/apis/games_hub/golf_hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/id_generator.h"
-#include "domains/games/apis/games_hub/thoughts_hub.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
@@ -60,11 +58,10 @@ inline std::string SeriesLabel(const CounterSeries& series) {
   return label + "}";
 }
 
-// The non-counter instruments the hubs emit (one live-session gauge each).
+// The non-counter instruments the hub emits (the live-session gauge).
 // Entry carries no instrument kind, so they are named rather than filtered.
 inline const std::set<std::string>& NonCounterInstruments() {
-  static const auto* kNames =
-      new std::set<std::string>{"golf_sessions_active", "thoughts_sessions_active"};
+  static const auto* kNames = new std::set<std::string>{"hub_sessions_active"};
   return *kNames;
 }
 
@@ -80,7 +77,7 @@ inline const std::set<std::string>& NonCounterInstruments() {
 // limiter or drops a stream is checking those series here without saying so.
 inline void ExpectOnlyDeclaredCounterSeries(
     const futility::otel::CapturingMetricsRecorder& recorder) {
-  const auto& declared = GamesHubHandler::DeclaredCounterSeries();
+  const auto& declared = GolfHub::DeclaredCounterSeries();
   for (const auto& entry : recorder.Entries()) {
     if (NonCounterInstruments().count(entry.name) > 0) continue;
     const bool found = std::any_of(declared.begin(), declared.end(), [&](const auto& series) {
@@ -98,17 +95,11 @@ inline void ExpectOnlyDeclaredCounterSeries(
 // test's whole timeout with nothing to show for it.
 inline constexpr std::chrono::milliseconds kReceiveBudget{5000};
 
-// The event type a generated client stream receives — PlayClientStream's
-// GameEvents, ThinkClientStream's ThoughtsEvents — so the receive helpers
-// below serve both hubs.
-template <typename Stream>
-using EventOf = std::remove_cvref_t<decltype(**std::declval<Stream&>().Receive())>;
-
 // Spends what is left of `budget` on one receive, or reports the timeout
 // itself when the budget is gone. Feeding the remainder to each call
 // keeps the helper's total wait bounded no matter how many frames arrive.
-template <typename Stream>
-auto ReceiveWithin(Stream& stream, std::chrono::steady_clock::time_point deadline) {
+inline auto ReceiveWithin(moonbase::games::PlayClientStream& stream,
+                          std::chrono::steady_clock::time_point deadline) {
   const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
       deadline - std::chrono::steady_clock::now());
   // A non-positive deadline polls rather than blocks, which is what we
@@ -119,9 +110,9 @@ auto ReceiveWithin(Stream& stream, std::chrono::steady_clock::time_point deadlin
 // Receives until an event of the wanted case arrives (skipping others),
 // giving up after a few frames so a wrong stream can't hang the test, or
 // after kReceiveBudget so a silent one can't either.
-template <typename Stream>
-std::optional<EventOf<Stream>> ReceiveCase(Stream& stream, const std::string& wanted,
-                                           std::chrono::milliseconds budget = kReceiveBudget) {
+inline std::optional<moonbase::games::GameEvents> ReceiveCase(
+    moonbase::games::PlayClientStream& stream, const std::string& wanted,
+    std::chrono::milliseconds budget = kReceiveBudget) {
   const auto deadline = std::chrono::steady_clock::now() + budget;
   for (int i = 0; i < 8; ++i) {
     auto received = ReceiveWithin(stream, deadline);
@@ -139,9 +130,8 @@ std::optional<EventOf<Stream>> ReceiveCase(Stream& stream, const std::string& wa
 
 // One frame, bounded, no skipping — for asserting exact event order.
 // ReceiveCase would silently step over an event that must not be there.
-template <typename Stream>
-std::optional<EventOf<Stream>> NextEvent(Stream& stream,
-                                         std::chrono::milliseconds budget = kReceiveBudget) {
+inline std::optional<moonbase::games::GameEvents> NextEvent(
+    moonbase::games::PlayClientStream& stream, std::chrono::milliseconds budget = kReceiveBudget) {
   auto received = stream.Receive(budget);
   if (!received.ok()) {
     ADD_FAILURE() << "receive failed mid-sequence: " << received.error().message();
@@ -157,9 +147,8 @@ std::optional<EventOf<Stream>> NextEvent(Stream& stream,
 // The negative twin of NextEvent: nothing arrives within `budget`. Receive
 // reports a timeout as an error outcome, and a clean close as ok+nullopt —
 // this wants the former, since a closed stream is not "silent".
-template <typename Stream>
-void ExpectNoEvent(Stream& stream,
-                   std::chrono::milliseconds budget = std::chrono::milliseconds(200)) {
+inline void ExpectNoEvent(moonbase::games::PlayClientStream& stream,
+                          std::chrono::milliseconds budget = std::chrono::milliseconds(200)) {
   auto received = stream.Receive(budget);
   EXPECT_FALSE(received.ok()) << "expected silence, got "
                               << (received->has_value() ? std::string((*received)->case_name())
@@ -303,6 +292,8 @@ inline RateLimits UnlimitedRateLimits() {
   RateLimits limits;
   limits.command_burst = 1e9;
   limits.command_refill_per_sec = 1e9;
+  limits.lobby_burst = 1e9;
+  limits.lobby_refill_per_sec = 1e9;
   limits.chat_burst = 1e9;
   limits.chat_refill_per_sec = 1e9;
   return limits;
@@ -343,12 +334,12 @@ inline std::string ReadModel(const std::string& path) {
   return buffer.str();
 }
 
-// The label values GamesHubHandler::DeclaredCounterSeries() carries for
-// one stream counter — both hubs' series, since the list is the union.
+// The label values GolfHub::DeclaredCounterSeries() carries for one
+// stream counter.
 inline std::set<std::string> DeclaredLabelValues(const std::string& counter,
                                                  const std::string& label) {
   std::set<std::string> values;
-  for (const auto& series : GamesHubHandler::DeclaredCounterSeries()) {
+  for (const auto& series : GolfHub::DeclaredCounterSeries()) {
     if (series.name != counter) continue;
     const auto value = series.attributes.find(label);
     if (value != series.attributes.end()) values.insert(value->second);
@@ -415,17 +406,8 @@ class GamesHubStreamFixture : public testing::Test {
   /// by accident; the expiry suites override it down to something a
   /// receive budget can wait out.
   virtual std::chrono::seconds GracePeriod() { return std::chrono::seconds(60); }
-  /// The race suites' scheduling seams; empty unless a suite overrides.
-  virtual ThoughtsTestHooks MakeThoughtsHooks() { return {}; }
+  /// The race suites' scheduling seam; empty unless a suite overrides.
   virtual GolfTestHooks MakeGolfHooks() { return {}; }
-  /// The thoughts stream's budget; the thoughts rate-limit suite overrides
-  /// with tiny frozen buckets.
-  virtual ThoughtsLimits MakeThoughtsLimits() {
-    ThoughtsLimits limits;
-    limits.command_burst = 1e9;
-    limits.command_refill_per_sec = 1e9;
-    return limits;
-  }
 
   void SetUp() override { BuildHub(); }
 
@@ -460,9 +442,7 @@ class GamesHubStreamFixture : public testing::Test {
     }
     const absl::Status restored = golf_->RestoreFromStore();
     ASSERT_TRUE(restored.ok()) << restored;
-    thoughts_ =
-        std::make_shared<ThoughtsHub>(vault_, metrics_, MakeThoughtsLimits(), MakeThoughtsHooks());
-    handler_ = std::make_shared<GamesHubHandler>(vault_, ids_, golf_, thoughts_);
+    handler_ = std::make_shared<GamesHubHandler>(vault_, ids_, golf_);
     server_ = std::make_unique<moonbase::games::GamesHubServer>(handler_);
 
     auto loopback = std::make_shared<smithy::http::Loopback>();
@@ -526,40 +506,6 @@ class GamesHubStreamFixture : public testing::Test {
   }
   std::optional<Seat> OpenSeat(const std::optional<std::string>& resume_token = std::nullopt) {
     return OpenSeatVia(*client_, resume_token);
-  }
-
-  // The thoughts twin: mint a session and open its Think stream, consuming
-  // the sessionReady so a test starts at the first command. Fails the
-  // test on any step.
-  struct ThoughtsSeat {
-    std::string player_id;
-    std::string resume_token;
-    moonbase::games::ThinkClientStream stream;
-  };
-  std::optional<ThoughtsSeat> OpenThoughtsSeat(
-      const std::optional<std::string>& resume_token = std::nullopt) {
-    moonbase::games::GetSessionInput session_input;
-    if (resume_token.has_value()) session_input.resumeToken = *resume_token;
-    auto session = client_->GetSession(session_input);
-    if (!session.ok()) {
-      ADD_FAILURE() << "GetSession failed: " << session.error().message();
-      return std::nullopt;
-    }
-    moonbase::games::ThinkInput think_input;
-    think_input.ticket = session->ticket;
-    auto stream = client_->Think(think_input);
-    if (!stream.ok()) {
-      ADD_FAILURE() << "Think dial failed: " << stream.error().message();
-      return std::nullopt;
-    }
-    auto ready = NextEvent(*stream);
-    if (!ready.has_value() || ready->as_sessionReady_or_null() == nullptr) {
-      ADD_FAILURE() << "no sessionReady on the thoughts stream";
-      return std::nullopt;
-    }
-    EXPECT_EQ(ready->as_sessionReady_or_null()->playerId, session->playerId);
-    EXPECT_FALSE(ready->as_sessionReady_or_null()->resumed);
-    return ThoughtsSeat{session->playerId, session->resumeToken, std::move(*stream)};
   }
 
   // The create-room preamble a dozen tests otherwise spell out: sends
@@ -711,91 +657,10 @@ class GamesHubStreamFixture : public testing::Test {
   std::shared_ptr<CapturingMetricsRecorder> metrics_ = MakeCapturingMetricsRecorder();
   std::shared_ptr<IdGenerator> ids_ = std::make_shared<SequentialIdGenerator>();
   std::shared_ptr<GolfHub> golf_;
-  std::shared_ptr<ThoughtsHub> thoughts_;
   std::shared_ptr<GamesHubHandler> handler_;
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::unique_ptr<moonbase::games::GamesHubClient> client_;
   std::vector<std::shared_ptr<smithy::http::WebSocket>> sessions_;
-};
-
-// A fixture whose hub hooks park at a named seam until the test releases
-// them, so an interleaving is the test's and not the scheduler's. A
-// subclass installs the hooks (MakeGolfHooks, MakeThoughtsHooks) as
-// `Park("<stage>")` calls.
-//
-// The in-memory wire completes a session's parked Receive inline on the
-// thread that sent the frame (or closed the socket), so the acting
-// session's command — and the hook it parks in — runs on whichever thread
-// triggered it. Each trigger therefore gets its own thread, and the test
-// thread stays free to observe and release.
-class SeamFixture : public GamesHubStreamFixture {
- protected:
-  // A hook that never released would hang the fixture's own closes.
-  void TearDown() override {
-    Disarm();
-    Release();
-    GamesHubStreamFixture::TearDown();
-  }
-
-  void Arm() {
-    const std::lock_guard<std::mutex> lock(park_mu_);
-    armed_ = true;
-    released_ = false;
-  }
-  void Disarm() {
-    const std::lock_guard<std::mutex> lock(park_mu_);
-    armed_ = false;
-  }
-  // Waits until a hook named `stage` is parked (the hub's thread is inside
-  // the seam), or fails after the budget.
-  bool WaitParked(const std::string& stage) {
-    std::unique_lock<std::mutex> lock(park_mu_);
-    return park_cv_.wait_for(lock, kReceiveBudget, [&] { return parked_ == stage; });
-  }
-  void Release() {
-    {
-      const std::lock_guard<std::mutex> lock(park_mu_);
-      parked_.clear();
-      released_ = true;
-    }
-    park_cv_.notify_all();
-  }
-  // A trigger on its own thread. Going out of scope releases the seam and
-  // joins, so an ASSERT that returns early neither destroys a joinable
-  // thread (std::terminate, and the rest of the binary with it) nor
-  // leaves the hub parked; declare it after the seats it touches.
-  class Trigger {
-   public:
-    Trigger(SeamFixture& fixture, std::function<void()> fn)
-        : fixture_(fixture), thread_(std::move(fn)) {}
-    ~Trigger() { Join(); }
-    void Join() {
-      if (!thread_.joinable()) return;
-      fixture_.Disarm();
-      fixture_.Release();
-      thread_.join();
-    }
-
-   private:
-    SeamFixture& fixture_;
-    std::thread thread_;
-  };
-
-  // The hook body: parks the calling thread while a test has armed the seam.
-  void Park(const std::string& stage) {
-    std::unique_lock<std::mutex> lock(park_mu_);
-    if (!armed_) return;
-    parked_ = stage;
-    park_cv_.notify_all();
-    park_cv_.wait(lock, [&] { return released_; });
-  }
-
- private:
-  std::mutex park_mu_;
-  std::condition_variable park_cv_;
-  std::string parked_;
-  bool armed_ = false;
-  bool released_ = false;
 };
 
 }  // namespace games_hub

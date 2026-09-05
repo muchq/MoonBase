@@ -2,15 +2,19 @@
 // generated client over the in-memory pair: the world is the session's
 // room's, or the plaza's while unroomed; a room change and a closed
 // socket leave it; a roomId on this stream can only agree with that.
-// The world's own rules (bounds, join-before-move, leave-first) are
-// thoughts_e2e_test's, on the same World.
+// The world's own rules (bounds, join-before-move, leave-first, fan-out)
+// are world_test's, on the World itself.
 
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -43,6 +47,86 @@ GameCommands LeaveWorld() { return Lobby(LobbyAction::FromLeave(moonbase::games:
 
 // On the seam fixture so the race test below can arm the hub's hooks;
 // unarmed, the seams are no-ops.
+// A fixture whose hub hooks park at a named seam until the test releases
+// them, so an interleaving is the test's and not the scheduler's. A
+// subclass installs the hooks (MakeGolfHooks) as
+// `Park("<stage>")` calls.
+//
+// The in-memory wire completes a session's parked Receive inline on the
+// thread that sent the frame (or closed the socket), so the acting
+// session's command — and the hook it parks in — runs on whichever thread
+// triggered it. Each trigger therefore gets its own thread, and the test
+// thread stays free to observe and release.
+class SeamFixture : public GamesHubStreamFixture {
+ protected:
+  // A hook that never released would hang the fixture's own closes.
+  void TearDown() override {
+    Disarm();
+    Release();
+    GamesHubStreamFixture::TearDown();
+  }
+
+  void Arm() {
+    const std::lock_guard<std::mutex> lock(park_mu_);
+    armed_ = true;
+    released_ = false;
+  }
+  void Disarm() {
+    const std::lock_guard<std::mutex> lock(park_mu_);
+    armed_ = false;
+  }
+  // Waits until a hook named `stage` is parked (the hub's thread is inside
+  // the seam), or fails after the budget.
+  bool WaitParked(const std::string& stage) {
+    std::unique_lock<std::mutex> lock(park_mu_);
+    return park_cv_.wait_for(lock, kReceiveBudget, [&] { return parked_ == stage; });
+  }
+  void Release() {
+    {
+      const std::lock_guard<std::mutex> lock(park_mu_);
+      parked_.clear();
+      released_ = true;
+    }
+    park_cv_.notify_all();
+  }
+  // A trigger on its own thread. Going out of scope releases the seam and
+  // joins, so an ASSERT that returns early neither destroys a joinable
+  // thread (std::terminate, and the rest of the binary with it) nor
+  // leaves the hub parked; declare it after the seats it touches.
+  class Trigger {
+   public:
+    Trigger(SeamFixture& fixture, std::function<void()> fn)
+        : fixture_(fixture), thread_(std::move(fn)) {}
+    ~Trigger() { Join(); }
+    void Join() {
+      if (!thread_.joinable()) return;
+      fixture_.Disarm();
+      fixture_.Release();
+      thread_.join();
+    }
+
+   private:
+    SeamFixture& fixture_;
+    std::thread thread_;
+  };
+
+  // The hook body: parks the calling thread while a test has armed the seam.
+  void Park(const std::string& stage) {
+    std::unique_lock<std::mutex> lock(park_mu_);
+    if (!armed_) return;
+    parked_ = stage;
+    park_cv_.notify_all();
+    park_cv_.wait(lock, [&] { return released_; });
+  }
+
+ private:
+  std::mutex park_mu_;
+  std::condition_variable park_cv_;
+  std::string parked_;
+  bool armed_ = false;
+  bool released_ = false;
+};
+
 class LobbyFixture : public SeamFixture {
  protected:
   // A seat past its sessionReady, in no room and no world.
@@ -132,7 +216,7 @@ TEST_F(LobbyFixture, ARoomIdOnTheRoomStreamCanOnlyNameTheSessionsWorld) {
   EXPECT_EQ(NextRejection(bob->stream), "the world is your room's; join the room first");
   ASSERT_TRUE(bob->stream.Send(JoinWorld(room_id)).ok());
   EXPECT_EQ(Listed(ReceiveLobby(bob->stream, "worldState")), std::vector<std::string>{});
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "state"}}), 4);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "state"}}), 4);
 }
 
 // A room change leaves the world behind: the plaza hears the leaver go,
@@ -347,9 +431,92 @@ class LobbyRaceFixture : public LobbyFixture {
   GolfTestHooks MakeGolfHooks() override {
     GolfTestHooks hooks;
     hooks.before_seat_release = [this](const std::string&) { Park("seat"); };
+    hooks.after_world_sent = [this] { Park("world"); };
     return hooks;
   }
 };
+
+// A leave that races a join lands behind the joiner's snapshot, never
+// ahead of it: the world's deliveries go to the registry under the lock,
+// so the joiner has the snapshot listing the leaver before the leaver's
+// erase can take the lock, and then hears playerLeft — the order a client
+// can apply. Delivered after the lock, the playerLeft could arrive first,
+// for a player the snapshot then resurrects.
+TEST_F(LobbyRaceFixture, ALeaveDuringAJoinLandsBehindTheJoinersSnapshot) {
+  auto alice = Arrive();
+  auto carol = Arrive();
+  auto bob = Arrive();
+  ASSERT_TRUE(alice.has_value() && carol.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "worldState").has_value());
+  ASSERT_TRUE(carol->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(carol->stream, "worldState").has_value());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "playerJoined").has_value());
+
+  // Bob joins and parks inside the seam with the lock held.
+  Arm();
+  Trigger joiner(*this, [&] { EXPECT_TRUE(bob->stream.Send(JoinWorld()).ok()); });
+  ASSERT_TRUE(WaitParked("world"));
+  // Inside the seam: bob already has his snapshot, carol in it, and alice
+  // has already heard of bob.
+  EXPECT_EQ(Listed(ReceiveLobby(bob->stream, "worldState")),
+            (std::vector<std::string>{alice->player_id, carol->player_id}));
+  auto joined = ReceiveLobby(alice->stream, "playerJoined");
+  ASSERT_TRUE(joined.has_value());
+  EXPECT_EQ(joined->as_playerJoined_or_null()->player.playerId, bob->player_id);
+  // Carol leaves now. Her erase needs the lock bob holds, so nothing
+  // about her leave can reach anyone yet.
+  Trigger leaver(*this, [&] { EXPECT_TRUE(carol->stream.Send(LeaveWorld()).ok()); });
+  ExpectNoEvent(alice->stream);
+  joiner.Join();
+  leaver.Join();
+
+  auto left = ReceiveLobby(bob->stream, "playerLeft");
+  ASSERT_TRUE(left.has_value());
+  EXPECT_EQ(left->as_playerLeft_or_null()->playerId, carol->player_id);
+  left = ReceiveLobby(alice->stream, "playerLeft");
+  ASSERT_TRUE(left.has_value());
+  EXPECT_EQ(left->as_playerLeft_or_null()->playerId, carol->player_id);
+}
+
+// The world's moves are cursor-driven and draw from their own budget:
+// two tokens and no refill, so the join and one move spend them, the
+// next move is refused in-band without reaching the world, and the
+// command budget — the games' — is untouched.
+class LobbyRateLimitedFixture : public LobbyFixture {
+ protected:
+  RateLimits MakeRateLimits() override {
+    RateLimits limits = UnlimitedRateLimits();
+    limits.lobby_burst = 2;
+    limits.lobby_refill_per_sec = 0;
+    return limits;
+  }
+};
+
+TEST_F(LobbyRateLimitedFixture, AMoveFloodIsRefusedAfterTheLobbysOwnBurst) {
+  auto alice = Arrive();
+  auto bob = Arrive();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(bob->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(bob->stream, "worldState").has_value());
+  ASSERT_TRUE(alice->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "worldState").has_value());
+  ASSERT_TRUE(ReceiveLobby(bob->stream, "playerJoined").has_value());
+
+  ASSERT_TRUE(alice->stream.Send(MoveTo({1, 0, 1})).ok());
+  ASSERT_TRUE(alice->stream.Send(MoveTo({2, 0, 2})).ok());
+  EXPECT_EQ(NextRejection(alice->stream), "slow down");
+  auto moved = ReceiveLobby(bob->stream, "playerMoved");
+  ASSERT_TRUE(moved.has_value());
+  EXPECT_EQ(moved->as_playerMoved_or_null()->position, (std::vector<double>{1, 0, 1}));
+  ExpectNoEvent(bob->stream);
+  // The room's own commands still have their budget.
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+  EXPECT_EQ(metrics_->CounterTotal("hub_rate_limited", {{"kind", "lobby"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rate_limited", {{"kind", "command"}}), 0);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "rate_limited"}}), 1);
+}
 
 // A resume admitted the instant the seat frees must find the world
 // already clean: were the seat released first, the resume's join could
@@ -419,7 +586,7 @@ TEST_F(ShortGraceLobbyFixture, GraceExpiryAfterACloseLeavesNothingMoreToLeave) {
   // A budget past the grace: the seat expires while bob listens, and he
   // hears nothing more.
   ExpectNoEvent(bob->stream, std::chrono::seconds(2));
-  EXPECT_EQ(metrics_->CounterTotal("golf_seats_expired", {}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_seats_expired", {}), 1);
   EXPECT_EQ(metrics_->CounterTotal("lobby_events", {{"event", "playerLeft"}}), 1);
 }
 

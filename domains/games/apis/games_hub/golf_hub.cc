@@ -331,44 +331,45 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"chat_failures", {{"stage", "history_load"}}},
       {"chat_history_replays", {}},
       {"chat_rows_delivered", {}},
-      {"golf_admissions_refused", {{"reason", "bad_ticket"}}},
-      {"golf_admissions_refused", {{"reason", "seat_conflict"}}},
-      // The GameCommands union in model order, golf.<move> for the envelope —
-      // CountCommand's naming, spelled out (see the model-pin note above).
-      {"golf_commands", {{"command", "createRoom"}}},
-      {"golf_commands", {{"command", "joinRoom"}}},
-      {"golf_commands", {{"command", "leaveRoom"}}},
-      {"golf_commands", {{"command", "getRoomState"}}},
-      {"golf_commands", {{"command", "chat"}}},
-      {"golf_commands", {{"command", "golf.createGame"}}},
-      {"golf_commands", {{"command", "golf.joinGame"}}},
-      {"golf_commands", {{"command", "golf.startGame"}}},
-      {"golf_commands", {{"command", "golf.leaveGame"}}},
-      {"golf_commands", {{"command", "golf.peekCard"}}},
-      {"golf_commands", {{"command", "golf.drawCard"}}},
-      {"golf_commands", {{"command", "golf.takeFromDiscard"}}},
-      {"golf_commands", {{"command", "golf.swapCard"}}},
-      {"golf_commands", {{"command", "golf.discardDrawn"}}},
-      {"golf_commands", {{"command", "golf.knock"}}},
-      {"golf_commands", {{"command", "golf.hideCards"}}},
-      {"golf_disconnects", {{"kind", "clean"}}},
-      {"golf_disconnects", {{"kind", "abrupt"}}},
-      // The GameEvents union in model order, golf.<update> for the envelope —
-      // Send's naming.
-      {"golf_events", {{"event", "sessionReady"}}},
-      {"golf_events", {{"event", "roomState"}}},
-      {"golf_events", {{"event", "roomLeft"}}},
-      {"golf_events", {{"event", "roomChat"}}},
-      {"golf_events", {{"event", "roomChatHistory"}}},
-      {"golf_events", {{"event", "commandRejected"}}},
-      {"golf_events", {{"event", "golf.gameJoined"}}},
-      {"golf_events", {{"event", "golf.gameState"}}},
-      {"golf_events", {{"event", "golf.gameCreated"}}},
-      {"golf_events", {{"event", "golf.gameStarted"}}},
-      {"golf_events", {{"event", "golf.turnChanged"}}},
-      {"golf_events", {{"event", "golf.playerKnocked"}}},
-      {"golf_events", {{"event", "golf.gameEnded"}}},
-      {"golf_events", {{"event", "golf.gameLeft"}}},
+      {"hub_admissions_refused", {{"reason", "bad_ticket"}}},
+      {"hub_admissions_refused", {{"reason", "seat_conflict"}}},
+      // The room layer's own GameCommands cases on hub_commands, golf's
+      // envelope on golf_commands — CountCommand's naming, spelled out
+      // (see the model-pin note above).
+      {"hub_commands", {{"command", "createRoom"}}},
+      {"hub_commands", {{"command", "joinRoom"}}},
+      {"hub_commands", {{"command", "leaveRoom"}}},
+      {"hub_commands", {{"command", "getRoomState"}}},
+      {"hub_commands", {{"command", "chat"}}},
+      {"golf_commands", {{"command", "createGame"}}},
+      {"golf_commands", {{"command", "joinGame"}}},
+      {"golf_commands", {{"command", "startGame"}}},
+      {"golf_commands", {{"command", "leaveGame"}}},
+      {"golf_commands", {{"command", "peekCard"}}},
+      {"golf_commands", {{"command", "drawCard"}}},
+      {"golf_commands", {{"command", "takeFromDiscard"}}},
+      {"golf_commands", {{"command", "swapCard"}}},
+      {"golf_commands", {{"command", "discardDrawn"}}},
+      {"golf_commands", {{"command", "knock"}}},
+      {"golf_commands", {{"command", "hideCards"}}},
+      {"hub_disconnects", {{"kind", "clean"}}},
+      {"hub_disconnects", {{"kind", "abrupt"}}},
+      // The room layer's own GameEvents cases on hub_events, golf's
+      // envelope on golf_events — Send's naming.
+      {"hub_events", {{"event", "sessionReady"}}},
+      {"hub_events", {{"event", "roomState"}}},
+      {"hub_events", {{"event", "roomLeft"}}},
+      {"hub_events", {{"event", "roomChat"}}},
+      {"hub_events", {{"event", "roomChatHistory"}}},
+      {"hub_events", {{"event", "commandRejected"}}},
+      {"golf_events", {{"event", "gameJoined"}}},
+      {"golf_events", {{"event", "gameState"}}},
+      {"golf_events", {{"event", "gameCreated"}}},
+      {"golf_events", {{"event", "gameStarted"}}},
+      {"golf_events", {{"event", "turnChanged"}}},
+      {"golf_events", {{"event", "playerKnocked"}}},
+      {"golf_events", {{"event", "gameEnded"}}},
+      {"golf_events", {{"event", "gameLeft"}}},
       // The lobby envelope on its own series, castle's precedent: the
       // LobbyAction and LobbyUpdate cases, pinned by
       // LobbySeriesMatchTheModelUnions.
@@ -381,19 +382,20 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"lobby_events", {{"event", "playerMoved"}}},
       {"lobby_events", {{"event", "shapeChanged"}}},
       {"lobby_events", {{"event", "playerLeft"}}},
-      {"golf_rate_limited", {{"kind", "chat"}}},
-      {"golf_rate_limited", {{"kind", "command"}}},
+      {"hub_rate_limited", {{"kind", "chat"}}},
+      {"hub_rate_limited", {{"kind", "command"}}},
+      {"hub_rate_limited", {{"kind", "lobby"}}},
       // One entry per RejectKind, in enum order.
-      {"golf_rejections", {{"kind", "rate_limited"}}},
-      {"golf_rejections", {{"kind", "invalid"}}},
-      {"golf_rejections", {{"kind", "state"}}},
-      {"golf_rejections", {{"kind", "rules"}}},
-      {"golf_rejections", {{"kind", "unavailable"}}},
-      {"golf_rejections", {{"kind", "unknown"}}},
-      {"golf_restored_seats_reaped", {}},
-      {"golf_seats_expired", {}},
-      {"golf_sessions", {{"resumed", "true"}}},
-      {"golf_sessions", {{"resumed", "false"}}},
+      {"hub_rejections", {{"kind", "rate_limited"}}},
+      {"hub_rejections", {{"kind", "invalid"}}},
+      {"hub_rejections", {{"kind", "state"}}},
+      {"hub_rejections", {{"kind", "rules"}}},
+      {"hub_rejections", {{"kind", "unavailable"}}},
+      {"hub_rejections", {{"kind", "unknown"}}},
+      {"hub_restored_seats_reaped", {}},
+      {"hub_seats_expired", {}},
+      {"hub_sessions", {{"resumed", "true"}}},
+      {"hub_sessions", {{"resumed", "false"}}},
   };
   return *kSeries;
 }
@@ -503,7 +505,7 @@ void GolfHub::BootReaperMain() {
     // the row spares the seat; if the reap wins mu_ first, the seat is
     // reaped and the resume admits room-less — the same outcome as
     // resuming a moment after the deadline.
-    if (ReapUnlessResumedElsewhere(player_id)) Count("golf_restored_seats_reaped");
+    if (ReapUnlessResumedElsewhere(player_id)) Count("hub_restored_seats_reaped");
   }
 }
 
@@ -682,7 +684,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
           it != player_room_.end() && it->second == room_id) {
         player_room_.erase(it);
         player_game_.erase(member_id);
-        LeaveWorldLocked(member_id, outbox);  // its world goes with it
+        LeaveWorldLocked(member_id);  // its world goes with it
       }
     }
     rooms_.erase(room);
@@ -748,7 +750,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
     if (auto it = player_room_.find(member_id); it != player_room_.end() && it->second == room_id) {
       player_room_.erase(it);
       player_game_.erase(member_id);
-      LeaveWorldLocked(member_id, outbox);  // a sibling's drop takes the world too
+      LeaveWorldLocked(member_id);  // a sibling's drop takes the world too
     }
   }
   room.members = std::move(members);
@@ -850,12 +852,12 @@ void GolfHub::UnlistenRoomLocked(const std::string& room_id) {
 smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
                                               moonbase::games::PlayAsyncServerStream& stream) {
   if (HasEmbeddedNul(input.ticket)) {
-    Count("golf_admissions_refused", {{"reason", "bad_ticket"}});
+    Count("hub_admissions_refused", {{"reason", "bad_ticket"}});
     co_return smithy::Error::Modeled("Unauthenticated", "ticket expired or already spent");
   }
   auto player = vault_->SpendTicket(input.ticket);
   if (!player.has_value()) {
-    Count("golf_admissions_refused", {{"reason", "bad_ticket"}});
+    Count("hub_admissions_refused", {{"reason", "bad_ticket"}});
     co_return smithy::Error::Modeled("Unauthenticated", "ticket expired or already spent");
   }
   const std::string player_id = *player;
@@ -865,10 +867,10 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
   const auto admission = registry_.ResumeOrAdd(
       player_id, [&stream] { return stream.Share(); }, std::chrono::seconds(1));
   if (admission == Registry::Admission::kRefused) {
-    Count("golf_admissions_refused", {{"reason", "seat_conflict"}});
+    Count("hub_admissions_refused", {{"reason", "seat_conflict"}});
     co_return smithy::Error::Modeled("SeatConflict", "player already has a live connection");
   }
-  Count("golf_sessions",
+  Count("hub_sessions",
         {{"resumed", admission == Registry::Admission::kResumed ? "true" : "false"}});
   TrackActive(+1);
 
@@ -913,6 +915,7 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
   // bucket; chat draws from its own tighter bucket too, because each
   // message is a durable database transaction plus fleet-wide fan-out.
   TokenBucket command_budget(limits_.command_burst, limits_.command_refill_per_sec);
+  TokenBucket lobby_budget(limits_.lobby_burst, limits_.lobby_refill_per_sec);
   TokenBucket chat_budget(limits_.chat_burst, limits_.chat_refill_per_sec);
 
   while (true) {
@@ -927,35 +930,33 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
       // The world is presence, not membership: the player leaves it now
       // and rejoins on resume, while the seat parks. Before Detach, so a
       // resume admitted the instant the seat is released finds no stale
-      // entry to refuse its join (the Think stream's close path keeps the
-      // same order for the same reason).
-      Outbox left;
+      // entry to refuse its join.
       {
         const std::lock_guard<std::mutex> lock(mu_);
-        LeaveWorldLocked(player_id, left);
+        LeaveWorldLocked(player_id);
       }
-      Deliver(left);
       if (hooks_.before_seat_release) hooks_.before_seat_release(player_id);
       if (registry_.Detach(player_id)) {
         TrackActive(-1);
-        Count("golf_disconnects", {{"kind", received.ok() ? "clean" : "abrupt"}});
+        Count("hub_disconnects", {{"kind", received.ok() ? "clean" : "abrupt"}});
         SetConnected(player_id, false);
         if (auto current = CurrentRoom(player_id)) BroadcastRoom(*current);
       }
       co_return smithy::Unit{};
     }
     const auto now = std::chrono::steady_clock::now();
-    if (!command_budget.Admit(now)) {
+    const bool lobby = (*received)->as_lobby_or_null() != nullptr;
+    if (!(lobby ? lobby_budget : command_budget).Admit(now)) {
       // Refused before any locked work: the whole point is that a flood
       // costs the hub almost nothing. The session stays open — the
       // buckets already bound the damage, and closing floods just
       // converts them into reconnect load.
-      Count("golf_rate_limited", {{"kind", "command"}});
+      Count("hub_rate_limited", {{"kind", lobby ? "lobby" : "command"}});
       Reject(player_id, RejectKind::kRateLimited, "slow down");
       continue;
     }
     if ((*received)->as_chat_or_null() != nullptr && !chat_budget.Admit(now)) {
-      Count("golf_rate_limited", {{"kind", "chat"}});
+      Count("hub_rate_limited", {{"kind", "chat"}});
       Reject(player_id, RejectKind::kRateLimited, "slow down");
       continue;
     }
@@ -978,7 +979,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
         // Born at zero with its room: it provably has no rows, and the
         // creator's first message must pump from the very beginning.
         chat_cursors_.emplace(room_id, ChatCursor{});
-        LeaveWorldLocked(player_id, outbox);  // out of the plaza's world
+        LeaveWorldLocked(player_id);  // out of the plaza's world
         player_room_[player_id] = room_id;
         ListenRoomLocked(room_id);
         StageLocked(writes, HubStore::UpsertRoom{room_id});
@@ -1018,7 +1019,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
         const auto room = rooms_.find(join->roomId);
         if (room != rooms_.end()) {
           const auto [member, inserted] = room->second.members.emplace(player_id, Member{});
-          LeaveWorldLocked(player_id, outbox);  // out of the plaza's world
+          LeaveWorldLocked(player_id);  // out of the plaza's world
           player_room_[player_id] = join->roomId;
           StageMemberLocked(join->roomId, player_id, member->second, writes);
           StageWakeLocked(join->roomId, writes);
@@ -1152,7 +1153,6 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
 void GolfHub::HandleLobby(const std::string& player_id,
                           const moonbase::games::LobbyAction& action) {
   std::optional<World::Refusal> refusal;
-  Outbox outbox;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     World::Deliveries deliveries;
@@ -1177,9 +1177,9 @@ void GolfHub::HandleLobby(const std::string& player_id,
     } else {
       refusal = World::Refusal{RejectKind::kUnknown, "unknown command"};
     }
-    StageWorldLocked(deliveries, outbox);
+    SendWorldLocked(deliveries);
+    if (hooks_.after_world_sent) hooks_.after_world_sent();
   }
-  Deliver(outbox);
   if (refusal.has_value()) Reject(player_id, std::move(*refusal));
 }
 
@@ -1188,19 +1188,22 @@ std::string GolfHub::WorldOfLocked(const std::string& player_id) const {
   return room != player_room_.end() ? room->second : std::string(World::kPlaza);
 }
 
-void GolfHub::StageWorldLocked(World::Deliveries& deliveries, Outbox& outbox) {
+// Under mu_, straight to the registry (which only queues): the world's
+// deliveries leave in the order the world changed, ahead of anything the
+// next command under this lock can send.
+void GolfHub::SendWorldLocked(World::Deliveries& deliveries) {
   for (auto& delivery : deliveries) {
     moonbase::games::LobbyEvent event;
     event.update = std::move(delivery.update);
-    outbox.To(delivery.to, GameEvents::FromLobby(std::move(event)));
+    Send(delivery.to, GameEvents::FromLobby(std::move(event)));
   }
   deliveries.clear();
 }
 
-void GolfHub::LeaveWorldLocked(const std::string& player_id, Outbox& outbox) {
+void GolfHub::LeaveWorldLocked(const std::string& player_id) {
   World::Deliveries deliveries;
   world_.Leave(player_id, deliveries);
-  StageWorldLocked(deliveries, outbox);
+  SendWorldLocked(deliveries);
 }
 
 void GolfHub::HandleMove(const std::string& player_id, const GolfMove& move) {
@@ -1835,7 +1838,7 @@ std::optional<GolfHub::GameRef> GolfHub::FindGameLocked(const std::string& playe
 }
 
 void GolfHub::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writes& writes) {
-  LeaveWorldLocked(player_id, outbox);
+  LeaveWorldLocked(player_id);
   LeaveGameLocked(player_id, outbox, writes);
 
   const auto it = player_room_.find(player_id);
@@ -1967,7 +1970,7 @@ void GolfHub::Reject(const std::string& player_id, RejectKind kind, std::string 
   // Reasons come from ~30 literals here and the cards engine's status
   // messages, exactly the label set that cannot be declared and so would
   // reopen #1323 for the rejection someone is actually looking for.
-  Count("golf_rejections", {{"kind", RejectKindName(kind)}});
+  Count("hub_rejections", {{"kind", RejectKindName(kind)}});
   moonbase::games::CommandRejected rejected;
   rejected.reason = std::move(reason);
   Send(player_id, GameEvents::FromCommandrejected(std::move(rejected)));
@@ -1976,7 +1979,7 @@ void GolfHub::Reject(const std::string& player_id, RejectKind kind, std::string 
 void GolfHub::OnExpired(const std::string& player_id) {
   // Grace ran out (ADR-0020): the seat is gone; free the room and game
   // slots and tell whoever remains. Runs on the registry's expiry thread.
-  Count("golf_seats_expired");
+  Count("hub_seats_expired");
   ReapUnlessResumedElsewhere(player_id);
 }
 
@@ -2126,46 +2129,39 @@ void GolfHub::Count(const char* name, const std::map<std::string, std::string>& 
 void GolfHub::TrackActive(int delta) {
   // Delta form, matching http_server_requests_active: the collector sums
   // an up-down counter into the live-session count.
-  if (metrics_) metrics_->RecordGauge("golf_sessions_active", delta);
+  if (metrics_) metrics_->RecordGauge("hub_sessions_active", delta);
 }
 
-// Each tenant's envelope counts on its own series (castle_*, lobby_*);
-// the room layer's commands and events stay on golf_* (the stream's
-// original name).
+// The room layer's own cases count on hub_commands; each tenant's
+// envelope counts its inner case on its own series (golf_*, castle_*,
+// lobby_*).
 void GolfHub::CountCommand(const GameCommands& command) {
   if (!metrics_) return;
-  if (const auto* castle_envelope = command.as_castle_or_null()) {
+  if (const auto* golf = command.as_golf_or_null()) {
+    metrics_->RecordCounter("golf_commands", 1, {{"command", std::string(golf->move.case_name())}});
+  } else if (const auto* castle = command.as_castle_or_null()) {
     metrics_->RecordCounter("castle_commands", 1,
-                            {{"command", std::string(castle_envelope->move.case_name())}});
-    return;
-  }
-  if (const auto* lobby = command.as_lobby_or_null()) {
+                            {{"command", std::string(castle->move.case_name())}});
+  } else if (const auto* lobby = command.as_lobby_or_null()) {
     metrics_->RecordCounter("lobby_commands", 1,
                             {{"command", std::string(lobby->action.case_name())}});
-    return;
+  } else {
+    metrics_->RecordCounter("hub_commands", 1, {{"command", std::string(command.case_name())}});
   }
-  const auto* envelope = command.as_golf_or_null();
-  const std::string name = envelope != nullptr ? absl::StrCat("golf.", envelope->move.case_name())
-                                               : std::string(command.case_name());
-  metrics_->RecordCounter("golf_commands", 1, {{"command", name}});
 }
 
 void GolfHub::Send(const std::string& player_id, GameEvents event) {
   if (metrics_) {
-    if (const auto* castle_envelope = event.as_castle_or_null()) {
+    if (const auto* golf = event.as_golf_or_null()) {
+      metrics_->RecordCounter("golf_events", 1, {{"event", std::string(golf->update.case_name())}});
+    } else if (const auto* castle = event.as_castle_or_null()) {
       metrics_->RecordCounter("castle_events", 1,
-                              {{"event", std::string(castle_envelope->update.case_name())}});
+                              {{"event", std::string(castle->update.case_name())}});
+    } else if (const auto* lobby = event.as_lobby_or_null()) {
+      metrics_->RecordCounter("lobby_events", 1,
+                              {{"event", std::string(lobby->update.case_name())}});
     } else {
-      if (const auto* lobby = event.as_lobby_or_null()) {
-        metrics_->RecordCounter("lobby_events", 1,
-                                {{"event", std::string(lobby->update.case_name())}});
-      } else {
-        const auto* envelope = event.as_golf_or_null();
-        const std::string name = envelope != nullptr
-                                     ? absl::StrCat("golf.", envelope->update.case_name())
-                                     : std::string(event.case_name());
-        metrics_->RecordCounter("golf_events", 1, {{"event", name}});
-      }
+      metrics_->RecordCounter("hub_events", 1, {{"event", std::string(event.case_name())}});
     }
   }
   registry_.SendTo(player_id, std::move(event));

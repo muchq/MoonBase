@@ -1028,14 +1028,11 @@ var publicRoutes = []struct {
 	{"@get_iili_redirect", []string{"method GET", "path /iili/v1/r/*"}, "iili:8091"},
 	// stats (#1460): read-only aggregates, GET-only on purpose.
 	{"@get_stats", []string{"method GET", "path /stats/v1/*"}, "stats:8092"},
-	// games_hub (#79): the session mint, the one stream (#1490), and the
-	// two pre-lobby routes the deployed site still dials. The websocket
-	// matchers carry no method — an upgrade is a GET the browser makes on
-	// its own terms.
+	// games_hub (#79): the session mint and the one stream (#1490). The
+	// websocket matcher carries no method — an upgrade is a GET the
+	// browser makes on its own terms.
 	{"@post_golf_v2_session", []string{"method POST", "path /games/v2/session"}, "games_hub:8089"},
 	{"@ws_play_v2", []string{"path /games/v2/play"}, "games_hub:8089"},
-	{"@ws_golf_v2", []string{"path /games/v2/golf/play"}, "games_hub:8089"},
-	{"@ws_thoughts_v2", []string{"path /games/v2/thoughts/play"}, "games_hub:8089"},
 	// The 1d4.net stats tab (#1465) reads its own service's aggregates on
 	// api.1d4.net, the host whose CORS grant covers the app — only the
 	// one_d4 prefix, since the rest of the stats API is muchq.com's.
@@ -2266,8 +2263,6 @@ func catchAllIsLastHandle(site []string, terminal string) (found bool, problem s
 var localRoutes = map[string]string{
 	"@post_golf_v2_session": "localhost:8089",
 	"@ws_play_v2":           "localhost:8089",
-	"@ws_golf_v2":           "localhost:8089",
-	"@ws_thoughts_v2":       "localhost:8089",
 	"@post_portrait":        "localhost:8081",
 	"@get_metrics":          "localhost:8082",
 	"@post_mithril":         "localhost:8083",

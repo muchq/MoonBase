@@ -44,10 +44,9 @@ namespace {
 
 using json = nlohmann::json;
 
-// The route the deployed golf client dials (#1490 phase 3 keeps it beside
-// /games/v2/play, lobby_wire_test's, until the site moves); renaming it
-// strands every deployed web client.
-constexpr char kPlayPath[] = "/games/v2/golf/play";
+// The one route every deployed web client dials (#1490); renaming it
+// strands them all.
+constexpr char kPlayPath[] = "/games/v2/play";
 
 class GolfWireTest : public HubWireFixture {
  protected:

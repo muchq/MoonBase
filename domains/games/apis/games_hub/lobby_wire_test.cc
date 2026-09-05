@@ -4,11 +4,10 @@
 // — a regeneration that renames what the client reads fails here even
 // though lobby_e2e_test (which regenerates with it) still passes.
 //
-// The pinned surface, exactly: the Play route; that it serves the room
-// layer byte for byte as the legacy route (golf_wire_test pins that one);
-// the lobby command frames as the client mints them, and the lobby
-// events as it reads them; and the terminal Unauthenticated frame on this
-// route. The session mint and resume bodies are golf_wire_test's pins.
+// The pinned surface, exactly: the lobby command frames as the client
+// mints them, and the lobby events as it reads them; and the terminal
+// Unauthenticated frame. The route, the session mint and resume bodies,
+// and the room layer's own frames are golf_wire_test's pins.
 //
 // The harness is wire_test_fixture.h's; non-Beast, so it runs with no
 // sandbox setup at all.
@@ -28,11 +27,11 @@ namespace {
 using json = nlohmann::json;
 
 // The one stream's route (#1490); renaming it strands every deployed web
-// client once the site is on it.
+// client.
 constexpr char kPlayPath[] = "/games/v2/play";
 
-// The join the lobby sends: the Think stream's fixture player, in the
-// lobby envelope, naming no room.
+// The join the lobby sends: the fixture player, in the lobby envelope,
+// naming no room.
 constexpr char kJoinPayload[] =
     R"({"action":{"join":{"position":[10,0,-5],"color":[0.8,0.2,0.6],"shape":0}}})";
 
@@ -42,20 +41,6 @@ class LobbyWireTest : public HubWireFixture {
     return HubWireFixture::DialReady(kPlayPath, session);
   }
 };
-
-// Consumer: the client's connect on the new route, and the room layer on
-// it — the same first frame and the same createRoom bytes golf_wire_test
-// pins on the legacy route.
-TEST_F(LobbyWireTest, TheOneRouteServesTheRoomLayerAsTheLegacyRouteDoes) {
-  const json session = MintSession();
-  auto socket = DialStream(kPlayPath, "?ticket=" + session["ticket"].get<std::string>());
-  EXPECT_EQ(EventPayload(NextFrame(*socket), "sessionReady"),
-            R"({"playerId":"player-1","resumed":false})");
-  ASSERT_TRUE(socket->Send(CommandFrame("createRoom", "{}")).ok());
-  EXPECT_EQ(EventPayload(NextFrame(*socket), "roomState"),
-            R"({"games":[],"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
-            R"("playerId":"player-1","totalScore":0}],"roomId":"room-1"})");
-}
 
 // Consumer: the lobby's join and the world it draws, under the `lobby`
 // event with the update nested under "update". The first joiner hears an
@@ -136,30 +121,8 @@ TEST_F(LobbyWireTest, RejectedLobbyCommandsYieldCommandRejectedEvents) {
             R"({"update":{"worldState":{"players":[]}}})");
 }
 
-// Consumer: the client's second-tab handling across the two routes. One
-// registry guards both: a seat live on the one route refuses a fresh
-// ticket dialed on the legacy route with the SeatConflict frame
-// golf_wire_test pins, so a tab on each route cannot hold one player twice.
-TEST_F(LobbyWireTest, ASeatLiveOnOneRouteRefusesTheOtherWithSeatConflict) {
-  json session;
-  auto socket = DialReady(session);
-
-  const std::string resume_body =
-      std::string(R"({"resumeToken":")") + session["resumeToken"].get<std::string>() + R"("})";
-  const auto response = PostSession(resume_body);
-  ASSERT_EQ(response.status, 200) << response.body;
-  const json second = json::parse(response.body);
-  auto conflicted =
-      DialStream("/games/v2/golf/play", "?ticket=" + second["ticket"].get<std::string>());
-  const auto frame = NextFrame(*conflicted);
-  ASSERT_TRUE(frame.has_value());
-  EXPECT_EQ(HeaderText(*frame, ":message-type"), "exception");
-  EXPECT_EQ(HeaderText(*frame, ":exception-type"), "SeatConflict");
-  EXPECT_EQ(frame->payload.ToString(), R"({"message":"player already has a live connection"})");
-}
-
-// Consumer: the client's dial error handling on this route — the same
-// terminal Unauthenticated frame and clean close as the legacy route.
+// Consumer: the client's dial error handling — the terminal
+// Unauthenticated frame and a clean close.
 TEST_F(LobbyWireTest, InvalidTicketRefusesWithTerminalUnauthenticatedFrame) {
   auto socket = DialStream(kPlayPath, "?ticket=bogus");
 

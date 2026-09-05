@@ -4,8 +4,6 @@
 #include <cstdint>
 #include <utility>
 
-#include "domains/games/apis/games_hub/protocol_input.h"
-
 namespace games_hub {
 
 using moonbase::games::LobbyUpdate;
@@ -39,14 +37,6 @@ std::optional<std::string> ShapeProblem(std::int32_t shape) {
 }
 
 }  // namespace
-
-std::optional<std::string> World::RoomProblem(const std::optional<std::string>& room_id) {
-  if (room_id.has_value() &&
-      (room_id->empty() || room_id->size() > kMaxRoomIdLength || HasEmbeddedNul(*room_id))) {
-    return "invalid room id";
-  }
-  return std::nullopt;
-}
 
 std::optional<World::Refusal> World::Join(const std::string& player_id, const std::string& room_id,
                                           const moonbase::games::JoinWorld& join, Deliveries& out) {

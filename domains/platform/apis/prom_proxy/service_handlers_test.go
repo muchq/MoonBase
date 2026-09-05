@@ -121,41 +121,45 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, string(DefaultView), response.View)
 
 	// Custom groups keep registry order and every descriptor is present.
-	require.Len(t, response.Custom, 6)
+	require.Len(t, response.Custom, 7)
 	assert.Equal(t, "Probes", response.Custom[0].Title)
-	assert.Equal(t, "Golf sessions", response.Custom[1].Title)
-	assert.Equal(t, "Golf activity", response.Custom[2].Title)
+	assert.Equal(t, "Sessions", response.Custom[1].Title)
+	assert.Equal(t, "Room layer", response.Custom[2].Title)
 	assert.Equal(t, "Chat", response.Custom[3].Title)
-	assert.Equal(t, "Thoughts", response.Custom[4].Title)
+	assert.Equal(t, "Golf", response.Custom[4].Title)
 	assert.Equal(t, "Castle", response.Custom[5].Title)
+	assert.Equal(t, "Lobby", response.Custom[6].Title)
 	assert.Len(t, response.Custom[0].Metrics, 1)
 	assert.Len(t, response.Custom[1].Metrics, 7)
 	assert.Len(t, response.Custom[2].Metrics, 4)
 	assert.Len(t, response.Custom[3].Metrics, 5)
-	require.Len(t, response.Custom[4].Metrics, 8)
+	require.Len(t, response.Custom[4].Metrics, 2)
 	require.Len(t, response.Custom[5].Metrics, 2)
+	require.Len(t, response.Custom[6].Metrics, 2)
 
 	assert.Equal(t, CustomMetricValue{Label: "health_checks", Value: 200.0, Toggleable: true},
 		response.Custom[0].Metrics[0])
 	// A gauge: one form, so no toggle offered.
-	assert.Equal(t, CustomMetricValue{Label: "golf_active", Value: 201.0, Unit: "sessions"},
+	assert.Equal(t, CustomMetricValue{Label: "hub_active", Value: 201.0, Unit: "sessions"},
 		response.Custom[1].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "golf_commands", Value: 208.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "hub_commands", Value: 208.0, Toggleable: true},
 		response.Custom[2].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "golf_rejections", Value: 210.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "hub_rejections", Value: 210.0, Toggleable: true},
 		response.Custom[2].Metrics[2])
 	// Chat starts at CustomScalars index 12, so its first value is 200+12.
 	assert.Equal(t, CustomMetricValue{Label: "messages", Value: 212.0, Toggleable: true},
 		response.Custom[3].Metrics[0])
-	// Thoughts starts at index 17 (#79). Labels carry the game prefix so a
-	// tile's label names it across the whole service, not just its group.
-	assert.Equal(t, CustomMetricValue{Label: "thoughts_active", Value: 217.0, Unit: "sessions"},
+	// The tenants' envelopes from index 17 (#1490): golf, castle, the lobby.
+	// Labels carry the game prefix so a tile's label names it across the
+	// whole service, not just its group.
+	assert.Equal(t, CustomMetricValue{Label: "golf_commands", Value: 217.0, Toggleable: true},
 		response.Custom[4].Metrics[0])
-	// Castle (#77) starts at index 25, after thoughts.
-	assert.Equal(t, CustomMetricValue{Label: "castle_commands", Value: 225.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "castle_commands", Value: 219.0, Toggleable: true},
 		response.Custom[5].Metrics[0])
+	assert.Equal(t, CustomMetricValue{Label: "lobby_commands", Value: 221.0, Toggleable: true},
+		response.Custom[6].Metrics[0])
 	// The omitted query's descriptor survives with a zero value.
-	last := response.Custom[5].Metrics[1]
+	last := response.Custom[6].Metrics[1]
 	assert.Equal(t, omitted.Label, last.Label)
 	assert.Equal(t, 0.0, last.Value)
 }
@@ -285,9 +289,9 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 		assert.GreaterOrEqual(t, series.MetricName, previous)
 		previous = series.MetricName
 	}
-	// The seven standard series plus the hub's thirty custom panels: four
-	// fixed-form charts, and thirteen toggleable ones each expanding to a
-	// _rate/_count pair (one prefix per game).
+	// The seven standard series plus the hub's thirty-one custom panels:
+	// three fixed-form charts, and fourteen toggleable ones each expanding
+	// to a _rate/_count pair (the room layer bare, one prefix per tenant).
 	expected := []string{
 		"request_rate", "request_count", "error_rate_percent", "error_count",
 		"avg_duration_us", "p95_duration_us", "active_requests",
@@ -300,12 +304,12 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 		"chat_message_rate", "chat_message_count",
 		"chat_delivery_rate", "chat_delivery_count",
 		"chat_failure_rate", "chat_failure_count",
-		"thoughts_active",
-		"thoughts_command_rate", "thoughts_command_count",
-		"thoughts_event_rate", "thoughts_event_count",
-		"thoughts_rejection_rate", "thoughts_rejection_count",
+		"golf_command_rate", "golf_command_count",
+		"golf_event_rate", "golf_event_count",
 		"castle_command_rate", "castle_command_count",
 		"castle_event_rate", "castle_event_count",
+		"lobby_command_rate", "lobby_command_count",
+		"lobby_event_rate", "lobby_event_count",
 	}
 	assert.Len(t, names, len(expected))
 	for _, name := range expected {
@@ -450,7 +454,7 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_IgnoresViewParam(t *testing.
 // both land in the response, and the count form is bucketed by the range's
 // own step exactly like request_count.
 func TestMetricsHandler_GetServiceMetricsTimeSeries_CustomCounterPanelBucketsByStep(t *testing.T) {
-	countQuery := `sum(increase(golf_commands_total[1h]))`
+	countQuery := `sum(increase(hub_commands_total[1h]))`
 	handler := &MetricsHandler{
 		promClient: &mockPrometheusClient{
 			queryRangeResponses: map[string]*QueryResponse{
@@ -611,14 +615,14 @@ func TestMetricsHandler_GetServiceMetrics_RateViewSelectsTheRateForm(t *testing.
 	// A unitless counter reads per-second; one with a unit keeps it and gains
 	// the suffix. Both come from the same descriptor, which in the count view
 	// answers "" and "rows".
-	assert.Equal(t, "/s", byLabel["golf_commands"].Unit)
+	assert.Equal(t, "/s", byLabel["hub_commands"].Unit)
 	assert.Equal(t, "rows/s", byLabel["delivered_rows"].Unit)
-	assert.Equal(t, 308.0, byLabel["golf_commands"].Value)
+	assert.Equal(t, 308.0, byLabel["hub_commands"].Value)
 
 	// The fixed-form tiles are untouched by the view: a gauge has no rate, and
 	// the windowed mean is already a ratio of two rates.
-	assert.Equal(t, "sessions", byLabel["golf_active"].Unit)
-	assert.False(t, byLabel["golf_active"].Toggleable)
+	assert.Equal(t, "sessions", byLabel["hub_active"].Unit)
+	assert.False(t, byLabel["hub_active"].Toggleable)
 	assert.Equal(t, "rows", byLabel["catch_up_rows_avg_5m"].Unit)
 	assert.False(t, byLabel["catch_up_rows_avg_5m"].Toggleable)
 }
@@ -682,14 +686,14 @@ func TestMetricsHandler_GetServiceMetrics_JsonKeysAreStable(t *testing.T) {
 		}
 	}
 
-	counter, ok := tiles["golf_commands"]
+	counter, ok := tiles["hub_commands"]
 	require.True(t, ok, "games_hub lost its commands tile")
 	assert.Equal(t, true, counter["toggleable"],
 		`a counter tile must carry "toggleable": true for the UI to offer the switch`)
 
 	// And the negative half: omitempty means a fixed-form tile has no key at
 	// all, which is what tells the UI not to draw a toggle it cannot honour.
-	gauge, ok := tiles["golf_active"]
+	gauge, ok := tiles["hub_active"]
 	require.True(t, ok, "games_hub lost its active tile")
 	_, present := gauge["toggleable"]
 	assert.False(t, present,

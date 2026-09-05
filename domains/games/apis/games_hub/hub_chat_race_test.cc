@@ -161,9 +161,8 @@ class HubChatRaceFixture : public GamesHubStreamFixture {
                                                ids, std::chrono::seconds(60), instance->metrics,
                                                store_, chat_store_, UnlimitedRateLimits());
     EXPECT_TRUE(instance->golf->RestoreFromStore().ok());
-    instance->server =
-        std::make_unique<moonbase::games::GamesHubServer>(std::make_shared<GamesHubHandler>(
-            vault_, ids, instance->golf, std::make_shared<ThoughtsHub>(vault_, instance->metrics)));
+    instance->server = std::make_unique<moonbase::games::GamesHubServer>(
+        std::make_shared<GamesHubHandler>(vault_, ids, instance->golf));
 
     auto loopback = std::make_shared<smithy::http::Loopback>();
     EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());

@@ -50,6 +50,9 @@ struct GolfTestHooks {
   /// On the close path, after the world entry is gone and playerLeft has
   /// fanned out, before the seat parks for a resume to reclaim.
   std::function<void(const std::string& player_id)> before_seat_release;
+  /// Under mu_, after a lobby command's world deliveries have gone to the
+  /// registry, before the lock is released.
+  std::function<void()> after_world_sent;
 };
 
 /// GolfHub is the room hub, phase 2 (#1187): seat admission, rooms,
@@ -58,16 +61,18 @@ struct GolfTestHooks {
 /// too. A room hosts tables of either game (#79): golf on libs/cards/golf
 /// and castle on libs/cards/castle, each a member of the stream's unions
 /// with its own per-viewer view. Each tenant's envelope counts on its own
-/// series (golf_, castle_, lobby_); the room layer stays on golf_*.
+/// series (golf_, castle_, lobby_); the room layer's own are hub_*.
 ///
-/// The lobby member is the thoughts World (world.h) keyed by the session's
-/// room: a roomed session stands in its room's world, an unroomed one in
-/// the plaza's. Presence is the socket — a close leaves the world at once
+/// The lobby member is the World (world.h) keyed by the session's room:
+/// a roomed session stands in its room's world, an unroomed one in the
+/// plaza's. Presence is the socket — a close leaves the world at once
 /// while the seat parks for grace — and the room: joining, creating, or
 /// leaving a room leaves whatever world the session stood in, and the
-/// client joins the new one. The world lives under mu_ with the rooms and
-/// its fan-outs ride the Outbox, so a member hears the world and the room
-/// in the order they changed. One SessionRegistry
+/// client joins the new one. The world lives under mu_ with the rooms,
+/// and its deliveries go to the registry under mu_ too — the registry
+/// only queues — so a joiner's snapshot is out before any later command
+/// can change what it shows, and a leave that races a join lands behind
+/// the snapshot that lists the leaver. One SessionRegistry
 /// keyed by playerId carries all fan-out (async delivery — no writer
 /// threads); rooms are a mutex'd map, membership marked disconnected
 /// during ADR-0020 grace and reaped by on_expired — with one boot-time
@@ -118,15 +123,16 @@ class GolfHub final {
   /// increments, and leaves the three real series to be born carrying their
   /// first event's value — which is the bug (#1323), not a fix for it.
   ///
-  /// golf_commands{command} and golf_events{event} take the case names
-  /// of golf.smithy's unions, so their block is a copy of the model.
+  /// hub_commands{command} and hub_events{event} take the case names of
+  /// games.smithy's stream unions, golf_commands and golf_events those of
+  /// golf.smithy's, so their blocks are a copy of the model.
   /// StreamSeriesMatchTheModelUnions parses the .smithy file and fails on
   /// any drift, in either direction — that test is what makes a hand-kept
   /// copy tolerable. The generated unions already hold this list (the
   /// kNames array behind case_name()); a smithy-cpp accessor exposing it
   /// would let this block be derived and the parser test deleted.
   ///
-  /// golf_rejections carries the bounded `kind` (see RejectKind), never
+  /// hub_rejections carries the bounded `kind` (see RejectKind), never
   /// the free-text reason: the reason strings are ~30 literals spread across
   /// this file and the cards engine, exactly the label set that rots.
   ///
@@ -291,11 +297,11 @@ class GolfHub final {
   /// The world key a session stands in, or would: its room, else the plaza.
   std::string WorldOfLocked(const std::string& player_id) const;
   /// Stages the world's deliveries as lobby events; callers hold mu_.
-  static void StageWorldLocked(World::Deliveries& deliveries, Outbox& outbox);
+  void SendWorldLocked(World::Deliveries& deliveries);
   /// Out of whatever world the session stood in, the rest of it told;
   /// callers hold mu_. Shared by every way of leaving: the close path,
   /// LeaveEverywhere, and a room change.
-  void LeaveWorldLocked(const std::string& player_id, Outbox& outbox);
+  void LeaveWorldLocked(const std::string& player_id);
   /// The lifecycle moves both games share. Create and join are told
   /// which game's envelope asked — a golf join of a castle table is
   /// refused, so nobody is seated at a table whose vocabulary they do not
@@ -375,7 +381,7 @@ class GolfHub final {
   void LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writes& writes);
   void BroadcastRoom(const std::string& room_id);
 
-  /// The bounded label on golf_rejections{kind} (hub_metrics.h).
+  /// The bounded label on hub_rejections{kind} (hub_metrics.h).
   using RejectKind = games_hub::RejectKind;
 
   /// The flows that work under mu_ and Reject after releasing it stage

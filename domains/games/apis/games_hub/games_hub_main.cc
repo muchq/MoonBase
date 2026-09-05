@@ -7,8 +7,6 @@
 //   curl -X POST localhost:8080/games/v2/session -H 'content-type: application/json' -d '{}'
 //   # browser: new WebSocket("ws://localhost:8080/games/v2/play?ticket=<t>",
 //   #                        "smithy.eventstream.v1+json")
-//   #          ...or the pre-lobby /games/v2/golf/play and
-//   #          /games/v2/thoughts/play on the same ticket shape
 //   kill -TERM <pid>   # drains sessions, then exits 0
 
 #include <chrono>
@@ -32,7 +30,6 @@
 #include "domains/games/apis/games_hub/pg_hub_store.h"
 #include "domains/games/apis/games_hub/pg_ticket_vault.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
-#include "domains/games/apis/games_hub/thoughts_hub.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/aura/middleware.h"
@@ -110,15 +107,14 @@ int main() {
     // wired to its membership guard.
     LOG(INFO) << "Persistence: in-memory (GAMES_HUB_DB_URL unset; restarts forget everything)";
   }
-  // Stream-side instruments (sessions, commands, events) of both hubs ride
-  // the same meter the aura chain's unary instruments use.
+  // Stream-side instruments (sessions, commands, events) ride the same
+  // meter the aura chain's unary instruments use.
   auto stream_metrics = std::make_shared<futility::otel::MetricsRecorder>("games_hub");
   auto ids = std::make_shared<games_hub::WhimsicalIdGenerator>();
   auto golf = std::make_shared<games_hub::GolfHub>(vault, std::make_shared<cards::Dealer>(), ids,
                                                    /*grace_period=*/std::chrono::minutes(5),
                                                    stream_metrics, store, chat_store);
-  auto thoughts = std::make_shared<games_hub::ThoughtsHub>(vault, stream_metrics);
-  auto handler = std::make_shared<games_hub::GamesHubHandler>(vault, ids, golf, thoughts);
+  auto handler = std::make_shared<games_hub::GamesHubHandler>(vault, ids, golf);
   // Same policy as the migration above: a database we can't read at boot
   // is a reason to let the supervisor retry, not to serve amnesiac.
   if (absl::Status restored = golf->RestoreFromStore(); !restored.ok()) {
@@ -238,10 +234,6 @@ int main() {
   LOG(INFO) << "Games hub running on http://" << options.address << ":" << transport.port();
   LOG(INFO) << "  POST http://localhost:" << transport.port() << "/games/v2/session";
   LOG(INFO) << "  WS   ws://localhost:" << transport.port() << "/games/v2/play?ticket=<ticket>";
-  LOG(INFO) << "  WS   ws://localhost:" << transport.port()
-            << "/games/v2/golf/play?ticket=<ticket> (pre-lobby route)";
-  LOG(INFO) << "  WS   ws://localhost:" << transport.port()
-            << "/games/v2/thoughts/play?ticket=<ticket> (pre-lobby route)";
 
   int signal_number = 0;
   sigwait(&shutdown_signals, &signal_number);
@@ -249,7 +241,6 @@ int main() {
   golf->AttachListener(nullptr);
   listener.reset();
   golf->registry().Drain(std::chrono::seconds(5));
-  thoughts->registry().Drain(std::chrono::seconds(5));
   transport.Stop();
   return 0;
 }

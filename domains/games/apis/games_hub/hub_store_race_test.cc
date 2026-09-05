@@ -126,9 +126,8 @@ class HubStoreRaceFixture : public GamesHubStreamFixture {
         vault, std::make_shared<cards::NoShuffleDealer>(), ids, std::chrono::seconds(60),
         instance->metrics, gated_store_, /*chat_store=*/nullptr, UnlimitedRateLimits());
     EXPECT_TRUE(instance->golf->RestoreFromStore().ok());
-    instance->server =
-        std::make_unique<moonbase::games::GamesHubServer>(std::make_shared<GamesHubHandler>(
-            vault, ids, instance->golf, std::make_shared<ThoughtsHub>(vault, instance->metrics)));
+    instance->server = std::make_unique<moonbase::games::GamesHubServer>(
+        std::make_shared<GamesHubHandler>(vault, ids, instance->golf));
 
     auto loopback = std::make_shared<smithy::http::Loopback>();
     EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());

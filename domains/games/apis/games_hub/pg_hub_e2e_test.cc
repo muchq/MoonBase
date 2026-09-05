@@ -129,9 +129,8 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     const absl::Status restored = instance->golf->RestoreFromStore();
     EXPECT_TRUE(restored.ok()) << restored;
     instance->listener = MakeListener(instance->golf);
-    instance->server =
-        std::make_unique<moonbase::games::GamesHubServer>(std::make_shared<GamesHubHandler>(
-            vault, ids, instance->golf, std::make_shared<ThoughtsHub>(vault, instance->metrics)));
+    instance->server = std::make_unique<moonbase::games::GamesHubServer>(
+        std::make_shared<GamesHubHandler>(vault, ids, instance->golf));
 
     auto loopback = std::make_shared<smithy::http::Loopback>();
     EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
