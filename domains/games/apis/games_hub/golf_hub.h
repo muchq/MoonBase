@@ -43,6 +43,15 @@ namespace games_hub {
 [[nodiscard]] std::unordered_set<int> WinnersAmong(const golf::GameState& state,
                                                    const std::vector<std::string>& roster);
 
+/// Scheduling seams for the race tests, unset in production. A hook runs
+/// on the hub's thread, outside the hub's lock, and must not call into
+/// the hub.
+struct GolfTestHooks {
+  /// On the close path, after the world entry is gone and playerLeft has
+  /// fanned out, before the seat parks for a resume to reclaim.
+  std::function<void(const std::string& player_id)> before_seat_release;
+};
+
 /// GolfHub is the room hub, phase 2 (#1187): seat admission, rooms,
 /// chat, and the game layer, behind GamesHubHandler::Play. The name is
 /// golf's; the room layer, castle (#77), and the lobby (#1490) live here
@@ -91,15 +100,6 @@ namespace games_hub {
 /// commits to its own ChatStore before it is echoed, so a message its
 /// sender sees is a message that was stored; cross-instance chat
 /// fan-out and join-time history replay are still to come (#1226).
-/// Scheduling seams for the race tests, unset in production. A hook runs
-/// on the hub's thread, outside the hub's lock, and must not call into
-/// the hub.
-struct GolfTestHooks {
-  /// On the close path, after the world entry is gone and playerLeft has
-  /// fanned out, before the seat parks for a resume to reclaim.
-  std::function<void(const std::string& player_id)> before_seat_release;
-};
-
 class GolfHub final {
  public:
   using Registry = smithy::server::SessionRegistry<moonbase::games::GameEvents>;
