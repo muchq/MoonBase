@@ -126,7 +126,7 @@ class GolfHub final {
   /// kNames array behind case_name()); a smithy-cpp accessor exposing it
   /// would let this block be derived and the parser test deleted.
   ///
-  /// golf_rejections carries the bounded `kind` (see RejectKind), never
+  /// hub_rejections carries the bounded `kind` (see RejectKind), never
   /// the free-text reason: the reason strings are ~30 literals spread across
   /// this file and the cards engine, exactly the label set that rots.
   ///
@@ -375,7 +375,7 @@ class GolfHub final {
   void LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writes& writes);
   void BroadcastRoom(const std::string& room_id);
 
-  /// The bounded label on golf_rejections{kind} (hub_metrics.h).
+  /// The bounded label on hub_rejections{kind} (hub_metrics.h).
   using RejectKind = games_hub::RejectKind;
 
   /// The flows that work under mu_ and Reject after releasing it stage

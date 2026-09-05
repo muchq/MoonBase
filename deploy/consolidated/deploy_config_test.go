@@ -1034,8 +1034,6 @@ var publicRoutes = []struct {
 	// its own terms.
 	{"@post_golf_v2_session", []string{"method POST", "path /games/v2/session"}, "games_hub:8089"},
 	{"@ws_play_v2", []string{"path /games/v2/play"}, "games_hub:8089"},
-	{"@ws_golf_v2", []string{"path /games/v2/golf/play"}, "games_hub:8089"},
-	{"@ws_thoughts_v2", []string{"path /games/v2/thoughts/play"}, "games_hub:8089"},
 	// The 1d4.net stats tab (#1465) reads its own service's aggregates on
 	// api.1d4.net, the host whose CORS grant covers the app — only the
 	// one_d4 prefix, since the rest of the stats API is muchq.com's.
@@ -2266,8 +2264,6 @@ func catchAllIsLastHandle(site []string, terminal string) (found bool, problem s
 var localRoutes = map[string]string{
 	"@post_golf_v2_session": "localhost:8089",
 	"@ws_play_v2":           "localhost:8089",
-	"@ws_golf_v2":           "localhost:8089",
-	"@ws_thoughts_v2":       "localhost:8089",
 	"@post_portrait":        "localhost:8081",
 	"@get_metrics":          "localhost:8082",
 	"@post_mithril":         "localhost:8083",

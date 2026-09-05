@@ -2,8 +2,8 @@
 // generated client over the in-memory pair: the world is the session's
 // room's, or the plaza's while unroomed; a room change and a closed
 // socket leave it; a roomId on this stream can only agree with that.
-// The world's own rules (bounds, join-before-move, leave-first) are
-// thoughts_e2e_test's, on the same World.
+// The world's own rules (bounds, join-before-move, leave-first, fan-out)
+// are world_test's, on the World itself.
 
 #include <gtest/gtest.h>
 
@@ -132,7 +132,7 @@ TEST_F(LobbyFixture, ARoomIdOnTheRoomStreamCanOnlyNameTheSessionsWorld) {
   EXPECT_EQ(NextRejection(bob->stream), "the world is your room's; join the room first");
   ASSERT_TRUE(bob->stream.Send(JoinWorld(room_id)).ok());
   EXPECT_EQ(Listed(ReceiveLobby(bob->stream, "worldState")), std::vector<std::string>{});
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "state"}}), 4);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "state"}}), 4);
 }
 
 // A room change leaves the world behind: the plaza hears the leaver go,
@@ -419,7 +419,7 @@ TEST_F(ShortGraceLobbyFixture, GraceExpiryAfterACloseLeavesNothingMoreToLeave) {
   // A budget past the grace: the seat expires while bob listens, and he
   // hears nothing more.
   ExpectNoEvent(bob->stream, std::chrono::seconds(2));
-  EXPECT_EQ(metrics_->CounterTotal("golf_seats_expired", {}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_seats_expired", {}), 1);
   EXPECT_EQ(metrics_->CounterTotal("lobby_events", {{"event", "playerLeft"}}), 1);
 }
 

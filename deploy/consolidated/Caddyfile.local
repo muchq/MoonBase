@@ -77,14 +77,6 @@
 		path /games/v2/play
 	}
 
-	@ws_golf_v2 {
-		path /games/v2/golf/play
-	}
-
-	@ws_thoughts_v2 {
-		path /games/v2/thoughts/play
-	}
-
 	@options {
 		method OPTIONS
 	}
@@ -110,12 +102,6 @@
 		reverse_proxy localhost:8089
 	}
 	handle @ws_play_v2 {
-		reverse_proxy localhost:8089
-	}
-	handle @ws_golf_v2 {
-		reverse_proxy localhost:8089
-	}
-	handle @ws_thoughts_v2 {
 		reverse_proxy localhost:8089
 	}
 	handle @post_portrait {

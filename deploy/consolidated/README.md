@@ -10,7 +10,7 @@ individually targetable.
 
 - **api.muchq.com** - API backend services
   - [`portrait`](../../domains/graphics/apis/portrait) (port 8081)
-  - [`games_hub`](../../domains/games/apis/games_hub) (port 8089, `/games/v2/*`: one stream at `/games/v2/play` for the lobby, golf and castle, plus the pre-lobby `/games/v2/golf/play` and `/games/v2/thoughts/play` until the site moves)
+  - [`games_hub`](../../domains/games/apis/games_hub) (port 8089, `/games/v2/*`: the session mint and one stream at `/games/v2/play` for the lobby, golf and castle)
   - [`prom_proxy`](../../domains/platform/apis/prom_proxy) (port 8082)
   - [`mithril`](../../domains/games/apis/mithril) (port 8083)
   - [`posterize`](../../domains/graphics/apis/posterize) (port 8084)

@@ -2,7 +2,7 @@
 #define DOMAINS_GAMES_APIS_GAMES_HUB_WIRE_TEST_FIXTURE_H
 
 // The raw-wire harness the Beyoncé Rule consumer-tier suites share
-// (golf_wire_test, thoughts_wire_test): GamesHubHandler behind the generated
+// (golf_wire_test, castle_wire_test, lobby_wire_test): GamesHubHandler behind the generated
 // GamesHubServer, unary requests through Loopback, streams through
 // StreamRouter()->ServeSession() over an InMemoryWebSocketPair whose near
 // end the test holds and drives with hand-built frames. No generated
@@ -30,7 +30,6 @@
 #include "domains/games/apis/games_hub/golf_hub.h"
 #include "domains/games/apis/games_hub/id_generator.h"
 #include "domains/games/apis/games_hub/rate_limiter.h"
-#include "domains/games/apis/games_hub/thoughts_hub.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
@@ -72,9 +71,9 @@ inline RateLimits WireRateLimits() {
 // does not name (#1323).
 inline void ExpectOnlyDeclaredCounterSeriesOnTheWire(
     const futility::otel::CapturingMetricsRecorder& recorder) {
-  const auto& declared = GamesHubHandler::DeclaredCounterSeries();
+  const auto& declared = GolfHub::DeclaredCounterSeries();
   for (const auto& entry : recorder.Entries()) {
-    if (entry.name == "golf_sessions_active" || entry.name == "thoughts_sessions_active") {
+    if (entry.name == "hub_sessions_active") {
       continue;  // the gauges
     }
     const bool found = std::any_of(declared.begin(), declared.end(), [&](const auto& series) {
@@ -139,8 +138,7 @@ class HubWireFixture : public ::testing::Test {
                                       /*grace_period=*/std::chrono::seconds(60), metrics_,
                                       /*store=*/nullptr, /*chat_store=*/nullptr, WireRateLimits());
     ASSERT_TRUE(golf_->RestoreFromStore().ok());
-    handler_ = std::make_shared<GamesHubHandler>(vault, ids, golf_,
-                                                 std::make_shared<ThoughtsHub>(vault, metrics_));
+    handler_ = std::make_shared<GamesHubHandler>(vault, ids, golf_);
     server_ = std::make_unique<moonbase::games::GamesHubServer>(handler_);
     ASSERT_TRUE(loopback_->Start(server_->Handler()).ok());
   }

@@ -31,8 +31,8 @@ using json = nlohmann::json;
 // client once the site is on it.
 constexpr char kPlayPath[] = "/games/v2/play";
 
-// The join the lobby sends: the Think stream's fixture player, in the
-// lobby envelope, naming no room.
+// The join the lobby sends: the fixture player, in the lobby envelope,
+// naming no room.
 constexpr char kJoinPayload[] =
     R"({"action":{"join":{"position":[10,0,-5],"color":[0.8,0.2,0.6],"shape":0}}})";
 
@@ -136,30 +136,8 @@ TEST_F(LobbyWireTest, RejectedLobbyCommandsYieldCommandRejectedEvents) {
             R"({"update":{"worldState":{"players":[]}}})");
 }
 
-// Consumer: the client's second-tab handling across the two routes. One
-// registry guards both: a seat live on the one route refuses a fresh
-// ticket dialed on the legacy route with the SeatConflict frame
-// golf_wire_test pins, so a tab on each route cannot hold one player twice.
-TEST_F(LobbyWireTest, ASeatLiveOnOneRouteRefusesTheOtherWithSeatConflict) {
-  json session;
-  auto socket = DialReady(session);
-
-  const std::string resume_body =
-      std::string(R"({"resumeToken":")") + session["resumeToken"].get<std::string>() + R"("})";
-  const auto response = PostSession(resume_body);
-  ASSERT_EQ(response.status, 200) << response.body;
-  const json second = json::parse(response.body);
-  auto conflicted =
-      DialStream("/games/v2/golf/play", "?ticket=" + second["ticket"].get<std::string>());
-  const auto frame = NextFrame(*conflicted);
-  ASSERT_TRUE(frame.has_value());
-  EXPECT_EQ(HeaderText(*frame, ":message-type"), "exception");
-  EXPECT_EQ(HeaderText(*frame, ":exception-type"), "SeatConflict");
-  EXPECT_EQ(frame->payload.ToString(), R"({"message":"player already has a live connection"})");
-}
-
-// Consumer: the client's dial error handling on this route — the same
-// terminal Unauthenticated frame and clean close as the legacy route.
+// Consumer: the client's dial error handling — the terminal
+// Unauthenticated frame and a clean close.
 TEST_F(LobbyWireTest, InvalidTicketRefusesWithTerminalUnauthenticatedFrame) {
   auto socket = DialStream(kPlayPath, "?ticket=bogus");
 

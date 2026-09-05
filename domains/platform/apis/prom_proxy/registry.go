@@ -340,20 +340,22 @@ var serviceRegistry = map[string]serviceEntry{
 	"games_hub": {
 		CustomScalars: []customScalarDef{
 			probesTile("games_hub"),
-			scalar("Golf sessions", "golf_active", "sessions", `sum(golf_sessions_active_gauge)`),
-			counter("Golf sessions", "golf_started", "", `golf_sessions_total`),
-			counter("Golf sessions", "golf_resumed", "", `golf_sessions_total{resumed="true"}`),
-			counter("Golf sessions", "golf_refused", "", `golf_admissions_refused_total`),
-			counter("Golf sessions", "golf_disconnects", "", `golf_disconnects_total`),
-			counter("Golf sessions", "golf_seats_expired", "", `golf_seats_expired_total`),
+			scalar("Sessions", "hub_active", "sessions", `sum(hub_sessions_active_gauge)`),
+			counter("Sessions", "hub_started", "", `hub_sessions_total`),
+			counter("Sessions", "hub_resumed", "", `hub_sessions_total{resumed="true"}`),
+			counter("Sessions", "hub_refused", "", `hub_admissions_refused_total`),
+			counter("Sessions", "hub_disconnects", "", `hub_disconnects_total`),
+			counter("Sessions", "hub_seats_expired", "", `hub_seats_expired_total`),
 			// Boot-cohort reaps (#1295): fires unattended at boot+grace, so
 			// this series is the only evidence the reaper runs at all — a
 			// broken one is indistinguishable from a hub with no ghosts.
-			counter("Golf sessions", "golf_restored_reaped", "", `golf_restored_seats_reaped_total`),
-			counter("Golf activity", "golf_commands", "", `golf_commands_total`),
-			counter("Golf activity", "golf_events", "", `golf_events_total`),
-			counter("Golf activity", "golf_rejections", "", `golf_rejections_total`),
-			counter("Golf activity", "golf_rate_limited", "", `golf_rate_limited_total`),
+			counter("Sessions", "hub_restored_reaped", "", `hub_restored_seats_reaped_total`),
+			// The room layer (#1490 phase 6): rooms, tables, and the stream's
+			// own refusals, on hub_*; each game's envelope is its own group.
+			counter("Room layer", "hub_commands", "", `hub_commands_total`),
+			counter("Room layer", "hub_events", "", `hub_events_total`),
+			counter("Room layer", "hub_rejections", "", `hub_rejections_total`),
+			counter("Room layer", "hub_rate_limited", "", `hub_rate_limited_total`),
 			// Room chat (#1226): outcome counts and stages only — the emitter
 			// never labels by room, player, or text. catch_up_rows_avg is rows
 			// per drain — how far behind a wake found an instance (the lag
@@ -368,24 +370,17 @@ var serviceRegistry = map[string]serviceEntry{
 				`sum(rate(chat_rows_delivered_total[5m]))/sum(rate(chat_catch_up_drains_total[5m]))`),
 			counter("Chat", "history_replays", "", `chat_history_replays_total`),
 			counterOver("Chat", "failures", "", `chat_failures_total`, alarmWindow),
-			// Thoughts (#79): the second hub in the process, on its own
-			// thoughts_* series. Series and labels carry the game prefix
-			// (golf_, thoughts_) because a label is a tile's identity across
-			// the whole service, not just its group; chat_* stays bare
-			// because chat belongs to the room layer, not to golf.
-			scalar("Thoughts", "thoughts_active", "sessions", `sum(thoughts_sessions_active_gauge)`),
-			counter("Thoughts", "thoughts_sessions", "", `thoughts_sessions_total`),
-			counter("Thoughts", "thoughts_refused", "", `thoughts_admissions_refused_total`),
-			counter("Thoughts", "thoughts_commands", "", `thoughts_commands_total`),
-			counter("Thoughts", "thoughts_events", "", `thoughts_events_total`),
-			counter("Thoughts", "thoughts_rejections", "", `thoughts_rejections_total`),
-			counter("Thoughts", "thoughts_rate_limited", "", `thoughts_rate_limited_total`),
-			counter("Thoughts", "thoughts_disconnects", "", `thoughts_disconnects_total`),
-			// Castle (#77) rides the room stream, so its sessions and
-			// rejections are the golf rows above; only its envelope has
-			// series of its own.
+			// Each tenant's envelope on the one stream (#1490): golf, castle
+			// (#77), and the lobby's world. Series and labels carry the game
+			// prefix because a label is a tile's identity across the whole
+			// service, not just its group; chat_* and hub_* are the room
+			// layer's.
+			counter("Golf", "golf_commands", "", `golf_commands_total`),
+			counter("Golf", "golf_events", "", `golf_events_total`),
 			counter("Castle", "castle_commands", "", `castle_commands_total`),
 			counter("Castle", "castle_events", "", `castle_events_total`),
+			counter("Lobby", "lobby_commands", "", `lobby_commands_total`),
+			counter("Lobby", "lobby_events", "", `lobby_events_total`),
 		},
 		// command/event/rejection/disconnect/rate_limited/chat_message/
 		// chat_delivery/chat_failure are all toggleable: each expands to a
@@ -394,29 +389,30 @@ var serviceRegistry = map[string]serviceEntry{
 		// only ever asked for the rate panel keeps reading the same series
 		// name it always did.
 		CustomTimeseries: map[string]customTimeseriesDef{
-			"sessions_active": tsFixed(`sum(golf_sessions_active_gauge)`),
-			// Fixed rather than tsCounter(golf_sessions_total): this key
+			"sessions_active": tsFixed(`sum(hub_sessions_active_gauge)`),
+			// Fixed rather than tsCounter(hub_sessions_total): this key
 			// predates the toggle and is already a count, over a plain 5m
 			// window rather than the chart's own step. Making it toggleable
 			// would rename it away from "session_starts" (tsCounter's base
 			// key becomes both the _rate and _count panel name), breaking
 			// the one client-facing name this key has ever had.
-			"session_starts":     tsFixed(`sum(increase(golf_sessions_total[5m]))`),
-			"command":            tsCounter(`golf_commands_total`),
-			"event":              tsCounter(`golf_events_total`),
-			"rejection":          tsCounter(`golf_rejections_total`),
-			"disconnect":         tsCounter(`golf_disconnects_total`),
-			"rate_limited":       tsCounter(`golf_rate_limited_total`),
+			"session_starts": tsFixed(`sum(increase(hub_sessions_total[5m]))`),
+			// The room layer's own traffic; each tenant's envelope below.
+			"command":            tsCounter(`hub_commands_total`),
+			"event":              tsCounter(`hub_events_total`),
+			"rejection":          tsCounter(`hub_rejections_total`),
+			"disconnect":         tsCounter(`hub_disconnects_total`),
+			"rate_limited":       tsCounter(`hub_rate_limited_total`),
 			"chat_message":       tsCounter(`chat_appends_total{result="stored"}`),
 			"chat_delivery":      tsCounter(`chat_rows_delivered_total`),
 			"chat_failure":       tsCounter(`chat_failures_total`),
 			"chat_catch_up_rows": tsMean(`chat_rows_delivered_total`, `chat_catch_up_drains_total`),
-			"thoughts_active":    tsFixed(`sum(thoughts_sessions_active_gauge)`),
-			"thoughts_command":   tsCounter(`thoughts_commands_total`),
-			"thoughts_event":     tsCounter(`thoughts_events_total`),
-			"thoughts_rejection": tsCounter(`thoughts_rejections_total`),
+			"golf_command":       tsCounter(`golf_commands_total`),
+			"golf_event":         tsCounter(`golf_events_total`),
 			"castle_command":     tsCounter(`castle_commands_total`),
 			"castle_event":       tsCounter(`castle_events_total`),
+			"lobby_command":      tsCounter(`lobby_commands_total`),
+			"lobby_event":        tsCounter(`lobby_events_total`),
 		},
 	},
 	"microgpt-serve": {

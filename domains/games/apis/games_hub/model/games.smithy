@@ -7,19 +7,17 @@ use moonbase.castle#CastleCommand
 use moonbase.castle#CastleEvent
 use moonbase.golf#GolfCommand
 use moonbase.golf#GolfEvent
-use moonbase.thoughts#LobbyCommand
-use moonbase.thoughts#LobbyEvent
-use moonbase.thoughts#Think
+use moonbase.lobby#LobbyCommand
+use moonbase.lobby#LobbyEvent
 
 /// The games hub (#79): one service, one session identity, one room layer,
 /// and one stream, Play, on which the lobby (#1490), golf, and castle
-/// (#77) each ride as one envelope member per direction. Think is the
-/// pre-lobby thoughts stream, kept until the site is on Play.
+/// (#77) each ride as one envelope member per direction.
 @simpleRestJson
 @title("Games Hub")
 service GamesHub {
     version: "2026-07-21"
-    operations: [GetSession, Play, PlayLegacy, Think]
+    operations: [GetSession, Play]
 }
 
 /// The one WebSocket session per player: commands up, events down. The
@@ -29,25 +27,6 @@ service GamesHub {
 /// commandRejected events; the modeled errors below are terminal.
 @http(method: "POST", uri: "/games/v2/play")
 operation Play {
-    input := {
-        @required
-        @httpQuery("ticket")
-        ticket: String
-
-        @httpPayload
-        commands: GameCommands
-    }
-    output := {
-        @httpPayload
-        events: GameEvents
-    }
-    errors: [Unauthenticated, SeatConflict]
-}
-
-/// Play on the route the deployed golf and castle clients dial; the same
-/// stream, byte for byte. Retires with Think once the site is on Play.
-@http(method: "POST", uri: "/games/v2/golf/play")
-operation PlayLegacy {
     input := {
         @required
         @httpQuery("ticket")

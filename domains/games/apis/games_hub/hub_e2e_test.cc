@@ -228,9 +228,8 @@ std::unique_ptr<SecondInstance> BuildSecondInstance(
                                              grace, instance->metrics, std::move(store),
                                              std::move(chat_store), UnlimitedRateLimits());
   EXPECT_TRUE(instance->golf->RestoreFromStore().ok());
-  instance->server =
-      std::make_unique<moonbase::games::GamesHubServer>(std::make_shared<GamesHubHandler>(
-          vault, ids, instance->golf, std::make_shared<ThoughtsHub>(vault, instance->metrics)));
+  instance->server = std::make_unique<moonbase::games::GamesHubServer>(
+      std::make_shared<GamesHubHandler>(vault, ids, instance->golf));
 
   auto loopback = std::make_shared<smithy::http::Loopback>();
   EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
@@ -1548,40 +1547,40 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"chat_failures", {{"stage", "history_load"}}},
       {"chat_history_replays", {}},
       {"chat_rows_delivered", {}},
-      {"golf_admissions_refused", {{"reason", "bad_ticket"}}},
-      {"golf_admissions_refused", {{"reason", "seat_conflict"}}},
-      {"golf_commands", {{"command", "createRoom"}}},
-      {"golf_commands", {{"command", "joinRoom"}}},
-      {"golf_commands", {{"command", "leaveRoom"}}},
-      {"golf_commands", {{"command", "getRoomState"}}},
-      {"golf_commands", {{"command", "chat"}}},
-      {"golf_commands", {{"command", "golf.createGame"}}},
-      {"golf_commands", {{"command", "golf.joinGame"}}},
-      {"golf_commands", {{"command", "golf.startGame"}}},
-      {"golf_commands", {{"command", "golf.leaveGame"}}},
-      {"golf_commands", {{"command", "golf.peekCard"}}},
-      {"golf_commands", {{"command", "golf.drawCard"}}},
-      {"golf_commands", {{"command", "golf.takeFromDiscard"}}},
-      {"golf_commands", {{"command", "golf.swapCard"}}},
-      {"golf_commands", {{"command", "golf.discardDrawn"}}},
-      {"golf_commands", {{"command", "golf.knock"}}},
-      {"golf_commands", {{"command", "golf.hideCards"}}},
-      {"golf_disconnects", {{"kind", "clean"}}},
-      {"golf_disconnects", {{"kind", "abrupt"}}},
-      {"golf_events", {{"event", "sessionReady"}}},
-      {"golf_events", {{"event", "roomState"}}},
-      {"golf_events", {{"event", "roomLeft"}}},
-      {"golf_events", {{"event", "roomChat"}}},
-      {"golf_events", {{"event", "roomChatHistory"}}},
-      {"golf_events", {{"event", "commandRejected"}}},
-      {"golf_events", {{"event", "golf.gameJoined"}}},
-      {"golf_events", {{"event", "golf.gameState"}}},
-      {"golf_events", {{"event", "golf.gameCreated"}}},
-      {"golf_events", {{"event", "golf.gameStarted"}}},
-      {"golf_events", {{"event", "golf.turnChanged"}}},
-      {"golf_events", {{"event", "golf.playerKnocked"}}},
-      {"golf_events", {{"event", "golf.gameEnded"}}},
-      {"golf_events", {{"event", "golf.gameLeft"}}},
+      {"hub_admissions_refused", {{"reason", "bad_ticket"}}},
+      {"hub_admissions_refused", {{"reason", "seat_conflict"}}},
+      {"hub_commands", {{"command", "createRoom"}}},
+      {"hub_commands", {{"command", "joinRoom"}}},
+      {"hub_commands", {{"command", "leaveRoom"}}},
+      {"hub_commands", {{"command", "getRoomState"}}},
+      {"hub_commands", {{"command", "chat"}}},
+      {"golf_commands", {{"command", "createGame"}}},
+      {"golf_commands", {{"command", "joinGame"}}},
+      {"golf_commands", {{"command", "startGame"}}},
+      {"golf_commands", {{"command", "leaveGame"}}},
+      {"golf_commands", {{"command", "peekCard"}}},
+      {"golf_commands", {{"command", "drawCard"}}},
+      {"golf_commands", {{"command", "takeFromDiscard"}}},
+      {"golf_commands", {{"command", "swapCard"}}},
+      {"golf_commands", {{"command", "discardDrawn"}}},
+      {"golf_commands", {{"command", "knock"}}},
+      {"golf_commands", {{"command", "hideCards"}}},
+      {"hub_disconnects", {{"kind", "clean"}}},
+      {"hub_disconnects", {{"kind", "abrupt"}}},
+      {"hub_events", {{"event", "sessionReady"}}},
+      {"hub_events", {{"event", "roomState"}}},
+      {"hub_events", {{"event", "roomLeft"}}},
+      {"hub_events", {{"event", "roomChat"}}},
+      {"hub_events", {{"event", "roomChatHistory"}}},
+      {"hub_events", {{"event", "commandRejected"}}},
+      {"golf_events", {{"event", "gameJoined"}}},
+      {"golf_events", {{"event", "gameState"}}},
+      {"golf_events", {{"event", "gameCreated"}}},
+      {"golf_events", {{"event", "gameStarted"}}},
+      {"golf_events", {{"event", "turnChanged"}}},
+      {"golf_events", {{"event", "playerKnocked"}}},
+      {"golf_events", {{"event", "gameEnded"}}},
+      {"golf_events", {{"event", "gameLeft"}}},
       {"lobby_commands", {{"command", "join"}}},
       {"lobby_commands", {{"command", "move"}}},
       {"lobby_commands", {{"command", "shape"}}},
@@ -1591,41 +1590,18 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"lobby_events", {{"event", "playerMoved"}}},
       {"lobby_events", {{"event", "shapeChanged"}}},
       {"lobby_events", {{"event", "playerLeft"}}},
-      {"golf_rate_limited", {{"kind", "chat"}}},
-      {"golf_rate_limited", {{"kind", "command"}}},
-      {"golf_rejections", {{"kind", "rate_limited"}}},
-      {"golf_rejections", {{"kind", "invalid"}}},
-      {"golf_rejections", {{"kind", "state"}}},
-      {"golf_rejections", {{"kind", "rules"}}},
-      {"golf_rejections", {{"kind", "unavailable"}}},
-      {"golf_rejections", {{"kind", "unknown"}}},
-      {"golf_restored_seats_reaped", {}},
-      {"golf_seats_expired", {}},
-      {"golf_sessions", {{"resumed", "true"}}},
-      {"golf_sessions", {{"resumed", "false"}}},
-      // The thoughts hub's list (#79), declared by the ThoughtsHub built on
-      // the same recorder.
-      {"thoughts_admissions_refused", {{"reason", "bad_ticket"}}},
-      {"thoughts_admissions_refused", {{"reason", "seat_conflict"}}},
-      {"thoughts_commands", {{"command", "join"}}},
-      {"thoughts_commands", {{"command", "move"}}},
-      {"thoughts_commands", {{"command", "shape"}}},
-      {"thoughts_commands", {{"command", "leave"}}},
-      {"thoughts_disconnects", {{"kind", "clean"}}},
-      {"thoughts_disconnects", {{"kind", "abrupt"}}},
-      {"thoughts_events", {{"event", "sessionReady"}}},
-      {"thoughts_events", {{"event", "worldState"}}},
-      {"thoughts_events", {{"event", "playerJoined"}}},
-      {"thoughts_events", {{"event", "playerMoved"}}},
-      {"thoughts_events", {{"event", "shapeChanged"}}},
-      {"thoughts_events", {{"event", "playerLeft"}}},
-      {"thoughts_events", {{"event", "commandRejected"}}},
-      {"thoughts_rate_limited", {}},
-      {"thoughts_rejections", {{"kind", "rate_limited"}}},
-      {"thoughts_rejections", {{"kind", "invalid"}}},
-      {"thoughts_rejections", {{"kind", "state"}}},
-      {"thoughts_rejections", {{"kind", "unknown"}}},
-      {"thoughts_sessions", {}},
+      {"hub_rate_limited", {{"kind", "chat"}}},
+      {"hub_rate_limited", {{"kind", "command"}}},
+      {"hub_rejections", {{"kind", "rate_limited"}}},
+      {"hub_rejections", {{"kind", "invalid"}}},
+      {"hub_rejections", {{"kind", "state"}}},
+      {"hub_rejections", {{"kind", "rules"}}},
+      {"hub_rejections", {{"kind", "unavailable"}}},
+      {"hub_rejections", {{"kind", "unknown"}}},
+      {"hub_restored_seats_reaped", {}},
+      {"hub_seats_expired", {}},
+      {"hub_sessions", {{"resumed", "true"}}},
+      {"hub_sessions", {{"resumed", "false"}}},
   };
 
   auto capture = MakeCapturingMetricsRecorder();
@@ -1634,7 +1610,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
 
   // Count first, so dropping an entry from the handler's list fails here rather
   // than only failing whichever per-series assertion happened to cover it.
-  EXPECT_EQ(GamesHubHandler::DeclaredCounterSeries().size(), kExpected.size());
+  EXPECT_EQ(GolfHub::DeclaredCounterSeries().size(), kExpected.size());
 
   const auto entries = capture->Entries();
   for (const auto& series : kExpected) {
@@ -1657,15 +1633,14 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
 // limiter, the chat store failures, and the disconnects the closes produce. One
 // scripted session would have covered a small fraction of the roster.
 
-// The golf_commands/golf_events declarations are a hand copy of the model's
-// union cases, and this test is what makes a hand copy safe to keep: it reads
-// golf.smithy and fails on drift in either direction — a case added to the
-// model without a declaration loses its first event after every deploy (#1323),
-// and a declaration for a case the model no longer has is a permanently flat
-// line on a dashboard. CountCommand and Send name series exactly this way:
-// the outer case name, or golf.<inner case> through the envelope. The castle
-// envelope counts on its own castle_* series (the pin below), so its outer
-// case is not a golf_ label.
+// The hub_*/golf_* command and event declarations are a hand copy of the
+// model's union cases, and this test is what makes a hand copy safe to keep:
+// it reads the model and fails on drift in either direction — a case added to
+// the model without a declaration loses its first event after every deploy
+// (#1323), and a declaration for a case the model no longer has is a
+// permanently flat line on a dashboard. CountCommand and Send name series
+// exactly this way: the room layer's outer case on hub_*, each envelope's
+// inner case on that tenant's series.
 TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
   const std::string room = ReadModel("domains/games/apis/games_hub/model/games.smithy");
   const std::string golf = ReadModel("domains/games/apis/games_hub/model/golf.smithy");
@@ -1688,28 +1663,28 @@ TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
             outer_events.end());
   ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
 
-  // The room layer's own cases bare and golf's envelope prefixed; castle's
-  // and the lobby's on their own series (the tests below).
-  std::set<std::string> expected_commands;
+  // The room layer's own cases on hub_*; golf's envelope, like castle's
+  // and the lobby's (the tests below), on its own series.
+  std::set<std::string> room_commands;
   for (const auto& name : outer_commands) {
-    if (name != "golf" && name != "castle" && name != "lobby") expected_commands.insert(name);
+    if (name != "golf" && name != "castle" && name != "lobby") room_commands.insert(name);
   }
-  for (const auto& name : moves) expected_commands.insert("golf." + name);
-
-  std::set<std::string> expected_events;
+  std::set<std::string> room_events;
   for (const auto& name : outer_events) {
-    if (name != "golf" && name != "castle" && name != "lobby") expected_events.insert(name);
+    if (name != "golf" && name != "castle" && name != "lobby") room_events.insert(name);
   }
-  for (const auto& name : updates) expected_events.insert("golf." + name);
-
-  EXPECT_EQ(DeclaredLabelValues("golf_commands", "command"), expected_commands);
-  EXPECT_EQ(DeclaredLabelValues("golf_events", "event"), expected_events);
+  EXPECT_EQ(DeclaredLabelValues("hub_commands", "command"), room_commands);
+  EXPECT_EQ(DeclaredLabelValues("hub_events", "event"), room_events);
+  EXPECT_EQ(DeclaredLabelValues("golf_commands", "command"),
+            std::set<std::string>(moves.begin(), moves.end()));
+  EXPECT_EQ(DeclaredLabelValues("golf_events", "event"),
+            std::set<std::string>(updates.begin(), updates.end()));
 }
 
 // The lobby envelope (#1490) counts its inner case names on lobby_commands
-// and lobby_events, pinned against thoughts.smithy the same way.
+// and lobby_events, pinned against lobby.smithy the same way.
 TEST(StreamSeriesModelPin, LobbySeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/thoughts.smithy");
+  const std::string model = ReadModel("domains/games/apis/games_hub/model/lobby.smithy");
   ASSERT_FALSE(model.empty());
   const auto actions = ModelUnionCases(model, "LobbyAction");
   const auto updates = ModelUnionCases(model, "LobbyUpdate");
@@ -1777,20 +1752,20 @@ TEST_F(GamesHubStreamFixture, RejectionsCountTheBoundedKindNeverTheReason) {
   ASSERT_TRUE(rules_rejected.has_value());
   const std::string rules_reason = rules_rejected->as_commandRejected_or_null()->reason;
 
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "state"}}), 1);
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "invalid"}}), 2);
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "rules"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "state"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "invalid"}}), 2);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "rules"}}), 1);
   // The kinds nothing here triggered, so a mapping change cannot hide as a
   // different kind absorbing the count.
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "rate_limited"}}), 0);
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "unavailable"}}), 0);
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "unknown"}}), 0);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "rate_limited"}}), 0);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "unavailable"}}), 0);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "unknown"}}), 0);
 
   // The reason text stayed off the wire's metrics entirely: every rejection
   // entry carries the kind label alone, and no label anywhere carries any of
   // the human-readable reasons the client was sent.
   for (const auto& entry : metrics_->Entries()) {
-    if (entry.name == "golf_rejections") {
+    if (entry.name == "hub_rejections") {
       ASSERT_EQ(entry.attributes.size(), 1u);
       ASSERT_EQ(entry.attributes.count("kind"), 1u);
     }
@@ -1853,8 +1828,8 @@ TEST_F(GamesHubStreamFixture, AStoreOutageOnTheJoinPathsCountsAsUnavailable) {
   join_game.gameId = "no-such-game";
   ASSERT_TRUE(alice->stream.Send(Move(moonbase::games::GolfMove::FromJoingame(join_game))).ok());
   ASSERT_TRUE(ReceiveCase(alice->stream, "commandRejected").has_value());
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "state"}}), 2);
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "unavailable"}}), 0);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "state"}}), 2);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "unavailable"}}), 0);
 
   // The outage: the same two shapes through a store whose refresh read fails.
   auto capture = MakeCapturingMetricsRecorder();
@@ -1874,8 +1849,8 @@ TEST_F(GamesHubStreamFixture, AStoreOutageOnTheJoinPathsCountsAsUnavailable) {
   auto game_refused = ReceiveCase(bob->stream, "commandRejected");
   ASSERT_TRUE(game_refused.has_value());
   EXPECT_EQ(game_refused->as_commandRejected_or_null()->reason, "storage unavailable; try again");
-  EXPECT_EQ(capture->CounterTotal("golf_rejections", {{"kind", "unavailable"}}), 2);
-  EXPECT_EQ(capture->CounterTotal("golf_rejections", {{"kind", "state"}}), 0);
+  EXPECT_EQ(capture->CounterTotal("hub_rejections", {{"kind", "unavailable"}}), 2);
+  EXPECT_EQ(capture->CounterTotal("hub_rejections", {{"kind", "state"}}), 0);
 }
 
 TEST_F(GamesHubStreamFixture, AnUnreachableStoreCountsTheAppendAsUnavailable) {
@@ -1899,7 +1874,7 @@ TEST_F(GamesHubStreamFixture, AnUnreachableStoreCountsTheAppendAsUnavailable) {
   EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "unavailable"}}), 1);
   EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "stored"}}), 0);
   EXPECT_EQ(capture->CounterTotal("chat_rows_delivered"), 0);
-  EXPECT_EQ(capture->CounterTotal("golf_rejections", {{"kind", "unavailable"}}), 1);
+  EXPECT_EQ(capture->CounterTotal("hub_rejections", {{"kind", "unavailable"}}), 1);
 }
 
 // The rejected side of the same counter: the store says the sender's
@@ -1928,7 +1903,7 @@ TEST_F(GamesHubStreamFixture, AStaleMembershipCountsTheAppendAsRejected) {
   EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "rejected"}}), 1);
   EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "unavailable"}}), 0);
   EXPECT_EQ(capture->CounterTotal("chat_appends", {{"result", "stored"}}), 0);
-  EXPECT_EQ(capture->CounterTotal("golf_rejections", {{"kind", "state"}}), 1);
+  EXPECT_EQ(capture->CounterTotal("hub_rejections", {{"kind", "state"}}), 1);
 }
 
 // Drain metrics at batch grain: one wake that finds two committed rows
@@ -2493,9 +2468,9 @@ TEST_F(RateLimitedStreamFixture, AChatFloodStoresTheBurstAndRejectsTheRest) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "slow down");
 
   EXPECT_EQ(metrics_->CounterTotal("chat_appends", {{"result", "stored"}}), 2);
-  EXPECT_EQ(metrics_->CounterTotal("golf_rate_limited", {{"kind", "chat"}}), 1);
-  EXPECT_EQ(metrics_->CounterTotal("golf_rate_limited", {{"kind", "command"}}), 0);
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "rate_limited"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rate_limited", {{"kind", "chat"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rate_limited", {{"kind", "command"}}), 0);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "rate_limited"}}), 1);
 }
 
 // The command budget guards everything, including frames that only ever
@@ -2524,8 +2499,8 @@ TEST_F(RateLimitedStreamFixture, ACommandFloodIsRefusedAfterTheBurst) {
   ASSERT_TRUE(limited.has_value());
   ASSERT_NE(limited->as_commandRejected_or_null(), nullptr);
   EXPECT_EQ(limited->as_commandRejected_or_null()->reason, "slow down");
-  EXPECT_EQ(metrics_->CounterTotal("golf_rate_limited", {{"kind", "command"}}), 1);
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "rate_limited"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rate_limited", {{"kind", "command"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "rate_limited"}}), 1);
 }
 
 }  // namespace

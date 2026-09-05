@@ -32,7 +32,6 @@
 #include "domains/games/apis/games_hub/golf_hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/id_generator.h"
-#include "domains/games/apis/games_hub/thoughts_hub.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
@@ -60,11 +59,10 @@ inline std::string SeriesLabel(const CounterSeries& series) {
   return label + "}";
 }
 
-// The non-counter instruments the hubs emit (one live-session gauge each).
+// The non-counter instruments the hub emits (the live-session gauge).
 // Entry carries no instrument kind, so they are named rather than filtered.
 inline const std::set<std::string>& NonCounterInstruments() {
-  static const auto* kNames =
-      new std::set<std::string>{"golf_sessions_active", "thoughts_sessions_active"};
+  static const auto* kNames = new std::set<std::string>{"hub_sessions_active"};
   return *kNames;
 }
 
@@ -80,7 +78,7 @@ inline const std::set<std::string>& NonCounterInstruments() {
 // limiter or drops a stream is checking those series here without saying so.
 inline void ExpectOnlyDeclaredCounterSeries(
     const futility::otel::CapturingMetricsRecorder& recorder) {
-  const auto& declared = GamesHubHandler::DeclaredCounterSeries();
+  const auto& declared = GolfHub::DeclaredCounterSeries();
   for (const auto& entry : recorder.Entries()) {
     if (NonCounterInstruments().count(entry.name) > 0) continue;
     const bool found = std::any_of(declared.begin(), declared.end(), [&](const auto& series) {
@@ -98,9 +96,8 @@ inline void ExpectOnlyDeclaredCounterSeries(
 // test's whole timeout with nothing to show for it.
 inline constexpr std::chrono::milliseconds kReceiveBudget{5000};
 
-// The event type a generated client stream receives — PlayClientStream's
-// GameEvents, ThinkClientStream's ThoughtsEvents — so the receive helpers
-// below serve both hubs.
+// The event type a generated client stream receives (PlayClientStream's
+// GameEvents), so the receive helpers below are one template.
 template <typename Stream>
 using EventOf = std::remove_cvref_t<decltype(**std::declval<Stream&>().Receive())>;
 
@@ -343,12 +340,12 @@ inline std::string ReadModel(const std::string& path) {
   return buffer.str();
 }
 
-// The label values GamesHubHandler::DeclaredCounterSeries() carries for
+// The label values GolfHub::DeclaredCounterSeries() carries for
 // one stream counter — both hubs' series, since the list is the union.
 inline std::set<std::string> DeclaredLabelValues(const std::string& counter,
                                                  const std::string& label) {
   std::set<std::string> values;
-  for (const auto& series : GamesHubHandler::DeclaredCounterSeries()) {
+  for (const auto& series : GolfHub::DeclaredCounterSeries()) {
     if (series.name != counter) continue;
     const auto value = series.attributes.find(label);
     if (value != series.attributes.end()) values.insert(value->second);
@@ -415,17 +412,8 @@ class GamesHubStreamFixture : public testing::Test {
   /// by accident; the expiry suites override it down to something a
   /// receive budget can wait out.
   virtual std::chrono::seconds GracePeriod() { return std::chrono::seconds(60); }
-  /// The race suites' scheduling seams; empty unless a suite overrides.
-  virtual ThoughtsTestHooks MakeThoughtsHooks() { return {}; }
+  /// The race suites' scheduling seam; empty unless a suite overrides.
   virtual GolfTestHooks MakeGolfHooks() { return {}; }
-  /// The thoughts stream's budget; the thoughts rate-limit suite overrides
-  /// with tiny frozen buckets.
-  virtual ThoughtsLimits MakeThoughtsLimits() {
-    ThoughtsLimits limits;
-    limits.command_burst = 1e9;
-    limits.command_refill_per_sec = 1e9;
-    return limits;
-  }
 
   void SetUp() override { BuildHub(); }
 
@@ -460,9 +448,7 @@ class GamesHubStreamFixture : public testing::Test {
     }
     const absl::Status restored = golf_->RestoreFromStore();
     ASSERT_TRUE(restored.ok()) << restored;
-    thoughts_ =
-        std::make_shared<ThoughtsHub>(vault_, metrics_, MakeThoughtsLimits(), MakeThoughtsHooks());
-    handler_ = std::make_shared<GamesHubHandler>(vault_, ids_, golf_, thoughts_);
+    handler_ = std::make_shared<GamesHubHandler>(vault_, ids_, golf_);
     server_ = std::make_unique<moonbase::games::GamesHubServer>(handler_);
 
     auto loopback = std::make_shared<smithy::http::Loopback>();
@@ -526,40 +512,6 @@ class GamesHubStreamFixture : public testing::Test {
   }
   std::optional<Seat> OpenSeat(const std::optional<std::string>& resume_token = std::nullopt) {
     return OpenSeatVia(*client_, resume_token);
-  }
-
-  // The thoughts twin: mint a session and open its Think stream, consuming
-  // the sessionReady so a test starts at the first command. Fails the
-  // test on any step.
-  struct ThoughtsSeat {
-    std::string player_id;
-    std::string resume_token;
-    moonbase::games::ThinkClientStream stream;
-  };
-  std::optional<ThoughtsSeat> OpenThoughtsSeat(
-      const std::optional<std::string>& resume_token = std::nullopt) {
-    moonbase::games::GetSessionInput session_input;
-    if (resume_token.has_value()) session_input.resumeToken = *resume_token;
-    auto session = client_->GetSession(session_input);
-    if (!session.ok()) {
-      ADD_FAILURE() << "GetSession failed: " << session.error().message();
-      return std::nullopt;
-    }
-    moonbase::games::ThinkInput think_input;
-    think_input.ticket = session->ticket;
-    auto stream = client_->Think(think_input);
-    if (!stream.ok()) {
-      ADD_FAILURE() << "Think dial failed: " << stream.error().message();
-      return std::nullopt;
-    }
-    auto ready = NextEvent(*stream);
-    if (!ready.has_value() || ready->as_sessionReady_or_null() == nullptr) {
-      ADD_FAILURE() << "no sessionReady on the thoughts stream";
-      return std::nullopt;
-    }
-    EXPECT_EQ(ready->as_sessionReady_or_null()->playerId, session->playerId);
-    EXPECT_FALSE(ready->as_sessionReady_or_null()->resumed);
-    return ThoughtsSeat{session->playerId, session->resumeToken, std::move(*stream)};
   }
 
   // The create-room preamble a dozen tests otherwise spell out: sends
@@ -711,7 +663,6 @@ class GamesHubStreamFixture : public testing::Test {
   std::shared_ptr<CapturingMetricsRecorder> metrics_ = MakeCapturingMetricsRecorder();
   std::shared_ptr<IdGenerator> ids_ = std::make_shared<SequentialIdGenerator>();
   std::shared_ptr<GolfHub> golf_;
-  std::shared_ptr<ThoughtsHub> thoughts_;
   std::shared_ptr<GamesHubHandler> handler_;
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::unique_ptr<moonbase::games::GamesHubClient> client_;
@@ -720,7 +671,7 @@ class GamesHubStreamFixture : public testing::Test {
 
 // A fixture whose hub hooks park at a named seam until the test releases
 // them, so an interleaving is the test's and not the scheduler's. A
-// subclass installs the hooks (MakeGolfHooks, MakeThoughtsHooks) as
+// subclass installs the hook (MakeGolfHooks) as
 // `Park("<stage>")` calls.
 //
 // The in-memory wire completes a session's parked Receive inline on the

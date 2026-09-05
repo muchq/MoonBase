@@ -2,37 +2,25 @@
 #define DOMAINS_GAMES_APIS_GAMES_HUB_GAMES_HUB_HANDLER_H
 
 #include <memory>
-#include <vector>
 
 #include "domains/games/apis/games_hub/golf_hub.h"
-#include "domains/games/apis/games_hub/hub_metrics.h"
 #include "domains/games/apis/games_hub/id_generator.h"
-#include "domains/games/apis/games_hub/thoughts_hub.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "moonbase/games/server.h"
 
 namespace games_hub {
 
 /// The generated service's one handler (#79): session identity here, and
-/// each game's stream forwarded whole to its hub. The games share the
-/// vault (one ticket opens either stream) and nothing else.
+/// the one stream, Play, forwarded whole to the room hub.
 ///
-/// What a new game costs depends on its shape. A thoughts-shaped game — a
-/// flat stream with its own registry, outside the room layer — is one
-/// forwarding override and one member. A room-shaped game is one more envelope
-/// member on Play — castle (#77) rides GolfHub's room layer (rooms, chat,
-/// grace, the store, per-viewer redaction) that way — so the next such
-/// game extends the room host rather than cloning ThoughtsHub, and the
-/// README says which union shape it copies.
+/// A new game is one more envelope member on Play — castle (#77) and the
+/// lobby (#1490) ride GolfHub's room layer (rooms, chat, grace, the store,
+/// per-viewer redaction) that way — so the next game extends the room
+/// host, and the README says which union shape it copies.
 class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
  public:
-  /// Every counter series either hub declares — what a sweep over a
-  /// recorder both hubs write to has to know. Each hub declares its own
-  /// list at its own construction.
-  static const std::vector<CounterSeries>& DeclaredCounterSeries();
-
   GamesHubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<IdGenerator> ids,
-                  std::shared_ptr<GolfHub> golf, std::shared_ptr<ThoughtsHub> thoughts);
+                  std::shared_ptr<GolfHub> golf);
 
   // Note: operation IO generates as <Op>Input/<Op>Output regardless of
   // the named shapes bound in the model, and every namespace's shapes
@@ -45,20 +33,10 @@ class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
   smithy::eventstream::StreamTask Play(moonbase::games::PlayInput input,
                                        moonbase::games::PlayAsyncServerStream& stream) override;
 
-  /// The same stream on the route the deployed clients dial; one stream
-  /// type, so it forwards to the same hub method. Retires with Think.
-  smithy::eventstream::StreamTask PlayLegacy(
-      moonbase::games::PlayLegacyInput input,
-      moonbase::games::PlayLegacyAsyncServerStream& stream) override;
-
-  smithy::eventstream::StreamTask Think(moonbase::games::ThinkInput input,
-                                        moonbase::games::ThinkAsyncServerStream& stream) override;
-
  private:
   const std::shared_ptr<TicketVault> vault_;
   const std::shared_ptr<IdGenerator> ids_;
   const std::shared_ptr<GolfHub> golf_;
-  const std::shared_ptr<ThoughtsHub> thoughts_;
 };
 
 }  // namespace games_hub

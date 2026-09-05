@@ -94,7 +94,7 @@ func TestRegistry_CustomTimeseriesPanelKeysAreUniquePerService(t *testing.T) {
 }
 
 // A tile's label is its identity across the whole service, not just its
-// group: the golf_/thoughts_ prefixes on games_hub exist for this. Two
+// group: the hub_/golf_/castle_/lobby_ prefixes on games_hub exist for this. Two
 // groups sharing a label ship two tiles nobody can tell apart, and every
 // byLabel map in these tests would read whichever came last.
 func TestRegistry_CustomScalarLabelsAreUniquePerService(t *testing.T) {
@@ -469,9 +469,9 @@ func TestCustomTimeseriesDef_ToggleableExpandsToRateAndCountBucketedByStep(t *te
 // A fixed custom chart keeps its map key unchanged and ignores step
 // entirely — there's no window in it to bucket.
 func TestCustomTimeseriesDef_FixedFormKeepsItsOwnKey(t *testing.T) {
-	def := tsFixed(`sum(golf_sessions_active_gauge)`)
+	def := tsFixed(`sum(hub_sessions_active_gauge)`)
 	panels := def.panels("sessions_active", "30s")
-	assert.Equal(t, map[string]string{"sessions_active": `sum(golf_sessions_active_gauge)`}, panels)
+	assert.Equal(t, map[string]string{"sessions_active": `sum(hub_sessions_active_gauge)`}, panels)
 }
 
 // microgpt-serve's tokens_per_second baked one form into its name the way
@@ -513,42 +513,38 @@ var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|c
 // What games_hub exports, as the collector's Prometheus exporter names it:
 // _total for a counter, _gauge for futility's up-down gauge.
 //
-// A hand-kept copy, verified against GamesHubHandler::DeclaredCounterSeries() (which
-// folds in ThoughtsHub's) by a
+// A hand-kept copy, verified against GolfHub::DeclaredCounterSeries() by a
 // person, not a test — the roster lives in C++ and this file in Go with no
 // shared artifact to pin them together (that is #1308's scope). What these
 // audits do close, on their own side: every tile reads only names in this
 // set, and every name in this set is read by some tile.
-var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:golf_|chat_|thoughts_|castle_)[a-z_]*)(\{[^}]*\})?`)
+var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:hub_|golf_|chat_|castle_|lobby_)[a-z_]*)(\{[^}]*\})?`)
 
 var gamesHubExportedNames = map[string]bool{
 	// The castle envelope (#77), from GolfHub::DeclaredCounterSeries().
-	"castle_commands_total":            true,
-	"castle_events_total":              true,
-	"chat_appends_total":               true,
-	"chat_catch_up_drains_total":       true,
-	"chat_failures_total":              true,
-	"chat_history_replays_total":       true,
-	"chat_rows_delivered_total":        true,
-	"golf_admissions_refused_total":    true,
-	"golf_commands_total":              true,
-	"golf_disconnects_total":           true,
-	"golf_events_total":                true,
-	"golf_rate_limited_total":          true,
-	"golf_rejections_total":            true,
-	"golf_restored_seats_reaped_total": true,
-	"golf_seats_expired_total":         true,
-	"golf_sessions_active_gauge":       true,
-	"golf_sessions_total":              true,
-	// The thoughts hub (#79), from ThoughtsHub::DeclaredCounterSeries().
-	"thoughts_admissions_refused_total": true,
-	"thoughts_commands_total":           true,
-	"thoughts_disconnects_total":        true,
-	"thoughts_events_total":             true,
-	"thoughts_rate_limited_total":       true,
-	"thoughts_rejections_total":         true,
-	"thoughts_sessions_active_gauge":    true,
-	"thoughts_sessions_total":           true,
+	"castle_commands_total":           true,
+	"castle_events_total":             true,
+	"chat_appends_total":              true,
+	"chat_catch_up_drains_total":      true,
+	"chat_failures_total":             true,
+	"chat_history_replays_total":      true,
+	"chat_rows_delivered_total":       true,
+	"hub_admissions_refused_total":    true,
+	"hub_commands_total":              true,
+	"hub_disconnects_total":           true,
+	"hub_events_total":                true,
+	"hub_rate_limited_total":          true,
+	"hub_rejections_total":            true,
+	"hub_restored_seats_reaped_total": true,
+	"hub_seats_expired_total":         true,
+	"hub_sessions_active_gauge":       true,
+	"hub_sessions_total":              true,
+	// The tenants' envelopes (#1490): each game's inner cases on its own
+	// series.
+	"golf_commands_total":  true,
+	"golf_events_total":    true,
+	"lobby_commands_total": true,
+	"lobby_events_total":   true,
 }
 
 // The one_d4 audit's shape (see TestOneD4QueriesNameRealInstrumentsAndScopeThem
@@ -608,7 +604,7 @@ func TestGamesHubQueriesNameRealInstruments(t *testing.T) {
 	}
 	for _, match := range regexp.MustCompile(`resumed="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
 		assert.Contains(t, []string{"true", "false"}, match[1],
-			"games_hub declares no golf_sessions resumed=%q", match[1])
+			"games_hub declares no hub_sessions resumed=%q", match[1])
 	}
 }
 

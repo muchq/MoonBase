@@ -1,53 +1,16 @@
 $version: "2.0"
 
-namespace moonbase.thoughts
+namespace moonbase.lobby
 
-use moonbase.games#CommandRejected
-use moonbase.games#SeatConflict
-use moonbase.games#SessionReady
-use moonbase.games#Unauthenticated
-
-// Thoughts (#79): the chill 3D vibe at muchq.com/thoughts, on the games
-// hub. A world per room (#1490): each joined player is a position on the
-// ground plane, a color, and a shape, and every change reaches everyone
-// else in the same world. The hub relays; it simulates nothing and
-// remembers nothing past the connection.
+// The lobby's world (#79, #1490): the chill 3D vibe at muchq.com/games
+// (and /thoughts), on the games hub. A world per room: each joined player
+// is a position on the ground plane, a color, and a shape, and every
+// change reaches everyone else in the same world. The hub relays; it
+// simulates nothing and remembers nothing past the connection.
 //
-// Two ways in. The `lobby` member of the room's Play stream (games.smithy)
-// is the one the lobby uses: the world is the session's room's, or the
-// plaza's while unroomed, on the same socket as chat and the tables. The
-// Think stream below is the pre-lobby route today's muchq.com/thoughts
-// dials, with its own world; it retires once the site has moved.
-
-/// The one WebSocket session per player, on the same ticket GetSession
-/// mints for golf. Invalid commands come back as commandRejected events
-/// and change nothing; the modeled errors are terminal. A closed socket
-/// is a player gone: presence is the whole game, so there is no reconnect
-/// grace and nothing to resume.
-@http(method: "POST", uri: "/games/v2/thoughts/play")
-operation Think {
-    input := {
-        @required
-        @httpQuery("ticket")
-        ticket: String
-
-        @httpPayload
-        commands: ThoughtsCommands
-    }
-    output := {
-        @httpPayload
-        events: ThoughtsEvents
-    }
-    errors: [Unauthenticated, SeatConflict]
-}
-
-@streaming
-union ThoughtsCommands {
-    join: JoinWorld
-    move: MoveTo
-    shape: ChangeShape
-    leave: LeaveWorld
-}
+// The way in is the `lobby` member of the room's Play stream
+// (games.smithy): the world is the session's room's, or the plaza's while
+// unroomed, on the same socket as chat and the tables.
 
 /// The lobby envelope on the room stream: exactly one action.
 structure LobbyCommand {
@@ -80,10 +43,9 @@ union LobbyUpdate {
 /// Enter a world. Refused while already in one: leave first to respawn,
 /// which is also how a color or a room changes.
 structure JoinWorld {
-    /// On the room stream the world is the session's: its room's, or the
-    /// plaza's — the well-known room "plaza" — while unroomed; a roomId
-    /// here must name that or is refused. On Think, absent is the plaza
-    /// and any other id names a world of its own.
+    /// The world is the session's: its room's, or the plaza's — the
+    /// well-known room "plaza" — while unroomed; a roomId here must name
+    /// that or is refused.
     roomId: String
 
     @required
@@ -110,17 +72,6 @@ structure ChangeShape {
 
 /// Leave the world but keep the session; join again to respawn.
 structure LeaveWorld {}
-
-@streaming
-union ThoughtsEvents {
-    sessionReady: SessionReady
-    worldState: WorldState
-    playerJoined: PlayerJoined
-    playerMoved: PlayerMoved
-    shapeChanged: ShapeChanged
-    playerLeft: PlayerLeft
-    commandRejected: CommandRejected
-}
 
 /// Everyone already in the joined world, sent once to a joiner — before
 /// anyone else hears their playerJoined, and never listing the joiner.

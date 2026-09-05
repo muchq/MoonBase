@@ -11,7 +11,7 @@ smithy_cpp_server_library(
         "model/castle.smithy",
         "model/games.smithy",
         "model/golf.smithy",
-        "model/thoughts.smithy",
+        "model/lobby.smithy",
     ],
     namespace = "moonbase::games",
     service = "moonbase.games#GamesHub",
@@ -23,7 +23,7 @@ smithy_cpp_client_library(
         "model/castle.smithy",
         "model/games.smithy",
         "model/golf.smithy",
-        "model/thoughts.smithy",
+        "model/lobby.smithy",
     ],
     namespace = "moonbase::games",
     service = "moonbase.games#GamesHub",
@@ -315,9 +315,8 @@ cc_library(
     deps = ["//domains/platform/libs/futility/rate_limiter:token_bucket"],
 )
 
-# The thoughts world's rules and map (#79, #1490): staged deliveries, no
-# wire, hosted by ThoughtsHub on Think and by GolfHub as the room
-# stream's lobby member.
+# The lobby's world, its rules and map (#79, #1490): staged deliveries,
+# no wire, hosted by GolfHub as the room stream's lobby member.
 cc_library(
     name = "world",
     srcs = ["world.cc"],
@@ -329,24 +328,17 @@ cc_library(
     ],
 )
 
-# Thoughts on Think (#79): the pre-lobby route, one World on its own
-# registry, no rooms, no store, no grace.
-cc_library(
-    name = "thoughts_hub",
-    srcs = ["thoughts_hub.cc"],
-    hdrs = ["thoughts_hub.h"],
+# The world's rules on the World itself: bounds, join-before-move,
+# leave-first, and fan-out that stays in one room and never echoes.
+cc_test(
+    name = "world_test",
+    size = "small",
+    srcs = ["world_test.cc"],
     deps = [
         ":games_hub_smithy_server",
         ":hub_metrics",
-        ":protocol_input",
-        ":rate_limiter",
-        ":ticket_vault",
         ":world",
-        "//domains/platform/libs/futility/otel:metrics",
-        "@com_google_absl//absl/log",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:eventstream",
-        "@smithy_cpp//runtime:server",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -396,7 +388,6 @@ cc_library(
         ":hub_metrics",
         ":id_generator",
         ":protocol_input",
-        ":thoughts_hub",
         ":ticket_vault",
         "@com_google_absl//absl/status:statusor",
         "@smithy_cpp//runtime:core",
@@ -435,7 +426,6 @@ cc_test(
         ":pg_chat_store",
         ":pg_hub_store",
         ":pg_ticket_vault",
-        ":thoughts_hub",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
@@ -527,7 +517,6 @@ cc_test(
         ":golf_hub",
         ":hub_store",
         ":id_generator",
-        ":thoughts_hub",
         ":ticket_vault",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:dealer",
@@ -557,7 +546,7 @@ cc_test(
         "model/castle.smithy",
         "model/games.smithy",
         "model/golf.smithy",
-        "model/thoughts.smithy",
+        "model/lobby.smithy",
     ],
     deps = [
         ":games_hub_smithy_client",
@@ -566,7 +555,6 @@ cc_test(
         ":golf_hub",
         ":hub_store",
         ":id_generator",
-        ":thoughts_hub",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
@@ -600,7 +588,6 @@ cc_test(
         ":golf_hub",
         ":hub_store",
         ":id_generator",
-        ":thoughts_hub",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
@@ -629,7 +616,6 @@ cc_test(
         ":golf_hub",
         ":hub_store",
         ":id_generator",
-        ":thoughts_hub",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
@@ -639,66 +625,6 @@ cc_test(
         "@smithy_cpp//runtime:core",
         "@smithy_cpp//runtime:http",
         "@smithy_cpp//runtime:http_beast",
-    ],
-)
-
-# The thoughts flows through the generated client, plus the model pin for
-# the thoughts_commands/thoughts_events rosters (the golf twin lives in
-# hub_e2e_test).
-cc_test(
-    name = "thoughts_e2e_test",
-    size = "small",
-    srcs = [
-        "stream_test_fixture.h",
-        "thoughts_e2e_test.cc",
-    ],
-    data = ["model/thoughts.smithy"],
-    deps = [
-        ":games_hub_handler",
-        ":games_hub_smithy_client",
-        ":games_hub_smithy_server",
-        ":golf_hub",
-        ":hub_store",
-        ":id_generator",
-        ":thoughts_hub",
-        ":ticket_vault",
-        ":world",
-        "//domains/games/libs/cards:dealer",
-        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
-        "//domains/platform/libs/futility/otel:metrics",
-        "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
-    ],
-)
-
-# The thoughts web client's wire, pinned raw the way golf_wire_test pins
-# golf's: routes, envelope headers, and exact payload bytes. Non-Beast.
-cc_test(
-    name = "thoughts_wire_test",
-    size = "small",
-    srcs = [
-        "thoughts_wire_test.cc",
-        "wire_test_fixture.h",
-    ],
-    deps = [
-        ":games_hub_handler",
-        ":games_hub_smithy_server",
-        ":golf_hub",
-        ":id_generator",
-        ":rate_limiter",
-        ":thoughts_hub",
-        ":ticket_vault",
-        "//domains/games/libs/cards:dealer",
-        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
-        "//domains/platform/libs/futility/otel:metrics",
-        "@googletest//:gtest_main",
-        "@nlohmann_json//:json",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:eventstream",
-        "@smithy_cpp//runtime:http",
     ],
 )
 
@@ -718,7 +644,6 @@ cc_test(
         ":golf_hub",
         ":hub_store",
         ":id_generator",
-        ":thoughts_hub",
         ":ticket_vault",
         ":world",
         "//domains/games/libs/cards:dealer",
@@ -747,7 +672,6 @@ cc_test(
         ":golf_hub",
         ":id_generator",
         ":rate_limiter",
-        ":thoughts_hub",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
@@ -774,7 +698,6 @@ cc_binary(
         ":pg_hub_store",
         ":pg_ticket_vault",
         ":protocol_input",
-        ":thoughts_hub",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/aura",

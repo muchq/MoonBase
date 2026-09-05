@@ -10,22 +10,8 @@
 namespace games_hub {
 
 GamesHubHandler::GamesHubHandler(std::shared_ptr<TicketVault> vault,
-                                 std::shared_ptr<IdGenerator> ids, std::shared_ptr<GolfHub> golf,
-                                 std::shared_ptr<ThoughtsHub> thoughts)
-    : vault_(std::move(vault)),
-      ids_(std::move(ids)),
-      golf_(std::move(golf)),
-      thoughts_(std::move(thoughts)) {}
-
-const std::vector<CounterSeries>& GamesHubHandler::DeclaredCounterSeries() {
-  static const auto* kSeries = [] {
-    auto* series = new std::vector<CounterSeries>(GolfHub::DeclaredCounterSeries());
-    const auto& thoughts = ThoughtsHub::DeclaredCounterSeries();
-    series->insert(series->end(), thoughts.begin(), thoughts.end());
-    return series;
-  }();
-  return *kSeries;
-}
+                                 std::shared_ptr<IdGenerator> ids, std::shared_ptr<GolfHub> golf)
+    : vault_(std::move(vault)), ids_(std::move(ids)), golf_(std::move(golf)) {}
 
 smithy::Outcome<moonbase::games::GetSessionOutput> GamesHubHandler::GetSession(
     const moonbase::games::GetSessionInput& input,
@@ -61,18 +47,6 @@ smithy::Outcome<moonbase::games::GetSessionOutput> GamesHubHandler::GetSession(
 smithy::eventstream::StreamTask GamesHubHandler::Play(
     moonbase::games::PlayInput input, moonbase::games::PlayAsyncServerStream& stream) {
   return golf_->Play(std::move(input), stream);
-}
-
-smithy::eventstream::StreamTask GamesHubHandler::PlayLegacy(
-    moonbase::games::PlayLegacyInput input, moonbase::games::PlayLegacyAsyncServerStream& stream) {
-  moonbase::games::PlayInput play;
-  play.ticket = std::move(input.ticket);
-  return golf_->Play(std::move(play), stream);
-}
-
-smithy::eventstream::StreamTask GamesHubHandler::Think(
-    moonbase::games::ThinkInput input, moonbase::games::ThinkAsyncServerStream& stream) {
-  return thoughts_->Think(std::move(input), stream);
 }
 
 }  // namespace games_hub

@@ -405,7 +405,7 @@ TEST_F(CastleGameFixture, TheRoomListsTablesByGameAndAGolfMoveOnACastleTableIsRe
     EXPECT_EQ(event->as_castle_or_null(), nullptr) << event->case_name();
     if (std::string(event->case_name()) == "roomState") break;
   }
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "state"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "state"}}), 1);
 }
 
 TEST_F(CastleGameFixture, ATableOfEachGameCanShareARoomAndJoinsAreByGame) {
@@ -512,7 +512,7 @@ TEST_F(CastleGameFixture, CastleMovesOnAGolfTableAreRefusedAndEngineRefusalsCoun
   auto wrong_game = ReceiveCase(golf_table->alice.stream, "commandRejected");
   ASSERT_TRUE(wrong_game.has_value());
   EXPECT_EQ(wrong_game->as_commandRejected_or_null()->reason, "that table plays golf");
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "state"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "state"}}), 1);
   // Joining the golf table in castle's envelope is refused the same way.
   auto carol = OpenSeat();
   ASSERT_TRUE(carol.has_value());
@@ -527,7 +527,7 @@ TEST_F(CastleGameFixture, CastleMovesOnAGolfTableAreRefusedAndEngineRefusalsCoun
   auto wrong_join = ReceiveCase(carol->stream, "commandRejected");
   ASSERT_TRUE(wrong_join.has_value());
   EXPECT_EQ(wrong_join->as_commandRejected_or_null()->reason, "that table plays golf");
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "state"}}), 2);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "state"}}), 2);
 
   // The engine's refusal is a rules refusal on the dashboard, and the
   // castle move still counted on its own series.
@@ -539,8 +539,8 @@ TEST_F(CastleGameFixture, CastleMovesOnAGolfTableAreRefusedAndEngineRefusalsCoun
   auto early = ReceiveCase(castle_table->alice.stream, "commandRejected");
   ASSERT_TRUE(early.has_value());
   EXPECT_EQ(early->as_commandRejected_or_null()->reason, "still setting up");
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "rules"}}), 1);
-  EXPECT_EQ(metrics_->CounterTotal("golf_rejections", {{"kind", "state"}}), 2);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "rules"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "state"}}), 2);
   EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "playFromHand"}}), 1);
   // Refused or not, a castle command counts on castle's series.
   EXPECT_EQ(metrics_->CounterTotal("castle_commands", {{"command", "joinGame"}}), 2);
