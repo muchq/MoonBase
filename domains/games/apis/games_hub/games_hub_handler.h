@@ -18,8 +18,8 @@ namespace games_hub {
 /// vault (one ticket opens either stream) and nothing else.
 ///
 /// What a new game costs depends on its shape. A thoughts-shaped game — a
-/// flat stream with its own registry and no rooms — is one forwarding
-/// override and one member. A room-shaped game is one more envelope
+/// flat stream with its own registry, outside the room layer — is one
+/// forwarding override and one member. A room-shaped game is one more envelope
 /// member on Play — castle (#77) rides GolfHub's room layer (rooms, chat,
 /// grace, the store, per-viewer redaction) that way — so the next such
 /// game extends the room host rather than cloning ThoughtsHub, and the

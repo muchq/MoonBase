@@ -1,6 +1,7 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_THOUGHTS_HUB_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_THOUGHTS_HUB_H
 
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <memory>
@@ -41,11 +42,16 @@ struct ThoughtsTestHooks {
   std::function<void(const std::string& player_id)> before_seat_release;
 };
 
-/// Thoughts on the games hub (#79): muchq.com/thoughts, one shared world in
-/// which every joined player is a position on the ground plane, a color,
-/// and a shape, and each change fans out to every other session. No rooms,
-/// no persistence, no reconnect grace — presence is the whole game, so a
-/// dropped socket is a player gone.
+/// Thoughts on the games hub (#79): muchq.com/thoughts, a world per room
+/// (#1490) in which every joined player is a position on the ground plane,
+/// a color, and a shape, and each change fans out to everyone else in the
+/// same world. No persistence, no reconnect grace — presence is the whole
+/// game, so a dropped socket is a player gone.
+///
+/// A join names its room or lands in the plaza, kPlaza, a well-known room
+/// nobody creates. Any other id names a world of its own; the room layer
+/// is not consulted (GolfHub's rooms and this hub's worlds meet in #1490's
+/// phase 3). A world exists while someone stands in it.
 ///
 /// The world's rules match the muchq.com/thoughts UI's own bounds, so
 /// retune them together: position is [x, 0, z] with x and z within
@@ -54,8 +60,13 @@ struct ThoughtsTestHooks {
 /// and changes nothing, as is move/shape before join. Refused rather than
 /// swallowed, so a client can tell a rejected move from a lost one.
 ///
-/// Fan-out reaches every live session, joined or not, minus the actor: a
-/// session that has connected but not yet joined is watching the world.
+/// Fan-out reaches the actor's world and nothing outside it: a session
+/// that has connected but not joined hears nothing, and the actor never
+/// hears its own echo. Every fan-out is queued to its recipients under
+/// the world lock, in the same hold as the mutation it announces, so each
+/// session's events arrive in the order the world changed: a player who
+/// respawns elsewhere hears the last of the old world before their own
+/// new snapshot, never after it, and a snapshot is a full replacement.
 ///
 /// Series carry the thoughts_ prefix (golf's carry golf_), so the two
 /// hubs never share a name and a dashboard tile means one game. Every
@@ -67,6 +78,13 @@ class ThoughtsHub {
   using Registry = smithy::server::SessionRegistry<moonbase::games::ThoughtsEvents>;
 
   static constexpr double kWorldHalfExtent = 50.0;
+  /// The unroomed join's world. Lowercase, so no generated room code
+  /// (IdGenerator's uppercase alphanumerics) can name it.
+  static constexpr const char* kPlaza = "plaza";
+  /// A room id is a client string this hub retains and compares on every
+  /// frame; the bound keeps both costs the hub's to choose, with room to
+  /// spare over IdGenerator's six-character codes.
+  static constexpr std::size_t kMaxRoomIdLength = 64;
 
   /// Every counter series this hub emits, on GolfHub's terms: the
   /// thoughts_commands/thoughts_events values are the model's union cases,
@@ -89,14 +107,21 @@ class ThoughtsHub {
  private:
   void HandleCommand(const std::string& player_id,
                      const moonbase::games::ThoughtsCommands& command);
-  /// Removes the player from the world and tells everyone else; false when
-  /// they were not in it. Shared by the leave command and the socket close.
+  /// Removes the player from their world and tells the rest of it; false
+  /// when they were in none. Shared by the leave command and the socket
+  /// close.
   bool Leave(const std::string& player_id);
   void Reject(const std::string& player_id, RejectKind kind, std::string reason);
   /// Every event leaves through one of these so thoughts_events sees each
-  /// delivery.
+  /// delivery. Fan-outs are queued under mu_ to everyone else in the
+  /// actor's world, as of the hold. The registry only enqueues, so the
+  /// hold stays short; a full queue closes that slow session (the
+  /// registry default), and Beast completes a close on its io thread,
+  /// never inside the initiating call, so the closed session's own
+  /// Leave takes mu_ after this hold rather than inside it.
   void Send(const std::string& player_id, moonbase::games::ThoughtsEvents event);
-  void SendToOthers(const std::string& sender_id, const moonbase::games::ThoughtsEvents& event);
+  void FanOutLocked(const std::string& room_id, const std::string& actor_id,
+                    const moonbase::games::ThoughtsEvents& event);
   void Count(const char* name, const std::map<std::string, std::string>& attributes = {});
   void TrackActive(int delta);
 
@@ -104,10 +129,19 @@ class ThoughtsHub {
   const std::shared_ptr<futility::otel::MetricsRecorder> metrics_;
   const ThoughtsLimits limits_;
   const ThoughtsTestHooks hooks_;
+  struct Standing {
+    std::string room_id;
+    moonbase::games::WorldPlayer player;
+  };
   std::mutex mu_;
-  /// The world: joined players by id. A live session without an entry
-  /// here has connected and not joined (or has left).
-  std::map<std::string, moonbase::games::WorldPlayer> world_;
+  /// Every joined player by id, with the room whose world they stand in.
+  /// A live session without an entry here has connected and not joined
+  /// (or has left). One map rather than one per world, so there is no
+  /// world lifecycle to manage; the cost is that a fan-out scans every
+  /// joined player, not only the room's, under mu_ — fine at the tens of
+  /// players this hub sees, and phase 3 of #1490 rehomes the world with
+  /// the room layer anyway.
+  std::map<std::string, Standing> world_;
   // Declared last: destroyed first, so no session it still holds can reach
   // the map above during teardown.
   Registry registry_;

@@ -27,7 +27,8 @@ auth ahead of the 101. One session identity opens either stream.
   in that table's own envelope.
 - `model/thoughts.smithy` — `moonbase.thoughts`: the `Think` stream
   (`/games/v2/thoughts/play`) with its own command and event unions —
-  thoughts has no rooms, so it shares only session identity and the
+  thoughts keys its worlds by room id but does not use the room layer
+  (#1490 phase 3 joins them), so it shares only session identity and the
   `commandRejected` shape with golf.
 
 A new game is one new model file. A game that wants rooms and chat is one
@@ -40,16 +41,21 @@ wants).
 
 ## Thoughts
 
-One shared world, no rooms: a joined player is a position on the ground
+A world per room (#1490): a joined player is a position on the ground
 plane (`[x, 0, z]`, x and z within ±50), an RGB color in 0..1, and a
-shape (0 sphere, 1 cube, 2 pyramid). `join` answers the joiner with a
-`worldState` of everyone else and tells every other session
+shape (0 sphere, 1 cube, 2 pyramid), standing in the world of the room
+`join` names — or in the plaza, the well-known room `plaza`, when it
+names none, which is what muchq.com/thoughts does. Any id names a world;
+the room layer is not consulted. `join` answers the joiner with a
+`worldState` of everyone else in that world and tells the rest of it
 `playerJoined`; `move` and `shape` fan out as `playerMoved` and
-`shapeChanged`, never echoed; `leave` — or a closed socket, alike — fans
-out `playerLeft`. Out-of-bounds values and commands before a join are
-refused in-band as `commandRejected`. No persistence and no reconnect
-grace: presence is the whole game. `ThoughtsHub` (`thoughts_hub.cc`)
-carries it, `GolfHub` (`golf_hub.cc`) carries the room games, golf and castle, and `GamesHubHandler`
+`shapeChanged`, never echoed and never past the world's edge; `leave` —
+or a closed socket, alike — fans out `playerLeft`. A session that has
+not joined hears nothing. Out-of-bounds values, a bad room id, and
+commands before a join are refused in-band as `commandRejected`. No
+persistence and no reconnect grace: presence is the whole game.
+`ThoughtsHub` (`thoughts_hub.cc`) carries it, `GolfHub` (`golf_hub.cc`)
+carries the room games, golf and castle, and `GamesHubHandler`
 implements the generated service: it mints sessions itself and forwards
 each stream to its hub. The two hubs share the ticket vault and nothing
 else. Counters carry the `thoughts_` prefix.
