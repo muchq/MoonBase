@@ -91,6 +91,15 @@ namespace games_hub {
 /// commits to its own ChatStore before it is echoed, so a message its
 /// sender sees is a message that was stored; cross-instance chat
 /// fan-out and join-time history replay are still to come (#1226).
+/// Scheduling seams for the race tests, unset in production. A hook runs
+/// on the hub's thread, outside the hub's lock, and must not call into
+/// the hub.
+struct GolfTestHooks {
+  /// On the close path, after the world entry is gone and playerLeft has
+  /// fanned out, before the seat parks for a resume to reclaim.
+  std::function<void(const std::string& player_id)> before_seat_release;
+};
+
 class GolfHub final {
  public:
   using Registry = smithy::server::SessionRegistry<moonbase::games::GameEvents>;
@@ -145,7 +154,8 @@ class GolfHub final {
                    std::chrono::seconds grace_period = std::chrono::minutes(5),
                    std::shared_ptr<futility::otel::MetricsRecorder> metrics = nullptr,
                    std::shared_ptr<HubStore> store = nullptr,
-                   std::shared_ptr<ChatStore> chat_store = nullptr, RateLimits limits = {});
+                   std::shared_ptr<ChatStore> chat_store = nullptr, RateLimits limits = {},
+                   GolfTestHooks hooks = {});
 
   /// Joins the boot reaper before the members it walks are torn down.
   ~GolfHub();
@@ -475,6 +485,7 @@ class GolfHub final {
   const std::shared_ptr<HubStore> store_;
   const std::shared_ptr<ChatStore> chat_store_;
   const RateLimits limits_;
+  const GolfTestHooks hooks_;
   /// ADR-0020 reconnect grace, shared by the registry's per-seat timers
   /// and the boot reaper's one cohort deadline. Zero disables both.
   const std::chrono::seconds grace_period_;

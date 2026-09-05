@@ -252,7 +252,7 @@ GolfHub::GolfHub(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Deal
                  std::shared_ptr<IdGenerator> ids, std::chrono::seconds grace_period,
                  std::shared_ptr<futility::otel::MetricsRecorder> metrics,
                  std::shared_ptr<HubStore> store, std::shared_ptr<ChatStore> chat_store,
-                 RateLimits limits)
+                 RateLimits limits, GolfTestHooks hooks)
     : vault_(std::move(vault)),
       dealer_(std::move(dealer)),
       ids_(std::move(ids)),
@@ -268,6 +268,7 @@ GolfHub::GolfHub(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Deal
                           return WithMember(room_id, player_id, action);
                         })),
       limits_(limits),
+      hooks_(std::move(hooks)),
       grace_period_(grace_period),
       instance_id_(InstanceId()),
       registry_([this, grace_period] {
@@ -747,6 +748,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
     if (auto it = player_room_.find(member_id); it != player_room_.end() && it->second == room_id) {
       player_room_.erase(it);
       player_game_.erase(member_id);
+      LeaveWorldLocked(member_id, outbox);  // a sibling's drop takes the world too
     }
   }
   room.members = std::move(members);
@@ -933,6 +935,7 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
         LeaveWorldLocked(player_id, left);
       }
       Deliver(left);
+      if (hooks_.before_seat_release) hooks_.before_seat_release(player_id);
       if (registry_.Detach(player_id)) {
         TrackActive(-1);
         Count("golf_disconnects", {{"kind", received.ok() ? "clean" : "abrupt"}});

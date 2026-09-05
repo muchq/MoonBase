@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -522,13 +521,7 @@ TEST_F(ThoughtsRateLimitedFixture, AMoveFloodIsRefusedAfterTheBurst) {
 
 // The two orderings the world lock is for, each driven at the hub's
 // scheduling seam so the interleaving is the test's, not the scheduler's.
-//
-// The in-memory wire completes a session's parked Receive inline on the
-// thread that sent the frame (or closed the socket), so the acting session's
-// command — and the hook it parks in — runs on whichever thread triggered
-// it. Each trigger therefore gets its own thread, and the test thread stays
-// free to observe and release.
-class ThoughtsRaceFixture : public GamesHubStreamFixture {
+class ThoughtsRaceFixture : public SeamFixture {
  protected:
   ThoughtsTestHooks MakeThoughtsHooks() override {
     ThoughtsTestHooks hooks;
@@ -536,52 +529,6 @@ class ThoughtsRaceFixture : public GamesHubStreamFixture {
     hooks.before_seat_release = [this](const std::string&) { Park("seat"); };
     return hooks;
   }
-
-  // A hook that never released would hang the fixture's own closes.
-  void TearDown() override {
-    Disarm();
-    Release();
-    GamesHubStreamFixture::TearDown();
-  }
-
-  void Arm() {
-    const std::lock_guard<std::mutex> lock(park_mu_);
-    armed_ = true;
-    released_ = false;
-  }
-  void Disarm() {
-    const std::lock_guard<std::mutex> lock(park_mu_);
-    armed_ = false;
-  }
-  // Waits until a hook named `stage` is parked (the hub's thread is inside
-  // the seam), or fails after the budget.
-  bool WaitParked(const std::string& stage) {
-    std::unique_lock<std::mutex> lock(park_mu_);
-    return park_cv_.wait_for(lock, kReceiveBudget, [&] { return parked_ == stage; });
-  }
-  void Release() {
-    {
-      const std::lock_guard<std::mutex> lock(park_mu_);
-      parked_.clear();
-      released_ = true;
-    }
-    park_cv_.notify_all();
-  }
-
- private:
-  void Park(const std::string& stage) {
-    std::unique_lock<std::mutex> lock(park_mu_);
-    if (!armed_) return;  // the seam only parks while a test has armed it
-    parked_ = stage;
-    park_cv_.notify_all();
-    park_cv_.wait(lock, [&] { return released_; });
-  }
-
-  std::mutex park_mu_;
-  std::condition_variable park_cv_;
-  std::string parked_;
-  bool armed_ = false;
-  bool released_ = false;
 };
 
 // A leave that races a join lands behind the joiner's snapshot, never ahead

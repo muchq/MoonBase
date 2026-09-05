@@ -11,9 +11,11 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
+#include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 #include "domains/games/apis/games_hub/world.h"
 
@@ -40,7 +42,9 @@ GameCommands MoveTo(std::vector<double> position) {
 
 GameCommands LeaveWorld() { return Lobby(LobbyAction::FromLeave(moonbase::games::LeaveWorld{})); }
 
-class LobbyFixture : public GamesHubStreamFixture {
+// On the seam fixture so the race test below can arm the hub's hooks;
+// unarmed, the seams are no-ops.
+class LobbyFixture : public SeamFixture {
  protected:
   // A seat past its sessionReady, in no room and no world.
   std::optional<Seat> Arrive() {
@@ -223,6 +227,115 @@ TEST_F(LobbyFixture, AClosedSocketLeavesTheWorldWhileTheSeatParks) {
   EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
   ASSERT_TRUE(back->stream.Send(MoveTo({1, 0, 1})).ok());
   EXPECT_EQ(NextRejection(back->stream), "join the world first");
+  ASSERT_TRUE(back->stream.Send(JoinWorld()).ok());
+  EXPECT_EQ(Listed(ReceiveLobby(back->stream, "worldState")),
+            std::vector<std::string>{bob->player_id});
+  auto rejoined = ReceiveLobby(bob->stream, "playerJoined");
+  ASSERT_TRUE(rejoined.has_value());
+  EXPECT_EQ(rejoined->as_playerJoined_or_null()->player.playerId, alice->player_id);
+  ExpectNoEvent(bob->stream);
+}
+
+// A sibling instance's write can drop a member from a room without the
+// member's own leave ever passing through here — a reap on the sibling's
+// boot cohort (#1295's residue) is one. The wake that mirrors the drop
+// takes the member's world standing with it, as it does for a deleted
+// room: peers hear playerLeft, and the member's next join — the plaza's
+// now — is a fresh arrival, not "already in the world".
+TEST_F(LobbyFixture, ASiblingsMemberDropLeavesTheWorldToo) {
+  auto alice = Arrive();
+  auto bob = Arrive();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+  moonbase::games::JoinRoom join_room;
+  join_room.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+  ASSERT_TRUE(alice->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "worldState").has_value());
+  ASSERT_TRUE(bob->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(bob->stream, "worldState").has_value());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "playerJoined").has_value());
+
+  store_->Enqueue({HubStore::DeleteMember{room_id, bob->player_id}});
+  golf_->OnNotify(RoomChannel(room_id), "sibling");
+  auto left = ReceiveLobby(alice->stream, "playerLeft");
+  ASSERT_TRUE(left.has_value());
+  EXPECT_EQ(left->as_playerLeft_or_null()->playerId, bob->player_id);
+
+  ASSERT_TRUE(bob->stream.Send(JoinWorld()).ok());
+  EXPECT_EQ(Listed(ReceiveLobby(bob->stream, "worldState")), std::vector<std::string>{});
+}
+
+// A room a sibling deleted takes its members' world standing with it.
+TEST_F(LobbyFixture, ASiblingsRoomDeleteLeavesTheWorldToo) {
+  auto alice = Arrive();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+  ASSERT_TRUE(alice->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "worldState").has_value());
+
+  store_->Enqueue({HubStore::DeleteRoom{room_id}});
+  golf_->OnNotify(RoomChannel(room_id), "sibling");
+  ASSERT_TRUE(alice->stream.Send(JoinWorld()).ok());
+  EXPECT_EQ(Listed(ReceiveLobby(alice->stream, "worldState")), std::vector<std::string>{});
+}
+
+// The close path at its seam: the world entry goes and playerLeft fans
+// out while the seat is still held, and only then does the seat park.
+class LobbyRaceFixture : public LobbyFixture {
+ protected:
+  GolfTestHooks MakeGolfHooks() override {
+    GolfTestHooks hooks;
+    hooks.before_seat_release = [this](const std::string&) { Park("seat"); };
+    return hooks;
+  }
+};
+
+// A resume admitted the instant the seat frees must find the world
+// already clean: were the seat released first, the resume's join could
+// be refused as "already in the world", or its fresh entry erased by the
+// old frame's leave.
+TEST_F(LobbyRaceFixture, AClosedSocketLeavesTheWorldBeforeTheSeatParks) {
+  auto alice = Arrive();
+  auto bob = Arrive();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "worldState").has_value());
+  ASSERT_TRUE(bob->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(bob->stream, "worldState").has_value());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "playerJoined").has_value());
+
+  Arm();
+  std::thread closer([&] { alice->stream.Close(); });
+  ASSERT_TRUE(WaitParked("seat"));
+
+  // Inside the seam: the world has already told bob, and the seat is
+  // still alice's and live — a resume now is the modeled SeatConflict.
+  auto left = ReceiveLobby(bob->stream, "playerLeft");
+  ASSERT_TRUE(left.has_value());
+  EXPECT_EQ(left->as_playerLeft_or_null()->playerId, alice->player_id);
+  auto conflicted = OpenSeat(alice->resume_token);
+  ASSERT_TRUE(conflicted.has_value());
+  auto refused = conflicted->stream.Receive();
+  ASSERT_FALSE(refused.ok()) << "the seat was released before the world was cleaned";
+  EXPECT_EQ(refused.error().code(), "SeatConflict");
+  Disarm();
+  Release();
+  closer.join();
+
+  // Past the seam the seat parks, and the resume's join is a fresh
+  // arrival: bob hears one playerJoined, nothing is refused.
+  auto back = OpenSeat(alice->resume_token);
+  ASSERT_TRUE(back.has_value());
+  ASSERT_TRUE(ReceiveCase(back->stream, "sessionReady").has_value());
   ASSERT_TRUE(back->stream.Send(JoinWorld()).ok());
   EXPECT_EQ(Listed(ReceiveLobby(back->stream, "worldState")),
             std::vector<std::string>{bob->player_id});
