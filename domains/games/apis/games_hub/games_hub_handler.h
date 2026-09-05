@@ -45,6 +45,12 @@ class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
   smithy::eventstream::StreamTask Play(moonbase::games::PlayInput input,
                                        moonbase::games::PlayAsyncServerStream& stream) override;
 
+  /// The same stream on the route the deployed clients dial; one stream
+  /// type, so it forwards to the same hub method. Retires with Think.
+  smithy::eventstream::StreamTask PlayLegacy(
+      moonbase::games::PlayLegacyInput input,
+      moonbase::games::PlayLegacyAsyncServerStream& stream) override;
+
   smithy::eventstream::StreamTask Think(moonbase::games::ThinkInput input,
                                         moonbase::games::ThinkAsyncServerStream& stream) override;
 

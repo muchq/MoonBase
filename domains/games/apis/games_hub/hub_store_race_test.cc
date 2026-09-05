@@ -25,7 +25,7 @@
 namespace games_hub {
 namespace {
 
-using moonbase::games::GolfCommands;
+using moonbase::games::GameCommands;
 using moonbase::games::GolfMove;
 
 class TestGate {
@@ -186,30 +186,30 @@ TEST_F(HubStoreRaceFixture, ActiveSignalRefreshesHeldRoom) {
   auto alice = OpenSeat();
   auto bob = OpenSeatVia(*remote->client);
   ASSERT_TRUE(alice.has_value() && bob.has_value());
-  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
                   [&] { return ReceiveCase(alice->stream, "sessionReady"); }, remote.get())
                   .has_value());
-  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
                   [&] { return ReceiveCase(bob->stream, "sessionReady"); }, remote.get())
                   .has_value());
 
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
-  auto created = ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  auto created = ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
       [&] { return ReceiveCase(alice->stream, "roomState"); }, remote.get());
   ASSERT_TRUE(created.has_value());
   const std::string room_id = created->as_roomState_or_null()->roomId;
 
   moonbase::games::JoinRoom join_room;
   join_room.roomId = room_id;
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join_room)).ok());
-  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
                   [&] { return ReceiveCase(bob->stream, "roomState"); }, remote.get())
                   .has_value());
 
   // No OnNotify: the active signal alone must carry bob onto alice's
   // projection the way a missed wake would after (re)LISTEN.
   golf_->OnChannelActive(RoomChannel(room_id));
-  auto refreshed = ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  auto refreshed = ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
       [&] { return ReceiveCase(alice->stream, "roomState"); }, remote.get());
   ASSERT_TRUE(refreshed.has_value());
   EXPECT_EQ(refreshed->as_roomState_or_null()->players.size(), 2u);
@@ -221,11 +221,11 @@ TEST_F(HubStoreRaceFixture, ActiveSignalForUnheldRoomIsIgnored) {
   ASSERT_NE(remote, nullptr);
   auto alice = OpenSeat();
   ASSERT_TRUE(alice.has_value());
-  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
                   [&] { return ReceiveCase(alice->stream, "sessionReady"); }, remote.get())
                   .has_value());
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
-  auto created = ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  auto created = ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
       [&] { return ReceiveCase(alice->stream, "roomState"); }, remote.get());
   ASSERT_TRUE(created.has_value());
   const std::string room_id = created->as_roomState_or_null()->roomId;
@@ -237,13 +237,13 @@ TEST_F(HubStoreRaceFixture, ActiveSignalForUnheldRoomIsIgnored) {
   // Primary stays healthy and can still host a join the ordinary way.
   auto bob = OpenSeatVia(*remote->client);
   ASSERT_TRUE(bob.has_value());
-  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
                   [&] { return ReceiveCase(bob->stream, "sessionReady"); }, remote.get())
                   .has_value());
   moonbase::games::JoinRoom join;
   join.roomId = room_id;
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join)).ok());
-  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
                   [&] { return ReceiveCase(bob->stream, "roomState"); }, remote.get())
                   .has_value());
 }
@@ -254,27 +254,27 @@ TEST_F(HubStoreRaceFixture, DelayedFinishWakeReadsRetainedTerminalRow) {
   auto alice = OpenSeat();
   auto bob = OpenSeatVia(*remote->client);
   ASSERT_TRUE(alice.has_value() && bob.has_value());
-  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
                   [&] { return ReceiveCase(alice->stream, "sessionReady"); }, remote.get())
                   .has_value());
-  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
                   [&] { return ReceiveCase(bob->stream, "sessionReady"); }, remote.get())
                   .has_value());
 
-  ASSERT_TRUE(alice->stream.Send(GolfCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
-  auto created = ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  auto created = ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
       [&] { return ReceiveCase(alice->stream, "roomState"); }, remote.get());
   ASSERT_TRUE(created.has_value());
   const std::string room_id = created->as_roomState_or_null()->roomId;
 
   moonbase::games::JoinRoom join_room;
   join_room.roomId = room_id;
-  ASSERT_TRUE(bob->stream.Send(GolfCommands::FromJoinroom(join_room)).ok());
-  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
                   [&] { return ReceiveCase(bob->stream, "roomState"); }, remote.get())
                   .has_value());
   golf_->OnNotify(RoomChannel(room_id), "remote-join");
-  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
                   [&] { return ReceiveCase(alice->stream, "roomState"); }, remote.get())
                   .has_value());
 
@@ -285,7 +285,7 @@ TEST_F(HubStoreRaceFixture, DelayedFinishWakeReadsRetainedTerminalRow) {
   ASSERT_TRUE(joined.has_value());
   const std::string game_id = joined->as_gameJoined_or_null()->view.gameId;
   remote->golf->OnNotify(RoomChannel(room_id), "primary-create");
-  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GolfEvents>>(
+  ASSERT_TRUE(ReceiveWithin<std::optional<moonbase::games::GameEvents>>(
                   [&] { return ReceiveCase(bob->stream, "roomState"); }, remote.get())
                   .has_value());
 

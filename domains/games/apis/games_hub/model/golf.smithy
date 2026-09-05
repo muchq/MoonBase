@@ -2,70 +2,22 @@ $version: "2.0"
 
 namespace moonbase.golf
 
-use moonbase.castle#CastleCommand
-use moonbase.castle#CastleEvent
 use moonbase.games#Card
 use moonbase.games#CardIndexes
-use moonbase.games#Chat
-use moonbase.games#ChatHistory
-use moonbase.games#ChatMessage
-use moonbase.games#CommandRejected
 use moonbase.games#CreateGame
-use moonbase.games#CreateRoom
 use moonbase.games#GameCreated
 use moonbase.games#GameLeft
 use moonbase.games#GameStarted
-use moonbase.games#GetRoomState
 use moonbase.games#JoinGame
-use moonbase.games#JoinRoom
 use moonbase.games#LeaveGame
-use moonbase.games#LeaveRoom
 use moonbase.games#PlayerIds
-use moonbase.games#RoomLeft
-use moonbase.games#RoomState
-use moonbase.games#SeatConflict
-use moonbase.games#SessionReady
 use moonbase.games#StartGame
 use moonbase.games#TurnChanged
-use moonbase.games#Unauthenticated
 
-// Golf's vocabulary (#79): the Play stream and the moves and updates nested
-// under one `golf` member per direction, so the room layer never changes
-// shape when a game joins the hub. Castle (#77) is the second such member:
-// the stream is the room's, and a room hosts tables of either game.
-
-/// The one WebSocket session per player: commands up, events down. The
-/// ticket rides the upgrade GET as a query member (browsers cannot set
-/// upgrade headers); the gate checks it pre-101 and the handler spends it
-/// (single use). Invalid moves never end the stream — they come back as
-/// commandRejected events; the modeled errors below are terminal.
-@http(method: "POST", uri: "/games/v2/golf/play")
-operation Play {
-    input := {
-        @required
-        @httpQuery("ticket")
-        ticket: String
-
-        @httpPayload
-        commands: GolfCommands
-    }
-    output := {
-        @httpPayload
-        events: GolfEvents
-    }
-    errors: [Unauthenticated, SeatConflict]
-}
-
-@streaming
-union GolfCommands {
-    createRoom: CreateRoom
-    joinRoom: JoinRoom
-    leaveRoom: LeaveRoom
-    getRoomState: GetRoomState
-    chat: Chat
-    golf: GolfCommand
-    castle: CastleCommand
-}
+// Golf's vocabulary (#79): the moves and updates nested under one `golf`
+// member per direction of the room's Play stream (games.smithy), so the
+// room layer never changes shape when a game joins the hub. Castle (#77)
+// and the lobby (#1490) are the other such members.
 
 /// The game-specific envelope: exactly one move.
 structure GolfCommand {
@@ -119,17 +71,6 @@ structure Knock {}
 /// Ends the post-peek reveal countdown for the whole game.
 structure HideCards {}
 
-@streaming
-union GolfEvents {
-    sessionReady: SessionReady
-    roomState: RoomState
-    roomLeft: RoomLeft
-    roomChat: ChatMessage
-    roomChatHistory: ChatHistory
-    commandRejected: CommandRejected
-    golf: GolfEvent
-    castle: CastleEvent
-}
 
 /// The game-specific envelope: exactly one update.
 structure GolfEvent {

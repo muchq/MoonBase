@@ -96,7 +96,7 @@ inline void ExpectOnlyDeclaredCounterSeries(
 inline constexpr std::chrono::milliseconds kReceiveBudget{5000};
 
 // The event type a generated client stream receives — PlayClientStream's
-// GolfEvents, ThinkClientStream's ThoughtsEvents — so the receive helpers
+// GameEvents, ThinkClientStream's ThoughtsEvents — so the receive helpers
 // below serve both hubs.
 template <typename Stream>
 using EventOf = std::remove_cvref_t<decltype(**std::declval<Stream&>().Receive())>;
@@ -170,7 +170,7 @@ template <typename Pick>
 auto ReceiveEnvelope(moonbase::games::PlayClientStream& stream, const std::string& wanted,
                      const char* game, Pick&& pick, std::chrono::milliseconds budget)
     -> std::optional<
-        std::decay_t<decltype(pick(std::declval<const moonbase::games::GolfEvents&>())->update)>> {
+        std::decay_t<decltype(pick(std::declval<const moonbase::games::GameEvents&>())->update)>> {
   const auto deadline = std::chrono::steady_clock::now() + budget;
   for (int i = 0; i < 16; ++i) {
     auto received = ReceiveWithin(stream, deadline);
@@ -192,7 +192,7 @@ inline std::optional<moonbase::games::GolfUpdate> ReceiveGolf(
     std::chrono::milliseconds budget = kReceiveBudget) {
   return ReceiveEnvelope(
       stream, wanted, "golf",
-      [](const moonbase::games::GolfEvents& event) { return event.as_golf_or_null(); }, budget);
+      [](const moonbase::games::GameEvents& event) { return event.as_golf_or_null(); }, budget);
 }
 
 inline std::optional<moonbase::games::CastleUpdate> ReceiveCastle(
@@ -200,7 +200,15 @@ inline std::optional<moonbase::games::CastleUpdate> ReceiveCastle(
     std::chrono::milliseconds budget = kReceiveBudget) {
   return ReceiveEnvelope(
       stream, wanted, "castle",
-      [](const moonbase::games::GolfEvents& event) { return event.as_castle_or_null(); }, budget);
+      [](const moonbase::games::GameEvents& event) { return event.as_castle_or_null(); }, budget);
+}
+
+inline std::optional<moonbase::games::LobbyUpdate> ReceiveLobby(
+    moonbase::games::PlayClientStream& stream, const std::string& wanted,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  return ReceiveEnvelope(
+      stream, wanted, "lobby",
+      [](const moonbase::games::GameEvents& event) { return event.as_lobby_or_null(); }, budget);
 }
 
 // Receives until a fetched value satisfies the predicate — flows that
@@ -345,17 +353,24 @@ inline std::set<std::string> DeclaredLabelValues(const std::string& counter,
   return values;
 }
 
-inline moonbase::games::GolfCommands Move(moonbase::games::GolfMove move) {
+inline moonbase::games::GameCommands Move(moonbase::games::GolfMove move) {
   moonbase::games::GolfCommand command;
   command.move = std::move(move);
-  return moonbase::games::GolfCommands::FromGolf(std::move(command));
+  return moonbase::games::GameCommands::FromGolf(std::move(command));
+}
+
+// The lobby twin of Move: a LobbyAction in its envelope on the room stream.
+inline moonbase::games::GameCommands Lobby(moonbase::games::LobbyAction action) {
+  moonbase::games::LobbyCommand command;
+  command.action = std::move(action);
+  return moonbase::games::GameCommands::FromLobby(std::move(command));
 }
 
 // The castle twin of Move: a CastleMove in its envelope on the room stream.
-inline moonbase::games::GolfCommands Castle(moonbase::games::CastleMove move) {
+inline moonbase::games::GameCommands Castle(moonbase::games::CastleMove move) {
   moonbase::games::CastleCommand command;
   command.move = std::move(move);
-  return moonbase::games::GolfCommands::FromCastle(std::move(command));
+  return moonbase::games::GameCommands::FromCastle(std::move(command));
 }
 
 // Captures every metric the hub records so tests can assert what is
@@ -549,7 +564,7 @@ class GamesHubStreamFixture : public testing::Test {
   // recorded) when any step misbehaves.
   std::string CreateRoomFor(Seat& seat) {
     if (!seat.stream
-             .Send(moonbase::games::GolfCommands::FromCreateroom(moonbase::games::CreateRoom{}))
+             .Send(moonbase::games::GameCommands::FromCreateroom(moonbase::games::CreateRoom{}))
              .ok()) {
       ADD_FAILURE() << "CreateRoom send failed";
       return "";
@@ -582,7 +597,7 @@ class GamesHubStreamFixture : public testing::Test {
     moonbase::games::JoinRoom join_room;
     join_room.roomId = room.room_id;
     for (std::size_t i = 1; i < room.seats.size(); ++i) {
-      if (!room.seats[i].stream.Send(moonbase::games::GolfCommands::FromJoinroom(join_room)).ok()) {
+      if (!room.seats[i].stream.Send(moonbase::games::GameCommands::FromJoinroom(join_room)).ok()) {
         return std::nullopt;
       }
       if (!ReceiveCase(room.seats[i].stream, "roomState").has_value()) return std::nullopt;

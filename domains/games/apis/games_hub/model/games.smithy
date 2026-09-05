@@ -3,18 +3,91 @@ $version: "2.0"
 namespace moonbase.games
 
 use alloy#simpleRestJson
-use moonbase.golf#Play
+use moonbase.castle#CastleCommand
+use moonbase.castle#CastleEvent
+use moonbase.golf#GolfCommand
+use moonbase.golf#GolfEvent
+use moonbase.thoughts#LobbyCommand
+use moonbase.thoughts#LobbyEvent
 use moonbase.thoughts#Think
 
 /// The games hub (#79): one service, one session identity, one room layer,
-/// and the game streams — the room's Play, thoughts' Think — each carrying
-/// its own vocabulary. A room-shaped game is one more envelope member on
-/// Play (castle, #77); a flat one is a new operation and a new model file.
+/// and one stream, Play, on which the lobby (#1490), golf, and castle
+/// (#77) each ride as one envelope member per direction. Think is the
+/// pre-lobby thoughts stream, kept until the site is on Play.
 @simpleRestJson
 @title("Games Hub")
 service GamesHub {
     version: "2026-07-21"
-    operations: [GetSession, Play, Think]
+    operations: [GetSession, Play, PlayLegacy, Think]
+}
+
+/// The one WebSocket session per player: commands up, events down. The
+/// ticket rides the upgrade GET as a query member (browsers cannot set
+/// upgrade headers); the gate checks it pre-101 and the handler spends it
+/// (single use). Invalid moves never end the stream — they come back as
+/// commandRejected events; the modeled errors below are terminal.
+@http(method: "POST", uri: "/games/v2/play")
+operation Play {
+    input := {
+        @required
+        @httpQuery("ticket")
+        ticket: String
+
+        @httpPayload
+        commands: GameCommands
+    }
+    output := {
+        @httpPayload
+        events: GameEvents
+    }
+    errors: [Unauthenticated, SeatConflict]
+}
+
+/// Play on the route the deployed golf and castle clients dial; the same
+/// stream, byte for byte. Retires with Think once the site is on Play.
+@http(method: "POST", uri: "/games/v2/golf/play")
+operation PlayLegacy {
+    input := {
+        @required
+        @httpQuery("ticket")
+        ticket: String
+
+        @httpPayload
+        commands: GameCommands
+    }
+    output := {
+        @httpPayload
+        events: GameEvents
+    }
+    errors: [Unauthenticated, SeatConflict]
+}
+
+/// The room layer's own commands, then one envelope per tenant: the
+/// lobby's world, golf's table, castle's table.
+@streaming
+union GameCommands {
+    createRoom: CreateRoom
+    joinRoom: JoinRoom
+    leaveRoom: LeaveRoom
+    getRoomState: GetRoomState
+    chat: Chat
+    lobby: LobbyCommand
+    golf: GolfCommand
+    castle: CastleCommand
+}
+
+@streaming
+union GameEvents {
+    sessionReady: SessionReady
+    roomState: RoomState
+    roomLeft: RoomLeft
+    roomChat: ChatMessage
+    roomChatHistory: ChatHistory
+    commandRejected: CommandRejected
+    lobby: LobbyEvent
+    golf: GolfEvent
+    castle: CastleEvent
 }
 
 /// Session identity is game-agnostic: the route carries no game segment,

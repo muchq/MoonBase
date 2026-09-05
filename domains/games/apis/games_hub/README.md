@@ -9,17 +9,19 @@ auth ahead of the 101. One session identity opens either stream.
 ## The model (four namespaces, per #79)
 
 - `model/games.smithy` — `moonbase.games`: the service, session identity
-  (`POST /games/v2/session`), the two terminal stream errors, and the
-  game-agnostic room layer — rooms, chat, player info with room-scoped
+  (`POST /games/v2/session`), the two terminal stream errors, the one
+  stream — `Play` at `/games/v2/play`, its `GameCommands`/`GameEvents`
+  unions carrying the room layer's own cases plus one envelope member
+  per tenant (`lobby`, `golf`, `castle`), and `PlayLegacy`, the same
+  stream on `/games/v2/golf/play` until the site is on `Play` (#1490) —
+  and the game-agnostic room layer — rooms, chat, player info with room-scoped
   stats and the member's table (`PlayerInfo.table`: which game, which
   table, pending or in play, absent while idle — how the lobby tells who
   is free, #1490). Apart from `GameSummary.game` and `Table.game`, the
   word that names a table's game for the lobby, nothing here knows which
   game a table plays.
-- `model/golf.smithy` — `moonbase.golf`: the `Play` stream
-  (`/games/v2/golf/play`) and golf's vocabulary nested under one `golf`
-  member in each streaming union. The stream is the room's: castle rides
-  it as a second member.
+- `model/golf.smithy` — `moonbase.golf`: golf's vocabulary, nested under
+  the `golf` member of each streaming union.
 - `model/castle.smithy` — `moonbase.castle`: castle's vocabulary (#77),
   the `castle` member of the same unions. A room hosts tables of either
   game (`GameSummary.game` says which); the shared lifecycle shapes
@@ -28,40 +30,49 @@ auth ahead of the 101. One session identity opens either stream.
   at a table whose vocabulary they do not speak. The room-wide
   `gameCreated` is the one event that crosses: a room hears every table
   in that table's own envelope.
-- `model/thoughts.smithy` — `moonbase.thoughts`: the `Think` stream
-  (`/games/v2/thoughts/play`) with its own command and event unions —
-  thoughts keys its worlds by room id but does not use the room layer
-  (#1490 phase 3 joins them), so it shares only session identity and the
-  `commandRejected` shape with golf.
+- `model/thoughts.smithy` — `moonbase.thoughts`: the world's shapes,
+  twice over — the `lobby` member of the room stream (`LobbyAction`,
+  `LobbyUpdate`), and the pre-lobby `Think` stream
+  (`/games/v2/thoughts/play`) with its own flat unions, kept until the
+  site is on `Play`.
 
-A new game is one new model file. A game that wants rooms and chat is one
-more envelope member on the room stream's unions, the way castle joined —
-not thoughts' flat unions, which opted out of the room layer and would
-have to be restructured, not extended, to join it. Codegen flattens every namespace into
-`moonbase::games`, so shape names must be unique across the four files (a
-collision gets the foreign namespace's name appended, which nothing here
-wants).
+A new game is one new model file and one more envelope member on the
+room stream's unions, the way castle and the lobby joined. Codegen
+flattens every namespace into `moonbase::games`, so shape names must be
+unique across the four files (a collision gets the foreign namespace's
+name appended, which nothing here wants).
 
-## Thoughts
+## Thoughts, the lobby
 
 A world per room (#1490): a joined player is a position on the ground
 plane (`[x, 0, z]`, x and z within ±50), an RGB color in 0..1, and a
-shape (0 sphere, 1 cube, 2 pyramid), standing in the world of the room
-`join` names — or in the plaza, the well-known room `plaza`, when it
-names none, which is what muchq.com/thoughts does. Any id names a world;
-the room layer is not consulted. `join` answers the joiner with a
-`worldState` of everyone else in that world and tells the rest of it
-`playerJoined`; `move` and `shape` fan out as `playerMoved` and
-`shapeChanged`, never echoed and never past the world's edge; `leave` —
-or a closed socket, alike — fans out `playerLeft`. A session that has
-not joined hears nothing. Out-of-bounds values, a bad room id, and
-commands before a join are refused in-band as `commandRejected`. No
-persistence and no reconnect grace: presence is the whole game.
-`ThoughtsHub` (`thoughts_hub.cc`) carries it, `GolfHub` (`golf_hub.cc`)
-carries the room games, golf and castle, and `GamesHubHandler`
-implements the generated service: it mints sessions itself and forwards
-each stream to its hub. The two hubs share the ticket vault and nothing
-else. Counters carry the `thoughts_` prefix.
+shape (0 sphere, 1 cube, 2 pyramid), standing in one room's world.
+`join` answers the joiner with a `worldState` of everyone else in that
+world and tells the rest of it `playerJoined`; `move` and `shape` fan
+out as `playerMoved` and `shapeChanged`, never echoed and never past the
+world's edge; `leave` — or a closed socket, alike — fans out
+`playerLeft`. A session that has not joined hears nothing. Out-of-bounds
+values and commands before a join are refused in-band as
+`commandRejected`. No persistence: presence is the whole game. The
+rules and the map are `World` (`world.cc`); two hubs host it.
+
+On the room stream, as the `lobby` member (`GolfHub`, `golf_hub.cc`),
+the world is the session's: its room's, or the plaza's — the well-known
+room `plaza` — while unroomed; a `roomId` on `join` can only agree with
+that. Joining, creating, or leaving a room leaves the world (the client
+joins the new one), and so does a closed socket, at once, while the
+seat parks for grace. Lobby traffic counts on `lobby_commands` and
+`lobby_events`, castle's precedent; the world is per instance, like
+the registry.
+
+On `Think` (`ThoughtsHub`, `thoughts_hub.cc`), the pre-lobby route
+today's muchq.com/thoughts dials, the world is its own — a `join` names
+its room or lands in the plaza, any id names a world, and a closed
+socket is a player gone with no grace. Counters carry the `thoughts_`
+prefix. It retires once the site is on the room stream; until then the
+two hubs' plazas are two rooms. `GamesHubHandler` implements the
+generated service: it mints sessions itself and forwards each stream to
+its hub. The two hubs share the ticket vault and nothing else.
 
 ## The rules
 

@@ -25,7 +25,8 @@ namespace {
 
 using json = nlohmann::json;
 
-// Castle rides the room stream; there is no castle route to rename.
+// Castle rides the room stream on the route the deployed client dials;
+// there is no castle route to rename.
 constexpr char kPlayPath[] = "/games/v2/golf/play";
 
 class CastleWireTest : public HubWireFixture {
