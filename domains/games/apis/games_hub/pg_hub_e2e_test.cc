@@ -566,6 +566,19 @@ TEST_F(PgGamesHubFixture, LiveGameSurvivesARestart) {
   auto rows = Rows();
   ASSERT_EQ(rows.games.size(), 1u);
   EXPECT_EQ(rows.games[0].version, version_before + 2);  // draw + discard
+
+  // The restored lobby puts them at the restored table: read off the
+  // roster the row carries, not off anything the old process had.
+  ASSERT_TRUE(
+      alice_back->stream.Send(GolfCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
+          .ok());
+  auto lobby = ReceiveCase(alice_back->stream, "roomState");
+  ASSERT_TRUE(lobby.has_value());
+  for (const auto& player : lobby->as_roomState_or_null()->players) {
+    ASSERT_TRUE(player.table.has_value()) << player.playerId;
+    EXPECT_EQ(player.table->game, "golf");
+    EXPECT_EQ(player.table->gameId, table->game_id);
+  }
 }
 
 TEST_F(PgGamesHubFixture, StatsSurviveARestart) {
@@ -1066,6 +1079,65 @@ TEST_F(PgGamesHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
     EXPECT_EQ(member.total_score, 0);
     EXPECT_EQ(member.games_won, member.player_id == alice.player_id ? 1 : 0);
   }
+}
+
+// A commit loop can rebase onto a remote finish: the store hands it the
+// finished state at the finisher's version, the engine refuses the move,
+// and the loop returns with the ended table still in the map, its
+// ceremony unpaid — the lobby keeps listing it and keeps its members at
+// it, and the "leave your current game first" guard locks them out of a
+// new one. The reconcile owes that ceremony whatever the versions say:
+// a finished entry still held is the debt, the finished row pays it.
+TEST_F(PgGamesHubFixture, ARebaseOntoARemoteFinishStillGetsTheCeremony) {
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  std::optional<CrossTable> table;
+  QuiesceOnScopeExit quiesce{this, remote.get(), &table};
+  table = SeatedCrossTable(*remote);
+  ASSERT_TRUE(table.has_value());
+  Seat& alice = table->alice;
+  Seat& bob = table->bob;
+
+  // Hold alice's listener behind everything that follows, so her
+  // instance learns of the finish only through its own commit.
+  golf_->AttachListener(nullptr);
+  listener_.reset();
+  // bob abandons on his instance: alice is the last seat standing, so the
+  // game resolves there and its row turns terminal.
+  ASSERT_TRUE(bob.stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  ASSERT_TRUE(ReceiveGolf(bob.stream, "gameLeft").has_value());
+  ASSERT_TRUE(ReceiveCase(bob.stream, "roomState").has_value());
+  remote->store->Flush();
+  auto rows = Rows();
+  ASSERT_EQ(rows.games.size(), 1u);
+  ASSERT_TRUE(rows.games[0].state.has_value());
+  ASSERT_TRUE(IsOver(*rows.games[0].state));
+
+  // alice, still at her stale turn, knocks: her commit loses to the
+  // finish, rebases onto the ended state, and the engine refuses.
+  ASSERT_TRUE(alice.stream.Send(Move(GolfMove::FromKnock(moonbase::games::Knock{}))).ok());
+  auto refused = ReceiveCase(alice.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "game is over");
+
+  // The wake she missed arrives with the reattach: the ceremony she is
+  // owed, then a lobby with the table gone and her free at last.
+  listener_ = MakeListener(golf_);
+  ASSERT_TRUE(WaitForListenerCount(table->room_id, 2));
+  pg::Client db(url_);
+  ASSERT_TRUE(db.Exec("SELECT pg_notify($1, 'finish-sync')", {RoomChannel(table->room_id)}).ok());
+  auto ended = ReceiveGolf(alice.stream, "gameEnded");
+  ASSERT_TRUE(ended.has_value());
+  EXPECT_EQ(ended->as_gameEnded_or_null()->winner, alice.player_id);
+  auto lobby = ReceiveCase(alice.stream, "roomState");
+  ASSERT_TRUE(lobby.has_value());
+  EXPECT_TRUE(lobby->as_roomState_or_null()->games.empty());
+  EXPECT_EQ(TableOf(*lobby->as_roomState_or_null(), alice.player_id), Idle());
+  ASSERT_TRUE(
+      alice.stream.Send(Move(GolfMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  ASSERT_TRUE(ReceiveGolf(alice.stream, "gameCreated").has_value());
+  ASSERT_TRUE(ReceiveGolf(alice.stream, "gameJoined").has_value());
+  ASSERT_TRUE(ReceiveCase(alice.stream, "roomState").has_value());
 }
 
 // Pins QuiesceCrossTable: an injected unread wake must be drained, or

@@ -96,13 +96,20 @@ list PlayerInfos {
     member: PlayerInfo
 }
 
-/// A room member with their room-scoped running stats.
+/// A room member with their room-scoped running stats, and the table
+/// they are at, if any.
 structure PlayerInfo {
     @required
     playerId: String
 
     @required
     connected: Boolean
+
+    /// The table this member is at — pending or in play — absent while
+    /// idle. A member at a table is still in the room (chat, presence),
+    /// so the lobby (#1490) reads this to tell who is free. A finished
+    /// table leaves the room's list, and this with it.
+    table: Table
 
     @required
     gamesPlayed: Integer
@@ -112,6 +119,16 @@ structure PlayerInfo {
 
     @required
     totalScore: Integer
+}
+
+/// A room member's table: which game, which table.
+structure Table {
+    /// golf | castle, as GameSummary.game spells it.
+    @required
+    game: String
+
+    @required
+    gameId: String
 }
 
 list GameSummaries {

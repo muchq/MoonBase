@@ -56,7 +56,8 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
             R"({"games":[{"game":"castle","gameId":"GAME01","playerCount":1,"status":"waiting"}],)"
             R"("players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
-            R"("playerId":"player-1","totalScore":0}],"roomId":"room-1"})");
+            R"("playerId":"player-1","table":{"game":"castle","gameId":"GAME01"},)"
+            R"("totalScore":0}],"roomId":"room-1"})");
 
   json joiner_session;
   auto joiner = DialReady(joiner_session);
@@ -110,9 +111,10 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
             R"({"games":[{"game":"castle","gameId":"GAME01","playerCount":2,"status":"setup"}],)"
             R"("players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
-            R"("playerId":"player-1","totalScore":0},)"
+            R"("playerId":"player-1","table":{"game":"castle","gameId":"GAME01"},)"
+            R"("totalScore":0},)"
             R"({"connected":true,"gamesPlayed":0,"gamesWon":0,"playerId":"player-2",)"
-            R"("totalScore":0}],"roomId":"room-1"})");
+            R"("table":{"game":"castle","gameId":"GAME01"},"totalScore":0}],"roomId":"room-1"})");
   (void)EventPayload(NextFrame(*joiner), "castle");  // gameStarted
   (void)EventPayload(NextFrame(*joiner), "castle");  // the dealt view
   (void)EventPayload(NextFrame(*joiner), "roomState");

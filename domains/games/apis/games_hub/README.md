@@ -11,8 +11,11 @@ auth ahead of the 101. One session identity opens either stream.
 - `model/games.smithy` — `moonbase.games`: the service, session identity
   (`POST /games/v2/session`), the two terminal stream errors, and the
   game-agnostic room layer — rooms, chat, player info with room-scoped
-  stats. Apart from `GameSummary.game`, the word that names a table's
-  game for the lobby, nothing here knows which game a table plays.
+  stats and the member's table (`PlayerInfo.table`: which game, which
+  table, pending or in play, absent while idle — how the lobby tells who
+  is free, #1490). Apart from `GameSummary.game` and `Table.game`, the
+  word that names a table's game for the lobby, nothing here knows which
+  game a table plays.
 - `model/golf.smithy` — `moonbase.golf`: the `Play` stream
   (`/games/v2/golf/play`) and golf's vocabulary nested under one `golf`
   member in each streaming union. The stream is the room's: castle rides
