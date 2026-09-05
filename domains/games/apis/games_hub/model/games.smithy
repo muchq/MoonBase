@@ -105,11 +105,11 @@ structure PlayerInfo {
     @required
     connected: Boolean
 
-    /// The table this member is seated at — pending or in play — absent
-    /// while idle. A seated member is still in the room (chat, presence),
+    /// The table this member is at — pending or in play — absent while
+    /// idle. A member at a table is still in the room (chat, presence),
     /// so the lobby (#1490) reads this to tell who is free. A finished
     /// table leaves the room's list, and this with it.
-    seat: Seat
+    table: Table
 
     @required
     gamesPlayed: Integer
@@ -121,8 +121,8 @@ structure PlayerInfo {
     totalScore: Integer
 }
 
-/// Where a member is seated: which game, at which table.
-structure Seat {
+/// A room member's table: which game, which table.
+structure Table {
     /// golf | castle, as GameSummary.game spells it.
     @required
     game: String

@@ -202,8 +202,8 @@ TEST_F(GolfWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
   // createGame, framed exactly as the browser mints it. The creator hears
   // the room-wide announcement, then their own seat (a gameJoined with the
   // waiting-phase view: four face-down slots, no optional members), then
-  // the lobby list gaining the game and the creator's seat at it. A
-  // member at no table carries no seat key at all (the goldens above).
+  // the lobby list gaining the game and the creator's table. A member
+  // at no table carries no table key at all (the goldens above).
   ASSERT_TRUE(creator->Send(CommandFrame("golf", R"({"move":{"createGame":{}}})")).ok());
   EXPECT_EQ(EventPayload(NextFrame(*creator), "golf"),
             R"({"update":{"gameCreated":{"createdBy":"player-1","gameId":"GAME01"}}})");
@@ -215,7 +215,7 @@ TEST_F(GolfWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
             R"({"games":[{"game":"golf","gameId":"GAME01","playerCount":1,"status":"waiting"}],)"
             R"("players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
-            R"("playerId":"player-1","seat":{"game":"golf","gameId":"GAME01"},)"
+            R"("playerId":"player-1","table":{"game":"golf","gameId":"GAME01"},)"
             R"("totalScore":0}],"roomId":"room-1"})");
 
   // A second session joins the room (that admission sequence is pinned in
@@ -270,14 +270,14 @@ TEST_F(GolfWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(KeysOf(view["discardTop"]), (std::set<std::string>{"rank", "suit"}));
 
   // The lobby list flips to playing for everyone in the room, and both
-  // members read as seated at it (#1490): the seat key is the lobby's.
+  // members read as at it (#1490): the table key is the lobby's.
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
             R"({"games":[{"game":"golf","gameId":"GAME01","playerCount":2,"status":"playing"}],)"
             R"("players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
-            R"("playerId":"player-1","seat":{"game":"golf","gameId":"GAME01"},)"
+            R"("playerId":"player-1","table":{"game":"golf","gameId":"GAME01"},)"
             R"("totalScore":0},)"
             R"({"connected":true,"gamesPlayed":0,"gamesWon":0,"playerId":"player-2",)"
-            R"("seat":{"game":"golf","gameId":"GAME01"},"totalScore":0}],"roomId":"room-1"})");
+            R"("table":{"game":"golf","gameId":"GAME01"},"totalScore":0}],"roomId":"room-1"})");
 }
 
 // Consumer: the golf web client's room-entry and chat rendering. The

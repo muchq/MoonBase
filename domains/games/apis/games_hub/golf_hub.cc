@@ -760,7 +760,12 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
       continue;
     }
     GameEntry& entry = game->second;
-    if (row.version <= entry.version) continue;  // ours is current
+    // A commit loop that rebased onto a remote finish holds the ended
+    // state at the finisher's version, and its caller only refused or
+    // left: the ceremony is still owed. A finished entry still held is
+    // that debt, whatever the versions say, and the finished row pays it.
+    const bool owed = entry.started() && IsOver(*entry.state);
+    if (row.version <= entry.version && !owed) continue;  // ours is current
     changed = true;
     // A code re-minted for a table of the other game: the kind travels
     // with the state, or the next view would read the wrong engine.
@@ -2078,14 +2083,15 @@ moonbase::games::RoomState GolfHub::RoomStateLocked(const std::string& room_id,
     info.gamesPlayed = member.games_played;
     info.gamesWon = member.games_won;
     info.totalScore = member.total_score;
-    // The seat is the roster: a finished table has already left the map,
-    // so anyone listed is at a live one, pending or in play.
+    // The table is the roster: a finished table leaves the map with its
+    // ceremony (ReconcileRoomLocked pays one a rebase left owing), so
+    // anyone listed is at a live one, pending or in play.
     for (const auto& [game_id, entry] : room.games) {
       if (std::find(entry.roster.begin(), entry.roster.end(), member_id) != entry.roster.end()) {
-        moonbase::games::Seat seat;
-        seat.game = std::string(GameKindName(entry.kind));
-        seat.gameId = game_id;
-        info.seat = std::move(seat);
+        moonbase::games::Table table;
+        table.game = std::string(GameKindName(entry.kind));
+        table.gameId = game_id;
+        info.table = std::move(table);
         break;
       }
     }

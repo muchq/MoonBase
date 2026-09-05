@@ -2051,6 +2051,8 @@ TEST_F(GolfGameFixture, MidGameBrowserCloseParksTheSeatAndTheGameSurvives) {
     for (const auto& player : room->players) {
       if (player.playerId == table->bob.player_id) bob_disconnected = !player.connected;
     }
+    // Parked, not free: the lobby must not offer bob's seat to anyone.
+    EXPECT_EQ(TableOf(*room, table->bob.player_id), AtTable("golf", table->game_id));
   }
   ASSERT_TRUE(bob_disconnected);
   // And then silence: no verdict follows the park.
@@ -2225,7 +2227,7 @@ TEST_F(GolfGameFixture, PendingGameLifecycleAndLobbySummaries) {
   EXPECT_EQ(second->as_commandRejected_or_null()->reason, "leave your current game first");
 
   // The lobby sees the pending game: waiting, one seat filled — and who
-  // fills it: alice is seated at the golf table, bob is idle (#1490).
+  // fills it: alice is at the golf table, bob is idle (#1490).
   ASSERT_TRUE(
       bob->stream.Send(GolfCommands::FromGetroomstate(moonbase::games::GetRoomState{})).ok());
   auto lobby = ReceiveCase(bob->stream, "roomState");
@@ -2235,19 +2237,19 @@ TEST_F(GolfGameFixture, PendingGameLifecycleAndLobbySummaries) {
     ASSERT_EQ(room->games.size(), 1u);
     EXPECT_EQ(room->games[0].status, "waiting");
     EXPECT_EQ(room->games[0].playerCount, 1);
-    EXPECT_EQ(SeatOf(*room, alice->player_id), Seated("golf", room->games[0].gameId));
-    EXPECT_EQ(SeatOf(*room, bob->player_id), Idle());
+    EXPECT_EQ(TableOf(*room, alice->player_id), AtTable("golf", room->games[0].gameId));
+    EXPECT_EQ(TableOf(*room, bob->player_id), Idle());
   }
 
-  // Leaving a pending game as its last member dissolves it, and the seat
-  // with it.
+  // Leaving a pending game as its last member dissolves it, and the
+  // table with it.
   ASSERT_TRUE(alice->stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
   auto ack = ReceiveGolf(alice->stream, "gameLeft");
   ASSERT_TRUE(ack.has_value());
   auto after = ReceiveCase(alice->stream, "roomState");
   ASSERT_TRUE(after.has_value());
   EXPECT_TRUE(after->as_roomState_or_null()->games.empty());
-  EXPECT_EQ(SeatOf(*after->as_roomState_or_null(), alice->player_id), Idle());
+  EXPECT_EQ(TableOf(*after->as_roomState_or_null(), alice->player_id), Idle());
 }
 
 TEST_F(GolfGameFixture, RoomStatsAccumulateAcrossGames) {
@@ -2279,6 +2281,15 @@ TEST_F(GolfGameFixture, RoomStatsAccumulateAcrossGames) {
   join.gameId = joined->as_gameJoined_or_null()->view.gameId;
   ASSERT_TRUE(table->bob.stream.Send(Move(GolfMove::FromJoingame(join))).ok());
   ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameJoined").has_value());
+  // Both at the pending table before it starts: joining seats, not
+  // only creating.
+  auto pending = ReceiveCase(table->bob.stream, "roomState");
+  ASSERT_TRUE(pending.has_value());
+  EXPECT_EQ(pending->as_roomState_or_null()->games[0].status, "waiting");
+  EXPECT_EQ(TableOf(*pending->as_roomState_or_null(), table->alice.player_id),
+            AtTable("golf", join.gameId));
+  EXPECT_EQ(TableOf(*pending->as_roomState_or_null(), table->bob.player_id),
+            AtTable("golf", join.gameId));
   ASSERT_TRUE(
       table->alice.stream.Send(Move(GolfMove::FromStartgame(moonbase::games::StartGame{}))).ok());
   ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameStarted").has_value());
@@ -2296,8 +2307,8 @@ TEST_F(GolfGameFixture, RoomStatsAccumulateAcrossGames) {
     EXPECT_EQ(player.gamesPlayed, 2);
     EXPECT_EQ(player.totalScore, 0);
     EXPECT_EQ(player.gamesWon, player.playerId == table->alice.player_id ? 2 : 0);
-    // A finished table seats nobody: both are free for a third.
-    EXPECT_FALSE(player.seat.has_value()) << player.playerId;
+    // A finished table holds nobody: both are free for a third.
+    EXPECT_FALSE(player.table.has_value()) << player.playerId;
   }
 }
 
