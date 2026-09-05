@@ -13,7 +13,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -21,6 +23,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -414,6 +417,7 @@ class GamesHubStreamFixture : public testing::Test {
   virtual std::chrono::seconds GracePeriod() { return std::chrono::seconds(60); }
   /// The race suites' scheduling seams; empty unless a suite overrides.
   virtual ThoughtsTestHooks MakeThoughtsHooks() { return {}; }
+  virtual GolfTestHooks MakeGolfHooks() { return {}; }
   /// The thoughts stream's budget; the thoughts rate-limit suite overrides
   /// with tiny frozen buckets.
   virtual ThoughtsLimits MakeThoughtsLimits() {
@@ -447,7 +451,7 @@ class GamesHubStreamFixture : public testing::Test {
     }
     golf_ = std::make_shared<GolfHub>(vault_, MakeDealer(), ids_,
                                       /*grace_period=*/GracePeriod(), metrics_, store_, chat_store_,
-                                      MakeRateLimits());
+                                      MakeRateLimits(), MakeGolfHooks());
     if (default_memory_chat) {
       *guard = [golf = golf_.get()](const std::string& room_id, const std::string& player_id,
                                     const MemberAction& action) {
@@ -712,6 +716,86 @@ class GamesHubStreamFixture : public testing::Test {
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::unique_ptr<moonbase::games::GamesHubClient> client_;
   std::vector<std::shared_ptr<smithy::http::WebSocket>> sessions_;
+};
+
+// A fixture whose hub hooks park at a named seam until the test releases
+// them, so an interleaving is the test's and not the scheduler's. A
+// subclass installs the hooks (MakeGolfHooks, MakeThoughtsHooks) as
+// `Park("<stage>")` calls.
+//
+// The in-memory wire completes a session's parked Receive inline on the
+// thread that sent the frame (or closed the socket), so the acting
+// session's command — and the hook it parks in — runs on whichever thread
+// triggered it. Each trigger therefore gets its own thread, and the test
+// thread stays free to observe and release.
+class SeamFixture : public GamesHubStreamFixture {
+ protected:
+  // A hook that never released would hang the fixture's own closes.
+  void TearDown() override {
+    Disarm();
+    Release();
+    GamesHubStreamFixture::TearDown();
+  }
+
+  void Arm() {
+    const std::lock_guard<std::mutex> lock(park_mu_);
+    armed_ = true;
+    released_ = false;
+  }
+  void Disarm() {
+    const std::lock_guard<std::mutex> lock(park_mu_);
+    armed_ = false;
+  }
+  // Waits until a hook named `stage` is parked (the hub's thread is inside
+  // the seam), or fails after the budget.
+  bool WaitParked(const std::string& stage) {
+    std::unique_lock<std::mutex> lock(park_mu_);
+    return park_cv_.wait_for(lock, kReceiveBudget, [&] { return parked_ == stage; });
+  }
+  void Release() {
+    {
+      const std::lock_guard<std::mutex> lock(park_mu_);
+      parked_.clear();
+      released_ = true;
+    }
+    park_cv_.notify_all();
+  }
+  // A trigger on its own thread. Going out of scope releases the seam and
+  // joins, so an ASSERT that returns early neither destroys a joinable
+  // thread (std::terminate, and the rest of the binary with it) nor
+  // leaves the hub parked; declare it after the seats it touches.
+  class Trigger {
+   public:
+    Trigger(SeamFixture& fixture, std::function<void()> fn)
+        : fixture_(fixture), thread_(std::move(fn)) {}
+    ~Trigger() { Join(); }
+    void Join() {
+      if (!thread_.joinable()) return;
+      fixture_.Disarm();
+      fixture_.Release();
+      thread_.join();
+    }
+
+   private:
+    SeamFixture& fixture_;
+    std::thread thread_;
+  };
+
+  // The hook body: parks the calling thread while a test has armed the seam.
+  void Park(const std::string& stage) {
+    std::unique_lock<std::mutex> lock(park_mu_);
+    if (!armed_) return;
+    parked_ = stage;
+    park_cv_.notify_all();
+    park_cv_.wait(lock, [&] { return released_; });
+  }
+
+ private:
+  std::mutex park_mu_;
+  std::condition_variable park_cv_;
+  std::string parked_;
+  bool armed_ = false;
+  bool released_ = false;
 };
 
 }  // namespace games_hub

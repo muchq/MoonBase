@@ -8,14 +8,12 @@
 
 #include <algorithm>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -522,13 +520,7 @@ TEST_F(ThoughtsRateLimitedFixture, AMoveFloodIsRefusedAfterTheBurst) {
 
 // The two orderings the world lock is for, each driven at the hub's
 // scheduling seam so the interleaving is the test's, not the scheduler's.
-//
-// The in-memory wire completes a session's parked Receive inline on the
-// thread that sent the frame (or closed the socket), so the acting session's
-// command — and the hook it parks in — runs on whichever thread triggered
-// it. Each trigger therefore gets its own thread, and the test thread stays
-// free to observe and release.
-class ThoughtsRaceFixture : public GamesHubStreamFixture {
+class ThoughtsRaceFixture : public SeamFixture {
  protected:
   ThoughtsTestHooks MakeThoughtsHooks() override {
     ThoughtsTestHooks hooks;
@@ -536,52 +528,6 @@ class ThoughtsRaceFixture : public GamesHubStreamFixture {
     hooks.before_seat_release = [this](const std::string&) { Park("seat"); };
     return hooks;
   }
-
-  // A hook that never released would hang the fixture's own closes.
-  void TearDown() override {
-    Disarm();
-    Release();
-    GamesHubStreamFixture::TearDown();
-  }
-
-  void Arm() {
-    const std::lock_guard<std::mutex> lock(park_mu_);
-    armed_ = true;
-    released_ = false;
-  }
-  void Disarm() {
-    const std::lock_guard<std::mutex> lock(park_mu_);
-    armed_ = false;
-  }
-  // Waits until a hook named `stage` is parked (the hub's thread is inside
-  // the seam), or fails after the budget.
-  bool WaitParked(const std::string& stage) {
-    std::unique_lock<std::mutex> lock(park_mu_);
-    return park_cv_.wait_for(lock, kReceiveBudget, [&] { return parked_ == stage; });
-  }
-  void Release() {
-    {
-      const std::lock_guard<std::mutex> lock(park_mu_);
-      parked_.clear();
-      released_ = true;
-    }
-    park_cv_.notify_all();
-  }
-
- private:
-  void Park(const std::string& stage) {
-    std::unique_lock<std::mutex> lock(park_mu_);
-    if (!armed_) return;  // the seam only parks while a test has armed it
-    parked_ = stage;
-    park_cv_.notify_all();
-    park_cv_.wait(lock, [&] { return released_; });
-  }
-
-  std::mutex park_mu_;
-  std::condition_variable park_cv_;
-  std::string parked_;
-  bool armed_ = false;
-  bool released_ = false;
 };
 
 // A leave that races a join lands behind the joiner's snapshot, never ahead
@@ -604,19 +550,17 @@ TEST_F(ThoughtsRaceFixture, ALeaveDuringAJoinLandsBehindTheJoinersSnapshot) {
   // snapshot (listing carol) already queued.
   Arm();
   bool join_sent = false;
-  std::thread joiner([&] { join_sent = bob->stream.Send(FixtureJoin()).ok(); });
+  Trigger joiner(*this, [&] { join_sent = bob->stream.Send(FixtureJoin()).ok(); });
   ASSERT_TRUE(WaitParked("snapshot"));
 
   // Carol leaves now. Her erase needs the lock bob holds, so nothing about
   // her leave can reach anyone yet — alice, in the world and not in the
   // seam, hears silence.
   bool leave_sent = false;
-  std::thread leaver([&] { leave_sent = carol->stream.Send(Leave()).ok(); });
+  Trigger leaver(*this, [&] { leave_sent = carol->stream.Send(Leave()).ok(); });
   ExpectNoEvent(alice->stream);
-  Disarm();
-  Release();
-  joiner.join();
-  leaver.join();
+  joiner.Join();
+  leaver.Join();
   EXPECT_TRUE(join_sent);
   EXPECT_TRUE(leave_sent);
 
@@ -657,7 +601,7 @@ TEST_F(ThoughtsRaceFixture, AClosedSocketErasesTheWorldBeforeReleasingTheSeat) {
   ASSERT_TRUE(NextEvent(bob->stream).has_value());
 
   Arm();
-  std::thread closer([&] { alice->stream.Close(); });
+  Trigger closer(*this, [&] { alice->stream.Close(); });
   ASSERT_TRUE(WaitParked("seat"));
 
   // Inside the seam: the world has already told bob, and the seat is still
@@ -669,9 +613,7 @@ TEST_F(ThoughtsRaceFixture, AClosedSocketErasesTheWorldBeforeReleasingTheSeat) {
   const auto seats = thoughts_->registry().Ids();
   EXPECT_NE(std::find(seats.begin(), seats.end(), alice->player_id), seats.end())
       << "the seat was released before the world was cleaned";
-  Disarm();
-  Release();
-  closer.join();
+  closer.Join();
 
   // Past the seam the seat frees, and the reconnect's join is a fresh
   // arrival: bob hears one playerJoined, nothing is refused.
@@ -702,18 +644,16 @@ TEST_F(ThoughtsRaceFixture, ARespawnDuringAJoinHearsTheJoinBeforeItsOwnSnapshot)
 
   Arm();
   bool join_sent = false;
-  std::thread joiner([&] { join_sent = alice->stream.Send(FixtureJoin()).ok(); });
+  Trigger joiner(*this, [&] { join_sent = alice->stream.Send(FixtureJoin()).ok(); });
   ASSERT_TRUE(WaitParked("snapshot"));
   bool respawn_sent = false;
-  std::thread respawner([&] {
+  Trigger respawner(*this, [&] {
     respawn_sent = bob->stream.Send(Leave()).ok() &&
                    bob->stream.Send(JoinIn("attic", {0, 0, 0}, {1, 1, 1}, 2)).ok();
   });
   ExpectNoEvent(bob->stream);
-  Disarm();
-  Release();
-  joiner.join();
-  respawner.join();
+  joiner.Join();
+  respawner.Join();
   EXPECT_TRUE(join_sent);
   EXPECT_TRUE(respawn_sent);
 

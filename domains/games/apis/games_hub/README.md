@@ -114,8 +114,8 @@ lobby-safe summaries only.
 - Observability: unary requests ride the shared aura chain (#1185); the
   stream side counts admissions, live sessions, disconnects, grace
   expiries, and the command/event flow (`golf_*` for golf and the room
-  layer, `castle_*` for castle's envelope, `thoughts_*` for thoughts,
-  `chat_*` for chat).
+  layer, `castle_*` for castle's envelope, `lobby_*` for the lobby's,
+  `thoughts_*` for thoughts, `chat_*` for chat).
 - `ALLOWED_ORIGINS` unset admits all origins (local dev); production
   sets the allowlist.
 - Deployed behind Caddy at `/games/v2/*` (`deploy/consolidated`); the
