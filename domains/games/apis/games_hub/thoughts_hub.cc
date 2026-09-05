@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
 #include "domains/games/apis/games_hub/rate_limiter.h"
 #include "smithy/core/error.h"
@@ -34,7 +35,12 @@ ThoughtsEvents ToThoughtsEvent(LobbyUpdate update) {
   if (const auto* changed = update.as_shapeChanged_or_null()) {
     return ThoughtsEvents::FromShapechanged(*changed);
   }
-  return ThoughtsEvents::FromPlayerleft(*update.as_playerLeft_or_null());
+  if (const auto* left = update.as_playerLeft_or_null()) {
+    return ThoughtsEvents::FromPlayerleft(*left);
+  }
+  // Every update is World's, and World speaks the cases above; a new one
+  // is a case to map here, not to drop.
+  LOG(FATAL) << "lobby update with no Think event: " << update.case_name();
 }
 
 }  // namespace

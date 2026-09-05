@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -91,16 +92,16 @@ TEST_F(LobbyFixture, AnUnroomedSessionStandsInThePlazaAndARoomedOneInItsRoom) {
   ExpectNoEvent(alice->stream);
   ExpectNoEvent(bob->stream);
 
-  // And a plaza move stays in the plaza, counted on the room stream's
-  // series under the lobby prefix.
+  // And a plaza move stays in the plaza, counted on the lobby's own
+  // series.
   ASSERT_TRUE(alice->stream.Send(MoveTo({15, 0, -8})).ok());
   auto moved = ReceiveLobby(bob->stream, "playerMoved");
   ASSERT_TRUE(moved.has_value());
   EXPECT_EQ(moved->as_playerMoved_or_null()->playerId, alice->player_id);
   ExpectNoEvent(carol->stream);
-  EXPECT_EQ(metrics_->CounterTotal("golf_commands", {{"command", "lobby.move"}}), 2);
-  EXPECT_EQ(metrics_->CounterTotal("golf_events", {{"event", "lobby.playerMoved"}}), 1);
-  EXPECT_EQ(metrics_->CounterTotal("golf_events", {{"event", "lobby.worldState"}}), 3);
+  EXPECT_EQ(metrics_->CounterTotal("lobby_commands", {{"command", "move"}}), 2);
+  EXPECT_EQ(metrics_->CounterTotal("lobby_events", {{"event", "playerMoved"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("lobby_events", {{"event", "worldState"}}), 3);
 }
 
 // The world is the session's room's: a roomId can only agree with it.
@@ -180,10 +181,16 @@ TEST_F(LobbyFixture, ChangingRoomsLeavesTheWorldBehind) {
   // his next join, back in the plaza with alice.
   ASSERT_TRUE(bob->stream.Send(GameCommands::FromLeaveroom(moonbase::games::LeaveRoom{})).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomLeft").has_value());
-  left = ReceiveLobby(carol->stream, "playerLeft");
-  ASSERT_TRUE(left.has_value());
-  EXPECT_EQ(left->as_playerLeft_or_null()->playerId, bob->player_id);
-  ASSERT_TRUE(ReceiveCase(carol->stream, "roomState").has_value());
+  // Carol hears the world before the room: playerLeft, then roomState,
+  // the order they changed.
+  auto first = NextEvent(carol->stream);
+  ASSERT_TRUE(first.has_value());
+  ASSERT_NE(first->as_lobby_or_null(), nullptr);
+  ASSERT_NE(first->as_lobby_or_null()->update.as_playerLeft_or_null(), nullptr);
+  EXPECT_EQ(first->as_lobby_or_null()->update.as_playerLeft_or_null()->playerId, bob->player_id);
+  auto second = NextEvent(carol->stream);
+  ASSERT_TRUE(second.has_value());
+  EXPECT_NE(second->as_roomState_or_null(), nullptr);
   ASSERT_TRUE(bob->stream.Send(JoinWorld()).ok());
   EXPECT_EQ(Listed(ReceiveLobby(bob->stream, "worldState")),
             std::vector<std::string>{alice->player_id});
@@ -223,6 +230,32 @@ TEST_F(LobbyFixture, AClosedSocketLeavesTheWorldWhileTheSeatParks) {
   ASSERT_TRUE(rejoined.has_value());
   EXPECT_EQ(rejoined->as_playerJoined_or_null()->player.playerId, alice->player_id);
   ExpectNoEvent(bob->stream);
+}
+
+// Grace expiry after a close finds the world already left: whoever
+// remains heard one playerLeft at the close and nothing at the reap.
+class ShortGraceLobbyFixture : public LobbyFixture {
+ protected:
+  std::chrono::seconds GracePeriod() override { return std::chrono::seconds(1); }
+};
+
+TEST_F(ShortGraceLobbyFixture, GraceExpiryAfterACloseLeavesNothingMoreToLeave) {
+  auto alice = Arrive();
+  auto bob = Arrive();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "worldState").has_value());
+  ASSERT_TRUE(bob->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(bob->stream, "worldState").has_value());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "playerJoined").has_value());
+
+  alice->stream.Close();
+  ASSERT_TRUE(ReceiveLobby(bob->stream, "playerLeft").has_value());
+  // A budget past the grace: the seat expires while bob listens, and he
+  // hears nothing more.
+  ExpectNoEvent(bob->stream, std::chrono::seconds(2));
+  EXPECT_EQ(metrics_->CounterTotal("golf_seats_expired", {}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("lobby_events", {{"event", "playerLeft"}}), 1);
 }
 
 }  // namespace

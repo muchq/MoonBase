@@ -48,8 +48,8 @@ namespace games_hub {
 /// golf's; the room layer, castle (#77), and the lobby (#1490) live here
 /// too. A room hosts tables of either game (#79): golf on libs/cards/golf
 /// and castle on libs/cards/castle, each a member of the stream's unions
-/// with its own per-viewer view. Each game's envelope counts on its own
-/// castle_/golf_ series; the room layer and the lobby stay on golf_*.
+/// with its own per-viewer view. Each tenant's envelope counts on its own
+/// series (golf_, castle_, lobby_); the room layer stays on golf_*.
 ///
 /// The lobby member is the thoughts World (world.h) keyed by the session's
 /// room: a roomed session stands in its room's world, an unroomed one in
@@ -368,13 +368,9 @@ class GolfHub final {
   /// The bounded label on golf_rejections{kind} (hub_metrics.h).
   using RejectKind = games_hub::RejectKind;
 
-  /// A refusal in flight: the flows that work under mu_ and Reject after
-  /// releasing it stage one of these, so a kind can never be assigned
-  /// without its reason or vice versa — half a refusal does not compile.
-  struct Refusal {
-    RejectKind kind;
-    std::string reason;
-  };
+  /// The flows that work under mu_ and Reject after releasing it stage
+  /// one of these (hub_metrics.h).
+  using Refusal = games_hub::Refusal;
   void Reject(const std::string& player_id, RejectKind kind, std::string reason);
   void Reject(const std::string& player_id, Refusal refusal);
   void OnExpired(const std::string& player_id);

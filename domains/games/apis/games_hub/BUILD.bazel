@@ -315,8 +315,6 @@ cc_library(
     deps = ["//domains/platform/libs/futility/rate_limiter:token_bucket"],
 )
 
-# Thoughts on the hub (#79): one shared world of positions, colors and
-# shapes, fanned out to every other session. No rooms, no store, no grace.
 # The thoughts world's rules and map (#79, #1490): staged deliveries, no
 # wire, hosted by ThoughtsHub on Think and by GolfHub as the room
 # stream's lobby member.
@@ -331,6 +329,8 @@ cc_library(
     ],
 )
 
+# Thoughts on Think (#79): the pre-lobby route, one World on its own
+# registry, no rooms, no store, no grace.
 cc_library(
     name = "thoughts_hub",
     srcs = ["thoughts_hub.cc"],
@@ -343,6 +343,7 @@ cc_library(
         ":ticket_vault",
         ":world",
         "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/log",
         "@smithy_cpp//runtime:core",
         "@smithy_cpp//runtime:eventstream",
         "@smithy_cpp//runtime:server",

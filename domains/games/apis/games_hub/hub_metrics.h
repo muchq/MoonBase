@@ -30,6 +30,14 @@ struct CounterSeries {
 /// model case shipped without one.
 enum class RejectKind { kRateLimited, kInvalid, kState, kRules, kUnavailable, kUnknown };
 
+/// A refusal in flight: the bounded kind for the metric and the free-text
+/// reason for the player, together, so a kind can never be assigned
+/// without its reason or vice versa — half a refusal does not compile.
+struct Refusal {
+  RejectKind kind;
+  std::string reason;
+};
+
 inline const char* RejectKindName(RejectKind kind) {
   switch (kind) {
     case RejectKind::kRateLimited:

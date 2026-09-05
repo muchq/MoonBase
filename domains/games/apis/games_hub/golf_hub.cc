@@ -350,11 +350,6 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"golf_commands", {{"command", "golf.discardDrawn"}}},
       {"golf_commands", {{"command", "golf.knock"}}},
       {"golf_commands", {{"command", "golf.hideCards"}}},
-      // The lobby envelope's LobbyAction cases, prefixed like golf's.
-      {"golf_commands", {{"command", "lobby.join"}}},
-      {"golf_commands", {{"command", "lobby.move"}}},
-      {"golf_commands", {{"command", "lobby.shape"}}},
-      {"golf_commands", {{"command", "lobby.leave"}}},
       {"golf_disconnects", {{"kind", "clean"}}},
       {"golf_disconnects", {{"kind", "abrupt"}}},
       // The GameEvents union in model order, golf.<update> for the envelope —
@@ -373,12 +368,18 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"golf_events", {{"event", "golf.playerKnocked"}}},
       {"golf_events", {{"event", "golf.gameEnded"}}},
       {"golf_events", {{"event", "golf.gameLeft"}}},
-      // The lobby envelope's LobbyUpdate cases.
-      {"golf_events", {{"event", "lobby.worldState"}}},
-      {"golf_events", {{"event", "lobby.playerJoined"}}},
-      {"golf_events", {{"event", "lobby.playerMoved"}}},
-      {"golf_events", {{"event", "lobby.shapeChanged"}}},
-      {"golf_events", {{"event", "lobby.playerLeft"}}},
+      // The lobby envelope on its own series, castle's precedent: the
+      // LobbyAction and LobbyUpdate cases, pinned by
+      // LobbySeriesMatchTheModelUnions.
+      {"lobby_commands", {{"command", "join"}}},
+      {"lobby_commands", {{"command", "move"}}},
+      {"lobby_commands", {{"command", "shape"}}},
+      {"lobby_commands", {{"command", "leave"}}},
+      {"lobby_events", {{"event", "worldState"}}},
+      {"lobby_events", {{"event", "playerJoined"}}},
+      {"lobby_events", {{"event", "playerMoved"}}},
+      {"lobby_events", {{"event", "shapeChanged"}}},
+      {"lobby_events", {{"event", "playerLeft"}}},
       {"golf_rate_limited", {{"kind", "chat"}}},
       {"golf_rate_limited", {{"kind", "command"}}},
       // One entry per RejectKind, in enum order.
@@ -680,6 +681,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
           it != player_room_.end() && it->second == room_id) {
         player_room_.erase(it);
         player_game_.erase(member_id);
+        LeaveWorldLocked(member_id, outbox);  // its world goes with it
       }
     }
     rooms_.erase(room);
@@ -920,17 +922,20 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
       // and the deliberate exit is the explicit leaveRoom command.
       // Detach fails only when the entry is already gone — nothing left
       // to do then.
+      // The world is presence, not membership: the player leaves it now
+      // and rejoins on resume, while the seat parks. Before Detach, so a
+      // resume admitted the instant the seat is released finds no stale
+      // entry to refuse its join (the Think stream's close path keeps the
+      // same order for the same reason).
+      Outbox left;
+      {
+        const std::lock_guard<std::mutex> lock(mu_);
+        LeaveWorldLocked(player_id, left);
+      }
+      Deliver(left);
       if (registry_.Detach(player_id)) {
         TrackActive(-1);
         Count("golf_disconnects", {{"kind", received.ok() ? "clean" : "abrupt"}});
-        // The world is presence, not membership: the seat parks, the
-        // player leaves the world now, and rejoins on resume.
-        Outbox left;
-        {
-          const std::lock_guard<std::mutex> lock(mu_);
-          LeaveWorldLocked(player_id, left);
-        }
-        Deliver(left);
         SetConnected(player_id, false);
         if (auto current = CurrentRoom(player_id)) BroadcastRoom(*current);
       }
@@ -1172,7 +1177,7 @@ void GolfHub::HandleLobby(const std::string& player_id,
     StageWorldLocked(deliveries, outbox);
   }
   Deliver(outbox);
-  if (refusal.has_value()) Reject(player_id, refusal->kind, std::move(refusal->reason));
+  if (refusal.has_value()) Reject(player_id, std::move(*refusal));
 }
 
 std::string GolfHub::WorldOfLocked(const std::string& player_id) const {
@@ -2122,8 +2127,9 @@ void GolfHub::TrackActive(int delta) {
   if (metrics_) metrics_->RecordGauge("golf_sessions_active", delta);
 }
 
-// Each game's envelope counts on its own series; the room layer's
-// commands and events stay on golf_* (the stream's original name).
+// Each tenant's envelope counts on its own series (castle_*, lobby_*);
+// the room layer's commands and events stay on golf_* (the stream's
+// original name).
 void GolfHub::CountCommand(const GameCommands& command) {
   if (!metrics_) return;
   if (const auto* castle_envelope = command.as_castle_or_null()) {
@@ -2131,12 +2137,14 @@ void GolfHub::CountCommand(const GameCommands& command) {
                             {{"command", std::string(castle_envelope->move.case_name())}});
     return;
   }
-  std::string name(command.case_name());
-  if (const auto* envelope = command.as_golf_or_null()) {
-    name = absl::StrCat("golf.", envelope->move.case_name());
-  } else if (const auto* lobby = command.as_lobby_or_null()) {
-    name = absl::StrCat("lobby.", lobby->action.case_name());
+  if (const auto* lobby = command.as_lobby_or_null()) {
+    metrics_->RecordCounter("lobby_commands", 1,
+                            {{"command", std::string(lobby->action.case_name())}});
+    return;
   }
+  const auto* envelope = command.as_golf_or_null();
+  const std::string name = envelope != nullptr ? absl::StrCat("golf.", envelope->move.case_name())
+                                               : std::string(command.case_name());
   metrics_->RecordCounter("golf_commands", 1, {{"command", name}});
 }
 
@@ -2146,13 +2154,16 @@ void GolfHub::Send(const std::string& player_id, GameEvents event) {
       metrics_->RecordCounter("castle_events", 1,
                               {{"event", std::string(castle_envelope->update.case_name())}});
     } else {
-      std::string name(event.case_name());
-      if (const auto* envelope = event.as_golf_or_null()) {
-        name = absl::StrCat("golf.", envelope->update.case_name());
-      } else if (const auto* lobby = event.as_lobby_or_null()) {
-        name = absl::StrCat("lobby.", lobby->update.case_name());
+      if (const auto* lobby = event.as_lobby_or_null()) {
+        metrics_->RecordCounter("lobby_events", 1,
+                                {{"event", std::string(lobby->update.case_name())}});
+      } else {
+        const auto* envelope = event.as_golf_or_null();
+        const std::string name = envelope != nullptr
+                                     ? absl::StrCat("golf.", envelope->update.case_name())
+                                     : std::string(event.case_name());
+        metrics_->RecordCounter("golf_events", 1, {{"event", name}});
       }
-      metrics_->RecordCounter("golf_events", 1, {{"event", name}});
     }
   }
   registry_.SendTo(player_id, std::move(event));

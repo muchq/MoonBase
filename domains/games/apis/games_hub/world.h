@@ -20,10 +20,9 @@ namespace games_hub {
 /// This is the rules and the map, and nothing about wires: it stages
 /// what each session is owed, in delivery order, and the hub that owns
 /// it — ThoughtsHub on the Think stream, GolfHub as the room stream's
-/// `lobby` member — delivers under its own lock and its own registry.
-/// Not thread-safe; the owner's lock covers every call, and the staged
-/// deliveries must be queued before that lock is released, so each
-/// session hears the world in the order it changed.
+/// `lobby` member — queues them on its own registry under its own
+/// ordering rule (ThoughtsHub under its lock, GolfHub through its
+/// Outbox). Not thread-safe; the owner's lock covers every call.
 ///
 /// The rules match the muchq.com/thoughts UI's own bounds, so retune
 /// them together: position is [x, 0, z] with x and z within
@@ -42,10 +41,7 @@ class World {
   /// room to spare over IdGenerator's six-character codes.
   static constexpr std::size_t kMaxRoomIdLength = 64;
 
-  struct Refusal {
-    RejectKind kind;
-    std::string reason;
-  };
+  using Refusal = games_hub::Refusal;
   /// One update owed to one session.
   struct Delivery {
     std::string to;

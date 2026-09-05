@@ -61,8 +61,9 @@ the world is the session's: its room's, or the plaza's — the well-known
 room `plaza` — while unroomed; a `roomId` on `join` can only agree with
 that. Joining, creating, or leaving a room leaves the world (the client
 joins the new one), and so does a closed socket, at once, while the
-seat parks for grace. Lobby traffic counts on `golf_commands` and
-`golf_events` under the `lobby.` prefix, like golf's own under `golf.`.
+seat parks for grace. Lobby traffic counts on `lobby_commands` and
+`lobby_events`, castle's precedent; the world is per instance, like
+the registry.
 
 On `Think` (`ThoughtsHub`, `thoughts_hub.cc`), the pre-lobby route
 today's muchq.com/thoughts dials, the world is its own — a `join` names

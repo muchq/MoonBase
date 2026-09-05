@@ -136,6 +136,28 @@ TEST_F(LobbyWireTest, RejectedLobbyCommandsYieldCommandRejectedEvents) {
             R"({"update":{"worldState":{"players":[]}}})");
 }
 
+// Consumer: the client's second-tab handling across the two routes. One
+// registry guards both: a seat live on the one route refuses a fresh
+// ticket dialed on the legacy route with the SeatConflict frame
+// golf_wire_test pins, so a tab on each route cannot hold one player twice.
+TEST_F(LobbyWireTest, ASeatLiveOnOneRouteRefusesTheOtherWithSeatConflict) {
+  json session;
+  auto socket = DialReady(session);
+
+  const std::string resume_body =
+      std::string(R"({"resumeToken":")") + session["resumeToken"].get<std::string>() + R"("})";
+  const auto response = PostSession(resume_body);
+  ASSERT_EQ(response.status, 200) << response.body;
+  const json second = json::parse(response.body);
+  auto conflicted =
+      DialStream("/games/v2/golf/play", "?ticket=" + second["ticket"].get<std::string>());
+  const auto frame = NextFrame(*conflicted);
+  ASSERT_TRUE(frame.has_value());
+  EXPECT_EQ(HeaderText(*frame, ":message-type"), "exception");
+  EXPECT_EQ(HeaderText(*frame, ":exception-type"), "SeatConflict");
+  EXPECT_EQ(frame->payload.ToString(), R"({"message":"player already has a live connection"})");
+}
+
 // Consumer: the client's dial error handling on this route — the same
 // terminal Unauthenticated frame and clean close as the legacy route.
 TEST_F(LobbyWireTest, InvalidTicketRefusesWithTerminalUnauthenticatedFrame) {

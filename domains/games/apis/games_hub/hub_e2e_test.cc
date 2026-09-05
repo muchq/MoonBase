@@ -887,6 +887,24 @@ TEST_F(GamesHubStreamFixture, ResumingOnAFreshInstanceReplaysChatHistory) {
   EXPECT_EQ(history->messages[1].text, "hi back");
   EXPECT_EQ(history->messages[1].playerId, bob->player_id);
   EXPECT_GT(history->messages[1].messageId, history->messages[0].messageId);
+
+  // And his world is the restored room's (#1490): a join naming the
+  // plaza is refused, an unnamed one lands in the room.
+  moonbase::games::JoinWorld join_world;
+  join_world.roomId = "plaza";
+  join_world.position = {0, 0, 0};
+  join_world.color = {1, 1, 1};
+  join_world.shape = 0;
+  ASSERT_TRUE(resumed->stream.Send(Lobby(moonbase::games::LobbyAction::FromJoin(join_world))).ok());
+  auto refused = ReceiveCase(resumed->stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
+            "the world is your room's; join the room first");
+  join_world.roomId = std::nullopt;
+  ASSERT_TRUE(resumed->stream.Send(Lobby(moonbase::games::LobbyAction::FromJoin(join_world))).ok());
+  auto world = ReceiveLobby(resumed->stream, "worldState");
+  ASSERT_TRUE(world.has_value());
+  EXPECT_TRUE(world->as_worldState_or_null()->players.empty());
 }
 
 // The boot-time twin of ActiveSignalRefreshesHeldRoom's contract: a
@@ -1548,10 +1566,6 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"golf_commands", {{"command", "golf.discardDrawn"}}},
       {"golf_commands", {{"command", "golf.knock"}}},
       {"golf_commands", {{"command", "golf.hideCards"}}},
-      {"golf_commands", {{"command", "lobby.join"}}},
-      {"golf_commands", {{"command", "lobby.move"}}},
-      {"golf_commands", {{"command", "lobby.shape"}}},
-      {"golf_commands", {{"command", "lobby.leave"}}},
       {"golf_disconnects", {{"kind", "clean"}}},
       {"golf_disconnects", {{"kind", "abrupt"}}},
       {"golf_events", {{"event", "sessionReady"}}},
@@ -1568,11 +1582,15 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"golf_events", {{"event", "golf.playerKnocked"}}},
       {"golf_events", {{"event", "golf.gameEnded"}}},
       {"golf_events", {{"event", "golf.gameLeft"}}},
-      {"golf_events", {{"event", "lobby.worldState"}}},
-      {"golf_events", {{"event", "lobby.playerJoined"}}},
-      {"golf_events", {{"event", "lobby.playerMoved"}}},
-      {"golf_events", {{"event", "lobby.shapeChanged"}}},
-      {"golf_events", {{"event", "lobby.playerLeft"}}},
+      {"lobby_commands", {{"command", "join"}}},
+      {"lobby_commands", {{"command", "move"}}},
+      {"lobby_commands", {{"command", "shape"}}},
+      {"lobby_commands", {{"command", "leave"}}},
+      {"lobby_events", {{"event", "worldState"}}},
+      {"lobby_events", {{"event", "playerJoined"}}},
+      {"lobby_events", {{"event", "playerMoved"}}},
+      {"lobby_events", {{"event", "shapeChanged"}}},
+      {"lobby_events", {{"event", "playerLeft"}}},
       {"golf_rate_limited", {{"kind", "chat"}}},
       {"golf_rate_limited", {{"kind", "command"}}},
       {"golf_rejections", {{"kind", "rate_limited"}}},
@@ -1651,48 +1669,56 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
 TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
   const std::string room = ReadModel("domains/games/apis/games_hub/model/games.smithy");
   const std::string golf = ReadModel("domains/games/apis/games_hub/model/golf.smithy");
-  const std::string lobby = ReadModel("domains/games/apis/games_hub/model/thoughts.smithy");
-  ASSERT_FALSE(room.empty() || golf.empty() || lobby.empty());
+  ASSERT_FALSE(room.empty() || golf.empty());
 
   const auto outer_commands = ModelUnionCases(room, "GameCommands");
   const auto moves = ModelUnionCases(golf, "GolfMove");
-  const auto actions = ModelUnionCases(lobby, "LobbyAction");
   const auto outer_events = ModelUnionCases(room, "GameEvents");
   const auto updates = ModelUnionCases(golf, "GolfUpdate");
-  const auto lobby_updates = ModelUnionCases(lobby, "LobbyUpdate");
   ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "castle"),
             outer_commands.end());
+  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "lobby"), outer_commands.end());
 
   // Controls before the comparison: a parser that quietly matched nothing
   // must fail here, not produce two empty sets that agree.
   ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "createRoom"),
             outer_commands.end());
   ASSERT_NE(std::find(moves.begin(), moves.end(), "knock"), moves.end());
-  ASSERT_NE(std::find(actions.begin(), actions.end(), "shape"), actions.end());
   ASSERT_NE(std::find(outer_events.begin(), outer_events.end(), "sessionReady"),
             outer_events.end());
   ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
-  ASSERT_NE(std::find(lobby_updates.begin(), lobby_updates.end(), "playerLeft"),
-            lobby_updates.end());
 
-  // The room layer's own cases bare; golf's and the lobby's envelopes
-  // prefixed; castle's on its own series (the test below).
+  // The room layer's own cases bare and golf's envelope prefixed; castle's
+  // and the lobby's on their own series (the tests below).
   std::set<std::string> expected_commands;
   for (const auto& name : outer_commands) {
     if (name != "golf" && name != "castle" && name != "lobby") expected_commands.insert(name);
   }
   for (const auto& name : moves) expected_commands.insert("golf." + name);
-  for (const auto& name : actions) expected_commands.insert("lobby." + name);
 
   std::set<std::string> expected_events;
   for (const auto& name : outer_events) {
     if (name != "golf" && name != "castle" && name != "lobby") expected_events.insert(name);
   }
   for (const auto& name : updates) expected_events.insert("golf." + name);
-  for (const auto& name : lobby_updates) expected_events.insert("lobby." + name);
 
   EXPECT_EQ(DeclaredLabelValues("golf_commands", "command"), expected_commands);
   EXPECT_EQ(DeclaredLabelValues("golf_events", "event"), expected_events);
+}
+
+// The lobby envelope (#1490) counts its inner case names on lobby_commands
+// and lobby_events, pinned against thoughts.smithy the same way.
+TEST(StreamSeriesModelPin, LobbySeriesMatchTheModelUnions) {
+  const std::string model = ReadModel("domains/games/apis/games_hub/model/thoughts.smithy");
+  ASSERT_FALSE(model.empty());
+  const auto actions = ModelUnionCases(model, "LobbyAction");
+  const auto updates = ModelUnionCases(model, "LobbyUpdate");
+  ASSERT_NE(std::find(actions.begin(), actions.end(), "shape"), actions.end());
+  ASSERT_NE(std::find(updates.begin(), updates.end(), "playerLeft"), updates.end());
+  EXPECT_EQ(DeclaredLabelValues("lobby_commands", "command"),
+            std::set<std::string>(actions.begin(), actions.end()));
+  EXPECT_EQ(DeclaredLabelValues("lobby_events", "event"),
+            std::set<std::string>(updates.begin(), updates.end()));
 }
 
 // Castle's envelope (#77) counts its inner case names on castle_commands and
