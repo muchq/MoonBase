@@ -231,6 +231,20 @@ auto AwaitMatching(Fetch&& fetch, Predicate&& predicate, const std::string& wait
   return std::nullopt;
 }
 
+// A member's seat as the lobby reads it, comparable against Seated/Idle;
+// "<no such member>" when the room does not list them.
+inline std::string SeatOf(const moonbase::games::RoomState& room, const std::string& player_id) {
+  for (const auto& player : room.players) {
+    if (player.playerId != player_id) continue;
+    return player.seat.has_value() ? player.seat->game + "@" + player.seat->gameId : "idle";
+  }
+  return "<no such member>";
+}
+inline std::string Seated(const std::string& game, const std::string& game_id) {
+  return game + "@" + game_id;
+}
+inline std::string Idle() { return "idle"; }
+
 template <typename Predicate>
 std::optional<moonbase::games::RoomState> AwaitRoomState(
     moonbase::games::PlayClientStream& stream, Predicate&& predicate,

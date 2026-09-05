@@ -2078,6 +2078,17 @@ moonbase::games::RoomState GolfHub::RoomStateLocked(const std::string& room_id,
     info.gamesPlayed = member.games_played;
     info.gamesWon = member.games_won;
     info.totalScore = member.total_score;
+    // The seat is the roster: a finished table has already left the map,
+    // so anyone listed is at a live one, pending or in play.
+    for (const auto& [game_id, entry] : room.games) {
+      if (std::find(entry.roster.begin(), entry.roster.end(), member_id) != entry.roster.end()) {
+        moonbase::games::Seat seat;
+        seat.game = std::string(GameKindName(entry.kind));
+        seat.gameId = game_id;
+        info.seat = std::move(seat);
+        break;
+      }
+    }
     state.players.push_back(std::move(info));
   }
   for (const auto& [game_id, entry] : room.games) {

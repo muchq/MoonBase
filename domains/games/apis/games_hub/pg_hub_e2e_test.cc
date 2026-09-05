@@ -566,6 +566,19 @@ TEST_F(PgGamesHubFixture, LiveGameSurvivesARestart) {
   auto rows = Rows();
   ASSERT_EQ(rows.games.size(), 1u);
   EXPECT_EQ(rows.games[0].version, version_before + 2);  // draw + discard
+
+  // The restored lobby seats them at the restored table: the seat is read
+  // off the roster the row carries, not off anything the old process had.
+  ASSERT_TRUE(
+      alice_back->stream.Send(GolfCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
+          .ok());
+  auto lobby = ReceiveCase(alice_back->stream, "roomState");
+  ASSERT_TRUE(lobby.has_value());
+  for (const auto& player : lobby->as_roomState_or_null()->players) {
+    ASSERT_TRUE(player.seat.has_value()) << player.playerId;
+    EXPECT_EQ(player.seat->game, "golf");
+    EXPECT_EQ(player.seat->gameId, table->game_id);
+  }
 }
 
 TEST_F(PgGamesHubFixture, StatsSurviveARestart) {
