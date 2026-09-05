@@ -7,14 +7,15 @@ streaming stack: a modeled protocol with generated async handlers
 (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018), and ticket
 auth ahead of the 101. One session identity opens the one stream.
 
-## The model (four namespaces, per #79)
+## The model (four namespaces)
 
 - `model/games.smithy` — `moonbase.games`: the service, session identity
   (`POST /games/v2/session`), the two terminal stream errors, the one
   stream — `Play` at `/games/v2/play`, its `GameCommands`/`GameEvents`
   unions carrying the room layer's own cases plus one envelope member
-  per tenant (`lobby`, `golf`, `castle`) — and the game-agnostic room layer — rooms, chat, player info with room-scoped
-  stats and the member's table (`PlayerInfo.table`: which game, which
+  per tenant (`lobby`, `golf`, `castle`) — and the game-agnostic room
+  layer — rooms, chat, player info with room-scoped stats and the
+  member's table (`PlayerInfo.table`: which game, which
   table, pending or in play, absent while idle — how the lobby tells who
   is free, #1490). Apart from `GameSummary.game` and `Table.game`, the
   word that names a table's game for the lobby, nothing here knows which

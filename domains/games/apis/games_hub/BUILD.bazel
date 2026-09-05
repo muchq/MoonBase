@@ -46,8 +46,8 @@ cc_library(
     hdrs = ["protocol_input.h"],
 )
 
-# The counter-series and rejection-kind vocabulary both hubs declare and
-# emit with (#1327, #1384).
+# The counter-series and rejection-kind vocabulary the hub declares and
+# emits with (#1327, #1384).
 cc_library(
     name = "hub_metrics",
     hdrs = ["hub_metrics.h"],
@@ -324,7 +324,6 @@ cc_library(
     deps = [
         ":games_hub_smithy_server",
         ":hub_metrics",
-        ":protocol_input",
     ],
 )
 

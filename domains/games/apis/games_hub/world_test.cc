@@ -96,10 +96,16 @@ TEST(World, TheBoundsAreRefusedAsInvalidAndChangeNothing) {
   EXPECT_EQ(Staged(out), std::vector<std::string>{"alice:worldState"});
   out.clear();
 
-  // Refused updates leave the admitted state alone.
-  EXPECT_EQ(Reason(world.Move("alice", MoveTo({60, 0, 0}), out)), "position out of bounds (±50)");
-  EXPECT_EQ(Reason(world.Shape("alice", Shape(5), out)),
-            "shape must be 0 (sphere), 1 (cube) or 2 (pyramid)");
+  // Refused updates are the client's malformed input, and leave the
+  // admitted state alone.
+  const auto move = world.Move("alice", MoveTo({60, 0, 0}), out);
+  ASSERT_TRUE(move.has_value());
+  EXPECT_EQ(move->reason, "position out of bounds (±50)");
+  EXPECT_EQ(move->kind, RejectKind::kInvalid);
+  const auto shape = world.Shape("alice", Shape(5), out);
+  ASSERT_TRUE(shape.has_value());
+  EXPECT_EQ(shape->reason, "shape must be 0 (sphere), 1 (cube) or 2 (pyramid)");
+  EXPECT_EQ(shape->kind, RejectKind::kInvalid);
   EXPECT_TRUE(out.empty());
   ASSERT_FALSE(world.Join("bob", World::kPlaza, FixtureJoin(), out).has_value());
   const auto* snapshot = out.at(0).update.as_worldState_or_null();
@@ -108,17 +114,6 @@ TEST(World, TheBoundsAreRefusedAsInvalidAndChangeNothing) {
   EXPECT_EQ(snapshot->players[0].playerId, "alice");
   EXPECT_EQ(snapshot->players[0].position, (std::vector<double>{50, 0, -50}));
   EXPECT_EQ(snapshot->players[0].shape, 2);
-}
-
-// A named room id is held to golf's NUL rule and, since any id here
-// creates a world, refused empty or over the length bound; the bound
-// itself names a room, and no id at all is fine.
-TEST(World, ARoomIdIsRefusedEmptyWithANulOrOverTheBound) {
-  EXPECT_EQ(World::RoomProblem(std::nullopt), std::nullopt);
-  EXPECT_EQ(World::RoomProblem(std::string(World::kMaxRoomIdLength, 'A')), std::nullopt);
-  EXPECT_EQ(World::RoomProblem(""), "invalid room id");
-  EXPECT_EQ(World::RoomProblem(std::string("AB\0C", 4)), "invalid room id");
-  EXPECT_EQ(World::RoomProblem(std::string(World::kMaxRoomIdLength + 1, 'A')), "invalid room id");
 }
 
 TEST(World, MoveShapeAndLeaveNeedAJoinAndAJoinNeedsALeave) {
@@ -174,14 +169,25 @@ TEST(World, FanOutStaysInTheRoomsWorldAndNeverEchoes) {
   ASSERT_FALSE(world.Shape("alice", Shape(2), out).has_value());
   EXPECT_EQ(Staged(out), std::vector<std::string>{"bob:shapeChanged"});
   out.clear();
+  // The world remembers: a later joiner's snapshot has alice where she
+  // moved, in the shape she took.
+  ASSERT_FALSE(world.Join("erin", "R1", FixtureJoin(), out).has_value());
+  const auto* seen = out.at(0).update.as_worldState_or_null();
+  ASSERT_NE(seen, nullptr);
+  ASSERT_EQ(seen->players.size(), 2u);
+  EXPECT_EQ(seen->players[0].playerId, "alice");
+  EXPECT_EQ(seen->players[0].position, (std::vector<double>{3, 0, 3}));
+  EXPECT_EQ(seen->players[0].shape, 2);
+  out.clear();
   EXPECT_TRUE(world.Leave("alice", out));
-  EXPECT_EQ(Staged(out), std::vector<std::string>{"bob:playerLeft"});
+  EXPECT_EQ(Staged(out), (std::vector<std::string>{"bob:playerLeft", "erin:playerLeft"}));
   EXPECT_EQ(out[0].update.as_playerLeft_or_null()->playerId, "alice");
   out.clear();
   // Gone from the snapshot the next joiner gets, and free to rejoin.
   ASSERT_FALSE(world.Join("dave", "R1", FixtureJoin(), out).has_value());
-  EXPECT_EQ(out[0].update.as_worldState_or_null()->players.size(), 1u);
+  ASSERT_EQ(out[0].update.as_worldState_or_null()->players.size(), 2u);
   EXPECT_EQ(out[0].update.as_worldState_or_null()->players[0].playerId, "bob");
+  EXPECT_EQ(out[0].update.as_worldState_or_null()->players[1].playerId, "erin");
 }
 
 }  // namespace

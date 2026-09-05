@@ -1,7 +1,6 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_WORLD_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_WORLD_H
 
-#include <cstddef>
 #include <map>
 #include <optional>
 #include <string>
@@ -19,8 +18,8 @@ namespace games_hub {
 ///
 /// This is the rules and the map, and nothing about wires: it stages
 /// what each session is owed, in delivery order, and GolfHub, which
-/// hosts it as the room stream's `lobby` member, queues them on its
-/// registry through its Outbox. Not thread-safe; the owner's lock covers
+/// hosts it as the room stream's `lobby` member, hands them to its
+/// registry under its lock. Not thread-safe; the owner's lock covers
 /// every call.
 ///
 /// The rules match the muchq.com world UI's own bounds, so retune
@@ -35,10 +34,6 @@ class World {
   /// The unroomed join's world. Lowercase, so no generated room code
   /// (IdGenerator's uppercase alphanumerics) can name it.
   static constexpr const char* kPlaza = "plaza";
-  /// A room id is a client string this world retains and compares on
-  /// every frame; the bound keeps both costs the hub's to choose, with
-  /// room to spare over IdGenerator's six-character codes.
-  static constexpr std::size_t kMaxRoomIdLength = 64;
 
   using Refusal = games_hub::Refusal;
   /// One update owed to one session.
@@ -47,12 +42,6 @@ class World {
     moonbase::games::LobbyUpdate update;
   };
   using Deliveries = std::vector<Delivery>;
-
-  /// A named room, when a stream lets the client name one: golf's NUL
-  /// rule and its reason, plus an empty id refused and a length bound,
-  /// because any id here creates a world and no store is behind it to
-  /// refuse one.
-  static std::optional<std::string> RoomProblem(const std::optional<std::string>& room_id);
 
   /// Enters `room_id`'s world. Stages the joiner's snapshot of that world
   /// first, then playerJoined to the rest of it, so whatever reaches the

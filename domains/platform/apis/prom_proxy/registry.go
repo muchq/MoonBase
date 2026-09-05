@@ -350,8 +350,9 @@ var serviceRegistry = map[string]serviceEntry{
 			// this series is the only evidence the reaper runs at all — a
 			// broken one is indistinguishable from a hub with no ghosts.
 			counter("Sessions", "hub_restored_reaped", "", `hub_restored_seats_reaped_total`),
-			// The room layer (#1490 phase 6): rooms, tables, and the stream's
-			// own refusals, on hub_*; each game's envelope is its own group.
+			// The room layer (#1490 phase 6): rooms, chat, and every refusal
+			// whichever tenant raised it, on hub_*; each game's envelope is
+			// its own group.
 			counter("Room layer", "hub_commands", "", `hub_commands_total`),
 			counter("Room layer", "hub_events", "", `hub_events_total`),
 			counter("Room layer", "hub_rejections", "", `hub_rejections_total`),

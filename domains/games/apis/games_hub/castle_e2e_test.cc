@@ -890,7 +890,7 @@ TEST_F(ShortGraceCastleFixture, GraceExpiryAbandonsTheTableWithNoLoser) {
   EXPECT_FALSE(ended->as_gameEnded_or_null()->loser.has_value());
   // The table is torn down before the absent seat leaves the room, so
   // the first roomState still lists both; the departure follows.
-  std::optional<EventOf<decltype(alice.stream)>> room;
+  std::optional<moonbase::games::GameEvents> room;
   for (int i = 0; i < 3; ++i) {
     room = ReceiveCase(alice.stream, "roomState");
     ASSERT_TRUE(room.has_value());

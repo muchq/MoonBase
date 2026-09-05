@@ -43,8 +43,8 @@ services:
           cpus: '0.5'
           memory: 256M
 
-  # The smithy event-stream games hub (/games/v2/*): golf, castle (on
-  # golf's play stream, #77) and thoughts (#79).
+  # The smithy event-stream games hub (/games/v2/*): the lobby (#1490),
+  # golf and castle (#77) on one play stream.
   games_hub:
     image: ghcr.io/muchq/games_hub:${GAMES_HUB_SHA:-${DEPLOY_SHA:-latest}}
     labels:

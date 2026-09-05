@@ -1592,6 +1592,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"lobby_events", {{"event", "playerLeft"}}},
       {"hub_rate_limited", {{"kind", "chat"}}},
       {"hub_rate_limited", {{"kind", "command"}}},
+      {"hub_rate_limited", {{"kind", "lobby"}}},
       {"hub_rejections", {{"kind", "rate_limited"}}},
       {"hub_rejections", {{"kind", "invalid"}}},
       {"hub_rejections", {{"kind", "state"}}},

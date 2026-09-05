@@ -384,6 +384,7 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"lobby_events", {{"event", "playerLeft"}}},
       {"hub_rate_limited", {{"kind", "chat"}}},
       {"hub_rate_limited", {{"kind", "command"}}},
+      {"hub_rate_limited", {{"kind", "lobby"}}},
       // One entry per RejectKind, in enum order.
       {"hub_rejections", {{"kind", "rate_limited"}}},
       {"hub_rejections", {{"kind", "invalid"}}},
@@ -683,7 +684,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
           it != player_room_.end() && it->second == room_id) {
         player_room_.erase(it);
         player_game_.erase(member_id);
-        LeaveWorldLocked(member_id, outbox);  // its world goes with it
+        LeaveWorldLocked(member_id);  // its world goes with it
       }
     }
     rooms_.erase(room);
@@ -749,7 +750,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
     if (auto it = player_room_.find(member_id); it != player_room_.end() && it->second == room_id) {
       player_room_.erase(it);
       player_game_.erase(member_id);
-      LeaveWorldLocked(member_id, outbox);  // a sibling's drop takes the world too
+      LeaveWorldLocked(member_id);  // a sibling's drop takes the world too
     }
   }
   room.members = std::move(members);
@@ -914,6 +915,7 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
   // bucket; chat draws from its own tighter bucket too, because each
   // message is a durable database transaction plus fleet-wide fan-out.
   TokenBucket command_budget(limits_.command_burst, limits_.command_refill_per_sec);
+  TokenBucket lobby_budget(limits_.lobby_burst, limits_.lobby_refill_per_sec);
   TokenBucket chat_budget(limits_.chat_burst, limits_.chat_refill_per_sec);
 
   while (true) {
@@ -929,12 +931,10 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
       // and rejoins on resume, while the seat parks. Before Detach, so a
       // resume admitted the instant the seat is released finds no stale
       // entry to refuse its join.
-      Outbox left;
       {
         const std::lock_guard<std::mutex> lock(mu_);
-        LeaveWorldLocked(player_id, left);
+        LeaveWorldLocked(player_id);
       }
-      Deliver(left);
       if (hooks_.before_seat_release) hooks_.before_seat_release(player_id);
       if (registry_.Detach(player_id)) {
         TrackActive(-1);
@@ -945,12 +945,13 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
       co_return smithy::Unit{};
     }
     const auto now = std::chrono::steady_clock::now();
-    if (!command_budget.Admit(now)) {
+    const bool lobby = (*received)->as_lobby_or_null() != nullptr;
+    if (!(lobby ? lobby_budget : command_budget).Admit(now)) {
       // Refused before any locked work: the whole point is that a flood
       // costs the hub almost nothing. The session stays open — the
       // buckets already bound the damage, and closing floods just
       // converts them into reconnect load.
-      Count("hub_rate_limited", {{"kind", "command"}});
+      Count("hub_rate_limited", {{"kind", lobby ? "lobby" : "command"}});
       Reject(player_id, RejectKind::kRateLimited, "slow down");
       continue;
     }
@@ -978,7 +979,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
         // Born at zero with its room: it provably has no rows, and the
         // creator's first message must pump from the very beginning.
         chat_cursors_.emplace(room_id, ChatCursor{});
-        LeaveWorldLocked(player_id, outbox);  // out of the plaza's world
+        LeaveWorldLocked(player_id);  // out of the plaza's world
         player_room_[player_id] = room_id;
         ListenRoomLocked(room_id);
         StageLocked(writes, HubStore::UpsertRoom{room_id});
@@ -1018,7 +1019,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
         const auto room = rooms_.find(join->roomId);
         if (room != rooms_.end()) {
           const auto [member, inserted] = room->second.members.emplace(player_id, Member{});
-          LeaveWorldLocked(player_id, outbox);  // out of the plaza's world
+          LeaveWorldLocked(player_id);  // out of the plaza's world
           player_room_[player_id] = join->roomId;
           StageMemberLocked(join->roomId, player_id, member->second, writes);
           StageWakeLocked(join->roomId, writes);
@@ -1152,7 +1153,6 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
 void GolfHub::HandleLobby(const std::string& player_id,
                           const moonbase::games::LobbyAction& action) {
   std::optional<World::Refusal> refusal;
-  Outbox outbox;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     World::Deliveries deliveries;
@@ -1177,9 +1177,9 @@ void GolfHub::HandleLobby(const std::string& player_id,
     } else {
       refusal = World::Refusal{RejectKind::kUnknown, "unknown command"};
     }
-    StageWorldLocked(deliveries, outbox);
+    SendWorldLocked(deliveries);
+    if (hooks_.after_world_sent) hooks_.after_world_sent();
   }
-  Deliver(outbox);
   if (refusal.has_value()) Reject(player_id, std::move(*refusal));
 }
 
@@ -1188,19 +1188,22 @@ std::string GolfHub::WorldOfLocked(const std::string& player_id) const {
   return room != player_room_.end() ? room->second : std::string(World::kPlaza);
 }
 
-void GolfHub::StageWorldLocked(World::Deliveries& deliveries, Outbox& outbox) {
+// Under mu_, straight to the registry (which only queues): the world's
+// deliveries leave in the order the world changed, ahead of anything the
+// next command under this lock can send.
+void GolfHub::SendWorldLocked(World::Deliveries& deliveries) {
   for (auto& delivery : deliveries) {
     moonbase::games::LobbyEvent event;
     event.update = std::move(delivery.update);
-    outbox.To(delivery.to, GameEvents::FromLobby(std::move(event)));
+    Send(delivery.to, GameEvents::FromLobby(std::move(event)));
   }
   deliveries.clear();
 }
 
-void GolfHub::LeaveWorldLocked(const std::string& player_id, Outbox& outbox) {
+void GolfHub::LeaveWorldLocked(const std::string& player_id) {
   World::Deliveries deliveries;
   world_.Leave(player_id, deliveries);
-  StageWorldLocked(deliveries, outbox);
+  SendWorldLocked(deliveries);
 }
 
 void GolfHub::HandleMove(const std::string& player_id, const GolfMove& move) {
@@ -1835,7 +1838,7 @@ std::optional<GolfHub::GameRef> GolfHub::FindGameLocked(const std::string& playe
 }
 
 void GolfHub::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writes& writes) {
-  LeaveWorldLocked(player_id, outbox);
+  LeaveWorldLocked(player_id);
   LeaveGameLocked(player_id, outbox, writes);
 
   const auto it = player_room_.find(player_id);

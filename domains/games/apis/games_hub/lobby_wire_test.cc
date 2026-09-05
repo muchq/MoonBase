@@ -4,11 +4,10 @@
 // — a regeneration that renames what the client reads fails here even
 // though lobby_e2e_test (which regenerates with it) still passes.
 //
-// The pinned surface, exactly: the Play route; that it serves the room
-// layer byte for byte as the legacy route (golf_wire_test pins that one);
-// the lobby command frames as the client mints them, and the lobby
-// events as it reads them; and the terminal Unauthenticated frame on this
-// route. The session mint and resume bodies are golf_wire_test's pins.
+// The pinned surface, exactly: the lobby command frames as the client
+// mints them, and the lobby events as it reads them; and the terminal
+// Unauthenticated frame. The route, the session mint and resume bodies,
+// and the room layer's own frames are golf_wire_test's pins.
 //
 // The harness is wire_test_fixture.h's; non-Beast, so it runs with no
 // sandbox setup at all.
@@ -28,7 +27,7 @@ namespace {
 using json = nlohmann::json;
 
 // The one stream's route (#1490); renaming it strands every deployed web
-// client once the site is on it.
+// client.
 constexpr char kPlayPath[] = "/games/v2/play";
 
 // The join the lobby sends: the fixture player, in the lobby envelope,
@@ -42,20 +41,6 @@ class LobbyWireTest : public HubWireFixture {
     return HubWireFixture::DialReady(kPlayPath, session);
   }
 };
-
-// Consumer: the client's connect on the new route, and the room layer on
-// it — the same first frame and the same createRoom bytes golf_wire_test
-// pins on the legacy route.
-TEST_F(LobbyWireTest, TheOneRouteServesTheRoomLayerAsTheLegacyRouteDoes) {
-  const json session = MintSession();
-  auto socket = DialStream(kPlayPath, "?ticket=" + session["ticket"].get<std::string>());
-  EXPECT_EQ(EventPayload(NextFrame(*socket), "sessionReady"),
-            R"({"playerId":"player-1","resumed":false})");
-  ASSERT_TRUE(socket->Send(CommandFrame("createRoom", "{}")).ok());
-  EXPECT_EQ(EventPayload(NextFrame(*socket), "roomState"),
-            R"({"games":[],"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
-            R"("playerId":"player-1","totalScore":0}],"roomId":"room-1"})");
-}
 
 // Consumer: the lobby's join and the world it draws, under the `lobby`
 // event with the update nested under "update". The first joiner hears an
