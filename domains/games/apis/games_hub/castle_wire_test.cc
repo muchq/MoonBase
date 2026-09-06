@@ -120,10 +120,11 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
   (void)EventPayload(NextFrame(*joiner), "castle");  // the dealt view
   (void)EventPayload(NextFrame(*joiner), "roomState");
 
-  // Both ready; the joiner opens on J♣ — the top of his ordered hand,
-  // above the two tens that would burn — and plays it. The creator's view
-  // of that turn is the populated shape: the last play with its flags,
-  // the run on the pile, and canPlay for the chair now on turn.
+  // Both ready; the joiner opens on J♣ — his only ordinary card, the two
+  // tens being specials that would burn the pile — and names it, since a
+  // play carries cards rather than hand offsets (#1505). The creator's
+  // view of that turn is the populated shape: the last play with its
+  // flags, the run on the pile, and canPlay for the chair now on turn.
   for (auto* seat : {&creator, &joiner}) {
     ASSERT_TRUE((*seat)->Send(CommandFrame("castle", R"({"move":{"ready":{}}})")).ok());
   }
@@ -132,8 +133,10 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
     EXPECT_EQ(EventPayload(NextFrame(**seat), "castle"),
               R"({"update":{"turnChanged":{"playerId":"player-2"}}})");
   }
-  ASSERT_TRUE(
-      joiner->Send(CommandFrame("castle", R"({"move":{"playFromHand":{"indexes":[2]}}})")).ok());
+  ASSERT_TRUE(joiner
+                  ->Send(CommandFrame(
+                      "castle", R"({"move":{"playFromHand":{"cards":[{"rank":"J","suit":"♣"}]}}})"))
+                  .ok());
   EXPECT_EQ(
       EventPayload(NextFrame(*creator), "castle"),
       R"({"update":{"gameState":{"view":{"currentPlayerId":"player-1","drawPileCount":33,)"

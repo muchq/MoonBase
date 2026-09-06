@@ -10,7 +10,6 @@ use moonbase.games#JoinGame
 use moonbase.games#LeaveGame
 use moonbase.games#StartGame
 use moonbase.games#Card
-use moonbase.games#CardIndexes
 use moonbase.games#PlayerIds
 use moonbase.games#TurnChanged
 
@@ -44,31 +43,36 @@ union CastleMove {
 }
 
 /// Exchange one hand card for one face-up card before declaring ready.
+/// Both are named as cards: the seat can see either row (#1505).
 structure SwapForSetup {
     @required
-    handIndex: Integer
+    handCard: Card
 
     @required
-    faceUpIndex: Integer
+    faceUpCard: Card
 }
 
 /// Done arranging; play begins once every seat is ready.
 structure Ready {}
 
-/// Hand indexes, all of one rank.
+/// Hand cards, all of one rank. Named cards, not slots: the hub refuses
+/// a card the hand does not hold rather than playing its neighbour.
 structure PlayFromHand {
     @required
-    indexes: CardIndexes
+    cards: Cards
 }
 
-/// Face-up row indexes, all of one rank; only once the hand is empty.
+/// Face-up cards, all of one rank; only once the hand is empty. Playing
+/// one does not disturb the row's pairing with the castle beneath it.
 structure PlayFaceUp {
     @required
-    indexes: CardIndexes
+    cards: Cards
 }
 
 /// One face-down card, played blind; only once the face-up row is gone.
-/// An unplayable flip picks the pile up, card included.
+/// An unplayable flip picks the pile up, card included. The one move
+/// that keeps a position: the player cannot see what they are turning
+/// over, so "the third one" is the move rather than an address for it.
 structure PlayFaceDown {
     @required
     index: Integer

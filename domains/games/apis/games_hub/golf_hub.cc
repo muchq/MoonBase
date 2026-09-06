@@ -18,7 +18,7 @@
 #include "absl/strings/str_join.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
-#include "domains/games/libs/cards/card_mapper.h"
+#include "domains/games/apis/games_hub/wire_cards.h"
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/golf/player.h"
 
@@ -69,30 +69,6 @@ moonbase::games::ChatMessage ChatEvent(const ChatRow& row) {
   message.text = row.text;
   message.sentAtUnixMillis = row.sent_at_unix_millis;
   return message;
-}
-
-// The v1 wire's card language, which the UI already renders. Ranks come
-// from the canonical CardMapper table; suits are the wire's glyphs
-// (CardMapper's letters are a different representation).
-std::string SuitString(cards::Suit suit) {
-  switch (suit) {
-    case cards::Suit::Spades:
-      return "♠";
-    case cards::Suit::Hearts:
-      return "♥";
-    case cards::Suit::Diamonds:
-      return "♦";
-    case cards::Suit::Clubs:
-      return "♣";
-  }
-  return "♠";
-}
-
-moonbase::games::Card WireCard(const cards::Card& card) {
-  moonbase::games::Card wire;
-  wire.rank = cards::CardMapper::rankToString(card.getRank());
-  wire.suit = SuitString(card.getSuit());
-  return wire;
 }
 
 std::string PhaseString(const golf::GameState& state) {
@@ -1349,11 +1325,17 @@ void GolfHub::HandleCastleMove(const std::string& player_id, const CastleMove& m
   }
 
   if (const auto* swap = move.as_swapForSetup_or_null()) {
-    const int hand_index = swap->handIndex;
-    const int face_up_index = swap->faceUpIndex;
+    const moonbase::games::Card hand_card = swap->handCard;
+    const moonbase::games::Card face_up_card = swap->faceUpCard;
     CastleEngineMove(player_id,
-                     [hand_index, face_up_index](const castle::GameState& state, int seat) {
-                       return state.swapForSetup(seat, hand_index, face_up_index);
+                     [hand_card, face_up_card](const castle::GameState& state,
+                                               int seat) -> absl::StatusOr<castle::GameState> {
+                       const castle::Player& player = state.getPlayer(seat);
+                       const auto hand = RowIndexesOf(player.getHand(), {hand_card});
+                       if (!hand.ok()) return hand.status();
+                       const auto face_up = RowIndexesOf(player.getFaceUp(), {face_up_card});
+                       if (!face_up.ok()) return face_up.status();
+                       return state.swapForSetup(seat, hand->front(), face_up->front());
                      });
     return;
   }
@@ -1362,18 +1344,29 @@ void GolfHub::HandleCastleMove(const std::string& player_id, const CastleMove& m
                      [](const castle::GameState& state, int seat) { return state.ready(seat); });
     return;
   }
+  // A play names its cards; the row it names them in says which slots
+  // the engine is being asked for. A card the row does not hold is a
+  // refusal, never the neighbour that happens to sit at that offset.
   if (const auto* play = move.as_playFromHand_or_null()) {
-    const std::vector<int> indexes = play->indexes;
-    CastleEngineMove(player_id, [indexes](const castle::GameState& state, int seat) {
-      return state.playFromHand(seat, indexes);
-    });
+    const std::vector<moonbase::games::Card> cards = play->cards;
+    CastleEngineMove(
+        player_id,
+        [cards](const castle::GameState& state, int seat) -> absl::StatusOr<castle::GameState> {
+          const auto indexes = RowIndexesOf(state.getPlayer(seat).getHand(), cards);
+          if (!indexes.ok()) return indexes.status();
+          return state.playFromHand(seat, *indexes);
+        });
     return;
   }
   if (const auto* play = move.as_playFaceUp_or_null()) {
-    const std::vector<int> indexes = play->indexes;
-    CastleEngineMove(player_id, [indexes](const castle::GameState& state, int seat) {
-      return state.playFaceUp(seat, indexes);
-    });
+    const std::vector<moonbase::games::Card> cards = play->cards;
+    CastleEngineMove(
+        player_id,
+        [cards](const castle::GameState& state, int seat) -> absl::StatusOr<castle::GameState> {
+          const auto indexes = RowIndexesOf(state.getPlayer(seat).getFaceUp(), cards);
+          if (!indexes.ok()) return indexes.status();
+          return state.playFaceUp(seat, *indexes);
+        });
     return;
   }
   if (const auto* play = move.as_playFaceDown_or_null()) {

@@ -41,17 +41,33 @@ std::vector<std::string> Faces(const std::vector<moonbase::games::Card>& cards) 
   return faces;
 }
 
-// The engine's cards spelled the way the wire spells them, so a view can
-// be compared to the mirror face by face.
-std::vector<std::string> Faces(const std::vector<cards::Card>& cards) {
+// The fixture header's card-namer, which the engine-card overloads below
+// would otherwise hide.
+using games_hub::Named;
+
+// The engine's cards spelled the way the wire spells them — this table,
+// not the hub's, so a view can be compared to the mirror face by face
+// and a move can name the cards the mirror is about to play.
+moonbase::games::Card Named(const cards::Card& card) {
   static constexpr const char* kRanks[] = {"2", "3",  "4", "5", "6", "7", "8",
                                            "9", "10", "J", "Q", "K", "A"};
   static constexpr const char* kSuits[] = {"♣", "♦", "♥", "♠"};
+  moonbase::games::Card wire;
+  wire.rank = kRanks[static_cast<int>(card.getRank())];
+  wire.suit = kSuits[static_cast<int>(card.getSuit())];
+  return wire;
+}
+
+std::vector<moonbase::games::Card> Named(const std::vector<cards::Card>& row,
+                                         const std::vector<int>& indexes) {
+  std::vector<moonbase::games::Card> named;
+  for (const int index : indexes) named.push_back(Named(row.at(index)));
+  return named;
+}
+
+std::vector<std::string> Faces(const std::vector<cards::Card>& cards) {
   std::vector<std::string> faces;
-  for (const auto& card : cards) {
-    faces.push_back(std::string(kRanks[static_cast<int>(card.getRank())]) +
-                    kSuits[static_cast<int>(card.getSuit())]);
-  }
+  for (const auto& card : cards) faces.push_back(Face(Named(card)));
   return faces;
 }
 
@@ -179,12 +195,12 @@ class CastleGameFixture : public GamesHubStreamFixture {
         ASSERT_FALSE(indexes.empty());
         if (mover.source() == castle::Source::Hand) {
           moonbase::games::PlayFromHand from_hand;
-          from_hand.indexes = indexes;
+          from_hand.cards = Named(row, indexes);
           ASSERT_TRUE(stream.stream.Send(Castle(CastleMove::FromPlayfromhand(from_hand))).ok());
           ASSERT_TRUE(advance(mirror->playFromHand(seat, indexes)));
         } else {
           moonbase::games::PlayFaceUp face_up;
-          face_up.indexes = indexes;
+          face_up.cards = Named(row, indexes);
           ASSERT_TRUE(stream.stream.Send(Castle(CastleMove::FromPlayfaceup(face_up))).ok());
           ASSERT_TRUE(advance(mirror->playFaceUp(seat, indexes)));
         }
@@ -285,7 +301,7 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
 
   // A play before setup is done is the engine's refusal, in band.
   moonbase::games::PlayFromHand play;
-  play.indexes = {0};
+  play.cards = {Named("Q", "♠")};
   ASSERT_TRUE(alice.stream.Send(Castle(CastleMove::FromPlayfromhand(play))).ok());
   auto early = ReceiveCase(alice.stream, "commandRejected");
   ASSERT_TRUE(early.has_value());
@@ -295,8 +311,8 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
   // row, only hers shows the ace in hand — at the top of it, since the
   // ace outranks the kings she kept.
   moonbase::games::SwapForSetup swap;
-  swap.handIndex = 0;
-  swap.faceUpIndex = 0;
+  swap.handCard = Named("Q", "♠");
+  swap.faceUpCard = Named("A", "♣");
   ASSERT_TRUE(alice.stream.Send(Castle(CastleMove::FromSwapforsetup(swap))).ok());
   auto swapped = ReceiveCastle(alice.stream, "gameState");
   ASSERT_TRUE(swapped.has_value());
@@ -357,6 +373,68 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
 
 // Three seats: the game ends when the first seat sheds its last card,
 // and with two still holding cards nobody is the loser.
+// The point of naming cards (#1505): a move that names a card the row
+// does not hold is refused, in band, with the card it named — never the
+// card that happens to sit at that offset. Every integer in range used
+// to be a valid address, so the hub could not tell a good one from a
+// stale one.
+TEST_F(CastleGameFixture, AMoveNamingACardTheRowDoesNotHoldIsRefused) {
+  auto table = SeatedCastleTable();
+  ASSERT_TRUE(table.has_value());
+  auto& alice = table->alice;
+  auto& bob = table->bob;
+  ASSERT_TRUE(ReceiveCastle(alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveCastle(bob.stream, "gameState").has_value());
+
+  // Setup: alice can only swap cards she is looking at. K♠ is bob's
+  // face-up card, and A♠ is under her own face-up row, unseen.
+  moonbase::games::SwapForSetup wrong_hand;
+  wrong_hand.handCard = Named("K", "♠");
+  wrong_hand.faceUpCard = Named("A", "♣");
+  ASSERT_TRUE(alice.stream.Send(Castle(CastleMove::FromSwapforsetup(wrong_hand))).ok());
+  auto refused = ReceiveCase(alice.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in that row: K♠");
+  moonbase::games::SwapForSetup wrong_face_up;
+  wrong_face_up.handCard = Named("Q", "♠");
+  wrong_face_up.faceUpCard = Named("A", "♠");
+  ASSERT_TRUE(alice.stream.Send(Castle(CastleMove::FromSwapforsetup(wrong_face_up))).ok());
+  refused = ReceiveCase(alice.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in that row: A♠");
+
+  std::optional<castle::GameState> mirror(MirrorDeal(*table));
+  ASSERT_NO_FATAL_FAILURE(ReadyAll({&alice, &bob}, mirror));
+  ASSERT_EQ(mirror->getPlayer(mirror->getWhoseTurn()).getId(), bob.player_id);
+
+  // On turn, holding 10♥ 10♠ J♣: a card he does not hold is refused, and
+  // a spelling no card has is refused the same way. Neither reaches the
+  // engine, so the table has not moved.
+  moonbase::games::PlayFromHand not_his;
+  not_his.cards = {Named("K", "♦")};
+  ASSERT_TRUE(bob.stream.Send(Castle(CastleMove::FromPlayfromhand(not_his))).ok());
+  refused = ReceiveCase(bob.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in that row: K♦");
+  moonbase::games::PlayFromHand nonsense;
+  nonsense.cards = {Named("J", "C")};
+  ASSERT_TRUE(bob.stream.Send(Castle(CastleMove::FromPlayfromhand(nonsense))).ok());
+  refused = ReceiveCase(bob.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "no such card: JC");
+  ExpectNoEvent(alice.stream, std::chrono::milliseconds(300));
+
+  // The card he does hold plays, and it is the card he named.
+  moonbase::games::PlayFromHand jack;
+  jack.cards = {Named("J", "♣")};
+  ASSERT_TRUE(bob.stream.Send(Castle(CastleMove::FromPlayfromhand(jack))).ok());
+  auto played = ReceiveCastle(alice.stream, "gameState");
+  ASSERT_TRUE(played.has_value());
+  const auto& view = played->as_gameState_or_null()->view;
+  ASSERT_TRUE(view.lastPlay.has_value());
+  EXPECT_EQ(Faces(view.lastPlay->cards), (std::vector<std::string>{"J♣"}));
+}
+
 TEST_F(CastleGameFixture, AThreeSeatGameEndsOnTheFirstOutAndNamesNoLoser) {
   auto table = MultiSeatCastleTable(3);
   ASSERT_TRUE(table.has_value());
@@ -538,7 +616,7 @@ TEST_F(CastleGameFixture, CastleMovesOnAGolfTableAreRefusedAndEngineRefusalsCoun
   auto castle_table = SeatedCastleTable();
   ASSERT_TRUE(castle_table.has_value());
   moonbase::games::PlayFromHand play;
-  play.indexes = {0};
+  play.cards = {Named("Q", "♠")};
   ASSERT_TRUE(castle_table->alice.stream.Send(Castle(CastleMove::FromPlayfromhand(play))).ok());
   auto early = ReceiveCase(castle_table->alice.stream, "commandRejected");
   ASSERT_TRUE(early.has_value());
@@ -751,9 +829,9 @@ TEST_F(CastleGameFixture, AMidGameBrowserCloseParksTheSeatAndTheTableSurvives) {
   EXPECT_TRUE(rejoined->as_gameJoined_or_null()->view.players[1].canPlay);
   // The reclaimed seat still plays: its jack lands and fans out.
   moonbase::games::PlayFromHand jack;
-  jack.indexes = {0};
+  jack.cards = {Named("J", "♣")};
   ASSERT_TRUE(resumed->stream.Send(Castle(CastleMove::FromPlayfromhand(jack))).ok());
-  auto step = mirror->playFromHand(1, {0});
+  auto step = mirror->playFromHand(1, {2});
   ASSERT_TRUE(step.ok());
   mirror.emplace(*std::move(step));
   for (Seat* seat : {&alice, &*resumed}) {
@@ -831,9 +909,9 @@ TEST_F(SevensCastleFixture, TheFourthSevenClearsThePileAndTheTurnStays) {
     EXPECT_EQ(turn->as_turnChanged_or_null()->playerId, alice.player_id);
   }
 
-  auto play = [&](Seat& seat, std::vector<int> indexes) {
+  auto play = [&](Seat& seat, std::vector<moonbase::games::Card> cards) {
     moonbase::games::PlayFromHand move;
-    move.indexes = std::move(indexes);
+    move.cards = std::move(cards);
     ASSERT_TRUE(seat.stream.Send(Castle(CastleMove::FromPlayfromhand(move))).ok());
   };
   auto view_after = [&](Seat& seat) {
@@ -843,13 +921,13 @@ TEST_F(SevensCastleFixture, TheFourthSevenClearsThePileAndTheTurnStays) {
                               : moonbase::games::CastleView{};
   };
 
-  play(alice, {0});
+  play(alice, {Named("7", "♣")});
   EXPECT_EQ(Faces(view_after(alice).run), (std::vector<std::string>{"7♣"}));
   EXPECT_EQ(view_after(bob).currentPlayerId.value_or(""), bob.player_id);
   for (Seat* seat : {&alice, &bob})
     ASSERT_TRUE(ReceiveCastle(seat->stream, "turnChanged").has_value());
 
-  play(bob, {0, 1});
+  play(bob, {Named("7", "♦"), Named("7", "♥")});
   EXPECT_EQ(Faces(view_after(bob).run), (std::vector<std::string>{"7♣", "7♦", "7♥"}));
   auto hers = view_after(alice);
   EXPECT_EQ(hers.currentPlayerId.value_or(""), alice.player_id);
@@ -857,12 +935,9 @@ TEST_F(SevensCastleFixture, TheFourthSevenClearsThePileAndTheTurnStays) {
   for (Seat* seat : {&alice, &bob})
     ASSERT_TRUE(ReceiveCastle(seat->stream, "turnChanged").has_value());
 
-  // Her other seven completes the four, wherever the draw-back left it
-  // in an ordered hand.
-  const std::vector<std::string> her_faces = Faces(hers.players[0].hand);
-  const auto seven = std::find(her_faces.begin(), her_faces.end(), "7♠");
-  ASSERT_NE(seven, her_faces.end());
-  play(alice, {static_cast<int>(seven - her_faces.begin())});
+  // Her other seven completes the four. She names it; where the
+  // draw-back left it in an ordered hand is the hub's problem now.
+  play(alice, {Named("7", "♠")});
   for (Seat* seat : {&alice, &bob}) {
     auto cleared = view_after(*seat);
     EXPECT_TRUE(cleared.run.empty());
