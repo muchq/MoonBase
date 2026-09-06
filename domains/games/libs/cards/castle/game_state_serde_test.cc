@@ -83,7 +83,11 @@ TEST(CastleSerde, EveryPhaseRoundTrips) {
   ASSERT_TRUE(playing.ok());
   ASSERT_EQ(playing->getPhase(), Phase::Playing);
   const int opener = playing->getWhoseTurn();
-  auto played = playing->playFromHand(opener, {0});
+  // The hand reads in rank order, so its last card is its highest — a
+  // plain card here, where the two or the ten a low index might hold
+  // would burn the pile away and leave nothing on it to round-trip.
+  const int highest = static_cast<int>(playing->getPlayer(opener).getHand().size()) - 1;
+  auto played = playing->playFromHand(opener, {highest});
   ASSERT_TRUE(played.ok()) << played.status();
   EXPECT_EQ(played->getPile().size(), 1u);
   ASSERT_TRUE(played->getLastPlay().has_value());
@@ -106,14 +110,27 @@ TEST(CastleSerde, EveryPhaseRoundTrips) {
   expectRoundTrips(over);
 }
 
+// A row written before the hand was ordered — or by any other hand —
+// comes back ordered and stores itself that way: the order belongs to
+// the engine, not to the row.
+TEST(CastleSerde, AStoredHandComesBackInRankOrderHoweverItWasWritten) {
+  json payload = dealtPayload();
+  payload["players"][0]["hand"] = json::array({45, 43, 44});
+  const auto restored = deserializeGameState(payload.dump());
+  ASSERT_TRUE(restored.ok()) << restored.status();
+  EXPECT_EQ(restored->getPlayer(0).getHand(), (std::vector<Card>{Card(43), Card(44), Card(45)}));
+  EXPECT_EQ(json::parse(serializeGameState(*restored))["players"][0]["hand"],
+            json::array({43, 44, 45}));
+}
+
 // The exact bytes a fresh two-seat deal stores. A change here is a
 // schema change and means a version bump, not an edit to this literal.
 TEST(CastleSerde, FrozenPayload) {
   constexpr const char* kRow =
       R"({"drawPile":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33],)"
       R"("finished":[],"phase":"setup","pile":[],)"
-      R"("players":[{"faceDown":[51,50,49],"faceUp":[48,47,46],"hand":[45,44,43],"id":"a","ready":false},)"
-      R"({"faceDown":[42,41,40],"faceUp":[39,38,37],"hand":[36,35,34],"id":"b","ready":false}],)"
+      R"("players":[{"faceDown":[51,50,49],"faceUp":[48,47,46],"hand":[43,44,45],"id":"a","ready":false},)"
+      R"({"faceDown":[42,41,40],"faceUp":[39,38,37],"hand":[34,35,36],"id":"b","ready":false}],)"
       R"("v":1,"whoseTurn":-1})";
   EXPECT_EQ(serializeGameState(dealt()), kRow);
   const auto restored = deserializeGameState(kRow);
@@ -129,7 +146,7 @@ TEST(CastleSerde, FrozenPlayingPayload) {
       R"({"drawPile":[0,1,2,3],"finished":[],"lastPlay":{"burned":false,"cards":[45,44],)"
       R"("pickedUp":false,"player":"a"},"phase":"playing","pile":[45,44],)"
       R"("players":[{"faceDown":[51],"faceUp":[48,47],"hand":[43],"id":"a","ready":true},)"
-      R"({"faceDown":[42,41,40],"faceUp":[39],"hand":[36,35,34],"id":"b","ready":true}],)"
+      R"({"faceDown":[42,41,40],"faceUp":[39],"hand":[34,35,36],"id":"b","ready":true}],)"
       R"("v":1,"whoseTurn":1})";
   const auto restored = deserializeGameState(kRow);
   ASSERT_TRUE(restored.ok()) << restored.status();

@@ -93,8 +93,8 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
       R"({"update":{"gameState":{"view":{"drawPileCount":34,"finished":[],)"
       R"("gameId":"GAME01","phase":"setup","pileCount":0,"players":[)"
       R"({"canPlay":false,"faceDownCount":3,"faceUp":[{"rank":"A","suit":"♣"},{"rank":"K","suit":"♠"},)"
-      R"({"rank":"K","suit":"♥"}],"hand":[{"rank":"K","suit":"♦"},{"rank":"K","suit":"♣"},)"
-      R"({"rank":"Q","suit":"♠"}],"handCount":3,"out":false,"playerId":"player-1",)"
+      R"({"rank":"K","suit":"♥"}],"hand":[{"rank":"Q","suit":"♠"},{"rank":"K","suit":"♣"},)"
+      R"({"rank":"K","suit":"♦"}],"handCount":3,"out":false,"playerId":"player-1",)"
       R"("ready":false},)"
       R"({"canPlay":false,"faceDownCount":3,"faceUp":[{"rank":"J","suit":"♠"},{"rank":"J","suit":"♥"},)"
       R"({"rank":"J","suit":"♦"}],"hand":[],"handCount":3,"out":false,)"
@@ -120,7 +120,8 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
   (void)EventPayload(NextFrame(*joiner), "castle");  // the dealt view
   (void)EventPayload(NextFrame(*joiner), "roomState");
 
-  // Both ready; the joiner opens on J♣ and plays it. The creator's view
+  // Both ready; the joiner opens on J♣ — the top of his ordered hand,
+  // above the two tens that would burn — and plays it. The creator's view
   // of that turn is the populated shape: the last play with its flags,
   // the run on the pile, and canPlay for the chair now on turn.
   for (auto* seat : {&creator, &joiner}) {
@@ -132,7 +133,7 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
               R"({"update":{"turnChanged":{"playerId":"player-2"}}})");
   }
   ASSERT_TRUE(
-      joiner->Send(CommandFrame("castle", R"({"move":{"playFromHand":{"indexes":[0]}}})")).ok());
+      joiner->Send(CommandFrame("castle", R"({"move":{"playFromHand":{"indexes":[2]}}})")).ok());
   EXPECT_EQ(
       EventPayload(NextFrame(*creator), "castle"),
       R"({"update":{"gameState":{"view":{"currentPlayerId":"player-1","drawPileCount":33,)"
@@ -140,8 +141,8 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
       R"("lastPlay":{"burned":false,"cards":[{"rank":"J","suit":"♣"}],"pickedUp":false,)"
       R"("playerId":"player-2"},"phase":"playing","pileCount":1,"players":[)"
       R"({"canPlay":true,"faceDownCount":3,"faceUp":[{"rank":"A","suit":"♣"},{"rank":"K","suit":"♠"},)"
-      R"({"rank":"K","suit":"♥"}],"hand":[{"rank":"K","suit":"♦"},{"rank":"K","suit":"♣"},)"
-      R"({"rank":"Q","suit":"♠"}],"handCount":3,"out":false,"playerId":"player-1",)"
+      R"({"rank":"K","suit":"♥"}],"hand":[{"rank":"Q","suit":"♠"},{"rank":"K","suit":"♣"},)"
+      R"({"rank":"K","suit":"♦"}],"handCount":3,"out":false,"playerId":"player-1",)"
       R"("ready":true},)"
       R"({"canPlay":false,"faceDownCount":3,"faceUp":[{"rank":"J","suit":"♠"},{"rank":"J","suit":"♥"},)"
       R"({"rank":"J","suit":"♦"}],"hand":[],"handCount":3,"out":false,)"

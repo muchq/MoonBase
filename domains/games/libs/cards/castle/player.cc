@@ -14,6 +14,36 @@ using namespace cards;
 using absl::InvalidArgumentError;
 using std::vector;
 
+namespace {
+
+// Rank order, suit breaking ties: Card::intValue is exactly that order
+// and Card(int) is its inverse, so the cards rebuild from their values.
+// Sorting them where they lie is not open to us — a Card is immutable.
+vector<Card> inRankOrder(const vector<Card>& cards) {
+  vector<int> values;
+  values.reserve(cards.size());
+  for (const Card& card : cards) {
+    values.push_back(card.intValue());
+  }
+  std::sort(values.begin(), values.end());
+  vector<Card> ordered;
+  ordered.reserve(values.size());
+  for (const int value : values) {
+    ordered.emplace_back(value);
+  }
+  return ordered;
+}
+
+}  // namespace
+
+Player::Player(std::string _id, vector<Card> _hand, vector<Card> _faceUp, vector<Card> _faceDown,
+               bool _ready)
+    : id(std::move(_id)),
+      hand(inRankOrder(_hand)),
+      faceUp(std::move(_faceUp)),
+      faceDown(std::move(_faceDown)),
+      ready(_ready) {}
+
 const vector<Card>& Player::row(Source source) const {
   switch (source) {
     case Source::Hand:

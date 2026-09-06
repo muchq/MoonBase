@@ -1,8 +1,8 @@
 // Castle on the room stream (#77): the second game on the hub, end to end
 // through the generated client. The NoShuffleDealer deals the pristine
 // deck from the back, so every card is known: alice (seat 0) holds the
-// aces face down, A♣ K♠ K♥ face up and K♦ K♣ Q♠ in hand; bob the queens,
-// jacks and J♣ 10♠ 10♥. A local engine mirror plays the same deal, which
+// aces face down, A♣ K♠ K♥ face up and, a hand reading in rank order,
+// Q♠ K♣ K♦; bob the queens, jacks and 10♥ 10♠ J♣. A local engine mirror plays the same deal, which
 // is what lets a whole game run to its end without a hand-written script
 // of forty moves: every turn the mirror picks a legal play, the same
 // command goes to the hub, and the hub's view must agree with the mirror.
@@ -264,9 +264,9 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
     EXPECT_EQ(me.playerId, alice.player_id);
     EXPECT_FALSE(me.ready);
     ASSERT_EQ(me.hand.size(), 3u);
-    EXPECT_EQ(Face(me.hand[0]), "K♦");
+    EXPECT_EQ(Face(me.hand[0]), "Q♠");
     EXPECT_EQ(Face(me.hand[1]), "K♣");
-    EXPECT_EQ(Face(me.hand[2]), "Q♠");
+    EXPECT_EQ(Face(me.hand[2]), "K♦");
     ASSERT_EQ(me.faceUp.size(), 3u);
     EXPECT_EQ(Face(me.faceUp[0]), "A♣");
     EXPECT_EQ(me.faceDownCount, 3);
@@ -288,19 +288,20 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
   ASSERT_TRUE(early.has_value());
   EXPECT_EQ(early->as_commandRejected_or_null()->reason, "still setting up");
 
-  // Alice swaps K♦ for her A♣; both chairs see the new face-up row, only
-  // hers shows the ace in hand.
+  // Alice swaps her queen for her A♣; both chairs see the new face-up
+  // row, only hers shows the ace in hand — at the top of it, since the
+  // ace outranks the kings she kept.
   moonbase::games::SwapForSetup swap;
   swap.handIndex = 0;
   swap.faceUpIndex = 0;
   ASSERT_TRUE(alice.stream.Send(Castle(CastleMove::FromSwapforsetup(swap))).ok());
   auto swapped = ReceiveCastle(alice.stream, "gameState");
   ASSERT_TRUE(swapped.has_value());
-  EXPECT_EQ(Face(swapped->as_gameState_or_null()->view.players[0].hand[0]), "A♣");
-  EXPECT_EQ(Face(swapped->as_gameState_or_null()->view.players[0].faceUp[0]), "K♦");
+  EXPECT_EQ(Face(swapped->as_gameState_or_null()->view.players[0].hand[2]), "A♣");
+  EXPECT_EQ(Face(swapped->as_gameState_or_null()->view.players[0].faceUp[0]), "Q♠");
   auto bob_saw_swap = ReceiveCastle(bob.stream, "gameState");
   ASSERT_TRUE(bob_saw_swap.has_value());
-  EXPECT_EQ(Face(bob_saw_swap->as_gameState_or_null()->view.players[0].faceUp[0]), "K♦");
+  EXPECT_EQ(Face(bob_saw_swap->as_gameState_or_null()->view.players[0].faceUp[0]), "Q♠");
   EXPECT_TRUE(bob_saw_swap->as_gameState_or_null()->view.players[0].hand.empty());
 
   // Ready, both: bob opens (his jack is the lowest ordinary hand card;
@@ -702,7 +703,7 @@ TEST_F(CastleGameFixture, AResumedCastleSeatGetsItsOwnViewBack) {
   EXPECT_EQ(view.phase, "setup");
   ASSERT_EQ(view.players.size(), 2u);
   EXPECT_EQ(view.players[0].hand.size(), 3u);
-  EXPECT_EQ(Face(view.players[0].hand[0]), "K♦");
+  EXPECT_EQ(Face(view.players[0].hand[0]), "Q♠");
   EXPECT_TRUE(view.players[1].hand.empty());
   EXPECT_EQ(view.players[1].handCount, 3);
 }
@@ -814,7 +815,7 @@ TEST_F(SevensCastleFixture, TheFourthSevenClearsThePileAndTheTurnStays) {
   auto dealt = ReceiveCastle(alice.stream, "gameState");
   ASSERT_TRUE(dealt.has_value());
   EXPECT_EQ(Faces(dealt->as_gameState_or_null()->view.players[0].hand),
-            (std::vector<std::string>{"7♠", "7♣", "9♥"}));
+            (std::vector<std::string>{"7♣", "7♠", "9♥"}));
   ASSERT_TRUE(ReceiveCastle(bob.stream, "gameState").has_value());
   for (Seat* seat : {&alice, &bob}) {
     ASSERT_TRUE(seat->stream.Send(Castle(CastleMove::FromReady(moonbase::games::Ready{}))).ok());
@@ -839,29 +840,32 @@ TEST_F(SevensCastleFixture, TheFourthSevenClearsThePileAndTheTurnStays) {
   };
 
   play(alice, {0});
-  EXPECT_EQ(Faces(view_after(alice).run), (std::vector<std::string>{"7♠"}));
+  EXPECT_EQ(Faces(view_after(alice).run), (std::vector<std::string>{"7♣"}));
   EXPECT_EQ(view_after(bob).currentPlayerId.value_or(""), bob.player_id);
   for (Seat* seat : {&alice, &bob})
     ASSERT_TRUE(ReceiveCastle(seat->stream, "turnChanged").has_value());
 
   play(bob, {0, 1});
-  EXPECT_EQ(Faces(view_after(bob).run), (std::vector<std::string>{"7♠", "7♥", "7♦"}));
+  EXPECT_EQ(Faces(view_after(bob).run), (std::vector<std::string>{"7♣", "7♦", "7♥"}));
   auto hers = view_after(alice);
   EXPECT_EQ(hers.currentPlayerId.value_or(""), alice.player_id);
   EXPECT_TRUE(hers.players[0].canPlay);
   for (Seat* seat : {&alice, &bob})
     ASSERT_TRUE(ReceiveCastle(seat->stream, "turnChanged").has_value());
 
-  // The 7♣ drew back to index 0 after the first play; it completes the four.
-  ASSERT_EQ(Face(hers.players[0].hand[0]), "7♣");
-  play(alice, {0});
+  // Her other seven completes the four, wherever the draw-back left it
+  // in an ordered hand.
+  const std::vector<std::string> her_faces = Faces(hers.players[0].hand);
+  const auto seven = std::find(her_faces.begin(), her_faces.end(), "7♠");
+  ASSERT_NE(seven, her_faces.end());
+  play(alice, {static_cast<int>(seven - her_faces.begin())});
   for (Seat* seat : {&alice, &bob}) {
     auto cleared = view_after(*seat);
     EXPECT_TRUE(cleared.run.empty());
     EXPECT_EQ(cleared.pileCount, 0);
     ASSERT_TRUE(cleared.lastPlay.has_value());
     EXPECT_TRUE(cleared.lastPlay->burned);
-    EXPECT_EQ(Faces(cleared.lastPlay->cards), (std::vector<std::string>{"7♣"}));
+    EXPECT_EQ(Faces(cleared.lastPlay->cards), (std::vector<std::string>{"7♠"}));
     EXPECT_EQ(cleared.currentPlayerId.value_or(""), alice.player_id);
     EXPECT_EQ(cleared.phase, "playing");
     ExpectNoEvent(seat->stream);

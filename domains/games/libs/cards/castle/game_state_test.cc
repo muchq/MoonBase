@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <deque>
 #include <optional>
 #include <string>
@@ -62,7 +63,11 @@ TEST(Deal, NineCardsASeatFromTheBackOfTheDeckIntoSetup) {
   // face-down row is dealt first, from the back, then face-up, then hand.
   EXPECT_EQ(game->getPlayer(0).getFaceDown().at(0), c(Rank::Ace, Suit::Spades));
   EXPECT_EQ(game->getPlayer(0).getFaceUp().at(0), c(Rank::Ace, Suit::Clubs));
-  EXPECT_EQ(game->getPlayer(0).getHand().at(0), c(Rank::King, Suit::Diamonds));
+  // The rows keep the order they were dealt in, but the hand is sorted:
+  // dealt kings and a queen off the back, it reads from the queen up.
+  EXPECT_EQ(game->getPlayer(0).getHand(),
+            (vector<Card>{c(Rank::Queen, Suit::Spades), c(Rank::King, Suit::Clubs),
+                          c(Rank::King, Suit::Diamonds)}));
   EXPECT_EQ(game->getPlayer(1).getFaceDown().at(0), c(Rank::Queen, Suit::Hearts));
   EXPECT_EQ(game->playerIndex("b"), 1);
   EXPECT_EQ(game->playerIndex("zed"), -1);
@@ -94,7 +99,11 @@ TEST(Setup, SwapsThenReadyOpensPlayWhenEveryoneIsReady) {
 
   auto swapped = game->swapForSetup(0, 0, 1);
   ASSERT_TRUE(swapped.ok());
-  EXPECT_EQ(swapped->getPlayer(0).getHand().at(0), tableCard);
+  // The card off the table joins the hand at its rank, not at the index
+  // it was swapped for; the card that left is gone from the hand.
+  const vector<Card>& swappedHand = swapped->getPlayer(0).getHand();
+  EXPECT_EQ(std::count(swappedHand.begin(), swappedHand.end(), tableCard), 1);
+  EXPECT_EQ(std::count(swappedHand.begin(), swappedHand.end(), handCard), 0);
   EXPECT_EQ(swapped->getPlayer(0).getFaceUp().at(1), handCard);
   EXPECT_EQ(swapped->getPlayer(1), game->getPlayer(1));
   EXPECT_FALSE(swapped->swapForSetup(0, 3, 0).ok());
@@ -242,7 +251,7 @@ TEST(Runs, TheLastPlaySetsTheCountAndTheRunSetsTheFour) {
       playing({seat("a", {c(Rank::Queen, Suit::Spades), c(Rank::King), c(Rank::Four)}),
                seat("b", {c(Rank::Queen, Suit::Hearts), c(Rank::Queen, Suit::Clubs),
                           c(Rank::Queen, Suit::Diamonds)})});
-  auto one = g.playFromHand(0, {0});
+  auto one = g.playFromHand(0, {1});
   ASSERT_TRUE(one.ok()) << one.status();
   auto two = one->playFromHand(1, {0});
   ASSERT_TRUE(two.ok()) << two.status();
@@ -250,7 +259,7 @@ TEST(Runs, TheLastPlaySetsTheCountAndTheRunSetsTheFour) {
   EXPECT_TRUE(two->isPlayable(Rank::King, 1));
   EXPECT_FALSE(two->isPlayable(Rank::Four, 1));
   EXPECT_TRUE(two->hasLegalPlay(0));
-  auto king = two->playFromHand(0, {0});
+  auto king = two->playFromHand(0, {1});
   ASSERT_TRUE(king.ok()) << king.status();
   EXPECT_EQ(king->getWhoseTurn(), 1);
 
@@ -265,7 +274,7 @@ TEST(Play, FourOfAKindOnTopBurnsAcrossPlays) {
   const GameState g = playing(
       {seat("a", {c(Rank::Eight), c(Rank::Eight), c(Rank::Four)}), seat("b", {c(Rank::Nine)})},
       {c(Rank::Eight, Suit::Hearts), c(Rank::Eight, Suit::Spades)});
-  auto burn = g.playFromHand(0, {0, 1});
+  auto burn = g.playFromHand(0, {1, 2});
   ASSERT_TRUE(burn.ok());
   EXPECT_TRUE(burn->getPile().empty());
   EXPECT_EQ(burn->getWhoseTurn(), 0);
@@ -275,7 +284,7 @@ TEST(Play, FourOfAKindOnTopBurnsAcrossPlays) {
       {c(Rank::Eight, Suit::Hearts), c(Rank::Eight, Suit::Spades), c(Rank::Eight, Suit::Diamonds),
        c(Rank::Seven)});
   // Three eights buried under a seven and two more on top is not a run of four.
-  auto noBurn = split.playFromHand(0, {0, 1});
+  auto noBurn = split.playFromHand(0, {1, 2});
   ASSERT_TRUE(noBurn.ok());
   EXPECT_EQ(noBurn->getPile().size(), 6u);
   EXPECT_EQ(noBurn->getWhoseTurn(), 1);
@@ -297,7 +306,7 @@ TEST(Play, AFourOfAKindRunBrokenByATwoDoesNotBurn) {
       playing({seat("a", {c(Rank::Eight), c(Rank::Eight, Suit::Hearts), c(Rank::Four)}),
                seat("b", {c(Rank::Nine)})},
               {c(Rank::Eight, Suit::Spades), c(Rank::Eight, Suit::Diamonds), c(Rank::Two)});
-  auto pair = g.playFromHand(0, {0, 1});
+  auto pair = g.playFromHand(0, {1, 2});
   ASSERT_TRUE(pair.ok());
   EXPECT_EQ(pair->getPile().size(), 5u);
   EXPECT_EQ(pair->getWhoseTurn(), 1);
@@ -337,7 +346,7 @@ TEST(Play, AHandPlayDrawsBackUpToThreeWhileTheDrawPileLasts) {
 
   auto three = g.playFromHand(0, {0, 1, 2});
   ASSERT_TRUE(three.ok());
-  EXPECT_EQ(three->getPlayer(0).getHand(), (vector<Card>{c(Rank::Queen), c(Rank::Jack)}));
+  EXPECT_EQ(three->getPlayer(0).getHand(), (vector<Card>{c(Rank::Jack), c(Rank::Queen)}));
   EXPECT_TRUE(three->getDrawPile().empty());
   EXPECT_EQ(three->getPile().size(), 3u);
 }
@@ -377,7 +386,7 @@ TEST(Play, ASeatWithNoPlayablePickUpTakesThePileWithoutDrawing) {
   auto chose = able.pickUp(0);
   ASSERT_TRUE(chose.ok()) << chose.status();
   EXPECT_EQ(chose->getPlayer(0).getHand(),
-            (vector<Card>{c(Rank::Three), c(Rank::Nine), c(Rank::Seven)}));
+            (vector<Card>{c(Rank::Three), c(Rank::Seven), c(Rank::Nine)}));
   EXPECT_EQ(chose->getWhoseTurn(), 1);
   EXPECT_FALSE(able.pickUp(1).ok());  // not b's turn
 }
@@ -433,7 +442,7 @@ TEST(Play, FaceDownCardsPlayBlindAndAnUnplayableOneIsPickedUpWithThePile) {
   auto unlucky = g.playFaceDown(0, 0);
   ASSERT_TRUE(unlucky.ok());
   EXPECT_TRUE(unlucky->getPile().empty());
-  EXPECT_EQ(unlucky->getPlayer(0).getHand(), (vector<Card>{c(Rank::Seven), c(Rank::Three)}));
+  EXPECT_EQ(unlucky->getPlayer(0).getHand(), (vector<Card>{c(Rank::Three), c(Rank::Seven)}));
   EXPECT_EQ(unlucky->getPlayer(0).getFaceDown(), (vector<Card>{c(Rank::King)}));
   EXPECT_EQ(unlucky->getWhoseTurn(), 1);
   EXPECT_EQ(unlucky->getPhase(), Phase::Playing);
@@ -522,7 +531,7 @@ TEST(Runs, SpecialsIgnoreTheCount) {
   ASSERT_TRUE(reset.ok()) << reset.status();
   EXPECT_EQ(reset->pileTop(), c(Rank::Two));
   EXPECT_EQ(reset->getWhoseTurn(), 0);  // and goes again
-  auto burn = g.playFromHand(0, {1});
+  auto burn = g.playFromHand(0, {2});
   ASSERT_TRUE(burn.ok()) << burn.status();
   EXPECT_TRUE(burn->getPile().empty());
 }
@@ -590,7 +599,7 @@ TEST(Runs, APairOfTwosOnTopStillSetsTheCount) {
   EXPECT_EQ(g.runOnTop(), 2);
   EXPECT_FALSE(g.isPlayable(Rank::King));
   EXPECT_FALSE(g.playFromHand(0, {0}).ok());
-  auto pair = g.playFromHand(0, {0, 1});
+  auto pair = g.playFromHand(0, {1, 2});
   ASSERT_TRUE(pair.ok()) << pair.status();
   EXPECT_EQ(pair->getPile().size(), 4u);
   EXPECT_EQ(pair->getWhoseTurn(), 1);
