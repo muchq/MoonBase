@@ -101,9 +101,13 @@ TEST(Setup, SwapsThenReadyOpensPlayWhenEveryoneIsReady) {
   ASSERT_TRUE(swapped.ok());
   // The card off the table joins the hand at its rank, not at the index
   // it was swapped for; the card that left is gone from the hand.
-  const vector<Card>& swappedHand = swapped->getPlayer(0).getHand();
-  EXPECT_EQ(std::count(swappedHand.begin(), swappedHand.end(), tableCard), 1);
-  EXPECT_EQ(std::count(swappedHand.begin(), swappedHand.end(), handCard), 0);
+  // The K♠ off the table is the highest of the three kings she now
+  // holds, so it lands last — not at index 0, where it was swapped in.
+  EXPECT_EQ(swapped->getPlayer(0).getHand(),
+            (vector<Card>{c(Rank::King, Suit::Clubs), c(Rank::King, Suit::Diamonds), tableCard}));
+  EXPECT_EQ(std::count(swapped->getPlayer(0).getHand().begin(),
+                       swapped->getPlayer(0).getHand().end(), handCard),
+            0);
   EXPECT_EQ(swapped->getPlayer(0).getFaceUp().at(1), handCard);
   EXPECT_EQ(swapped->getPlayer(1), game->getPlayer(1));
   EXPECT_FALSE(swapped->swapForSetup(0, 3, 0).ok());
@@ -598,7 +602,7 @@ TEST(Runs, APairOfTwosOnTopStillSetsTheCount) {
               {c(Rank::Two), c(Rank::Two, Suit::Hearts)});
   EXPECT_EQ(g.runOnTop(), 2);
   EXPECT_FALSE(g.isPlayable(Rank::King));
-  EXPECT_FALSE(g.playFromHand(0, {0}).ok());
+  EXPECT_FALSE(g.playFromHand(0, {1}).ok());
   auto pair = g.playFromHand(0, {1, 2});
   ASSERT_TRUE(pair.ok()) << pair.status();
   EXPECT_EQ(pair->getPile().size(), 4u);

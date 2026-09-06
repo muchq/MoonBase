@@ -123,8 +123,11 @@ TEST(CastleSerde, AStoredHandComesBackInRankOrderHoweverItWasWritten) {
             json::array({43, 44, 45}));
 }
 
-// The exact bytes a fresh two-seat deal stores. A change here is a
-// schema change and means a version bump, not an edit to this literal.
+// The exact bytes a fresh two-seat deal stores. A change to the shape
+// here is a schema change and means a version bump, not an edit to this
+// literal; a change to the order of cards within a field is not, so long
+// as a row written the other way still loads — which the test above
+// covers.
 TEST(CastleSerde, FrozenPayload) {
   constexpr const char* kRow =
       R"({"drawPile":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33],)"

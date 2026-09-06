@@ -55,23 +55,34 @@ TEST(Player, SetupSwapExchangesAHandCardWithAFaceUpCard) {
 }
 
 TEST(Player, WithoutRemovesTheNamedCardsAndKeepsTheOrder) {
-  const Player p{
-      "a", {c(Rank::Three), c(Rank::Four), c(Rank::Five)}, {c(Rank::King)}, {c(Rank::Ace)}};
+  const Player p{"a",
+                 {c(Rank::Three), c(Rank::Four), c(Rank::Five)},
+                 {c(Rank::King), c(Rank::Two), c(Rank::Queen)},
+                 {c(Rank::Ace), c(Rank::Six)}};
   auto fewer = p.without(Source::Hand, {2, 0});
   ASSERT_TRUE(fewer.ok());
   EXPECT_EQ(fewer->getHand(), (std::vector<Card>{c(Rank::Four)}));
   EXPECT_EQ(fewer->getFaceUp(), p.getFaceUp());
 
-  auto noFaceUp = p.without(Source::FaceUp, {0});
+  // What is left of a table row holds its place: the row is dealt, not
+  // sorted, and its index is what pairs it with the row beneath.
+  auto played = p.without(Source::FaceUp, {1});
+  ASSERT_TRUE(played.ok());
+  EXPECT_EQ(played->getFaceUp(), (std::vector<Card>{c(Rank::King), c(Rank::Queen)}));
+  auto flipped = p.without(Source::FaceDown, {0});
+  ASSERT_TRUE(flipped.ok());
+  EXPECT_EQ(flipped->getFaceDown(), (std::vector<Card>{c(Rank::Six)}));
+
+  auto noFaceUp = p.without(Source::FaceUp, {0, 1, 2});
   ASSERT_TRUE(noFaceUp.ok());
   EXPECT_TRUE(noFaceUp->getFaceUp().empty());
-  auto noFaceDown = p.without(Source::FaceDown, {0});
+  auto noFaceDown = p.without(Source::FaceDown, {0, 1});
   ASSERT_TRUE(noFaceDown.ok());
   EXPECT_TRUE(noFaceDown->getFaceDown().empty());
 
   EXPECT_FALSE(p.without(Source::Hand, {0, 0}).ok());
   EXPECT_FALSE(p.without(Source::Hand, {3}).ok());
-  EXPECT_FALSE(p.without(Source::FaceUp, {1}).ok());
+  EXPECT_FALSE(p.without(Source::FaceUp, {3}).ok());
   EXPECT_FALSE(p.without(Source::FaceDown, {-1}).ok());
 }
 

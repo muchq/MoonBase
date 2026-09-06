@@ -1,8 +1,11 @@
 // Castle on the room stream (#77): the second game on the hub, end to end
 // through the generated client. The NoShuffleDealer deals the pristine
 // deck from the back, so every card is known: alice (seat 0) holds the
-// aces face down, A♣ K♠ K♥ face up and, a hand reading in rank order,
-// Q♠ K♣ K♦; bob the queens, jacks and 10♥ 10♠ J♣. A local engine mirror plays the same deal, which
+// aces face down and A♣ K♠ K♥ face up; bob the queens and jacks. A hand
+// reads in rank order whatever order it was dealt in, so alice's is
+// Q♠ K♣ K♦ and bob's 10♥ 10♠ J♣.
+//
+// A local engine mirror plays the same deal, which
 // is what lets a whole game run to its end without a hand-written script
 // of forty moves: every turn the mirror picks a legal play, the same
 // command goes to the hub, and the hub's view must agree with the mirror.
@@ -760,8 +763,8 @@ TEST_F(CastleGameFixture, AMidGameBrowserCloseParksTheSeatAndTheTableSurvives) {
   }
 }
 
-// A deal that puts the four sevens in the hands: alice holds 7♠ 7♣ 9♥,
-// bob 7♥ 7♦ 8♣. Everything else stays where the pristine deck has it.
+// A deal that puts the four sevens in the hands: alice holds 7♣ 7♠ 9♥,
+// bob 7♦ 7♥ 8♣. Everything else stays where the pristine deck has it.
 class SevensDealer : public cards::Dealer {
  public:
   void ShuffleDeck(std::deque<cards::Card>& deck) override {
@@ -770,7 +773,8 @@ class SevensDealer : public cards::Dealer {
     using cards::Suit;
     // Dealt from the back, nine a seat: face-down, face-up, then hand,
     // each row taking the back card first. So alice's hand is positions
-    // 7-9 from the back and bob's 16-18, and a hand reads back to front.
+    // 7-9 from the back and bob's 16-18; the seat then holds it in rank
+    // order, whichever way it came off the deck.
     const std::vector<Card> alice = {Card(Suit::Hearts, Rank::Nine), Card(Suit::Clubs, Rank::Seven),
                                      Card(Suit::Spades, Rank::Seven)};
     const std::vector<Card> bob = {Card(Suit::Clubs, Rank::Eight),
