@@ -16,22 +16,12 @@ using std::vector;
 
 namespace {
 
-// Rank order, suit breaking ties: Card::intValue is exactly that order
-// and Card(int) is its inverse, so the cards rebuild from their values.
-// Sorting them where they lie is not open to us — a Card is immutable.
-vector<Card> inRankOrder(const vector<Card>& cards) {
-  vector<int> values;
-  values.reserve(cards.size());
-  for (const Card& card : cards) {
-    values.push_back(card.intValue());
-  }
-  std::sort(values.begin(), values.end());
-  vector<Card> ordered;
-  ordered.reserve(values.size());
-  for (const int value : values) {
-    ordered.emplace_back(value);
-  }
-  return ordered;
+// Rank order, the deck's own order of suits breaking a tie: Card's
+// intValue is exactly that order.
+vector<Card> inRankOrder(vector<Card> cards) {
+  std::sort(cards.begin(), cards.end(),
+            [](const Card& a, const Card& b) { return a.intValue() < b.intValue(); });
+  return cards;
 }
 
 }  // namespace
@@ -39,7 +29,7 @@ vector<Card> inRankOrder(const vector<Card>& cards) {
 Player::Player(std::string _id, vector<Card> _hand, vector<Card> _faceUp, vector<Card> _faceDown,
                bool _ready)
     : id(std::move(_id)),
-      hand(inRankOrder(_hand)),
+      hand(inRankOrder(std::move(_hand))),
       faceUp(std::move(_faceUp)),
       faceDown(std::move(_faceDown)),
       ready(_ready) {}
