@@ -169,12 +169,16 @@ class CastleGameFixture : public GamesHubStreamFixture {
           // Both table rows are gone the same way the hand went: a play
           // named in an empty row answers with the row in play.
           played.probed_empty_face_up = true;
+          const double rules = metrics_->CounterTotal("hub_rejections", {{"kind", "rules"}});
           moonbase::games::PlayFaceUp wrong_row;
           wrong_row.cards = Wire(mover.getFaceDown(), {0});
           ASSERT_TRUE(stream.stream.Send(Castle(CastleMove::FromPlayfaceup(wrong_row))).ok());
           auto refused = ReceiveCase(stream.stream, "commandRejected");
           ASSERT_TRUE(refused.has_value());
           EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not the row in play");
+          // The engine's own answer, so it counts as one: a short-circuit
+          // that kept the words would land on the out-of-sync series.
+          EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "rules"}}), rules + 1);
         }
         // Blind: the engine plays the flip or hands the pile over itself.
         ++played.blind_plays;
@@ -195,12 +199,14 @@ class CastleGameFixture : public GamesHubStreamFixture {
           // The hand is gone. A play named there answers with the row in
           // play, not with a card missing from an empty row.
           played.probed_empty_hand = true;
+          const double rules = metrics_->CounterTotal("hub_rejections", {{"kind", "rules"}});
           moonbase::games::PlayFromHand wrong_row;
           wrong_row.cards = Wire(row, {0});
           ASSERT_TRUE(stream.stream.Send(Castle(CastleMove::FromPlayfromhand(wrong_row))).ok());
           auto refused = ReceiveCase(stream.stream, "commandRejected");
           ASSERT_TRUE(refused.has_value());
           EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not the row in play");
+          EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "rules"}}), rules + 1);
         }
         std::vector<int> indexes;
         for (std::size_t i = 0; i < row.size() && indexes.empty(); ++i) {
@@ -452,11 +458,18 @@ TEST_F(CastleGameFixture, AMoveNamingACardTheRowDoesNotHoldIsRefused) {
   refused = ReceiveCase(bob.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "no such card: JC");
+  // One card is one card, however many times a play lists it.
+  moonbase::games::PlayFromHand twice;
+  twice.cards = {Named("J", "♣"), Named("J", "♣")};
+  ASSERT_TRUE(bob.stream.Send(Castle(CastleMove::FromPlayfromhand(twice))).ok());
+  refused = ReceiveCase(bob.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "named twice: J♣");
   ExpectNoEvent(alice.stream, std::chrono::milliseconds(300));
-  // Three cards named in the wrong row (two swaps and a play) against
-  // one that names no card at all.
+  // Three cards named in the wrong row (two swaps and a play) against two
+  // plays no row was ever consulted for. The engine refused nothing.
   EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "state"}}), 3);
-  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "invalid"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "invalid"}}), 2);
   EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "rules"}}), 0);
 
   // The card he does hold plays, and it is the card he named.
