@@ -25,11 +25,8 @@ enum class Source { Hand, FaceUp, FaceDown };
 ///
 /// This class addresses a row by index, and a card entering the hand —
 /// a draw, a pick-up, a setup swap — lands at its rank rather than on
-/// the end, so it shifts the cards above it. Those indexes are internal:
-/// a move off the wire names cards, and the hub resolves them against
-/// the row it is holding (#1505), so a shift between the view a player
-/// read and the move they sent costs a refusal at worst rather than the
-/// neighbouring card.
+/// the end, so it shifts the cards above it. Those indexes are internal;
+/// nothing outside holds one across a move (#1505).
 ///
 /// The two table rows keep the order they were dealt in: face-up pairs
 /// with face-down by index, which is the castle.

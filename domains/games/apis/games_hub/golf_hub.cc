@@ -1325,8 +1325,13 @@ void GolfHub::HandleCastleMove(const std::string& player_id, const CastleMove& m
   }
 
   if (const auto* swap = move.as_swapForSetup_or_null()) {
-    const moonbase::games::Card hand_card = swap->handCard;
-    const moonbase::games::Card face_up_card = swap->faceUpCard;
+    const auto named = CardsFromWire({swap->handCard, swap->faceUpCard});
+    if (!named.ok()) {
+      Reject(player_id, RejectKind::kInvalid, std::string(named.status().message()));
+      return;
+    }
+    const cards::Card hand_card = named->front();
+    const cards::Card face_up_card = named->back();
     CastleEngineMove(player_id,
                      [hand_card, face_up_card](const castle::GameState& state,
                                                int seat) -> absl::StatusOr<castle::GameState> {
@@ -1344,26 +1349,42 @@ void GolfHub::HandleCastleMove(const std::string& player_id, const CastleMove& m
                      [](const castle::GameState& state, int seat) { return state.ready(seat); });
     return;
   }
-  // A play names its cards; the row it names them in says which slots
-  // the engine is being asked for. A card the row does not hold is a
-  // refusal, never the neighbour that happens to sit at that offset.
+  // A play names its cards; the row it names them in says which slots the
+  // engine is being asked for. A card the row does not hold is a refusal,
+  // never the neighbour that happens to sit at that offset. An empty row
+  // goes to the engine as it stands, so the answer names the row in play
+  // rather than a card missing from the wrong one.
   if (const auto* play = move.as_playFromHand_or_null()) {
-    const std::vector<moonbase::games::Card> cards = play->cards;
+    const auto named = CardsFromWire(play->cards);
+    if (!named.ok()) {
+      Reject(player_id, RejectKind::kInvalid, std::string(named.status().message()));
+      return;
+    }
+    const std::vector<cards::Card> cards = *named;
     CastleEngineMove(
         player_id,
         [cards](const castle::GameState& state, int seat) -> absl::StatusOr<castle::GameState> {
-          const auto indexes = RowIndexesOf(state.getPlayer(seat).getHand(), cards);
+          const std::vector<cards::Card>& row = state.getPlayer(seat).getHand();
+          if (row.empty()) return state.playFromHand(seat, {});
+          const auto indexes = RowIndexesOf(row, cards);
           if (!indexes.ok()) return indexes.status();
           return state.playFromHand(seat, *indexes);
         });
     return;
   }
   if (const auto* play = move.as_playFaceUp_or_null()) {
-    const std::vector<moonbase::games::Card> cards = play->cards;
+    const auto named = CardsFromWire(play->cards);
+    if (!named.ok()) {
+      Reject(player_id, RejectKind::kInvalid, std::string(named.status().message()));
+      return;
+    }
+    const std::vector<cards::Card> cards = *named;
     CastleEngineMove(
         player_id,
         [cards](const castle::GameState& state, int seat) -> absl::StatusOr<castle::GameState> {
-          const auto indexes = RowIndexesOf(state.getPlayer(seat).getFaceUp(), cards);
+          const std::vector<cards::Card>& row = state.getPlayer(seat).getFaceUp();
+          if (row.empty()) return state.playFaceUp(seat, {});
+          const auto indexes = RowIndexesOf(row, cards);
           if (!indexes.ok()) return indexes.status();
           return state.playFaceUp(seat, *indexes);
         });
@@ -1726,7 +1747,13 @@ void GolfHub::CastleEngineMove(const std::string& player_id, const CastleMoveFn&
         }
         auto next = move(state, seat);
         if (!next.ok()) {
-          refusal = Refusal{RejectKind::kRules, std::string(next.status().message())};
+          // A card the seat's row does not hold (absl::NotFound, the one
+          // code the engine never returns) is a client acting on a view
+          // the table has moved past, not a rules refusal.
+          const RejectKind kind = next.status().code() == absl::StatusCode::kNotFound
+                                      ? RejectKind::kState
+                                      : RejectKind::kRules;
+          refusal = Refusal{kind, std::string(next.status().message())};
           break;
         }
         // Occupant ids, not seats: the engine renumbers on a leave. The

@@ -29,6 +29,11 @@ structure CastleCommand {
 /// one rank from the hand, then the face-up row, then a blind face-down
 /// card once the hand is gone; a player who cannot play picks the pile
 /// up. The engine refuses anything else in-band (commandRejected).
+///
+/// A move names the cards it means (#1505). A card the named row does
+/// not hold is refused in band with that card, so a move sent against a
+/// view the table has moved past costs a refusal rather than playing
+/// whatever took its place.
 union CastleMove {
     createGame: CreateGame
     joinGame: JoinGame
@@ -43,7 +48,6 @@ union CastleMove {
 }
 
 /// Exchange one hand card for one face-up card before declaring ready.
-/// Both are named as cards: the seat can see either row (#1505).
 structure SwapForSetup {
     @required
     handCard: Card
@@ -55,15 +59,13 @@ structure SwapForSetup {
 /// Done arranging; play begins once every seat is ready.
 structure Ready {}
 
-/// Hand cards, all of one rank. Named cards, not slots: the hub refuses
-/// a card the hand does not hold rather than playing its neighbour.
+/// Hand cards, all of one rank.
 structure PlayFromHand {
     @required
     cards: Cards
 }
 
-/// Face-up cards, all of one rank; only once the hand is empty. Playing
-/// one does not disturb the row's pairing with the castle beneath it.
+/// Face-up cards, all of one rank; only once the hand is empty.
 structure PlayFaceUp {
     @required
     cards: Cards
@@ -71,7 +73,7 @@ structure PlayFaceUp {
 
 /// One face-down card, played blind; only once the face-up row is gone.
 /// An unplayable flip picks the pile up, card included. The one move
-/// that keeps a position: the player cannot see what they are turning
+/// that names a position: the player cannot see what they are turning
 /// over, so "the third one" is the move rather than an address for it.
 structure PlayFaceDown {
     @required

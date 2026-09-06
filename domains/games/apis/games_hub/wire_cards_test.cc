@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "domains/games/libs/cards/card.h"
 
 namespace games_hub {
@@ -41,29 +42,45 @@ TEST(WireCards, ASpellingNoCardHasIsNoCard) {
   EXPECT_FALSE(CardFromWire(Wire("a", "♠")).has_value());  // ranks are upper case
 }
 
+TEST(WireCards, TheCardsAMoveNamesAreReadBeforeAnyRowIsConsulted) {
+  const auto cards = CardsFromWire({Wire("7", "♥"), Wire("Q", "♠")});
+  ASSERT_TRUE(cards.ok());
+  EXPECT_EQ(*cards,
+            (std::vector<Card>{Card{Suit::Hearts, Rank::Seven}, Card{Suit::Spades, Rank::Queen}}));
+  EXPECT_TRUE(CardsFromWire({}).ok());
+  // The client's own errors, refused without a row: a spelling no card
+  // has, and one card named twice.
+  EXPECT_EQ(CardsFromWire({Wire("Q", "H")}).status().code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_EQ(CardsFromWire({Wire("Q", "♠"), Wire("Q", "♠")}).status().code(),
+            absl::StatusCode::kInvalidArgument);
+}
+
 TEST(WireCards, NamedCardsResolveToTheirRowSlotsInOrder) {
   const std::vector<Card> row{Card{Suit::Spades, Rank::Queen}, Card{Suit::Clubs, Rank::Seven},
                               Card{Suit::Hearts, Rank::Seven}};
   // Named in any order, addressed in row order.
-  EXPECT_EQ(*RowIndexesOf(row, {Wire("7", "♥"), Wire("Q", "♠")}), (std::vector<int>{0, 2}));
-  EXPECT_EQ(*RowIndexesOf(row, {Wire("7", "♣")}), (std::vector<int>{1}));
+  EXPECT_EQ(*RowIndexesOf(row, {Card{Suit::Hearts, Rank::Seven}, Card{Suit::Spades, Rank::Queen}}),
+            (std::vector<int>{0, 2}));
+  EXPECT_EQ(*RowIndexesOf(row, {Card{Suit::Clubs, Rank::Seven}}), (std::vector<int>{1}));
   EXPECT_EQ(*RowIndexesOf(row, {}), (std::vector<int>{}));
 }
 
-TEST(WireCards, ACardTheRowDoesNotHoldIsRefusedRatherThanNeighboured) {
+TEST(WireCards, ACardTheRowDoesNotHoldIsNotFoundRatherThanNeighboured) {
   const std::vector<Card> row{Card{Suit::Spades, Rank::Queen}, Card{Suit::Clubs, Rank::Seven}};
-  EXPECT_FALSE(RowIndexesOf(row, {Wire("7", "♥")}).ok());
-  EXPECT_FALSE(RowIndexesOf(row, {Wire("Q", "♠"), Wire("7", "♥")}).ok());
-  EXPECT_FALSE(RowIndexesOf(row, {Wire("Q", "H")}).ok());
-  // One slot each: naming a card twice is not a pair.
-  EXPECT_FALSE(RowIndexesOf(row, {Wire("Q", "♠"), Wire("Q", "♠")}).ok());
+  // NotFound is the code the hub reads as an out-of-sync client, so it
+  // is part of the contract, not an implementation detail.
+  EXPECT_EQ(RowIndexesOf(row, {Card{Suit::Hearts, Rank::Seven}}).status().code(),
+            absl::StatusCode::kNotFound);
+  EXPECT_FALSE(
+      RowIndexesOf(row, {Card{Suit::Spades, Rank::Queen}, Card{Suit::Hearts, Rank::Seven}}).ok());
 }
 
 TEST(WireCards, ARowHoldingTwoOfACardIsRefusedRatherThanGuessedAt) {
   // A real deal cannot do this; a fixture can, and either slot would be
   // a card the player did not point to.
   const std::vector<Card> row{Card{Suit::Spades, Rank::Five}, Card{Suit::Spades, Rank::Five}};
-  EXPECT_FALSE(RowIndexesOf(row, {Wire("5", "♠")}).ok());
+  EXPECT_EQ(RowIndexesOf(row, {Card{Suit::Spades, Rank::Five}}).status().code(),
+            absl::StatusCode::kNotFound);
 }
 
 }  // namespace

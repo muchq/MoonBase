@@ -70,6 +70,7 @@ cc_test(
     deps = [
         ":wire_cards",
         "//domains/games/libs/cards",
+        "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
     ],
 )
