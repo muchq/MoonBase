@@ -360,6 +360,15 @@ inline moonbase::games::GameCommands Lobby(moonbase::games::LobbyAction action) 
   return moonbase::games::GameCommands::FromLobby(std::move(command));
 }
 
+// A card the way a castle move names one (#1505) — the wire's own
+// spelling, spelled out here rather than borrowed from the hub.
+inline moonbase::games::Card Named(const std::string& rank, const std::string& suit) {
+  moonbase::games::Card card;
+  card.rank = rank;
+  card.suit = suit;
+  return card;
+}
+
 // The castle twin of Move: a CastleMove in its envelope on the room stream.
 inline moonbase::games::GameCommands Castle(moonbase::games::CastleMove move) {
   moonbase::games::CastleCommand command;

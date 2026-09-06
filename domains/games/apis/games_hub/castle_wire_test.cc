@@ -120,10 +120,11 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
   (void)EventPayload(NextFrame(*joiner), "castle");  // the dealt view
   (void)EventPayload(NextFrame(*joiner), "roomState");
 
-  // Both ready; the joiner opens on J♣ — the top of his ordered hand,
-  // above the two tens that would burn — and plays it. The creator's view
-  // of that turn is the populated shape: the last play with its flags,
-  // the run on the pile, and canPlay for the chair now on turn.
+  // Both ready; the joiner opens on J♣ — his only ordinary card, the two
+  // tens being specials that would burn the pile — and names it, since a
+  // play carries cards rather than hand offsets (#1505). The creator's
+  // view of that turn is the populated shape: the last play with its
+  // flags, the run on the pile, and canPlay for the chair now on turn.
   for (auto* seat : {&creator, &joiner}) {
     ASSERT_TRUE((*seat)->Send(CommandFrame("castle", R"({"move":{"ready":{}}})")).ok());
   }
@@ -132,8 +133,10 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
     EXPECT_EQ(EventPayload(NextFrame(**seat), "castle"),
               R"({"update":{"turnChanged":{"playerId":"player-2"}}})");
   }
-  ASSERT_TRUE(
-      joiner->Send(CommandFrame("castle", R"({"move":{"playFromHand":{"indexes":[2]}}})")).ok());
+  ASSERT_TRUE(joiner
+                  ->Send(CommandFrame(
+                      "castle", R"({"move":{"playFromHand":{"cards":[{"rank":"J","suit":"♣"}]}}})"))
+                  .ok());
   EXPECT_EQ(
       EventPayload(NextFrame(*creator), "castle"),
       R"({"update":{"gameState":{"view":{"currentPlayerId":"player-1","drawPileCount":33,)"
@@ -147,6 +150,63 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
       R"({"canPlay":false,"faceDownCount":3,"faceUp":[{"rank":"J","suit":"♠"},{"rank":"J","suit":"♥"},)"
       R"({"rank":"J","suit":"♦"}],"hand":[],"handCount":3,"out":false,)"
       R"("playerId":"player-2","ready":true}],"run":[{"rank":"J","suit":"♣"}]}}}})");
+}
+
+// The other two moves that name cards. The golden above pins
+// playFromHand; these are the same contract on the same terms — the
+// typed suites regenerate both sides and cannot see a rename, and a
+// renamed member here does not refuse the move, it fails to decode and
+// ends the stream. Kept out of the flow above so the swap does not move
+// its frozen view.
+TEST_F(CastleWireTest, SwapAndFaceUpCommandsCarryCards) {
+  json creator_session;
+  auto creator = DialReady(creator_session);
+  ASSERT_TRUE(creator->Send(CommandFrame("createRoom", "{}")).ok());
+  (void)EventPayload(NextFrame(*creator), "roomState");
+  ASSERT_TRUE(creator->Send(CommandFrame("castle", R"({"move":{"createGame":{}}})")).ok());
+  for (int i = 0; i < 2; ++i) (void)EventPayload(NextFrame(*creator), "castle");
+  (void)EventPayload(NextFrame(*creator), "roomState");
+
+  json joiner_session;
+  auto joiner = DialReady(joiner_session);
+  ASSERT_TRUE(joiner->Send(CommandFrame("joinRoom", R"({"roomId":"room-1"})")).ok());
+  (void)EventPayload(NextFrame(*joiner), "roomState");
+  (void)EventPayload(NextFrame(*joiner), "roomChatHistory");
+  (void)EventPayload(NextFrame(*creator), "roomState");
+  ASSERT_TRUE(
+      joiner->Send(CommandFrame("castle", R"({"move":{"joinGame":{"gameId":"GAME01"}}})")).ok());
+  (void)EventPayload(NextFrame(*joiner), "castle");
+  (void)EventPayload(NextFrame(*creator), "castle");
+  (void)EventPayload(NextFrame(*joiner), "roomState");
+  (void)EventPayload(NextFrame(*creator), "roomState");
+  ASSERT_TRUE(creator->Send(CommandFrame("castle", R"({"move":{"startGame":{}}})")).ok());
+  for (int i = 0; i < 2; ++i) (void)EventPayload(NextFrame(*creator), "castle");
+  (void)EventPayload(NextFrame(*creator), "roomState");
+
+  // The creator holds Q♠ K♣ K♦ with A♣ K♠ K♥ on the table. The swap
+  // names one card of each row, and lands on the two the cards name —
+  // different slots, so the rows say which.
+  ASSERT_TRUE(
+      creator
+          ->Send(CommandFrame("castle", R"({"move":{"swapForSetup":{"handCard":{"rank":"Q",)"
+                                        R"("suit":"♠"},"faceUpCard":{"rank":"K","suit":"♥"}}}})"))
+          .ok());
+  const json seat = json::parse(
+      EventPayload(NextFrame(*creator), "castle"))["update"]["gameState"]["view"]["players"][0];
+  EXPECT_EQ(seat["hand"].dump(),
+            R"([{"rank":"K","suit":"♣"},{"rank":"K","suit":"♦"},{"rank":"K","suit":"♥"}])");
+  EXPECT_EQ(seat["faceUp"].dump(),
+            R"([{"rank":"A","suit":"♣"},{"rank":"K","suit":"♠"},{"rank":"Q","suit":"♠"}])");
+
+  // playFaceUp decodes, its card resolves against the face-up row, and
+  // the engine refuses it for the phase. A renamed member would not get
+  // this far: it would fail to decode and end the stream.
+  ASSERT_TRUE(creator
+                  ->Send(CommandFrame(
+                      "castle", R"({"move":{"playFaceUp":{"cards":[{"rank":"A","suit":"♣"}]}}})"))
+                  .ok());
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
+            R"({"reason":"still setting up"})");
 }
 
 }  // namespace

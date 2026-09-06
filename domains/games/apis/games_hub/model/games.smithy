@@ -317,7 +317,10 @@ structure SeatConflict {
 }
 
 /// Ranks A 2..10 J Q K, suits ♠ ♥ ♦ ♣ — the v1 wire's card language,
-/// which the UI already renders.
+/// which the UI already renders. Castle's moves name cards in it too, so
+/// it is written as well as read: the ten is "10" and not "T", the suit
+/// is the glyph and not a letter, and the ranks are upper case. A card
+/// spelled any other way names nothing and is refused as malformed.
 structure Card {
     @required
     rank: String

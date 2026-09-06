@@ -46,6 +46,35 @@ cc_library(
     hdrs = ["protocol_input.h"],
 )
 
+# The wire's card language, both directions, and the translation from
+# the cards a castle move names to the slots the engine addresses
+# (#1505).
+cc_library(
+    name = "wire_cards",
+    srcs = ["wire_cards.cc"],
+    hdrs = ["wire_cards.h"],
+    deps = [
+        ":games_hub_smithy_server",
+        "//domains/games/libs/cards",
+        "//domains/games/libs/cards:card_mapper",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "wire_cards_test",
+    size = "small",
+    srcs = ["wire_cards_test.cc"],
+    deps = [
+        ":wire_cards",
+        "//domains/games/libs/cards",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The counter-series and rejection-kind vocabulary the hub declares and
 # emits with (#1327, #1384).
 cc_library(
@@ -357,9 +386,9 @@ cc_library(
         ":protocol_input",
         ":rate_limiter",
         ":ticket_vault",
+        ":wire_cards",
         ":world",
         "//domains/games/libs/cards",
-        "//domains/games/libs/cards:card_mapper",
         "//domains/games/libs/cards:dealer",
         "//domains/games/libs/cards/castle:game_state",
         "//domains/games/libs/cards/castle:player",

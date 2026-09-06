@@ -23,12 +23,10 @@ enum class Source { Hand, FaceUp, FaceDown };
 /// the type rather than a courtesy of each caller, so a seat's own cards
 /// read the same way all game and nothing has to remember to sort them.
 ///
-/// A move names hand cards by index, and a card entering the hand — a
-/// draw, a pick-up, a setup swap — now lands at its rank rather than on
-/// the end, so it can shift the cards above it. An index is only ever
-/// good against the view it was read from, as it was before; what
-/// changed is that a move sent before that view arrives can now name a
-/// neighbour rather than a card the play had not touched (#1504).
+/// This class addresses a row by index, and a card entering the hand —
+/// a draw, a pick-up, a setup swap — lands at its rank rather than on
+/// the end, so it shifts the cards above it. Those indexes are internal;
+/// nothing outside holds one across a move (#1505).
 ///
 /// The two table rows keep the order they were dealt in: face-up pairs
 /// with face-down by index, which is the castle.
