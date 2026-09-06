@@ -14,6 +14,26 @@ using namespace cards;
 using absl::InvalidArgumentError;
 using std::vector;
 
+namespace {
+
+// Rank order, the deck's own order of suits breaking a tie: Card's
+// intValue is exactly that order.
+vector<Card> inRankOrder(vector<Card> cards) {
+  std::sort(cards.begin(), cards.end(),
+            [](const Card& a, const Card& b) { return a.intValue() < b.intValue(); });
+  return cards;
+}
+
+}  // namespace
+
+Player::Player(std::string _id, vector<Card> _hand, vector<Card> _faceUp, vector<Card> _faceDown,
+               bool _ready)
+    : id(std::move(_id)),
+      hand(inRankOrder(std::move(_hand))),
+      faceUp(std::move(_faceUp)),
+      faceDown(std::move(_faceDown)),
+      ready(_ready) {}
+
 const vector<Card>& Player::row(Source source) const {
   switch (source) {
     case Source::Hand:

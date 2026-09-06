@@ -656,7 +656,8 @@ TEST_F(PgGamesHubFixture, CastleTableSurvivesARestart) {
   ASSERT_TRUE(ReceiveCastle(alice.stream, "gameState").has_value());
   ASSERT_TRUE(ReceiveCastle(bob.stream, "gameState").has_value());
 
-  // Both ready as dealt; bob opens on his jack and plays it.
+  // Both ready as dealt; bob opens on his jack — the top of his ordered
+  // hand, above the two tens that would burn — and plays it.
   for (Seat* seat : {&alice, &bob}) {
     ASSERT_TRUE(seat->stream.Send(Castle(CastleMove::FromReady(moonbase::games::Ready{}))).ok());
   }
@@ -666,7 +667,7 @@ TEST_F(PgGamesHubFixture, CastleTableSurvivesARestart) {
     EXPECT_EQ(turn->as_turnChanged_or_null()->playerId, bob.player_id);
   }
   moonbase::games::PlayFromHand jack;
-  jack.indexes = {0};
+  jack.indexes = {2};
   ASSERT_TRUE(bob.stream.Send(Castle(CastleMove::FromPlayfromhand(jack))).ok());
   auto before_update = ReceiveCastle(alice.stream, "gameState");
   ASSERT_TRUE(before_update.has_value());
@@ -751,7 +752,7 @@ TEST_F(PgGamesHubFixture, CastleTableSurvivesARestart) {
   // fans out to the restored bob, and the save continues the version
   // sequence.
   moonbase::games::PlayFromHand queen;
-  queen.indexes = {2};
+  queen.indexes = {0};
   ASSERT_TRUE(alice_back->stream.Send(Castle(CastleMove::FromPlayfromhand(queen))).ok());
   auto next_turn = ReceiveCastle(bob_back->stream, "turnChanged");
   ASSERT_TRUE(next_turn.has_value());
@@ -805,7 +806,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesShareOneCastleTable) {
   // bob's jack from his instance lands on alice's as the last play and
   // her turn; her queen answers and lands on his.
   moonbase::games::PlayFromHand jack;
-  jack.indexes = {0};
+  jack.indexes = {2};
   ASSERT_TRUE(bob.stream.Send(Castle(CastleMove::FromPlayfromhand(jack))).ok());
   auto her_turn = AwaitCastleView(
       alice.stream,
@@ -818,7 +819,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesShareOneCastleTable) {
   EXPECT_EQ(her_turn->lastPlay->playerId, bob.player_id);
   EXPECT_TRUE(her_turn->players[0].canPlay);
   moonbase::games::PlayFromHand queen;
-  queen.indexes = {2};
+  queen.indexes = {0};
   ASSERT_TRUE(alice.stream.Send(Castle(CastleMove::FromPlayfromhand(queen))).ok());
   auto his_turn = AwaitCastleView(
       bob.stream,

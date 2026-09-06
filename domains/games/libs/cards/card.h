@@ -19,8 +19,11 @@ class Card {
   bool operator==(const Card& o) const { return suit == o.suit && rank == o.rank; }
 
  private:
-  const Suit suit;
-  const Rank rank;
+  // Immutable through the interface — no setter, and none belongs here.
+  // Not const members: those delete assignment, and a value that cannot
+  // be assigned cannot be sorted, erased, or shifted in a container.
+  Suit suit;
+  Rank rank;
 };
 
 };  // namespace cards
