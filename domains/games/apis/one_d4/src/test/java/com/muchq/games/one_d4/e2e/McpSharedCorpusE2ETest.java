@@ -280,6 +280,49 @@ public class McpSharedCorpusE2ETest {
   }
 
   /**
+   * A misspelled field is rejected with the roster, through both doors (#1257).
+   *
+   * <p>The compiler's unit test proves the message names the known fields. This proves the message
+   * survives the trip: one_d4's error handler puts it in the 400 body, the client turns the 400
+   * back into an argument error, and the tool relays it on the {@code isError} channel. Any hop
+   * that swapped in its own wording — "Bad Request", a status line, a wrapped exception's class
+   * name — would leave an MCP caller with exactly the message the issue describes: a rejection with
+   * nothing to retry with.
+   */
+  @Test
+  public void aMisspelledFieldIsRejectedWithTheRosterThroughBothDoors() throws Exception {
+    HttpResponse<String> direct =
+        http.send(
+            HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + oneD4.getPort() + "/v1/query"))
+                .header("Content-Type", "application/json")
+                .POST(
+                    HttpRequest.BodyPublishers.ofString(
+                        "{\"query\":\"white.eloo >= 2500\",\"limit\":50,\"offset\":0}"))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertThat(direct.statusCode()).isEqualTo(400);
+    String siteMessage = JsonUtils.mapper().readTree(direct.body()).get("error").asText();
+    assertThat(siteMessage).contains("Unknown field: white.eloo").contains("Known fields: ");
+    // Looked for in the roster, not the whole message: the typo itself contains "white.elo".
+    assertThat(siteMessage.substring(siteMessage.indexOf("Known fields: ")))
+        .contains("white.elo")
+        .contains("black.elo");
+
+    CallToolResult rejected = queryTool.queryChessGames("white.eloo >= 2500", null, 50, null);
+    assertThat(rejected.isError()).isTrue();
+    assertThat(rejected.content()).hasSize(1);
+    String mcpMessage =
+        JsonUtils.mapper()
+            .readTree(((TextContent) rejected.content().get(0)).text())
+            .get("error")
+            .asText();
+    assertThat(mcpMessage)
+        .as("the MCP caller has to read the same rejection the site does")
+        .isEqualTo(siteMessage);
+  }
+
+  /**
    * The text payload of a tool result.
    *
    * <p>The tools return MCP's {@code CallToolResult} since #1331, so a rejection can travel on the
