@@ -220,6 +220,8 @@ class GolfHub final {
   /// re-read (#1276) but only re-project when rows actually moved, so a
   /// reconnect across many rooms does not flood session queues.
   void OnChannelActive(const std::string& channel);
+  /// Off-lock room reads a catch-up tries before it reads under the lock.
+  static constexpr int kCatchUpReadAttempts = 3;
 
  private:
   struct Member {
@@ -252,12 +254,15 @@ class GolfHub final {
   struct Room {
     std::map<std::string, Member> members;
     std::map<std::string, GameEntry> games;
-    /// Count of this instance's writes to the room's rows: member
-    /// upserts and drops, game commits and deletes. A catch-up that read
-    /// the rows off mu_ compares it before and after; a write in between
-    /// means the rows may predate local truth, and reconciling them
-    /// would roll the room back to the moment of the read.
-    uint64_t local_writes = 0;
+    /// Stamp of the last local change to what this instance holds for
+    /// the room: a write to its rows (member upserts and drops, game
+    /// commits and deletes) or a reconcile that adopted rows. Drawn from
+    /// one hub-wide sequence, so a room dropped and held again never
+    /// repeats a stamp. A catch-up that read the rows off mu_ compares
+    /// it before and after: a change in between means the rows may
+    /// predate local truth, and reconciling them would roll the room
+    /// back to the moment of the read.
+    uint64_t revision = 0;
   };
 
   /// Events staged under the lock, delivered outside it. Delivery
@@ -415,9 +420,9 @@ class GolfHub final {
   /// Writes above). Asynchronous — clients may be told before the row
   /// lands. No-op without a store; always leaves writes empty.
   void EnqueueWritesLocked(Writes& writes);
-  /// Records a local write against the room, for the catch-up's
-  /// staleness check. A room this instance no longer holds is skipped.
-  void NoteRoomWriteLocked(const std::string& room_id);
+  /// Stamps the room with the next revision (see Room::revision). A
+  /// room this instance no longer holds is skipped.
+  void TouchRoomLocked(const std::string& room_id);
 
   /// Write-through staging; callers hold mu_.
   void StageLocked(Writes& writes, HubStore::Op op) const;
@@ -450,8 +455,9 @@ class GolfHub final {
   /// Notify/active catch-up for a held room: Flush+LoadRoom off mu_
   /// (PumpChat's pattern), then reconcile under the lock. Keeps the
   /// listener poll thread from holding mu_ across DB round trips on a
-  /// reconnect storm. Rows read while a local write landed are not
-  /// trusted: that catch-up re-reads under the lock instead.
+  /// reconnect storm. Rows read while the room changed locally are not
+  /// trusted: the read is retried, and a room that keeps moving is
+  /// re-read under the lock.
   void CatchUpRoom(const std::string& room_id, bool project_always);
 
   /// The wake handler's body: flush our own queue (so the read is never
@@ -462,7 +468,7 @@ class GolfHub final {
   /// Returns whether the store answered the read — false is an outage, not
   /// an absent room, and the join paths label their refusal kUnavailable on
   /// it rather than blaming the client's state.
-  bool RefreshRoomLocked(const std::string& room_id, Outbox& outbox, bool project_always = true);
+  bool RefreshRoomLocked(const std::string& room_id, Outbox& outbox, bool project_always);
   /// Returns whether local membership/games changed. When
   /// `project_always` is false, skips re-project on a no-op catch-up.
   bool ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
@@ -512,6 +518,8 @@ class GolfHub final {
   std::mutex mu_;
   pg::Listener* listener_ = nullptr;  // owned by the caller; guarded by mu_
   std::unordered_map<std::string, Room> rooms_;
+  /// Source of Room::revision stamps.
+  uint64_t room_revisions_ = 0;
   /// The lobby's worlds, one per room and the plaza; guarded by mu_.
   World world_;
 

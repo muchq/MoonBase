@@ -5,8 +5,10 @@
 #include <limits>
 #include <set>
 #include <string_view>
+#include <type_traits>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "absl/log/log.h"
@@ -503,25 +505,26 @@ void GolfHub::SeedChatCursorLocked(const std::string& room_id) {
 void GolfHub::EnqueueWritesLocked(Writes& writes) {
   if (writes.empty()) return;
   for (const HubStore::Op& op : writes) {
-    if (const auto* upsert = std::get_if<HubStore::UpsertRoom>(&op)) {
-      NoteRoomWriteLocked(upsert->room_id);
-    } else if (const auto* erase = std::get_if<HubStore::DeleteRoom>(&op)) {
-      NoteRoomWriteLocked(erase->room_id);
-    } else if (const auto* upsert = std::get_if<HubStore::UpsertMember>(&op)) {
-      NoteRoomWriteLocked(upsert->row.room_id);
-    } else if (const auto* erase = std::get_if<HubStore::DeleteMember>(&op)) {
-      NoteRoomWriteLocked(erase->room_id);
-    } else if (const auto* erase = std::get_if<HubStore::DeleteGame>(&op)) {
-      NoteRoomWriteLocked(erase->room_id);
-    }
+    std::visit(
+        [this](const auto& write) {
+          using Write = std::decay_t<decltype(write)>;
+          if constexpr (std::is_same_v<Write, HubStore::Notify>) {
+            // A wake changes no row.
+          } else if constexpr (std::is_same_v<Write, HubStore::UpsertMember>) {
+            TouchRoomLocked(write.row.room_id);
+          } else {
+            TouchRoomLocked(write.room_id);
+          }
+        },
+        op);
   }
   store_->Enqueue(std::move(writes));
   writes.clear();
 }
 
-void GolfHub::NoteRoomWriteLocked(const std::string& room_id) {
+void GolfHub::TouchRoomLocked(const std::string& room_id) {
   const auto room = rooms_.find(room_id);
-  if (room != rooms_.end()) ++room->second.local_writes;
+  if (room != rooms_.end()) room->second.revision = ++room_revisions_;
 }
 
 void GolfHub::StageLocked(Writes& writes, HubStore::Op op) const {
@@ -549,9 +552,9 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
                                            const std::optional<HostedState>& state,
                                            const std::vector<HubStore::StatsDelta>* finish) {
   const int64_t version = entry.version + 1;
-  // Counted before the outcome is known: a commit whose fate is unknown
+  // Stamped before the outcome is known: a commit whose fate is unknown
   // may still have landed.
-  NoteRoomWriteLocked(room_id);
+  TouchRoomLocked(room_id);
   // The async outbox may still hold rows this commit depends on — the
   // room behind the insert's FK, the membership behind the finish's
   // stat deltas. Drain it so the synchronous write never outruns the
@@ -631,40 +634,42 @@ void GolfHub::WakeChannel(const std::string& channel, const std::string& payload
 }
 
 void GolfHub::CatchUpRoom(const std::string& room_id, bool project_always) {
-  uint64_t writes_before_read = 0;
-  {
-    const std::lock_guard<std::mutex> lock(mu_);
-    // Only rooms we hold: a stale wake for a dropped room must not
-    // resurrect it (join is the one path that materializes rooms).
-    const auto room = rooms_.find(room_id);
-    if (room == rooms_.end()) return;
-    writes_before_read = room->second.local_writes;
-  }
-  // Off mu_: reconnect fires this once per room on the poll thread; holding
-  // the lock across Flush+LoadRoom would stall every move/chat/join for
-  // the whole burst. Same shape as PumpChat.
-  store_->Flush();
-  auto rows = store_->LoadRoom(room_id);
-  if (!rows.ok()) {
-    LOG(WARNING) << "room " << room_id << " catch-up failed: " << rows.status();
-    return;
-  }
   Outbox outbox;
-  {
+  for (int attempt = 0;; ++attempt) {
+    uint64_t revision_before_read = 0;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      // Only rooms we hold: a stale wake for a dropped room must not
+      // resurrect it (join is the one path that materializes rooms).
+      const auto room = rooms_.find(room_id);
+      if (room == rooms_.end()) return;
+      revision_before_read = room->second.revision;
+    }
+    // Off mu_: reconnect fires this once per room on the poll thread, and a
+    // sibling's every commit fires it too; holding the lock across
+    // Flush+LoadRoom would stall every move/chat/join for the whole burst.
+    // Same shape as PumpChat.
+    store_->Flush();
+    auto rows = store_->LoadRoom(room_id);
+    if (!rows.ok()) {
+      LOG(WARNING) << "room " << room_id << " catch-up failed: " << rows.status();
+      return;
+    }
     const std::lock_guard<std::mutex> lock(mu_);
     const auto room = rooms_.find(room_id);
     if (room == rooms_.end()) return;
-    if (room->second.local_writes == writes_before_read) {
+    if (room->second.revision == revision_before_read) {
       ReconcileRoomLocked(room_id, *rows, outbox, project_always);
-    } else {
-      // A local write landed during the read, so the rows may show the
-      // room as it was before it: a game this instance has since ended
-      // still live, one it has since created absent. Reconciling that
-      // would adopt the ended game back and drop the new one. Re-read
-      // under the lock, where nothing local moves; rare enough that the
-      // stall the off-lock read avoids does not matter here.
-      RefreshRoomLocked(room_id, outbox, project_always);
+      break;
     }
+    // The room moved locally during the read, so the rows may show it as
+    // it was before: a game since ended still live, one since created
+    // absent, a member since dropped still seated. Reconciling that would
+    // roll the room back. Read again; a room that keeps moving gets its
+    // read under the lock, where nothing local moves.
+    if (attempt + 1 < kCatchUpReadAttempts) continue;
+    RefreshRoomLocked(room_id, outbox, project_always);
+    break;
   }
   Deliver(outbox);
 }
@@ -687,6 +692,9 @@ bool GolfHub::RefreshRoomLocked(const std::string& room_id, Outbox& outbox, bool
 
 bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
                                   Outbox& outbox, bool project_always) {
+  // The rows are trusted as a complete snapshot of the room; that they
+  // are current is the caller's promise, kept by reading under mu_ or by
+  // CatchUpRoom's revision check.
   if (!rows.exists) {
     // Deleted by another instance; nothing local can outrank that.
     const auto room = rooms_.find(room_id);
@@ -830,6 +838,8 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
     game = room.games.erase(game);
   }
 
+  // An adoption moves the room as surely as a write does.
+  if (changed) TouchRoomLocked(room_id);
   // Notify wake contract: always re-project. Active catch-up: only when
   // something moved, so a no-op reconnect does not fill session queues.
   if (changed || project_always) {
@@ -1026,7 +1036,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
         // The room may live on another instance (#1194 step 3): one
         // synchronous read materializes it here before refusing.
         if (!rooms_.contains(join->roomId)) {
-          store_answered = RefreshRoomLocked(join->roomId, outbox);
+          store_answered = RefreshRoomLocked(join->roomId, outbox, /*project_always=*/true);
         }
         const auto room = rooms_.find(join->roomId);
         if (room != rooms_.end()) {
@@ -1518,7 +1528,7 @@ void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game
       bool store_answered = true;
       if (!room->games.contains(game_id)) {
         // Another instance may have created it since our last wake.
-        store_answered = RefreshRoomLocked(room_id, outbox);
+        store_answered = RefreshRoomLocked(room_id, outbox, /*project_always=*/true);
         room = FindRoomLocked(player_id);  // the refresh can drop us or the room
       }
       if (room == nullptr || !room->games.contains(game_id)) {
@@ -2054,7 +2064,7 @@ bool GolfHub::ReapUnlessResumedElsewhere(const std::string& player_id) {
     // this leaves — only that seat's owner could have known better).
     bool resumed_elsewhere = false;
     if (const auto room_it = player_room_.find(player_id); room_it != player_room_.end()) {
-      RefreshRoomLocked(room_it->second, outbox);
+      RefreshRoomLocked(room_it->second, outbox, /*project_always=*/true);
       if (Room* room = FindRoomLocked(player_id); room != nullptr) {
         const auto member = room->members.find(player_id);
         resumed_elsewhere = member != room->members.end() && member->second.connected;
