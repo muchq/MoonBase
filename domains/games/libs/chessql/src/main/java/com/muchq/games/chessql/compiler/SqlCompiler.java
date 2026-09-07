@@ -105,8 +105,8 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * over MCP (#1326) instead of generated.
    *
    * <p>The rejections enumerate them: "Unknown field: x" and "Unknown motif: x" append the sorted
-   * roster, built from these accessors. That is the cheap half of #1257 — near-miss suggestions
-   * ("did you mean white.elo?") remain open.
+   * roster, built from these accessors. Near-miss suggestions ("did you mean white.elo?") are not
+   * offered: the roster is short enough to scan.
    *
    * <p>Canonical spellings only. Underscore forms ({@code white_elo} for {@code white.elo}) are
    * accepted everywhere the dotted form is, mechanically, so listing both would say nothing extra.
