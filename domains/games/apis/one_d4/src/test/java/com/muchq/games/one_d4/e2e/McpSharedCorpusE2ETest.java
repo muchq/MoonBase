@@ -273,24 +273,19 @@ public class McpSharedCorpusE2ETest {
     assertThat(group.get("count").asLong()).isPositive();
   }
 
-  private static List<String> urls(JsonNode games) {
-    return java.util.stream.StreamSupport.stream(games.spliterator(), false)
-        .map(g -> g.get("gameUrl").asText())
-        .toList();
-  }
-
   /**
-   * A misspelled field is rejected with the roster, through both doors (#1257).
+   * A rejection reaches the MCP caller as one_d4 wrote it.
    *
-   * <p>The compiler's unit test proves the message names the known fields. This proves the message
-   * survives the trip: one_d4's error handler puts it in the 400 body, the client turns the 400
-   * back into an argument error, and the tool relays it on the {@code isError} channel. Any hop
-   * that swapped in its own wording — "Bad Request", a status line, a wrapped exception's class
-   * name — would leave an MCP caller with exactly the message the issue describes: a rejection with
-   * nothing to retry with.
+   * <p>The instance is #1257's: a misspelled field, whose message names the known fields. The
+   * compiler's unit test proves the wording; this proves it survives the trip. one_d4's error
+   * handler puts it in the 400 body, the client turns the 400 back into an argument error, and the
+   * tool relays it on the {@code isError} channel. Any hop that swapped in its own wording — "Bad
+   * Request", a status line, a wrapped exception's class name — would leave an MCP caller with a
+   * rejection and nothing to retry with. The roster is checked on the site side first so that the
+   * equality below cannot be satisfied by two doors agreeing on an empty message.
    */
   @Test
-  public void aMisspelledFieldIsRejectedWithTheRosterThroughBothDoors() throws Exception {
+  public void aRejectionReachesTheMcpCallerAsOneD4WroteIt() throws Exception {
     HttpResponse<String> direct =
         http.send(
             HttpRequest.newBuilder()
@@ -309,17 +304,16 @@ public class McpSharedCorpusE2ETest {
         .contains("white.elo")
         .contains("black.elo");
 
-    CallToolResult rejected = queryTool.queryChessGames("white.eloo >= 2500", null, 50, null);
-    assertThat(rejected.isError()).isTrue();
-    assertThat(rejected.content()).hasSize(1);
-    String mcpMessage =
-        JsonUtils.mapper()
-            .readTree(((TextContent) rejected.content().get(0)).text())
-            .get("error")
-            .asText();
+    String mcpMessage = errorOf(queryTool.queryChessGames("white.eloo >= 2500", null, 50, null));
     assertThat(mcpMessage)
         .as("the MCP caller has to read the same rejection the site does")
         .isEqualTo(siteMessage);
+  }
+
+  private static List<String> urls(JsonNode games) {
+    return java.util.stream.StreamSupport.stream(games.spliterator(), false)
+        .map(g -> g.get("gameUrl").asText())
+        .toList();
   }
 
   /**
@@ -335,5 +329,13 @@ public class McpSharedCorpusE2ETest {
     String text = ((TextContent) result.content().get(0)).text();
     assertThat(result.isError()).as("the tool call failed: %s", text).isFalse();
     return text;
+  }
+
+  /** The message of a rejected tool result: the flag must be set, and the body carries the text. */
+  private static String errorOf(CallToolResult result) throws Exception {
+    assertThat(result.content()).hasSize(1);
+    String text = ((TextContent) result.content().get(0)).text();
+    assertThat(result.isError()).as("the tool call succeeded: %s", text).isTrue();
+    return JsonUtils.mapper().readTree(text).get("error").asText();
   }
 }
