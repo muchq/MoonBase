@@ -33,13 +33,9 @@ const (
 const DefaultView = ViewCount
 
 // Every windowed tile — the standard Serving numbers, the counters in both
-// views, the windowed means — is computed over the range the dashboard is
-// showing, so a tile and the chart under it answer the same question. A
-// counter tile over five minutes read zero for a game played at lunch while
-// the day's chart showed the burst plainly, and the alarm tiles (a failed
-// run, a stalled cleanup) had to carry their own day-long window to stay
-// lit; with the range as the window, those are the same rule. See
-// TimeRange.Window.
+// views, the windowed means — is computed over the range the request names,
+// so a tile and the chart under it answer the same question (#1323 is what
+// a tile on a window of its own looks like). See TimeRange.Window.
 //
 // windowSlot is where a fixed-form tile query takes its window: written as
 // `[w]`, filled by QueryFor. A chart query never carries it — charts window
@@ -48,7 +44,7 @@ const windowSlot = "w"
 
 // The rate() lookback the Trends charts' rate panels use, and the floor of
 // latencyWindow. Not a tile's window: those come from the request's range.
-const defaultCounterWindow = "5m"
+const chartRateWindow = "5m"
 
 // Serving numbers exclude probe traffic (#1303): the container healthcheck's
 // steady GET /health otherwise floors every request count (~10 per 5m at
@@ -217,7 +213,7 @@ func (d customTimeseriesDef) panels(key, step string) map[string]string {
 		return map[string]string{key: d.Query}
 	}
 	return map[string]string{
-		key + "_rate":  fmt.Sprintf("sum(rate(%s[%s]))", d.Counter, defaultCounterWindow),
+		key + "_rate":  fmt.Sprintf("sum(rate(%s[%s]))", d.Counter, chartRateWindow),
 		key + "_count": fmt.Sprintf("sum(increase(%s[%s]))", d.Counter, step),
 	}
 }
@@ -523,9 +519,8 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("Cleanup", "requests_requeued", "",
 				`retention_requests_settled_total{service_name=~"one_d4(_worker)?",arm="released"}`),
 			// The two that end a request rather than moving it. Both mean a user
-			// got an answer they did not want, so both read on the alarm window:
-			// poisoned is a range that fails repeatedly, stalled is a fleet that
-			// was not running at all.
+			// got an answer they did not want: poisoned is a range that fails
+			// repeatedly, stalled is a fleet that was not running at all.
 			counter("Cleanup", "requests_poisoned", "",
 				`retention_requests_settled_total{service_name=~"one_d4(_worker)?",arm="poisoned"}`),
 			counter("Cleanup", "requests_stalled", "",
@@ -576,7 +571,7 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("URL cache", "operations", "", cacheOps("iili", "url_cache")),
 		},
 		CustomTimeseries: map[string]customTimeseriesDef{
-			"cache_hit_rate":   tsFixed(cacheHitPercent("iili", "url_cache", defaultCounterWindow)),
+			"cache_hit_rate":   tsFixed(cacheHitPercent("iili", "url_cache", chartRateWindow)),
 			"cache_operations": tsCounter(cacheOps("iili", "url_cache")),
 		},
 	},
@@ -615,7 +610,7 @@ var serviceRegistry = map[string]serviceEntry{
 		// only cost clarity for a chart that was never going to pair with
 		// anything.
 		CustomTimeseries: map[string]customTimeseriesDef{
-			"cache_hit_rate":          tsFixed(cacheHitPercent("portrait", "trace", defaultCounterWindow)),
+			"cache_hit_rate":          tsFixed(cacheHitPercent("portrait", "trace", chartRateWindow)),
 			"cache_operations":        tsCounter(cacheOps("portrait", "trace")),
 			"scene_spheres_requested": tsMean(`scene_spheres_total`, `trace_scenes_total`),
 			"scene_spheres_rendered": tsMean(`scene_spheres_total{cache_hit="false"}`,
@@ -684,8 +679,8 @@ func standardScalarQueries(service, window string) []struct {
 // new UI reading an old proxy simply finds no request_count series, the same
 // "nothing there yet" a chart already renders for any absent series.
 //
-// The count form buckets per step rather than over a fixed window like the
-// scalar tiles' 5m: a chart wants one count per point, and increase() over a
+// The count form buckets per step rather than over one fixed window: a
+// chart wants one count per point, and increase() over a
 // window wider than the gap between points would make adjacent buckets
 // overlap and double-count requests that land near a boundary. container_
 // handlers' "restarts" series already windows a range query by its own step
@@ -735,7 +730,7 @@ func standardTimeseriesQueries(service, step string) map[string]string {
 const scrapeInterval = 15 * time.Second
 
 // latencyWindow is the rate() lookback avg_duration_us and p95_duration_us
-// use in a timeseries chart: at least defaultCounterWindow (5m), widened to
+// use in a timeseries chart: at least chartRateWindow (5m), widened to
 // the chart's own step plus one scrape interval whenever that sum is larger.
 //
 // The +scrapeInterval matters even once step alone already clears 5m.
@@ -748,16 +743,16 @@ const scrapeInterval = 15 * time.Second
 // https://prometheus.io/docs/prometheus/latest/querying/basics/#range-vector-selectors.
 //
 // An unparsable step (never produced by GetTimeRangeConfig, but this has no
-// other caller to lean on that) falls back to defaultCounterWindow rather
+// other caller to lean on that) falls back to chartRateWindow rather
 // than propagating a broken duration string into three PromQL queries.
 func latencyWindow(step string) string {
 	stepDuration, err := time.ParseDuration(step)
 	if err != nil {
-		return defaultCounterWindow
+		return chartRateWindow
 	}
 	widened := stepDuration + scrapeInterval
 	if widened <= 5*time.Minute {
-		return defaultCounterWindow
+		return chartRateWindow
 	}
 	return widened.String()
 }

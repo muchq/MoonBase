@@ -48,9 +48,11 @@ func GetTimeRangeConfig(timeRange TimeRange) (duration time.Duration, step strin
 }
 
 // DefaultRange is what a scalar request that names no range gets: the
-// dashboard's own default, a day. Long enough that a game played at lunch or
-// a run that failed overnight is still on its tile by the time anyone looks.
+// dashboard's own default, a day.
 const DefaultRange = LastDay
+
+// What a request naming a range this package does not build gets told.
+const badTimeRangeDetail = "Invalid time range. Valid options: 30m, 1d, 7d"
 
 // Window is this range as the lookback its tiles read over. The range names
 // are already PromQL durations, so the window is the name itself.

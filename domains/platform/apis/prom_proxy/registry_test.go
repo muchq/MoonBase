@@ -315,7 +315,7 @@ func TestStandardQueries_GoldenStrings(t *testing.T) {
 // rather than hide behind the enumeration in TestRegistry_*.
 //
 // request_count windows by step (5m here, standing in for whatever
-// GetTimeRangeConfig picked) rather than the scalar tiles' fixed 5m — see
+// GetTimeRangeConfig picked) rather than a fixed chartRateWindow — see
 // standardTimeseriesQueries for why a fixed window would overlap and
 // double-count. request_rate is untouched: unlike the scalar block's
 // counter-derived custom tiles, this pair doesn't share a query built by
@@ -371,7 +371,7 @@ func TestStandardTimeseriesQueries_LatencyAndActiveHaveNoCountForm(t *testing.T)
 }
 
 // At 30m the step (30s) plus one scrape interval (15s) still lands well
-// under defaultCounterWindow, so avg/p95 latency keep exactly the fixed 5m
+// under chartRateWindow, so avg/p95 latency keep exactly the fixed 5m
 // window they've always had — the regression guard for the widening below
 // staying scoped to ranges wide enough to need it.
 func TestStandardTimeseriesQueries_LatencyWindowStaysFixedBelowFiveMinutes(t *testing.T) {
@@ -386,7 +386,7 @@ func TestStandardTimeseriesQueries_LatencyWindowStaysFixedBelowFiveMinutes(t *te
 	}
 }
 
-// At 1d the step is exactly defaultCounterWindow (5m) — the case that most
+// At 1d the step is exactly chartRateWindow (5m) — the case that most
 // directly exercises the left-open-range-vector fix: window == step with no
 // overlap still leaves the boundary gap latencyWindow's doc comment
 // describes, so even here the window must pad past 5m rather than land back
@@ -459,8 +459,8 @@ func TestCustomTimeseriesDef_ToggleableExpandsToRateAndCountBucketedByStep(t *te
 		"command_count": `sum(increase(golf_commands_total[30s]))`,
 	}, panels)
 
-	// The rate form is fixed at the scalar tiles' 5m regardless of step —
-	// only the count form windows per point.
+	// The rate form is fixed at chartRateWindow regardless of step — only
+	// the count form windows per point.
 	withStep := def.panels("command", "1h")
 	assert.Equal(t, panels["command_rate"], withStep["command_rate"])
 	assert.NotEqual(t, panels["command_count"], withStep["command_count"])
@@ -733,9 +733,9 @@ func TestPortraitQueriesNameRealInstruments(t *testing.T) {
 // hub is keeping up), milliseconds over the requests that spent them, tokens
 // over the milliseconds that generated them.
 func TestRegistry_WindowedMeansAreCounterRatios(t *testing.T) {
-	// The tile read over a five-minute range, which is the window a mean
-	// chart at a sub-5m step floors to — the point at which tile and chart
-	// must agree exactly.
+	// The tile read over a five-minute window, which is what a mean chart
+	// at a sub-5m step floors to — the point at which tile and chart must
+	// agree exactly.
 	scalarByLabel := func(service string) map[string]string {
 		out := map[string]string{}
 		for _, def := range serviceRegistry[service].CustomScalars {
@@ -1149,11 +1149,9 @@ func TestStandardQueries_RequestsIsWindowedNotCumulative(t *testing.T) {
 
 // Every windowed tile reads over the range the request names — the standard
 // Serving numbers, both views of every counter, and the windowed means — so
-// a tile and the chart beside it describe the same span. No tile keeps a
-// window of its own: over five minutes a game played at lunch or a run that
-// failed overnight read zero (#1323) while the day's chart showed them, and
-// the day-long windows a few tiles carried to stay lit are now what the
-// default range gives every tile.
+// a tile and the chart beside it describe the same span, and no tile keeps
+// a window of its own (#1323 is the tile that did). AllQueries, which the
+// audits read, is the same tiles over the default range.
 func TestRegistry_EveryWindowedTileReadsOverTheRange(t *testing.T) {
 	brackets := regexp.MustCompile(`\[[^\]]*\]`)
 	for _, name := range serviceOrder {
@@ -1170,6 +1168,28 @@ func TestRegistry_EveryWindowedTileReadsOverTheRange(t *testing.T) {
 				}
 				if def.Toggleable() {
 					assert.Contains(t, query, "[7d]", "%s/%s is a counter and must be windowed", name, def.Label)
+					assert.Contains(t, def.AllQueries()[0], "["+DefaultRange.Window()+"]", "%s/%s", name, def.Label)
+				}
+			}
+		}
+	}
+}
+
+// A chart query windows by its own step or by chartRateWindow, never by the
+// request: one that shipped with the tiles' slot unfilled would be invalid
+// PromQL and draw nothing, and nothing but this would notice.
+func TestRegistry_ChartsCarryNoWindowSlot(t *testing.T) {
+	duration := regexp.MustCompile(`^\[[0-9]+[smhdwy]([0-9]+[smhdwy])*\]$`)
+	brackets := regexp.MustCompile(`\[[^\]]*\]`)
+	for _, name := range serviceOrder {
+		for _, step := range []string{"30s", "1h"} {
+			charts := expandCustomTimeseries(serviceRegistry[name].CustomTimeseries, step)
+			for key, query := range standardTimeseriesQueries(name, step) {
+				charts[key] = query
+			}
+			for key, query := range charts {
+				for _, window := range brackets.FindAllString(query, -1) {
+					assert.Regexp(t, duration, window, "%s/%s at step %s: %s", name, key, step, query)
 				}
 			}
 		}
