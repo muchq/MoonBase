@@ -47,6 +47,15 @@ func GetTimeRangeConfig(timeRange TimeRange) (duration time.Duration, step strin
 	}
 }
 
+// DefaultRange is what a scalar request that names no range gets: the
+// dashboard's own default, a day. Long enough that a game played at lunch or
+// a run that failed overnight is still on its tile by the time anyone looks.
+const DefaultRange = LastDay
+
+// Window is this range as the lookback its tiles read over. The range names
+// are already PromQL durations, so the window is the name itself.
+func (tr TimeRange) Window() string { return string(tr) }
+
 // ValidTimeRange checks if a time range string is valid
 func ValidTimeRange(tr string) bool {
 	switch TimeRange(tr) {
@@ -157,8 +166,8 @@ type HostMetricsResponse struct {
 type StandardMetrics struct {
 	RequestsTotal     float64 `json:"requests_total"`
 	RatePerSec        float64 `json:"rate_per_sec"`
-	SuccessCount5m    float64 `json:"success_count_5m"`
-	FailureCount5m    float64 `json:"failure_count_5m"`
+	SuccessCount      float64 `json:"success_count"`
+	FailureCount      float64 `json:"failure_count"`
 	ErrorRatePercent  float64 `json:"error_rate_percent"`
 	AvgDurationMicros float64 `json:"avg_duration_microseconds"`
 	P95DurationMicros float64 `json:"p95_duration_microseconds"`
@@ -190,7 +199,10 @@ type ServiceMetricsResponse struct {
 	// implicit so a client that sent no ?view= still knows what it is looking
 	// at, and so the default can move without a silent reinterpretation of
 	// every counter tile on the page.
-	View   string              `json:"view"`
+	View string `json:"view"`
+	// The window every windowed tile was computed over, as the PromQL
+	// duration the queries carried. Echoed for the same reason View is.
+	Window string              `json:"window"`
 	Custom []CustomMetricGroup `json:"custom"`
 }
 

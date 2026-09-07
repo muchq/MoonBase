@@ -102,6 +102,18 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 		}
 		view = MetricView(raw)
 	}
+	// The range the tiles read over, the same one the timeseries route takes
+	// in its path, so the dashboard asks both for the window it is showing.
+	timeRange := DefaultRange
+	if raw := r.URL.Query().Get("range"); raw != "" {
+		if !ValidTimeRange(raw) {
+			problem := mucks.NewBadRequest("Invalid time range. Valid options: 30m, 1d, 7d")
+			mucks.JsonError(w, problem)
+			return
+		}
+		timeRange = TimeRange(raw)
+	}
+	window := timeRange.Window()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
@@ -110,10 +122,11 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 		Timestamp: time.Now().UTC(),
 		Service:   name,
 		View:      string(view),
+		Window:    window,
 		Custom:    []CustomMetricGroup{},
 	}
 
-	for _, q := range standardScalarQueries(name) {
+	for _, q := range standardScalarQueries(name, window) {
 		resp, err := h.promClient.Query(ctx, q.Query)
 		if err == nil && len(resp.Data.Result) > 0 {
 			if val, err := extractFloatValue(&resp.Data.Result[0]); err == nil {
@@ -127,7 +140,7 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 	groupIndex := map[string]int{}
 	for _, def := range entry.CustomScalars {
 		value := 0.0
-		resp, err := h.promClient.Query(ctx, def.QueryFor(view))
+		resp, err := h.promClient.Query(ctx, def.QueryFor(view, window))
 		if err == nil && len(resp.Data.Result) > 0 {
 			if val, err := extractFloatValue(&resp.Data.Result[0]); err == nil {
 				value = val

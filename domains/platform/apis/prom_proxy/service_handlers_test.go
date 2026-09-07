@@ -78,7 +78,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	// or custom descriptor fails loudly. One custom query is deliberately
 	// omitted from the mock — its descriptor must still appear, zeroed.
 	responses := map[string]*QueryResponse{}
-	standard := standardScalarQueries("games_hub")
+	standard := standardScalarQueries("games_hub", DefaultRange.Window())
 	for i, q := range standard {
 		responses[q.Query] = scalarResponse(fmt.Sprintf("%d", 100+i))
 	}
@@ -88,7 +88,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 		if def == omitted {
 			continue
 		}
-		responses[def.QueryFor(DefaultView)] = scalarResponse(fmt.Sprintf("%d", 200+i))
+		responses[def.QueryFor(DefaultView, DefaultRange.Window())] = scalarResponse(fmt.Sprintf("%d", 200+i))
 	}
 
 	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryResponses: responses}}
@@ -109,16 +109,18 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	// Standard fields in declaration order of standardScalarQueries.
 	assert.Equal(t, 100.0, response.Standard.RequestsTotal)
 	assert.Equal(t, 101.0, response.Standard.RatePerSec)
-	assert.Equal(t, 102.0, response.Standard.SuccessCount5m)
-	assert.Equal(t, 103.0, response.Standard.FailureCount5m)
+	assert.Equal(t, 102.0, response.Standard.SuccessCount)
+	assert.Equal(t, 103.0, response.Standard.FailureCount)
 	assert.Equal(t, 104.0, response.Standard.ErrorRatePercent)
 	assert.Equal(t, 105.0, response.Standard.AvgDurationMicros)
 	assert.Equal(t, 106.0, response.Standard.P95DurationMicros)
 	assert.Equal(t, 107.0, response.Standard.ActiveRequests)
 
 	// An unasked-for view is the default, and it is stated rather than left
-	// for the client to assume.
+	// for the client to assume. The range likewise: a day, echoed as the
+	// window every tile above was read over.
 	assert.Equal(t, string(DefaultView), response.View)
+	assert.Equal(t, "1d", response.Window)
 
 	// Custom groups keep registry order and every descriptor is present.
 	require.Len(t, response.Custom, 7)
@@ -174,7 +176,7 @@ func TestMetricsHandler_GetServiceMetrics_NoCustomServiceKeepsEmptyArray(t *test
 
 	mockClient := &mockPrometheusClient{
 		queryResponses: map[string]*QueryResponse{
-			`sum(rate(http_server_requests_total{service_name="fixture_svc",route!="/health"}[5m]))`: scalarResponse("2.5"),
+			`sum(rate(http_server_requests_total{service_name="fixture_svc",route!="/health"}[1d]))`: scalarResponse("2.5"),
 		},
 	}
 
@@ -222,6 +224,55 @@ func TestMetricsHandler_GetServiceMetrics_PrometheusError(t *testing.T) {
 			assert.Equal(t, 0.0, metric.Value, metric.Label)
 		}
 	}
+}
+
+// ?range= is the window every tile reads over, standard and custom alike,
+// and the response says which one it used.
+func TestMetricsHandler_GetServiceMetrics_RangeWindowsEveryTile(t *testing.T) {
+	responses := map[string]*QueryResponse{}
+	for i, q := range standardScalarQueries("games_hub", "7d") {
+		responses[q.Query] = scalarResponse(fmt.Sprintf("%d", 100+i))
+	}
+	entry := serviceRegistry["games_hub"]
+	for i, def := range entry.CustomScalars {
+		responses[def.QueryFor(ViewRate, "7d")] = scalarResponse(fmt.Sprintf("%d", 200+i))
+	}
+	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryResponses: responses}}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub?view=rate&range=7d", nil)
+	req.SetPathValue("name", "games_hub")
+	w := httptest.NewRecorder()
+	handler.GetServiceMetrics(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var response ServiceMetricsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(t, "7d", response.Window)
+	assert.Equal(t, 100.0, response.Standard.RequestsTotal)
+	assert.Equal(t, 107.0, response.Standard.ActiveRequests)
+	// Every custom tile answered from a 7d query: none fell back to zero.
+	i := 0
+	for _, group := range response.Custom {
+		for _, metric := range group.Metrics {
+			assert.Equal(t, float64(200+i), metric.Value, metric.Label)
+			i++
+		}
+	}
+	assert.Equal(t, len(entry.CustomScalars), i)
+}
+
+func TestMetricsHandler_GetServiceMetrics_InvalidRange(t *testing.T) {
+	handler := &MetricsHandler{promClient: &mockPrometheusClient{}}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub?range=2h", nil)
+	req.SetPathValue("name", "games_hub")
+	w := httptest.NewRecorder()
+	handler.GetServiceMetrics(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	var response map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Contains(t, response["detail"], "Invalid time range")
 }
 
 func TestMetricsHandler_GetServiceMetrics_UnknownService(t *testing.T) {
@@ -590,7 +641,7 @@ func TestMetricsHandler_GetServiceMetrics_RateViewSelectsTheRateForm(t *testing.
 	entry := serviceRegistry["games_hub"]
 	responses := map[string]*QueryResponse{}
 	for i, def := range entry.CustomScalars {
-		responses[def.QueryFor(ViewRate)] = scalarResponse(fmt.Sprintf("%d", 300+i))
+		responses[def.QueryFor(ViewRate, DefaultRange.Window())] = scalarResponse(fmt.Sprintf("%d", 300+i))
 	}
 
 	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryResponses: responses}}
@@ -623,8 +674,8 @@ func TestMetricsHandler_GetServiceMetrics_RateViewSelectsTheRateForm(t *testing.
 	// the windowed mean is already a ratio of two rates.
 	assert.Equal(t, "sessions", byLabel["hub_active"].Unit)
 	assert.False(t, byLabel["hub_active"].Toggleable)
-	assert.Equal(t, "rows", byLabel["catch_up_rows_avg_5m"].Unit)
-	assert.False(t, byLabel["catch_up_rows_avg_5m"].Toggleable)
+	assert.Equal(t, "rows", byLabel["catch_up_rows_avg"].Unit)
+	assert.False(t, byLabel["catch_up_rows_avg"].Toggleable)
 }
 
 func TestMetricsHandler_GetServiceMetrics_InvalidViewIsRejected(t *testing.T) {
@@ -659,7 +710,7 @@ func TestMetricsHandler_GetServiceMetrics_JsonKeysAreStable(t *testing.T) {
 	entry := serviceRegistry["games_hub"]
 	responses := map[string]*QueryResponse{}
 	for i, def := range entry.CustomScalars {
-		responses[def.QueryFor(DefaultView)] = scalarResponse(fmt.Sprintf("%d", 400+i))
+		responses[def.QueryFor(DefaultView, DefaultRange.Window())] = scalarResponse(fmt.Sprintf("%d", 400+i))
 	}
 
 	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryResponses: responses}}

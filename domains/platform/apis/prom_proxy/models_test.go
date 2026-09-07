@@ -1,6 +1,7 @@
 package prom_proxy
 
 import (
+	"regexp"
 	"testing"
 	"time"
 
@@ -47,6 +48,17 @@ func TestGetTimeRangeConfig(t *testing.T) {
 			assert.Equal(t, tt.expectedStep, step)
 		})
 	}
+}
+
+// The window a range's tiles read over is the range's own name: each one is
+// a PromQL duration as written, and the default is the dashboard's, a day.
+func TestTimeRangeWindow(t *testing.T) {
+	promDuration := regexp.MustCompile(`^[0-9]+[smhdwy]$`)
+	for _, tr := range []TimeRange{Last30Minutes, LastDay, LastWeek} {
+		assert.Equal(t, string(tr), tr.Window())
+		assert.Regexp(t, promDuration, tr.Window())
+	}
+	assert.Equal(t, "1d", DefaultRange.Window())
 }
 
 func TestValidTimeRange(t *testing.T) {

@@ -2,6 +2,7 @@ package prom_proxy
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -27,11 +28,26 @@ const (
 )
 
 // DefaultView is what a request that names no view gets. Count, because most
-// of these tiles read as counts today and "N in the last five minutes" is the
-// more direct answer for an outcome counter; rate is one parameter away.
+// of these tiles read as counts today and "N in the window" is the more
+// direct answer for an outcome counter; rate is one parameter away.
 const DefaultView = ViewCount
 
-// The window both views are computed over, unless a descriptor overrides it.
+// Every windowed tile — the standard Serving numbers, the counters in both
+// views, the windowed means — is computed over the range the dashboard is
+// showing, so a tile and the chart under it answer the same question. A
+// counter tile over five minutes read zero for a game played at lunch while
+// the day's chart showed the burst plainly, and the alarm tiles (a failed
+// run, a stalled cleanup) had to carry their own day-long window to stay
+// lit; with the range as the window, those are the same rule. See
+// TimeRange.Window.
+//
+// windowSlot is where a fixed-form tile query takes its window: written as
+// `[w]`, filled by QueryFor. A chart query never carries it — charts window
+// by their own step, see customTimeseriesDef.panels.
+const windowSlot = "w"
+
+// The rate() lookback the Trends charts' rate panels use, and the floor of
+// latencyWindow. Not a tile's window: those come from the request's range.
 const defaultCounterWindow = "5m"
 
 // Serving numbers exclude probe traffic (#1303): the container healthcheck's
@@ -60,9 +76,9 @@ const probeFilter = `,route!="/health"`
 // probesTile is the standard Probes tile for a service with a compose
 // healthcheck (#1307): the /health traffic excluded from every Serving
 // number by probeFilter, shown as its own count so the subtraction is a
-// visible fact rather than a floor under every chart. ~10/5m while the 30s
-// probe is healthy; zero means the probe is failing, or the service's route
-// label hasn't deployed yet. The route literal counts everything on the
+// visible fact rather than a floor under every chart. Two a minute while
+// the 30s probe is healthy; zero means the probe is failing, or the
+// service's route label hasn't deployed yet. The route literal counts everything on the
 // health path — Caddy exposes /health publicly, so scanner traffic to it
 // also lands here rather than in Serving, and can in principle hold this
 // tile above zero while the container's own probe is dead. (Wrong-method
@@ -72,31 +88,6 @@ func probesTile(service string) customScalarDef {
 	return counter("Probes", "health_checks", "",
 		fmt.Sprintf(`http_server_requests_total{service_name=%q,route="/health"}`, service))
 }
-
-// The window for counters that are alarms rather than volumes.
-//
-// Some of these tiles answer "has this happened at all" — the comment on
-// runs_interrupted below says as much: anything above zero means a worker was
-// stuck long enough to be given up on. Over five minutes an interruption from
-// an hour ago reads zero and the alarm silently disarms, which is the failure
-// mode the tile exists to prevent. A day is long enough that a human looking
-// at the dashboard after the fact still sees it.
-const alarmWindow = "24h"
-
-// The window for counters over work that arrives in bursts rather than as a
-// steady stream: indexing runs, and the months and archive fetches inside
-// them. All of it is triggered by a person asking for a player, so between
-// asks the true rate is zero and a 5m window reads zero — which is the honest
-// answer to "how busy is it right now?" and the wrong answer to the question
-// anyone actually opens this panel with, "did the thing I ran work?".
-//
-// #1323: a thousand-game run at 05:09 left a panel of zeros by breakfast,
-// with nothing to distinguish it from a service that had never indexed
-// anything. Same length as alarmWindow, for the same reason — the interesting
-// events are sparse — but named apart because these are volumes, not alarms,
-// and a future change to how long a failure stays on screen should not
-// silently retune how far back the counts reach.
-const burstWindow = "24h"
 
 // ValidView reports whether a client-supplied view is one this package builds
 // queries for. Callers must check before passing the value on: a view string
@@ -117,7 +108,8 @@ type customScalarDef struct {
 	Unit  string
 
 	// A tile with one fixed form — a gauge, a percentage, a windowed mean —
-	// carries its whole expression here and ignores the view.
+	// carries its whole expression here and ignores the view. A windowed
+	// one writes its window as `[w]` (windowSlot), filled per request.
 	Query string
 
 	// A counter-derived tile sets this instead: the bare selector both views
@@ -125,24 +117,15 @@ type customScalarDef struct {
 	// proxy wraps it rather than the descriptor spelling out two expressions,
 	// so the two forms cannot drift into describing different series.
 	Counter string
-
-	// Overrides defaultCounterWindow for this tile. Ignored unless Counter is
-	// set.
-	Window string
 }
 
-// counter declares a toggleable tile over defaultCounterWindow.
+// counter declares a toggleable tile.
 //
 // The label deliberately carries no _total or _per_sec suffix: the tile shows
 // whichever form was asked for, so a suffix naming one of them is wrong half
 // the time. The unit says which one is on screen.
 func counter(group, label, unit, selector string) customScalarDef {
 	return customScalarDef{Group: group, Label: label, Unit: unit, Counter: selector}
-}
-
-// counterOver is counter with an explicit window.
-func counterOver(group, label, unit, selector, window string) customScalarDef {
-	return customScalarDef{Group: group, Label: label, Unit: unit, Counter: selector, Window: window}
 }
 
 // scalar declares a tile with a single fixed form and no toggle.
@@ -153,37 +136,33 @@ func scalar(group, label, unit, query string) customScalarDef {
 // Toggleable reports whether this tile has both a count and a rate form.
 func (d customScalarDef) Toggleable() bool { return d.Counter != "" }
 
-func (d customScalarDef) window() string {
-	if d.Window != "" {
-		return d.Window
-	}
-	return defaultCounterWindow
-}
-
-// QueryFor builds the expression for one view. A non-toggleable tile answers
-// with its fixed query whatever it is asked for.
-func (d customScalarDef) QueryFor(view MetricView) string {
+// QueryFor builds the expression for one view over one window — the
+// request's range, as a PromQL duration. A non-toggleable tile answers with
+// its fixed query whatever view it is asked for, its slot filled.
+func (d customScalarDef) QueryFor(view MetricView, window string) string {
 	if !d.Toggleable() {
-		return d.Query
+		return strings.ReplaceAll(d.Query, "["+windowSlot+"]", "["+window+"]")
 	}
 	fn := "increase"
 	if view == ViewRate {
 		fn = "rate"
 	}
-	return fmt.Sprintf("sum(%s(%s[%s]))", fn, d.Counter, d.window())
+	return fmt.Sprintf("sum(%s(%s[%s]))", fn, d.Counter, window)
 }
 
-// AllQueries is every expression this descriptor can produce.
+// AllQueries is every expression this descriptor can produce, over the
+// default range's window.
 //
 // Exists for the registry audits: they scan queries for unscoped selectors and
 // dead metric names, and a counter tile's Query field is empty, so scanning
 // that field alone would let every toggleable tile through unexamined. The
 // selectors those tiles are built from are exactly the ones worth checking.
 func (d customScalarDef) AllQueries() []string {
+	w := DefaultRange.Window()
 	if !d.Toggleable() {
-		return []string{d.Query}
+		return []string{d.QueryFor(ViewCount, w)}
 	}
-	return []string{d.QueryFor(ViewCount), d.QueryFor(ViewRate)}
+	return []string{d.QueryFor(ViewCount, w), d.QueryFor(ViewRate, w)}
 }
 
 // UnitFor is the unit as displayed in that view. A rate is the tile's own unit
@@ -294,10 +273,11 @@ type serviceEntry struct {
 // aura::Cache emitters share the standard cache family (#1209), selected on
 // both labels: which service, and which cache within it. Parameterized —
 // the prom_proxy half of #1209 — now that iili's url_cache is the second
-// emitter (#1359).
-func cacheHitPercent(service, cache string) string {
-	hit := fmt.Sprintf(`rate(cache_hits_total{service_name=%q,cache=%q}[5m])`, service, cache)
-	miss := fmt.Sprintf(`rate(cache_misses_total{service_name=%q,cache=%q}[5m])`, service, cache)
+// emitter (#1359). The window is windowSlot for the tile and a fixed
+// lookback for the chart.
+func cacheHitPercent(service, cache, window string) string {
+	hit := fmt.Sprintf(`rate(cache_hits_total{service_name=%q,cache=%q}[%s])`, service, cache, window)
+	miss := fmt.Sprintf(`rate(cache_misses_total{service_name=%q,cache=%q}[%s])`, service, cache, window)
 	return hit + `/(` + hit + `+` + miss + `)*100`
 }
 
@@ -323,14 +303,14 @@ func cacheOps(service, cache string) string {
 // declared at zero by the tracer, so the first render after a deploy moves
 // every one of these.
 const (
-	portraitSpheresRequested = `sum(rate(scene_spheres_total[1h]))/` +
-		`sum(rate(trace_scenes_total[1h]))`
-	portraitSpheresRendered = `sum(rate(scene_spheres_total{cache_hit="false"}[1h]))/` +
-		`sum(rate(trace_scenes_total{cache_hit="false"}[1h]))`
-	portraitLightsRequested = `sum(rate(scene_lights_total[1h]))/` +
-		`sum(rate(trace_scenes_total[1h]))`
-	portraitLightsRendered = `sum(rate(scene_lights_total{cache_hit="false"}[1h]))/` +
-		`sum(rate(trace_scenes_total{cache_hit="false"}[1h]))`
+	portraitSpheresRequested = `sum(rate(scene_spheres_total[w]))/` +
+		`sum(rate(trace_scenes_total[w]))`
+	portraitSpheresRendered = `sum(rate(scene_spheres_total{cache_hit="false"}[w]))/` +
+		`sum(rate(trace_scenes_total{cache_hit="false"}[w]))`
+	portraitLightsRequested = `sum(rate(scene_lights_total[w]))/` +
+		`sum(rate(trace_scenes_total[w]))`
+	portraitLightsRendered = `sum(rate(scene_lights_total{cache_hit="false"}[w]))/` +
+		`sum(rate(trace_scenes_total{cache_hit="false"}[w]))`
 )
 
 // Catalog order doubles as the UI's tab order.
@@ -367,10 +347,10 @@ var serviceRegistry = map[string]serviceEntry{
 			// keeping up. A mean rather than a count, so it has no rate form.
 			counter("Chat", "messages", "", `chat_appends_total{result="stored"}`),
 			counter("Chat", "delivered_rows", "rows", `chat_rows_delivered_total`),
-			scalar("Chat", "catch_up_rows_avg_5m", "rows",
-				`sum(rate(chat_rows_delivered_total[5m]))/sum(rate(chat_catch_up_drains_total[5m]))`),
+			scalar("Chat", "catch_up_rows_avg", "rows",
+				`sum(rate(chat_rows_delivered_total[w]))/sum(rate(chat_catch_up_drains_total[w]))`),
 			counter("Chat", "history_replays", "", `chat_history_replays_total`),
-			counterOver("Chat", "failures", "", `chat_failures_total`, alarmWindow),
+			counter("Chat", "failures", "", `chat_failures_total`),
 			// Each tenant's envelope on the one stream (#1490): golf, castle
 			// (#77), and the lobby's world. Series and labels carry the game
 			// prefix because a label is a tile's identity across the whole
@@ -430,9 +410,9 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("Requests by endpoint", "chat", "", `microgpt_requests_total{endpoint="chat"}`),
 			counter("Inference", "tokens_generated", "tokens", `microgpt_tokens_generated_total`),
 			scalar("Inference", "avg_duration_ms", "ms",
-				`sum(rate(microgpt_inference_ms_total[5m]))/sum(rate(microgpt_requests_total[5m]))`),
-			scalar("Inference", "tokens_per_sec_5m", "tok/s",
-				`sum(rate(microgpt_tokens_generated_total[5m]))/sum(rate(microgpt_inference_ms_total[5m]))*1000`),
+				`sum(rate(microgpt_inference_ms_total[w]))/sum(rate(microgpt_requests_total[w]))`),
+			scalar("Inference", "tokens_per_sec", "tok/s",
+				`sum(rate(microgpt_tokens_generated_total[w]))/sum(rate(microgpt_inference_ms_total[w]))*1000`),
 			counter("Inference", "conversations", "", `microgpt_conversations_total`),
 		},
 		// "tokens" replaces the old "tokens_per_second" key: that name baked
@@ -473,28 +453,27 @@ var serviceRegistry = map[string]serviceEntry{
 			// half matches nothing today; kept for the day it does.
 			counter("Queries", "served", "",
 				`one_d4_queries_total{service_name=~"one_d4(_worker)?",outcome="ok"}`),
-			counterOver("Queries", "failed", "",
-				`one_d4_queries_total{service_name=~"one_d4(_worker)?",outcome="failed"}`, alarmWindow),
-			counterOver("Indexing", "games_indexed", "games",
-				`games_indexed_total{service_name=~"one_d4(_worker)?"}`, burstWindow),
-			counterOver("Indexing", "runs_completed", "",
-				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="completed"}`, burstWindow),
-			// The three outcomes below are alarms rather than volumes. They
-			// share burstWindow's length by coincidence of both being sparse,
-			// not by meaning: a failed run an hour ago is still the thing an
-			// operator opened this page to find.
-			counterOver("Indexing", "runs_failed", "",
-				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="failed"}`, alarmWindow),
+			counter("Queries", "failed", "",
+				`one_d4_queries_total{service_name=~"one_d4(_worker)?",outcome="failed"}`),
+			counter("Indexing", "games_indexed", "games",
+				`games_indexed_total{service_name=~"one_d4(_worker)?"}`),
+			counter("Indexing", "runs_completed", "",
+				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="completed"}`),
+			// The three outcomes below are alarms rather than volumes: a
+			// failed run an hour ago is still the thing an operator opened
+			// this page to find, which the default day-long range keeps lit.
+			counter("Indexing", "runs_failed", "",
+				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="failed"}`),
 			// A wedge cut loose by the MAX_RUN ceiling lands here (#1282). Anything
 			// above zero means a worker was stuck long enough to be given up on.
-			counterOver("Indexing", "runs_interrupted", "",
-				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="interrupted"}`, alarmWindow),
+			counter("Indexing", "runs_interrupted", "",
+				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="interrupted"}`),
 			// Emitted since the ceiling landed, and listed so the four outcomes add up to
 			// index_runs_total. A range changing hands mid-run is ordinary; a rising count
-			// beside a flat interrupted count is contention, not a wedge — which only
-			// reads that way if the two share a window, hence the same one.
-			counterOver("Indexing", "runs_lease_lost", "",
-				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="lease_lost"}`, alarmWindow),
+			// beside a flat interrupted count is contention, not a wedge — which
+			// reads that way because the two share the page's window.
+			counter("Indexing", "runs_lease_lost", "",
+				`index_runs_total{service_name=~"one_d4(_worker)?",outcome="lease_lost"}`),
 			// Windowed means as counter ratios (#1452): the worker records
 			// cumulative run microseconds 1:1 beside the run counter, and its
 			// games land beside the months that measured them, so each mean
@@ -502,21 +481,21 @@ var serviceRegistry = map[string]serviceEntry{
 			// Completed runs only: an interrupted run is one that sat at the
 			// MAX_RUN ceiling — pooling those in makes the average spike at
 			// exactly the moment someone is reading it to size a real run.
-			scalar("Indexing", "avg_run_seconds_1h", "s",
-				`sum(rate(index_run_duration_micros_total{service_name=~"one_d4(_worker)?",outcome="completed"}[1h]))/sum(rate(index_runs_total{service_name=~"one_d4(_worker)?",outcome="completed"}[1h]))/1000000`),
+			scalar("Indexing", "avg_run_seconds", "s",
+				`sum(rate(index_run_duration_micros_total{service_name=~"one_d4(_worker)?",outcome="completed"}[w]))/sum(rate(index_runs_total{service_name=~"one_d4(_worker)?",outcome="completed"}[w]))/1000000`),
 			// The measured results only — an empty or cached month feeds the
 			// numerator nothing, so counting it in the denominator would make
 			// a decade-long backfill read as tiny archives.
-			scalar("Indexing", "avg_games_per_month_1h", "games",
-				`sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?"}[1h]))/sum(rate(index_months_total{service_name=~"one_d4(_worker)?",result=~"indexed|degraded"}[1h]))`),
-			counterOver("Indexing", "empty_months", "",
-				`index_months_total{service_name=~"one_d4(_worker)?",result="empty"}`, burstWindow),
-			counterOver("Indexing", "cached_months", "",
-				`index_months_total{service_name=~"one_d4(_worker)?",result="cached"}`, burstWindow),
-			counterOver("Indexing", "archive_fetches", "",
-				`chess_com_archive_fetches_total{service_name=~"one_d4(_worker)?"}`, burstWindow),
-			counterOver("Motifs", "occurrences", "",
-				`motif_occurrences_total{service_name=~"one_d4(_worker)?"}`, burstWindow),
+			scalar("Indexing", "avg_games_per_month", "games",
+				`sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?"}[w]))/sum(rate(index_months_total{service_name=~"one_d4(_worker)?",result=~"indexed|degraded"}[w]))`),
+			counter("Indexing", "empty_months", "",
+				`index_months_total{service_name=~"one_d4(_worker)?",result="empty"}`),
+			counter("Indexing", "cached_months", "",
+				`index_months_total{service_name=~"one_d4(_worker)?",result="cached"}`),
+			counter("Indexing", "archive_fetches", "",
+				`chess_com_archive_fetches_total{service_name=~"one_d4(_worker)?"}`),
+			counter("Motifs", "occurrences", "",
+				`motif_occurrences_total{service_name=~"one_d4(_worker)?"}`),
 			// No motifs-per-game tile. The two counters are recorded on opposite sides of
 			// the durability boundary — motifs per game inside the drain loop, games only
 			// after the month's flush and period write succeed — so an interrupted or
@@ -530,27 +509,27 @@ var serviceRegistry = map[string]serviceEntry{
 			// indistinguishable from here. sweeps is the tile that separates
 			// them: it counts every pass, so a sweep that dies shows up as this
 			// falling to zero while the others merely stay there.
-			counterOver("Cleanup", "sweeps", "",
-				`retention_sweeps_total{service_name=~"one_d4(_worker)?",outcome="ok"}`, burstWindow),
+			counter("Cleanup", "sweeps", "",
+				`retention_sweeps_total{service_name=~"one_d4(_worker)?",outcome="ok"}`),
 			// An alarm, not a volume: a sweep that cannot reach the database
 			// leaves rows uncollected and requests unsettled, and neither is
 			// visible in any other tile.
-			counterOver("Cleanup", "sweeps_failed", "",
-				`retention_sweeps_total{service_name=~"one_d4(_worker)?",outcome="error"}`, alarmWindow),
-			counterOver("Cleanup", "rows_deleted", "rows",
-				`retention_rows_deleted_total{service_name=~"one_d4(_worker)?"}`, burstWindow),
+			counter("Cleanup", "sweeps_failed", "",
+				`retention_sweeps_total{service_name=~"one_d4(_worker)?",outcome="error"}`),
+			counter("Cleanup", "rows_deleted", "rows",
+				`retention_rows_deleted_total{service_name=~"one_d4(_worker)?"}`),
 			// Requeued work, which is ordinary — a worker died and another took
 			// its range.
-			counterOver("Cleanup", "requests_requeued", "",
-				`retention_requests_settled_total{service_name=~"one_d4(_worker)?",arm="released"}`, burstWindow),
+			counter("Cleanup", "requests_requeued", "",
+				`retention_requests_settled_total{service_name=~"one_d4(_worker)?",arm="released"}`),
 			// The two that end a request rather than moving it. Both mean a user
 			// got an answer they did not want, so both read on the alarm window:
 			// poisoned is a range that fails repeatedly, stalled is a fleet that
 			// was not running at all.
-			counterOver("Cleanup", "requests_poisoned", "",
-				`retention_requests_settled_total{service_name=~"one_d4(_worker)?",arm="poisoned"}`, alarmWindow),
-			counterOver("Cleanup", "requests_stalled", "",
-				`retention_requests_settled_total{service_name=~"one_d4(_worker)?",arm="stalled"}`, alarmWindow),
+			counter("Cleanup", "requests_poisoned", "",
+				`retention_requests_settled_total{service_name=~"one_d4(_worker)?",arm="poisoned"}`),
+			counter("Cleanup", "requests_stalled", "",
+				`retention_requests_settled_total{service_name=~"one_d4(_worker)?",arm="stalled"}`),
 		},
 		CustomTimeseries: map[string]customTimeseriesDef{
 			"games_indexed":  tsCounter(`games_indexed_total{service_name=~"one_d4(_worker)?"}`),
@@ -593,11 +572,11 @@ var serviceRegistry = map[string]serviceEntry{
 	"iili": {
 		CustomScalars: []customScalarDef{
 			probesTile("iili"),
-			scalar("URL cache", "hit_rate_percent", "%", cacheHitPercent("iili", "url_cache")),
+			scalar("URL cache", "hit_rate_percent", "%", cacheHitPercent("iili", "url_cache", windowSlot)),
 			counter("URL cache", "operations", "", cacheOps("iili", "url_cache")),
 		},
 		CustomTimeseries: map[string]customTimeseriesDef{
-			"cache_hit_rate":   tsFixed(cacheHitPercent("iili", "url_cache")),
+			"cache_hit_rate":   tsFixed(cacheHitPercent("iili", "url_cache", defaultCounterWindow)),
 			"cache_operations": tsCounter(cacheOps("iili", "url_cache")),
 		},
 	},
@@ -618,16 +597,16 @@ var serviceRegistry = map[string]serviceEntry{
 	"portrait": {
 		CustomScalars: []customScalarDef{
 			probesTile("portrait"),
-			scalar("Render cache", "hit_rate_percent", "%", cacheHitPercent("portrait", "trace")),
+			scalar("Render cache", "hit_rate_percent", "%", cacheHitPercent("portrait", "trace", windowSlot)),
 			counter("Render cache", "operations", "", cacheOps("portrait", "trace")),
 			// Windowed means as counter ratios (#1452): per-scene sums over
 			// the trace_scenes denominator, all declared at zero by the
 			// tracer. Requested is every accepted request; rendered is the
 			// cache misses the tracer actually drew.
-			scalar("Scene complexity", "avg_spheres_requested_1h", "spheres", portraitSpheresRequested),
-			scalar("Scene complexity", "avg_spheres_rendered_1h", "spheres", portraitSpheresRendered),
-			scalar("Scene complexity", "avg_lights_requested_1h", "lights", portraitLightsRequested),
-			scalar("Scene complexity", "avg_lights_rendered_1h", "lights", portraitLightsRendered),
+			scalar("Scene complexity", "avg_spheres_requested", "spheres", portraitSpheresRequested),
+			scalar("Scene complexity", "avg_spheres_rendered", "spheres", portraitSpheresRendered),
+			scalar("Scene complexity", "avg_lights_requested", "lights", portraitLightsRequested),
+			scalar("Scene complexity", "avg_lights_rendered", "lights", portraitLightsRendered),
 		},
 		// cache_hit_rate keeps its _rate-shaped name despite being fixed-form:
 		// it is a ratio (hits over hits+misses), not a counter-derived rate,
@@ -636,7 +615,7 @@ var serviceRegistry = map[string]serviceEntry{
 		// only cost clarity for a chart that was never going to pair with
 		// anything.
 		CustomTimeseries: map[string]customTimeseriesDef{
-			"cache_hit_rate":          tsFixed(cacheHitPercent("portrait", "trace")),
+			"cache_hit_rate":          tsFixed(cacheHitPercent("portrait", "trace", defaultCounterWindow)),
 			"cache_operations":        tsCounter(cacheOps("portrait", "trace")),
 			"scene_spheres_requested": tsMean(`scene_spheres_total`, `trace_scenes_total`),
 			"scene_spheres_rendered": tsMean(`scene_spheres_total{cache_hit="false"}`,
@@ -658,8 +637,9 @@ var serviceRegistry = map[string]serviceEntry{
 // RatePerSec — so there is nothing here for a toggle to choose between.
 // RequestsTotal did change: it was sum(x), cumulative since process start, and
 // is now the same windowed count the custom tiles use. The field name is left
-// alone so the UI keeps rendering it while it lives in another repo.
-func standardScalarQueries(service string) []struct {
+// alone so the UI keeps rendering it while it lives in another repo. Every
+// windowed number here reads over the request's range, like the custom tiles.
+func standardScalarQueries(service, window string) []struct {
 	Query string
 	Field func(*StandardMetrics) *float64
 } {
@@ -668,19 +648,19 @@ func standardScalarQueries(service string) []struct {
 		Query string
 		Field func(*StandardMetrics) *float64
 	}{
-		{`sum(increase(http_server_requests_total{service_name=` + s + probeFilter + `}[` + defaultCounterWindow + `]))`,
+		{`sum(increase(http_server_requests_total{service_name=` + s + probeFilter + `}[` + window + `]))`,
 			func(m *StandardMetrics) *float64 { return &m.RequestsTotal }},
-		{`sum(rate(http_server_requests_total{service_name=` + s + probeFilter + `}[5m]))`,
+		{`sum(rate(http_server_requests_total{service_name=` + s + probeFilter + `}[` + window + `]))`,
 			func(m *StandardMetrics) *float64 { return &m.RatePerSec }},
-		{`sum(increase(http_server_requests_success_total{service_name=` + s + probeFilter + `}[5m]))`,
-			func(m *StandardMetrics) *float64 { return &m.SuccessCount5m }},
-		{`sum(increase(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[5m]))`,
-			func(m *StandardMetrics) *float64 { return &m.FailureCount5m }},
-		{`sum(rate(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[5m]))/(sum(rate(http_server_requests_success_total{service_name=` + s + probeFilter + `}[5m]))+sum(rate(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[5m])))*100`,
+		{`sum(increase(http_server_requests_success_total{service_name=` + s + probeFilter + `}[` + window + `]))`,
+			func(m *StandardMetrics) *float64 { return &m.SuccessCount }},
+		{`sum(increase(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[` + window + `]))`,
+			func(m *StandardMetrics) *float64 { return &m.FailureCount }},
+		{`sum(rate(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[` + window + `]))/(sum(rate(http_server_requests_success_total{service_name=` + s + probeFilter + `}[` + window + `]))+sum(rate(http_server_requests_failure_total{service_name=` + s + probeFilter + `}[` + window + `])))*100`,
 			func(m *StandardMetrics) *float64 { return &m.ErrorRatePercent }},
-		{`sum(rate(http_server_request_duration_microseconds_sum{service_name=` + s + probeFilter + `}[5m]))/sum(rate(http_server_request_duration_microseconds_count{service_name=` + s + probeFilter + `}[5m]))`,
+		{`sum(rate(http_server_request_duration_microseconds_sum{service_name=` + s + probeFilter + `}[` + window + `]))/sum(rate(http_server_request_duration_microseconds_count{service_name=` + s + probeFilter + `}[` + window + `]))`,
 			func(m *StandardMetrics) *float64 { return &m.AvgDurationMicros }},
-		{`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name=` + s + probeFilter + `}[5m])))`,
+		{`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name=` + s + probeFilter + `}[` + window + `])))`,
 			func(m *StandardMetrics) *float64 { return &m.P95DurationMicros }},
 		{`sum(http_server_requests_active_gauge{service_name=` + s + probeFilter + `})`,
 			func(m *StandardMetrics) *float64 { return &m.ActiveRequests }},

@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -42,7 +41,7 @@ func TestRegistry_StandardServingQueriesExcludeTheProbeRoute(t *testing.T) {
 		}
 	}
 	for _, name := range serviceOrder {
-		for _, q := range standardScalarQueries(name) {
+		for _, q := range standardScalarQueries(name, "1d") {
 			check(t, "scalar for "+name, q.Query)
 		}
 		for key, query := range standardTimeseriesQueries(name, "5m") {
@@ -199,7 +198,7 @@ func TestRegistry_CacheHelpersEmitTheExactQueries(t *testing.T) {
 		`rate(cache_hits_total{service_name="iili",cache="url_cache"}[5m])`+
 			`/(rate(cache_hits_total{service_name="iili",cache="url_cache"}[5m])`+
 			`+rate(cache_misses_total{service_name="iili",cache="url_cache"}[5m]))*100`,
-		cacheHitPercent("iili", "url_cache"))
+		cacheHitPercent("iili", "url_cache", "5m"))
 	assert.Equal(t,
 		`{__name__=~"cache_hits_total|cache_misses_total",`+
 			`service_name="iili",cache="url_cache"}`,
@@ -293,17 +292,18 @@ func mapKeysExcept(m map[string]int, except ...string) []string {
 }
 
 // A few standard queries pinned as literal strings, so a typo in the
-// shared instrument names can't hide behind the enumeration below.
+// shared instrument names can't hide behind the enumeration below. The
+// window is the request's range, here a week.
 func TestStandardQueries_GoldenStrings(t *testing.T) {
-	queries := standardScalarQueries("games_hub")
+	queries := standardScalarQueries("games_hub", "7d")
 	var all []string
 	for _, q := range queries {
 		all = append(all, q.Query)
 	}
 	assert.Contains(t, all,
-		`sum(rate(http_server_requests_total{service_name="games_hub",route!="/health"}[5m]))`)
+		`sum(rate(http_server_requests_total{service_name="games_hub",route!="/health"}[7d]))`)
 	assert.Contains(t, all,
-		`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="games_hub",route!="/health"}[5m])))`)
+		`histogram_quantile(0.95,sum by (le) (rate(http_server_request_duration_microseconds_bucket{service_name="games_hub",route!="/health"}[7d])))`)
 	assert.Contains(t, all,
 		`sum(http_server_requests_active_gauge{service_name="games_hub",route!="/health"})`)
 }
@@ -733,22 +733,22 @@ func TestPortraitQueriesNameRealInstruments(t *testing.T) {
 // hub is keeping up), milliseconds over the requests that spent them, tokens
 // over the milliseconds that generated them.
 func TestRegistry_WindowedMeansAreCounterRatios(t *testing.T) {
+	// The tile read over a five-minute range, which is the window a mean
+	// chart at a sub-5m step floors to — the point at which tile and chart
+	// must agree exactly.
 	scalarByLabel := func(service string) map[string]string {
 		out := map[string]string{}
 		for _, def := range serviceRegistry[service].CustomScalars {
-			out[def.Label] = def.Query
+			out[def.Label] = def.QueryFor(ViewCount, "5m")
 		}
 		return out
 	}
-	// A mean chart at a sub-5m step, where latencyWindow floors to the same
-	// 5m the scalar tile uses — the step at which tile and chart must agree
-	// exactly.
 	chartAt30s := func(service, key string) string {
 		return expandCustomTimeseries(serviceRegistry[service].CustomTimeseries, "30s")[key]
 	}
 
 	catchUp := `sum(rate(chat_rows_delivered_total[5m]))/sum(rate(chat_catch_up_drains_total[5m]))`
-	assert.Equal(t, catchUp, scalarByLabel("games_hub")["catch_up_rows_avg_5m"])
+	assert.Equal(t, catchUp, scalarByLabel("games_hub")["catch_up_rows_avg"])
 	assert.Equal(t, catchUp, chartAt30s("games_hub", "chat_catch_up_rows"),
 		"the tile and the chart must describe the same signal")
 
@@ -759,31 +759,31 @@ func TestRegistry_WindowedMeansAreCounterRatios(t *testing.T) {
 
 	assert.Equal(t,
 		`sum(rate(microgpt_tokens_generated_total[5m]))/sum(rate(microgpt_inference_ms_total[5m]))*1000`,
-		scalarByLabel("microgpt-serve")["tokens_per_sec_5m"],
+		scalarByLabel("microgpt-serve")["tokens_per_sec"],
 		"tokens per second of inference: total tokens over total model milliseconds, times 1000")
 
 	// one_d4 (#1452): run micros over the runs that spent them — completed
 	// only, on both factors — and games over the months that measured them.
 	assert.Equal(t,
-		`sum(rate(index_run_duration_micros_total{service_name=~"one_d4(_worker)?",outcome="completed"}[1h]))/sum(rate(index_runs_total{service_name=~"one_d4(_worker)?",outcome="completed"}[1h]))/1000000`,
-		scalarByLabel("one_d4")["avg_run_seconds_1h"])
+		`sum(rate(index_run_duration_micros_total{service_name=~"one_d4(_worker)?",outcome="completed"}[5m]))/sum(rate(index_runs_total{service_name=~"one_d4(_worker)?",outcome="completed"}[5m]))/1000000`,
+		scalarByLabel("one_d4")["avg_run_seconds"])
 	assert.Equal(t,
-		`sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?"}[1h]))/sum(rate(index_months_total{service_name=~"one_d4(_worker)?",result=~"indexed|degraded"}[1h]))`,
-		scalarByLabel("one_d4")["avg_games_per_month_1h"])
+		`sum(rate(games_indexed_total{service_name=~"one_d4(_worker)?"}[5m]))/sum(rate(index_months_total{service_name=~"one_d4(_worker)?",result=~"indexed|degraded"}[5m]))`,
+		scalarByLabel("one_d4")["avg_games_per_month"])
 
 	// portrait (#1452): per-scene sums over the trace_scenes denominator —
 	// requested sums across cache_hit, rendered selects the misses on both
 	// factors, or a hit-heavy hour inflates the render-cost reading.
-	assert.Equal(t, `sum(rate(scene_spheres_total[1h]))/sum(rate(trace_scenes_total[1h]))`,
-		scalarByLabel("portrait")["avg_spheres_requested_1h"])
+	assert.Equal(t, `sum(rate(scene_spheres_total[5m]))/sum(rate(trace_scenes_total[5m]))`,
+		scalarByLabel("portrait")["avg_spheres_requested"])
 	assert.Equal(t,
-		`sum(rate(scene_spheres_total{cache_hit="false"}[1h]))/sum(rate(trace_scenes_total{cache_hit="false"}[1h]))`,
-		scalarByLabel("portrait")["avg_spheres_rendered_1h"])
-	assert.Equal(t, `sum(rate(scene_lights_total[1h]))/sum(rate(trace_scenes_total[1h]))`,
-		scalarByLabel("portrait")["avg_lights_requested_1h"])
+		`sum(rate(scene_spheres_total{cache_hit="false"}[5m]))/sum(rate(trace_scenes_total{cache_hit="false"}[5m]))`,
+		scalarByLabel("portrait")["avg_spheres_rendered"])
+	assert.Equal(t, `sum(rate(scene_lights_total[5m]))/sum(rate(trace_scenes_total[5m]))`,
+		scalarByLabel("portrait")["avg_lights_requested"])
 	assert.Equal(t,
-		`sum(rate(scene_lights_total{cache_hit="false"}[1h]))/sum(rate(trace_scenes_total{cache_hit="false"}[1h]))`,
-		scalarByLabel("portrait")["avg_lights_rendered_1h"])
+		`sum(rate(scene_lights_total{cache_hit="false"}[5m]))/sum(rate(trace_scenes_total{cache_hit="false"}[5m]))`,
+		scalarByLabel("portrait")["avg_lights_rendered"])
 }
 
 // The mean charts track the chart's own step the way avg_duration_us does,
@@ -1118,7 +1118,7 @@ func TestRegistry_NoTileReadsACounterCumulatively(t *testing.T) {
 		for key, query := range expandCustomTimeseries(entry.CustomTimeseries, "5m") {
 			check(t, "timeseries "+name+"/"+key, query)
 		}
-		for _, q := range standardScalarQueries(name) {
+		for _, q := range standardScalarQueries(name, "1d") {
 			check(t, "standard scalar "+name, q.Query)
 		}
 		for key, query := range standardTimeseriesQueries(name, "5m") {
@@ -1135,7 +1135,7 @@ func TestRegistry_NoTileReadsACounterCumulatively(t *testing.T) {
 // and only this assertion says which of the two it is.
 func TestStandardQueries_RequestsIsWindowedNotCumulative(t *testing.T) {
 	var requests string
-	for _, q := range standardScalarQueries("games_hub") {
+	for _, q := range standardScalarQueries("games_hub", "1d") {
 		var probe StandardMetrics
 		if q.Field(&probe) == &probe.RequestsTotal {
 			requests = q.Query
@@ -1143,51 +1143,48 @@ func TestStandardQueries_RequestsIsWindowedNotCumulative(t *testing.T) {
 	}
 	require.NotEmpty(t, requests, "no query maps to RequestsTotal")
 	assert.Equal(t,
-		`sum(increase(http_server_requests_total{service_name="games_hub",route!="/health"}[5m]))`,
+		`sum(increase(http_server_requests_total{service_name="games_hub",route!="/health"}[1d]))`,
 		requests)
 }
 
-// Counters that answer "has this happened" rather than "how fast" count over a
-// day.
-//
-// Over five minutes an interruption from an hour ago reads zero, and a tile
-// whose whole purpose is to be non-zero after something went wrong disarms
-// itself between the failure and someone looking at it.
-func TestRegistry_AlarmCountersCountOverALongWindow(t *testing.T) {
-	// First, that the window is actually long. Every check below compares
-	// against the alarmWindow constant, so the constant itself is the thing
-	// that has to be pinned — otherwise shrinking it leaves every assertion
-	// comparing against the shrunken value and still passing, which is the
-	// regression these tiles exist to prevent, invisible to the test meant to
-	// catch it.
-	//
-	// A floor rather than "not the default": alarmWindow = "6m" differs from
-	// the default and still fails the purpose, since a failure from an hour
-	// ago has already decayed out of it. An hour is the loosest bound that
-	// still means "someone who looks after the fact sees it".
-	window, err := time.ParseDuration(alarmWindow)
-	require.NoError(t, err, "alarmWindow is not a duration Go can parse: %q", alarmWindow)
-	require.GreaterOrEqual(t, window, time.Hour,
-		"alarmWindow is %s — long enough to differ from the default, too short to still be "+
-			"non-zero when someone reads the dashboard after the failure", alarmWindow)
-
-	alarms := map[string][]string{
-		"one_d4":    {"runs_failed", "runs_interrupted", "runs_lease_lost"},
-		"games_hub": {"failures"},
-	}
-
-	for service, labels := range alarms {
-		byLabel := map[string]customScalarDef{}
-		for _, def := range serviceRegistry[service].CustomScalars {
-			byLabel[def.Label] = def
+// Every windowed tile reads over the range the request names — the standard
+// Serving numbers, both views of every counter, and the windowed means — so
+// a tile and the chart beside it describe the same span. No tile keeps a
+// window of its own: over five minutes a game played at lunch or a run that
+// failed overnight read zero (#1323) while the day's chart showed them, and
+// the day-long windows a few tiles carried to stay lit are now what the
+// default range gives every tile.
+func TestRegistry_EveryWindowedTileReadsOverTheRange(t *testing.T) {
+	brackets := regexp.MustCompile(`\[[^\]]*\]`)
+	for _, name := range serviceOrder {
+		for _, q := range standardScalarQueries(name, "7d") {
+			for _, window := range brackets.FindAllString(q.Query, -1) {
+				assert.Equal(t, "[7d]", window, "standard tile for %s: %s", name, q.Query)
+			}
 		}
-		for _, label := range labels {
-			def, ok := byLabel[label]
-			require.True(t, ok, "%s lost its %s tile", service, label)
-			require.True(t, def.Toggleable(), "%s/%s stopped being counter-derived", service, label)
-			assert.Equal(t, alarmWindow, def.window(),
-				"%s/%s is an alarm and must not decay inside a five-minute window", service, label)
-			assert.Contains(t, def.QueryFor(ViewCount), "["+alarmWindow+"]")
+		for _, def := range serviceRegistry[name].CustomScalars {
+			for _, view := range []MetricView{ViewCount, ViewRate} {
+				query := def.QueryFor(view, "7d")
+				for _, window := range brackets.FindAllString(query, -1) {
+					assert.Equal(t, "[7d]", window, "%s/%s in view %s: %s", name, def.Label, view, query)
+				}
+				if def.Toggleable() {
+					assert.Contains(t, query, "[7d]", "%s/%s is a counter and must be windowed", name, def.Label)
+				}
+			}
+		}
+	}
+}
+
+// A windowed mean's label does not name a window any more, since the window
+// is whatever range the page is on. A label like avg_run_seconds_1h over a
+// week's numbers is a caption that contradicts the value under it.
+func TestRegistry_LabelsNameNoWindow(t *testing.T) {
+	suffix := regexp.MustCompile(`_\d+[smhd]$`)
+	for _, name := range serviceOrder {
+		for _, def := range serviceRegistry[name].CustomScalars {
+			assert.False(t, suffix.MatchString(def.Label),
+				"%s/%s names a window; the range is the window", name, def.Label)
 		}
 	}
 }
@@ -1223,85 +1220,17 @@ func TestRegistry_BothViewsShareOneSelector(t *testing.T) {
 	for _, name := range serviceOrder {
 		for _, def := range serviceRegistry[name].CustomScalars {
 			if !def.Toggleable() {
-				assert.Equal(t, def.Query, def.QueryFor(ViewRate),
+				assert.Equal(t, def.QueryFor(ViewCount, "1d"), def.QueryFor(ViewRate, "1d"),
 					"%s/%s is fixed-form but changed under a view", name, def.Label)
 				continue
 			}
-			count := def.QueryFor(ViewCount)
-			rate := def.QueryFor(ViewRate)
+			count := def.QueryFor(ViewCount, "1d")
+			rate := def.QueryFor(ViewRate, "1d")
 			assert.NotEqual(t, count, rate)
 			assert.Equal(t, strings.Replace(count, "increase(", "rate(", 1), rate,
 				"%s/%s builds its two views from different expressions", name, def.Label)
 			assert.Contains(t, count, def.Counter)
 			assert.Contains(t, rate, def.Counter)
-		}
-	}
-}
-
-// Indexing is triggered by a person asking for a player, so between asks the
-// true rate is zero. Read through the 5m window every serving tile uses, a
-// thousand-game run is invisible by breakfast — which is what #1323 reported:
-// an Indexing panel of zeros over a night's work, indistinguishable from a
-// service that had never indexed anything. These tiles count over burstWindow
-// instead, so "did the thing I ran work?" has an answer for as long as the
-// question is likely to be asked.
-//
-// Only the volume tiles. The three run-outcome alarms in the same group are
-// owned by TestRegistry_AlarmCountersCountOverALongWindow and measured against
-// alarmWindow — asserting them here against a literal would re-couple the two
-// constants that were deliberately named apart, so retuning how long a failure
-// stays on screen would fail a test about volumes.
-func TestRegistry_OneD4IndexingVolumesCountOverABurstWindow(t *testing.T) {
-	// The constant itself first, for the reason the alarm test gives: every
-	// check below compares against burstWindow, so shrinking it would leave
-	// them all comparing against the shrunken value and still passing.
-	//
-	// A floor of twelve hours, because the reported gap is the point: the run
-	// finished overnight and the panel was read the next morning. Anything
-	// shorter differs from the default and still answers zero to the question
-	// this window exists to answer.
-	window, err := time.ParseDuration(burstWindow)
-	require.NoError(t, err, "burstWindow is not a duration Go can parse: %q", burstWindow)
-	require.GreaterOrEqual(t, window, 12*time.Hour,
-		"burstWindow is %s — too short to still be non-zero when someone reads the "+
-			"dashboard the morning after a run", burstWindow)
-
-	entry, ok := serviceRegistry["one_d4"]
-	require.True(t, ok, "one_d4 missing from the registry")
-
-	// Every volume counter, not a sample: a tile left on the 5m default is
-	// exactly the flat zero this test exists to prevent.
-	wantBurst := map[string]bool{
-		"games_indexed": true, "empty_months": true, "cached_months": true,
-		"archive_fetches": true, "occurrences": true, "runs_completed": true,
-	}
-	alarms := map[string]bool{
-		"runs_failed": true, "runs_interrupted": true, "runs_lease_lost": true,
-	}
-	seen := map[string]bool{}
-	for _, def := range entry.CustomScalars {
-		if def.Group != "Indexing" && def.Group != "Motifs" {
-			continue
-		}
-		if def.Counter == "" {
-			continue // the windowed averages are scalars, with their own 1h range
-		}
-		if alarms[def.Label] {
-			continue // owned by the alarm test, against alarmWindow
-		}
-		seen[def.Label] = true
-		if !wantBurst[def.Label] {
-			t.Errorf("unexpected indexing counter %q: add it to this test with a window decision", def.Label)
-			continue
-		}
-		if got := def.window(); got != burstWindow {
-			t.Errorf("%s counts over %s; episodic work needs burstWindow (%s) to stay visible",
-				def.Label, got, burstWindow)
-		}
-	}
-	for label := range wantBurst {
-		if !seen[label] {
-			t.Errorf("expected an indexing counter %q; did it move groups or get dropped?", label)
 		}
 	}
 }
