@@ -2,6 +2,7 @@ package prom_proxy
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -50,7 +51,7 @@ func (h *MetricsHandler) GetHostMetricsTimeSeries(w http.ResponseWriter, r *http
 	timeRange := r.PathValue("range")
 
 	if !ValidTimeRange(timeRange) {
-		problem := mucks.NewBadRequest("Invalid time range. Valid options: 30m, 1d, 7d")
+		problem := mucks.NewBadRequest(badTimeRangeDetail)
 		mucks.JsonError(w, problem)
 		return
 	}
@@ -102,6 +103,18 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 		}
 		view = MetricView(raw)
 	}
+	// The range the tiles read over, the same one the timeseries route takes
+	// in its path, so the dashboard asks both for the window it is showing.
+	timeRange := DefaultRange
+	if raw := r.URL.Query().Get("range"); raw != "" {
+		if !ValidTimeRange(raw) {
+			problem := mucks.NewBadRequest(badTimeRangeDetail)
+			mucks.JsonError(w, problem)
+			return
+		}
+		timeRange = TimeRange(raw)
+	}
+	window := timeRange.Window()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
@@ -110,12 +123,19 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 		Timestamp: time.Now().UTC(),
 		Service:   name,
 		View:      string(view),
+		Window:    window,
 		Custom:    []CustomMetricGroup{},
 	}
 
-	for _, q := range standardScalarQueries(name) {
+	// A query Prometheus refuses — a week-long lookback past its sample
+	// budget, say — leaves its tile at zero, which is the outage contract
+	// below; the log is the one place that zero is told apart from a real
+	// one.
+	for _, q := range standardScalarQueries(name, window) {
 		resp, err := h.promClient.Query(ctx, q.Query)
-		if err == nil && len(resp.Data.Result) > 0 {
+		if err != nil {
+			log.Printf("service %s: %s: %v", name, q.Query, err)
+		} else if len(resp.Data.Result) > 0 {
 			if val, err := extractFloatValue(&resp.Data.Result[0]); err == nil {
 				*q.Field(&response.Standard) = val
 			}
@@ -127,8 +147,10 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 	groupIndex := map[string]int{}
 	for _, def := range entry.CustomScalars {
 		value := 0.0
-		resp, err := h.promClient.Query(ctx, def.QueryFor(view))
-		if err == nil && len(resp.Data.Result) > 0 {
+		resp, err := h.promClient.Query(ctx, def.QueryFor(view, window))
+		if err != nil {
+			log.Printf("service %s tile %s: %v", name, def.Label, err)
+		} else if len(resp.Data.Result) > 0 {
 			if val, err := extractFloatValue(&resp.Data.Result[0]); err == nil {
 				value = val
 			}
@@ -160,7 +182,7 @@ func (h *MetricsHandler) GetServiceMetricsTimeSeries(w http.ResponseWriter, r *h
 
 	timeRange := r.PathValue("range")
 	if !ValidTimeRange(timeRange) {
-		problem := mucks.NewBadRequest("Invalid time range. Valid options: 30m, 1d, 7d")
+		problem := mucks.NewBadRequest(badTimeRangeDetail)
 		mucks.JsonError(w, problem)
 		return
 	}

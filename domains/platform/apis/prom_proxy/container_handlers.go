@@ -111,7 +111,7 @@ func (h *MetricsHandler) GetContainerTimeSeries(w http.ResponseWriter, r *http.R
 	requested := r.PathValue("name")
 	rangeParam := r.PathValue("range")
 	if !ValidTimeRange(rangeParam) {
-		mucks.JsonError(w, mucks.NewBadRequest("Invalid time range. Valid options: 30m, 1d, 7d"))
+		mucks.JsonError(w, mucks.NewBadRequest(badTimeRangeDetail))
 		return
 	}
 	timeRange := TimeRange(rangeParam)
