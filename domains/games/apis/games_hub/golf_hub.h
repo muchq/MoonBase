@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -251,6 +252,12 @@ class GolfHub final {
   struct Room {
     std::map<std::string, Member> members;
     std::map<std::string, GameEntry> games;
+    /// Count of this instance's writes to the room's rows: member
+    /// upserts and drops, game commits and deletes. A catch-up that read
+    /// the rows off mu_ compares it before and after; a write in between
+    /// means the rows may predate local truth, and reconciling them
+    /// would roll the room back to the moment of the read.
+    uint64_t local_writes = 0;
   };
 
   /// Events staged under the lock, delivered outside it. Delivery
@@ -408,6 +415,9 @@ class GolfHub final {
   /// Writes above). Asynchronous — clients may be told before the row
   /// lands. No-op without a store; always leaves writes empty.
   void EnqueueWritesLocked(Writes& writes);
+  /// Records a local write against the room, for the catch-up's
+  /// staleness check. A room this instance no longer holds is skipped.
+  void NoteRoomWriteLocked(const std::string& room_id);
 
   /// Write-through staging; callers hold mu_.
   void StageLocked(Writes& writes, HubStore::Op op) const;
@@ -440,7 +450,8 @@ class GolfHub final {
   /// Notify/active catch-up for a held room: Flush+LoadRoom off mu_
   /// (PumpChat's pattern), then reconcile under the lock. Keeps the
   /// listener poll thread from holding mu_ across DB round trips on a
-  /// reconnect storm.
+  /// reconnect storm. Rows read while a local write landed are not
+  /// trusted: that catch-up re-reads under the lock instead.
   void CatchUpRoom(const std::string& room_id, bool project_always);
 
   /// The wake handler's body: flush our own queue (so the read is never
@@ -451,7 +462,7 @@ class GolfHub final {
   /// Returns whether the store answered the read — false is an outage, not
   /// an absent room, and the join paths label their refusal kUnavailable on
   /// it rather than blaming the client's state.
-  bool RefreshRoomLocked(const std::string& room_id, Outbox& outbox);
+  bool RefreshRoomLocked(const std::string& room_id, Outbox& outbox, bool project_always = true);
   /// Returns whether local membership/games changed. When
   /// `project_always` is false, skips re-project on a no-op catch-up.
   bool ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,

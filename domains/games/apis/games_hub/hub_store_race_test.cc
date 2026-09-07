@@ -83,17 +83,32 @@ class GatedHubStore final : public HubStore {
     return delegate_.LoadGame(room_id, game_id);
   }
   absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override {
-    return delegate_.LoadRoom(room_id);
+    auto rows = delegate_.LoadRoom(room_id);
+    // The rows are already in hand: holding here is what a catch-up
+    // looks like when the hub moves between its read and its reconcile.
+    if (hold_next_load_room_.exchange(false)) {
+      load_room_read_.Open();
+      allow_load_room_return_.Wait();
+    }
+    return rows;
   }
 
   bool WaitForFinish(std::chrono::milliseconds timeout) { return finish_landed_.WaitFor(timeout); }
   void AllowFinishReturn() { allow_finish_return_.Open(); }
+  void HoldNextLoadRoom() { hold_next_load_room_ = true; }
+  bool WaitForLoadRoom(std::chrono::milliseconds timeout) {
+    return load_room_read_.WaitFor(timeout);
+  }
+  void AllowLoadRoomReturn() { allow_load_room_return_.Open(); }
   int delete_game_count() const { return delete_game_count_.load(); }
 
  private:
   MemoryHubStore delegate_;
   TestGate finish_landed_;
   TestGate allow_finish_return_;
+  std::atomic<bool> hold_next_load_room_ = false;
+  TestGate load_room_read_;
+  TestGate allow_load_room_return_;
   std::atomic<int> delete_game_count_ = 0;
 };
 
@@ -343,6 +358,87 @@ TEST_F(HubStoreRaceFixture, DelayedFinishWakeReadsRetainedTerminalRow) {
   auto alice_ended = ReceiveWithin<std::optional<moonbase::games::GolfUpdate>>(
       [&] { return ReceiveGolf(alice->stream, "gameEnded"); }, remote.get());
   EXPECT_TRUE(alice_ended.has_value());
+}
+
+// A LISTEN-active catch-up reads the room off mu_, and the hub keeps
+// moving while it does: here bob's leave ends the started game and his
+// next create opens a lobby game, both after the read and before the
+// reconcile. Rows from before those writes must not roll the room back
+// to that moment — the ended game returning as live, bob's seat moved
+// onto it, the lobby game dropped locally with its row left behind
+// (#1431).
+TEST_F(HubStoreRaceFixture, StaleCatchUpReadDoesNotRollBackLocalWrites) {
+  gated_store_->AllowFinishReturn();  // the finish gate is another test's
+  auto table = SeatedTable();
+  ASSERT_TRUE(table.has_value());
+
+  gated_store_->HoldNextLoadRoom();
+  std::thread catch_up([&] { golf_->OnChannelActive(RoomChannel(table->room_id)); });
+  const bool read_started = gated_store_->WaitForLoadRoom(std::chrono::seconds(1));
+  if (!read_started) {
+    gated_store_->AllowLoadRoomReturn();
+    catch_up.join();
+    FAIL() << "catch-up never read the room";
+  }
+
+  ASSERT_TRUE(
+      table->bob.stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameLeft").has_value());
+  ASSERT_TRUE(
+      table->bob.stream.Send(Move(GolfMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveGolf(table->bob.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  const std::string pending_id = created->as_gameJoined_or_null()->view.gameId;
+
+  gated_store_->AllowLoadRoomReturn();
+  catch_up.join();
+
+  ASSERT_TRUE(
+      table->bob.stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  auto left = ReceiveGolf(table->bob.stream, "gameLeft");
+  ASSERT_TRUE(left.has_value());
+  EXPECT_EQ(left->as_gameLeft_or_null()->gameId, pending_id);
+  gated_store_->Flush();
+  auto rows = gated_store_->LoadSnapshot();
+  ASSERT_TRUE(rows.ok());
+  ASSERT_EQ(rows->games.size(), 1u);
+  EXPECT_EQ(rows->games[0].game_id, table->game_id);
+}
+
+// The same read, straddling a queued write instead of a synchronous
+// commit: bob's room leave lands after the catch-up read its rows. The
+// stale rows still list him; adopting them would seat him back.
+TEST_F(HubStoreRaceFixture, StaleCatchUpReadDoesNotReseatADroppedMember) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  ASSERT_TRUE(ReceiveCase(alice.stream, "roomState").has_value());  // bob's join
+
+  gated_store_->HoldNextLoadRoom();
+  std::thread catch_up([&] { golf_->OnChannelActive(RoomChannel(room->room_id)); });
+  const bool read_started = gated_store_->WaitForLoadRoom(std::chrono::seconds(1));
+  if (!read_started) {
+    gated_store_->AllowLoadRoomReturn();
+    catch_up.join();
+    FAIL() << "catch-up never read the room";
+  }
+
+  ASSERT_TRUE(bob.stream.Send(GameCommands::FromLeaveroom(moonbase::games::LeaveRoom{})).ok());
+  ASSERT_TRUE(ReceiveCase(bob.stream, "roomLeft").has_value());
+  auto shrunk = ReceiveCase(alice.stream, "roomState");
+  ASSERT_TRUE(shrunk.has_value());
+  ASSERT_EQ(shrunk->as_roomState_or_null()->players.size(), 1u);
+
+  gated_store_->AllowLoadRoomReturn();
+  catch_up.join();
+
+  ASSERT_TRUE(
+      alice.stream.Send(GameCommands::FromGetroomstate(moonbase::games::GetRoomState{})).ok());
+  auto after = ReceiveCase(alice.stream, "roomState");
+  ASSERT_TRUE(after.has_value());
+  ASSERT_EQ(after->as_roomState_or_null()->players.size(), 1u);
+  EXPECT_EQ(after->as_roomState_or_null()->players[0].playerId, alice.player_id);
 }
 
 }  // namespace

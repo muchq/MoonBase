@@ -501,8 +501,27 @@ void GolfHub::SeedChatCursorLocked(const std::string& room_id) {
 }
 
 void GolfHub::EnqueueWritesLocked(Writes& writes) {
-  if (!writes.empty()) store_->Enqueue(std::move(writes));
+  if (writes.empty()) return;
+  for (const HubStore::Op& op : writes) {
+    if (const auto* upsert = std::get_if<HubStore::UpsertRoom>(&op)) {
+      NoteRoomWriteLocked(upsert->room_id);
+    } else if (const auto* erase = std::get_if<HubStore::DeleteRoom>(&op)) {
+      NoteRoomWriteLocked(erase->room_id);
+    } else if (const auto* upsert = std::get_if<HubStore::UpsertMember>(&op)) {
+      NoteRoomWriteLocked(upsert->row.room_id);
+    } else if (const auto* erase = std::get_if<HubStore::DeleteMember>(&op)) {
+      NoteRoomWriteLocked(erase->room_id);
+    } else if (const auto* erase = std::get_if<HubStore::DeleteGame>(&op)) {
+      NoteRoomWriteLocked(erase->room_id);
+    }
+  }
+  store_->Enqueue(std::move(writes));
   writes.clear();
+}
+
+void GolfHub::NoteRoomWriteLocked(const std::string& room_id) {
+  const auto room = rooms_.find(room_id);
+  if (room != rooms_.end()) ++room->second.local_writes;
 }
 
 void GolfHub::StageLocked(Writes& writes, HubStore::Op op) const {
@@ -530,6 +549,9 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
                                            const std::optional<HostedState>& state,
                                            const std::vector<HubStore::StatsDelta>* finish) {
   const int64_t version = entry.version + 1;
+  // Counted before the outcome is known: a commit whose fate is unknown
+  // may still have landed.
+  NoteRoomWriteLocked(room_id);
   // The async outbox may still hold rows this commit depends on — the
   // room behind the insert's FK, the membership behind the finish's
   // stat deltas. Drain it so the synchronous write never outruns the
@@ -609,11 +631,14 @@ void GolfHub::WakeChannel(const std::string& channel, const std::string& payload
 }
 
 void GolfHub::CatchUpRoom(const std::string& room_id, bool project_always) {
+  uint64_t writes_before_read = 0;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     // Only rooms we hold: a stale wake for a dropped room must not
     // resurrect it (join is the one path that materializes rooms).
-    if (!rooms_.contains(room_id)) return;
+    const auto room = rooms_.find(room_id);
+    if (room == rooms_.end()) return;
+    writes_before_read = room->second.local_writes;
   }
   // Off mu_: reconnect fires this once per room on the poll thread; holding
   // the lock across Flush+LoadRoom would stall every move/chat/join for
@@ -627,13 +652,24 @@ void GolfHub::CatchUpRoom(const std::string& room_id, bool project_always) {
   Outbox outbox;
   {
     const std::lock_guard<std::mutex> lock(mu_);
-    if (!rooms_.contains(room_id)) return;
-    ReconcileRoomLocked(room_id, *rows, outbox, project_always);
+    const auto room = rooms_.find(room_id);
+    if (room == rooms_.end()) return;
+    if (room->second.local_writes == writes_before_read) {
+      ReconcileRoomLocked(room_id, *rows, outbox, project_always);
+    } else {
+      // A local write landed during the read, so the rows may show the
+      // room as it was before it: a game this instance has since ended
+      // still live, one it has since created absent. Reconciling that
+      // would adopt the ended game back and drop the new one. Re-read
+      // under the lock, where nothing local moves; rare enough that the
+      // stall the off-lock read avoids does not matter here.
+      RefreshRoomLocked(room_id, outbox, project_always);
+    }
   }
   Deliver(outbox);
 }
 
-bool GolfHub::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
+bool GolfHub::RefreshRoomLocked(const std::string& room_id, Outbox& outbox, bool project_always) {
   // The flush means this read can never be older than our own truth;
   // holding mu_ across it means nothing local moves in between. The
   // writer thread needs no lock we hold, so it drains freely. Join uses
@@ -645,7 +681,7 @@ bool GolfHub::RefreshRoomLocked(const std::string& room_id, Outbox& outbox) {
     LOG(WARNING) << "room " << room_id << " refresh failed: " << rows.status();
     return false;
   }
-  ReconcileRoomLocked(room_id, *rows, outbox, /*project_always=*/true);
+  ReconcileRoomLocked(room_id, *rows, outbox, project_always);
   return true;
 }
 
