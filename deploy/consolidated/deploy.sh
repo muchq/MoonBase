@@ -6,6 +6,14 @@ cd "$(dirname "$0")/../.." || exit 1
 
 HOST=ubuntu@consolidated.cmptr.info
 COMPOSE_FILE=deploy/consolidated/compose.yaml
+REGISTRY=${IMAGE_REGISTRY:-https://ghcr.io}
+# How far back --list --service looks for commits that changed the image.
+LIST_SCAN=${DEPLOY_LIST_SCAN:-100}
+
+# manifest_digests: the content an image manifest names, shared with CI's
+# blast-radius comparison so the two read a commit's image the same way.
+# shellcheck source=../../scripts/diff-build-lib.sh
+source scripts/diff-build-lib.sh
 
 usage() {
   cat <<'USAGE'
@@ -15,7 +23,9 @@ Deploys the consolidated stack. Every service image is pinned to a commit SHA,
 so what runs is reproducible and a rollback is just --sha.
 
 Options:
-  -l, --list [COUNT]     Show the last COUNT commits (default 10) and exit
+  -l, --list [COUNT]     Show the last COUNT commits (default 10) and exit.
+                         With --service, the last COUNT commits that changed
+                         that service's image, by the published image itself
       --services         Show the deployable services and exit
       --status           Show what each container is actually running, and exit
   -s, --sha SHA          Deploy a specific commit; default is the latest on main
@@ -71,6 +81,33 @@ sha_var_for() {
 
 describe() { # describe <sha> -> "subject", or a placeholder when not local
   git log -1 --pretty=%s "$1" 2>/dev/null || echo "(unknown commit)"
+}
+
+# The content digests of <service>'s published image at <sha>, on stdout;
+# nothing when no image is published there. Anonymous pull — the images are
+# public. Any other registry answer is fatal: a listing built over it would
+# be wrong in a way that looks right.
+image_content() { # image_content <service> <sha>
+  local service=$1 sha=$2 token status body
+  body=$(mktemp)
+  token=$(curl -sS --connect-timeout 10 --max-time 60 --retry 3 \
+    "$REGISTRY/token?scope=repository:muchq/$service:pull" |
+    sed -n 's/.*"token": *"\([^"]*\)".*/\1/p')
+  [ -n "$token" ] || { echo "Error: no registry token for $service" >&2; rm -f "$body"; exit 1; }
+  status=$(curl -sS --connect-timeout 10 --max-time 60 --retry 3 -o "$body" -w '%{http_code}' \
+    -H "Authorization: Bearer $token" \
+    -H "Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json" \
+    "$REGISTRY/v2/muchq/$service/manifests/$sha")
+  case "$status" in
+    200) manifest_digests < "$body" ;;
+    404) ;;
+    *)
+      echo "Error: registry returned $status for $service at ${sha:0:7}" >&2
+      rm -f "$body"
+      exit 1
+      ;;
+  esac
+  rm -f "$body"
 }
 
 LIST_COUNT=""
@@ -255,17 +292,64 @@ else
   deployed_sha=$(host_pin DEPLOY_SHA)
 fi
 
+list_row() { # list_row <sha> <note>
+  local marker=""
+  case "$deployed_sha" in
+    "$1"*) marker="  <- deployed" ;;
+  esac
+  printf '%-9s  %-10s  %s%s%s\n' "${1:0:9}" "$(git log -1 --date=short --pretty=%ad "$1")" \
+    "$(describe "$1")" "$marker" "$2"
+}
+
+if [ -n "$LIST_COUNT" ] && [ -z "$TARGET_SERVICE" ]; then
+  printf '%-9s  %-10s  %s\n' "COMMIT" "DATE" "SUBJECT"
+  for sha in $(git log --max-count="$LIST_COUNT" --pretty=%H origin/main); do
+    list_row "$sha" ""
+  done
+  exit 0
+fi
+
+# The commits that changed one service, read off the images themselves: a
+# commit changed the service when its image's content differs from the next
+# older commit's. Ground truth rather than intent, and it reaches back over
+# every commit ever published. A commit with no published image (a failed
+# publish, or the service did not exist yet) cannot be compared, so the next
+# older one that has an image stands in, and the row says how many were
+# skipped.
 if [ -n "$LIST_COUNT" ]; then
   printf '%-9s  %-10s  %s\n' "COMMIT" "DATE" "SUBJECT"
-  git log --max-count="$LIST_COUNT" --date=short \
-    --pretty=tformat:'%h|%ad|%s' origin/main |
-    while IFS='|' read -r sha date subject; do
-      marker=""
-      case "$deployed_sha" in
-        "$sha"*) marker="  <- deployed" ;;
-      esac
-      printf '%-9s  %-10s  %s%s\n' "$sha" "$date" "$subject" "$marker"
-    done
+  newer=""          # the newest commit with an image not yet judged
+  newer_content=""
+  gap=0             # imageless commits since it
+  found=0
+  scanned=0
+  for sha in $(git log --max-count="$LIST_SCAN" --pretty=%H origin/main); do
+    scanned=$((scanned + 1))
+    content=$(image_content "$TARGET_SERVICE" "$sha")
+    if [ -z "$content" ]; then
+      [ -z "$newer" ] || gap=$((gap + 1))
+      continue
+    fi
+    if [ -n "$newer" ] && [ "$content" != "$newer_content" ]; then
+      note=""
+      [ "$gap" -eq 0 ] || note="  ($gap commit(s) between have no image)"
+      list_row "$newer" "$note"
+      found=$((found + 1))
+      [ "$found" -lt "$LIST_COUNT" ] || { newer=""; break; }
+    fi
+    newer=$sha
+    newer_content=$content
+    gap=0
+  done
+  if [ -n "$newer" ] && [ "$found" -lt "$LIST_COUNT" ]; then
+    if [ "$scanned" -lt "$LIST_SCAN" ]; then
+      # History ended: nothing older has an image, so this is where the
+      # service's image first appeared.
+      list_row "$newer" "  (first image)"
+    else
+      echo "(${newer:0:9} not compared: only the last $LIST_SCAN commits were scanned; set DEPLOY_LIST_SCAN to look further)" >&2
+    fi
+  fi
   exit 0
 fi
 

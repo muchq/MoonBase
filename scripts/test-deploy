@@ -16,6 +16,7 @@ TESTROOT=$WORK/repo
 ORIGIN=$WORK/origin.git
 HOSTDIR=$WORK/host
 DOCKER_LOG=$WORK/docker.log
+IMAGES=$WORK/images
 
 FAILURES=0
 pass() { echo "  ok    $1"; }
@@ -133,6 +134,36 @@ echo "docker $* || env: $pins" >> "$DOCKER_LOG"
 exit 0
 STUB
 
+  # The registry, for --list --service. A token request answers with a token;
+  # a manifest request answers from $FAKE_IMAGES/<service>_<sha>, whose one
+  # line is the image's content, and 404 without one. FAKE_REGISTRY_DOWN makes
+  # every manifest request a 503.
+  cat > "$STUBS/curl" <<'STUB'
+#!/bin/bash
+out=/dev/null url=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o | -w | -H | --connect-timeout | --max-time | --retry) [ "$1" = -o ] && out=$2; shift 2 ;;
+    -*) shift ;;
+    *) url=$1; shift ;;
+  esac
+done
+case "$url" in
+  */token?*) printf '{"token":"t"}' ;;
+  */v2/muchq/*/manifests/*)
+    [ -z "${FAKE_REGISTRY_DOWN:-}" ] || { echo 503; exit 0; }
+    rest=${url#*/v2/muchq/}
+    key=$FAKE_IMAGES/${rest%%/*}_${rest##*/}
+    if [ -f "$key" ]; then
+      printf '{"config":{"digest":"sha256:%s"},"layers":[]}' "$(cat "$key")" > "$out"
+      echo 200
+    else
+      echo 404
+    fi
+    ;;
+esac
+STUB
+
   chmod +x "$STUBS"/*
 }
 
@@ -145,7 +176,9 @@ make_repo() {
   mkdir -p "$TESTROOT/deploy/consolidated/o11y" \
     "$TESTROOT/deploy/consolidated/forgejo" \
     "$TESTROOT/fixture"
+  mkdir -p "$TESTROOT/scripts"
   cp "$REPO/deploy/consolidated/deploy.sh" "$TESTROOT/deploy/consolidated/"
+  cp "$REPO/scripts/diff-build-lib.sh" "$TESTROOT/scripts/"
   cp "$REPO/deploy/consolidated/compose.yaml" "$TESTROOT/deploy/consolidated/"
   cp "$REPO/deploy/consolidated/docker-compose.observability.yml" "$TESTROOT/deploy/consolidated/"
   cp "$REPO/deploy/consolidated/o11y/"* "$TESTROOT/deploy/consolidated/o11y/"
@@ -198,7 +231,8 @@ deploy() { # deploy <args...> -> exit code, output in $WORK/out.txt
     cd "$TESTROOT" || exit 1
     PATH="$STUBS:$PATH" FAKE_HOST="$HOSTDIR" DOCKER_LOG="$DOCKER_LOG" \
       FAKE_MISSING_IMAGES="${FAKE_MISSING_IMAGES:-}" FAKE_PS="${FAKE_PS:-}" \
-      FAKE_RESTARTS="${FAKE_RESTARTS:-}" \
+      FAKE_RESTARTS="${FAKE_RESTARTS:-}" FAKE_IMAGES="$IMAGES" \
+      FAKE_REGISTRY_DOWN="${FAKE_REGISTRY_DOWN:-}" \
       bash deploy/consolidated/deploy.sh "$@"
   ) > "$WORK/out.txt" 2>&1
 }
@@ -272,6 +306,67 @@ deploy --services
 check "lists every pinned service" \
   test "$(tail -n +2 "$WORK/out.txt" | wc -l)" -eq \
   "$(grep -c 'image: ghcr.io/muchq/' "$REPO/deploy/consolidated/compose.yaml")"
+
+echo "listing by service"
+MID_SHA=$(git -C "$TESTROOT" rev-parse "origin/main~1")
+published() { # published <service> <sha> <content>
+  mkdir -p "$IMAGES"
+  printf '%s\n' "$3" > "$IMAGES/$1_$2"
+}
+rows() { tail -n +2 "$WORK/out.txt" | grep -v '^(' ; }
+
+# mithril's image changed at the middle commit and not since; posterize's
+# never changed. The service's own pin, not the stack-wide one, is what a
+# targeted listing marks.
+rm -rf "$IMAGES"
+published mithril "$SHA" aaa
+published mithril "$MID_SHA" aaa
+published mithril "$OLD_SHA" bbb
+published posterize "$SHA" eee
+published posterize "$MID_SHA" eee
+published posterize "$OLD_SHA" eee
+reset_host "DEPLOY_SHA=$SHA" "MITHRIL_SHA=$MID_SHA"
+deploy --list --service mithril
+rc=$?
+check "exits 0" test $rc -eq 0
+check "lists the commit whose image differs from the one before" grep -q "(#1002)" "$WORK/out.txt"
+check "does not list a commit whose image is the same as before" \
+  bash -c '! grep -q "(#1003)" "$0"' "$WORK/out.txt"
+check "lists the commit where the image first appeared" grep -q "(#1001).*first image" "$WORK/out.txt"
+check "marks the service's own deployed revision" grep -q "(#1002).*<- deployed" "$WORK/out.txt"
+check "does not mark the stack-wide revision" \
+  bash -c '! grep -q "(#1003).*<- deployed" "$0"' "$WORK/out.txt"
+deploy --list --service posterize
+check "a service that never changed lists only its first image" \
+  test "$(rows | wc -l)" -eq 1
+deploy --list 1 --service mithril
+check "COUNT bounds the listing" test "$(rows | wc -l)" -eq 1
+check "to the newest change" grep -q "(#1002)" "$WORK/out.txt"
+
+# The middle commit's publish failed: the newest is compared with the older
+# one, and the row says a commit was skipped.
+rm -f "$IMAGES/mithril_$MID_SHA"
+published mithril "$SHA" ccc
+deploy --list --service mithril
+check "a commit with no image is skipped over" grep -q "(#1003).*1 commit(s) between have no image" "$WORK/out.txt"
+check "and not listed itself" bash -c '! grep -q "(#1002)" "$0"' "$WORK/out.txt"
+
+# Two changes, one asked for: the listing stops at the newest.
+published mithril "$MID_SHA" aaa
+deploy --list 1 --service mithril
+check "COUNT stops the listing after one change" test "$(rows | wc -l)" -eq 1
+check "and that change is the newest" grep -q "(#1003)" "$WORK/out.txt"
+
+# The scan runs out before the oldest commit: the last one seen cannot be
+# judged, and the listing says so instead of guessing.
+published mithril "$MID_SHA" ccc
+DEPLOY_LIST_SCAN=2 deploy --list --service mithril
+check "an unjudged commit at the scan limit is reported" grep -q "not compared" "$WORK/out.txt"
+check "and not listed as a change" test "$(rows | wc -l)" -eq 0
+
+FAKE_REGISTRY_DOWN=1 deploy --list --service mithril
+check "a registry error fails the listing" test $? -ne 0
+check "and says so" grep -q "registry returned 503" "$WORK/out.txt"
 
 echo "status"
 reset_host "DEPLOY_SHA=$SHA" "POSTERIZE_SHA=posterizepin"
