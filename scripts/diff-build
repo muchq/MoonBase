@@ -39,11 +39,21 @@ echo "--- [diff-build] WORKSPACE_ROOT=$WORKSPACE_ROOT"
 echo "--- [diff-build] BASE_REVISION=$BASE_REVISION  CURRENT_REF=$CURRENT_REF"
 echo "--- [diff-build] java=$(which java 2>/dev/null || echo 'NOT FOUND')  version=$(java -version 2>&1 | head -1 || echo 'N/A')"
 
+# The services whose image this change reaches, one name per line, for CI to
+# label the PR with (#1214). Written as soon as the impact set is known and
+# before any build runs, so a red build still gets its labels — and not
+# before, so a run that dies computing the set leaves no file rather than an
+# empty one that would strip the PR's labels.
+IMPACTED_SERVICES=/tmp/impacted_services.txt
+
 # 2. Config or shared macros changed: bazel-diff isn't reliable; full build/test.
 FULL_BUILD_CHANGES=$(paths_forcing_full_build "$BASE_REVISION")
 if [ -n "$FULL_BUILD_CHANGES" ]; then
   echo "Bazel config or shared build macros changed; running full build and test..."
   echo "$FULL_BUILD_CHANGES" | sed 's/^/  /'
+  # Every image rebuilds, so every service is in the blast radius.
+  bazel query 'kind(oci_push, //...)' --output=build | services_from_push_rules > "$IMPACTED_SERVICES"
+  echo "--- [diff-build] impacted services: $(tr '\n' ' ' < "$IMPACTED_SERVICES")"
   bazel build //... || exit 1
   bazel test //... || exit 1
   exit 0
@@ -97,6 +107,17 @@ if [ -s /tmp/impacted_targets.txt ]; then
     BUILDS=$(bazel query "kind(rule, set($TARGET_SET)) except kind(test, set($TARGET_SET)) except attr(tags, 'manual', set($TARGET_SET)) except filter('.*__internal__.*', set($TARGET_SET))" 2>&1 | tee /dev/stderr | grep '^//' || true)
     echo "--- [diff-build] targets to build: $(echo "$BUILDS" | grep -c . || echo 0)"
 
+    # bazel-diff's impact set is transitive, so the push rules of every image
+    # that would change are already in it. A failed query leaves no file (the
+    # label step then skips) rather than failing the build over labels.
+    if bazel query "kind(oci_push, set($TARGET_SET))" --output=build > /tmp/impacted_push_rules.txt 2>/dev/null; then
+      services_from_push_rules < /tmp/impacted_push_rules.txt > "$IMPACTED_SERVICES"
+      echo "--- [diff-build] impacted services: $(tr '\n' ' ' < "$IMPACTED_SERVICES")"
+    else
+      rm -f "$IMPACTED_SERVICES"
+      echo "--- [diff-build] WARNING: oci_push query failed; impacted services unknown"
+    fi
+
     if [ -n "$BUILDS" ]; then
       echo "--- [diff-build] running bazel build..."
       bazel build --skip_incompatible_explicit_targets $BUILDS
@@ -106,6 +127,7 @@ if [ -s /tmp/impacted_targets.txt ]; then
       bazel test --skip_incompatible_explicit_targets $TESTS
     fi
 else
+    : > "$IMPACTED_SERVICES"
     echo "No changes detected."
 fi
 echo "--- [diff-build] done."

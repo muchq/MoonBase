@@ -1,0 +1,103 @@
+#!/bin/bash
+# Bring a PR's service:* labels in line with the services a change impacts.
+#
+# Usage: label-services OWNER/REPO PR_NUMBER SERVICES_FILE
+#
+# SERVICES_FILE is one service name per line — what scripts/diff-build writes
+# to /tmp/impacted_services.txt. Labels for services not in the file are
+# removed, so a PR that stops touching a service loses the label on its next
+# run; labels outside the service: prefix are never touched. A label that
+# does not exist in the repo yet is created, so a new service needs nothing
+# by hand.
+#
+# Talks to the GitHub REST API through curl with GITHUB_TOKEN: the CI image
+# carries neither gh nor jq, and the responses read here are flat enough for
+# sed. Every call is checked; a 4xx is a real failure (a token without
+# pull-requests: write, a fork), not something to shrug past.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=diff-build-lib.sh
+source "$SCRIPT_DIR/diff-build-lib.sh"
+
+REPO=${1:?usage: label-services OWNER/REPO PR_NUMBER SERVICES_FILE}
+PR=${2:?usage: label-services OWNER/REPO PR_NUMBER SERVICES_FILE}
+SERVICES=${3:?usage: label-services OWNER/REPO PR_NUMBER SERVICES_FILE}
+: "${GITHUB_TOKEN:?GITHUB_TOKEN is required}"
+API=${GITHUB_API_URL:-https://api.github.com}
+
+# gh_api METHOD PATH [BODY]: response body on stdout; non-2xx fails the script
+# with the status and body on stderr.
+gh_api() {
+  local method=$1 path=$2 body=${3:-}
+  local out status
+  local args=(-sS -o "" -w '%{http_code}' -X "$method"
+    -H "Authorization: Bearer $GITHUB_TOKEN"
+    -H "Accept: application/vnd.github+json")
+  out=$(mktemp)
+  args[2]=$out
+  if [ -n "$body" ]; then
+    args+=(-H "Content-Type: application/json" --data "$body")
+  fi
+  status=$(curl "${args[@]}" "$API$path")
+  if [ "${status:0:1}" != "2" ]; then
+    echo "ERROR: $method $path returned $status" >&2
+    cat "$out" >&2
+    rm -f "$out"
+    return 1
+  fi
+  cat "$out"
+  rm -f "$out"
+}
+
+# The "name" values of a JSON list of labels, one per line.
+label_names() {
+  # `|| true`: an unlabeled PR is an empty list, not a failed read.
+  { grep -o '"name": *"[^"]*"' || true; } | sed 's/.*"name": *"\([^"]*\)"/\1/'
+}
+
+# 404 from GET /labels/NAME means create it; anything else is an error.
+ensure_label() {
+  local name=$1 status
+  status=$(curl -sS -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $GITHUB_TOKEN" \
+    -H "Accept: application/vnd.github+json" \
+    "$API/repos/$REPO/labels/$name")
+  case "$status" in
+    200) return 0 ;;
+    404)
+      gh_api POST "/repos/$REPO/labels" \
+        "{\"name\":\"$name\",\"color\":\"0e8a16\",\"description\":\"Changes the ${name#"$SERVICE_LABEL_PREFIX"} image\"}" \
+        >/dev/null
+      ;;
+    *)
+      echo "ERROR: GET /repos/$REPO/labels/$name returned $status" >&2
+      return 1
+      ;;
+  esac
+}
+
+HAVE=$(mktemp)
+trap 'rm -f "$HAVE"' EXIT
+gh_api GET "/repos/$REPO/issues/$PR/labels?per_page=100" | label_names > "$HAVE"
+
+ADD=()
+while read -r verb label; do
+  case "$verb" in
+    add) ADD+=("$label") ;;
+    remove)
+      echo "removing $label"
+      gh_api DELETE "/repos/$REPO/issues/$PR/labels/$label" >/dev/null
+      ;;
+  esac
+done < <(service_label_plan "$SERVICES" "$HAVE")
+
+if [ "${#ADD[@]}" -gt 0 ]; then
+  for label in "${ADD[@]}"; do
+    ensure_label "$label"
+    echo "adding $label"
+  done
+  json=$(printf '"%s",' "${ADD[@]}")
+  gh_api POST "/repos/$REPO/issues/$PR/labels" "{\"labels\":[${json%,}]}" >/dev/null
+fi
+echo "labels in sync: $(tr '\n' ' ' < "$SERVICES")"

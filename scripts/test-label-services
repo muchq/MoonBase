@@ -1,0 +1,208 @@
+#!/bin/bash
+# Pins the service-label sync (#1214): which names come out of the oci_push
+# rules, which labels a PR gains and loses, and what scripts/label-services
+# asks the GitHub API to do about it.
+#
+# The API half runs against a stub curl that records every request and answers
+# from canned responses, so no token, no network, and the assertions read the
+# request log — what was asked, not what a real API would have answered.
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+# shellcheck source=diff-build-lib.sh
+source "$REPO/scripts/diff-build-lib.sh"
+
+FAILURES=0
+pass() { echo "  ok    $1"; }
+fail() {
+  echo "  FAIL  $1"
+  FAILURES=$((FAILURES + 1))
+}
+check() {
+  local desc=$1
+  shift
+  if "$@"; then pass "$desc"; else fail "$desc"; fi
+}
+same() { # same <expected> <actual>
+  [ "$1" = "$2" ] || { echo "    expected: $1"; echo "    actual:   $2"; false; }
+}
+
+# ---------------------------------------------------------------- parsing
+
+echo "services_from_push_rules"
+
+# The shape of `bazel query 'kind(oci_push, ...)' --output=build`: one rule per
+# block, the repository attribute among others, plus a comment line and a rule
+# pushing somewhere that is not ours.
+cat > "$WORK/push.build" <<'BUILD'
+# /workspace/domains/games/apis/mithril/BUILD.bazel:40:1
+oci_push(
+  name = "mithril_push_image",
+  image = "//domains/games/apis/mithril:mithril_image",
+  remote_tags = ["latest"],
+  repository = "ghcr.io/muchq/mithril",
+)
+# /workspace/domains/ai/apis/microgpt_serve/BUILD.bazel:12:1
+oci_push(
+  name = "microgpt-serve_push_image",
+  repository = "ghcr.io/muchq/microgpt-serve",
+)
+oci_push(
+  name = "again",
+  repository = "ghcr.io/muchq/mithril",
+)
+oci_push(
+  name = "elsewhere",
+  repository = "docker.io/library/nginx",
+)
+BUILD
+check "names are the repository's last segment, sorted and unique, ours only" \
+  same $'microgpt-serve\nmithril' "$(services_from_push_rules < "$WORK/push.build")"
+check "no push rules means no services" \
+  same "" "$(printf '' | services_from_push_rules)"
+
+# ------------------------------------------------------------------- plan
+
+echo "service_label_plan"
+
+plan() { # plan <services...> -- <labels...>
+  : > "$WORK/services"
+  : > "$WORK/labels"
+  local dest=$WORK/services
+  for arg in "$@"; do
+    if [ "$arg" = "--" ]; then dest=$WORK/labels; else printf '%s\n' "$arg" >> "$dest"; fi
+  done
+  service_label_plan "$WORK/services" "$WORK/labels"
+}
+
+check "a missing label is added and a stale one removed" \
+  same $'add service:posterize\nremove service:stats' \
+  "$(plan mithril posterize -- games service:mithril service:stats)"
+check "labels outside the prefix are never removed" \
+  same "" "$(plan mithril -- games deploy service:mithril)"
+check "no impacted services retires every service label" \
+  same "remove service:stats" "$(plan -- service:stats)"
+check "nothing to do prints nothing" \
+  same "" "$(plan -- )"
+check "a duplicated service name is one label" \
+  same "add service:mithril" "$(plan mithril mithril -- )"
+
+# ---------------------------------------------------------------- the sync
+
+echo "label-services"
+
+STUBS=$WORK/stubs
+ROUTES=$WORK/routes
+LOG=$WORK/requests.log
+mkdir -p "$STUBS" "$ROUTES"
+
+# Records "METHOD PATH BODY" per call. Answers from $ROUTES/<METHOD>_<path>
+# (slashes and colons to underscores, query string dropped): first line is
+# the status, the rest the body. Unrouted paths are 404 with an empty body.
+cat > "$STUBS/curl" <<'STUB'
+#!/bin/bash
+method=GET out=/dev/null body= url=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -X) method=$2; shift 2 ;;
+    -o) out=$2; shift 2 ;;
+    --data) body=$2; shift 2 ;;
+    -w | -H) shift 2 ;;
+    -*) shift ;;
+    *) url=$1; shift ;;
+  esac
+done
+path=${url#"$GITHUB_API_URL"}
+printf '%s %s %s\n' "$method" "$path" "$body" >> "$REQUEST_LOG"
+key=$(printf '%s_%s' "$method" "${path%%\?*}" | tr '/:' '__')
+if [ -f "$ROUTES/$key" ]; then
+  sed -n '1p' "$ROUTES/$key"
+  sed -n '2,$p' "$ROUTES/$key" > "$out"
+else
+  echo 404
+  : > "$out"
+fi
+STUB
+chmod +x "$STUBS/curl"
+
+route() { # route METHOD PATH STATUS [BODY]
+  local key
+  key=$(printf '%s_%s' "$1" "$2" | tr '/:' '__')
+  { echo "$3"; [ $# -gt 3 ] && printf '%s\n' "$4"; } > "$ROUTES/$key"
+}
+
+sync() { # sync <services...>; stdout+stderr to $WORK/sync.out, status in $?
+  printf '%s\n' "$@" > "$WORK/services"
+  [ $# -gt 0 ] || : > "$WORK/services"
+  : > "$LOG"
+  PATH="$STUBS:$PATH" GITHUB_TOKEN=t GITHUB_API_URL=https://api.test \
+    REQUEST_LOG="$LOG" ROUTES="$ROUTES" \
+    "$REPO/scripts/label-services" muchq/MoonBase 42 "$WORK/services" \
+    > "$WORK/sync.out" 2>&1
+}
+requested() { grep -qxF "$1" "$LOG"; }
+not_requested() { ! grep -qF "$1" "$LOG"; }
+
+# The PR carries a hand-applied label and one stale service label; the repo
+# already knows service:mithril but has never seen service:posterize.
+rm -f "$ROUTES"/*
+route GET /repos/muchq/MoonBase/issues/42/labels 200 '[
+  { "id": 1, "name": "games", "color": "ededed" },
+  { "id": 2, "name": "service:stats", "color": "0e8a16" }
+]'
+route GET /repos/muchq/MoonBase/labels/service:mithril 200 '{ "name": "service:mithril" }'
+route POST /repos/muchq/MoonBase/labels 201 '{}'
+route POST /repos/muchq/MoonBase/issues/42/labels 200 '[]'
+route DELETE /repos/muchq/MoonBase/issues/42/labels/service:stats 200 '[]'
+
+sync mithril posterize
+check "the sync succeeds" test $? -eq 0
+check "the stale service label is removed" \
+  requested "DELETE /repos/muchq/MoonBase/issues/42/labels/service:stats "
+check "a label the repo already has is not created again" \
+  not_requested '"name":"service:mithril"'
+check "a label the repo lacks is created first" \
+  requested 'POST /repos/muchq/MoonBase/labels {"name":"service:posterize","color":"0e8a16","description":"Changes the posterize image"}'
+check "both wanted labels are added in one call" \
+  requested 'POST /repos/muchq/MoonBase/issues/42/labels {"labels":["service:mithril","service:posterize"]}'
+check "the hand-applied label is left alone" \
+  not_requested 'labels/games'
+
+# Already in sync: one read, no writes.
+sync stats
+check "an in-sync PR is read and not written" \
+  same "GET /repos/muchq/MoonBase/issues/42/labels?per_page=100 " "$(cat "$LOG")"
+
+# Nothing impacted: the stale label goes, nothing is added.
+sync
+check "no impacted services removes the service label and adds none" \
+  same $'GET /repos/muchq/MoonBase/issues/42/labels?per_page=100 \nDELETE /repos/muchq/MoonBase/issues/42/labels/service:stats ' \
+  "$(cat "$LOG")"
+
+# A token that cannot write: the failure is loud, not a green step.
+rm -f "$ROUTES"/*
+route GET /repos/muchq/MoonBase/issues/42/labels 200 '[]'
+route GET /repos/muchq/MoonBase/labels/service:mithril 200 '{}'
+route POST /repos/muchq/MoonBase/issues/42/labels 403 '{ "message": "Resource not accessible by integration" }'
+sync mithril
+STATUS=$?
+check "a rejected write fails the script" test "$STATUS" -ne 0
+check "a rejected write names the call and status" \
+  grep -q 'POST /repos/muchq/MoonBase/issues/42/labels returned 403' "$WORK/sync.out"
+
+rm -f "$ROUTES"/*
+route GET /repos/muchq/MoonBase/issues/42/labels 401 '{ "message": "Bad credentials" }'
+sync mithril
+STATUS=$?
+check "an unreadable PR fails the script" test "$STATUS" -ne 0
+
+echo
+if [ "$FAILURES" -eq 0 ]; then
+  echo "all label-services checks passed"
+else
+  echo "$FAILURES check(s) failed"
+fi
+exit $((FAILURES > 0))

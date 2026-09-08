@@ -42,6 +42,12 @@ jobs:
       - name: Test diff-build full-build decision
         run: ./scripts/test-diff-build
 
+      # The service labels build-and-test applies (#1214) are a claim about
+      # blast radius that reviewers and deploys act on. Exercised against a
+      # stub curl; no token, no network.
+      - name: Test service labels
+        run: ./scripts/test-label-services
+
       # make-git-overrides is what makes this repo buildable behind a proxy
       # that 403s source archives, and nothing else in CI runs it. Its
       # archive_override path built a stale commit for a whole release of a
@@ -156,6 +162,14 @@ jobs:
     container:
       image: ghcr.io/muchq/moonbase/ci-base:latest
 
+    # pull-requests: write applies the service labels; issues: write creates a
+    # label the repo has not seen yet. Job-scoped so nothing else in the
+    # workflow gains it.
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
     # A real postgres for the DB-gated suites (pg_test, pg_ticket_vault_test):
     # without it they skip silently and none of the SQL is exercised on main.
     # Image tracks the deployed postgres:18 (deploy/consolidated/compose.yaml).
@@ -211,6 +225,22 @@ jobs:
       - name: bazel-diff-build-and-test
         run: |
           ./scripts/diff-build origin/main
+
+      # Label the PR with the services whose image this change reaches
+      # (#1214), from the impact set diff-build already computed. Runs after a
+      # red build too: the labels say what a change touches, not whether it
+      # passed. A fork's token cannot write labels, so a fork PR is skipped
+      # rather than failed.
+      - name: Label impacted services
+        if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f /tmp/impacted_services.txt ]; then
+            echo "diff-build did not get as far as computing impacted services; nothing to label"
+            exit 0
+          fi
+          ./scripts/label-services "$GITHUB_REPOSITORY" "${{ github.event.pull_request.number }}" /tmp/impacted_services.txt
 
   # Sanitizers (#1273). The class of bug these catch — use-after-free, leaks,
   # signed overflow — has no symptom an assertion can see, so before this job
