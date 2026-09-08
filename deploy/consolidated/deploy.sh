@@ -285,10 +285,11 @@ fi
 # The commits that changed one service, read off the images themselves: a
 # commit changed the service when its image's content differs from the next
 # older commit's. Ground truth rather than intent, and it reads commits
-# published long before anything labeled them. A commit with no published
-# image (a failed publish, or the service did not exist yet) cannot be
-# compared, so the next older one that has an image stands in, and the row
-# says the change may sit in the gap.
+# published long before anything labeled them. The registry's tag list says
+# which commits have an image at all, so only those are read; a commit
+# without one (a failed publish, or the service did not exist yet) is
+# skipped, the next older one that has an image stands in, and the row says
+# the change may sit in the gap.
 if [ -n "$LIST_COUNT" ]; then
   # Reading an image, shared with CI's blast-radius comparison so the two
   # read a commit's image the same way. Sourced here rather than up top: a
@@ -301,23 +302,21 @@ if [ -n "$LIST_COUNT" ]; then
     [ $? -eq 44 ] || exit 1
   }
 
-  # One more commit than the scan, to tell a cap that truncated history from
-  # a history that ended. A shallow clone cannot tell, and says nothing.
-  commits=$(git log --max-count=$((LIST_SCAN + 1)) --pretty=%H origin/main)
-  history_ended=0
-  [ "$(printf '%s\n' "$commits" | grep -c .)" -gt "$LIST_SCAN" ] ||
-    [ "$(git rev-parse --is-shallow-repository)" = true ] || history_ended=1
-
   echo "Scanning up to $LIST_SCAN commits on main for changes to the $TARGET_SERVICE image..." >&2
   # Minted here, in this shell, so every read below inherits it; a read runs
   # in a substitution and could not cache it for the next.
   registry_token "$REGISTRY" "muchq/$TARGET_SERVICE" > /dev/null || exit 1
+  published=$(mktemp)
+  trap 'rm -f "$published"' EXIT
+  registry_commit_tags "$REGISTRY" "muchq/$TARGET_SERVICE" > "$published" || exit 1
+  has_image() { grep -qxF "$1" "$published"; }
 
   # The image that is running, so the listing can mark the change it came
   # from: what a rollback replaces is a change point, not necessarily the
   # commit the pin names.
   deployed_content=""
   [ -z "$deployed_sha" ] || deployed_content=$(content_at "$deployed_sha")
+
   rows=""
   add_row() { # add_row <sha> <note>
     local marker=""
@@ -335,14 +334,12 @@ if [ -n "$LIST_COUNT" ]; then
   gap=0             # imageless commits since it
   found=0
   scanned=0
-  for sha in $commits; do
-    [ "$scanned" -lt "$LIST_SCAN" ] || break
+  for sha in $(git log --max-count="$LIST_SCAN" --pretty=%H origin/main); do
     scanned=$((scanned + 1))
+    has_image "$sha" || { gap=$((gap + 1)); continue; }
     content=$(content_at "$sha")
-    if [ -z "$content" ]; then
-      gap=$((gap + 1))
-      continue
-    fi
+    # Tagged and yet not there: a tag being written as we read. A gap.
+    [ -n "$content" ] || { gap=$((gap + 1)); continue; }
     if [ -n "$newer" ] && [ "$content" != "$newer_content" ]; then
       note=""
       [ "$gap" -eq 0 ] || note="  (or in the $gap commit(s) between, which have no image)"
@@ -355,14 +352,17 @@ if [ -n "$LIST_COUNT" ]; then
     gap=0
   done
 
+  # The last commit seen with an image has nothing in the window to compare
+  # with. Whether anything older has one is a question for the tag list and
+  # git, not for a wider scan: none means the image first appeared here.
   trailer=""
   if [ -n "$newer" ] && [ "$found" -lt "$LIST_COUNT" ]; then
-    if [ "$history_ended" -eq 1 ]; then
-      add_row "$newer" "  (first image)"
-    elif [ "$gap" -gt 0 ]; then
-      add_row "$newer" "  (first image in the last $scanned commits; the $gap older have none)"
-    else
+    if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+      trailer="(${newer:0:9} not compared: this clone is shallow, so what is older is unknown)"
+    elif git rev-list "$newer" | tail -n +2 | grep -qxF -f "$published"; then
       trailer="(${newer:0:9} not compared: only the last $LIST_SCAN commits were scanned; set DEPLOY_LIST_SCAN to look further)"
+    else
+      add_row "$newer" "  (first image)"
     fi
   fi
   if [ -z "$rows" ] && [ -z "$trailer" ]; then

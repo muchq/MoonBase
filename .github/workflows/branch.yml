@@ -229,8 +229,8 @@ jobs:
         if: ${{ !cancelled() }}
         continue-on-error: true
         # Bounded: it builds the candidate images (a cache hit after a green
-        # diff-build), waits a few minutes for a base image publish has not
-        # pushed yet, and talks to the registry.
+        # diff-build), waits a few minutes for a base image that publish has
+        # not pushed yet, and talks to the registry.
         timeout-minutes: 20
         run: ./scripts/impacted-services origin/main /tmp/impacted_targets.txt /tmp/impacted_services.txt
 

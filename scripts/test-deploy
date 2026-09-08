@@ -136,17 +136,22 @@ exit 0
 STUB
 
   # The registry, for --list --service. A token request answers with a token
-  # unless FAKE_NO_REPO is set; a manifest request answers from
+  # unless FAKE_NO_REPO is set. A tag listing answers with the shas that have
+  # a file in $FAKE_IMAGES for that service, two per page when
+  # FAKE_TAG_PAGE is set. A manifest request answers from
   # $FAKE_IMAGES/<service>_<sha>, whose one line is the image's content, and
-  # 404 without one. FAKE_REGISTRY_DOWN makes a manifest request a 503 once
-  # that many have been served. Records each request in $REGISTRY_LOG.
+  # 404 without one; the first one is a 401 when FAKE_STALE_TOKEN is set, and
+  # FAKE_REGISTRY_DOWN makes one a 503 once that many have been served.
+  # Records each request in $REGISTRY_LOG.
   cat > "$STUBS/curl" <<'STUB'
 #!/bin/bash
-out=/dev/null url= headers=
+out=/dev/null hdr=/dev/null url= headers=
 while [ $# -gt 0 ]; do
   case "$1" in
     -H) headers="$headers[$2]"; shift 2 ;;
-    -o | -w | --connect-timeout | --max-time | --retry) [ "$1" = -o ] && out=$2; shift 2 ;;
+    -o) out=$2; shift 2 ;;
+    -D) hdr=$2; shift 2 ;;
+    -w | --connect-timeout | --max-time | --retry) shift 2 ;;
     -*) shift ;;
     *) url=$1; shift ;;
   esac
@@ -156,10 +161,36 @@ case "$url" in
     echo token >> "$REGISTRY_LOG"
     [ -n "${FAKE_NO_REPO:-}" ] || printf '{"token":"t"}'
     ;;
+  */v2/muchq/*/tags/list*)
+    rest=${url#*/v2/muchq/}
+    service=${rest%%/*}
+    echo "tags $service" >> "$REGISTRY_LOG"
+    : > "$hdr"
+    all=$(ls "$FAKE_IMAGES" 2>/dev/null | sed -n "s/^${service}_//p" | sort)
+    if [ -n "${FAKE_TAG_PAGE:-}" ]; then
+      case "$url" in
+        *last=*) last=${url##*last=}; last=${last%%&*}; all=$(printf '%s\n' "$all" | sed "1,/^$last\$/d") ;;
+      esac
+      page=$(printf '%s\n' "$all" | head -n "$FAKE_TAG_PAGE")
+      if [ "$(printf '%s\n' "$all" | grep -c .)" -gt "$FAKE_TAG_PAGE" ]; then
+        printf 'Link: </v2/muchq/%s/tags/list?last=%s&n=%s>; rel="next"\r\n' \
+          "$service" "$(printf '%s\n' "$page" | tail -1)" "$FAKE_TAG_PAGE" > "$hdr"
+      fi
+    else
+      page=$all
+    fi
+    printf '{"name":"muchq/%s","tags":["latest"%s]}' "$service" \
+      "$(printf '%s\n' "$page" | grep . | sed 's/.*/,"&"/' | tr -d '\n')" > "$out"
+    echo 200
+    ;;
   */v2/muchq/*/manifests/*)
     rest=${url#*/v2/muchq/}
     echo "manifest ${rest%%/*} ${rest##*/} $headers" >> "$REGISTRY_LOG"
     served=$(grep -c '^manifest' "$REGISTRY_LOG")
+    if [ -n "${FAKE_STALE_TOKEN:-}" ] && [ "$served" -eq 1 ]; then
+      echo 401
+      exit 0
+    fi
     if [ -n "${FAKE_REGISTRY_DOWN:-}" ] && [ "$served" -gt "$FAKE_REGISTRY_DOWN" ]; then
       echo 503
       exit 0
@@ -248,6 +279,7 @@ deploy() { # deploy <args...> -> exit code, output in $WORK/out.txt
       FAKE_MISSING_IMAGES="${FAKE_MISSING_IMAGES:-}" FAKE_PS="${FAKE_PS:-}" \
       FAKE_RESTARTS="${FAKE_RESTARTS:-}" FAKE_IMAGES="$IMAGES" \
       FAKE_REGISTRY_DOWN="${FAKE_REGISTRY_DOWN:-}" FAKE_NO_REPO="${FAKE_NO_REPO:-}" \
+      FAKE_STALE_TOKEN="${FAKE_STALE_TOKEN:-}" FAKE_TAG_PAGE="${FAKE_TAG_PAGE:-}" \
       REGISTRY_LOG="$REGISTRY_LOG" \
       bash deploy/consolidated/deploy.sh "$@"
   ) > "$WORK/out.txt" 2>&1
@@ -360,6 +392,16 @@ check "lists the commit where the image first appeared" grep -q "(#1000).*first 
 check "and nothing in between" test "$(stdout_rows)" -eq 2
 check "marks the service's own deployed revision" grep -q "(#1002).*<- deployed" "$WORK/out.txt"
 check "mints one token for the whole scan" test "$(grep -c '^token' "$REGISTRY_LOG")" -eq 1
+check "reads the tag list once" test "$(grep -c '^tags mithril' "$REGISTRY_LOG")" -eq 1
+check "reads only the commits the tag list names, plus the running one" \
+  test "$(grep -c '^manifest' "$REGISTRY_LOG")" -eq 5
+FAKE_TAG_PAGE=2 deploy --list --service mithril
+check "a paged tag list is followed to its end" grep -q "(#1000).*first image" "$WORK/out.txt"
+check "across every page" test "$(grep -c '^tags mithril' "$REGISTRY_LOG")" -eq 2
+FAKE_STALE_TOKEN=1 deploy --list --service mithril
+check "a 401 remints the token and the listing continues" test $? -eq 0
+check "with a second token" test "$(grep -c '^token' "$REGISTRY_LOG")" -eq 2
+check "and the same rows" grep -q "(#1002).*<- deployed" "$WORK/out.txt"
 check "every manifest read carries the token" \
   test "$(grep -c '^manifest.*\[Authorization: Bearer t\]' "$REGISTRY_LOG")" -eq "$(grep -c '^manifest' "$REGISTRY_LOG")"
 check "and asks for a manifest, not an index" \
@@ -399,10 +441,12 @@ check "to the newest change" grep -q "(#1002)" "$WORK/out.txt"
 rm -f "$IMAGES/mithril_$MID_SHA"
 published mithril "$SHA" ccc
 published mithril "$OLDEST_SHA" aaa
+reset_host "DEPLOY_SHA=$SHA"
 deploy --list --service mithril
 check "a commit with no image is skipped over" \
   grep -q "(#1003).*or in the 1 commit(s) between, which have no image" "$WORK/out.txt"
 check "and not listed itself" bash -c '! grep -q "(#1002)" "$0"' "$WORK/out.txt"
+check "and never asked for" bash -c '! grep -q "^manifest mithril $1" "$0"' "$REGISTRY_LOG" "$MID_SHA"
 check "a change with no gap carries no gap note" \
   bash -c 'grep "(#1001)" "$0" | grep -qv "between"' "$WORK/out.txt"
 published mithril "$OLDEST_SHA" bbb
@@ -432,13 +476,25 @@ DEPLOY_LIST_SCAN=4 deploy --list --service mithril
 check "a scan that ends exactly at history's end still finds the first image" \
   grep -q "(#1000).*first image" "$WORK/out.txt"
 
-# A service introduced recently: everything older has no image, and the
-# scan cap is not what stopped the listing.
+# A service introduced recently: nothing older has an image, so the scan
+# cap is not what stopped the listing and the tag list says so.
 rm -f "$IMAGES/mithril_$MID_SHA" "$IMAGES/mithril_$OLD_SHA" "$IMAGES/mithril_$OLDEST_SHA"
 DEPLOY_LIST_SCAN=2 deploy --list --service mithril
 check "a service newer than the scan is reported as first appearing" \
-  grep -q "(#1003).*first image in the last 2 commits; the 1 older have none" "$WORK/out.txt"
+  grep -q "(#1003).*first image" "$WORK/out.txt"
 check "and not as a scan limit" bash -c '! grep -q "not compared" "$0"' "$WORK/out.txt"
+
+# The scan ends inside an imageless streak but an older image exists beyond
+# it: that older image may differ, so the last commit seen is not compared,
+# not called the first.
+published mithril "$OLDEST_SHA" bbb
+DEPLOY_LIST_SCAN=3 deploy --list --service mithril
+check "a scan ending on imageless commits with an image beyond is not compared" \
+  grep -q "not compared" "$WORK/out.txt"
+check "and does not call it the first image" bash -c '! grep -q "first image" "$0"' "$WORK/out.txt"
+DEPLOY_LIST_SCAN=4 deploy --list --service mithril
+check "one commit further, the change is found across the gap" \
+  grep -q "(#1003).*or in the 2 commit(s) between" "$WORK/out.txt"
 
 # No image anywhere in the scan: an answer, not an empty listing.
 rm -rf "$IMAGES"

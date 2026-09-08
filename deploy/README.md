@@ -23,7 +23,8 @@ not be read — the PR gets `service:unknown` beside whatever service labels it
 has and loses none, so an unknown blast radius is never mistaken for an empty
 one; the next run that does know the answer retires the marker. A base commit
 whose image publish has not pushed yet is waited for a few minutes; past that,
-the graph's answer stands for it.
+the graph's answer stands for it — except on a full build, where the graph
+would say every service, so the answer stays unknown.
 
 ## Deploy history by service
 

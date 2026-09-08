@@ -44,6 +44,9 @@ require_base_revision "$BASE_REVISION"
 REGISTRY=${IMAGE_REGISTRY:-https://ghcr.io}
 PUBLISH_WAIT=${IMPACT_PUBLISH_WAIT:-300}
 POLL_INTERVAL=${IMPACT_POLL_INTERVAL:-30}
+# One budget for the whole run, not one per service: every candidate lags
+# on the same publish, and a wait per candidate would stack past the step.
+PUBLISH_DEADLINE=$(( $(date +%s) + PUBLISH_WAIT ))
 
 rm -f "$DEST"
 WORK=$(mktemp -d)
@@ -129,7 +132,6 @@ remote_digests() { # remote_digests <service> <ref>
 # waiting), error.
 base_digests() { # base_digests <service>
   local service=$1 status latest
-  local deadline=$(( $(date +%s) + PUBLISH_WAIT ))
   while :; do
     set +e
     remote_digests "$service" "$MERGE_BASE" > "$WORK/remote"
@@ -149,7 +151,7 @@ base_digests() { # base_digests <service>
       0) ;;
       *) echo error; return ;;
     esac
-    if [ "$(date +%s)" -ge "$deadline" ]; then
+    if [ "$(date +%s)" -ge "$PUBLISH_DEADLINE" ]; then
       echo lag
       return
     fi

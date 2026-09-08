@@ -72,3 +72,38 @@ registry_image_content() { # registry_image_content <registry url> <repository p
       ;;
   esac
 }
+
+# Every commit tag in <repository path>, one full sha per line, following the
+# registry's paging. Says which commits have an image at all, so a walk over
+# history need not ask about each one. Returns 1 on a registry error, said on
+# stderr; a repository with no tags is empty output.
+registry_commit_tags() { # registry_commit_tags <registry url> <repository path>
+  local registry=$1 repo=$2 token status body headers next
+  body=$(mktemp)
+  headers=$(mktemp)
+  next="$registry/v2/$repo/tags/list?n=1000"
+  while [ -n "$next" ]; do
+    token=$(registry_token "$registry" "$repo") || { rm -f "$body" "$headers"; return 1; }
+    : > "$headers"
+    status=$("${REGISTRY_CURL[@]}" -o "$body" -D "$headers" -w '%{http_code}' \
+      -H "Authorization: Bearer $token" "$next")
+    case "$status" in
+      200) ;;
+      404) break ;;
+      *)
+        echo "registry returned $status listing tags for $repo" >&2
+        rm -f "$body" "$headers"
+        return 1
+        ;;
+    esac
+    grep -o '"[0-9a-f]\{40\}"' "$body" | tr -d '"'
+    # A Link header names the next page as a path; anything else ends it.
+    next=$(tr -d '\r' < "$headers" | sed -n 's/^[Ll]ink: *<\([^>]*\)>; *rel="next".*/\1/p' | head -1)
+    case "$next" in
+      /*) next="$registry$next" ;;
+      http*) ;;
+      *) next="" ;;
+    esac
+  done
+  rm -f "$body" "$headers"
+}

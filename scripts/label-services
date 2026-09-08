@@ -48,6 +48,12 @@ if [ ! -f "$SERVICES" ]; then
   exit 0
 fi
 
+# Planned into a file first: a plan that failed to compute must stop here,
+# and a process substitution's failure would not.
+PLAN=$(mktemp)
+trap 'rm -f "$HAVE" "$PLAN"' EXIT
+service_label_plan "$SERVICES" "$HAVE" > "$PLAN"
+
 ADD=""
 REMOVE=""
 while read -r verb label; do
@@ -58,7 +64,7 @@ while read -r verb label; do
       ;;
     remove) REMOVE="$REMOVE,$label" ;;
   esac
-done < <(service_label_plan "$SERVICES" "$HAVE")
+done < "$PLAN"
 
 EDIT=()
 [ -z "$ADD" ] || EDIT+=(--add-label "${ADD#,}")
