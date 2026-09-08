@@ -16,7 +16,7 @@
 # Writes DEST with one service name per line — empty when no image changed —
 # or leaves no DEST when the answer is not known: diff-build died before its
 # impact set, a build or query failed, or the registry could not be read.
-# The consumer treats a missing DEST as "skip", so an unknown blast radius
+# The consumer marks a missing DEST as unknown, so an unknown blast radius
 # is never reported as an empty one.
 #
 # A base commit whose image is not published yet is waited for, up to

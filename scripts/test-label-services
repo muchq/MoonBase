@@ -123,7 +123,37 @@ sync mithril
 check "an unlabeled PR gains its label" \
   called "pr edit 42 --add-label service:mithril"
 
+echo "an unknown answer"
+
+# No services file: the marker goes on, and the stale service label stays.
+printf '%s\n' games service:stats > "$WORK/pr_labels"
+: > "$LOG"
+PATH="$STUBS:$PATH" GH_LOG="$LOG" PR_LABELS="$WORK/pr_labels" GH_FAIL="" \
+  "$REPO/scripts/label-services" 42 "$WORK/does-not-exist" > "$WORK/sync.out" 2>&1
+check "a missing services file succeeds" test $? -eq 0
+check "the unknown marker is created with its own description" \
+  called "label create service:unknown --force --color 0e8a16 --description Impacted services could not be computed"
+check "the unknown marker is added and nothing removed" \
+  called "pr edit 42 --add-label service:unknown"
+check "the stale service label is kept" not_called "remove-label"
+
+# Already marked: nothing to do.
+printf '%s\n' service:stats service:unknown > "$WORK/pr_labels"
+: > "$LOG"
+PATH="$STUBS:$PATH" GH_LOG="$LOG" PR_LABELS="$WORK/pr_labels" GH_FAIL="" \
+  "$REPO/scripts/label-services" 42 "$WORK/does-not-exist" > "$WORK/sync.out" 2>&1
+check "an already-marked PR is read and not written" \
+  same "api repos/{owner}/{repo}/issues/42/labels --paginate --jq .[].name" "$(cat "$LOG")"
+
+# A known answer retires the marker with the other stale labels.
+sync stats
+check "a known answer retires the unknown marker" \
+  called "pr edit 42 --remove-label service:unknown"
+
+echo "failures"
+
 # A token that cannot write: the failure is loud, not a green step.
+printf '%s\n' games service:stats > "$WORK/pr_labels"
 GH_FAIL="pr edit" sync mithril
 STATUS=$?
 check "a rejected edit fails the script" test "$STATUS" -ne 0

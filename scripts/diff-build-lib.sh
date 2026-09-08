@@ -46,6 +46,9 @@ paths_forcing_full_build() {
 # under one prefix, so the sync below can retire a stale one without touching
 # the hand-applied labels beside it.
 SERVICE_LABEL_PREFIX="service:"
+# The marker for a run that could not compute the set; under the prefix so a
+# known answer retires it.
+UNKNOWN_LABEL="${SERVICE_LABEL_PREFIX}unknown"
 
 # The label changes that bring a PR from the labels it has to the services it
 # impacts. Reads two files of names, one per line: the impacted services and
@@ -79,9 +82,10 @@ push_rule_pairs() {
 
 # The content digests an image manifest names, one per line in manifest
 # order: the config, then each layer. Two manifests with the same list are
-# the same image even when their own digests differ — the docker re-tag in
-# publish.yml relabels a layer's media type, which changes the manifest's
-# digest and nothing the image is made of.
+# the same image even when their own digests differ: commit tags pushed
+# before publish tagged from the built image went through docker, which
+# relabels a layer's media type and so the manifest's digest, and nothing the
+# image is made of.
 manifest_digests() {
   grep -o '"digest": *"sha256:[a-f0-9]*"' | sed 's/.*"sha256:/sha256:/; s/"$//' || true
 }

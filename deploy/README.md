@@ -19,7 +19,8 @@ changing it, and get no label for it.
 The labels are re-synced on each push; ones for services a PR no longer
 touches are removed, and labels outside the `service:` prefix are never
 touched. When the answer is unknown — a build failed, or the registry could
-not be read — the PR gets no service labels and loses none: an unknown blast
-radius is not reported as an empty one. A base commit whose image publish
-has not pushed yet is waited for a few minutes; past that, the graph's answer
-stands for it.
+not be read — the PR gets `service:unknown` beside whatever service labels it
+has and loses none, so an unknown blast radius is never mistaken for an empty
+one; the next run that does know the answer retires the marker. A base commit
+whose image publish has not pushed yet is waited for a few minutes; past that,
+the graph's answer stands for it.
