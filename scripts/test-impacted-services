@@ -1,19 +1,22 @@
 #!/bin/bash
 # Pins what scripts/impacted-services writes for each state of a diff-build
-# run (#1214): a set, an empty set, or — for a full build, a run that died
-# before its impact set, or a failed query — no file at all. The consumer
-# reads "no file" as "unknown, skip", so this is where an unknown blast
-# radius is kept from being reported as an empty one.
+# run (#1214): the services whose image content changed, an empty set, or —
+# when the answer is not known — no file at all. The consumer reads "no file"
+# as "unknown, skip", so this is where an unknown blast radius is kept from
+# being reported as an empty one.
 #
-# The subject decides over a git diff and one bazel query, so the fixture is a
-# throwaway repo (as in test-diff-build) and a stub bazel that records the
-# query and answers from a canned oci_push listing.
+# The subject decides over a git diff, a few bazel calls, and the registry, so
+# the fixture is a throwaway repo, a stub bazel answering from canned push
+# rules and image layouts, and a stub curl answering from canned manifests.
 set -uo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 SUBJECT=$REPO/scripts/impacted-services
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
+
+# shellcheck source=diff-build-lib.sh
+source "$REPO/scripts/diff-build-lib.sh"
 
 FAILURES=0
 pass() { echo "  ok    $1"; }
@@ -30,57 +33,243 @@ same() { # same <expected> <actual>
   [ "$1" = "$2" ] || { echo "    expected: $1"; echo "    actual:   $2"; false; }
 }
 
+# ---------------------------------------------------------------- parsing
+
+echo "push_rule_pairs"
+
+cat > "$WORK/rules" <<'BUILD'
+# /workspace/domains/games/apis/mithril/BUILD.bazel:40:1
+oci_push(
+  name = "mithril_push_image",
+  tags = ["manual"],
+  image = "//domains/games/apis/mithril:mithril_image",
+  repository = "ghcr.io/muchq/mithril",
+)
+oci_push(
+  name = "microgpt-serve_push_image",
+  repository = "ghcr.io/muchq/microgpt-serve",
+  image = "//domains/ai/apis/microgpt_serve:microgpt-serve_image",
+)
+oci_push(
+  name = "elsewhere",
+  image = "//x:y",
+  repository = "docker.io/library/nginx",
+)
+BUILD
+check "a pair per push rule of ours, sorted, in either attribute order" \
+  same $'microgpt-serve //domains/ai/apis/microgpt_serve:microgpt-serve_image\nmithril //domains/games/apis/mithril:mithril_image' \
+  "$(push_rule_pairs < "$WORK/rules")"
+
+echo "manifest_digests"
+
+# A docker schema-2 manifest as the registry serves it (media types, sizes,
+# digest last) and an OCI manifest as bazel writes it (digest first): the
+# same content reads the same.
+DOCKER_MANIFEST='{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.v2+json","config":{"mediaType":"application/vnd.docker.container.image.v1+json","size":1234,"digest":"sha256:c1"},"layers":[{"mediaType":"application/vnd.docker.image.rootfs.diff.tar.gzip","size":10,"digest":"sha256:b1"},{"mediaType":"application/vnd.docker.image.rootfs.diff.tar.gzip","size":20,"digest":"sha256:d1"}]}'
+OCI_MANIFEST='{
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "config": { "digest": "sha256:c1", "mediaType": "application/vnd.oci.image.config.v1+json", "size": 1230 },
+  "layers": [
+    { "digest": "sha256:b1", "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "size": 10 },
+    { "digest": "sha256:d1", "mediaType": "application/vnd.oci.image.layer.v1.tar", "size": 25 }
+  ]
+}'
+check "config then layers, in manifest order, from a compact docker manifest" \
+  same $'sha256:c1\nsha256:b1\nsha256:d1' "$(printf '%s' "$DOCKER_MANIFEST" | manifest_digests)"
+check "the same from a spaced OCI manifest with other media types and sizes" \
+  same $'sha256:c1\nsha256:b1\nsha256:d1' "$(printf '%s' "$OCI_MANIFEST" | manifest_digests)"
+check "no digests is empty, not a failure" same "" "$(printf '{}' | manifest_digests)"
+
 # ---------------------------------------------------------------- fixture
 
+# main moves past the branch point, so the merge base and main's tip differ.
 FIXTURE=$WORK/repo
 mkdir -p "$FIXTURE"
 cd "$FIXTURE"
-git init -q
+git init -q -b main
 git config user.email "test@example.com"
 git config user.name "test"
 git config commit.gpgsign false
 printf 'build --foo\n' > .bazelrc
 mkdir -p domains/games
 printf 'src\n' > domains/games/hello.txt
+printf 'readme\n' > README.md
 git add .
 git commit -q -m base
-BASE=$(git rev-parse HEAD)
+MERGE_BASE=$(git rev-parse HEAD)
+git checkout -q -b feature
+git checkout -q main
+printf 'readme moved on\n' > README.md
+git commit -q -am "main moves on"
+MAIN_TIP=$(git rev-parse HEAD)
+git checkout -q feature
 
 commit_change_to() { # commit_change_to <path> <contents>
   printf '%s\n' "$2" > "$1"
   git add "$1"
   git commit -q -m "change $1"
 }
-reset_to_base() { git reset -q --hard "$BASE"; }
+reset_to_base() { git reset -q --hard "$MERGE_BASE"; }
+
+# A manifest naming <config> and <layer>... in docker or oci dress.
+manifest() { # manifest docker|oci <config> <layer>...
+  local dress=$1 config=$2
+  shift 2
+  local layers="" l
+  if [ "$dress" = docker ]; then
+    for l in "$@"; do
+      layers="$layers{\"mediaType\":\"application/vnd.docker.image.rootfs.diff.tar.gzip\",\"size\":1,\"digest\":\"sha256:$l\"},"
+    done
+    printf '{"mediaType":"application/vnd.docker.distribution.manifest.v2+json","config":{"size":2,"digest":"sha256:%s"},"layers":[%s]}' "$config" "${layers%,}"
+  else
+    for l in "$@"; do
+      layers="$layers{\"digest\": \"sha256:$l\", \"mediaType\": \"application/vnd.oci.image.layer.v1.tar\"},"
+    done
+    printf '{"mediaType": "application/vnd.oci.image.manifest.v1+json", "config": {"digest": "sha256:%s"}, "layers": [%s]}' "$config" "${layers%,}"
+  fi
+}
+layout() { # layout <dir> <config> <layer>...: a built image's OCI layout
+  local dir=$1
+  shift
+  rm -rf "$dir"
+  mkdir -p "$dir/blobs/sha256"
+  manifest oci "$@" > "$dir/blobs/sha256/deadbeef"
+  printf '{"manifests":[{"digest":"sha256:deadbeef"}]}' > "$dir/index.json"
+}
 
 STUBS=$WORK/stubs
-mkdir -p "$STUBS"
-QUERY_LOG=$WORK/bazel.log
+FIX=$WORK/fix
+ROUTES=$WORK/routes
+mkdir -p "$STUBS" "$FIX" "$ROUTES"
+BAZEL_LOG=$WORK/bazel.log
+CURL_LOG=$WORK/curl.log
+
+# query answers from $FIX/rules_all (a //... expression) or $FIX/rules_set;
+# cquery from $FIX/layouts; each fails when its *_FAIL flag is set.
 cat > "$STUBS/bazel" <<'STUB'
 #!/bin/bash
 printf '%s\n' "$*" >> "$BAZEL_LOG"
-[ -z "${BAZEL_FAIL:-}" ] || { echo "ERROR: query failed" >&2; exit 2; }
-cat "$BAZEL_ANSWER"
+case "$1" in
+  query)
+    [ -z "${BAZEL_QUERY_FAIL:-}" ] || { echo "ERROR: query failed" >&2; exit 2; }
+    case "$*" in *'//...'*) cat "$FIX/rules_all" ;; *) cat "$FIX/rules_set" ;; esac
+    ;;
+  build) [ -z "${BAZEL_BUILD_FAIL:-}" ] || { echo "ERROR: build failed" >&2; exit 1; } ;;
+  cquery)
+    [ -z "${BAZEL_CQUERY_FAIL:-}" ] || { echo "ERROR: cquery failed" >&2; exit 2; }
+    cat "$FIX/layouts"
+    ;;
+esac
 STUB
 chmod +x "$STUBS/bazel"
-cat > "$WORK/answer" <<'BUILD'
-oci_push(
-  name = "mithril_push_image",
-  repository = "ghcr.io/muchq/mithril",
-)
-oci_push(
-  name = "posterize_push_image",
-  repository = "ghcr.io/muchq/posterize",
-)
-BUILD
+
+# A token request answers with a token unless TOKEN_FAIL is set; a manifest
+# request answers from $ROUTES/<service>_<ref> (first line the status, the
+# rest the body) and 404 without one. A route with a ".later" twin is
+# replaced by it after answering once, for the publish-lag wait. Records
+# each manifest request as "<service> <ref>".
+cat > "$STUBS/curl" <<'STUB'
+#!/bin/bash
+out=/dev/null url=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o | -w | -H | --connect-timeout | --max-time | --retry) [ "$1" = -o ] && out=$2; shift 2 ;;
+    -*) shift ;;
+    *) url=$1; shift ;;
+  esac
+done
+case "$url" in
+  */token?*) [ -n "${TOKEN_FAIL:-}" ] || printf '{"token":"t"}' ;;
+  */v2/muchq/*/manifests/*)
+    rest=${url#*/v2/muchq/}
+    service=${rest%%/*}
+    ref=${rest##*/}
+    printf '%s %s\n' "$service" "$ref" >> "$CURL_LOG"
+    key=$ROUTES/${service}_$ref
+    if [ -f "$key" ]; then
+      sed -n '1p' "$key"
+      sed -n '2,$p' "$key" > "$out"
+    else
+      echo 404
+    fi
+    [ ! -f "$key.later" ] || mv "$key.later" "$key"
+    ;;
+esac
+STUB
+chmod +x "$STUBS/curl"
+
+route() { # route <service> <ref> <status> [body]
+  { echo "$3"; [ $# -gt 3 ] && printf '%s\n' "$4"; } > "$ROUTES/${1}_$2"
+}
+published() { # published <service> <ref> <config> <layer>...: a 200 docker manifest
+  local service=$1 ref=$2
+  shift 2
+  route "$service" "$ref" 200 "$(manifest docker "$@")"
+}
+unpublished() { rm -f "$ROUTES/${1}_$2"; }
 
 TARGETS=$WORK/impacted_targets.txt
 DEST=$WORK/impacted_services.txt
 
 run() { # run [BASE]; stdout+stderr to $WORK/run.out, status in $?
-  : > "$QUERY_LOG"
-  PATH="$STUBS:$PATH" BAZEL_LOG="$QUERY_LOG" BAZEL_ANSWER="$WORK/answer" BAZEL_FAIL="${BAZEL_FAIL:-}" \
-    "$SUBJECT" "${1:-$BASE}" "$TARGETS" "$DEST" > "$WORK/run.out" 2>&1
+  : > "$BAZEL_LOG"
+  : > "$CURL_LOG"
+  PATH="$STUBS:$PATH" BAZEL_LOG="$BAZEL_LOG" FIX="$FIX" ROUTES="$ROUTES" CURL_LOG="$CURL_LOG" \
+    BAZEL_BUILD_FAIL="${BAZEL_BUILD_FAIL:-}" BAZEL_QUERY_FAIL="${BAZEL_QUERY_FAIL:-}" \
+    BAZEL_CQUERY_FAIL="${BAZEL_CQUERY_FAIL:-}" TOKEN_FAIL="${TOKEN_FAIL:-}" \
+    IMAGE_REGISTRY=https://registry.test \
+    IMPACT_PUBLISH_WAIT="${IMPACT_PUBLISH_WAIT:-0}" IMPACT_POLL_INTERVAL=0 \
+    "$SUBJECT" "${1:-main}" "$TARGETS" "$DEST" > "$WORK/run.out" 2>&1
+}
+built() { grep -q '^build ' "$BAZEL_LOG"; }
+not_built() { ! built; }
+said() { grep -qF "$1" "$WORK/run.out"; }
+
+# Three services in the impact set: mithril's image matches what was
+# published for the base; posterize and games_hub have new application
+# layers. The full-build listing adds stats, unchanged.
+cat > "$FIX/rules_set" <<'BUILD'
+oci_push(
+  name = "posterize_push_image",
+  image = "//domains/graphics/apis/posterize:posterize_image",
+  repository = "ghcr.io/muchq/posterize",
+)
+oci_push(
+  name = "mithril_push_image",
+  image = "//domains/games/apis/mithril:mithril_image",
+  repository = "ghcr.io/muchq/mithril",
+)
+oci_push(
+  name = "games_hub_push_image",
+  image = "//domains/games/apis/games_hub:games_hub_image",
+  repository = "ghcr.io/muchq/games_hub",
+)
+BUILD
+{ cat "$FIX/rules_set"; cat <<'BUILD'
+oci_push(
+  name = "stats_push_image",
+  image = "//domains/platform/apis/stats:stats_image",
+  repository = "ghcr.io/muchq/stats",
+)
+BUILD
+} > "$FIX/rules_all"
+layout "$FIX/mithril" c1 b1 a1
+layout "$FIX/posterize" c2 b1 a2ee
+layout "$FIX/games_hub" c4 b1 a4ee
+layout "$FIX/stats" c3 b1 a3
+# Labels as cquery prints them: canonical, with the repo prefix.
+cat > "$FIX/layouts" <<EOF2
+@@//domains/games/apis/mithril:mithril_image $FIX/mithril
+@@//domains/graphics/apis/posterize:posterize_image $FIX/posterize
+@@//domains/games/apis/games_hub:games_hub_image $FIX/games_hub
+@@//domains/platform/apis/stats:stats_image $FIX/stats
+EOF2
+publish_all() {
+  published mithril "$MERGE_BASE" c1 b1 a1
+  published posterize "$MERGE_BASE" c2 b1 a2
+  published games_hub "$MERGE_BASE" c4 b1 a4
+  published stats "$MERGE_BASE" c3 b1 a3
 }
 
 # ----------------------------------------------------------------- cases
@@ -89,42 +278,175 @@ echo "impacted-services"
 
 reset_to_base
 commit_change_to domains/games/hello.txt 'changed'
+publish_all
 printf '%s\n' '//domains/games/apis/mithril:mithril_push_image' '@@rules_cc++//:foo' '//domains/games:lib' > "$TARGETS"
+
 run
 check "a computed set exits zero" test $? -eq 0
-check "the services come from the oci_push rules in the set" \
-  same $'mithril\nposterize' "$(cat "$DEST")"
-check "the query is over the first-party targets only" \
-  same 'query kind(oci_push, set(//domains/games/apis/mithril:mithril_push_image //domains/games:lib )) --output=build' \
-  "$(cat "$QUERY_LOG")"
+check "the images whose content changed are impacted, sorted" \
+  same $'games_hub\nposterize' "$(cat "$DEST")"
+check "the candidates are the push rules in the impact set" \
+  grep -q 'query kind(oci_push, set(//domains/games/apis/mithril:mithril_push_image //domains/games:lib ))' "$BAZEL_LOG"
+check "the candidate images are built" \
+  grep -q '^build //domains/games/apis/games_hub:games_hub_image //domains/games/apis/mithril:mithril_image //domains/graphics/apis/posterize:posterize_image' "$BAZEL_LOG"
+check "each candidate is read from the registry at the merge base, not main's tip" \
+  same $'games_hub '"$MERGE_BASE"$'\nmithril '"$MERGE_BASE"$'\nposterize '"$MERGE_BASE" "$(cat "$CURL_LOG")"
+check "an unchanged verdict is logged" said 'mithril: unchanged'
+check "a changed verdict is logged" said 'posterize: changed'
 
-printf '%s\n' '@@rules_cc++//:foo' > "$TARGETS"
+# A full build: every push rule is a candidate, and the comparison still
+# decides — a config edit that changes no image reports none of them.
+reset_to_base
+commit_change_to .bazelrc 'build --bar'
 run
-check "a set with no first-party target writes an empty file" \
-  test -f "$DEST" -a ! -s "$DEST"
-check "and asks bazel nothing" test ! -s "$QUERY_LOG"
+check "a full build takes every push rule as a candidate" \
+  grep -q "query kind(oci_push, //...)" "$BAZEL_LOG"
+check "a full build reports the images that changed, not all of them" \
+  same $'games_hub\nposterize' "$(cat "$DEST")"
+check "a full build compares every image" \
+  same $'games_hub '"$MERGE_BASE"$'\nmithril '"$MERGE_BASE"$'\nposterize '"$MERGE_BASE"$'\nstats '"$MERGE_BASE" \
+  "$(cat "$CURL_LOG")"
 
-printf '%s\n' '//domains/games:lib' > "$TARGETS"
-BAZEL_FAIL=1 run
+printf 'stale\n' > "$DEST"
+BAZEL_QUERY_FAIL=1 run
 STATUS=$?
-check "a failed query is not a failure" test "$STATUS" -eq 0
+check "a failed full-build query is not a failure" test "$STATUS" -eq 0
+check "a failed full-build query leaves no file" test ! -e "$DEST"
+
+echo "unknown answers leave no file"
+
+reset_to_base
+commit_change_to domains/games/hello.txt 'changed'
+
+printf 'stale\n' > "$DEST"
+BAZEL_BUILD_FAIL=1 run
+STATUS=$?
+check "a failed image build is not a failure" test "$STATUS" -eq 0
+check "a failed image build leaves no file" test ! -e "$DEST"
+check "a failed image build says so" said 'build failed'
+
+printf 'stale\n' > "$DEST"
+BAZEL_QUERY_FAIL=1 run
 check "a failed query leaves no file" test ! -e "$DEST"
-check "a failed query says so" grep -q 'query failed' "$WORK/run.out"
+
+printf 'stale\n' > "$DEST"
+BAZEL_CQUERY_FAIL=1 run
+check "a failed cquery leaves no file" test ! -e "$DEST"
+check "and says so" said 'cquery failed'
+
+printf 'stale\n' > "$DEST"
+cp "$FIX/layouts" "$WORK/layouts.keep"
+grep -v games_hub "$FIX/layouts" > "$FIX/layouts.tmp" && mv "$FIX/layouts.tmp" "$FIX/layouts"
+run
+check "an image with no layout leaves no file" test ! -e "$DEST"
+check "and names it" said 'no built layout for //domains/games/apis/games_hub:games_hub_image'
+cp "$WORK/layouts.keep" "$FIX/layouts"
+
+printf 'stale\n' > "$DEST"
+rm "$FIX/games_hub/index.json"
+run
+check "an unreadable layout leaves no file" test ! -e "$DEST"
+layout "$FIX/games_hub" c4 b1 a4ee
+
+printf 'stale\n' > "$DEST"
+printf '{"manifests":[{"digest":"sha256:deadbeef"},{"digest":"sha256:cafe"}]}' > "$FIX/games_hub/index.json"
+run
+check "a multi-platform layout leaves no file rather than comparing one platform" test ! -e "$DEST"
+layout "$FIX/games_hub" c4 b1 a4ee
+
+printf 'stale\n' > "$DEST"
+TOKEN_FAIL=1 run
+check "a registry that issues no token leaves no file" test ! -e "$DEST"
+check "and says so" said 'no registry token'
+
+printf 'stale\n' > "$DEST"
+route mithril "$MERGE_BASE" 503 'upstream unhappy'
+run
+check "a registry error leaves no file" test ! -e "$DEST"
+check "a registry error is reported" said 'registry returned 503'
+publish_all
+
+printf 'stale\n' > "$DEST"
+route mithril "$MERGE_BASE" 200 '{"manifests":[{"digest":"sha256:c1"}]}'
+run
+check "a registry that serves an index leaves no file" test ! -e "$DEST"
+check "and says so" said 'served an index'
+publish_all
+
+printf 'stale\n' > "$DEST"
+cp "$FIX/rules_set" "$WORK/rules.keep"
+sed 's/repository = /repo = /' "$WORK/rules.keep" > "$FIX/rules_set"
+run
+check "push rules the parser cannot read leave no file, not an empty one" test ! -e "$DEST"
+check "and say so" said 'did not parse'
+cp "$WORK/rules.keep" "$FIX/rules_set"
 
 printf 'stale\n' > "$DEST"
 rm -f "$TARGETS"
 run
 check "no impact set leaves no file, stale or otherwise" test ! -e "$DEST"
-check "no impact set is not a failure" grep -q 'not computed' "$WORK/run.out"
+check "no impact set asks bazel nothing" test ! -s "$BAZEL_LOG"
 
+echo "the base image is not published"
+
+printf '%s\n' '//domains/games:lib' > "$TARGETS"
+
+# Never published at all: a new service, and therefore changed.
+printf 'stale\n' > "$DEST"
+unpublished posterize "$MERGE_BASE"
+run
+check "a service never published is new, and impacted" same $'games_hub\nposterize' "$(cat "$DEST")"
+check "and is logged as new" said 'posterize: new'
+
+# Published, but not this base, and the wait runs out: the graph's answer
+# stands for that service, the bytes' answer for the rest.
+printf 'stale\n' > "$DEST"
+published posterize latest c2 b1 a2
+run
+check "past the wait, a lagging candidate stands as impacted" same $'games_hub\nposterize' "$(cat "$DEST")"
+check "and says which answer that is" said 'posterize: no image for'
+check "the other services still compared" said 'mithril: unchanged'
+
+# ...unless every image is a candidate, where that answer would be "all".
 reset_to_base
 commit_change_to .bazelrc 'build --bar'
-printf '%s\n' '//domains/games:lib' > "$TARGETS"
 printf 'stale\n' > "$DEST"
 run
-check "a full build leaves no file" test ! -e "$DEST"
-check "a full build asks bazel nothing" test ! -s "$QUERY_LOG"
-check "a full build says so" grep -q 'full build' "$WORK/run.out"
+check "on a full build a lagging base leaves no file" test ! -e "$DEST"
+reset_to_base
+commit_change_to domains/games/hello.txt 'changed'
+
+# The publish lands while waiting: compared like any other.
+printf 'stale\n' > "$DEST"
+manifest docker c2 b1 a2ee | { echo 200; cat; } > "$ROUTES/posterize_$MERGE_BASE.later"
+IMPACT_PUBLISH_WAIT=30 run
+check "a base published during the wait is compared" same "games_hub" "$(cat "$DEST")"
+check "after being asked for again" \
+  test "$(grep -c "^posterize $MERGE_BASE$" "$CURL_LOG")" -eq 2
+check "and the wait was logged" said 'no image for'
+
+# A registry error while probing latest is an error, not a new service.
+printf 'stale\n' > "$DEST"
+unpublished posterize "$MERGE_BASE"
+route posterize latest 503 'upstream unhappy'
+run
+check "a registry error on the latest probe leaves no file" test ! -e "$DEST"
+publish_all
+unpublished posterize latest
+
+echo "nothing to compare"
+
+printf '%s\n' '@@rules_cc++//:foo' > "$TARGETS"
+run
+check "a set with no first-party target writes an empty file" test -f "$DEST" -a ! -s "$DEST"
+check "and builds nothing" test ! -s "$BAZEL_LOG"
+
+printf '%s\n' '//domains/games:lib' > "$TARGETS"
+: > "$FIX/rules_set"
+run
+check "a set with no push rule writes an empty file" test -f "$DEST" -a ! -s "$DEST"
+check "and builds nothing" not_built
+cp "$WORK/rules.keep" "$FIX/rules_set"
 
 run refs/heads/does-not-exist
 STATUS=$?

@@ -4,6 +4,12 @@ on:
   push:
     branches: [ "main" ]
 
+# One publish at a time, none cancelled: two runs overlapping could leave
+# :latest on the older commit.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 permissions:
   contents: write
   packages: write
@@ -13,8 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/muchq/moonbase/ci-base:latest
-      volumes:
-        - /var/run/docker.sock:/var/run/docker.sock
 
     steps:
       - uses: actions/checkout@v7
@@ -47,15 +51,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Each image is pushed once and tagged twice from that push: latest,
+      # and the commit for deploy.sh pins and rollback. Tagging the built
+      # image rather than re-pulling :latest keeps the commit tag the exact
+      # manifest bazel produced, which is what a PR's blast-radius comparison
+      # reads it against.
       - name: bazel-run-oci-push
         run: |
-          bazel query 'kind(oci_push, //...)' | xargs -n1 bazel run
-
-      - name: Tag images with commit SHA (for rollback)
-        run: |
-          repos=$(bazel query 'kind(oci_push, //...)' --output=build | sed -n 's/.*repository = "\(ghcr\.io\/muchq\/[^"]*\)".*/\1/p')
-          for repo in $repos; do
-            docker pull "$repo:latest"
-            docker tag "$repo:latest" "$repo:${{ github.sha }}"
-            docker push "$repo:${{ github.sha }}"
-          done
+          set -o pipefail
+          bazel query 'kind(oci_push, //...)' | xargs -n1 -I{} bazel run {} -- --tag "${{ github.sha }}"

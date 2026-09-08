@@ -10,6 +10,11 @@
 # refreshed before it is applied, so a new service needs nothing by hand and
 # two PRs introducing the same label at once cannot race each other.
 #
+# A missing SERVICES_FILE is an unknown answer: the PR gets service:unknown
+# beside whatever service labels it has, and loses none. A first run can then
+# be told apart from "no image changed", and a later run that does know the
+# answer retires the marker like any other stale label.
+#
 # Runs through gh, which reads GH_TOKEN and GH_REPO from the environment.
 # Any gh failure fails the script: a token that cannot write is a
 # misconfiguration to see, not to shrug past.
@@ -26,13 +31,29 @@ HAVE=$(mktemp)
 trap 'rm -f "$HAVE"' EXIT
 gh api "repos/{owner}/{repo}/issues/$PR/labels" --paginate --jq '.[].name' > "$HAVE"
 
+ensure_label() { # ensure_label <label>
+  local description="Changes the ${1#"$SERVICE_LABEL_PREFIX"} image"
+  [ "$1" != "$UNKNOWN_LABEL" ] || description="Impacted services could not be computed"
+  gh label create "$1" --force --color 0e8a16 --description "$description"
+}
+
+if [ ! -f "$SERVICES" ]; then
+  if grep -qx "$UNKNOWN_LABEL" "$HAVE"; then
+    echo "impacted services unknown; $UNKNOWN_LABEL already applied"
+  else
+    ensure_label "$UNKNOWN_LABEL"
+    gh pr edit "$PR" --add-label "$UNKNOWN_LABEL"
+    echo "impacted services unknown; $UNKNOWN_LABEL applied, other labels kept"
+  fi
+  exit 0
+fi
+
 ADD=""
 REMOVE=""
 while read -r verb label; do
   case "$verb" in
     add)
-      gh label create "$label" --force --color 0e8a16 \
-        --description "Changes the ${label#"$SERVICE_LABEL_PREFIX"} image"
+      ensure_label "$label"
       ADD="$ADD,$label"
       ;;
     remove) REMOVE="$REMOVE,$label" ;;

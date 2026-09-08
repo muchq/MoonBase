@@ -42,22 +42,13 @@ paths_forcing_full_build() {
   git diff --name-only "$base" HEAD -- "${FULL_BUILD_PATHSPECS[@]}"
 }
 
-# Service names from `bazel query 'kind(oci_push, ...)' --output=build` on
-# stdin: the last path segment of each rule's repository attribute, sorted and
-# unique. This is the parse publish.yml does to tag images, and the names are
-# the ones compose.yaml pins and deploy.sh --services lists.
-#
-# Derived from the dependency graph rather than from changed paths on purpose:
-# a shared library fans out to every image that links it, and only the graph
-# knows which those are.
-services_from_push_rules() {
-  sed -n 's/.*repository = "ghcr\.io\/muchq\/\([^"]*\)".*/\1/p' | sort -u
-}
-
 # Labels a PR carries for its impacted services. One label per service, all
 # under one prefix, so the sync below can retire a stale one without touching
 # the hand-applied labels beside it.
 SERVICE_LABEL_PREFIX="service:"
+# The marker for a run that could not compute the set; under the prefix so a
+# known answer retires it.
+UNKNOWN_LABEL="${SERVICE_LABEL_PREFIX}unknown"
 
 # The label changes that bring a PR from the labels it has to the services it
 # impacts. Reads two files of names, one per line: the impacted services and
@@ -72,4 +63,29 @@ service_label_plan() { # service_label_plan <services-file> <labels-file>
     | sed 's/^/add /'
   comm -13 <(printf '%s\n' "$want" | grep . || true) <(printf '%s\n' "$have" | grep . || true) \
     | sed 's/^/remove /'
+}
+
+# "<service> <image label>" per push rule from `bazel query 'kind(oci_push,
+# ...)' --output=build` on stdin: the repository's last path segment and the
+# image attribute. What the digest comparison needs — the built image to read
+# and the registry repository to read it against — in one line per service.
+push_rule_pairs() {
+  awk '
+    /^oci_push\(/ { svc = ""; img = "" }
+    /^ *image = "/ { img = $0; sub(/^ *image = "/, "", img); sub(/".*/, "", img) }
+    /^ *repository = "ghcr\.io\/muchq\// {
+      svc = $0; sub(/.*repository = "ghcr\.io\/muchq\//, "", svc); sub(/".*/, "", svc)
+    }
+    /^\)/ && svc != "" && img != "" { print svc, img }
+  ' | sort -u
+}
+
+# The content digests an image manifest names, one per line in manifest
+# order: the config, then each layer. Two manifests with the same list are
+# the same image even when their own digests differ: commit tags pushed
+# before publish tagged from the built image went through docker, which
+# relabels a layer's media type and so the manifest's digest, and nothing the
+# image is made of.
+manifest_digests() {
+  grep -o '"digest": *"sha256:[a-f0-9]*"' | sed 's/.*"sha256:/sha256:/; s/"$//' || true
 }

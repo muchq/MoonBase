@@ -1,7 +1,6 @@
 #!/bin/bash
-# Pins the service-label sync (#1214): which names come out of the oci_push
-# rules, which labels a PR gains and loses, and what scripts/label-services
-# asks the GitHub API to do about it.
+# Pins the service-label sync (#1214): which labels a PR gains and loses, and
+# what scripts/label-services asks gh to do about it.
 #
 # The API half runs against a stub curl that records every request and answers
 # from canned responses, so no token, no network, and the assertions read the
@@ -29,40 +28,6 @@ check() {
 same() { # same <expected> <actual>
   [ "$1" = "$2" ] || { echo "    expected: $1"; echo "    actual:   $2"; false; }
 }
-
-# ---------------------------------------------------------------- parsing
-
-echo "services_from_push_rules"
-
-# The shape of `bazel query 'kind(oci_push, ...)' --output=build`: one rule per
-# block, the repository attribute among others, plus a comment line and a rule
-# pushing somewhere that is not ours.
-cat > "$WORK/push.build" <<'BUILD'
-# /workspace/domains/games/apis/mithril/BUILD.bazel:40:1
-oci_push(
-  name = "mithril_push_image",
-  image = "//domains/games/apis/mithril:mithril_image",
-  remote_tags = ["latest"],
-  repository = "ghcr.io/muchq/mithril",
-)
-# /workspace/domains/ai/apis/microgpt_serve/BUILD.bazel:12:1
-oci_push(
-  name = "microgpt-serve_push_image",
-  repository = "ghcr.io/muchq/microgpt-serve",
-)
-oci_push(
-  name = "again",
-  repository = "ghcr.io/muchq/mithril",
-)
-oci_push(
-  name = "elsewhere",
-  repository = "docker.io/library/nginx",
-)
-BUILD
-check "names are the repository's last segment, sorted and unique, ours only" \
-  same $'microgpt-serve\nmithril' "$(services_from_push_rules < "$WORK/push.build")"
-check "no push rules means no services" \
-  same "" "$(printf '' | services_from_push_rules)"
 
 # ------------------------------------------------------------------- plan
 
@@ -158,7 +123,37 @@ sync mithril
 check "an unlabeled PR gains its label" \
   called "pr edit 42 --add-label service:mithril"
 
+echo "an unknown answer"
+
+# No services file: the marker goes on, and the stale service label stays.
+printf '%s\n' games service:stats > "$WORK/pr_labels"
+: > "$LOG"
+PATH="$STUBS:$PATH" GH_LOG="$LOG" PR_LABELS="$WORK/pr_labels" GH_FAIL="" \
+  "$REPO/scripts/label-services" 42 "$WORK/does-not-exist" > "$WORK/sync.out" 2>&1
+check "a missing services file succeeds" test $? -eq 0
+check "the unknown marker is created with its own description" \
+  called "label create service:unknown --force --color 0e8a16 --description Impacted services could not be computed"
+check "the unknown marker is added and nothing removed" \
+  called "pr edit 42 --add-label service:unknown"
+check "the stale service label is kept" not_called "remove-label"
+
+# Already marked: nothing to do.
+printf '%s\n' service:stats service:unknown > "$WORK/pr_labels"
+: > "$LOG"
+PATH="$STUBS:$PATH" GH_LOG="$LOG" PR_LABELS="$WORK/pr_labels" GH_FAIL="" \
+  "$REPO/scripts/label-services" 42 "$WORK/does-not-exist" > "$WORK/sync.out" 2>&1
+check "an already-marked PR is read and not written" \
+  same "api repos/{owner}/{repo}/issues/42/labels --paginate --jq .[].name" "$(cat "$LOG")"
+
+# A known answer retires the marker with the other stale labels.
+sync stats
+check "a known answer retires the unknown marker" \
+  called "pr edit 42 --remove-label service:unknown"
+
+echo "failures"
+
 # A token that cannot write: the failure is loud, not a green step.
+printf '%s\n' games service:stats > "$WORK/pr_labels"
 GH_FAIL="pr edit" sync mithril
 STATUS=$?
 check "a rejected edit fails the script" test "$STATUS" -ne 0
