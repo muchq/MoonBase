@@ -17,6 +17,7 @@ ORIGIN=$WORK/origin.git
 HOSTDIR=$WORK/host
 DOCKER_LOG=$WORK/docker.log
 IMAGES=$WORK/images
+REGISTRY_LOG=$WORK/registry.log
 
 FAILURES=0
 pass() { echo "  ok    $1"; }
@@ -134,25 +135,35 @@ echo "docker $* || env: $pins" >> "$DOCKER_LOG"
 exit 0
 STUB
 
-  # The registry, for --list --service. A token request answers with a token;
-  # a manifest request answers from $FAKE_IMAGES/<service>_<sha>, whose one
-  # line is the image's content, and 404 without one. FAKE_REGISTRY_DOWN makes
-  # every manifest request a 503.
+  # The registry, for --list --service. A token request answers with a token
+  # unless FAKE_NO_REPO is set; a manifest request answers from
+  # $FAKE_IMAGES/<service>_<sha>, whose one line is the image's content, and
+  # 404 without one. FAKE_REGISTRY_DOWN makes a manifest request a 503 once
+  # that many have been served. Records each request in $REGISTRY_LOG.
   cat > "$STUBS/curl" <<'STUB'
 #!/bin/bash
-out=/dev/null url=
+out=/dev/null url= headers=
 while [ $# -gt 0 ]; do
   case "$1" in
-    -o | -w | -H | --connect-timeout | --max-time | --retry) [ "$1" = -o ] && out=$2; shift 2 ;;
+    -H) headers="$headers[$2]"; shift 2 ;;
+    -o | -w | --connect-timeout | --max-time | --retry) [ "$1" = -o ] && out=$2; shift 2 ;;
     -*) shift ;;
     *) url=$1; shift ;;
   esac
 done
 case "$url" in
-  */token?*) printf '{"token":"t"}' ;;
+  */token?*)
+    echo token >> "$REGISTRY_LOG"
+    [ -n "${FAKE_NO_REPO:-}" ] || printf '{"token":"t"}'
+    ;;
   */v2/muchq/*/manifests/*)
-    [ -z "${FAKE_REGISTRY_DOWN:-}" ] || { echo 503; exit 0; }
     rest=${url#*/v2/muchq/}
+    echo "manifest ${rest%%/*} ${rest##*/} $headers" >> "$REGISTRY_LOG"
+    served=$(grep -c '^manifest' "$REGISTRY_LOG")
+    if [ -n "${FAKE_REGISTRY_DOWN:-}" ] && [ "$served" -gt "$FAKE_REGISTRY_DOWN" ]; then
+      echo 503
+      exit 0
+    fi
     key=$FAKE_IMAGES/${rest%%/*}_${rest##*/}
     if [ -f "$key" ]; then
       printf '{"config":{"digest":"sha256:%s"},"layers":[]}' "$(cat "$key")" > "$out"
@@ -178,7 +189,7 @@ make_repo() {
     "$TESTROOT/fixture"
   mkdir -p "$TESTROOT/scripts"
   cp "$REPO/deploy/consolidated/deploy.sh" "$TESTROOT/deploy/consolidated/"
-  cp "$REPO/scripts/diff-build-lib.sh" "$TESTROOT/scripts/"
+  cp "$REPO/scripts/image-lib.sh" "$TESTROOT/scripts/"
   cp "$REPO/deploy/consolidated/compose.yaml" "$TESTROOT/deploy/consolidated/"
   cp "$REPO/deploy/consolidated/docker-compose.observability.yml" "$TESTROOT/deploy/consolidated/"
   cp "$REPO/deploy/consolidated/o11y/"* "$TESTROOT/deploy/consolidated/o11y/"
@@ -188,6 +199,9 @@ make_repo() {
 
   git -C "$TESTROOT" init -q -b main
   local g="git -C $TESTROOT -c user.email=t@example.com -c user.name=test"
+  $g add -A
+  $g commit -qm "oldest change (#1000)"
+  echo "w" > "$TESTROOT/fixture/v1.txt"
   $g add -A
   $g commit -qm "older change (#1001)"
   echo "x" > "$TESTROOT/fixture/v2.txt"
@@ -227,12 +241,14 @@ reset_host() {
 deploy() { # deploy <args...> -> exit code, output in $WORK/out.txt
   # Run from the fixture so the script under test can't reach the real repo,
   # whether or not it self-locates.
+  : > "$REGISTRY_LOG"
   (
     cd "$TESTROOT" || exit 1
     PATH="$STUBS:$PATH" FAKE_HOST="$HOSTDIR" DOCKER_LOG="$DOCKER_LOG" \
       FAKE_MISSING_IMAGES="${FAKE_MISSING_IMAGES:-}" FAKE_PS="${FAKE_PS:-}" \
       FAKE_RESTARTS="${FAKE_RESTARTS:-}" FAKE_IMAGES="$IMAGES" \
-      FAKE_REGISTRY_DOWN="${FAKE_REGISTRY_DOWN:-}" \
+      FAKE_REGISTRY_DOWN="${FAKE_REGISTRY_DOWN:-}" FAKE_NO_REPO="${FAKE_NO_REPO:-}" \
+      REGISTRY_LOG="$REGISTRY_LOG" \
       bash deploy/consolidated/deploy.sh "$@"
   ) > "$WORK/out.txt" 2>&1
 }
@@ -243,6 +259,7 @@ make_stubs
 make_repo
 SHA=$(git -C "$TESTROOT" rev-parse origin/main)
 OLD_SHA=$(git -C "$TESTROOT" rev-parse "origin/main~2")
+OLDEST_SHA=$(git -C "$TESTROOT" rev-parse "origin/main~3")
 
 echo "full deploy"
 reset_host "DEPLOY_SHA=previoussha"
@@ -309,11 +326,15 @@ check "lists every pinned service" \
 
 echo "listing by service"
 MID_SHA=$(git -C "$TESTROOT" rev-parse "origin/main~1")
+# <content> must be hex: it is served as a digest, and the parser under test
+# reads a non-hex one as no digest at all — which is "no image", not an error.
 published() { # published <service> <sha> <content>
   mkdir -p "$IMAGES"
   printf '%s\n' "$3" > "$IMAGES/$1_$2"
 }
-rows() { tail -n +2 "$WORK/out.txt" | grep -v '^(' ; }
+# Listing rows start with a nine-character sha; the title, header, progress
+# line and trailer do not.
+stdout_rows() { grep -cE '^[0-9a-f]{9}  ' "$WORK/out.txt"; }
 
 # mithril's image changed at the middle commit and not since; posterize's
 # never changed. The service's own pin, not the stack-wide one, is what a
@@ -322,39 +343,83 @@ rm -rf "$IMAGES"
 published mithril "$SHA" aaa
 published mithril "$MID_SHA" aaa
 published mithril "$OLD_SHA" bbb
+published mithril "$OLDEST_SHA" bbb
 published posterize "$SHA" eee
 published posterize "$MID_SHA" eee
 published posterize "$OLD_SHA" eee
+published posterize "$OLDEST_SHA" eee
 reset_host "DEPLOY_SHA=$SHA" "MITHRIL_SHA=$MID_SHA"
 deploy --list --service mithril
 rc=$?
 check "exits 0" test $rc -eq 0
+check "names the service in the title" grep -q "changed the mithril image" "$WORK/out.txt"
 check "lists the commit whose image differs from the one before" grep -q "(#1002)" "$WORK/out.txt"
 check "does not list a commit whose image is the same as before" \
   bash -c '! grep -q "(#1003)" "$0"' "$WORK/out.txt"
-check "lists the commit where the image first appeared" grep -q "(#1001).*first image" "$WORK/out.txt"
+check "lists the commit where the image first appeared" grep -q "(#1000).*first image" "$WORK/out.txt"
+check "and nothing in between" test "$(stdout_rows)" -eq 2
 check "marks the service's own deployed revision" grep -q "(#1002).*<- deployed" "$WORK/out.txt"
-check "does not mark the stack-wide revision" \
-  bash -c '! grep -q "(#1003).*<- deployed" "$0"' "$WORK/out.txt"
+check "mints one token for the whole scan" test "$(grep -c '^token' "$REGISTRY_LOG")" -eq 1
+check "every manifest read carries the token" \
+  test "$(grep -c '^manifest.*\[Authorization: Bearer t\]' "$REGISTRY_LOG")" -eq "$(grep -c '^manifest' "$REGISTRY_LOG")"
+check "and asks for a manifest, not an index" \
+  bash -c '! grep "^manifest" "$0" | grep -v "manifest.v2+json" | grep -q .' "$REGISTRY_LOG"
+
+# The stack-wide deploy put the newest commit on the host; its mithril image
+# is the one the middle commit introduced, so that is the row a rollback
+# would move away from.
+reset_host "DEPLOY_SHA=$SHA"
+deploy --list --service mithril
+check "marks the change the running image came from, not the pinned commit" \
+  grep -q "(#1002).*<- deployed" "$WORK/out.txt"
+
 deploy --list --service posterize
-check "a service that never changed lists only its first image" \
-  test "$(rows | wc -l)" -eq 1
+check "a service that never changed lists only its first image" test "$(stdout_rows)" -eq 1
+
+# A revert: the running image's content appears at two change points, and
+# only the one it came from is marked.
+published mithril "$SHA" bbb
+published mithril "$MID_SHA" aaa
+published mithril "$OLD_SHA" bbb
+published mithril "$OLDEST_SHA" bbb
+reset_host "DEPLOY_SHA=$SHA"
+deploy --list --service mithril
+check "a reverted image is marked once, at the change it came from" \
+  test "$(grep -c -- '<- deployed' "$WORK/out.txt")" -eq 1
+check "and that is the newest change with that content" grep -q "(#1003).*<- deployed" "$WORK/out.txt"
+published mithril "$SHA" aaa
+reset_host "DEPLOY_SHA=$SHA" "MITHRIL_SHA=$MID_SHA"
 deploy --list 1 --service mithril
-check "COUNT bounds the listing" test "$(rows | wc -l)" -eq 1
+check "COUNT bounds the listing" test "$(stdout_rows)" -eq 1
 check "to the newest change" grep -q "(#1002)" "$WORK/out.txt"
 
 # The middle commit's publish failed: the newest is compared with the older
-# one, and the row says a commit was skipped.
+# one, and the row says the change may sit in the gap. The change below it
+# has no gap, and says nothing.
 rm -f "$IMAGES/mithril_$MID_SHA"
 published mithril "$SHA" ccc
+published mithril "$OLDEST_SHA" aaa
 deploy --list --service mithril
-check "a commit with no image is skipped over" grep -q "(#1003).*1 commit(s) between have no image" "$WORK/out.txt"
+check "a commit with no image is skipped over" \
+  grep -q "(#1003).*or in the 1 commit(s) between, which have no image" "$WORK/out.txt"
 check "and not listed itself" bash -c '! grep -q "(#1002)" "$0"' "$WORK/out.txt"
+check "a change with no gap carries no gap note" \
+  bash -c 'grep "(#1001)" "$0" | grep -qv "between"' "$WORK/out.txt"
+published mithril "$OLDEST_SHA" bbb
+
+# The newest commit's publish has not landed yet: it is not a gap in
+# anything, and the first change listed is not charged with it.
+rm -f "$IMAGES/mithril_$SHA"
+published mithril "$MID_SHA" ccc
+deploy --list --service mithril
+check "an unpublished head is not counted as a gap" \
+  bash -c 'grep "(#1002)" "$0" | grep -qv "between"' "$WORK/out.txt"
+published mithril "$SHA" ccc
 
 # Two changes, one asked for: the listing stops at the newest.
 published mithril "$MID_SHA" aaa
 deploy --list 1 --service mithril
-check "COUNT stops the listing after one change" test "$(rows | wc -l)" -eq 1
+check "COUNT stops the listing after one change" test "$(stdout_rows)" -eq 1
 check "and that change is the newest" grep -q "(#1003)" "$WORK/out.txt"
 
 # The scan runs out before the oldest commit: the last one seen cannot be
@@ -362,11 +427,39 @@ check "and that change is the newest" grep -q "(#1003)" "$WORK/out.txt"
 published mithril "$MID_SHA" ccc
 DEPLOY_LIST_SCAN=2 deploy --list --service mithril
 check "an unjudged commit at the scan limit is reported" grep -q "not compared" "$WORK/out.txt"
-check "and not listed as a change" test "$(rows | wc -l)" -eq 0
+check "and not listed as a change" test "$(stdout_rows)" -eq 0
+DEPLOY_LIST_SCAN=4 deploy --list --service mithril
+check "a scan that ends exactly at history's end still finds the first image" \
+  grep -q "(#1000).*first image" "$WORK/out.txt"
 
-FAKE_REGISTRY_DOWN=1 deploy --list --service mithril
+# A service introduced recently: everything older has no image, and the
+# scan cap is not what stopped the listing.
+rm -f "$IMAGES/mithril_$MID_SHA" "$IMAGES/mithril_$OLD_SHA" "$IMAGES/mithril_$OLDEST_SHA"
+DEPLOY_LIST_SCAN=2 deploy --list --service mithril
+check "a service newer than the scan is reported as first appearing" \
+  grep -q "(#1003).*first image in the last 2 commits; the 1 older have none" "$WORK/out.txt"
+check "and not as a scan limit" bash -c '! grep -q "not compared" "$0"' "$WORK/out.txt"
+
+# No image anywhere in the scan: an answer, not an empty listing.
+rm -rf "$IMAGES"
+mkdir -p "$IMAGES"
+deploy --list --service mithril
+check "a service with no image in the scan fails" test $? -ne 0
+check "and says so" grep -q "No image published for mithril" "$WORK/out.txt"
+
+published mithril "$SHA" aaa
+published mithril "$MID_SHA" aaa
+published mithril "$OLD_SHA" bbb
+published mithril "$OLDEST_SHA" bbb
+FAKE_REGISTRY_DOWN=2 deploy --list --service mithril
 check "a registry error fails the listing" test $? -ne 0
 check "and says so" grep -q "registry returned 503" "$WORK/out.txt"
+check "and prints no rows that would look like a whole history" \
+  bash -c '! grep -q "^COMMIT" "$0"' "$WORK/out.txt"
+
+FAKE_NO_REPO=1 deploy --list --service mithril
+check "a service the registry has no repository for fails" test $? -ne 0
+check "and says what was refused" grep -q "no pull token for muchq/mithril" "$WORK/out.txt"
 
 echo "status"
 reset_host "DEPLOY_SHA=$SHA" "POSTERIZE_SHA=posterizepin"
@@ -413,7 +506,7 @@ echo "portability"
 # /bin/bash — no associative arrays, no case-conversion expansions, no negative
 # array indices. CI runs bash 5, so only a static check catches this.
 # Comments are stripped first so prose about these constructs doesn't trip it.
-bash4_only=$(sed 's/#.*//' "$REPO/deploy/consolidated/deploy.sh" |
+bash4_only=$(sed 's/#.*//' "$REPO/deploy/consolidated/deploy.sh" "$REPO/scripts/image-lib.sh" |
   grep -nE 'declare -A|\$\{[A-Za-z_][A-Za-z0-9_]*\^\^|\$\{[A-Za-z_][A-Za-z0-9_]*,,|\bmapfile\b|\breadarray\b|\[-1\]' || true)
 check "no bash 4+ only syntax" test -z "$bash4_only"
 [ -n "$bash4_only" ] && printf '%s\n' "$bash4_only" | sed 's/^/          /'

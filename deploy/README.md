@@ -31,6 +31,9 @@ the graph's answer stands for it.
 `one_d4` image, so a targeted deploy or rollback can be aimed without reading
 every subject. It reads the published images themselves: a commit changed the
 service when its image's content differs from the next older commit's, which
-is ground truth rather than intent and reaches back over every commit ever
-published. A commit with no published image is skipped over and the row says
-so. The scan stops after 100 commits by default; `DEPLOY_LIST_SCAN` widens it.
+is ground truth rather than intent, and works on commits published long before
+anything labeled them. The `<- deployed` marker sits on the change the running
+image came from. A commit with no published image is skipped over and the row
+says the change may sit in the gap. The scan covers the last 100 commits by
+default and says so when it runs out before an answer; `DEPLOY_LIST_SCAN`
+widens it.

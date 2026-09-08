@@ -17,6 +17,8 @@ trap 'rm -rf "$WORK"' EXIT
 
 # shellcheck source=diff-build-lib.sh
 source "$REPO/scripts/diff-build-lib.sh"
+# shellcheck source=image-lib.sh
+source "$REPO/scripts/image-lib.sh"
 
 FAILURES=0
 pass() { echo "  ok    $1"; }
@@ -357,7 +359,7 @@ layout "$FIX/games_hub" c4 b1 a4ee
 printf 'stale\n' > "$DEST"
 TOKEN_FAIL=1 run
 check "a registry that issues no token leaves no file" test ! -e "$DEST"
-check "and says so" said 'no registry token'
+check "and says so" said 'no pull token'
 
 printf 'stale\n' > "$DEST"
 route mithril "$MERGE_BASE" 503 'upstream unhappy'
