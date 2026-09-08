@@ -261,7 +261,6 @@ jobs:
           persist-credentials: false
 
       - uses: actions/download-artifact@v8
-        id: impact
         continue-on-error: true
         with:
           name: impacted-services

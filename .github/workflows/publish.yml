@@ -58,4 +58,5 @@ jobs:
       # reads it against.
       - name: bazel-run-oci-push
         run: |
+          set -o pipefail
           bazel query 'kind(oci_push, //...)' | xargs -n1 -I{} bazel run {} -- --tag "${{ github.sha }}"
