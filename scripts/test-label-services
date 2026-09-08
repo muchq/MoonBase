@@ -95,109 +95,79 @@ check "a duplicated service name is one label" \
 echo "label-services"
 
 STUBS=$WORK/stubs
-ROUTES=$WORK/routes
-LOG=$WORK/requests.log
-mkdir -p "$STUBS" "$ROUTES"
+LOG=$WORK/gh.log
+mkdir -p "$STUBS"
 
-# Records "METHOD PATH BODY" per call. Answers from $ROUTES/<METHOD>_<path>
-# (slashes and colons to underscores, query string dropped): first line is
-# the status, the rest the body. Unrouted paths are 404 with an empty body.
-cat > "$STUBS/curl" <<'STUB'
+# Records each gh invocation, one line of arguments per call. `gh api` for
+# the PR's labels answers from $PR_LABELS (one name per line); everything
+# else only records. A call whose arguments contain $GH_FAIL exits 1.
+cat > "$STUBS/gh" <<'STUB'
 #!/bin/bash
-method=GET out=/dev/null body= url=
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -X) method=$2; shift 2 ;;
-    -o) out=$2; shift 2 ;;
-    --data) body=$2; shift 2 ;;
-    -w | -H) shift 2 ;;
-    -*) shift ;;
-    *) url=$1; shift ;;
-  esac
-done
-path=${url#"$GITHUB_API_URL"}
-printf '%s %s %s\n' "$method" "$path" "$body" >> "$REQUEST_LOG"
-key=$(printf '%s_%s' "$method" "${path%%\?*}" | tr '/:' '__')
-if [ -f "$ROUTES/$key" ]; then
-  sed -n '1p' "$ROUTES/$key"
-  sed -n '2,$p' "$ROUTES/$key" > "$out"
-else
-  echo 404
-  : > "$out"
+printf '%s\n' "$*" >> "$GH_LOG"
+if [ -n "${GH_FAIL:-}" ] && [[ "$*" == *"$GH_FAIL"* ]]; then
+  echo "gh: $GH_FAIL failed" >&2
+  exit 1
 fi
+if [ "$1" = "api" ]; then cat "$PR_LABELS"; fi
 STUB
-chmod +x "$STUBS/curl"
-
-route() { # route METHOD PATH STATUS [BODY]
-  local key
-  key=$(printf '%s_%s' "$1" "$2" | tr '/:' '__')
-  { echo "$3"; [ $# -gt 3 ] && printf '%s\n' "$4"; } > "$ROUTES/$key"
-}
+chmod +x "$STUBS/gh"
 
 sync() { # sync <services...>; stdout+stderr to $WORK/sync.out, status in $?
-  printf '%s\n' "$@" > "$WORK/services"
-  [ $# -gt 0 ] || : > "$WORK/services"
+  : > "$WORK/services"
+  for s in "$@"; do printf '%s\n' "$s" >> "$WORK/services"; done
   : > "$LOG"
-  PATH="$STUBS:$PATH" GITHUB_TOKEN=t GITHUB_API_URL=https://api.test \
-    REQUEST_LOG="$LOG" ROUTES="$ROUTES" \
-    "$REPO/scripts/label-services" muchq/MoonBase 42 "$WORK/services" \
-    > "$WORK/sync.out" 2>&1
+  PATH="$STUBS:$PATH" GH_LOG="$LOG" PR_LABELS="$WORK/pr_labels" GH_FAIL="${GH_FAIL:-}" \
+    "$REPO/scripts/label-services" 42 "$WORK/services" > "$WORK/sync.out" 2>&1
 }
-requested() { grep -qxF "$1" "$LOG"; }
-not_requested() { ! grep -qF "$1" "$LOG"; }
+called() { grep -qxF "$1" "$LOG"; }
+not_called() { ! grep -qF "$1" "$LOG"; }
+call_index() { grep -nxF "$1" "$LOG" | cut -d: -f1 | head -1; }
 
-# The PR carries a hand-applied label and one stale service label; the repo
-# already knows service:mithril but has never seen service:posterize.
-rm -f "$ROUTES"/*
-route GET /repos/muchq/MoonBase/issues/42/labels 200 '[
-  { "id": 1, "name": "games", "color": "ededed" },
-  { "id": 2, "name": "service:stats", "color": "0e8a16" }
-]'
-route GET /repos/muchq/MoonBase/labels/service:mithril 200 '{ "name": "service:mithril" }'
-route POST /repos/muchq/MoonBase/labels 201 '{}'
-route POST /repos/muchq/MoonBase/issues/42/labels 200 '[]'
-route DELETE /repos/muchq/MoonBase/issues/42/labels/service:stats 200 '[]'
+# The PR carries a hand-applied label and one stale service label.
+printf '%s\n' games service:stats > "$WORK/pr_labels"
 
 sync mithril posterize
 check "the sync succeeds" test $? -eq 0
-check "the stale service label is removed" \
-  requested "DELETE /repos/muchq/MoonBase/issues/42/labels/service:stats "
-check "a label the repo already has is not created again" \
-  not_requested '"name":"service:mithril"'
-check "a label the repo lacks is created first" \
-  requested 'POST /repos/muchq/MoonBase/labels {"name":"service:posterize","color":"0e8a16","description":"Changes the posterize image"}'
-check "both wanted labels are added in one call" \
-  requested 'POST /repos/muchq/MoonBase/issues/42/labels {"labels":["service:mithril","service:posterize"]}'
-check "the hand-applied label is left alone" \
-  not_requested 'labels/games'
+check "the PR's labels are read through the API" \
+  called "api repos/{owner}/{repo}/issues/42/labels --paginate --jq .[].name"
+check "each wanted label is created or refreshed" \
+  called "label create service:mithril --force --color 0e8a16 --description Changes the mithril image"
+check "the add and the removal are one edit" \
+  called "pr edit 42 --add-label service:mithril,service:posterize --remove-label service:stats"
+check "labels are created before they are applied" \
+  test "$(call_index 'label create service:posterize --force --color 0e8a16 --description Changes the posterize image')" \
+    -lt "$(call_index 'pr edit 42 --add-label service:mithril,service:posterize --remove-label service:stats')"
+check "the hand-applied label is left alone" not_called "games"
+check "the sync makes no other call" test "$(wc -l < "$LOG")" -eq 4
 
 # Already in sync: one read, no writes.
+printf '%s\n' games service:stats > "$WORK/pr_labels"
 sync stats
 check "an in-sync PR is read and not written" \
-  same "GET /repos/muchq/MoonBase/issues/42/labels?per_page=100 " "$(cat "$LOG")"
+  same "api repos/{owner}/{repo}/issues/42/labels --paginate --jq .[].name" "$(cat "$LOG")"
 
 # Nothing impacted: the stale label goes, nothing is added.
 sync
 check "no impacted services removes the service label and adds none" \
-  same $'GET /repos/muchq/MoonBase/issues/42/labels?per_page=100 \nDELETE /repos/muchq/MoonBase/issues/42/labels/service:stats ' \
+  same $'api repos/{owner}/{repo}/issues/42/labels --paginate --jq .[].name\npr edit 42 --remove-label service:stats' \
   "$(cat "$LOG")"
 
-# A token that cannot write: the failure is loud, not a green step.
-rm -f "$ROUTES"/*
-route GET /repos/muchq/MoonBase/issues/42/labels 200 '[]'
-route GET /repos/muchq/MoonBase/labels/service:mithril 200 '{}'
-route POST /repos/muchq/MoonBase/issues/42/labels 403 '{ "message": "Resource not accessible by integration" }'
+# An unlabeled PR is an empty list, not a failed read.
+: > "$WORK/pr_labels"
 sync mithril
-STATUS=$?
-check "a rejected write fails the script" test "$STATUS" -ne 0
-check "a rejected write names the call and status" \
-  grep -q 'POST /repos/muchq/MoonBase/issues/42/labels returned 403' "$WORK/sync.out"
+check "an unlabeled PR gains its label" \
+  called "pr edit 42 --add-label service:mithril"
 
-rm -f "$ROUTES"/*
-route GET /repos/muchq/MoonBase/issues/42/labels 401 '{ "message": "Bad credentials" }'
-sync mithril
+# A token that cannot write: the failure is loud, not a green step.
+GH_FAIL="pr edit" sync mithril
+STATUS=$?
+check "a rejected edit fails the script" test "$STATUS" -ne 0
+check "a rejected edit is reported" grep -q 'pr edit failed' "$WORK/sync.out"
+
+GH_FAIL="api" sync mithril
 STATUS=$?
 check "an unreadable PR fails the script" test "$STATUS" -ne 0
+check "an unreadable PR is not edited" not_called "pr edit"
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
