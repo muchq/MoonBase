@@ -7,16 +7,22 @@
 # Candidates come from bazel-diff's impact set — the push rules in it — or,
 # on a full build, from every push rule, since that set is untrustworthy
 # there. Each candidate's image is built and its content digests compared
-# with the manifest published for the merge base; only an image whose
-# content changed is reported. bazel-diff says what a change might reach, and
-# this says what it did: a test-only edit under a service's package is in the
-# impact set and leaves the image alone.
+# with the manifest published for the merge base; only an image whose content
+# changed is reported. The graph says what a change reaches; the bytes say
+# whether it mattered — a reworded comment, a dependency nothing links, or a
+# config edit that rebuilds every image identically all reach an image and
+# leave it alone.
 #
 # Writes DEST with one service name per line — empty when no image changed —
 # or leaves no DEST when the answer is not known: diff-build died before its
-# impact set, a build or query failed, or the base commit's image is not
-# published yet. The consumer treats a missing DEST as "skip", so an unknown
-# blast radius is never reported as an empty one.
+# impact set, a build or query failed, or the registry could not be read.
+# The consumer treats a missing DEST as "skip", so an unknown blast radius
+# is never reported as an empty one.
+#
+# A base commit whose image is not published yet is waited for, up to
+# IMPACT_PUBLISH_WAIT seconds; past that, a candidate from the graph stands
+# as impacted (the graph's answer is a superset of the bytes' one), while a
+# full build — where every image is a candidate — stays unknown.
 #
 # Exits non-zero only for a caller error; an unknown answer is a normal
 # outcome, so this can run after a red diff-build without adding a failure.
@@ -34,6 +40,8 @@ require_base_revision "$BASE_REVISION"
 # The registry the images are published to; the repository path comes from
 # each push rule.
 REGISTRY=${IMAGE_REGISTRY:-https://ghcr.io}
+PUBLISH_WAIT=${IMPACT_PUBLISH_WAIT:-300}
+POLL_INTERVAL=${IMPACT_POLL_INTERVAL:-30}
 
 rm -f "$DEST"
 WORK=$(mktemp -d)
@@ -46,7 +54,9 @@ unknown() {
 
 # ---- candidates ------------------------------------------------------------
 
+FULL_BUILD=0
 if [ -n "$(paths_forcing_full_build "$BASE_REVISION")" ]; then
+  FULL_BUILD=1
   echo "full build: every image is a candidate"
   bazel query 'kind(oci_push, //...)' --output=build > "$WORK/rules" \
     || unknown "oci_push query failed"
@@ -66,6 +76,8 @@ fi
 
 push_rule_pairs < "$WORK/rules" > "$WORK/pairs"
 if [ ! -s "$WORK/pairs" ]; then
+  # No rule at all is a real "none"; rules the parser could not read is not.
+  ! grep -q '^oci_push(' "$WORK/rules" || unknown "push rules did not parse"
   : > "$DEST"
   echo "impacted services: (none)"
   exit 0
@@ -76,47 +88,95 @@ fi
 IMAGES=$(cut -d' ' -f2 "$WORK/pairs" | tr '\n' ' ')
 # shellcheck disable=SC2086
 bazel build $IMAGES || unknown "image build failed"
-# "<label> <layout dir>" per image. Labels print in canonical form (@@//pkg:name);
-# the pairs carry them as written, so the prefix is stripped for the join.
+# "<label> <layout dir>" per image. cquery prints main-repo labels in
+# canonical form (@@//pkg:name) where the push rules carry //pkg:name, so
+# that prefix alone is stripped for the join; an image in another repo
+# would not join, and is reported as unknown rather than guessed at.
 # shellcheck disable=SC2086
 bazel cquery "set($IMAGES)" --output=starlark \
   --starlark:expr='str(target.label) + " " + target.files.to_list()[0].path' \
-  | sed 's/^@@*//' > "$WORK/layouts" || unknown "image cquery failed"
+  > "$WORK/layouts.raw" || unknown "image cquery failed"
+sed 's|^@@//|//|' "$WORK/layouts.raw" > "$WORK/layouts"
 
 layout_of() { # layout_of <image label>
-  sed -n "s|^${1#@@} ||p" "$WORK/layouts" | head -1
+  sed -n "s|^$1 ||p" "$WORK/layouts" | head -1
 }
 
 # The content digests of a built image: index.json names its manifest, the
-# manifest names the config and layers.
+# manifest names the config and layers. One manifest only — an index naming
+# several platforms would need each compared, and none is built today.
 local_digests() { # local_digests <layout dir>
-  local manifest
-  manifest=$(manifest_digests < "$1/index.json" | head -1)
-  [ -n "$manifest" ] || return 1
-  manifest_digests < "$1/blobs/sha256/${manifest#sha256:}"
+  local manifests
+  manifests=$(manifest_digests < "$1/index.json")
+  [ "$(printf '%s\n' "$manifests" | grep -c .)" -eq 1 ] || return 1
+  manifest_digests < "$1/blobs/sha256/${manifests#sha256:}"
 }
 
 # ---- the published images --------------------------------------------------
 
-MERGE_BASE=$(git merge-base "$BASE_REVISION" HEAD)
+MERGE_BASE=$(git merge-base "$BASE_REVISION" HEAD) || unknown "no merge base with $BASE_REVISION"
+
+CURL=(curl -sS --connect-timeout 10 --max-time 60 --retry 3)
 
 # The content digests of <service>'s published image at <ref>, on stdout.
 # Returns 0 with them, 44 when the registry has no such tag, and 1 for
-# anything else. Anonymous pull: the images are public.
+# anything else. Anonymous pull: the images are public. Only a manifest is
+# asked for — an index would name manifests, not content, and the images
+# are pushed one platform each.
 remote_digests() { # remote_digests <service> <ref>
   local service=$1 ref=$2 token status
-  token=$(curl -sS "$REGISTRY/token?scope=repository:muchq/$service:pull" \
+  token=$("${CURL[@]}" "$REGISTRY/token?scope=repository:muchq/$service:pull" \
     | sed -n 's/.*"token": *"\([^"]*\)".*/\1/p')
-  [ -n "$token" ] || return 1
-  status=$(curl -sS -o "$WORK/manifest" -w '%{http_code}' \
+  [ -n "$token" ] || { echo "no registry token for $service" >&2; return 1; }
+  status=$("${CURL[@]}" -o "$WORK/manifest" -w '%{http_code}' \
     -H "Authorization: Bearer $token" \
-    -H "Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json" \
+    -H "Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json" \
     "$REGISTRY/v2/muchq/$service/manifests/$ref")
   case "$status" in
-    200) manifest_digests < "$WORK/manifest" ;;
+    200)
+      if grep -q '"manifests"' "$WORK/manifest"; then
+        echo "registry served an index for $service:$ref" >&2
+        return 1
+      fi
+      manifest_digests < "$WORK/manifest"
+      ;;
     404) return 44 ;;
     *) echo "registry returned $status for $service:$ref" >&2; return 1 ;;
   esac
+}
+
+# The base image's digests for <service> into $WORK/remote. Prints one of:
+# found, new (never published), lag (published, but not this base yet, after
+# waiting), error.
+base_digests() { # base_digests <service>
+  local service=$1 status latest
+  local deadline=$(( $(date +%s) + PUBLISH_WAIT ))
+  while :; do
+    set +e
+    remote_digests "$service" "$MERGE_BASE" > "$WORK/remote"
+    status=$?
+    set -e
+    case "$status" in
+      0) echo found; return ;;
+      44) ;;
+      *) echo error; return ;;
+    esac
+    set +e
+    remote_digests "$service" latest > /dev/null
+    latest=$?
+    set -e
+    case "$latest" in
+      44) echo new; return ;;
+      0) ;;
+      *) echo error; return ;;
+    esac
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+      echo lag
+      return
+    fi
+    echo "$service: no image for ${MERGE_BASE:0:9} yet; waiting" >&2
+    sleep "$POLL_INTERVAL"
+  done
 }
 
 # ---- the comparison --------------------------------------------------------
@@ -127,12 +187,8 @@ while read -r service image; do
   [ -n "$layout" ] || unknown "no built layout for $image"
   local_digests "$layout" > "$WORK/local" || unknown "unreadable layout for $image at $layout"
 
-  set +e
-  remote_digests "$service" "$MERGE_BASE" > "$WORK/remote"
-  status=$?
-  set -e
-  case "$status" in
-    0)
+  case "$(base_digests "$service")" in
+    found)
       if cmp -s "$WORK/local" "$WORK/remote"; then
         echo "$service: unchanged"
       else
@@ -140,22 +196,14 @@ while read -r service image; do
         echo "$service" >> "$WORK/impacted"
       fi
       ;;
-    44)
-      # No image at the base commit: a service that has never been published
-      # is new, and therefore changed; one whose latest exists is publish
-      # lag, and the answer has to wait for it.
-      set +e
-      remote_digests "$service" latest > /dev/null
-      latest=$?
-      set -e
-      case "$latest" in
-        44)
-          echo "$service: new"
-          echo "$service" >> "$WORK/impacted"
-          ;;
-        0) unknown "$service has no image for ${MERGE_BASE:0:9} yet" ;;
-        *) unknown "registry read failed for $service" ;;
-      esac
+    new)
+      echo "$service: new"
+      echo "$service" >> "$WORK/impacted"
+      ;;
+    lag)
+      [ "$FULL_BUILD" -eq 0 ] || unknown "$service has no image for ${MERGE_BASE:0:9}"
+      echo "$service: no image for ${MERGE_BASE:0:9}; the graph says impacted"
+      echo "$service" >> "$WORK/impacted"
       ;;
     *) unknown "registry read failed for $service" ;;
   esac

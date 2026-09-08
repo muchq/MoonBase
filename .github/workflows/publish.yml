@@ -4,6 +4,14 @@ on:
   push:
     branches: [ "main" ]
 
+# One publish at a time, none cancelled: the commit tag is taken from
+# :latest after the push, so two runs overlapping would tag one commit with
+# the other's image — and the tag is what a rollback and a PR's blast-radius
+# comparison read.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
 permissions:
   contents: write
   packages: write

@@ -1,7 +1,6 @@
 #!/bin/bash
-# Pins the service-label sync (#1214): which names come out of the oci_push
-# rules, which labels a PR gains and loses, and what scripts/label-services
-# asks the GitHub API to do about it.
+# Pins the service-label sync (#1214): which labels a PR gains and loses, and
+# what scripts/label-services asks gh to do about it.
 #
 # The API half runs against a stub curl that records every request and answers
 # from canned responses, so no token, no network, and the assertions read the
@@ -29,40 +28,6 @@ check() {
 same() { # same <expected> <actual>
   [ "$1" = "$2" ] || { echo "    expected: $1"; echo "    actual:   $2"; false; }
 }
-
-# ---------------------------------------------------------------- parsing
-
-echo "services_from_push_rules"
-
-# The shape of `bazel query 'kind(oci_push, ...)' --output=build`: one rule per
-# block, the repository attribute among others, plus a comment line and a rule
-# pushing somewhere that is not ours.
-cat > "$WORK/push.build" <<'BUILD'
-# /workspace/domains/games/apis/mithril/BUILD.bazel:40:1
-oci_push(
-  name = "mithril_push_image",
-  image = "//domains/games/apis/mithril:mithril_image",
-  remote_tags = ["latest"],
-  repository = "ghcr.io/muchq/mithril",
-)
-# /workspace/domains/ai/apis/microgpt_serve/BUILD.bazel:12:1
-oci_push(
-  name = "microgpt-serve_push_image",
-  repository = "ghcr.io/muchq/microgpt-serve",
-)
-oci_push(
-  name = "again",
-  repository = "ghcr.io/muchq/mithril",
-)
-oci_push(
-  name = "elsewhere",
-  repository = "docker.io/library/nginx",
-)
-BUILD
-check "names are the repository's last segment, sorted and unique, ours only" \
-  same $'microgpt-serve\nmithril' "$(services_from_push_rules < "$WORK/push.build")"
-check "no push rules means no services" \
-  same "" "$(printf '' | services_from_push_rules)"
 
 # ------------------------------------------------------------------- plan
 
