@@ -73,3 +73,27 @@ service_label_plan() { # service_label_plan <services-file> <labels-file>
   comm -13 <(printf '%s\n' "$want" | grep . || true) <(printf '%s\n' "$have" | grep . || true) \
     | sed 's/^/remove /'
 }
+
+# "<service> <image label>" per push rule from `bazel query 'kind(oci_push,
+# ...)' --output=build` on stdin: the repository's last path segment and the
+# image attribute. What the digest comparison needs — the built image to read
+# and the registry repository to read it against — in one line per service.
+push_rule_pairs() {
+  awk '
+    /^oci_push\(/ { svc = ""; img = "" }
+    /^ *image = "/ { img = $0; sub(/^ *image = "/, "", img); sub(/".*/, "", img) }
+    /^ *repository = "ghcr\.io\/muchq\// {
+      svc = $0; sub(/.*repository = "ghcr\.io\/muchq\//, "", svc); sub(/".*/, "", svc)
+    }
+    /^\)/ && svc != "" && img != "" { print svc, img }
+  ' | sort -u
+}
+
+# The content digests an image manifest names, one per line in manifest
+# order: the config, then each layer. Two manifests with the same list are
+# the same image even when their own digests differ — the docker re-tag in
+# publish.yml relabels a layer's media type, which changes the manifest's
+# digest and nothing the image is made of.
+manifest_digests() {
+  grep -o '"digest": *"sha256:[a-f0-9]*"' | sed 's/.*"sha256:/sha256:/; s/"$//' || true
+}
