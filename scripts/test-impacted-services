@@ -17,6 +17,8 @@ trap 'rm -rf "$WORK"' EXIT
 
 # shellcheck source=diff-build-lib.sh
 source "$REPO/scripts/diff-build-lib.sh"
+# shellcheck source=image-lib.sh
+source "$REPO/scripts/image-lib.sh"
 
 FAILURES=0
 pass() { echo "  ok    $1"; }
@@ -219,7 +221,7 @@ run() { # run [BASE]; stdout+stderr to $WORK/run.out, status in $?
     BAZEL_BUILD_FAIL="${BAZEL_BUILD_FAIL:-}" BAZEL_QUERY_FAIL="${BAZEL_QUERY_FAIL:-}" \
     BAZEL_CQUERY_FAIL="${BAZEL_CQUERY_FAIL:-}" TOKEN_FAIL="${TOKEN_FAIL:-}" \
     IMAGE_REGISTRY=https://registry.test \
-    IMPACT_PUBLISH_WAIT="${IMPACT_PUBLISH_WAIT:-0}" IMPACT_POLL_INTERVAL=0 \
+    IMPACT_PUBLISH_WAIT="${IMPACT_PUBLISH_WAIT:-0}" IMPACT_POLL_INTERVAL="${IMPACT_POLL_INTERVAL:-0}" \
     "$SUBJECT" "${1:-main}" "$TARGETS" "$DEST" > "$WORK/run.out" 2>&1
 }
 built() { grep -q '^build ' "$BAZEL_LOG"; }
@@ -357,7 +359,7 @@ layout "$FIX/games_hub" c4 b1 a4ee
 printf 'stale\n' > "$DEST"
 TOKEN_FAIL=1 run
 check "a registry that issues no token leaves no file" test ! -e "$DEST"
-check "and says so" said 'no registry token'
+check "and says so" said 'no pull token'
 
 printf 'stale\n' > "$DEST"
 route mithril "$MERGE_BASE" 503 'upstream unhappy'
@@ -424,6 +426,21 @@ check "a base published during the wait is compared" same "games_hub" "$(cat "$D
 check "after being asked for again" \
   test "$(grep -c "^posterize $MERGE_BASE$" "$CURL_LOG")" -eq 2
 check "and the wait was logged" said 'no image for'
+
+# Two services lag at once: one budget covers the run, so the second is not
+# waited for again once the first has used it up.
+printf 'stale\n' > "$DEST"
+unpublished posterize "$MERGE_BASE"
+unpublished games_hub "$MERGE_BASE"
+published posterize latest c2 b1 a2
+published games_hub latest c4 b1 a4
+IMPACT_PUBLISH_WAIT=2 IMPACT_POLL_INTERVAL=1 run
+check "past one budget, both lagging candidates stand as impacted" same $'games_hub\nposterize' "$(cat "$DEST")"
+check "and the second is asked for once, not waited for again" \
+  test "$(grep -c "^posterize $MERGE_BASE$" "$CURL_LOG")" -eq 1
+publish_all
+unpublished posterize latest
+unpublished games_hub latest
 
 # A registry error while probing latest is an error, not a new service.
 printf 'stale\n' > "$DEST"

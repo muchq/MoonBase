@@ -6,6 +6,9 @@ cd "$(dirname "$0")/../.." || exit 1
 
 HOST=ubuntu@consolidated.cmptr.info
 COMPOSE_FILE=deploy/consolidated/compose.yaml
+REGISTRY=${IMAGE_REGISTRY:-https://ghcr.io}
+# How far back --list --service looks for commits that changed the image.
+LIST_SCAN=${DEPLOY_LIST_SCAN:-100}
 
 usage() {
   cat <<'USAGE'
@@ -15,7 +18,11 @@ Deploys the consolidated stack. Every service image is pinned to a commit SHA,
 so what runs is reproducible and a rollback is just --sha.
 
 Options:
-  -l, --list [COUNT]     Show the last COUNT commits (default 10) and exit
+  -l, --list [COUNT]     Show the last COUNT commits (default 10) and exit.
+                         With --service, the last COUNT commits that changed
+                         that service's image, by the published image itself;
+                         the scan covers DEPLOY_LIST_SCAN commits (100) and
+                         says so if it runs out first
       --services         Show the deployable services and exit
       --status           Show what each container is actually running, and exit
   -s, --sha SHA          Deploy a specific commit; default is the latest on main
@@ -255,17 +262,121 @@ else
   deployed_sha=$(host_pin DEPLOY_SHA)
 fi
 
-if [ -n "$LIST_COUNT" ]; then
+list_row() { # list_row <sha> <note>
+  local marker=""
+  # The pin is a full sha, but a hand-edited one may be short: a prefix match.
+  if [ -n "$deployed_sha" ]; then
+    case "$1" in
+      "$deployed_sha"*) marker="  <- deployed" ;;
+    esac
+  fi
+  printf '%-9s  %-10s  %s%s%s\n' "${1:0:9}" "$(git log -1 --date=short --pretty=%ad "$1")" \
+    "$(describe "$1")" "$marker" "$2"
+}
+
+if [ -n "$LIST_COUNT" ] && [ -z "$TARGET_SERVICE" ]; then
   printf '%-9s  %-10s  %s\n' "COMMIT" "DATE" "SUBJECT"
-  git log --max-count="$LIST_COUNT" --date=short \
-    --pretty=tformat:'%h|%ad|%s' origin/main |
-    while IFS='|' read -r sha date subject; do
-      marker=""
-      case "$deployed_sha" in
-        "$sha"*) marker="  <- deployed" ;;
-      esac
-      printf '%-9s  %-10s  %s%s\n' "$sha" "$date" "$subject" "$marker"
-    done
+  for sha in $(git log --max-count="$LIST_COUNT" --pretty=%H origin/main); do
+    list_row "$sha" ""
+  done
+  exit 0
+fi
+
+# The commits that changed one service, read off the images themselves: a
+# commit changed the service when its image's content differs from the next
+# older commit's. Ground truth rather than intent, and it reads commits
+# published long before anything labeled them. The registry's tag list says
+# which commits have an image at all, so only those are read; a commit
+# without one (a failed publish, or the service did not exist yet) is
+# skipped, the next older one that has an image stands in, and the row says
+# the change may sit in the gap.
+if [ -n "$LIST_COUNT" ]; then
+  # Reading an image, shared with CI's blast-radius comparison so the two
+  # read a commit's image the same way. Sourced here rather than up top: a
+  # deploy does not need it, and must not fail for it.
+  # shellcheck source=../../scripts/image-lib.sh
+  source scripts/image-lib.sh
+  content_at() { # content_at <sha>: digests on stdout, empty for no image, exit on error
+    local content
+    content=$(registry_image_content "$REGISTRY" "muchq/$TARGET_SERVICE" "$1") && { printf '%s' "$content"; return; }
+    [ $? -eq 44 ] || exit 1
+  }
+
+  echo "Scanning up to $LIST_SCAN commits on main for changes to the $TARGET_SERVICE image..." >&2
+  # Minted here, in this shell, so every read below inherits it; a read runs
+  # in a substitution and could not cache it for the next.
+  registry_token "$REGISTRY" "muchq/$TARGET_SERVICE" > /dev/null || exit 1
+  published=$(mktemp)
+  trap 'rm -f "$published"' EXIT
+  registry_commit_tags "$REGISTRY" "muchq/$TARGET_SERVICE" > "$published" || exit 1
+  has_image() { grep -qxF "$1" "$published"; }
+
+  # The image that is running, so the listing can mark the change it came
+  # from: what a rollback replaces is a change point, not necessarily the
+  # commit the pin names.
+  deployed_content=""
+  [ -z "$deployed_sha" ] || deployed_content=$(content_at "$deployed_sha")
+
+  rows=""
+  add_row() { # add_row <sha> <note>
+    local marker=""
+    if [ -n "$deployed_content" ] && [ "$newer_content" = "$deployed_content" ]; then
+      marker="  <- deployed"
+      deployed_content=""
+    fi
+    rows="$rows$(printf '%-9s  %-10s  %s%s%s' "${1:0:9}" "$(git log -1 --date=short --pretty=%ad "$1")" \
+      "$(describe "$1")" "$marker" "$2")
+"
+  }
+
+  newer=""          # the newest commit with an image not yet judged
+  newer_content=""
+  gap=0             # imageless commits since it
+  found=0
+  scanned=0
+  for sha in $(git log --max-count="$LIST_SCAN" --pretty=%H origin/main); do
+    scanned=$((scanned + 1))
+    has_image "$sha" || { gap=$((gap + 1)); continue; }
+    content=$(content_at "$sha")
+    # Tagged and yet not there: a tag being written as we read. A gap.
+    [ -n "$content" ] || { gap=$((gap + 1)); continue; }
+    if [ -n "$newer" ] && [ "$content" != "$newer_content" ]; then
+      note=""
+      [ "$gap" -eq 0 ] || note="  (or in the $gap commit(s) between, which have no image)"
+      add_row "$newer" "$note"
+      found=$((found + 1))
+      [ "$found" -lt "$LIST_COUNT" ] || { newer=""; break; }
+    fi
+    newer=$sha
+    newer_content=$content
+    gap=0
+  done
+
+  # The last commit seen with an image has nothing in the window to compare
+  # with. Whether anything older has one is a question for the tag list and
+  # git, not for a wider scan: none means the image first appeared here.
+  trailer=""
+  if [ -n "$newer" ] && [ "$found" -lt "$LIST_COUNT" ]; then
+    if [ "$(git rev-parse --is-shallow-repository)" = true ]; then
+      trailer="(${newer:0:9} not compared: this clone is shallow, so what is older is unknown)"
+    elif git rev-list "$newer" | tail -n +2 | grep -qxF -f "$published"; then
+      trailer="(${newer:0:9} not compared: only the last $LIST_SCAN commits were scanned; set DEPLOY_LIST_SCAN to look further)"
+    else
+      add_row "$newer" "  (first image)"
+    fi
+  fi
+  if [ -z "$rows" ] && [ -z "$trailer" ]; then
+    echo "No image published for $TARGET_SERVICE in the last $scanned commits on main." >&2
+    exit 1
+  fi
+
+  # Printed only once the scan is complete: a registry error mid-way exits
+  # above with nothing on stdout, rather than a history that stops short and
+  # looks whole.
+  echo "Commits that changed the $TARGET_SERVICE image (scanned $scanned):"
+  printf '%-9s  %-10s  %s\n' "COMMIT" "DATE" "SUBJECT"
+  printf '%s' "$rows"
+  [ -z "$trailer" ] || echo "$trailer"
   exit 0
 fi
 

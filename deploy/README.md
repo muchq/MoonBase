@@ -23,4 +23,18 @@ not be read — the PR gets `service:unknown` beside whatever service labels it
 has and loses none, so an unknown blast radius is never mistaken for an empty
 one; the next run that does know the answer retires the marker. A base commit
 whose image publish has not pushed yet is waited for a few minutes; past that,
-the graph's answer stands for it.
+the graph's answer stands for it — except on a full build, where the graph
+would say every service, so the answer stays unknown.
+
+## Deploy history by service
+
+`deploy.sh --list --service one_d4` lists the last commits that changed the
+`one_d4` image, so a targeted deploy or rollback can be aimed without reading
+every subject. It reads the published images themselves: a commit changed the
+service when its image's content differs from the next older commit's, which
+is ground truth rather than intent, and works on commits published long before
+anything labeled them. The `<- deployed` marker sits on the change the running
+image came from. A commit with no published image is skipped over and the row
+says the change may sit in the gap. The scan covers the last 100 commits by
+default and says so when it runs out before an answer; `DEPLOY_LIST_SCAN`
+widens it.

@@ -31,6 +31,8 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=diff-build-lib.sh
 source "$SCRIPT_DIR/diff-build-lib.sh"
+# shellcheck source=image-lib.sh
+source "$SCRIPT_DIR/image-lib.sh"
 
 BASE_REVISION=${1:?usage: impacted-services BASE_REVISION IMPACTED_TARGETS_FILE DEST}
 TARGETS=${2:?usage: impacted-services BASE_REVISION IMPACTED_TARGETS_FILE DEST}
@@ -42,6 +44,9 @@ require_base_revision "$BASE_REVISION"
 REGISTRY=${IMAGE_REGISTRY:-https://ghcr.io}
 PUBLISH_WAIT=${IMPACT_PUBLISH_WAIT:-300}
 POLL_INTERVAL=${IMPACT_POLL_INTERVAL:-30}
+# One budget for the whole run, not one per service: every candidate lags
+# on the same publish, and a wait per candidate would stack past the step.
+PUBLISH_DEADLINE=$(( $(date +%s) + PUBLISH_WAIT ))
 
 rm -f "$DEST"
 WORK=$(mktemp -d)
@@ -116,33 +121,10 @@ local_digests() { # local_digests <layout dir>
 
 MERGE_BASE=$(git merge-base "$BASE_REVISION" HEAD) || unknown "no merge base with $BASE_REVISION"
 
-CURL=(curl -sS --connect-timeout 10 --max-time 60 --retry 3)
-
-# The content digests of <service>'s published image at <ref>, on stdout.
-# Returns 0 with them, 44 when the registry has no such tag, and 1 for
-# anything else. Anonymous pull: the images are public. Only a manifest is
-# asked for — an index would name manifests, not content, and the images
-# are pushed one platform each.
+# The content digests of <service>'s published image at <ref>, on stdout:
+# 0 with them, 44 for no such ref, 1 for anything else.
 remote_digests() { # remote_digests <service> <ref>
-  local service=$1 ref=$2 token status
-  token=$("${CURL[@]}" "$REGISTRY/token?scope=repository:muchq/$service:pull" \
-    | sed -n 's/.*"token": *"\([^"]*\)".*/\1/p')
-  [ -n "$token" ] || { echo "no registry token for $service" >&2; return 1; }
-  status=$("${CURL[@]}" -o "$WORK/manifest" -w '%{http_code}' \
-    -H "Authorization: Bearer $token" \
-    -H "Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json" \
-    "$REGISTRY/v2/muchq/$service/manifests/$ref")
-  case "$status" in
-    200)
-      if grep -q '"manifests"' "$WORK/manifest"; then
-        echo "registry served an index for $service:$ref" >&2
-        return 1
-      fi
-      manifest_digests < "$WORK/manifest"
-      ;;
-    404) return 44 ;;
-    *) echo "registry returned $status for $service:$ref" >&2; return 1 ;;
-  esac
+  registry_image_content "$REGISTRY" "muchq/$1" "$2"
 }
 
 # The base image's digests for <service> into $WORK/remote. Prints one of:
@@ -150,7 +132,6 @@ remote_digests() { # remote_digests <service> <ref>
 # waiting), error.
 base_digests() { # base_digests <service>
   local service=$1 status latest
-  local deadline=$(( $(date +%s) + PUBLISH_WAIT ))
   while :; do
     set +e
     remote_digests "$service" "$MERGE_BASE" > "$WORK/remote"
@@ -170,7 +151,7 @@ base_digests() { # base_digests <service>
       0) ;;
       *) echo error; return ;;
     esac
-    if [ "$(date +%s)" -ge "$deadline" ]; then
+    if [ "$(date +%s)" -ge "$PUBLISH_DEADLINE" ]; then
       echo lag
       return
     fi

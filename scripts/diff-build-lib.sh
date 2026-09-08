@@ -1,6 +1,7 @@
-# Shared by scripts/diff-build (CI) and scripts/diff-build-decide (test-only).
-# Sourced, not executed. Keep this free of side effects beyond defining the
-# pathspec list and the two helpers below.
+# Shared by scripts/diff-build (CI), scripts/diff-build-decide (test-only),
+# and the impacted-services / label-services pair that reads diff-build's
+# output. Sourced, not executed. Keep this free of side effects beyond the
+# definitions.
 
 # Paths whose change makes bazel-diff's impacted-target set untrustworthy for
 # the property CI needs: every consumer that would feel the change actually
@@ -78,14 +79,4 @@ push_rule_pairs() {
     }
     /^\)/ && svc != "" && img != "" { print svc, img }
   ' | sort -u
-}
-
-# The content digests an image manifest names, one per line in manifest
-# order: the config, then each layer. Two manifests with the same list are
-# the same image even when their own digests differ: commit tags pushed
-# before publish tagged from the built image went through docker, which
-# relabels a layer's media type and so the manifest's digest, and nothing the
-# image is made of.
-manifest_digests() {
-  grep -o '"digest": *"sha256:[a-f0-9]*"' | sed 's/.*"sha256:/sha256:/; s/"$//' || true
 }
