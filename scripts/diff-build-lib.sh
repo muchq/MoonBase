@@ -41,3 +41,35 @@ paths_forcing_full_build() {
   local base=$1
   git diff --name-only "$base" HEAD -- "${FULL_BUILD_PATHSPECS[@]}"
 }
+
+# Service names from `bazel query 'kind(oci_push, ...)' --output=build` on
+# stdin: the last path segment of each rule's repository attribute, sorted and
+# unique. This is the parse publish.yml does to tag images, and the names are
+# the ones compose.yaml pins and deploy.sh --services lists.
+#
+# Derived from the dependency graph rather than from changed paths on purpose:
+# a shared library fans out to every image that links it, and only the graph
+# knows which those are.
+services_from_push_rules() {
+  sed -n 's/.*repository = "ghcr\.io\/muchq\/\([^"]*\)".*/\1/p' | sort -u
+}
+
+# Labels a PR carries for its impacted services. One label per service, all
+# under one prefix, so the sync below can retire a stale one without touching
+# the hand-applied labels beside it.
+SERVICE_LABEL_PREFIX="service:"
+
+# The label changes that bring a PR from the labels it has to the services it
+# impacts. Reads two files of names, one per line: the impacted services and
+# the labels currently on the PR. Prints "add <label>" and "remove <label>",
+# one per line, and nothing for a label already in the right state.
+service_label_plan() { # service_label_plan <services-file> <labels-file>
+  local services=$1 labels=$2
+  local want have
+  want=$(sed "s/^/$SERVICE_LABEL_PREFIX/" "$services" | sort -u)
+  have=$(grep "^$SERVICE_LABEL_PREFIX" "$labels" | sort -u || true)
+  comm -23 <(printf '%s\n' "$want" | grep . || true) <(printf '%s\n' "$have" | grep . || true) \
+    | sed 's/^/add /'
+  comm -13 <(printf '%s\n' "$want" | grep . || true) <(printf '%s\n' "$have" | grep . || true) \
+    | sed 's/^/remove /'
+}

@@ -1,0 +1,48 @@
+#!/bin/bash
+# Bring a PR's service:* labels in line with the services a change reaches.
+#
+# Usage: label-services PR_NUMBER SERVICES_FILE
+#
+# SERVICES_FILE is one service name per line, as scripts/impacted-services
+# writes it. Labels for services not in the file are removed, so a PR that
+# stops touching a service loses the label on its next run; labels outside
+# the service: prefix are never touched. Each wanted label is created or
+# refreshed before it is applied, so a new service needs nothing by hand and
+# two PRs introducing the same label at once cannot race each other.
+#
+# Runs through gh, which reads GH_TOKEN and GH_REPO from the environment.
+# Any gh failure fails the script: a token that cannot write is a
+# misconfiguration to see, not to shrug past.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=diff-build-lib.sh
+source "$SCRIPT_DIR/diff-build-lib.sh"
+
+PR=${1:?usage: label-services PR_NUMBER SERVICES_FILE}
+SERVICES=${2:?usage: label-services PR_NUMBER SERVICES_FILE}
+
+HAVE=$(mktemp)
+trap 'rm -f "$HAVE"' EXIT
+gh api "repos/{owner}/{repo}/issues/$PR/labels" --paginate --jq '.[].name' > "$HAVE"
+
+ADD=""
+REMOVE=""
+while read -r verb label; do
+  case "$verb" in
+    add)
+      gh label create "$label" --force --color 0e8a16 \
+        --description "Changes the ${label#"$SERVICE_LABEL_PREFIX"} image"
+      ADD="$ADD,$label"
+      ;;
+    remove) REMOVE="$REMOVE,$label" ;;
+  esac
+done < <(service_label_plan "$SERVICES" "$HAVE")
+
+EDIT=()
+[ -z "$ADD" ] || EDIT+=(--add-label "${ADD#,}")
+[ -z "$REMOVE" ] || EDIT+=(--remove-label "${REMOVE#,}")
+if [ "${#EDIT[@]}" -gt 0 ]; then
+  gh pr edit "$PR" "${EDIT[@]}"
+fi
+echo "labels in sync: $(tr '\n' ' ' < "$SERVICES")"

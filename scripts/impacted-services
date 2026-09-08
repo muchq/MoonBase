@@ -1,0 +1,56 @@
+#!/bin/bash
+# The services whose image a change reaches, from the impact set diff-build
+# already computed (#1214).
+#
+# Usage: impacted-services BASE_REVISION IMPACTED_TARGETS_FILE DEST
+#
+# Writes DEST with one service name per line — empty when the change reaches
+# no image — or leaves no DEST at all when the answer is not known: the
+# change forced a full build (bazel-diff's set is untrustworthy there, which
+# is not the same as "everything"), diff-build died before writing its impact
+# set, or the query over that set failed. The consumer treats a missing DEST
+# as "skip", so an unknown blast radius is never reported as an empty one.
+#
+# Exits non-zero only for a caller error; an unknown answer is a normal
+# outcome, so this can run after a red diff-build without adding a failure.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=diff-build-lib.sh
+source "$SCRIPT_DIR/diff-build-lib.sh"
+
+BASE_REVISION=${1:?usage: impacted-services BASE_REVISION IMPACTED_TARGETS_FILE DEST}
+TARGETS=${2:?usage: impacted-services BASE_REVISION IMPACTED_TARGETS_FILE DEST}
+DEST=${3:?usage: impacted-services BASE_REVISION IMPACTED_TARGETS_FILE DEST}
+require_base_revision "$BASE_REVISION"
+
+rm -f "$DEST"
+
+if [ -n "$(paths_forcing_full_build "$BASE_REVISION")" ]; then
+  echo "full build: impacted services not computed"
+  exit 0
+fi
+if [ ! -f "$TARGETS" ]; then
+  echo "no impact set at $TARGETS: impacted services not computed"
+  exit 0
+fi
+
+# First-party targets only, as diff-build filters them: external labels are
+# not valid in a set() expression.
+TARGET_SET=$(grep '^//' "$TARGETS" | tr '\n' ' ' || true)
+if [ -z "$TARGET_SET" ]; then
+  : > "$DEST"
+  echo "impacted services: (none)"
+  exit 0
+fi
+
+# bazel-diff's set is transitive, so the push rule of every image that would
+# change is already in it.
+RULES=$(mktemp)
+trap 'rm -f "$RULES"' EXIT
+if ! bazel query "kind(oci_push, set($TARGET_SET))" --output=build > "$RULES"; then
+  echo "oci_push query failed: impacted services not computed" >&2
+  exit 0
+fi
+services_from_push_rules < "$RULES" > "$DEST"
+echo "impacted services: $(tr '\n' ' ' < "$DEST")"

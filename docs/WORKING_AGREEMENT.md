@@ -371,6 +371,8 @@ Run these, and don't report success on a step that didn't run.
 | Deploy scripts | `scripts/test-deploy` | yes — `test-deploy`, `test-deploy-macos` |
 | diff-build full-build decision | `scripts/test-diff-build` | yes — `test-deploy` |
 | mutation-check harness | `scripts/test-mutation-check` | yes — `test-deploy` |
+| impacted services | `scripts/test-impacted-services` | yes — `test-deploy` |
+| service labels | `scripts/test-label-services` | yes — `test-deploy` |
 
 `scripts/format-all` runs the bazel/java/cc/scala formatters together. Note
 what it does **not** cover: Rust, Go, and TypeScript have no formatting gate in

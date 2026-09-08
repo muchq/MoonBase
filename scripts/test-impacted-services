@@ -1,0 +1,139 @@
+#!/bin/bash
+# Pins what scripts/impacted-services writes for each state of a diff-build
+# run (#1214): a set, an empty set, or — for a full build, a run that died
+# before its impact set, or a failed query — no file at all. The consumer
+# reads "no file" as "unknown, skip", so this is where an unknown blast
+# radius is kept from being reported as an empty one.
+#
+# The subject decides over a git diff and one bazel query, so the fixture is a
+# throwaway repo (as in test-diff-build) and a stub bazel that records the
+# query and answers from a canned oci_push listing.
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+SUBJECT=$REPO/scripts/impacted-services
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+FAILURES=0
+pass() { echo "  ok    $1"; }
+fail() {
+  echo "  FAIL  $1"
+  FAILURES=$((FAILURES + 1))
+}
+check() {
+  local desc=$1
+  shift
+  if "$@"; then pass "$desc"; else fail "$desc"; fi
+}
+same() { # same <expected> <actual>
+  [ "$1" = "$2" ] || { echo "    expected: $1"; echo "    actual:   $2"; false; }
+}
+
+# ---------------------------------------------------------------- fixture
+
+FIXTURE=$WORK/repo
+mkdir -p "$FIXTURE"
+cd "$FIXTURE"
+git init -q
+git config user.email "test@example.com"
+git config user.name "test"
+git config commit.gpgsign false
+printf 'build --foo\n' > .bazelrc
+mkdir -p domains/games
+printf 'src\n' > domains/games/hello.txt
+git add .
+git commit -q -m base
+BASE=$(git rev-parse HEAD)
+
+commit_change_to() { # commit_change_to <path> <contents>
+  printf '%s\n' "$2" > "$1"
+  git add "$1"
+  git commit -q -m "change $1"
+}
+reset_to_base() { git reset -q --hard "$BASE"; }
+
+STUBS=$WORK/stubs
+mkdir -p "$STUBS"
+QUERY_LOG=$WORK/bazel.log
+cat > "$STUBS/bazel" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >> "$BAZEL_LOG"
+[ -z "${BAZEL_FAIL:-}" ] || { echo "ERROR: query failed" >&2; exit 2; }
+cat "$BAZEL_ANSWER"
+STUB
+chmod +x "$STUBS/bazel"
+cat > "$WORK/answer" <<'BUILD'
+oci_push(
+  name = "mithril_push_image",
+  repository = "ghcr.io/muchq/mithril",
+)
+oci_push(
+  name = "posterize_push_image",
+  repository = "ghcr.io/muchq/posterize",
+)
+BUILD
+
+TARGETS=$WORK/impacted_targets.txt
+DEST=$WORK/impacted_services.txt
+
+run() { # run [BASE]; stdout+stderr to $WORK/run.out, status in $?
+  : > "$QUERY_LOG"
+  PATH="$STUBS:$PATH" BAZEL_LOG="$QUERY_LOG" BAZEL_ANSWER="$WORK/answer" BAZEL_FAIL="${BAZEL_FAIL:-}" \
+    "$SUBJECT" "${1:-$BASE}" "$TARGETS" "$DEST" > "$WORK/run.out" 2>&1
+}
+
+# ----------------------------------------------------------------- cases
+
+echo "impacted-services"
+
+reset_to_base
+commit_change_to domains/games/hello.txt 'changed'
+printf '%s\n' '//domains/games/apis/mithril:mithril_push_image' '@@rules_cc++//:foo' '//domains/games:lib' > "$TARGETS"
+run
+check "a computed set exits zero" test $? -eq 0
+check "the services come from the oci_push rules in the set" \
+  same $'mithril\nposterize' "$(cat "$DEST")"
+check "the query is over the first-party targets only" \
+  same 'query kind(oci_push, set(//domains/games/apis/mithril:mithril_push_image //domains/games:lib )) --output=build' \
+  "$(cat "$QUERY_LOG")"
+
+printf '%s\n' '@@rules_cc++//:foo' > "$TARGETS"
+run
+check "a set with no first-party target writes an empty file" \
+  test -f "$DEST" -a ! -s "$DEST"
+check "and asks bazel nothing" test ! -s "$QUERY_LOG"
+
+printf '%s\n' '//domains/games:lib' > "$TARGETS"
+BAZEL_FAIL=1 run
+STATUS=$?
+check "a failed query is not a failure" test "$STATUS" -eq 0
+check "a failed query leaves no file" test ! -e "$DEST"
+check "a failed query says so" grep -q 'query failed' "$WORK/run.out"
+
+printf 'stale\n' > "$DEST"
+rm -f "$TARGETS"
+run
+check "no impact set leaves no file, stale or otherwise" test ! -e "$DEST"
+check "no impact set is not a failure" grep -q 'not computed' "$WORK/run.out"
+
+reset_to_base
+commit_change_to .bazelrc 'build --bar'
+printf '%s\n' '//domains/games:lib' > "$TARGETS"
+printf 'stale\n' > "$DEST"
+run
+check "a full build leaves no file" test ! -e "$DEST"
+check "a full build asks bazel nothing" test ! -s "$QUERY_LOG"
+check "a full build says so" grep -q 'full build' "$WORK/run.out"
+
+run refs/heads/does-not-exist
+STATUS=$?
+check "an unresolvable base exits non-zero" test "$STATUS" -ne 0
+
+echo
+if [ "$FAILURES" -eq 0 ]; then
+  echo "all impacted-services checks passed"
+else
+  echo "$FAILURES check(s) failed"
+fi
+exit $((FAILURES > 0))

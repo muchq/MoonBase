@@ -1,0 +1,178 @@
+#!/bin/bash
+# Pins the service-label sync (#1214): which names come out of the oci_push
+# rules, which labels a PR gains and loses, and what scripts/label-services
+# asks the GitHub API to do about it.
+#
+# The API half runs against a stub curl that records every request and answers
+# from canned responses, so no token, no network, and the assertions read the
+# request log — what was asked, not what a real API would have answered.
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+# shellcheck source=diff-build-lib.sh
+source "$REPO/scripts/diff-build-lib.sh"
+
+FAILURES=0
+pass() { echo "  ok    $1"; }
+fail() {
+  echo "  FAIL  $1"
+  FAILURES=$((FAILURES + 1))
+}
+check() {
+  local desc=$1
+  shift
+  if "$@"; then pass "$desc"; else fail "$desc"; fi
+}
+same() { # same <expected> <actual>
+  [ "$1" = "$2" ] || { echo "    expected: $1"; echo "    actual:   $2"; false; }
+}
+
+# ---------------------------------------------------------------- parsing
+
+echo "services_from_push_rules"
+
+# The shape of `bazel query 'kind(oci_push, ...)' --output=build`: one rule per
+# block, the repository attribute among others, plus a comment line and a rule
+# pushing somewhere that is not ours.
+cat > "$WORK/push.build" <<'BUILD'
+# /workspace/domains/games/apis/mithril/BUILD.bazel:40:1
+oci_push(
+  name = "mithril_push_image",
+  image = "//domains/games/apis/mithril:mithril_image",
+  remote_tags = ["latest"],
+  repository = "ghcr.io/muchq/mithril",
+)
+# /workspace/domains/ai/apis/microgpt_serve/BUILD.bazel:12:1
+oci_push(
+  name = "microgpt-serve_push_image",
+  repository = "ghcr.io/muchq/microgpt-serve",
+)
+oci_push(
+  name = "again",
+  repository = "ghcr.io/muchq/mithril",
+)
+oci_push(
+  name = "elsewhere",
+  repository = "docker.io/library/nginx",
+)
+BUILD
+check "names are the repository's last segment, sorted and unique, ours only" \
+  same $'microgpt-serve\nmithril' "$(services_from_push_rules < "$WORK/push.build")"
+check "no push rules means no services" \
+  same "" "$(printf '' | services_from_push_rules)"
+
+# ------------------------------------------------------------------- plan
+
+echo "service_label_plan"
+
+plan() { # plan <services...> -- <labels...>
+  : > "$WORK/services"
+  : > "$WORK/labels"
+  local dest=$WORK/services
+  for arg in "$@"; do
+    if [ "$arg" = "--" ]; then dest=$WORK/labels; else printf '%s\n' "$arg" >> "$dest"; fi
+  done
+  service_label_plan "$WORK/services" "$WORK/labels"
+}
+
+check "a missing label is added and a stale one removed" \
+  same $'add service:posterize\nremove service:stats' \
+  "$(plan mithril posterize -- games service:mithril service:stats)"
+check "labels outside the prefix are never removed" \
+  same "" "$(plan mithril -- games deploy service:mithril)"
+check "no impacted services retires every service label" \
+  same "remove service:stats" "$(plan -- service:stats)"
+check "nothing to do prints nothing" \
+  same "" "$(plan -- )"
+check "a duplicated service name is one label" \
+  same "add service:mithril" "$(plan mithril mithril -- )"
+
+# ---------------------------------------------------------------- the sync
+
+echo "label-services"
+
+STUBS=$WORK/stubs
+LOG=$WORK/gh.log
+mkdir -p "$STUBS"
+
+# Records each gh invocation, one line of arguments per call. `gh api` for
+# the PR's labels answers from $PR_LABELS (one name per line); everything
+# else only records. A call whose arguments contain $GH_FAIL exits 1.
+cat > "$STUBS/gh" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >> "$GH_LOG"
+if [ -n "${GH_FAIL:-}" ] && [[ "$*" == *"$GH_FAIL"* ]]; then
+  echo "gh: $GH_FAIL failed" >&2
+  exit 1
+fi
+if [ "$1" = "api" ]; then cat "$PR_LABELS"; fi
+STUB
+chmod +x "$STUBS/gh"
+
+sync() { # sync <services...>; stdout+stderr to $WORK/sync.out, status in $?
+  : > "$WORK/services"
+  for s in "$@"; do printf '%s\n' "$s" >> "$WORK/services"; done
+  : > "$LOG"
+  PATH="$STUBS:$PATH" GH_LOG="$LOG" PR_LABELS="$WORK/pr_labels" GH_FAIL="${GH_FAIL:-}" \
+    "$REPO/scripts/label-services" 42 "$WORK/services" > "$WORK/sync.out" 2>&1
+}
+called() { grep -qxF "$1" "$LOG"; }
+not_called() { ! grep -qF "$1" "$LOG"; }
+call_index() { grep -nxF "$1" "$LOG" | cut -d: -f1 | head -1; }
+
+# The PR carries a hand-applied label and one stale service label.
+printf '%s\n' games service:stats > "$WORK/pr_labels"
+
+sync mithril posterize
+check "the sync succeeds" test $? -eq 0
+check "the PR's labels are read through the API" \
+  called "api repos/{owner}/{repo}/issues/42/labels --paginate --jq .[].name"
+check "each wanted label is created or refreshed" \
+  called "label create service:mithril --force --color 0e8a16 --description Changes the mithril image"
+check "the add and the removal are one edit" \
+  called "pr edit 42 --add-label service:mithril,service:posterize --remove-label service:stats"
+check "labels are created before they are applied" \
+  test "$(call_index 'label create service:posterize --force --color 0e8a16 --description Changes the posterize image')" \
+    -lt "$(call_index 'pr edit 42 --add-label service:mithril,service:posterize --remove-label service:stats')"
+check "the hand-applied label is left alone" not_called "games"
+check "the sync makes no other call" test "$(wc -l < "$LOG")" -eq 4
+
+# Already in sync: one read, no writes.
+printf '%s\n' games service:stats > "$WORK/pr_labels"
+sync stats
+check "an in-sync PR is read and not written" \
+  same "api repos/{owner}/{repo}/issues/42/labels --paginate --jq .[].name" "$(cat "$LOG")"
+
+# Nothing impacted: the stale label goes, nothing is added.
+sync
+check "no impacted services removes the service label and adds none" \
+  same $'api repos/{owner}/{repo}/issues/42/labels --paginate --jq .[].name\npr edit 42 --remove-label service:stats' \
+  "$(cat "$LOG")"
+
+# An unlabeled PR is an empty list, not a failed read.
+: > "$WORK/pr_labels"
+sync mithril
+check "an unlabeled PR gains its label" \
+  called "pr edit 42 --add-label service:mithril"
+
+# A token that cannot write: the failure is loud, not a green step.
+GH_FAIL="pr edit" sync mithril
+STATUS=$?
+check "a rejected edit fails the script" test "$STATUS" -ne 0
+check "a rejected edit is reported" grep -q 'pr edit failed' "$WORK/sync.out"
+
+GH_FAIL="api" sync mithril
+STATUS=$?
+check "an unreadable PR fails the script" test "$STATUS" -ne 0
+check "an unreadable PR is not edited" not_called "pr edit"
+
+echo
+if [ "$FAILURES" -eq 0 ]; then
+  echo "all label-services checks passed"
+else
+  echo "$FAILURES check(s) failed"
+fi
+exit $((FAILURES > 0))

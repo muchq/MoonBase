@@ -42,6 +42,15 @@ jobs:
       - name: Test diff-build full-build decision
         run: ./scripts/test-diff-build
 
+      # The service labels a PR gets (#1214) are a claim about blast radius
+      # that reviewers act on, and "unknown" must never come out as "none".
+      # Both halves run against stubs; no bazel, no token, no network.
+      - name: Test impacted services
+        run: ./scripts/test-impacted-services
+
+      - name: Test service labels
+        run: ./scripts/test-label-services
+
       # make-git-overrides is what makes this repo buildable behind a proxy
       # that 403s source archives, and nothing else in CI runs it. Its
       # archive_override path built a stale commit for a whole release of a
@@ -211,6 +220,55 @@ jobs:
       - name: bazel-diff-build-and-test
         run: |
           ./scripts/diff-build origin/main
+
+      # The services whose image this change reaches (#1214), from the impact
+      # set diff-build wrote. Runs after a red build too — the labels say what
+      # a change touches, not whether it passed — and can never make one red:
+      # an unknown answer is no file, and its own failure is not the job's.
+      - name: Impacted services
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: ./scripts/impacted-services origin/main /tmp/impacted_targets.txt /tmp/impacted_services.txt
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: impacted-services
+          path: /tmp/impacted_services.txt
+          if-no-files-found: ignore
+
+  # Applies the service labels. Its own job so the write-capable token never
+  # shares a runner with the PR's build and test code, and so nothing here can
+  # colour build-and-test. A fork's token cannot write labels, so a fork PR is
+  # skipped rather than failed. No artifact means the answer was unknown, and
+  # the labels the PR has are left as they are.
+  label-services:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v8
+        id: impact
+        continue-on-error: true
+        with:
+          name: impacted-services
+          path: /tmp/impact
+
+      - name: Label impacted services
+        if: steps.impact.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: ./scripts/label-services "${{ github.event.pull_request.number }}" /tmp/impact/impacted_services.txt
 
   # Sanitizers (#1273). The class of bug these catch — use-after-free, leaks,
   # signed overflow — has no symptom an assertion can see, so before this job
