@@ -1,0 +1,81 @@
+#!/bin/bash
+# Pins that scripts/actionlint catches the class of bug it exists for: a
+# bash-only line in a job GitHub runs under sh (#1061, #1515). The linter
+# only sees it when the shell is declared, so the guard for an undeclared
+# container job is the load-bearing half.
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+FAILURES=0
+pass() { echo "  ok    $1"; }
+fail() {
+  echo "  FAIL  $1"
+  FAILURES=$((FAILURES + 1))
+}
+check() {
+  local desc=$1
+  shift
+  if "$@"; then pass "$desc"; else fail "$desc"; fi
+}
+
+# actionlint wants a project root around the workflows.
+mkdir -p "$WORK/.github/workflows"
+git -C "$WORK" init -q
+
+workflow() { # workflow <name> <defaults-shell|none> <container|plain>
+  local f=$WORK/.github/workflows/$1.yml
+  {
+    echo "on: push"
+    if [ "$2" != none ]; then
+      printf 'defaults:\n  run:\n    shell: %s\n' "$2"
+    fi
+    echo "jobs:"
+    echo "  j:"
+    echo "    runs-on: ubuntu-latest"
+    if [ "$3" = container ]; then
+      printf '    container:\n      image: ubuntu:24.04\n'
+    fi
+    echo "    steps:"
+    echo "      - run: |"
+    echo "          set -o pipefail"
+    echo '          echo "${GITHUB_SHA::7}"'
+  } > "$f"
+  echo "$f"
+}
+
+lint() { # lint <workflow file>; output in $WORK/out.txt, status in $?
+  "$REPO/scripts/actionlint" "$1" > "$WORK/out.txt" 2>&1
+}
+
+echo "the shell the workflow declares"
+
+lint "$(workflow sh sh plain)"
+check "bash-only lines under a declared sh fail" test $? -ne 0
+check "pipefail is named" grep -q SC3040 "$WORK/out.txt"
+check "string indexing is named" grep -q SC3057 "$WORK/out.txt"
+
+lint "$(workflow bash bash plain)"
+check "the same lines under a declared bash pass" test $? -eq 0
+
+echo "a container job"
+
+lint "$(workflow undeclared none container)"
+check "an undeclared shell is refused" test $? -ne 0
+check "and the reason names sh" grep -q "would run under sh" "$WORK/out.txt"
+
+lint "$(workflow declared bash container)"
+check "a declared bash passes" test $? -eq 0
+
+lint "$(workflow plain-undeclared none plain)"
+check "a job without a container needs no declaration" test $? -eq 0
+
+echo
+if [ "$FAILURES" -eq 0 ]; then
+  echo "all actionlint checks passed"
+else
+  echo "$FAILURES check(s) failed"
+fi
+exit $((FAILURES > 0))

@@ -14,6 +14,11 @@ permissions:
   contents: write
   packages: write
 
+# A container job runs under sh unless told otherwise; see branch.yml.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test-and-publish:
     runs-on: ubuntu-latest
@@ -56,9 +61,6 @@ jobs:
       # image rather than re-pulling :latest keeps the commit tag the exact
       # manifest bazel produced, which is what a PR's blast-radius comparison
       # reads it against.
-      # The container's shell is sh: a failed query has to fail the step
-      # through the assignment, since sh has no pipefail.
       - name: bazel-run-oci-push
         run: |
-          targets=$(bazel query 'kind(oci_push, //...)')
-          echo "$targets" | xargs -n1 -I{} bazel run {} -- --tag "${{ github.sha }}"
+          bazel query 'kind(oci_push, //...)' | xargs -n1 -I{} bazel run {} -- --tag "${{ github.sha }}"

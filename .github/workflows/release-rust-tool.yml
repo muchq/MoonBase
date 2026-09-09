@@ -112,9 +112,11 @@ jobs:
             TAG="${{ inputs.tool_name }}-v${VERSION}"
             REF="${{ inputs.workflow_run_sha }}"
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "ref=$REF"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: [prepare]

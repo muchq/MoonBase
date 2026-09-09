@@ -11,6 +11,13 @@ concurrency:
 permissions:
   contents: read
 
+# A container job runs under sh unless told otherwise, and the ci-base image
+# has bash. Declared here so every run block gets bash — with pipefail — and
+# so scripts/actionlint lints it as the shell it actually runs in.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test-deploy:
     runs-on: ubuntu-latest
@@ -51,6 +58,11 @@ jobs:
       - name: Test service labels
         run: ./scripts/test-label-services
 
+      # The workflow linter's own contract: a bash-only line in a job that
+      # runs under sh is caught, and a container job must declare its shell.
+      - name: Test actionlint
+        run: ./scripts/test-actionlint
+
       # make-git-overrides is what makes this repo buildable behind a proxy
       # that 403s source archives, and nothing else in CI runs it. Its
       # archive_override path built a stale commit for a whole release of a
@@ -60,6 +72,17 @@ jobs:
       # network, no clones.
       - name: Test make-git-overrides
         run: ./scripts/test-make-git-overrides
+
+  # The workflows themselves (#1061): actionlint, with shellcheck over every
+  # run block in the shell the workflow declares. Its own job so it never
+  # waits on a build.
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Lint workflows
+        run: ./scripts/actionlint
 
   # deploy_config_test pins the text of the collector config, which can only
   # catch mistakes someone already knew to look for: `match_type: glob` passed
@@ -151,6 +174,8 @@ jobs:
             exit 0
           fi
           echo "Checking $FILE_COUNT Java files..."
+          # One argument per file is the point of the unquoted expansion.
+          # shellcheck disable=SC2086
           java \
             --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED \
             --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED \

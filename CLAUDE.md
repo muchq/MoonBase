@@ -105,5 +105,11 @@ Bazel formatting do.
   Without it every Beast-transport target fails to fetch, along with portrait
   and tracy_demo (the only libpng consumers); say so rather than reporting a
   skipped target as passing.
+- **A container job runs under `sh` unless the workflow declares its shell.**
+  `branch.yml` and `publish.yml` declare `defaults: run: shell: bash`, which
+  is what makes `bash` syntax and `pipefail` legal in their run blocks.
+  `scripts/actionlint` (the `actionlint` job) refuses a workflow with a
+  container job and no such declaration, because the linter assumes bash and
+  would otherwise pass a line that CI then fails on.
 - **Never commit `MODULE.bazel.lock` churn** from the sandbox overrides — they
   run under `--lockfile_mode=off` for exactly this reason.
