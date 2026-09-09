@@ -1,0 +1,125 @@
+#!/bin/bash
+# Pins that scripts/actionlint catches the class of bug it exists for: a
+# bash-only line in a job GitHub runs under sh (#1061, #1515). The linter
+# only sees it when the shell is declared, so the guard that every workflow
+# declares one is the load-bearing half.
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64 | Darwin-arm64) ;;
+  *)
+    echo "skipping: scripts/actionlint pins no binaries for $(uname -s)-$(uname -m)"
+    exit 0
+    ;;
+esac
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+FAILURES=0
+pass() { echo "  ok    $1"; }
+fail() {
+  echo "  FAIL  $1"
+  FAILURES=$((FAILURES + 1))
+}
+check() {
+  local desc=$1
+  shift
+  if "$@"; then pass "$desc"; else fail "$desc"; fi
+}
+
+# actionlint wants a project root around the workflows.
+mkdir -p "$WORK/.github/workflows"
+git -C "$WORK" init -q
+
+workflow() { # workflow <name> <defaults-shell|none> <container|plain>
+  local f=$WORK/.github/workflows/$1.yml
+  {
+    echo "on: push"
+    if [ "$2" != none ]; then
+      printf 'defaults:\n  run:\n    shell: %s\n' "$2"
+    fi
+    echo "jobs:"
+    echo "  j:"
+    echo "    runs-on: ubuntu-latest"
+    if [ "$3" = container ]; then
+      printf '    container:\n      image: ubuntu:24.04\n'
+    fi
+    echo "    steps:"
+    echo "      - run: |"
+    echo "          set -o pipefail"
+    echo '          echo "${GITHUB_SHA::7}"'
+  } > "$f"
+  echo "$f"
+}
+
+lint() { # lint <workflow file>; output in $WORK/out.txt, status in $?
+  "$REPO/scripts/actionlint" "$1" > "$WORK/out.txt" 2>&1
+}
+
+echo "the shell the workflow declares"
+
+lint "$(workflow sh sh plain)"
+check "bash-only lines under a declared sh fail" test $? -ne 0
+check "pipefail is named" grep -q SC3040 "$WORK/out.txt"
+check "string indexing is named" grep -q SC3057 "$WORK/out.txt"
+
+lint "$(workflow bash bash plain)"
+check "the same lines under a declared bash pass" test $? -eq 0
+
+echo "the declaration"
+
+lint "$(workflow undeclared none container)"
+check "a container job with no declared shell is refused" test $? -ne 0
+check "and the reason names sh" grep -q "would run under sh" "$WORK/out.txt"
+
+lint "$(workflow plain-undeclared none plain)"
+check "a workflow with no container job is refused too" test $? -ne 0
+
+lint "$(workflow declared bash container)"
+check "a declared bash passes" test $? -eq 0
+
+lint "$(workflow declared-sh sh container)"
+check "a declared sh passes the guard and is linted as sh" test $? -ne 0
+check "so the bash-only lines are what fail it" grep -q SC3040 "$WORK/out.txt"
+check "not the declaration" bash -c '! grep -q "would run under sh" "$0"' "$WORK/out.txt"
+
+# Declared for one job only: not what the guard looks for, on purpose.
+f=$(workflow job-level none container)
+sed -i.bak 's/^    runs-on: ubuntu-latest$/    runs-on: ubuntu-latest\n    defaults:\n      run:\n        shell: bash/' "$f"
+lint "$f"
+check "a job-level declaration is refused" test $? -ne 0
+check "and the message asks for the workflow-level one" grep -q "workflow-level" "$WORK/out.txt"
+
+# The declaration as people actually write it.
+f=$(workflow spelled bash plain)
+sed -i.bak 's/^    shell: bash$/# a column-0 comment inside the block\n    shell: "bash"  # quoted, with a trailing comment/' "$f"
+lint "$f"
+check "a quoted value with comments around it is a declaration" test $? -eq 0
+f=$(workflow crlf bash plain)
+awk '{ printf "%s\r\n", $0 }' "$f" > "$f.crlf" && mv "$f.crlf" "$f"
+lint "$f"
+check "CRLF line endings are a declaration" test $? -eq 0
+
+echo "paths"
+
+f=$(workflow relative bash plain)
+(cd "$WORK/.github" && "$REPO/scripts/actionlint" workflows/relative.yml > "$WORK/out.txt" 2>&1)
+check "a relative path is read from the caller's directory" test $? -eq 0
+check "and reaches the linter" bash -c '! grep -qi "no such file" "$0"' "$WORK/out.txt"
+
+echo "which files are linted"
+
+cp "$(workflow undeclared-yaml none container)" "$WORK/.github/workflows/other.yaml"
+rm "$WORK/.github/workflows/undeclared-yaml.yml"
+ACTIONLINT_REPO="$WORK" "$REPO/scripts/actionlint" > "$WORK/out.txt" 2>&1
+check "with no files named, a .yaml workflow is linted too" grep -q "other.yaml" "$WORK/out.txt"
+
+echo
+if [ "$FAILURES" -eq 0 ]; then
+  echo "all actionlint checks passed"
+else
+  echo "$FAILURES check(s) failed"
+fi
+exit $((FAILURES > 0))

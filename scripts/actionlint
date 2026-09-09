@@ -1,0 +1,96 @@
+#!/bin/bash
+# Lint the GitHub Actions workflows: actionlint over .github/workflows, with
+# shellcheck over every run block in the shell the workflow declares.
+#
+# Usage: actionlint [WORKFLOW...]      (default: every workflow)
+#
+# The shell matters more than the linter. GitHub runs a container job under
+# sh unless the workflow says otherwise, and every other job under bash
+# without pipefail, while actionlint assumes bash unless told. A bash-only
+# line in an undeclared container job is invisible to the linter and fatal
+# in CI — twice now (#1061, #1515) — and a pipeline's failing left side is
+# invisible to every undeclared job. So every workflow declares its shell,
+# once, at the top, and this refuses one that does not.
+#
+# Pinned binaries, fetched once per machine into a cache and verified on
+# every run, so the local run and the CI run lint with the same versions.
+set -euo pipefail
+
+REPO=${ACTIONLINT_REPO:-$(cd "$(dirname "$0")/.." && pwd)}
+ACTIONLINT_VERSION=1.7.12
+SHELLCHECK_VERSION=0.11.0
+CACHE=${ACTIONLINT_CACHE:-/tmp/actionlint-$ACTIONLINT_VERSION-shellcheck-$SHELLCHECK_VERSION-$(uname -s)-$(uname -m)}
+
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64)
+    ACTIONLINT_ASSET=actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz
+    ACTIONLINT_SHA256=8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+    SHELLCHECK_ASSET=shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz
+    SHELLCHECK_SHA256=8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+    ;;
+  Darwin-arm64)
+    ACTIONLINT_ASSET=actionlint_${ACTIONLINT_VERSION}_darwin_arm64.tar.gz
+    ACTIONLINT_SHA256=aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f
+    SHELLCHECK_ASSET=shellcheck-v${SHELLCHECK_VERSION}.darwin.aarch64.tar.xz
+    SHELLCHECK_SHA256=56affdd8de5527894dca6dc3d7e0a99a873b0f004d7aabc30ae407d3f48b0a79
+    ;;
+  *)
+    echo "ERROR: no pinned actionlint/shellcheck for $(uname -s)-$(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+# fetch <url> <sha256> <dest>: download once per machine, verify every run.
+fetch() {
+  local url=$1 sha=$2 dest=$3
+  if [ ! -f "$dest" ]; then
+    curl -fsSL -o "$dest.part" "$url"
+    mv "$dest.part" "$dest"
+  fi
+  echo "$sha  $dest" | shasum -a 256 -c - >/dev/null || {
+    rm -f "$dest"
+    echo "ERROR: checksum mismatch for $url" >&2
+    exit 1
+  }
+}
+
+# Extracted from the verified tarball every run, so what runs is what was
+# checked, not whatever sits at the cache path.
+mkdir -p "$CACHE"
+fetch "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/$ACTIONLINT_ASSET" \
+  "$ACTIONLINT_SHA256" "$CACHE/$ACTIONLINT_ASSET"
+fetch "https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/$SHELLCHECK_ASSET" \
+  "$SHELLCHECK_SHA256" "$CACHE/$SHELLCHECK_ASSET"
+tar -xzf "$CACHE/$ACTIONLINT_ASSET" -C "$CACHE" actionlint
+tar -xJf "$CACHE/$SHELLCHECK_ASSET" -C "$CACHE" --strip-components=1 "shellcheck-v$SHELLCHECK_VERSION/shellcheck"
+
+if [ $# -gt 0 ]; then
+  WORKFLOWS=("$@")
+else
+  WORKFLOWS=("$REPO"/.github/workflows/*.yml "$REPO"/.github/workflows/*.yaml)
+  # Either extension may be absent; keep only what exists.
+  existing=()
+  for wf in "${WORKFLOWS[@]}"; do [ -f "$wf" ] && existing+=("$wf"); done
+  WORKFLOWS=("${existing[@]}")
+fi
+
+# Every workflow declares its shell at the top: `defaults: run: shell:`,
+# workflow-level. Whatever it names, GitHub runs and the linter lints; left
+# undeclared, a container job runs sh while the linter assumes bash, and any
+# job runs without pipefail. A job- or step-level declaration is not looked
+# for, so one declaration covers every job.
+undeclared=0
+for wf in "${WORKFLOWS[@]}"; do
+  awk '
+    /^#/ { next }
+    /^defaults:/ { d = 1; next }
+    /^[^ ]/ { d = 0 }
+    d && /^ *shell: *["'"'"']?[^ "'"'"'#]/ { found = 1 }
+    END { exit !found }
+  ' "$wf" && continue
+  echo "$wf: no workflow-level 'defaults: run: shell:'; its container jobs would run under sh, and no job would have pipefail" >&2
+  undeclared=$((undeclared + 1))
+done
+[ "$undeclared" -eq 0 ] || exit 1
+
+exec "$CACHE/actionlint" -shellcheck "$CACHE/shellcheck" "${WORKFLOWS[@]}"

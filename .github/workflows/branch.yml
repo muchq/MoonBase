@@ -11,6 +11,14 @@ concurrency:
 permissions:
   contents: read
 
+# Every workflow declares its shell. Undeclared, a container job runs under
+# sh and every job runs without pipefail, while the linter assumes bash;
+# declared, every run block gets bash with pipefail and is linted as such.
+# scripts/actionlint refuses a workflow without this.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test-deploy:
     runs-on: ubuntu-latest
@@ -60,6 +68,24 @@ jobs:
       # network, no clones.
       - name: Test make-git-overrides
         run: ./scripts/test-make-git-overrides
+
+  # The workflows themselves (#1061): actionlint, with shellcheck over every
+  # run block in the shell the workflow declares. Its own job so it never
+  # waits on a build.
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The linter's own contract first: a bash-only line in a job that runs
+      # under sh is caught, and a container job declares its shell. Here
+      # rather than in test-deploy, which stays off the network; the two
+      # steps share one download.
+      - name: Test actionlint
+        run: ./scripts/test-actionlint
+
+      - name: Lint workflows
+        run: ./scripts/actionlint
 
   # deploy_config_test pins the text of the collector config, which can only
   # catch mistakes someone already knew to look for: `match_type: glob` passed
@@ -151,6 +177,8 @@ jobs:
             exit 0
           fi
           echo "Checking $FILE_COUNT Java files..."
+          # One argument per file is the point of the unquoted expansion.
+          # shellcheck disable=SC2086
           java \
             --add-exports jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED \
             --add-exports jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED \

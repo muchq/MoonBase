@@ -22,6 +22,11 @@ on:
 permissions:
   contents: read
 
+# Every workflow declares its shell; see branch.yml.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   semgrep:
     permissions:

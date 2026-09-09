@@ -33,6 +33,11 @@ on:
       HOMEBREW_TAP_TOKEN:
         required: true
 
+# Every workflow declares its shell; see branch.yml.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   check-and-tag:
     runs-on: ubuntu-latest
@@ -112,9 +117,11 @@ jobs:
             TAG="${{ inputs.tool_name }}-v${VERSION}"
             REF="${{ inputs.workflow_run_sha }}"
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "ref=$REF"
+          } >> "$GITHUB_OUTPUT"
 
   build:
     needs: [prepare]

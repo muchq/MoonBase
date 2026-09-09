@@ -373,6 +373,8 @@ Run these, and don't report success on a step that didn't run.
 | mutation-check harness | `scripts/test-mutation-check` | yes — `test-deploy` |
 | impacted services | `scripts/test-impacted-services` | yes — `test-deploy` |
 | service labels | `scripts/test-label-services` | yes — `test-deploy` |
+| Workflow files | `scripts/actionlint` | yes — `actionlint` |
+| actionlint harness | `scripts/test-actionlint` | yes — `actionlint` |
 
 `scripts/format-all` runs the bazel/java/cc/scala formatters together. Note
 what it does **not** cover: Rust, Go, and TypeScript have no formatting gate in

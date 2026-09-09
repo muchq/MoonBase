@@ -16,6 +16,11 @@ concurrency:
   group: release-wordchains
   cancel-in-progress: false
 
+# Every workflow declares its shell; see branch.yml.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   release:
     uses: ./.github/workflows/release-rust-tool.yml
