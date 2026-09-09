@@ -56,7 +56,9 @@ jobs:
       # image rather than re-pulling :latest keeps the commit tag the exact
       # manifest bazel produced, which is what a PR's blast-radius comparison
       # reads it against.
+      # The container's shell is sh: a failed query has to fail the step
+      # through the assignment, since sh has no pipefail.
       - name: bazel-run-oci-push
         run: |
-          set -o pipefail
-          bazel query 'kind(oci_push, //...)' | xargs -n1 -I{} bazel run {} -- --tag "${{ github.sha }}"
+          targets=$(bazel query 'kind(oci_push, //...)')
+          echo "$targets" | xargs -n1 -I{} bazel run {} -- --tag "${{ github.sha }}"
