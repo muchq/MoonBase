@@ -81,13 +81,13 @@ fi
 # for, so one declaration covers every job.
 undeclared=0
 for wf in "${WORKFLOWS[@]}"; do
-  tr -d '\r' < "$wf" | awk '
+  awk '
     /^#/ { next }
     /^defaults:/ { d = 1; next }
     /^[^ ]/ { d = 0 }
     d && /^ *shell: *["'"'"']?[^ "'"'"'#]/ { found = 1 }
     END { exit !found }
-  ' && continue
+  ' "$wf" && continue
   echo "$wf: no workflow-level 'defaults: run: shell:'; its container jobs would run under sh, and no job would have pipefail" >&2
   undeclared=$((undeclared + 1))
 done
