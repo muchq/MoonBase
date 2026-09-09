@@ -17,6 +17,11 @@ permissions:
   contents: read
   packages: write
 
+# Every workflow declares its shell; see branch.yml.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest

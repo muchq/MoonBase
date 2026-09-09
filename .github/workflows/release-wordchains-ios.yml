@@ -16,6 +16,11 @@ concurrency:
   group: release-wordchains-ios
   cancel-in-progress: false
 
+# Every workflow declares its shell; see branch.yml.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   check-and-tag:
     runs-on: ubuntu-latest

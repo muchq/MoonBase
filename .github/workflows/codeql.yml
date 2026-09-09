@@ -13,6 +13,11 @@ on:
   schedule:
     - cron: '26 1 * * 1'
 
+# Every workflow declares its shell; see branch.yml.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})

@@ -33,6 +33,11 @@ on:
       HOMEBREW_TAP_TOKEN:
         required: true
 
+# Every workflow declares its shell; see branch.yml.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   check-and-tag:
     runs-on: ubuntu-latest

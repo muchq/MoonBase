@@ -14,7 +14,7 @@ permissions:
   contents: write
   packages: write
 
-# A container job runs under sh unless told otherwise; see branch.yml.
+# Every workflow declares its shell; see branch.yml.
 defaults:
   run:
     shell: bash

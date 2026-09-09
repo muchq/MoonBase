@@ -11,9 +11,10 @@ concurrency:
 permissions:
   contents: read
 
-# A container job runs under sh unless told otherwise, and the ci-base image
-# has bash. Declared here so every run block gets bash — with pipefail — and
-# so scripts/actionlint lints it as the shell it actually runs in.
+# Every workflow declares its shell. Undeclared, a container job runs under
+# sh and every job runs without pipefail, while the linter assumes bash;
+# declared, every run block gets bash with pipefail and is linted as such.
+# scripts/actionlint refuses a workflow without this.
 defaults:
   run:
     shell: bash
@@ -58,11 +59,6 @@ jobs:
       - name: Test service labels
         run: ./scripts/test-label-services
 
-      # The workflow linter's own contract: a bash-only line in a job that
-      # runs under sh is caught, and a container job must declare its shell.
-      - name: Test actionlint
-        run: ./scripts/test-actionlint
-
       # make-git-overrides is what makes this repo buildable behind a proxy
       # that 403s source archives, and nothing else in CI runs it. Its
       # archive_override path built a stale commit for a whole release of a
@@ -80,6 +76,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      # The linter's own contract first: a bash-only line in a job that runs
+      # under sh is caught, and a container job declares its shell. Here
+      # rather than in test-deploy, which stays off the network; the two
+      # steps share one download.
+      - name: Test actionlint
+        run: ./scripts/test-actionlint
 
       - name: Lint workflows
         run: ./scripts/actionlint

@@ -4,20 +4,22 @@
 #
 # Usage: actionlint [WORKFLOW...]      (default: every workflow)
 #
-# The shell matters more than the linter: GitHub runs a container job under
-# sh unless the workflow says otherwise, while actionlint assumes bash unless
-# told. A bash-only line in an undeclared container job is invisible to the
-# linter and fatal in CI — twice now (#1061, #1515). So a workflow with a
-# container job has to declare its shell, and this refuses one that does not.
+# The shell matters more than the linter. GitHub runs a container job under
+# sh unless the workflow says otherwise, and every other job under bash
+# without pipefail, while actionlint assumes bash unless told. A bash-only
+# line in an undeclared container job is invisible to the linter and fatal
+# in CI — twice now (#1061, #1515) — and a pipeline's failing left side is
+# invisible to every undeclared job. So every workflow declares its shell,
+# once, at the top, and this refuses one that does not.
 #
-# Pinned binaries, fetched once into a cache and verified, so the local run
-# and the CI run lint with the same versions.
+# Pinned binaries, fetched once per machine into a cache and verified on
+# every run, so the local run and the CI run lint with the same versions.
 set -euo pipefail
 
-REPO=$(cd "$(dirname "$0")/.." && pwd)
+REPO=${ACTIONLINT_REPO:-$(cd "$(dirname "$0")/.." && pwd)}
 ACTIONLINT_VERSION=1.7.12
 SHELLCHECK_VERSION=0.11.0
-CACHE=${ACTIONLINT_CACHE:-/tmp/actionlint-$ACTIONLINT_VERSION-shellcheck-$SHELLCHECK_VERSION}
+CACHE=${ACTIONLINT_CACHE:-/tmp/actionlint-$ACTIONLINT_VERSION-shellcheck-$SHELLCHECK_VERSION-$(uname -s)-$(uname -m)}
 
 case "$(uname -s)-$(uname -m)" in
   Linux-x86_64)
@@ -38,7 +40,7 @@ case "$(uname -s)-$(uname -m)" in
     ;;
 esac
 
-# fetch <url> <sha256> <dest>: download once, verify always.
+# fetch <url> <sha256> <dest>: download once per machine, verify every run.
 fetch() {
   local url=$1 sha=$2 dest=$3
   if [ ! -f "$dest" ]; then
@@ -52,34 +54,43 @@ fetch() {
   }
 }
 
+# Extracted from the verified tarball every run, so what runs is what was
+# checked, not whatever sits at the cache path.
 mkdir -p "$CACHE"
-if [ ! -x "$CACHE/actionlint" ]; then
-  fetch "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/$ACTIONLINT_ASSET" \
-    "$ACTIONLINT_SHA256" "$CACHE/$ACTIONLINT_ASSET"
-  tar -xzf "$CACHE/$ACTIONLINT_ASSET" -C "$CACHE" actionlint
-fi
-if [ ! -x "$CACHE/shellcheck" ]; then
-  fetch "https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/$SHELLCHECK_ASSET" \
-    "$SHELLCHECK_SHA256" "$CACHE/$SHELLCHECK_ASSET"
-  tar -xJf "$CACHE/$SHELLCHECK_ASSET" -C "$CACHE" --strip-components=1 "shellcheck-v$SHELLCHECK_VERSION/shellcheck"
-fi
+fetch "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/$ACTIONLINT_ASSET" \
+  "$ACTIONLINT_SHA256" "$CACHE/$ACTIONLINT_ASSET"
+fetch "https://github.com/koalaman/shellcheck/releases/download/v$SHELLCHECK_VERSION/$SHELLCHECK_ASSET" \
+  "$SHELLCHECK_SHA256" "$CACHE/$SHELLCHECK_ASSET"
+tar -xzf "$CACHE/$ACTIONLINT_ASSET" -C "$CACHE" actionlint
+tar -xJf "$CACHE/$SHELLCHECK_ASSET" -C "$CACHE" --strip-components=1 "shellcheck-v$SHELLCHECK_VERSION/shellcheck"
 
 if [ $# -gt 0 ]; then
   WORKFLOWS=("$@")
 else
-  WORKFLOWS=("$REPO"/.github/workflows/*.yml)
+  WORKFLOWS=("$REPO"/.github/workflows/*.yml "$REPO"/.github/workflows/*.yaml)
+  # Either extension may be absent; keep only what exists.
+  existing=()
+  for wf in "${WORKFLOWS[@]}"; do [ -f "$wf" ] && existing+=("$wf"); done
+  WORKFLOWS=("${existing[@]}")
 fi
 
-# A container job runs sh unless the workflow declares its shell, and the
-# linter cannot tell. Declared once for the workflow, under defaults.
+# Every workflow declares its shell at the top: `defaults: run: shell:`,
+# workflow-level. Whatever it names, GitHub runs and the linter lints; left
+# undeclared, a container job runs sh while the linter assumes bash, and any
+# job runs without pipefail. A job- or step-level declaration is not looked
+# for, so one declaration covers every job.
 undeclared=0
 for wf in "${WORKFLOWS[@]}"; do
-  grep -q '^ *container:' "$wf" || continue
-  awk '/^defaults:/{d=1; next} /^[^ ]/{d=0} d && /^ *shell: *bash *$/{found=1} END{exit !found}' "$wf" && continue
-  echo "$wf: has a container job but does not declare 'defaults: run: shell: bash'; the job would run under sh" >&2
+  tr -d '\r' < "$wf" | awk '
+    /^#/ { next }
+    /^defaults:/ { d = 1; next }
+    /^[^ ]/ { d = 0 }
+    d && /^ *shell: *["'"'"']?[^ "'"'"'#]/ { found = 1 }
+    END { exit !found }
+  ' && continue
+  echo "$wf: no workflow-level 'defaults: run: shell:'; its container jobs would run under sh, and no job would have pipefail" >&2
   undeclared=$((undeclared + 1))
 done
 [ "$undeclared" -eq 0 ] || exit 1
 
-cd "$REPO"
 exec "$CACHE/actionlint" -shellcheck "$CACHE/shellcheck" "${WORKFLOWS[@]}"
