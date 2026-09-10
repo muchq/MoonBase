@@ -75,13 +75,16 @@ std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
 ///     Smithy operation name from the generated router, kHealthRoute for the
 ///     endpoint ProductionChain composes, kUnmatchedRoute for everything else
 ///   - one access-log line per request except health probes, which are
-///     metered but not logged: a single JSON object in the
-///     metrics vocabulary (#1459) — service_name, http_method, route,
-///     target, status, duration_us, response_bytes, trace_id (the W3C id
-///     minted or joined at transport ingress, opal-cpp ADR-0011) and
-///     x_forwarded_for. Field spelling is pinned cross-rail by
+///     metered but not logged: the runtime's FormatAccessLog record
+///     (opal/server/access_log.h — http_method, target, route, status,
+///     duration_us, request_bytes, response_bytes, client, client_source,
+///     handler_threw, trace_id) plus "event":"access" and service_name.
+///     client is the ADR-0012 derived address the rate limiter keys on,
+///     never the raw x-forwarded-for; `trusted_proxies` is the boundary it
+///     derives against. Field spelling is pinned cross-rail by
 ///     //domains/platform/libs/otel_contract.
-opal::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> metrics);
+opal::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> metrics,
+                                              opal::http::TrustedProxies trusted_proxies);
 
 /// The production middleware chain around a generated server's handler,
 /// shared between service mains and their middleware tests so both exercise

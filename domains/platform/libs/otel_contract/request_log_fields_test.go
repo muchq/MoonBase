@@ -17,7 +17,9 @@ import (
 // cross-language spelling; that the fields actually reach the wire is each
 // rail's own behavioral test (aura's middleware_test reads the served line
 // off a mock log sink, server_pal's access_log tests parse the subscriber's
-// JSON output).
+// JSON output). The C++ line is rendered by opal-cpp's FormatAccessLog, so
+// its spelling is pinned where aura asserts on the parsed line rather than
+// in the runtime's source.
 //
 // The Java rail is deliberately absent: one_d4 and mcpserver emit JSON app
 // logs (logback's JsonEncoder, pinned by LogbackConfigTest) but no
@@ -31,23 +33,30 @@ var requestLogFields = []string{
 	"status",
 	"duration_us",
 	"trace_id",
-	"x_forwarded_for",
+	"client",
+	"client_source",
 }
 
-// response_bytes is deliberately not in the list: the C++ rail emits it and
-// the Rust rail cannot without wrapping the response body to count it, so a
-// cross-service response_bytes query covers the C++ services only.
+// client is the address the rail's rate limiter keys on, never the raw
+// x-forwarded-for: the ADR-0012 derived client on C++, the socket peer on
+// Rust (which has not adopted a trust boundary yet — see RateLimit there).
+// client_source says which case produced it, in opal-cpp's vocabulary.
+//
+// request_bytes, response_bytes and handler_threw are deliberately not in
+// the list: the C++ rail emits them and the Rust rail cannot without wrapping
+// the body to count it, so a cross-service query on them covers the C++
+// services only.
 
 func TestRequestLogFieldSpellingAgreesAcrossRails(t *testing.T) {
-	// C++: every emitted key is a quoted string literal handed to
-	// AppendJsonField / AppendJsonNumber, so the pin matches `"key"` — a
-	// bare identifier elsewhere in the file cannot satisfy it.
-	aura := string(codeLines(t, "../aura/middleware.cc", "AppendJsonField"))
+	// C++: the keys are asserted on the parsed line as `line["key"]`, so the
+	// pin matches that shape — a bare identifier elsewhere in the file cannot
+	// satisfy it.
+	aura := string(codeLines(t, "../aura/middleware_test.cc", "ParsedAccessLine"))
 	for _, field := range requestLogFields {
-		assert.Contains(t, aura, `"`+field+`"`,
-			"aura's access line no longer emits a %q key; the two rails' lines no "+
-				"longer speak one vocabulary and a cross-service log query silently "+
-				"misses this rail", field)
+		assert.Contains(t, aura, `line["`+field+`"]`,
+			"aura's middleware_test no longer asserts a %q key on the access line; "+
+				"the two rails' lines no longer speak one vocabulary and a "+
+				"cross-service log query silently misses this rail", field)
 	}
 
 	// Rust: the emitted keys are the field names inside the one

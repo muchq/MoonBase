@@ -7,7 +7,8 @@ Opinionated Axum router builder with batteries included.
 - Per-IP rate limiting via `tower_governor` (default: 100 req/s, burst 200)
 - One JSON access-log line per request (#1459) — the metrics vocabulary
   (`http_method`, `route`, `service_name`) plus `target`, `status`,
-  `duration_us`, `trace_id` and the raw `x_forwarded_for`. Binaries call
+  `duration_us`, `trace_id`, and `client`/`client_source` (the socket peer
+  the limiter keys on, never the raw x-forwarded-for). Binaries call
   `server_pal::init_logging()` to install the JSON subscriber; `RUST_LOG`
   still filters. (`tower_http::trace` stays in the stack for its ERROR
   event on failures.)
