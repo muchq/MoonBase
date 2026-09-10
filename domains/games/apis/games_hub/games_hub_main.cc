@@ -1,5 +1,5 @@
 // The games hub server (#79): sessions, rooms, chat, and the golf game
-// layer on smithy-cpp's streaming stack — generated async
+// layer on opal-cpp's streaming stack — generated async
 // handlers (ADR-0021), SessionRegistry fan-out with reconnect grace
 // (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018).
 //
@@ -41,9 +41,9 @@
 #include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "moonbase/games/server.h"
-#include "smithy/http/beast_transport.h"
-#include "smithy/http/message.h"
-#include "smithy/server/origin_gate.h"
+#include "opal/http/beast_transport.h"
+#include "opal/http/message.h"
+#include "opal/server/origin_gate.h"
 
 namespace {
 
@@ -166,7 +166,7 @@ int main() {
       std::make_shared<futility::rate_limiter::SlidingWindowRateLimiter<std::string>>(
           session_limiter_config);
 
-  // The reverse-proxy trust boundary (smithy-cpp ADR-0012):
+  // The reverse-proxy trust boundary (opal-cpp ADR-0012):
   // deploy/consolidated/compose.yaml pins Caddy's address into
   // TRUSTED_PROXY_CIDRS. A refused value already logged why.
   auto trusted_proxies = aura::TrustedProxiesFromEnv();
@@ -185,21 +185,21 @@ int main() {
   // ALLOWED_ORIGINS admits all origins, for local dev) -> ticket
   // freshness -> the stream router's own refusals.
   const std::vector<std::string> allowed_origins = futility::env::ReadList("ALLOWED_ORIGINS");
-  auto origin_gate = allowed_origins.empty()
-                         ? std::function<std::optional<smithy::http::HttpResponse>(
-                               const smithy::http::HttpRequest&)>()
-                         : smithy::server::RequireOrigin(allowed_origins);
+  auto origin_gate =
+      allowed_origins.empty()
+          ? std::function<std::optional<opal::http::HttpResponse>(const opal::http::HttpRequest&)>()
+          : opal::server::RequireOrigin(allowed_origins);
   auto router_gate = server.StreamRouter()->Gate();
-  smithy::http::BeastServerTransport::Options options;
+  opal::http::BeastServerTransport::Options options;
   options.websocket_gate =
-      [origin_gate = std::move(origin_gate), router_gate = std::move(router_gate), vault](
-          const smithy::http::HttpRequest& request) -> std::optional<smithy::http::HttpResponse> {
+      [origin_gate = std::move(origin_gate), router_gate = std::move(router_gate),
+       vault](const opal::http::HttpRequest& request) -> std::optional<opal::http::HttpResponse> {
     if (origin_gate) {
       if (auto refusal = origin_gate(request)) return refusal;
     }
     const auto ticket = ExtractQueryParam(request.target, "ticket");
     if (!ticket.has_value() || games_hub::HasEmbeddedNul(*ticket) || !vault->PeekTicket(*ticket)) {
-      smithy::http::HttpResponse refusal;
+      opal::http::HttpResponse refusal;
       refusal.status = 401;
       refusal.headers.Set("content-type", "application/json");
       refusal.body = R"({"message":"mint a ticket via POST /games/v2/session"})";
@@ -222,9 +222,9 @@ int main() {
   // (ADR-0013).
   options.on_rejected = aura::RejectionMetrics(metrics);
   options.on_connection_event = aura::ConnectionEventLog();
-  smithy::http::BeastServerTransport transport(options);
+  opal::http::BeastServerTransport transport(options);
 
-  smithy::Outcome<smithy::Unit> started = transport.Start(unary);
+  opal::Outcome<opal::Unit> started = transport.Start(unary);
   if (!started.ok()) {
     LOG(ERROR) << "Failed to start games hub on " << options.address << ":" << options.port << ": "
                << started.error().message();

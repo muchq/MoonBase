@@ -18,7 +18,7 @@ namespace games_hub {
 /// ids; not a cryptographic claim.
 std::string RandomId(std::string_view prefix);
 
-/// Store for the hub's two credentials (smithy-cpp ADR-0018's ticket
+/// Store for the hub's two credentials (opal-cpp ADR-0018's ticket
 /// pattern): tickets are single-use and short-lived — minted by
 /// GetSession, checked by the gate pre-101 (PeekTicket), spent exactly
 /// once by the Play handler (SpendTicket). Resume tokens are multi-use

@@ -19,7 +19,7 @@
 #include <string>
 
 #include "domains/games/apis/games_hub/wire_test_fixture.h"
-#include "smithy/http/message.h"
+#include "opal/http/message.h"
 
 namespace games_hub {
 namespace {
@@ -37,7 +37,7 @@ constexpr char kJoinPayload[] =
 
 class LobbyWireTest : public HubWireFixture {
  protected:
-  std::shared_ptr<smithy::http::WebSocket> DialReady(json& session) {
+  std::shared_ptr<opal::http::WebSocket> DialReady(json& session) {
     return HubWireFixture::DialReady(kPlayPath, session);
   }
 };

@@ -106,7 +106,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     std::unique_ptr<moonbase::games::GamesHubServer> server;
     std::unique_ptr<moonbase::games::GamesHubClient> client;
     std::unique_ptr<pg::Listener> listener;
-    std::vector<std::shared_ptr<smithy::http::WebSocket>> sessions;
+    std::vector<std::shared_ptr<opal::http::WebSocket>> sessions;
     // The emit→declare sweep for this instance's own recorder — the fixture's
     // TearDown only covers the primary's (#1327).
     ~Instance() {
@@ -132,16 +132,16 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     instance->server = std::make_unique<moonbase::games::GamesHubServer>(
         std::make_shared<GamesHubHandler>(vault, ids, instance->golf));
 
-    auto loopback = std::make_shared<smithy::http::Loopback>();
+    auto loopback = std::make_shared<opal::http::Loopback>();
     EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
-    smithy::ClientConfig config;
+    opal::ClientConfig config;
     config.retry.max_attempts = 1;
     config.http_client = loopback;
     Instance* raw = instance.get();
-    config.websocket_dialer = [raw](const smithy::http::WebSocketDialRequest& request)
-        -> smithy::Outcome<std::shared_ptr<smithy::http::WebSocket>> {
-      auto [near, far] = smithy::http::InMemoryWebSocketPair::Create();
-      smithy::http::HttpRequest upgrade;
+    config.websocket_dialer = [raw](const opal::http::WebSocketDialRequest& request)
+        -> opal::Outcome<std::shared_ptr<opal::http::WebSocket>> {
+      auto [near, far] = opal::http::InMemoryWebSocketPair::Create();
+      opal::http::HttpRequest upgrade;
       upgrade.method = "GET";
       upgrade.target = request.target;
       upgrade.headers = request.headers;
@@ -200,7 +200,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
   }
 
   // Pulls already-queued frames off a seat so the registry's async
-  // delivery chain can finish. smithy-cpp#173 (send-before-receive on
+  // delivery chain can finish. opal-cpp#173 (send-before-receive on
   // terminal transitions) fixed the End()/Close deadlock; draining here
   // still keeps TearDown deterministic when wake frames are unread.
   static void DrainPending(moonbase::games::PlayClientStream& stream) {

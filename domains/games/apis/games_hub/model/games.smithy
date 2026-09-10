@@ -89,7 +89,7 @@ structure SessionRequest {
     resumeToken: String
 }
 
-/// The two credentials of the blessed browser auth (smithy-cpp ADR-0018):
+/// The two credentials of the blessed browser auth (opal-cpp ADR-0018):
 /// a single-use short-lived ticket spent on the play upgrade, and a
 /// multi-use resume token. playerId is whimsical and doubles as the
 /// display name.

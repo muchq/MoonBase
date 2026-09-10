@@ -1,7 +1,7 @@
-# games_hub — the games hub on smithy-cpp event streams
+# games_hub — the games hub on opal-cpp event streams
 
 The backend behind muchq.com/games — the lobby (#1490), golf, and castle
-(#77) — and its /golf and /thoughts pages (#79), on smithy-cpp's
+(#77) — and its /golf and /thoughts pages (#79), on opal-cpp's
 streaming stack: a modeled protocol with generated async handlers
 (ADR-0021), `SessionRegistry` fan-out with reconnect grace
 (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018), and ticket

@@ -24,7 +24,7 @@
 #include "domains/platform/libs/futility/otel/otel_provider.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "moonbase/one_d4/server.h"
-#include "smithy/http/beast_transport.h"
+#include "opal/http/beast_transport.h"
 
 int main() {
   absl::InitializeLog();
@@ -77,7 +77,7 @@ int main() {
           .retry_after = std::chrono::seconds(60)},
       server.Handler());
 
-  smithy::http::BeastServerTransport::Options options;
+  opal::http::BeastServerTransport::Options options;
   options.address = "0.0.0.0";
   options.port = futility::env::ReadPort(8090);
   // The analyze handler refuses PGNs past 256KB; a body meaningfully past
@@ -86,9 +86,9 @@ int main() {
   options.max_body_bytes = std::size_t{1} * 1024 * 1024;
   options.on_rejected = aura::RejectionMetrics(metrics);
   options.on_connection_event = aura::ConnectionEventLog();
-  smithy::http::BeastServerTransport transport(options);
+  opal::http::BeastServerTransport transport(options);
 
-  smithy::Outcome<smithy::Unit> started = transport.Start(handler);
+  opal::Outcome<opal::Unit> started = transport.Start(handler);
   if (!started.ok()) {
     LOG(ERROR) << "Failed to start server on " << options.address << ":" << options.port << ": "
                << started.error().message();

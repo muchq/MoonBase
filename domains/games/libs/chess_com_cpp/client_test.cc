@@ -10,10 +10,10 @@
 #include <vector>
 
 #include "moonbase/chess_com/server.h"
-#include "smithy/core/error.h"
-#include "smithy/http/loopback.h"
-#include "smithy/http/message.h"
-#include "smithy/http/transport.h"
+#include "opal/core/error.h"
+#include "opal/http/loopback.h"
+#include "opal/http/message.h"
+#include "opal/http/transport.h"
 
 namespace {
 
@@ -32,49 +32,48 @@ using moonbase::chess_com::PlayerNotFound;
 using moonbase::chess_com::PlayerResult;
 using moonbase::chess_com::TitleNotFound;
 
-class ScriptedHttpClient final : public smithy::http::HttpClient {
+class ScriptedHttpClient final : public opal::http::HttpClient {
  public:
-  explicit ScriptedHttpClient(std::vector<smithy::http::HttpResponse> responses)
+  explicit ScriptedHttpClient(std::vector<opal::http::HttpResponse> responses)
       : responses_(std::move(responses)) {}
 
-  smithy::Outcome<smithy::http::HttpResponse> Send(
-      const smithy::http::HttpRequest& request) override {
+  opal::Outcome<opal::http::HttpResponse> Send(const opal::http::HttpRequest& request) override {
     requests_.push_back(request);
     if (next_response_ == responses_.size()) {
-      return smithy::Error::Unknown("no scripted response");
+      return opal::Error::Unknown("no scripted response");
     }
     return responses_[next_response_++];
   }
 
-  const std::vector<smithy::http::HttpRequest>& requests() const { return requests_; }
+  const std::vector<opal::http::HttpRequest>& requests() const { return requests_; }
 
  private:
-  std::vector<smithy::http::HttpResponse> responses_;
-  std::vector<smithy::http::HttpRequest> requests_;
+  std::vector<opal::http::HttpResponse> responses_;
+  std::vector<opal::http::HttpRequest> requests_;
   std::size_t next_response_ = 0;
 };
 
 class RecordingHandler final : public ChessComHandler {
  public:
-  smithy::Outcome<FetchPlayerOutput> FetchPlayer(
-      const FetchPlayerInput& input, const smithy::server::RequestContext& /*context*/) override {
+  opal::Outcome<FetchPlayerOutput> FetchPlayer(
+      const FetchPlayerInput& input, const opal::server::RequestContext& /*context*/) override {
     const std::lock_guard<std::mutex> lock(mu_);
     player_input_ = input;
     if (player_not_found_) {
-      smithy::Error error = smithy::Error::Modeled("PlayerNotFound", "player not found");
+      opal::Error error = opal::Error::Modeled("PlayerNotFound", "player not found");
       error.set_detail(PlayerNotFound{.message = "player not found"});
       return error;
     }
     return FetchPlayerOutput{.title = "GM"};
   }
 
-  smithy::Outcome<FetchTitledOutput> FetchTitled(
-      const FetchTitledInput& input, const smithy::server::RequestContext& /*context*/) override {
+  opal::Outcome<FetchTitledOutput> FetchTitled(
+      const FetchTitledInput& input, const opal::server::RequestContext& /*context*/) override {
     const std::lock_guard<std::mutex> lock(mu_);
     titled_input_ = input;
     ++titled_calls_;
     if (title_not_found_) {
-      smithy::Error error = smithy::Error::Modeled("TitleNotFound", "title not found");
+      opal::Error error = opal::Error::Modeled("TitleNotFound", "title not found");
       error.set_detail(TitleNotFound{.message = "title not found"});
       return error;
     }
@@ -101,13 +100,13 @@ class RecordingHandler final : public ChessComHandler {
     title_not_found_ = true;
   }
 
-  smithy::Outcome<FetchArchiveOutput> FetchArchive(
-      const FetchArchiveInput& input, const smithy::server::RequestContext& /*context*/) override {
+  opal::Outcome<FetchArchiveOutput> FetchArchive(
+      const FetchArchiveInput& input, const opal::server::RequestContext& /*context*/) override {
     const std::lock_guard<std::mutex> lock(mu_);
     archive_input_ = input;
     ++archive_calls_;
     if (archive_not_found_) {
-      smithy::Error error = smithy::Error::Modeled("ArchiveNotFound", "archive not found");
+      opal::Error error = opal::Error::Modeled("ArchiveNotFound", "archive not found");
       error.set_detail(ArchiveNotFound{.message = "archive not found"});
       return error;
     }
@@ -162,10 +161,10 @@ class ClientTest : public ::testing::Test {
  protected:
   void SetUp() override {
     server_ = std::make_unique<ChessComServer>(handler_);
-    loopback_ = std::make_shared<smithy::http::Loopback>();
+    loopback_ = std::make_shared<opal::http::Loopback>();
     ASSERT_TRUE(loopback_->Start(server_->Handler()).ok());
 
-    smithy::ClientConfig config = chess_com::DefaultClientConfig();
+    opal::ClientConfig config = chess_com::DefaultClientConfig();
     config.http_client = loopback_;
     auto client = Client::Create(std::move(config));
     ASSERT_TRUE(client.ok()) << client.error().message();
@@ -174,12 +173,12 @@ class ClientTest : public ::testing::Test {
 
   std::shared_ptr<RecordingHandler> handler_ = std::make_shared<RecordingHandler>();
   std::unique_ptr<ChessComServer> server_;
-  std::shared_ptr<smithy::http::Loopback> loopback_;
+  std::shared_ptr<opal::http::Loopback> loopback_;
   std::unique_ptr<Client> client_;
 };
 
 TEST(DefaultClientConfigTest, UsesChessComProductionDefaults) {
-  const smithy::ClientConfig config = chess_com::DefaultClientConfig();
+  const opal::ClientConfig config = chess_com::DefaultClientConfig();
 
   EXPECT_EQ(config.endpoint, "https://api.chess.com");
   EXPECT_EQ(config.user_agent, "MoonBase indexer/1.0");
@@ -201,7 +200,7 @@ TEST_F(ClientTest, FetchArchiveFormatsLabelsAndReturnsIndexerFields) {
   PlayedGame game;
   game.url = "https://www.chess.com/game/live/123";
   game.pgn = "[Event \"Live Chess\"]\n\n1. e4 e5";
-  game.endTime = smithy::Timestamp::FromEpochSeconds(1'700'000'000);
+  game.endTime = opal::Timestamp::FromEpochSeconds(1'700'000'000);
   game.timeClass = "blitz";
   game.white = PlayerResult{.username = "Hikaru", .rating = 2800, .result = "win"};
   game.black = PlayerResult{.username = "Opponent", .rating = 2700, .result = "resigned"};
@@ -307,7 +306,7 @@ TEST_F(ClientTest, AnUnknownTitleStaysDistinctFromTheOtherNotFounds) {
 }
 
 TEST(ClientContractTest, UnknownResponseMembersDoNotBreakArchiveDecoding) {
-  smithy::http::HttpResponse response;
+  opal::http::HttpResponse response;
   response.status = 200;
   response.body = R"({
     "games": [{
@@ -322,8 +321,8 @@ TEST(ClientContractTest, UnknownResponseMembersDoNotBreakArchiveDecoding) {
     "future_field": "ignored"
   })";
   auto transport =
-      std::make_shared<ScriptedHttpClient>(std::vector<smithy::http::HttpResponse>{response});
-  smithy::ClientConfig config = chess_com::DefaultClientConfig();
+      std::make_shared<ScriptedHttpClient>(std::vector<opal::http::HttpResponse>{response});
+  opal::ClientConfig config = chess_com::DefaultClientConfig();
   config.http_client = transport;
   auto client = Client::Create(std::move(config));
   ASSERT_TRUE(client.ok()) << client.error().message();
@@ -340,7 +339,7 @@ TEST(ClientContractTest, UnknownResponseMembersDoNotBreakArchiveDecoding) {
 }
 
 TEST(ClientContractTest, MissingPlayerSideIsAccepted) {
-  smithy::http::HttpResponse response;
+  opal::http::HttpResponse response;
   response.status = 200;
   response.body = R"({
     "games": [{
@@ -352,8 +351,8 @@ TEST(ClientContractTest, MissingPlayerSideIsAccepted) {
     }]
   })";
   auto transport =
-      std::make_shared<ScriptedHttpClient>(std::vector<smithy::http::HttpResponse>{response});
-  smithy::ClientConfig config = chess_com::DefaultClientConfig();
+      std::make_shared<ScriptedHttpClient>(std::vector<opal::http::HttpResponse>{response});
+  opal::ClientConfig config = chess_com::DefaultClientConfig();
   config.http_client = transport;
   auto client = Client::Create(std::move(config));
   ASSERT_TRUE(client.ok()) << client.error().message();
@@ -367,7 +366,7 @@ TEST(ClientContractTest, MissingPlayerSideIsAccepted) {
 }
 
 TEST(ClientContractTest, MissingGameAndPlayerFieldsDoNotDiscardTheArchive) {
-  smithy::http::HttpResponse response;
+  opal::http::HttpResponse response;
   response.status = 200;
   response.body = R"({
     "games": [
@@ -383,8 +382,8 @@ TEST(ClientContractTest, MissingGameAndPlayerFieldsDoNotDiscardTheArchive) {
     ]
   })";
   auto transport =
-      std::make_shared<ScriptedHttpClient>(std::vector<smithy::http::HttpResponse>{response});
-  smithy::ClientConfig config = chess_com::DefaultClientConfig();
+      std::make_shared<ScriptedHttpClient>(std::vector<opal::http::HttpResponse>{response});
+  opal::ClientConfig config = chess_com::DefaultClientConfig();
   config.http_client = transport;
   auto client = Client::Create(std::move(config));
   ASSERT_TRUE(client.ok()) << client.error().message();
@@ -406,15 +405,15 @@ TEST(ClientContractTest, MissingGameAndPlayerFieldsDoNotDiscardTheArchive) {
 }
 
 TEST(ClientContractTest, RateLimitIsRetriedWithConfiguredPolicy) {
-  smithy::http::HttpResponse rate_limited;
+  opal::http::HttpResponse rate_limited;
   rate_limited.status = 429;
   rate_limited.body = R"({"code":0,"message":"try again"})";
-  smithy::http::HttpResponse success;
+  opal::http::HttpResponse success;
   success.status = 200;
   success.body = R"({"games":[]})";
   auto transport = std::make_shared<ScriptedHttpClient>(
-      std::vector<smithy::http::HttpResponse>{rate_limited, success});
-  smithy::ClientConfig config = chess_com::DefaultClientConfig();
+      std::vector<opal::http::HttpResponse>{rate_limited, success});
+  opal::ClientConfig config = chess_com::DefaultClientConfig();
   config.http_client = transport;
   std::vector<std::chrono::milliseconds> delays;
   config.retry.sleep = [&](std::chrono::milliseconds delay) { delays.push_back(delay); };
@@ -434,12 +433,12 @@ TEST(ClientContractTest, RateLimitIsRetriedWithConfiguredPolicy) {
 }
 
 TEST(ClientContractTest, PersistentRateLimitStopsAfterThreeAttempts) {
-  smithy::http::HttpResponse rate_limited;
+  opal::http::HttpResponse rate_limited;
   rate_limited.status = 429;
   rate_limited.body = R"({"code":0,"message":"try again"})";
   auto transport = std::make_shared<ScriptedHttpClient>(
-      std::vector<smithy::http::HttpResponse>{rate_limited, rate_limited, rate_limited});
-  smithy::ClientConfig config = chess_com::DefaultClientConfig();
+      std::vector<opal::http::HttpResponse>{rate_limited, rate_limited, rate_limited});
+  opal::ClientConfig config = chess_com::DefaultClientConfig();
   config.http_client = transport;
   std::vector<std::chrono::milliseconds> delays;
   config.retry.sleep = [&](std::chrono::milliseconds delay) { delays.push_back(delay); };
@@ -456,12 +455,12 @@ TEST(ClientContractTest, PersistentRateLimitStopsAfterThreeAttempts) {
 }
 
 TEST(ClientContractTest, Bare404UsesTheOperationSpecificError) {
-  smithy::http::HttpResponse not_found;
+  opal::http::HttpResponse not_found;
   not_found.status = 404;
   not_found.body = R"({"code":0,"message":"not found"})";
   auto transport = std::make_shared<ScriptedHttpClient>(
-      std::vector<smithy::http::HttpResponse>{not_found, not_found});
-  smithy::ClientConfig config = chess_com::DefaultClientConfig();
+      std::vector<opal::http::HttpResponse>{not_found, not_found});
+  opal::ClientConfig config = chess_com::DefaultClientConfig();
   config.http_client = transport;
   auto client = Client::Create(std::move(config));
   ASSERT_TRUE(client.ok()) << client.error().message();

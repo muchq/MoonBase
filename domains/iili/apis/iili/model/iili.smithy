@@ -35,7 +35,7 @@ operation Shorten {
 ///
 /// @suppress is load-bearing: Smithy's HttpResponseCodeSemantics validator
 /// refuses a non-2xx @http code and a redirect is the legitimate exception —
-/// deleting it stops the model assembling. See smithy-cpp docs/server-guide.md,
+/// deleting it stops the model assembling. See opal-cpp docs/server-guide.md,
 /// "Redirects (3xx)". The 302 carries a `{}` body (alloy conformance pins it);
 /// wire_test pins ours.
 @readonly

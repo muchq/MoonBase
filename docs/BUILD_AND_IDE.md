@@ -63,14 +63,14 @@ metadata is not blocked — and writes one `--override_module` line per
 module.
 
 It then covers the two kinds that scan structurally cannot find. Modules
-pinned in a `MODULE.bazel` with `archive_override` — `smithy_cpp` — are
+pinned in a `MODULE.bazel` with `archive_override` — `opal_cpp` — are
 not served by the registry, so they have no `source.json` for the scan to
 walk; they are read straight out of the `MODULE.bazel` files and cloned
 at their pinned commit. And repos created by module extensions are not
 modules at all: the `bats` toolchain gets an empty stub, and `raylib`
 gets a clone plus this repo's own `bazel/3p/raylib.BUILD`.
 
-`smithy_cpp` is worth knowing about specifically, because it fails
+`opal_cpp` is worth knowing about specifically, because it fails
 earlier and louder than the rest. Bazel resolves the module graph before
 it analyses anything, so an uncovered `archive_override` takes down
 *every* bazel command — `version` aside — with a 403 during "Computing
@@ -105,7 +105,7 @@ test runner (`xctestrunner`), which is still blocked. `bazel build
 --nobuild //...` does not, and the iOS targets only build on macOS
 anyway — so scope a `query` universe below `//...` on Linux.
 
-The approach is lifted from smithy-cpp's `bazel/make-git-overrides.sh`
+The approach is lifted from opal-cpp's `bazel/make-git-overrides.sh`
 (its `docs/development.md`, "Sandboxed sessions").
 
 On a machine with normal egress, ignore all of this and run `bazel`.

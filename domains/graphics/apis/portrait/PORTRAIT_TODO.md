@@ -1,7 +1,7 @@
 # Portrait — remaining work
 
 `:portrait` serves the Smithy-modeled API (`model/portrait.smithy`) on
-smithy-cpp's Beast transport, guarded by golden wire fixtures
+opal-cpp's Beast transport, guarded by golden wire fixtures
 (`portrait_smithy_wire_test`), real-render handler tests
 (`smithy_handler_test`), and an end-to-end pass over the shared aura
 serving chain (`production_chain_test`; the chain's own behavior is tested
@@ -14,7 +14,7 @@ in `//domains/platform/libs/aura`).
 - [ ] X-RateLimit-Limit / X-RateLimit-Remaining response headers
 - [ ] Rate-limit bypass for authenticated clients (`@httpApiKeyAuth` +
       `RequireApiKeyHeader` exist upstream)
-- [ ] Progressive rendering / streaming — smithy-cpp `@streaming` landed
+- [ ] Progressive rendering / streaming — opal-cpp `@streaming` landed
       upstream (phase 8); model the streaming response when there's a
       consumer for it
 - [ ] Scene-complexity limits beyond the current constraint traits (memory
@@ -26,7 +26,7 @@ in `//domains/platform/libs/aura`).
 - [ ] Put the `DeriveClient` source distribution on a dashboard (the
       trust-boundary drift signal: ~100% kUntrustedHeaderIgnored behind
       Caddy means the trust set no longer matches the topology — recipe in
-      smithy-cpp docs/production-guide.md). Same decision for ADR-0013
+      opal-cpp docs/production-guide.md). Same decision for ADR-0013
       connection-event kind counters, currently log-only WARNING lines
       (`ConnectionEventLog`). Both need instruments outside the inherited
       http_server_* set — decide naming together

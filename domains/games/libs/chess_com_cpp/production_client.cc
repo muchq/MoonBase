@@ -2,13 +2,13 @@
 
 #include <utility>
 
-#include "smithy/http/beast_transport.h"
+#include "opal/http/beast_transport.h"
 
 namespace chess_com {
 
-smithy::Outcome<Client> CreateProductionClient() {
-  smithy::ClientConfig config = DefaultClientConfig();
-  auto transport = smithy::http::BeastHttpClient::FromConfig(config);
+opal::Outcome<Client> CreateProductionClient() {
+  opal::ClientConfig config = DefaultClientConfig();
+  auto transport = opal::http::BeastHttpClient::FromConfig(config);
   if (!transport.ok()) {
     return std::move(transport).error();
   }

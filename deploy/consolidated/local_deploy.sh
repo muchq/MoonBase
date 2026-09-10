@@ -42,7 +42,7 @@ if [ -f ".env" ]; then
 fi
 
 # Ensure the shared network exists with the pinned subnet AND an ip-range that
-# keeps the dynamic pool off Caddy's static 172.28.0.2 (smithy-cpp ADR-0012).
+# keeps the dynamic pool off Caddy's static 172.28.0.2 (opal-cpp ADR-0012).
 # The observability compose file marks this network `external: true`, so Compose
 # won't create it and ignores the ipam block — we own it here.
 echo "Ensuring docker network..."

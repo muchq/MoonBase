@@ -18,12 +18,12 @@
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 #include "domains/games/libs/cards/dealer.h"
-#include "smithy/client/config.h"
-#include "smithy/core/outcome.h"
-#include "smithy/http/loopback.h"
-#include "smithy/http/message.h"
-#include "smithy/http/websocket.h"
-#include "smithy/http/websocket_pair.h"
+#include "opal/client/config.h"
+#include "opal/core/outcome.h"
+#include "opal/http/loopback.h"
+#include "opal/http/message.h"
+#include "opal/http/websocket.h"
+#include "opal/http/websocket_pair.h"
 
 // The chat pump's cross-instance behavior, pinned deterministically: the
 // handlers share the memory stores, and the tests hand-deliver the wakes
@@ -120,7 +120,7 @@ class HubChatRaceFixture : public GamesHubStreamFixture {
     std::shared_ptr<CapturingMetricsRecorder> metrics;
     std::unique_ptr<moonbase::games::GamesHubServer> server;
     std::unique_ptr<moonbase::games::GamesHubClient> client;
-    std::vector<std::shared_ptr<smithy::http::WebSocket>> sessions;
+    std::vector<std::shared_ptr<opal::http::WebSocket>> sessions;
 
     // The emit→declare sweep for this instance's own recorder — the fixture's
     // TearDown only covers the primary's (#1327).
@@ -164,16 +164,16 @@ class HubChatRaceFixture : public GamesHubStreamFixture {
     instance->server = std::make_unique<moonbase::games::GamesHubServer>(
         std::make_shared<GamesHubHandler>(vault_, ids, instance->golf));
 
-    auto loopback = std::make_shared<smithy::http::Loopback>();
+    auto loopback = std::make_shared<opal::http::Loopback>();
     EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
-    smithy::ClientConfig config;
+    opal::ClientConfig config;
     config.retry.max_attempts = 1;
     config.http_client = loopback;
     Instance* raw = instance.get();
-    config.websocket_dialer = [raw](const smithy::http::WebSocketDialRequest& request)
-        -> smithy::Outcome<std::shared_ptr<smithy::http::WebSocket>> {
-      auto [near, far] = smithy::http::InMemoryWebSocketPair::Create();
-      smithy::http::HttpRequest upgrade;
+    config.websocket_dialer = [raw](const opal::http::WebSocketDialRequest& request)
+        -> opal::Outcome<std::shared_ptr<opal::http::WebSocket>> {
+      auto [near, far] = opal::http::InMemoryWebSocketPair::Create();
+      opal::http::HttpRequest upgrade;
       upgrade.method = "GET";
       upgrade.target = request.target;
       upgrade.headers = request.headers;

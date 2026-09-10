@@ -6,7 +6,7 @@
 namespace chess_com {
 
 /// Creates a client using the Beast HTTPS transport.
-smithy::Outcome<Client> CreateProductionClient();
+opal::Outcome<Client> CreateProductionClient();
 
 }  // namespace chess_com
 

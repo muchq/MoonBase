@@ -35,12 +35,12 @@
 #include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "moonbase/games/server.h"
-#include "smithy/core/blob.h"
-#include "smithy/eventstream/frame.h"
-#include "smithy/http/loopback.h"
-#include "smithy/http/message.h"
-#include "smithy/http/websocket.h"
-#include "smithy/http/websocket_pair.h"
+#include "opal/core/blob.h"
+#include "opal/eventstream/frame.h"
+#include "opal/http/loopback.h"
+#include "opal/http/message.h"
+#include "opal/http/websocket.h"
+#include "opal/http/websocket_pair.h"
 
 namespace games_hub {
 
@@ -88,17 +88,17 @@ inline void ExpectOnlyDeclaredCounterSeriesOnTheWire(
 // convention in smithy/eventstream/envelope.h): :message-type "event",
 // :event-type naming the commands-union member, :content-type
 // "application/json", payload the member's JSON structure.
-inline smithy::eventstream::Message CommandFrame(const std::string& event_type,
-                                                 const std::string& payload_json) {
-  smithy::eventstream::Message frame;
+inline opal::eventstream::Message CommandFrame(const std::string& event_type,
+                                               const std::string& payload_json) {
+  opal::eventstream::Message frame;
   frame.headers = {{":message-type", std::string("event")},
                    {":event-type", event_type},
                    {":content-type", std::string("application/json")}};
-  frame.payload = smithy::Blob::FromString(payload_json);
+  frame.payload = opal::Blob::FromString(payload_json);
   return frame;
 }
 
-inline std::string HeaderText(const smithy::eventstream::Message& message, std::string_view name) {
+inline std::string HeaderText(const opal::eventstream::Message& message, std::string_view name) {
   const std::string* value = message.FindString(name);
   return value != nullptr ? *value : "<missing>";
 }
@@ -106,7 +106,7 @@ inline std::string HeaderText(const smithy::eventstream::Message& message, std::
 // Asserts the event envelope trio on a received frame and hands back the
 // payload bytes for the golden comparison; "<no frame>" (with the failure
 // already recorded by NextFrame) when nothing arrived.
-inline std::string EventPayload(const std::optional<smithy::eventstream::Message>& frame,
+inline std::string EventPayload(const std::optional<opal::eventstream::Message>& frame,
                                 const std::string& event_type) {
   if (!frame.has_value()) return "<no frame>";
   EXPECT_EQ(HeaderText(*frame, ":message-type"), "event");
@@ -125,7 +125,7 @@ inline std::set<std::string> KeysOf(const nlohmann::json& object) {
 
 class HubWireFixture : public ::testing::Test {
  protected:
-  using Message = smithy::eventstream::Message;
+  using Message = opal::eventstream::Message;
 
   void SetUp() override {
     // The hub_e2e recipe: sequential ids make the goldens deterministic
@@ -151,24 +151,24 @@ class HubWireFixture : public ::testing::Test {
   }
 
   // A raw POST /games/v2/session, exactly the fetch() a web client makes.
-  smithy::http::HttpResponse PostSession(const std::string& body) {
-    smithy::http::HttpRequest request;
+  opal::http::HttpResponse PostSession(const std::string& body) {
+    opal::http::HttpRequest request;
     request.method = "POST";
     request.target = kSessionPath;
     request.headers.Set("content-type", "application/json");
     request.body = body;
     auto response = loopback_->Send(request);
     EXPECT_TRUE(response.ok()) << response.error().message();
-    if (!response.ok()) return smithy::http::HttpResponse{};
+    if (!response.ok()) return opal::http::HttpResponse{};
     return *std::move(response);
   }
 
   // A raw upgrade on `path` through the generated session router; the
   // caller holds the near (client) end and speaks frames itself.
-  std::shared_ptr<smithy::http::WebSocket> DialStream(const std::string& path,
-                                                      const std::string& query) {
-    auto [near, far] = smithy::http::InMemoryWebSocketPair::Create();
-    smithy::http::HttpRequest upgrade;
+  std::shared_ptr<opal::http::WebSocket> DialStream(const std::string& path,
+                                                    const std::string& query) {
+    auto [near, far] = opal::http::InMemoryWebSocketPair::Create();
+    opal::http::HttpRequest upgrade;
     upgrade.method = "GET";
     upgrade.target = path + query;
     sessions_.push_back(far);
@@ -178,7 +178,7 @@ class HubWireFixture : public ::testing::Test {
 
   // One frame under the budget; fails the test (and returns nullopt) on a
   // timeout, an error, or a close where a frame was expected.
-  static std::optional<Message> NextFrame(smithy::http::WebSocket& socket) {
+  static std::optional<Message> NextFrame(opal::http::WebSocket& socket) {
     auto received = socket.Receive(kWireReceiveBudget);
     if (!received.ok()) {
       ADD_FAILURE() << "receive failed: " << received.error().message();
@@ -201,8 +201,8 @@ class HubWireFixture : public ::testing::Test {
   // The multi-frame tests' preamble: mint, dial `path`, consume the fresh
   // sessionReady. The session body lands in `session` so the caller keeps
   // the resumeToken.
-  std::shared_ptr<smithy::http::WebSocket> DialReady(const std::string& path,
-                                                     nlohmann::json& session) {
+  std::shared_ptr<opal::http::WebSocket> DialReady(const std::string& path,
+                                                   nlohmann::json& session) {
     session = MintSession();
     auto socket = DialStream(path, "?ticket=" + session["ticket"].get<std::string>());
     const auto ready = NextFrame(*socket);
@@ -216,8 +216,8 @@ class HubWireFixture : public ::testing::Test {
   std::shared_ptr<GolfHub> golf_;
   std::shared_ptr<GamesHubHandler> handler_;
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
-  std::shared_ptr<smithy::http::Loopback> loopback_ = std::make_shared<smithy::http::Loopback>();
-  std::vector<std::shared_ptr<smithy::http::WebSocket>> sessions_;
+  std::shared_ptr<opal::http::Loopback> loopback_ = std::make_shared<opal::http::Loopback>();
+  std::vector<std::shared_ptr<opal::http::WebSocket>> sessions_;
 };
 
 }  // namespace games_hub

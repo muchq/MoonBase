@@ -22,10 +22,10 @@
 #include "absl/base/log_severity.h"
 #include "absl/log/scoped_mock_log.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
-#include "smithy/http/beast_transport.h"
-#include "smithy/http/forwarded.h"
-#include "smithy/http/loopback.h"
-#include "smithy/http/socket_transport.h"
+#include "opal/http/beast_transport.h"
+#include "opal/http/forwarded.h"
+#include "opal/http/loopback.h"
+#include "opal/http/socket_transport.h"
 
 namespace {
 
@@ -75,9 +75,9 @@ class RecordingSink final : public aura::HttpMetricsSink {
 // with an operation the way the generated router does, so completions carry
 // the matched-handler route label; tests for the unrouted shapes use
 // UnroutedHandler below.
-smithy::http::RequestHandler EchoHandler() {
-  return [](const smithy::http::HttpRequest& /*request*/) {
-    smithy::http::HttpResponse response;
+opal::http::RequestHandler EchoHandler() {
+  return [](const opal::http::HttpRequest& /*request*/) {
+    opal::http::HttpResponse response;
     response.status = 200;
     response.headers.Set("content-type", "text/plain");
     response.body = "echo";
@@ -88,9 +88,9 @@ smithy::http::RequestHandler EchoHandler() {
 
 // A handler that never annotates an operation — the shape of a generated
 // router's dispatch failures (404/405/400), where no handler matched.
-smithy::http::RequestHandler UnroutedHandler(int status) {
-  return [status](const smithy::http::HttpRequest& /*request*/) {
-    smithy::http::HttpResponse response;
+opal::http::RequestHandler UnroutedHandler(int status) {
+  return [status](const opal::http::HttpRequest& /*request*/) {
+    opal::http::HttpResponse response;
     response.status = status;
     response.headers.Set("content-type", "text/plain");
     response.body = "no route";
@@ -144,10 +144,10 @@ class AuraMiddlewareTest : public ::testing::Test {
             .metrics = sink_,
             .allow_request =
                 [limiter = limiter_](const std::string& client) { return limiter->allow(client); },
-            .trusted_proxies = smithy::http::TrustedProxies::Parse({kProxy}).value(),
+            .trusted_proxies = opal::http::TrustedProxies::Parse({kProxy}).value(),
             .retry_after = std::chrono::seconds(60)},
         EchoHandler());
-    loopback_ = std::make_shared<smithy::http::Loopback>();
+    loopback_ = std::make_shared<opal::http::Loopback>();
     const auto started = loopback_->Start(handler_);
     if (!started.ok()) ADD_FAILURE() << "loopback start failed: " << started.error().message();
   }
@@ -156,11 +156,11 @@ class AuraMiddlewareTest : public ::testing::Test {
   // unnamed peer gets a fresh TEST-NET address per send, so sends that don't
   // exercise keying never share a rate-limit bucket; pass an explicit peer
   // to exercise it.
-  smithy::http::HttpResponse Send(
+  opal::http::HttpResponse Send(
       const std::string& method, const std::string& target, const std::string& body = "",
       const std::string& peer = "",
       const std::vector<std::pair<std::string, std::string>>& headers = {}) {
-    smithy::http::HttpRequest request;
+    opal::http::HttpRequest request;
     request.method = method;
     request.target = target;
     request.peer_address = peer.empty() ? "192.0.2." + std::to_string(++next_default_peer_) : peer;
@@ -188,8 +188,8 @@ class AuraMiddlewareTest : public ::testing::Test {
 
   std::shared_ptr<RecordingSink> sink_;
   std::shared_ptr<SlidingWindowRateLimiter<std::string>> limiter_;
-  smithy::http::RequestHandler handler_;
-  std::shared_ptr<smithy::http::Loopback> loopback_;
+  opal::http::RequestHandler handler_;
+  std::shared_ptr<opal::http::Loopback> loopback_;
   int next_default_peer_ = 0;
 };
 
@@ -237,11 +237,11 @@ TEST_F(AuraMiddlewareTest, QueryStringDoesNotDefeatTheHealthRouteMapping) {
 TEST(AuraUnroutedTest, ScannerPathsCollapseIntoTheSentinel) {
   auto sink = std::make_shared<RecordingSink>();
   auto handler = aura::ProductionChain(aura::ChainOptions{.metrics = sink}, UnroutedHandler(404));
-  auto loopback = std::make_shared<smithy::http::Loopback>();
+  auto loopback = std::make_shared<opal::http::Loopback>();
   ASSERT_TRUE(loopback->Start(handler).ok());
 
   for (const std::string target : {"/wp-login.php", "/admin/config", "/v1/nope?x=1"}) {
-    smithy::http::HttpRequest request;
+    opal::http::HttpRequest request;
     request.method = "GET";
     request.target = target;
     request.peer_address = "203.0.113.4";
@@ -265,11 +265,11 @@ TEST(AuraUnroutedTest, ScannerPathsCollapseIntoTheSentinel) {
 TEST(AuraUnroutedTest, InventedMethodsCollapseIntoCustom) {
   auto sink = std::make_shared<RecordingSink>();
   auto handler = aura::ProductionChain(aura::ChainOptions{.metrics = sink}, UnroutedHandler(405));
-  auto loopback = std::make_shared<smithy::http::Loopback>();
+  auto loopback = std::make_shared<opal::http::Loopback>();
   ASSERT_TRUE(loopback->Start(handler).ok());
 
   for (const std::string method : {"FOOBAR1", "FOOBAR2", "get"}) {
-    smithy::http::HttpRequest request;
+    opal::http::HttpRequest request;
     request.method = method;
     request.target = "/echo";
     request.peer_address = "203.0.113.4";
@@ -350,11 +350,11 @@ TEST_F(AuraMiddlewareTest, HealthIsNeverRateLimited) {
 TEST(AuraChainWithoutLimiterTest, NoGuardWhenAllowRequestUnset) {
   auto sink = std::make_shared<RecordingSink>();
   auto handler = aura::ProductionChain(aura::ChainOptions{.metrics = sink}, EchoHandler());
-  auto loopback = std::make_shared<smithy::http::Loopback>();
+  auto loopback = std::make_shared<opal::http::Loopback>();
   ASSERT_TRUE(loopback->Start(handler).ok());
 
   for (int i = 0; i < 20; ++i) {
-    smithy::http::HttpRequest request;
+    opal::http::HttpRequest request;
     request.method = "POST";
     request.target = "/echo";
     request.peer_address = "203.0.113.4";
@@ -368,7 +368,7 @@ TEST(AuraChainWithoutLimiterTest, NoGuardWhenAllowRequestUnset) {
 
 // The access-log line's "trace_id" field carries the W3C trace id parsed
 // from the traceparent the transport guard mints or joins at ingress. The
-// mint/join/replace mechanics themselves are upstream-tested (smithy-cpp
+// mint/join/replace mechanics themselves are upstream-tested (opal-cpp
 // ADR-0011); these tests pin what aura logs.
 std::string TraceIdIn(const std::string& log_line) {
   constexpr char kKey[] = "\"trace_id\":\"";
@@ -412,14 +412,14 @@ TEST_F(AuraMiddlewareTest, AccessLogIsOneJsonObjectInTheMetricsVocabulary) {
 // Sends one request through a fresh chain over the given handler and
 // returns the access-log line. The fixture's chain echoes 200 with an
 // operation for every path, so the unrouted shapes need their own handler.
-std::string AccessLogLineThrough(smithy::http::RequestHandler handler, const std::string& target,
+std::string AccessLogLineThrough(opal::http::RequestHandler handler, const std::string& target,
                                  int expected_status) {
   auto chain = aura::ProductionChain(
       aura::ChainOptions{.metrics = std::make_shared<RecordingSink>()}, std::move(handler));
-  auto loopback = std::make_shared<smithy::http::Loopback>();
+  auto loopback = std::make_shared<opal::http::Loopback>();
   EXPECT_TRUE(loopback->Start(chain).ok());
 
-  smithy::http::HttpRequest request;
+  opal::http::HttpRequest request;
   request.method = "POST";
   request.target = target;
   request.peer_address = "192.0.2.200";
@@ -445,7 +445,7 @@ TEST(AccessLogJsonTest, RouteFallsBackToTheSharedSentinel) {
 }
 
 // The target is attacker-controlled and reaches the line verbatim, so JSON
-// escaping is security-adjacent (smithy-cpp #203): an unescaped quote or a
+// escaping is security-adjacent (opal-cpp #203): an unescaped quote or a
 // raw control byte terminates the record early and lets the rest of the URI
 // masquerade as its own log entry.
 TEST(AccessLogJsonTest, QuotesAndControlBytesInTheTargetAreEscaped) {
@@ -496,8 +496,8 @@ TEST_F(AuraMiddlewareTest, AccessLogCarriesMintedTraceIdWhenInboundIsAbsentOrMal
 // Pin the WARNING line an operator greps for during an incident.
 // Transport-to-hook delivery is upstream-tested; the mapping is aura's.
 TEST(ConnectionEventLogTest, LogsKindPeerDetailAndElapsed) {
-  smithy::http::BeastServerTransport::ConnectionEvent event;
-  event.kind = smithy::http::BeastServerTransport::ConnectionEvent::Kind::kFramingError;
+  opal::http::BeastServerTransport::ConnectionEvent event;
+  event.kind = opal::http::BeastServerTransport::ConnectionEvent::Kind::kFramingError;
   event.peer_address = "203.0.113.9:4711";
   event.detail = "bad method";
   event.elapsed = std::chrono::milliseconds(250);
@@ -514,8 +514,8 @@ TEST(ConnectionEventLogTest, LogsKindPeerDetailAndElapsed) {
 // Failed WebSocket upgrades (smithy ConnectionEvent::kUpgradeFailure) must
 // name themselves — not fall through to unknown(N) after a pin bump.
 TEST(ConnectionEventLogTest, LogsUpgradeFailureKind) {
-  smithy::http::BeastServerTransport::ConnectionEvent event;
-  event.kind = smithy::http::BeastServerTransport::ConnectionEvent::Kind::kUpgradeFailure;
+  opal::http::BeastServerTransport::ConnectionEvent event;
+  event.kind = opal::http::BeastServerTransport::ConnectionEvent::Kind::kUpgradeFailure;
   event.peer_address = "203.0.113.10:80";
   event.detail = "handshake failed";
   event.elapsed = std::chrono::milliseconds(12);
@@ -547,9 +547,9 @@ TEST(RejectionMetricsTest, UnparsedRejectionLandsOnStableLabels) {
 // One pass over the real Beast transport: the chain serves through a real
 // socket, and a declared Content-Length over max_body_bytes is rejected at
 // the transport with a 413 the on_rejected hook records in the same
-// instruments (smithy-cpp #102).
+// instruments (opal-cpp #102).
 TEST_F(AuraMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
-  smithy::http::BeastServerTransport::Options options;
+  opal::http::BeastServerTransport::Options options;
   options.address = "127.0.0.1";
   options.port = 0;
   options.max_body_bytes = 2048;
@@ -557,11 +557,11 @@ TEST_F(AuraMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   // Production-shaped options; no event can fire in this test (the 413 is
   // on_rejected-only by design).
   options.on_connection_event = aura::ConnectionEventLog();
-  smithy::http::BeastServerTransport transport(options);
+  opal::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(handler_).ok());
 
-  smithy::http::SocketHttpClient raw("127.0.0.1", transport.port());
-  smithy::http::HttpRequest request;
+  opal::http::SocketHttpClient raw("127.0.0.1", transport.port());
+  opal::http::HttpRequest request;
   request.method = "POST";
   request.target = "/echo";
   request.headers.Set("content-type", "text/plain");
@@ -572,7 +572,7 @@ TEST_F(AuraMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   EXPECT_EQ(served->body, "echo");
 
   const auto completes_before = sink_->completes().size();
-  smithy::http::HttpRequest oversized;
+  opal::http::HttpRequest oversized;
   oversized.method = "POST";
   oversized.target = "/echo";
   oversized.headers.Set("content-type", "text/plain");

@@ -4,7 +4,7 @@
 // cannot catch a wire rename — both sides regenerate together — so every
 // assertion here is on raw strings: paths, status codes, JSON key names,
 // envelope headers (:message-type / :event-type / :exception-type /
-// :content-type), and exact payload bytes (smithy::json::Encode is
+// :content-type), and exact payload bytes (opal::json::Encode is
 // compact with sorted keys, and NoShuffleDealer + SequentialIdGenerator
 // pin the values too).
 //
@@ -37,7 +37,7 @@
 #include <string>
 
 #include "domains/games/apis/games_hub/wire_test_fixture.h"
-#include "smithy/http/message.h"
+#include "opal/http/message.h"
 
 namespace games_hub {
 namespace {
@@ -50,10 +50,10 @@ constexpr char kPlayPath[] = "/games/v2/play";
 
 class GolfWireTest : public HubWireFixture {
  protected:
-  std::shared_ptr<smithy::http::WebSocket> DialPlay(const std::string& query) {
+  std::shared_ptr<opal::http::WebSocket> DialPlay(const std::string& query) {
     return DialStream(kPlayPath, query);
   }
-  std::shared_ptr<smithy::http::WebSocket> DialReady(json& session) {
+  std::shared_ptr<opal::http::WebSocket> DialReady(json& session) {
     return HubWireFixture::DialReady(kPlayPath, session);
   }
 };

@@ -18,9 +18,9 @@
 #include "domains/platform/libs/aura/middleware.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "moonbase/one_d4/server.h"
-#include "smithy/http/beast_transport.h"
-#include "smithy/http/loopback.h"
-#include "smithy/http/socket_transport.h"
+#include "opal/http/beast_transport.h"
+#include "opal/http/loopback.h"
+#include "opal/http/socket_transport.h"
 
 namespace one_d4_v2 {
 namespace {
@@ -71,13 +71,13 @@ class ProductionChainTest : public ::testing::Test {
                 [limiter = limiter_](const std::string& client) { return limiter->allow(client); },
             .retry_after = std::chrono::seconds(60)},
         server_.Handler());
-    loopback_ = std::make_shared<smithy::http::Loopback>();
+    loopback_ = std::make_shared<opal::http::Loopback>();
     const auto started = loopback_->Start(handler_);
     EXPECT_TRUE(started.ok());
   }
 
-  smithy::http::HttpResponse AnalyzeAs(const std::string& peer) {
-    smithy::http::HttpRequest request;
+  opal::http::HttpResponse AnalyzeAs(const std::string& peer) {
+    opal::http::HttpRequest request;
     request.method = "POST";
     request.target = "/v2/analyze";
     request.peer_address = peer;
@@ -85,14 +85,14 @@ class ProductionChainTest : public ::testing::Test {
     request.body = kScholarsMateJson;
     auto response = loopback_->Send(std::move(request));
     EXPECT_TRUE(response.ok());
-    return response.ok() ? *response : smithy::http::HttpResponse{};
+    return response.ok() ? *response : opal::http::HttpResponse{};
   }
 
   std::shared_ptr<RecordingSink> sink_;
   std::shared_ptr<SlidingWindowRateLimiter<std::string>> limiter_;
   moonbase::one_d4::OneD4V2Server server_;
-  smithy::http::RequestHandler handler_;
-  std::shared_ptr<smithy::http::Loopback> loopback_;
+  opal::http::RequestHandler handler_;
+  std::shared_ptr<opal::http::Loopback> loopback_;
 };
 
 TEST_F(ProductionChainTest, ServesAnalyzeHealthAnd429ThroughTheChain) {
@@ -111,7 +111,7 @@ TEST_F(ProductionChainTest, ServesAnalyzeHealthAnd429ThroughTheChain) {
 
   // Health sits before the guard: still served for the exhausted client,
   // which is what keeps a busy service from probing as a sick one.
-  smithy::http::HttpRequest health;
+  opal::http::HttpRequest health;
   health.method = "GET";
   health.target = "/health";
   health.peer_address = "203.0.113.4";
@@ -128,20 +128,20 @@ TEST_F(ProductionChainTest, ServesAnalyzeHealthAnd429ThroughTheChain) {
 // to read but too large to analyze. Both are deliberate; this pins which
 // one a caller meets where, shaped like main.cc's options.
 TEST_F(ProductionChainTest, TheTransportAndThePgnCapSplitTheOversizedSpace) {
-  smithy::http::BeastServerTransport::Options options;
+  opal::http::BeastServerTransport::Options options;
   options.address = "127.0.0.1";
   options.port = 0;
   options.max_body_bytes = std::size_t{1} * 1024 * 1024;
   options.on_rejected = aura::RejectionMetrics(sink_);
   options.on_connection_event = aura::ConnectionEventLog();
-  smithy::http::BeastServerTransport transport(options);
+  opal::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(handler_).ok());
 
-  smithy::http::SocketHttpClient raw("127.0.0.1", transport.port());
+  opal::http::SocketHttpClient raw("127.0.0.1", transport.port());
 
   // Over the PGN cap, under the transport limit: read fully, refused by the
   // handler as the modeled 400.
-  smithy::http::HttpRequest big_pgn;
+  opal::http::HttpRequest big_pgn;
   big_pgn.method = "POST";
   big_pgn.target = "/v2/analyze";
   big_pgn.peer_address = "203.0.113.9";
@@ -160,7 +160,7 @@ TEST_F(ProductionChainTest, TheTransportAndThePgnCapSplitTheOversizedSpace) {
   // rejection lands in the instruments under the sentinel route, and the
   // handler is never invoked.
   const auto completes_before = sink_->completes().size();
-  smithy::http::HttpRequest oversized = big_pgn;
+  opal::http::HttpRequest oversized = big_pgn;
   oversized.body = std::string(2 * 1024 * 1024, 'x');
   const auto rejected = raw.Send(oversized);
   if (rejected.ok()) {

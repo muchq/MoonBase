@@ -13,8 +13,8 @@
 
 #include "moonbase/portrait/client.h"
 #include "moonbase/portrait/server.h"
-#include "smithy/http/loopback.h"
-#include "smithy/http/transport.h"
+#include "opal/http/loopback.h"
+#include "opal/http/transport.h"
 
 namespace portrait::test_support {
 
@@ -31,7 +31,7 @@ std::string ValidTraceJson();
 /// with a middleware chain composed around the server's handler via `wrap`.
 class LoopbackHarness {
  public:
-  using Wrap = std::function<smithy::http::RequestHandler(smithy::http::RequestHandler)>;
+  using Wrap = std::function<opal::http::RequestHandler(opal::http::RequestHandler)>;
 
   explicit LoopbackHarness(std::shared_ptr<moonbase::portrait::PortraitHandler> handler,
                            Wrap wrap = nullptr);
@@ -41,19 +41,19 @@ class LoopbackHarness {
 
   /// Drives a raw request through the composed handler chain. Reports a
   /// gtest failure and returns a default response if the transport errors.
-  smithy::http::HttpResponse Send(smithy::http::HttpRequest request);
+  opal::http::HttpResponse Send(opal::http::HttpRequest request);
 
   /// POSTs a body to the trace route.
-  smithy::http::HttpResponse PostTrace(const std::string& body,
-                                       const std::string& content_type = "application/json");
+  opal::http::HttpResponse PostTrace(const std::string& body,
+                                     const std::string& content_type = "application/json");
 
   /// The composed handler chain, for driving other transports (e.g. Beast).
-  const smithy::http::RequestHandler& handler() const { return handler_; }
+  const opal::http::RequestHandler& handler() const { return handler_; }
 
  private:
   std::unique_ptr<moonbase::portrait::PortraitServer> server_;
-  smithy::http::RequestHandler handler_;
-  std::shared_ptr<smithy::http::Loopback> loopback_;
+  opal::http::RequestHandler handler_;
+  std::shared_ptr<opal::http::Loopback> loopback_;
 };
 
 }  // namespace portrait::test_support

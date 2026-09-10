@@ -3,9 +3,9 @@
 
 #include "absl/status/status.h"
 #include "moonbase/one_d4/server.h"
-#include "smithy/core/error.h"
-#include "smithy/core/outcome.h"
-#include "smithy/server/router.h"
+#include "opal/core/error.h"
+#include "opal/core/outcome.h"
+#include "opal/server/router.h"
 
 namespace one_d4_v2 {
 
@@ -15,16 +15,16 @@ namespace one_d4_v2 {
 /// only refuses input, so today the second arm is unreachable — the mapping
 /// exists so the day that changes, the consequence is already written down
 /// and tested rather than decided by accident.
-smithy::Error ToSmithyError(const absl::Status& status);
+opal::Error ToSmithyError(const absl::Status& status);
 
 /// Serves the generated Smithy OneD4V2 API over Analyze(). Stateless, which
 /// is the whole thread-safety story: transports dispatch one handler
 /// instance across a thread pool, and this one holds nothing.
 class SmithyAnalyzeHandler final : public moonbase::one_d4::OneD4V2Handler {
  public:
-  smithy::Outcome<moonbase::one_d4::AnalyzeOutput> Analyze(
+  opal::Outcome<moonbase::one_d4::AnalyzeOutput> Analyze(
       const moonbase::one_d4::AnalyzeInput& input,
-      const smithy::server::RequestContext& context) override;
+      const opal::server::RequestContext& context) override;
 };
 
 }  // namespace one_d4_v2

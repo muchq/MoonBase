@@ -253,7 +253,7 @@ func TestHandler(t *testing.T) {
 
 - [`resilience4g`](../resilience4g/) - Rate limiting, circuit breakers, retry patterns
 - [`server_pal`](../server_pal/) - Rust HTTP server utilities
-- [`aura`](../aura/) - C++ serving chain for smithy-cpp services
+- [`aura`](../aura/) - C++ serving chain for opal-cpp services
 
 ## License
 

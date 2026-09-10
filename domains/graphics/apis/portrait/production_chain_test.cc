@@ -20,10 +20,10 @@
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "moonbase/portrait/client.h"
 #include "moonbase/portrait/server.h"
-#include "smithy/client/config.h"
-#include "smithy/core/blob.h"
-#include "smithy/http/beast_transport.h"
-#include "smithy/http/socket_transport.h"
+#include "opal/client/config.h"
+#include "opal/core/blob.h"
+#include "opal/http/beast_transport.h"
+#include "opal/http/socket_transport.h"
 
 namespace {
 
@@ -43,11 +43,11 @@ using portrait::test_support::ValidTraceJson;
 // TheRateLimiterAnswersBeforeTheOperationIsReached.
 class StubHandler final : public PortraitHandler {
  public:
-  smithy::Outcome<TraceOutput> Trace(const TraceInput& input,
-                                     const smithy::server::RequestContext& /*context*/) override {
+  opal::Outcome<TraceOutput> Trace(const TraceInput& input,
+                                   const opal::server::RequestContext& /*context*/) override {
     invocations_.fetch_add(1, std::memory_order_relaxed);
     TraceOutput output;
-    output.base64_png = smithy::Blob::FromString("png");
+    output.base64_png = opal::Blob::FromString("png");
     output.width = input.output.width;
     output.height = input.output.height;
     return output;
@@ -82,7 +82,7 @@ class PortraitProductionChainTest : public ::testing::Test {
                                            .cleanup_interval = std::chrono::seconds(30),
                                            .max_keys = 100})),
         handler_(std::make_shared<StubHandler>()),
-        harness_(handler_, [this](smithy::http::RequestHandler inner) {
+        harness_(handler_, [this](opal::http::RequestHandler inner) {
           return aura::ProductionChain(
               aura::ChainOptions{.metrics = sink_,
                                  .allow_request =
@@ -93,8 +93,8 @@ class PortraitProductionChainTest : public ::testing::Test {
               std::move(inner));
         }) {}
 
-  smithy::http::HttpResponse PostTraceAs(const std::string& peer) {
-    smithy::http::HttpRequest request;
+  opal::http::HttpResponse PostTraceAs(const std::string& peer) {
+    opal::http::HttpRequest request;
     request.method = "POST";
     request.target = "/portrait/v1/trace";
     request.peer_address = peer;
@@ -126,7 +126,7 @@ TEST_F(PortraitProductionChainTest, ServesTraceHealthAnd429ThroughTheChain) {
   EXPECT_EQ(limited.headers.Get("retry-after").value_or(""), "60");
 
   // Health sits before the guard: still served for the exhausted client.
-  smithy::http::HttpRequest health;
+  opal::http::HttpRequest health;
   health.method = "GET";
   health.target = "/health";
   health.peer_address = "203.0.113.4";
@@ -169,16 +169,16 @@ TEST_F(PortraitProductionChainTest, TheRateLimiterAnswersBeforeTheOperationIsRea
 // limit rejects oversized payloads at the transport with the 413 recorded
 // in the same instruments.
 TEST_F(PortraitProductionChainTest, BeastTransportServesChainAndEnforcesBodyLimit) {
-  smithy::http::BeastServerTransport::Options options;
+  opal::http::BeastServerTransport::Options options;
   options.address = "127.0.0.1";
   options.port = 0;
   options.max_body_bytes = 2048;
   options.on_rejected = aura::RejectionMetrics(sink_);
   options.on_connection_event = aura::ConnectionEventLog();
-  smithy::http::BeastServerTransport transport(options);
+  opal::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(harness_.handler()).ok());
 
-  smithy::ClientConfig config;
+  opal::ClientConfig config;
   config.endpoint = "http://127.0.0.1:" + std::to_string(transport.port());
   auto created = PortraitClient::Create(std::move(config));
   ASSERT_TRUE(created.ok()) << created.error().message();
@@ -189,8 +189,8 @@ TEST_F(PortraitProductionChainTest, BeastTransportServesChainAndEnforcesBodyLimi
   EXPECT_EQ(traced->width, 20);
 
   const auto completes_before = sink_->completes_.size();
-  smithy::http::SocketHttpClient raw("127.0.0.1", transport.port());
-  smithy::http::HttpRequest oversized;
+  opal::http::SocketHttpClient raw("127.0.0.1", transport.port());
+  opal::http::HttpRequest oversized;
   oversized.method = "POST";
   oversized.target = "/portrait/v1/trace";
   oversized.headers.Set("content-type", "application/json");

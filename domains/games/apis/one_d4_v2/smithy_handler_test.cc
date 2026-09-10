@@ -11,7 +11,7 @@ namespace {
 using ::testing::HasSubstr;
 
 TEST(ToSmithyErrorTest, InvalidArgumentIsTheModeled400WithItsMessage) {
-  const smithy::Error error =
+  const opal::Error error =
       ToSmithyError(absl::InvalidArgumentError("pgn has 4200 plies (max 4096)"));
   EXPECT_EQ(error.code(), "InvalidPgnError");
   const auto* detail = error.detail<moonbase::one_d4::InvalidPgnError>();
@@ -23,7 +23,7 @@ TEST(ToSmithyErrorTest, InvalidArgumentIsTheModeled400WithItsMessage) {
 // the day a dependency appears its failure is a 500 with a fixed body
 // rather than a 400 blaming the caller for the server's problem.
 TEST(ToSmithyErrorTest, AnythingElseIsUnmodeledAndItsMessageStaysInside) {
-  const smithy::Error error = ToSmithyError(absl::InternalError("libpq said something private"));
+  const opal::Error error = ToSmithyError(absl::InternalError("libpq said something private"));
   EXPECT_NE(error.code(), "InvalidPgnError");
   EXPECT_EQ(error.detail<moonbase::one_d4::InvalidPgnError>(), nullptr);
 }

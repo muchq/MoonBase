@@ -871,16 +871,16 @@ void GolfHub::UnlistenRoomLocked(const std::string& room_id) {
   listener_->Unlisten(ChatChannel(room_id));
 }
 
-smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
-                                              moonbase::games::PlayAsyncServerStream& stream) {
+opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
+                                            moonbase::games::PlayAsyncServerStream& stream) {
   if (HasEmbeddedNul(input.ticket)) {
     Count("hub_admissions_refused", {{"reason", "bad_ticket"}});
-    co_return smithy::Error::Modeled("Unauthenticated", "ticket expired or already spent");
+    co_return opal::Error::Modeled("Unauthenticated", "ticket expired or already spent");
   }
   auto player = vault_->SpendTicket(input.ticket);
   if (!player.has_value()) {
     Count("hub_admissions_refused", {{"reason", "bad_ticket"}});
-    co_return smithy::Error::Modeled("Unauthenticated", "ticket expired or already spent");
+    co_return opal::Error::Modeled("Unauthenticated", "ticket expired or already spent");
   }
   const std::string player_id = *player;
 
@@ -890,7 +890,7 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
       player_id, [&stream] { return stream.Share(); }, std::chrono::seconds(1));
   if (admission == Registry::Admission::kRefused) {
     Count("hub_admissions_refused", {{"reason", "seat_conflict"}});
-    co_return smithy::Error::Modeled("SeatConflict", "player already has a live connection");
+    co_return opal::Error::Modeled("SeatConflict", "player already has a live connection");
   }
   Count("hub_sessions",
         {{"resumed", admission == Registry::Admission::kResumed ? "true" : "false"}});
@@ -964,7 +964,7 @@ smithy::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
         SetConnected(player_id, false);
         if (auto current = CurrentRoom(player_id)) BroadcastRoom(*current);
       }
-      co_return smithy::Unit{};
+      co_return opal::Unit{};
     }
     const auto now = std::chrono::steady_clock::now();
     const bool lobby = (*received)->as_lobby_or_null() != nullptr;

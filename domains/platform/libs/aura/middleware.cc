@@ -11,8 +11,8 @@
 #include "absl/log/log.h"
 #include "domains/platform/libs/futility/env/env.h"
 #include "domains/platform/libs/futility/otel/http_metrics.h"
-#include "smithy/http/trace_context.h"
-#include "smithy/http/transport.h"
+#include "opal/http/trace_context.h"
+#include "opal/http/transport.h"
 
 namespace aura {
 namespace {
@@ -78,8 +78,8 @@ std::string MethodLabelOf(const std::string& method) {
   return "CUSTOM";
 }
 
-std::string KindName(smithy::http::BeastServerTransport::ConnectionEvent::Kind kind) {
-  using Kind = smithy::http::BeastServerTransport::ConnectionEvent::Kind;
+std::string KindName(opal::http::BeastServerTransport::ConnectionEvent::Kind kind) {
+  using Kind = opal::http::BeastServerTransport::ConnectionEvent::Kind;
   switch (kind) {
     case Kind::kTlsHandshakeFailure:
       return "tls_handshake_failure";
@@ -103,7 +103,7 @@ std::string KindName(smithy::http::BeastServerTransport::ConnectionEvent::Kind k
 // replaced with U+FFFD, because the target reaches the line verbatim and is
 // attacker-controlled - a raw control byte or an unescaped quote terminates
 // the record early and lets the rest of the URI masquerade as its own log
-// entry (smithy-cpp #203), and a stray non-UTF-8 byte (legal in a request
+// entry (opal-cpp #203), and a stray non-UTF-8 byte (legal in a request
 // target per Beast's parser) would make the one record describing that
 // request the record strict JSON parsers reject.
 void AppendJsonEscaped(std::string& out, std::string_view value) {
@@ -199,26 +199,26 @@ const std::string& ServiceNameFromEnv() {
 // response body size, which RequestObservation doesn't carry; it measures
 // its own duration for the line only. The trace_id field is the W3C trace
 // id parsed from the request's traceparent — the transport guard mints or
-// joins it at ingress (smithy-cpp ADR-0011), so on transport-served
+// joins it at ingress (opal-cpp ADR-0011), so on transport-served
 // requests it always parses. Empty only for hand-driven handler chains in
 // tests.
 //
 // x_forwarded_for is the raw header, which since ADR-0012 is NOT the
 // identity the rate limiter keys on — a 429's actual bucket (the derived
 // client address) is not on this line.
-smithy::server::Middleware AccessLog() {
-  return [](smithy::http::RequestHandler next) {
+opal::server::Middleware AccessLog() {
+  return [](opal::http::RequestHandler next) {
     return [next = std::move(next)](
-               const smithy::http::HttpRequest& request) -> smithy::http::HttpResponse {
+               const opal::http::HttpRequest& request) -> opal::http::HttpResponse {
       const auto start = std::chrono::steady_clock::now();
 
-      smithy::http::HttpResponse response = next(request);
+      opal::http::HttpResponse response = next(request);
 
       const auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start);
       const std::string trace_id =
-          smithy::http::ParseTraceparent(request.headers.Get("traceparent").value_or(""))
-              .value_or(smithy::http::TraceContext{})
+          opal::http::ParseTraceparent(request.headers.Get("traceparent").value_or(""))
+              .value_or(opal::http::TraceContext{})
               .trace_id;
       std::string line = R"({"event":"access")";
       AppendJsonField(line, "service_name", ServiceNameFromEnv());
@@ -245,41 +245,41 @@ std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
   return std::make_shared<OtelHttpMetricsSink>(std::move(metrics));
 }
 
-smithy::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> metrics) {
-  return [metrics = std::move(metrics)](smithy::http::RequestHandler next) {
+opal::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> metrics) {
+  return [metrics = std::move(metrics)](opal::http::RequestHandler next) {
     // Metrics ride the runtime's Observe: microsecond durations (as of
-    // smithy-cpp cfd8299) and start/complete guaranteed to pair even when
+    // opal-cpp cfd8299) and start/complete guaranteed to pair even when
     // dispatch throws. The completion carries the observation's operation —
     // the matched handler the router annotated — which RouteLabelOf turns
     // into the bounded route label (#1305).
-    smithy::server::Middleware observe = smithy::server::Observe(
-        [metrics](const smithy::server::RequestObservation& observation) {
+    opal::server::Middleware observe = opal::server::Observe(
+        [metrics](const opal::server::RequestObservation& observation) {
           metrics->RecordRequestComplete(RouteLabelOf(observation.operation, observation.target),
                                          MethodLabelOf(observation.method), observation.status,
                                          observation.duration);
         },
-        [metrics](const smithy::server::RequestStart& start) {
+        [metrics](const opal::server::RequestStart& start) {
           metrics->RecordRequestStart(MethodLabelOf(start.method));
         });
     return observe(AccessLog()(std::move(next)));
   };
 }
 
-smithy::http::RequestHandler ProductionChain(ChainOptions options,
-                                             smithy::http::RequestHandler handler) {
-  std::vector<smithy::server::Middleware> chain = {ServingObservability(std::move(options.metrics)),
-                                                   smithy::server::HealthEndpoint(kHealthRoute)};
+opal::http::RequestHandler ProductionChain(ChainOptions options,
+                                           opal::http::RequestHandler handler) {
+  std::vector<opal::server::Middleware> chain = {ServingObservability(std::move(options.metrics)),
+                                                 opal::server::HealthEndpoint(kHealthRoute)};
   if (options.allow_request) {
-    chain.push_back(smithy::server::PerClientRateLimit(
+    chain.push_back(opal::server::PerClientRateLimit(
         std::move(options.allow_request), std::move(options.trusted_proxies), options.retry_after));
   }
-  return smithy::server::Chain(std::move(chain), std::move(handler));
+  return opal::server::Chain(std::move(chain), std::move(handler));
 }
 
-std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
+std::function<void(const opal::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
     std::shared_ptr<HttpMetricsSink> metrics) {
   return [metrics = std::move(metrics)](
-             const smithy::http::BeastServerTransport::RejectedRequest& rejected) {
+             const opal::http::BeastServerTransport::RejectedRequest& rejected) {
     // A rejection fires before any routing, so the route is always the
     // sentinel — a 413 flood against distinct paths must not mint a series
     // per path (#1305), and the method is bounded like everywhere else. The
@@ -296,9 +296,8 @@ std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> 
   };
 }
 
-std::function<void(const smithy::http::BeastServerTransport::ConnectionEvent&)>
-ConnectionEventLog() {
-  return [](const smithy::http::BeastServerTransport::ConnectionEvent& event) {
+std::function<void(const opal::http::BeastServerTransport::ConnectionEvent&)> ConnectionEventLog() {
+  return [](const opal::http::BeastServerTransport::ConnectionEvent& event) {
     // One line, no locks beyond the logger's own.
     LOG(WARNING) << "connection_event kind=" << KindName(event.kind)
                  << " peer=" << event.peer_address << " detail=" << event.detail << " elapsed_ms="
@@ -306,16 +305,16 @@ ConnectionEventLog() {
   };
 }
 
-std::optional<smithy::http::TrustedProxies> TrustedProxiesFromEnv() {
+std::optional<opal::http::TrustedProxies> TrustedProxiesFromEnv() {
   if (std::getenv("TRUSTED_PROXY_CIDRS") == nullptr) {
-    return smithy::http::TrustedProxies::None();
+    return opal::http::TrustedProxies::None();
   }
   const std::vector<std::string> cidrs = futility::env::ReadList("TRUSTED_PROXY_CIDRS");
   if (cidrs.empty()) {
     LOG(ERROR) << "TRUSTED_PROXY_CIDRS is set but empty; unset it to serve direct-connect";
     return std::nullopt;
   }
-  auto parsed = smithy::http::TrustedProxies::Parse(cidrs);
+  auto parsed = opal::http::TrustedProxies::Parse(cidrs);
   if (!parsed.ok()) {
     LOG(ERROR) << "Invalid TRUSTED_PROXY_CIDRS: " << parsed.error().message();
     return std::nullopt;

@@ -22,8 +22,8 @@
 #include "domains/platform/libs/futility/otel/otel_provider.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "moonbase/portrait/server.h"
-#include "smithy/http/beast_transport.h"
-#include "smithy/server/middleware.h"
+#include "opal/http/beast_transport.h"
+#include "opal/server/middleware.h"
 
 int main() {
   absl::InitializeLog();
@@ -56,7 +56,7 @@ int main() {
       std::make_shared<futility::rate_limiter::SlidingWindowRateLimiter<std::string>>(
           limiter_config);
 
-  // The reverse-proxy trust boundary (smithy-cpp ADR-0012):
+  // The reverse-proxy trust boundary (opal-cpp ADR-0012):
   // deploy/consolidated/compose.yaml pins Caddy's address into
   // TRUSTED_PROXY_CIDRS. A refused value already logged why.
   auto trusted_proxies = aura::TrustedProxiesFromEnv();
@@ -71,7 +71,7 @@ int main() {
           .retry_after = std::chrono::seconds(60)},
       server.Handler());
 
-  smithy::http::BeastServerTransport::Options options;
+  opal::http::BeastServerTransport::Options options;
   options.address = "0.0.0.0";
   options.port = futility::env::ReadPort(8080);
   // Trace scenes are small JSON (at most 10 spheres); the 64 MiB transport
@@ -82,9 +82,9 @@ int main() {
   // Connections the transport terminates without a response get a WARNING
   // line (ADR-0013).
   options.on_connection_event = aura::ConnectionEventLog();
-  smithy::http::BeastServerTransport transport(options);
+  opal::http::BeastServerTransport transport(options);
 
-  smithy::Outcome<smithy::Unit> started = transport.Start(handler);
+  opal::Outcome<opal::Unit> started = transport.Start(handler);
   if (!started.ok()) {
     LOG(ERROR) << "Failed to start server on " << options.address << ":" << options.port << ": "
                << started.error().message();

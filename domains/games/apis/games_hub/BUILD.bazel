@@ -1,8 +1,8 @@
+load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
-load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
-# The games hub (#79): golf, phase 2 of its rebuild on smithy-cpp event streams (#1187),
+# The games hub (#79): golf, phase 2 of its rebuild on opal-cpp event streams (#1187),
 # the game-agnostic room layer (model/games.smithy, per #79) plus golf's
 # game vocabulary, on the reshaped libs/cards/golf engine.
 smithy_cpp_server_library(
@@ -104,7 +104,7 @@ cc_test(
 )
 
 # Beyoncé Rule contract tests (hub tier; platform tier lives in
-# //domains/platform/libs/aura:smithy_contract_test): the smithy-cpp
+# //domains/platform/libs/aura:smithy_contract_test): the opal-cpp
 # behaviors the hub depends on — RequireOrigin, the in-memory socket pair,
 # SessionRegistry admission/grace/fan-out, and the ADR-0018 JSON
 # text-frame codec production browsers ride — pinned so a pin bump that
@@ -115,11 +115,11 @@ cc_test(
     srcs = ["smithy_contract_test.cc"],
     deps = [
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:eventstream",
-        "@smithy_cpp//runtime:eventstream_json",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:eventstream",
+        "@opal_cpp//runtime:eventstream_json",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:server",
     ],
 )
 
@@ -399,8 +399,8 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/strings",
-        "@smithy_cpp//runtime:eventstream",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:eventstream",
+        "@opal_cpp//runtime:server",
     ],
 )
 
@@ -418,9 +418,9 @@ cc_library(
         ":protocol_input",
         ":ticket_vault",
         "@com_google_absl//absl/status:statusor",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:eventstream",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:eventstream",
+        "@opal_cpp//runtime:server",
     ],
 )
 
@@ -432,7 +432,7 @@ cc_test(
     # Small on purpose (#1241, #1276): normal runtime is ~2s; the tight
     # ceiling turns a recurrence into a loud red. Two hang shapes share
     # the signature — a lost LISTEN/NOTIFY wakeup (fixed in pg::Listener)
-    # and a TearDown End() deadlock on unread wake frames (smithy-cpp#173
+    # and a TearDown End() deadlock on unread wake frames (opal-cpp#173
     # send-before-receive; QuiesceCrossTable still drains for deterministic
     # teardown). Do not raise the ceiling.
     size = "small",
@@ -461,10 +461,10 @@ cc_test(
         "//domains/platform/libs/pg",
         "//domains/platform/libs/pg:listener",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
     ],
 )
 
@@ -498,9 +498,9 @@ cc_test(
         "//domains/platform/libs/futility/otel:metrics",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:eventstream",
-        "@smithy_cpp//runtime:http",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:eventstream",
+        "@opal_cpp//runtime:http",
     ],
 )
 
@@ -523,9 +523,9 @@ cc_test(
         "//domains/platform/libs/futility/otel:metrics",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:eventstream",
-        "@smithy_cpp//runtime:http",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:eventstream",
+        "@opal_cpp//runtime:http",
     ],
 )
 
@@ -553,10 +553,10 @@ cc_test(
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
     ],
 )
 
@@ -588,13 +588,13 @@ cc_test(
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
         # The generated streaming client names BeastWebSocketClient::Dialer()
         # unconditionally, even under an injected dialer (documented ADR-0016
         # cost) — the symbol must link from somewhere.
-        "@smithy_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:http_beast",
     ],
 )
 
@@ -623,10 +623,10 @@ cc_test(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
     ],
 )
 
@@ -649,10 +649,10 @@ cc_test(
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
     ],
 )
 
@@ -678,10 +678,10 @@ cc_test(
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
     ],
 )
 
@@ -706,9 +706,9 @@ cc_test(
         "//domains/platform/libs/futility/otel:metrics",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:eventstream",
-        "@smithy_cpp//runtime:http",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:eventstream",
+        "@opal_cpp//runtime:http",
     ],
 )
 
@@ -739,9 +739,9 @@ cc_binary(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
         "@com_google_absl//absl/log:initialize",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:server",
     ],
 )
 

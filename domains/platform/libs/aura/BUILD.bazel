@@ -7,7 +7,7 @@ exports_files([
     "middleware.h",
 ])
 
-# aura: the serving chain for smithy-cpp services — observability over the
+# aura: the serving chain for opal-cpp services — observability over the
 # shared futility/otel HTTP instruments (plus the access log), health, and
 # optional per-client rate limiting, composed identically in production and
 # in tests (https://github.com/muchq/MoonBase/issues/1184).
@@ -20,9 +20,9 @@ cc_library(
         "//domains/platform/libs/futility/env",
         "//domains/platform/libs/futility/otel:http_metrics",
         "@com_google_absl//absl/log",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:server",
     ],
 )
 
@@ -54,7 +54,7 @@ cc_test(
     ],
 )
 
-# Beyoncé Rule contract tests (platform tier): every smithy-cpp behavior the
+# Beyoncé Rule contract tests (platform tier): every opal-cpp behavior the
 # aura chain — and through it every C++ service — depends on, pinned here so
 # a pin bump that changes one fails with a named contract. Non-Beast deps
 # only, so this runs with no sandbox setup at all — behind a proxy that 403s
@@ -66,9 +66,9 @@ cc_test(
     srcs = ["smithy_contract_test.cc"],
     deps = [
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:server",
     ],
 )
 
@@ -86,8 +86,8 @@ cc_test(
         "@com_google_absl//absl/log:scoped_mock_log",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:server",
     ],
 )

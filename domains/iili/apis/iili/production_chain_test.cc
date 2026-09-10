@@ -25,9 +25,9 @@
 #include "domains/platform/libs/aura/middleware.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "moonbase/iili/server.h"
-#include "smithy/http/beast_transport.h"
-#include "smithy/http/loopback.h"
-#include "smithy/http/socket_transport.h"
+#include "opal/http/beast_transport.h"
+#include "opal/http/loopback.h"
+#include "opal/http/socket_transport.h"
 
 namespace iili {
 namespace {
@@ -77,27 +77,27 @@ class ProductionChainTest : public ::testing::Test {
                 [limiter = limiter_](const std::string& client) { return limiter->allow(client); },
             .retry_after = std::chrono::seconds(60)},
         server_.Handler());
-    loopback_ = std::make_shared<smithy::http::Loopback>();
+    loopback_ = std::make_shared<opal::http::Loopback>();
     const auto started = loopback_->Start(handler_);
     EXPECT_TRUE(started.ok());
   }
 
-  smithy::http::HttpResponse RedirectAs(const std::string& peer) {
-    smithy::http::HttpRequest request;
+  opal::http::HttpResponse RedirectAs(const std::string& peer) {
+    opal::http::HttpRequest request;
     request.method = "GET";
     request.target = "/iili/v1/r/DAA";
     request.peer_address = peer;
     auto response = loopback_->Send(std::move(request));
     EXPECT_TRUE(response.ok());
-    return response.ok() ? *response : smithy::http::HttpResponse{};
+    return response.ok() ? *response : opal::http::HttpResponse{};
   }
 
   std::shared_ptr<RecordingSink> sink_;
   std::shared_ptr<SlidingWindowRateLimiter<std::string>> limiter_;
   std::shared_ptr<FakeUrlStore> store_;
   moonbase::iili::IiliServer server_;
-  smithy::http::RequestHandler handler_;
-  std::shared_ptr<smithy::http::Loopback> loopback_;
+  opal::http::RequestHandler handler_;
+  std::shared_ptr<opal::http::Loopback> loopback_;
 };
 
 TEST_F(ProductionChainTest, ServesRedirectHealthAnd429ThroughTheChain) {
@@ -117,7 +117,7 @@ TEST_F(ProductionChainTest, ServesRedirectHealthAnd429ThroughTheChain) {
 
   // One bucket for both operations: the exhausted client can't shorten
   // either. A per-op split in main.cc must fail here.
-  smithy::http::HttpRequest shorten;
+  opal::http::HttpRequest shorten;
   shorten.method = "POST";
   shorten.target = "/iili/v1/shorten";
   shorten.peer_address = "203.0.113.4";
@@ -128,7 +128,7 @@ TEST_F(ProductionChainTest, ServesRedirectHealthAnd429ThroughTheChain) {
   EXPECT_EQ(blocked->status, 429);
 
   // Health sits before the guard: still served for the exhausted client.
-  smithy::http::HttpRequest health;
+  opal::http::HttpRequest health;
   health.method = "GET";
   health.target = "/health";
   health.peer_address = "203.0.113.4";
@@ -141,7 +141,7 @@ TEST_F(ProductionChainTest, ServesRedirectHealthAnd429ThroughTheChain) {
 }
 
 TEST_F(ProductionChainTest, ShortenCarriesItsOwnRouteLabel) {
-  smithy::http::HttpRequest request;
+  opal::http::HttpRequest request;
   request.method = "POST";
   request.target = "/iili/v1/shorten";
   request.peer_address = "203.0.113.6";
@@ -159,18 +159,18 @@ TEST_F(ProductionChainTest, ShortenCarriesItsOwnRouteLabel) {
 // The 413/400 seam: past 16KB the transport answers; inside it, generated
 // validation does.
 TEST_F(ProductionChainTest, TheTransportAndTheUrlBoundSplitTheOversizedSpace) {
-  smithy::http::BeastServerTransport::Options options;
+  opal::http::BeastServerTransport::Options options;
   options.address = "127.0.0.1";
   options.port = 0;
   options.max_body_bytes = std::size_t{16} * 1024;
   options.on_rejected = aura::RejectionMetrics(sink_);
   options.on_connection_event = aura::ConnectionEventLog();
-  smithy::http::BeastServerTransport transport(options);
+  opal::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(handler_).ok());
 
-  smithy::http::SocketHttpClient raw("127.0.0.1", transport.port());
+  opal::http::SocketHttpClient raw("127.0.0.1", transport.port());
 
-  smithy::http::HttpRequest big_url;
+  opal::http::HttpRequest big_url;
   big_url.method = "POST";
   big_url.target = "/iili/v1/shorten";
   big_url.peer_address = "203.0.113.9";
@@ -186,7 +186,7 @@ TEST_F(ProductionChainTest, TheTransportAndTheUrlBoundSplitTheOversizedSpace) {
   // the client reads the 413 or takes the reset depends on socket
   // buffering (see one_d4_v2's twin of this test).
   const auto completes_before = sink_->completes().size();
-  smithy::http::HttpRequest oversized = big_url;
+  opal::http::HttpRequest oversized = big_url;
   oversized.body = std::string(64 * 1024, 'x');
   const auto rejected = raw.Send(oversized);
   if (rejected.ok()) {
@@ -266,10 +266,10 @@ std::string ContentLengthOf(const std::string& raw) {
 TEST_F(ProductionChainTest, HeadRedirectCarriesTheGetsLengthAndNoBodyOnTheWire) {
   store_->targets["DAA"] = Target{"https://www.example.com/target", kNow + absl::Hours(1)};
 
-  smithy::http::BeastServerTransport::Options options;
+  opal::http::BeastServerTransport::Options options;
   options.address = "127.0.0.1";
   options.port = 0;
-  smithy::http::BeastServerTransport transport(options);
+  opal::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(handler_).ok());
 
   const std::string head = RawRoundTrip(
@@ -298,10 +298,10 @@ TEST_F(ProductionChainTest, HeadRedirectCarriesTheGetsLengthAndNoBodyOnTheWire) 
 // A modeled error serializes on a different branch of the generated server,
 // so the success test does not cover it.
 TEST_F(ProductionChainTest, HeadOnAnUnknownSlugIsFramedLikeItsGetToo) {
-  smithy::http::BeastServerTransport::Options options;
+  opal::http::BeastServerTransport::Options options;
   options.address = "127.0.0.1";
   options.port = 0;
-  smithy::http::BeastServerTransport transport(options);
+  opal::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(handler_).ok());
 
   const std::string head = RawRoundTrip(

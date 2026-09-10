@@ -14,7 +14,7 @@ namespace one_d4_worker {
 
 /// The chess.com archive, as the run wants it.
 ///
-/// Two jobs, both about the seam: smithy::Outcome becomes absl::Status, and
+/// Two jobs, both about the seam: opal::Outcome becomes absl::Status, and
 /// every optional field becomes a present-but-empty one. The run never sees
 /// a nullopt, because "the archive did not say" and "the player has no
 /// rating" are the same row either way.

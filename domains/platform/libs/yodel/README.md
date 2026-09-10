@@ -35,7 +35,7 @@ server_pal (in-memory exporter), and at the recorder seam for futility
 The `route` *value* vocabulary differs per rail because each router
 exposes a different bounded identity: yodel and server_pal emit the
 matched route template ("/games/{id}"), while futility emits the matched
-Smithy operation name ("Trace") — smithy-cpp annotates responses with the
+Smithy operation name ("Trace") — opal-cpp annotates responses with the
 operation, not the URI pattern. All three agree on the literal `/health`
 for the probe endpoint (which prom_proxy's probeFilter subtracts), on the
 `unmatched` sentinel, and on the bounded method rule (the nine RFC 9110

@@ -26,7 +26,7 @@
 #include "domains/graphics/libs/image_core/image_core.h"
 #include "domains/graphics/libs/png_plusplus/png_plusplus.h"
 #include "moonbase/portrait/client.h"
-#include "smithy/core/error.h"
+#include "opal/core/error.h"
 
 namespace {
 
@@ -40,7 +40,7 @@ using portrait::test_support::LoopbackHarness;
 using portrait::test_support::ValidTraceInput;
 using portrait::test_support::ValidTraceJson;
 
-bool LooksLikePng(const smithy::Blob& blob) { return pngpp::isPng(blob.data(), blob.size()); }
+bool LooksLikePng(const opal::Blob& blob) { return pngpp::isPng(blob.data(), blob.size()); }
 
 class SmithyHandlerTest : public ::testing::Test {
  protected:
@@ -140,27 +140,27 @@ INSTANTIATE_TEST_SUITE_P(
 struct MappingCase {
   absl::StatusCode code;
   const char* expected_error_code;
-  smithy::ErrorKind expected_kind;
+  opal::ErrorKind expected_kind;
 };
 
 // The canonical (non-Ok) codes, mirroring gRPC's list.
 constexpr MappingCase kMappingCases[] = {
-    {absl::StatusCode::kCancelled, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kUnknown, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kInvalidArgument, "InvalidSceneError", smithy::ErrorKind::kModeled},
-    {absl::StatusCode::kDeadlineExceeded, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kNotFound, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kAlreadyExists, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kPermissionDenied, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kResourceExhausted, "RenderCapacityError", smithy::ErrorKind::kModeled},
-    {absl::StatusCode::kFailedPrecondition, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kAborted, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kOutOfRange, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kUnimplemented, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kInternal, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kUnavailable, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kDataLoss, "UnknownError", smithy::ErrorKind::kUnknown},
-    {absl::StatusCode::kUnauthenticated, "UnknownError", smithy::ErrorKind::kUnknown},
+    {absl::StatusCode::kCancelled, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kUnknown, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kInvalidArgument, "InvalidSceneError", opal::ErrorKind::kModeled},
+    {absl::StatusCode::kDeadlineExceeded, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kNotFound, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kAlreadyExists, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kPermissionDenied, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kResourceExhausted, "RenderCapacityError", opal::ErrorKind::kModeled},
+    {absl::StatusCode::kFailedPrecondition, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kAborted, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kOutOfRange, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kUnimplemented, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kInternal, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kUnavailable, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kDataLoss, "UnknownError", opal::ErrorKind::kUnknown},
+    {absl::StatusCode::kUnauthenticated, "UnknownError", opal::ErrorKind::kUnknown},
 };
 
 class StatusMappingTest : public ::testing::TestWithParam<MappingCase> {};
@@ -168,7 +168,7 @@ class StatusMappingTest : public ::testing::TestWithParam<MappingCase> {};
 TEST_P(StatusMappingTest, MapsToTheDeclaredErrorSpace) {
   const absl::Status status(GetParam().code, "some service message");
 
-  const smithy::Error error = portrait::ToSmithyError(status);
+  const opal::Error error = portrait::ToSmithyError(status);
 
   EXPECT_EQ(error.code(), GetParam().expected_error_code);
   EXPECT_EQ(error.kind(), GetParam().expected_kind);
@@ -194,7 +194,7 @@ TEST(StatusMappingTest, EveryStatusCodeHasARow) {
 }
 
 TEST(StatusMappingTest, ResourceExhaustedIsRetryableAndCarriesItsTypedDetail) {
-  const smithy::Error error =
+  const opal::Error error =
       portrait::ToSmithyError(absl::ResourceExhaustedError("render exceeded available memory"));
 
   EXPECT_TRUE(error.retryable());
@@ -208,18 +208,18 @@ TEST(StatusMappingTest, ResourceExhaustedIsRetryableAndCarriesItsTypedDetail) {
 // unmodeled failure that arrived as kModeled would therefore be both the
 // wrong status and a leak.
 TEST(StatusMappingTest, UnmappedStatusesAreNotModeled) {
-  const smithy::Error error =
+  const opal::Error error =
       portrait::ToSmithyError(absl::UnavailableError("upstream 10.0.0.5 refused the connection"));
 
-  EXPECT_EQ(error.kind(), smithy::ErrorKind::kUnknown);
-  EXPECT_NE(error.kind(), smithy::ErrorKind::kModeled);
+  EXPECT_EQ(error.kind(), opal::ErrorKind::kUnknown);
+  EXPECT_NE(error.kind(), opal::ErrorKind::kModeled);
 }
 
 // ---------------------------------------------------------------------------
 // Server-fault paths end to end: a render that fails, through the real
 // handler, the generated server, and the loopback transport.
 //
-// Loopback runs the handler through the same smithy::http::InvokeHandlerGuarded
+// Loopback runs the handler through the same opal::http::InvokeHandlerGuarded
 // that the Beast transport uses, so what these observe is what a deployed
 // server produces — no boost needed to check it.
 

@@ -538,10 +538,10 @@ cc_test(
         "//domains/games/libs/chess_com_cpp:chess_com_smithy_server",
         "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:server",
     ],
 )
 

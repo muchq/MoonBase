@@ -1,7 +1,7 @@
 #ifndef DOMAINS_PLATFORM_LIBS_AURA_MIDDLEWARE_H
 #define DOMAINS_PLATFORM_LIBS_AURA_MIDDLEWARE_H
 
-// aura: the serving chain for smithy-cpp services — observability (the
+// aura: the serving chain for opal-cpp services — observability (the
 // shared http_server_* instruments plus an access log), health, and
 // optional per-client rate limiting, composed the same way in production
 // and in tests.
@@ -12,9 +12,9 @@
 #include <optional>
 #include <string>
 
-#include "smithy/http/beast_transport.h"
-#include "smithy/http/forwarded.h"
-#include "smithy/server/middleware.h"
+#include "opal/http/beast_transport.h"
+#include "opal/http/forwarded.h"
+#include "opal/server/middleware.h"
 
 namespace futility::otel {
 class HttpMetricsManager;
@@ -77,10 +77,10 @@ std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
 ///   - one access-log line per request: a single JSON object in the
 ///     metrics vocabulary (#1459) — service_name, http_method, route,
 ///     target, status, duration_us, response_bytes, trace_id (the W3C id
-///     minted or joined at transport ingress, smithy-cpp ADR-0011) and
+///     minted or joined at transport ingress, opal-cpp ADR-0011) and
 ///     x_forwarded_for. Field spelling is pinned cross-rail by
 ///     //domains/platform/libs/otel_contract.
-smithy::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> metrics);
+opal::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> metrics);
 
 /// The production middleware chain around a generated server's handler,
 /// shared between service mains and their middleware tests so both exercise
@@ -92,35 +92,34 @@ smithy::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink>
 struct ChainOptions {
   std::shared_ptr<HttpMetricsSink> metrics;
   std::function<bool(const std::string& client)> allow_request = nullptr;
-  smithy::http::TrustedProxies trusted_proxies = smithy::http::TrustedProxies::None();
+  opal::http::TrustedProxies trusted_proxies = opal::http::TrustedProxies::None();
   std::chrono::seconds retry_after = std::chrono::seconds(60);
 };
-smithy::http::RequestHandler ProductionChain(ChainOptions options,
-                                             smithy::http::RequestHandler handler);
+opal::http::RequestHandler ProductionChain(ChainOptions options,
+                                           opal::http::RequestHandler handler);
 
 /// ChainOptions::trusted_proxies from TRUSTED_PROXY_CIDRS, single-sourced
 /// because every service behind the same Caddy must read the trust
-/// boundary identically (smithy-cpp ADR-0012; the deployment pins Caddy's
+/// boundary identically (opal-cpp ADR-0012; the deployment pins Caddy's
 /// address in deploy/consolidated/compose.yaml). Unset is the deliberate
 /// direct-connect statement (TrustedProxies::None()); set-but-empty or
 /// malformed logs the refusal and returns nullopt — fail startup rather
 /// than silently collapsing proxied traffic onto one client key.
-std::optional<smithy::http::TrustedProxies> TrustedProxiesFromEnv();
+std::optional<opal::http::TrustedProxies> TrustedProxiesFromEnv();
 
 /// Sink callback for BeastServerTransport::Options::on_rejected, so the
 /// 413/431 rejections the transport writes before any handler chain exists
 /// land in the same instruments as everything else (an over-limit flood
 /// would otherwise be invisible to metrics).
-std::function<void(const smithy::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
+std::function<void(const opal::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
     std::shared_ptr<HttpMetricsSink> metrics);
 
 /// Log-only observer for BeastServerTransport::Options::on_connection_event
-/// (smithy-cpp ADR-0013, kinds in beast_transport.h): each connection the
+/// (opal-cpp ADR-0013, kinds in beast_transport.h): each connection the
 /// transport terminates without delivering a response gets one WARNING
 /// line. Log-only because these are connections, not requests — mapping
 /// them into the request-shaped instruments would distort request counts.
-std::function<void(const smithy::http::BeastServerTransport::ConnectionEvent&)>
-ConnectionEventLog();
+std::function<void(const opal::http::BeastServerTransport::ConnectionEvent&)> ConnectionEventLog();
 
 }  // namespace aura
 

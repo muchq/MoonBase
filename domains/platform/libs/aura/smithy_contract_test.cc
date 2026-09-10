@@ -1,4 +1,4 @@
-// Beyoncé Rule for smithy-cpp (if we depend on it, we put a test on it):
+// Beyoncé Rule for opal-cpp (if we depend on it, we put a test on it):
 // every upstream behavior the aura serving chain — and through it every
 // C++ service (portrait, games_hub) — relies on, pinned as a MoonBase-side
 // contract test. A pin bump that changes any of these fails HERE with a
@@ -6,7 +6,7 @@
 // grep through upstream diffs (the TrustedProxies constructor removal
 // that motivated this file arrived exactly that way).
 //
-// Deliberately depends only on smithy-cpp's non-Beast targets, so it runs
+// Deliberately depends only on opal-cpp's non-Beast targets, so it runs
 // with no sandbox setup at all — scripts/make-git-overrides.sh unblocks the
 // Beast dep closure behind a proxy that 403s GitHub source archives, but
 // this file should not need anyone to have run it. The Beast transport's
@@ -23,22 +23,22 @@
 #include <utility>
 #include <vector>
 
-#include "smithy/core/error.h"
-#include "smithy/core/outcome.h"
-#include "smithy/http/forwarded.h"
-#include "smithy/http/loopback.h"
-#include "smithy/http/message.h"
-#include "smithy/http/trace_context.h"
-#include "smithy/http/transport.h"
-#include "smithy/server/middleware.h"
+#include "opal/core/error.h"
+#include "opal/core/outcome.h"
+#include "opal/http/forwarded.h"
+#include "opal/http/loopback.h"
+#include "opal/http/message.h"
+#include "opal/http/trace_context.h"
+#include "opal/http/transport.h"
+#include "opal/server/middleware.h"
 
 namespace {
 
-using smithy::http::DeriveClient;
-using smithy::http::HttpRequest;
-using smithy::http::HttpResponse;
-using smithy::http::RequestHandler;
-using smithy::http::TrustedProxies;
+using opal::http::DeriveClient;
+using opal::http::HttpRequest;
+using opal::http::HttpResponse;
+using opal::http::RequestHandler;
+using opal::http::TrustedProxies;
 
 HttpRequest RequestFrom(const std::string& peer, const std::string& xff = "") {
   HttpRequest request;
@@ -84,13 +84,13 @@ TEST(DeriveClientContract, DirectPeerAndUntrustedHeaderIgnored) {
 
   auto direct = DeriveClient(RequestFrom("203.0.113.9"), none);
   EXPECT_EQ(direct.address, "203.0.113.9");
-  EXPECT_EQ(direct.source, smithy::http::DerivedClient::Source::kDirectPeer);
+  EXPECT_EQ(direct.source, opal::http::DerivedClient::Source::kDirectPeer);
 
   // A spoofed X-Forwarded-For from an untrusted peer must not move the
   // rate-limit key.
   auto spoofed = DeriveClient(RequestFrom("203.0.113.9", "198.51.100.7"), none);
   EXPECT_EQ(spoofed.address, "203.0.113.9");
-  EXPECT_EQ(spoofed.source, smithy::http::DerivedClient::Source::kUntrustedHeaderIgnored);
+  EXPECT_EQ(spoofed.source, opal::http::DerivedClient::Source::kUntrustedHeaderIgnored);
 }
 
 TEST(DeriveClientContract, ForwardedWalkEndsOnClientEntryAndTrustedTier) {
@@ -101,22 +101,22 @@ TEST(DeriveClientContract, ForwardedWalkEndsOnClientEntryAndTrustedTier) {
   auto forwarded =
       DeriveClient(RequestFrom("172.28.0.2", "198.51.100.7, 172.28.0.2"), proxies.value());
   EXPECT_EQ(forwarded.address, "198.51.100.7");
-  EXPECT_EQ(forwarded.source, smithy::http::DerivedClient::Source::kForwarded);
+  EXPECT_EQ(forwarded.source, opal::http::DerivedClient::Source::kForwarded);
 
   // No header from inside the trust set: the walk never leaves it.
   auto tier = DeriveClient(RequestFrom("172.28.0.2"), proxies.value());
-  EXPECT_EQ(tier.source, smithy::http::DerivedClient::Source::kTrustedTier);
+  EXPECT_EQ(tier.source, opal::http::DerivedClient::Source::kTrustedTier);
 
   // Loopback/hand-driven requests have no peer at all.
   auto unknown = DeriveClient(RequestFrom(""), proxies.value());
-  EXPECT_EQ(unknown.source, smithy::http::DerivedClient::Source::kUnknown);
+  EXPECT_EQ(unknown.source, opal::http::DerivedClient::Source::kUnknown);
 }
 
 // --- The middleware chain aura::ProductionChain composes. ---------------
 
 TEST(MiddlewareContract, ChainAppliesOutermostFirst) {
   std::vector<std::string> order;
-  auto tag = [&order](std::string name) -> smithy::server::Middleware {
+  auto tag = [&order](std::string name) -> opal::server::Middleware {
     return [&order, name = std::move(name)](RequestHandler next) -> RequestHandler {
       return [&order, name, next = std::move(next)](const HttpRequest& request) {
         order.push_back(name);
@@ -124,8 +124,8 @@ TEST(MiddlewareContract, ChainAppliesOutermostFirst) {
       };
     };
   };
-  auto handler = smithy::server::Chain({tag("outer"), tag("inner")},
-                                       [](const HttpRequest&) { return HttpResponse{}; });
+  auto handler = opal::server::Chain({tag("outer"), tag("inner")},
+                                     [](const HttpRequest&) { return HttpResponse{}; });
 
   handler(HttpRequest{});
   ASSERT_EQ(order.size(), 2u);
@@ -135,11 +135,11 @@ TEST(MiddlewareContract, ChainAppliesOutermostFirst) {
 
 TEST(MiddlewareContract, HealthEndpointInterceptsItsPathOnlyAndPassesOthers) {
   bool reached = false;
-  auto handler = smithy::server::Chain({smithy::server::HealthEndpoint("/health")},
-                                       [&reached](const HttpRequest&) {
-                                         reached = true;
-                                         return HttpResponse{.status = 418};
-                                       });
+  auto handler = opal::server::Chain({opal::server::HealthEndpoint("/health")},
+                                     [&reached](const HttpRequest&) {
+                                       reached = true;
+                                       return HttpResponse{.status = 418};
+                                     });
 
   HttpRequest health;
   health.target = "/health";
@@ -158,10 +158,10 @@ TEST(MiddlewareContract, PerClientRateLimitKeysOnDerivedClientAnd429sWithRetryAf
 
   // Deny exactly the derived client, not the proxy: proves the limiter
   // buckets on DeriveClient's answer (what aura's 429s key on).
-  auto limited = smithy::server::PerClientRateLimit(
+  auto limited = opal::server::PerClientRateLimit(
       [](const std::string& client) { return client != "198.51.100.7"; }, proxies.value(),
       std::chrono::seconds(60));
-  auto handler = smithy::server::Chain(
+  auto handler = opal::server::Chain(
       {limited}, [](const HttpRequest&) { return HttpResponse{.status = 200}; });
 
   HttpResponse denied = handler(RequestFrom("172.28.0.2", "198.51.100.7, 172.28.0.2"));
@@ -175,15 +175,15 @@ TEST(MiddlewareContract, PerClientRateLimitKeysOnDerivedClientAnd429sWithRetryAf
 TEST(MiddlewareContract, ObservePairsStartAndCompleteWithStatusAndDuration) {
   std::atomic<int> starts{0};
   std::atomic<int> completes{0};
-  smithy::server::RequestObservation seen;
+  opal::server::RequestObservation seen;
 
-  auto observe = smithy::server::Observe(
-      [&completes, &seen](const smithy::server::RequestObservation& observation) {
+  auto observe = opal::server::Observe(
+      [&completes, &seen](const opal::server::RequestObservation& observation) {
         completes++;
         seen = observation;
       },
-      [&starts](const smithy::server::RequestStart&) { starts++; });
-  auto handler = smithy::server::Chain(
+      [&starts](const opal::server::RequestStart&) { starts++; });
+  auto handler = opal::server::Chain(
       {observe}, [](const HttpRequest&) -> HttpResponse { return HttpResponse{.status = 204}; });
 
   HttpRequest request;
@@ -203,18 +203,18 @@ TEST(MiddlewareContract, ObservePairsStartAndCompleteWithStatusAndDuration) {
 
 TEST(TraceContextContract, ParsesW3CTraceparentAndRejectsGarbage) {
   auto parsed =
-      smithy::http::ParseTraceparent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+      opal::http::ParseTraceparent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
   ASSERT_TRUE(parsed.has_value());
   EXPECT_EQ(parsed->trace_id, "0af7651916cd43dd8448eb211c80319c");
   EXPECT_EQ(parsed->parent_id, "b7ad6b7169203331");
   EXPECT_TRUE(parsed->sampled);
 
-  EXPECT_FALSE(smithy::http::ParseTraceparent("").has_value());
-  EXPECT_FALSE(smithy::http::ParseTraceparent("not-a-traceparent").has_value());
+  EXPECT_FALSE(opal::http::ParseTraceparent("").has_value());
+  EXPECT_FALSE(opal::http::ParseTraceparent("not-a-traceparent").has_value());
 
   // Round trip: what we format, we parse (the transport guard mints these).
-  const smithy::http::TraceContext minted = smithy::http::GenerateTraceContext();
-  auto reparsed = smithy::http::ParseTraceparent(smithy::http::FormatTraceparent(minted));
+  const opal::http::TraceContext minted = opal::http::GenerateTraceContext();
+  auto reparsed = opal::http::ParseTraceparent(opal::http::FormatTraceparent(minted));
   ASSERT_TRUE(reparsed.has_value());
   EXPECT_EQ(reparsed->trace_id, minted.trace_id);
 }
@@ -222,7 +222,7 @@ TEST(TraceContextContract, ParsesW3CTraceparentAndRejectsGarbage) {
 // --- Message shapes handlers construct all over MoonBase. ---------------
 
 TEST(MessageContract, HeadersAreCaseInsensitiveFirstValueWithSetReplaceAddAppend) {
-  smithy::http::Headers headers;
+  opal::http::Headers headers;
   headers.Add("X-Forwarded-For", "a");
   headers.Add("x-forwarded-for", "b");
 
@@ -250,7 +250,7 @@ TEST(MessageContract, PartialAggregateInitializationStaysValid) {
 // --- Loopback: the in-memory transport every middleware test stands on. -
 
 TEST(LoopbackContract, RoundTripsNoHandlerErrorAndContainsHandlerFailure) {
-  smithy::http::Loopback loopback;
+  opal::http::Loopback loopback;
 
   auto unstarted = loopback.Send(HttpRequest{});
   EXPECT_FALSE(unstarted.ok());
@@ -282,11 +282,11 @@ TEST(LoopbackContract, RoundTripsNoHandlerErrorAndContainsHandlerFailure) {
 // --- Outcome/Error idioms used at every boundary. ------------------------
 
 TEST(OutcomeContract, OkErrorAndMoveValueSemantics) {
-  smithy::Outcome<std::string> good = std::string("value");
+  opal::Outcome<std::string> good = std::string("value");
   ASSERT_TRUE(good.ok());
   EXPECT_EQ(std::move(good).value(), "value");
 
-  smithy::Outcome<std::string> bad = smithy::Error::Validation("nope");
+  opal::Outcome<std::string> bad = opal::Error::Validation("nope");
   ASSERT_FALSE(bad.ok());
   EXPECT_EQ(bad.error().message(), "nope");
 }
