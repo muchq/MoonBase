@@ -214,6 +214,12 @@ opal::server::Middleware AccessLog() {
 
       opal::http::HttpResponse response = next(request);
 
+      // Health probes stay in the metrics (prom_proxy subtracts exactly that
+      // route) but out of the log: a probe every few seconds per replica
+      // would otherwise be most of every service's log volume.
+      const std::string route = RouteLabelOf(response.operation, request.target);
+      if (route == kHealthRoute) return response;
+
       const auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start);
       const std::string trace_id =
@@ -223,7 +229,7 @@ opal::server::Middleware AccessLog() {
       std::string line = R"({"event":"access")";
       AppendJsonField(line, "service_name", ServiceNameFromEnv());
       AppendJsonField(line, "http_method", MethodLabelOf(request.method));
-      AppendJsonField(line, "route", RouteLabelOf(response.operation, request.target));
+      AppendJsonField(line, "route", route);
       AppendJsonField(line, "target", Capped(request.target, 2048));
       AppendJsonNumber(line, "status", response.status);
       AppendJsonNumber(line, "duration_us", duration_us.count());

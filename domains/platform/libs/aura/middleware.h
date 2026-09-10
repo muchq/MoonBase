@@ -74,7 +74,8 @@ std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
 ///     histogram at completion, labeled with the bounded route — the matched
 ///     Smithy operation name from the generated router, kHealthRoute for the
 ///     endpoint ProductionChain composes, kUnmatchedRoute for everything else
-///   - one access-log line per request: a single JSON object in the
+///   - one access-log line per request except health probes, which are
+///     metered but not logged: a single JSON object in the
 ///     metrics vocabulary (#1459) — service_name, http_method, route,
 ///     target, status, duration_us, response_bytes, trace_id (the W3C id
 ///     minted or joined at transport ingress, opal-cpp ADR-0011) and

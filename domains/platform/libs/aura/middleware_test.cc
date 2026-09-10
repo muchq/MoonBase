@@ -225,6 +225,19 @@ TEST_F(AuraMiddlewareTest, CompletionCarriesTheMatchedOperationAsItsRoute) {
   EXPECT_GE(completes[0].duration.count(), 0);
 }
 
+// Probes are metered (above) but never logged: with a probe every few
+// seconds per replica the access log would be mostly health lines.
+TEST_F(AuraMiddlewareTest, HealthProbesAreNotAccessLogged) {
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log, Log(testing::_, testing::_, testing::HasSubstr("\"event\":\"access\"")))
+      .Times(0);
+  log.StartCapturingLogs();
+  EXPECT_EQ(Send("GET", "/health").status, 200);
+  EXPECT_EQ(Send("GET", "/health?probe=1").status, 200);
+  log.StopCapturingLogs();
+  EXPECT_EQ(sink_->completes().size(), 2u);
+}
+
 TEST_F(AuraMiddlewareTest, QueryStringDoesNotDefeatTheHealthRouteMapping) {
   Send("GET", "/health?probe=1");
   const auto completes = sink_->completes();
