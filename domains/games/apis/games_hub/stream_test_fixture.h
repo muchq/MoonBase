@@ -1,7 +1,7 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_STREAM_TEST_FIXTURE_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_STREAM_TEST_FIXTURE_H
 
-// The in-memory e2e fixture, following smithy-cpp's server-guide recipe
+// The in-memory e2e fixture, following opal-cpp's server-guide recipe
 // (and examples/chat/stream_test_fixture.h): a generated GamesHubClient
 // whose websocket_dialer hands back one end of an InMemoryWebSocketPair,
 // serving the other end through the generated StreamRouter's session seam
@@ -37,12 +37,12 @@
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "moonbase/games/client.h"
 #include "moonbase/games/server.h"
-#include "smithy/client/config.h"
-#include "smithy/core/outcome.h"
-#include "smithy/http/loopback.h"
-#include "smithy/http/message.h"
-#include "smithy/http/websocket.h"
-#include "smithy/http/websocket_pair.h"
+#include "opal/client/config.h"
+#include "opal/core/outcome.h"
+#include "opal/http/loopback.h"
+#include "opal/http/message.h"
+#include "opal/http/websocket.h"
+#include "opal/http/websocket_pair.h"
 
 namespace games_hub {
 
@@ -454,16 +454,16 @@ class GamesHubStreamFixture : public testing::Test {
     handler_ = std::make_shared<GamesHubHandler>(vault_, ids_, golf_);
     server_ = std::make_unique<moonbase::games::GamesHubServer>(handler_);
 
-    auto loopback = std::make_shared<smithy::http::Loopback>();
+    auto loopback = std::make_shared<opal::http::Loopback>();
     ASSERT_TRUE(loopback->Start(server_->Handler()).ok());
 
-    smithy::ClientConfig config;
+    opal::ClientConfig config;
     config.retry.max_attempts = 1;
     config.http_client = loopback;
-    config.websocket_dialer = [this](const smithy::http::WebSocketDialRequest& request)
-        -> smithy::Outcome<std::shared_ptr<smithy::http::WebSocket>> {
-      auto [near, far] = smithy::http::InMemoryWebSocketPair::Create();
-      smithy::http::HttpRequest upgrade;
+    config.websocket_dialer = [this](const opal::http::WebSocketDialRequest& request)
+        -> opal::Outcome<std::shared_ptr<opal::http::WebSocket>> {
+      auto [near, far] = opal::http::InMemoryWebSocketPair::Create();
+      opal::http::HttpRequest upgrade;
       upgrade.method = "GET";
       upgrade.target = request.target;
       upgrade.headers = request.headers;
@@ -669,7 +669,7 @@ class GamesHubStreamFixture : public testing::Test {
   std::shared_ptr<GamesHubHandler> handler_;
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::unique_ptr<moonbase::games::GamesHubClient> client_;
-  std::vector<std::shared_ptr<smithy::http::WebSocket>> sessions_;
+  std::vector<std::shared_ptr<opal::http::WebSocket>> sessions_;
 };
 
 }  // namespace games_hub

@@ -39,14 +39,14 @@ equals() {
 # to notice.
 pinned_at() {
   cat > "$1" <<FIXTURE
-bazel_dep(name = "smithy_cpp", version = "0.0.0")
+bazel_dep(name = "opal_cpp", version = "0.0.0")
 
 archive_override(
-    module_name = "smithy_cpp",
+    module_name = "opal_cpp",
     integrity = "sha256-deadbeef",
-    strip_prefix = "smithy-cpp-$2",
+    strip_prefix = "opal-cpp-$2",
     urls = [
-        "https://github.com/muchq/smithy-cpp/archive/$2.tar.gz",
+        "https://github.com/muchq/opal-cpp/archive/$2.tar.gz",
     ],
 )
 FIXTURE
@@ -62,7 +62,7 @@ echo "make-git-overrides lib"
 # ------------------------------------------------------- reading the pins
 
 equals "reads one pin per archive_override" \
-  "smithy_cpp	https://github.com/muchq/smithy-cpp/archive/$OLD_SHA.tar.gz	smithy-cpp-$OLD_SHA" \
+  "opal_cpp	https://github.com/muchq/opal-cpp/archive/$OLD_SHA.tar.gz	opal-cpp-$OLD_SHA" \
   "$(archive_override_pins "$WORK/old.MODULE.bazel")"
 
 # A file with no archive_override must read as "no pins", and must not be
@@ -82,11 +82,11 @@ equals "reads pins across several files" "2" \
 
 # ------------------------------------------------------- deciding the clone
 
-equals "takes owner/repo from the url" "muchq/smithy-cpp" \
-  "$(override_repo "https://github.com/muchq/smithy-cpp/archive/$OLD_SHA.tar.gz")"
+equals "takes owner/repo from the url" "muchq/opal-cpp" \
+  "$(override_repo "https://github.com/muchq/opal-cpp/archive/$OLD_SHA.tar.gz")"
 
 equals "takes a commit ref from the url" "$OLD_SHA" \
-  "$(override_ref "https://github.com/muchq/smithy-cpp/archive/$OLD_SHA.tar.gz")"
+  "$(override_ref "https://github.com/muchq/opal-cpp/archive/$OLD_SHA.tar.gz")"
 
 equals "takes a tag ref from the url" "v1.2.3" \
   "$(override_ref "https://github.com/some/dep/archive/refs/tags/v1.2.3.tar.gz")"
@@ -94,7 +94,7 @@ equals "takes a tag ref from the url" "v1.2.3" \
 # strip_prefix's first component is the wrapper directory a clone does not
 # have; anything after it is a real subdirectory of the repo.
 equals "drops the archive wrapper directory" "" \
-  "$(override_subdir "smithy-cpp-$OLD_SHA")"
+  "$(override_subdir "opal-cpp-$OLD_SHA")"
 equals "keeps a real subdirectory" "src" \
   "$(override_subdir "opencensus-proto-0.4.1/src")"
 
@@ -105,7 +105,7 @@ check_blocked() {
   equals "$1" "$3" "$got"
 }
 check_blocked "treats a source archive as blocked" \
-  "https://github.com/muchq/smithy-cpp/archive/$OLD_SHA.tar.gz" blocked
+  "https://github.com/muchq/opal-cpp/archive/$OLD_SHA.tar.gz" blocked
 check_blocked "treats a release asset as allowed" \
   "https://github.com/some/dep/releases/download/v1/dep.tar.gz" allowed
 
@@ -113,10 +113,10 @@ check_blocked "treats a release asset as allowed" \
 
 read -r _ old_url _ < <(archive_override_pins "$WORK/old.MODULE.bazel")
 read -r _ new_url _ < <(archive_override_pins "$WORK/new.MODULE.bazel")
-OLD_DIR=$(override_dir /dest smithy_cpp "$(override_ref "$old_url")")
-NEW_DIR=$(override_dir /dest smithy_cpp "$(override_ref "$new_url")")
+OLD_DIR=$(override_dir /dest opal_cpp "$(override_ref "$old_url")")
+NEW_DIR=$(override_dir /dest opal_cpp "$(override_ref "$new_url")")
 
-equals "the clone directory names the ref" "/dest/smithy_cpp-$OLD_SHA" "$OLD_DIR"
+equals "the clone directory names the ref" "/dest/opal_cpp-$OLD_SHA" "$OLD_DIR"
 if [ "$OLD_DIR" != "$NEW_DIR" ]; then
   pass "a bumped pin picks a different clone directory"
 else
@@ -126,7 +126,7 @@ fi
 # The other half of the same property: an unchanged pin must reuse its clone,
 # or every run re-fetches every module.
 equals "an unchanged pin reuses its clone directory" "$OLD_DIR" \
-  "$(override_dir /dest smithy_cpp "$(override_ref "$old_url")")"
+  "$(override_dir /dest opal_cpp "$(override_ref "$old_url")")"
 
 if [ "$FAILURES" -eq 0 ]; then
   echo "all checks passed"

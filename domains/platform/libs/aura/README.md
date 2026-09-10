@@ -1,7 +1,7 @@
 # Aura
 
 The serving-tier components for C++ services on
-[smithy-cpp](https://github.com/muchq/smithy-cpp): observability, health,
+[opal-cpp](https://github.com/muchq/opal-cpp): observability, health,
 per-client rate limiting, and caching, composed the same way in production
 and in tests.
 
@@ -25,7 +25,7 @@ without `scripts/make-git-overrides.sh`.
     (`futility/otel:http_metrics`) plus one access-log line per request —
     a single JSON object carrying the metrics vocabulary plus the raw
     target and the W3C `trace_id` from the request's traceparent
-    (smithy-cpp ADR-0011). The object rides inside absl's stderr record,
+    (opal-cpp ADR-0011). The object rides inside absl's stderr record,
     so the shipped line is `I0831 ... middleware.cc:NNN] {...}` — a
     consumer strips the prefix up to `] ` before parsing. The route label is bounded (#1305): the matched Smithy
     operation name the generated router stamps on its responses,
@@ -59,7 +59,7 @@ auto handler = aura::ProductionChain(
         .trusted_proxies = trusted_proxies},
     server.Handler());
 
-smithy::http::BeastServerTransport::Options options;
+opal::http::BeastServerTransport::Options options;
 options.on_rejected = aura::RejectionMetrics(metrics);
 options.on_connection_event = aura::ConnectionEventLog();
 ```

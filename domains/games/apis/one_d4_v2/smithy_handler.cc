@@ -38,19 +38,18 @@ gen::AnalyzedOccurrence ToWire(const one_d4::MotifOccurrence& occurrence) {
 
 }  // namespace
 
-smithy::Error ToSmithyError(const absl::Status& status) {
+opal::Error ToSmithyError(const absl::Status& status) {
   const std::string message(status.message());
   if (status.code() == absl::StatusCode::kInvalidArgument) {
-    smithy::Error error = smithy::Error::Modeled("InvalidPgnError", message);
+    opal::Error error = opal::Error::Modeled("InvalidPgnError", message);
     error.set_detail(gen::InvalidPgnError{.message = message});
     return error;
   }
-  return smithy::Error::Unknown(message);
+  return opal::Error::Unknown(message);
 }
 
-smithy::Outcome<gen::AnalyzeOutput> SmithyAnalyzeHandler::Analyze(
-    const gen::AnalyzeInput& input,
-    [[maybe_unused]] const smithy::server::RequestContext& context) {
+opal::Outcome<gen::AnalyzeOutput> SmithyAnalyzeHandler::Analyze(
+    const gen::AnalyzeInput& input, [[maybe_unused]] const opal::server::RequestContext& context) {
   const absl::StatusOr<Analysis> analysis = one_d4_v2::Analyze(input.pgn);
   if (!analysis.ok()) {
     return ToSmithyError(analysis.status());

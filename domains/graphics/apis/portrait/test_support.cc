@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 
-#include "smithy/client/config.h"
+#include "opal/client/config.h"
 
 namespace portrait::test_support {
 
@@ -49,7 +49,7 @@ LoopbackHarness::LoopbackHarness(std::shared_ptr<moonbase::portrait::PortraitHan
                                  Wrap wrap)
     : server_(std::make_unique<moonbase::portrait::PortraitServer>(std::move(handler))) {
   handler_ = wrap ? wrap(server_->Handler()) : server_->Handler();
-  loopback_ = std::make_shared<smithy::http::Loopback>();
+  loopback_ = std::make_shared<opal::http::Loopback>();
   const auto started = loopback_->Start(handler_);
   if (!started.ok()) {
     ADD_FAILURE() << "loopback start failed: " << started.error().message();
@@ -57,14 +57,14 @@ LoopbackHarness::LoopbackHarness(std::shared_ptr<moonbase::portrait::PortraitHan
 }
 
 moonbase::portrait::PortraitClient LoopbackHarness::MakeClient() {
-  smithy::ClientConfig config;
+  opal::ClientConfig config;
   config.http_client = loopback_;
   auto client = moonbase::portrait::PortraitClient::Create(std::move(config));
   EXPECT_TRUE(client.ok()) << client.error().message();
   return std::move(*client);
 }
 
-smithy::http::HttpResponse LoopbackHarness::Send(smithy::http::HttpRequest request) {
+opal::http::HttpResponse LoopbackHarness::Send(opal::http::HttpRequest request) {
   auto response = loopback_->Send(std::move(request));
   if (!response.ok()) {
     ADD_FAILURE() << "loopback send failed: " << response.error().message();
@@ -73,9 +73,9 @@ smithy::http::HttpResponse LoopbackHarness::Send(smithy::http::HttpRequest reque
   return *response;
 }
 
-smithy::http::HttpResponse LoopbackHarness::PostTrace(const std::string& body,
-                                                      const std::string& content_type) {
-  smithy::http::HttpRequest request;
+opal::http::HttpResponse LoopbackHarness::PostTrace(const std::string& body,
+                                                    const std::string& content_type) {
+  opal::http::HttpRequest request;
   request.method = "POST";
   request.target = "/portrait/v1/trace";
   request.headers.Set("content-type", content_type);

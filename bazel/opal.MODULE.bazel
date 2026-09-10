@@ -1,0 +1,20 @@
+bazel_dep(name = "opal_cpp", version = "0.0.0")
+
+# opal_cpp is not published to the Bazel Central Registry yet, so the module
+# version above is a placeholder and the source comes from the pinned archive
+# below. The integrity hash pins the contents, so a re-pointed URL fails
+# loudly rather than silently changing the build.
+# Evaluation: https://github.com/muchq/MoonBase/issues/1168
+#
+# Carries the ADR-0024 rename: the runtime namespace is opal::, its include
+# root is opal/, and the module and its labels are opal_cpp. The
+# smithy_cpp_*_library rules keep their names; they take a Smithy model as
+# input.
+archive_override(
+    module_name = "opal_cpp",
+    integrity = "sha256-HRk2o7jshk/XOpsUO15ha2dJbummWjyCpky7W7PnVEM=",
+    strip_prefix = "opal-cpp-dee816288a365e32e8d126b59ff990c1f7921f00",
+    urls = [
+        "https://github.com/muchq/opal-cpp/archive/dee816288a365e32e8d126b59ff990c1f7921f00.tar.gz",
+    ],
+)

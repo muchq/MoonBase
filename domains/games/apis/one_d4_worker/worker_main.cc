@@ -140,7 +140,7 @@ int main(int /*argc*/, char** argv) {
   const absl::Duration idle_wait =
       absl::Seconds(futility::env::ReadPositiveIntOr("ONE_D4_POLL_SECONDS", 5));
 
-  smithy::Outcome<chess_com::Client> client = chess_com::CreateProductionClient();
+  opal::Outcome<chess_com::Client> client = chess_com::CreateProductionClient();
   if (!client.ok()) {
     LOG(ERROR) << "Could not build the chess.com client: " << client.error().message();
     return 1;

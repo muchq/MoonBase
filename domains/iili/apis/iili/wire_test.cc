@@ -13,8 +13,8 @@
 #include "domains/iili/apis/iili/test_support.h"
 #include "moonbase/iili/client.h"
 #include "moonbase/iili/server.h"
-#include "smithy/http/loopback.h"
-#include "smithy/http/transport.h"
+#include "opal/http/loopback.h"
+#include "opal/http/transport.h"
 
 // The bytes on the wire, through the generated server: the v2 contract.
 
@@ -33,14 +33,14 @@ class WireTest : public testing::Test {
         shortener_(MakeShortener(store_, [] { return kNow; })) {
     server_ = std::make_unique<moonbase::iili::IiliServer>(
         std::make_shared<SmithyShortenerHandler>(shortener_));
-    loopback_ = std::make_shared<smithy::http::Loopback>();
+    loopback_ = std::make_shared<opal::http::Loopback>();
     const auto started = loopback_->Start(server_->Handler());
     EXPECT_TRUE(started.ok());
   }
 
-  smithy::http::HttpResponse Send(const std::string& method, const std::string& target,
-                                  const std::string& body) {
-    smithy::http::HttpRequest request;
+  opal::http::HttpResponse Send(const std::string& method, const std::string& target,
+                                const std::string& body) {
+    opal::http::HttpRequest request;
     request.method = method;
     request.target = target;
     if (!body.empty()) {
@@ -49,13 +49,13 @@ class WireTest : public testing::Test {
     }
     auto response = loopback_->Send(std::move(request));
     EXPECT_TRUE(response.ok());
-    return response.ok() ? *response : smithy::http::HttpResponse{};
+    return response.ok() ? *response : opal::http::HttpResponse{};
   }
 
   std::shared_ptr<FakeUrlStore> store_;
   std::shared_ptr<Shortener> shortener_;
   std::unique_ptr<moonbase::iili::IiliServer> server_;
-  std::shared_ptr<smithy::http::Loopback> loopback_;
+  std::shared_ptr<opal::http::Loopback> loopback_;
 };
 
 TEST_F(WireTest, ShortenReturns201WithTheSlugAloneInTheBody) {
@@ -186,9 +186,9 @@ TEST_F(WireTest, UnknownAndExpiredSlugsShareTheOneModeledJson404) {
 }
 
 // The redirect arrives as a typed success carrying Location — what the
-// smithy-cpp pin bump (#187) exists for.
+// opal-cpp pin bump (#187) exists for.
 TEST_F(WireTest, TheGeneratedClientRoundTripsBothOperations) {
-  smithy::ClientConfig config;
+  opal::ClientConfig config;
   config.http_client = loopback_;
   auto client = moonbase::iili::IiliClient::Create(std::move(config));
   ASSERT_TRUE(client.ok()) << client.error().message();
@@ -208,7 +208,7 @@ TEST_F(WireTest, TheGeneratedClientRoundTripsBothOperations) {
 }
 
 TEST_F(WireTest, TheClientReadsTheTypedErrors) {
-  smithy::ClientConfig config;
+  opal::ClientConfig config;
   config.http_client = loopback_;
   auto client = moonbase::iili::IiliClient::Create(std::move(config));
   ASSERT_TRUE(client.ok());

@@ -33,7 +33,7 @@ services:
       - mcpserver
     networks:
       # Static address so services can name Caddy — and only Caddy — as
-      # their x-forwarded-for trust boundary (smithy-cpp ADR-0012). The
+      # their x-forwarded-for trust boundary (opal-cpp ADR-0012). The
       # anchor is the single source; consumers alias it as *caddy_ip.
       app_network:
         ipv4_address: &caddy_ip 172.28.0.2

@@ -117,7 +117,7 @@ struct SecondInstance {
   std::shared_ptr<CapturingMetricsRecorder> metrics;
   std::unique_ptr<moonbase::games::GamesHubServer> server;
   std::unique_ptr<moonbase::games::GamesHubClient> client;
-  std::vector<std::shared_ptr<smithy::http::WebSocket>> sessions;
+  std::vector<std::shared_ptr<opal::http::WebSocket>> sessions;
 
   // The sweep the fixture's TearDown runs for its own recorder, run here for
   // this instance's — paths that only ever fire on a second instance (the
@@ -231,16 +231,16 @@ std::unique_ptr<SecondInstance> BuildSecondInstance(
   instance->server = std::make_unique<moonbase::games::GamesHubServer>(
       std::make_shared<GamesHubHandler>(vault, ids, instance->golf));
 
-  auto loopback = std::make_shared<smithy::http::Loopback>();
+  auto loopback = std::make_shared<opal::http::Loopback>();
   EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
-  smithy::ClientConfig config;
+  opal::ClientConfig config;
   config.retry.max_attempts = 1;
   config.http_client = loopback;
   SecondInstance* raw = instance.get();
-  config.websocket_dialer = [raw](const smithy::http::WebSocketDialRequest& request)
-      -> smithy::Outcome<std::shared_ptr<smithy::http::WebSocket>> {
-    auto [near, far] = smithy::http::InMemoryWebSocketPair::Create();
-    smithy::http::HttpRequest upgrade;
+  config.websocket_dialer = [raw](const opal::http::WebSocketDialRequest& request)
+      -> opal::Outcome<std::shared_ptr<opal::http::WebSocket>> {
+    auto [near, far] = opal::http::InMemoryWebSocketPair::Create();
+    opal::http::HttpRequest upgrade;
     upgrade.method = "GET";
     upgrade.target = request.target;
     upgrade.headers = request.headers;

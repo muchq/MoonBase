@@ -8,9 +8,9 @@
 #include "absl/status/status.h"
 #include "domains/graphics/apis/portrait/tracer_service.h"
 #include "moonbase/portrait/server.h"
-#include "smithy/core/error.h"
-#include "smithy/core/outcome.h"
-#include "smithy/server/router.h"
+#include "opal/core/error.h"
+#include "opal/core/outcome.h"
+#include "opal/server/router.h"
 
 namespace portrait {
 
@@ -33,7 +33,7 @@ namespace portrait {
 ///
 /// Free function rather than a private method so that table can exercise
 /// codes the renderer cannot currently produce.
-smithy::Error ToSmithyError(const absl::Status& status);
+opal::Error ToSmithyError(const absl::Status& status);
 
 /// Serves the generated Smithy Portrait API by wrapping TracerService:
 /// generated inputs convert to the portrait domain types, so TracerService
@@ -55,9 +55,9 @@ class SmithyTracerHandler final : public moonbase::portrait::PortraitHandler {
   explicit SmithyTracerHandler(std::unique_ptr<TracerService> tracer_service)
       : tracer_service_(std::move(tracer_service)) {}
 
-  smithy::Outcome<moonbase::portrait::TraceOutput> Trace(
+  opal::Outcome<moonbase::portrait::TraceOutput> Trace(
       const moonbase::portrait::TraceInput& input,
-      const smithy::server::RequestContext& context) override;
+      const opal::server::RequestContext& context) override;
 
  private:
   /// const because never reassigning it after construction is what makes

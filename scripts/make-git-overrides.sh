@@ -2,7 +2,7 @@
 # Rebuilds, from git clones, the Bazel modules whose source archives a
 # download-blocking proxy refuses.
 #
-# Adapted from smithy-cpp's bazel/make-git-overrides.sh (see its
+# Adapted from opal-cpp's bazel/make-git-overrides.sh (see its
 # docs/development.md, "Sandboxed sessions"). The approach is theirs. Three
 # things MoonBase's module graph needs that theirs does not, each marked at
 # the site: commit-pinned modules (their clone uses --branch, which only
@@ -41,7 +41,7 @@
 # Registry modules are the bulk of it and are found by scanning the
 # lockfile. Two other kinds cannot be found that way and are handled after
 # it: modules pinned with archive_override, which have no source.json for
-# the scan to walk (smithy_cpp), and repos created by module extensions,
+# the scan to walk (opal_cpp), and repos created by module extensions,
 # which are not modules at all (the bats toolchain, raylib).
 # (container_structure_test needs no special case — it is a registry
 # module, so the scan already covers it.)
@@ -69,7 +69,7 @@ fetch() { curl -fsS --retry 4 --retry-all-errors --retry-delay 2 "$@"; }
 
 # Every module version the lockfile consulted a source.json for.
 #
-# No hand-maintained extras list. smithy-cpp's version carries
+# No hand-maintained extras list. opal-cpp's version carries
 # EXTRA_MODULES="rules_perl/0.5.0" for a module its lockfile does not
 # record; ours does record rules_perl, at 1.1.0, whose BCR source is a
 # release asset the proxy allows — so the scan rightly skips it and no
@@ -152,7 +152,7 @@ done
 # Modules this repo pins with archive_override rather than taking from the
 # registry (#1349). They are invisible to the scan above for a structural
 # reason: it walks source.json URLs, and a module the registry does not
-# serve has no source.json to record — so smithy_cpp never appeared, and
+# serve has no source.json to record — so opal_cpp never appeared, and
 # every bazel command in a sandbox died before analysis with a 403 on its
 # archive URL. Not "the scan missed one": it could not have seen it.
 #

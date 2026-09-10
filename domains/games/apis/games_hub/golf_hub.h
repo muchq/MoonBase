@@ -30,7 +30,7 @@
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "moonbase/games/server.h"
-#include "smithy/server/session_registry.h"
+#include "opal/server/session_registry.h"
 
 namespace games_hub {
 
@@ -108,7 +108,7 @@ struct GolfTestHooks {
 /// fan-out and join-time history replay are still to come (#1226).
 class GolfHub final {
  public:
-  using Registry = smithy::server::SessionRegistry<moonbase::games::GameEvents>;
+  using Registry = opal::server::SessionRegistry<moonbase::games::GameEvents>;
 
   /// One counter series, name and exact attributes (hub_metrics.h); the
   /// alias keeps the golf-era spelling every test uses.
@@ -130,7 +130,7 @@ class GolfHub final {
   /// StreamSeriesMatchTheModelUnions parses the .smithy file and fails on
   /// any drift, in either direction — that test is what makes a hand-kept
   /// copy tolerable. The generated unions already hold this list (the
-  /// kNames array behind case_name()); a smithy-cpp accessor exposing it
+  /// kNames array behind case_name()); a opal-cpp accessor exposing it
   /// would let this block be derived and the parser test deleted.
   ///
   /// hub_rejections carries the bounded `kind` (see RejectKind), never
@@ -184,8 +184,8 @@ class GolfHub final {
   /// The golf stream, on GamesHubHandler::Play's signature: spend the
   /// ticket, admit the seat, sessionReady and the room resync, then
   /// commands until the socket closes.
-  smithy::eventstream::StreamTask Play(moonbase::games::PlayInput input,
-                                       moonbase::games::PlayAsyncServerStream& stream);
+  opal::eventstream::StreamTask Play(moonbase::games::PlayInput input,
+                                     moonbase::games::PlayAsyncServerStream& stream);
 
   /// For main's SIGTERM path: Drain, then transport Stop.
   Registry& registry() { return registry_; }

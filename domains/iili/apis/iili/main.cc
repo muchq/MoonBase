@@ -32,7 +32,7 @@
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "moonbase/iili/server.h"
-#include "smithy/http/beast_transport.h"
+#include "opal/http/beast_transport.h"
 
 int main() {
   absl::InitializeLog();
@@ -101,16 +101,16 @@ int main() {
   sigaddset(&shutdown_signals, SIGTERM);
   pthread_sigmask(SIG_BLOCK, &shutdown_signals, nullptr);
 
-  smithy::http::BeastServerTransport::Options options;
+  opal::http::BeastServerTransport::Options options;
   options.address = "0.0.0.0";
   options.port = futility::env::ReadPort(8091);
   // A shorten body tops out near 1100 bytes; 16KB is headroom.
   options.max_body_bytes = std::size_t{16} * 1024;
   options.on_rejected = aura::RejectionMetrics(metrics);
   options.on_connection_event = aura::ConnectionEventLog();
-  smithy::http::BeastServerTransport transport(options);
+  opal::http::BeastServerTransport transport(options);
 
-  smithy::Outcome<smithy::Unit> started = transport.Start(handler);
+  opal::Outcome<opal::Unit> started = transport.Start(handler);
   if (!started.ok()) {
     LOG(ERROR) << "Failed to start server on " << options.address << ":" << options.port << ": "
                << started.error().message();

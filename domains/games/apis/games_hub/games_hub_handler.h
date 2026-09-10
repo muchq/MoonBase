@@ -26,12 +26,12 @@ class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
   // the named shapes bound in the model, and every namespace's shapes
   // land in moonbase::games (codegen flattens the model into the one
   // namespace the BUILD rule names).
-  smithy::Outcome<moonbase::games::GetSessionOutput> GetSession(
+  opal::Outcome<moonbase::games::GetSessionOutput> GetSession(
       const moonbase::games::GetSessionInput& input,
-      const smithy::server::RequestContext& context) override;
+      const opal::server::RequestContext& context) override;
 
-  smithy::eventstream::StreamTask Play(moonbase::games::PlayInput input,
-                                       moonbase::games::PlayAsyncServerStream& stream) override;
+  opal::eventstream::StreamTask Play(moonbase::games::PlayInput input,
+                                     moonbase::games::PlayAsyncServerStream& stream) override;
 
  private:
   const std::shared_ptr<TicketVault> vault_;

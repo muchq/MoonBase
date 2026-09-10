@@ -8,8 +8,8 @@
 #include "domains/games/apis/one_d4_v2/smithy_handler.h"
 #include "moonbase/one_d4/client.h"
 #include "moonbase/one_d4/server.h"
-#include "smithy/http/loopback.h"
-#include "smithy/http/transport.h"
+#include "opal/http/loopback.h"
+#include "opal/http/transport.h"
 
 // The bytes on the wire, through the generated server. The route, the field
 // names, and the error shape are the v2 contract; the MCP tool and any v1
@@ -28,24 +28,24 @@ class WireTest : public testing::Test {
   void SetUp() override {
     server_ =
         std::make_unique<moonbase::one_d4::OneD4V2Server>(std::make_shared<SmithyAnalyzeHandler>());
-    loopback_ = std::make_shared<smithy::http::Loopback>();
+    loopback_ = std::make_shared<opal::http::Loopback>();
     const auto started = loopback_->Start(server_->Handler());
     ASSERT_TRUE(started.ok()) << started.error().message();
   }
 
-  smithy::http::HttpResponse Post(const std::string& body) {
-    smithy::http::HttpRequest request;
+  opal::http::HttpResponse Post(const std::string& body) {
+    opal::http::HttpRequest request;
     request.method = "POST";
     request.target = "/v2/analyze";
     request.headers.Set("content-type", "application/json");
     request.body = body;
     auto response = loopback_->Send(std::move(request));
     EXPECT_TRUE(response.ok());
-    return response.ok() ? *response : smithy::http::HttpResponse{};
+    return response.ok() ? *response : opal::http::HttpResponse{};
   }
 
   std::unique_ptr<moonbase::one_d4::OneD4V2Server> server_;
-  std::shared_ptr<smithy::http::Loopback> loopback_;
+  std::shared_ptr<opal::http::Loopback> loopback_;
 };
 
 TEST_F(WireTest, AnalyzesAGameAtTheV2Route) {
@@ -101,7 +101,7 @@ TEST_F(WireTest, ABadPgnIsA400WithTheModeledError) {
 
   // The typed half, read the way a caller reads it: the generated client
   // surfaces the modeled code and detail.
-  smithy::ClientConfig config;
+  opal::ClientConfig config;
   config.http_client = loopback_;
   auto client = moonbase::one_d4::OneD4V2Client::Create(std::move(config));
   ASSERT_TRUE(client.ok());
@@ -120,7 +120,7 @@ TEST_F(WireTest, AMissingPgnIsA400) { EXPECT_EQ(Post(R"({"pgn": ""})").status, 4
 // The generated client, end to end — what the day-two C++ caller uses, and
 // a second reader of the same wire the substring assertions pin.
 TEST_F(WireTest, TheGeneratedClientRoundTrips) {
-  smithy::ClientConfig config;
+  opal::ClientConfig config;
   config.http_client = loopback_;
   auto client = moonbase::one_d4::OneD4V2Client::Create(std::move(config));
   ASSERT_TRUE(client.ok()) << client.error().message();
@@ -140,7 +140,7 @@ TEST_F(WireTest, TheGeneratedClientRoundTrips) {
 // motifs is exactly the key set of occurrences — carried separately for the
 // caller that only wants "what happened", and wrong the moment they drift.
 TEST_F(WireTest, MotifsIsExactlyTheOccurrenceKeySet) {
-  smithy::ClientConfig config;
+  opal::ClientConfig config;
   config.http_client = loopback_;
   auto client = moonbase::one_d4::OneD4V2Client::Create(std::move(config));
   ASSERT_TRUE(client.ok());

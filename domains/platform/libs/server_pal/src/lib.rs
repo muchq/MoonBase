@@ -161,7 +161,7 @@ fn service_name_from_env() -> &'static str {
 }
 
 /// The W3C trace id off a traceparent header, or "" when absent/malformed.
-/// The full mint/join semantics live on the C++ rail (smithy-cpp ADR-0011);
+/// The full mint/join semantics live on the C++ rail (opal-cpp ADR-0011);
 /// here the header is Caddy's or the caller's to send, so parse-don't-trust
 /// is the whole contract.
 fn trace_id_of(traceparent: &str) -> &str {
@@ -477,7 +477,7 @@ pub struct RateLimit {
     /// service in `deploy/consolidated` is Caddy — so external callers share a
     /// single bucket. Sizing a limit as though it were per-user will throttle
     /// everyone at once. The C++ rail keys off a trusted-proxy boundary
-    /// instead (smithy-cpp ADR-0012, `TRUSTED_PROXY_CIDRS` in compose.yaml);
+    /// instead (opal-cpp ADR-0012, `TRUSTED_PROXY_CIDRS` in compose.yaml);
     /// this rail has not adopted that yet.
     pub per_second: f64,
     /// How many may arrive at once before the sustained rate binds.

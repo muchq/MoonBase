@@ -4,7 +4,7 @@ URL shortening services and related applications.
 
 ## APIs
 
-- [**iili API**](apis/iili): The C++ shortener on smithy-cpp (#1359),
+- [**iili API**](apis/iili): The C++ shortener on opal-cpp (#1359),
   serving `/iili/v1/*` behind `api.muchq.com`.
 
 ## Apps

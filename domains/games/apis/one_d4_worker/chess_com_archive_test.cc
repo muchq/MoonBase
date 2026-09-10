@@ -10,10 +10,10 @@
 
 #include "absl/status/status.h"
 #include "moonbase/chess_com/server.h"
-#include "smithy/core/error.h"
-#include "smithy/http/loopback.h"
-#include "smithy/http/message.h"
-#include "smithy/http/transport.h"
+#include "opal/core/error.h"
+#include "opal/http/loopback.h"
+#include "opal/http/message.h"
+#include "opal/http/transport.h"
 
 namespace one_d4_worker {
 namespace {
@@ -34,12 +34,12 @@ using ::moonbase::chess_com::TitleNotFound;
 
 class ScriptedHandler final : public ChessComHandler {
  public:
-  smithy::Outcome<FetchTitledOutput> FetchTitled(
-      const FetchTitledInput& input, const smithy::server::RequestContext& /*ctx*/) override {
+  opal::Outcome<FetchTitledOutput> FetchTitled(
+      const FetchTitledInput& input, const opal::server::RequestContext& /*ctx*/) override {
     const std::lock_guard<std::mutex> lock(mu_);
     titled_seen_ = input;
     if (title_not_found_) {
-      smithy::Error error = smithy::Error::Modeled("TitleNotFound", "no such title");
+      opal::Error error = opal::Error::Modeled("TitleNotFound", "no such title");
       error.set_detail(TitleNotFound{.message = "no such title"});
       return error;
     }
@@ -59,11 +59,11 @@ class ScriptedHandler final : public ChessComHandler {
     return titled_seen_;
   }
 
-  smithy::Outcome<FetchPlayerOutput> FetchPlayer(
-      const FetchPlayerInput& /*input*/, const smithy::server::RequestContext& /*ctx*/) override {
+  opal::Outcome<FetchPlayerOutput> FetchPlayer(
+      const FetchPlayerInput& /*input*/, const opal::server::RequestContext& /*ctx*/) override {
     const std::lock_guard<std::mutex> lock(mu_);
     if (player_not_found_) {
-      smithy::Error error = smithy::Error::Modeled("PlayerNotFound", "player not found");
+      opal::Error error = opal::Error::Modeled("PlayerNotFound", "player not found");
       error.set_detail(PlayerNotFound{.message = "player not found"});
       return error;
     }
@@ -79,12 +79,12 @@ class ScriptedHandler final : public ChessComHandler {
     player_not_found_ = true;
   }
 
-  smithy::Outcome<FetchArchiveOutput> FetchArchive(
-      const FetchArchiveInput& input, const smithy::server::RequestContext& /*ctx*/) override {
+  opal::Outcome<FetchArchiveOutput> FetchArchive(
+      const FetchArchiveInput& input, const opal::server::RequestContext& /*ctx*/) override {
     const std::lock_guard<std::mutex> lock(mu_);
     seen_ = input;
     if (not_found_) {
-      smithy::Error error = smithy::Error::Modeled("ArchiveNotFound", "archive not found");
+      opal::Error error = opal::Error::Modeled("ArchiveNotFound", "archive not found");
       error.set_detail(ArchiveNotFound{.message = "archive not found"});
       return error;
     }
@@ -120,10 +120,10 @@ class ChessComArchiveTest : public ::testing::Test {
  protected:
   void SetUp() override {
     server_ = std::make_unique<ChessComServer>(handler_);
-    loopback_ = std::make_shared<smithy::http::Loopback>();
+    loopback_ = std::make_shared<opal::http::Loopback>();
     ASSERT_TRUE(loopback_->Start(server_->Handler()).ok());
 
-    smithy::ClientConfig config = chess_com::DefaultClientConfig();
+    opal::ClientConfig config = chess_com::DefaultClientConfig();
     config.http_client = loopback_;
     // One attempt: a test that waits out three backoffs on the error paths
     // is a test nobody runs.
@@ -136,7 +136,7 @@ class ChessComArchiveTest : public ::testing::Test {
 
   std::shared_ptr<ScriptedHandler> handler_ = std::make_shared<ScriptedHandler>();
   std::unique_ptr<ChessComServer> server_;
-  std::shared_ptr<smithy::http::Loopback> loopback_;
+  std::shared_ptr<opal::http::Loopback> loopback_;
   std::unique_ptr<chess_com::Client> client_;
   std::unique_ptr<ChessComArchive> archive_;
 };
@@ -153,7 +153,7 @@ TEST_F(ChessComArchiveTest, CarriesEveryFieldTheIndexerReads) {
   PlayedGame game;
   game.url = "https://www.chess.com/game/live/123";
   game.pgn = "[Event \"Live Chess\"]\n\n1. e4 e5";
-  game.endTime = smithy::Timestamp::FromEpochSeconds(1'700'000'000);
+  game.endTime = opal::Timestamp::FromEpochSeconds(1'700'000'000);
   game.timeClass = "blitz";
   game.white = PlayerResult{.username = "Hikaru", .rating = 2800, .result = "win"};
   game.black = PlayerResult{.username = "Opponent", .rating = 2700, .result = "resigned"};
@@ -246,15 +246,15 @@ TEST_F(ChessComArchiveTest, ATitleWithNoRosterIsEmptyRatherThanAFailedRefresh) {
 TEST(ChessComArchiveTransportTest, ATransportFailureIsNotAMissingArchive) {
   // The failure mode this exists for: a 5xx or a dead connection read as
   // "no such archive" would complete a request having indexed nothing.
-  class DeadTransport final : public smithy::http::HttpClient {
+  class DeadTransport final : public opal::http::HttpClient {
    public:
-    smithy::Outcome<smithy::http::HttpResponse> Send(
-        const smithy::http::HttpRequest& /*request*/) override {
-      return smithy::Error::Unknown("connection refused");
+    opal::Outcome<opal::http::HttpResponse> Send(
+        const opal::http::HttpRequest& /*request*/) override {
+      return opal::Error::Unknown("connection refused");
     }
   };
 
-  smithy::ClientConfig config = chess_com::DefaultClientConfig();
+  opal::ClientConfig config = chess_com::DefaultClientConfig();
   config.http_client = std::make_shared<DeadTransport>();
   config.retry.max_attempts = 1;
   auto client = chess_com::Client::Create(std::move(config));

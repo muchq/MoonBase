@@ -86,7 +86,7 @@ The default extractor reads the socket's peer address. Every service in
 `deploy/consolidated` is reached only through Caddy, so external callers all
 key on Caddy's container IP and **share one bucket** — a limit sized as though
 it were per-user throttles everyone at once. The C++ rail keys off a declared
-trust boundary instead (`TRUSTED_PROXY_CIDRS`, smithy-cpp ADR-0012); this rail
+trust boundary instead (`TRUSTED_PROXY_CIDRS`, opal-cpp ADR-0012); this rail
 has not adopted that yet. Note that simply switching to `SmartIpKeyExtractor`
 would make the key client-controlled, since Caddy appends to `X-Forwarded-For`
 rather than replacing it.

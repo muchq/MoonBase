@@ -1,5 +1,5 @@
+load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
-load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 # TracerService's domain layer: plain structs (the render cache key) and the
@@ -105,10 +105,10 @@ cc_library(
         ":portrait_smithy_client",
         ":portrait_smithy_server",
         "@googletest//:gtest",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:server",
     ],
 )
 
@@ -122,10 +122,10 @@ cc_test(
         ":test_support",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:server",
     ],
 )
 
@@ -140,7 +140,7 @@ cc_library(
         ":types",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@smithy_cpp//runtime:core",
+        "@opal_cpp//runtime:core",
     ],
 )
 
@@ -159,8 +159,8 @@ cc_test(
         "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
     ],
 )
 
@@ -178,11 +178,11 @@ cc_test(
         "//domains/platform/libs/aura",
         "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:server",
     ],
 )
 
@@ -201,9 +201,9 @@ cc_binary(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
         "@com_google_absl//absl/log:initialize",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:server",
     ],
 )
 

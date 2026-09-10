@@ -1,7 +1,7 @@
-// Beyoncé Rule for smithy-cpp, games_hub tier (see also
+// Beyoncé Rule for opal-cpp, games_hub tier (see also
 // domains/platform/libs/aura/smithy_contract_test.cc for the platform
 // tier): the upstream behaviors the hub itself depends on, pinned as
-// MoonBase-side contract tests so a smithy-cpp pin bump that changes any
+// MoonBase-side contract tests so a opal-cpp pin bump that changes any
 // of them fails here with a named contract.
 //
 // What the hub relies on and where:
@@ -29,20 +29,20 @@
 #include <thread>
 #include <utility>
 
-#include "smithy/core/error.h"
-#include "smithy/eventstream/envelope.h"
-#include "smithy/eventstream/event_stream.h"
-#include "smithy/eventstream/frame.h"
-#include "smithy/eventstream/json_frame.h"
-#include "smithy/http/message.h"
-#include "smithy/http/websocket.h"
-#include "smithy/http/websocket_pair.h"
-#include "smithy/server/origin_gate.h"
-#include "smithy/server/session_registry.h"
+#include "opal/core/error.h"
+#include "opal/eventstream/envelope.h"
+#include "opal/eventstream/event_stream.h"
+#include "opal/eventstream/frame.h"
+#include "opal/eventstream/json_frame.h"
+#include "opal/http/message.h"
+#include "opal/http/websocket.h"
+#include "opal/http/websocket_pair.h"
+#include "opal/server/origin_gate.h"
+#include "opal/server/session_registry.h"
 
 namespace {
 
-using smithy::http::HttpRequest;
+using opal::http::HttpRequest;
 
 // --- RequireOrigin: the hub's cross-site-WebSocket-hijacking gate. ------
 
@@ -55,7 +55,7 @@ HttpRequest UpgradeWithOrigin(const std::string& origin) {
 }
 
 TEST(RequireOriginContract, AdmitsAllowlistedAndAbsentRefusesForeignAndNull) {
-  auto gate = smithy::server::RequireOrigin({"https://muchq.com"});
+  auto gate = opal::server::RequireOrigin({"https://muchq.com"});
 
   // Allowlisted origin and the no-Origin non-browser client are admitted.
   EXPECT_FALSE(gate(UpgradeWithOrigin("https://muchq.com")).has_value());
@@ -72,7 +72,7 @@ TEST(RequireOriginContract, AdmitsAllowlistedAndAbsentRefusesForeignAndNull) {
 }
 
 TEST(RequireOriginContract, NormalizesCaseAndDefaultPorts) {
-  auto gate = smithy::server::RequireOrigin({"https://muchq.com"});
+  auto gate = opal::server::RequireOrigin({"https://muchq.com"});
   EXPECT_FALSE(gate(UpgradeWithOrigin("HTTPS://MUCHQ.COM")).has_value());
   EXPECT_FALSE(gate(UpgradeWithOrigin("https://muchq.com:443")).has_value());
   // Same host, wrong scheme is a different origin.
@@ -82,11 +82,11 @@ TEST(RequireOriginContract, NormalizesCaseAndDefaultPorts) {
 // --- InMemoryWebSocketPair: the hub test harness's wire. -----------------
 
 TEST(WebSocketPairContract, DeliversBothDirectionsAndCloseEndsCleanly) {
-  auto [a, b] = smithy::http::InMemoryWebSocketPair::Create();
+  auto [a, b] = opal::http::InMemoryWebSocketPair::Create();
 
-  smithy::eventstream::Message ping;
+  opal::eventstream::Message ping;
   ping.headers = {{":event-type", "ping"}};
-  ping.payload = smithy::Blob::FromString("hello");
+  ping.payload = opal::Blob::FromString("hello");
   ASSERT_TRUE(a->Send(ping).ok());
 
   auto received = b->Receive();
@@ -94,8 +94,8 @@ TEST(WebSocketPairContract, DeliversBothDirectionsAndCloseEndsCleanly) {
   ASSERT_TRUE(received.value().has_value());
   EXPECT_EQ(received.value()->payload.ToString(), "hello");
 
-  smithy::eventstream::Message pong;
-  pong.payload = smithy::Blob::FromString("yo");
+  opal::eventstream::Message pong;
+  pong.payload = opal::Blob::FromString("yo");
   ASSERT_TRUE(b->Send(pong).ok());
   auto back = a->Receive();
   ASSERT_TRUE(back.ok());
@@ -121,16 +121,16 @@ TEST(JsonFrameContract, EventFramesRenderTheEnvelopeTextAndRoundTrip) {
   // onmessage receives for the hub's first event. The codec's JSON output
   // is deterministic (compact, sorted keys), so string equality is wire
   // equality.
-  const smithy::eventstream::Message ready = smithy::eventstream::MakeEventMessage(
+  const opal::eventstream::Message ready = opal::eventstream::MakeEventMessage(
       "sessionReady", "application/json",
-      smithy::Blob::FromString(R"({"playerId":"player-1","resumed":false})"));
-  const auto text = smithy::eventstream::EncodeJsonFrame(ready);
+      opal::Blob::FromString(R"({"playerId":"player-1","resumed":false})"));
+  const auto text = opal::eventstream::EncodeJsonFrame(ready);
   ASSERT_TRUE(text.ok()) << text.error().message();
   EXPECT_EQ(*text, R"({"event":"sessionReady","payload":{"playerId":"player-1","resumed":false}})");
 
   // Decode gives back the Message the binary wire would have carried, so
   // everything above the socket is oblivious to the wire mode.
-  const auto decoded = smithy::eventstream::DecodeJsonFrame(*text);
+  const auto decoded = opal::eventstream::DecodeJsonFrame(*text);
   ASSERT_TRUE(decoded.ok()) << decoded.error().message();
   EXPECT_EQ(*decoded, ready);
 }
@@ -138,15 +138,15 @@ TEST(JsonFrameContract, EventFramesRenderTheEnvelopeTextAndRoundTrip) {
 TEST(JsonFrameContract, ExceptionFramesRenderTheExceptionMember) {
   // The terminal error arm — what a browser sees when a dial is refused
   // (golf_wire_test pins the same refusal's binary framing).
-  const smithy::eventstream::Message refusal = smithy::eventstream::MakeExceptionMessage(
+  const opal::eventstream::Message refusal = opal::eventstream::MakeExceptionMessage(
       "Unauthenticated", "application/json",
-      smithy::Blob::FromString(R"({"message":"ticket expired or already spent"})"));
-  const auto text = smithy::eventstream::EncodeJsonFrame(refusal);
+      opal::Blob::FromString(R"({"message":"ticket expired or already spent"})"));
+  const auto text = opal::eventstream::EncodeJsonFrame(refusal);
   ASSERT_TRUE(text.ok()) << text.error().message();
   EXPECT_EQ(*text, R"({"exception":"Unauthenticated",)"
                    R"("payload":{"message":"ticket expired or already spent"}})");
 
-  const auto decoded = smithy::eventstream::DecodeJsonFrame(*text);
+  const auto decoded = opal::eventstream::DecodeJsonFrame(*text);
   ASSERT_TRUE(decoded.ok()) << decoded.error().message();
   EXPECT_EQ(*decoded, refusal);
 }
@@ -157,12 +157,12 @@ TEST(JsonFrameContract, HeadersBeyondTheEnvelopeAreRefusedNotDropped) {
   // untouched) rather than encoded with the header silently dropped — the
   // refusal is what keeps a future hub from leaking a header-borne fact
   // into thin air on the production browser wire.
-  smithy::eventstream::Message extra = smithy::eventstream::MakeEventMessage(
-      "sessionReady", "application/json", smithy::Blob::FromString("{}"));
+  opal::eventstream::Message extra = opal::eventstream::MakeEventMessage(
+      "sessionReady", "application/json", opal::Blob::FromString("{}"));
   extra.headers.push_back({"x-hub-extra", std::string("boom")});
-  const auto text = smithy::eventstream::EncodeJsonFrame(extra);
+  const auto text = opal::eventstream::EncodeJsonFrame(extra);
   ASSERT_FALSE(text.ok());
-  EXPECT_EQ(text.error().kind(), smithy::ErrorKind::kValidation);
+  EXPECT_EQ(text.error().kind(), opal::ErrorKind::kValidation);
 }
 
 // --- SessionRegistry: admission, grace, and fan-out (ADR-0020/21/22). ----
@@ -174,30 +174,30 @@ struct Note {
   std::string text;
 };
 
-smithy::Outcome<smithy::eventstream::Message> EncodeNote(const Note& note) {
-  smithy::eventstream::Message message;
+opal::Outcome<opal::eventstream::Message> EncodeNote(const Note& note) {
+  opal::eventstream::Message message;
   message.headers = {{":event-type", "note"}};
-  message.payload = smithy::Blob::FromString(note.text);
+  message.payload = opal::Blob::FromString(note.text);
   return message;
 }
 
-using ServerStream = smithy::eventstream::EventStream<Note, smithy::eventstream::NoEvents>;
-using Registry = smithy::server::SessionRegistry<Note>;
+using ServerStream = opal::eventstream::EventStream<Note, opal::eventstream::NoEvents>;
+using Registry = opal::server::SessionRegistry<Note>;
 
 struct Session {
-  std::shared_ptr<smithy::http::WebSocket> client;
+  std::shared_ptr<opal::http::WebSocket> client;
   std::unique_ptr<ServerStream> stream;
 };
 
 Session MakeSession() {
-  auto [client_end, server_end] = smithy::http::InMemoryWebSocketPair::Create();
+  auto [client_end, server_end] = opal::http::InMemoryWebSocketPair::Create();
   Session session;
   session.client = client_end;
   session.stream = std::make_unique<ServerStream>(server_end, EncodeNote, nullptr);
   return session;
 }
 
-std::optional<std::string> ReceivePayload(smithy::http::WebSocket& socket) {
+std::optional<std::string> ReceivePayload(opal::http::WebSocket& socket) {
   auto received = socket.Receive(std::chrono::milliseconds(2000));
   if (!received.ok() || !received.value().has_value()) {
     return std::nullopt;

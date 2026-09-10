@@ -8,7 +8,7 @@ This is process, not architecture. Architecture lives in each domain's
 `README.md` and in the per-service `docs/` directories (e.g.
 `domains/games/apis/one_d4/src/main/java/com/muchq/games/one_d4/docs/`).
 
-Adapted from the smithy-cpp working agreement. Where a convention there has no
+Adapted from the opal-cpp working agreement. Where a convention there has no
 MoonBase analogue it has been dropped rather than restated aspirationally, and
 where MoonBase's tooling differs the MoonBase command is the one named.
 
@@ -22,7 +22,7 @@ work: two features, or a refactor riding along with a fix.
 
 A causal chain is one item. A dependency bump, the change it unblocks, and the
 fallout it forces cannot land separately, so they ship together. #1445 bumped
-the smithy-cpp pin, modeled the HEAD operation the bump made possible, deleted
+the opal-cpp pin, modeled the HEAD operation the bump made possible, deleted
 the middleware that had stood in for it, and fixed an abseil deprecation the
 bump surfaced — the pin alone fails `-Werror` on `domains/`, and the model
 change alone leaves the transport putting a body on a HEAD.

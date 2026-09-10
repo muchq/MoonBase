@@ -1,5 +1,5 @@
+load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
-load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 
 smithy_cpp_client_library(
     name = "chess_com_smithy_client",
@@ -30,8 +30,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":chess_com_smithy_client",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
     ],
 )
 
@@ -42,8 +42,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http_beast",
     ],
 )
 
@@ -55,10 +55,10 @@ cc_test(
         ":chess_com_smithy_server",
         ":client",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:server",
     ],
 )
 

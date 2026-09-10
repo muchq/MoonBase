@@ -9,8 +9,8 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "domains/graphics/apis/portrait/types.h"
-#include "smithy/core/blob.h"
-#include "smithy/core/error.h"
+#include "opal/core/blob.h"
+#include "opal/core/error.h"
 
 namespace portrait {
 namespace {
@@ -71,7 +71,7 @@ TraceRequest toDomainRequest(const gen::TraceInput& input) {
 
 }  // namespace
 
-smithy::Error ToSmithyError(const absl::Status& status) {
+opal::Error ToSmithyError(const absl::Status& status) {
   const std::string message(status.message());
   switch (status.code()) {
     case absl::StatusCode::kInvalidArgument: {
@@ -79,13 +79,12 @@ smithy::Error ToSmithyError(const absl::Status& status) {
       // Present only for rules that blame a single member; the cross-field
       // ones (camera vs focus, aspect ratio) leave it absent on purpose.
       detail.field = invalidField(status);
-      smithy::Error error = smithy::Error::Modeled("InvalidSceneError", message);
+      opal::Error error = opal::Error::Modeled("InvalidSceneError", message);
       error.set_detail(std::move(detail));
       return error;
     }
     case absl::StatusCode::kResourceExhausted: {
-      smithy::Error error =
-          smithy::Error::Modeled("RenderCapacityError", message, /*retryable=*/true);
+      opal::Error error = opal::Error::Modeled("RenderCapacityError", message, /*retryable=*/true);
       error.set_detail(gen::RenderCapacityError{.message = message});
       return error;
     }
@@ -94,12 +93,12 @@ smithy::Error ToSmithyError(const absl::Status& status) {
       // answers 500 {"__type":"InternalFailure","message":"internal
       // failure"}, so nothing the service put in the status reaches the
       // client.
-      return smithy::Error::Unknown(message);
+      return opal::Error::Unknown(message);
   }
 }
 
-smithy::Outcome<gen::TraceOutput> SmithyTracerHandler::Trace(
-    const gen::TraceInput& input, const smithy::server::RequestContext& /*context*/) {
+opal::Outcome<gen::TraceOutput> SmithyTracerHandler::Trace(
+    const gen::TraceInput& input, const opal::server::RequestContext& /*context*/) {
   TraceRequest request = toDomainRequest(input);
   absl::StatusOr<TraceResponse> response = tracer_service_->trace(request);
   if (!response.ok()) {
@@ -107,7 +106,7 @@ smithy::Outcome<gen::TraceOutput> SmithyTracerHandler::Trace(
   }
 
   gen::TraceOutput output;
-  output.base64_png = smithy::Blob(std::move(response->png_bytes));
+  output.base64_png = opal::Blob(std::move(response->png_bytes));
   output.width = response->width;
   output.height = response->height;
   return output;

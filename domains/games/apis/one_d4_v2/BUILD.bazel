@@ -1,5 +1,5 @@
+load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
-load("@smithy_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 # one_d4_v2: the v2 HTTP API (#1389 phase 6). The seed that eventually
@@ -67,8 +67,8 @@ cc_library(
         "//domains/games/libs/one_d4_motifs:occurrence",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:server",
     ],
 )
 
@@ -81,10 +81,10 @@ cc_test(
         ":one_d4_v2_smithy_server",
         ":smithy_handler",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:client",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:server",
     ],
 )
 
@@ -103,9 +103,9 @@ cc_binary(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
         "@com_google_absl//absl/log:initialize",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:server",
     ],
 )
 
@@ -119,8 +119,8 @@ cc_test(
         ":smithy_handler",
         "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:core",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:server",
     ],
 )
 
@@ -134,8 +134,8 @@ cc_test(
         "//domains/platform/libs/aura",
         "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
         "@googletest//:gtest_main",
-        "@smithy_cpp//runtime:http",
-        "@smithy_cpp//runtime:http_beast",
-        "@smithy_cpp//runtime:server",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+        "@opal_cpp//runtime:server",
     ],
 )

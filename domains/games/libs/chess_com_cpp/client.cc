@@ -4,7 +4,7 @@
 #include <string>
 #include <utility>
 
-#include "smithy/core/error.h"
+#include "opal/core/error.h"
 
 namespace chess_com {
 namespace {
@@ -21,11 +21,11 @@ std::string LowercaseUsername(std::string_view username) {
 
 }  // namespace
 
-smithy::ClientConfig DefaultClientConfig() {
-  smithy::ClientConfig config;
+opal::ClientConfig DefaultClientConfig() {
+  opal::ClientConfig config;
   config.endpoint = "https://api.chess.com";
   config.user_agent = "MoonBase indexer/1.0";
-  // smithy-cpp applies this timeout to each attempt. With three attempts,
+  // opal-cpp applies this timeout to each attempt. With three attempts,
   // a call can therefore spend up to 180 seconds in transport work, plus
   // backoff, until the runtime gains an overall-deadline setting.
   config.request_timeout_ms = 60'000;
@@ -35,7 +35,7 @@ smithy::ClientConfig DefaultClientConfig() {
   return config;
 }
 
-smithy::Outcome<Client> Client::Create(smithy::ClientConfig config) {
+opal::Outcome<Client> Client::Create(opal::ClientConfig config) {
   auto client = moonbase::chess_com::ChessComClient::Create(std::move(config));
   if (!client.ok()) {
     return std::move(client).error();
@@ -43,19 +43,19 @@ smithy::Outcome<Client> Client::Create(smithy::ClientConfig config) {
   return Client(std::move(*client));
 }
 
-smithy::Outcome<moonbase::chess_com::FetchPlayerOutput> Client::FetchPlayer(
+opal::Outcome<moonbase::chess_com::FetchPlayerOutput> Client::FetchPlayer(
     std::string_view username) const {
   return client_.FetchPlayer(
       moonbase::chess_com::FetchPlayerInput{.username = LowercaseUsername(username)});
 }
 
-smithy::Outcome<moonbase::chess_com::FetchArchiveOutput> Client::FetchArchive(
+opal::Outcome<moonbase::chess_com::FetchArchiveOutput> Client::FetchArchive(
     std::string_view username, int year, unsigned month) const {
   if (year < 1000 || year > 9999) {
-    return smithy::Error::Validation("year must be four digits");
+    return opal::Error::Validation("year must be four digits");
   }
   if (month < 1 || month > 12) {
-    return smithy::Error::Validation("month must be between 1 and 12");
+    return opal::Error::Validation("month must be between 1 and 12");
   }
 
   moonbase::chess_com::FetchArchiveInput input;
@@ -65,12 +65,12 @@ smithy::Outcome<moonbase::chess_com::FetchArchiveOutput> Client::FetchArchive(
   return client_.FetchArchive(input);
 }
 
-smithy::Outcome<moonbase::chess_com::FetchTitledOutput> Client::FetchTitled(
+opal::Outcome<moonbase::chess_com::FetchTitledOutput> Client::FetchTitled(
     std::string_view title) const {
   // An empty title builds /pub/titled/, a different resource that 404s —
   // and a 404 here is the modeled "no such title", which callers read as
   // "nobody holds it" rather than as a request they got wrong.
-  if (title.empty()) return smithy::Error::Validation("FetchTitled: title is required");
+  if (title.empty()) return opal::Error::Validation("FetchTitled: title is required");
 
   std::string upper(title);
   for (char& value : upper) {

@@ -27,11 +27,11 @@
 #include "domains/graphics/apis/portrait/test_support.h"
 #include "moonbase/portrait/client.h"
 #include "moonbase/portrait/server.h"
-#include "smithy/core/blob.h"
-#include "smithy/core/error.h"
-#include "smithy/core/outcome.h"
-#include "smithy/http/message.h"
-#include "smithy/server/router.h"
+#include "opal/core/blob.h"
+#include "opal/core/error.h"
+#include "opal/core/outcome.h"
+#include "opal/http/message.h"
+#include "opal/server/router.h"
 
 namespace {
 
@@ -54,18 +54,18 @@ constexpr char kFakePngBase64[] = "bm90LXJlYWxseS1hLXBuZw==";
 // assert both directions of the wire without any rendering.
 class RecordingHandler final : public PortraitHandler {
  public:
-  smithy::Outcome<TraceOutput> Trace(const TraceInput& input,
-                                     const smithy::server::RequestContext& /*context*/) override {
+  opal::Outcome<TraceOutput> Trace(const TraceInput& input,
+                                   const opal::server::RequestContext& /*context*/) override {
     const std::lock_guard<std::mutex> lock(mu_);
     last_input_ = input;
     if (reject_scene_) {
       const std::string message = "camera position and focus cannot be the same";
-      smithy::Error error = smithy::Error::Modeled("InvalidSceneError", message);
+      opal::Error error = opal::Error::Modeled("InvalidSceneError", message);
       error.set_detail(InvalidSceneError{.message = message});
       return error;
     }
     TraceOutput output;
-    output.base64_png = smithy::Blob::FromString(kFakePng);
+    output.base64_png = opal::Blob::FromString(kFakePng);
     output.width = input.output.width;
     output.height = input.output.height;
     return output;
@@ -269,7 +269,7 @@ TEST_F(PortraitWireTest, NonJsonContentTypeRejected) {
 // Clients (and their monitoring) key off this exact shape to tell "wrong
 // URL" apart from an application error.
 TEST_F(PortraitWireTest, UnknownRouteReturns404WithCodeEnvelope) {
-  smithy::http::HttpRequest request;
+  opal::http::HttpRequest request;
   request.method = "POST";
   request.target = "/portrait/v1/nope";
   request.headers.Set("content-type", "application/json");
@@ -284,7 +284,7 @@ TEST_F(PortraitWireTest, UnknownRouteReturns404WithCodeEnvelope) {
 // is a 405 whose Allow header lists the methods the route does serve —
 // the generated router's promise, distinct from the 404 above.
 TEST_F(PortraitWireTest, WrongMethodReturns405WithAllowHeader) {
-  smithy::http::HttpRequest request;
+  opal::http::HttpRequest request;
   request.method = "GET";
   request.target = "/portrait/v1/trace";
   const auto response = harness_.Send(std::move(request));
@@ -318,7 +318,7 @@ TEST_F(PortraitWireTest, GeneratedClientRoundTrips) {
 
   const auto traced = client.Trace(input);
   ASSERT_TRUE(traced.ok()) << traced.error().message();
-  EXPECT_EQ(traced->base64_png, smithy::Blob::FromString(kFakePng));
+  EXPECT_EQ(traced->base64_png, opal::Blob::FromString(kFakePng));
   EXPECT_EQ(traced->width, 640);
   EXPECT_EQ(traced->height, 480);
 
@@ -363,20 +363,19 @@ TEST_F(PortraitWireTest, ModeledErrorSurfacesTyped) {
 // the handler's error space can be pinned without a renderer.
 class ErroringHandler final : public PortraitHandler {
  public:
-  explicit ErroringHandler(smithy::Error error) : error_(std::move(error)) {}
+  explicit ErroringHandler(opal::Error error) : error_(std::move(error)) {}
 
-  smithy::Outcome<TraceOutput> Trace(const TraceInput& /*input*/,
-                                     const smithy::server::RequestContext& /*context*/) override {
+  opal::Outcome<TraceOutput> Trace(const TraceInput& /*input*/,
+                                   const opal::server::RequestContext& /*context*/) override {
     return error_;
   }
 
  private:
-  smithy::Error error_;
+  opal::Error error_;
 };
 
 TEST(PortraitErrorWireTest, InvalidSceneErrorCarriesTheOffendingFieldPath) {
-  smithy::Error error =
-      smithy::Error::Modeled("InvalidSceneError", "Sphere radius must be positive");
+  opal::Error error = opal::Error::Modeled("InvalidSceneError", "Sphere radius must be positive");
   error.set_detail(InvalidSceneError{.message = "Sphere radius must be positive",
                                      .field = "/scene/spheres/0/radius"});
   LoopbackHarness harness{std::make_shared<ErroringHandler>(std::move(error))};
@@ -393,8 +392,8 @@ TEST(PortraitErrorWireTest, InvalidSceneErrorCarriesTheOffendingFieldPath) {
 }
 
 TEST(PortraitErrorWireTest, InvalidSceneErrorOmitsFieldWhenNoSingleMemberIsAtFault) {
-  smithy::Error error =
-      smithy::Error::Modeled("InvalidSceneError", "Camera position and focus cannot be the same");
+  opal::Error error =
+      opal::Error::Modeled("InvalidSceneError", "Camera position and focus cannot be the same");
   error.set_detail(InvalidSceneError{.message = "Camera position and focus cannot be the same"});
   LoopbackHarness harness{std::make_shared<ErroringHandler>(std::move(error))};
 
@@ -406,9 +405,9 @@ TEST(PortraitErrorWireTest, InvalidSceneErrorOmitsFieldWhenNoSingleMemberIsAtFau
 }
 
 TEST(PortraitErrorWireTest, RenderCapacityErrorIsA503) {
-  smithy::Error error = smithy::Error::Modeled(
-      "RenderCapacityError", "render exceeded available memory; try a smaller output",
-      /*retryable=*/true);
+  opal::Error error = opal::Error::Modeled("RenderCapacityError",
+                                           "render exceeded available memory; try a smaller output",
+                                           /*retryable=*/true);
   error.set_detail(
       RenderCapacityError{.message = "render exceeded available memory; try a smaller output"});
   LoopbackHarness harness{std::make_shared<ErroringHandler>(std::move(error))};
@@ -428,7 +427,7 @@ TEST(PortraitErrorWireTest, RenderCapacityErrorIsA503) {
 TEST(PortraitErrorWireTest, AnUnknownErrorsMessageNeverReachesTheClient) {
   constexpr char kSecret[] = "postgres://portrait:hunter2@10.0.0.5/scenes";
   LoopbackHarness harness{
-      std::make_shared<ErroringHandler>(smithy::Error::Unknown(std::string(kSecret)))};
+      std::make_shared<ErroringHandler>(opal::Error::Unknown(std::string(kSecret)))};
 
   const auto response = harness.PostTrace(GoldenRequest().dump());
 
@@ -450,7 +449,7 @@ TEST(PortraitErrorWireTest, AnUnknownErrorsMessageNeverReachesTheClient) {
 // error tests make is understood as the thing that rules it out.
 TEST(PortraitErrorWireTest, AMisspelledModeledCodeFallsThroughToA400) {
   LoopbackHarness harness{std::make_shared<ErroringHandler>(
-      smithy::Error::Modeled("InvalidScenError", "internal detail"))};
+      opal::Error::Modeled("InvalidScenError", "internal detail"))};
 
   const auto response = harness.PostTrace(GoldenRequest().dump());
 
@@ -460,21 +459,21 @@ TEST(PortraitErrorWireTest, AMisspelledModeledCodeFallsThroughToA400) {
 
 // What the transport does when a handler throws rather than returning an
 // error (#1267 finding 1). MoonBase compiles with exceptions enabled, and
-// every smithy-cpp server transport — Beast, socket, and the loopback used
+// every opal-cpp server transport — Beast, socket, and the loopback used
 // here — routes the handler through InvokeHandlerGuarded, which contains the
 // throw as a correlated 500 rather than letting it unwind out of the I/O
 // thread and take the process down.
 //
 // TracerService no longer throws, so nothing in portrait depends on this
-// today. It is pinned because the alternative is a crash: if a smithy-cpp
+// today. It is pinned because the alternative is a crash: if a opal-cpp
 // bump ever removed the guard, the first evidence would otherwise be a
 // production restart under load.
 class ThrowingHandler final : public PortraitHandler {
  public:
   static constexpr char kSecret[] = "/srv/portrait/oops";
 
-  smithy::Outcome<TraceOutput> Trace(const TraceInput& /*input*/,
-                                     const smithy::server::RequestContext& /*context*/) override {
+  opal::Outcome<TraceOutput> Trace(const TraceInput& /*input*/,
+                                   const opal::server::RequestContext& /*context*/) override {
     throw std::runtime_error(kSecret);
   }
 };
