@@ -418,8 +418,27 @@ TEST_F(AuraMiddlewareTest, AccessLogIsOneJsonObjectInTheMetricsVocabulary) {
   EXPECT_EQ(line["status"], 200);
   EXPECT_TRUE(line["duration_us"].is_number()) << line.dump();
   EXPECT_EQ(line["response_bytes"], 4);
+  EXPECT_EQ(line["request_bytes"], 5);
+  EXPECT_EQ(line["handler_threw"], false);
   EXPECT_TRUE(line["trace_id"].is_string()) << line.dump();
-  EXPECT_EQ(line["x_forwarded_for"], "203.0.113.9");
+  // An untrusted peer's x-forwarded-for is ignored, and the line says so:
+  // the client is the ADR-0012 derived address the rate limiter keyed on,
+  // never the raw header a client can forge.
+  EXPECT_EQ(line["client_source"], "untrusted_header_ignored");
+  EXPECT_EQ(line["client"], "192.0.2.1");
+  EXPECT_FALSE(line.contains("x_forwarded_for")) << line.dump();
+}
+
+// Through the trusted proxy the same header is honored, and the line names
+// the client the limiter's 429 would have come from — the pivot from a
+// rate-limit alert to the log query is on this field.
+TEST_F(AuraMiddlewareTest, AccessLogClientIsTheDerivedAddressBehindATrustedProxy) {
+  const nlohmann::json line = ParsedAccessLine(CaptureAccessLogLine([&] {
+    EXPECT_EQ(Send("POST", "/echo", "hello", kProxy, {{"X-Forwarded-For", "203.0.113.9"}}).status,
+              200);
+  }));
+  EXPECT_EQ(line["client"], "203.0.113.9");
+  EXPECT_EQ(line["client_source"], "forwarded");
 }
 
 // Sends one request through a fresh chain over the given handler and
@@ -452,9 +471,10 @@ TEST(AccessLogJsonTest, RouteFallsBackToTheSharedSentinel) {
       ParsedAccessLine(AccessLogLineThrough(UnroutedHandler(404), "/no/such/path", 404));
   EXPECT_EQ(line["route"], "unmatched");
   EXPECT_EQ(line["target"], "/no/such/path");
-  // No X-Forwarded-For on this request: the field must read absent-as-empty,
-  // never a fabricated value.
-  EXPECT_EQ(line["x_forwarded_for"], "");
+  // A chain with no trusted proxies (TrustedProxies::None()) still derives:
+  // the peer is the client, and the line says which case it was.
+  EXPECT_EQ(line["client"], "192.0.2.200");
+  EXPECT_EQ(line["client_source"], "direct_peer");
 }
 
 // The target is attacker-controlled and reaches the line verbatim, so JSON

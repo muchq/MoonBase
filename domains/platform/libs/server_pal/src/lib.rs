@@ -2,7 +2,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, OnceLock};
 
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, MatchedPath, Request, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, MatchedPath, Request, State};
 use axum::http::{StatusCode, Uri};
 use axum::middleware::Next;
 use axum::response::Response;
@@ -179,21 +179,22 @@ fn trace_id_of(traceparent: &str) -> &str {
 /// vocabulary (#1459) — http_method and route are the bounded labels the
 /// instruments carry, so a dashboard-to-logs pivot is a copy-paste; the raw
 /// path-and-query rides in "target" where an unbounded value is data, not a
-/// label. duration_us matches the histogram's unit. x_forwarded_for is the
-/// raw header, not the limiter's key — this rail's governor keys on the
-/// socket peer address (see RateLimit).
+/// label. duration_us matches the histogram's unit. client is the address
+/// the limiter keys on — the socket peer, reported as client_source
+/// "direct_peer" (see RateLimit: this rail has no trusted-proxy boundary
+/// yet, so behind Caddy that is Caddy) — never the raw x-forwarded-for a
+/// client can forge; "unknown" when the request carried no peer at all.
+/// Same spelling as opal-cpp's FormatAccessLog, so a query keyed on the
+/// C++ rail's line reads this one.
 async fn access_log_middleware(req: Request, next: Next) -> Response {
     let start = std::time::Instant::now();
     let http_method = bounded_method_label(req.method());
     let route = route_label(&req);
     let target = req.uri().to_string();
-    // Lossy, not blanked: a deliberately malformed forwarded-for chain is
-    // forensic content, and "" would read as the header being absent.
-    let x_forwarded_for = req
-        .headers()
-        .get("x-forwarded-for")
-        .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
-        .unwrap_or_default();
+    let (client, client_source) = match req.extensions().get::<ConnectInfo<SocketAddr>>() {
+        Some(ConnectInfo(peer)) => (peer.ip().to_string(), "direct_peer"),
+        None => (String::new(), "unknown"),
+    };
     let traceparent = req
         .headers()
         .get("traceparent")
@@ -215,7 +216,8 @@ async fn access_log_middleware(req: Request, next: Next) -> Response {
         status = resp.status().as_u16(),
         duration_us = start.elapsed().as_micros() as u64,
         trace_id = trace_id_of(&traceparent),
-        x_forwarded_for,
+        client,
+        client_source,
         "request"
     );
     resp
@@ -653,7 +655,6 @@ pub async fn serve(router: Router<()>, addr: &str) {
 mod tests {
     use super::*;
     use axum::body::Body;
-    use axum::extract::ConnectInfo;
     use axum::http::{Request, StatusCode};
     use tower::util::ServiceExt;
 
@@ -913,7 +914,11 @@ mod tests {
         assert_eq!(v["status"], 200);
         assert!(v["duration_us"].is_number(), "duration_us: {v}");
         assert_eq!(v["trace_id"], "4bf92f3577b34da6a3ce929d0e0e4736");
-        assert_eq!(v["x_forwarded_for"], "203.0.113.9");
+        // The peer the governor keyed on, not the forwarded-for header the
+        // request also carried — the same field the C++ rail's line reports.
+        assert_eq!(v["client"], "127.0.0.1");
+        assert_eq!(v["client_source"], "direct_peer");
+        assert!(v.get("x_forwarded_for").is_none(), "{v}");
         // The value, not just the key. The bazel target sets
         // OTEL_SERVICE_NAME=server-pal-under-test, so under CI an env-key
         // typo in the reader cannot pass; a bare `cargo test` has it unset
@@ -924,13 +929,42 @@ mod tests {
         );
     }
 
-    /// Absent headers read as empty fields — never a fabricated value, and
-    /// never a missing key.
+    /// An absent traceparent reads as an empty field — never a fabricated
+    /// value, and never a missing key.
     #[tokio::test]
     async fn absent_headers_log_as_empty_fields() {
         let v = access_line("/no/such/path", StatusCode::NOT_FOUND, false).await;
-        assert_eq!(v["x_forwarded_for"], "");
         assert_eq!(v["trace_id"], "");
+        assert_eq!(v["client_source"], "direct_peer");
+    }
+
+    /// A request with no peer (a chain driven without connect_info) says so
+    /// rather than inventing an address.
+    #[tokio::test]
+    async fn access_log_without_a_peer_reports_unknown_client() {
+        let buf: Arc<std::sync::Mutex<Vec<u8>>> = Arc::default();
+        let writer_buf = buf.clone();
+        let subscriber = log_subscriber_builder()
+            .with_writer(move || SharedWriter(writer_buf.clone()))
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let app = router_builder::<NoState>()
+            .route("/w", get(|| async { "w" }))
+            .rate_limit(None)
+            .build()
+            .with_state(NoState);
+        let req = Request::builder().uri("/w").body(Body::empty()).unwrap();
+        assert_eq!(app.oneshot(req).await.unwrap().status(), StatusCode::OK);
+
+        let output = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+        let line = output
+            .lines()
+            .find(|l| l.contains("\"event\":\"access\""))
+            .unwrap_or_else(|| panic!("no access line in: {output}"));
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(v["client"], "");
+        assert_eq!(v["client_source"], "unknown");
     }
 
     /// Unrouted requests log the shared sentinel, the same spelling the

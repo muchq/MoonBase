@@ -23,6 +23,7 @@ go_test(
         "//domains/platform/apis/stats:queries.go",
         "//domains/platform/libs/aura:middleware.cc",
         "//domains/platform/libs/aura:middleware.h",
+        "//domains/platform/libs/aura:middleware_test.cc",
         "//domains/platform/libs/futility/otel:http_instrument_descriptions.h",
         "//domains/platform/libs/futility/otel:otel_provider.h",
         "//domains/platform/libs/server_pal:src/lib.rs",

@@ -1,6 +1,5 @@
 #include "domains/platform/libs/aura/middleware.h"
 
-#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <stdexcept>
@@ -11,8 +10,8 @@
 #include "absl/log/log.h"
 #include "domains/platform/libs/futility/env/env.h"
 #include "domains/platform/libs/futility/otel/http_metrics.h"
-#include "opal/http/trace_context.h"
 #include "opal/http/transport.h"
+#include "opal/server/access_log.h"
 
 namespace aura {
 namespace {
@@ -98,84 +97,13 @@ std::string KindName(opal::http::BeastServerTransport::ConnectionEvent::Kind kin
   return "unknown(" + std::to_string(static_cast<int>(kind)) + ")";
 }
 
-// JSON string escaping for the access-log line. Every byte below 0x20 is
-// escaped (\uXXXX, or the short form for \n \r \t) and invalid UTF-8 is
-// replaced with U+FFFD, because the target reaches the line verbatim and is
-// attacker-controlled - a raw control byte or an unescaped quote terminates
-// the record early and lets the rest of the URI masquerade as its own log
-// entry (opal-cpp #203), and a stray non-UTF-8 byte (legal in a request
-// target per Beast's parser) would make the one record describing that
-// request the record strict JSON parsers reject.
-void AppendJsonEscaped(std::string& out, std::string_view value) {
-  static constexpr char kHex[] = "0123456789abcdef";
-  static constexpr char kReplacement[] = "\xEF\xBF\xBD";  // U+FFFD
-  for (size_t i = 0; i < value.size(); ++i) {
-    const unsigned char c = static_cast<unsigned char>(value[i]);
-    switch (c) {
-      case '"':
-        out += "\\\"";
-        continue;
-      case '\\':
-        out += "\\\\";
-        continue;
-      case '\n':
-        out += "\\n";
-        continue;
-      case '\r':
-        out += "\\r";
-        continue;
-      case '\t':
-        out += "\\t";
-        continue;
-    }
-    if (c < 0x20) {
-      out += "\\u00";
-      out += kHex[(c >> 4) & 0xF];
-      out += kHex[c & 0xF];
-      continue;
-    }
-    if (c < 0x80) {
-      out += static_cast<char>(c);
-      continue;
-    }
-    // Multi-byte lead: accept a well-formed sequence whole, replace anything
-    // else. Truncated sequences and stray continuation bytes both land here.
-    const int continuations = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC2 ? 1 : -1;
-    bool valid = continuations > 0 && i + continuations < value.size();
-    for (int k = 1; valid && k <= continuations; ++k) {
-      valid = (static_cast<unsigned char>(value[i + k]) & 0xC0) == 0x80;
-    }
-    if (valid) {
-      out.append(value.substr(i, continuations + 1));
-      i += continuations;
-    } else {
-      out += kReplacement;
-    }
-  }
-}
-
-void AppendJsonField(std::string& out, std::string_view name, std::string_view value) {
-  out += ",\"";
-  out += name;
-  out += "\":\"";
-  AppendJsonEscaped(out, value);
-  out += '"';
-}
-
-void AppendJsonNumber(std::string& out, std::string_view name, long long value) {
-  out += ",\"";
-  out += name;
-  out += "\":";
-  out += std::to_string(value);
-}
-
 // absl truncates a LOG message at its 15000-byte buffer, and a truncated
-// record is unparseable JSON - so the two unbounded, caller-controlled
-// fields are capped well under it. 2KB of target is more than any
-// legitimate route needs and enough of a hostile one to be diagnosable.
-std::string_view Capped(std::string_view value, size_t cap) {
-  return value.substr(0, std::min(value.size(), cap));
-}
+// record is unparseable JSON - so the one unbounded, caller-controlled
+// field is capped well under it. 2KB of target is more than any legitimate
+// route needs and enough of a hostile one to be diagnosable. A cut inside a
+// multi-byte sequence is fine: the formatter replaces the stray lead with
+// U+FFFD.
+constexpr size_t kMaxLoggedTarget = 2048;
 
 // The log's identity, from the compose contract (OTEL_SERVICE_NAME).
 // Note the C++ metrics resource does NOT read this variable - each
@@ -189,59 +117,28 @@ const std::string& ServiceNameFromEnv() {
   return name;
 }
 
-// One access-log line per request: a single JSON object in the metrics
-// vocabulary (#1459) — http_method and route are the bounded labels the
-// instruments carry, so a dashboard-to-logs pivot is a copy-paste; the raw
-// target rides in its own field where an unbounded value is data, not a
-// label. duration_us matches the histogram's unit.
+// One access-log line per request, except health probes: the runtime's
+// FormatAccessLog owns the record (field order, escaping, the derived
+// client and its provenance), aura adds the identity every dashboard
+// selects on (service_name, from the compose contract) and "event", which
+// server_pal's line carries under the same spelling. Probes stay in the
+// metrics (prom_proxy subtracts exactly that route) but out of the log: a
+// probe every few seconds per replica would otherwise be most of every
+// service's log volume.
 //
-// Kept separate from Observe because the line needs X-Forwarded-For and the
-// response body size, which RequestObservation doesn't carry; it measures
-// its own duration for the line only. The trace_id field is the W3C trace
-// id parsed from the request's traceparent — the transport guard mints or
-// joins it at ingress (opal-cpp ADR-0011), so on transport-served
-// requests it always parses. Empty only for hand-driven handler chains in
-// tests.
-//
-// x_forwarded_for is the raw header, which since ADR-0012 is NOT the
-// identity the rate limiter keys on — a 429's actual bucket (the derived
-// client address) is not on this line.
-opal::server::Middleware AccessLog() {
-  return [](opal::http::RequestHandler next) {
-    return [next = std::move(next)](
-               const opal::http::HttpRequest& request) -> opal::http::HttpResponse {
-      const auto start = std::chrono::steady_clock::now();
-
-      opal::http::HttpResponse response = next(request);
-
-      // Health probes stay in the metrics (prom_proxy subtracts exactly that
-      // route) but out of the log: a probe every few seconds per replica
-      // would otherwise be most of every service's log volume.
-      const std::string route = RouteLabelOf(response.operation, request.target);
-      if (route == kHealthRoute) return response;
-
-      const auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::steady_clock::now() - start);
-      const std::string trace_id =
-          opal::http::ParseTraceparent(request.headers.Get("traceparent").value_or(""))
-              .value_or(opal::http::TraceContext{})
-              .trace_id;
-      std::string line = R"({"event":"access")";
-      AppendJsonField(line, "service_name", ServiceNameFromEnv());
-      AppendJsonField(line, "http_method", MethodLabelOf(request.method));
-      AppendJsonField(line, "route", route);
-      AppendJsonField(line, "target", Capped(request.target, 2048));
-      AppendJsonNumber(line, "status", response.status);
-      AppendJsonNumber(line, "duration_us", duration_us.count());
-      AppendJsonNumber(line, "response_bytes", static_cast<long long>(response.body.size()));
-      AppendJsonField(line, "trace_id", trace_id);
-      AppendJsonField(line, "x_forwarded_for",
-                      Capped(request.headers.Get("X-Forwarded-For").value_or(""), 256));
-      line += '}';
-      LOG(INFO) << line;
-      return response;
-    };
-  };
+// The runtime formats target verbatim; the cap keeps a hostile URI under
+// absl's buffer so the record stays one parseable object.
+void LogAccess(const opal::server::RequestObservation& observation) {
+  if (RouteLabelOf(observation.operation, observation.target) == kHealthRoute) return;
+  if (observation.target.size() <= kMaxLoggedTarget) {
+    LOG(INFO) << opal::server::FormatAccessLog(
+        observation, {{"event", "access"}, {"service_name", ServiceNameFromEnv()}});
+    return;
+  }
+  opal::server::RequestObservation capped = observation;
+  capped.target.resize(kMaxLoggedTarget);
+  LOG(INFO) << opal::server::FormatAccessLog(
+      capped, {{"event", "access"}, {"service_name", ServiceNameFromEnv()}});
 }
 
 }  // namespace
@@ -251,30 +148,32 @@ std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
   return std::make_shared<OtelHttpMetricsSink>(std::move(metrics));
 }
 
-opal::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> metrics) {
-  return [metrics = std::move(metrics)](opal::http::RequestHandler next) {
-    // Metrics ride the runtime's Observe: microsecond durations (as of
-    // opal-cpp cfd8299) and start/complete guaranteed to pair even when
-    // dispatch throws. The completion carries the observation's operation —
-    // the matched handler the router annotated — which RouteLabelOf turns
-    // into the bounded route label (#1305).
-    opal::server::Middleware observe = opal::server::Observe(
-        [metrics](const opal::server::RequestObservation& observation) {
-          metrics->RecordRequestComplete(RouteLabelOf(observation.operation, observation.target),
-                                         MethodLabelOf(observation.method), observation.status,
-                                         observation.duration);
-        },
-        [metrics](const opal::server::RequestStart& start) {
-          metrics->RecordRequestStart(MethodLabelOf(start.method));
-        });
-    return observe(AccessLog()(std::move(next)));
-  };
+opal::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> metrics,
+                                              opal::http::TrustedProxies trusted_proxies) {
+  // Metrics and the access line both ride the runtime's Observe: microsecond
+  // durations and start/complete guaranteed to pair even when dispatch
+  // throws. The completion carries the observation's operation — the matched
+  // handler the router annotated — which RouteLabelOf turns into the bounded
+  // route label (#1305). The trust boundary is what lets the observation
+  // derive the ADR-0012 client the log line reports.
+  return opal::server::Observe(
+      [metrics](const opal::server::RequestObservation& observation) {
+        metrics->RecordRequestComplete(RouteLabelOf(observation.operation, observation.target),
+                                       MethodLabelOf(observation.method), observation.status,
+                                       observation.duration);
+        LogAccess(observation);
+      },
+      [metrics](const opal::server::RequestStart& start) {
+        metrics->RecordRequestStart(MethodLabelOf(start.method));
+      },
+      /*now=*/nullptr, std::move(trusted_proxies));
 }
 
 opal::http::RequestHandler ProductionChain(ChainOptions options,
                                            opal::http::RequestHandler handler) {
-  std::vector<opal::server::Middleware> chain = {ServingObservability(std::move(options.metrics)),
-                                                 opal::server::HealthEndpoint(kHealthRoute)};
+  std::vector<opal::server::Middleware> chain = {
+      ServingObservability(std::move(options.metrics), options.trusted_proxies),
+      opal::server::HealthEndpoint(kHealthRoute)};
   if (options.allow_request) {
     chain.push_back(opal::server::PerClientRateLimit(
         std::move(options.allow_request), std::move(options.trusted_proxies), options.retry_after));

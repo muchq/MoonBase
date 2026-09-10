@@ -23,9 +23,10 @@ without `scripts/make-git-overrides.sh`.
   - `ServingObservability` outermost, so health probes and 429s are
     observed too: the shared `http_server_*` instruments
     (`futility/otel:http_metrics`) plus one access-log line per request —
-    a single JSON object carrying the metrics vocabulary plus the raw
-    target and the W3C `trace_id` from the request's traceparent
-    (opal-cpp ADR-0011). The object rides inside absl's stderr record,
+    opal-cpp's `FormatAccessLog` record (the metrics vocabulary, the raw
+    target, the ADR-0012 derived `client` and its `client_source`, the
+    W3C `trace_id`) plus `event` and `service_name`. Health probes are
+    metered but not logged. The object rides inside absl's stderr record,
     so the shipped line is `I0831 ... middleware.cc:NNN] {...}` — a
     consumer strips the prefix up to `] ` before parsing. The route label is bounded (#1305): the matched Smithy
     operation name the generated router stamps on its responses,

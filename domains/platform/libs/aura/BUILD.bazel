@@ -5,6 +5,7 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 exports_files([
     "middleware.cc",
     "middleware.h",
+    "middleware_test.cc",
 ])
 
 # aura: the serving chain for opal-cpp services — observability over the
