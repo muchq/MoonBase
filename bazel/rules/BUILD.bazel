@@ -21,26 +21,22 @@ exports_files([
 # decision and no separate refresh story. Refreshing them is bumping that
 # digest, which is a thing somebody already has to do.
 #
-# The genrule fails the build if the file moves or the image stops
+# The extractor fails the build if the file moves or the image stops
 # carrying it, rather than quietly producing an image with no roots.
 genrule(
     name = "ca_certificates_crt",
     srcs = ["@distroless_base_linux_amd64"],
     outs = ["ca-certificates.crt"],
-    cmd = """
-set -eu
-for blob in $(location @distroless_base_linux_amd64//:distroless_base_linux_amd64)/blobs/sha256/*; do
-  if tar xOf "$$blob" ./etc/ssl/certs/ca-certificates.crt > $@.part 2>/dev/null; then
-    if [ -s $@.part ]; then
-      mv $@.part $@
-      exit 0
-    fi
-  fi
-done
-echo "no ./etc/ssl/certs/ca-certificates.crt in the pinned distroless layers" >&2
-exit 1
-""",
+    cmd = "bash $(location extract_ca_certificates.sh) $(location @distroless_base_linux_amd64//:distroless_base_linux_amd64) $@",
+    tools = ["extract_ca_certificates.sh"],
     visibility = ["//visibility:private"],
+)
+
+sh_test(
+    name = "extract_ca_certificates_test",
+    size = "small",
+    srcs = ["extract_ca_certificates_test.sh"],
+    data = ["extract_ca_certificates.sh"],
 )
 
 # Two names for the same bytes, because two runtimes look in two places.
