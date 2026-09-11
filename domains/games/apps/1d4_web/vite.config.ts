@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import chessqlReference from './vite-plugin-chessql';
+import chessqlReference from './vite-plugin-chessql.ts';
 
 export default defineConfig(async () => {
   const plugins = [tailwindcss(), react(), chessqlReference()];
