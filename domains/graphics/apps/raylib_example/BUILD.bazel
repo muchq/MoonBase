@@ -3,6 +3,8 @@ load("@rules_cc//cc:defs.bzl", "cc_binary")
 cc_binary(
     name = "raylib_example",
     srcs = ["hello_raylib.cc"],
+    # foreign_cc bootstrap is broken (#1524).
+    tags = ["manual"],
     visibility = ["//visibility:public"],
     deps = [
         "@raylib",
