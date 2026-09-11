@@ -1,5 +1,7 @@
-load("@crates//:defs.bzl", "all_crate_deps", "crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 
 rust_library(
     name = "impact_mcp_lib",
@@ -26,20 +28,7 @@ rust_library(
     compile_data = glob(["commands/*.md"]),
     crate_name = "impact_mcp",
     visibility = ["//visibility:public"],
-    deps = crate_deps([
-        "chrono",
-        "clap",
-        "dirs",
-        "reqwest",
-        "rmcp",
-        "schemars",
-        "serde",
-        "serde_json",
-        "serde_yaml_ng",
-        "tokio",
-        "tracing",
-        "uuid",
-    ]),
+    deps = all_crate_deps(),
 )
 
 rust_binary(
@@ -58,9 +47,7 @@ rust_test(
     size = "small",
     compile_data = glob(["commands/*.md"]),
     crate = ":impact-mcp",
-    deps = crate_deps([
-        "tempfile",
-    ]),
+    deps = all_crate_deps(normal_dev = True),
 )
 
 rust_test(
@@ -68,7 +55,5 @@ rust_test(
     size = "small",
     compile_data = glob(["commands/*.md"]),
     crate = ":impact_mcp_lib",
-    deps = crate_deps([
-        "tempfile",
-    ]),
+    deps = all_crate_deps(normal_dev = True),
 )

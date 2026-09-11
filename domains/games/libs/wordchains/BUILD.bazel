@@ -1,5 +1,6 @@
-load("@crates//:defs.bzl", "crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 
 rust_library(
     name = "wordchains",
@@ -13,12 +14,7 @@ rust_library(
     ],
     crate_name = "wordchains",
     visibility = ["//visibility:public"],
-    deps = crate_deps([
-        "base64ct",
-        "sha2",
-        "tracing",
-        "serde",
-    ]),
+    deps = all_crate_deps(),
 )
 
 rust_test(

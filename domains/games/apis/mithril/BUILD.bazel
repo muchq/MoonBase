@@ -1,5 +1,5 @@
 load("@crates//:defs.bzl", "all_crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 rust_binary(
@@ -15,7 +15,7 @@ rust_binary(
     deps = [
         "//domains/games/libs/wordchains",
         "//domains/platform/libs/server_pal",
-    ] + all_crate_deps(),
+    ] + all_crate_deps(cargo_only = True),
 )
 
 linux_amd64_oci_binary(bin_name = "mithril")
