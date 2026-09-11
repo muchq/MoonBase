@@ -236,6 +236,15 @@ RELEASE=$WORK/release
 rm -f "$RELEASE"
 INTERRUPTIBLE="grep -qx 'value = 41' project/answer.txt || until [ -f '$RELEASE' ]; do sleep 0.05; done"
 INT_OUT=$WORK/int-out.txt
+# Job control, so the run can actually be interrupted. Without it bash starts
+# every background child with SIGINT ignored, and an ignored-at-entry signal
+# cannot be trapped — `trap 'exit 130' INT` is silently dropped, the interrupt
+# does nothing, and the run finishes normally. The file is restored and no cp
+# error is printed *because nothing was interrupted*, so the two checks either
+# side of the status one pass without testing anything. `set -m` puts the child
+# in its own process group with SIGINT at its default, which is the disposition
+# a Ctrl-C at a terminal finds.
+set -m
 # `exec` so the backgrounded subshell is *replaced* by the script: $! is then
 # the PID that has the traps, and the interrupt lands on it rather than on a
 # wrapper that would sit there while the run carried on underneath.
@@ -252,12 +261,18 @@ kill -INT "$runner" 2>/dev/null
 touch "$RELEASE"
 wait "$runner"
 int_status=$?
+set +m
 
 check "an interrupted run restores the file" subject_is_intact
 check "an interrupted run exits 130" test "$int_status" -eq 130
 int_out_lacks() { ! grep -q "$1" "$INT_OUT"; }
 check "an interrupted run does not error on the way out" \
   int_out_lacks 'No such file or directory'
+# The two checks above are satisfied by a run that was never interrupted at all
+# — a run that finishes restores the file and prints no cp error either. The
+# mutation here outlives the suite, so reaching the verdict at all means the
+# signal did nothing.
+check "an interrupted run never reaches its verdict" int_out_lacks 'SURVIVED'
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
