@@ -11,14 +11,14 @@
     "com.fasterxml.jackson.datatype:jackson-datatype-jsr310": -578085414,
     "com.fasterxml.jackson.module:jackson-module-scala_2.13": 667474392,
     "com.fasterxml.jackson:jackson-bom": -317755572,
-    "com.github.ben-manes.caffeine:caffeine": 1135537849,
+    "com.github.ben-manes.caffeine:caffeine": 1815596219,
     "com.google.code.findbugs:jsr305": 495355163,
     "com.google.code.gson:gson": 597770368,
     "com.google.errorprone:error_prone_annotations": -1035138750,
     "com.google.errorprone:error_prone_core": 1313483394,
-    "com.google.guava:guava": -249069712,
+    "com.google.guava:guava": 965079090,
     "com.google.j2objc:j2objc-annotations": 2003271689,
-    "com.h2database:h2": 867138720,
+    "com.h2database:h2": 377222208,
     "com.uber.nullaway:nullaway": 1940496150,
     "com.zaxxer:HikariCP": 1991920386,
     "io.micronaut.jaxrs:micronaut-jaxrs-bom": -1922445730,
@@ -43,13 +43,13 @@
     "io.netty:netty-common": 1498958496,
     "io.netty:netty-handler": 1278819283,
     "io.netty:netty-transport": 320927026,
-    "io.sentry:sentry-logback": -1682225963,
+    "io.sentry:sentry-logback": 243808115,
     "jakarta.annotation:jakarta.annotation-api": -906475446,
     "org.assertj:assertj-core": -1145412507,
     "org.eclipse.jetty.websocket:websocket-jetty-server": -39664684,
     "org.eclipse.jetty:jetty-server": 2089965301,
     "org.jdbi:jdbi3-core": 2027133583,
-    "org.jspecify:jspecify": -382205121,
+    "org.jspecify:jspecify": 2105307712,
     "org.junit.jupiter:junit-jupiter-api": 194920406,
     "org.junit.jupiter:junit-jupiter-engine": -1886863302,
     "org.junit.jupiter:junit-jupiter-params": 1082310006,
@@ -57,87 +57,87 @@
     "org.junit.platform:junit-platform-reporting": 1896713402,
     "org.junit:junit-bom": 934071297,
     "org.postgresql:postgresql": -1283293677,
-    "org.slf4j:slf4j-api": -2005163028,
-    "org.yaml:snakeyaml": -320766088,
+    "org.slf4j:slf4j-api": 482349805,
+    "org.yaml:snakeyaml": -1448162181,
     "repositories": -1949687017
   },
   "__RESOLVED_ARTIFACTS_HASH": {
-    "ch.qos.logback:logback-classic": -130418118,
+    "ch.qos.logback:logback-classic": 1896323395,
     "ch.qos.logback:logback-core": 459824923,
     "com.ethlo.time:itu": -908980983,
     "com.fasterxml.jackson.core:jackson-annotations": -1012223496,
     "com.fasterxml.jackson.core:jackson-core": -1244959148,
     "com.fasterxml.jackson.core:jackson-databind": 728542137,
-    "com.fasterxml.jackson.datatype:jackson-datatype-guava": -23622417,
+    "com.fasterxml.jackson.datatype:jackson-datatype-guava": 1447281979,
     "com.fasterxml.jackson.datatype:jackson-datatype-jdk8": 1748107625,
     "com.fasterxml.jackson.datatype:jackson-datatype-jsr310": -1158266059,
     "com.fasterxml.jackson.module:jackson-module-scala_2.13": -1850506568,
-    "com.github.ben-manes.caffeine:caffeine": -1494872453,
+    "com.github.ben-manes.caffeine:caffeine": -1094095223,
     "com.github.javaparser:javaparser-core": -1165910921,
     "com.github.javaparser:javaparser-symbol-solver-core": -2145359977,
     "com.github.kevinstern:software-and-algorithms": 2052480962,
     "com.google.auto.service:auto-service-annotations": 1999106941,
     "com.google.auto.value:auto-value-annotations": 410854482,
-    "com.google.auto:auto-common": 2146159016,
+    "com.google.auto:auto-common": -677903884,
     "com.google.code.findbugs:jsr305": 870839855,
     "com.google.code.gson:gson": -1575757252,
-    "com.google.errorprone:error_prone_annotation": -843715032,
+    "com.google.errorprone:error_prone_annotation": 627189364,
     "com.google.errorprone:error_prone_annotations": 652227016,
-    "com.google.errorprone:error_prone_check_api": -1016103013,
-    "com.google.errorprone:error_prone_core": 596577796,
-    "com.google.googlejavaformat:google-java-format": 1151813790,
+    "com.google.errorprone:error_prone_check_api": 887770322,
+    "com.google.errorprone:error_prone_core": 554484760,
+    "com.google.googlejavaformat:google-java-format": -1672249110,
     "com.google.guava:failureaccess": 1715931538,
-    "com.google.guava:guava": 951060859,
+    "com.google.guava:guava": 311464563,
     "com.google.guava:listenablefuture": 1079558157,
     "com.google.j2objc:j2objc-annotations": -1008747351,
     "com.google.protobuf:protobuf-java": 1838995038,
-    "com.h2database:h2": 1660949213,
-    "com.networknt:json-schema-validator": -448005541,
+    "com.h2database:h2": -552414482,
+    "com.networknt:json-schema-validator": -807295466,
     "com.thoughtworks.paranamer:paranamer": -1233040102,
-    "com.uber.nullaway:nullaway": 435081709,
-    "com.zaxxer:HikariCP": 1080799863,
+    "com.uber.nullaway:nullaway": -1989014956,
+    "com.zaxxer:HikariCP": 789375142,
     "io.github.eisop:dataflow-errorprone": 1875600084,
     "io.github.java-diff-utils:java-diff-utils": -1540151507,
     "io.leangen.geantyref:geantyref": 669182600,
-    "io.micronaut.jaxrs:micronaut-jaxrs-common": -2107790014,
-    "io.micronaut.jaxrs:micronaut-jaxrs-processor": 1022854398,
-    "io.micronaut.jaxrs:micronaut-jaxrs-server": -1862314693,
-    "io.micronaut.jsonschema:micronaut-json-schema-annotations": -1480261473,
-    "io.micronaut.jsonschema:micronaut-json-schema-utils": -326768646,
-    "io.micronaut.jsonschema:micronaut-json-schema-validation": 2110376091,
-    "io.micronaut.mcp:micronaut-mcp": 1121654626,
-    "io.micronaut.mcp:micronaut-mcp-annotations": 2123690444,
-    "io.micronaut.mcp:micronaut-mcp-server-java-sdk": 1857387703,
-    "io.micronaut.reactor:micronaut-reactor": -1723279319,
-    "io.micronaut.serde:micronaut-serde-api": 1414178283,
-    "io.micronaut.sourcegen:micronaut-sourcegen-bytecode-writer": 609190321,
-    "io.micronaut.sourcegen:micronaut-sourcegen-model": 2027929118,
-    "io.micronaut.validation:micronaut-validation": -1928196637,
-    "io.micronaut.validation:micronaut-validation-processor": -874388867,
-    "io.micronaut:micronaut-aop": -1750649142,
-    "io.micronaut:micronaut-buffer-netty": 1777971096,
-    "io.micronaut:micronaut-context": 648910238,
-    "io.micronaut:micronaut-context-propagation": -1945750872,
-    "io.micronaut:micronaut-core": -788465717,
-    "io.micronaut:micronaut-core-processor": -885391581,
-    "io.micronaut:micronaut-core-reactive": 255573533,
-    "io.micronaut:micronaut-discovery-core": 1894929037,
-    "io.micronaut:micronaut-http": -933674423,
-    "io.micronaut:micronaut-http-client": -123668860,
-    "io.micronaut:micronaut-http-client-core": 950182997,
-    "io.micronaut:micronaut-http-netty": 265673274,
-    "io.micronaut:micronaut-http-server": 166533778,
-    "io.micronaut:micronaut-http-server-netty": 1042869078,
-    "io.micronaut:micronaut-inject": 1787836429,
-    "io.micronaut:micronaut-inject-java": 144308794,
-    "io.micronaut:micronaut-jackson-core": -649417058,
-    "io.micronaut:micronaut-jackson-databind": 92877517,
-    "io.micronaut:micronaut-json-core": -1045492321,
-    "io.micronaut:micronaut-retry": 530880800,
-    "io.micronaut:micronaut-router": 118801276,
-    "io.micronaut:micronaut-runtime": -348451785,
-    "io.micronaut:micronaut-websocket": -1112034115,
-    "io.modelcontextprotocol.sdk:mcp-core": -2077442527,
+    "io.micronaut.jaxrs:micronaut-jaxrs-common": -227361585,
+    "io.micronaut.jaxrs:micronaut-jaxrs-processor": -1946554082,
+    "io.micronaut.jaxrs:micronaut-jaxrs-server": -402385916,
+    "io.micronaut.jsonschema:micronaut-json-schema-annotations": 51291224,
+    "io.micronaut.jsonschema:micronaut-json-schema-utils": -1632068580,
+    "io.micronaut.jsonschema:micronaut-json-schema-validation": -618878248,
+    "io.micronaut.mcp:micronaut-mcp": 1620884687,
+    "io.micronaut.mcp:micronaut-mcp-annotations": -639724155,
+    "io.micronaut.mcp:micronaut-mcp-server-java-sdk": -399267645,
+    "io.micronaut.reactor:micronaut-reactor": 1215488034,
+    "io.micronaut.serde:micronaut-serde-api": -1417476563,
+    "io.micronaut.sourcegen:micronaut-sourcegen-bytecode-writer": -302849155,
+    "io.micronaut.sourcegen:micronaut-sourcegen-model": -735485481,
+    "io.micronaut.validation:micronaut-validation": -2128302527,
+    "io.micronaut.validation:micronaut-validation-processor": -1048234298,
+    "io.micronaut:micronaut-aop": 1488019126,
+    "io.micronaut:micronaut-buffer-netty": -577417144,
+    "io.micronaut:micronaut-context": -517340200,
+    "io.micronaut:micronaut-context-propagation": 1604838930,
+    "io.micronaut:micronaut-core": 839101653,
+    "io.micronaut:micronaut-core-processor": 547223056,
+    "io.micronaut:micronaut-core-reactive": -829438164,
+    "io.micronaut:micronaut-discovery-core": 2053181296,
+    "io.micronaut:micronaut-http": 528762675,
+    "io.micronaut:micronaut-http-client": 1581061071,
+    "io.micronaut:micronaut-http-client-core": -173712944,
+    "io.micronaut:micronaut-http-netty": 491753714,
+    "io.micronaut:micronaut-http-server": 984975969,
+    "io.micronaut:micronaut-http-server-netty": -1889918050,
+    "io.micronaut:micronaut-inject": -288873052,
+    "io.micronaut:micronaut-inject-java": -3331112,
+    "io.micronaut:micronaut-jackson-core": -1870344326,
+    "io.micronaut:micronaut-jackson-databind": 818579206,
+    "io.micronaut:micronaut-json-core": -1399312516,
+    "io.micronaut:micronaut-retry": 1101652789,
+    "io.micronaut:micronaut-router": -400761858,
+    "io.micronaut:micronaut-runtime": 65595825,
+    "io.micronaut:micronaut-websocket": -2074621672,
+    "io.modelcontextprotocol.sdk:mcp-core": 1668108860,
     "io.netty.contrib:netty-codec-multipart-core": 1927629490,
     "io.netty:netty-buffer": -2075998888,
     "io.netty:netty-codec": -510651193,
@@ -155,8 +155,8 @@
     "io.netty:netty-transport": -1075172341,
     "io.netty:netty-transport-native-unix-common": 81535987,
     "io.projectreactor:reactor-core": 1846691143,
-    "io.sentry:sentry": -996947687,
-    "io.sentry:sentry-logback": 943943580,
+    "io.sentry:sentry": -448468909,
+    "io.sentry:sentry-logback": -2085147391,
     "jakarta.annotation:jakarta.annotation-api": 196616042,
     "jakarta.inject:jakarta.inject-api": 188991469,
     "jakarta.validation:jakarta.validation-api": -1708329466,
@@ -168,29 +168,29 @@
     "org.checkerframework:checker-qual": -1868243245,
     "org.checkerframework:dataflow-nullaway": -1959857330,
     "org.eclipse.jetty.toolchain:jetty-jakarta-servlet-api": 1314593940,
-    "org.eclipse.jetty.websocket:websocket-core-common": 57702218,
-    "org.eclipse.jetty.websocket:websocket-core-server": -1525194790,
+    "org.eclipse.jetty.websocket:websocket-core-common": 1078928314,
+    "org.eclipse.jetty.websocket:websocket-core-server": 555097747,
     "org.eclipse.jetty.websocket:websocket-jetty-api": 377960543,
-    "org.eclipse.jetty.websocket:websocket-jetty-common": -112196553,
-    "org.eclipse.jetty.websocket:websocket-jetty-server": -1661549358,
-    "org.eclipse.jetty.websocket:websocket-servlet": -105558179,
-    "org.eclipse.jetty:jetty-http": -1379222086,
-    "org.eclipse.jetty:jetty-io": -1640513550,
-    "org.eclipse.jetty:jetty-security": -113513852,
-    "org.eclipse.jetty:jetty-server": 989303924,
-    "org.eclipse.jetty:jetty-servlet": -1786802359,
-    "org.eclipse.jetty:jetty-util": -728342729,
-    "org.eclipse.jetty:jetty-webapp": -1529162505,
-    "org.eclipse.jetty:jetty-xml": 398291446,
-    "org.jdbi:jdbi3-core": 1642485829,
-    "org.jspecify:jspecify": 117231129,
-    "org.junit.jupiter:junit-jupiter-api": 1344106988,
-    "org.junit.jupiter:junit-jupiter-engine": -1946997797,
-    "org.junit.jupiter:junit-jupiter-params": 452214198,
-    "org.junit.platform:junit-platform-commons": -1751712524,
-    "org.junit.platform:junit-platform-engine": -1417672575,
-    "org.junit.platform:junit-platform-launcher": 1929794892,
-    "org.junit.platform:junit-platform-reporting": -1773189321,
+    "org.eclipse.jetty.websocket:websocket-jetty-common": -2048566004,
+    "org.eclipse.jetty.websocket:websocket-jetty-server": -1570057141,
+    "org.eclipse.jetty.websocket:websocket-servlet": 2014387087,
+    "org.eclipse.jetty:jetty-http": -1981311502,
+    "org.eclipse.jetty:jetty-io": 1961444356,
+    "org.eclipse.jetty:jetty-security": 1686275563,
+    "org.eclipse.jetty:jetty-server": 2010530020,
+    "org.eclipse.jetty:jetty-servlet": 800234131,
+    "org.eclipse.jetty:jetty-util": 540529638,
+    "org.eclipse.jetty:jetty-webapp": 794995042,
+    "org.eclipse.jetty:jetty-xml": -294717944,
+    "org.jdbi:jdbi3-core": 1021770904,
+    "org.jspecify:jspecify": -109882726,
+    "org.junit.jupiter:junit-jupiter-api": 592737217,
+    "org.junit.jupiter:junit-jupiter-engine": -1867890377,
+    "org.junit.jupiter:junit-jupiter-params": -296119346,
+    "org.junit.platform:junit-platform-commons": 403149281,
+    "org.junit.platform:junit-platform-engine": -1297467764,
+    "org.junit.platform:junit-platform-launcher": 614168111,
+    "org.junit.platform:junit-platform-reporting": 1647565947,
     "org.opentest4j.reporting:open-test-reporting-tooling-spi": -1725000643,
     "org.opentest4j:opentest4j": -1711174392,
     "org.ow2.asm:asm": 1614653533,
@@ -202,9 +202,9 @@
     "org.postgresql:postgresql": -439421249,
     "org.reactivestreams:reactive-streams": 1281941191,
     "org.scala-lang:scala-library": -997461185,
-    "org.slf4j:slf4j-api": 500377983,
+    "org.slf4j:slf4j-api": 1965957737,
     "org.snakeyaml:snakeyaml-engine": -1273354013,
-    "org.yaml:snakeyaml": 1218201193,
+    "org.yaml:snakeyaml": -1766780312,
     "tools.jackson.core:jackson-core": -435916916,
     "tools.jackson.core:jackson-databind": 1536017795,
     "tools.jackson.dataformat:jackson-dataformat-yaml": -850893627
@@ -304,9 +304,9 @@
     },
     "com.github.ben-manes.caffeine:caffeine": {
       "shasums": {
-        "jar": "c74a6c72221dfb76eb92f2bb40108ea561a7da2f315dc3b1e64afa8f077f210c"
+        "jar": "9d9d2cfd681fd9272ded3d27c9930db12f89f732345975aa113ebc223bbf1224"
       },
-      "version": "3.2.2"
+      "version": "3.2.4"
     },
     "com.github.javaparser:javaparser-core": {
       "shasums": {
@@ -394,9 +394,9 @@
     },
     "com.google.guava:guava": {
       "shasums": {
-        "jar": "dc573e1fca4fd5454f4a5fd3d7da2df03002876a4175bafc14a95980dd7713b3"
+        "jar": "796d8e28ac64e83a47c4c5935a8fecc4682650a04bbdead738ef0f5a3a0e6c46"
       },
-      "version": "33.6.0-jre"
+      "version": "33.7.1-jre"
     },
     "com.google.guava:listenablefuture": {
       "shasums": {
@@ -418,9 +418,9 @@
     },
     "com.h2database:h2": {
       "shasums": {
-        "jar": "29b70e427cc1c40cdc376283adbb0cc62853073797bb5fe5761f81fe73d57ce0"
+        "jar": "82a80a2ac06901b03cdb233c663d21c4f49c884bf6d0cf85022729e8db9ab86f"
       },
-      "version": "2.4.240"
+      "version": "2.5.250"
     },
     "com.networknt:json-schema-validator": {
       "shasums": {
@@ -802,15 +802,15 @@
     },
     "io.sentry:sentry": {
       "shasums": {
-        "jar": "4b6d841691019f720e3106c4cb455a74380652c2cfb4bbcfea7b34b04ed3b67f"
+        "jar": "8d0d0e6b36d82f16c82ca9dfd44c43f2b139c14243890c74b0c64751308b7724"
       },
-      "version": "8.47.0"
+      "version": "8.56.0"
     },
     "io.sentry:sentry-logback": {
       "shasums": {
-        "jar": "e9b615d8e5df62a3f6da25d7e513da74fa68e810f17815535cf1f3d1bd6737fa"
+        "jar": "11d8694b2b0a21b5ff40462b90694d0783f297a2e017bd533129abf1df251c7d"
       },
-      "version": "8.47.0"
+      "version": "8.56.0"
     },
     "jakarta.annotation:jakarta.annotation-api": {
       "shasums": {
@@ -970,9 +970,9 @@
     },
     "org.jspecify:jspecify": {
       "shasums": {
-        "jar": "1fad6e6be7557781e4d33729d49ae1cdc8fdda6fe477bb0cc68ce351eafdfbab"
+        "jar": "070d75f261fe4c5b8202508366715f7f2d4660f88c8ef7e6d3575e48c9683b66"
       },
-      "version": "1.0.0"
+      "version": "1.0.1"
     },
     "org.junit.jupiter:junit-jupiter-api": {
       "shasums": {
@@ -1084,9 +1084,9 @@
     },
     "org.slf4j:slf4j-api": {
       "shasums": {
-        "jar": "44508fd1576500688c790b190acdd16fec4f8c79a3e0b900afd70503cf055f55"
+        "jar": "e91ff6d720609e7a194ffe758c3ed5c84e798617ae07b0a0f6a4fe229741b4bb"
       },
-      "version": "2.0.18"
+      "version": "2.0.19"
     },
     "org.snakeyaml:snakeyaml-engine": {
       "shasums": {
@@ -1096,9 +1096,9 @@
     },
     "org.yaml:snakeyaml": {
       "shasums": {
-        "jar": "ef779af5d29a9dde8cc70ce0341f5c6f7735e23edff9685ceaa9d35359b7bb7f"
+        "jar": "2e194eba45a67dee19a4e272f4a04b18de8054e9f598b094382f6dae0b0e4b5e"
       },
-      "version": "2.4"
+      "version": "2.7"
     },
     "tools.jackson.core:jackson-core": {
       "shasums": {
@@ -2783,6 +2783,7 @@
       "io.sentry.protocol",
       "io.sentry.protocol.profiling",
       "io.sentry.rrweb",
+      "io.sentry.time",
       "io.sentry.transport",
       "io.sentry.util",
       "io.sentry.util.network",
@@ -3315,7 +3316,6 @@
       "org.yaml.snakeyaml.env",
       "org.yaml.snakeyaml.error",
       "org.yaml.snakeyaml.events",
-      "org.yaml.snakeyaml.extensions.compactnotation",
       "org.yaml.snakeyaml.external.com.google.gdata.util.common.base",
       "org.yaml.snakeyaml.inspector",
       "org.yaml.snakeyaml.internal",
