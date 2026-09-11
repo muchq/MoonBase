@@ -1,6 +1,6 @@
-bazel_dep(name = "rules_java", version = "9.7.0")
+bazel_dep(name = "rules_java", version = "9.9.0")
 bazel_dep(name = "rules_jvm_external", version = "7.1")
-bazel_dep(name = "contrib_rules_jvm", version = "0.33.0")
+bazel_dep(name = "contrib_rules_jvm", version = "0.34.0")
 
 single_version_override(
     module_name = "rules_android",
@@ -30,18 +30,18 @@ maven.install(
         "com.fasterxml.jackson.core:jackson-annotations:2.22",
         "com.fasterxml.jackson.core:jackson-core",
         "com.fasterxml.jackson.core:jackson-databind",
-        "com.github.ben-manes.caffeine:caffeine:3.2.2",
+        "com.github.ben-manes.caffeine:caffeine:3.2.4",
         "com.google.errorprone:error_prone_core:%s" % ERROR_PRONE_VERSION,
         "com.uber.nullaway:nullaway:%s" % NULLAWAY_VERSION,
         "com.zaxxer:HikariCP:7.1.0",
-        "com.h2database:h2:2.4.240",
+        "com.h2database:h2:2.5.250",
         "org.jdbi:jdbi3-core:3.54.0",
         "org.postgresql:postgresql:42.7.13",
         "com.fasterxml.jackson.datatype:jackson-datatype-guava",
         "com.fasterxml.jackson.datatype:jackson-datatype-jdk8",
         "com.fasterxml.jackson.datatype:jackson-datatype-jsr310",
         "com.fasterxml.jackson.module:jackson-module-scala_2.13",
-        "com.google.guava:guava:33.6.0-jre",
+        "com.google.guava:guava:33.7.1-jre",
         "io.micronaut:micronaut-inject",
         "io.micronaut:micronaut-inject-java",
         "io.micronaut.validation:micronaut-validation",
@@ -61,7 +61,7 @@ maven.install(
         "io.netty:netty-codec",
         "io.netty:netty-handler",
         "io.netty:netty-transport",
-        "io.sentry:sentry-logback:8.47.0",
+        "io.sentry:sentry-logback:8.56.0",
         "jakarta.annotation:jakarta.annotation-api:3.0.0",
         "org.junit.jupiter:junit-jupiter-api",
         "org.junit.jupiter:junit-jupiter-engine",
@@ -71,8 +71,8 @@ maven.install(
         "org.assertj:assertj-core:3.27.7",
         "org.eclipse.jetty:jetty-server:%s" % JETTY_VERSION,
         "org.eclipse.jetty.websocket:websocket-jetty-server:%s" % JETTY_VERSION,
-        "org.jspecify:jspecify:1.0.0",
-        "org.slf4j:slf4j-api:2.0.18",
+        "org.jspecify:jspecify:1.0.1",
+        "org.slf4j:slf4j-api:2.0.19",
         # Micronaut's YamlPropertySourceLoader is compiled against classic snakeyaml
         # (org.yaml.snakeyaml.Yaml) and disables itself when that class is absent —
         # silently, so application.yml is simply never read. Nothing in this repo had
@@ -80,7 +80,7 @@ maven.install(
         # Jackson 3 upgrade dropped it again (Jackson 3 uses snakeyaml-engine, a
         # different package). Declared directly so YAML config depends on nothing but
         # itself: without it the file is inert and every property silently defaults.
-        "org.yaml:snakeyaml:2.4",
+        "org.yaml:snakeyaml:2.7",
     ],
     boms = [
         "io.netty:netty-bom:4.2.16.Final",

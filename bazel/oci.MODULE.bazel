@@ -1,11 +1,11 @@
-bazel_dep(name = "rules_pkg", version = "1.2.0")
+bazel_dep(name = "rules_pkg", version = "1.3.0")
 bazel_dep(name = "rules_oci", version = "2.3.0")
 bazel_dep(name = "container_structure_test", version = "1.22.1")
 
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 oci.pull(
     name = "docker_lib_ubuntu",
-    digest = "sha256:d1e2e92c075e5ca139d51a140fff46f84315c0fdce203eab2807c7e495eff4f9",
+    digest = "sha256:513c074113a871b51a8d16ab445c88779d6452d937a164fb5cc479f32668a41d",
     image = "docker.io/library/ubuntu",
     platforms = [
         "linux/amd64",
@@ -14,7 +14,7 @@ oci.pull(
 )
 oci.pull(
     name = "java_base",
-    digest = "sha256:e7585cf598c00a9a7a6a9fc478aea5eb869eacb0bf25ded479c2fab2ee51163a",
+    digest = "sha256:b782b1d4fb2064f97044c1ee658bbaa4e688a4caf06bbe04acaec0279727df7e",
     image = "docker.io/azul/zulu-openjdk",
     platforms = [
         "linux/amd64",
@@ -24,7 +24,7 @@ oci.pull(
 )
 oci.pull(
     name = "distroless_base",
-    digest = "sha256:937c7eaaf6f3f2d38a1f8c4aeff326f0c56e4593ea152e9e8f74d976dde52f56",
+    digest = "sha256:fabbf1c0c357a3d42550111351daed089b20a2c954df13ee2fcff60602515e84",
     image = "gcr.io/distroless/base-debian12",
     platforms = [
         "linux/amd64",
