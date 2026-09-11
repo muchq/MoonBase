@@ -1,5 +1,5 @@
-load("@crates//:defs.bzl", "crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_binary")
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 
 # Generator binary (host configuration)
 rust_binary(
@@ -10,12 +10,7 @@ rust_binary(
         "src/main.rs",
     ],
     crate_name = "wordchains_gen",
-    deps = crate_deps([
-        "clap",
-        "log",
-        "simplelog",
-        "serde_json",
-    ]) + ["//domains/games/libs/wordchains"],
+    deps = all_crate_deps(cargo_only = True) + ["//domains/games/libs/wordchains"],
 )
 
 # Rule to generate graph JSON
@@ -54,10 +49,5 @@ rust_binary(
         "GRAPH_LOADER_PATH": "$(execpath :generate_graph_rs)",
     },
     visibility = ["//visibility:public"],
-    deps = crate_deps([
-        "clap",
-        "log",
-        "simplelog",
-        "serde_json",
-    ]) + ["//domains/games/libs/wordchains"],
+    deps = all_crate_deps(cargo_only = True) + ["//domains/games/libs/wordchains"],
 )

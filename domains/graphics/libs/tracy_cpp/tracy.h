@@ -2,6 +2,7 @@
 #define CPP_TRACY_TRACY_H
 
 #include <cmath>
+#include <optional>
 #include <random>
 #include <tuple>
 #include <vector>

@@ -122,20 +122,15 @@ build:sanitizer --test_timeout=120,600,1800,3600
 # issue's acceptance test. Pass --test_tag_filters= to see them anyway.
 test:sanitizer --test_tag_filters=-no-sanitize
 
+# The toolchain stages compiler-rt per sanitizer; a bare -fsanitize= copt
+# gets the flag without the runtime and fails at link.
 build:asan --config=sanitizer
-build:asan --copt=-fsanitize=address
-build:asan --linkopt=-fsanitize=address
+build:asan --@llvm//config:asan=true
 test:asan --test_env=ASAN_OPTIONS=detect_stack_use_after_return=1:strict_string_checks=1
 
 build:ubsan --config=sanitizer
-build:ubsan --copt=-fsanitize=undefined
-build:ubsan --linkopt=-fsanitize=undefined
-# Everything except the vptr check, which is the one UBSan check that needs
-# the C++-specific runtime (libclang_rt.ubsan_standalone_cxx). The toolchain
-# links through clang rather than clang++, so leaving it on fails at link
-# with undefined __ubsan_vptr_type_cache rather than finding anything. The
-# checks that carry the weight here — signed overflow, shifts, alignment,
-# null deref, bogus bool/enum loads, float casts — are all still on.
+build:ubsan --@llvm//config:ubsan=true
+# vptr needs libclang_rt.ubsan_standalone_cxx; every other check stays on.
 build:ubsan --copt=-fno-sanitize=vptr
 build:ubsan --linkopt=-fno-sanitize=vptr
 # UBSan diagnoses and keeps going by default, so a finding scrolls past
@@ -144,8 +139,7 @@ build:ubsan --copt=-fno-sanitize-recover=all
 test:ubsan --test_env=UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 
 build:tsan --config=sanitizer
-build:tsan --copt=-fsanitize=thread
-build:tsan --linkopt=-fsanitize=thread
+build:tsan --@llvm//config:tsan=true
 test:tsan --test_env=TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1
 
 # Platform-specific configurations

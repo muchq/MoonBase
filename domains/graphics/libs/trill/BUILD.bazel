@@ -4,6 +4,8 @@ cc_library(
     name = "trill",
     srcs = ["trill.cc"],
     hdrs = ["trill.h"],
+    # foreign_cc bootstrap is broken (#1524).
+    tags = ["manual"],
     visibility = ["//visibility:public"],
     deps = [
         "@sdl3",

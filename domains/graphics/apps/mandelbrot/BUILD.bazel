@@ -10,6 +10,8 @@ cc_library(
 cc_binary(
     name = "mandelbrot",
     srcs = ["mandelbrot.cc"],
+    # foreign_cc bootstrap is broken (#1524).
+    tags = ["manual"],
     visibility = ["//visibility:public"],
     deps = [
         ":color",

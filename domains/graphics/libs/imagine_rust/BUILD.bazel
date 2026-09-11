@@ -1,5 +1,7 @@
-load("@crates//:defs.bzl", "all_crate_deps", "crate_deps")
-load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
 
 rust_library(
     name = "imagine_lib",
@@ -11,9 +13,7 @@ rust_library(
     ],
     crate_name = "imagine",
     visibility = ["//visibility:public"],
-    deps = crate_deps([
-        "image",
-    ]),
+    deps = all_crate_deps(),
 )
 
 rust_binary(
