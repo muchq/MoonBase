@@ -12,32 +12,37 @@ import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+/**
+ * What the migration files build, asserted against the schema they build it in. An empty schema per
+ * test, because half of these are about the upgrade path onto a column rather than about a fresh
+ * one.
+ */
 public class MigrationTest {
 
   private DataSource dataSource;
+  private String schema;
 
   @BeforeEach
   public void setUp() {
-    // nanoTime, not currentTimeMillis: two tests starting in the same millisecond would silently
-    // share a database — the same trap TestDb documents and avoids.
-    String jdbcUrl = "jdbc:h2:mem:migration_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1";
-    dataSource = DataSourceFactory.create(jdbcUrl);
+    TestDb empty = TestDb.emptySchema("migration");
+    dataSource = empty.dataSource();
+    schema = empty.schema();
   }
 
   @Test
   public void run_createsMotifOccurrencesTable_andDropsHasMotifColumns() throws Exception {
-    Migration migration = new Migration(dataSource, new H2SqlDialect());
+    Migration migration = new Migration(dataSource);
     migration.run();
 
     try (Connection conn = dataSource.getConnection()) {
       DatabaseMetaData meta = conn.getMetaData();
       try (ResultSet tables =
-          meta.getTables(null, null, "MOTIF_OCCURRENCES", new String[] {"TABLE"})) {
+          meta.getTables(null, schema, "motif_occurrences", new String[] {"TABLE"})) {
         assertThat(tables.next()).as("motif_occurrences table should exist").isTrue();
       }
 
       // has_* boolean columns should not exist — motif queries use motif_occurrences directly
-      try (ResultSet columns = meta.getColumns(null, null, "GAME_FEATURES", "HAS_PIN")) {
+      try (ResultSet columns = meta.getColumns(null, schema, "game_features", "has_pin")) {
         assertThat(columns.next()).as("game_features.has_pin column should not exist").isFalse();
       }
     }
@@ -52,7 +57,7 @@ public class MigrationTest {
    */
   @Test
   public void run_addsDispatchColumnsAndBackfillsExistingRows() throws Exception {
-    new Migration(dataSource, new H2SqlDialect()).run();
+    new Migration(dataSource).run();
 
     UUID legacy = UUID.randomUUID();
     try (Connection conn = dataSource.getConnection();
@@ -66,7 +71,7 @@ public class MigrationTest {
     }
 
     // Idempotent: running again must not disturb the row or the columns.
-    new Migration(dataSource, new H2SqlDialect()).run();
+    new Migration(dataSource).run();
 
     try (Connection conn = dataSource.getConnection();
         var ps =
@@ -97,33 +102,31 @@ public class MigrationTest {
    */
   @Test
   public void run_createsReanalysisRequestsWithItsOwnLeaseColumns() throws Exception {
-    new Migration(dataSource, new H2SqlDialect()).run();
+    new Migration(dataSource).run();
 
     try (Connection conn = dataSource.getConnection()) {
       DatabaseMetaData meta = conn.getMetaData();
       try (ResultSet tables =
-          meta.getTables(null, null, "REANALYSIS_REQUESTS", new String[] {"TABLE"})) {
+          meta.getTables(null, schema, "reanalysis_requests", new String[] {"TABLE"})) {
         assertThat(tables.next()).as("reanalysis_requests table should exist").isTrue();
       }
 
       for (String column :
           new String[] {
-            "ID",
-            "STATUS",
-            "CREATED_AT",
-            "UPDATED_AT",
-            "OWNER_ID",
-            "LEASE_EXPIRES_AT",
-            "ATTEMPTS",
-            "ERROR_MESSAGE",
-            "CURSOR_GAME_URL",
-            "GAMES_PROCESSED",
-            "GAMES_FAILED"
+            "id",
+            "status",
+            "created_at",
+            "updated_at",
+            "owner_id",
+            "lease_expires_at",
+            "attempts",
+            "error_message",
+            "cursor_game_url",
+            "games_processed",
+            "games_failed"
           }) {
-        try (ResultSet columns = meta.getColumns(null, null, "REANALYSIS_REQUESTS", column)) {
-          assertThat(columns.next())
-              .as("reanalysis_requests.%s should exist", column.toLowerCase())
-              .isTrue();
+        try (ResultSet columns = meta.getColumns(null, schema, "reanalysis_requests", column)) {
+          assertThat(columns.next()).as("reanalysis_requests.%s should exist", column).isTrue();
         }
       }
     }
@@ -153,16 +156,16 @@ public class MigrationTest {
   /**
    * At most one live reanalysis pass. Two PENDING rows are two claimable passes, and two worker
    * replicas would walk the whole corpus twice for no benefit — so the queue refuses the second at
-   * insert. H2 has no partial indexes, so this asserts existence only; the uniqueness itself is
-   * asserted on the engine that enforces it, in {@code PostgresSingleLiveReanalysisTest}.
+   * insert. Existence only here; what the index actually rejects is driven in {@code
+   * PostgresSingleLiveReanalysisTest}.
    */
   @Test
   public void run_addsTheSingleLiveReanalysisIndex() throws Exception {
-    new Migration(dataSource, new H2SqlDialect()).run();
+    new Migration(dataSource).run();
 
     try (Connection conn = dataSource.getConnection();
         ResultSet indexes =
-            conn.getMetaData().getIndexInfo(null, null, "REANALYSIS_REQUESTS", false, false)) {
+            conn.getMetaData().getIndexInfo(null, schema, "reanalysis_requests", false, false)) {
       boolean found = false;
       while (indexes.next()) {
         String name = indexes.getString("INDEX_NAME");
@@ -179,11 +182,11 @@ public class MigrationTest {
    */
   @Test
   public void run_addsTheClaimableIndex() throws Exception {
-    new Migration(dataSource, new H2SqlDialect()).run();
+    new Migration(dataSource).run();
 
     try (Connection conn = dataSource.getConnection();
         ResultSet indexes =
-            conn.getMetaData().getIndexInfo(null, null, "INDEXING_REQUESTS", false, false)) {
+            conn.getMetaData().getIndexInfo(null, schema, "indexing_requests", false, false)) {
       boolean found = false;
       while (indexes.next()) {
         String name = indexes.getString("INDEX_NAME");
@@ -208,7 +211,7 @@ public class MigrationTest {
    */
   @Test
   public void run_addsThePlayedAtBrowseIndexMatchingTheCompilersOrderBy() throws Exception {
-    new Migration(dataSource, new H2SqlDialect()).run();
+    new Migration(dataSource).run();
 
     String compiledDefault =
         new com.muchq.games.chessql.compiler.SqlCompiler()
@@ -221,7 +224,7 @@ public class MigrationTest {
     java.util.List<String> columnsInOrder = new java.util.ArrayList<>();
     try (Connection conn = dataSource.getConnection();
         ResultSet indexes =
-            conn.getMetaData().getIndexInfo(null, null, "GAME_FEATURES", false, false)) {
+            conn.getMetaData().getIndexInfo(null, schema, "game_features", false, false)) {
       while (indexes.next()) {
         String name = indexes.getString("INDEX_NAME");
         if (name != null && name.equalsIgnoreCase("idx_game_features_played_at")) {
@@ -233,20 +236,19 @@ public class MigrationTest {
 
     assertThat(columnsInOrder)
         .as("idx_game_features_played_at must mirror ORDER BY played_at DESC, game_url ASC")
-        .containsExactly("PLAYED_AT:D", "GAME_URL:A");
+        .containsExactly("played_at:D", "game_url:A");
   }
 
   /**
    * The username indexes behind the player-participation guard, and the predicate they exist to
-   * serve. On H2 they are plain column indexes (H2 has no expression indexes), so what this pins is
-   * presence and the compiler's side of the contract: the guard must still be the
-   * case-folded-on-both-sides shape the Postgres {@code LOWER(...)} expression indexes mirror. If
-   * the compiler's predicate changes shape, this fails and points at the index definitions; the
-   * plan-level proof on the deployment dialect lives in {@code PostgresPlayerIndexTest}.
+   * serve. Both halves in one test: the compiler must still emit the case-folded-on-both-sides
+   * shape, and the indexes must still be {@code LOWER(...)} over the matching column. Either
+   * drifting alone fails here rather than quietly costing the plan; the plan-level proof lives in
+   * {@code PostgresPlayerIndexTest}.
    */
   @Test
   public void run_addsTheUsernameIndexesBehindTheParticipationGuard() throws Exception {
-    new Migration(dataSource, new H2SqlDialect()).run();
+    new Migration(dataSource).run();
 
     String playerScoped =
         new com.muchq.games.chessql.compiler.SqlCompiler()
@@ -269,25 +271,28 @@ public class MigrationTest {
         .as("the browse search predicate these indexes serve, case-folded on both sides")
         .contains("(LOWER(white_username) = LOWER(?) OR LOWER(black_username) = LOWER(?))");
 
-    java.util.Map<String, java.util.List<String>> columnsByIndex = new java.util.HashMap<>();
+    // One index per side — an OR across two columns is served by two indexes, not one — and each
+    // must fold its own side's column: an index pointed at the wrong column keeps the name this
+    // test looks for while serving nothing.
+    assertThat(indexDefinition("idx_game_features_white_username"))
+        .contains("lower((white_username)::text)");
+    assertThat(indexDefinition("idx_game_features_black_username"))
+        .contains("lower((black_username)::text)");
+  }
+
+  /** {@code pg_indexes.indexdef}, which is where an expression index's expression is legible. */
+  private String indexDefinition(String indexName) throws Exception {
     try (Connection conn = dataSource.getConnection();
-        ResultSet indexes =
-            conn.getMetaData().getIndexInfo(null, null, "GAME_FEATURES", false, false)) {
-      while (indexes.next()) {
-        String name = indexes.getString("INDEX_NAME");
-        if (name != null) {
-          columnsByIndex
-              .computeIfAbsent(name.toLowerCase(), k -> new java.util.ArrayList<>())
-              .add(indexes.getString("COLUMN_NAME").toLowerCase());
-        }
+        var ps =
+            conn.prepareStatement(
+                "SELECT indexdef FROM pg_indexes WHERE schemaname = ? AND indexname = ?")) {
+      ps.setString(1, schema);
+      ps.setString(2, indexName);
+      try (ResultSet rs = ps.executeQuery()) {
+        assertThat(rs.next()).as("%s does not exist", indexName).isTrue();
+        return rs.getString(1);
       }
     }
-    // One index per side — an OR across two columns is served by two indexes, not one — and each
-    // stand-in must sit on its own side's column: a stand-in redirected at the wrong column would
-    // keep the name this test looks for while modeling an index Postgres doesn't have.
-    assertThat(columnsByIndex)
-        .containsEntry("idx_game_features_white_username", java.util.List.of("white_username"))
-        .containsEntry("idx_game_features_black_username", java.util.List.of("black_username"));
   }
 
   /**
@@ -298,12 +303,12 @@ public class MigrationTest {
    */
   @Test
   public void run_addsTheIndexedAtRetentionIndex() throws Exception {
-    new Migration(dataSource, new H2SqlDialect()).run();
+    new Migration(dataSource).run();
 
     java.util.List<String> columns = new java.util.ArrayList<>();
     try (Connection conn = dataSource.getConnection();
         ResultSet indexes =
-            conn.getMetaData().getIndexInfo(null, null, "GAME_FEATURES", false, false)) {
+            conn.getMetaData().getIndexInfo(null, schema, "game_features", false, false)) {
       while (indexes.next()) {
         String name = indexes.getString("INDEX_NAME");
         if (name != null && name.equalsIgnoreCase("idx_game_features_indexed_at")) {
@@ -316,14 +321,14 @@ public class MigrationTest {
 
   @Test
   public void run_addsTitleAndOpeningColumns() throws Exception {
-    Migration migration = new Migration(dataSource, new H2SqlDialect());
+    Migration migration = new Migration(dataSource);
     migration.run();
 
     try (Connection conn = dataSource.getConnection()) {
       DatabaseMetaData meta = conn.getMetaData();
       for (String column :
-          new String[] {"WHITE_TITLE", "BLACK_TITLE", "OPENING_NAME", "OPENING_FAMILY"}) {
-        try (ResultSet columns = meta.getColumns(null, null, "GAME_FEATURES", column)) {
+          new String[] {"white_title", "black_title", "opening_name", "opening_family"}) {
+        try (ResultSet columns = meta.getColumns(null, schema, "game_features", column)) {
           assertThat(columns.next()).as("game_features.%s column should exist", column).isTrue();
         }
       }
@@ -332,7 +337,7 @@ public class MigrationTest {
 
   @Test
   public void run_motifOccurrencesTableAcceptsInsertAndSelect() throws Exception {
-    Migration migration = new Migration(dataSource, new H2SqlDialect());
+    Migration migration = new Migration(dataSource);
     migration.run();
 
     UUID requestId = UUID.randomUUID();
@@ -379,108 +384,87 @@ public class MigrationTest {
   }
 
   /**
-   * The backfill renders the dedupe key in SQL while {@link IndexingRequestDao} renders it in Java,
-   * and the two have to agree exactly or a migrated row is invisible to dedupe. H2 spells a BOOLEAN
-   * 'TRUE' where Java and Postgres spell it 'true', so the excludeBullet=true case is the one that
-   * catches a missing LOWER(CAST(...)) — the false case passes either way.
+   * The live-request invariant, as the schema states it since V018: one PENDING/PROCESSING row per
+   * (player, platform, start_month, end_month, exclude_bullet), and terminal rows free to pile up.
+   * Read off {@code indexdef} rather than inferred from a rejected insert, so a unique index that
+   * lost its {@code WHERE} — which would block a resubmit after a COMPLETED run — fails here too.
    */
   @Test
-  public void run_backfillsDedupeKeyMatchingTheJavaRendering() throws Exception {
-    new Migration(dataSource, new H2SqlDialect()).run();
+  public void run_addsTheLiveRequestIndexAsAPartialUniqueIndex() throws Exception {
+    new Migration(dataSource).run();
 
-    UUID pending = insertLegacyRequest("hikaru", "2024-01", "2024-03", true, "PENDING");
-    UUID completed = insertLegacyRequest("magnus", "2024-01", "2024-01", false, "COMPLETED");
-    clearDedupeKeys();
+    assertThat(indexDefinition("idx_indexing_requests_live"))
+        .contains("UNIQUE")
+        .contains("(player, platform, start_month, end_month, exclude_bullet)")
+        .contains("WHERE ((status)::text = ANY");
+  }
 
-    new Migration(dataSource, new H2SqlDialect()).run();
+  /** V009's column and its constraint are gone, not merely unwritten. */
+  @Test
+  public void run_leavesNoDedupeKeyColumnBehind() throws Exception {
+    new Migration(dataSource).run();
 
-    assertThat(dedupeKeyOf(pending))
-        .isEqualTo(IndexingRequestDao.dedupeKey("hikaru", "CHESS_COM", "2024-01", "2024-03", true));
-    assertThat(dedupeKeyOf(completed)).as("terminal rows hold no slot").isNull();
-
-    // The proof that the rendering agrees: a fresh submit for the same tuple adopts the migrated
-    // row rather than trying to create a second one.
-    IndexingRequestDao dao = new IndexingRequestDao(org.jdbi.v3.core.Jdbi.create(dataSource));
-    IndexingRequestStore.Claim claim =
-        dao.createOrAdopt(
-            "hikaru",
-            "CHESS_COM",
-            "2024-01",
-            "2024-03",
-            true,
-            false,
-            java.time.Duration.ofHours(1),
-            java.time.Instant.now());
-    assertThat(claim.created()).isFalse();
-    assertThat(claim.request().id()).isEqualTo(pending);
+    try (Connection conn = dataSource.getConnection()) {
+      try (ResultSet columns =
+          conn.getMetaData().getColumns(null, schema, "indexing_requests", "dedupe_key")) {
+        assertThat(columns.next()).as("dedupe_key survived V018").isFalse();
+      }
+    }
   }
 
   /**
-   * The pre-constraint schema allowed several live rows per tuple, so the backfill has to key at
-   * most one of them or ADD CONSTRAINT fails and the whole migration aborts.
+   * The upgrade path onto the index, which is the one thing about V018 that a fresh schema cannot
+   * show. V009's losers stayed PENDING while holding no key, so a real database can carry several
+   * live rows per range — and {@code CREATE UNIQUE INDEX} would reject them and abort the deploy.
    *
-   * <p>All three rows are given the <em>same</em> created_at deliberately. The backfill orders
-   * candidates by (created_at, id); on distinct timestamps created_at alone decides and the id
-   * tiebreak never runs, so a fixture with distinct timestamps would pass against a backfill that
-   * omitted it. A tie is what forces the tiebreak to do the work — and a tie is exactly what a
-   * coarse clock produces when duplicate submits land in the same instant, which is the situation
-   * that created these duplicates in the first place.
+   * <p>Staged by dropping the index and inserting the duplicates the old schema permitted, then
+   * running the migrations again: the same statements a deploy would run, against the state a
+   * deploy would find.
+   *
+   * <p>All three get the same created_at deliberately. V018 orders candidates by (created_at, id),
+   * and on distinct timestamps the id tiebreak never runs — so distinct timestamps would pass
+   * against a statement that omitted it, while duplicate submits landing in one instant are exactly
+   * what produced these rows.
+   *
+   * <p>Which row survives is asserted as "the one a resubmit attaches to" rather than computed
+   * here: V018 and {@code findExistingRequest} order candidates the same way and have to, or a
+   * caller is handed a row nobody is working on. Recomputing the tiebreak in Java would also get it
+   * wrong — {@code UUID.compareTo} is signed and Postgres compares uuid bytes unsigned.
    */
   @Test
-  public void run_backfillKeysOnlyOneOfSeveralLiveRequestsCreatedInTheSameInstant()
-      throws Exception {
-    new Migration(dataSource, new H2SqlDialect()).run();
+  public void run_retiresPreExistingDuplicateLiveRequestsSoTheIndexCanBeBuilt() throws Exception {
+    new Migration(dataSource).run();
 
+    try (Connection conn = dataSource.getConnection();
+        Statement stmt = conn.createStatement()) {
+      stmt.execute("DROP INDEX idx_indexing_requests_live");
+    }
     Instant sameInstant = Instant.parse("2026-06-01T00:00:00Z");
     UUID first = insertLegacyRequest("dupe", "2024-05", "2024-05", false, "PENDING", sameInstant);
     UUID second = insertLegacyRequest("dupe", "2024-05", "2024-05", false, "PENDING", sameInstant);
     UUID third =
         insertLegacyRequest("dupe", "2024-05", "2024-05", false, "PROCESSING", sameInstant);
-    clearDedupeKeys();
 
-    new Migration(dataSource, new H2SqlDialect()).run();
+    new Migration(dataSource).run();
 
-    long keyed =
-        java.util.stream.Stream.of(first, second, third)
-            .filter(id -> dedupeKeyOf(id) != null)
-            .count();
-    assertThat(keyed).as("exactly one duplicate may hold the slot").isEqualTo(1);
-  }
-
-  /**
-   * The backfill decides which duplicate holds the slot; {@code findExistingRequest} decides which
-   * one a later submit attaches to. They have to be the same row. Ordering by created_at alone
-   * settles it only when the timestamps differ — and duplicate submits are precisely what produces
-   * ties — so a tie is where the two can disagree and hand a caller a row nobody is working on
-   * while the keyed row does the work.
-   */
-  @Test
-  public void run_theBackfillWinnerIsTheRowASubsequentLookupReturns() throws Exception {
-    new Migration(dataSource, new H2SqlDialect()).run();
-
-    Instant sameInstant = Instant.parse("2026-06-01T00:00:00Z");
-    for (int i = 0; i < 3; i++) {
-      insertLegacyRequest("tied", "2024-05", "2024-05", false, "PENDING", sameInstant);
-    }
-    clearDedupeKeys();
-
-    new Migration(dataSource, new H2SqlDialect()).run();
-
-    IndexingRequestDao dao = new IndexingRequestDao(org.jdbi.v3.core.Jdbi.create(dataSource));
-    UUID found =
-        dao.findExistingRequest("tied", "CHESS_COM", "2024-05", "2024-05", false)
+    UUID adopted =
+        new IndexingRequestDao(org.jdbi.v3.core.Jdbi.create(dataSource))
+            .findExistingRequest("dupe", "CHESS_COM", "2024-05", "2024-05", false)
             .orElseThrow()
             .id();
+    assertThat(statusOf(adopted))
+        .as("the surviving row keeps the range")
+        .isIn("PENDING", "PROCESSING");
+    for (UUID id : java.util.List.of(first, second, third)) {
+      if (!id.equals(adopted)) {
+        assertThat(statusOf(id))
+            .as("a superseded duplicate is retired, not left live")
+            .isEqualTo("FAILED");
+      }
+    }
 
-    assertThat(dedupeKeyOf(found))
-        .as("the row a submit attaches to must be the row that holds the slot")
-        .isNotNull();
-  }
-
-  private UUID insertLegacyRequest(
-      String player, String startMonth, String endMonth, boolean excludeBullet, String status)
-      throws Exception {
-    return insertLegacyRequest(player, startMonth, endMonth, excludeBullet, status, null);
+    // The point of the retirement: the index exists again afterwards, so the deploy completed.
+    assertThat(indexDefinition("idx_indexing_requests_live")).contains("UNIQUE");
   }
 
   private UUID insertLegacyRequest(
@@ -510,21 +494,13 @@ public class MigrationTest {
     return id;
   }
 
-  /** Simulates rows written before the column existed, so the backfill has work to do. */
-  private void clearDedupeKeys() throws Exception {
+  private String statusOf(UUID id) {
     try (Connection conn = dataSource.getConnection();
-        Statement stmt = conn.createStatement()) {
-      stmt.execute("UPDATE indexing_requests SET dedupe_key = NULL");
-    }
-  }
-
-  private String dedupeKeyOf(UUID id) {
-    try (Connection conn = dataSource.getConnection();
-        var ps = conn.prepareStatement("SELECT dedupe_key FROM indexing_requests WHERE id = ?")) {
+        var ps = conn.prepareStatement("SELECT status FROM indexing_requests WHERE id = ?")) {
       ps.setObject(1, id);
       try (ResultSet rs = ps.executeQuery()) {
-        assertThat(rs.next()).isTrue();
-        return rs.getString("dedupe_key");
+        assertThat(rs.next()).as("row %s is gone", id).isTrue();
+        return rs.getString("status");
       }
     } catch (Exception e) {
       throw new RuntimeException(e);

@@ -207,9 +207,8 @@ Environment variables (with defaults):
 
 The deploy sets all three from `compose.yaml` (MoonBase#1351). Credentials are passed
 separately rather than as URL query parameters, which pgjdbc decodes. There is no
-in-memory default: H2 is a test-only dependency and its driver is not on the service's
-classpath (MoonBase#1362), so a missing URL is a failed startup rather than a service
-quietly running on a database that disappears.
+in-memory default (MoonBase#1362, #1532), so a missing URL is a failed startup rather
+than a service quietly running on a database that disappears.
 
 ## Build & Test
 

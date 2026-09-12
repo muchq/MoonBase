@@ -47,7 +47,7 @@ public final class MigrationRunner {
       // Inside the try: an unreachable database fails pool construction, and that is this
       // container's likeliest failure, so it takes the same logged path as a failed statement.
       DataSource dataSource = DataSourceFactory.create(url.strip(), username, password);
-      new Migration(dataSource, new PostgresSqlDialect()).run();
+      new Migration(dataSource).run();
       return 0;
     } catch (RuntimeException e) {
       LOG.error("Migration failed", e);

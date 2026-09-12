@@ -1,7 +1,6 @@
 package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.SqlCompiler;
@@ -22,21 +21,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The username expression indexes on the deployment dialect. The participation guard case-folds
- * both sides — {@code LOWER(white_username) = LOWER(?)} — so only an expression index on {@code
- * LOWER(...)} can serve it, and only Postgres has expression indexes; the H2 side of the migration
- * creates plain-column stand-ins that this predicate cannot use. The compiled predicate shape is
- * pinned on H2 too ({@code MigrationTest}), so what is uniquely this suite's job is the
- * <em>index</em> side of the contract: an index expression drifting from the compiler's predicate —
- * losing its {@code LOWER}, say — leaves every H2 test green while production quietly returns to
- * the full-table walk these indexes exist to remove (#1313 item 10).
+ * That the planner actually uses the username expression indexes. The participation guard
+ * case-folds both sides — {@code LOWER(white_username) = LOWER(?)} — so only an index on {@code
+ * LOWER(...)} can serve it. {@code MigrationTest} pins the index definitions and the compiled
+ * predicate against each other; this suite is the plan, which is the only thing that catches the
+ * two agreeing on a shape the planner still refuses (#1313 item 10).
  *
- * <p>Runs against the real postgres CI provides via {@code PG_TEST_DB_URL}; skips when unset. Uses
- * a dedicated schema like the other PG-gated suites sharing that scratch database.
+ * <p>Its own named schema, like the other {@code pg_db_tests} suites sharing the scratch database.
  */
 public class PostgresPlayerIndexTest {
 
-  private static final String DB_URL_ENV = "PG_TEST_DB_URL";
   private static final String SCHEMA = "one_d4_pg_player_index_test";
 
   private DataSource dataSource;
@@ -45,10 +39,7 @@ public class PostgresPlayerIndexTest {
 
   @BeforeEach
   public void setUp() throws Exception {
-    String rawUrl = System.getenv(DB_URL_ENV);
-    assumeTrue(
-        rawUrl != null && !rawUrl.isBlank(),
-        DB_URL_ENV + " is not set; skipping the real-postgres player-index suite");
+    String rawUrl = PgTestUrls.requireRawUrl();
 
     try (Connection conn = DriverManager.getConnection(PgTestUrls.jdbcUrl(rawUrl, null));
         Statement stmt = conn.createStatement()) {
@@ -57,8 +48,8 @@ public class PostgresPlayerIndexTest {
     }
 
     dataSource = DataSourceFactory.create(PgTestUrls.jdbcUrl(rawUrl, SCHEMA));
-    new Migration(dataSource, new PostgresSqlDialect()).run();
-    dao = new GameFeatureDao(Jdbi.create(dataSource), new PostgresSqlDialect());
+    new Migration(dataSource).run();
+    dao = new GameFeatureDao(Jdbi.create(dataSource));
 
     requestId = UUID.randomUUID();
     try (Connection conn = dataSource.getConnection();
@@ -76,7 +67,7 @@ public class PostgresPlayerIndexTest {
     if (dataSource instanceof Closeable closeable) {
       closeable.close();
     }
-    String rawUrl = System.getenv(DB_URL_ENV);
+    String rawUrl = System.getenv(PgTestUrls.DB_URL_ENV);
     if (rawUrl == null || rawUrl.isBlank()) {
       return;
     }

@@ -1,7 +1,6 @@
 package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -26,10 +25,7 @@ public class PostgresMigrationRunnerTest {
 
   @BeforeEach
   public void setUp() throws Exception {
-    rawUrl = System.getenv("PG_TEST_DB_URL");
-    assumeTrue(
-        rawUrl != null && !rawUrl.isBlank(),
-        "PG_TEST_DB_URL is not set; skipping the real-postgres runner suite");
+    rawUrl = PgTestUrls.requireRawUrl();
 
     try (Connection conn = DriverManager.getConnection(PgTestUrls.jdbcUrl(rawUrl, null));
         Statement stmt = conn.createStatement()) {

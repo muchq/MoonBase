@@ -26,10 +26,10 @@ public class DataSourceFactoryTest {
                 .getProperty("socketTimeout"))
         .isEqualTo("150");
     assertThat(
-            DataSourceFactory.hikariConfig("jdbc:h2:mem:x;DB_CLOSE_DELAY=-1")
+            DataSourceFactory.hikariConfig("jdbc:mysql://host:3306/db")
                 .getDataSourceProperties()
                 .getProperty("socketTimeout"))
-        .as("H2 must get no driver property it would reject")
+        .as("a non-Postgres URL must get no driver property its driver would reject")
         .isNull();
   }
 
@@ -59,9 +59,10 @@ public class DataSourceFactoryTest {
   }
 
   @Test
-  public void h2UrlsGetNoSocketTimeout() {
-    // H2 rejects unknown connection properties outright, so the default must be Postgres-only.
-    assertThat(DataSourceFactory.defaultSocketTimeout("jdbc:h2:mem:x;DB_CLOSE_DELAY=-1")).isEmpty();
+  public void nonPostgresUrlsGetNoSocketTimeout() {
+    // The property is pgjdbc's spelling. Another driver would reject it outright, so the default
+    // has to be scoped to the URL it was written for.
+    assertThat(DataSourceFactory.defaultSocketTimeout("jdbc:mysql://host:3306/db")).isEmpty();
   }
 
   /**
@@ -100,13 +101,15 @@ public class DataSourceFactoryTest {
 
   /**
    * The compatibility half. A URL that carries its own credentials — a Neon connection string, and
-   * every H2 test URL — must be untouched, so unset variables cannot override what the URL says.
+   * every test URL PgTestUrls builds — must be untouched, so unset variables cannot override what
+   * the URL says.
    */
   @Test
   public void absentCredentialsLeaveTheConfigAlone() {
     for (String[] pair : new String[][] {{null, null}, {"", ""}}) {
       HikariConfig config =
-          DataSourceFactory.hikariConfig("jdbc:h2:mem:x;DB_CLOSE_DELAY=-1", pair[0], pair[1]);
+          DataSourceFactory.hikariConfig(
+              "jdbc:postgresql://host:5432/db?user=u&password=p", pair[0], pair[1]);
       assertThat(config.getUsername()).isNull();
       assertThat(config.getPassword()).isNull();
     }

@@ -9,8 +9,6 @@ import com.muchq.games.one_d4.api.dto.ReanalysisRequestResponse;
 import com.muchq.games.one_d4.api.dto.RederiveResponse;
 import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.games.one_d4.db.GameFeatureStore.GameOpening;
-import com.muchq.games.one_d4.db.ReanalysisRequestDao;
-import com.muchq.games.one_d4.db.TestDb;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
 import com.muchq.games.one_d4.engine.model.Motif;
 import java.time.Instant;
@@ -26,9 +24,8 @@ public class AdminControllerTest {
   // === Tests ===
 
   // The reanalyze endpoint enqueues; the pass itself runs in the C++ worker.
-  // A real dao over H2, because the interesting behavior — one live pass,
-  // reuse instead of stacking — is the dao's, and a fake of it would just
-  // restate the controller.
+  // Both stores are fakes: what this suite is about is what the controller
+  // does with what it is handed, and neither claim below needs a database.
 
   @Test
   public void reanalyze_enqueuesAPendingPass() {
@@ -57,15 +54,7 @@ public class AdminControllerTest {
   public void getReanalysis_reportsWhatTheWorkerCheckpointed() {
     AdminController controller = controller();
     UUID id = controller.reanalyze().id();
-    testDb
-        .jdbi()
-        .useHandle(
-            h ->
-                h.createUpdate(
-                        "UPDATE reanalysis_requests SET status = 'PROCESSING',"
-                            + " games_processed = 500, games_failed = 3 WHERE id = :id")
-                    .bind("id", id)
-                    .execute());
+    reanalysisRequests.checkpoint(id, "PROCESSING", 500, 3);
 
     ReanalysisRequestResponse response = controller.getReanalysis(id);
 
@@ -84,15 +73,14 @@ public class AdminControllerTest {
 
   // === Helpers ===
 
-  private TestDb testDb;
+  private final FakeReanalysisRequestStore reanalysisRequests = new FakeReanalysisRequestStore();
 
   private AdminController controller() {
     return controller(new FakeGameFeatureStore());
   }
 
   private AdminController controller(GameFeatureStore store) {
-    testDb = TestDb.create("admin_ctrl_test");
-    return new AdminController(store, new ReanalysisRequestDao(testDb.jdbi()));
+    return new AdminController(store, reanalysisRequests);
   }
 
   @Test

@@ -1,7 +1,6 @@
 package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.Closeable;
 import java.sql.Connection;
@@ -26,17 +25,13 @@ import org.junit.jupiter.api.Test;
  */
 public class PostgresRetentionIndexTest {
 
-  private static final String DB_URL_ENV = "PG_TEST_DB_URL";
   private static final String SCHEMA = "one_d4_pg_retention_index_test";
 
   private DataSource dataSource;
 
   @BeforeEach
   public void setUp() throws Exception {
-    String rawUrl = System.getenv(DB_URL_ENV);
-    assumeTrue(
-        rawUrl != null && !rawUrl.isBlank(),
-        DB_URL_ENV + " is not set; skipping the real-postgres retention-index suite");
+    String rawUrl = PgTestUrls.requireRawUrl();
 
     try (Connection conn = DriverManager.getConnection(PgTestUrls.jdbcUrl(rawUrl, null));
         Statement stmt = conn.createStatement()) {
@@ -45,7 +40,7 @@ public class PostgresRetentionIndexTest {
     }
 
     dataSource = DataSourceFactory.create(PgTestUrls.jdbcUrl(rawUrl, SCHEMA));
-    new Migration(dataSource, new PostgresSqlDialect()).run();
+    new Migration(dataSource).run();
   }
 
   @AfterEach
@@ -53,7 +48,7 @@ public class PostgresRetentionIndexTest {
     if (dataSource instanceof Closeable closeable) {
       closeable.close();
     }
-    String rawUrl = System.getenv(DB_URL_ENV);
+    String rawUrl = System.getenv(PgTestUrls.DB_URL_ENV);
     if (rawUrl == null || rawUrl.isBlank()) {
       return;
     }

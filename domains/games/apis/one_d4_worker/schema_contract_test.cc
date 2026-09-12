@@ -33,10 +33,8 @@ TEST(SchemaContract, EveryMigrationFileIsReachableFromTheManifest) {
 
   std::set<std::string> reachable = {absl::StrCat(MigrationsRoot(), "/manifest.txt")};
   for (const std::string& step : *steps) {
-    for (const std::string& engine : {"pg", "h2"}) {
-      const absl::StatusOr<std::string> path = MigrationSqlPath(step, engine);
-      if (path.ok()) reachable.insert(*path);
-    }
+    const absl::StatusOr<std::string> path = MigrationSqlPath(step);
+    if (path.ok()) reachable.insert(*path);
   }
 
   // Walks the runfiles copy of :migrations_sql only: a file on disk but
@@ -58,17 +56,14 @@ TEST(SchemaContract, EveryMigrationFileIsReachableFromTheManifest) {
   EXPECT_GT(seen, 10) << "the directory walk found almost nothing — the data moved";
 }
 
-// Both engines resolve every step. The Postgres half is exercised by every
-// suite that migrates; H2 is one_d4's own path, and a step it cannot resolve
-// is one the Java service dies on at boot.
-TEST(SchemaContract, EveryManifestStepResolvesForBothEngines) {
+// Every step resolves. A step whose file is missing from :migrations_sql is
+// one the Java service dies on at boot and one no suite here can migrate.
+TEST(SchemaContract, EveryManifestStepResolves) {
   const absl::StatusOr<std::vector<std::string>> steps = MigrationSteps();
   ASSERT_TRUE(steps.ok()) << steps.status();
   for (const std::string& step : *steps) {
-    for (const std::string& engine : {"pg", "h2"}) {
-      const absl::StatusOr<std::string> path = MigrationSqlPath(step, engine);
-      EXPECT_TRUE(path.ok()) << path.status();
-    }
+    const absl::StatusOr<std::string> path = MigrationSqlPath(step);
+    EXPECT_TRUE(path.ok()) << path.status();
   }
 }
 

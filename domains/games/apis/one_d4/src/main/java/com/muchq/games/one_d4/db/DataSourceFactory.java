@@ -45,7 +45,7 @@ public class DataSourceFactory {
    * message.
    *
    * <p>Null or empty leaves the config alone, so a URL that carries its own credentials (a Neon
-   * connection string, and every H2 test URL) behaves exactly as before.
+   * connection string, and every URL the test suites build) behaves exactly as before.
    */
   public static DataSource create(
       String jdbcUrl, @Nullable String username, @Nullable String password) {
@@ -86,9 +86,10 @@ public class DataSourceFactory {
   }
 
   /**
-   * The socket-timeout default to apply for this URL, if any. Postgres only — H2 rejects unknown
-   * connection properties outright — and only when the URL does not already carry one, so an
-   * operator's explicit {@code socketTimeout} in {@code INDEXER_DB_URL} is never overridden.
+   * The socket-timeout default to apply for this URL, if any. The property is pgjdbc's spelling and
+   * another driver would reject it outright, so this is scoped to {@code jdbc:postgresql:} — and
+   * applies only when the URL does not already carry one, so an operator's explicit {@code
+   * socketTimeout} in {@code INDEXER_DB_URL} is never overridden.
    */
   static OptionalInt defaultSocketTimeout(String jdbcUrl) {
     // Matched at a parameter boundary so the substring appearing inside another parameter's

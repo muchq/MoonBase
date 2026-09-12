@@ -34,10 +34,9 @@ java_library(
         # In :db rather than only in the binary so MigrationRunnerTest can
         # reach run() — the exit contract one_d4_worker's compose gate keys on.
         "src/main/java/com/muchq/games/one_d4/db/MigrationRunner.java",
-        "src/main/java/com/muchq/games/one_d4/db/PostgresSqlDialect.java",
         "src/main/java/com/muchq/games/one_d4/db/ReanalysisRequestDao.java",
+        "src/main/java/com/muchq/games/one_d4/db/ReanalysisRequestStore.java",
         "src/main/java/com/muchq/games/one_d4/db/RetentionPolicy.java",
-        "src/main/java/com/muchq/games/one_d4/db/SqlDialect.java",
         "src/main/java/com/muchq/games/one_d4/db/SqlStatements.java",
         "src/main/java/com/muchq/games/one_d4/db/StatementTimeouts.java",
     ],
@@ -60,75 +59,41 @@ java_library(
 )
 
 # The schema itself (#1419): numbered idempotent .sql files, manifest-ordered.
-# One copy of the DDL, three readers — Migration at boot (both engines), the
-# one_d4_migrate deploy step, and one_d4_worker's Postgres suites via
-# :migrations_sql. Each file is named exactly once, in one of the three
-# groups below; the shipping and test targets compose the groups, so a new
-# step is a line in manifest.txt plus a line in one group.
+# One copy of the DDL, three readers — Migration at boot, the one_d4_migrate
+# deploy step, and one_d4_worker's Postgres suites via :migrations_sql. A new
+# step is a line in manifest.txt plus a line here.
 filegroup(
-    name = "migrations_shared_sql",
+    name = "migrations_sql_files",
     srcs = [
+        "migrations/V001__core_tables.sql",
         "migrations/V002__exclude_bullet.sql",
+        "migrations/V003__indexed_periods_unique.sql",
         "migrations/V004__game_features_indexed_at.sql",
         "migrations/V005__drop_motifs_json.sql",
         "migrations/V006__motif_occurrences.sql",
         "migrations/V007__openings_and_titles.sql",
         "migrations/V008__drop_has_motif_columns.sql",
         "migrations/V009__dedupe_key.sql",
+        "migrations/V010__dedupe_key_unique.sql",
         "migrations/V011__game_features_read_indexes.sql",
+        "migrations/V012__username_indexes.sql",
         "migrations/V013__indexed_at_index.sql",
         "migrations/V014__lease_columns.sql",
         "migrations/V015__dispatch_columns.sql",
+        "migrations/V016__claimable_index.sql",
+        "migrations/V017__reanalysis_requests.sql",
+        "migrations/V018__live_request_index.sql",
     ],
 )
 
-filegroup(
-    name = "migrations_pg_sql",
-    srcs = [
-        "migrations/pg/V001__core_tables.sql",
-        "migrations/pg/V003__indexed_periods_unique.sql",
-        "migrations/pg/V010__dedupe_key_unique.sql",
-        "migrations/pg/V012__username_indexes.sql",
-        "migrations/pg/V016__claimable_index.sql",
-        "migrations/pg/V017__reanalysis_requests.sql",
-    ],
-)
-
-filegroup(
-    name = "migrations_h2_sql",
-    testonly = True,
-    srcs = [
-        "migrations/h2/V001__core_tables.sql",
-        "migrations/h2/V003__indexed_periods_unique.sql",
-        "migrations/h2/V010__dedupe_key_unique.sql",
-        "migrations/h2/V012__username_indexes.sql",
-        "migrations/h2/V016__claimable_index.sql",
-        "migrations/h2/V017__reanalysis_requests.sql",
-    ],
-)
-
-# What ships with the service: Postgres + shared files only. The H2
-# translations are test-only (:h2_migrations) and never reach this image —
-# IndexerModuleTest pins that, step by step.
+# What ships with the service, and what every suite migrates with.
 java_library(
     name = "migrations",
     resource_strip_prefix = "domains/games/apis",
     resources = [
         "migrations/manifest.txt",
-        ":migrations_pg_sql",
-        ":migrations_shared_sql",
+        ":migrations_sql_files",
     ],
-    visibility = ["//visibility:public"],
-)
-
-# The H2 side of every forked step, test classpaths only (option 1 of #1419's
-# H2 discussion): the test engine's DDL as files beside the Postgres ones,
-# same step list, wired through :test_db exactly as H2SqlDialect is.
-java_library(
-    name = "h2_migrations",
-    testonly = True,
-    resource_strip_prefix = "domains/games/apis",
-    resources = [":migrations_h2_sql"],
     visibility = ["//visibility:public"],
 )
 
@@ -141,9 +106,7 @@ filegroup(
     testonly = True,
     srcs = [
         "migrations/manifest.txt",
-        ":migrations_h2_sql",
-        ":migrations_pg_sql",
-        ":migrations_shared_sql",
+        ":migrations_sql_files",
     ],
     visibility = ["//domains/games:__subpackages__"],
 )
@@ -445,7 +408,6 @@ java_test_suite(
         ":dto",
         ":hikaru_corpus",
         ":openings",
-        ":test_db",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         artifact("org.junit.jupiter:junit-jupiter-api"),
@@ -462,6 +424,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/AggregateControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/AggregateRequestValidatorTest.java",
         "src/test/java/com/muchq/games/one_d4/api/FakeGameFeatureStore.java",
+        "src/test/java/com/muchq/games/one_d4/api/FakeReanalysisRequestStore.java",
         "src/test/java/com/muchq/games/one_d4/api/FirstPageCacheTest.java",
         "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/IndexControllerTest.java",
@@ -474,7 +437,6 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/dto/DtoJsonCompatTest.java",
     ],
     deps = [
-        ":test_db",
         ":api",
         ":db",
         ":dto",
@@ -525,9 +487,16 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/IndexerModuleTest.java",
     ],
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     deps = [
         ":db",
         ":module",
+        # bootVerifiesTheSchemaRatherThanWritingIt calls the bean against an
+        # empty schema on the real database.
+        ":pg_test_urls",
         artifact("io.micronaut:micronaut-inject"),
         # The driver itself, so the URL shape compose hands this container is checked
         # against the parser that will actually read it (#1351).
@@ -537,21 +506,17 @@ java_test_suite(
     ],
 )
 
-# The resolution failure modes MigrationFilesTest pins (a step with two
-# files, a step with none) as a miniature classpath tree — the real tree is
-# valid by construction, so the errors need somewhere else to live.
+# What MigrationFilesTest pins about resolution — manifest order, and a
+# listed step with no file — as a miniature classpath tree. The real tree is
+# valid by construction, so the failure needs somewhere else to live.
 java_library(
     name = "migrations_fixture",
     testonly = True,
     resource_strip_prefix = "domains/games/apis/one_d4/src/test/resources",
     resources = [
-        "src/test/resources/migrations_fixture/ambiguous/V001__both.sql",
-        "src/test/resources/migrations_fixture/ambiguous/manifest.txt",
-        "src/test/resources/migrations_fixture/ambiguous/pg/V001__both.sql",
-        "src/test/resources/migrations_fixture/good/V002__shared.sql",
-        "src/test/resources/migrations_fixture/good/h2/V001__forked.sql",
+        "src/test/resources/migrations_fixture/good/V001__first.sql",
+        "src/test/resources/migrations_fixture/good/V002__second.sql",
         "src/test/resources/migrations_fixture/good/manifest.txt",
-        "src/test/resources/migrations_fixture/good/pg/V001__forked.sql",
         "src/test/resources/migrations_fixture/missing/manifest.txt",
     ],
 )
@@ -568,11 +533,16 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/db/MigrationFilesTest.java",
         "src/test/java/com/muchq/games/one_d4/db/MigrationRunnerTest.java",
         "src/test/java/com/muchq/games/one_d4/db/MigrationTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/PgTestUrlsTest.java",
         "src/test/java/com/muchq/games/one_d4/db/ReanalysisRequestDaoTest.java",
         "src/test/java/com/muchq/games/one_d4/db/RetentionPolicyTest.java",
         "src/test/java/com/muchq/games/one_d4/db/SqlStatementsTest.java",
         "src/test/java/com/muchq/games/one_d4/db/StatementTimeoutsTest.java",
         "src/test/java/com/muchq/games/one_d4/db/TableDispatchTest.java",
+    ],
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
     ],
     deps = [
         ":migrations_fixture",
@@ -583,6 +553,7 @@ java_test_suite(
         # initializer (#1424). Arrives transitively through :db as well; listed
         # here so the reason is visible where the tests are.
         ":retention_policy_resource",
+        ":pg_test_urls",
         ":test_db",
         "//domains/platform/libs/json",
         # HikariConfig: DataSourceFactoryTest asserts on the config create() builds,
@@ -592,6 +563,8 @@ java_test_suite(
         "//domains/games/libs/chessql:parser",
         artifact("com.fasterxml.jackson.core:jackson-databind"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
+        # TestAbortedException: PgTestUrlsTest asserts on the skip itself.
+        artifact("org.opentest4j:opentest4j"),
         artifact("org.assertj:assertj-core"),
         artifact("org.jdbi:jdbi3-core"),
     ],
@@ -602,7 +575,7 @@ java_test_suite(
 # is only correct if the write and query sides agree on that zone. This target
 # pins TZ to UTC+14 so the suite proves the boundaries stay UTC days instead of
 # sliding with the JVM. It is its own target because the zone has to be set in
-# the environment: H2 caches the default zone on first use, so a mid-JVM
+# the environment: the driver reads the default zone as it loads, so a mid-JVM
 # TimeZone.setDefault would pass vacuously.
 java_test_suite(
     name = "played_at_timezone_tests",
@@ -611,6 +584,10 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/db/PlayedAtTimeZoneTest.java",
     ],
     env = {"TZ": "Pacific/Kiritimati"},
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     deps = [
         ":db",
         ":dto",
@@ -626,7 +603,7 @@ java_test_suite(
 # over a one-hour window, so a zone leak does not move the boundary, it inverts
 # the predicate — retiring every healthy request or ignoring every strand. Its
 # own target for the same reason as above: the zone has to come from the
-# environment or H2's cached default makes the suite vacuous.
+# environment or the suite is vacuous.
 java_test_suite(
     name = "request_staleness_timezone_tests",
     size = "small",
@@ -634,6 +611,10 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/db/RequestStalenessTimeZoneTest.java",
     ],
     env = {"TZ": "Pacific/Kiritimati"},
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     deps = [
         ":db",
         ":test_db",
@@ -642,19 +623,14 @@ java_test_suite(
     ],
 )
 
-# Every other DAO suite runs on H2, but Postgres is the deployment target, and
-# some claims are only true — or only falsifiable — there. The aggregate SQL uses
-# two constructs the dialects can disagree on: GROUP BY referencing a SELECT-list
-# alias, and timestamp binds against a TIMESTAMP-without-zone column. The
-# concurrent-write suite covers guarantees about READ COMMITTED behaviour that
-# H2's MVStore does not reproduce, so asserting them on H2 would pass either way.
-# Real postgres via PG_TEST_DB_URL (which CI's build-and-test job exports);
-# skips otherwise.
+# The suites that build and name their own schema rather than taking one from
+# TestDb: the migration runner's own subject is an unmigrated database, and
+# the index and concurrency suites read pg_catalog and drive several sessions
+# at once. Exclusive because they share one scratch database by name.
 java_test_suite(
     name = "pg_db_tests",
     size = "small",
     srcs = [
-        "src/test/java/com/muchq/games/one_d4/db/H2IsNotOnThePostgresSuiteClasspathTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresAggregateCompatTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresConcurrentWriteTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresMigrationRunnerTest.java",
@@ -664,7 +640,10 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/db/PostgresRetentionIndexTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PostgresSingleLiveReanalysisTest.java",
     ],
-    env_inherit = ["PG_TEST_DB_URL"],
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     # One shared scratch database: concurrent DB tests drop each other's schemas.
     tags = ["exclusive"],
     runtime_deps = [
@@ -683,9 +662,8 @@ java_test_suite(
     ],
 )
 
-# URL helper for the Postgres-gated suites. Kept off :test_db on purpose: H2 is a
-# runtime dep of :test_db (that is the library that opens jdbc:h2:mem:…), and
-# pg_db_tests must not see it — H2IsNotOnThePostgresSuiteClasspathTest pins that.
+# URL helper: a raw PG_TEST_DB_URL plus a schema. Its own target because the
+# suites that manage their own schema use it without :test_db.
 java_library(
     name = "pg_test_urls",
     testonly = True,
@@ -693,67 +671,60 @@ java_library(
         "src/test/java/com/muchq/games/one_d4/db/PgTestUrls.java",
     ],
     visibility = ["//visibility:public"],
+    deps = [
+        # requireRawUrl aborts through Assumptions, so a developer without a
+        # database gets a skip rather than a failure.
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+        artifact("org.opentest4j:opentest4j"),
+    ],
 )
 
-# In-memory H2 for DAO/worker/e2e suites that go through TestDb.create. The driver
-# is a runtime_dep here rather than copy-pasted onto every consumer, so a suite that
-# only needs PgTestUrls (pg_db_tests) does not pick it up.
+# A migrated Postgres schema per suite (#1532). Every consumer needs
+# PG_TEST_DB_URL in its env_inherit, and CI so a missing database fails the
+# job instead of skipping it — see TestDb.
 java_library(
     name = "test_db",
     testonly = True,
     srcs = [
-        "src/test/java/com/muchq/games/one_d4/db/H2SqlDialect.java",
         "src/test/java/com/muchq/games/one_d4/db/TestDb.java",
     ],
     visibility = ["//visibility:public"],
     runtime_deps = [
-        # The H2 DDL rides with the H2 driver: a suite that can open
-        # jdbc:h2:mem:… can also migrate it.
-        ":h2_migrations",
-        artifact("com.h2database:h2"),
+        artifact("org.postgresql:postgresql"),
     ],
     deps = [
         ":db",
+        ":pg_test_urls",
+        # HikariConfig: TestDb builds the production config and drops only the
+        # pool floor, so a suite that has finished querying holds nothing.
+        artifact("com.zaxxer:HikariCP"),
         artifact("org.jdbi:jdbi3-core"),
-    ],
-)
-
-java_library(
-    name = "e2e_support",
-    testonly = True,
-    srcs = [
-        "src/test/java/com/muchq/games/one_d4/e2e/TestSqlDialectFactory.java",
-    ],
-    deps = [
-        ":db",
-        ":test_db",
-        artifact("io.micronaut:micronaut-context"),
-        artifact("io.micronaut:micronaut-inject"),
-        artifact("jakarta.inject:jakarta-inject-api"),
+        artifact("org.opentest4j:opentest4j"),
     ],
 )
 
 # The MCP-to-one_d4 seam: real tools, real HTTP, real corpus (#1332). Lives here rather than in
-# mcpserver because it needs one_d4's e2e_support (FakeChessClient) and a booted one_d4 server;
+# mcpserver because it needs a booted one_d4 server against a real schema;
 # the mcpserver side is just the tool objects, which are a plain library dep.
 java_test_suite(
     name = "mcp_shared_corpus_tests",
     size = "small",
     srcs = ["src/test/java/com/muchq/games/one_d4/e2e/McpSharedCorpusE2ETest.java"],
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     runtime_deps = [
         "//domains/platform/libs/logging",
         "//domains/platform/resources:micronaut_config_lib",
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
-        # Module-boot suites set indexer.db.url to H2 without going through :test_db, so
-        # the driver has to be declared here. TestDb consumers get it from :test_db instead.
-        artifact("com.h2database:h2"),
         # CallToolResult: the MCP tools return it since #1331.
         artifact("io.modelcontextprotocol.sdk:mcp-core"),
         ":db",
         ":dto",
-        ":e2e_support",
+        ":test_db",
         ":module",
         "//domains/games/apis/mcpserver:tools",
         "//domains/platform/libs/http_client:jdk11",
@@ -776,11 +747,14 @@ java_test_suite(
     srcs = [
         "src/test/java/com/muchq/games/one_d4/e2e/RederiveOpeningsE2ETest.java",
     ],
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     deps = [
         ":api",
         ":db",
         ":dto",
-        ":e2e_support",
         ":model",
         ":service",
         ":test_db",
@@ -809,6 +783,10 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/QueryErrorWireTest.java",
         "src/test/java/com/muchq/games/one_d4/api/QueryEventWireTest.java",
     ],
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     runtime_deps = [
         "//domains/platform/libs/logging",
         # These pin what the service puts on the wire, so they have to boot with the
@@ -818,16 +796,13 @@ java_test_suite(
         artifact("org.postgresql:postgresql"),
     ],
     deps = [
-        # Module-boot suites set indexer.db.url to H2 without going through :test_db, so
-        # the driver has to be declared here. TestDb consumers get it from :test_db instead.
-        artifact("com.h2database:h2"),
         # FirstPageWarmupTest reads FirstPageCache (:api) and its QueryResponse (:dto) out of the
         # booted context and seeds a row through GameFeatureStore/Jdbi (:db, jdbi3-core); Bazel
         # java deps are not transitive, so riding on :module is not enough.
         ":api",
         ":db",
         ":dto",
-        ":e2e_support",
+        ":test_db",
         ":first_page_request_fixture",
         ":model",
         ":module",

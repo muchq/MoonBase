@@ -64,8 +64,8 @@ public class ConcurrentFlushTest {
 
   /**
    * How long the rival in {@code aTakeoverThatCommitsDuringAFlushStillStopsIt} holds its row lock.
-   * Long enough that the flush is certainly inside its ownership probe, short enough to stay under
-   * H2's one-second default lock timeout so the blocked probe waits rather than erroring.
+   * Long enough that the flush is certainly inside its ownership probe, short enough that the
+   * blocked probe does not dominate the suite's runtime.
    */
   private static final long RIVAL_HOLD_MILLIS = 600;
 
@@ -88,7 +88,7 @@ public class ConcurrentFlushTest {
   public void setUp() {
     testDb = TestDb.create("concurrent_flush");
     dataSource = testDb.dataSource();
-    store = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
+    store = new GameFeatureDao(testDb.jdbi());
     requestId = insertRequest(OWNER_A, NOW.plus(Duration.ofMinutes(5)));
     pool = Executors.newFixedThreadPool(2);
   }

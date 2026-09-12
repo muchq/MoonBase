@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.jdbi.v3.core.Jdbi;
 import org.jdbi.v3.core.mapper.RowMapper;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -80,18 +81,25 @@ public class IndexingRequestDao implements IndexingRequestStore {
   }
 
   /**
-   * The value stored in {@code dedupe_key} while a request is live. Must render identically to the
-   * SQL backfill in {@link Migration}, or a row migrated from the pre-constraint schema would not
-   * be found by a Java-side lookup.
-   *
-   * <p>Player goes last on purpose. It is the only free-form component — platform is validated
-   * against a closed set, the months are {@code YearMonth}-parsed, and the flag is a boolean — so
-   * putting it at the tail makes the encoding unambiguous without escaping the delimiter, whatever
-   * a username happens to contain.
+   * The range a live request holds: the columns {@code idx_indexing_requests_live} is unique over
+   * while {@code status} is PENDING or PROCESSING. Only here to keep the five values travelling
+   * together through {@link #reclaim}, which narrows to one tuple on the submit path and sweeps
+   * every row on the retention path.
    */
-  static String dedupeKey(
+  record LiveRange(
       String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
-    return platform + "|" + startMonth + "|" + endMonth + "|" + excludeBullet + "|" + player;
+
+    @Override
+    public String toString() {
+      return player
+          + " on "
+          + platform
+          + " "
+          + startMonth
+          + ".."
+          + endMonth
+          + (excludeBullet ? " excluding bullet" : "");
+    }
   }
 
   @Override
@@ -104,26 +112,25 @@ public class IndexingRequestDao implements IndexingRequestStore {
       boolean skipCache,
       Duration staleAfter,
       Instant now) {
-    String key = dedupeKey(player, platform, startMonth, endMonth, excludeBullet);
+    LiveRange range = new LiveRange(player, platform, startMonth, endMonth, excludeBullet);
 
     // Settle any abandoned holder first. Usually that means releasing it — the work is still
     // queued and this caller should adopt it rather than start a rival — and retiring it only once
-    // its attempts are spent, which frees the key so an insert can succeed.
-    reclaim(key, staleAfter, now);
+    // its attempts are spent, which frees the range so an insert can succeed.
+    reclaim(range, staleAfter, now);
 
     RuntimeException lastConflict = null;
     for (int attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt++) {
-      Optional<IndexingRequest> holder = findByDedupeKey(key);
+      Optional<IndexingRequest> holder = findLiveRequest(range);
       if (holder.isPresent()) {
         return new Claim(holder.get(), false);
       }
-      // Each step is its own transaction rather than one enclosing it. On Postgres a constraint
+      // Each step is its own transaction rather than one enclosing it: on Postgres a constraint
       // violation aborts the whole transaction, so an insert-then-recover inside a single one
-      // would need a savepoint; separate statements make the recovery path identical on both
-      // engines. The constraint, not the transaction boundary, is what makes this safe: exactly
-      // one racer's insert can succeed.
+      // would need a savepoint. The index, not the transaction boundary, is what makes this safe:
+      // exactly one racer's insert can succeed.
       try {
-        UUID id = insert(key, player, platform, startMonth, endMonth, excludeBullet, skipCache);
+        UUID id = insert(player, platform, startMonth, endMonth, excludeBullet, skipCache);
         return new Claim(
             findById(id)
                 .orElseThrow(
@@ -136,7 +143,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
           throw e;
         }
         // Lost the race. Go round: normally the winner is there to adopt, but if it finished in
-        // the gap the key is free again and inserting is the right move.
+        // the gap the range is free again and inserting is the right move.
         //
         // Keep the exception. isUniqueViolation matches SQLState class 23 broadly, so a NOT NULL
         // or check violation lands here too; without the cause, the throw below would blame
@@ -146,7 +153,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
     }
     throw new IllegalStateException(
         "Could not claim or adopt an indexing request for "
-            + key
+            + range
             + " after "
             + MAX_CLAIM_ATTEMPTS
             + " attempts",
@@ -155,7 +162,6 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   /** Throws on conflict; {@link #createOrAdopt} decides whether that is recoverable. */
   private UUID insert(
-      String dedupeKey,
       String player,
       String platform,
       String startMonth,
@@ -171,9 +177,9 @@ public class IndexingRequestDao implements IndexingRequestStore {
             h.createUpdate(
                     """
                     INSERT INTO indexing_requests
-                      (id, player, platform, start_month, end_month, exclude_bullet, dedupe_key,
+                      (id, player, platform, start_month, end_month, exclude_bullet,
                        created_at, updated_at, skip_cache, attempts)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                     """)
                 .bind(0, id)
                 .bind(1, player)
@@ -181,18 +187,17 @@ public class IndexingRequestDao implements IndexingRequestStore {
                 .bind(3, startMonth)
                 .bind(4, endMonth)
                 .bind(5, excludeBullet)
-                .bind(6, dedupeKey)
+                .bindByType(6, stamp, LocalDateTime.class)
                 .bindByType(7, stamp, LocalDateTime.class)
-                .bindByType(8, stamp, LocalDateTime.class)
-                .bind(9, skipCache)
+                .bind(8, skipCache)
                 .execute());
     return id;
   }
 
   /**
    * True when the cause chain carries SQLState class 23 (integrity constraint violation). Matching
-   * on the class rather than the exact code keeps this working across both engines — Postgres and
-   * H2 both raise 23505 for a duplicate key, but only the class is guaranteed by the standard.
+   * on the class rather than the exact code because only the class is guaranteed by the standard;
+   * Postgres raises 23505 for a duplicate key.
    */
   private static boolean isUniqueViolation(Throwable e) {
     for (Throwable t = e; t != null; t = t.getCause()) {
@@ -209,14 +214,50 @@ public class IndexingRequestDao implements IndexingRequestStore {
     return false;
   }
 
-  private Optional<IndexingRequest> findByDedupeKey(String dedupeKey) {
+  /**
+   * The one live row holding a range, if there is one. {@code idx_indexing_requests_live} is what
+   * makes "the one" true, so there is no ordering to pick between rows.
+   *
+   * <p>Unlike {@link #findExistingRequest} this does not filter on {@code attempts}: a row at the
+   * limit still holds the range until a sweep retires it, and {@link #createOrAdopt} has to adopt
+   * it rather than insert against an index that would reject it.
+   */
+  private Optional<IndexingRequest> findLiveRequest(LiveRange range) {
     return jdbi.withHandle(
         h ->
-            h.createQuery("SELECT * FROM indexing_requests WHERE dedupe_key = ?")
-                .bind(0, dedupeKey)
+            bindRange(
+                    h.createQuery(
+                        """
+                        SELECT * FROM indexing_requests
+                        WHERE status IN ('PENDING', 'PROCESSING')
+                        """
+                            + RANGE_CLAUSE),
+                    range)
                 .map(ROW_MAPPER)
                 .findFirst());
   }
+
+  /** Narrows a live-row statement to one range; see {@link #RANGE_CLAUSE}. */
+  private static <T extends org.jdbi.v3.core.statement.SqlStatement<T>> T bindRange(
+      T statement, LiveRange range) {
+    return statement
+        .bind("player", range.player())
+        .bind("platform", range.platform())
+        .bind("startMonth", range.startMonth())
+        .bind("endMonth", range.endMonth())
+        .bind("excludeBullet", range.excludeBullet());
+  }
+
+  /**
+   * Appended to a statement that already filters on a live status, to narrow it from every live row
+   * to the one holding a range.
+   */
+  private static final String RANGE_CLAUSE =
+      """
+        AND player = :player AND platform = :platform
+        AND start_month = :startMonth AND end_month = :endMonth
+        AND exclude_bullet = :excludeBullet
+      """;
 
   @Override
   public int reclaimStale(Duration staleAfter, Instant now) {
@@ -229,9 +270,9 @@ public class IndexingRequestDao implements IndexingRequestStore {
    *
    * <p>This is the half of #1279 that is easiest to get backwards. Before dispatch read from this
    * table an expired lease had to be retired: nothing was ever going to run that request again, so
-   * freeing the dedupe slot and telling the user to resubmit was the only way out. Now the row
+   * freeing the range and telling the user to resubmit was the only way out. Now the row
    * <em>is</em> the queue, and retiring it throws away work any worker could pick up. Clearing the
-   * owner is enough — {@code dedupe_key} stays, because the range is still spoken for.
+   * owner is enough — the status stays live, because the range is still spoken for.
    */
   private static final String RELEASE_SQL =
       """
@@ -257,7 +298,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
   private static final String RETIRE_POISONED_SQL =
       """
       UPDATE indexing_requests
-      SET status = 'FAILED', error_message = :poisoned, dedupe_key = NULL, updated_at = :now,
+      SET status = 'FAILED', error_message = :poisoned, updated_at = :now,
           owner_id = NULL, lease_expires_at = NULL
       WHERE status IN ('PENDING', 'PROCESSING')
         AND attempts >= :maxAttempts
@@ -314,7 +355,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
   private static final String RETIRE_ABANDONED_SQL =
       """
       UPDATE indexing_requests
-      SET status = 'FAILED', error_message = :stalled, dedupe_key = NULL, updated_at = :now,
+      SET status = 'FAILED', error_message = :stalled, updated_at = :now,
           owner_id = NULL, lease_expires_at = NULL
       WHERE status IN ('PENDING', 'PROCESSING')
         AND (owner_id IS NULL
@@ -333,8 +374,8 @@ public class IndexingRequestDao implements IndexingRequestStore {
       "Abandoned: no indexing worker has picked this up, and none is running anywhere. Re-submit"
           + " once indexing is available again.";
 
-  private int reclaim(String keyOrNull, Duration staleAfter, Instant now) {
-    String keyClause = keyOrNull == null ? "" : "  AND dedupe_key = :key\n";
+  private int reclaim(@Nullable LiveRange rangeOrNull, Duration staleAfter, Instant now) {
+    String rangeClause = rangeOrNull == null ? "" : RANGE_CLAUSE;
     // Bounded at the sweep timeout: this is the submit path's reclaim of the tuple being
     // submitted, with no lease or interrupt machinery behind it, and settling is idempotent — a
     // truncated pass re-runs on the next submit of the same tuple, or in the C++ worker's next
@@ -355,25 +396,23 @@ public class IndexingRequestDao implements IndexingRequestStore {
           // freshly touched and hide it from the staleness the stalled arm looks for — costing the
           // user another full window of silence.
           var retire =
-              h.createUpdate(RETIRE_POISONED_SQL + keyClause)
+              h.createUpdate(RETIRE_POISONED_SQL + rangeClause)
                   .bind("poisoned", POISONED_MESSAGE)
                   .bind("maxAttempts", MAX_ATTEMPTS)
                   .bindByType("now", toUtcWallClock(now), LocalDateTime.class);
           var release =
-              h.createUpdate(RELEASE_SQL + keyClause)
+              h.createUpdate(RELEASE_SQL + rangeClause)
                   .bind("maxAttempts", MAX_ATTEMPTS)
                   .bindByType("now", toUtcWallClock(now), LocalDateTime.class);
-          if (keyOrNull != null) {
-            retire.bind("key", keyOrNull);
-            release.bind("key", keyOrNull);
-          }
           var abandoned =
-              h.createUpdate(RETIRE_ABANDONED_SQL + keyClause)
+              h.createUpdate(RETIRE_ABANDONED_SQL + rangeClause)
                   .bind("stalled", STALLED_MESSAGE)
                   .bindByType("now", toUtcWallClock(now), LocalDateTime.class)
                   .bindByType("cutoff", toUtcWallClock(now.minus(staleAfter)), LocalDateTime.class);
-          if (keyOrNull != null) {
-            abandoned.bind("key", keyOrNull);
+          if (rangeOrNull != null) {
+            bindRange(retire, rangeOrNull);
+            bindRange(release, rangeOrNull);
+            bindRange(abandoned, rangeOrNull);
           }
           int retired = retire.execute();
           // Before the release, deliberately: releasing sets updated_at = now, which would make
@@ -448,10 +487,6 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   @Override
   public void updateStatus(UUID id, String status, String errorMessage, int gamesIndexed) {
-    // A terminal status releases the dedupe slot: the same range becomes requestable again the
-    // moment the work stops being in flight. Leaving the key behind would make one COMPLETED
-    // request block that range permanently.
-    //
     // Nothing here is fenced on ownership, so this is the unowned path: it is for callers writing
     // about a request they hold no token for — the inline-dispatch failure in IndexRequestService,
     // and tests. A worker presents its token and goes through updateStatusOwned instead, which is
@@ -470,21 +505,16 @@ public class IndexingRequestDao implements IndexingRequestStore {
             ? """
             UPDATE indexing_requests
             SET status = ?, error_message = ?, games_indexed = ?, updated_at = ?,
-                dedupe_key = NULL, owner_id = NULL
+                owner_id = NULL
             WHERE id = ?
             """
             // A non-terminal write may only move a row that is still live. Without the status
             // guard a retired request can be resurrected: reclaimStale marks a stalled request
-            // FAILED and NULLs its key on the assumption its owner is dead, but nothing fences
-            // that owner, and IndexWorker writes PROCESSING once per month rather than once per
-            // run. The next such write would flip the row back to PROCESSING while leaving
-            // dedupe_key NULL — a live request holding no slot. Its replacement already holds the
-            // key, so the constraint cannot see the violation, and the next submit for that
-            // range would then start exactly the rival run this change exists to prevent.
-            //
-            // Restoring the key here instead would be wrong: the replacement holds it, so the
-            // UPDATE would fail on the constraint. Refusing the resurrection is the only shape
-            // that keeps one live row per tuple.
+            // FAILED on the assumption its owner is dead, but nothing fences that owner, and
+            // IndexWorker writes PROCESSING once per month rather than once per run. The next
+            // such write would flip the row back to PROCESSING alongside the replacement that
+            // now holds the range. The index rejects that, so the guard is what turns a
+            // constraint violation on a routine progress write into the logged refusal below.
             : """
             UPDATE indexing_requests
             SET status = ?, error_message = ?, games_indexed = ?, updated_at = ?
@@ -527,7 +557,7 @@ public class IndexingRequestDao implements IndexingRequestStore {
             ? """
             UPDATE indexing_requests
             SET status = :status, error_message = :message, games_indexed = :games,
-                updated_at = :now, dedupe_key = NULL, owner_id = NULL
+                updated_at = :now, owner_id = NULL
             WHERE id = :id AND owner_id = :owner
               AND status IN ('PENDING', 'PROCESSING')
               AND lease_expires_at > :now
@@ -578,10 +608,9 @@ public class IndexingRequestDao implements IndexingRequestStore {
 
   @Override
   public Optional<IndexingRequest> claimNext(String ownerId, Duration lease, Instant now) {
-    // Read candidates, then try to claim each. One statement would want FOR UPDATE SKIP LOCKED and
-    // H2 has none; the conditional UPDATE claim already performs is what makes this safe without
-    // it, since at most one racer's WHERE can match a given row. Losing costs a retry against the
-    // next candidate, not correctness.
+    // Read candidates, then try to claim each. The conditional UPDATE claim already performs is
+    // what makes this safe without FOR UPDATE SKIP LOCKED, since at most one racer's WHERE can
+    // match a given row. Losing costs a retry against the next candidate, not correctness.
     //
     // Bounded: this scan runs every few seconds on the poller's single dedicated thread, whose
     // loop never returns while a statement is in flight — unbounded, one wedged scan stopped the

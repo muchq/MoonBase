@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.muchq.games.one_d4.db.TestDb;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
 import java.net.URI;
@@ -40,7 +41,7 @@ public class QueryErrorWireTest {
             EmbeddedServer.class,
             Map.of(
                 "indexer.db.url",
-                "jdbc:h2:mem:query_error_wire_test_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1",
+                TestDb.jdbcUrlFor("query_error_wire"),
                 "micronaut.server.port",
                 "-1"));
     client = HttpClient.newHttpClient();

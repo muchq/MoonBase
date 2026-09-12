@@ -4,7 +4,7 @@ import com.muchq.games.one_d4.api.dto.ReanalysisRequestResponse;
 import com.muchq.games.one_d4.api.dto.RederiveResponse;
 import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.games.one_d4.db.GameFeatureStore.GameOpening;
-import com.muchq.games.one_d4.db.ReanalysisRequestDao;
+import com.muchq.games.one_d4.db.ReanalysisRequestStore;
 import com.muchq.games.one_d4.openings.Openings;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.GET;
@@ -34,10 +34,10 @@ public class AdminController {
   static final int BATCH_SIZE = 1000;
 
   private final GameFeatureStore gameFeatureStore;
-  private final ReanalysisRequestDao reanalysisRequests;
+  private final ReanalysisRequestStore reanalysisRequests;
 
   public AdminController(
-      GameFeatureStore gameFeatureStore, ReanalysisRequestDao reanalysisRequests) {
+      GameFeatureStore gameFeatureStore, ReanalysisRequestStore reanalysisRequests) {
     this.gameFeatureStore = gameFeatureStore;
     this.reanalysisRequests = reanalysisRequests;
   }
@@ -53,7 +53,7 @@ public class AdminController {
   @Path("/reanalyze")
   @Produces(MediaType.APPLICATION_JSON)
   public ReanalysisRequestResponse reanalyze() {
-    ReanalysisRequestDao.EnqueueResult result = reanalysisRequests.enqueue();
+    ReanalysisRequestStore.EnqueueResult result = reanalysisRequests.enqueue();
     LOG.info(
         "POST /admin/reanalyze request_id={} created={}", result.request().id(), result.created());
     return toResponse(result.request());
@@ -71,7 +71,7 @@ public class AdminController {
   }
 
   private static ReanalysisRequestResponse toResponse(
-      ReanalysisRequestDao.ReanalysisRequest request) {
+      ReanalysisRequestStore.ReanalysisRequest request) {
     return new ReanalysisRequestResponse(
         request.id(),
         request.status(),

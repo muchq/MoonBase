@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.db.GameFeatureStore;
+import com.muchq.games.one_d4.db.TestDb;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
 import java.net.URI;
@@ -40,7 +41,7 @@ public class FirstPageWarmupTest {
             EmbeddedServer.class,
             Map.of(
                 "indexer.db.url",
-                "jdbc:h2:mem:first_page_warmup_test_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1",
+                TestDb.jdbcUrlFor("first_page_warmup"),
                 "micronaut.server.port",
                 "-1"));
     client = HttpClient.newHttpClient();

@@ -94,12 +94,32 @@ public class GameFeatureDao implements GameFeatureStore {
               rs.getString("opening_name"),
               rs.getString("opening_family"));
 
+  /**
+   * On conflict, refresh the derived/enriched columns too so that reindexing a period backfills
+   * titles and opening names on rows indexed before those columns existed.
+   */
+  private static final String INSERT_GAME_FEATURE =
+      """
+      INSERT INTO game_features (
+          request_id, game_url, platform, white_username, black_username,
+          white_elo, black_elo, white_title, black_title, time_class, eco,
+          opening_name, opening_family, result, played_at, num_moves,
+          indexed_at, pgn
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (game_url) DO UPDATE SET
+          indexed_at = EXCLUDED.indexed_at,
+          request_id = EXCLUDED.request_id,
+          white_title = EXCLUDED.white_title,
+          black_title = EXCLUDED.black_title,
+          opening_name = EXCLUDED.opening_name,
+          opening_family = EXCLUDED.opening_family
+      """;
+
   private final Jdbi jdbi;
-  private final SqlDialect dialect;
   private final Clock clock;
 
-  public GameFeatureDao(Jdbi jdbi, SqlDialect dialect) {
-    this(jdbi, dialect, Clock.systemUTC());
+  public GameFeatureDao(Jdbi jdbi) {
+    this(jdbi, Clock.systemUTC());
   }
 
   /**
@@ -107,9 +127,8 @@ public class GameFeatureDao implements GameFeatureStore {
    *     compares that column against a threshold this same clock produces, so both sides have to
    *     come from one source; see {@link #deleteOlderThan}.
    */
-  public GameFeatureDao(Jdbi jdbi, SqlDialect dialect, Clock clock) {
+  public GameFeatureDao(Jdbi jdbi, Clock clock) {
     this.jdbi = jdbi;
-    this.dialect = dialect;
     this.clock = clock;
   }
 
@@ -146,8 +165,7 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   private void insertFeatures(org.jdbi.v3.core.Handle h, List<GameFeature> features) {
-    String sql = dialect.insertGameFeature();
-    var batch = h.prepareBatch(sql);
+    var batch = h.prepareBatch(INSERT_GAME_FEATURE);
     for (GameFeature row : features) {
       // bindByType, not bind: played_at is nullable, and only the typed form carries
       // Types.TIMESTAMP into setNull. Plain bind() would fall back to JDBI's untyped-null

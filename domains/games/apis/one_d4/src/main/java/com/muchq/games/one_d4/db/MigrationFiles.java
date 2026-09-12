@@ -12,11 +12,6 @@ import java.util.List;
  * {@code migrations/README.md} is the authoring contract — and this class is deliberately dumb
  * about their contents: ordering comes from the manifest, splitting from {@link SqlStatements}, and
  * everything else from the files themselves.
- *
- * <p>A step resolves to {@code <engine>/<step>.sql} when the engines fork and {@code <step>.sql}
- * when they agree; exactly one of the two may exist. Both or neither is refused, not guessed around
- * — a migration that silently skipped a step, or picked one of two files claiming the same step,
- * would leave a schema nobody can reason about from the files.
  */
 public final class MigrationFiles {
 
@@ -41,42 +36,13 @@ public final class MigrationFiles {
     return steps;
   }
 
-  /** The SQL for one step on one engine ({@code "pg"} or {@code "h2"}). */
-  public static String sqlFor(String step, String engine) {
-    return sqlFor(ROOT, step, engine);
+  /** The SQL for one step. */
+  public static String sqlFor(String step) {
+    return sqlFor(ROOT, step);
   }
 
-  static String sqlFor(String root, String step, String engine) {
-    String enginePath = root + "/" + engine + "/" + step + ".sql";
-    String sharedPath = root + "/" + step + ".sql";
-    boolean engineExists = exists(enginePath);
-    boolean sharedExists = exists(sharedPath);
-    if (engineExists && sharedExists) {
-      throw new IllegalStateException(
-          "migration step "
-              + step
-              + " has both "
-              + enginePath
-              + " and "
-              + sharedPath
-              + " on the classpath — a forked step must not also have a shared file");
-    }
-    if (!engineExists && !sharedExists) {
-      throw new IllegalStateException(
-          "migration step "
-              + step
-              + " has no SQL for engine "
-              + engine
-              + " — expected "
-              + enginePath
-              + " or "
-              + sharedPath);
-    }
-    return read(engineExists ? enginePath : sharedPath, "migration step " + step);
-  }
-
-  private static boolean exists(String path) {
-    return MigrationFiles.class.getClassLoader().getResource(path) != null;
+  static String sqlFor(String root, String step) {
+    return read(root + "/" + step + ".sql", "migration step " + step);
   }
 
   private static String read(String path, String what) {

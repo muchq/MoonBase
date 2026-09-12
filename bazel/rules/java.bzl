@@ -85,7 +85,7 @@ def _analysis(plugins, javacopts, micronaut):
     every test compile in the repo buys nothing to offset the cost. Test code
     that does need a bean definition generated gets it the same way any other
     library does — a `testonly` `java_library` beside the suite, as in
-    yodel's `filter_test_app` and one_d4's `e2e_support`.
+    yodel's `filter_test_app`.
 
     Args:
         plugins: Plugins the caller asked for.

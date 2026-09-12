@@ -1,13 +1,20 @@
 package com.muchq.games.one_d4;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.muchq.games.one_d4.db.DataSourceFactory;
+import com.muchq.games.one_d4.db.Migration;
+import com.muchq.games.one_d4.db.PgTestUrls;
 import io.micronaut.context.annotation.Context;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.List;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 
 public class IndexerModuleTest {
@@ -141,28 +148,6 @@ public class IndexerModuleTest {
   }
 
   /**
-   * The dependency half of "H2 is test-only". Production code that merely avoids naming H2 is one
-   * edit away from using it again with nothing to fail; a closure that cannot resolve the driver is
-   * not. This target depends on the module and its db library and on no test database, so the
-   * driver's absence here is its absence from one_d4's production dependency closure.
-   *
-   * <p>The control is pgjdbc, which the same closure does carry — without it this passes just as
-   * well against a lookup that can no longer find anything at all.
-   */
-  @Test
-  public void h2IsNotOnTheProductionClasspath() {
-    assertThatThrownBy(() -> Class.forName("org.h2.Driver"))
-        .as(
-            "org.h2.Driver resolves from one_d4's production dependency closure. H2 is for tests;"
-                + " a deployed container must not be able to fall back to an in-memory database.")
-        .isInstanceOf(ClassNotFoundException.class);
-
-    assertThatCode(() -> Class.forName("org.postgresql.Driver"))
-        .as("pgjdbc is missing too, so the assertion above proves nothing")
-        .doesNotThrowAnyException();
-  }
-
-  /**
    * The environment is the only input to the URL. Asserted here rather than left to {@code
    * deploy_config_test.go}, which pins what compose hands the container and stays green against a
    * class that has grown a second source of its own.
@@ -190,57 +175,10 @@ public class IndexerModuleTest {
         .doesNotContain("java/nio/file");
   }
 
-  /**
-   * The production DAOs and Migration carry Postgres SQL only. H2's {@code MERGE INTO} is the
-   * observable mark of the old in-class dialect branch; its absence here (with {@code ON CONFLICT}
-   * present on {@link com.muchq.games.one_d4.db.PostgresSqlDialect} as the control) is what makes
-   * "H2 is a test dialect" a fact about the class files rather than a comment.
-   */
-  @Test
-  public void productionSqlCarriesNoH2Merge() throws Exception {
-    for (Class<?> type :
-        List.of(
-            com.muchq.games.one_d4.db.GameFeatureDao.class,
-            com.muchq.games.one_d4.db.IndexedPeriodDao.class,
-            com.muchq.games.one_d4.db.Migration.class)) {
-      String bytes = compiledBytes(type);
-      assertThat(bytes).as("%s still names useH2", type.getSimpleName()).doesNotContain("useH2");
-      assertThat(bytes)
-          .as("%s still carries H2 MERGE INTO SQL", type.getSimpleName())
-          .doesNotContain("MERGE INTO");
-    }
-
-    String postgres = compiledBytes(com.muchq.games.one_d4.db.PostgresSqlDialect.class);
-    assertThat(postgres)
-        .as("PostgresSqlDialect does not name ON CONFLICT, so the absences above prove nothing")
-        .contains("ON CONFLICT");
-  }
-
-  /**
-   * The same fact about the DDL now that it is files (#1419): the H2 translations ride {@code
-   * :h2_migrations}, a test-only target this suite deliberately does not depend on, so their
-   * absence here is their absence from every production classpath. Every step, not a sample — a
-   * future forked step whose h2 file landed in {@code :migrations} by mistake would ship, and
-   * nothing else inspects the production classpath. The control is the same loop resolving each
-   * step for Postgres the way the service does: an empty classpath would pass the absence half
-   * while proving nothing.
-   */
-  @Test
-  public void h2MigrationFilesAreNotOnTheProductionClasspath() {
-    ClassLoader cl = com.muchq.games.one_d4.db.Migration.class.getClassLoader();
-    for (String step : com.muchq.games.one_d4.db.MigrationFiles.steps()) {
-      assertThat(com.muchq.games.one_d4.db.MigrationFiles.sqlFor(step, "pg"))
-          .as("the Postgres DDL for %s must resolve on the service classpath", step)
-          .isNotBlank();
-      assertThat(cl.getResource("one_d4/migrations/h2/" + step + ".sql"))
-          .as("the H2 DDL for %s is test-only and must not ship with the service", step)
-          .isNull();
-    }
-  }
-
   @Test
   public void resolveJdbcUrl_prefersConfiguredProperty() {
-    assertThat(IndexerModule.resolveJdbcUrl("  jdbc:h2:mem:x  ")).isEqualTo("jdbc:h2:mem:x");
+    assertThat(IndexerModule.resolveJdbcUrl("  jdbc:postgresql://db:5432/x  "))
+        .isEqualTo("jdbc:postgresql://db:5432/x");
   }
 
   @Test
@@ -251,6 +189,45 @@ public class IndexerModuleTest {
     assertThatThrownBy(() -> IndexerModule.resolveJdbcUrl(null))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("INDEXER_DB_URL");
+  }
+
+  /**
+   * The wiring, not just the method: the bean the service builds at startup checks the schema
+   * rather than creating it. {@code one_d4_migrate} owns writing it (#1426), so a boot that built
+   * what it found missing would be a second writer, and a container that started against a
+   * half-migrated database would serve against it.
+   *
+   * <p>Against an empty schema, so the refusal and the absence are both observable — a migrated one
+   * cannot tell {@link Migration#verify} from {@link Migration#run}.
+   */
+  @Test
+  public void bootVerifiesTheSchemaRatherThanWritingIt() throws Exception {
+    String rawUrl = PgTestUrls.requireRawUrl();
+    String schema = "one_d4_module_boot";
+    try (Connection conn = DriverManager.getConnection(PgTestUrls.jdbcUrl(rawUrl, null));
+        Statement stmt = conn.createStatement()) {
+      stmt.execute("DROP SCHEMA IF EXISTS " + schema + " CASCADE");
+      stmt.execute("CREATE SCHEMA " + schema);
+    }
+    DataSource dataSource =
+        DataSourceFactory.create(PgTestUrls.jdbcUrl(rawUrl, schema), null, null);
+
+    assertThatThrownBy(() -> new IndexerModule().migration(dataSource))
+        .as("boot returned against a schema one_d4_migrate has not written")
+        .isInstanceOf(IllegalStateException.class);
+
+    try (Connection conn = DriverManager.getConnection(PgTestUrls.jdbcUrl(rawUrl, null));
+        Statement stmt = conn.createStatement();
+        ResultSet rs =
+            stmt.executeQuery(
+                "SELECT count(*) FROM information_schema.tables WHERE table_schema = '"
+                    + schema
+                    + "'")) {
+      rs.next();
+      assertThat(rs.getInt(1))
+          .as("boot built the schema instead of refusing to serve without it")
+          .isZero();
+    }
   }
 
   /** The class's own bytes, decoded so that byte-for-byte substrings survive. */

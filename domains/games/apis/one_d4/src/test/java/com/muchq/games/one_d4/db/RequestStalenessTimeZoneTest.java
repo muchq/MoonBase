@@ -14,10 +14,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@code indexing_requests.created_at} and {@code updated_at} are TIMESTAMP columns with no zone on
- * both H2 and Postgres, and {@link RetentionPolicy#STALE_REQUEST} measures against them across a
- * window of one hour. That window is short enough that a zone leak does not shift a boundary — it
- * inverts the predicate, retiring every healthy request or ignoring every stranded one.
+ * {@code indexing_requests.created_at} and {@code updated_at} are TIMESTAMP columns with no zone,
+ * and {@link RetentionPolicy#STALE_REQUEST} measures against them across a window of one hour. That
+ * window is short enough that a zone leak does not shift a boundary — it inverts the predicate,
+ * retiring every healthy request or ignoring every stranded one.
  *
  * <p>This is the same hazard {@code game_features.indexed_at} had (#1268), so this suite is the
  * counterpart to {@link PlayedAtTimeZoneTest} and exists for the same reason its javadoc gives:
@@ -31,8 +31,8 @@ import org.junit.jupiter.api.Test;
  * convention, one would systematically mis-measure the other's requests.
  *
  * <p>The zone comes from the Bazel target's {@code env = {"TZ": ...}} rather than {@code
- * TimeZone.setDefault} in a {@code @BeforeEach}: H2 caches the default zone globally the first time
- * it converts a value, so a zone changed mid-JVM would not reach the driver and this would pass
+ * TimeZone.setDefault} in a {@code @BeforeEach}: pgjdbc reads the default zone as it builds its
+ * timestamp conversions, so a zone changed mid-JVM would not reach the driver and this would pass
  * vacuously.
  */
 public class RequestStalenessTimeZoneTest {

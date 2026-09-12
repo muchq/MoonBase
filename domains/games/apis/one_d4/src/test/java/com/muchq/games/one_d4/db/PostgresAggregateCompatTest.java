@@ -1,7 +1,6 @@
 package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.muchq.games.chessql.compiler.AggregateSpec;
 import com.muchq.games.chessql.compiler.SqlCompiler;
@@ -26,9 +25,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The aggregate SQL is the part of the compiler where H2 and Postgres can legitimately disagree,
- * and Postgres is the deployment target while every other DAO test runs on H2. Three constructs
- * carry real dialect risk:
+ * The aggregate SQL, which is the part of the compiler that leans hardest on what the engine
+ * promises. Three constructs carry the weight:
  *
  * <ul>
  *   <li>GROUP BY (and the ORDER BY tiebreak) referencing a SELECT-list <em>alias</em> rather than
@@ -38,22 +36,18 @@ import org.junit.jupiter.api.Test;
  *       integer arithmetic on top of the CASE.
  *   <li>date/month bounds bound as {@link java.time.LocalDateTime} against a TIMESTAMP-without-zone
  *       column. {@link GameFeatureDao} uses that zone-free type on both the write and the read, so
- *       pgjdbc stores the UTC wall clock as-is instead of converting through the JVM default zone;
- *       {@link PlayedAtTimeZoneTest} pins that under a non-UTC JVM on H2, and this suite checks
- *       pgjdbc honours it the same way.
+ *       pgjdbc stores the UTC wall clock as-is instead of converting through the JVM default zone.
+ *       {@link PlayedAtTimeZoneTest} pins that under a non-UTC JVM.
  *   <li>{@code (predicate) IS NOT TRUE}, which every negated filter compiles to since #1302. It
- *       decides whether a NULL-valued row survives a negation, so a dialect that parsed it
- *       differently would restore the bug in production with H2 still green. The NULL ordering it
- *       newly exposes is pinned here too, against its H2 twin.
+ *       decides whether a NULL-valued row survives a negation, and the NULL ordering it exposes is
+ *       pinned here too.
  * </ul>
  *
- * <p>Runs against the real postgres that CI's build-and-test job provides via {@code
- * PG_TEST_DB_URL}; skips when that is unset (i.e. on a developer machine without one). Uses a
- * dedicated schema so it cannot collide with the other suites sharing that scratch database.
+ * <p>Its own schema, named rather than TestDb's, because this suite shares the scratch database
+ * with the other {@code pg_db_tests} suites and drops its schema on the way in.
  */
 public class PostgresAggregateCompatTest {
 
-  private static final String DB_URL_ENV = "PG_TEST_DB_URL";
   private static final String SCHEMA = "one_d4_pg_compat_test";
 
   private DataSource dataSource;
@@ -62,10 +56,7 @@ public class PostgresAggregateCompatTest {
 
   @BeforeEach
   public void setUp() throws Exception {
-    String rawUrl = System.getenv(DB_URL_ENV);
-    assumeTrue(
-        rawUrl != null && !rawUrl.isBlank(),
-        DB_URL_ENV + " is not set; skipping the real-postgres compatibility suite");
+    String rawUrl = PgTestUrls.requireRawUrl();
 
     // A clean schema per run: the same scratch database backs the other DB-gated suites.
     try (Connection conn = DriverManager.getConnection(PgTestUrls.jdbcUrl(rawUrl, null));
@@ -75,8 +66,8 @@ public class PostgresAggregateCompatTest {
     }
 
     dataSource = DataSourceFactory.create(PgTestUrls.jdbcUrl(rawUrl, SCHEMA));
-    new Migration(dataSource, new PostgresSqlDialect()).run();
-    dao = new GameFeatureDao(Jdbi.create(dataSource), new PostgresSqlDialect());
+    new Migration(dataSource).run();
+    dao = new GameFeatureDao(Jdbi.create(dataSource));
 
     requestId = UUID.randomUUID();
     try (Connection conn = dataSource.getConnection();
@@ -94,7 +85,7 @@ public class PostgresAggregateCompatTest {
     if (dataSource instanceof Closeable closeable) {
       closeable.close();
     }
-    String rawUrl = System.getenv(DB_URL_ENV);
+    String rawUrl = System.getenv(PgTestUrls.DB_URL_ENV);
     if (rawUrl == null || rawUrl.isBlank()) {
       return;
     }
@@ -165,7 +156,7 @@ public class PostgresAggregateCompatTest {
   /**
    * Grouping by opponent.title on real Postgres resolves the opposite side's nullable column, so
    * this doubles as the pin that a NULL group key groups (Postgres pools NULLs into one GROUP BY
-   * bucket, like H2) and comes back as a null map value rather than an error.
+   * bucket) and comes back as a null map value rather than an error.
    */
   @Test
   public void aggregateGroupsByOpponentTitleWithNullBucketOnPostgres() {
@@ -221,10 +212,10 @@ public class PostgresAggregateCompatTest {
 
   /**
    * The bucket arithmetic on real Postgres: {@code (CASE ...) / width * width} under a SELECT alias
-   * that GROUP BY and the tiebreak reference. Integer division must truncate the same way H2's does
-   * (INT / INT stays INT — a dialect that widened to numeric would surface here as a non-integer
-   * key), a NULL elo must propagate through the arithmetic into the NULL bucket, and pgjdbc must
-   * hand the key back as an Integer.
+   * that GROUP BY and the tiebreak reference. Integer division must truncate (INT / INT stays INT —
+   * a dialect that widened to numeric would surface here as a non-integer key), a NULL elo must
+   * propagate through the arithmetic into the NULL bucket, and pgjdbc must hand the key back as an
+   * Integer.
    */
   @Test
   public void aggregateGroupsByOpponentEloBucketsWithNullBucketOnPostgres() {
@@ -318,11 +309,9 @@ public class PostgresAggregateCompatTest {
   }
 
   /**
-   * The other half of the dialect divergence pinned by
-   * GameFeatureDaoTest.aggregate_nullGroupKeySortsFirstInTheTiebreakOnH2: on Postgres a NULL group
-   * key sorts LAST in the ASC tiebreak. The two twins pin opposite orders on purpose — the compiler
-   * emits no NULLS FIRST/LAST normalization, and this pair is what turns that recorded divergence
-   * into something CI checks instead of something comments assert.
+   * Where a NULL group key lands in the ASC tiebreak: last. The compiler emits no NULLS FIRST/LAST
+   * normalization, so this is the engine's default, and it is the order users see — pinned here so
+   * a compiler that starts normalizing has to say so.
    */
   @Test
   public void nullGroupKeySortsLastInTheTiebreakOnPostgres() {
@@ -362,7 +351,7 @@ public class PostgresAggregateCompatTest {
   }
 
   /**
-   * The bucket arithmetic at the INT extremes on the real dialect — the H2 twin
+   * The bucket arithmetic at the INT extremes — the twin
    * (GameFeatureDaoTest.aggregate_bucketArithmeticAtIntegerExtremes) explains the fixture. This is
    * the test behind the portability claim that {@code int4 / int4 * int4} neither widens nor raises
    * for any elo the column can hold: Integer.MAX_VALUE at width 100 must key 2147483600 as an
@@ -471,12 +460,12 @@ public class PostgresAggregateCompatTest {
   }
 
   /**
-   * The outcome metrics and the score ranking on the real dialect (#1345). Three things could
-   * differ from H2 and none of them would show up as a compile error: {@code SUM(CASE ... THEN 1
-   * ELSE 0 END)} comes back as bigint rather than int, the ranking wraps the grouped query in a
-   * derived table whose columns the outer ORDER BY names, and {@code (wins * 2 + draws) * 1.0 /
-   * group_count} is numeric division in Postgres and floating-point in H2 — which must still order
-   * the same way. The floor rides along as a HAVING inside the derived table.
+   * The outcome metrics and the score ranking on the real dialect (#1345). Three things could be
+   * wrong in ways no compile error would show: {@code SUM(CASE ... THEN 1 ELSE 0 END)} comes back
+   * as bigint rather than int, the ranking wraps the grouped query in a derived table whose columns
+   * the outer ORDER BY names, and {@code (wins * 2 + draws) * 1.0 / group_count} is numeric
+   * division in Postgres — which must still order the same way. The floor rides along as a HAVING
+   * inside the derived table.
    */
   @Test
   public void outcomeMetricsAndScoreRankingOnPostgres() {
@@ -534,7 +523,7 @@ public class PostgresAggregateCompatTest {
     assertThat(totals.totalGames()).isEqualTo(7);
   }
 
-  /** The same day/month boundary math the H2 suite pins, against pgjdbc's timestamp binding. */
+  /** The day/month boundary math against pgjdbc's timestamp binding. */
   @Test
   public void dateAndMonthBoundariesOnPostgres() {
     dao.insertBatch(
@@ -560,7 +549,7 @@ public class PostgresAggregateCompatTest {
    * #1302's cure on the deployment target. Every negation compiles to {@code (predicate) IS NOT
    * TRUE}, which is the construct that decides whether a NULL-valued row survives a negated filter
    * — so a dialect that parsed it differently, or applied it to the CASE's result rather than the
-   * comparison's, would silently restore the bug in production while H2 stayed green.
+   * comparison's, would silently restore the bug in production.
    *
    * <p>Both nullable shapes in one fixture: a NULL title reached through the perspective CASE, and
    * a NULL played_at reached through the date range rewrite. The positive halves are the controls —
@@ -637,7 +626,7 @@ public class PostgresAggregateCompatTest {
    * EXISTS is two-valued and because Postgres pulls a SubLink up into an anti-join only through a
    * literal NOT. This is the engine that rationale is about, and {@code NOT motif(...)} is an
    * advertised example in the MCP tool description, so it runs here rather than being reasoned
-   * about. Its H2 twin is {@code GameFeatureDaoTest.insertOccurrences_doesNotAffectOtherGames}.
+   * about. Its sibling is {@code GameFeatureDaoTest.insertOccurrences_doesNotAffectOtherGames}.
    */
   @Test
   public void negatedMotifRunsOnPostgres() {
@@ -672,12 +661,10 @@ public class PostgresAggregateCompatTest {
 
   /**
    * Where a row with no played_at lands in the default ordering, on the deployment engine. {@code
-   * ORDER BY played_at DESC} leaves NULL placement to the engine and the two disagree: Postgres
-   * sorts it first, H2 last ({@code GameFeatureDaoTest.query_nullPlayedAtSortsLastInTheDefaultOrder
-   * OnH2} is the twin). #1302 is what makes that reachable from a date-scoped query — such a row
-   * now leads page one of {@code date != "D"} in production and trails it in every H2 test — so it
-   * is pinned on both engines rather than left as a comment. Deliberately unsorted, unlike every
-   * other assertion in this file.
+   * ORDER BY played_at DESC} leaves NULL placement to the engine, and Postgres sorts it first.
+   * #1302 is what makes that reachable from a date-scoped query — such a row leads page one of
+   * {@code date != "D"} — so the placement is pinned rather than left as a comment. Deliberately
+   * unsorted, unlike every other assertion in this file.
    */
   @Test
   public void nullPlayedAtLeadsTheDefaultOrderOnPostgres() {
@@ -697,7 +684,7 @@ public class PostgresAggregateCompatTest {
   /**
    * A perspective filter, a date bound and the motif_count ORDER BY each contribute bind params at
    * different points in the statement. Postgres rejects a placeholder whose inferred type does not
-   * match the value, so a misordered list fails here even when H2 would coerce it.
+   * match the value, so a misordered list fails here rather than being coerced.
    */
   @Test
   public void mixedParamOrderExecutesOnPostgres() {

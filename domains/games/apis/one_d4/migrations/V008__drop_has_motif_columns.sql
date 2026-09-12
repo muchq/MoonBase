@@ -1,6 +1,5 @@
 -- Drop the has_* boolean motif columns — queries use motif_occurrences
--- directly. One drop per statement because H2 doesn't support
--- comma-separated multi-column drops.
+-- directly.
 
 ALTER TABLE game_features DROP COLUMN IF EXISTS has_pin;
 

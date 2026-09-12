@@ -10,6 +10,7 @@ import com.muchq.games.mcpserver.tools.OneD4Client;
 import com.muchq.games.mcpserver.tools.QueryGamesTool;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.db.GameFeatureStore;
+import com.muchq.games.one_d4.db.TestDb;
 import com.muchq.platform.http_client.jdk.Jdk11HttpClient;
 import com.muchq.platform.json.JsonUtils;
 import io.micronaut.context.ApplicationContext;
@@ -62,11 +63,7 @@ public class McpSharedCorpusE2ETest {
     oneD4 =
         ApplicationContext.run(
             EmbeddedServer.class,
-            Map.of(
-                "indexer.db.url",
-                "jdbc:h2:mem:mcp_e2e_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1",
-                "micronaut.server.port",
-                "-1"));
+            Map.of("indexer.db.url", TestDb.jdbcUrlFor("mcp_e2e"), "micronaut.server.port", "-1"));
     http = java.net.http.HttpClient.newHttpClient();
 
     // The corpus, written the way a worker flush writes it: a request row first (game_features

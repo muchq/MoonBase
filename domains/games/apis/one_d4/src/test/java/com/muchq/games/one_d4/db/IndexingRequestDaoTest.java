@@ -343,9 +343,8 @@ public class IndexingRequestDaoTest {
   /**
    * The unfenced write path, which is still reachable: {@code IndexRequestService}'s
    * inline-dispatch failure handler has no lease to present, and neither do the tests below. A
-   * status write with no token behind it must not resurrect a row that was already retired — that
-   * would produce a live request holding no dedupe slot, and since the replacement already holds
-   * the key the constraint could not see the second live row.
+   * status write with no token behind it must not resurrect a row that was already retired — the
+   * replacement is already the live row for that range, so the resurrection is a second one.
    *
    * <p>A worker cannot reach this state at all now: its writes go through {@code updateStatusOwned}
    * and are refused outright. This guard covers everything that is not a worker.
@@ -393,18 +392,16 @@ public class IndexingRequestDaoTest {
   }
 
   /**
-   * Every other test reaches the constraint only through {@code findByDedupeKey}, which short
-   * circuits before the insert. This drives the constraint itself, so removing it from the
+   * Every other test reaches the index only through {@code createOrAdopt}, which finds the live row
+   * and short circuits before the insert. This drives the index itself, so removing it from the
    * migration fails deterministically rather than only under a thread interleaving.
    */
   @Test
-  public void schema_rejectsASecondRowWithTheSameDedupeKey() {
+  public void schema_rejectsASecondLiveRowForTheSameRange() {
     create("constrained", "2025-11", "2025-11", false);
-    String key =
-        IndexingRequestDao.dedupeKey("constrained", "CHESS_COM", "2025-11", "2025-11", false);
 
-    assertThatThrownBy(() -> insertRawWithDedupeKey(key))
-        .as("the database, not the application, is what makes the slot exclusive")
+    assertThatThrownBy(() -> insertRawLiveRequest("constrained", "2025-11", "2025-11", false))
+        .as("the database, not the application, is what makes the range exclusive")
         .isInstanceOf(Exception.class);
   }
 
@@ -733,8 +730,8 @@ public class IndexingRequestDaoTest {
 
   /**
    * A lapsed lease no longer means the range is free. The row goes back in the queue, so it is
-   * still the holder and dedupe must keep answering with it — a second submit should adopt the work
-   * already waiting rather than create a rival for the same range.
+   * still the holder and a second submit must keep adopting it — a second submit should adopt the
+   * work already waiting rather than create a rival for the same range.
    *
    * <p>This is the inverse of what it asserted before #1279, and deliberately so: back then a
    * lapsed lease was retired, because nothing was ever going to run that request again.
@@ -1078,7 +1075,7 @@ public class IndexingRequestDaoTest {
   }
 
   @Test
-  public void updateStatusOwned_terminalWriteReleasesTheLeaseAndTheDedupeSlot() {
+  public void updateStatusOwned_terminalWriteReleasesTheLeaseAndTheRange() {
     IndexingRequestStore.Claim claim =
         dao.createOrAdopt(
             "released", "CHESS_COM", "2026-03", "2026-03", false, false, STALE_AFTER, now);
@@ -1189,15 +1186,19 @@ public class IndexingRequestDaoTest {
     }
   }
 
-  private void insertRawWithDedupeKey(String dedupeKey) {
+  /** A PENDING row written straight past the DAO, so the index is the only thing refusing it. */
+  private void insertRawLiveRequest(
+      String player, String startMonth, String endMonth, boolean excludeBullet) {
     try (var conn = dataSource.getConnection();
         var ps =
             conn.prepareStatement(
                 "INSERT INTO indexing_requests (id, player, platform, start_month, end_month,"
-                    + " dedupe_key) VALUES (?, 'constrained', 'CHESS_COM', '2025-11', '2025-11',"
-                    + " ?)")) {
+                    + " exclude_bullet, status) VALUES (?, ?, 'CHESS_COM', ?, ?, ?, 'PENDING')")) {
       ps.setObject(1, UUID.randomUUID());
-      ps.setString(2, dedupeKey);
+      ps.setString(2, player);
+      ps.setString(3, startMonth);
+      ps.setString(4, endMonth);
+      ps.setBoolean(5, excludeBullet);
       ps.executeUpdate();
     } catch (java.sql.SQLException e) {
       throw new RuntimeException(e);

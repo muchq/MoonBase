@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.db.GameFeatureStore;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
+import com.muchq.games.one_d4.db.TestDb;
 import com.muchq.platform.json.JsonUtils;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
@@ -52,7 +53,7 @@ public class NegatedFilterHttpTest {
             EmbeddedServer.class,
             java.util.Map.of(
                 "indexer.db.url",
-                "jdbc:h2:mem:negated_filter_http_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1",
+                TestDb.jdbcUrlFor("negated_filter_http"),
                 "micronaut.server.port",
                 "-1"));
     http = HttpClient.newHttpClient();

@@ -62,7 +62,9 @@ Bazel formatting do.
   `npm test` still passes locally, because neither reads `BUILD.bazel`.
 - **Postgres-gated suites skip silently** without `PG_TEST_DB_URL` /
   `GAMES_HUB_TEST_DB_URL`. CI supplies them from a `postgres:18` service; a
-  local green run may have exercised no SQL at all.
+  local green run may have exercised no SQL at all. one_d4's suites are the
+  exception — they fail rather than skip when `CI` is set, which is what let
+  them drop H2 (#1532) — so run them with a URL or read the skips.
 - **C++ warnings are errors for `domains/` (#1408)** — `.bazelrc` sets
   `--per_file_copt=^domains/.*@-Wall,-Werror`. The anchor is load-bearing:
   unanchored, it also matches generated sources under `bazel-out/*/bin/domains/`,
@@ -94,10 +96,9 @@ Bazel formatting do.
   test compile in the repo buys nothing to offset the cost. Test code that
   genuinely needs a generated bean definition goes in a `testonly`
   `java_library` beside the suite, which gets the processors like any other
-  library — see `filter_test_app` in `domains/platform/libs/yodel/BUILD.bazel`
-  and `e2e_support` in `domains/games/apis/one_d4/BUILD.bazel`. Reaching for the
-  suite's own `plugins` instead is not the pattern. Also guarded, in both
-  directions.
+  library — see `filter_test_app` in `domains/platform/libs/yodel/BUILD.bazel`.
+  Reaching for the suite's own `plugins` instead is not the pattern. Also
+  guarded, in both directions.
 - **Behind a proxy that 403s GitHub source archives** (cloud sandboxes, some CI
   runners), run `scripts/make-git-overrides.sh` once and import its output from
   `.bazelrc.user` — see [`docs/BUILD_AND_IDE.md`](docs/BUILD_AND_IDE.md). That

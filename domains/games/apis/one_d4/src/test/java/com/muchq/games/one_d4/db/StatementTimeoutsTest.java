@@ -10,7 +10,6 @@ import java.util.ArrayList;
 import java.util.List;
 import org.jdbi.v3.core.statement.SqlLogger;
 import org.jdbi.v3.core.statement.StatementContext;
-import org.jdbi.v3.core.statement.UnableToExecuteStatementException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -109,8 +108,7 @@ public class StatementTimeoutsTest {
         .containsExactly(StatementTimeouts.SERVING_READ_SECONDS);
 
     timeouts.clear();
-    new IndexedPeriodDao(testDb.jdbi(), new H2SqlDialect())
-        .findPeriodsForPlayers(List.of("hikaru"));
+    new IndexedPeriodDao(testDb.jdbi()).findPeriodsForPlayers(List.of("hikaru"));
     assertThat(timeouts)
         .as("findPeriodsForPlayers — GET /v1/index's data-availability read")
         .containsExactly(StatementTimeouts.SERVING_READ_SECONDS);
@@ -140,7 +138,7 @@ public class StatementTimeoutsTest {
     Instant threshold = Instant.parse("2026-01-01T00:00:00Z");
 
     timeouts.clear();
-    new GameFeatureDao(testDb.jdbi(), new H2SqlDialect()).deleteOlderThan(threshold);
+    new GameFeatureDao(testDb.jdbi()).deleteOlderThan(threshold);
     assertThat(timeouts)
         .as("game_features delete")
         .contains(StatementTimeouts.RETENTION_SWEEP_SECONDS);
@@ -152,95 +150,15 @@ public class StatementTimeoutsTest {
         .contains(StatementTimeouts.RETENTION_SWEEP_SECONDS);
 
     timeouts.clear();
-    new IndexedPeriodDao(testDb.jdbi(), new H2SqlDialect()).deleteOlderThan(threshold);
+    new IndexedPeriodDao(testDb.jdbi()).deleteOlderThan(threshold);
     assertThat(timeouts)
         .as("indexed_periods delete")
         .contains(StatementTimeouts.RETENTION_SWEEP_SECONDS);
   }
 
-  @Test
-  public void aBoundedSweepLeavesNoTimeoutOnTheSession() throws Exception {
-    new GameFeatureDao(testDb.jdbi(), new H2SqlDialect())
-        .deleteOlderThan(Instant.parse("2026-01-01T00:00:00Z"));
-
-    try (var conn = testDb.dataSource().getConnection();
-        var probe = conn.createStatement()) {
-      assertThat(probe.getQueryTimeout())
-          .as("the sweep bound must not leak to later statements on the pooled connection")
-          .isEqualTo(0);
-    }
-  }
-
   // ---------------------------------------------------------------------------------------------
   // The mechanism itself, tested directly rather than through a DAO.
   // ---------------------------------------------------------------------------------------------
-
-  /** H2 alias target for the slow-query tests: sleeps per evaluated row. Must be public static. */
-  public static int nap(int millis) throws InterruptedException {
-    Thread.sleep(millis);
-    return 0;
-  }
-
-  /**
-   * The bound must cancel a statement that is actually running, not merely be set. 400 rows
-   * sleeping 20ms each is a ~8s query; a 1s bound has to kill it partway. H2 enforces the timeout
-   * cooperatively and only checks every so many processed rows, which is why the fixture needs
-   * hundreds of rows — with too few the check never runs and the query completes as if unbounded.
-   * The positive twin shares the fixture (same alias, same query shape), so a broken alias cannot
-   * masquerade as the bound firing. Postgres-side cancellation is covered by
-   * PostgresReadTimeoutTest.
-   */
-  @Test
-  public void slowExecutionIsCancelledAtTheBound() throws Exception {
-    try (var conn = testDb.dataSource().getConnection();
-        var stmt = conn.createStatement()) {
-      stmt.execute(
-          "CREATE ALIAS IF NOT EXISTS NAP FOR"
-              + " \"com.muchq.games.one_d4.db.StatementTimeoutsTest.nap\"");
-      for (int i = 0; i < 400; i++) {
-        stmt.execute(
-            "INSERT INTO indexed_periods (player, platform, year_month, fetched_at, is_complete,"
-                + " games_count) VALUES ('slow-"
-                + i
-                + "', 'CHESS_COM', '2026-01', now(), true, 0)");
-      }
-    }
-
-    String slowSql = "SELECT player FROM indexed_periods WHERE NAP(20) = 0";
-    long start = System.nanoTime();
-    assertThatThrownBy(
-            () ->
-                StatementTimeouts.withStatementTimeout(
-                    testDb.jdbi(), 1, h -> h.createQuery(slowSql).mapTo(String.class).list()))
-        .as("a statement outrunning the bound must be cancelled, not awaited")
-        .isInstanceOf(UnableToExecuteStatementException.class);
-    long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
-    assertThat(elapsedMillis)
-        .as("cancellation must arrive well before the ~8s the full query needs")
-        .isLessThan(5_000);
-
-    // The error path must clear the H2 session too: this is the leak that matters in production
-    // — a timed-out statement returning its pooled connection with the bound still set. Without
-    // the reset running in a finally (rather than at the end of the try), this probe reads 1.
-    try (var conn = testDb.dataSource().getConnection();
-        var probe = conn.createStatement()) {
-      assertThat(probe.getQueryTimeout())
-          .as("a cancelled statement must not leave its bound on the pooled connection")
-          .isEqualTo(0);
-    }
-
-    // Positive twin: the same query shape under a negligible per-row sleep completes normally,
-    // proving the alias and the query work and the failure above is the bound.
-    List<String> rows =
-        StatementTimeouts.withStatementTimeout(
-            testDb.jdbi(),
-            1,
-            h ->
-                h.createQuery("SELECT player FROM indexed_periods WHERE NAP(0) = 0")
-                    .mapTo(String.class)
-                    .list());
-    assertThat(rows).hasSize(400);
-  }
 
   @Test
   public void withStatementTimeout_appliesTheGivenBoundAndReturnsTheBodysValue() {
@@ -255,8 +173,7 @@ public class StatementTimeoutsTest {
   }
 
   @Test
-  public void withStatementTimeout_propagatesTheBodysExceptionAndStillClearsTheSession()
-      throws Exception {
+  public void withStatementTimeout_propagatesTheBodysException() {
     assertThatThrownBy(
             () ->
                 StatementTimeouts.withStatementTimeout(
@@ -268,74 +185,6 @@ public class StatementTimeoutsTest {
         .as("the body's own exception must come through untouched")
         .isInstanceOf(IllegalStateException.class)
         .hasMessage("body failure");
-
-    try (var conn = testDb.dataSource().getConnection();
-        var probe = conn.createStatement()) {
-      assertThat(probe.getQueryTimeout())
-          .as("a failing body must still not leak its bound onto the pooled connection")
-          .isEqualTo(0);
-    }
-  }
-
-  /**
-   * The log-and-swallow contract of the session cleanup, under an injected cleanup failure: a
-   * proxied connection whose plain {@code createStatement()} — the cleanup's only entry — starts
-   * failing after the body has run. The body's statements go through {@code prepareStatement}, so
-   * only the cleanup is hit. This is the panel finding (a finally-throw replacing the real outcome)
-   * pinned by a test rather than fixed on trust.
-   */
-  @Test
-  public void aFailingCleanupNeverReplacesTheBodysOutcome() {
-    java.util.concurrent.atomic.AtomicBoolean failCreateStatement =
-        new java.util.concurrent.atomic.AtomicBoolean(false);
-    org.jdbi.v3.core.Jdbi faultyJdbi =
-        org.jdbi.v3.core.Jdbi.create(
-            () -> {
-              java.sql.Connection real = testDb.dataSource().getConnection();
-              return (java.sql.Connection)
-                  java.lang.reflect.Proxy.newProxyInstance(
-                      getClass().getClassLoader(),
-                      new Class<?>[] {java.sql.Connection.class},
-                      (proxy, method, args) -> {
-                        if (method.getName().equals("createStatement")
-                            && (args == null || args.length == 0)
-                            && failCreateStatement.get()) {
-                          throw new SQLException("injected cleanup failure");
-                        }
-                        try {
-                          return method.invoke(real, args);
-                        } catch (java.lang.reflect.InvocationTargetException e) {
-                          throw e.getCause();
-                        }
-                      });
-            });
-
-    // Success path: the body's result survives a failed cleanup.
-    failCreateStatement.set(false);
-    int result =
-        StatementTimeouts.withStatementTimeout(
-            faultyJdbi,
-            7,
-            h -> {
-              int r = h.createQuery("SELECT 42").mapTo(Integer.class).one();
-              failCreateStatement.set(true);
-              return r;
-            });
-    assertThat(result).as("a successful body must not be failed by its cleanup").isEqualTo(42);
-
-    // Error path: the body's exception survives a failed cleanup — not the cleanup's.
-    failCreateStatement.set(false);
-    assertThatThrownBy(
-            () ->
-                StatementTimeouts.withStatementTimeout(
-                    faultyJdbi,
-                    7,
-                    h -> {
-                      failCreateStatement.set(true);
-                      throw new IllegalStateException("the real failure");
-                    }))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessage("the real failure");
   }
 
   @Test

@@ -41,8 +41,8 @@ public interface IndexingRequestStore {
    *
    * <p>Implementations settle any abandoned holder first, as part of the same atomic step. Usually
    * that means releasing it back to the queue and letting this caller adopt it rather than start a
-   * rival; only a request whose attempts are spent is retired, which frees the key so an insert can
-   * succeed. See {@link #reclaimStale}.
+   * rival; only a request whose attempts are spent is retired, which frees the range so an insert
+   * can succeed. See {@link #reclaimStale}.
    */
   Claim createOrAdopt(
       String player,
@@ -115,9 +115,9 @@ public interface IndexingRequestStore {
    *
    * <ul>
    *   <li><b>Released.</b> A lease expired with attempts to spare. The owner is gone; the work is
-   *       not. The row is unclaimed and left live for the next worker, keeping its {@code
-   *       dedupe_key} because the range is still spoken for. This is the common case and it is
-   *       silent — telling the user anything here would be a lie about work that is about to run.
+   *       not. The row is unclaimed and left live for the next worker, keeping the range it holds
+   *       because that range is still spoken for. This is the common case and it is silent —
+   *       telling the user anything here would be a lie about work that is about to run.
    *   <li><b>Poisoned.</b> Claimed {@code MAX_ATTEMPTS} times, each worker stopping before it
    *       finished. Releasing is unbounded by construction, so without this a request that kills
    *       the process handling it tours the fleet forever, costing a worker each lap — a
@@ -236,9 +236,9 @@ public interface IndexingRequestStore {
    * <p>The fenced counterpart to {@link #updateStatus}. A worker holds a token, so every write it
    * makes is conditioned on that token, and this is the request row's half of the same rule {@link
    * GameFeatureStore#flushOwned} applies to the data plane. Without it a worker whose lease lapsed
-   * could still stamp COMPLETED — and a terminal write clears {@code dedupe_key} and the lease, so
-   * it would free the slot out from under whoever legitimately owns the range now, and report the
-   * dead run's game count as the answer.
+   * could still stamp COMPLETED — and a terminal status releases the range, so it would free the
+   * slot out from under whoever legitimately owns it now, and report the dead run's game count as
+   * the answer.
    *
    * <p>Non-owner callers keep using {@link #updateStatus}: the inline-dispatch failure path in
    * {@code IndexRequestService} writes on behalf of a request no worker ever claimed, and has no

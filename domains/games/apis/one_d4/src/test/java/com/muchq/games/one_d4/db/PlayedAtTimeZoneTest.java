@@ -14,11 +14,11 @@ import org.junit.jupiter.api.Test;
 
 /**
  * ChessQL's {@code date} / {@code month} fields compile to played_at comparisons against UTC
- * day/month boundaries. played_at is a TIMESTAMP column with no zone on both H2 and Postgres, so
- * any binding that routes through an instant converts via the JVM's default zone — and the whole
- * feature is then only correct if the write side and the query side agree on that zone. This suite
- * runs the end-to-end path under a deliberately extreme non-UTC default zone (Pacific/Kiritimati,
- * UTC+14) to prove the day boundaries stay UTC days rather than sliding with the JVM.
+ * day/month boundaries. played_at is a TIMESTAMP column with no zone, so any binding that routes
+ * through an instant converts via the JVM's default zone — and the whole feature is then only
+ * correct if the write side and the query side agree on that zone. This suite runs the end-to-end
+ * path under a deliberately extreme non-UTC default zone (Pacific/Kiritimati, UTC+14) to prove the
+ * day boundaries stay UTC days rather than sliding with the JVM.
  *
  * <p>Agreeing on the JVM zone is not enough, which is why {@link
  * #storedWallClockIsUtcNotJvmLocal()} asserts the wall clock actually on disk rather than a round
@@ -29,9 +29,10 @@ import org.junit.jupiter.api.Test;
  * zone-independent.
  *
  * <p>The zone comes from the Bazel target's {@code env = {"TZ": ...}} rather than {@code
- * TimeZone.setDefault} in a {@code @BeforeEach}: H2 caches the default zone globally the first time
- * it converts a value, so a zone changed mid-JVM would not reach the driver and the test would pass
- * vacuously. {@code GameFeatureDaoTest} covers the same path under the container's default zone.
+ * TimeZone.setDefault} in a {@code @BeforeEach}: pgjdbc reads the default zone as it builds its
+ * timestamp conversions, so a zone changed mid-JVM would not reach the driver and the test would
+ * pass vacuously. {@code GameFeatureDaoTest} covers the same path under the container's default
+ * zone.
  */
 public class PlayedAtTimeZoneTest {
 
@@ -45,7 +46,7 @@ public class PlayedAtTimeZoneTest {
   @BeforeEach
   public void setUp() {
     testDb = TestDb.create("playedattz");
-    dao = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
+    dao = new GameFeatureDao(testDb.jdbi());
     requestId = UUID.randomUUID();
     try (var conn = testDb.dataSource().getConnection();
         var stmt =
@@ -118,10 +119,9 @@ public class PlayedAtTimeZoneTest {
 
   /**
    * indexed_at is what retention compares against, and it used to be written by the database's own
-   * {@code now()} while the threshold came from the JVM (#1268). On H2 that was self-consistent —
-   * the engine runs in-process and shares the JVM's zone, so both sides shifted together and no
-   * round-trip test could see it — but it made the stored value depend on whichever process wrote
-   * it. Against a real Postgres in a different zone than the app, retention deleted early.
+   * {@code now()} while the threshold came from the JVM (#1268). That made the stored value depend
+   * on whichever process wrote it: with the database in a different zone than the app, retention
+   * deleted early.
    *
    * <p>So the assertion has to be on the bytes on disk, not a round trip: under UTC+14 the old path
    * wrote {@code 2026-07-01 14:00:00} for this instant.

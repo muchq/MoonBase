@@ -1,18 +1,8 @@
--- dedupe_key enforces "at most one live request per (player, platform,
+-- dedupe_key enforced "at most one live request per (player, platform,
 -- start_month, end_month, exclude_bullet)" in the database, closing the
--- check-then-act race in IndexRequestService (#1249). It carries the
--- composite key while a request is PENDING/PROCESSING and NULL once it
--- reaches a terminal status — a plain UNIQUE constraint ignores NULLs on
--- both engines, so terminal rows accumulate freely while live ones cannot
--- collide.
---
--- A Postgres partial unique index would express this more directly, but H2
--- does not support one, and H2 is what the default CI suite runs — the
--- pg-backed suites skip silently without GAMES_HUB_TEST_DB_URL /
--- PG_TEST_DB_URL. A PG-only constraint would leave the race guard
--- effectively untested on every ordinary PR. One nullable column costs a
--- little schema surface and buys the same invariant, enforced identically
--- on both engines and exercised by db_tests.
+-- check-then-act race in IndexRequestService (#1249). V018 replaces it with
+-- the partial unique index it was a stand-in for and drops this column; the
+-- steps are append-only, so this one still runs first.
 
 ALTER TABLE indexing_requests ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR(600);
 
@@ -30,15 +20,10 @@ ALTER TABLE indexing_requests ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR(600);
 -- work. created_at alone does not settle it — ties are exactly what
 -- duplicate submits produce.
 --
--- Two details, both learned by watching this fail:
+-- LOWER(CAST(... AS VARCHAR)) rather than bare concatenation, so the key
+-- matches the one Java rendered from the same values.
 --
--- LOWER(CAST(... AS VARCHAR)) rather than bare concatenation, because H2
--- renders a BOOLEAN as 'TRUE' while Postgres and Boolean.toString render
--- 'true'. Left implicit, a backfilled row's key would not match the one
--- IndexingRequestDao computes in Java on H2, and dedupe would miss it
--- exactly once.
---
--- And the winner is picked by a total order — (created_at, id), with ids
+-- The winner is picked by a total order — (created_at, id), with ids
 -- compared by '<' rather than MIN(id), since Postgres has ordering operators
 -- for uuid but no min/max aggregate over it. Selecting on MIN(created_at)
 -- alone is not enough: duplicate submits are precisely the rows most likely

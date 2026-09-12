@@ -34,7 +34,7 @@ public class GameFeatureDaoTest {
   @BeforeEach
   public void setUp() {
     testDb = TestDb.create("gamefeaturedao");
-    dao = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
+    dao = new GameFeatureDao(testDb.jdbi());
     requestId = UUID.randomUUID();
 
     try (var conn = testDb.dataSource().getConnection();
@@ -77,11 +77,9 @@ public class GameFeatureDaoTest {
    * edit rather than a scavenger hunt. Behavioral cancellation at a short bound lives on the
    * mechanism in StatementTimeoutsTest too.
    *
-   * <p>The final probe pins the H2 session cleanup: H2 scopes setQueryTimeout to the pooled
-   * connection's session, so without the entry point's reset a read's timeout would leak into every
-   * later statement on that connection — including writes, which are deliberately left without a
-   * statement bound. It also keeps the per-path probes honest: with a leaked session value, a read
-   * path that lost its own bound would inherit an earlier read's and still probe as bounded.
+   * <p>The final probe keeps the per-path probes honest: if a bound could linger on the pooled
+   * connection, a read path that lost its own would inherit an earlier read's and still probe as
+   * bounded. That it cannot is pgjdbc's doing, pinned in {@code PostgresReadTimeoutTest}.
    */
   @Test
   public void allFourReadPathsCarryTheProductionTimeout() {
@@ -103,7 +101,7 @@ public class GameFeatureDaoTest {
                 }
               }
             });
-    GameFeatureDao prodDao = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
+    GameFeatureDao prodDao = new GameFeatureDao(testDb.jdbi());
     dao.insertBatch(List.of(createGame("https://chess.com/game/timeout-probe")));
 
     lastTimeout.set(-1);
@@ -914,31 +912,6 @@ public class GameFeatureDaoTest {
   }
 
   /**
-   * Where a row with no played_at lands in the default ordering, on H2. {@code ORDER BY played_at
-   * DESC} leaves NULL placement to the engine and the two disagree: H2 sorts it last, Postgres
-   * first (its twin, {@code nullPlayedAtLeadsTheDefaultOrderOnPostgres}, pins that). #1302 is what
-   * makes the divergence reachable from a date-scoped query, so it is pinned on both engines rather
-   * than asserted in a comment.
-   */
-  @Test
-  public void query_nullPlayedAtSortsLastInTheDefaultOrderOnH2() {
-    dao.insertBatch(
-        List.of(
-            createGameAt("https://chess.com/game/ord-null", null),
-            createGameAt("https://chess.com/game/ord-old", Instant.parse("2024-01-01T00:00:00Z")),
-            createGameAt("https://chess.com/game/ord-new", Instant.parse("2026-01-01T00:00:00Z"))));
-
-    List<GameFeature> rows =
-        dao.query(new SqlCompiler().compile(Parser.parse("num.moves >= 0")), 10, 0);
-
-    assertThat(rows.stream().map(GameFeature::gameUrl))
-        .containsExactly(
-            "https://chess.com/game/ord-new",
-            "https://chess.com/game/ord-old",
-            "https://chess.com/game/ord-null");
-  }
-
-  /**
    * The negated filter's count now equals what grouping reports, which is the reconciliation #1311
    * made visible and this fixes. Untitled opponents are the {@code null} bucket; before the fix the
    * filter returned every other bucket's games and silently omitted that one.
@@ -1186,8 +1159,8 @@ public class GameFeatureDaoTest {
    * Two perspective CASEs with different player-param counts in one grouping, executed for real:
    * opponent.title binds one player param, outcome binds two, and the participation guard prepends
    * two more — the bind-order contract SqlCompilerTest pins as strings, driven through the engine.
-   * Tuple assertions are order-free on purpose: every group ties at count 1, and H2 and Postgres
-   * disagree on where NULL sorts in an ASC tiebreak.
+   * Tuple assertions are order-free on purpose: every group ties at count 1, so the NULL key's
+   * place in the ASC tiebreak is not what this test is about.
    */
   @Test
   public void aggregate_groupsByOpponentTitleAndOutcomeTogether() {
@@ -1256,8 +1229,7 @@ public class GameFeatureDaoTest {
             10);
 
     // 2450 (as White), 2499 (as Black), and boundary 2400 pool into one bucket; hikaru's own
-    // 2800s reach no bucket. The count-1 groups tie, so those assertions are order-free (H2 and
-    // Postgres disagree on where NULL sorts in an ASC tiebreak).
+    // 2800s reach no bucket. The count-1 groups tie, so those assertions are order-free.
     assertThat(groups).hasSize(3);
     assertThat(groups.get(0).group()).containsEntry("opponent_elo", 2400);
     assertThat(groups.get(0).count()).isEqualTo(3);
@@ -1295,7 +1267,7 @@ public class GameFeatureDaoTest {
    * A bucket term and a categorical perspective term in one grouping, executed for real: the
    * arithmetic-wrapped alias and the plain CASE alias must both survive GROUP BY and the ORDER BY
    * tiebreak in the same statement, with the bucket's player param binding before me.color's.
-   * Order-free tuples because every count-1 group ties (H2 and Postgres disagree on NULL order).
+   * Order-free tuples because every count-1 group ties.
    */
   @Test
   public void aggregate_groupsByMeColorAndOpponentEloBucketsTogether() {
@@ -1393,43 +1365,6 @@ public class GameFeatureDaoTest {
   }
 
   /**
-   * One half of the dialect divergence the order-free sibling assertions accommodate, pinned
-   * deliberately: H2 sorts a NULL group key FIRST in the ASC tiebreak, while the Postgres twin
-   * (PostgresAggregateCompatTest.nullGroupKeySortsLastInTheTiebreakOnPostgres) pins LAST. The
-   * compiler emits no NULLS FIRST/LAST normalization on purpose; if it ever does, or if either
-   * engine changes its default, exactly one of the twins fails and the recorded divergence gets
-   * re-examined.
-   */
-  @Test
-  public void aggregate_nullGroupKeySortsFirstInTheTiebreakOnH2() {
-    dao.insertBatch(
-        List.of(
-            perspectiveGame(
-                "https://chess.com/game/nf-1", "hikaru", "fmfoe", "IM", "FM", "1-0", "Caro Kann"),
-            perspectiveGame(
-                "https://chess.com/game/nf-2",
-                "untitled_foe",
-                "hikaru",
-                null,
-                "IM",
-                "0-1",
-                "Caro Kann")));
-
-    SqlCompiler compiler = new SqlCompiler();
-    List<AggregateRow> groups =
-        dao.aggregate(
-            compiler.compileAggregate(
-                Parser.parse("time.class = \"blitz\""), List.of("opponent.title"), "hikaru"),
-            List.of("opponent_title"),
-            10);
-
-    // Both groups tie at count 1, so the order IS the ASC tiebreak — and on H2 the NULL key
-    // leads.
-    assertThat(groups.stream().map(g -> g.group().get("opponent_title")))
-        .containsExactly(null, "FM");
-  }
-
-  /**
    * opponent.username groups by the stored casing, exactly as documented: the perspective filter
    * matches the player case-insensitively (hikaru/Hikaru is one player here), but group keys are
    * the raw stored values, so one opponent stored under two casings forms two groups — the same
@@ -1468,7 +1403,7 @@ public class GameFeatureDaoTest {
   }
 
   @Test
-  public void dateAndMonthScoping_filterByPlayedAtOnH2() {
+  public void dateAndMonthScoping_filterByPlayedAt() {
     Instant june = Instant.parse("2026-06-15T12:00:00Z");
     // Exactly midnight on the month boundary — belongs to July, not June
     Instant julyBoundary = Instant.parse("2026-07-01T00:00:00Z");
@@ -1525,7 +1460,7 @@ public class GameFeatureDaoTest {
    * puts one of these rows on the wrong side, which the equality assertions below catch.
    */
   @Test
-  public void dateOperators_boundaryInstantsOnH2() {
+  public void dateOperators_boundaryInstants() {
     dao.insertBatch(
         List.of(
             createGameAt("prevEnd", Instant.parse("2026-06-14T23:59:59.999Z")),
@@ -1614,9 +1549,9 @@ public class GameFeatureDaoTest {
 
   /**
    * compileAggregate puts perspective group expressions in the SELECT list and has GROUP BY / ORDER
-   * BY reference the alias. H2 and Postgres resolve such a name differently when a physical column
-   * shares it: H2 binds it to the SELECT alias, Postgres binds it to the input column and then
-   * fails with "must appear in the GROUP BY clause". So the aliases must not collide with any
+   * BY reference the alias. Postgres resolves a bare GROUP BY name against input columns first, so
+   * an alias colliding with a physical column binds to the column and the statement fails with
+   * "must appear in the GROUP BY clause". The aliases must therefore not collide with any
    * game_features column — this pins that, and fires if a column named outcome or me_color is ever
    * added to the schema.
    */
@@ -1627,7 +1562,7 @@ public class GameFeatureDaoTest {
 
     List<String> columns = new ArrayList<>();
     try (var conn = testDb.dataSource().getConnection();
-        var rs = conn.getMetaData().getColumns(null, null, "GAME_FEATURES", null)) {
+        var rs = conn.getMetaData().getColumns(null, testDb.schema(), "game_features", null)) {
       while (rs.next()) {
         columns.add(rs.getString("COLUMN_NAME").toLowerCase());
       }
@@ -1645,8 +1580,8 @@ public class GameFeatureDaoTest {
 
   /**
    * The same, resolved against a perspective player. Sorted rather than left in query order on
-   * purpose: {@code ORDER BY played_at DESC} sorts NULLs to opposite ends on H2 and Postgres, and
-   * these fixtures carry NULL-valued rows.
+   * purpose: {@code ORDER BY played_at DESC} leaves NULL placement to the engine, and these
+   * fixtures carry NULL-valued rows.
    */
   private List<String> urlsMatchingAs(String chessql, String player) {
     return dao.query(new SqlCompiler().compile(Parser.parse(chessql), player), 50, 0).stream()
@@ -1656,7 +1591,7 @@ public class GameFeatureDaoTest {
   }
 
   @Test
-  public void aggregate_groupByMeColorAndOutcome_splitsWinLossByColorOnH2() {
+  public void aggregate_groupByMeColorAndOutcome_splitsWinLossByColor() {
     dao.insertBatch(
         List.of(
             // hikaru as white: two wins
@@ -1702,7 +1637,7 @@ public class GameFeatureDaoTest {
   }
 
   @Test
-  public void perspectiveFields_resolveAgainstPlayerOnH2() {
+  public void perspectiveFields_resolveAgainstPlayer() {
     dao.insertBatch(
         List.of(
             // hikaru wins as white; untitled opponent
@@ -1792,7 +1727,7 @@ public class GameFeatureDaoTest {
   }
 
   @Test
-  public void perspectiveOutcomeUnknownAndOrGuard_onH2() {
+  public void perspectiveOutcomeUnknownAndOrGuard() {
     dao.insertBatch(
         List.of(
             // aborted game — result "*" must classify as unknown, not loss
