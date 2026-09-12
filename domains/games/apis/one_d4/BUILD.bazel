@@ -738,7 +738,7 @@ java_library(
 # the mcpserver side is just the tool objects, which are a plain library dep.
 java_test_suite(
     name = "mcp_shared_corpus_tests",
-    size = "medium",
+    size = "small",
     srcs = ["src/test/java/com/muchq/games/one_d4/e2e/McpSharedCorpusE2ETest.java"],
     runtime_deps = [
         "//domains/platform/libs/logging",

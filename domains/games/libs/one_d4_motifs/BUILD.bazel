@@ -176,7 +176,7 @@ cc_test(
 # build -c dbg, which also re-arms the vendored header's asserts.
 cc_test(
     name = "parity_test",
-    size = "medium",
+    size = "small",
     srcs = ["parity_test.cc"],
     data = [
         "testdata/cpp_only_rows.tsv",
