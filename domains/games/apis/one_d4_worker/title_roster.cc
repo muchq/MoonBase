@@ -41,10 +41,23 @@ void TitleRoster::RefreshIfStale() {
   // against a chess.com that is timing out can themselves take longer
   // than the backoff, and a backoff the attempt outlasts is no backoff.
   attempted_ = Now();
+
+  // Nothing to answer from, which is the case that used to write a whole
+  // month untitled.
+  if (!loaded_) AdoptStored();
+}
+
+void TitleRoster::AdoptStored() {
+  if (options_.store == nullptr) return;
+  const absl::StatusOr<TitleMap> stored = options_.store->Load(options_.platform);
+  if (!stored.ok() || stored->empty()) return;
+
+  titles_ = *stored;
+  loaded_ = true;
 }
 
 void TitleRoster::Rebuild(absl::Time now) {
-  std::map<std::string, std::string, std::less<>> titles;
+  TitleMap titles;
   for (const std::string_view title : kTitles) {
     if (Stopping()) return;
     const absl::StatusOr<std::vector<std::string>> players = source_.FetchTitled(title);
@@ -64,6 +77,16 @@ void TitleRoster::Rebuild(absl::Time now) {
   titles_ = std::move(titles);
   loaded_ = true;
   refreshed_ = now;
+
+  // Under the lock, like the ten reads above it and for the same reason:
+  // a refresh is already the one operation here that is not a map probe,
+  // and letting a second one start while this one writes would have two
+  // processes racing to install rosters read at different instants.
+  // Failing to store is not failing to refresh — this roster answers
+  // either way, and the next process is the only thing that loses.
+  if (options_.store != nullptr) {
+    (void)options_.store->Save(options_.platform, titles_, now);
+  }
 }
 
 bool TitleRoster::Stale() const {

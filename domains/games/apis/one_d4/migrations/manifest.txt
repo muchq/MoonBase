@@ -5,3 +5,4 @@
 #
 # Each step is one file, <step>.sql. See README.md.
 V001__initial_schema
+V002__player_titles
