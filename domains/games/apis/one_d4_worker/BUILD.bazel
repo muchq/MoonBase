@@ -687,6 +687,7 @@ cc_binary(
         ":pg_game_sink",
         ":pg_queue",
         ":pg_reanalysis",
+        ":pg_title_store",
         ":poller",
         ":poller_options",
         ":reanalysis_poller",
@@ -831,6 +832,57 @@ cc_test(
     ],
 )
 
+# Where titles outlive the process, as an interface. Header-only so
+# title_roster does not inherit a Postgres dependency to be tested.
+cc_library(
+    name = "title_store",
+    hdrs = ["title_store.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_library(
+    name = "pg_title_store",
+    srcs = ["pg_title_store.cc"],
+    hdrs = ["pg_title_store.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":title_store",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# The ordering rule in the upsert is two statements meeting on one row, so
+# it is checked against a real Postgres. Skips without PG_TEST_DB_URL.
+cc_test(
+    name = "pg_title_store_test",
+    size = "small",
+    srcs = ["pg_title_store_test.cc"],
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
+    deps = [
+        ":migration_files",
+        ":pg_test_db",
+        ":pg_title_store",
+        "//domains/platform/libs/pg",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Who holds a title, for the whole site. Ten documents instead of a round
 # trip per opponent — see title_roster.h.
 cc_library(
@@ -839,6 +891,7 @@ cc_library(
     hdrs = ["title_roster.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":title_store",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -855,6 +908,7 @@ cc_test(
     deps = [
         ":title_roster",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
     ],

@@ -66,6 +66,7 @@ filegroup(
     name = "migrations_sql_files",
     srcs = [
         "migrations/V001__initial_schema.sql",
+        "migrations/V002__player_titles.sql",
     ],
 )
 

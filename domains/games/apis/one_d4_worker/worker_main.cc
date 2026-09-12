@@ -37,6 +37,7 @@
 #include "domains/games/apis/one_d4_worker/pg_game_sink.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
 #include "domains/games/apis/one_d4_worker/pg_reanalysis.h"
+#include "domains/games/apis/one_d4_worker/pg_title_store.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
 #include "domains/games/apis/one_d4_worker/poller_options.h"
 #include "domains/games/apis/one_d4_worker/reanalysis_poller.h"
@@ -146,17 +147,28 @@ int main(int /*argc*/, char** argv) {
     return 1;
   }
   one_d4_worker::ChessComArchive archive(*client);
-  // Ten documents for the whole titled population of the site, held for
-  // the life of the process. See title_roster.h.
-  one_d4_worker::TitleRoster::Options title_options;
-  title_options.stopping = [] { return g_stopping.load(std::memory_order_relaxed); };
-  one_d4_worker::TitleRoster titles(archive, std::move(title_options));
 
   // Bounded, because nothing else bounds them and the run ceiling cannot:
   // a thread inside libpq never reaches a checkpoint to be told its time
   // is up. Cancelling a run that is already blocked is a separate job
   // (#1400).
   const std::string bounded_db_url = one_d4_worker::WithExecutionBounds(db_url);
+
+  // Ten documents for the whole titled population of the site, held for
+  // the life of the process. See title_roster.h.
+  //
+  // Its own connection: the roster takes its lock for the whole of a
+  // refresh, so the one statement this adds cannot contend with a run's
+  // flushes, and sharing a run's client would put it behind them.
+  pg::Client title_db(bounded_db_url);
+  one_d4_worker::PgTitleStore title_store(title_db);
+  one_d4_worker::TitleRoster::Options title_options;
+  title_options.stopping = [] { return g_stopping.load(std::memory_order_relaxed); };
+  title_options.store = &title_store;
+  // The string indexing_requests.platform carries, so a row here keys the
+  // same way a game_features row does.
+  title_options.platform = "CHESS_COM";
+  one_d4_worker::TitleRoster titles(archive, std::move(title_options));
   LOG(INFO) << "Polling indexing_requests as " << poller_options.owner;
 
   std::signal(SIGINT, RequestShutdown);
