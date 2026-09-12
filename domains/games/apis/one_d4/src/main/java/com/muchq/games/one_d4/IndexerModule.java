@@ -16,6 +16,7 @@ import com.muchq.games.one_d4.db.RetentionPolicy;
 import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
 import com.muchq.platform.json.JsonUtils;
+import com.zaxxer.hikari.HikariDataSource;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Value;
@@ -98,9 +99,18 @@ public class IndexerModule {
     return resolveJdbcUrl(configuredUrl);
   }
 
+  /**
+   * {@code preDestroy} because nothing else closes it. Micronaut disposes a bean through {@code
+   * DisposableBeanDefinition}, which it only generates when a destroy method is declared — there is
+   * no {@code AutoCloseable} fallback — so without this the pool outlives every context that built
+   * it, holding its idle connections. A JVM that boots contexts in a loop (the HTTP wire suites,
+   * one per test) runs the database out of client slots; a container gets a shutdown that drops
+   * connections rather than closing them.
+   */
   @Context
-  public DataSource dataSource(@jakarta.inject.Named("indexerJdbcUrl") String jdbcUrl) {
-    return DataSourceFactory.create(
+  @io.micronaut.context.annotation.Bean(preDestroy = "close")
+  public HikariDataSource dataSource(@jakarta.inject.Named("indexerJdbcUrl") String jdbcUrl) {
+    return DataSourceFactory.createPool(
         jdbcUrl, System.getenv("INDEXER_DB_USERNAME"), System.getenv("INDEXER_DB_PASSWORD"));
   }
 

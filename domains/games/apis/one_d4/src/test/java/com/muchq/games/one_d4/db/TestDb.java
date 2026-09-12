@@ -15,9 +15,7 @@ import org.opentest4j.TestAbortedException;
  * A migrated Postgres schema for one suite, from {@code PG_TEST_DB_URL}.
  *
  * <p>One engine, so the DDL has one spelling and the schema is designed for the database it is
- * deployed to (#1532). What this replaced ran on H2, which cost two forked migration steps per
- * expression or partial index and a production column that existed only because H2 could not
- * express a partial unique constraint.
+ * deployed to (#1532).
  *
  * <p>Every suite gets its own schema off the one scratch database, because bazel runs them in
  * parallel and tables are shared mutable state otherwise. The drop is on the way in rather than the

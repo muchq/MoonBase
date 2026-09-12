@@ -26,8 +26,9 @@ against.
   steps to an empty scratch schema and compares, so a step that only works
   against a populated database breaks boot verification, not just re-runs.
 - **Append, don't edit.** A schema change is a new `V<NNN>` step: the next
-  number, a line in `manifest.txt`, and the file named in `:migrations`
-  (`BUILD.bazel`). A file unlisted in BUILD neither ships nor runs, and no
+  number, a line in `manifest.txt`, and the file named in
+  `:migrations_sql_files` (`BUILD.bazel`) — the one list both `:migrations`
+  and `:migrations_sql` compose. A file unlisted in BUILD neither ships nor runs, and no
   test can see it. Editing an old step is for comments only.
 - **Plain SQL, and a whole file has to work as one script.** Every file also
   works under `psql -f`; nothing here depends on the runner. Java splits on

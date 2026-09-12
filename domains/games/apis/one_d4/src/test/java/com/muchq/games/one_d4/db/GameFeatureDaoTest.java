@@ -1298,10 +1298,9 @@ public class GameFeatureDaoTest {
    * width) * width} must stay in INT range for every elo the column can hold (truncating division
    * bounds the product by the input, so Integer.MAX_VALUE at width 100 keys 2147483600, and at
    * width Integer.MAX_VALUE keys itself), and a negative elo — impossible via ingest but not
-   * constrained by the schema — truncates toward zero (-150 keys -100, not FLOOR's -200).
-   * PostgresAggregateCompatTest runs the same fixture on the real dialect; if either engine widened
-   * the arithmetic or raised on the multiply, one of these buckets would come back a different
-   * type, a different key, or not at all.
+   * constrained by the schema — truncates toward zero (-150 keys -100, not FLOOR's -200). If
+   * Postgres widened the arithmetic or raised on the multiply, one of these buckets would come back
+   * a different type, a different key, or not at all.
    */
   @Test
   public void aggregate_bucketArithmeticAtIntegerExtremes() {

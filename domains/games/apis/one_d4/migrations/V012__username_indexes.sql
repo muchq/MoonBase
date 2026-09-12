@@ -14,7 +14,7 @@
 -- Without them these predicates were the full-table scan on the
 -- player-search path — and with a 5-connection pool, five concurrent player
 -- searches held every connection for the full serving-read bound.
--- PostgresPlayerIndexTest pins the contract on the deployment dialect for
+-- PostgresPlayerIndexTest pins that the planner uses them for
 -- both emitting paths: the plan actually reaches these indexes for the
 -- compiler's exact predicates, so either side drifting (a compiler path
 -- losing its LOWER, or an index expression changing) fails a test.

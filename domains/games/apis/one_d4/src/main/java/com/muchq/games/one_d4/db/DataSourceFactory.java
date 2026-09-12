@@ -49,6 +49,16 @@ public class DataSourceFactory {
    */
   public static DataSource create(
       String jdbcUrl, @Nullable String username, @Nullable String password) {
+    return createPool(jdbcUrl, username, password);
+  }
+
+  /**
+   * The same pool, typed so a caller that owns its lifecycle can close it. {@code IndexerModule}
+   * needs this: Micronaut generates a disposable bean definition only when the declared bean type
+   * has the destroy method, and {@link DataSource} has no {@code close}.
+   */
+  public static HikariDataSource createPool(
+      String jdbcUrl, @Nullable String username, @Nullable String password) {
     return new HikariDataSource(hikariConfig(jdbcUrl, username, password));
   }
 

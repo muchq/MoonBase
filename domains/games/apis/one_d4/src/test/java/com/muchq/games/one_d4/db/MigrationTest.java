@@ -1,6 +1,7 @@
 package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -299,7 +300,7 @@ public class MigrationTest {
    * The retention delete's index, pinned to its column: {@code deleteOlderThan} filters {@code
    * game_features} on {@code indexed_at} hourly, and without this index a sweep truncated at its
    * 120s bound made no forward progress — same scan, next hour, forever. The plan-level proof on
-   * the deployment dialect lives in {@code PostgresRetentionIndexTest}.
+   * the plan lives in {@code PostgresRetentionIndexTest}.
    */
   @Test
   public void run_addsTheIndexedAtRetentionIndex() throws Exception {
@@ -386,8 +387,11 @@ public class MigrationTest {
   /**
    * The live-request invariant, as the schema states it since V018: one PENDING/PROCESSING row per
    * (player, platform, start_month, end_month, exclude_bullet), and terminal rows free to pile up.
-   * Read off {@code indexdef} rather than inferred from a rejected insert, so a unique index that
-   * lost its {@code WHERE} — which would block a resubmit after a COMPLETED run — fails here too.
+   *
+   * <p>Both statuses by name, not just the shape of the predicate. A predicate naming only one of
+   * them still renders as a partial unique index over the right columns, and would leave the range
+   * of a PROCESSING request open to a second live row — the #1249 race, reopened, since {@code
+   * findLiveRequest} is a read and this index is the only thing closing it.
    */
   @Test
   public void run_addsTheLiveRequestIndexAsAPartialUniqueIndex() throws Exception {
@@ -396,7 +400,30 @@ public class MigrationTest {
     assertThat(indexDefinition("idx_indexing_requests_live"))
         .contains("UNIQUE")
         .contains("(player, platform, start_month, end_month, exclude_bullet)")
-        .contains("WHERE ((status)::text = ANY");
+        .contains("WHERE ((status)::text = ANY")
+        .contains("'PENDING'")
+        .contains("'PROCESSING'");
+  }
+
+  /**
+   * The same invariant driven rather than read: a PROCESSING incumbent holds its range against a
+   * raw insert. PROCESSING specifically, because {@code createOrAdopt} short circuits on the live
+   * row it finds and never reaches the index, so nothing else in the tree puts a second live row in
+   * front of an in-flight one.
+   */
+  @Test
+  public void theLiveRequestIndexRefusesASecondLiveRowAgainstAProcessingIncumbent()
+      throws Exception {
+    new Migration(dataSource).run();
+    insertLegacyRequest("held", "2024-07", "2024-07", false, "PROCESSING", null);
+
+    assertThatThrownBy(
+            () -> insertLegacyRequest("held", "2024-07", "2024-07", false, "PENDING", null))
+        .isInstanceOf(java.sql.SQLException.class)
+        .hasMessageContaining("idx_indexing_requests_live");
+
+    // The control: a terminal row for the same range is what the WHERE exists to allow.
+    insertLegacyRequest("held", "2024-07", "2024-07", false, "COMPLETED", null);
   }
 
   /** V009's column and its constraint are gone, not merely unwritten. */
@@ -421,15 +448,10 @@ public class MigrationTest {
    * running the migrations again: the same statements a deploy would run, against the state a
    * deploy would find.
    *
-   * <p>All three get the same created_at deliberately. V018 orders candidates by (created_at, id),
-   * and on distinct timestamps the id tiebreak never runs — so distinct timestamps would pass
-   * against a statement that omitted it, while duplicate submits landing in one instant are exactly
-   * what produced these rows.
-   *
-   * <p>Which row survives is asserted as "the one a resubmit attaches to" rather than computed
-   * here: V018 and {@code findExistingRequest} order candidates the same way and have to, or a
-   * caller is handed a row nobody is working on. Recomputing the tiebreak in Java would also get it
-   * wrong — {@code UUID.compareTo} is signed and Postgres compares uuid bytes unsigned.
+   * <p>All three share a created_at, so the id tiebreak is what picks the survivor: without it the
+   * statement retires nothing and {@code CREATE UNIQUE INDEX} aborts. Which row that is comes from
+   * {@code findExistingRequest} rather than from a Java-side comparison — {@code UUID.compareTo} is
+   * signed and Postgres compares uuid bytes unsigned.
    */
   @Test
   public void run_retiresPreExistingDuplicateLiveRequestsSoTheIndexCanBeBuilt() throws Exception {
@@ -465,6 +487,61 @@ public class MigrationTest {
 
     // The point of the retirement: the index exists again afterwards, so the deploy completed.
     assertThat(indexDefinition("idx_indexing_requests_live")).contains("UNIQUE");
+  }
+
+  /**
+   * Which duplicate survives when a worker is running one of them. Age alone would retire the
+   * leased run in favour of an older idle row — clearing {@code owner_id} out from under a flush,
+   * which no reclaim arm ever does — and the oldest row stops being the one that holds the range as
+   * soon as a terminal write frees V009's key and a resubmit takes it.
+   */
+  @Test
+  public void run_keepsTheDuplicateAWorkerIsRunning() throws Exception {
+    new Migration(dataSource).run();
+
+    try (Connection conn = dataSource.getConnection();
+        Statement stmt = conn.createStatement()) {
+      stmt.execute("DROP INDEX idx_indexing_requests_live");
+    }
+    UUID idle =
+        insertLegacyRequest(
+            "leased",
+            "2024-06",
+            "2024-06",
+            false,
+            "PENDING",
+            Instant.parse("2026-01-01T00:00:00Z"));
+    UUID running =
+        insertLegacyRequest(
+            "leased",
+            "2024-06",
+            "2024-06",
+            false,
+            "PROCESSING",
+            Instant.parse("2026-02-01T00:00:00Z"));
+    lease(running, Instant.parse("2099-01-01T00:00:00Z"));
+
+    new Migration(dataSource).run();
+
+    assertThat(statusOf(running))
+        .as("the run a worker holds keeps the range")
+        .isEqualTo("PROCESSING");
+    assertThat(statusOf(idle))
+        .as("the older idle duplicate is the one retired")
+        .isEqualTo("FAILED");
+  }
+
+  /** Marks a request as held by a worker whose lease runs to {@code until}. */
+  private void lease(UUID id, Instant until) throws Exception {
+    try (Connection conn = dataSource.getConnection();
+        var ps =
+            conn.prepareStatement(
+                "UPDATE indexing_requests SET owner_id = 'worker-1', lease_expires_at = ?"
+                    + " WHERE id = ?")) {
+      ps.setTimestamp(1, java.sql.Timestamp.from(until));
+      ps.setObject(2, id);
+      ps.executeUpdate();
+    }
   }
 
   private UUID insertLegacyRequest(

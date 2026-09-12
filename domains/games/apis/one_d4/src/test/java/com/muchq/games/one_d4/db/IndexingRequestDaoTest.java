@@ -402,7 +402,12 @@ public class IndexingRequestDaoTest {
 
     assertThatThrownBy(() -> insertRawLiveRequest("constrained", "2025-11", "2025-11", false))
         .as("the database, not the application, is what makes the range exclusive")
-        .isInstanceOf(Exception.class);
+        .rootCause()
+        .hasMessageContaining("idx_indexing_requests_live");
+
+    // The control: the same raw insert for a range nobody holds lands, so the rejection above is
+    // the index and not a column this insert forgot.
+    insertRawLiveRequest("unconstrained", "2025-11", "2025-11", false);
   }
 
   @Test

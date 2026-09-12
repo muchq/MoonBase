@@ -64,11 +64,10 @@ public interface IndexingRequestStore {
    * restart lost the messages while the rows survived, and the two-JVM deployment sent load
    * wherever the submit happened to arrive.
    *
-   * <p>Selection then {@link #claim}, rather than one statement, and deliberately so. {@code SELECT
-   * ... FOR UPDATE SKIP LOCKED} would be the obvious shape and H2 does not have it; the conditional
-   * UPDATE {@code claim} already performs is what makes this safe without it, since at most one
-   * racer's WHERE can match. Losing the race costs a retry against the next candidate, not
-   * correctness.
+   * <p>Selection then {@link #claim}, rather than one statement. The conditional UPDATE {@code
+   * claim} already performs is what makes this safe without {@code FOR UPDATE SKIP LOCKED}, since
+   * at most one racer's WHERE can match. Losing the race costs a retry against the next candidate,
+   * not correctness.
    *
    * <p>Ordered oldest-first because the queue it replaces was FIFO. Rows whose attempts are
    * exhausted are skipped — see {@link #reclaimStale}.

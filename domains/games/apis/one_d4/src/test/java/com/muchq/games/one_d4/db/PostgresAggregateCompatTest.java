@@ -43,8 +43,8 @@ import org.junit.jupiter.api.Test;
  *       pinned here too.
  * </ul>
  *
- * <p>Its own schema, named rather than TestDb's, because this suite shares the scratch database
- * with the other {@code pg_db_tests} suites and drops its schema on the way in.
+ * <p>Its own named schema rather than TestDb's, because its teardown DDL needs the name as a
+ * constant.
  */
 public class PostgresAggregateCompatTest {
 
@@ -460,12 +460,12 @@ public class PostgresAggregateCompatTest {
   }
 
   /**
-   * The outcome metrics and the score ranking on the real dialect (#1345). Three things could be
-   * wrong in ways no compile error would show: {@code SUM(CASE ... THEN 1 ELSE 0 END)} comes back
-   * as bigint rather than int, the ranking wraps the grouped query in a derived table whose columns
-   * the outer ORDER BY names, and {@code (wins * 2 + draws) * 1.0 / group_count} is numeric
-   * division in Postgres — which must still order the same way. The floor rides along as a HAVING
-   * inside the derived table.
+   * The outcome metrics and the score ranking (#1345). Three things could be wrong in ways no
+   * compile error would show: {@code SUM(CASE ... THEN 1 ELSE 0 END)} comes back as bigint rather
+   * than int, the ranking wraps the grouped query in a derived table whose columns the outer ORDER
+   * BY names, and {@code (wins * 2 + draws) * 1.0 / group_count} is numeric division in Postgres —
+   * which must still order the same way. The floor rides along as a HAVING inside the derived
+   * table.
    */
   @Test
   public void outcomeMetricsAndScoreRankingOnPostgres() {

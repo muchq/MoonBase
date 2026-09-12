@@ -134,7 +134,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * Virtual date-scoping fields compiled against the played_at TIMESTAMP column. Values are
    * validated ISO strings ({@code date = "YYYY-MM-DD"}, {@code month = "YYYY-MM"}); every operator
    * is rewritten to plain played_at comparisons against day/month boundaries bound as {@link
-   * LocalDateTime}, which behaves identically on H2 and Postgres (no dialect date functions).
+   * LocalDateTime} — the column's own type, so no date functions are involved.
    */
   private static final String DATE_FIELD = "date";
 
@@ -855,11 +855,11 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
 
   /**
    * Coerces a comparison/IN value to its column's type, or rejects it with the fix in the message.
-   * Binding untyped is not an option: JDBI sends a String parameter as VARCHAR, which H2 coerces
-   * against a typed column and Postgres rejects at the operator — so a quoted number against an INT
-   * column was a green local test and a 500 in production. The type partition needs no new
-   * hand-maintained list: {@link #STRING_COLUMNS} is the string side, played_at is the one
-   * timestamp, and every remaining physical column is INT.
+   * Binding untyped is not an option: JDBI sends a String parameter as VARCHAR, which Postgres
+   * rejects at the operator — so a quoted number against an INT column is a 500, and rejecting it
+   * here is a 400 that names the fix. The type partition needs no new hand-maintained list: {@link
+   * #STRING_COLUMNS} is the string side, played_at is the one timestamp, and every remaining
+   * physical column is INT.
    */
   private static Object coerceValue(String field, String column, Object value) {
     if ("played_at".equals(column)) {
@@ -1084,11 +1084,11 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
   /**
    * Renders a groupBy term's SQL: the bare column name for physical terms, the CASE expression
    * (binding its player params in SQL order) for perspective terms. Rating terms floor the CASE to
-   * their bucket's lower bound with integer arithmetic — {@code / width * width} truncates
-   * identically on H2 and Postgres for the non-negative INT elo columns, and a NULL elo propagates
-   * straight through to the NULL group bucket. The width is an inlined literal rather than a bind
-   * param (it round-trips through Integer.parseInt, so there is no injection surface) to keep the
-   * groups/totals param positions identical to the categorical fields'.
+   * their bucket's lower bound with integer arithmetic — {@code / width * width} truncates toward
+   * zero for the non-negative INT elo columns, and a NULL elo propagates straight through to the
+   * NULL group bucket. The width is an inlined literal rather than a bind param (it round-trips
+   * through Integer.parseInt, so there is no injection surface) to keep the groups/totals param
+   * positions identical to the categorical fields'.
    */
   private static String groupTermExpr(
       GroupByTerm term, Perspective perspective, List<Object> params) {

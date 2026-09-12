@@ -164,8 +164,7 @@ com.muchq.indexer/
 | updated_at    | TIMESTAMP    | Updated on status change       |
 | error_message | TEXT         | Populated on FAILED            |
 | games_indexed | INT          | Running count during processing|
-| exclude_bullet | BOOLEAN     | Part of the dedupe tuple       |
-| dedupe_key    | VARCHAR      | UNIQUE. Held while live, NULLed on a terminal status — one live request per (player, platform, range, exclude_bullet) |
+| exclude_bullet | BOOLEAN     | Part of the live-request key    |
 | owner_id      | VARCHAR(128) | Who holds the lease; the fencing token every write is conditioned on. The Java worker claims as a process, the C++ worker mints one per run so several of its runs can be in flight at once |
 | lease_expires_at | TIMESTAMP | Renewed every 75s while the owner is alive. Past this the request is reclaimable. Deliberately survives a terminal write, as the record of when a worker last held the row |
 | skip_cache    | BOOLEAN      | Persisted so a worker on any instance honours what the submitter asked for |
@@ -223,8 +222,8 @@ bazel test //domains/games/apis/one_d4/...
 bazel test //domains/games/libs/chessql:src/test/java/com/muchq/games/chessql/lexer/LexerTest
 bazel test //domains/games/libs/chessql:src/test/java/com/muchq/games/chessql/parser/ParserTest
 bazel test //domains/games/libs/chessql:src/test/java/com/muchq/games/chessql/compiler/SqlCompilerTest
-bazel test //domains/games/apis/one_d4:src/test/java/com/muchq/games/one_d4/engine/PgnParserTest
-bazel test //domains/games/apis/one_d4:src/test/java/com/muchq/games/one_d4/queue/InMemoryIndexQueueTest
+bazel test //domains/games/apis/one_d4:src/test/java/com/muchq/games/one_d4/db/MigrationTest
+bazel test //domains/games/apis/one_d4:src/test/java/com/muchq/games/one_d4/db/IndexingRequestDaoTest
 
 # Build OCI image
 bazel build //domains/games/apis/one_d4:one_d4_image

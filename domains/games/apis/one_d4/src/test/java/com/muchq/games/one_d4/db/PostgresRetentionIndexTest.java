@@ -13,15 +13,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The retention delete's index on the deployment dialect (#1313 item 11). The hourly sweep runs
+ * The retention delete's index, as the planner actually uses it (#1313 item 11). The sweep runs
  * {@code DELETE FROM game_features WHERE indexed_at < ?} under a 120s statement bound; unindexed, a
  * sweep that hit the bound rolled back with no forward progress and retried the identical scan an
  * hour later. What this pins is that the delete's plan can reach {@code
  * idx_game_features_indexed_at} — same reachability question, and same {@code enable_seqscan = off}
  * technique, as {@code PostgresPlayerIndexTest}.
  *
- * <p>Runs against the real postgres CI provides via {@code PG_TEST_DB_URL}; skips when unset. Uses
- * a dedicated schema like the other PG-gated suites sharing that scratch database.
+ * <p>Uses a dedicated schema like the other PG-gated suites sharing that scratch database.
  */
 public class PostgresRetentionIndexTest {
 

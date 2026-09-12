@@ -32,7 +32,6 @@ public class ReanalysisRequestDao implements ReanalysisRequestStore {
         return new EnqueueResult(live.get(), false);
       }
       try {
-        // Generated keys rather than RETURNING, which H2 does not parse.
         UUID id =
             jdbi.withHandle(
                 h ->

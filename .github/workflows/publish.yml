@@ -25,6 +25,27 @@ jobs:
     container:
       image: ghcr.io/muchq/moonbase/ci-base:latest
 
+    # The same postgres branch.yml runs, for the same reason: `bazel test //...`
+    # reaches the DB-gated suites, and one_d4's fail rather than skip when CI is
+    # set (#1532). Without a database here, main publishes nothing.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: moonbase_test
+          POSTGRES_PASSWORD: moonbase_test
+          POSTGRES_DB: moonbase_test
+        options: >-
+          --health-cmd "pg_isready -U moonbase_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      GAMES_HUB_TEST_DB_URL: postgresql://moonbase_test:moonbase_test@postgres:5432/moonbase_test
+      PG_TEST_DB_URL: postgresql://moonbase_test:moonbase_test@postgres:5432/moonbase_test
+      STATS_TEST_DB_URL: postgresql://moonbase_test:moonbase_test@postgres:5432/moonbase_test
+
     steps:
       - uses: actions/checkout@v7
 

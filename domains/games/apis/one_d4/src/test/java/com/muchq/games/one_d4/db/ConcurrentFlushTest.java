@@ -300,7 +300,7 @@ public class ConcurrentFlushTest {
    * A takeover that commits <em>during</em> a flush, rather than before one.
    *
    * <p>This is the case a check-then-write cannot survive without a row lock. Nothing sets an
-   * isolation level, so both engines run READ COMMITTED and a plain {@code SELECT} inside the
+   * isolation level, so this runs under READ COMMITTED and a plain {@code SELECT} inside the
    * transaction is a snapshot, not a claim: the rival's {@code claim} commits in the gap and the
    * flush goes on to write rows for a request it no longer owns. The window is the whole flush.
    *

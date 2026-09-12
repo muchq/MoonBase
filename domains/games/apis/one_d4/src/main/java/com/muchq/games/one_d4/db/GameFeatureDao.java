@@ -133,14 +133,14 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   /**
-   * played_at is TIMESTAMP WITHOUT TIME ZONE on both H2 and Postgres, so the column holds a wall
-   * clock rather than an instant — and {@link LocalDateTime} is exactly that type. Binding and
-   * reading it as a LocalDateTime is a straight JDBC 4.2 mapping onto the column: no zone
-   * conversion happens on either side, so there is no zone to get wrong and nothing for a caller to
-   * remember to pass. Modelling it as an {@link Instant} instead would drag the JVM default zone
-   * into every bind, making the stored value depend on where the process happened to run — a game
-   * written under UTC and read back under America/Los_Angeles would land on the wrong calendar day
-   * and drop out of {@code month = "2026-06"}.
+   * played_at is TIMESTAMP WITHOUT TIME ZONE, so the column holds a wall clock rather than an
+   * instant — and {@link LocalDateTime} is exactly that type. Binding and reading it as a
+   * LocalDateTime is a straight JDBC 4.2 mapping onto the column: no zone conversion happens on
+   * either side, so there is no zone to get wrong and nothing for a caller to remember to pass.
+   * Modelling it as an {@link Instant} instead would drag the JVM default zone into every bind,
+   * making the stored value depend on where the process happened to run — a game written under UTC
+   * and read back under America/Los_Angeles would land on the wrong calendar day and drop out of
+   * {@code month = "2026-06"}.
    *
    * <p>These two helpers encode the one convention the type cannot: the stored wall clock is UTC.
    * ChessQL's date/month rewrite emits its day and month boundaries as zone-free LocalDateTimes on
@@ -236,12 +236,12 @@ public class GameFeatureDao implements GameFeatureStore {
    * occurrences are rewritten.
    *
    * <p>Making each writer's delete-and-insert one transaction is necessary and not sufficient.
-   * Nothing sets an isolation level, so both engines run READ COMMITTED, and under that a {@code
-   * DELETE} that blocks on another transaction's uncommitted delete re-evaluates the rows it was
-   * blocked on — but not rows that transaction <em>inserted</em>, which are outside its statement
-   * snapshot. Two transactional writers over one game therefore still interleave as delete, delete,
-   * insert, insert and both sets survive: exactly the doubling {@code ConcurrentFlushTest}
-   * demonstrates, one isolation level up.
+   * Nothing sets an isolation level, so this runs under READ COMMITTED, and there a {@code DELETE}
+   * that blocks on another transaction's uncommitted delete re-evaluates the rows it was blocked on
+   * — but not rows that transaction <em>inserted</em>, which are outside its statement snapshot.
+   * Two transactional writers over one game therefore still interleave as delete, delete, insert,
+   * insert and both sets survive: exactly the doubling {@code ConcurrentFlushTest} demonstrates,
+   * one isolation level up.
    *
    * <p>What removes it is a lock both writers must take first. {@code game_features.game_url} is
    * UNIQUE and every occurrence belongs to a game, so that row is the natural serialization point.

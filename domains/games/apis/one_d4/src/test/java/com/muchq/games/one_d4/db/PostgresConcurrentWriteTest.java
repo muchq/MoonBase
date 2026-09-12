@@ -55,11 +55,8 @@ import org.junit.jupiter.api.Timeout;
  * race: neither production method can be paused mid-transaction from outside, so the order that
  * produces the doubling cannot be forced through the API, and a pass is corroboration rather than
  * proof. That the shared lock is taken at all is pinned deterministically in {@code
- * ConcurrentFlushTest.bothOccurrenceWritersTakeTheGamesFeatureRowBeforeRewritingIt}, which holds
- * the row from outside and asserts both writers block on it.
- *
- * <p>Runs against the real postgres CI provides via {@code PG_TEST_DB_URL}; skips when that is
- * unset. A skipped run proves nothing about either property — say so rather than reporting green.
+ * ConcurrentFlushTest.aFlushTakesTheGamesFeatureRowBeforeRewritingIt}, which holds the row from
+ * outside and asserts the flush blocks on it.
  */
 public class PostgresConcurrentWriteTest {
 

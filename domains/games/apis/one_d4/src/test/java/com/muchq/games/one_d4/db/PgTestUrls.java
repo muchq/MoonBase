@@ -21,9 +21,9 @@ public final class PgTestUrls {
 
   /**
    * Set wherever a missing database is a broken job rather than a developer without one. A skip is
-   * indistinguishable from a pass in a CI summary, which is the trap that kept H2 around (#1532):
-   * these suites are the only thing exercising the schema now, so somewhere has to refuse to pass
-   * vacuously. GitHub Actions sets CI on every runner.
+   * indistinguishable from a pass in a CI summary, and these suites are the only thing exercising
+   * the schema (#1532), so somewhere has to refuse to pass vacuously. GitHub Actions sets CI on
+   * every runner; {@code TestDbUrl} is the C++ twin.
    */
   public static final String REQUIRE = "CI";
 

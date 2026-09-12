@@ -7,10 +7,9 @@ import org.junit.jupiter.api.Test;
 import org.opentest4j.TestAbortedException;
 
 /**
- * The gate every one_d4 suite goes through, and the reason dropping H2 does not quietly drop the
- * schema's coverage with it (#1532): a missing database is a skip for a developer and a failure for
- * a CI job. Driven directly, because a suite that gets this wrong reports a pass either way — which
- * is exactly the failure mode being guarded against.
+ * The gate every one_d4 suite goes through: a missing database is a skip for a developer and a
+ * failure for a CI job (#1532). Driven directly, because a suite that gets this wrong reports a
+ * pass either way — which is exactly the failure mode being guarded against.
  */
 public class PgTestUrlsTest {
 

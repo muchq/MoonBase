@@ -14,8 +14,8 @@
 -- failures, which is the conservative direction: a worker killed before it
 -- could report anything still moves the counter.
 --
--- The DEFAULTs are the whole backfill — both engines fill existing rows
--- from them as the column is added, so a request in flight during a deploy
+-- The DEFAULTs are the whole backfill — existing rows are filled from them
+-- as the column is added, so a request in flight during a deploy
 -- comes out as "do not skip the cache, never attempted", which is exactly
 -- its pre-#1279 behaviour. Both columns are read as primitives (getBoolean,
 -- getInt), so a NULL would silently arrive as the same values without

@@ -325,9 +325,9 @@ public class IndexingRequestDao implements IndexingRequestStore {
    *
    * <p>A live lease <em>right now</em> is the obvious signal and it is not enough on its own:
    * leases are held in bursts, and between one job's terminal write and the next claim there is a
-   * real moment with none held anywhere. Sampling there declares a healthy fleet dead — reproduced
-   * on both engines, forty-nine queued rows FAILED in one statement by a millisecond-wide gap.
-   * Worse than the bug the guard exists to prevent.
+   * real moment with none held anywhere. Sampling there declares a healthy fleet dead — forty-nine
+   * queued rows FAILED in one statement by a millisecond-wide gap. Worse than the bug the guard
+   * exists to prevent.
    *
    * <p>A recent {@code lease_expires_at} covers that gap, and the column choice is the point. A
    * plain "anything touched lately" would count submits, so a user submitting into a fleet of dead

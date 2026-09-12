@@ -9,11 +9,14 @@
 #include <string>
 #include <thread>
 
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/synchronization/notification.h"
 #include "absl/time/clock.h"
 #include "domains/games/apis/one_d4_worker/migration_files.h"
+#include "domains/games/apis/one_d4_worker/pg_test_db.h"
 
 namespace one_d4_worker {
 namespace {
@@ -48,8 +51,10 @@ std::string Conninfo(const std::string& url) {
 class PgReanalysisTest : public testing::Test {
  protected:
   void SetUp() override {
-    const char* url = std::getenv("PG_TEST_DB_URL");
-    if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
+    const absl::StatusOr<std::string> db_url = TestDbUrl();
+    if (absl::IsUnavailable(db_url.status())) GTEST_SKIP() << db_url.status().message();
+    ASSERT_TRUE(db_url.ok()) << db_url.status();
+    const char* url = db_url->c_str();
     conninfo_ = Conninfo(url);
     client_ = std::make_unique<pg::Client>(conninfo_);
     ASSERT_TRUE(ResetToMigratedSchema(*client_, kSchema).ok());

@@ -20,9 +20,6 @@ ALTER TABLE indexing_requests ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR(600);
 -- work. created_at alone does not settle it — ties are exactly what
 -- duplicate submits produce.
 --
--- LOWER(CAST(... AS VARCHAR)) rather than bare concatenation, so the key
--- matches the one Java rendered from the same values.
---
 -- The winner is picked by a total order — (created_at, id), with ids
 -- compared by '<' rather than MIN(id), since Postgres has ordering operators
 -- for uuid but no min/max aggregate over it. Selecting on MIN(created_at)
