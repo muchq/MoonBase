@@ -4,6 +4,22 @@ bazel_dep(name = "platforms", version = "1.1.0")
 
 register_toolchains("@llvm//toolchain:all")
 
+# The hermetic macOS SDK ships a minimal framework set; sandboxing the whole
+# SDK is what it is avoiding. Naming any framework here replaces that default
+# set rather than adding to it, so the list carries both halves: the six the
+# extension would have picked, then the ones this repo links.
+osx = use_extension("@llvm//extensions:osx.bzl", "osx")
+osx.frameworks(names = [
+    "CoreFoundation",
+    "Foundation",
+    "Kernel",
+    "OSLog",
+    "Security",
+    "SystemConfiguration",
+    # candle's metal feature, reached through //domains/ai/libs/microgpt.
+    "Metal",
+])
+
 bazel_dep(name = "bazel_features", version = "1.51.0")
 
 bazel_dep(name = "buildifier_prebuilt", version = "8.5.1.4", dev_dependency = True)
