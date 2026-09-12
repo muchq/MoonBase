@@ -28,6 +28,13 @@ namespace one_d4_worker {
 ///     ASSERT_TRUE(url.ok()) << url.status();
 absl::StatusOr<std::string> TestDbUrl();
 
+/// The same decision over explicit values, so pg_test_db_test can drive all
+/// three outcomes without mutating the process environment. Every caller
+/// branches on the status rather than asserting it, so inverting the CI arm
+/// would otherwise turn six suites green-by-skip with nothing going red.
+/// Null or empty stands for an unset variable, as getenv reports one.
+absl::StatusOr<std::string> TestDbUrlFrom(const char* url, const char* required);
+
 }  // namespace one_d4_worker
 
 #endif  // DOMAINS_GAMES_APIS_ONE_D4_WORKER_PG_TEST_DB_H

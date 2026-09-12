@@ -166,6 +166,18 @@ cc_library(
 )
 
 cc_test(
+    name = "pg_test_db_test",
+    size = "small",
+    srcs = ["pg_test_db_test.cc"],
+    deps = [
+        ":pg_test_db",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "retention_policy_test",
     size = "small",
     srcs = ["retention_policy_test.cc"],
