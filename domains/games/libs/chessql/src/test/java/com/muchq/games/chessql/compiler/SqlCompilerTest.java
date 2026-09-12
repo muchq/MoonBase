@@ -727,8 +727,8 @@ public class SqlCompilerTest {
 
   @Test
   public void testPlayedAtTruncatesToMicroseconds() {
-    // Both engines store microsecond TIMESTAMPs, but only pgjdbc rounds the parameter; H2 would
-    // compare full nanoseconds. Truncating at compile time keeps the two engines agreeing.
+    // Postgres TIMESTAMPs hold microseconds, so a nanosecond-precision parameter can never equal
+    // a stored value. Truncating at compile time is what makes the comparison meet the column.
     CompiledQuery result = compile("played.at = \"2026-07-01T13:30:00.123456789\"");
     assertThat(result.parameters())
         .isEqualTo(List.of(LocalDateTime.of(2026, 7, 1, 13, 30, 0, 123_456_000)));
@@ -751,9 +751,8 @@ public class SqlCompilerTest {
   }
 
   // === value/column type coercion ===
-  // JDBI binds a String parameter as VARCHAR; H2 coerces it against a typed column, Postgres
-  // rejects it at the operator — a 500 in production for a green local test. So a mistyped value
-  // is rejected at compile time, with the fix in the message.
+  // JDBI binds a String parameter as VARCHAR and Postgres rejects it at the operator, so a
+  // mistyped value would be a 500. Rejected at compile time instead, with the fix in the message.
 
   @Test
   public void testQuotedNumberAgainstAnIntColumnIsRejectedWithTheFix() {

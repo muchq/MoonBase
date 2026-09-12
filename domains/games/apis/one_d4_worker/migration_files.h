@@ -27,12 +27,11 @@ std::string MigrationsRoot();
 /// The manifest's step names, in the order they run.
 absl::StatusOr<std::vector<std::string>> MigrationSteps();
 
-/// The file one step resolves to for one engine ("pg" or "h2"):
-/// `<engine>/<step>.sql` when the engines fork, `<step>.sql` when they
-/// agree. Both or neither is refused rather than guessed around.
-absl::StatusOr<std::string> MigrationSqlPath(const std::string& step, const std::string& engine);
+/// The file one step resolves to. A listed step with no file is refused
+/// rather than skipped.
+absl::StatusOr<std::string> MigrationSqlPath(const std::string& step);
 
-/// Drops `schema`, recreates it, and runs the Postgres migrations into it in
+/// Drops `schema`, recreates it, and runs the migrations into it in
 /// manifest order. `client` is the connection the caller goes on to test
 /// against; it must resolve unqualified names to `schema`, and that is
 /// checked rather than assumed — a suite whose search_path went missing

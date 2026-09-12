@@ -10,13 +10,13 @@ import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestDao;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.db.Migration;
-import com.muchq.games.one_d4.db.PostgresSqlDialect;
 import com.muchq.games.one_d4.db.ReanalysisRequestDao;
+import com.muchq.games.one_d4.db.ReanalysisRequestStore;
 import com.muchq.games.one_d4.db.RetentionPolicy;
-import com.muchq.games.one_d4.db.SqlDialect;
 import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
 import com.muchq.platform.json.JsonUtils;
+import com.zaxxer.hikari.HikariDataSource;
 import io.micronaut.context.annotation.Context;
 import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Value;
@@ -37,10 +37,6 @@ public class IndexerModule {
    * database, a file on the host — turns a misconfigured URL into a container that boots, serves,
    * answers {@code /health} 200, and loses every write on restart. That is silent data loss where
    * an outage is the correct answer, and this exception is the outage.
-   *
-   * <p>Naming H2 as a default would not even reach that far: the driver is a test dependency and is
-   * not on this classpath ({@code IndexerModuleTest.h2IsNotOnTheProductionClasspath}), so it would
-   * fail at pool construction with "No suitable driver" instead of with the variable's name.
    *
    * <p>Local development needs a real Postgres and a real URL, the same as the deploy. See the
    * README.
@@ -93,10 +89,9 @@ public class IndexerModule {
 
   /**
    * @param configuredUrl the {@code indexer.db.url} property. Tests set it to give each
-   *     ApplicationContext its own H2 database, which is the only place H2 is reachable from — the
-   *     driver is a test dependency. It has to be read here rather than assumed: a context whose
-   *     property is ignored silently shares one database with every other context. Nothing sets it
-   *     in production, where the URL comes from {@code $INDEXER_DB_URL}.
+   *     ApplicationContext its own Postgres schema. It has to be read here rather than assumed: a
+   *     context whose property is ignored silently shares one database with every other context.
+   *     Nothing sets it in production, where the URL comes from {@code $INDEXER_DB_URL}.
    */
   @Context
   @jakarta.inject.Named("indexerJdbcUrl")
@@ -104,39 +99,34 @@ public class IndexerModule {
     return resolveJdbcUrl(configuredUrl);
   }
 
+  /**
+   * {@code preDestroy} because nothing else closes it. Micronaut disposes a bean through {@code
+   * DisposableBeanDefinition}, which it only generates when a destroy method is declared — there is
+   * no {@code AutoCloseable} fallback — so without this the pool outlives every context that built
+   * it, holding its idle connections. A JVM that boots contexts in a loop (the HTTP wire suites,
+   * one per test) runs the database out of client slots; a container gets a shutdown that drops
+   * connections rather than closing them.
+   */
   @Context
-  public DataSource dataSource(@jakarta.inject.Named("indexerJdbcUrl") String jdbcUrl) {
-    return DataSourceFactory.create(
+  @io.micronaut.context.annotation.Bean(preDestroy = "close")
+  public HikariDataSource dataSource(@jakarta.inject.Named("indexerJdbcUrl") String jdbcUrl) {
+    return DataSourceFactory.createPool(
         jdbcUrl, System.getenv("INDEXER_DB_USERNAME"), System.getenv("INDEXER_DB_PASSWORD"));
   }
 
-  /**
-   * Production speaks Postgres only. Module-boot tests replace this bean via {@code
-   * TestSqlDialectFactory}, which reads the same {@code indexerJdbcUrl} bean the DataSource uses so
-   * the dialect cannot diverge from the pool.
-   */
-  @Context
-  public SqlDialect sqlDialect() {
-    return new PostgresSqlDialect();
-  }
-
-  /**
-   * Property if set, otherwise {@code $INDEXER_DB_URL}. One resolution path for both the DataSource
-   * and (in tests) the dialect factory.
-   */
+  /** Property if set, otherwise {@code $INDEXER_DB_URL}. */
   static String resolveJdbcUrl(@Nullable String configuredUrl) {
     return configuredUrl == null || configuredUrl.isBlank() ? readJdbcUrl() : configuredUrl.strip();
   }
 
   /**
    * The schema is {@code one_d4_migrate}'s to write (#1426); boot's job is to refuse to serve
-   * against one that step did not finish. The H2 test path has no such step and applies the
-   * migrations itself.
+   * against one that step did not finish, which is why this verifies rather than runs.
    */
   @Context
-  public Migration migration(DataSource dataSource, SqlDialect dialect) {
-    Migration migration = new Migration(dataSource, dialect);
-    migration.atBoot();
+  public Migration migration(DataSource dataSource) {
+    Migration migration = new Migration(dataSource);
+    migration.verify();
     return migration;
   }
 
@@ -151,18 +141,18 @@ public class IndexerModule {
   }
 
   @Context
-  public ReanalysisRequestDao reanalysisRequestDao(Jdbi jdbi) {
+  public ReanalysisRequestStore reanalysisRequestStore(Jdbi jdbi) {
     return new ReanalysisRequestDao(jdbi);
   }
 
   @Context
-  public GameFeatureStore gameFeatureStore(Jdbi jdbi, SqlDialect dialect) {
-    return new GameFeatureDao(jdbi, dialect);
+  public GameFeatureStore gameFeatureStore(Jdbi jdbi) {
+    return new GameFeatureDao(jdbi);
   }
 
   @Context
-  public IndexedPeriodStore indexedPeriodStore(Jdbi jdbi, SqlDialect dialect) {
-    return new IndexedPeriodDao(jdbi, dialect);
+  public IndexedPeriodStore indexedPeriodStore(Jdbi jdbi) {
+    return new IndexedPeriodDao(jdbi);
   }
 
   @Context

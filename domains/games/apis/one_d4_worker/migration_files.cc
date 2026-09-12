@@ -53,21 +53,12 @@ absl::StatusOr<std::vector<std::string>> MigrationSteps() {
   return steps;
 }
 
-absl::StatusOr<std::string> MigrationSqlPath(const std::string& step, const std::string& engine) {
-  const std::string engine_path = absl::StrCat(kRoot, "/", engine, "/", step, ".sql");
-  const std::string shared_path = absl::StrCat(kRoot, "/", step, ".sql");
-  const bool engine_exists = std::filesystem::exists(engine_path);
-  const bool shared_exists = std::filesystem::exists(shared_path);
-  if (engine_exists && shared_exists) {
-    return absl::FailedPreconditionError(absl::StrCat(step, " has both ", engine_path, " and ",
-                                                      shared_path,
-                                                      " — a forked step has no shared file"));
+absl::StatusOr<std::string> MigrationSqlPath(const std::string& step) {
+  const std::string path = absl::StrCat(kRoot, "/", step, ".sql");
+  if (!std::filesystem::exists(path)) {
+    return absl::NotFoundError(absl::StrCat(step, " has no SQL — expected ", path));
   }
-  if (!engine_exists && !shared_exists) {
-    return absl::NotFoundError(absl::StrCat(step, " has no SQL for ", engine, " — expected ",
-                                            engine_path, " or ", shared_path));
-  }
-  return engine_exists ? engine_path : shared_path;
+  return path;
 }
 
 absl::Status ResetToMigratedSchema(pg::Client& client, const std::string& schema) {
@@ -91,7 +82,7 @@ absl::Status ResetToMigratedSchema(pg::Client& client, const std::string& schema
   const absl::StatusOr<std::vector<std::string>> steps = MigrationSteps();
   if (!steps.ok()) return steps.status();
   for (const std::string& step : *steps) {
-    const absl::StatusOr<std::string> path = MigrationSqlPath(step, "pg");
+    const absl::StatusOr<std::string> path = MigrationSqlPath(step);
     if (!path.ok()) return path.status();
     const absl::StatusOr<std::string> sql = Read(*path);
     if (!sql.ok()) return sql.status();

@@ -94,12 +94,32 @@ public class GameFeatureDao implements GameFeatureStore {
               rs.getString("opening_name"),
               rs.getString("opening_family"));
 
+  /**
+   * On conflict, refresh the derived/enriched columns too so that reindexing a period backfills
+   * titles and opening names on rows indexed before those columns existed.
+   */
+  private static final String INSERT_GAME_FEATURE =
+      """
+      INSERT INTO game_features (
+          request_id, game_url, platform, white_username, black_username,
+          white_elo, black_elo, white_title, black_title, time_class, eco,
+          opening_name, opening_family, result, played_at, num_moves,
+          indexed_at, pgn
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (game_url) DO UPDATE SET
+          indexed_at = EXCLUDED.indexed_at,
+          request_id = EXCLUDED.request_id,
+          white_title = EXCLUDED.white_title,
+          black_title = EXCLUDED.black_title,
+          opening_name = EXCLUDED.opening_name,
+          opening_family = EXCLUDED.opening_family
+      """;
+
   private final Jdbi jdbi;
-  private final SqlDialect dialect;
   private final Clock clock;
 
-  public GameFeatureDao(Jdbi jdbi, SqlDialect dialect) {
-    this(jdbi, dialect, Clock.systemUTC());
+  public GameFeatureDao(Jdbi jdbi) {
+    this(jdbi, Clock.systemUTC());
   }
 
   /**
@@ -107,21 +127,20 @@ public class GameFeatureDao implements GameFeatureStore {
    *     compares that column against a threshold this same clock produces, so both sides have to
    *     come from one source; see {@link #deleteOlderThan}.
    */
-  public GameFeatureDao(Jdbi jdbi, SqlDialect dialect, Clock clock) {
+  public GameFeatureDao(Jdbi jdbi, Clock clock) {
     this.jdbi = jdbi;
-    this.dialect = dialect;
     this.clock = clock;
   }
 
   /**
-   * played_at is TIMESTAMP WITHOUT TIME ZONE on both H2 and Postgres, so the column holds a wall
-   * clock rather than an instant — and {@link LocalDateTime} is exactly that type. Binding and
-   * reading it as a LocalDateTime is a straight JDBC 4.2 mapping onto the column: no zone
-   * conversion happens on either side, so there is no zone to get wrong and nothing for a caller to
-   * remember to pass. Modelling it as an {@link Instant} instead would drag the JVM default zone
-   * into every bind, making the stored value depend on where the process happened to run — a game
-   * written under UTC and read back under America/Los_Angeles would land on the wrong calendar day
-   * and drop out of {@code month = "2026-06"}.
+   * played_at is TIMESTAMP WITHOUT TIME ZONE, so the column holds a wall clock rather than an
+   * instant — and {@link LocalDateTime} is exactly that type. Binding and reading it as a
+   * LocalDateTime is a straight JDBC 4.2 mapping onto the column: no zone conversion happens on
+   * either side, so there is no zone to get wrong and nothing for a caller to remember to pass.
+   * Modelling it as an {@link Instant} instead would drag the JVM default zone into every bind,
+   * making the stored value depend on where the process happened to run — a game written under UTC
+   * and read back under America/Los_Angeles would land on the wrong calendar day and drop out of
+   * {@code month = "2026-06"}.
    *
    * <p>These two helpers encode the one convention the type cannot: the stored wall clock is UTC.
    * ChessQL's date/month rewrite emits its day and month boundaries as zone-free LocalDateTimes on
@@ -146,8 +165,7 @@ public class GameFeatureDao implements GameFeatureStore {
   }
 
   private void insertFeatures(org.jdbi.v3.core.Handle h, List<GameFeature> features) {
-    String sql = dialect.insertGameFeature();
-    var batch = h.prepareBatch(sql);
+    var batch = h.prepareBatch(INSERT_GAME_FEATURE);
     for (GameFeature row : features) {
       // bindByType, not bind: played_at is nullable, and only the typed form carries
       // Types.TIMESTAMP into setNull. Plain bind() would fall back to JDBI's untyped-null
@@ -218,12 +236,12 @@ public class GameFeatureDao implements GameFeatureStore {
    * occurrences are rewritten.
    *
    * <p>Making each writer's delete-and-insert one transaction is necessary and not sufficient.
-   * Nothing sets an isolation level, so both engines run READ COMMITTED, and under that a {@code
-   * DELETE} that blocks on another transaction's uncommitted delete re-evaluates the rows it was
-   * blocked on — but not rows that transaction <em>inserted</em>, which are outside its statement
-   * snapshot. Two transactional writers over one game therefore still interleave as delete, delete,
-   * insert, insert and both sets survive: exactly the doubling {@code ConcurrentFlushTest}
-   * demonstrates, one isolation level up.
+   * Nothing sets an isolation level, so this runs under READ COMMITTED, and there a {@code DELETE}
+   * that blocks on another transaction's uncommitted delete re-evaluates the rows it was blocked on
+   * — but not rows that transaction <em>inserted</em>, which are outside its statement snapshot.
+   * Two transactional writers over one game therefore still interleave as delete, delete, insert,
+   * insert and both sets survive: exactly the doubling {@code ConcurrentFlushTest} demonstrates,
+   * one isolation level up.
    *
    * <p>What removes it is a lock both writers must take first. {@code game_features.game_url} is
    * UNIQUE and every occurrence belongs to a game, so that row is the natural serialization point.

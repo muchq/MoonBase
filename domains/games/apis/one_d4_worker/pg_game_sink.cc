@@ -29,7 +29,7 @@ WHERE id = $1::uuid AND owner_id = $2
 FOR UPDATE
 )sql";
 
-// Column list and conflict clause from PostgresSqlDialect.insertGameFeature.
+// Column list and conflict clause from GameFeatureDao.INSERT_GAME_FEATURE.
 // The empty string stands in for SQL NULL, because pg::Client binds text
 // parameters and has no null. No indexed column is legitimately empty.
 constexpr char kUpsertGame[] = R"sql(
@@ -58,7 +58,7 @@ ON CONFLICT (game_url) DO UPDATE SET
 RETURNING id
 )sql";
 
-// PostgresSqlDialect.upsertIndexedPeriod, key for key. The conflict target
+// IndexedPeriodDao.UPSERT_INDEXED_PERIOD, key for key. The conflict target
 // is the four-column unique constraint, so a period for the same month with
 // and without bullet games are separate rows rather than one overwriting
 // the other.

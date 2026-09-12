@@ -2,23 +2,21 @@
 
 The schema as numbered, idempotent SQL files (#1419). This directory is the
 one copy of the DDL: the `one_d4_migrate` deploy step applies it before the
-services start, the Java service verifies at boot that it did, and
-`one_d4_worker`'s Postgres suites apply it to build the schema they test
+services start, the Java service verifies at boot that it did, and both the
+Java and `one_d4_worker` suites apply it to build the schema they test
 against.
 
 ## Layout
 
 - `manifest.txt` — the ordering. A step not listed here never runs.
-- `V<NNN>__<name>.sql` — a step whose SQL both engines share.
-- `pg/V<NNN>__<name>.sql`, `h2/V<NNN>__<name>.sql` — a step where the
-  engines fork. A forked step has a file in *both* engine directories and
-  none at the top level; a shared step has only the top-level file. Anything
-  else fails `MigrationFilesTest` and `Migration` itself refuses to run it.
+- `V<NNN>__<name>.sql` — a step. One file, one engine: Postgres, the engine
+  every suite and the deployment run (#1532).
 
-Postgres is the deployment engine. H2 is the test engine — `h2/` files ship
-only on test classpaths (`:test_db`), never in the service image, and exist
-so the default CI suite exercises the same migration path (see the dedupe
-notes in `V009__dedupe_key.sql` for why that is load-bearing).
+`V001__initial_schema.sql` is the whole schema today. It was collapsed from
+eighteen steps in #1532, which is a thing you can do exactly once and only
+while no deployed database has state worth keeping — there is no tracking
+table, so the files are re-executed in full every deploy and nothing records
+which of them a given database has seen. From here the rule below applies.
 
 ## Rules
 
@@ -34,32 +32,33 @@ notes in `V009__dedupe_key.sql` for why that is load-bearing).
   steps to an empty scratch schema and compares, so a step that only works
   against a populated database breaks boot verification, not just re-runs.
 - **Append, don't edit.** A schema change is a new `V<NNN>` step: the next
-  number, a line in `manifest.txt`, and the file named in *each* applicable
-  `BUILD.bazel` list — `:migrations` (pg + shared, ships with the service),
-  `:h2_migrations` (h2, test-only), `:migrations_sql` (all of them, what
-  the C++ suites run and walk). A file unlisted in BUILD neither ships nor
-  runs, and no test can see it. Editing an old step is for comments only.
-- **Plain SQL, and a whole file has to work as one script.** Each `pg/` and
-  shared file also works under `psql -f`; nothing here depends on the runner
-  (the `h2/` files are H2 syntax and are not psql-compatible). Java splits
-  on top-level semicolons — dollar-quoting, `''` escapes and comments
-  respected — and executes them individually, so a failure names its step;
-  the splitter does not model double-quoted identifiers or `E''` strings, so
-  don't use them (none of the schema needs either). `one_d4_worker`'s
-  Postgres suites send each `pg/` or shared file whole through libpq
-  instead (`migration_files`), which puts its statements in one implicit
-  transaction — so no step may depend on an earlier statement in the same
-  file having committed.
-- **Forked steps stay in step.** Both engines run the same step list in the
-  same order; only a step's SQL may differ. If you add a partial index on
-  Postgres, add the H2 stand-in with the same name (see `V016`, `V017`).
+  number, a line in `manifest.txt`, and the file named in
+  `:migrations_sql_files` (`BUILD.bazel`) — the one list both `:migrations`
+  and `:migrations_sql` compose.
+
+  Editing an applied step is for comments only, and the trap is specific:
+  a step that *adds* something a later step *drops* runs both halves on
+  every deploy, forever. Postgres never reuses a dropped column's attnum
+  and counts it against the 1600-column ceiling, so an add/drop pair spends
+  one permanently per deploy until `ADD COLUMN` starts failing. If a step's
+  effect is meant to go away, the step that added it is what should stop
+  adding it. A file unlisted in BUILD neither ships nor runs, and no
+  test can see it. Editing an old step is for comments only.
+- **Plain SQL, and a whole file has to work as one script.** Every file also
+  works under `psql -f`; nothing here depends on the runner. Java splits on
+  top-level semicolons — dollar-quoting, `''` escapes and comments respected
+  — and executes them individually, so a failure names its step; the splitter
+  does not model double-quoted identifiers or `E''` strings, so don't use
+  them (none of the schema needs either). `one_d4_worker`'s Postgres suites
+  send each file whole through libpq instead (`migration_files`), which puts
+  its statements in one implicit transaction — so no step may depend on an
+  earlier statement in the same file having committed.
 
 ## Running them by hand
 
 ```bash
 for step in $(grep -v '^#' manifest.txt); do
-  f="pg/$step.sql"; [ -f "$f" ] || f="$step.sql"
-  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
+  psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$step.sql"
 done
 ```
 

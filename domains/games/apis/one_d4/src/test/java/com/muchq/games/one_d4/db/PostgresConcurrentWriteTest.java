@@ -1,7 +1,6 @@
 package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.engine.model.GameFeatures;
@@ -31,14 +30,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * The concurrency guarantees behind {@code motif_occurrences} writes, against the engine they are
- * guarantees about.
+ * The concurrency guarantees behind {@code motif_occurrences} writes.
  *
- * <p>{@link ConcurrentFlushTest} covers what H2 can show: that the delete and insert are one
- * transaction, and that a reader never sees a half-applied flush. Two of the properties this change
- * relies on are not observable there, because they are statements about PostgreSQL's READ COMMITTED
- * behaviour and H2's MVStore does not reproduce them. Asserting them on H2 would produce tests that
- * pass whether or not the code is right — the same vacuity trap this suite exists to avoid.
+ * <p>{@link ConcurrentFlushTest} covers the single-writer half: that the delete and insert are one
+ * transaction, and that a reader never sees a half-applied flush. The two properties below are
+ * statements about what READ COMMITTED does to two sessions racing, so they need two real sessions
+ * and a lock to block on — which is why they live in their own suite rather than beside the rest.
  *
  * <ul>
  *   <li><b>The ownership probe must take a row lock.</b> Nothing sets an isolation level, so a
@@ -58,15 +55,11 @@ import org.junit.jupiter.api.Timeout;
  * race: neither production method can be paused mid-transaction from outside, so the order that
  * produces the doubling cannot be forced through the API, and a pass is corroboration rather than
  * proof. That the shared lock is taken at all is pinned deterministically in {@code
- * ConcurrentFlushTest.bothOccurrenceWritersTakeTheGamesFeatureRowBeforeRewritingIt}, which holds
- * the row from outside and asserts both writers block on it.
- *
- * <p>Runs against the real postgres CI provides via {@code PG_TEST_DB_URL}; skips when that is
- * unset. A skipped run proves nothing about either property — say so rather than reporting green.
+ * ConcurrentFlushTest.aFlushTakesTheGamesFeatureRowBeforeRewritingIt}, which holds the row from
+ * outside and asserts the flush blocks on it.
  */
 public class PostgresConcurrentWriteTest {
 
-  private static final String DB_URL_ENV = "PG_TEST_DB_URL";
   private static final String SCHEMA = "one_d4_pg_concurrent_test";
   private static final String GAME_URL = "https://chess.com/game/pg-contended";
   private static final String OWNER_A = "host-a/1/aaaa";
@@ -89,10 +82,7 @@ public class PostgresConcurrentWriteTest {
 
   @BeforeEach
   public void setUp() throws Exception {
-    String rawUrl = System.getenv(DB_URL_ENV);
-    assumeTrue(
-        rawUrl != null && !rawUrl.isBlank(),
-        DB_URL_ENV + " is not set; skipping the real-postgres concurrency suite");
+    String rawUrl = PgTestUrls.requireRawUrl();
 
     try (Connection conn = DriverManager.getConnection(PgTestUrls.jdbcUrl(rawUrl, null));
         Statement stmt = conn.createStatement()) {
@@ -101,8 +91,8 @@ public class PostgresConcurrentWriteTest {
     }
 
     dataSource = DataSourceFactory.create(PgTestUrls.jdbcUrl(rawUrl, SCHEMA));
-    new Migration(dataSource, new PostgresSqlDialect()).run();
-    dao = new GameFeatureDao(Jdbi.create(dataSource), new PostgresSqlDialect());
+    new Migration(dataSource).run();
+    dao = new GameFeatureDao(Jdbi.create(dataSource));
     requestId = insertClaimedRequest();
     pool = Executors.newFixedThreadPool(2);
   }
@@ -115,7 +105,7 @@ public class PostgresConcurrentWriteTest {
     if (dataSource instanceof Closeable closeable) {
       closeable.close();
     }
-    String rawUrl = System.getenv(DB_URL_ENV);
+    String rawUrl = System.getenv(PgTestUrls.DB_URL_ENV);
     if (rawUrl == null || rawUrl.isBlank()) {
       return;
     }

@@ -99,10 +99,10 @@ process that holds the leases. It deletes game_features, motif_occurrences (via 
 
 ## Running Locally
 
-one_d4 needs a real PostgreSQL. **H2 is a test dependency** — the driver is not on the
-service's classpath — so there is no in-memory mode and no default URL. An unset
+one_d4 needs a real PostgreSQL. There is no in-memory mode and no default URL: an unset
 `INDEXER_DB_URL` fails at startup, rather than quietly starting on a database that
-disappears with the process.
+disappears with the process. The test suites need one too — they run against
+`PG_TEST_DB_URL`, one schema each (#1532).
 
 ```bash
 docker run -d --name one_d4_dev -p 5432:5432 \
@@ -139,7 +139,7 @@ pgjdbc decodes query values, so `+` becomes a space, `&` truncates the rest, and
 The app resolves the URL from `INDEXER_DB_URL` and nowhere else: no host file, no
 default. Tests are the exception and don't go through this path at all — they set the
 `indexer.db.url` Micronaut property directly, which is how each `ApplicationContext`
-gets its own H2 database.
+gets its own schema off the scratch database.
 
 **On the deployed server** `compose.yaml` sets `INDEXER_DB_URL`, `INDEXER_DB_USERNAME` and
 `INDEXER_DB_PASSWORD` (MoonBase#1351), and `deploy/consolidated/deploy_config_test.go`
@@ -458,8 +458,7 @@ is possible and simply not built. Changing *that* derivation still needs a reind
 
 On the deployed machine the indexer runs against **PostgreSQL** — the `shared_postgres` service
 (image `postgres:18`, Compose volume `shared_pgdata`), reached via the JDBC URL `compose.yaml`
-sets in `INDEXER_DB_URL` — the only source there is (see above). H2 appears nowhere outside the
-test suite.
+sets in `INDEXER_DB_URL` — the only source there is (see above).
 
 The instance is shared: `games_hub` keeps its own database on it too, which is why the service is
 no longer named after one_d4 (MoonBase#1225). The Compose volume key is not the volume's name —

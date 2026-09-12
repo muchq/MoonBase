@@ -9,9 +9,12 @@
 #include <utility>
 #include <vector>
 
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/migration_files.h"
+#include "domains/games/apis/one_d4_worker/pg_test_db.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace one_d4_worker {
@@ -38,8 +41,10 @@ std::string Conninfo(const std::string& url) {
 class RetentionTest : public testing::Test {
  protected:
   void SetUp() override {
-    const char* url = std::getenv("PG_TEST_DB_URL");
-    if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
+    const absl::StatusOr<std::string> db_url = TestDbUrl();
+    if (absl::IsUnavailable(db_url.status())) GTEST_SKIP() << db_url.status().message();
+    ASSERT_TRUE(db_url.ok()) << db_url.status();
+    const char* url = db_url->c_str();
     client_ = std::make_unique<pg::Client>(Conninfo(url));
     ASSERT_TRUE(ResetToMigratedSchema(*client_, kSchema).ok());
   }
@@ -53,9 +58,9 @@ class RetentionTest : public testing::Test {
     auto result = client_->Exec(
         R"(INSERT INTO indexing_requests
              (id, player, platform, start_month, end_month, status, created_at, updated_at,
-              owner_id, lease_expires_at, attempts, dedupe_key)
+              owner_id, lease_expires_at, attempts)
            VALUES ($1::uuid, $2, 'chess.com', '2026-01', '2026-01', $3, $4::timestamp,
-                   $5::timestamp, NULLIF($6, ''), NULLIF($7, '')::timestamp, $8::int, $1))",
+                   $5::timestamp, NULLIF($6, ''), NULLIF($7, '')::timestamp, $8::int))",
         {id, name, status, created_at, Stamp(updated), owner,
          lease == absl::InfinitePast() ? "" : Stamp(lease), std::to_string(attempts)});
     EXPECT_TRUE(result.ok()) << result.status();
@@ -65,7 +70,6 @@ class RetentionTest : public testing::Test {
   std::string Status(const std::string& id) { return Scalar("status", id); }
   std::string Owner(const std::string& id) { return Scalar("COALESCE(owner_id, '')", id); }
   std::string Error(const std::string& id) { return Scalar("COALESCE(error_message, '')", id); }
-  std::string DedupeKey(const std::string& id) { return Scalar("COALESCE(dedupe_key, '')", id); }
 
   int CountOf(const std::string& table) {
     auto result = client_->Exec(absl::StrCat("SELECT COUNT(*) FROM ", table));
@@ -170,9 +174,13 @@ TEST_F(RetentionTest, RetiresARequestWhoseAttemptsAreSpent) {
   EXPECT_EQ(report.poisoned, 1);
   EXPECT_EQ(Status(id), "FAILED");
   EXPECT_EQ(Error(id), PoisonedMessage(policy_.max_attempts));
-  // The key is surrendered, so the next submit for the same range starts a new
-  // request rather than colliding with a dead one.
-  EXPECT_EQ(DedupeKey(id), "");
+  // The range goes with the status: idx_indexing_requests_live only covers the
+  // live ones, so the next submit for the same range lands rather than
+  // colliding with a dead request.
+  const auto resubmitted = client_->Exec(
+      R"(INSERT INTO indexing_requests (player, platform, start_month, end_month, status)
+         VALUES ('poisoned', 'chess.com', '2026-01', '2026-01', 'PENDING'))");
+  EXPECT_TRUE(resubmitted.ok()) << resubmitted.status();
 }
 
 TEST_F(RetentionTest, ARowAtTheAttemptLimitIsPoisonedRatherThanReleased) {

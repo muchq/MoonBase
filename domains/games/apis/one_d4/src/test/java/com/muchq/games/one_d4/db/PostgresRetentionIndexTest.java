@@ -1,7 +1,6 @@
 package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.Closeable;
 import java.sql.Connection;
@@ -14,29 +13,24 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The retention delete's index on the deployment dialect (#1313 item 11). The hourly sweep runs
+ * The retention delete's index, as the planner actually uses it (#1313 item 11). The sweep runs
  * {@code DELETE FROM game_features WHERE indexed_at < ?} under a 120s statement bound; unindexed, a
  * sweep that hit the bound rolled back with no forward progress and retried the identical scan an
  * hour later. What this pins is that the delete's plan can reach {@code
  * idx_game_features_indexed_at} — same reachability question, and same {@code enable_seqscan = off}
  * technique, as {@code PostgresPlayerIndexTest}.
  *
- * <p>Runs against the real postgres CI provides via {@code PG_TEST_DB_URL}; skips when unset. Uses
- * a dedicated schema like the other PG-gated suites sharing that scratch database.
+ * <p>Uses a dedicated schema like the other PG-gated suites sharing that scratch database.
  */
 public class PostgresRetentionIndexTest {
 
-  private static final String DB_URL_ENV = "PG_TEST_DB_URL";
   private static final String SCHEMA = "one_d4_pg_retention_index_test";
 
   private DataSource dataSource;
 
   @BeforeEach
   public void setUp() throws Exception {
-    String rawUrl = System.getenv(DB_URL_ENV);
-    assumeTrue(
-        rawUrl != null && !rawUrl.isBlank(),
-        DB_URL_ENV + " is not set; skipping the real-postgres retention-index suite");
+    String rawUrl = PgTestUrls.requireRawUrl();
 
     try (Connection conn = DriverManager.getConnection(PgTestUrls.jdbcUrl(rawUrl, null));
         Statement stmt = conn.createStatement()) {
@@ -45,7 +39,7 @@ public class PostgresRetentionIndexTest {
     }
 
     dataSource = DataSourceFactory.create(PgTestUrls.jdbcUrl(rawUrl, SCHEMA));
-    new Migration(dataSource, new PostgresSqlDialect()).run();
+    new Migration(dataSource).run();
   }
 
   @AfterEach
@@ -53,7 +47,7 @@ public class PostgresRetentionIndexTest {
     if (dataSource instanceof Closeable closeable) {
       closeable.close();
     }
-    String rawUrl = System.getenv(DB_URL_ENV);
+    String rawUrl = System.getenv(PgTestUrls.DB_URL_ENV);
     if (rawUrl == null || rawUrl.isBlank()) {
       return;
     }

@@ -33,10 +33,8 @@ TEST(SchemaContract, EveryMigrationFileIsReachableFromTheManifest) {
 
   std::set<std::string> reachable = {absl::StrCat(MigrationsRoot(), "/manifest.txt")};
   for (const std::string& step : *steps) {
-    for (const std::string& engine : {"pg", "h2"}) {
-      const absl::StatusOr<std::string> path = MigrationSqlPath(step, engine);
-      if (path.ok()) reachable.insert(*path);
-    }
+    const absl::StatusOr<std::string> path = MigrationSqlPath(step);
+    if (path.ok()) reachable.insert(*path);
   }
 
   // Walks the runfiles copy of :migrations_sql only: a file on disk but
@@ -53,22 +51,21 @@ TEST(SchemaContract, EveryMigrationFileIsReachableFromTheManifest) {
         << path << " is not reachable from manifest.txt — it never runs anywhere";
     ++seen;
   }
-  // A loose floor: only there to catch the walk finding nothing at all, so a
-  // legitimate consolidation of steps doesn't trip it.
-  EXPECT_GT(seen, 10) << "the directory walk found almost nothing — the data moved";
+  // Exactly the manifest's steps plus the manifest itself. Pinned to the
+  // manifest rather than a floor, so consolidating steps cannot trip it and a
+  // walk that found nothing cannot pass it.
+  EXPECT_EQ(seen, static_cast<int>(steps->size()) + 1)
+      << "the runfiles tree and manifest.txt disagree about how many files there are";
 }
 
-// Both engines resolve every step. The Postgres half is exercised by every
-// suite that migrates; H2 is one_d4's own path, and a step it cannot resolve
-// is one the Java service dies on at boot.
-TEST(SchemaContract, EveryManifestStepResolvesForBothEngines) {
+// Every step resolves. A step whose file is missing from :migrations_sql is
+// one the Java service dies on at boot and one no suite here can migrate.
+TEST(SchemaContract, EveryManifestStepResolves) {
   const absl::StatusOr<std::vector<std::string>> steps = MigrationSteps();
   ASSERT_TRUE(steps.ok()) << steps.status();
   for (const std::string& step : *steps) {
-    for (const std::string& engine : {"pg", "h2"}) {
-      const absl::StatusOr<std::string> path = MigrationSqlPath(step, engine);
-      EXPECT_TRUE(path.ok()) << path.status();
-    }
+    const absl::StatusOr<std::string> path = MigrationSqlPath(step);
+    EXPECT_TRUE(path.ok()) << path.status();
   }
 }
 

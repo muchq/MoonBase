@@ -151,6 +151,32 @@ cc_library(
     ],
 )
 
+# The one decision every Postgres suite here has to make the same way: skip
+# without a database, fail when CI says there should have been one.
+cc_library(
+    name = "pg_test_db",
+    testonly = True,
+    srcs = ["pg_test_db.cc"],
+    hdrs = ["pg_test_db.h"],
+    visibility = ["//domains/games:__subpackages__"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_test(
+    name = "pg_test_db_test",
+    size = "small",
+    srcs = ["pg_test_db_test.cc"],
+    deps = [
+        ":pg_test_db",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_test(
     name = "retention_policy_test",
     size = "small",
@@ -203,13 +229,18 @@ cc_test(
     data = ["//domains/games/apis/one_d4:retention_policy_json"],
     # Without this the whole suite GTEST_SKIPs: bazel does not forward the
     # ambient environment into the test sandbox, and CI sets PG_TEST_DB_URL as
-    # a job-level variable rather than passing --test_env. Every sibling here
-    # carries the same line. The "requires-postgres" tag documents the
-    # dependency; it is this that supplies it.
-    env_inherit = ["PG_TEST_DB_URL"],
+    # a job-level variable rather than passing --test_env. CI rides along so
+    # TestDbUrl can tell a developer without a database from a job that lost
+    # one. Every sibling here carries the same pair; the "requires-postgres"
+    # tag documents the dependency, this supplies it.
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     tags = ["requires-postgres"],
     deps = [
         ":migration_files",
+        ":pg_test_db",
         ":retention",
         "//domains/platform/libs/pg",
         "@com_google_absl//absl/strings",
@@ -241,10 +272,14 @@ cc_test(
     name = "pg_queue_test",
     size = "small",
     srcs = ["pg_queue_test.cc"],
-    env_inherit = ["PG_TEST_DB_URL"],
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     deps = [
         ":migration_files",
         ":pg_queue",
+        ":pg_test_db",
         "//domains/platform/libs/pg",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
@@ -316,10 +351,14 @@ cc_test(
     name = "pg_reanalysis_test",
     size = "small",
     srcs = ["pg_reanalysis_test.cc"],
-    env_inherit = ["PG_TEST_DB_URL"],
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     deps = [
         ":migration_files",
         ":pg_reanalysis",
+        ":pg_test_db",
         "//domains/games/libs/one_d4_motifs:occurrence",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
@@ -379,9 +418,13 @@ cc_test(
     name = "reanalysis_queue_test",
     size = "small",
     srcs = ["reanalysis_queue_test.cc"],
-    env_inherit = ["PG_TEST_DB_URL"],
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     deps = [
         ":migration_files",
+        ":pg_test_db",
         ":reanalysis_queue",
         "//domains/platform/libs/pg",
         "@com_google_absl//absl/strings",
@@ -567,10 +610,14 @@ cc_test(
     name = "pg_game_sink_test",
     size = "small",
     srcs = ["pg_game_sink_test.cc"],
-    env_inherit = ["PG_TEST_DB_URL"],
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     deps = [
         ":migration_files",
         ":pg_game_sink",
+        ":pg_test_db",
         "//domains/platform/libs/pg",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
@@ -698,9 +745,13 @@ cc_test(
     name = "db_options_test",
     size = "small",
     srcs = ["db_options_test.cc"],
-    env_inherit = ["PG_TEST_DB_URL"],
+    env_inherit = [
+        "CI",
+        "PG_TEST_DB_URL",
+    ],
     deps = [
         ":db_options",
+        ":pg_test_db",
         "//domains/platform/libs/pg",
         "@com_google_absl//absl/strings",
         "@googletest//:gtest_main",

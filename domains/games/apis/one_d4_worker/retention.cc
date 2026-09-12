@@ -75,7 +75,7 @@ absl::Status Sweep(pg::Client& client, const RetentionPolicy& policy, absl::Time
     // arm looks for — costing the user another whole window of silence.
     auto poisoned = tx.Exec(absl::StrCat(R"(
         UPDATE indexing_requests
-           SET status = 'FAILED', error_message = $2, dedupe_key = NULL,
+           SET status = 'FAILED', error_message = $2,
                updated_at = $1::timestamp, owner_id = NULL, lease_expires_at = NULL
          WHERE status IN ('PENDING', 'PROCESSING')
            AND attempts >= $3::int
@@ -92,7 +92,7 @@ absl::Status Sweep(pg::Client& client, const RetentionPolicy& policy, absl::Time
     // enough to still be working.
     auto stalled = tx.Exec(absl::StrCat(R"(
         UPDATE indexing_requests
-           SET status = 'FAILED', error_message = $2, dedupe_key = NULL,
+           SET status = 'FAILED', error_message = $2,
                updated_at = $1::timestamp, owner_id = NULL, lease_expires_at = NULL
          WHERE status IN ('PENDING', 'PROCESSING')
            AND )",

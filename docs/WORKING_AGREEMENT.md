@@ -258,7 +258,7 @@ observable behavior worth keeping gets a test, at every level that fits:
 
 - **unit** — the mechanism itself;
 - **integration** — the behavior through the real store, transport, or codec
-  (`TestDb`-backed DAO tests, the `e2e/` suites against in-memory H2);
+  (`TestDb`-backed DAO tests against a real Postgres schema, the `e2e/` suites);
 - **the consumer's boundary** — where the behavior is part of a contract
   someone else depends on, prove it the way they will actually hit it. That
   means raw JSON and raw frames, not a round trip through generated types that
@@ -355,6 +355,11 @@ embedded server gets `--runs_per_test=15` or so before it's trusted.
 without the env var. CI supplies it from a `postgres:18` service; a local run
 without it is green and has exercised none of the SQL. When you add a gated
 test, say so in the PR body.
+
+one_d4's suites also inherit `CI` and fail rather than skip when it is set
+(`PgTestUrls.requireRawUrl`), because after #1532 they are the only thing that
+exercises its schema at all. That is the shape to copy for a suite whose skip
+would leave a component untested, rather than merely less tested.
 
 ## Verification before pushing
 

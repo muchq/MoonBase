@@ -64,8 +64,8 @@ public class ConcurrentFlushTest {
 
   /**
    * How long the rival in {@code aTakeoverThatCommitsDuringAFlushStillStopsIt} holds its row lock.
-   * Long enough that the flush is certainly inside its ownership probe, short enough to stay under
-   * H2's one-second default lock timeout so the blocked probe waits rather than erroring.
+   * Long enough that the flush is certainly inside its ownership probe, short enough that the
+   * blocked probe does not dominate the suite's runtime.
    */
   private static final long RIVAL_HOLD_MILLIS = 600;
 
@@ -88,7 +88,7 @@ public class ConcurrentFlushTest {
   public void setUp() {
     testDb = TestDb.create("concurrent_flush");
     dataSource = testDb.dataSource();
-    store = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
+    store = new GameFeatureDao(testDb.jdbi());
     requestId = insertRequest(OWNER_A, NOW.plus(Duration.ofMinutes(5)));
     pool = Executors.newFixedThreadPool(2);
   }
@@ -300,7 +300,7 @@ public class ConcurrentFlushTest {
    * A takeover that commits <em>during</em> a flush, rather than before one.
    *
    * <p>This is the case a check-then-write cannot survive without a row lock. Nothing sets an
-   * isolation level, so both engines run READ COMMITTED and a plain {@code SELECT} inside the
+   * isolation level, so this runs under READ COMMITTED and a plain {@code SELECT} inside the
    * transaction is a snapshot, not a claim: the rival's {@code claim} commits in the gap and the
    * flush goes on to write rows for a request it no longer owns. The window is the whole flush.
    *

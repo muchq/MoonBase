@@ -2,7 +2,6 @@ package com.muchq.games.one_d4.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.Closeable;
 import java.sql.Connection;
@@ -15,30 +14,22 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The statement-timeout mechanism on the deployment dialect. H2's cooperative enforcement is
- * covered in {@link StatementTimeoutsTest}; Postgres enforces the bound differently — pgjdbc runs a
- * cancel timer that interrupts the server out-of-band — and Postgres is also the dialect where the
- * session cleanup must be a harmless no-op: pgjdbc scopes the timeout to the statement, which this
- * suite pins behaviorally rather than asserting in prose. (The cleanup runs unconditionally on both
- * dialects; on Postgres it is pure client-side bookkeeping.)
+ * What the statement bound actually does to a running statement, and what it leaves behind. {@link
+ * StatementTimeouts} unwinds nothing on the way out, which is only correct because pgjdbc enforces
+ * the bound with a client-side cancel timer scoped to the statement — so that is pinned
+ * behaviorally here rather than asserted in prose.
  *
- * <p>Runs against the real postgres that CI's build-and-test job provides via {@code
- * PG_TEST_DB_URL}; skips when that is unset. Runs no migrations and touches no tables — everything
- * here is expressible with {@code pg_sleep} and session probes.
+ * <p>Its own suite because it runs no migrations and touches no tables: everything here is
+ * expressible with {@code pg_sleep} and session probes.
  */
 public class PostgresReadTimeoutTest {
-
-  private static final String DB_URL_ENV = "PG_TEST_DB_URL";
 
   private DataSource dataSource;
   private Jdbi jdbi;
 
   @BeforeEach
   public void setUp() {
-    String rawUrl = System.getenv(DB_URL_ENV);
-    assumeTrue(
-        rawUrl != null && !rawUrl.isBlank(),
-        DB_URL_ENV + " is not set; skipping the real-postgres read-timeout suite");
+    String rawUrl = PgTestUrls.requireRawUrl();
 
     dataSource = DataSourceFactory.create(PgTestUrls.jdbcUrl(rawUrl, null));
     jdbi = Jdbi.create(dataSource);
@@ -79,15 +70,15 @@ public class PostgresReadTimeoutTest {
   }
 
   /**
-   * On Postgres a bounded statement's timeout must not bound later statements on the same pooled
-   * connection, even though the cleanup does nothing driver-visible there.
+   * A bounded statement's timeout must not bound later statements on the same pooled connection.
+   * This is the claim that lets {@link StatementTimeouts} clear nothing afterwards.
    *
    * <p>Pinned behaviorally, not by reading a client-side field: a fresh {@code PgStatement}'s
    * {@code getQueryTimeout()} is 0 by construction, so asserting it proves nothing. Instead, after
    * a 1s-bounded statement, an <em>unbounded</em> 2s {@code pg_sleep} on the same pool must
    * complete — any leak, through the client timer or a server-side {@code statement_timeout}, would
-   * cancel it at 1s. The {@code SHOW statement_timeout} probe additionally pins that pgjdbc's
-   * mechanism is the client cancel timer and left no server-side session setting behind.
+   * cancel it at 1s. The {@code SHOW statement_timeout} probe additionally pins that the bound left
+   * no server-side session setting behind.
    */
   @Test
   public void boundDoesNotLeakAcrossStatementsOnPostgres() throws Exception {

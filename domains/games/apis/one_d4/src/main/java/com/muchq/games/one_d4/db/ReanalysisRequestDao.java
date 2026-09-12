@@ -3,19 +3,9 @@ package com.muchq.games.one_d4.db;
 import java.util.Optional;
 import java.util.UUID;
 import org.jdbi.v3.core.Jdbi;
-import org.jspecify.annotations.Nullable;
 
-/**
- * The API side of {@code reanalysis_requests}: enqueue a pass, read one back. Claiming, leases and
- * every write past that live in the C++ worker — this class must never grow them.
- */
-public class ReanalysisRequestDao {
-
-  public record ReanalysisRequest(
-      UUID id, String status, int gamesProcessed, int gamesFailed, @Nullable String errorMessage) {}
-
-  /** What enqueue answered with, and whether it made the row or found it. */
-  public record EnqueueResult(ReanalysisRequest request, boolean created) {}
+/** {@link ReanalysisRequestStore} over JDBC. */
+public class ReanalysisRequestDao implements ReanalysisRequestStore {
 
   private static final String SELECT_COLUMNS =
       "SELECT id, status, games_processed, games_failed, error_message FROM reanalysis_requests ";
@@ -27,15 +17,14 @@ public class ReanalysisRequestDao {
   }
 
   /**
-   * The live pass, or a fresh {@code PENDING} one. One pass walks the whole corpus, so a second
-   * live row buys nothing — {@code idx_reanalysis_requests_single_live} refuses it at insert, and
-   * this answers with the pass already doing what was asked instead of surfacing that refusal.
+   * {@code idx_reanalysis_requests_single_live} refuses a second live row at insert, and this
+   * answers with the pass already doing what was asked instead of surfacing that refusal.
    *
    * <p>Check-then-insert, with the insert re-checking on a unique violation: two racers can both
-   * see no live row, but the index lets only one insert land. The loser returns the winner's row.
-   * (H2 carries a non-unique stand-in for the index, so the race backstop is a Postgres behavior —
-   * {@code PostgresSingleLiveReanalysisTest} is where it has teeth.)
+   * see no live row, but the index lets only one insert land. The loser returns the winner's row —
+   * {@code PostgresSingleLiveReanalysisTest} drives that branch.
    */
+  @Override
   public EnqueueResult enqueue() {
     for (int attempt = 0; ; attempt++) {
       Optional<ReanalysisRequest> live = findLive();
@@ -43,7 +32,6 @@ public class ReanalysisRequestDao {
         return new EnqueueResult(live.get(), false);
       }
       try {
-        // Generated keys rather than RETURNING, which H2 does not parse.
         UUID id =
             jdbi.withHandle(
                 h ->
@@ -88,6 +76,7 @@ public class ReanalysisRequestDao {
     return false;
   }
 
+  @Override
   public Optional<ReanalysisRequest> findById(UUID id) {
     return jdbi.withHandle(
         h ->

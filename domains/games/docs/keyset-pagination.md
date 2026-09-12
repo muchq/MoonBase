@@ -62,8 +62,8 @@ ON game_features (played_at DESC, game_url ASC);
 
 This index also speeds up the current LIMIT/OFFSET approach and is safe to add
 at any time without waiting for the full keyset migration. **Done:** it ships as
-`idx_game_features_played_at` in the one_d4 migrations (PR #1312; since #1419,
-`migrations/V011__game_features_read_indexes.sql`).
+`idx_game_features_played_at` in `migrations/V001__initial_schema.sql` (PR
+#1312; the migrations became files in #1419 and collapsed to one in #1532).
 
 ### Frontend change
 

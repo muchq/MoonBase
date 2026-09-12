@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.muchq.games.one_d4.db.TestDb;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
 import java.net.URI;
@@ -37,7 +38,7 @@ public class QueryEventWireTest {
             EmbeddedServer.class,
             Map.of(
                 "indexer.db.url",
-                "jdbc:h2:mem:query_event_wire_test_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1",
+                TestDb.jdbcUrlFor("query_event_wire"),
                 "micronaut.server.port",
                 "-1",
                 // A bare embedded server refuses non-localhost origins outright; the deployment

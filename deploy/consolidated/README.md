@@ -238,10 +238,9 @@ reach them. games_hub already accepts that, so this makes one_d4 consistent with
 stack rather than newly exposed — but the password does move from a root-owned file into container
 metadata, and that is a real change in where it sits.
 
-`INDEXER_DB_URL` is one_d4's only source for the URL: it reads no host file, and H2 is a
-test-only dependency whose driver the container does not carry. An unset variable is therefore a
-container that exits on boot naming the variable, rather than one that starts, serves, and loses
-every write on restart. `deploy_config_test.go` fails if this file stops setting it.
+`INDEXER_DB_URL` is one_d4's only source for the URL: it reads no host file and has no
+in-memory fallback. An unset variable is therefore a container that exits on boot naming the
+variable, rather than one that starts, serves, and loses every write on restart. `deploy_config_test.go` fails if this file stops setting it.
 
 When verifying a deploy, read the **body** of `/health` — it answers 200 with
 `{"status":"DOWN"}` when Postgres is unreachable, so the status code alone proves nothing.

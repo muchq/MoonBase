@@ -9,7 +9,6 @@ import com.muchq.games.one_d4.api.dto.AggregateRow;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.RederiveResponse;
 import com.muchq.games.one_d4.db.GameFeatureDao;
-import com.muchq.games.one_d4.db.H2SqlDialect;
 import com.muchq.games.one_d4.db.ReanalysisRequestDao;
 import com.muchq.games.one_d4.db.TestDb;
 import java.time.Instant;
@@ -42,7 +41,7 @@ public class RederiveOpeningsE2ETest {
   @BeforeEach
   public void setUp() {
     TestDb testDb = TestDb.create("rederive_openings_e2e");
-    store = new GameFeatureDao(testDb.jdbi(), new H2SqlDialect());
+    store = new GameFeatureDao(testDb.jdbi());
     admin = new AdminController(store, new ReanalysisRequestDao(testDb.jdbi()));
 
     requestId = UUID.randomUUID();

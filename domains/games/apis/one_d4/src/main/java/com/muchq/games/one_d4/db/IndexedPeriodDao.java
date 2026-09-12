@@ -42,12 +42,20 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
   private static final String DELETE_OLDER_THAN =
       "DELETE FROM indexed_periods WHERE fetched_at < ?";
 
-  private final Jdbi jdbi;
-  private final SqlDialect dialect;
+  private static final String UPSERT_INDEXED_PERIOD =
+      """
+      INSERT INTO indexed_periods
+          (player, platform, year_month, fetched_at, is_complete, games_count, exclude_bullet)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (player, platform, year_month, exclude_bullet)
+      DO UPDATE SET fetched_at = EXCLUDED.fetched_at, is_complete = EXCLUDED.is_complete,
+                    games_count = EXCLUDED.games_count
+      """;
 
-  public IndexedPeriodDao(Jdbi jdbi, SqlDialect dialect) {
+  private final Jdbi jdbi;
+
+  public IndexedPeriodDao(Jdbi jdbi) {
     this.jdbi = jdbi;
-    this.dialect = dialect;
   }
 
   @Override
@@ -73,10 +81,9 @@ public class IndexedPeriodDao implements IndexedPeriodStore {
       boolean isComplete,
       int gamesCount,
       boolean excludeBullet) {
-    String sql = dialect.upsertIndexedPeriod();
     jdbi.useHandle(
         h ->
-            h.createUpdate(sql)
+            h.createUpdate(UPSERT_INDEXED_PERIOD)
                 .bind(0, player)
                 .bind(1, platform)
                 .bind(2, month)

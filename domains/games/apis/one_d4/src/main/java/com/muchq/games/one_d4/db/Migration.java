@@ -17,12 +17,12 @@ import org.slf4j.LoggerFactory;
 
 /**
  * The schema: the numbered, idempotent .sql files under {@code migrations/} (#1419), in manifest
- * order, resolved for this dialect's engine by {@link MigrationFiles} and split into statements by
- * {@link SqlStatements}. The files are the one copy of the DDL; this class carries none.
+ * order, read by {@link MigrationFiles} and split into statements by {@link SqlStatements}. The
+ * files are the one copy of the DDL; this class carries none.
  *
  * <p>{@link #run} applies them — the standalone {@code one_d4_migrate} deploy step ({@link
- * MigrationRunner}), and the H2 test path, which has no deploy step in front of it. There is no
- * tracking table: re-running everything is the whole mechanism, which is what makes the two callers
+ * MigrationRunner}), and the test suites, which build a scratch schema per suite. There is no
+ * tracking table: re-running everything is the whole mechanism, which is what makes the callers
  * interchangeable. See {@code migrations/README.md} for the authoring rules.
  *
  * <p>{@link #verify} checks they have already been applied, and writes nothing. That is what the
@@ -60,25 +60,9 @@ public class Migration {
   private static final List<String> KINDS = List.of("table", "column", "index", "constraint");
 
   private final DataSource dataSource;
-  private final SqlDialect dialect;
 
-  public Migration(DataSource dataSource, SqlDialect dialect) {
+  public Migration(DataSource dataSource) {
     this.dataSource = dataSource;
-    this.dialect = dialect;
-  }
-
-  /**
-   * What the service does about the schema when it starts: check it, or build it. Postgres has
-   * {@code one_d4_migrate} in front of it and gets {@link #verify}; the H2 test path has nothing in
-   * front of it and gets {@link #run}. Here rather than in {@code IndexerModule} so the choice is
-   * reachable from a test that can watch what it wrote.
-   */
-  public void atBoot() {
-    if (dialect.migratedBeforeBoot()) {
-      verify();
-    } else {
-      run();
-    }
   }
 
   public void run() {
@@ -100,8 +84,8 @@ public class Migration {
    * is never committed and the live tables are never touched — every statement runs against the
    * empty copies.
    *
-   * <p>Postgres only: it needs DDL to be transactional. The H2 path calls {@link #run} instead
-   * ({@link SqlDialect#migratedBeforeBoot}).
+   * <p>Needs DDL to be transactional, which Postgres has and which is the reason boot can check the
+   * schema without ever writing it.
    */
   public void verify() {
     String scratch = "one_d4_verify_" + UUID.randomUUID().toString().replace("-", "");
@@ -177,14 +161,13 @@ public class Migration {
     return KINDS.indexOf(object.substring(0, object.indexOf(' ')));
   }
 
-  private void apply(Statement stmt) throws SQLException {
-    String engine = dialect.migrationsEngine();
+  private static void apply(Statement stmt) throws SQLException {
     for (String step : MigrationFiles.steps()) {
-      for (String sql : SqlStatements.split(MigrationFiles.sqlFor(step, engine))) {
+      for (String sql : SqlStatements.split(MigrationFiles.sqlFor(step))) {
         try {
           stmt.execute(sql);
         } catch (SQLException e) {
-          throw new RuntimeException("Migration step " + step + " failed on " + engine, e);
+          throw new RuntimeException("Migration step " + step + " failed", e);
         }
       }
     }

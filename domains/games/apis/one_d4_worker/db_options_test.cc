@@ -8,7 +8,10 @@
 #include <string>
 #include <string_view>
 
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "domains/games/apis/one_d4_worker/pg_test_db.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace one_d4_worker {
@@ -34,11 +37,13 @@ TEST(DbOptions, KeepsAQueryStringTheUrlAlreadyHad) {
   EXPECT_THAT(bounded, ::testing::Not(HasSubstr("?options=")));
 }
 
-// The bound is only worth anything if the server honours it. Skips
-// without PG_TEST_DB_URL, like the other Postgres suites.
+// The bound is only worth anything if the server honours it. Gated on a real
+// database like every other Postgres suite here — see TestDbUrl.
 TEST(DbOptions, TheServerActuallyCancelsAStatementThatOverruns) {
-  const char* url = std::getenv("PG_TEST_DB_URL");
-  if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
+  const absl::StatusOr<std::string> db_url = TestDbUrl();
+  if (absl::IsUnavailable(db_url.status())) GTEST_SKIP() << db_url.status().message();
+  ASSERT_TRUE(db_url.ok()) << db_url.status();
+  const char* url = db_url->c_str();
 
   // A tenth of a second, so the test does not wait out the real bound.
   const std::string quick =
@@ -58,8 +63,10 @@ TEST(DbOptions, TheServerActuallyCancelsAStatementThatOverruns) {
 }
 
 TEST(DbOptions, AStatementInsideTheBoundIsLeftAlone) {
-  const char* url = std::getenv("PG_TEST_DB_URL");
-  if (url == nullptr || *url == '\0') GTEST_SKIP() << "PG_TEST_DB_URL unset";
+  const absl::StatusOr<std::string> db_url = TestDbUrl();
+  if (absl::IsUnavailable(db_url.status())) GTEST_SKIP() << db_url.status().message();
+  ASSERT_TRUE(db_url.ok()) << db_url.status();
+  const char* url = db_url->c_str();
 
   pg::Client client(WithExecutionBounds(url));
 

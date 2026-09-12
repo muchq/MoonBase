@@ -32,9 +32,8 @@ public class ReanalysisRequestDaoTest {
   @Test
   public void enqueue_whileAPassIsLive_returnsItInsteadOfStackingASecond() {
     // One pass walks the whole corpus, so a second live row buys nothing and
-    // idx_reanalysis_requests_single_live refuses it at insert on Postgres.
-    // The dao answers the same way on both engines: here is the pass that is
-    // already doing what you asked for.
+    // idx_reanalysis_requests_single_live refuses it at insert. The dao
+    // answers with the pass already doing what you asked for.
     UUID first = dao.enqueue().request().id();
 
     ReanalysisRequestDao.EnqueueResult again = dao.enqueue();
@@ -42,10 +41,9 @@ public class ReanalysisRequestDaoTest {
     assertThat(again.request().id()).isEqualTo(first);
   }
 
-  // The likeliest real re-post is while the worker is mid-corpus. A
-  // findLive narrowed to PENDING answers that POST with a 500 on Postgres
-  // (the index refuses the insert, the re-check sees nothing live) and a
-  // stacked second row here.
+  // The likeliest real re-post is while the worker is mid-corpus. A findLive
+  // narrowed to PENDING would answer that POST with a 500: the index refuses
+  // the insert and the re-check sees nothing live.
   @Test
   public void enqueue_whileAPassIsRunning_returnsItToo() {
     UUID first = dao.enqueue().request().id();

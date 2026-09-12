@@ -15,44 +15,21 @@ public class MigrationFilesTest {
 
   @Test
   public void manifestOrderIsFileOrder_commentsAndBlanksIgnored() {
-    assertThat(MigrationFiles.steps(FIXTURE)).containsExactly("V001__forked", "V002__shared");
+    assertThat(MigrationFiles.steps(FIXTURE)).containsExactly("V001__first", "V002__second");
   }
 
   @Test
-  public void forkedStepResolvesToTheEngineFile() {
-    assertThat(MigrationFiles.sqlFor(FIXTURE, "V001__forked", "pg")).contains("pg side");
-    assertThat(MigrationFiles.sqlFor(FIXTURE, "V001__forked", "h2")).contains("h2 side");
+  public void aStepResolvesToItsFile() {
+    assertThat(MigrationFiles.sqlFor(FIXTURE, "V001__first")).contains("the first step");
+    assertThat(MigrationFiles.sqlFor(FIXTURE, "V002__second")).contains("the second step");
   }
 
+  /** A listed step with no SQL must fail the migration, not skip. */
   @Test
-  public void sharedStepResolvesToTheTopLevelFile() {
-    assertThat(MigrationFiles.sqlFor(FIXTURE, "V002__shared", "pg"))
-        .contains("shared for every engine");
-    assertThat(MigrationFiles.sqlFor(FIXTURE, "V002__shared", "h2"))
-        .contains("shared for every engine");
-  }
-
-  /**
-   * A step with both a shared and an engine file is two sources of truth for one engine — refusing
-   * to run beats silently picking one.
-   */
-  @Test
-  public void aStepWithBothSharedAndEngineFilesIsAnError() {
-    assertThatThrownBy(
-            () -> MigrationFiles.sqlFor("migrations_fixture/ambiguous", "V001__both", "pg"))
+  public void aListedStepWithNoFileIsAnError() {
+    assertThatThrownBy(() -> MigrationFiles.sqlFor("migrations_fixture/missing", "V001__gone"))
         .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("V001__both")
-        .hasMessageContaining("both");
-  }
-
-  /** A listed step with no SQL for this engine must fail the migration, not skip. */
-  @Test
-  public void aStepWithNoFileForTheEngineIsAnError() {
-    assertThatThrownBy(
-            () -> MigrationFiles.sqlFor("migrations_fixture/missing", "V001__gone", "pg"))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("V001__gone")
-        .hasMessageContaining("no SQL");
+        .hasMessageContaining("V001__gone");
   }
 
   @Test
@@ -81,18 +58,13 @@ public class MigrationFilesTest {
   }
 
   /**
-   * Every real step resolves to exactly one file on both engines. This is what turns "the migration
-   * path stays identical on both engines" from a convention into a failure: a Postgres-only step
-   * with no H2 side (or the reverse) fails here, on the ordinary H2-only CI run.
+   * Every real step resolves, which is what makes a manifest line and a file the same fact: a step
+   * listed without its .sql (or shipped without its BUILD entry) fails here rather than at deploy.
    */
   @Test
-  public void everyRealStepResolvesForBothEngines() {
+  public void everyRealStepResolves() {
     for (String step : MigrationFiles.steps()) {
-      for (String engine : new String[] {"pg", "h2"}) {
-        assertThat(MigrationFiles.sqlFor(step, engine))
-            .as("step %s on %s", step, engine)
-            .isNotBlank();
-      }
+      assertThat(MigrationFiles.sqlFor(step)).as("step %s", step).isNotBlank();
     }
   }
 
@@ -100,11 +72,7 @@ public class MigrationFilesTest {
   @Test
   public void everyRealStepCarriesAtLeastOneStatement() {
     for (String step : MigrationFiles.steps()) {
-      for (String engine : new String[] {"pg", "h2"}) {
-        assertThat(SqlStatements.split(MigrationFiles.sqlFor(step, engine)))
-            .as("step %s on %s", step, engine)
-            .isNotEmpty();
-      }
+      assertThat(SqlStatements.split(MigrationFiles.sqlFor(step))).as("step %s", step).isNotEmpty();
     }
   }
 }

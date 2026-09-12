@@ -116,7 +116,7 @@ absl::StatusOr<bool> PgQueue::Progress(ClaimRef claim, int games_indexed) {
 absl::StatusOr<bool> PgQueue::Complete(ClaimRef claim, int games_indexed) {
   const auto written = client_.Exec(
       R"(UPDATE indexing_requests
-         SET status = 'COMPLETED', games_indexed = $3, owner_id = NULL, dedupe_key = NULL,
+         SET status = 'COMPLETED', games_indexed = $3, owner_id = NULL,
              error_message = NULL, updated_at = NOW()
          WHERE id = $1 AND owner_id = $2
            AND status IN ('PENDING', 'PROCESSING')
@@ -130,7 +130,7 @@ absl::StatusOr<bool> PgQueue::Complete(ClaimRef claim, int games_indexed) {
 absl::StatusOr<bool> PgQueue::Fail(ClaimRef claim, std::string_view message) {
   const auto written = client_.Exec(
       R"(UPDATE indexing_requests
-         SET status = 'FAILED', error_message = $3, owner_id = NULL, dedupe_key = NULL,
+         SET status = 'FAILED', error_message = $3, owner_id = NULL,
              updated_at = NOW()
          WHERE id = $1 AND owner_id = $2
            AND status IN ('PENDING', 'PROCESSING')

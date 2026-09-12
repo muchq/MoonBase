@@ -5,17 +5,57 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.Assumptions;
+import org.opentest4j.TestAbortedException;
 
 /**
- * Converts the libpq-style URL CI exports for the PG-gated suites ({@code
- * postgresql://user:pass@host:port/db}) into a pgjdbc URL. pgjdbc does not accept credentials in
- * the authority, so they move to query params; each suite passes its own {@code currentSchema} so
- * suites sharing the scratch database cannot collide. Extracted here once it had been copied into a
- * fourth test class.
+ * The scratch Postgres database every suite runs against: where its URL comes from, and the
+ * libpq-to-pgjdbc conversion. pgjdbc does not accept credentials in the authority, so they move to
+ * query params; each suite passes its own {@code currentSchema} so suites sharing the database
+ * cannot collide.
  */
 public final class PgTestUrls {
 
+  /** The libpq-style URL CI exports: {@code postgresql://user:pass@host:port/db}. */
+  public static final String DB_URL_ENV = "PG_TEST_DB_URL";
+
+  /**
+   * Set wherever a missing database is a broken job rather than a developer without one. A skip is
+   * indistinguishable from a pass in a CI summary, and these suites are the only thing exercising
+   * the schema (#1532), so somewhere has to refuse to pass vacuously. GitHub Actions sets CI on
+   * every runner; {@code TestDbUrl} is the C++ twin.
+   */
+  public static final String REQUIRE = "CI";
+
   private PgTestUrls() {}
+
+  /**
+   * The configured database.
+   *
+   * @throws TestAbortedException when none is configured and none is required, which JUnit reports
+   *     as a skip
+   * @throws IllegalStateException when {@link #REQUIRE} is set, so a CI job cannot pass by skipping
+   */
+  public static String requireRawUrl() {
+    return requireRawUrl(System.getenv(DB_URL_ENV), System.getenv(REQUIRE));
+  }
+
+  /** Split from the environment so {@code PgTestUrlsTest} can drive all three outcomes. */
+  static String requireRawUrl(String rawUrl, String required) {
+    if (rawUrl != null && !rawUrl.isBlank()) {
+      return rawUrl;
+    }
+    if (required != null && !required.isBlank()) {
+      throw new IllegalStateException(
+          DB_URL_ENV
+              + " is unset but "
+              + REQUIRE
+              + " is set. These suites are what exercises the schema; skipping them here would"
+              + " report a pass that tested no SQL.");
+    }
+    Assumptions.abort(DB_URL_ENV + " is not set; skipping the suites that need a database");
+    throw new AssertionError("unreachable");
+  }
 
   /** pgjdbc URL for the given libpq URL, scoped to {@code schema} when non-null. */
   public static String jdbcUrl(String rawUrl, String schema) {

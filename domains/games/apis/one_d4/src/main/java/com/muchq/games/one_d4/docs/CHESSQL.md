@@ -241,9 +241,9 @@ NULLs resolve on the next pass rather than persisting.
 
 To count unset rows directly, group by the field on `/v1/aggregate` and read the `null` bucket.
 
-One paging consequence worth knowing: results are ordered by `played_at` descending, and the two
-engines sort unset timestamps to opposite ends — Postgres (the deployment) puts them first, H2
-last. A game with no `played_at` therefore leads the first page of `date != "D"` in production.
+One paging consequence worth knowing: results are ordered by `played_at` descending, and
+Postgres sorts unset timestamps first. A game with no `played_at` therefore leads the first page
+of `date != "D"`.
 
 ## Motifs
 

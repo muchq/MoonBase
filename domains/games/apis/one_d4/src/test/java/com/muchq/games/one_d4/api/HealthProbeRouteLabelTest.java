@@ -2,6 +2,7 @@ package com.muchq.games.one_d4.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.muchq.games.one_d4.db.TestDb;
 import com.muchq.platform.yodel.micronaut.HttpServerMetricsFilter;
 import io.micronaut.context.ApplicationContext;
 import io.micronaut.runtime.server.EmbeddedServer;
@@ -34,7 +35,7 @@ public class HealthProbeRouteLabelTest {
             EmbeddedServer.class,
             Map.of(
                 "indexer.db.url",
-                "jdbc:h2:mem:health_probe_route_test_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1",
+                TestDb.jdbcUrlFor("health_probe_route"),
                 "micronaut.server.port",
                 "-1"));
     client = HttpClient.newHttpClient();
