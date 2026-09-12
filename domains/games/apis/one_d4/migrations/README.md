@@ -12,6 +12,12 @@ against.
 - `V<NNN>__<name>.sql` — a step. One file, one engine: Postgres, the engine
   every suite and the deployment run (#1532).
 
+`V001__initial_schema.sql` is the whole schema today. It was collapsed from
+eighteen steps in #1532, which is a thing you can do exactly once and only
+while no deployed database has state worth keeping — there is no tracking
+table, so the files are re-executed in full every deploy and nothing records
+which of them a given database has seen. From here the rule below applies.
+
 ## Rules
 
 - **Idempotent, always.** Every statement must be safe to re-run:
@@ -28,7 +34,15 @@ against.
 - **Append, don't edit.** A schema change is a new `V<NNN>` step: the next
   number, a line in `manifest.txt`, and the file named in
   `:migrations_sql_files` (`BUILD.bazel`) — the one list both `:migrations`
-  and `:migrations_sql` compose. A file unlisted in BUILD neither ships nor runs, and no
+  and `:migrations_sql` compose.
+
+  Editing an applied step is for comments only, and the trap is specific:
+  a step that *adds* something a later step *drops* runs both halves on
+  every deploy, forever. Postgres never reuses a dropped column's attnum
+  and counts it against the 1600-column ceiling, so an add/drop pair spends
+  one permanently per deploy until `ADD COLUMN` starts failing. If a step's
+  effect is meant to go away, the step that added it is what should stop
+  adding it. A file unlisted in BUILD neither ships nor runs, and no
   test can see it. Editing an old step is for comments only.
 - **Plain SQL, and a whole file has to work as one script.** Every file also
   works under `psql -f`; nothing here depends on the runner. Java splits on

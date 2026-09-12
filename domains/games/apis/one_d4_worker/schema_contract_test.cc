@@ -51,9 +51,11 @@ TEST(SchemaContract, EveryMigrationFileIsReachableFromTheManifest) {
         << path << " is not reachable from manifest.txt — it never runs anywhere";
     ++seen;
   }
-  // A loose floor: only there to catch the walk finding nothing at all, so a
-  // legitimate consolidation of steps doesn't trip it.
-  EXPECT_GT(seen, 10) << "the directory walk found almost nothing — the data moved";
+  // Exactly the manifest's steps plus the manifest itself. Pinned to the
+  // manifest rather than a floor, so consolidating steps cannot trip it and a
+  // walk that found nothing cannot pass it.
+  EXPECT_EQ(seen, static_cast<int>(steps->size()) + 1)
+      << "the runfiles tree and manifest.txt disagree about how many files there are";
 }
 
 // Every step resolves. A step whose file is missing from :migrations_sql is

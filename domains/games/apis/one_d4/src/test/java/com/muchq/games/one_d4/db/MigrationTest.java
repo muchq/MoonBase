@@ -31,7 +31,7 @@ public class MigrationTest {
   }
 
   @Test
-  public void run_createsMotifOccurrencesTable_andDropsHasMotifColumns() throws Exception {
+  public void run_createsMotifOccurrencesTableAndNoHasMotifColumns() throws Exception {
     Migration migration = new Migration(dataSource);
     migration.run();
 
@@ -42,7 +42,8 @@ public class MigrationTest {
         assertThat(tables.next()).as("motif_occurrences table should exist").isTrue();
       }
 
-      // has_* boolean columns should not exist — motif queries use motif_occurrences directly
+      // The has_* boolean motif columns are not part of the schema — motif queries read
+      // motif_occurrences directly, and an index on a denormalized copy is what this avoids.
       try (ResultSet columns = meta.getColumns(null, schema, "game_features", "has_pin")) {
         assertThat(columns.next()).as("game_features.has_pin column should not exist").isFalse();
       }
@@ -50,14 +51,12 @@ public class MigrationTest {
   }
 
   /**
-   * The columns that make the table dispatchable, and the upgrade path onto them.
-   *
-   * <p>Asserted against a table that already has a row, because the interesting case is not a fresh
-   * schema — it is a request in flight during a deploy. Both columns are read as primitives, so a
-   * row the migration left NULL would arrive silently as "do not skip the cache, never attempted".
+   * {@code skip_cache} and {@code attempts} are read as primitives, so a NULL arrives silently as
+   * "do not skip the cache, never attempted" rather than as an error. Their DEFAULTs are what keep
+   * that from being load-bearing, and a row inserted without them is where it shows.
    */
   @Test
-  public void run_addsDispatchColumnsAndBackfillsExistingRows() throws Exception {
+  public void run_defaultsTheDispatchColumnsForARowThatOmitsThem() throws Exception {
     new Migration(dataSource).run();
 
     UUID legacy = UUID.randomUUID();
@@ -415,136 +414,17 @@ public class MigrationTest {
   public void theLiveRequestIndexRefusesASecondLiveRowAgainstAProcessingIncumbent()
       throws Exception {
     new Migration(dataSource).run();
-    insertLegacyRequest("held", "2024-07", "2024-07", false, "PROCESSING", null);
+    insertRequest("held", "2024-07", "2024-07", false, "PROCESSING", null);
 
-    assertThatThrownBy(
-            () -> insertLegacyRequest("held", "2024-07", "2024-07", false, "PENDING", null))
+    assertThatThrownBy(() -> insertRequest("held", "2024-07", "2024-07", false, "PENDING", null))
         .isInstanceOf(java.sql.SQLException.class)
         .hasMessageContaining("idx_indexing_requests_live");
 
     // The control: a terminal row for the same range is what the WHERE exists to allow.
-    insertLegacyRequest("held", "2024-07", "2024-07", false, "COMPLETED", null);
+    insertRequest("held", "2024-07", "2024-07", false, "COMPLETED", null);
   }
 
-  /** V009's column and its constraint are gone, not merely unwritten. */
-  @Test
-  public void run_leavesNoDedupeKeyColumnBehind() throws Exception {
-    new Migration(dataSource).run();
-
-    try (Connection conn = dataSource.getConnection()) {
-      try (ResultSet columns =
-          conn.getMetaData().getColumns(null, schema, "indexing_requests", "dedupe_key")) {
-        assertThat(columns.next()).as("dedupe_key survived V018").isFalse();
-      }
-    }
-  }
-
-  /**
-   * The upgrade path onto the index, which is the one thing about V018 that a fresh schema cannot
-   * show. V009's losers stayed PENDING while holding no key, so a real database can carry several
-   * live rows per range — and {@code CREATE UNIQUE INDEX} would reject them and abort the deploy.
-   *
-   * <p>Staged by dropping the index and inserting the duplicates the old schema permitted, then
-   * running the migrations again: the same statements a deploy would run, against the state a
-   * deploy would find.
-   *
-   * <p>All three share a created_at, so the id tiebreak is what picks the survivor: without it the
-   * statement retires nothing and {@code CREATE UNIQUE INDEX} aborts. Which row that is comes from
-   * {@code findExistingRequest} rather than from a Java-side comparison — {@code UUID.compareTo} is
-   * signed and Postgres compares uuid bytes unsigned.
-   */
-  @Test
-  public void run_retiresPreExistingDuplicateLiveRequestsSoTheIndexCanBeBuilt() throws Exception {
-    new Migration(dataSource).run();
-
-    try (Connection conn = dataSource.getConnection();
-        Statement stmt = conn.createStatement()) {
-      stmt.execute("DROP INDEX idx_indexing_requests_live");
-    }
-    Instant sameInstant = Instant.parse("2026-06-01T00:00:00Z");
-    UUID first = insertLegacyRequest("dupe", "2024-05", "2024-05", false, "PENDING", sameInstant);
-    UUID second = insertLegacyRequest("dupe", "2024-05", "2024-05", false, "PENDING", sameInstant);
-    UUID third =
-        insertLegacyRequest("dupe", "2024-05", "2024-05", false, "PROCESSING", sameInstant);
-
-    new Migration(dataSource).run();
-
-    UUID adopted =
-        new IndexingRequestDao(org.jdbi.v3.core.Jdbi.create(dataSource))
-            .findExistingRequest("dupe", "CHESS_COM", "2024-05", "2024-05", false)
-            .orElseThrow()
-            .id();
-    assertThat(statusOf(adopted))
-        .as("the surviving row keeps the range")
-        .isIn("PENDING", "PROCESSING");
-    for (UUID id : java.util.List.of(first, second, third)) {
-      if (!id.equals(adopted)) {
-        assertThat(statusOf(id))
-            .as("a superseded duplicate is retired, not left live")
-            .isEqualTo("FAILED");
-      }
-    }
-
-    // The point of the retirement: the index exists again afterwards, so the deploy completed.
-    assertThat(indexDefinition("idx_indexing_requests_live")).contains("UNIQUE");
-  }
-
-  /**
-   * Which duplicate survives when a worker is running one of them. Age alone would retire the
-   * leased run in favour of an older idle row — clearing {@code owner_id} out from under a flush,
-   * which no reclaim arm ever does — and the oldest row stops being the one that holds the range as
-   * soon as a terminal write frees V009's key and a resubmit takes it.
-   */
-  @Test
-  public void run_keepsTheDuplicateAWorkerIsRunning() throws Exception {
-    new Migration(dataSource).run();
-
-    try (Connection conn = dataSource.getConnection();
-        Statement stmt = conn.createStatement()) {
-      stmt.execute("DROP INDEX idx_indexing_requests_live");
-    }
-    UUID idle =
-        insertLegacyRequest(
-            "leased",
-            "2024-06",
-            "2024-06",
-            false,
-            "PENDING",
-            Instant.parse("2026-01-01T00:00:00Z"));
-    UUID running =
-        insertLegacyRequest(
-            "leased",
-            "2024-06",
-            "2024-06",
-            false,
-            "PROCESSING",
-            Instant.parse("2026-02-01T00:00:00Z"));
-    lease(running, Instant.parse("2099-01-01T00:00:00Z"));
-
-    new Migration(dataSource).run();
-
-    assertThat(statusOf(running))
-        .as("the run a worker holds keeps the range")
-        .isEqualTo("PROCESSING");
-    assertThat(statusOf(idle))
-        .as("the older idle duplicate is the one retired")
-        .isEqualTo("FAILED");
-  }
-
-  /** Marks a request as held by a worker whose lease runs to {@code until}. */
-  private void lease(UUID id, Instant until) throws Exception {
-    try (Connection conn = dataSource.getConnection();
-        var ps =
-            conn.prepareStatement(
-                "UPDATE indexing_requests SET owner_id = 'worker-1', lease_expires_at = ?"
-                    + " WHERE id = ?")) {
-      ps.setTimestamp(1, java.sql.Timestamp.from(until));
-      ps.setObject(2, id);
-      ps.executeUpdate();
-    }
-  }
-
-  private UUID insertLegacyRequest(
+  private UUID insertRequest(
       String player,
       String startMonth,
       String endMonth,
@@ -569,18 +449,5 @@ public class MigrationTest {
       ps.executeUpdate();
     }
     return id;
-  }
-
-  private String statusOf(UUID id) {
-    try (Connection conn = dataSource.getConnection();
-        var ps = conn.prepareStatement("SELECT status FROM indexing_requests WHERE id = ?")) {
-      ps.setObject(1, id);
-      try (ResultSet rs = ps.executeQuery()) {
-        assertThat(rs.next()).as("row %s is gone", id).isTrue();
-        return rs.getString("status");
-      }
-    } catch (Exception e) {
-      throw new RuntimeException(e);
-    }
   }
 }

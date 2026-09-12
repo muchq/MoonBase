@@ -65,24 +65,7 @@ java_library(
 filegroup(
     name = "migrations_sql_files",
     srcs = [
-        "migrations/V001__core_tables.sql",
-        "migrations/V002__exclude_bullet.sql",
-        "migrations/V003__indexed_periods_unique.sql",
-        "migrations/V004__game_features_indexed_at.sql",
-        "migrations/V005__drop_motifs_json.sql",
-        "migrations/V006__motif_occurrences.sql",
-        "migrations/V007__openings_and_titles.sql",
-        "migrations/V008__drop_has_motif_columns.sql",
-        "migrations/V009__dedupe_key.sql",
-        "migrations/V010__dedupe_key_unique.sql",
-        "migrations/V011__game_features_read_indexes.sql",
-        "migrations/V012__username_indexes.sql",
-        "migrations/V013__indexed_at_index.sql",
-        "migrations/V014__lease_columns.sql",
-        "migrations/V015__dispatch_columns.sql",
-        "migrations/V016__claimable_index.sql",
-        "migrations/V017__reanalysis_requests.sql",
-        "migrations/V018__live_request_index.sql",
+        "migrations/V001__initial_schema.sql",
     ],
 )
 
