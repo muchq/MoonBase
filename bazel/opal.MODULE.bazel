@@ -6,15 +6,15 @@ bazel_dep(name = "opal_cpp", version = "0.0.0")
 # loudly rather than silently changing the build.
 # Evaluation: https://github.com/muchq/MoonBase/issues/1168
 #
-# Carries the ADR-0024 rename: the runtime namespace is opal::, its include
-# root is opal/, and the module and its labels are opal_cpp. The
-# smithy_cpp_*_library rules keep their names; they take a Smithy model as
-# input.
+# Generated clients stream a @streaming blob response payload, and the retry
+# loop honors Retry-After — both for the lichess archive (#1527). Responses
+# now cap at ClientConfig::max_response_bytes, 64 MiB; a 500-game chess.com
+# month is about 2 MB.
 archive_override(
     module_name = "opal_cpp",
-    integrity = "sha256-HRk2o7jshk/XOpsUO15ha2dJbummWjyCpky7W7PnVEM=",
-    strip_prefix = "opal-cpp-dee816288a365e32e8d126b59ff990c1f7921f00",
+    integrity = "sha256-EnIcMqHGYYfCb35ZUJ2NwjMm6HK/UFCHbezEEO/pA58=",
+    strip_prefix = "opal-cpp-6bb66f1fee163dd8d79b7f5ccce48b9eec274431",
     urls = [
-        "https://github.com/muchq/opal-cpp/archive/dee816288a365e32e8d126b59ff990c1f7921f00.tar.gz",
+        "https://github.com/muchq/opal-cpp/archive/6bb66f1fee163dd8d79b7f5ccce48b9eec274431.tar.gz",
     ],
 )
