@@ -11,9 +11,12 @@ document; the highlights below are pointers, not a substitute.
 
 The three rules that change behavior most:
 
-- **A test beats an argument.** If a behavior is worth reasoning about, the
-  deliverable is a CI test, not a paragraph. When a reviewer asks "what happens
-  if X?", write the test named after X.
+- **A test beats an argument, and it lands first.** If a behavior is worth
+  reasoning about, the deliverable is a CI test, not a paragraph — written
+  before the code and watched failing for the right reason. Reverting the fix
+  afterwards to make the test go red is not the same thing and does not count
+  as having watched it fail. When a reviewer asks "what happens if X?", write
+  the test named after X.
 - **Push — and open the PR where one is being opened — then run the review
   panel** against that head: four independent agents on four distinct lenses,
   each refuting its own findings. Landing first makes the panel's work visible
