@@ -113,8 +113,11 @@ public class ChessQlReferenceTest {
       String documentedSql = unbacktick(cells[2]);
       CompiledQuery compiled = compiler.compile(Parser.parse(input));
 
-      Optional<List<Object>> documented =
-          cells.length > 3 ? documentedParameters(unbacktick(cells[3])) : Optional.empty();
+      if (cells.length <= 3) {
+        throw new AssertionError(
+            "CHESSQL.md documents `" + input + "` with no Parameters cell at all");
+      }
+      Optional<List<Object>> documented = documentedParameters(unbacktick(cells[3]));
       if (documented.isPresent()) {
         assertThat(compiled.parameters())
             .as("CHESSQL.md documents `%s` as binding %s", input, documented.get())
@@ -152,13 +155,20 @@ public class ChessQlReferenceTest {
    * The Parameters cell as values, or empty for the timestamp rows, which render a bound value for
    * a human rather than as its {@code toString}.
    *
-   * <p>Only that shape is skipped. Anything else unreadable fails: quietly skipping it would let a
-   * single edit both un-pin a row and change what it documents, and the floor on the number of
-   * pinned rows cannot see which row went missing.
+   * <p>Only that shape is skipped, and only inside a well-formed list. A missing cell, a cell that
+   * is not a {@code [...]} list, and an entry that is neither a quoted string nor a bare integer
+   * all fail: quietly skipping any of them would let a single edit both un-pin a row and change
+   * what it documents, and the floor on the number of pinned rows cannot see which row went
+   * missing.
    */
   private static Optional<List<Object>> documentedParameters(String cell) {
+    // Not a list at all. Skipping it would let one edit both un-pin a row and
+    // change what it documents — the brackets are not decoration.
     if (!cell.startsWith("[") || !cell.endsWith("]")) {
-      return Optional.empty();
+      throw new AssertionError(
+          "CHESSQL.md Parameters cell "
+              + cell
+              + " is not a [...] list — every data row binds something, even if that is []");
     }
     String body = cell.substring(1, cell.length() - 1).trim();
     if (body.isEmpty()) {
