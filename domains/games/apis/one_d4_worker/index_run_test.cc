@@ -279,6 +279,40 @@ TEST(IndexRun, RecordsAGameItCannotReplayRatherThanDroppingIt) {
   EXPECT_THAT(sink.written[0].occurrences, Not(IsEmpty())) << "the good games still extract";
 }
 
+// A platform that states the opening beats one that has to be scraped out of
+// a URL slug: Lichess writes [Opening], and OpeningNameFromEcoUrl only knows
+// chess.com's ECOUrl. Without the preference every Lichess row would carry a
+// blank opening name while its PGN named one.
+TEST(IndexRun, PrefersAStatedOpeningNameOverTheScrapedOne) {
+  FakeArchive archive;
+  ArchivedGame stated = AGame("g-stated");
+  stated.eco_url = "";
+  stated.opening_name = "Goldsmith Defense";
+  archive.months["2026-01"] = {stated};
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  ASSERT_EQ(sink.written.size(), 1u);
+  EXPECT_EQ(sink.written[0].opening_name, "Goldsmith Defense");
+}
+
+// chess.com states neither, so the slug stays the fallback.
+TEST(IndexRun, ScrapesTheOpeningNameWhenNoneIsStated) {
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g-scraped")};
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  ASSERT_EQ(sink.written.size(), 1u);
+  EXPECT_EQ(sink.written[0].opening_name, "Kings Pawn Opening Wayward Queen Attack");
+}
+
 TEST(IndexRun, RecordsAGameWhosePgnWillNotEvenParse) {
   FakeArchive archive;
   ArchivedGame garbage = AGame("g-garbage");

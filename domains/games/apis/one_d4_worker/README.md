@@ -105,11 +105,66 @@ hit them:
 |---|---|---|
 | Postgres connections | 2 — one to claim and renew over, one to flush over | `max_connections` is 100 by default, shared with one_d4 and games_hub |
 | chess.com requests | 1 concurrent | a run fetches one month at a time, so `slots × replicas` is the concurrency against a rate-limited API |
+| Lichess exports | 1 concurrent **per process, enforced** | Lichess refuses concurrent exports outright; see below |
 | CPU | fraction of one | PGN replay and motif detection; `cpus: '0.5'` in compose bounds it |
 
 Neither connection may be shared. A heartbeat queued behind a flush is a
 lease lost under a healthy run, and one `pg::Client` is one connection
 serialised by a mutex.
+
+### Why Lichess is gated and chess.com is not
+
+chess.com tolerates `slots × replicas` concurrent requests and merely rate
+limits. Lichess refuses them: a second export in flight answers 429 *Please
+only run 1 request(s) at a time*, and the cooldown has outlasted a
+75-second backoff. So `LichessArchive` holds a mutex across the export —
+and across nothing else.
+
+That distinction is the whole design. The lock covers the HTTP stream; the
+PGN split, the replay, the motif detection and the flush all happen outside
+it, so one slot streaming does not stop the others computing.
+
+```mermaid
+flowchart TB
+  subgraph slots["Worker slots — ONE_D4_INDEX_SLOTS, 4 in compose"]
+    S1["slot 1"]
+    S2["slot 2"]
+    S3["slot 3"]
+  end
+
+  S1 --> Gate
+  S2 --> Gate
+  S3 --> Gate
+
+  Gate{{"LichessArchive::one_at_a_time_"}}
+  Gate -->|"one at a time"| Stream["ExportGames — HTTP stream, ~20 games/s"]
+  Stream --> Release(["lock released"])
+
+  Release --> P1["slot 1: split → parse → motifs → flush"]
+  Release --> P2["slot 2: split → parse → motifs → flush"]
+  Release --> P3["slot 3: split → parse → motifs → flush"]
+
+  S1 -.->|"CHESS_COM: no gate"| CC["FetchArchive"]
+  S2 -.-> CC
+  S3 -.-> CC
+```
+
+Serialised IO, parallel CPU, and pipelined: while one slot is detecting
+motifs, the next is already streaming.
+
+A dedicated IO thread would add nothing over this. A run cannot compute
+before its own month arrives, so parking on a mutex and parking on a queue
+reply are the same park, and the ceiling is Lichess's 20 games/second
+either way.
+
+What the gate does cost is slots. A run waiting on it holds its claim, its
+lease and its two Postgres connections while doing nothing, for as long as
+the export ahead of it takes — up to `request_timeout_ms`, ten minutes. With
+every slot on a LICHESS request, the worker is one stream wide and the rest
+is parked, including against chess.com work that has no such rule. Not
+reachable yet: the API refuses a LICHESS submit until #1527 slice 6 opens
+it, and the fix when it does is upstream of here — not claiming more than
+one LICHESS request at a time.
 
 ### Reading the log
 

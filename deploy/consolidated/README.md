@@ -206,6 +206,22 @@ it, because renaming a role and database holding live rows is an operation, not 
 both URL-safe (no `@ / ? # %` or quotes): each rides in a libpq URL and a single-quoted SQL
 literal. Compose refuses to start the project if either is unset.
 
+### The Lichess token
+
+**`ONE_D4_LICHESS_TOKEN`** in `~/.env` is a Lichess personal access token, and
+`one_d4_worker` reads it through `compose.yaml`. No scope is needed for the games
+export; create one at <https://lichess.org/account/oauth/token> with nothing ticked.
+
+It is optional, and a host without it is a working host: chess.com indexing is
+unaffected, and the API does not yet accept a LICHESS submit (#1527). What it
+changes is whether a LICHESS request can succeed at all — Lichess answers the games
+export with **404 to anonymous callers, even for accounts that exist**, so without
+the token every such request fails rather than returning nothing. Unset, no
+`Authorization` header is sent at all, which is the correct anonymous request.
+
+No URL-safe constraint, unlike the database passwords: it rides in an HTTP header,
+not a libpq URL or a SQL literal.
+
 ### The stats profile
 
 `log_shipper`, `stats` and `stats_db_init` sit behind the `stats` compose profile: they fail

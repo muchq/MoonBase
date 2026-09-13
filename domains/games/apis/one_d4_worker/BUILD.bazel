@@ -687,6 +687,7 @@ cc_binary(
         ":db_options",
         ":index_pool",
         ":index_run",
+        ":lichess_archive",
         ":metrics",
         ":pg_game_sink",
         ":pg_queue",
@@ -701,6 +702,7 @@ cc_binary(
         ":title_roster",
         ":worker",
         "//domains/games/libs/chess_com_cpp:production_client",
+        "//domains/games/libs/lichess_cpp:production_client",
         "//domains/platform/libs/futility/env",
         "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/futility/otel:otel_provider",
@@ -803,6 +805,43 @@ cc_test(
 # The assembly: which pieces a claimed request is run against. Split out
 # of worker_main because a binary has no test target, and every wiring
 # choice in it was one nothing would notice changing (#1406).
+# The Lichess half of the archive port (#1527 slice 4). Concatenated PGN
+# rather than game objects, so the row is read out of tag pairs.
+cc_library(
+    name = "lichess_archive",
+    srcs = ["lichess_archive.cc"],
+    hdrs = ["lichess_archive.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":archive",
+        ":job",
+        "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/lichess_cpp:client",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "lichess_archive_test",
+    size = "small",
+    srcs = ["lichess_archive_test.cc"],
+    deps = [
+        ":lichess_archive",
+        ":result",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
 cc_library(
     name = "worker",
     srcs = ["worker.cc"],
