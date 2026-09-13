@@ -70,7 +70,7 @@ Start indexing a player's games for motif detection.
     },
     "platform": {
       "type": "string",
-      "description": "The chess platform (currently only chess.com)"
+      "description": "The chess platform: chess.com or lichess"
     },
     "start_month": {
       "type": "string",

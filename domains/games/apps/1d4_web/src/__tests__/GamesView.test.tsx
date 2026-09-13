@@ -33,7 +33,7 @@ vi.mock('react-chessboard', () => ({
 
 const mockGame: GameRow = {
   gameUrl: 'https://chess.com/game/99',
-  platform: 'chess.com',
+  platform: 'CHESS_COM',
   whiteUsername: '_prior',
   blackUsername: 'OpponentA',
   whiteElo: 1500,

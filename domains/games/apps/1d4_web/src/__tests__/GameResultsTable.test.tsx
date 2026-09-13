@@ -12,7 +12,7 @@ vi.mock('react-chessboard', () => ({
 
 const game1: GameRow = {
   gameUrl: 'https://chess.com/game/1',
-  platform: 'chess.com',
+  platform: 'CHESS_COM',
   whiteUsername: 'Alice',
   blackUsername: 'Bob',
   whiteElo: 1800,
@@ -28,7 +28,7 @@ const game1: GameRow = {
 
 const game2: GameRow = {
   gameUrl: 'https://chess.com/game/2',
-  platform: 'chess.com',
+  platform: 'CHESS_COM',
   whiteUsername: 'Carol',
   blackUsername: 'Dave',
   whiteElo: 2100,

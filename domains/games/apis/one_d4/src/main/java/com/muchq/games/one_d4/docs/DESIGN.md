@@ -2,7 +2,7 @@
 
 ## Overview
 
-A Micronaut service that indexes chess games from chess.com (lichess planned), extracts tactical motifs via position replay, and exposes a custom query language (ChessQL) for searching indexed games.
+A Micronaut service that indexes chess games from chess.com and lichess, extracts tactical motifs via position replay, and exposes a custom query language (ChessQL) for searching indexed games.
 
 **Stack**: Java 21, Micronaut 4.x, Bazel, PostgreSQL, chariot (chess library), JDBI3, HikariCP
 

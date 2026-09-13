@@ -355,3 +355,27 @@ describe('IndexView', () => {
     expect(api.createIndex).not.toHaveBeenCalled();
   });
 });
+
+// The gate #1527 was waiting on, from the form's side. The select's state
+// already defaulted to CHESS_COM and posted it; what was missing was anywhere
+// else to go.
+describe('platform options', () => {
+  beforeEach(() => {
+    vi.mocked(api.listIndexRequests).mockResolvedValue([]);
+  });
+
+  it('offers both platforms, labelled the way their sites spell themselves', () => {
+    render(<IndexView />, { wrapper: makeWrapper() });
+
+    const select = screen.getByLabelText('Platform') as HTMLSelectElement;
+    const options = Array.from(select.options);
+    expect(options.map((o) => o.value)).toEqual(['CHESS_COM', 'LICHESS']);
+    expect(options.map((o) => o.textContent)).toEqual(['chess.com', 'lichess']);
+  });
+
+  it('still defaults to chess.com', () => {
+    render(<IndexView />, { wrapper: makeWrapper() });
+
+    expect((screen.getByLabelText('Platform') as HTMLSelectElement).value).toBe('CHESS_COM');
+  });
+});

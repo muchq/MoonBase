@@ -10,7 +10,9 @@ import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * The single owner of the index-request lifecycle: validate → normalize → dedupe → create →
@@ -151,6 +153,15 @@ public class IndexRequestService {
   }
 
   /**
+   * What one_d4_worker's archive registry serves, in the spelling that registry is keyed on.
+   *
+   * <p>The two lists have to be the same: a request naming a platform no archive serves fails the
+   * run rather than completing it empty (#1360), which spends an attempt on work nobody could do.
+   * Accepting one here that {@code worker_main.cc} does not register is how that happens.
+   */
+  private static final Set<String> SUPPORTED_PLATFORMS = Set.of("CHESS_COM", "LICHESS");
+
+  /**
    * The canonical spelling of a platform this service will index, or a 400. What it returns is what
    * gets stored, so it returns the canonicalised value rather than a constant that happens to equal
    * it — {@link Platforms#canonical} is then the one rule deciding the stored spelling as well as
@@ -161,9 +172,13 @@ public class IndexRequestService {
       throw new IllegalArgumentException("platform is required");
     }
     String normalized = Platforms.canonical(platform);
-    if (!"CHESS_COM".equals(normalized)) {
+    if (!SUPPORTED_PLATFORMS.contains(normalized)) {
+      // Names what it will take: a 400 that only says no costs a round trip to the source.
       throw new IllegalArgumentException(
-          "Unsupported platform: " + platform + ". Supported: chess.com (CHESS_COM)");
+          "Unsupported platform: "
+              + platform
+              + ". Supported: "
+              + SUPPORTED_PLATFORMS.stream().sorted().collect(Collectors.joining(", ")));
     }
     return normalized;
   }

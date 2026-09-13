@@ -1,3 +1,4 @@
+import { PLATFORMS } from '../platforms';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listIndexRequests, createIndex } from '../api';
@@ -122,7 +123,11 @@ export default function IndexView() {
                 value={platform}
                 onChange={(e) => setPlatform(e.target.value)}
               >
-                <option value="CHESS_COM">chess.com</option>
+                {PLATFORMS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
               </select>
             </div>
           </div>

@@ -218,6 +218,13 @@ table {
   white-space: normal;
 }
 
+/* The Site column reads as secondary: it disambiguates the row, it is not what
+   anyone scans for. */
+.platform-label {
+  color: var(--text-muted, #888);
+  white-space: nowrap;
+}
+
 th,
 td {
   padding: 0.5rem 0.75rem;

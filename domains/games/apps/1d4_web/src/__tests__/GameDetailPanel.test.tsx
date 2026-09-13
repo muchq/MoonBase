@@ -23,7 +23,7 @@ const forkOccurrence: OccurrenceRow = {
 
 const mockGame: GameRow = {
   gameUrl: 'https://chess.com/game/1',
-  platform: 'chess.com',
+  platform: 'CHESS_COM',
   whiteUsername: 'Alice',
   blackUsername: 'Bob',
   whiteElo: 1500,
@@ -221,5 +221,27 @@ describe('GameDetailPanel', () => {
     expect(items[0]).toHaveTextContent('pin');
     expect(items[1]).toHaveTextContent('2.');
     expect(items[1]).toHaveTextContent('fork');
+  });
+});
+
+// #1540 called this the sharpest case: the panel links out, and the link's
+// host was the only thing on the page saying where the game came from.
+describe('platform', () => {
+  it('names the site alongside the rest of the game meta', () => {
+    render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
+
+    expect(screen.getByText(/chess\.com/)).toBeInTheDocument();
+    expect(screen.queryByText(/CHESS_COM/)).toBeNull();
+  });
+
+  it('names a lichess game as lichess', () => {
+    render(
+      <GameDetailPanel
+        game={{ ...mockGame, platform: 'LICHESS', gameUrl: 'https://lichess.org/abc' }}
+        onClose={() => {}}
+      />
+    );
+
+    expect(screen.getByText(/lichess/)).toBeInTheDocument();
   });
 });

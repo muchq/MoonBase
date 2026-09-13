@@ -28,7 +28,7 @@ public class IndexGamesTool {
               + " query_chess_games and aggregate_chess_games.")
   public CallToolResult indexChessGames(
       @ToolArg(description = "Chess platform username") String username,
-      @ToolArg(description = "Chess platform (currently only chess.com)") String platform,
+      @ToolArg(description = "Chess platform: chess.com or lichess") String platform,
       @ToolArg(name = "start_month", description = "Start month in YYYY-MM format (e.g. 2026-03)")
           String startMonth,
       @ToolArg(name = "end_month", description = "End month in YYYY-MM format (e.g. 2026-03)")

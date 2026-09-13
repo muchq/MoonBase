@@ -1,5 +1,6 @@
 import { Fragment, useId, useRef } from 'react';
 import type { GameRow } from '../types';
+import { platformLabel } from '../platforms';
 import MotifBadge from './MotifBadge';
 import GameDetailPanel from './GameDetailPanel';
 
@@ -9,6 +10,11 @@ import GameDetailPanel from './GameDetailPanel';
 // room, squeezed to nothing on a laptop-width screen. Click the row to get
 // both back.
 const COLUMNS = [
+  // Narrow, and kept despite the note above about column count: the two that
+  // were removed were the game URL and a timestamp, both wide. A site name is
+  // not, and without it two players sharing a handle across platforms read as
+  // the same person (#1540).
+  { id: 'platform', label: 'Site', sort: true },
   { id: 'whiteUsername', label: 'White', sort: true },
   { id: 'blackUsername', label: 'Black', sort: true },
   { id: 'whiteElo', label: 'White ELO', sort: true },
@@ -45,6 +51,8 @@ function renderCell(
 ): React.ReactNode {
   const g = game as unknown as Record<string, unknown>;
   switch (colId) {
+    case 'platform':
+      return <span className="platform-label">{platformLabel(game.platform)}</span>;
     // The White cell doubles as the row's expand control. The row's own
     // onClick stays for mouse users, but a <tr> is not focusable and has no
     // keyboard semantics, so before this the detail panel — and with it the
