@@ -1,5 +1,6 @@
 package com.muchq.games.one_d4.service;
 
+import com.muchq.games.chessql.compiler.Platforms;
 import com.muchq.games.one_d4.api.dto.IndexResponse;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.db.RetentionPolicy;
@@ -152,7 +153,7 @@ public class IndexRequestService {
     if (platform == null || platform.isBlank()) {
       throw new IllegalArgumentException("platform is required");
     }
-    String normalized = platform.strip().toUpperCase(Locale.ROOT).replace('.', '_');
+    String normalized = Platforms.canonical(platform);
     if (!"CHESS_COM".equals(normalized)) {
       throw new IllegalArgumentException(
           "Unsupported platform: " + platform + ". Supported: chess.com (CHESS_COM)");

@@ -866,7 +866,11 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
       return parsePlayedAtValue(field, value);
     }
     if (STRING_COLUMNS.contains(column)) {
-      return requireString(field, value);
+      String string = requireString(field, value);
+      // platform is stored canonically by whoever indexed the game, so the literal is canonicalised
+      // to match rather than bound as typed (#1539). LOWER() on both sides then compares
+      // chess_com to chess_com.
+      return "platform".equals(column) ? Platforms.canonical(string) : string;
     }
     return requireInteger(field, value);
   }

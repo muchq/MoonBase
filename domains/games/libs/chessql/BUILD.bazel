@@ -21,6 +21,7 @@ java_library(
     srcs = [
         "src/main/java/com/muchq/games/chessql/compiler/AggregateSpec.java",
         "src/main/java/com/muchq/games/chessql/compiler/CompiledQuery.java",
+        "src/main/java/com/muchq/games/chessql/compiler/Platforms.java",
         "src/main/java/com/muchq/games/chessql/compiler/QueryCompiler.java",
         "src/main/java/com/muchq/games/chessql/compiler/SqlCompiler.java",
     ],
@@ -60,6 +61,7 @@ java_test_suite(
     size = "small",
     srcs = [
         "src/test/java/com/muchq/games/chessql/compiler/AggregateSpecTest.java",
+        "src/test/java/com/muchq/games/chessql/compiler/PlatformsTest.java",
         "src/test/java/com/muchq/games/chessql/compiler/SqlCompilerTest.java",
     ],
     deps = [

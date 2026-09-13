@@ -148,7 +148,29 @@ public class SqlCompilerTest {
     CompiledQuery result = compile("platform IN [\"lichess\", \"chess.com\"]");
     assertThat(result.selectSql())
         .isEqualTo(BASE_PREFIX + "LOWER(platform) IN (LOWER(?), LOWER(?))" + BASE_SUFFIX);
-    assertThat(result.parameters()).isEqualTo(List.of("lichess", "chess.com"));
+    assertThat(result.parameters()).isEqualTo(List.of("LICHESS", "CHESS_COM"));
+  }
+
+  /**
+   * The stored spelling is canonical — the indexer writes CHESS_COM — so a platform literal is
+   * canonicalised at compile time rather than bound as typed. Before #1539, {@code platform =
+   * "chess.com"} lowered to chess.com on both sides and matched nothing at all.
+   */
+  @Test
+  public void platformLiteralsAreBoundCanonically() {
+    assertThat(compile("platform = \"chess.com\"").parameters()).isEqualTo(List.of("CHESS_COM"));
+    assertThat(compile("platform = \" Chess.Com \"").parameters()).isEqualTo(List.of("CHESS_COM"));
+    assertThat(compile("platform = \"CHESS_COM\"").parameters()).isEqualTo(List.of("CHESS_COM"));
+    assertThat(compile("platform = \"Lichess\"").parameters()).isEqualTo(List.of("LICHESS"));
+    assertThat(compile("platform != \"chess.com\"").parameters()).isEqualTo(List.of("CHESS_COM"));
+  }
+
+  /** Only platform gets the treatment; the other string columns bind what the user typed. */
+  @Test
+  public void otherStringColumnsAreBoundAsWritten() {
+    assertThat(compile("white.username = \"Hikaru\"").parameters()).isEqualTo(List.of("Hikaru"));
+    assertThat(compile("opening.name = \"Caro-Kann Defense\"").parameters())
+        .isEqualTo(List.of("Caro-Kann Defense"));
   }
 
   @Test

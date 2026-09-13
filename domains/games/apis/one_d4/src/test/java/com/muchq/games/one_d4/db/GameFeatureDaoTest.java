@@ -1569,6 +1569,40 @@ public class GameFeatureDaoTest {
     assertThat(columns).isNotEmpty().doesNotContainAnyElementsOf(aliases);
   }
 
+  /**
+   * The bug #1539 was filed for, end to end: the indexer stores CHESS_COM, and users type
+   * chess.com. This runs the compiled predicate against real rows rather than asserting on SQL text
+   * — the SQL looked right the whole time it was returning nothing.
+   */
+  @Test
+  public void platformFilterMatchesTheStoredSpellingHoweverItIsTyped() {
+    dao.insertBatch(
+        List.of(
+            gameOnPlatform("https://chess.com/game/plat-cc", "CHESS_COM"),
+            gameOnPlatform("https://lichess.org/plat-li", "LICHESS")));
+
+    assertThat(urlsMatching("platform = \"chess.com\""))
+        .containsExactly("https://chess.com/game/plat-cc");
+    assertThat(urlsMatching("platform = \"CHESS_COM\""))
+        .containsExactly("https://chess.com/game/plat-cc");
+    assertThat(urlsMatching("platform = \"Chess.Com\""))
+        .containsExactly("https://chess.com/game/plat-cc");
+    assertThat(urlsMatching("platform = \"lichess\""))
+        .containsExactly("https://lichess.org/plat-li");
+    assertThat(urlsMatching("platform IN [\"chess.com\", \"Lichess\"]"))
+        .containsExactly("https://chess.com/game/plat-cc", "https://lichess.org/plat-li");
+    assertThat(urlsMatching("platform != \"chess.com\""))
+        .containsExactly("https://lichess.org/plat-li");
+  }
+
+  /** A platform nobody indexed still compiles and still runs — it just matches nothing. */
+  @Test
+  public void anUnindexedPlatformMatchesNoRowsRatherThanFailing() {
+    dao.insertBatch(List.of(gameOnPlatform("https://chess.com/game/plat-only", "CHESS_COM")));
+
+    assertThat(urlsMatching("platform = \"chess24.com\"")).isEmpty();
+  }
+
   /** Game URLs matching a ChessQL filter, sorted so assertions read as a set. */
   private List<String> urlsMatching(String chessql) {
     return dao.query(new SqlCompiler().compile(Parser.parse(chessql)), 50, 0).stream()
@@ -2094,6 +2128,29 @@ public class GameFeatureDaoTest {
         requestId,
         url,
         "CHESS_COM",
+        "w",
+        "b",
+        1500,
+        1500,
+        null,
+        null,
+        "blitz",
+        "B00",
+        null,
+        null,
+        "1-0",
+        Instant.now(),
+        20,
+        Instant.now(),
+        "pgn");
+  }
+
+  private GameFeature gameOnPlatform(String url, String platform) {
+    return new GameFeature(
+        null,
+        requestId,
+        url,
+        platform,
         "w",
         "b",
         1500,

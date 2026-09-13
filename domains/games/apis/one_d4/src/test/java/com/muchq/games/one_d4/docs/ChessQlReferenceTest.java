@@ -2,15 +2,20 @@ package com.muchq.games.one_d4.docs;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.Parser;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -83,14 +88,19 @@ public class ChessQlReferenceTest {
    * green, in a file served verbatim to MCP clients as the query-language reference.
    *
    * <p>The documented fragment is matched as an ordered set of substrings so a row may elide with
-   * {@code ...}, which several do rather than reprint a whole EXISTS subquery. Parameters are not
-   * pinned: the column renders them for a human (a bound {@code LocalDateTime} prints unlike its
-   * {@code toString}), and the SQL is what drifted.
+   * {@code ...}, which several do rather than reprint a whole EXISTS subquery.
+   *
+   * <p>Parameters are pinned only where the column is unambiguous — every entry a quoted string or
+   * a bare integer. The timestamp rows render a bound value for a human rather than as its {@code
+   * toString}, so they are skipped rather than given a parser that would only ever be approximately
+   * right. That is enough to cover #1539, where the binds changed and the SQL did not: platform
+   * literals are canonicalised at compile time, and the table went on documenting the old ones.
    */
   @Test
   public void theCompilationExamplesTableMatchesWhatTheCompilerEmits() throws IOException {
     SqlCompiler compiler = new SqlCompiler();
     int checked = 0;
+    int pinnedParameters = 0;
 
     for (String line : section("## Compilation Examples", "## Error Handling").split("\n")) {
       String[] cells = line.split("\\|");
@@ -101,8 +111,18 @@ public class ChessQlReferenceTest {
       }
       String input = unbacktick(cells[1]);
       String documentedSql = unbacktick(cells[2]);
+      CompiledQuery compiled = compiler.compile(Parser.parse(input));
 
-      String actual = compiler.compile(Parser.parse(input)).selectSql();
+      Optional<List<Object>> documented =
+          documentedParameters(cells.length > 3 ? unbacktick(cells[3]) : null);
+      if (documented.isPresent()) {
+        assertThat(compiled.parameters())
+            .as("CHESSQL.md documents `%s` as binding %s", input, documented.get())
+            .isEqualTo(documented.get());
+        pinnedParameters++;
+      }
+
+      String actual = compiled.selectSql();
       String cursor = actual;
       for (String fragment : documentedSql.split("\\.\\.\\.")) {
         assertThat(cursor)
@@ -118,6 +138,38 @@ public class ChessQlReferenceTest {
     assertThat(checked)
         .as("the Compilation Examples table must still have rows to check")
         .isGreaterThanOrEqualTo(8);
+    // An unreadable Parameters cell is skipped, so a reformat could quietly un-pin every row and
+    // leave this test green on a table it no longer reads.
+    assertThat(pinnedParameters)
+        .as("the Compilation Examples table must still have readable Parameters cells")
+        .isGreaterThanOrEqualTo(8);
+  }
+
+  /**
+   * The Parameters cell as values, or empty when a row renders something this cannot read back —
+   * the timestamp rows. An unreadable cell is skipped, not failed: the point is that the readable
+   * ones stay true.
+   */
+  private static Optional<List<Object>> documentedParameters(@Nullable String cell) {
+    if (cell == null || !cell.startsWith("[") || !cell.endsWith("]")) {
+      return Optional.empty();
+    }
+    String body = cell.substring(1, cell.length() - 1).trim();
+    if (body.isEmpty()) {
+      return Optional.of(List.of());
+    }
+    List<Object> values = new ArrayList<>();
+    for (String entry : body.split(",")) {
+      String trimmed = entry.trim();
+      if (trimmed.length() > 1 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+        values.add(trimmed.substring(1, trimmed.length() - 1));
+      } else if (trimmed.matches("-?\\d+")) {
+        values.add(Integer.valueOf(trimmed));
+      } else {
+        return Optional.empty();
+      }
+    }
+    return Optional.of(values);
   }
 
   private static String unbacktick(String cell) {

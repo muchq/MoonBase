@@ -167,6 +167,7 @@ java_library(
         ":db",
         ":dto",
         ":model",
+        "//domains/games/libs/chessql:compiler",
         artifact("org.jspecify:jspecify"),
     ],
 )
@@ -300,6 +301,7 @@ java_test_suite(
         # The Compilation Examples table is checked by compiling its first column.
         "//domains/games/libs/chessql:parser",
         artifact("org.assertj:assertj-core"),
+        artifact("org.jspecify:jspecify"),
         artifact("org.junit.jupiter:junit-jupiter-api"),
     ],
 )
