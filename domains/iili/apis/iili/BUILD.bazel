@@ -106,7 +106,10 @@ cc_test(
     srcs = ["pg_url_store_test.cc"],
     env_inherit = ["PG_TEST_DB_URL"],
     # One shared scratch database: concurrent DB tests truncate each other.
-    tags = ["exclusive"],
+    tags = [
+        "exclusive",
+        "requires-postgres",
+    ],
     deps = [
         ":pg_url_store",
         "//domains/platform/libs/pg",

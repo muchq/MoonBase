@@ -25,7 +25,10 @@ go_test(
         "o11y/otel-collector.yml",
         # Read by TestCIStillRunsTheCollectorDryRun, which checks that CI has not
         # quietly stopped invoking the collector dry-run.
+        "//:.bazelrc",
         "//:.github/workflows/branch.yml",
+        "//:.github/workflows/publish.yml",
+        "//:scripts/diff-build",
         "//:scripts/validate-otel-config",
     ],
 )
