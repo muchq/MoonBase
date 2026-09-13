@@ -38,11 +38,13 @@ class FakeArchive : public ArchiveSource {
  public:
   absl::StatusOr<std::vector<ArchivedGame>> FetchMonth(std::string_view /*player*/,
                                                        YearMonth month) override {
+    ++fetches;
     return months.count(month.ToString()) != 0 ? months[month.ToString()]
                                                : std::vector<ArchivedGame>{};
   }
 
   std::map<std::string, std::vector<ArchivedGame>> months;
+  int fetches = 0;
 };
 
 class FakeRosters : public TitleSource {
@@ -108,10 +110,92 @@ Claim AClaim(std::string id) {
   claim.owner = absl::StrCat("cpp/test/", id);
   claim.job.id = std::move(id);
   claim.job.player = "alice";
-  claim.job.platform = "chess.com";
+  claim.job.platform = "CHESS_COM";
   claim.job.start_month = "2026-01";
   claim.job.end_month = "2026-01";
   return claim;
+}
+
+// ---- Platform dispatch ----
+
+// The key is whatever the API wrote into the row. IndexRequestService
+// canonicalises to CHESS_COM — uppercased, dots to underscores — so a
+// registry keyed on the spelling a human types answers nothing.
+TEST(CanonicalPlatform, MatchesWhatTheApiWrites) {
+  EXPECT_EQ(CanonicalPlatform("chess.com"), "CHESS_COM");
+  EXPECT_EQ(CanonicalPlatform("CHESS_COM"), "CHESS_COM");
+  EXPECT_EQ(CanonicalPlatform("Chess.Com"), "CHESS_COM");
+  EXPECT_EQ(CanonicalPlatform("  chess.com  "), "CHESS_COM");
+  EXPECT_EQ(CanonicalPlatform("lichess"), "LICHESS");
+}
+
+TEST(MakeRun, SendsAJobToTheArchiveForItsPlatform) {
+  FakeArchive chess_com;
+  chess_com.months["2026-01"] = {AGame("c1")};
+  FakeArchive lichess;
+  lichess.months["2026-01"] = {AGame("l1")};
+  FakeRosters rosters;
+  TitleRoster titles(rosters, TitleRoster::Options{});
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  FakeLease lease;
+
+  Recorded recorded;
+  const Poller::Run run = MakeRun({{"CHESS_COM", &chess_com}, {"LICHESS", &lichess}}, titles,
+                                  SinksInto(recorded), metrics, [] { return false; });
+
+  Claim claim = AClaim("first");
+  claim.job.platform = "LICHESS";
+  ASSERT_TRUE(run(claim, lease).ok());
+
+  EXPECT_EQ(lichess.fetches, 1);
+  EXPECT_EQ(chess_com.fetches, 0) << "the job went to the wrong platform's archive";
+}
+
+// The row says chess.com's canonical spelling; the registry must answer it
+// however it was registered. Getting this wrong fails every live request.
+TEST(MakeRun, FindsTheArchiveWhateverSpellingItWasRegisteredUnder) {
+  FakeArchive chess_com;
+  chess_com.months["2026-01"] = {AGame("c1")};
+  FakeRosters rosters;
+  TitleRoster titles(rosters, TitleRoster::Options{});
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  FakeLease lease;
+
+  Recorded recorded;
+  const Poller::Run run = MakeRun({{"chess.com", &chess_com}}, titles, SinksInto(recorded), metrics,
+                                  [] { return false; });
+
+  Claim claim = AClaim("first");
+  claim.job.platform = "CHESS_COM";
+  ASSERT_TRUE(run(claim, lease).ok());
+
+  EXPECT_EQ(chess_com.fetches, 1);
+}
+
+// A platform nobody registered has to fail the request, not complete it. A
+// run that indexed nothing and returned ok would mark the month complete and
+// cache the gap — #1360's rule, one level up.
+TEST(MakeRun, AnUnknownPlatformFailsTheRunRatherThanIndexingNothing) {
+  FakeArchive chess_com;
+  FakeRosters rosters;
+  TitleRoster titles(rosters, TitleRoster::Options{});
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  FakeLease lease;
+
+  Recorded recorded;
+  const Poller::Run run = MakeRun({{"CHESS_COM", &chess_com}}, titles, SinksInto(recorded), metrics,
+                                  [] { return false; });
+
+  Claim claim = AClaim("first");
+  claim.job.platform = "LICHESS";
+  const absl::StatusOr<RunReport> report = run(claim, lease);
+
+  EXPECT_FALSE(report.ok());
+  EXPECT_THAT(std::string(report.status().message()), ::testing::HasSubstr("LICHESS"));
+  EXPECT_TRUE(recorded.periods.empty()) << "an unreadable platform cached a complete month";
 }
 
 // ---- MakeRun: which pieces a claimed request is run against ----
@@ -131,8 +215,8 @@ TEST(MakeRun, RunsEveryJobAgainstTheOneRoster) {
   FakeLease lease;
 
   Recorded recorded;
-  const Poller::Run run =
-      MakeRun(archive, titles, SinksInto(recorded), metrics, [] { return false; });
+  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, titles, SinksInto(recorded), metrics,
+                                  [] { return false; });
 
   ASSERT_TRUE(run(AClaim("first"), lease).ok());
   ASSERT_TRUE(run(AClaim("second"), lease).ok());
@@ -154,8 +238,8 @@ TEST(MakeRun, EveryRunGetsTheRoster) {
   FakeLease lease;
 
   Recorded recorded;
-  const Poller::Run run =
-      MakeRun(archive, titles, SinksInto(recorded), metrics, [] { return false; });
+  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, titles, SinksInto(recorded), metrics,
+                                  [] { return false; });
   ASSERT_TRUE(run(AClaim("first"), lease).ok());
 
   ASSERT_EQ(recorded.written.size(), 1u);
@@ -174,8 +258,8 @@ TEST(MakeRun, EveryRunGetsItsOwnSinkForTheJobItClaimed) {
   FakeLease lease;
 
   Recorded recorded;
-  const Poller::Run run =
-      MakeRun(archive, titles, SinksInto(recorded), metrics, [] { return false; });
+  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, titles, SinksInto(recorded), metrics,
+                                  [] { return false; });
 
   ASSERT_TRUE(run(AClaim("first"), lease).ok());
   ASSERT_TRUE(run(AClaim("second"), lease).ok());
@@ -195,8 +279,8 @@ TEST(MakeRun, EveryRunGetsTheObserver) {
   FakeLease lease;
 
   Recorded recorded;
-  const Poller::Run run =
-      MakeRun(archive, titles, SinksInto(recorded), metrics, [] { return false; });
+  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, titles, SinksInto(recorded), metrics,
+                                  [] { return false; });
   ASSERT_TRUE(run(AClaim("first"), lease).ok());
 
   EXPECT_GT(recorder.CounterTotal(kGamesIndexedMetric, {{kIndexerLabel, kIndexerValue}}), 0);
@@ -215,7 +299,7 @@ TEST(MakeRun, EveryRunGetsTheShutdownSwitch) {
 
   Recorded recorded;
   const Poller::Run run =
-      MakeRun(archive, titles, SinksInto(recorded), metrics, [] { return true; });
+      MakeRun({{"CHESS_COM", &archive}}, titles, SinksInto(recorded), metrics, [] { return true; });
   const absl::StatusOr<RunReport> report = run(AClaim("first"), lease);
 
   ASSERT_TRUE(report.ok()) << report.status();

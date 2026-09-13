@@ -2,24 +2,54 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <string>
 #include <utility>
 
 #include "absl/status/statusor.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 
 namespace one_d4_worker {
 
-Poller::Run MakeRun(ArchiveSource& archive, TitleRoster& titles, SinkFactory make_sink,
+std::string CanonicalPlatform(std::string_view platform) {
+  std::string canonical;
+  canonical.reserve(platform.size());
+  for (const char c : platform) {
+    if (absl::ascii_isspace(static_cast<unsigned char>(c))) continue;
+    canonical.push_back(c == '.' ? '_' : absl::ascii_toupper(static_cast<unsigned char>(c)));
+  }
+  return canonical;
+}
+
+namespace {
+
+PlatformArchives Canonicalised(PlatformArchives registered) {
+  PlatformArchives by_platform;
+  by_platform.reserve(registered.size());
+  for (auto& [platform, archive] : registered) {
+    by_platform.emplace(CanonicalPlatform(platform), archive);
+  }
+  return by_platform;
+}
+
+}  // namespace
+
+Poller::Run MakeRun(PlatformArchives archives, TitleRoster& titles, SinkFactory make_sink,
                     RunObserver& observer, std::function<bool()> stopping) {
-  return [&archive, &titles, &observer, make_sink = std::move(make_sink),
-          stopping = std::move(stopping)](const Claim& claim,
-                                          LeaseKeeper& keeper) -> absl::StatusOr<RunReport> {
+  return [archives = Canonicalised(std::move(archives)), &titles, &observer,
+          make_sink = std::move(make_sink), stopping = std::move(stopping)](
+             const Claim& claim, LeaseKeeper& keeper) -> absl::StatusOr<RunReport> {
+    const auto found = archives.find(CanonicalPlatform(claim.job.platform));
+    if (found == archives.end()) {
+      return absl::InvalidArgumentError(
+          absl::StrCat("no archive serves platform ", claim.job.platform));
+    }
     const std::unique_ptr<GameSink> sink = make_sink(claim);
     IndexRun::Options options;
     options.observer = &observer;
     options.titles = &titles;
     options.stopping = stopping;
-    IndexRun run(archive, *sink, options);
+    IndexRun run(*found->second, *sink, options);
     return run.Execute(claim.job, keeper);
   };
 }
