@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.one_d4.api.dto.QueryRequest;
 import com.muchq.games.one_d4.api.dto.QueryResponse;
+import com.muchq.games.one_d4.testing.FakeGameFeatureStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -81,9 +82,9 @@ public class FirstPageCacheTest {
     cache.get();
 
     assertThat(store.queryCount()).isEqualTo(1);
-    assertThat(store.lastLimit()).isEqualTo(FirstPageCache.DEFAULT_LIMIT);
-    assertThat(store.lastOffset()).isEqualTo(0);
-    assertThat(store.lastCompiled())
+    assertThat(store.lastQueryLimit()).isEqualTo(FirstPageCache.DEFAULT_LIMIT);
+    assertThat(store.lastQueryOffset()).isEqualTo(0);
+    assertThat(store.lastQueryCompiled())
         .isEqualTo(
             new SqlCompiler()
                 .compile(

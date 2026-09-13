@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.db.StatementTimeouts;
+import com.muchq.games.one_d4.testing.FakeGameFeatureStore;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -33,7 +34,7 @@ public class FirstPageWarmerTest {
   @Test
   public void refresh_populatesTheCacheWithoutWaitingForARequest() {
     store.setQueryResult(List.of(gameFeature("https://chess.com/game/warm")));
-    store.setOccurrencesResult(Map.of());
+    store.setOccurrences(Map.of());
 
     warmer.refresh();
 
@@ -45,16 +46,16 @@ public class FirstPageWarmerTest {
   @Test
   public void refresh_asksTheStoreForExactlyTheDefaultFirstPage() {
     store.setQueryResult(List.of());
-    store.setOccurrencesResult(Map.of());
+    store.setOccurrences(Map.of());
 
     warmer.refresh();
 
     // A warmer that warms any other page poisons the cache the controller serves as page 0.
     // The compiled query is pinned too: limit/offset alone would let the loader run a different
     // ChessQL query with the right pagination and stay green.
-    assertThat(store.lastLimit()).isEqualTo(FirstPageCache.DEFAULT_LIMIT);
-    assertThat(store.lastOffset()).isEqualTo(0);
-    assertThat(store.lastCompiled())
+    assertThat(store.lastQueryLimit()).isEqualTo(FirstPageCache.DEFAULT_LIMIT);
+    assertThat(store.lastQueryOffset()).isEqualTo(0);
+    assertThat(store.lastQueryCompiled())
         .isEqualTo(
             new SqlCompiler()
                 .compile(

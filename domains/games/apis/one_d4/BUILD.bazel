@@ -163,7 +163,6 @@ java_library(
         "src/main/java/com/muchq/games/one_d4/service/DataAvailabilityResolver.java",
         "src/main/java/com/muchq/games/one_d4/service/IndexRequestService.java",
     ],
-    visibility = ["//visibility:public"],
     deps = [
         ":db",
         ":dto",
@@ -407,7 +406,6 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/api/AdminControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/AggregateControllerTest.java",
         "src/test/java/com/muchq/games/one_d4/api/AggregateRequestValidatorTest.java",
-        "src/test/java/com/muchq/games/one_d4/api/FakeGameFeatureStore.java",
         "src/test/java/com/muchq/games/one_d4/api/FakeReanalysisRequestStore.java",
         "src/test/java/com/muchq/games/one_d4/api/FirstPageCacheTest.java",
         "src/test/java/com/muchq/games/one_d4/api/FirstPageWarmerTest.java",
@@ -425,8 +423,8 @@ java_test_suite(
         ":db",
         ":dto",
         ":first_page_request_fixture",
-        ":model",
         ":service",
+        ":store_fakes",
         "//domains/games/libs/chessql:compiler",
         "//domains/games/libs/chessql:parser",
         "//domains/platform/libs/yodel",
@@ -448,6 +446,46 @@ java_test_suite(
     ],
 )
 
+# One home for one_d4's store doubles (#1534). Before this, GameFeatureStore
+# had three hand-written fakes and IndexedPeriodStore two, so adding an
+# interface method meant writing the same do-nothing stub in three files.
+# A fresh package, so it is NullAway-analyzed rather than inheriting an
+# exemption from the code it stands in for.
+java_library(
+    name = "store_fakes",
+    testonly = True,
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/testing/FakeGameFeatureStore.java",
+        "src/test/java/com/muchq/games/one_d4/testing/FakeIndexedPeriodStore.java",
+        "src/test/java/com/muchq/games/one_d4/testing/FakeIndexingRequestStore.java",
+    ],
+    deps = [
+        ":db",
+        ":dto",
+        ":model",
+        artifact("org.jspecify:jspecify"),
+    ],
+)
+
+# Nine test sources read these doubles, so a wrong answer in one is a false
+# green across all of them rather than a failure in any.
+java_test_suite(
+    name = "store_fake_tests",
+    size = "small",
+    srcs = [
+        "src/test/java/com/muchq/games/one_d4/testing/FakeGameFeatureStoreTest.java",
+        "src/test/java/com/muchq/games/one_d4/testing/FakeIndexedPeriodStoreTest.java",
+        "src/test/java/com/muchq/games/one_d4/testing/FakeIndexingRequestStoreTest.java",
+    ],
+    deps = [
+        ":db",
+        ":dto",
+        ":store_fakes",
+        artifact("org.assertj:assertj-core"),
+        artifact("org.junit.jupiter:junit-jupiter-api"),
+    ],
+)
+
 java_test_suite(
     name = "service_tests",
     size = "small",
@@ -460,6 +498,7 @@ java_test_suite(
         ":dto",
         ":model",
         ":service",
+        ":store_fakes",
         artifact("org.junit.jupiter:junit-jupiter-api"),
         artifact("org.assertj:assertj-core"),
     ],
