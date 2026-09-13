@@ -125,6 +125,36 @@ TEST_F(PgTitleStoreTest, NeverStoresAnEmptyTitle) {
   EXPECT_EQ(Stored("CHESS_COM", "nobody", "title"), "(none)");
 }
 
+// A save that fails partway leaves the roster it was replacing untouched.
+//
+// This is the batching's real hazard: one Exec per batch commits each batch
+// on its own, so a failure on the fourth would install three. TitleRoster
+// drops Save's error, and AdoptStored takes any non-empty table as a
+// complete fallback — so the next restart into a roster outage would answer
+// from a partial roster and write every player missing from it untitled,
+// which is the bug player_titles exists to prevent.
+//
+// The failure is a title one character past VARCHAR(10), on a username that
+// sorts last so it lands in the final batch: TitleMap is ordered, so "zz" is
+// written after all 500 "player####" rows.
+TEST_F(PgTitleStoreTest, AFailedSaveLeavesThePreviousRosterIntact) {
+  ASSERT_TRUE(store_->Save("CHESS_COM", {{"player0", "IM"}}, absl::FromUnixSeconds(1000)).ok());
+
+  TitleMap doomed;
+  for (int i = 0; i < PgTitleStore::kBatchRows; ++i) {
+    doomed.emplace(absl::StrCat("player", i), "GM");
+  }
+  doomed.emplace("zz", "ELEVENCHARS");
+
+  // Newer than the stored observation, so the guard would let it through.
+  EXPECT_FALSE(store_->Save("CHESS_COM", doomed, absl::FromUnixSeconds(2000)).ok());
+
+  const auto loaded = store_->Load("CHESS_COM");
+  ASSERT_TRUE(loaded.ok()) << loaded.status();
+  EXPECT_THAT(*loaded, ElementsAre(Pair("player0", "IM")))
+      << "a batch of the failed save committed on its own";
+}
+
 // A roster is tens of thousands of players, so Save batches. The batch
 // boundary is where a bug would hide.
 TEST_F(PgTitleStoreTest, WritesMoreRowsThanOneBatchHolds) {

@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 
 namespace one_d4_worker {
@@ -32,32 +33,41 @@ absl::Status PgTitleStore::Save(std::string_view platform, const TitleMap& title
   // $1 and $2 are the same for every row in the statement.
   const std::string seconds = absl::StrCat(absl::ToUnixSeconds(observed_at));
 
-  auto it = titles.begin();
-  while (it != titles.end()) {
-    std::vector<std::string> params = {seconds, kSource};
-    std::string values;
-    for (int row = 0; row < kBatchRows && it != titles.end(); ++row, ++it) {
-      // A title is never stored empty: absence of one is every untitled
-      // player too, so a blank row would shadow a real title rather than
-      // record that the player holds none.
-      if (it->second.empty()) continue;
-      const int base = static_cast<int>(params.size());
-      params.push_back(std::string(platform));
-      params.push_back(it->first);
-      params.push_back(it->second);
-      absl::StrAppend(&values, values.empty() ? "" : ",", "($", base + 1, ",$", base + 2, ",$",
-                      base + 3, ",to_timestamp($1::bigint) AT TIME ZONE 'UTC',$2)");
-    }
-    if (values.empty()) continue;
+  // One transaction for every batch, because a half-written roster is worse
+  // than none: TitleRoster::Rebuild drops this error on the floor, and
+  // AdoptStored takes any non-empty table as a complete fallback. A save
+  // that failed on its fourth batch would leave three batches installed,
+  // and the next restart into a roster outage would answer from them and
+  // write every player in the batches that never landed untitled — the bug
+  // this table exists to fix, through a narrower door.
+  return client_.InTransaction([&](pg::Transaction& tx) -> absl::Status {
+    auto it = titles.begin();
+    while (it != titles.end()) {
+      std::vector<std::string> params = {seconds, kSource};
+      std::string values;
+      for (int row = 0; row < kBatchRows && it != titles.end(); ++row, ++it) {
+        // A title is never stored empty: absence of one is every untitled
+        // player too, so a blank row would shadow a real title rather than
+        // record that the player holds none.
+        if (it->second.empty()) continue;
+        const int base = static_cast<int>(params.size());
+        params.push_back(std::string(platform));
+        params.push_back(it->first);
+        params.push_back(it->second);
+        absl::StrAppend(&values, values.empty() ? "" : ",", "($", base + 1, ",$", base + 2, ",$",
+                        base + 3, ",to_timestamp($1::bigint) AT TIME ZONE 'UTC',$2)");
+      }
+      if (values.empty()) continue;
 
-    const absl::StatusOr<pg::Result> written = client_.Exec(
-        absl::StrCat("INSERT INTO player_titles (platform, username, title, observed_at, source)"
-                     " VALUES ",
-                     values, kConflict),
-        params);
-    if (!written.ok()) return written.status();
-  }
-  return absl::OkStatus();
+      const absl::StatusOr<pg::Result> written = tx.Exec(
+          absl::StrCat("INSERT INTO player_titles (platform, username, title, observed_at, source)"
+                       " VALUES ",
+                       values, kConflict),
+          params);
+      if (!written.ok()) return written.status();
+    }
+    return absl::OkStatus();
+  });
 }
 
 absl::StatusOr<TitleMap> PgTitleStore::Load(std::string_view platform) {
