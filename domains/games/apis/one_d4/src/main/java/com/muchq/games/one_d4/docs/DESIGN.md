@@ -2,7 +2,7 @@
 
 ## Overview
 
-A Micronaut service that indexes chess games from chess.com (lichess planned), extracts tactical motifs via position replay, and exposes a custom query language (ChessQL) for searching indexed games.
+A Micronaut service that indexes chess games from chess.com and lichess, extracts tactical motifs via position replay, and exposes a custom query language (ChessQL) for searching indexed games.
 
 **Stack**: Java 21, Micronaut 4.x, Bazel, PostgreSQL, chariot (chess library), JDBI3, HikariCP
 
@@ -155,8 +155,8 @@ com.muchq.indexer/
 | Column        | Type         | Notes                          |
 |---------------|--------------|--------------------------------|
 | id            | UUID PK      | gen_random_uuid()              |
-| player        | VARCHAR(255) | chess.com username             |
-| platform      | VARCHAR(50)  | "chess.com", "lichess" (future)|
+| player        | VARCHAR(255) | username on `platform`         |
+| platform      | VARCHAR(50)  | "CHESS_COM" or "LICHESS", canonical (V003 CHECK) |
 | start_month   | VARCHAR(7)   | "2024-01"                      |
 | end_month     | VARCHAR(7)   | "2024-03"                      |
 | status        | VARCHAR(20)  | PENDING→PROCESSING→COMPLETED/FAILED |

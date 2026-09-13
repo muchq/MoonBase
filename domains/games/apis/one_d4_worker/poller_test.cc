@@ -3,6 +3,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <optional>
 #include <string>
@@ -26,10 +27,22 @@ using ::testing::IsEmpty;
 class FakeQueue : public IndexQueue {
  public:
   absl::StatusOr<std::optional<IndexJob>> ClaimNext(
-      std::string_view owner, [[maybe_unused]] absl::Duration lease) override {
+      std::string_view owner, [[maybe_unused]] absl::Duration lease,
+      absl::Span<const std::string> at_capacity) override {
     ++claims;
     owners.push_back(std::string(owner));
+    excluded.emplace_back(at_capacity.begin(), at_capacity.end());
     if (claim_fails) return absl::UnavailableError("queue is down");
+    // The queue's own contract, as Postgres implements it: a row naming an
+    // excluded platform is not a candidate.
+    while (!queued.empty()) {
+      IndexJob job = queued.front();
+      queued.erase(queued.begin());
+      if (std::find(at_capacity.begin(), at_capacity.end(), job.platform) == at_capacity.end()) {
+        return job;
+      }
+      skipped.push_back(job);
+    }
     if (!next.has_value()) return std::nullopt;
     IndexJob job = *next;
     next.reset();
@@ -98,6 +111,11 @@ class FakeQueue : public IndexQueue {
   std::vector<int> progress;
   std::atomic<bool> progress_accepted{true};
   bool terminal_write_wins = true;
+  /// What each claim was told not to take.
+  std::vector<std::vector<std::string>> excluded;
+  /// Rows the queue passed over because their platform was at capacity.
+  std::vector<IndexJob> queued;
+  std::vector<IndexJob> skipped;
   int claims = 0;
   std::atomic<int> heartbeats{0};
   std::vector<std::string> calls;
@@ -120,6 +138,14 @@ IndexJob AJob() {
   job.platform = "CHESS_COM";
   job.start_month = "2026-01";
   job.end_month = "2026-01";
+  return job;
+}
+
+/// A job with an id and a platform of its own, for the capacity tests.
+IndexJob AJobFor(std::string id, std::string platform) {
+  IndexJob job = AJob();
+  job.id = std::move(id);
+  job.platform = std::move(platform);
   return job;
 }
 
@@ -330,6 +356,50 @@ TEST(Poller, FailsAJobThatRaised) {
   // API, so a chess.com body or a libpq diagnostic in there is an
   // internal detail told to whoever asked for the index.
   EXPECT_THAT(queue.calls, ElementsAre("fail job-1 Indexing failed due to an internal error"));
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kFailed);
+  ExpectEveryWriteFencedOnTheClaim(queue);
+}
+
+// The one exception to the fixed sentence, and still a fixed sentence: a
+// worker with no lichess token fails every LICHESS request it claims, and
+// "internal error" sends the operator reading logs for a bug that is a
+// missing environment variable. Says what to do without quoting anything
+// upstream said.
+TEST(Poller, SaysSoWhenTheRunFailedForWantOfCredentials) {
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller poller(
+      queue,
+      [](const Claim&, LeaseKeeper&) -> absl::StatusOr<RunReport> {
+        return absl::UnauthenticatedError("lichess games alice 2026-01: GamesNotFound: ...");
+      },
+      Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_THAT(queue.calls,
+              ElementsAre("fail job-1 This server is not configured to index that platform"));
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kFailed);
+  ExpectEveryWriteFencedOnTheClaim(queue);
+}
+
+// The other failure whose cause is not ours: a handle that does not exist.
+// Verified against both archives rather than assumed — chess.com answers an
+// empty month on a real player with 200 and an empty list, and 404s only a
+// player it has never heard of; an authenticated Lichess export is the same.
+// So NotFound here means the handle, and "internal error" would send someone
+// chasing a server bug over their own typo.
+TEST(Poller, SaysSoWhenThePlayerWasNotFound) {
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller poller(
+      queue,
+      [](const Claim&, LeaseKeeper&) -> absl::StatusOr<RunReport> {
+        return absl::NotFoundError("chess.com archive alice 2026-01: ArchiveNotFound: ...");
+      },
+      Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_THAT(queue.calls, ElementsAre("fail job-1 Player was not found on that platform"));
   EXPECT_EQ(poller.last_outcome(), RunOutcome::kFailed);
   ExpectEveryWriteFencedOnTheClaim(queue);
 }
@@ -691,6 +761,173 @@ TEST(Poller, LeavesARunInsideItsCeilingAlone) {
 
   ASSERT_TRUE(poller.PollOnce().ok());
   EXPECT_EQ(poller.last_outcome(), RunOutcome::kCompleted);
+}
+
+// ---- platform capacity ----
+
+// Lichess asks for one request at a time and LichessArchive holds a mutex to
+// honour it. A second LICHESS claim would park on that mutex holding a lease
+// and two Postgres connections for as long as the export ahead of it takes.
+// Not claiming it is the fix (#1527 slice 6).
+TEST(PollerPlatformLimits, WillNotClaimASecondRequestForACappedPlatform) {
+  FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options options = Options();
+  options.admission = &admission;
+  // A run that never returns would hang the test; what matters is that the
+  // claim is held, so the run completes and ClaimOne is called directly.
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+
+  // One LICHESS run in flight, held open — the claim is what holds it.
+  queue.queued = {AJobFor("first", "LICHESS")};
+  const auto first = poller.ClaimOne();
+  ASSERT_TRUE(first->has_value());
+
+  queue.queued = {AJobFor("second", "LICHESS")};
+  const auto second = poller.ClaimOne();
+
+  ASSERT_TRUE(second.ok()) << second.status();
+  EXPECT_FALSE(second->has_value()) << "a second LICHESS row was claimed and would have parked";
+  EXPECT_THAT(queue.excluded.back(), ElementsAre("LICHESS"));
+}
+
+// The point of excluding at claim time rather than parking after it: work for
+// a platform with no such rule keeps moving. This is the mixed queue.
+TEST(PollerPlatformLimits, StillClaimsAnotherPlatformWhileTheCappedOneIsBusy) {
+  FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options options = Options();
+  options.admission = &admission;
+  // A run that never returns would hang the test; what matters is that the
+  // claim is held, so the run completes and ClaimOne is called directly.
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+
+  queue.queued = {AJobFor("lichess-1", "LICHESS")};
+  const auto held = poller.ClaimOne();
+  ASSERT_TRUE(held->has_value());
+
+  // A LICHESS row at the front, a chess.com row behind it.
+  queue.queued = {AJobFor("lichess-2", "LICHESS"), AJobFor("chess-1", "CHESS_COM")};
+  const auto next = poller.ClaimOne();
+
+  ASSERT_TRUE(next.ok()) << next.status();
+  ASSERT_TRUE(next->has_value()) << "chess.com work starved behind a Lichess export";
+  EXPECT_EQ((*next)->job.id, "chess-1");
+  EXPECT_EQ((*next)->job.platform, "CHESS_COM");
+}
+
+// A cap that never gave a slot back would run one Lichess request and then
+// refuse forever.
+TEST(PollerPlatformLimits, GivesTheSlotBackWhenTheRunEnds) {
+  FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options options = Options();
+  options.admission = &admission;
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+
+  queue.queued = {AJobFor("first", "LICHESS")};
+  ASSERT_TRUE(poller.PollOnce().value());
+
+  queue.queued = {AJobFor("second", "LICHESS")};
+  const auto second = poller.ClaimOne();
+
+  ASSERT_TRUE(second.ok()) << second.status();
+  ASSERT_TRUE(second->has_value()) << "the cap never released after the first run finished";
+  EXPECT_EQ((*second)->job.id, "second");
+}
+
+// Every other platform is uncapped, and an empty exclusion list has to mean
+// "take anything" rather than "take nothing".
+TEST(PollerPlatformLimits, AnUncappedPlatformIsNeverExcluded) {
+  FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options options = Options();
+  options.admission = &admission;
+  // A run that never returns would hang the test; what matters is that the
+  // claim is held, so the run completes and ClaimOne is called directly.
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+
+  queue.queued = {AJobFor("a", "CHESS_COM")};
+  const auto first = poller.ClaimOne();
+  ASSERT_TRUE(first->has_value());
+  queue.queued = {AJobFor("b", "CHESS_COM")};
+  const auto second = poller.ClaimOne();
+
+  ASSERT_TRUE(second->has_value()) << "chess.com capped itself";
+  EXPECT_THAT(queue.excluded.back(), IsEmpty());
+}
+
+// The bug the single-Poller tests above could not see: IndexPool builds one
+// Poller per slot thread from one copy of Options, so a cap that lived in
+// the Poller counted a slot and capped nothing. Two Pollers sharing an
+// admission are what the pool actually does.
+TEST(PollerPlatformLimits, TwoPollersSharingAnAdmissionShareTheCap) {
+  FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options options = Options();
+  options.admission = &admission;
+  Poller slot_one(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+  Poller slot_two(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+
+  queue.queued = {AJobFor("lichess-1", "LICHESS")};
+  const auto first = slot_one.ClaimOne();
+  ASSERT_TRUE(first->has_value());
+
+  queue.queued = {AJobFor("lichess-2", "LICHESS"), AJobFor("chess-1", "CHESS_COM")};
+  const auto second = slot_two.ClaimOne();
+
+  ASSERT_TRUE(second.ok()) << second.status();
+  ASSERT_TRUE(second->has_value());
+  EXPECT_EQ((*second)->job.platform, "CHESS_COM")
+      << "a second slot claimed LICHESS: the cap is per Poller, not per worker";
+}
+
+// The other half of the cap's lifecycle, and the half production used:
+// IndexPool::Work claims and runs in two calls rather than through
+// PollOnce, so a release living in PollOnce never ran. The first LICHESS
+// run kept the place forever and every later LICHESS row stayed PENDING
+// until the process restarted.
+TEST(PollerPlatformLimits, GivesThePlaceBackWhenTheClaimIsRunTheWayThePoolRunsIt) {
+  FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options options = Options();
+  options.admission = &admission;
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+
+  queue.queued = {AJobFor("lichess-1", "LICHESS")};
+  {
+    const auto first = poller.ClaimOne();
+    ASSERT_TRUE(first->has_value());
+    ASSERT_TRUE(poller.RunClaimed(**first).ok());
+  }
+
+  queue.queued = {AJobFor("lichess-2", "LICHESS")};
+  const auto second = poller.ClaimOne();
+
+  ASSERT_TRUE(second->has_value()) << "the platform was never given back";
+  EXPECT_EQ((*second)->job.platform, "LICHESS");
+}
+
+// Two Pollers with admissions of their own are the bug, stated as a test so
+// the distinction is visible rather than implied.
+TEST(PollerPlatformLimits, AnUnsharedAdmissionCapsNothingAcrossSlots) {
+  FakeQueue queue;
+  PlatformAdmission one({{"LICHESS", 1}});
+  PlatformAdmission two({{"LICHESS", 1}});
+  Poller::Options first = Options();
+  first.admission = &one;
+  Poller::Options second = Options();
+  second.admission = &two;
+  Poller slot_one(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, first);
+  Poller slot_two(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, second);
+
+  queue.queued = {AJobFor("lichess-1", "LICHESS")};
+  const auto held = slot_one.ClaimOne();
+  ASSERT_TRUE(held->has_value());
+  queue.queued = {AJobFor("lichess-2", "LICHESS")};
+
+  EXPECT_EQ(slot_two.ClaimOne().value().value().job.platform, "LICHESS")
+      << "separate admissions are why the pool has to share one";
 }
 
 }  // namespace

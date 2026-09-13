@@ -43,10 +43,19 @@ class Client {
                                                                   std::int64_t since_ms,
                                                                   std::int64_t until_ms) const;
 
+  /// Whether this client was built with a token.
+  ///
+  /// Callers need it because Lichess answers anonymous export calls 404 for
+  /// accounts that exist: the status code alone cannot tell "no such player"
+  /// from "no credential", and nothing downstream of here knows which.
+  bool authenticated() const { return authenticated_; }
+
  private:
-  explicit Client(moonbase::lichess::LichessClient client) : client_(std::move(client)) {}
+  Client(moonbase::lichess::LichessClient client, bool authenticated)
+      : client_(std::move(client)), authenticated_(authenticated) {}
 
   moonbase::lichess::LichessClient client_;
+  bool authenticated_;
 };
 
 }  // namespace lichess

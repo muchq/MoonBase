@@ -6,6 +6,7 @@
 
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "domains/games/apis/one_d4_worker/claim_ref.h"
 #include "domains/games/apis/one_d4_worker/job.h"
 
@@ -23,8 +24,15 @@ class IndexQueue {
 
   /// Claims the oldest request nobody holds, for `lease`. nullopt when
   /// there is nothing to claim.
-  virtual absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
-                                                            absl::Duration lease) = 0;
+  ///
+  /// Rows naming a platform in `at_capacity` are not candidates. That is a
+  /// caller's cap, not the queue's: the row stays PENDING and the next
+  /// worker — or this one, once it has room — takes it. Claiming a row
+  /// this process cannot start is what it avoids, because a claim holds a
+  /// lease and two connections whether or not the run can proceed.
+  virtual absl::StatusOr<std::optional<IndexJob>> ClaimNext(
+      std::string_view owner, absl::Duration lease,
+      absl::Span<const std::string> at_capacity = {}) = 0;
 
   /// Extends our lease. False when we no longer hold it.
   virtual absl::StatusOr<bool> Heartbeat(ClaimRef claim, absl::Duration lease) = 0;

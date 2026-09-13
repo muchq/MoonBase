@@ -13,7 +13,7 @@ vi.mock('react-chessboard', () => ({
 const mockGames: GameRow[] = [
   {
     gameUrl: 'https://chess.com/game/1',
-    platform: 'chess.com',
+    platform: 'CHESS_COM',
     whiteUsername: 'Alice',
     blackUsername: 'Bob',
     whiteElo: 1800,
@@ -27,8 +27,8 @@ const mockGames: GameRow[] = [
     occurrences: { pin: [{ gameUrl: 'https://chess.com/game/1', motif: 'pin', moveNumber: 15, side: 'white', description: 'Pin' }] },
   },
   {
-    gameUrl: 'https://chess.com/game/2',
-    platform: 'chess.com',
+    gameUrl: 'https://lichess.org/game2',
+    platform: 'LICHESS',
     whiteUsername: 'Carol',
     blackUsername: 'Dave',
     whiteElo: 2100,
@@ -40,8 +40,8 @@ const mockGames: GameRow[] = [
     indexedAt: 1700101000,
     numMoves: 55,
     occurrences: {
-      fork: [{ gameUrl: 'https://chess.com/game/2', motif: 'fork', moveNumber: 20, side: 'white', description: 'Fork' }],
-      checkmate: [{ gameUrl: 'https://chess.com/game/2', motif: 'checkmate', moveNumber: 55, side: 'white', description: 'Checkmate' }],
+      fork: [{ gameUrl: 'https://lichess.org/game2', motif: 'fork', moveNumber: 20, side: 'white', description: 'Fork' }],
+      checkmate: [{ gameUrl: 'https://lichess.org/game2', motif: 'checkmate', moveNumber: 55, side: 'white', description: 'Checkmate' }],
     },
   },
 ];
@@ -130,6 +130,7 @@ describe('GameTable', () => {
       screen.getByRole('table').querySelectorAll('thead th')
     ).map((th) => th.textContent);
     expect(headers).toEqual([
+      'Site',
       'White',
       'Black',
       'White ELO',
@@ -242,5 +243,25 @@ describe('GameTable', () => {
     // The wrapper has to be the thing that scrolls, or the min-width just
     // overflows the page and the columns are off-screen instead of squeezed.
     expect(rule('.table-wrap')).toMatch(/overflow-x:\s*auto/);
+  });
+});
+
+// #1540: platform reached the client and no component rendered it. Harmless
+// with one platform; at two, usernames do not carry across sites, so two
+// people sharing a handle produce rows identical on screen.
+describe('platform', () => {
+  it('says which site each row came from', () => {
+    render(<GameTable games={mockGames} />);
+
+    const rows = screen.getAllByRole('row').slice(1);
+    expect(rows[0]).toHaveTextContent('chess.com');
+    expect(rows[1]).toHaveTextContent('lichess');
+  });
+
+  it('shows the site name rather than the stored spelling', () => {
+    render(<GameTable games={mockGames} />);
+
+    expect(screen.queryByText('CHESS_COM')).toBeNull();
+    expect(screen.queryByText('LICHESS')).toBeNull();
   });
 });

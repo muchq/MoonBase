@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.muchq.games.one_d4.api.dto.IndexResponse;
+import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.testing.FakeIndexedPeriodStore;
 import com.muchq.games.one_d4.testing.FakeIndexingRequestStore;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,6 +65,32 @@ public class IndexRequestServiceTest {
     IndexResponse response = service.submit(submission("hikaru", "chess.com"));
     assertThat(response.platform()).isEqualTo("CHESS_COM");
     assertThat(requestStore.listRecent(10).get(0).platform()).isEqualTo("CHESS_COM");
+  }
+
+  /**
+   * The gate #1527 was waiting on. Every spelling a user might type reaches the one canonical form
+   * the worker's archive registry is keyed on — anything else fails the run rather than completing
+   * it empty, so what this accepts and what that registry serves have to be the same set.
+   */
+  @Test
+  public void submit_acceptsLichessHoweverItIsSpelled() {
+    for (String spelling : List.of("lichess", "LICHESS", "Lichess", " lichess ")) {
+      IndexResponse response = service.submit(submission("player-" + spelling.strip(), spelling));
+      assertThat(response.platform()).as(spelling).isEqualTo("LICHESS");
+    }
+    assertThat(requestStore.listRecent(10))
+        .extracting(IndexingRequestStore.IndexingRequest::platform)
+        .containsOnly("LICHESS");
+  }
+
+  @Test
+  public void submit_stillRefusesAPlatformNobodyIndexes() {
+    assertThatThrownBy(() -> service.submit(submission("x", "chess24.com")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Unsupported platform")
+        // The message names what it will take, so a 400 is actionable without the source.
+        .hasMessageContaining("CHESS_COM")
+        .hasMessageContaining("LICHESS");
   }
 
   @Test
@@ -210,9 +238,9 @@ public class IndexRequestServiceTest {
     assertThatThrownBy(() -> service.submit(submission(" ", "CHESS_COM")))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("player is required");
-    assertThatThrownBy(() -> service.submit(submission("x", "lichess")))
+    assertThatThrownBy(() -> service.submit(submission("x", "  ")))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("Unsupported platform");
+        .hasMessageContaining("platform is required");
     assertThatThrownBy(
             () ->
                 service.submit(

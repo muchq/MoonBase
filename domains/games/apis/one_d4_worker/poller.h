@@ -2,10 +2,15 @@
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_POLLER_H
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 
+#include "absl/base/thread_annotations.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/functional/function_ref.h"
 #include "absl/status/statusor.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/claim_ref.h"
 #include "domains/games/apis/one_d4_worker/job.h"
@@ -58,10 +63,28 @@ class LeaseKeeper {
   virtual bool OutOfTime() = 0;
 };
 
+class PlatformAdmission;
+
+/// A place in the platform's cap, given back when the last copy of the
+/// claim holding it goes away.
+///
+/// Shared rather than moved because a Claim is copied, and reference
+/// counted rather than released by whoever finishes the run because there
+/// is more than one caller: PollOnce runs a claim it took itself, while
+/// IndexPool::Work claims on one call and runs on the next. A release
+/// spelled out at the end of one of those paths is a release the other
+/// path does not do — which is how the count leaked and capped LICHESS at
+/// one until the process restarted.
+using PlatformSlot = std::shared_ptr<void>;
+
 /// A claim, and the id it is fenced on.
 struct Claim {
   IndexJob job;
   std::string owner;
+
+  /// Null when nothing caps this platform. Last field, so it is released
+  /// after everything that might still name the job.
+  PlatformSlot slot;
 
   ClaimRef ref() const { return {.id = job.id, .owner = owner}; }
 };
@@ -70,6 +93,47 @@ struct Claim {
 ///
 /// Terminal writes happen here and nowhere else, so the rule that a run
 /// which lost its lease reports nothing lives in one place.
+/// How many runs of a platform one worker will have in flight at once.
+///
+/// Lichess asks for one request at a time, and LichessArchive holds a mutex
+/// to honour it. That makes a second LICHESS claim worse than useless: the
+/// slot parks on the mutex holding a lease and two Postgres connections for
+/// as long as the export ahead of it takes — up to ten minutes — and queued
+/// chess.com work, which has no such rule, waits behind it. Not claiming the
+/// row is the fix; parking on it was the symptom (#1527 slice 6).
+///
+/// One of these is shared by every slot of a worker. Per process, not per
+/// fleet: replicas each get their own, which is not what Lichess's global
+/// rule asks for — the fleet-wide version is a partial unique index like
+/// idx_reanalysis_requests_single_live, and belongs with whatever makes
+/// replicas real. See README.
+class PlatformAdmission {
+ public:
+  explicit PlatformAdmission(absl::flat_hash_map<std::string, int> limits)
+      : limits_(std::move(limits)) {}
+
+  /// Calls `claim` with the platforms that are full, and counts what it
+  /// returns.
+  ///
+  /// The lock spans the claim rather than just the read of what is in
+  /// flight: two slots that each saw "none running" would each claim, and
+  /// the cap would hold by luck. It costs nothing — a claim is one statement
+  /// on a pg::Client, which serialises its connection behind a mutex anyway.
+  absl::StatusOr<std::optional<Claim>> Claim(
+      absl::FunctionRef<absl::StatusOr<std::optional<IndexJob>>(absl::Span<const std::string>)>
+          claim,
+      std::string owner);
+
+  /// Gives a finished run's place back. Called by the slot the claim
+  /// carries rather than by hand.
+  void Release(const std::string& platform);
+
+ private:
+  const absl::flat_hash_map<std::string, int> limits_;
+  absl::Mutex mu_;
+  absl::flat_hash_map<std::string, int> in_flight_ ABSL_GUARDED_BY(mu_);
+};
+
 class Poller {
  public:
   struct Options {
@@ -80,6 +144,17 @@ class Poller {
     /// right when the run holding it has ended, wrong when another run
     /// of this process is still wedged on it.
     std::string owner;
+
+    /// Who decides whether this worker has room for another run of a
+    /// platform. Null means no cap, which is what every test that does not
+    /// care wants.
+    ///
+    /// A pointer rather than a value because it must be *shared*: IndexPool
+    /// builds one Poller per slot thread from one copy of these Options, so
+    /// a counter living in the Poller counts a single slot and caps nothing
+    /// — four slots would admit four LICHESS runs, which is the starvation
+    /// the cap exists to prevent.
+    PlatformAdmission* admission = nullptr;
     /// How long a claim is good for without renewal. See max_run below for
     /// where this and the two after it come from in production.
     absl::Duration lease = absl::Minutes(5);

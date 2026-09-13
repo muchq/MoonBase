@@ -135,8 +135,18 @@ int main(int /*argc*/, char** argv) {
     return 1;
   }
 
-  const one_d4_worker::Poller::Options poller_options =
+  one_d4_worker::Poller::Options poller_options =
       one_d4_worker::PollerOptionsFrom(*policy, one_d4_worker::OwnerId(Hostname(), getpid()));
+  // Lichess asks for one request at a time, and LichessArchive holds a mutex
+  // to honour it. Without this a second LICHESS claim parks on that mutex
+  // holding a lease and two Postgres connections, and chess.com work queues
+  // behind it. Per process — see the README on what replicas would need.
+  //
+  // Outside the pool, because the pool builds a Poller per slot thread from
+  // these Options: one of these shared by all of them caps the worker, one
+  // per Poller caps a slot and therefore nothing.
+  one_d4_worker::PlatformAdmission admission({{"LICHESS", 1}});
+  poller_options.admission = &admission;
 
   // How often to ask an empty queue is local: it costs one round trip and
   // affects nobody else.
@@ -151,14 +161,17 @@ int main(int /*argc*/, char** argv) {
   one_d4_worker::ChessComArchive archive(*client);
 
   // Empty unless deployed with one. The games export answers anonymous
-  // callers 404 even for accounts that exist, so without a token a LICHESS
-  // request fails rather than indexing nothing — which is the right failure,
-  // and unreachable until the API gate opens (#1527 slice 6).
-  opal::Outcome<lichess::Client> lichess_client =
-      lichess::CreateProductionClient(Env("ONE_D4_LICHESS_TOKEN"));
+  // callers 404 even for accounts that exist, so a host that offers LICHESS
+  // without a token fails every request for it — the archive is told which
+  // it is so the row can say so rather than reporting an internal error.
+  const std::string lichess_token = Env("ONE_D4_LICHESS_TOKEN");
+  opal::Outcome<lichess::Client> lichess_client = lichess::CreateProductionClient(lichess_token);
   if (!lichess_client.ok()) {
     LOG(ERROR) << "Could not build the lichess client: " << lichess_client.error().message();
     return 1;
+  }
+  if (lichess_token.empty()) {
+    LOG(WARNING) << "ONE_D4_LICHESS_TOKEN is unset; LICHESS requests will fail";
   }
   one_d4_worker::LichessArchive lichess_archive(*lichess_client);
 

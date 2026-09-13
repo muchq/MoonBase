@@ -223,12 +223,18 @@ realistic one cannot be committed: GitHub push protection recognises a Lichess
 token by its `lip_` prefix and length, and rejects the push whether or not the
 characters after it were ever real.
 
-It is optional, and a host without it is a working host: chess.com indexing is
-unaffected, and the API does not yet accept a LICHESS submit (#1527). What it
-changes is whether a LICHESS request can succeed at all — Lichess answers the games
-export with **404 to anonymous callers, even for accounts that exist**, so without
-the token every such request fails rather than returning nothing. Unset, no
+It is optional to *start*, and required to *use*: the API accepts LICHESS submits
+since #1527 slice 6, and Lichess answers the games export with **404 to anonymous
+callers, even for accounts that exist**. On a host with no token every LICHESS
+request therefore fails immediately, and the request table shows *This server is
+not configured to index that platform* — as does a token Lichess refuses, which
+answers 401 rather than 404 — one of the two failures whose cause is
+not the worker's, so one of the two it names rather than storing its usual
+"internal error" (the other is a handle that does not exist). chess.com indexing is unaffected either way. Unset, no
 `Authorization` header is sent at all, which is the correct anonymous request.
+
+So: a host that offers the platform needs the token. Nothing refuses the submit
+on its behalf, because the API cannot see which hosts hold one.
 
 No URL-safe constraint, unlike the database passwords: it rides in an HTTP header,
 not a libpq URL or a SQL literal.

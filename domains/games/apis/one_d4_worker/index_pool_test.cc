@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -18,6 +19,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
+#include "absl/types/span.h"
 #include "domains/games/apis/one_d4_worker/claim_ref.h"
 #include "domains/games/apis/one_d4_worker/queue.h"
 #include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
@@ -31,8 +33,9 @@ using ::testing::IsEmpty;
 /// An endless supply of requests, or none, or an outage.
 class FakeQueue : public IndexQueue {
  public:
-  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
-                                                    absl::Duration /*lease*/) override {
+  absl::StatusOr<std::optional<IndexJob>> ClaimNext(
+      std::string_view owner, absl::Duration /*lease*/,
+      [[maybe_unused]] absl::Span<const std::string> at_capacity) override {
     const absl::MutexLock lock(mu_);
     ++claims_;
     owners_.insert(std::string(owner));
@@ -41,10 +44,21 @@ class FakeQueue : public IndexQueue {
     IndexJob job;
     job.id = absl::StrCat("job-", claims_);
     job.player = "hikaru";
-    job.platform = "CHESS_COM";
+    // Every row is LICHESS when asked to be, so a cap that is not shared
+    // across the pool's slots shows up as more than one of them running.
+    job.platform = all_lichess_ && std::find(at_capacity.begin(), at_capacity.end(), "LICHESS") ==
+                                       at_capacity.end()
+                       ? "LICHESS"
+                       : "CHESS_COM";
     job.start_month = "2026-01";
     job.end_month = "2026-01";
     return job;
+  }
+
+  /// Serves LICHESS rows to any claim that has not excluded LICHESS.
+  void ServeLichess() {
+    const absl::MutexLock lock(mu_);
+    all_lichess_ = true;
   }
 
   absl::StatusOr<bool> Heartbeat(ClaimRef, absl::Duration) override { return true; }
@@ -57,6 +71,8 @@ class FakeQueue : public IndexQueue {
   absl::StatusOr<bool> Fail(ClaimRef, std::string_view) override { return true; }
   absl::StatusOr<bool> HandBack(ClaimRef) override { return true; }
   absl::StatusOr<bool> Release(ClaimRef) override { return true; }
+
+  bool all_lichess_ ABSL_GUARDED_BY(mu_) = false;
 
   int claims() const {
     const absl::MutexLock lock(mu_);
@@ -103,15 +119,23 @@ class FakeQueue : public IndexQueue {
 class BlockingRuns {
  public:
   Poller::Run AsRun() {
-    return [this](const Claim&, LeaseKeeper&) -> absl::StatusOr<RunReport> {
+    return [this](const Claim& claim, LeaseKeeper&) -> absl::StatusOr<RunReport> {
       const absl::MutexLock lock(mu_);
       ++running_;
       ++started_;
+      ++running_on_[claim.job.platform];
       peak_ = std::max(peak_, running_);
       mu_.Await(absl::Condition(&released_));
       --running_;
       return RunReport{};
     };
+  }
+
+  /// How many runs of a platform started and have not been released.
+  int RunningOn(const std::string& platform) const {
+    const absl::MutexLock lock(mu_);
+    const auto found = running_on_.find(platform);
+    return found == running_on_.end() ? 0 : found->second;
   }
 
   /// Waits for `n` runs to have started. Fails rather than hangs.
@@ -127,6 +151,8 @@ class BlockingRuns {
     const absl::MutexLock lock(mu_);
     released_ = true;
   }
+  std::map<std::string, int> running_on_ ABSL_GUARDED_BY(mu_);
+
   int peak() const {
     const absl::MutexLock lock(mu_);
     return peak_;
@@ -161,9 +187,10 @@ class SharedQueue : public IndexQueue {
  public:
   explicit SharedQueue(IndexQueue& to) : to_(to) {}
 
-  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
-                                                    absl::Duration lease) override {
-    return to_.ClaimNext(owner, lease);
+  absl::StatusOr<std::optional<IndexJob>> ClaimNext(
+      std::string_view owner, absl::Duration lease,
+      absl::Span<const std::string> at_capacity = {}) override {
+    return to_.ClaimNext(owner, lease, at_capacity);
   }
   absl::StatusOr<bool> Heartbeat(ClaimRef claim, absl::Duration lease) override {
     return to_.Heartbeat(claim, lease);
@@ -572,6 +599,83 @@ TEST(IndexPool, DoesNotSayItIsDrainingUntilItIs) {
 
   stopping = true;
   runs.Release();
+  driver.join();
+}
+
+// The pool is where the platform cap actually has to hold, and where it did
+// not: Work() builds a Poller per slot thread, so a counter living in the
+// Poller counted one slot and admitted one LICHESS run *each*. Four slots
+// were four concurrent exports — the starvation the cap exists to prevent.
+//
+// Two slots, both offered LICHESS work: exactly one may be running it.
+TEST(IndexPool, CapsAPlatformAcrossEverySlotRatherThanWithinOne) {
+  FakeQueue queue;
+  queue.ServeLichess();
+  BlockingRuns runs;
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options poller = PollerOptions();
+  poller.admission = &admission;
+
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(), poller,
+                 metrics, PoolOptions(2));
+
+  std::atomic<bool> stopping{false};
+  std::thread driver(
+      [&] { pool.Run([&stopping] { return stopping.load(); }, [](absl::Duration) {}); });
+  // Both slots fill: one with the LICHESS row, the other with the chess.com
+  // row it is handed once LICHESS is excluded.
+  runs.AwaitStarted(2);
+
+  EXPECT_EQ(runs.RunningOn("LICHESS"), 1)
+      << "both slots ran LICHESS: the cap counts a slot, not the worker";
+  EXPECT_EQ(runs.RunningOn("CHESS_COM"), 1) << "the second slot idled instead of taking other work";
+
+  stopping = true;
+  runs.Release();
+  driver.join();
+}
+
+// The cap's other half, and the half production ran: Work() claims and runs
+// in two calls rather than through PollOnce, so a release that lived in
+// PollOnce never happened. One slot, an endless supply of LICHESS rows —
+// the second one may only start if the first gave its place back.
+TEST(IndexPool, GivesAPlatformBackWhenARunFinishes) {
+  FakeQueue queue;
+  queue.ServeLichess();
+  // Exactly two rows, so "both runs were LICHESS" is a statement the fake can
+  // make. Endless work plus a sticky release would let the loop start a third
+  // before the assertion reads the count, and == 2 would hold only by
+  // scheduling.
+  queue.set_jobs(2);
+  BlockingRuns runs;
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options poller = PollerOptions();
+  poller.admission = &admission;
+
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(), poller,
+                 metrics, PoolOptions(1));
+
+  std::atomic<bool> stopping{false};
+  std::thread driver(
+      [&] { pool.Run([&stopping] { return stopping.load(); }, [](absl::Duration) {}); });
+
+  runs.AwaitStarted(1);
+  ASSERT_EQ(runs.RunningOn("LICHESS"), 1);
+
+  // Lets the first run finish. The second row is the last one the queue has.
+  runs.Release();
+  runs.AwaitStarted(2);
+
+  EXPECT_EQ(runs.RunningOn("LICHESS"), 2)
+      << "the second run was not LICHESS: the first one's place was never given back";
+
+  stopping = true;
   driver.join();
 }
 

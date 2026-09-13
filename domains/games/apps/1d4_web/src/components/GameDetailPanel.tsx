@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react';
 import { Chess, type Move } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
 import type { GameRow, OccurrenceRow } from '../types';
+import { platformLabel } from '../platforms';
 
 const MOTIF_COLORS: Record<string, string> = {
   attack: '#f6c90e',
@@ -177,7 +178,7 @@ export default function GameDetailPanel({ game, onClose }: Props) {
             </span>
           )}
           <span className="text-muted" style={{ marginLeft: '0.75rem', fontSize: '0.875rem' }}>
-            {game.result} · {game.timeClass} · {game.eco}
+            {platformLabel(game.platform)} · {game.result} · {game.timeClass} · {game.eco}
           </span>
           {game.indexedAt && (
             <span className="text-muted" style={{ marginLeft: '0.75rem', fontSize: '0.875rem' }}>

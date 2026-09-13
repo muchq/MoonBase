@@ -1,8 +1,11 @@
 #include "domains/games/apis/one_d4_worker/poller.h"
 
+#include <algorithm>
+#include <memory>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/log/log.h"
@@ -22,6 +25,22 @@ namespace {
 /// one fixed sentence, never the cause. Stored rows already carry this exact
 /// string, so a caller matching on it keeps matching.
 constexpr char kInternalFailure[] = "Indexing failed due to an internal error";
+
+/// The two failures whose cause is not ours, and so the two the caller can
+/// act on. Fixed sentences like the one above — a vocabulary, never the
+/// upstream text — and neither names a platform, because the row carries
+/// one.
+///
+/// A worker deployed without the platform's credentials fails every request
+/// for it, and an "internal error" there sends the operator looking for a
+/// bug instead of an environment variable.
+constexpr char kNotConfigured[] = "This server is not configured to index that platform";
+
+/// A handle that does not exist, which is the archives' only other 404:
+/// chess.com answers a quiet month on a real player with an empty list, and
+/// an authenticated Lichess export does the same. Without this, a typo reads
+/// as a server fault.
+constexpr char kPlayerNotFound[] = "Player was not found on that platform";
 
 /// A token no other claimant will present: 128 random bits.
 ///
@@ -73,6 +92,16 @@ class QueueLease : public LeaseKeeper {
   LeaseCore core_;
 };
 
+/// What a failed run stores, from what failed.
+///
+/// Everything unlisted is kInternalFailure: the default is the opaque one,
+/// so a new error code cannot start leaking an upstream body by accident.
+const char* Explain(const absl::Status& why) {
+  if (absl::IsUnauthenticated(why)) return kNotConfigured;
+  if (absl::IsNotFound(why)) return kPlayerNotFound;
+  return kInternalFailure;
+}
+
 }  // namespace
 
 std::string_view ToString(RunOutcome outcome) {
@@ -92,14 +121,50 @@ std::string_view ToString(RunOutcome outcome) {
 Poller::Poller(IndexQueue& queue, Run run, Options options)
     : queue_(queue), run_(std::move(run)), options_(std::move(options)) {}
 
-absl::StatusOr<std::optional<Claim>> Poller::ClaimOne() {
-  Claim claim;
-  claim.owner = absl::StrCat(options_.owner, "/", RunToken());
-  absl::StatusOr<std::optional<IndexJob>> claimed = queue_.ClaimNext(claim.owner, options_.lease);
+absl::StatusOr<std::optional<Claim>> PlatformAdmission::Claim(
+    absl::FunctionRef<absl::StatusOr<std::optional<IndexJob>>(absl::Span<const std::string>)> claim,
+    std::string owner) {
+  const absl::MutexLock lock(mu_);
+  std::vector<std::string> at_capacity;
+  for (const auto& [platform, limit] : limits_) {
+    const auto running = in_flight_.find(platform);
+    if (running != in_flight_.end() && running->second >= limit) at_capacity.push_back(platform);
+  }
+  // Sorted so the statement's parameter is stable for a given set, which is
+  // one less thing to explain when reading the log.
+  std::sort(at_capacity.begin(), at_capacity.end());
+
+  const absl::StatusOr<std::optional<IndexJob>> claimed = claim(at_capacity);
   if (!claimed.ok()) return claimed.status();
   if (!claimed->has_value()) return std::nullopt;
-  claim.job = **claimed;
-  return claim;
+
+  const std::string& platform = (*claimed)->platform;
+  ++in_flight_[platform];
+  // Owns nothing; the deleter is the whole point. It runs when the last
+  // copy of the claim is destroyed, wherever that happens to be.
+  PlatformSlot slot(nullptr, [this, platform](void*) { Release(platform); });
+  return one_d4_worker::Claim{.job = **claimed, .owner = std::move(owner), .slot = std::move(slot)};
+}
+
+void PlatformAdmission::Release(const std::string& platform) {
+  const absl::MutexLock lock(mu_);
+  const auto running = in_flight_.find(platform);
+  if (running == in_flight_.end()) return;
+  if (--running->second <= 0) in_flight_.erase(running);
+}
+
+absl::StatusOr<std::optional<Claim>> Poller::ClaimOne() {
+  std::string owner = absl::StrCat(options_.owner, "/", RunToken());
+
+  const auto take = [&](absl::Span<const std::string> at_capacity) {
+    return queue_.ClaimNext(owner, options_.lease, at_capacity);
+  };
+  if (options_.admission != nullptr) return options_.admission->Claim(take, std::move(owner));
+
+  const absl::StatusOr<std::optional<IndexJob>> claimed = take({});
+  if (!claimed.ok()) return claimed.status();
+  if (!claimed->has_value()) return std::nullopt;
+  return Claim{.job = **claimed, .owner = std::move(owner), .slot = nullptr};
 }
 
 absl::StatusOr<RunOutcome> Poller::RunClaimed(const Claim& claim) {
@@ -127,7 +192,7 @@ absl::StatusOr<RunOutcome> Poller::RunClaimed(const Claim& claim) {
     // handed back by the API, and a chess.com body or a libpq diagnostic
     // in there is an internal detail told to whoever asked for the index.
     LOG(ERROR) << "Run failed request_id=" << job.id << " error=" << report.status();
-    return Finish(RunOutcome::kFailed, queue_.Fail(claim.ref(), kInternalFailure));
+    return Finish(RunOutcome::kFailed, queue_.Fail(claim.ref(), Explain(report.status())));
   }
 
   // Only kShutdown reaches here; the ceiling is handled above. The

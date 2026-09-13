@@ -7,6 +7,7 @@
 
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "domains/games/apis/one_d4_worker/job.h"
 #include "domains/games/apis/one_d4_worker/queue.h"
 #include "domains/platform/libs/pg/pg.h"
@@ -21,8 +22,9 @@ class PgQueue : public IndexQueue {
   /// constant so the two cannot hold different numbers.
   PgQueue(pg::Client& client, int max_attempts) : client_(client), max_attempts_(max_attempts) {}
 
-  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
-                                                    absl::Duration lease) override;
+  absl::StatusOr<std::optional<IndexJob>> ClaimNext(
+      std::string_view owner, absl::Duration lease,
+      absl::Span<const std::string> at_capacity = {}) override;
   absl::StatusOr<bool> Heartbeat(ClaimRef claim, absl::Duration lease) override;
   absl::StatusOr<bool> Progress(ClaimRef claim, int games_indexed) override;
 
