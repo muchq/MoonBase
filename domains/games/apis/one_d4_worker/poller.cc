@@ -1,10 +1,13 @@
 #include "domains/games/apis/one_d4_worker/poller.h"
 
+#include <algorithm>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "absl/base/thread_annotations.h"
+#include "absl/cleanup/cleanup.h"
 #include "absl/log/log.h"
 #include "absl/random/random.h"
 #include "absl/status/status.h"
@@ -95,11 +98,35 @@ Poller::Poller(IndexQueue& queue, Run run, Options options)
 absl::StatusOr<std::optional<Claim>> Poller::ClaimOne() {
   Claim claim;
   claim.owner = absl::StrCat(options_.owner, "/", RunToken());
-  absl::StatusOr<std::optional<IndexJob>> claimed = queue_.ClaimNext(claim.owner, options_.lease);
+
+  // The lock spans the claim, not just the read of in_flight_: two slots
+  // that each saw "none in flight" would each claim, and the cap would be
+  // one only by luck. It costs nothing to hold — a claim is one statement
+  // on a pg::Client, which serialises its connection behind a mutex anyway.
+  const absl::MutexLock lock(claims_mu_);
+  std::vector<std::string> at_capacity;
+  for (const auto& [platform, limit] : options_.platform_limits) {
+    const auto running = in_flight_.find(platform);
+    if (running != in_flight_.end() && running->second >= limit) at_capacity.push_back(platform);
+  }
+  // Sorted so the statement's parameter is stable for a given set, which is
+  // one less thing to explain when reading the log.
+  std::sort(at_capacity.begin(), at_capacity.end());
+
+  absl::StatusOr<std::optional<IndexJob>> claimed =
+      queue_.ClaimNext(claim.owner, options_.lease, at_capacity);
   if (!claimed.ok()) return claimed.status();
   if (!claimed->has_value()) return std::nullopt;
   claim.job = **claimed;
+  ++in_flight_[claim.job.platform];
   return claim;
+}
+
+void Poller::ReleaseClaim(const Claim& claim) {
+  const absl::MutexLock lock(claims_mu_);
+  const auto running = in_flight_.find(claim.job.platform);
+  if (running == in_flight_.end()) return;
+  if (--running->second <= 0) in_flight_.erase(running);
 }
 
 absl::StatusOr<RunOutcome> Poller::RunClaimed(const Claim& claim) {
@@ -143,6 +170,10 @@ absl::StatusOr<bool> Poller::PollOnce() {
   const absl::StatusOr<std::optional<Claim>> claim = ClaimOne();
   if (!claim.ok()) return claim.status();
   if (!claim->has_value()) return false;
+
+  // Every exit past here, including the queue refusing a terminal write:
+  // a slot that kept its count would cap the platform at one forever.
+  const absl::Cleanup release = [this, &claim] { ReleaseClaim(**claim); };
 
   const absl::StatusOr<RunOutcome> outcome = RunClaimed(**claim);
   if (!outcome.ok()) return outcome.status();

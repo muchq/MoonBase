@@ -34,8 +34,22 @@ int ToInt(const std::optional<std::string>& value) {
 
 }  // namespace
 
-absl::StatusOr<std::optional<IndexJob>> PgQueue::ClaimNext(std::string_view owner,
-                                                           absl::Duration lease) {
+/// A Postgres text[] literal. Empty is '{}', which `= ANY` matches nothing
+/// against — so an empty exclusion list excludes nothing rather than
+/// everything.
+std::string TextArray(absl::Span<const std::string> values) {
+  std::string literal = "{";
+  for (const std::string& value : values) {
+    if (literal.size() > 1) literal += ",";
+    // Platform values are canonical — upper-case, no dots, no whitespace at
+    // the edges (V003) — so there is nothing here that needs quoting.
+    literal += value;
+  }
+  return literal + "}";
+}
+
+absl::StatusOr<std::optional<IndexJob>> PgQueue::ClaimNext(
+    std::string_view owner, absl::Duration lease, absl::Span<const std::string> at_capacity) {
   // One conditional UPDATE, so two workers racing for the same row cannot
   // both win: the row lock decides, and the loser's WHERE no longer
   // matches. FOR UPDATE SKIP LOCKED picks the candidate without the two of
@@ -60,6 +74,7 @@ absl::StatusOr<std::optional<IndexJob>> PgQueue::ClaimNext(std::string_view owne
              SELECT id FROM indexing_requests
              WHERE status IN ('PENDING', 'PROCESSING')
                AND attempts < $3
+               AND NOT (platform = ANY($4::text[]))
                AND (owner_id IS NULL
                     OR lease_expires_at IS NULL OR lease_expires_at <= NOW())
              ORDER BY created_at ASC, id ASC
@@ -67,7 +82,7 @@ absl::StatusOr<std::optional<IndexJob>> PgQueue::ClaimNext(std::string_view owne
              LIMIT 1)
          RETURNING id, player, platform, start_month, end_month, exclude_bullet, skip_cache,
                    attempts)",
-      {std::string(owner), Seconds(lease), std::to_string(max_attempts_)});
+      {std::string(owner), Seconds(lease), std::to_string(max_attempts_), TextArray(at_capacity)});
   if (!claimed.ok()) return claimed.status();
   if (claimed->rows() == 0) return std::nullopt;
 
@@ -172,9 +187,10 @@ class OwnedPgQueue : public IndexQueue {
   OwnedPgQueue(const std::string& db_url, int max_attempts)
       : client_(db_url), queue_(client_, max_attempts) {}
 
-  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
-                                                    absl::Duration lease) override {
-    return queue_.ClaimNext(owner, lease);
+  absl::StatusOr<std::optional<IndexJob>> ClaimNext(
+      std::string_view owner, absl::Duration lease,
+      absl::Span<const std::string> at_capacity = {}) override {
+    return queue_.ClaimNext(owner, lease, at_capacity);
   }
   absl::StatusOr<bool> Heartbeat(ClaimRef claim, absl::Duration lease) override {
     return queue_.Heartbeat(claim, lease);

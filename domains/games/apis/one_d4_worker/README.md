@@ -180,10 +180,20 @@ What the gate does cost is slots. A run waiting on it holds its claim, its
 lease and its two Postgres connections while doing nothing, for as long as
 the export ahead of it takes — up to `request_timeout_ms`, ten minutes. With
 every slot on a LICHESS request, the worker is one stream wide and the rest
-is parked, including against chess.com work that has no such rule. Not
-reachable yet: the API refuses a LICHESS submit until #1527 slice 6 opens
-it, and the fix when it does is upstream of here — not claiming more than
-one LICHESS request at a time.
+is parked, including against chess.com work that has no such rule.
+
+So it does not claim one. `Poller::Options::platform_limits` caps LICHESS at
+one run per process, and the cap is applied when the row is *claimed*: a
+request for a platform this process is full on is not a candidate, stays
+PENDING, and is passed over for one the process can run. Parking on the
+mutex was the symptom; claiming the row was the cause.
+
+**Per process, not per fleet.** Replicas each get their own cap, so three of
+them are three concurrent exports against a rule Lichess states globally.
+`compose.yaml` sets no `replicas` today, which is the only reason that is
+survivable. The fleet-wide version is a partial unique index over liveness,
+exactly as `idx_reanalysis_requests_single_live` already does for reanalysis,
+and belongs with whatever makes replicas real.
 
 ### Reading the log
 

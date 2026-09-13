@@ -57,6 +57,15 @@ class PgQueueTest : public testing::Test {
   /// A stable UUID per test-local name, because the real id column is one.
   static std::string Id(int n) { return absl::StrFormat("00000000-0000-4000-8000-%012d", n); }
 
+  void InsertOn(const std::string& id, const std::string& player, const std::string& platform) {
+    ASSERT_TRUE(client_
+                    ->Exec("INSERT INTO indexing_requests (id, player, platform, start_month,"
+                           " end_month, status, created_at, updated_at) VALUES ($1, $2, $3,"
+                           " '2026-01', '2026-02', 'PENDING', NOW(), NOW())",
+                           {id, player, platform})
+                    .ok());
+  }
+
   void Insert(const std::string& id, const std::string& player,
               const std::string& status = "PENDING") {
     ASSERT_TRUE(
@@ -99,6 +108,51 @@ TEST_F(PgQueueTest, ClaimsAPendingRequestAndReadsItBack) {
   EXPECT_EQ((*claimed)->end_month, "2026-02");
   EXPECT_EQ((*claimed)->attempts, 1) << "claiming spends an attempt";
   EXPECT_EQ(Column(Id(1), "owner_id"), "worker-1");
+}
+
+// The claim-time half of the per-process platform cap (#1527 slice 6). A
+// caller at capacity for a platform says so, and the row stays PENDING for
+// whoever has room rather than being claimed and parked.
+TEST_F(PgQueueTest, WillNotClaimARequestForAPlatformTheCallerIsFullOn) {
+  InsertOn(Id(1), "alireza", "LICHESS");
+
+  const std::vector<std::string> full = {"LICHESS"};
+  const auto claimed = queue_->ClaimNext("worker-1", absl::Minutes(5), full);
+
+  ASSERT_TRUE(claimed.ok()) << claimed.status();
+  EXPECT_FALSE(claimed->has_value());
+  EXPECT_EQ(Column(Id(1), "status"), "PENDING") << "the row was taken out of the queue anyway";
+  EXPECT_EQ(Column(Id(1), "attempts"), "0") << "a refused claim must not spend an attempt";
+}
+
+// The mixed queue: the excluded row is passed over, not a stopping point.
+// Without this the oldest-first order would starve every later platform
+// behind one capped row.
+TEST_F(PgQueueTest, ClaimsPastAnExcludedRowToOneItCanRun) {
+  InsertOn(Id(1), "alireza", "LICHESS");
+  InsertOn(Id(2), "hikaru", "CHESS_COM");
+
+  const std::vector<std::string> full = {"LICHESS"};
+  const auto claimed = queue_->ClaimNext("worker-1", absl::Minutes(5), full);
+
+  ASSERT_TRUE(claimed.ok()) << claimed.status();
+  ASSERT_TRUE(claimed->has_value()) << "chess.com work starved behind a capped Lichess row";
+  EXPECT_EQ((*claimed)->id, Id(2));
+  EXPECT_EQ((*claimed)->platform, "CHESS_COM");
+}
+
+// An empty exclusion list has to mean "take anything". Postgres reads
+// `platform = ANY('{}')` as false, so the NOT makes it true — but a literal
+// built wrong would read as excluding everything, and the queue would go
+// silent with work in it.
+TEST_F(PgQueueTest, AnEmptyExclusionListExcludesNothing) {
+  InsertOn(Id(1), "alireza", "LICHESS");
+
+  const auto claimed = queue_->ClaimNext("worker-1", absl::Minutes(5), {});
+
+  ASSERT_TRUE(claimed.ok()) << claimed.status();
+  ASSERT_TRUE(claimed->has_value()) << "an empty cap list emptied the queue";
+  EXPECT_EQ((*claimed)->platform, "LICHESS");
 }
 
 TEST_F(PgQueueTest, TwoWorkersCannotClaimTheSameRequest) {

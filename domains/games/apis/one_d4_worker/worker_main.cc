@@ -135,8 +135,13 @@ int main(int /*argc*/, char** argv) {
     return 1;
   }
 
-  const one_d4_worker::Poller::Options poller_options =
+  one_d4_worker::Poller::Options poller_options =
       one_d4_worker::PollerOptionsFrom(*policy, one_d4_worker::OwnerId(Hostname(), getpid()));
+  // Lichess asks for one request at a time, and LichessArchive holds a mutex
+  // to honour it. Without this a second LICHESS claim parks on that mutex
+  // holding a lease and two Postgres connections, and chess.com work queues
+  // behind it. Per process — see the README on what replicas would need.
+  poller_options.platform_limits = {{"LICHESS", 1}};
 
   // How often to ask an empty queue is local: it costs one round trip and
   // affects nobody else.

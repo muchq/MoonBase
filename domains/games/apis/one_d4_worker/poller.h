@@ -5,7 +5,10 @@
 #include <optional>
 #include <string>
 
+#include "absl/base/thread_annotations.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/statusor.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/claim_ref.h"
 #include "domains/games/apis/one_d4_worker/job.h"
@@ -80,6 +83,23 @@ class Poller {
     /// right when the run holding it has ended, wrong when another run
     /// of this process is still wedged on it.
     std::string owner;
+
+    /// How many requests for a platform this process will run at once.
+    /// Absent means no cap, which is every platform but one.
+    ///
+    /// Lichess asks for one request at a time, and LichessArchive holds a
+    /// mutex to honour it. That makes a second LICHESS claim worse than
+    /// useless: the slot parks on the mutex holding a lease and two
+    /// Postgres connections for as long as the export ahead of it takes —
+    /// up to ten minutes — and queued chess.com work, which has no such
+    /// rule, waits behind it. Not claiming the row is the fix; parking on
+    /// it was the symptom (#1527 slice 6).
+    ///
+    /// Per process, not per fleet. Replicas each get their own cap, which
+    /// is not what Lichess's global rule asks for — the fleet-wide version
+    /// is a partial unique index like idx_reanalysis_requests_single_live,
+    /// and belongs with whatever makes replicas real. See README.
+    absl::flat_hash_map<std::string, int> platform_limits;
     /// How long a claim is good for without renewal. See max_run below for
     /// where this and the two after it come from in production.
     absl::Duration lease = absl::Minutes(5);
@@ -139,6 +159,15 @@ class Poller {
 
  private:
   absl::StatusOr<RunOutcome> Finish(RunOutcome outcome, const absl::StatusOr<bool>& written);
+
+  /// Gives a finished claim's platform back to the cap.
+  void ReleaseClaim(const Claim& claim);
+
+  /// Platforms this process is already running, counted. Guards the cap,
+  /// and is held across the claim itself: two slots that both read "none in
+  /// flight" would both claim, which is the thing being prevented.
+  absl::Mutex claims_mu_;
+  absl::flat_hash_map<std::string, int> in_flight_ ABSL_GUARDED_BY(claims_mu_);
 
   IndexQueue& queue_;
   Run run_;

@@ -3,6 +3,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <optional>
 #include <string>
@@ -26,10 +27,22 @@ using ::testing::IsEmpty;
 class FakeQueue : public IndexQueue {
  public:
   absl::StatusOr<std::optional<IndexJob>> ClaimNext(
-      std::string_view owner, [[maybe_unused]] absl::Duration lease) override {
+      std::string_view owner, [[maybe_unused]] absl::Duration lease,
+      absl::Span<const std::string> at_capacity) override {
     ++claims;
     owners.push_back(std::string(owner));
+    excluded.emplace_back(at_capacity.begin(), at_capacity.end());
     if (claim_fails) return absl::UnavailableError("queue is down");
+    // The queue's own contract, as Postgres implements it: a row naming an
+    // excluded platform is not a candidate.
+    while (!queued.empty()) {
+      IndexJob job = queued.front();
+      queued.erase(queued.begin());
+      if (std::find(at_capacity.begin(), at_capacity.end(), job.platform) == at_capacity.end()) {
+        return job;
+      }
+      skipped.push_back(job);
+    }
     if (!next.has_value()) return std::nullopt;
     IndexJob job = *next;
     next.reset();
@@ -98,6 +111,11 @@ class FakeQueue : public IndexQueue {
   std::vector<int> progress;
   std::atomic<bool> progress_accepted{true};
   bool terminal_write_wins = true;
+  /// What each claim was told not to take.
+  std::vector<std::vector<std::string>> excluded;
+  /// Rows the queue passed over because their platform was at capacity.
+  std::vector<IndexJob> queued;
+  std::vector<IndexJob> skipped;
   int claims = 0;
   std::atomic<int> heartbeats{0};
   std::vector<std::string> calls;
@@ -120,6 +138,14 @@ IndexJob AJob() {
   job.platform = "CHESS_COM";
   job.start_month = "2026-01";
   job.end_month = "2026-01";
+  return job;
+}
+
+/// A job with an id and a platform of its own, for the capacity tests.
+IndexJob AJobFor(std::string id, std::string platform) {
+  IndexJob job = AJob();
+  job.id = std::move(id);
+  job.platform = std::move(platform);
   return job;
 }
 
@@ -691,6 +717,93 @@ TEST(Poller, LeavesARunInsideItsCeilingAlone) {
 
   ASSERT_TRUE(poller.PollOnce().ok());
   EXPECT_EQ(poller.last_outcome(), RunOutcome::kCompleted);
+}
+
+// ---- platform capacity ----
+
+// Lichess asks for one request at a time and LichessArchive holds a mutex to
+// honour it. A second LICHESS claim would park on that mutex holding a lease
+// and two Postgres connections for as long as the export ahead of it takes.
+// Not claiming it is the fix (#1527 slice 6).
+TEST(PollerPlatformLimits, WillNotClaimASecondRequestForACappedPlatform) {
+  FakeQueue queue;
+  Poller::Options options = Options();
+  options.platform_limits = {{"LICHESS", 1}};
+  // A run that never returns would hang the test; what matters is that the
+  // claim is held, so the run completes and ClaimOne is called directly.
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+
+  // One LICHESS run in flight, held open.
+  queue.queued = {AJobFor("first", "LICHESS")};
+  ASSERT_TRUE(poller.ClaimOne().value().has_value());
+
+  queue.queued = {AJobFor("second", "LICHESS")};
+  const auto second = poller.ClaimOne();
+
+  ASSERT_TRUE(second.ok()) << second.status();
+  EXPECT_FALSE(second->has_value()) << "a second LICHESS row was claimed and would have parked";
+  EXPECT_THAT(queue.excluded.back(), ElementsAre("LICHESS"));
+}
+
+// The point of excluding at claim time rather than parking after it: work for
+// a platform with no such rule keeps moving. This is the mixed queue.
+TEST(PollerPlatformLimits, StillClaimsAnotherPlatformWhileTheCappedOneIsBusy) {
+  FakeQueue queue;
+  Poller::Options options = Options();
+  options.platform_limits = {{"LICHESS", 1}};
+  // A run that never returns would hang the test; what matters is that the
+  // claim is held, so the run completes and ClaimOne is called directly.
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+
+  queue.queued = {AJobFor("lichess-1", "LICHESS")};
+  ASSERT_TRUE(poller.ClaimOne().value().has_value());
+
+  // A LICHESS row at the front, a chess.com row behind it.
+  queue.queued = {AJobFor("lichess-2", "LICHESS"), AJobFor("chess-1", "CHESS_COM")};
+  const auto next = poller.ClaimOne();
+
+  ASSERT_TRUE(next.ok()) << next.status();
+  ASSERT_TRUE(next->has_value()) << "chess.com work starved behind a Lichess export";
+  EXPECT_EQ((*next)->job.id, "chess-1");
+  EXPECT_EQ((*next)->job.platform, "CHESS_COM");
+}
+
+// A cap that never gave a slot back would run one Lichess request and then
+// refuse forever.
+TEST(PollerPlatformLimits, GivesTheSlotBackWhenTheRunEnds) {
+  FakeQueue queue;
+  Poller::Options options = Options();
+  options.platform_limits = {{"LICHESS", 1}};
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+
+  queue.queued = {AJobFor("first", "LICHESS")};
+  ASSERT_TRUE(poller.PollOnce().value());
+
+  queue.queued = {AJobFor("second", "LICHESS")};
+  const auto second = poller.ClaimOne();
+
+  ASSERT_TRUE(second.ok()) << second.status();
+  ASSERT_TRUE(second->has_value()) << "the cap never released after the first run finished";
+  EXPECT_EQ((*second)->job.id, "second");
+}
+
+// Every other platform is uncapped, and an empty exclusion list has to mean
+// "take anything" rather than "take nothing".
+TEST(PollerPlatformLimits, AnUncappedPlatformIsNeverExcluded) {
+  FakeQueue queue;
+  Poller::Options options = Options();
+  options.platform_limits = {{"LICHESS", 1}};
+  // A run that never returns would hang the test; what matters is that the
+  // claim is held, so the run completes and ClaimOne is called directly.
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+
+  queue.queued = {AJobFor("a", "CHESS_COM")};
+  ASSERT_TRUE(poller.ClaimOne().value().has_value());
+  queue.queued = {AJobFor("b", "CHESS_COM")};
+  const auto second = poller.ClaimOne();
+
+  ASSERT_TRUE(second->has_value()) << "chess.com capped itself";
+  EXPECT_THAT(queue.excluded.back(), IsEmpty());
 }
 
 }  // namespace

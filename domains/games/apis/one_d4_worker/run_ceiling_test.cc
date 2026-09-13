@@ -10,6 +10,7 @@
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
+#include "absl/types/span.h"
 #include "domains/games/apis/one_d4_worker/claim_ref.h"
 #include "domains/games/apis/one_d4_worker/index_run.h"
 #include "domains/games/apis/one_d4_worker/poller.h"
@@ -34,7 +35,8 @@ using ::testing::IsEmpty;
 class FakeQueue : public IndexQueue {
  public:
   absl::StatusOr<std::optional<IndexJob>> ClaimNext(
-      [[maybe_unused]] std::string_view owner, [[maybe_unused]] absl::Duration lease) override {
+      [[maybe_unused]] std::string_view owner, [[maybe_unused]] absl::Duration lease,
+      [[maybe_unused]] absl::Span<const std::string> at_capacity) override {
     if (!next.has_value()) return std::nullopt;
     IndexJob job = *next;
     next.reset();

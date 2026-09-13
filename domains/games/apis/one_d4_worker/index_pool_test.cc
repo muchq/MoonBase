@@ -18,6 +18,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/time/clock.h"
+#include "absl/types/span.h"
 #include "domains/games/apis/one_d4_worker/claim_ref.h"
 #include "domains/games/apis/one_d4_worker/queue.h"
 #include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
@@ -31,8 +32,9 @@ using ::testing::IsEmpty;
 /// An endless supply of requests, or none, or an outage.
 class FakeQueue : public IndexQueue {
  public:
-  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
-                                                    absl::Duration /*lease*/) override {
+  absl::StatusOr<std::optional<IndexJob>> ClaimNext(
+      std::string_view owner, absl::Duration /*lease*/,
+      [[maybe_unused]] absl::Span<const std::string> at_capacity) override {
     const absl::MutexLock lock(mu_);
     ++claims_;
     owners_.insert(std::string(owner));
@@ -161,9 +163,10 @@ class SharedQueue : public IndexQueue {
  public:
   explicit SharedQueue(IndexQueue& to) : to_(to) {}
 
-  absl::StatusOr<std::optional<IndexJob>> ClaimNext(std::string_view owner,
-                                                    absl::Duration lease) override {
-    return to_.ClaimNext(owner, lease);
+  absl::StatusOr<std::optional<IndexJob>> ClaimNext(
+      std::string_view owner, absl::Duration lease,
+      absl::Span<const std::string> at_capacity = {}) override {
+    return to_.ClaimNext(owner, lease, at_capacity);
   }
   absl::StatusOr<bool> Heartbeat(ClaimRef claim, absl::Duration lease) override {
     return to_.Heartbeat(claim, lease);
