@@ -11,6 +11,7 @@
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
+#include "domains/games/apis/one_d4_worker/title_store.h"
 
 namespace one_d4_worker {
 
@@ -55,6 +56,15 @@ class TitleRoster {
     std::function<bool()> stopping;
 
     std::function<absl::Time()> now;
+
+    /// Where a roster is kept so the next process can answer from it, and
+    /// where this one reads when a refresh has nothing to install. Null
+    /// leaves both out and the roster is memory-only.
+    TitleStore* store = nullptr;
+
+    /// Whose titles these are. The store is keyed by it, because a
+    /// username means a different player on another platform.
+    std::string platform;
   };
 
   TitleRoster(TitleSource& source, Options options);
@@ -81,6 +91,10 @@ class TitleRoster {
   void RefreshIfStale() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
   /// Reads all ten rosters and installs them, or leaves what we had.
   void Rebuild(absl::Time now) ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
+  /// Installs the stored roster when a refresh left us with none. Does not
+  /// stamp refreshed_: a stored roster answers lookups but the refresh is
+  /// still overdue, so Stale() keeps saying the month is incomplete.
+  void AdoptStored() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   TitleSource& source_;
   const Options options_;
@@ -88,7 +102,7 @@ class TitleRoster {
   /// Lowercased username to title. The rosters come back lowercase and an
   /// archive names the same player however they typed it.
   mutable absl::Mutex mu_;
-  std::map<std::string, std::string, std::less<>> titles_ ABSL_GUARDED_BY(mu_);
+  TitleMap titles_ ABSL_GUARDED_BY(mu_);
   bool loaded_ ABSL_GUARDED_BY(mu_) = false;
   absl::Time refreshed_ ABSL_GUARDED_BY(mu_) = absl::InfinitePast();
   absl::Time attempted_ ABSL_GUARDED_BY(mu_) = absl::InfinitePast();

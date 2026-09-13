@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 
@@ -169,6 +170,152 @@ TEST(TitleRoster, ForgetsATitleThatWasTakenAway) {
   now += absl::ToInt64Seconds(absl::Hours(24));
 
   EXPECT_EQ(*roster.TitleOf("hikaru"), "");
+}
+
+// A store that counts what it was asked, so a test can tell "answered from
+// the store" from "answered from a roster it still had".
+class FakeStore : public TitleStore {
+ public:
+  absl::Status Save(std::string_view platform, const TitleMap& titles,
+                    absl::Time observed_at) override {
+    if (!save_status.ok()) return save_status;
+    ++saves;
+    saved = titles;
+    saved_platform = std::string(platform);
+    saved_at = observed_at;
+    return absl::OkStatus();
+  }
+
+  absl::StatusOr<TitleMap> Load(std::string_view platform) override {
+    ++loads;
+    loaded_platform = std::string(platform);
+    if (!load_status.ok()) return load_status;
+    return stored;
+  }
+
+  TitleMap stored;
+  TitleMap saved;
+  std::string saved_platform;
+  std::string loaded_platform;
+  absl::Time saved_at = absl::InfinitePast();
+  int saves = 0;
+  int loads = 0;
+  absl::Status save_status;
+  absl::Status load_status;
+};
+
+TitleRoster::Options StoredOptions(int64_t& now, FakeStore& store) {
+  TitleRoster::Options options = Options(now);
+  options.store = &store;
+  options.platform = "CHESS_COM";
+  return options;
+}
+
+TEST(TitleRoster, StoresTheRosterItRead) {
+  int64_t now = 1000;
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"Hikaru"};
+  FakeStore store;
+  TitleRoster roster(rosters, StoredOptions(now, store));
+
+  ASSERT_EQ(*roster.TitleOf("hikaru"), "GM");
+
+  EXPECT_EQ(store.saves, 1);
+  EXPECT_EQ(store.saved_platform, "CHESS_COM");
+  EXPECT_EQ(store.saved_at, absl::FromUnixSeconds(1000));
+  // Lowercased, which is the key it is read back by.
+  EXPECT_THAT(store.saved, ElementsAre(::testing::Pair("hikaru", "GM")));
+}
+
+// The point of the whole table: chess.com being down no longer writes a
+// month of games with every player in it untitled.
+TEST(TitleRoster, AnswersFromTheStoreWhenThereIsNoRosterToRead) {
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.status = absl::UnavailableError("chess.com is down");
+  FakeStore store;
+  store.stored = {{"hikaru", "GM"}};
+  TitleRoster roster(rosters, StoredOptions(now, store));
+
+  EXPECT_EQ(*roster.TitleOf("hikaru"), "GM");
+  EXPECT_EQ(*roster.TitleOf("Hikaru"), "GM");
+  EXPECT_EQ(*roster.TitleOf("nobody"), "");
+  EXPECT_EQ(store.loads, 1);
+  EXPECT_EQ(store.loaded_platform, "CHESS_COM");
+}
+
+// Answering is not the same as being fresh. A stored roster is as old as
+// whatever wrote it, so the month it answers for is still incomplete and
+// still gets refetched — otherwise an outage would cache a day of months
+// against titles nobody will ever correct.
+TEST(TitleRoster, IsStaleWhileItIsAnsweringFromTheStore) {
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.status = absl::UnavailableError("chess.com is down");
+  FakeStore store;
+  store.stored = {{"hikaru", "GM"}};
+  TitleRoster roster(rosters, StoredOptions(now, store));
+
+  ASSERT_EQ(*roster.TitleOf("hikaru"), "GM");
+  EXPECT_TRUE(roster.Stale());
+}
+
+TEST(TitleRoster, PrefersARosterItCanReadOverTheStoredOne) {
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"hikaru"};
+  FakeStore store;
+  store.stored = {{"hikaru", "IM"}};
+  TitleRoster roster(rosters, StoredOptions(now, store));
+
+  EXPECT_EQ(*roster.TitleOf("hikaru"), "GM");
+  EXPECT_EQ(store.loads, 0);
+}
+
+// An empty table is not an answer, for the same reason ten empty rosters
+// are not: taking it would untitle the whole site and report nothing wrong.
+TEST(TitleRoster, DoesNotTakeAnEmptyStoreAsAnAnswer) {
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.status = absl::UnavailableError("chess.com is down");
+  FakeStore store;
+  TitleRoster roster(rosters, StoredOptions(now, store));
+
+  EXPECT_FALSE(roster.TitleOf("hikaru").ok());
+}
+
+TEST(TitleRoster, ARosterThatCannotBeStoredStillAnswers) {
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"hikaru"};
+  FakeStore store;
+  store.save_status = absl::InternalError("no database");
+  TitleRoster roster(rosters, StoredOptions(now, store));
+
+  // Failing to store is not failing to refresh.
+  EXPECT_EQ(*roster.TitleOf("hikaru"), "GM");
+  EXPECT_FALSE(roster.Stale());
+}
+
+TEST(TitleRoster, AStoreThatCannotBeReadLeavesTheOldAnswer) {
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.status = absl::UnavailableError("chess.com is down");
+  FakeStore store;
+  store.load_status = absl::InternalError("no database");
+  TitleRoster roster(rosters, StoredOptions(now, store));
+
+  EXPECT_FALSE(roster.TitleOf("hikaru").ok());
+}
+
+// Memory-only is still a supported shape, and the default.
+TEST(TitleRoster, WorksWithNoStoreAtAll) {
+  int64_t now = 0;
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"hikaru"};
+  TitleRoster roster(rosters, Options(now));
+
+  EXPECT_EQ(*roster.TitleOf("hikaru"), "GM");
 }
 
 TEST(TitleRoster, SaysSoWhenItHasNoRosterAtAll) {

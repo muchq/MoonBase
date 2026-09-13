@@ -384,13 +384,8 @@ public class MigrationTest {
   }
 
   /**
-   * The live-request invariant, as the schema states it since V018: one PENDING/PROCESSING row per
-   * (player, platform, start_month, end_month, exclude_bullet), and terminal rows free to pile up.
-   *
-   * <p>Both statuses by name, not just the shape of the predicate. A predicate naming only one of
-   * them still renders as a partial unique index over the right columns, and would leave the range
-   * of a PROCESSING request open to a second live row — the #1249 race, reopened, since {@code
-   * findLiveRequest} is a read and this index is the only thing closing it.
+   * Both statuses by name, not just the shape of the predicate: naming only one still renders as a
+   * partial unique index over the right columns, and reopens the #1249 race for PROCESSING rows.
    */
   @Test
   public void run_addsTheLiveRequestIndexAsAPartialUniqueIndex() throws Exception {
@@ -405,10 +400,8 @@ public class MigrationTest {
   }
 
   /**
-   * The same invariant driven rather than read: a PROCESSING incumbent holds its range against a
-   * raw insert. PROCESSING specifically, because {@code createOrAdopt} short circuits on the live
-   * row it finds and never reaches the index, so nothing else in the tree puts a second live row in
-   * front of an in-flight one.
+   * PROCESSING specifically: {@code createOrAdopt} short circuits on the live row it finds and
+   * never reaches the index, so nothing else puts a second live row in front of an in-flight one.
    */
   @Test
   public void theLiveRequestIndexRefusesASecondLiveRowAgainstAProcessingIncumbent()
