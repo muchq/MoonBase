@@ -22,7 +22,14 @@ receivers:
     root_path: /hostfs
     collection_interval: 10s
     scrapers:
-      cpu: {}
+      cpu:
+        metrics:
+          # `cpu` is opt-in, and system.cpu.time defaults to summing across
+          # cores — which empties the Host page's CPU Cores chart and drives its
+          # CPU percentage negative. `state` is relisted because this key
+          # replaces the default attribute set rather than adding to it.
+          system.cpu.time:
+            attributes: [cpu, state]
       memory: {}
       disk: {}
       filesystem:
