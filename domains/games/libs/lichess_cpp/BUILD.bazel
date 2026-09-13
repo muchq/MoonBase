@@ -59,3 +59,13 @@ cc_test(
         "@opal_cpp//runtime:http",
     ],
 )
+
+cc_test(
+    name = "production_client_test",
+    size = "small",
+    srcs = ["production_client_test.cc"],
+    deps = [
+        ":production_client",
+        "@googletest//:gtest_main",
+    ],
+)

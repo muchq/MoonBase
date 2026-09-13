@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <string>
@@ -63,6 +64,33 @@ std::pair<Client, std::shared_ptr<ScriptedHttpClient>> ClientOver(
   auto client = Client::Create(std::move(config));
   EXPECT_TRUE(client.ok()) << client.error().message();
   return {std::move(*client), transport};
+}
+
+// ---- the budget the config encodes ----
+
+// The timeout is not a round number picked by habit: Lichess streams the
+// export at about 20 games/second anonymously, and opal applies this per
+// attempt, so the timeout *is* the largest month this client can read. A
+// retry restarts the response rather than resuming it, so a month that
+// cannot finish in one attempt cannot finish at all.
+//
+// Pinned as arithmetic rather than as a constant so the reason survives:
+// lower it and the test says which months stop being indexable.
+TEST(LichessClientConfig, TheTimeoutCoversAMonthAnActiveBulletPlayerCouldPlay) {
+  constexpr int kGamesPerSecondAnonymous = 20;
+  constexpr int kBusyMonthGames = 10'000;
+  constexpr int kNeededMs = (kBusyMonthGames / kGamesPerSecondAnonymous) * 1000;
+
+  EXPECT_GE(lichess::DefaultClientConfig().request_timeout_ms, kNeededMs)
+      << "a month of " << kBusyMonthGames << " games streams for " << kNeededMs / 1000
+      << "s and would be cut off, and the retry would restart it rather than resume";
+}
+
+// Lichess's 429 cooldown for concurrent requests was observed outlasting a
+// 75-second backoff. A ceiling below that retries into the same refusal and
+// spends the attempts discovering it.
+TEST(LichessClientConfig, TheBackoffCeilingOutlastsTheObservedCooldown) {
+  EXPECT_GE(lichess::DefaultClientConfig().retry.max_backoff, std::chrono::seconds(75));
 }
 
 // PGN is the format the whole slice turns on: it carries the ECO, Opening and

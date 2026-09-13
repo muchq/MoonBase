@@ -879,6 +879,28 @@ func caddyBlockAt(lines []string, open int) []string {
 // service name, so a missing variable does not fail loudly — it just happens to
 // work here and would not anywhere else. Pinning it in compose keeps the
 // deployment's answer written down rather than inherited from a code default.
+// Lichess answers the games export with 404 to anonymous callers, even for
+// accounts that exist, so a LICHESS request only works with a token. The
+// worker reads ONE_D4_LICHESS_TOKEN — and a container inherits nothing the
+// compose block does not declare, so provisioning the secret on the host and
+// forgetting this line leaves every such request failing with the variable
+// sitting right there in ~/.env. That is the failure this pins: it looks
+// configured from the host and is not.
+//
+// The :- default is load-bearing in the other direction. Compose refuses to
+// start the project on an unset variable with no default, and a host that
+// indexes only chess.com has no reason to hold a Lichess token.
+func TestTheWorkerCarriesTheLichessTokenAndToleratesItsAbsence(t *testing.T) {
+	block := serviceBlock(t, "compose.yaml", "one_d4_worker")
+
+	if !strings.Contains(block, "ONE_D4_LICHESS_TOKEN=${ONE_D4_LICHESS_TOKEN:-}") {
+		t.Errorf("one_d4_worker does not pass ONE_D4_LICHESS_TOKEN through with an empty "+
+			"default. Without the variable the worker reads nothing and every LICHESS request "+
+			"hits the anonymous 404; without the :- default compose refuses to start a host "+
+			"that has no token at all (#1527). Block was:\n%s", block)
+	}
+}
+
 func TestMcpserverIsPointedAtOneD4(t *testing.T) {
 	block := serviceBlock(t, "compose.yaml", "mcpserver")
 
