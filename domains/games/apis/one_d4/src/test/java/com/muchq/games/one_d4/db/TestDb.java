@@ -25,11 +25,9 @@ import org.opentest4j.TestAbortedException;
 public final class TestDb {
 
   /**
-   * The live pool per schema name, so a {@code @BeforeEach} that builds a TestDb per test leaves
-   * one pool behind rather than one per test. It does not leave zero: nothing tells a JUnit test
-   * when its DataSource is finished with, and no suite closes one. Unbounded, four test JVMs
-   * running in parallel exhausted the scratch database's client slots — {@code FATAL: sorry, too
-   * many clients already} — which reads as a broken database rather than as a leak.
+   * One live pool per schema name. Nothing tells a JUnit test when its DataSource is finished with,
+   * so a {@code @BeforeEach} per test leaked one each until the scratch database ran out of client
+   * slots.
    */
   private static final Map<String, HikariDataSource> POOLS = new ConcurrentHashMap<>();
 
@@ -81,11 +79,7 @@ public final class TestDb {
     return db.url;
   }
 
-  /**
-   * Every production setting from {@link DataSourceFactory}, with the pool floor dropped to zero: a
-   * suite that has finished querying should be holding nothing. Replacing the pool registered under
-   * {@code name} closes it.
-   */
+  /** Production settings, floor dropped to zero. Replacing a name's pool closes it. */
   private static DataSource pool(String name, String url) {
     HikariConfig config = DataSourceFactory.hikariConfig(url);
     config.setMinimumIdle(0);
