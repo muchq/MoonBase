@@ -167,6 +167,7 @@ java_library(
         ":db",
         ":dto",
         ":model",
+        "//domains/games/libs/chessql:compiler",
         artifact("org.jspecify:jspecify"),
     ],
 )

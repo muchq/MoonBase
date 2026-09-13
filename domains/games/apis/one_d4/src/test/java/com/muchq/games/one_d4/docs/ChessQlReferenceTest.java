@@ -2,12 +2,16 @@ package com.muchq.games.one_d4.docs;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.muchq.games.chessql.compiler.CompiledQuery;
 import com.muchq.games.chessql.compiler.SqlCompiler;
 import com.muchq.games.chessql.parser.Parser;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -83,14 +87,20 @@ public class ChessQlReferenceTest {
    * green, in a file served verbatim to MCP clients as the query-language reference.
    *
    * <p>The documented fragment is matched as an ordered set of substrings so a row may elide with
-   * {@code ...}, which several do rather than reprint a whole EXISTS subquery. Parameters are not
-   * pinned: the column renders them for a human (a bound {@code LocalDateTime} prints unlike its
-   * {@code toString}), and the SQL is what drifted.
+   * {@code ...}, which several do rather than reprint a whole EXISTS subquery.
+   *
+   * <p>Parameters are pinned only where the column is unambiguous — every entry a quoted string or
+   * a bare integer. The timestamp rows render a bound value for a human rather than as its {@code
+   * toString}, so they are skipped rather than given a parser that would only ever be approximately
+   * right. The Parameters column is pinned at all because a bind can change without the SQL
+   * changing — platform literals are canonicalised at compile time — and an unpinned column is one
+   * a reader has no reason to distrust.
    */
   @Test
   public void theCompilationExamplesTableMatchesWhatTheCompilerEmits() throws IOException {
     SqlCompiler compiler = new SqlCompiler();
     int checked = 0;
+    int pinnedParameters = 0;
 
     for (String line : section("## Compilation Examples", "## Error Handling").split("\n")) {
       String[] cells = line.split("\\|");
@@ -101,8 +111,21 @@ public class ChessQlReferenceTest {
       }
       String input = unbacktick(cells[1]);
       String documentedSql = unbacktick(cells[2]);
+      CompiledQuery compiled = compiler.compile(Parser.parse(input));
 
-      String actual = compiler.compile(Parser.parse(input)).selectSql();
+      if (cells.length <= 3) {
+        throw new AssertionError(
+            "CHESSQL.md documents `" + input + "` with no Parameters cell at all");
+      }
+      Optional<List<Object>> documented = documentedParameters(unbacktick(cells[3]));
+      if (documented.isPresent()) {
+        assertThat(compiled.parameters())
+            .as("CHESSQL.md documents `%s` as binding %s", input, documented.get())
+            .isEqualTo(documented.get());
+        pinnedParameters++;
+      }
+
+      String actual = compiled.selectSql();
       String cursor = actual;
       for (String fragment : documentedSql.split("\\.\\.\\.")) {
         assertThat(cursor)
@@ -118,6 +141,58 @@ public class ChessQlReferenceTest {
     assertThat(checked)
         .as("the Compilation Examples table must still have rows to check")
         .isGreaterThanOrEqualTo(8);
+    // An unreadable Parameters cell is skipped, so a reformat could quietly un-pin every row and
+    // leave this test green on a table it no longer reads.
+    assertThat(pinnedParameters)
+        .as("the Compilation Examples table must still have readable Parameters cells")
+        .isGreaterThanOrEqualTo(8);
+  }
+
+  /** A rendered bound timestamp — the one entry shape this deliberately does not read back. */
+  private static final Pattern RENDERED_TIMESTAMP = Pattern.compile("\\d{4}-\\d{2}-\\d{2}T\\S*");
+
+  /**
+   * The Parameters cell as values, or empty for the timestamp rows, which render a bound value for
+   * a human rather than as its {@code toString}.
+   *
+   * <p>Only that shape is skipped, and only inside a well-formed list. A missing cell, a cell that
+   * is not a {@code [...]} list, and an entry that is neither a quoted string nor a bare integer
+   * all fail: quietly skipping any of them would let a single edit both un-pin a row and change
+   * what it documents, and the floor on the number of pinned rows cannot see which row went
+   * missing.
+   */
+  private static Optional<List<Object>> documentedParameters(String cell) {
+    // Not a list at all. Skipping it would let one edit both un-pin a row and
+    // change what it documents — the brackets are not decoration.
+    if (!cell.startsWith("[") || !cell.endsWith("]")) {
+      throw new AssertionError(
+          "CHESSQL.md Parameters cell "
+              + cell
+              + " is not a [...] list — every data row binds something, even if that is []");
+    }
+    String body = cell.substring(1, cell.length() - 1).trim();
+    if (body.isEmpty()) {
+      return Optional.of(List.of());
+    }
+    List<Object> values = new ArrayList<>();
+    for (String entry : body.split(",")) {
+      String trimmed = entry.trim();
+      if (trimmed.length() > 1 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+        values.add(trimmed.substring(1, trimmed.length() - 1));
+      } else if (trimmed.matches("-?\\d+")) {
+        values.add(Integer.valueOf(trimmed));
+      } else if (RENDERED_TIMESTAMP.matcher(trimmed).matches()) {
+        return Optional.empty();
+      } else {
+        throw new AssertionError(
+            "CHESSQL.md Parameters cell "
+                + cell
+                + " has an entry this cannot read: "
+                + trimmed
+                + " — quote a string, leave an integer bare, or it is not a Parameters cell");
+      }
+    }
+    return Optional.of(values);
   }
 
   private static String unbacktick(String cell) {

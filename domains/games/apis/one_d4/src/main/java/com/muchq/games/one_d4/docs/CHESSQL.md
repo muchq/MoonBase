@@ -59,6 +59,10 @@ Dotted field names are mapped to database columns:
 
 Underscore-separated names also work directly: `white_elo >= 2500` is equivalent to `white.elo >= 2500`.
 
+`platform` values are canonicalised before they are bound: trimmed, upper-cased, dots to
+underscores. `chess.com`, `Chess.Com` and `CHESS_COM` are one value, and that value is the
+spelling the indexer stored. Write whichever you like.
+
 `date` and `month` have no column of their own: they compile to `played_at` ranges and are
 filter-only, rejected in `IN` lists and in `groupBy`. See [Date scoping](#date-scoping) below.
 
@@ -343,7 +347,8 @@ platform IN ["chess.com"] AND black.elo > 2700 AND motif(discovered_attack)
 | `NOT motif(pin)` | `(NOT EXISTS (...motif = 'PIN'...))` | `[]` |
 | `black.title != "GM"` | `(LOWER(black_title) = LOWER(?)) IS NOT TRUE` | `["GM"]` |
 | `NOT black.title IN ["GM", "IM"]` | `(LOWER(black_title) IN (LOWER(?), LOWER(?))) IS NOT TRUE` | `["GM", "IM"]` |
-| `platform IN ["lichess", "chess.com"]` | `LOWER(platform) IN (LOWER(?), LOWER(?))` | `["lichess", "chess.com"]` |
+| `platform = "chess.com"` | `LOWER(platform) = LOWER(?)` | `["CHESS_COM"]` |
+| `platform IN ["lichess", "chess.com"]` | `LOWER(platform) IN (LOWER(?), LOWER(?))` | `["LICHESS", "CHESS_COM"]` |
 | `date >= "2026-07-01"` | `played_at >= ?` | `[2026-07-01T00:00:00Z]` |
 | `month = "2026-07"` | `(played_at >= ? AND played_at < ?)` | `[2026-07-01T00:00:00Z, 2026-08-01T00:00:00Z]` |
 

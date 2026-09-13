@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -297,7 +298,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
         allParams.addAll(whereParams);
       } else {
         // Stored motifs: count rows directly; param must come before WHERE params
-        allParams.add(motifName.toUpperCase());
+        allParams.add(motifName.toUpperCase(Locale.ROOT));
         allParams.addAll(whereParams);
         countSubquery =
             "SELECT game_url, COUNT(*) AS c FROM motif_occurrences WHERE motif = ? GROUP BY"
@@ -860,13 +861,20 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
    * here is a 400 that names the fix. The type partition needs no new hand-maintained list: {@link
    * #STRING_COLUMNS} is the string side, played_at is the one timestamp, and every remaining
    * physical column is INT.
+   *
+   * <p>A bind can also change identity here: platform is canonicalised to the spelling the indexer
+   * stored.
    */
   private static Object coerceValue(String field, String column, Object value) {
     if ("played_at".equals(column)) {
       return parsePlayedAtValue(field, value);
     }
     if (STRING_COLUMNS.contains(column)) {
-      return requireString(field, value);
+      String string = requireString(field, value);
+      // platform is stored canonically by whoever indexed the game, so the literal is canonicalised
+      // to match rather than bound as typed (#1539). LOWER() on both sides then compares
+      // chess_com to chess_com.
+      return "platform".equals(column) ? Platforms.canonical(string) : string;
     }
     return requireInteger(field, value);
   }
@@ -1163,7 +1171,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
               + " GROUP BY mo.ply HAVING COUNT(*) >= 2)";
       // All other motifs are stored directly in motif_occurrences under their own name
       default -> {
-        String motifDbValue = name.toUpperCase();
+        String motifDbValue = name.toUpperCase(Locale.ROOT);
         yield "EXISTS (SELECT 1 FROM motif_occurrences mo"
             + " WHERE mo.game_url = g.game_url AND mo.motif = '"
             + motifDbValue
@@ -1246,7 +1254,7 @@ public class SqlCompiler implements QueryCompiler<CompiledQuery> {
               + " GROUP BY game_url, ply HAVING COUNT(*) >= 2";
       default -> {
         // Stored motif: inline the validated name as an uppercase literal.
-        String dbValue = name.toUpperCase();
+        String dbValue = name.toUpperCase(Locale.ROOT);
         yield "SELECT game_url, ply FROM motif_occurrences WHERE motif = '" + dbValue + "'";
       }
     };

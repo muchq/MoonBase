@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -172,6 +173,33 @@ public class GameFeatureDaoTest {
   public void insertOccurrencesBatch_emptyMap_noOp() {
     dao.insertOccurrencesBatch(Map.of());
     // No exception thrown, no rows inserted
+  }
+
+  /**
+   * The motif key a response carries is the ChessQL motif name, so it is lower-cased from the
+   * stored PIN. Turkish maps 'I' to a dotless lowercase, which would hand clients "pın" — a key
+   * matching no motif they can ask for, against a row that was found correctly.
+   */
+  @Test
+  public void occurrenceMotifKeysDoNotDependOnTheDefaultLocale() {
+    String gameUrl = "https://chess.com/game/occ-locale";
+    dao.insertBatch(List.of(createGame(gameUrl)));
+    dao.insertOccurrencesBatch(
+        Map.of(
+            gameUrl,
+            Map.of(
+                Motif.PIN,
+                List.of(
+                    new GameFeatures.MotifOccurrence(
+                        5, 3, "white", "pinned", null, null, null, false, false, null)))));
+
+    Locale previous = Locale.getDefault();
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+      assertThat(dao.queryOccurrences(List.of(gameUrl)).get(gameUrl)).containsKey("pin");
+    } finally {
+      Locale.setDefault(previous);
+    }
   }
 
   @Test
@@ -1569,6 +1597,47 @@ public class GameFeatureDaoTest {
     assertThat(columns).isNotEmpty().doesNotContainAnyElementsOf(aliases);
   }
 
+  /**
+   * The bug #1539 was filed for, end to end: the indexer stores CHESS_COM, and users type
+   * chess.com. This runs the compiled predicate against real rows rather than asserting on SQL text
+   * — the SQL looked right the whole time it was returning nothing.
+   */
+  @Test
+  public void platformFilterMatchesTheStoredSpellingHoweverItIsTyped() {
+    dao.insertBatch(
+        List.of(
+            gameOnPlatform("https://chess.com/game/plat-cc", "CHESS_COM"),
+            gameOnPlatform("https://lichess.org/plat-li", "LICHESS")));
+
+    assertThat(urlsMatching("platform = \"chess.com\""))
+        .containsExactly("https://chess.com/game/plat-cc");
+    assertThat(urlsMatching("platform = \"CHESS_COM\""))
+        .containsExactly("https://chess.com/game/plat-cc");
+    assertThat(urlsMatching("platform = \"Chess.Com\""))
+        .containsExactly("https://chess.com/game/plat-cc");
+    assertThat(urlsMatching("platform = \"lichess\""))
+        .containsExactly("https://lichess.org/plat-li");
+    assertThat(urlsMatching("platform IN [\"chess.com\", \"Lichess\"]"))
+        .containsExactly("https://chess.com/game/plat-cc", "https://lichess.org/plat-li");
+    assertThat(urlsMatching("platform != \"chess.com\""))
+        .containsExactly("https://lichess.org/plat-li");
+  }
+
+  /**
+   * A platform nobody indexed still compiles and still runs — it just matches nothing. The control
+   * matters more than the assertion here: empty is also what a wholly broken platform predicate
+   * returns, so the row has to be shown reachable in the same fixture for the empty to mean "no
+   * such platform" rather than "no platform filter works".
+   */
+  @Test
+  public void anUnindexedPlatformMatchesNoRowsRatherThanFailing() {
+    String url = "https://chess.com/game/plat-only";
+    dao.insertBatch(List.of(gameOnPlatform(url, "CHESS_COM")));
+
+    assertThat(urlsMatching("platform = \"chess.com\"")).containsExactly(url);
+    assertThat(urlsMatching("platform = \"chess24.com\"")).isEmpty();
+  }
+
   /** Game URLs matching a ChessQL filter, sorted so assertions read as a set. */
   private List<String> urlsMatching(String chessql) {
     return dao.query(new SqlCompiler().compile(Parser.parse(chessql)), 50, 0).stream()
@@ -2111,12 +2180,35 @@ public class GameFeatureDaoTest {
         "pgn");
   }
 
+  private GameFeature gameOnPlatform(String url, String platform) {
+    return new GameFeature(
+        null,
+        requestId,
+        url,
+        platform,
+        "w",
+        "b",
+        1500,
+        1500,
+        null,
+        null,
+        "blitz",
+        "B00",
+        null,
+        null,
+        "1-0",
+        Instant.now(),
+        20,
+        Instant.now(),
+        "pgn");
+  }
+
   private GameFeature createGameAt(String url, Instant playedAt) {
     return new GameFeature(
         null,
         requestId,
         url,
-        "chess.com",
+        "CHESS_COM",
         "white",
         "black",
         1500,
