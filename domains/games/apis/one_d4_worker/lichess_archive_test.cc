@@ -175,6 +175,51 @@ TEST(LichessArchive, AnUnfinishedGameHasNoResultRatherThanAWrongOne) {
   EXPECT_EQ(ResultOf((*games)[0].white_result, (*games)[0].black_result), "unknown");
 }
 
+// ---- titles ----
+
+// Lichess states a title on the game itself, which chess.com never does —
+// against 493 games of hikaru's August 2026 archive, zero carry any *Title
+// tag (#1527). So for a Lichess game the title is free: no roster, no
+// per-player lookup, no extra request.
+TEST(LichessArchive, TitlesComeFromTheGamesOwnTags) {
+  Fixture fixture = ArchiveOver(
+      {Pgn(AGame("Rated Blitz game", "https://lichess.org/a", "Sultai", "Zhigalko_Sergei", "0-1",
+                 "[WhiteTitle \"CM\"]\n[BlackTitle \"GM\"]\n"))});
+
+  const auto games = fixture.archive->FetchMonth("alice", January());
+
+  ASSERT_TRUE(games.ok()) << games.status();
+  EXPECT_EQ((*games)[0].white_title, "CM");
+  EXPECT_EQ((*games)[0].black_title, "GM");
+}
+
+// An untitled player carries no tag at all, which is the same absence a
+// chess.com game shows for everyone. Empty is the only honest reading: it
+// says nothing, and nothing is what gets stored.
+TEST(LichessArchive, AnAbsentTitleTagIsEmptyRatherThanInvented) {
+  Fixture fixture =
+      ArchiveOver({Pgn(AGame("Rated Blitz game", "https://lichess.org/a", "a", "b", "1-0"))});
+
+  const auto games = fixture.archive->FetchMonth("alice", January());
+
+  ASSERT_TRUE(games.ok()) << games.status();
+  EXPECT_EQ((*games)[0].white_title, "");
+  EXPECT_EQ((*games)[0].black_title, "");
+}
+
+// One side titled and the other not is the common case, and the sides must
+// not borrow from each other.
+TEST(LichessArchive, OneSidedTitlesStayOnTheirOwnSide) {
+  Fixture fixture = ArchiveOver({Pgn(AGame("Rated Blitz game", "https://lichess.org/a", "gm",
+                                           "nobody", "1-0", "[WhiteTitle \"GM\"]\n"))});
+
+  const auto games = fixture.archive->FetchMonth("alice", January());
+
+  ASSERT_TRUE(games.ok()) << games.status();
+  EXPECT_EQ((*games)[0].white_title, "GM");
+  EXPECT_EQ((*games)[0].black_title, "");
+}
+
 // ---- speeds ----
 
 TEST(LichessArchive, TimeClassComesFromTheEventTag) {

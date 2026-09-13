@@ -108,6 +108,19 @@ TEST(LichessClient, AsksForPgn) {
 // Milliseconds, and half-open. chess.com's end_time is seconds, so whoever
 // maps a month onto a range is converting; sending the wrong unit asks for a
 // window about 24 days wide starting in 1970.
+// Off by default on Lichess's side, and a real archive settles what that
+// costs: seven games fetched without it carry no [ECO] and no [Opening], so
+// index_run has nothing to read and no slug to scrape. See
+// one_d4_worker/lichess_corpus_test.cc.
+TEST(LichessClient, AsksForOpeningNames) {
+  auto [client, transport] = ClientOver({PgnResponse(kTwoGames)});
+
+  ASSERT_TRUE(client.ExportGames("hikaru", 1767225600000, 1769904000000).ok());
+
+  const std::string& target = transport->requests()[0].target;
+  EXPECT_NE(target.find("opening=true"), std::string::npos) << target;
+}
+
 TEST(LichessClient, SendsTheRangeAsQueryParameters) {
   auto [client, transport] = ClientOver({PgnResponse(kTwoGames)});
 

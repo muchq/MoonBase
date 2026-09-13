@@ -192,7 +192,11 @@ int main(int /*argc*/, char** argv) {
   // Keyed by the spelling indexing_requests.platform carries. A request
   // naming anything else fails rather than completing empty (#1527).
   const one_d4_worker::Poller::Run run = one_d4_worker::MakeRun(
-      {{"CHESS_COM", &archive}, {"LICHESS", &lichess_archive}}, titles,
+      {{"CHESS_COM", &archive}, {"LICHESS", &lichess_archive}},
+      // Only chess.com. Lichess states a title on the game itself and has
+      // no roster endpoint to read, so it is absent rather than empty —
+      // and absent means "needs none", not "failed to load".
+      {{"CHESS_COM", &titles}},
       // A connection per run: one pg::Client is one connection serialised
       // by a mutex, so runs sharing one would queue every flush behind
       // every other run's and leave nothing to overlap.

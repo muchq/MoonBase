@@ -60,7 +60,7 @@ class PgReanalysisTest : public testing::Test {
     ASSERT_TRUE(ResetToMigratedSchema(*client_, kSchema).ok());
     ASSERT_TRUE(client_
                     ->Exec("INSERT INTO indexing_requests (id, player, platform, start_month,"
-                           " end_month) VALUES ($1, 'alice', 'chess.com', '2026-01', '2026-01')",
+                           " end_month) VALUES ($1, 'alice', 'CHESS_COM', '2026-01', '2026-01')",
                            {kRequest})
                     .ok());
   }
@@ -68,7 +68,7 @@ class PgReanalysisTest : public testing::Test {
   void AddGame(const std::string& url, const std::string& pgn) {
     ASSERT_TRUE(client_
                     ->Exec("INSERT INTO game_features (request_id, game_url, platform, pgn)"
-                           " VALUES ($1, $2, 'chess.com', $3)",
+                           " VALUES ($1, $2, 'CHESS_COM', $3)",
                            {kRequest, url, pgn})
                     .ok());
   }
@@ -169,7 +169,7 @@ TEST_F(PgReanalysisTest, AnEmptyCorpusPagesToNothing) {
 TEST_F(PgReanalysisTest, ANullPgnComesBackEmptyRatherThanMissing) {
   ASSERT_TRUE(client_
                   ->Exec("INSERT INTO game_features (request_id, game_url, platform, pgn)"
-                         " VALUES ($1, $2, 'chess.com', NULL)",
+                         " VALUES ($1, $2, 'CHESS_COM', NULL)",
                          {kRequest, Url(0)})
                   .ok());
   PgGameCorpus corpus(*client_);

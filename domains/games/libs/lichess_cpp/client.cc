@@ -52,6 +52,11 @@ opal::Outcome<moonbase::lichess::ExportGamesOutput> Client::ExportGames(
   input.username = std::string(username);
   input.since = since_ms;
   input.until = until_ms;
+  // Asked for explicitly, because the default export sends no [ECO] and no
+  // [Opening] — a real archive of seven games carries neither. Without this
+  // every Lichess row stores a null opening, and opening.family answers
+  // nothing for the platform.
+  input.opening = true;
   input.accept = std::string(kPgnAccept);
   return client_.ExportGames(input);
 }

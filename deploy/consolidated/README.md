@@ -212,6 +212,17 @@ literal. Compose refuses to start the project if either is unset.
 `one_d4_worker` reads it through `compose.yaml`. No scope is needed for the games
 export; create one at <https://lichess.org/account/oauth/token> with nothing ticked.
 
+One line, unquoted:
+
+```
+ONE_D4_LICHESS_TOKEN=lip_<the token lichess shows you>
+```
+
+The placeholder is angle-bracketed rather than filled in with x's because a
+realistic one cannot be committed: GitHub push protection recognises a Lichess
+token by its `lip_` prefix and length, and rejects the push whether or not the
+characters after it were ever real.
+
 It is optional, and a host without it is a working host: chess.com indexing is
 unaffected, and the API does not yet accept a LICHESS submit (#1527). What it
 changes is whether a LICHESS request can succeed at all — Lichess answers the games
