@@ -159,8 +159,8 @@ describe('IndexView', () => {
 
     const silentRow = screen.getByText('silent').closest('tr') as HTMLTableRowElement;
     // Data column is 5th; Error is 6th and also renders a dash, so index precisely.
-    expect(silentRow.cells[4]).toHaveTextContent('—');
-    expect(silentRow.cells[4].querySelector('.data-badge')).toBeNull();
+    expect(silentRow.cells[5]).toHaveTextContent('—');
+    expect(silentRow.cells[5].querySelector('.data-badge')).toBeNull();
   });
 
   it('offers no toggle when nothing is pruned, and says so when everything is', async () => {
@@ -214,6 +214,7 @@ describe('IndexView', () => {
     // via ::before, so a missing label silently drops a field's name on mobile.
     expect(Array.from(row.cells).map((c) => c.dataset.label)).toEqual([
       'Player',
+      'Site',
       'Months',
       'Status',
       'Games',
@@ -225,7 +226,7 @@ describe('IndexView', () => {
       Array.from(screen.getByRole('table').querySelectorAll('thead th')).map(
         (th) => th.textContent
       )
-    ).toEqual(['Player', 'Months', 'Status', 'Games', 'Data', 'Error']);
+    ).toEqual(['Player', 'Site', 'Months', 'Status', 'Games', 'Data', 'Error']);
   });
 
   it('marks an empty error cell so the card layout can drop the line', async () => {
@@ -238,8 +239,8 @@ describe('IndexView', () => {
 
     const okRow = screen.getByText('ok').closest('tr') as HTMLTableRowElement;
     const badRow = screen.getByText('bad').closest('tr') as HTMLTableRowElement;
-    expect(okRow.cells[5]).toHaveClass('is-empty');
-    expect(badRow.cells[5]).not.toHaveClass('is-empty');
+    expect(okRow.cells[6]).toHaveClass('is-empty');
+    expect(badRow.cells[6]).not.toHaveClass('is-empty');
   });
 
   it('shows empty state when no requests', async () => {
@@ -377,5 +378,39 @@ describe('platform options', () => {
     render(<IndexView />, { wrapper: makeWrapper() });
 
     expect((screen.getByLabelText('Platform') as HTMLSelectElement).value).toBe('CHESS_COM');
+  });
+
+  // The option list existing is not the same as the form submitting it. This is
+  // the path a user actually takes.
+  it('submits the platform the user picked', async () => {
+    const user = userEvent.setup({ delay: null });
+    render(<IndexView />, { wrapper: makeWrapper() });
+
+    await user.type(screen.getByLabelText('Username'), 'alireza2003');
+    await user.selectOptions(screen.getByLabelText('Platform'), 'LICHESS');
+    submitForm();
+
+    await waitFor(() =>
+      expect(vi.mocked(api.createIndex)).toHaveBeenCalledWith(
+        expect.objectContaining({ platform: 'LICHESS' })
+      )
+    );
+  });
+
+  // Two requests for the same handle and range, one per platform, are different
+  // requests — usernames do not carry across sites. Without the column they
+  // render identically and nobody can tell which one failed.
+  it('says which platform each request was for', async () => {
+    vi.mocked(api.listIndexRequests).mockResolvedValue([
+      { ...completedRequest, id: 'cc-1', platform: 'CHESS_COM' },
+      { ...completedRequest, id: 'li-1', platform: 'LICHESS' },
+    ]);
+    render(<IndexView />, { wrapper: makeWrapper() });
+
+    const rows = await screen.findAllByRole('row');
+    const body = rows.slice(1);
+    expect(body[0]).toHaveTextContent('chess.com');
+    expect(body[1]).toHaveTextContent('lichess');
+    expect(screen.queryByText('CHESS_COM')).toBeNull();
   });
 });

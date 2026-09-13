@@ -1,4 +1,4 @@
-import { PLATFORMS } from '../platforms';
+import { PLATFORMS, platformLabel } from '../platforms';
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listIndexRequests, createIndex } from '../api';
@@ -194,6 +194,7 @@ export default function IndexView() {
               <thead>
                 <tr>
                   <th>Player</th>
+                  <th>Site</th>
                   <th>Months</th>
                   <th>Status</th>
                   <th>Games</th>
@@ -203,10 +204,16 @@ export default function IndexView() {
               </thead>
               <tbody>
                 {/* data-label drives the stacked card layout under 640px, where
-                    six columns cannot fit across and the header row is hidden. */}
+                    seven columns cannot fit across and the header row is hidden. */}
                 {requests.map((row) => (
                   <tr key={row.id}>
                     <td data-label="Player">{row.player}</td>
+                    {/* Two requests for the same handle and range, one per
+                        platform, are different requests: usernames do not carry
+                        across sites (#1540). */}
+                    <td data-label="Site" className="nowrap">
+                      <span className="platform-label">{platformLabel(row.platform)}</span>
+                    </td>
                     <td data-label="Months" className="nowrap">
                       {formatMonthRange(row)}
                     </td>

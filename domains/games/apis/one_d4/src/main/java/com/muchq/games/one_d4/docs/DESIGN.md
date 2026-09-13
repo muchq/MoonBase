@@ -156,7 +156,7 @@ com.muchq.indexer/
 |---------------|--------------|--------------------------------|
 | id            | UUID PK      | gen_random_uuid()              |
 | player        | VARCHAR(255) | chess.com username             |
-| platform      | VARCHAR(50)  | "chess.com", "lichess" (future)|
+| platform      | VARCHAR(50)  | "CHESS_COM" or "LICHESS", canonical (V003 CHECK) |
 | start_month   | VARCHAR(7)   | "2024-01"                      |
 | end_month     | VARCHAR(7)   | "2024-03"                      |
 | status        | VARCHAR(20)  | PENDING→PROCESSING→COMPLETED/FAILED |

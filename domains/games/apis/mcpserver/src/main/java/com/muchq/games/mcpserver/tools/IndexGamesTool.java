@@ -20,8 +20,8 @@ public class IndexGamesTool {
   @Tool(
       name = "index_chess_games",
       description =
-          "Index a chess player's games for tactical motif detection and ChessQL queries."
-              + " Fetches games from chess.com, replays positions, and detects pins, forks,"
+          "Index a chess player's games for tactical motif detection and ChessQL queries. Fetches"
+              + " games from chess.com or lichess, replays positions, and detects pins, forks,"
               + " skewers, discovered attacks, checks, checkmates, promotions, and more."
               + " Single-month requests complete synchronously; multi-month requests run in the"
               + " background — check progress with index_status. Once indexed, use"

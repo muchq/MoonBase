@@ -517,8 +517,9 @@ services:
       - ONE_D4_INDEX_SLOTS=4
       # Lichess refuses the games export to anonymous callers — 404, even for
       # accounts that exist — so LICHESS requests need this to work at all.
-      # Empty is a valid deployment: chess.com is unaffected, and the API
-      # does not yet accept a LICHESS submit (#1527).
+      # Empty still starts, and chess.com is unaffected, but the API accepts
+      # LICHESS submits since #1527 slice 6: without a token every one of them
+      # fails. See deploy/consolidated/README.md.
       - ONE_D4_LICHESS_TOKEN=${ONE_D4_LICHESS_TOKEN:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=one_d4_worker
