@@ -95,17 +95,12 @@ std::string_view ToString(RunOutcome outcome) {
 Poller::Poller(IndexQueue& queue, Run run, Options options)
     : queue_(queue), run_(std::move(run)), options_(std::move(options)) {}
 
-absl::StatusOr<std::optional<Claim>> Poller::ClaimOne() {
-  Claim claim;
-  claim.owner = absl::StrCat(options_.owner, "/", RunToken());
-
-  // The lock spans the claim, not just the read of in_flight_: two slots
-  // that each saw "none in flight" would each claim, and the cap would be
-  // one only by luck. It costs nothing to hold — a claim is one statement
-  // on a pg::Client, which serialises its connection behind a mutex anyway.
-  const absl::MutexLock lock(claims_mu_);
+absl::StatusOr<std::optional<IndexJob>> PlatformAdmission::Claim(
+    absl::FunctionRef<absl::StatusOr<std::optional<IndexJob>>(absl::Span<const std::string>)>
+        claim) {
+  const absl::MutexLock lock(mu_);
   std::vector<std::string> at_capacity;
-  for (const auto& [platform, limit] : options_.platform_limits) {
+  for (const auto& [platform, limit] : limits_) {
     const auto running = in_flight_.find(platform);
     if (running != in_flight_.end() && running->second >= limit) at_capacity.push_back(platform);
   }
@@ -113,20 +108,36 @@ absl::StatusOr<std::optional<Claim>> Poller::ClaimOne() {
   // one less thing to explain when reading the log.
   std::sort(at_capacity.begin(), at_capacity.end());
 
+  absl::StatusOr<std::optional<IndexJob>> claimed = claim(at_capacity);
+  if (claimed.ok() && claimed->has_value()) ++in_flight_[(*claimed)->platform];
+  return claimed;
+}
+
+void PlatformAdmission::Release(const std::string& platform) {
+  const absl::MutexLock lock(mu_);
+  const auto running = in_flight_.find(platform);
+  if (running == in_flight_.end()) return;
+  if (--running->second <= 0) in_flight_.erase(running);
+}
+
+absl::StatusOr<std::optional<Claim>> Poller::ClaimOne() {
+  Claim claim;
+  claim.owner = absl::StrCat(options_.owner, "/", RunToken());
+
+  const auto take = [&](absl::Span<const std::string> at_capacity) {
+    return queue_.ClaimNext(claim.owner, options_.lease, at_capacity);
+  };
   absl::StatusOr<std::optional<IndexJob>> claimed =
-      queue_.ClaimNext(claim.owner, options_.lease, at_capacity);
+      options_.admission == nullptr ? take({}) : options_.admission->Claim(take);
+
   if (!claimed.ok()) return claimed.status();
   if (!claimed->has_value()) return std::nullopt;
   claim.job = **claimed;
-  ++in_flight_[claim.job.platform];
   return claim;
 }
 
 void Poller::ReleaseClaim(const Claim& claim) {
-  const absl::MutexLock lock(claims_mu_);
-  const auto running = in_flight_.find(claim.job.platform);
-  if (running == in_flight_.end()) return;
-  if (--running->second <= 0) in_flight_.erase(running);
+  if (options_.admission != nullptr) options_.admission->Release(claim.job.platform);
 }
 
 absl::StatusOr<RunOutcome> Poller::RunClaimed(const Claim& claim) {

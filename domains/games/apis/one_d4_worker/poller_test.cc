@@ -727,8 +727,9 @@ TEST(Poller, LeavesARunInsideItsCeilingAlone) {
 // Not claiming it is the fix (#1527 slice 6).
 TEST(PollerPlatformLimits, WillNotClaimASecondRequestForACappedPlatform) {
   FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
   Poller::Options options = Options();
-  options.platform_limits = {{"LICHESS", 1}};
+  options.admission = &admission;
   // A run that never returns would hang the test; what matters is that the
   // claim is held, so the run completes and ClaimOne is called directly.
   Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
@@ -749,8 +750,9 @@ TEST(PollerPlatformLimits, WillNotClaimASecondRequestForACappedPlatform) {
 // a platform with no such rule keeps moving. This is the mixed queue.
 TEST(PollerPlatformLimits, StillClaimsAnotherPlatformWhileTheCappedOneIsBusy) {
   FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
   Poller::Options options = Options();
-  options.platform_limits = {{"LICHESS", 1}};
+  options.admission = &admission;
   // A run that never returns would hang the test; what matters is that the
   // claim is held, so the run completes and ClaimOne is called directly.
   Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
@@ -772,8 +774,9 @@ TEST(PollerPlatformLimits, StillClaimsAnotherPlatformWhileTheCappedOneIsBusy) {
 // refuse forever.
 TEST(PollerPlatformLimits, GivesTheSlotBackWhenTheRunEnds) {
   FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
   Poller::Options options = Options();
-  options.platform_limits = {{"LICHESS", 1}};
+  options.admission = &admission;
   Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
 
   queue.queued = {AJobFor("first", "LICHESS")};
@@ -791,8 +794,9 @@ TEST(PollerPlatformLimits, GivesTheSlotBackWhenTheRunEnds) {
 // "take anything" rather than "take nothing".
 TEST(PollerPlatformLimits, AnUncappedPlatformIsNeverExcluded) {
   FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
   Poller::Options options = Options();
-  options.platform_limits = {{"LICHESS", 1}};
+  options.admission = &admission;
   // A run that never returns would hang the test; what matters is that the
   // claim is held, so the run completes and ClaimOne is called directly.
   Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
@@ -804,6 +808,51 @@ TEST(PollerPlatformLimits, AnUncappedPlatformIsNeverExcluded) {
 
   ASSERT_TRUE(second->has_value()) << "chess.com capped itself";
   EXPECT_THAT(queue.excluded.back(), IsEmpty());
+}
+
+// The bug the single-Poller tests above could not see: IndexPool builds one
+// Poller per slot thread from one copy of Options, so a cap that lived in
+// the Poller counted a slot and capped nothing. Two Pollers sharing an
+// admission are what the pool actually does.
+TEST(PollerPlatformLimits, TwoPollersSharingAnAdmissionShareTheCap) {
+  FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options options = Options();
+  options.admission = &admission;
+  Poller slot_one(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+  Poller slot_two(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+
+  queue.queued = {AJobFor("lichess-1", "LICHESS")};
+  ASSERT_TRUE(slot_one.ClaimOne().value().has_value());
+
+  queue.queued = {AJobFor("lichess-2", "LICHESS"), AJobFor("chess-1", "CHESS_COM")};
+  const auto second = slot_two.ClaimOne();
+
+  ASSERT_TRUE(second.ok()) << second.status();
+  ASSERT_TRUE(second->has_value());
+  EXPECT_EQ((*second)->job.platform, "CHESS_COM")
+      << "a second slot claimed LICHESS: the cap is per Poller, not per worker";
+}
+
+// Two Pollers with admissions of their own are the bug, stated as a test so
+// the distinction is visible rather than implied.
+TEST(PollerPlatformLimits, AnUnsharedAdmissionCapsNothingAcrossSlots) {
+  FakeQueue queue;
+  PlatformAdmission one({{"LICHESS", 1}});
+  PlatformAdmission two({{"LICHESS", 1}});
+  Poller::Options first = Options();
+  first.admission = &one;
+  Poller::Options second = Options();
+  second.admission = &two;
+  Poller slot_one(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, first);
+  Poller slot_two(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, second);
+
+  queue.queued = {AJobFor("lichess-1", "LICHESS")};
+  ASSERT_TRUE(slot_one.ClaimOne().value().has_value());
+  queue.queued = {AJobFor("lichess-2", "LICHESS")};
+
+  EXPECT_EQ(slot_two.ClaimOne().value().value().job.platform, "LICHESS")
+      << "separate admissions are why the pool has to share one";
 }
 
 }  // namespace

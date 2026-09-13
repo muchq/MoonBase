@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -43,10 +44,21 @@ class FakeQueue : public IndexQueue {
     IndexJob job;
     job.id = absl::StrCat("job-", claims_);
     job.player = "hikaru";
-    job.platform = "CHESS_COM";
+    // Every row is LICHESS when asked to be, so a cap that is not shared
+    // across the pool's slots shows up as more than one of them running.
+    job.platform = all_lichess_ && std::find(at_capacity.begin(), at_capacity.end(), "LICHESS") ==
+                                       at_capacity.end()
+                       ? "LICHESS"
+                       : "CHESS_COM";
     job.start_month = "2026-01";
     job.end_month = "2026-01";
     return job;
+  }
+
+  /// Serves LICHESS rows to any claim that has not excluded LICHESS.
+  void ServeLichess() {
+    const absl::MutexLock lock(mu_);
+    all_lichess_ = true;
   }
 
   absl::StatusOr<bool> Heartbeat(ClaimRef, absl::Duration) override { return true; }
@@ -59,6 +71,8 @@ class FakeQueue : public IndexQueue {
   absl::StatusOr<bool> Fail(ClaimRef, std::string_view) override { return true; }
   absl::StatusOr<bool> HandBack(ClaimRef) override { return true; }
   absl::StatusOr<bool> Release(ClaimRef) override { return true; }
+
+  bool all_lichess_ ABSL_GUARDED_BY(mu_) = false;
 
   int claims() const {
     const absl::MutexLock lock(mu_);
@@ -105,15 +119,23 @@ class FakeQueue : public IndexQueue {
 class BlockingRuns {
  public:
   Poller::Run AsRun() {
-    return [this](const Claim&, LeaseKeeper&) -> absl::StatusOr<RunReport> {
+    return [this](const Claim& claim, LeaseKeeper&) -> absl::StatusOr<RunReport> {
       const absl::MutexLock lock(mu_);
       ++running_;
       ++started_;
+      ++running_on_[claim.job.platform];
       peak_ = std::max(peak_, running_);
       mu_.Await(absl::Condition(&released_));
       --running_;
       return RunReport{};
     };
+  }
+
+  /// How many runs of a platform started and have not been released.
+  int RunningOn(const std::string& platform) const {
+    const absl::MutexLock lock(mu_);
+    const auto found = running_on_.find(platform);
+    return found == running_on_.end() ? 0 : found->second;
   }
 
   /// Waits for `n` runs to have started. Fails rather than hangs.
@@ -129,6 +151,8 @@ class BlockingRuns {
     const absl::MutexLock lock(mu_);
     released_ = true;
   }
+  std::map<std::string, int> running_on_ ABSL_GUARDED_BY(mu_);
+
   int peak() const {
     const absl::MutexLock lock(mu_);
     return peak_;
@@ -572,6 +596,42 @@ TEST(IndexPool, DoesNotSayItIsDrainingUntilItIs) {
   runs.AwaitStarted(2);
   absl::SleepFor(absl::Milliseconds(200));
   log.StopCapturingLogs();
+
+  stopping = true;
+  runs.Release();
+  driver.join();
+}
+
+// The pool is where the platform cap actually has to hold, and where it did
+// not: Work() builds a Poller per slot thread, so a counter living in the
+// Poller counted one slot and admitted one LICHESS run *each*. Four slots
+// were four concurrent exports — the starvation the cap exists to prevent.
+//
+// Two slots, both offered LICHESS work: exactly one may be running it.
+TEST(IndexPool, CapsAPlatformAcrossEverySlotRatherThanWithinOne) {
+  FakeQueue queue;
+  queue.ServeLichess();
+  BlockingRuns runs;
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options poller = PollerOptions();
+  poller.admission = &admission;
+
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(), poller,
+                 metrics, PoolOptions(2));
+
+  std::atomic<bool> stopping{false};
+  std::thread driver(
+      [&] { pool.Run([&stopping] { return stopping.load(); }, [](absl::Duration) {}); });
+  // Both slots fill: one with the LICHESS row, the other with the chess.com
+  // row it is handed once LICHESS is excluded.
+  runs.AwaitStarted(2);
+
+  EXPECT_EQ(runs.RunningOn("LICHESS"), 1)
+      << "both slots ran LICHESS: the cap counts a slot, not the worker";
+  EXPECT_EQ(runs.RunningOn("CHESS_COM"), 1) << "the second slot idled instead of taking other work";
 
   stopping = true;
   runs.Release();

@@ -141,7 +141,12 @@ int main(int /*argc*/, char** argv) {
   // to honour it. Without this a second LICHESS claim parks on that mutex
   // holding a lease and two Postgres connections, and chess.com work queues
   // behind it. Per process — see the README on what replicas would need.
-  poller_options.platform_limits = {{"LICHESS", 1}};
+  //
+  // Outside the pool, because the pool builds a Poller per slot thread from
+  // these Options: one of these shared by all of them caps the worker, one
+  // per Poller caps a slot and therefore nothing.
+  one_d4_worker::PlatformAdmission admission({{"LICHESS", 1}});
+  poller_options.admission = &admission;
 
   // How often to ask an empty queue is local: it costs one round trip and
   // affects nobody else.
