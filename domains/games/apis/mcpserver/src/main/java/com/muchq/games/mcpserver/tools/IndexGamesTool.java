@@ -23,8 +23,9 @@ public class IndexGamesTool {
           "Index a chess player's games for tactical motif detection and ChessQL queries. Fetches"
               + " games from chess.com or lichess, replays positions, and detects pins, forks,"
               + " skewers, discovered attacks, checks, checkmates, promotions, and more."
-              + " Single-month requests complete synchronously; multi-month requests run in the"
-              + " background — check progress with index_status. Once indexed, use"
+              + " A single-month request is waited on for up to a minute; a multi-month one is"
+              + " not waited on at all. Either can come back still running, so follow any"
+              + " non-terminal status with index_status. Once indexed, use"
               + " query_chess_games and aggregate_chess_games.")
   public CallToolResult indexChessGames(
       @ToolArg(description = "Chess platform username") String username,

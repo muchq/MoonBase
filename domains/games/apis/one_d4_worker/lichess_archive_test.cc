@@ -393,6 +393,26 @@ TEST(LichessArchive, A404WithoutATokenIsUnauthenticatedRatherThanAMissingPlayer)
   EXPECT_TRUE(absl::IsUnauthenticated(games.status())) << games.status();
 }
 
+// The other half of the token story, and the likelier one once a host has
+// configured one: Lichess answers a revoked or mistyped token with 401 "No
+// such token". Same thing for the operator to fix as no token at all, so it
+// gets the same answer — an "internal error" here would send them looking
+// for a bug in the worker.
+TEST(LichessArchive, A401IsUnauthenticatedSoAStaleTokenSaysSo) {
+  opal::http::HttpResponse rejected;
+  rejected.status = 401;
+  rejected.headers.Set("content-type", "application/json");
+  rejected.body = "{\"error\":\"No such token\"}";
+  // One response, not three: a refused credential is not retryable, and a
+  // retry would fall off the end of the script into a different error.
+  Fixture fixture = ArchiveOver({rejected});
+
+  const auto games = fixture.archive->FetchMonth("alice", January());
+
+  EXPECT_TRUE(absl::IsUnauthenticated(games.status())) << games.status();
+  EXPECT_EQ(fixture.transport->requests().size(), 1);
+}
+
 // Only the 404 is about the token. A tokenless worker that gets a 429 has
 // still been refused for the ordinary reason, and calling that a
 // configuration problem would send the operator after the wrong thing.

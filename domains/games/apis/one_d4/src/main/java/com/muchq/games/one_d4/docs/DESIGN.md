@@ -155,7 +155,7 @@ com.muchq.indexer/
 | Column        | Type         | Notes                          |
 |---------------|--------------|--------------------------------|
 | id            | UUID PK      | gen_random_uuid()              |
-| player        | VARCHAR(255) | chess.com username             |
+| player        | VARCHAR(255) | username on `platform`         |
 | platform      | VARCHAR(50)  | "CHESS_COM" or "LICHESS", canonical (V003 CHECK) |
 | start_month   | VARCHAR(7)   | "2024-01"                      |
 | end_month     | VARCHAR(7)   | "2024-03"                      |

@@ -227,7 +227,8 @@ It is optional to *start*, and required to *use*: the API accepts LICHESS submit
 since #1527 slice 6, and Lichess answers the games export with **404 to anonymous
 callers, even for accounts that exist**. On a host with no token every LICHESS
 request therefore fails immediately, and the request table shows *This server is
-not configured to index that platform* — one of the two failures whose cause is
+not configured to index that platform* — as does a token Lichess refuses, which
+answers 401 rather than 404 — one of the two failures whose cause is
 not the worker's, so one of the two it names rather than storing its usual
 "internal error" (the other is a handle that does not exist). chess.com indexing is unaffected either way. Unset, no
 `Authorization` header is sent at all, which is the correct anonymous request.

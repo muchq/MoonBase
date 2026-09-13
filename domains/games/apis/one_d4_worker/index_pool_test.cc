@@ -645,6 +645,11 @@ TEST(IndexPool, CapsAPlatformAcrossEverySlotRatherThanWithinOne) {
 TEST(IndexPool, GivesAPlatformBackWhenARunFinishes) {
   FakeQueue queue;
   queue.ServeLichess();
+  // Exactly two rows, so "both runs were LICHESS" is a statement the fake can
+  // make. Endless work plus a sticky release would let the loop start a third
+  // before the assertion reads the count, and == 2 would hold only by
+  // scheduling.
+  queue.set_jobs(2);
   BlockingRuns runs;
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
@@ -663,7 +668,7 @@ TEST(IndexPool, GivesAPlatformBackWhenARunFinishes) {
   runs.AwaitStarted(1);
   ASSERT_EQ(runs.RunningOn("LICHESS"), 1);
 
-  // Lets the first run finish, and every run after it.
+  // Lets the first run finish. The second row is the last one the queue has.
   runs.Release();
   runs.AwaitStarted(2);
 

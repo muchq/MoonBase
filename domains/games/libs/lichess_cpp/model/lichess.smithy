@@ -61,7 +61,7 @@ operation ExportGames {
         games: Blob
     }
 
-    errors: [GamesNotFound]
+    errors: [GamesNotFound, InvalidToken]
 }
 
 /// No members on purpose. With Accept: application/x-chess-pgn the 404 body
@@ -70,3 +70,11 @@ operation ExportGames {
 @error("client")
 @httpError(404)
 structure GamesNotFound {}
+
+/// A token Lichess will not accept — revoked, expired, or mistyped. Modeled
+/// because it is the operator's to fix and reads nothing like the 404: that
+/// one means the handle, or that no token was sent at all. No members, for
+/// the same reason as above — callers key on which error, not on its body.
+@error("client")
+@httpError(401)
+structure InvalidToken {}

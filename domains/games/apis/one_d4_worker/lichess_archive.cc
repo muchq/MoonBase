@@ -125,6 +125,9 @@ absl::StatusOr<std::vector<ArchivedGame>> LichessArchive::FetchMonth(std::string
     const std::string message =
         absl::StrCat("lichess games ", player, " ", month.ToString(), ": ", exported.error().code(),
                      ": ", exported.error().message());
+    // A token Lichess refuses, which is the deployment's to fix whether it
+    // is revoked, expired or mistyped.
+    if (exported.error().code() == "InvalidToken") return absl::UnauthenticatedError(message);
     // Only the modeled 404 is NotFound, as on the chess.com side: everything
     // else is a failure to read the month, and completing the run on it
     // would record "indexed, no games" for a month nobody read (#1360).
