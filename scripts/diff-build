@@ -45,7 +45,7 @@ if [ -n "$FULL_BUILD_CHANGES" ]; then
   echo "Bazel config or shared build macros changed; running full build and test..."
   echo "$FULL_BUILD_CHANGES" | sed 's/^/  /'
   bazel build //... || exit 1
-  bazel test //... || exit 1
+  bazel test --config=ci //... || exit 1
   exit 0
 fi
 
@@ -103,7 +103,7 @@ if [ -s /tmp/impacted_targets.txt ]; then
     fi
     if [ -n "$TESTS" ]; then
       echo "--- [diff-build] running bazel test..."
-      bazel test --skip_incompatible_explicit_targets $TESTS
+      bazel test --config=ci --skip_incompatible_explicit_targets $TESTS
     fi
 else
     echo "No changes detected."

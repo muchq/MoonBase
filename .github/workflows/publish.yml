@@ -68,7 +68,7 @@ jobs:
 
       - name: bazel-test
         run: |
-          bazel build //... && bazel test //...
+          bazel build //... && bazel test --config=ci //...
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4

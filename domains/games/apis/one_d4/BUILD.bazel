@@ -514,6 +514,7 @@ java_test_suite(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     deps = [
         ":db",
         ":module",
@@ -567,6 +568,7 @@ java_test_suite(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     deps = [
         ":migrations_fixture",
         ":db",
@@ -611,6 +613,7 @@ java_test_suite(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     deps = [
         ":db",
         ":dto",
@@ -638,6 +641,7 @@ java_test_suite(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     deps = [
         ":db",
         ":test_db",
@@ -668,7 +672,10 @@ java_test_suite(
         "PG_TEST_DB_URL",
     ],
     # One shared scratch database: concurrent DB tests drop each other's schemas.
-    tags = ["exclusive"],
+    tags = [
+        "exclusive",
+        "requires-postgres",
+    ],
     runtime_deps = [
         artifact("org.postgresql:postgresql"),
     ],
@@ -737,6 +744,7 @@ java_test_suite(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     runtime_deps = [
         "//domains/platform/libs/logging",
         "//domains/platform/resources:micronaut_config_lib",
@@ -774,6 +782,7 @@ java_test_suite(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     deps = [
         ":api",
         ":db",
@@ -810,6 +819,7 @@ java_test_suite(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     runtime_deps = [
         "//domains/platform/libs/logging",
         # These pin what the service puts on the wire, so they have to boot with the
