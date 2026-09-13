@@ -191,7 +191,10 @@ symptom; claiming the row was the cause.
 One admission object serves the whole pool. Every slot builds its own
 `Poller` from one `Options`, so the counts have to live outside the poller
 — inside it, each slot would cap itself at one and four slots would still
-admit four.
+admit four. The place is given back by the claim that holds it, not by
+whoever finishes the run: `Work` claims on one call and runs on the next,
+so a release spelled out at the end of `PollOnce` is a release production
+never reached, and the count leaked on the first Lichess run.
 
 **Per process, not per fleet.** Replicas each get their own cap, so three of
 them are three concurrent exports against a rule Lichess states globally.

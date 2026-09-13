@@ -638,5 +638,41 @@ TEST(IndexPool, CapsAPlatformAcrossEverySlotRatherThanWithinOne) {
   driver.join();
 }
 
+// The cap's other half, and the half production ran: Work() claims and runs
+// in two calls rather than through PollOnce, so a release that lived in
+// PollOnce never happened. One slot, an endless supply of LICHESS rows —
+// the second one may only start if the first gave its place back.
+TEST(IndexPool, GivesAPlatformBackWhenARunFinishes) {
+  FakeQueue queue;
+  queue.ServeLichess();
+  BlockingRuns runs;
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options poller = PollerOptions();
+  poller.admission = &admission;
+
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(), poller,
+                 metrics, PoolOptions(1));
+
+  std::atomic<bool> stopping{false};
+  std::thread driver(
+      [&] { pool.Run([&stopping] { return stopping.load(); }, [](absl::Duration) {}); });
+
+  runs.AwaitStarted(1);
+  ASSERT_EQ(runs.RunningOn("LICHESS"), 1);
+
+  // Lets the first run finish, and every run after it.
+  runs.Release();
+  runs.AwaitStarted(2);
+
+  EXPECT_EQ(runs.RunningOn("LICHESS"), 2)
+      << "the second run was not LICHESS: the first one's place was never given back";
+
+  stopping = true;
+  driver.join();
+}
+
 }  // namespace
 }  // namespace one_d4_worker

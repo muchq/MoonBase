@@ -2,6 +2,7 @@
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_POLLER_H
 
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -62,10 +63,28 @@ class LeaseKeeper {
   virtual bool OutOfTime() = 0;
 };
 
+class PlatformAdmission;
+
+/// A place in the platform's cap, given back when the last copy of the
+/// claim holding it goes away.
+///
+/// Shared rather than moved because a Claim is copied, and reference
+/// counted rather than released by whoever finishes the run because there
+/// is more than one caller: PollOnce runs a claim it took itself, while
+/// IndexPool::Work claims on one call and runs on the next. A release
+/// spelled out at the end of one of those paths is a release the other
+/// path does not do — which is how the count leaked and capped LICHESS at
+/// one until the process restarted.
+using PlatformSlot = std::shared_ptr<void>;
+
 /// A claim, and the id it is fenced on.
 struct Claim {
   IndexJob job;
   std::string owner;
+
+  /// Null when nothing caps this platform. Last field, so it is released
+  /// after everything that might still name the job.
+  PlatformSlot slot;
 
   ClaimRef ref() const { return {.id = job.id, .owner = owner}; }
 };
@@ -100,11 +119,13 @@ class PlatformAdmission {
   /// flight: two slots that each saw "none running" would each claim, and
   /// the cap would hold by luck. It costs nothing — a claim is one statement
   /// on a pg::Client, which serialises its connection behind a mutex anyway.
-  absl::StatusOr<std::optional<IndexJob>> Claim(
+  absl::StatusOr<std::optional<Claim>> Claim(
       absl::FunctionRef<absl::StatusOr<std::optional<IndexJob>>(absl::Span<const std::string>)>
-          claim);
+          claim,
+      std::string owner);
 
-  /// Gives a finished run's place back.
+  /// Gives a finished run's place back. Called by the slot the claim
+  /// carries rather than by hand.
   void Release(const std::string& platform);
 
  private:
@@ -193,9 +214,6 @@ class Poller {
 
  private:
   absl::StatusOr<RunOutcome> Finish(RunOutcome outcome, const absl::StatusOr<bool>& written);
-
-  /// Gives a finished claim's platform back to the cap.
-  void ReleaseClaim(const Claim& claim);
 
   IndexQueue& queue_;
   Run run_;
