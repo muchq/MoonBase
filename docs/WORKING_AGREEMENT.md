@@ -302,7 +302,8 @@ assert, because it only mutates code that exists to break tests that exist. And
 it applies long after the design decisions it might have influenced were made.
 
 Reaching for it to justify tests written after the fact is the failure it looks
-most like a fix for. Two receipts from one session:
+most like a fix for — and hand-reverting the fix to watch the new test go red is
+the same move without the script. Two receipts from one session:
 
 - #1371's first regression fixture asserted the property with an absolute path,
   and passed against the very bug it was written to catch — the failure needed
