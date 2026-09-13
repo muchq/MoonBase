@@ -59,7 +59,7 @@ class RetentionTest : public testing::Test {
         R"(INSERT INTO indexing_requests
              (id, player, platform, start_month, end_month, status, created_at, updated_at,
               owner_id, lease_expires_at, attempts)
-           VALUES ($1::uuid, $2, 'chess.com', '2026-01', '2026-01', $3, $4::timestamp,
+           VALUES ($1::uuid, $2, 'CHESS_COM', '2026-01', '2026-01', $3, $4::timestamp,
                    $5::timestamp, NULLIF($6, ''), NULLIF($7, '')::timestamp, $8::int))",
         {id, name, status, created_at, Stamp(updated), owner,
          lease == absl::InfinitePast() ? "" : Stamp(lease), std::to_string(attempts)});
@@ -179,7 +179,7 @@ TEST_F(RetentionTest, RetiresARequestWhoseAttemptsAreSpent) {
   // colliding with a dead request.
   const auto resubmitted = client_->Exec(
       R"(INSERT INTO indexing_requests (player, platform, start_month, end_month, status)
-         VALUES ('poisoned', 'chess.com', '2026-01', '2026-01', 'PENDING'))");
+         VALUES ('poisoned', 'CHESS_COM', '2026-01', '2026-01', 'PENDING'))");
   EXPECT_TRUE(resubmitted.ok()) << resubmitted.status();
 }
 
@@ -263,8 +263,8 @@ TEST_F(RetentionTest, DeletesGamesAndPeriodsPastTheWindowAndCascadesMotifs) {
   Request("owner", "COMPLETE", kNow, "", absl::InfinitePast(), 0, kNow);
   ASSERT_TRUE(client_
                   ->Exec(R"(INSERT INTO game_features (game_url, platform, request_id, indexed_at)
-                            VALUES ('old', 'chess.com', $1::uuid, $2::timestamp),
-                                   ('new', 'chess.com', $1::uuid, $3::timestamp))",
+                            VALUES ('old', 'CHESS_COM', $1::uuid, $2::timestamp),
+                                   ('new', 'CHESS_COM', $1::uuid, $3::timestamp))",
                          {Id("owner"), Stamp(kNow - absl::Hours(24 * 8)), Stamp(kNow)})
                   .ok());
   ASSERT_TRUE(
@@ -276,8 +276,8 @@ TEST_F(RetentionTest, DeletesGamesAndPeriodsPastTheWindowAndCascadesMotifs) {
   ASSERT_TRUE(client_
                   ->Exec(R"(INSERT INTO indexed_periods
                               (player, platform, year_month, is_complete, games_count, fetched_at)
-                            VALUES ('alice', 'chess.com', '2026-01', TRUE, 1, $1::timestamp),
-                                   ('bob', 'chess.com', '2026-01', TRUE, 1, $2::timestamp))",
+                            VALUES ('alice', 'CHESS_COM', '2026-01', TRUE, 1, $1::timestamp),
+                                   ('bob', 'CHESS_COM', '2026-01', TRUE, 1, $2::timestamp))",
                          {Stamp(kNow - absl::Hours(24 * 8)), Stamp(kNow)})
                   .ok());
 
@@ -299,7 +299,7 @@ TEST_F(RetentionTest, KeepsARequestWhileAnyGameStillPointsAtIt) {
           kNow - absl::Hours(24 * 31));
   ASSERT_TRUE(client_
                   ->Exec(R"(INSERT INTO game_features (game_url, platform, request_id, indexed_at)
-                            VALUES ('fresh', 'chess.com', $1::uuid, $2::timestamp))",
+                            VALUES ('fresh', 'CHESS_COM', $1::uuid, $2::timestamp))",
                          {Id("referenced"), Stamp(kNow)})
                   .ok());
 
@@ -317,7 +317,7 @@ TEST_F(RetentionTest, ARequestAndItsGamesClearInOnePass) {
           kNow - absl::Hours(24 * 31));
   ASSERT_TRUE(client_
                   ->Exec(R"(INSERT INTO game_features (game_url, platform, request_id, indexed_at)
-                            VALUES ('stale', 'chess.com', $1::uuid, $2::timestamp))",
+                            VALUES ('stale', 'CHESS_COM', $1::uuid, $2::timestamp))",
                          {Id("aged"), Stamp(kNow - absl::Hours(24 * 31))})
                   .ok());
 

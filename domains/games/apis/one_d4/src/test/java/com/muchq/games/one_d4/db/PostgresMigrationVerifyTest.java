@@ -93,7 +93,7 @@ public class PostgresMigrationVerifyTest {
     exec("ALTER TABLE indexing_requests DROP COLUMN skip_cache CASCADE", SCHEMA);
     exec(
         "INSERT INTO indexing_requests (player, platform, start_month, end_month)"
-            + " VALUES ('alice', 'chess.com', '2026-01', '2026-01')",
+            + " VALUES ('alice', 'CHESS_COM', '2026-01', '2026-01')",
         SCHEMA);
 
     assertThatThrownBy(() -> verifier().verify()).isInstanceOf(IllegalStateException.class);

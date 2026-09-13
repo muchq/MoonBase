@@ -66,7 +66,7 @@ class PgGameSinkTest : public testing::Test {
     ASSERT_TRUE(client_
                     ->Exec("INSERT INTO indexing_requests (id, player, platform, start_month,"
                            " end_month, owner_id, lease_expires_at) VALUES ($1, 'alice',"
-                           " 'chess.com', '2026-01', '2026-01', $2, NOW() + INTERVAL '5 minutes')",
+                           " 'CHESS_COM', '2026-01', '2026-01', $2, NOW() + INTERVAL '5 minutes')",
                            {kRequest, kOwner})
                     .ok());
     sink_ = std::make_unique<PgGameSink>(*client_, kRequest, kOwner);
