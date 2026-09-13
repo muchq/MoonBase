@@ -1,0 +1,61 @@
+load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+smithy_cpp_client_library(
+    name = "lichess_smithy_client",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/lichess.smithy",
+    ],
+    namespace = "moonbase::lichess",
+    service = "moonbase.lichess#Lichess",
+)
+
+smithy_cpp_server_library(
+    name = "lichess_smithy_server",
+    testonly = True,
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/lichess.smithy",
+    ],
+    namespace = "moonbase::lichess",
+    service = "moonbase.lichess#Lichess",
+    visibility = ["//domains/games:__subpackages__"],
+)
+
+cc_library(
+    name = "client",
+    srcs = ["client.cc"],
+    hdrs = ["client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":lichess_smithy_client",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+    ],
+)
+
+cc_library(
+    name = "production_client",
+    srcs = ["production_client.cc"],
+    hdrs = ["production_client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
+cc_test(
+    name = "client_test",
+    size = "small",
+    srcs = ["client_test.cc"],
+    deps = [
+        ":client",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+    ],
+)
