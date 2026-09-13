@@ -25,7 +25,13 @@ struct ArchivedGame {
   std::string white_result;
   std::string black_result;
   /// chess.com's ECOUrl — a slug carrying the opening name, not a code.
+  /// Empty on platforms that state the opening outright; see opening_name.
   std::string eco_url;
+
+  /// The opening's name, when the source says it. Lichess writes an
+  /// [Opening] tag; chess.com writes neither a name nor a code and leaves
+  /// this empty, so the run falls back to scraping eco_url's slug.
+  std::string opening_name;
   /// Seconds since the epoch, 0 when the archive did not say.
   int64_t end_time = 0;
 };

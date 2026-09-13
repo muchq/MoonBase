@@ -33,6 +33,7 @@
 #include "domains/games/apis/one_d4_worker/db_options.h"
 #include "domains/games/apis/one_d4_worker/index_pool.h"
 #include "domains/games/apis/one_d4_worker/index_run.h"
+#include "domains/games/apis/one_d4_worker/lichess_archive.h"
 #include "domains/games/apis/one_d4_worker/metrics.h"
 #include "domains/games/apis/one_d4_worker/pg_game_sink.h"
 #include "domains/games/apis/one_d4_worker/pg_queue.h"
@@ -48,6 +49,7 @@
 #include "domains/games/apis/one_d4_worker/title_roster.h"
 #include "domains/games/apis/one_d4_worker/worker.h"
 #include "domains/games/libs/chess_com_cpp/production_client.h"
+#include "domains/games/libs/lichess_cpp/production_client.h"
 #include "domains/platform/libs/futility/env/env.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
@@ -148,6 +150,18 @@ int main(int /*argc*/, char** argv) {
   }
   one_d4_worker::ChessComArchive archive(*client);
 
+  // Empty unless deployed with one. The games export answers anonymous
+  // callers 404 even for accounts that exist, so without a token a LICHESS
+  // request fails rather than indexing nothing — which is the right failure,
+  // and unreachable until the API gate opens (#1527 slice 6).
+  opal::Outcome<lichess::Client> lichess_client =
+      lichess::CreateProductionClient(Env("ONE_D4_LICHESS_TOKEN"));
+  if (!lichess_client.ok()) {
+    LOG(ERROR) << "Could not build the lichess client: " << lichess_client.error().message();
+    return 1;
+  }
+  one_d4_worker::LichessArchive lichess_archive(*lichess_client);
+
   // Bounded, because nothing else bounds them and the run ceiling cannot:
   // a thread inside libpq never reaches a checkpoint to be told its time
   // is up. Cancelling a run that is already blocked is a separate job
@@ -175,10 +189,10 @@ int main(int /*argc*/, char** argv) {
   std::signal(SIGTERM, RequestShutdown);
 
   const auto stopping = [] { return g_stopping.load(std::memory_order_relaxed); };
-  // One entry today. A request naming anything else fails rather than
-  // completing empty, so adding a platform is adding a line here (#1527).
+  // Keyed by the spelling indexing_requests.platform carries. A request
+  // naming anything else fails rather than completing empty (#1527).
   const one_d4_worker::Poller::Run run = one_d4_worker::MakeRun(
-      {{"CHESS_COM", &archive}}, titles,
+      {{"CHESS_COM", &archive}, {"LICHESS", &lichess_archive}}, titles,
       // A connection per run: one pg::Client is one connection serialised
       // by a mutex, so runs sharing one would queue every flush behind
       // every other run's and leave nothing to overlap.

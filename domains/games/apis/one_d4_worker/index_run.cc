@@ -195,7 +195,10 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       row.black_title = TitleOf(game.black_username, complete);
       row.time_class = game.time_class;
       row.eco = parsed.ok() ? EcoFrom(parsed->headers) : "";
-      row.opening_name = OpeningNameFromEcoUrl(game.eco_url);
+      // A stated name beats a scraped one: Lichess writes [Opening], and
+      // OpeningNameFromEcoUrl only knows how to read chess.com's slug.
+      row.opening_name =
+          game.opening_name.empty() ? OpeningNameFromEcoUrl(game.eco_url) : game.opening_name;
       row.opening_family = OpeningFamilyFromName(row.opening_name);
       row.result = std::string(ResultOf(game.white_result, game.black_result));
       row.played_at = game.end_time;
