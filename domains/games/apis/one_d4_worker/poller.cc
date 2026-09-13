@@ -26,6 +26,13 @@ namespace {
 /// string, so a caller matching on it keeps matching.
 constexpr char kInternalFailure[] = "Indexing failed due to an internal error";
 
+/// The one thing the caller can act on, and a fixed sentence for the same
+/// reason: a worker deployed without the platform's credentials fails every
+/// request for it, and "internal error" sends whoever reads it looking for a
+/// bug instead of an environment variable. Names no platform, because the
+/// row already carries one.
+constexpr char kNotConfigured[] = "This server is not configured to index that platform";
+
 /// A token no other claimant will present: 128 random bits.
 ///
 /// Not a counter, because there is a poller per indexing thread and
@@ -165,7 +172,9 @@ absl::StatusOr<RunOutcome> Poller::RunClaimed(const Claim& claim) {
     // handed back by the API, and a chess.com body or a libpq diagnostic
     // in there is an internal detail told to whoever asked for the index.
     LOG(ERROR) << "Run failed request_id=" << job.id << " error=" << report.status();
-    return Finish(RunOutcome::kFailed, queue_.Fail(claim.ref(), kInternalFailure));
+    const char* stored =
+        absl::IsUnauthenticated(report.status()) ? kNotConfigured : kInternalFailure;
+    return Finish(RunOutcome::kFailed, queue_.Fail(claim.ref(), stored));
   }
 
   // Only kShutdown reaches here; the ceiling is handled above. The

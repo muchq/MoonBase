@@ -128,7 +128,13 @@ absl::StatusOr<std::vector<ArchivedGame>> LichessArchive::FetchMonth(std::string
     // Only the modeled 404 is NotFound, as on the chess.com side: everything
     // else is a failure to read the month, and completing the run on it
     // would record "indexed, no games" for a month nobody read (#1360).
-    if (exported.error().code() == "GamesNotFound") return absl::NotFoundError(message);
+    if (exported.error().code() == "GamesNotFound") {
+      // Every export a tokenless worker makes comes back this way, whoever
+      // the player is, so on such a worker the 404 says nothing about the
+      // player and everything about the deployment.
+      if (!client_.authenticated()) return absl::UnauthenticatedError(message);
+      return absl::NotFoundError(message);
+    }
     return absl::UnavailableError(message);
   }
 

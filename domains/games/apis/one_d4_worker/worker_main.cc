@@ -161,14 +161,17 @@ int main(int /*argc*/, char** argv) {
   one_d4_worker::ChessComArchive archive(*client);
 
   // Empty unless deployed with one. The games export answers anonymous
-  // callers 404 even for accounts that exist, so without a token a LICHESS
-  // request fails rather than indexing nothing — which is the right failure,
-  // and unreachable until the API gate opens (#1527 slice 6).
-  opal::Outcome<lichess::Client> lichess_client =
-      lichess::CreateProductionClient(Env("ONE_D4_LICHESS_TOKEN"));
+  // callers 404 even for accounts that exist, so a host that offers LICHESS
+  // without a token fails every request for it — the archive is told which
+  // it is so the row can say so rather than reporting an internal error.
+  const std::string lichess_token = Env("ONE_D4_LICHESS_TOKEN");
+  opal::Outcome<lichess::Client> lichess_client = lichess::CreateProductionClient(lichess_token);
   if (!lichess_client.ok()) {
     LOG(ERROR) << "Could not build the lichess client: " << lichess_client.error().message();
     return 1;
+  }
+  if (lichess_token.empty()) {
+    LOG(WARNING) << "ONE_D4_LICHESS_TOKEN is unset; LICHESS requests will fail";
   }
   one_d4_worker::LichessArchive lichess_archive(*lichess_client);
 

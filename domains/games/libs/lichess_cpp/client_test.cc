@@ -152,6 +152,27 @@ TEST(LichessClient, SendsNoAuthorizationHeaderWithoutAToken) {
   EXPECT_FALSE(transport->requests()[0].headers.Get("authorization").has_value());
 }
 
+// Whether a token was supplied, which callers need because Lichess answers
+// anonymous export calls 404 for accounts that exist — the status code
+// cannot say "no such player" apart from "no credential", and the client is
+// the only thing that knows which.
+TEST(LichessClient, SaysWhetherItIsAuthenticated) {
+  auto [with_token, unused_a] = ClientOver({PgnResponse(kTwoGames)}, "lip_secret");
+  auto [anonymous, unused_b] = ClientOver({PgnResponse(kTwoGames)});
+
+  EXPECT_TRUE(with_token.authenticated());
+  EXPECT_FALSE(anonymous.authenticated());
+}
+
+// An empty token is no token: WithBearerToken leaves the header off, so
+// calling it anyway must not make the client claim a credential it will
+// never send.
+TEST(LichessClient, AnEmptyTokenIsNotAuthentication) {
+  auto [client, unused] = ClientOver({PgnResponse(kTwoGames)}, "");
+
+  EXPECT_FALSE(client.authenticated());
+}
+
 // The payload is bytes, not a JSON document: it must arrive exactly as sent,
 // because a PGN parser is the next thing to read it.
 TEST(LichessClient, ReturnsThePgnBytesVerbatim) {

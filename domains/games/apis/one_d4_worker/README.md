@@ -182,11 +182,16 @@ the export ahead of it takes — up to `request_timeout_ms`, ten minutes. With
 every slot on a LICHESS request, the worker is one stream wide and the rest
 is parked, including against chess.com work that has no such rule.
 
-So it does not claim one. `Poller::Options::platform_limits` caps LICHESS at
-one run per process, and the cap is applied when the row is *claimed*: a
-request for a platform this process is full on is not a candidate, stays
-PENDING, and is passed over for one the process can run. Parking on the
-mutex was the symptom; claiming the row was the cause.
+So it does not claim one. `PlatformAdmission` caps LICHESS at one run per
+process, and the cap is applied when the row is *claimed*: a request for a
+platform this process is full on is not a candidate, stays PENDING, and is
+passed over for one the process can run. Parking on the mutex was the
+symptom; claiming the row was the cause.
+
+One admission object serves the whole pool. Every slot builds its own
+`Poller` from one `Options`, so the counts have to live outside the poller
+— inside it, each slot would cap itself at one and four slots would still
+admit four.
 
 **Per process, not per fleet.** Replicas each get their own cap, so three of
 them are three concurrent exports against a rule Lichess states globally.

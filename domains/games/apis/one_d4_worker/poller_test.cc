@@ -360,6 +360,28 @@ TEST(Poller, FailsAJobThatRaised) {
   ExpectEveryWriteFencedOnTheClaim(queue);
 }
 
+// The one exception to the fixed sentence, and still a fixed sentence: a
+// worker with no lichess token fails every LICHESS request it claims, and
+// "internal error" sends the operator reading logs for a bug that is a
+// missing environment variable. Says what to do without quoting anything
+// upstream said.
+TEST(Poller, SaysSoWhenTheRunFailedForWantOfCredentials) {
+  FakeQueue queue;
+  queue.next = AJob();
+  Poller poller(
+      queue,
+      [](const Claim&, LeaseKeeper&) -> absl::StatusOr<RunReport> {
+        return absl::UnauthenticatedError("lichess games alice 2026-01: GamesNotFound: ...");
+      },
+      Options());
+
+  ASSERT_TRUE(poller.PollOnce().ok());
+  EXPECT_THAT(queue.calls,
+              ElementsAre("fail job-1 This server is not configured to index that platform"));
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kFailed);
+  ExpectEveryWriteFencedOnTheClaim(queue);
+}
+
 TEST(Poller, WritesNothingWhenTheLeaseIsLost) {
   // The row belongs to whoever holds the lease now, and they own its
   // outcome. Reporting ours would overwrite theirs — this is the whole

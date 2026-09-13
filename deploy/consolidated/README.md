@@ -226,10 +226,11 @@ characters after it were ever real.
 It is optional to *start*, and required to *use*: the API accepts LICHESS submits
 since #1527 slice 6, and Lichess answers the games export with **404 to anonymous
 callers, even for accounts that exist**. On a host with no token every LICHESS
-request therefore fails — three attempts, then retired — with the archive's own
-message naming lichess and the status, which the request table shows. chess.com
-indexing is unaffected either way. Unset, no `Authorization` header is sent at
-all, which is the correct anonymous request.
+request therefore fails immediately, and the request table shows *This server is
+not configured to index that platform* — the one failure whose cause is the
+operator's to fix, so the one the worker names rather than storing its usual
+"internal error". chess.com indexing is unaffected either way. Unset, no
+`Authorization` header is sent at all, which is the correct anonymous request.
 
 So: a host that offers the platform needs the token. Nothing refuses the submit
 on its behalf, because the API cannot see which hosts hold one.

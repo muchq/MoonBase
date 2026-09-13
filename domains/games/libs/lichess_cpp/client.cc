@@ -39,11 +39,15 @@ opal::ClientConfig WithBearerToken(opal::ClientConfig config, std::string_view t
 }
 
 opal::Outcome<Client> Client::Create(opal::ClientConfig config) {
+  // Read before the move, and from the config rather than from the token
+  // that was passed in: WithBearerToken drops an empty one, so this is the
+  // question of whether a header will actually be sent.
+  const bool authenticated = config.bearer_token != nullptr;
   auto client = moonbase::lichess::LichessClient::Create(std::move(config));
   if (!client.ok()) {
     return std::move(client).error();
   }
-  return Client(std::move(*client));
+  return Client(std::move(*client), authenticated);
 }
 
 opal::Outcome<moonbase::lichess::ExportGamesOutput> Client::ExportGames(

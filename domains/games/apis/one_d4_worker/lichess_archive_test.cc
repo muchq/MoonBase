@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -82,10 +83,11 @@ struct Fixture {
   std::unique_ptr<LichessArchive> archive;
 };
 
-Fixture ArchiveOver(std::vector<opal::http::HttpResponse> responses) {
+Fixture ArchiveOver(std::vector<opal::http::HttpResponse> responses,
+                    std::string_view token = "lip_secret") {
   Fixture fixture;
   fixture.transport = std::make_shared<ScriptedHttpClient>(std::move(responses));
-  opal::ClientConfig config = lichess::DefaultClientConfig();
+  opal::ClientConfig config = lichess::WithBearerToken(lichess::DefaultClientConfig(), token);
   config.http_client = fixture.transport;
   auto client = lichess::Client::Create(std::move(config));
   EXPECT_TRUE(client.ok()) << client.error().message();
@@ -371,6 +373,38 @@ TEST(LichessArchive, A404IsNotFoundSoTheRunFails) {
   const auto games = fixture.archive->FetchMonth("alice", January());
 
   EXPECT_TRUE(absl::IsNotFound(games.status())) << games.status();
+}
+
+// A worker with no token cannot read any month of any player: the export
+// answers anonymous callers 404 even for accounts that exist. Same status
+// code as a handle that does not exist, and the two want opposite answers
+// — "check the spelling" against "configure the server" — so which one it
+// is comes from whether this worker has a token, the only thing here that
+// can tell them apart.
+TEST(LichessArchive, A404WithoutATokenIsUnauthenticatedRatherThanAMissingPlayer) {
+  opal::http::HttpResponse not_found;
+  not_found.status = 404;
+  not_found.headers.Set("content-type", "text/html; charset=utf-8");
+  not_found.body = "<!DOCTYPE html><html><head><title>Page not found</title></head></html>";
+  Fixture fixture = ArchiveOver({not_found}, /*token=*/"");
+
+  const auto games = fixture.archive->FetchMonth("alice", January());
+
+  EXPECT_TRUE(absl::IsUnauthenticated(games.status())) << games.status();
+}
+
+// Only the 404 is about the token. A tokenless worker that gets a 429 has
+// still been refused for the ordinary reason, and calling that a
+// configuration problem would send the operator after the wrong thing.
+TEST(LichessArchive, WithoutATokenARateLimitIsStillUnavailable) {
+  opal::http::HttpResponse limited;
+  limited.status = 429;
+  limited.body = "{\"error\":\"Please only run 1 request(s) at a time\"}";
+  Fixture fixture = ArchiveOver({limited, limited, limited}, /*token=*/"");
+
+  const auto games = fixture.archive->FetchMonth("alice", January());
+
+  EXPECT_TRUE(absl::IsUnavailable(games.status())) << games.status();
 }
 
 // Anything that is not the modeled 404 is a failure to read the month rather

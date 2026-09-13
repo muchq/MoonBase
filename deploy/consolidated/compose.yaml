@@ -519,7 +519,8 @@ services:
       # accounts that exist — so LICHESS requests need this to work at all.
       # Empty still starts, and chess.com is unaffected, but the API accepts
       # LICHESS submits since #1527 slice 6: without a token every one of them
-      # fails. See deploy/consolidated/README.md.
+      # fails, saying the server is not configured for the platform. See
+      # deploy/consolidated/README.md.
       - ONE_D4_LICHESS_TOKEN=${ONE_D4_LICHESS_TOKEN:-}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=one_d4_worker
