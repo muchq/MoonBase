@@ -3,13 +3,10 @@ package com.muchq.games.chessql.compiler;
 import java.util.Locale;
 
 /**
- * The one spelling rule for the {@code platform} column, shared by the writer that stores it and
- * the compiler that queries it.
- *
- * <p>They have to agree, and for a while they did not: the request path stored {@code CHESS_COM}
- * while a {@code platform = "chess.com"} filter bound {@code chess.com}, so the obvious query
- * returned nothing (#1539). Canonicalising in one place is what keeps a new platform from
- * re-opening that gap — {@code lichess}, {@code Lichess} and {@code LICHESS} are one value.
+ * The one spelling rule for the {@code platform} column, applied by the request path that stores a
+ * value and by the compiler that queries one. The stored spelling is canonical, so a literal must
+ * be canonicalised before it is compared — {@code lichess}, {@code Lichess} and {@code LICHESS} are
+ * one value, and so are {@code chess.com} and {@code CHESS_COM}.
  */
 public final class Platforms {
 

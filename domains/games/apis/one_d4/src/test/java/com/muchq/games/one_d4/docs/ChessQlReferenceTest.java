@@ -15,7 +15,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -93,8 +92,9 @@ public class ChessQlReferenceTest {
    * <p>Parameters are pinned only where the column is unambiguous — every entry a quoted string or
    * a bare integer. The timestamp rows render a bound value for a human rather than as its {@code
    * toString}, so they are skipped rather than given a parser that would only ever be approximately
-   * right. That is enough to cover #1539, where the binds changed and the SQL did not: platform
-   * literals are canonicalised at compile time, and the table went on documenting the old ones.
+   * right. The Parameters column is pinned at all because a bind can change without the SQL
+   * changing — platform literals are canonicalised at compile time — and an unpinned column is one
+   * a reader has no reason to distrust.
    */
   @Test
   public void theCompilationExamplesTableMatchesWhatTheCompilerEmits() throws IOException {
@@ -114,7 +114,7 @@ public class ChessQlReferenceTest {
       CompiledQuery compiled = compiler.compile(Parser.parse(input));
 
       Optional<List<Object>> documented =
-          documentedParameters(cells.length > 3 ? unbacktick(cells[3]) : null);
+          cells.length > 3 ? documentedParameters(unbacktick(cells[3])) : Optional.empty();
       if (documented.isPresent()) {
         assertThat(compiled.parameters())
             .as("CHESSQL.md documents `%s` as binding %s", input, documented.get())
@@ -150,8 +150,8 @@ public class ChessQlReferenceTest {
    * the timestamp rows. An unreadable cell is skipped, not failed: the point is that the readable
    * ones stay true.
    */
-  private static Optional<List<Object>> documentedParameters(@Nullable String cell) {
-    if (cell == null || !cell.startsWith("[") || !cell.endsWith("]")) {
+  private static Optional<List<Object>> documentedParameters(String cell) {
+    if (!cell.startsWith("[") || !cell.endsWith("]")) {
       return Optional.empty();
     }
     String body = cell.substring(1, cell.length() - 1).trim();

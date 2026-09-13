@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Locale;
 import org.junit.jupiter.api.Test;
 
 public class SqlCompilerTest {
@@ -493,6 +494,32 @@ public class SqlCompilerTest {
     assertThatThrownBy(() -> compile("sequence(fork THEN unknown)"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Unknown motif in sequence");
+  }
+
+  /**
+   * Motif names reach SQL upper-cased, on all three paths that emit one. Turkish maps 'i' to a
+   * dotless capital, so a JVM defaulting to that locale asks motif_occurrences for PİN and gets
+   * nothing back — the same zero-row answer, from SQL that reads correctly, that #1539 was. Eight
+   * of the motif names carry an 'i'.
+   */
+  @Test
+  public void motifNamesUpperCaseIndependentlyOfTheDefaultLocale() {
+    Locale previous = Locale.getDefault();
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+
+      assertThat(compile("motif(pin)").selectSql()).contains(motifExists("PIN"));
+      assertThat(compile("sequence(pin THEN promotion)").selectSql())
+          .contains(storedPlySubquery("PIN"))
+          .contains(storedPlySubquery("PROMOTION"));
+      assertThat(
+              compiler
+                  .compile(Parser.parse("motif(fork) ORDER BY motif_count(pin) DESC"))
+                  .parameters())
+          .contains("PIN");
+    } finally {
+      Locale.setDefault(previous);
+    }
   }
 
   @Test

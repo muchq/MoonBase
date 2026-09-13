@@ -14,9 +14,10 @@ import java.util.UUID;
 
 /**
  * The single owner of the index-request lifecycle: validate → normalize → dedupe → create →
- * dispatch. Both entry points — the one_d4 REST API (IndexController) and mcpserver's in-process
- * MCP tools (IndexerFacade) — go through this service, so validation, player normalization, and
- * skip-cache semantics cannot drift between them.
+ * dispatch. Every index request arrives through the one_d4 REST API (IndexController) and so
+ * through this service — mcpserver's MCP tools included, which reach it over HTTP (#1332) rather
+ * than running an indexer of their own. Validation, player normalization, platform canonicalization
+ * and skip-cache semantics therefore cannot drift between entry points.
  */
 public class IndexRequestService {
 
@@ -89,7 +90,7 @@ public class IndexRequestService {
     // Request dedupe and the indexed-period cache are keyed by the player string as given, so
     // normalize case here — "Hikaru" and "hikaru" must not index twice.
     String player = submission.player().strip().toLowerCase(Locale.ROOT);
-    String platform = canonicalPlatform(submission.platform());
+    String platform = requireSupportedPlatform(submission.platform());
     YearMonth start = parseMonth(submission.startMonth(), "startMonth");
     YearMonth end = parseMonth(submission.endMonth(), "endMonth");
     if (start.isAfter(end)) {
@@ -149,7 +150,13 @@ public class IndexRequestService {
         row.excludeBullet());
   }
 
-  private static String canonicalPlatform(String platform) {
+  /**
+   * The canonical spelling of a platform this service will index, or a 400. What it returns is what
+   * gets stored, so it returns the canonicalised value rather than a constant that happens to equal
+   * it — {@link Platforms#canonical} is then the one rule deciding the stored spelling as well as
+   * the queried one.
+   */
+  private static String requireSupportedPlatform(String platform) {
     if (platform == null || platform.isBlank()) {
       throw new IllegalArgumentException("platform is required");
     }
@@ -158,7 +165,7 @@ public class IndexRequestService {
       throw new IllegalArgumentException(
           "Unsupported platform: " + platform + ". Supported: chess.com (CHESS_COM)");
     }
-    return "CHESS_COM";
+    return normalized;
   }
 
   private static YearMonth parseMonth(String value, String fieldName) {

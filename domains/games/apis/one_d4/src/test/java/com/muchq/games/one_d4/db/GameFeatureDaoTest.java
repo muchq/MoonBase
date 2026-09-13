@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -172,6 +173,33 @@ public class GameFeatureDaoTest {
   public void insertOccurrencesBatch_emptyMap_noOp() {
     dao.insertOccurrencesBatch(Map.of());
     // No exception thrown, no rows inserted
+  }
+
+  /**
+   * The motif key a response carries is the ChessQL motif name, so it is lower-cased from the
+   * stored PIN. Turkish maps 'I' to a dotless lowercase, which would hand clients "pın" — a key
+   * matching no motif they can ask for, against a row that was found correctly.
+   */
+  @Test
+  public void occurrenceMotifKeysDoNotDependOnTheDefaultLocale() {
+    String gameUrl = "https://chess.com/game/occ-locale";
+    dao.insertBatch(List.of(createGame(gameUrl)));
+    dao.insertOccurrencesBatch(
+        Map.of(
+            gameUrl,
+            Map.of(
+                Motif.PIN,
+                List.of(
+                    new GameFeatures.MotifOccurrence(
+                        5, 3, "white", "pinned", null, null, null, false, false, null)))));
+
+    Locale previous = Locale.getDefault();
+    try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+      assertThat(dao.queryOccurrences(List.of(gameUrl)).get(gameUrl)).containsKey("pin");
+    } finally {
+      Locale.setDefault(previous);
+    }
   }
 
   @Test
@@ -2173,7 +2201,7 @@ public class GameFeatureDaoTest {
         null,
         requestId,
         url,
-        "chess.com",
+        "CHESS_COM",
         "white",
         "black",
         1500,

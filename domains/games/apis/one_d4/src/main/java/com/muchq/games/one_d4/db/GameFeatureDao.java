@@ -17,6 +17,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import org.jdbi.v3.core.Handle;
@@ -490,9 +491,9 @@ public class GameFeatureDao implements GameFeatureStore {
                       .map(
                           (rs, ctx) -> {
                             String gameUrl = rs.getString("game_url");
-                            // Store motif key as lowercase to match ChessQL motif naming
-                            // convention
-                            String motif = rs.getString("motif").toLowerCase();
+                            // The key is a ChessQL motif name, which is ASCII lowercase —
+                            // Locale.ROOT because a Turkish default would spell PIN as "pın".
+                            String motif = rs.getString("motif").toLowerCase(Locale.ROOT);
                             return new OccurrenceRow(
                                 gameUrl,
                                 motif,
