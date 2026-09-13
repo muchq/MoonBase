@@ -145,10 +145,16 @@ public class ChessQlReferenceTest {
         .isGreaterThanOrEqualTo(8);
   }
 
+  /** A rendered bound timestamp — the one entry shape this deliberately does not read back. */
+  private static final Pattern RENDERED_TIMESTAMP = Pattern.compile("\\d{4}-\\d{2}-\\d{2}T\\S*");
+
   /**
-   * The Parameters cell as values, or empty when a row renders something this cannot read back —
-   * the timestamp rows. An unreadable cell is skipped, not failed: the point is that the readable
-   * ones stay true.
+   * The Parameters cell as values, or empty for the timestamp rows, which render a bound value for
+   * a human rather than as its {@code toString}.
+   *
+   * <p>Only that shape is skipped. Anything else unreadable fails: quietly skipping it would let a
+   * single edit both un-pin a row and change what it documents, and the floor on the number of
+   * pinned rows cannot see which row went missing.
    */
   private static Optional<List<Object>> documentedParameters(String cell) {
     if (!cell.startsWith("[") || !cell.endsWith("]")) {
@@ -165,8 +171,15 @@ public class ChessQlReferenceTest {
         values.add(trimmed.substring(1, trimmed.length() - 1));
       } else if (trimmed.matches("-?\\d+")) {
         values.add(Integer.valueOf(trimmed));
-      } else {
+      } else if (RENDERED_TIMESTAMP.matcher(trimmed).matches()) {
         return Optional.empty();
+      } else {
+        throw new AssertionError(
+            "CHESSQL.md Parameters cell "
+                + cell
+                + " has an entry this cannot read: "
+                + trimmed
+                + " — quote a string, leave an integer bare, or it is not a Parameters cell");
       }
     }
     return Optional.of(values);

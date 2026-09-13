@@ -166,12 +166,20 @@ public class SqlCompilerTest {
     assertThat(compile("platform != \"chess.com\"").parameters()).isEqualTo(List.of("CHESS_COM"));
   }
 
-  /** Only platform gets the treatment; the other string columns bind what the user typed. */
+  /**
+   * Only platform gets the treatment; the other string columns bind what the user typed. game_url
+   * is the one that has to be checked with a dotted value: canonicalising it would rewrite
+   * chess.com to chess_com inside the URL, and LOWER() on both sides hides the case half of the
+   * mutation — so a dotless fixture cannot tell the two apart.
+   */
   @Test
   public void otherStringColumnsAreBoundAsWritten() {
     assertThat(compile("white.username = \"Hikaru\"").parameters()).isEqualTo(List.of("Hikaru"));
     assertThat(compile("opening.name = \"Caro-Kann Defense\"").parameters())
         .isEqualTo(List.of("Caro-Kann Defense"));
+    assertThat(compile("game.url = \"https://chess.com/game/1\"").parameters())
+        .isEqualTo(List.of("https://chess.com/game/1"));
+    assertThat(compile("eco = \"B90\"").parameters()).isEqualTo(List.of("B90"));
   }
 
   @Test

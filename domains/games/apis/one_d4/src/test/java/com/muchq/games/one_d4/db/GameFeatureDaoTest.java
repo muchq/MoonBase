@@ -1623,11 +1623,18 @@ public class GameFeatureDaoTest {
         .containsExactly("https://lichess.org/plat-li");
   }
 
-  /** A platform nobody indexed still compiles and still runs — it just matches nothing. */
+  /**
+   * A platform nobody indexed still compiles and still runs — it just matches nothing. The control
+   * matters more than the assertion here: empty is also what a wholly broken platform predicate
+   * returns, so the row has to be shown reachable in the same fixture for the empty to mean "no
+   * such platform" rather than "no platform filter works".
+   */
   @Test
   public void anUnindexedPlatformMatchesNoRowsRatherThanFailing() {
-    dao.insertBatch(List.of(gameOnPlatform("https://chess.com/game/plat-only", "CHESS_COM")));
+    String url = "https://chess.com/game/plat-only";
+    dao.insertBatch(List.of(gameOnPlatform(url, "CHESS_COM")));
 
+    assertThat(urlsMatching("platform = \"chess.com\"")).containsExactly(url);
     assertThat(urlsMatching("platform = \"chess24.com\"")).isEmpty();
   }
 
