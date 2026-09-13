@@ -9,6 +9,7 @@ import com.muchq.games.one_d4.api.dto.GameFeatureRow;
 import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.api.dto.QueryRequest;
 import com.muchq.games.one_d4.api.dto.QueryResponse;
+import com.muchq.games.one_d4.testing.FakeGameFeatureStore;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -42,7 +43,7 @@ public class QueryControllerTest {
     String gameUrl = "https://chess.com/game/with-motifs";
     GameFeature feature = createGameFeature(gameUrl);
     store.setQueryResult(List.of(feature));
-    store.setOccurrencesResult(
+    store.setOccurrences(
         Map.of(
             gameUrl,
             Map.of(
@@ -116,7 +117,7 @@ public class QueryControllerTest {
   public void query_whenNoOccurrences_returnsEmptyOccurrencesMapPerGame() {
     String gameUrl = "https://chess.com/game/no-motifs";
     store.setQueryResult(List.of(createGameFeature(gameUrl)));
-    store.setOccurrencesResult(Map.of(gameUrl, Map.of()));
+    store.setOccurrences(Map.of(gameUrl, Map.of()));
 
     QueryResponse response =
         controller.query(new QueryRequest("white_elo >= 2000", 10, 0), null, null);
@@ -128,7 +129,7 @@ public class QueryControllerTest {
   @Test
   public void query_whenStoreReturnsEmptyList_returnsEmptyResponse() {
     store.setQueryResult(List.of());
-    store.setOccurrencesResult(Map.of());
+    store.setOccurrences(Map.of());
 
     QueryResponse response = controller.query(new QueryRequest("motif(fork)", 10, 0), null, null);
 
@@ -147,7 +148,7 @@ public class QueryControllerTest {
   @Test
   public void query_perspectiveFieldWithPlayer_succeeds() {
     store.setQueryResult(List.of());
-    store.setOccurrencesResult(Map.of());
+    store.setOccurrences(Map.of());
 
     QueryResponse response =
         controller.query(new QueryRequest("outcome = \"win\"", 10, 0, "hikaru"), null, null);
@@ -159,7 +160,7 @@ public class QueryControllerTest {
   public void query_defaultFirstPageRequest_secondRequestIsServedFromCacheWithoutStoreQuery() {
     String gameUrl = "https://chess.com/game/cached";
     store.setQueryResult(List.of(createGameFeature(gameUrl)));
-    store.setOccurrencesResult(Map.of(gameUrl, Map.of()));
+    store.setOccurrences(Map.of(gameUrl, Map.of()));
 
     QueryResponse first = controller.query(defaultRequest(), null, null);
     QueryResponse second = controller.query(defaultRequest(), null, null);
@@ -172,7 +173,7 @@ public class QueryControllerTest {
   @Test
   public void query_defaultFirstPageRequest_staleCacheFallsThroughToStoreAndRewarms() {
     store.setQueryResult(List.of());
-    store.setOccurrencesResult(Map.of());
+    store.setOccurrences(Map.of());
 
     controller.query(defaultRequest(), null, null);
     ticker.advance(FirstPageCache.MAX_AGE.plusSeconds(1));
@@ -188,7 +189,7 @@ public class QueryControllerTest {
   public void query_nonDefaultRequests_bypassTheCacheEvenWhenWarm() {
     String cachedUrl = "https://chess.com/game/warmed-first";
     store.setQueryResult(List.of(createGameFeature(cachedUrl)));
-    store.setOccurrencesResult(Map.of());
+    store.setOccurrences(Map.of());
 
     controller.query(defaultRequest(), null, null);
     assertThat(store.queryCount()).isEqualTo(1);
@@ -211,18 +212,18 @@ public class QueryControllerTest {
   @Test
   public void query_passesTheRequestsLimitAndOffsetToTheStore() {
     store.setQueryResult(List.of());
-    store.setOccurrencesResult(Map.of());
+    store.setOccurrences(Map.of());
 
     controller.query(new QueryRequest("white_elo >= 2000", 10, 7, null), null, null);
 
-    assertThat(store.lastLimit()).isEqualTo(10);
-    assertThat(store.lastOffset()).isEqualTo(7);
+    assertThat(store.lastQueryLimit()).isEqualTo(10);
+    assertThat(store.lastQueryOffset()).isEqualTo(7);
   }
 
   @Test
   public void query_defaultRequestWithSurroundingWhitespace_stillHitsCache() {
     store.setQueryResult(List.of());
-    store.setOccurrencesResult(Map.of());
+    store.setOccurrences(Map.of());
 
     controller.query(defaultRequest(), null, null);
     controller.query(

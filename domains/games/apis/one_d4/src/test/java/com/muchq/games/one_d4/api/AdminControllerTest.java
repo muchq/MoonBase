@@ -3,18 +3,10 @@ package com.muchq.games.one_d4.api;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.muchq.games.one_d4.api.dto.GameFeature;
-import com.muchq.games.one_d4.api.dto.OccurrenceRow;
 import com.muchq.games.one_d4.api.dto.ReanalysisRequestResponse;
 import com.muchq.games.one_d4.api.dto.RederiveResponse;
 import com.muchq.games.one_d4.db.GameFeatureStore;
-import com.muchq.games.one_d4.db.GameFeatureStore.GameOpening;
-import com.muchq.games.one_d4.engine.model.GameFeatures;
-import com.muchq.games.one_d4.engine.model.Motif;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import com.muchq.games.one_d4.testing.FakeGameFeatureStore;
 import java.util.NoSuchElementException;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -161,93 +153,5 @@ public class AdminControllerTest {
     assertThat(response.gamesScanned()).isEqualTo(rows);
     assertThat(response.gamesUpdated()).isEqualTo(rows);
     assertThat(store.writtenUrls()).hasSize(rows).doesNotHaveDuplicates();
-  }
-
-  private static class FakeGameFeatureStore implements GameFeatureStore {
-
-    /** Not part of the AdminController surface: only the worker flushes. */
-    @Override
-    public boolean flushOwned(
-        java.util.UUID requestId,
-        String ownerId,
-        Instant now,
-        List<GameFeature> features,
-        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {
-      throw new UnsupportedOperationException("AdminController tests never flush");
-    }
-
-    private final List<GameOpening> openings = new ArrayList<>();
-    private final List<String> written = new ArrayList<>();
-
-    void addOpening(String url, String name, String family) {
-      openings.add(new GameOpening(url, name, family));
-    }
-
-    String familyOf(String url) {
-      return openings.stream()
-          .filter(o -> o.gameUrl().equals(url))
-          .findFirst()
-          .orElseThrow()
-          .openingFamily();
-    }
-
-    List<String> writtenUrls() {
-      return List.copyOf(written);
-    }
-
-    @Override
-    public List<GameOpening> fetchOpeningsForRederive(int limit, int offset) {
-      int start = Math.min(offset, openings.size());
-      int end = Math.min(offset + limit, openings.size());
-      return List.copyOf(openings.subList(start, end));
-    }
-
-    @Override
-    public int updateOpeningFamilies(List<GameOpening> updates) {
-      for (GameOpening update : updates) {
-        written.add(update.gameUrl());
-        openings.replaceAll(
-            existing ->
-                existing.gameUrl().equals(update.gameUrl())
-                    ? new GameOpening(
-                        existing.gameUrl(), existing.openingName(), update.openingFamily())
-                    : existing);
-      }
-      return updates.size();
-    }
-
-    public void deleteOccurrencesByGameUrls(List<String> gameUrls) {}
-
-    @Override
-    public void insertBatch(List<GameFeature> features) {}
-
-    @Override
-    public int deleteOlderThan(Instant threshold) {
-      return 0;
-    }
-
-    public void insertOccurrencesBatch(
-        Map<String, Map<Motif, List<GameFeatures.MotifOccurrence>>> occurrencesByGame) {}
-
-    @Override
-    public List<GameFeature> query(Object compiledQuery, int limit, int offset) {
-      return List.of();
-    }
-
-    @Override
-    public List<com.muchq.games.one_d4.api.dto.AggregateRow> aggregate(
-        Object compiledQuery, List<String> groupColumns, boolean withOutcomeMetrics, int limit) {
-      return List.of();
-    }
-
-    @Override
-    public AggregateTotals aggregateTotals(Object compiledQuery) {
-      return new AggregateTotals(0, 0);
-    }
-
-    @Override
-    public Map<String, Map<String, List<OccurrenceRow>>> queryOccurrences(List<String> gameUrls) {
-      return Map.of();
-    }
   }
 }

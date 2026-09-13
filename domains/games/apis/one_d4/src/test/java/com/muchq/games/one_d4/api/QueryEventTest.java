@@ -15,6 +15,7 @@ import com.muchq.games.one_d4.api.dto.GameFeature;
 import com.muchq.games.one_d4.api.dto.QueryRequest;
 import com.muchq.games.one_d4.api.dto.QueryResponse;
 import com.muchq.games.one_d4.db.GameFeatureStore.AggregateTotals;
+import com.muchq.games.one_d4.testing.FakeGameFeatureStore;
 import com.muchq.platform.yodel.CustomMetrics;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -332,10 +333,10 @@ public class QueryEventTest {
   @Test
   public void anAggregateLogsItsGroupingAndRankingAndFillsTheTotalsBranch() {
     // Two groups against a limit of two: the totals branch runs, and rows is the group count.
-    store.setAggregateResult(
+    store.setAggregateRows(
         List.of(
-            new AggregateRow(Map.of("eco", "B90"), 7), new AggregateRow(Map.of("eco", "B91"), 3)),
-        new AggregateTotals(15, 4));
+            new AggregateRow(Map.of("eco", "B90"), 7), new AggregateRow(Map.of("eco", "B91"), 3)));
+    store.setAggregateTotals(new AggregateTotals(15, 4));
 
     AggregateResponse response =
         aggregateController.aggregate(

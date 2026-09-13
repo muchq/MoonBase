@@ -4,16 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.muchq.games.one_d4.api.dto.IndexRequest;
 import com.muchq.games.one_d4.api.dto.IndexResponse;
-import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestStore;
 import com.muchq.games.one_d4.service.DataAvailabilityResolver;
 import com.muchq.games.one_d4.service.IndexRequestService;
-import java.time.Duration;
+import com.muchq.games.one_d4.testing.FakeIndexedPeriodStore;
+import com.muchq.games.one_d4.testing.FakeIndexingRequestStore;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,12 +20,12 @@ public class IndexControllerTest {
 
   private IndexController controller;
   private FakeIndexingRequestStore requestStore;
-  private FakePeriodStore periodStore;
+  private FakeIndexedPeriodStore periodStore;
 
   @BeforeEach
   public void setUp() {
     requestStore = new FakeIndexingRequestStore();
-    periodStore = new FakePeriodStore();
+    periodStore = new FakeIndexedPeriodStore();
     controller =
         new IndexController(
             new IndexRequestService(requestStore, new DataAvailabilityResolver(periodStore)),
@@ -95,7 +92,7 @@ public class IndexControllerTest {
   @Test
   public void createIndex_returnsExistingRequestWhenDuplicateParams() {
     UUID existingId = UUID.randomUUID();
-    requestStore.setExistingRequest(
+    requestStore.seed(
         new IndexingRequestStore.IndexingRequest(
             existingId,
             "hikaru",
@@ -128,7 +125,7 @@ public class IndexControllerTest {
   @Test
   public void createIndex_returnsExistingPendingRequest() {
     UUID existingId = UUID.randomUUID();
-    requestStore.setExistingRequest(
+    requestStore.seed(
         new IndexingRequestStore.IndexingRequest(
             existingId,
             "player",
@@ -188,7 +185,7 @@ public class IndexControllerTest {
   @Test
   public void createIndex_skipCacheCoalescesOntoAnInFlightRequest() {
     UUID existingId = UUID.randomUUID();
-    requestStore.setExistingRequest(
+    requestStore.seed(
         new IndexingRequestStore.IndexingRequest(
             existingId,
             "hikaru",
@@ -225,7 +222,7 @@ public class IndexControllerTest {
     IntStream.range(0, count)
         .forEach(
             i ->
-                requestStore.addRequest(
+                requestStore.seed(
                     new IndexingRequestStore.IndexingRequest(
                         UUID.randomUUID(),
                         "player" + i,
@@ -263,8 +260,7 @@ public class IndexControllerTest {
             false,
             false,
             0);
-    requestStore.setExistingRequest(stored);
-    requestStore.setFindByIdResponse(stored);
+    requestStore.seed(stored);
 
     IndexResponse response = controller.getIndex(stored.id());
 
@@ -281,8 +277,8 @@ public class IndexControllerTest {
   public void listRequests_reportsWhetherEachRequestsDataSurvives() {
     IndexingRequestStore.IndexingRequest intact = completed("intact", "2026-01", "2026-02");
     IndexingRequestStore.IndexingRequest swept = completed("swept", "2026-01", "2026-02");
-    requestStore.addRequest(intact);
-    requestStore.addRequest(swept);
+    requestStore.seed(intact);
+    requestStore.seed(swept);
     periodStore.add("intact", "CHESS_COM", "2026-01", false, Instant.parse("2026-03-01T00:00:00Z"));
     periodStore.add("intact", "CHESS_COM", "2026-02", false, Instant.parse("2026-03-02T00:00:00Z"));
 
@@ -308,7 +304,7 @@ public class IndexControllerTest {
   @Test
   public void getIndex_reportsDataAvailability() {
     IndexingRequestStore.IndexingRequest stored = completed("drawlya", "2026-01", "2026-02");
-    requestStore.setFindByIdResponse(stored);
+    requestStore.seed(stored);
     periodStore.add(
         "drawlya", "CHESS_COM", "2026-01", false, Instant.parse("2026-03-01T00:00:00Z"));
 
@@ -353,199 +349,5 @@ public class IndexControllerTest {
         .filter(r -> player.equals(r.player()))
         .findFirst()
         .orElseThrow(() -> new AssertionError("no response for " + player));
-  }
-
-  private static final class FakePeriodStore implements IndexedPeriodStore {
-    private final List<IndexedPeriod> periods = new ArrayList<>();
-    private int lookupCount = 0;
-
-    void add(
-        String player, String platform, String month, boolean excludeBullet, Instant fetchedAt) {
-      periods.add(new IndexedPeriod(player, platform, month, fetchedAt, true, 1, excludeBullet));
-    }
-
-    int lookupCount() {
-      return lookupCount;
-    }
-
-    @Override
-    public List<IndexedPeriod> findPeriodsForPlayers(Collection<String> players) {
-      lookupCount++;
-      return periods.stream().filter(p -> players.contains(p.player())).toList();
-    }
-
-    @Override
-    public Optional<IndexedPeriod> findCompletePeriod(
-        String player, String platform, String month, boolean excludeBullet) {
-      return Optional.empty();
-    }
-
-    @Override
-    public void upsertPeriod(
-        String player,
-        String platform,
-        String month,
-        Instant fetchedAt,
-        boolean isComplete,
-        int gamesCount,
-        boolean excludeBullet) {}
-
-    @Override
-    public int deleteOlderThan(Instant threshold) {
-      return 0;
-    }
-  }
-
-  private static final class FakeIndexingRequestStore implements IndexingRequestStore {
-    private Optional<IndexingRequestStore.IndexingRequest> existingRequest = Optional.empty();
-    private Optional<IndexingRequestStore.IndexingRequest> findByIdResponse = Optional.empty();
-    private final List<IndexingRequestStore.IndexingRequest> allRequests = new ArrayList<>();
-    // The rows createOrAdopt minted. The row is the queue (#1279): the created row is the
-    // dispatch, and it is what the C++ worker will claim.
-    private final List<IndexingRequestStore.IndexingRequest> created = new ArrayList<>();
-    private int createCallCount = 0;
-
-    List<IndexingRequestStore.IndexingRequest> created() {
-      return created;
-    }
-
-    void setExistingRequest(IndexingRequestStore.IndexingRequest request) {
-      this.existingRequest = Optional.of(request);
-    }
-
-    void setFindByIdResponse(IndexingRequestStore.IndexingRequest request) {
-      this.findByIdResponse = Optional.of(request);
-    }
-
-    void addRequest(IndexingRequestStore.IndexingRequest request) {
-      allRequests.add(request);
-    }
-
-    int createCallCount() {
-      return createCallCount;
-    }
-
-    @Override
-    public Claim createOrAdopt(
-        String player,
-        String platform,
-        String startMonth,
-        String endMonth,
-        boolean excludeBullet,
-        boolean skipCache,
-        Duration staleAfter,
-        Instant now) {
-      // Mirrors the schema's exclusivity: if a live request is already registered for this tuple,
-      // the caller adopts it rather than creating a rival.
-      Optional<IndexingRequestStore.IndexingRequest> holder =
-          existingRequest.filter(
-              r ->
-                  r.player().equals(player)
-                      && r.platform().equals(platform)
-                      && r.startMonth().equals(startMonth)
-                      && r.endMonth().equals(endMonth)
-                      && r.excludeBullet() == excludeBullet);
-      if (holder.isPresent()) {
-        return new Claim(holder.get(), false);
-      }
-      createCallCount++;
-      IndexingRequestStore.IndexingRequest row =
-          new IndexingRequestStore.IndexingRequest(
-              UUID.randomUUID(),
-              player,
-              platform,
-              startMonth,
-              endMonth,
-              "PENDING",
-              now,
-              now,
-              null,
-              0,
-              excludeBullet,
-              skipCache,
-              0);
-      created.add(row);
-      return new Claim(row, true);
-    }
-
-    /** Not exercised by IndexController tests: nothing here dispatches from the table. */
-    @Override
-    public Optional<IndexingRequestStore.IndexingRequest> claimNext(
-        String ownerId, java.time.Duration lease, Instant now) {
-      return Optional.empty();
-    }
-
-    @Override
-    public Optional<IndexingRequestStore.IndexingRequest> findById(UUID id) {
-      return findByIdResponse.filter(r -> r.id().equals(id));
-    }
-
-    @Override
-    public int reclaimStale(Duration staleAfter, Instant now) {
-      return 0;
-    }
-
-    @Override
-    public boolean claim(UUID id, String ownerId, Duration lease, Instant now) {
-      return true;
-    }
-
-    @Override
-    public boolean renewLease(UUID id, String ownerId, Duration lease, Instant now) {
-      return true;
-    }
-
-    @Override
-    public boolean handBack(UUID id, String ownerId, Instant now) {
-
-      return false;
-    }
-
-    @Override
-    public boolean releaseOwned(UUID id, String ownerId, Instant now) {
-
-      return false;
-    }
-
-    @Override
-    public boolean holdsLease(UUID id, String ownerId, Instant now) {
-      return true;
-    }
-
-    @Override
-    public boolean updateStatusOwned(
-        UUID id,
-        String ownerId,
-        String status,
-        String errorMessage,
-        int gamesIndexed,
-        Instant now) {
-      return true;
-    }
-
-    @Override
-    public int deleteOlderThan(Instant threshold) {
-      return 0;
-    }
-
-    @Override
-    public List<IndexingRequestStore.IndexingRequest> listRecent(int limit) {
-      return allRequests.stream().limit(limit).toList();
-    }
-
-    @Override
-    public void updateStatus(UUID id, String status, String errorMessage, int gamesIndexed) {}
-
-    @Override
-    public Optional<IndexingRequestStore.IndexingRequest> findExistingRequest(
-        String player, String platform, String startMonth, String endMonth, boolean excludeBullet) {
-      return existingRequest.filter(
-          r ->
-              r.player().equals(player)
-                  && r.platform().equals(platform)
-                  && r.startMonth().equals(startMonth)
-                  && r.endMonth().equals(endMonth)
-                  && r.excludeBullet() == excludeBullet);
-    }
   }
 }

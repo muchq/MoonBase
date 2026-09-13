@@ -3,14 +3,12 @@ package com.muchq.games.one_d4.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.muchq.games.one_d4.api.dto.DataAvailability;
-import com.muchq.games.one_d4.db.IndexedPeriodStore;
 import com.muchq.games.one_d4.db.IndexingRequestStore.IndexingRequest;
 import com.muchq.games.one_d4.db.RetentionPolicy;
+import com.muchq.games.one_d4.testing.FakeIndexedPeriodStore;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
@@ -23,14 +21,14 @@ public class DataAvailabilityResolverTest {
 
   private static final Instant FETCHED = Instant.parse("2026-07-20T12:00:00Z");
 
-  private final FakePeriodStore periods = new FakePeriodStore();
+  private final FakeIndexedPeriodStore periods = new FakeIndexedPeriodStore();
   private final DataAvailabilityResolver resolver = new DataAvailabilityResolver(periods);
 
   @Test
   public void allMonthsPresent_isAvailable() {
-    periods.add("hikaru", "CHESS_COM", false, "2026-05", FETCHED);
-    periods.add("hikaru", "CHESS_COM", false, "2026-06", FETCHED);
-    periods.add("hikaru", "CHESS_COM", false, "2026-07", FETCHED);
+    periods.add("hikaru", "CHESS_COM", "2026-05", false, FETCHED);
+    periods.add("hikaru", "CHESS_COM", "2026-06", false, FETCHED);
+    periods.add("hikaru", "CHESS_COM", "2026-07", false, FETCHED);
 
     DataAvailability data = resolve(completed("hikaru", "2026-05", "2026-07"));
 
@@ -41,7 +39,7 @@ public class DataAvailabilityResolverTest {
 
   @Test
   public void someMonthsSwept_isPartial() {
-    periods.add("hikaru", "CHESS_COM", false, "2026-07", FETCHED);
+    periods.add("hikaru", "CHESS_COM", "2026-07", false, FETCHED);
 
     DataAvailability data = resolve(completed("hikaru", "2026-05", "2026-07"));
 
@@ -63,8 +61,8 @@ public class DataAvailabilityResolverTest {
   @Test
   public void expiresAtTracksTheEarliestFetch() {
     Instant oldest = Instant.parse("2026-07-18T09:00:00Z");
-    periods.add("hikaru", "CHESS_COM", false, "2026-06", Instant.parse("2026-07-22T09:00:00Z"));
-    periods.add("hikaru", "CHESS_COM", false, "2026-07", oldest);
+    periods.add("hikaru", "CHESS_COM", "2026-06", false, Instant.parse("2026-07-22T09:00:00Z"));
+    periods.add("hikaru", "CHESS_COM", "2026-07", false, oldest);
 
     DataAvailability data = resolve(completed("hikaru", "2026-06", "2026-07"));
 
@@ -75,15 +73,15 @@ public class DataAvailabilityResolverTest {
   @Test
   public void periodsForAnotherPlayerPlatformOrBulletSettingDoNotCount() {
     IndexingRequest request = completed("hikaru", "2026-07", "2026-07");
-    periods.add("magnus", "CHESS_COM", false, "2026-07", FETCHED);
-    periods.add("hikaru", "LICHESS", false, "2026-07", FETCHED);
+    periods.add("magnus", "CHESS_COM", "2026-07", false, FETCHED);
+    periods.add("hikaru", "LICHESS", "2026-07", false, FETCHED);
     // indexed_periods is unique on exclude_bullet too: a bullet-excluding index is a different
     // corpus, so it cannot vouch for a request that kept bullet games.
-    periods.add("hikaru", "CHESS_COM", true, "2026-07", FETCHED);
+    periods.add("hikaru", "CHESS_COM", "2026-07", true, FETCHED);
 
     assertThat(resolve(request).status()).isEqualTo("EXPIRED");
 
-    periods.add("hikaru", "CHESS_COM", false, "2026-07", FETCHED);
+    periods.add("hikaru", "CHESS_COM", "2026-07", false, FETCHED);
     assertThat(resolve(request).status()).isEqualTo("AVAILABLE");
   }
 
@@ -112,10 +110,10 @@ public class DataAvailabilityResolverTest {
             0);
 
     // The period a CHESS_COM bullet-including request would have written cannot vouch for it.
-    periods.add("hikaru", "CHESS_COM", false, "2026-07", FETCHED);
+    periods.add("hikaru", "CHESS_COM", "2026-07", false, FETCHED);
     assertThat(resolve(bulletExcluded).status()).isEqualTo("EXPIRED");
 
-    periods.add("hikaru", "LICHESS", true, "2026-07", FETCHED);
+    periods.add("hikaru", "LICHESS", "2026-07", true, FETCHED);
     assertThat(resolve(bulletExcluded).status()).isEqualTo("AVAILABLE");
   }
 
@@ -127,7 +125,7 @@ public class DataAvailabilityResolverTest {
    */
   @Test
   public void anIncompletePeriodStillCountsAsAvailable() {
-    periods.add("hikaru", "CHESS_COM", false, "2026-07", FETCHED, false);
+    periods.add("hikaru", "CHESS_COM", "2026-07", false, FETCHED, false);
 
     DataAvailability data = resolve(completed("hikaru", "2026-07", "2026-07"));
 
@@ -137,7 +135,7 @@ public class DataAvailabilityResolverTest {
 
   @Test
   public void singleMonthRangeCountsOneMonth() {
-    periods.add("hikaru", "CHESS_COM", false, "2026-07", FETCHED);
+    periods.add("hikaru", "CHESS_COM", "2026-07", false, FETCHED);
 
     DataAvailability data = resolve(completed("hikaru", "2026-07", "2026-07"));
 
@@ -154,7 +152,7 @@ public class DataAvailabilityResolverTest {
 
   @Test
   public void unfinishedRequestsAreNotReported() {
-    periods.add("hikaru", "CHESS_COM", false, "2026-07", FETCHED);
+    periods.add("hikaru", "CHESS_COM", "2026-07", false, FETCHED);
 
     for (String status : List.of("PENDING", "PROCESSING", "FAILED")) {
       IndexingRequest request = request("hikaru", "2026-07", "2026-07", status);
@@ -180,9 +178,9 @@ public class DataAvailabilityResolverTest {
     page.add(request("pending", "2026-07", "2026-07", "PENDING"));
 
     assertThat(resolver.resolveAll(page)).hasSize(20);
-    assertThat(periods.lookupCount).isEqualTo(1);
+    assertThat(periods.lookupCount()).isEqualTo(1);
     // Only the players that could have data are asked about.
-    assertThat(periods.lastPlayersQueried).hasSize(20).doesNotContain("pending");
+    assertThat(periods.lastPlayersQueried()).hasSize(20).doesNotContain("pending");
   }
 
   @Test
@@ -190,7 +188,7 @@ public class DataAvailabilityResolverTest {
     assertThat(resolver.resolveAll(List.of(request("x", "2026-07", "2026-07", "PENDING"))))
         .isEmpty();
     assertThat(resolver.resolveAll(List.of())).isEmpty();
-    assertThat(periods.lookupCount).isZero();
+    assertThat(periods.lookupCount()).isZero();
   }
 
   private DataAvailability resolve(IndexingRequest request) {
@@ -217,55 +215,5 @@ public class DataAvailabilityResolverTest {
         false,
         false,
         0);
-  }
-
-  private static final class FakePeriodStore implements IndexedPeriodStore {
-    private final List<IndexedPeriod> stored = new ArrayList<>();
-    private int lookupCount;
-    private Collection<String> lastPlayersQueried = List.of();
-
-    void add(
-        String player, String platform, boolean excludeBullet, String month, Instant fetchedAt) {
-      add(player, platform, excludeBullet, month, fetchedAt, true);
-    }
-
-    void add(
-        String player,
-        String platform,
-        boolean excludeBullet,
-        String month,
-        Instant fetchedAt,
-        boolean isComplete) {
-      stored.add(
-          new IndexedPeriod(player, platform, month, fetchedAt, isComplete, 1, excludeBullet));
-    }
-
-    @Override
-    public List<IndexedPeriod> findPeriodsForPlayers(Collection<String> players) {
-      lookupCount++;
-      lastPlayersQueried = players;
-      return stored.stream().filter(p -> players.contains(p.player())).toList();
-    }
-
-    @Override
-    public Optional<IndexedPeriod> findCompletePeriod(
-        String player, String platform, String month, boolean excludeBullet) {
-      return Optional.empty();
-    }
-
-    @Override
-    public void upsertPeriod(
-        String player,
-        String platform,
-        String month,
-        Instant fetchedAt,
-        boolean isComplete,
-        int gamesCount,
-        boolean excludeBullet) {}
-
-    @Override
-    public int deleteOlderThan(Instant threshold) {
-      return 0;
-    }
   }
 }
