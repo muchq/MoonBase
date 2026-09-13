@@ -47,6 +47,25 @@ request after three before it ever reached the end. A ceiling that moved
 Scaling out does not speed a pass up — one owner at a time is the point —
 but it does mean any instance can pick up a pass whose owner died.
 
+## Where titles come from
+
+Per platform, because a username means a different player on each one.
+
+chess.com states a title on no game at all — zero of hikaru's 493 games in
+August 2026 carry a `*Title` tag — so the worker reads the ten
+`/pub/titled/{title}` rosters once and answers from memory. Lichess writes
+`[WhiteTitle]` / `[BlackTitle]` on the game itself and has no roster
+endpoint, so it is registered with no roster and the title costs nothing.
+
+A platform with no roster is not a platform whose roster failed: its months
+are complete. Only a roster that was supposed to load and did not degrades
+one, because that is a title nobody will go back and correct.
+
+Titles a game states are also written to `player_titles`, dated by the game
+rather than by the write — indexing is not chronological, and a backfill of
+2019 running after 2026 would otherwise demote a current GM. Roster titles
+are not written that way: the roster describes now.
+
 ## Scaling out
 
 There is no ingress. Nothing routes to this service, nothing load

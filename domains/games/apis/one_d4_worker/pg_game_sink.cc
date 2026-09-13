@@ -9,6 +9,7 @@
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/one_d4_worker/occurrence_writer.h"
+#include "domains/games/apis/one_d4_worker/pg_title_store.h"
 #include "domains/games/libs/chess_cpp/side.h"
 #include "domains/games/libs/one_d4_motifs/motif.h"
 
@@ -98,6 +99,10 @@ std::string OptionalNumber(int64_t value) { return value == 0 ? "" : std::to_str
 
 std::string Bool(bool value) { return value ? "true" : "false"; }
 
+/// What a title read off the game's own PGN is filed as, so a roster
+/// observation and a stated one stay distinguishable in the table.
+constexpr char kStatedSource[] = "pgn";
+
 }  // namespace
 
 absl::Status PgGameSink::Write(absl::Span<const IndexedGame> games) {
@@ -132,6 +137,17 @@ absl::Status PgGameSink::Write(absl::Span<const IndexedGame> games) {
     for (const IndexedGame* game : ordered) {
       const absl::Status replaced = ReplaceOccurrences(tx, game->url, game->occurrences);
       if (!replaced.ok()) return replaced;
+    }
+
+    // In this transaction rather than after it: the observation and the row
+    // it was read from land together or not at all. Only titles a game
+    // stated itself get here — a roster-derived one describes now, not the
+    // date this game was played.
+    for (const IndexedGame* game : ordered) {
+      if (game->stated_titles.empty()) continue;
+      const absl::Status observed =
+          UpsertTitles(tx, game->platform, game->stated_titles, kStatedSource);
+      if (!observed.ok()) return observed;
     }
     return absl::OkStatus();
   });

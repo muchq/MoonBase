@@ -130,8 +130,9 @@ TEST(MakeRun, SendsAJobToTheArchiveForItsPlatform) {
   FakeLease lease;
 
   Recorded recorded;
-  const Poller::Run run = MakeRun({{"CHESS_COM", &chess_com}, {"LICHESS", &lichess}}, titles,
-                                  SinksInto(recorded), metrics, [] { return false; });
+  const Poller::Run run =
+      MakeRun({{"CHESS_COM", &chess_com}, {"LICHESS", &lichess}}, {{"CHESS_COM", &titles}},
+              SinksInto(recorded), metrics, [] { return false; });
 
   Claim claim = AClaim("first");
   claim.job.platform = "LICHESS";
@@ -139,6 +140,64 @@ TEST(MakeRun, SendsAJobToTheArchiveForItsPlatform) {
 
   EXPECT_EQ(lichess.fetches, 1);
   EXPECT_EQ(chess_com.fetches, 0) << "the job went to the wrong platform's archive";
+}
+
+// A username means a different player on another platform, which is why
+// player_titles is keyed on (platform, username). A single roster shared
+// across platforms breaks that from the other end: the chess.com GM roster
+// would answer a Lichess lookup, and a Lichess player who happens to share
+// a handle with a titled chess.com player is recorded holding their title.
+TEST(MakeRun, ARostersTitlesDoNotAnswerForAnotherPlatform) {
+  FakeArchive chess_com;
+  FakeArchive lichess;
+  // Untitled on Lichess, and the game says nothing — so the run falls back.
+  lichess.months["2026-01"] = {AGame("l1")};
+  FakeRosters chess_com_rosters;
+  // "alice" is a GM on chess.com, and the Lichess player of the same name
+  // is somebody else entirely.
+  chess_com_rosters.rosters["GM"] = {"alice"};
+  TitleRoster chess_com_titles(chess_com_rosters, TitleRoster::Options{});
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  FakeLease lease;
+
+  Recorded recorded;
+  const Poller::Run run = MakeRun({{"CHESS_COM", &chess_com}, {"LICHESS", &lichess}},
+                                  {{"CHESS_COM", &chess_com_titles}}, SinksInto(recorded), metrics,
+                                  [] { return false; });
+
+  Claim claim = AClaim("first");
+  claim.job.platform = "LICHESS";
+  ASSERT_TRUE(run(claim, lease).ok());
+
+  ASSERT_EQ(recorded.written.size(), 1u);
+  EXPECT_EQ(recorded.written.front().white_title, "")
+      << "a chess.com roster titled a Lichess player who only shares the name";
+}
+
+// A platform with no roster registered is not a platform whose titles
+// failed to load: Lichess states them per game and has no roster endpoint
+// at all, so the month is complete rather than degraded.
+TEST(MakeRun, APlatformWithNoRosterIsNotADegradedOne) {
+  FakeArchive lichess;
+  ArchivedGame titled = AGame("l1");
+  titled.white_title = "GM";
+  lichess.months["2026-01"] = {titled};
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  FakeLease lease;
+
+  Recorded recorded;
+  const Poller::Run run =
+      MakeRun({{"LICHESS", &lichess}}, {}, SinksInto(recorded), metrics, [] { return false; });
+
+  Claim claim = AClaim("first");
+  claim.job.platform = "LICHESS";
+  ASSERT_TRUE(run(claim, lease).ok());
+
+  ASSERT_EQ(recorded.periods.size(), 1u);
+  EXPECT_TRUE(recorded.periods.front().complete);
+  EXPECT_EQ(recorded.written.front().white_title, "GM");
 }
 
 // The stored spelling is the contract. IndexRequestService normalises before
@@ -154,8 +213,8 @@ TEST(MakeRun, TheKeyIsTheStoredSpellingNotAFriendlyOne) {
   FakeLease lease;
 
   Recorded recorded;
-  const Poller::Run run = MakeRun({{"chess.com", &chess_com}}, titles, SinksInto(recorded), metrics,
-                                  [] { return false; });
+  const Poller::Run run = MakeRun({{"chess.com", &chess_com}}, {{"CHESS_COM", &titles}},
+                                  SinksInto(recorded), metrics, [] { return false; });
 
   EXPECT_FALSE(run(AClaim("first"), lease).ok())
       << "a friendlier spelling answered a claim, hiding a key no row carries";
@@ -174,8 +233,8 @@ TEST(MakeRun, AnUnknownPlatformFailsTheRunRatherThanIndexingNothing) {
   FakeLease lease;
 
   Recorded recorded;
-  const Poller::Run run = MakeRun({{"CHESS_COM", &chess_com}}, titles, SinksInto(recorded), metrics,
-                                  [] { return false; });
+  const Poller::Run run = MakeRun({{"CHESS_COM", &chess_com}}, {{"CHESS_COM", &titles}},
+                                  SinksInto(recorded), metrics, [] { return false; });
 
   Claim claim = AClaim("first");
   claim.job.platform = "LICHESS";
@@ -203,8 +262,8 @@ TEST(MakeRun, RunsEveryJobAgainstTheOneRoster) {
   FakeLease lease;
 
   Recorded recorded;
-  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, titles, SinksInto(recorded), metrics,
-                                  [] { return false; });
+  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, {{"CHESS_COM", &titles}},
+                                  SinksInto(recorded), metrics, [] { return false; });
 
   ASSERT_TRUE(run(AClaim("first"), lease).ok());
   ASSERT_TRUE(run(AClaim("second"), lease).ok());
@@ -226,8 +285,8 @@ TEST(MakeRun, EveryRunGetsTheRoster) {
   FakeLease lease;
 
   Recorded recorded;
-  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, titles, SinksInto(recorded), metrics,
-                                  [] { return false; });
+  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, {{"CHESS_COM", &titles}},
+                                  SinksInto(recorded), metrics, [] { return false; });
   ASSERT_TRUE(run(AClaim("first"), lease).ok());
 
   ASSERT_EQ(recorded.written.size(), 1u);
@@ -246,8 +305,8 @@ TEST(MakeRun, EveryRunGetsItsOwnSinkForTheJobItClaimed) {
   FakeLease lease;
 
   Recorded recorded;
-  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, titles, SinksInto(recorded), metrics,
-                                  [] { return false; });
+  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, {{"CHESS_COM", &titles}},
+                                  SinksInto(recorded), metrics, [] { return false; });
 
   ASSERT_TRUE(run(AClaim("first"), lease).ok());
   ASSERT_TRUE(run(AClaim("second"), lease).ok());
@@ -267,8 +326,8 @@ TEST(MakeRun, EveryRunGetsTheObserver) {
   FakeLease lease;
 
   Recorded recorded;
-  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, titles, SinksInto(recorded), metrics,
-                                  [] { return false; });
+  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, {{"CHESS_COM", &titles}},
+                                  SinksInto(recorded), metrics, [] { return false; });
   ASSERT_TRUE(run(AClaim("first"), lease).ok());
 
   EXPECT_GT(recorder.CounterTotal(kGamesIndexedMetric, {{kIndexerLabel, kIndexerValue}}), 0);
@@ -286,8 +345,8 @@ TEST(MakeRun, EveryRunGetsTheShutdownSwitch) {
   FakeLease lease;
 
   Recorded recorded;
-  const Poller::Run run =
-      MakeRun({{"CHESS_COM", &archive}}, titles, SinksInto(recorded), metrics, [] { return true; });
+  const Poller::Run run = MakeRun({{"CHESS_COM", &archive}}, {{"CHESS_COM", &titles}},
+                                  SinksInto(recorded), metrics, [] { return true; });
   const absl::StatusOr<RunReport> report = run(AClaim("first"), lease);
 
   ASSERT_TRUE(report.ok()) << report.status();

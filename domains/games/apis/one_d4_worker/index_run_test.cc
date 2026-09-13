@@ -765,6 +765,147 @@ TEST(IndexRun, CarriesThePlayersTitles) {
   EXPECT_EQ(sink.written.front().black_title, "") << "untitled, and said so";
 }
 
+// Lichess states the title on the game; chess.com states it nowhere and is
+// why the roster exists. A stated one wins, the same way a stated opening
+// name beats a slug scraped out of an ECOUrl.
+TEST(IndexRun, AStatedTitleBeatsTheRoster) {
+  FakeArchive archive;
+  ArchivedGame game = AGame("g1");
+  game.white_title = "CM";
+  game.black_title = "GM";
+  archive.months["2026-01"] = {game};
+  FakeRosters rosters;
+  // The roster disagrees about both sides. It is not asked.
+  rosters.rosters["GM"] = {"alice"};
+  TitleRoster titles(rosters, TitleRoster::Options{});
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun::Options options = Options();
+  options.titles = &titles;
+  IndexRun run(archive, sink, options);
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  ASSERT_EQ(sink.written.size(), 1u);
+  EXPECT_EQ(sink.written.front().white_title, "CM");
+  EXPECT_EQ(sink.written.front().black_title, "GM");
+}
+
+// A platform that states titles needs no roster, so the month it produced
+// is not missing anything. Degrading it would mark every Lichess month
+// incomplete forever — there is no roster coming that would fix it.
+TEST(IndexRun, AMonthOfStatedTitlesIsCompleteWithNoRosterAtAll) {
+  FakeArchive archive;
+  ArchivedGame titled = AGame("g1");
+  titled.white_title = "GM";
+  ArchivedGame untitled = AGame("g2");
+  archive.months["2026-01"] = {titled, untitled};
+  FakeSink sink;
+  FakeLease lease;
+
+  // No roster: the Lichess wiring.
+  IndexRun::Options options = Options();
+  options.titles = nullptr;
+  IndexRun run(archive, sink, options);
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  ASSERT_EQ(sink.periods.size(), 1u);
+  EXPECT_TRUE(sink.periods[0].complete);
+  EXPECT_EQ(sink.written.front().white_title, "GM");
+}
+
+// The roster is still consulted for a side the game said nothing about, so
+// a source that states some titles and not others does not lose the rest.
+TEST(IndexRun, AnUnstatedSideStillFallsBackToTheRoster) {
+  FakeArchive archive;
+  ArchivedGame game = AGame("g1");
+  game.black_title = "IM";
+  archive.months["2026-01"] = {game};
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"alice"};
+  TitleRoster titles(rosters, TitleRoster::Options{});
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun::Options options = Options();
+  options.titles = &titles;
+  IndexRun run(archive, sink, options);
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  EXPECT_EQ(sink.written.front().white_title, "GM")
+      << "alice was not stated, so the roster answers";
+  EXPECT_EQ(sink.written.front().black_title, "IM");
+}
+
+// A stated title is evidence about the moment the game was played, and for
+// a platform with no roster endpoint it is the only durable record there
+// will ever be. Lowercased, because player_titles keys on the username that
+// way.
+TEST(IndexRun, AStatedTitleBecomesAnObservationDatedByTheGame) {
+  FakeArchive archive;
+  ArchivedGame game = AGame("g1");
+  game.white_title = "GM";
+  game.black_title = "CM";
+  game.white_username = "Alice";
+  game.black_username = "BOB";
+  archive.months["2026-01"] = {game};
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  ASSERT_EQ(sink.written.size(), 1u);
+  const std::vector<TitleObservation>& observed = sink.written.front().stated_titles;
+  ASSERT_EQ(observed.size(), 2u);
+  EXPECT_EQ(observed[0].username, "alice");
+  EXPECT_EQ(observed[0].title, "GM");
+  EXPECT_EQ(observed[0].observed_at, game.end_time);
+  EXPECT_EQ(observed[1].username, "bob");
+  EXPECT_EQ(observed[1].title, "CM");
+}
+
+// A roster-derived title is true now, not as of this game. Filing it under
+// the game's date would backdate a title the player may not have held then
+// — and the roster already records itself, on its own schedule.
+TEST(IndexRun, ARosterTitleIsNotRecordedAsAnObservationAboutTheGame) {
+  FakeArchive archive;
+  archive.months["2026-01"] = {AGame("g1")};
+  FakeRosters rosters;
+  rosters.rosters["GM"] = {"alice"};
+  TitleRoster titles(rosters, TitleRoster::Options{});
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun::Options options = Options();
+  options.titles = &titles;
+  IndexRun run(archive, sink, options);
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  EXPECT_EQ(sink.written.front().white_title, "GM") << "the row still carries it";
+  EXPECT_THAT(sink.written.front().stated_titles, IsEmpty());
+}
+
+// An observation with no date cannot take part in the ordered upsert: it
+// would compare against every stored observation as older than all of them.
+// A game whose archive never said when it was played is not evidence about
+// any particular moment.
+TEST(IndexRun, AnUndatedGameStatesNoObservation) {
+  FakeArchive archive;
+  ArchivedGame game = AGame("g1");
+  game.white_title = "GM";
+  game.end_time = 0;
+  archive.months["2026-01"] = {game};
+  FakeSink sink;
+  FakeLease lease;
+
+  IndexRun run(archive, sink, Options());
+  ASSERT_TRUE(run.Execute(AJob(), lease).ok());
+
+  EXPECT_EQ(sink.written.front().white_title, "GM") << "the row still carries it";
+  EXPECT_THAT(sink.written.front().stated_titles, IsEmpty());
+}
+
 TEST(IndexRun, AsksChessComNothingAboutTheOpponentsItMeets) {
   // The point of the roster. Four hundred games is ten requests, and the
   // same ten however many months follow.

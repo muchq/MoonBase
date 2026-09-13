@@ -114,6 +114,72 @@ IndexedGame AGame(std::string_view url = "https://chess.com/game/1") {
   return game;
 }
 
+// A title the game stated is an observation about when that game was played,
+// so it is recorded — and it is the only durable record there is for a
+// platform with no roster endpoint. Written in the sink's own transaction:
+// the observation and the row it came from land together or not at all.
+TEST_F(PgGameSinkTest, StatedTitlesArePersistedAsObservations) {
+  IndexedGame game = AGame();
+  game.platform = "LICHESS";
+  game.stated_titles = {{"sultai", "CM", game.played_at},
+                        {"zhigalko_sergei", "GM", game.played_at}};
+
+  ASSERT_TRUE(sink_->Write({&game, 1}).ok());
+
+  EXPECT_EQ(One("SELECT title FROM player_titles WHERE platform = $1 AND username = $2",
+                {"LICHESS", "sultai"}),
+            "CM");
+  EXPECT_EQ(One("SELECT title FROM player_titles WHERE platform = $1 AND username = $2",
+                {"LICHESS", "zhigalko_sergei"}),
+            "GM");
+  EXPECT_EQ(One("SELECT source FROM player_titles WHERE platform = $1 AND username = $2",
+                {"LICHESS", "sultai"}),
+            "pgn")
+      << "a roster observation and a stated one are not the same evidence";
+}
+
+// observed_at is the game's date, not now(). Indexing is not chronological:
+// keyed on insert time, a backfill of 2019 running after 2026 silently
+// demotes a current GM.
+TEST_F(PgGameSinkTest, AnObservationIsDatedByTheGameNotTheWrite) {
+  IndexedGame game = AGame();
+  game.stated_titles = {{"alice", "GM", game.played_at}};
+
+  ASSERT_TRUE(sink_->Write({&game, 1}).ok());
+
+  EXPECT_EQ(One("SELECT EXTRACT(EPOCH FROM observed_at AT TIME ZONE 'UTC')::bigint FROM"
+                " player_titles WHERE username = $1",
+                {"alice"}),
+            std::to_string(game.played_at));
+}
+
+// The ordered upsert, from this side. An older game cannot overwrite what a
+// newer observation already recorded.
+TEST_F(PgGameSinkTest, AnOlderGameDoesNotDemoteANewerObservation) {
+  IndexedGame recent = AGame("https://chess.com/game/recent");
+  recent.stated_titles = {{"alice", "GM", recent.played_at}};
+  ASSERT_TRUE(sink_->Write({&recent, 1}).ok());
+
+  IndexedGame old = AGame("https://chess.com/game/old");
+  old.played_at = recent.played_at - 100'000;
+  old.stated_titles = {{"alice", "NM", old.played_at}};
+  ASSERT_TRUE(sink_->Write({&old, 1}).ok());
+
+  EXPECT_EQ(One("SELECT title FROM player_titles WHERE username = $1", {"alice"}), "GM");
+}
+
+// Absence of a title tag is every untitled player and every chess.com game.
+// Storing it would let a blank row shadow a real title.
+TEST_F(PgGameSinkTest, AGameThatStatedNoTitleWritesNoObservation) {
+  IndexedGame game = AGame();
+  game.stated_titles = {};
+
+  ASSERT_TRUE(sink_->Write({&game, 1}).ok());
+
+  EXPECT_EQ(One("SELECT count(*)::text FROM player_titles"), "0")
+      << "white_title was set from the roster, which is not an observation about this game";
+}
+
 one_d4::MotifOccurrence AnOccurrence(one_d4::Motif motif, int ply) {
   one_d4::MotifOccurrence occurrence;
   occurrence.motif = motif;

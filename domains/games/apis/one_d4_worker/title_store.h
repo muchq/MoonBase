@@ -15,6 +15,23 @@ namespace one_d4_worker {
 /// Lowercased username to title, which is how the roster holds it.
 using TitleMap = std::map<std::string, std::string, std::less<>>;
 
+/// One player's title as a single game stated it, dated by that game.
+///
+/// Lichess writes [WhiteTitle] / [BlackTitle]; chess.com writes neither for
+/// anyone, which is why TitleRoster exists at all. A roster-derived title
+/// never becomes one of these: the roster says what is true now, and filing
+/// that under the game's own date would backdate a title the player may not
+/// have held then.
+struct TitleObservation {
+  /// Lowercased, as the table keys it.
+  std::string username;
+  std::string title;
+  /// Seconds since the epoch — when the game was played. Not the write
+  /// time: indexing is not chronological, so a backfill of 2019 running
+  /// after 2026 would otherwise demote a current GM.
+  int64_t observed_at = 0;
+};
+
 /// Where titles outlive the process.
 ///
 /// A port so TitleRoster can be tested without Postgres, and so the roster
