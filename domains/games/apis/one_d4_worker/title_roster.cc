@@ -78,12 +78,9 @@ void TitleRoster::Rebuild(absl::Time now) {
   loaded_ = true;
   refreshed_ = now;
 
-  // Under the lock, like the ten reads above it and for the same reason:
-  // a refresh is already the one operation here that is not a map probe,
-  // and letting a second one start while this one writes would have two
-  // processes racing to install rosters read at different instants.
-  // Failing to store is not failing to refresh — this roster answers
-  // either way, and the next process is the only thing that loses.
+  // Under the lock, so two refreshes cannot install rosters read at
+  // different instants.
+  // Failing to store is not failing to refresh: only the next process loses.
   if (options_.store != nullptr) {
     (void)options_.store->Save(options_.platform, titles_, now);
   }

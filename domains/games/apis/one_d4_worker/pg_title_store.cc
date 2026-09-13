@@ -33,13 +33,8 @@ absl::Status PgTitleStore::Save(std::string_view platform, const TitleMap& title
   // $1 and $2 are the same for every row in the statement.
   const std::string seconds = absl::StrCat(absl::ToUnixSeconds(observed_at));
 
-  // One transaction for every batch, because a half-written roster is worse
-  // than none: TitleRoster::Rebuild drops this error on the floor, and
-  // AdoptStored takes any non-empty table as a complete fallback. A save
-  // that failed on its fourth batch would leave three batches installed,
-  // and the next restart into a roster outage would answer from them and
-  // write every player in the batches that never landed untitled — the bug
-  // this table exists to fix, through a narrower door.
+  // All batches or none. AdoptStored takes any non-empty table as a complete
+  // roster, so a half-written one answers for the players it is missing.
   return client_.InTransaction([&](pg::Transaction& tx) -> absl::Status {
     auto it = titles.begin();
     while (it != titles.end()) {

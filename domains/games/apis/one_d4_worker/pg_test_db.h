@@ -7,32 +7,18 @@
 
 namespace one_d4_worker {
 
-// The scratch database the Postgres suites here run against, and the one
-// decision every one of them has to make the same way.
-
-/// `$PG_TEST_DB_URL`, or:
-///
-/// - `Unavailable` when it is unset and `$CI` is not — a developer without a
-///   database gets a skip.
-/// - `FailedPrecondition` when it is unset and `$CI` is set. A skip reads as a
-///   pass in a CI summary, and these suites are the only thing that exercises
-///   the worker's half of the one_d4 schema (#1532), so a missing database is
-///   a broken job rather than a broken developer setup.
-///
-/// `PgTestUrls.requireRawUrl` is the Java twin, on the same two variables.
-/// Callers hold the distinction because GTEST_SKIP and ASSERT_ return from the
-/// test body and cannot be delegated:
+/// `$PG_TEST_DB_URL`; `Unavailable` when it is unset, or `FailedPrecondition`
+/// when `$CI` is also set — under CI a skip would report a pass that ran no
+/// SQL. `PgTestUrls.requireRawUrl` is the Java twin. Callers branch because
+/// GTEST_SKIP returns from the test body and cannot be delegated:
 ///
 ///     const absl::StatusOr<std::string> url = TestDbUrl();
 ///     if (absl::IsUnavailable(url.status())) GTEST_SKIP() << url.status().message();
 ///     ASSERT_TRUE(url.ok()) << url.status();
 absl::StatusOr<std::string> TestDbUrl();
 
-/// The same decision over explicit values, so pg_test_db_test can drive all
-/// three outcomes without mutating the process environment. Every caller
-/// branches on the status rather than asserting it, so inverting the CI arm
-/// would otherwise turn six suites green-by-skip with nothing going red.
-/// Null or empty stands for an unset variable, as getenv reports one.
+/// The same decision over explicit values, so the three outcomes are testable
+/// without touching the environment. Null or empty means unset.
 absl::StatusOr<std::string> TestDbUrlFrom(const char* url, const char* required);
 
 }  // namespace one_d4_worker

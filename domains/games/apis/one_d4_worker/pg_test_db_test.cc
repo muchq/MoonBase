@@ -10,10 +10,8 @@
 namespace one_d4_worker {
 namespace {
 
-// The gate the six Postgres suites here go through. Driven directly because
-// every one of them branches on the status rather than asserting it: deleting
-// the CI arm would turn all six green-by-skip and nothing else would notice.
-// PgTestUrlsTest is the Java twin, on the same two variables.
+// Driven directly because every caller branches on the status rather than
+// asserting it: deleting the CI arm would turn six suites green-by-skip.
 
 TEST(PgTestDb, AConfiguredUrlIsReturned) {
   const absl::StatusOr<std::string> url = TestDbUrlFrom("postgresql://h/db", "1");
