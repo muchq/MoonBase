@@ -133,7 +133,7 @@ IndexJob AJob(std::string start, std::string end) {
   IndexJob job;
   job.id = "job-1";
   job.player = "alice";
-  job.platform = "chess.com";
+  job.platform = "CHESS_COM";
   job.start_month = std::move(start);
   job.end_month = std::move(end);
   job.skip_cache = true;

@@ -118,17 +118,6 @@ Claim AClaim(std::string id) {
 
 // ---- Platform dispatch ----
 
-// The key is whatever the API wrote into the row. IndexRequestService
-// canonicalises to CHESS_COM — uppercased, dots to underscores — so a
-// registry keyed on the spelling a human types answers nothing.
-TEST(CanonicalPlatform, MatchesWhatTheApiWrites) {
-  EXPECT_EQ(CanonicalPlatform("chess.com"), "CHESS_COM");
-  EXPECT_EQ(CanonicalPlatform("CHESS_COM"), "CHESS_COM");
-  EXPECT_EQ(CanonicalPlatform("Chess.Com"), "CHESS_COM");
-  EXPECT_EQ(CanonicalPlatform("  chess.com  "), "CHESS_COM");
-  EXPECT_EQ(CanonicalPlatform("lichess"), "LICHESS");
-}
-
 TEST(MakeRun, SendsAJobToTheArchiveForItsPlatform) {
   FakeArchive chess_com;
   chess_com.months["2026-01"] = {AGame("c1")};
@@ -152,9 +141,10 @@ TEST(MakeRun, SendsAJobToTheArchiveForItsPlatform) {
   EXPECT_EQ(chess_com.fetches, 0) << "the job went to the wrong platform's archive";
 }
 
-// The row says chess.com's canonical spelling; the registry must answer it
-// however it was registered. Getting this wrong fails every live request.
-TEST(MakeRun, FindsTheArchiveWhateverSpellingItWasRegisteredUnder) {
+// The stored spelling is the contract. IndexRequestService normalises before
+// the row exists, so a registry keyed on the name a human types is keyed on
+// something no claim will ever carry — and every live request misses.
+TEST(MakeRun, TheKeyIsTheStoredSpellingNotAFriendlyOne) {
   FakeArchive chess_com;
   chess_com.months["2026-01"] = {AGame("c1")};
   FakeRosters rosters;
@@ -167,11 +157,9 @@ TEST(MakeRun, FindsTheArchiveWhateverSpellingItWasRegisteredUnder) {
   const Poller::Run run = MakeRun({{"chess.com", &chess_com}}, titles, SinksInto(recorded), metrics,
                                   [] { return false; });
 
-  Claim claim = AClaim("first");
-  claim.job.platform = "CHESS_COM";
-  ASSERT_TRUE(run(claim, lease).ok());
-
-  EXPECT_EQ(chess_com.fetches, 1);
+  EXPECT_FALSE(run(AClaim("first"), lease).ok())
+      << "a friendlier spelling answered a claim, hiding a key no row carries";
+  EXPECT_EQ(chess_com.fetches, 0);
 }
 
 // A platform nobody registered has to fail the request, not complete it. A

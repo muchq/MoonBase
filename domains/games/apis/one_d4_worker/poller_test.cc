@@ -117,7 +117,7 @@ IndexJob AJob() {
   IndexJob job;
   job.id = "job-1";
   job.player = "hikaru";
-  job.platform = "chess.com";
+  job.platform = "CHESS_COM";
   job.start_month = "2026-01";
   job.end_month = "2026-01";
   return job;

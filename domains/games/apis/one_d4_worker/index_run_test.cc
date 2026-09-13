@@ -136,7 +136,7 @@ IndexJob AJob(std::string_view start = "2026-01", std::string_view end = "2026-0
   IndexJob job;
   job.id = "job-1";
   job.player = "alice";
-  job.platform = "chess.com";
+  job.platform = "CHESS_COM";
   job.start_month = std::string(start);
   job.end_month = std::string(end);
   return job;
@@ -428,7 +428,7 @@ TEST(IndexRun, RecordsEveryMonthItRead) {
 
   ASSERT_EQ(sink.periods.size(), 2u);
   EXPECT_EQ(sink.periods[0].player, "alice");
-  EXPECT_EQ(sink.periods[0].platform, "chess.com");
+  EXPECT_EQ(sink.periods[0].platform, "CHESS_COM");
   EXPECT_EQ(sink.periods[0].month, "2026-01");
   EXPECT_EQ(sink.periods[0].games, 2);
   EXPECT_TRUE(sink.periods[0].complete);

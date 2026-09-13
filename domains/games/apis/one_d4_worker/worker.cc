@@ -6,40 +6,16 @@
 #include <utility>
 
 #include "absl/status/statusor.h"
-#include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 
 namespace one_d4_worker {
 
-std::string CanonicalPlatform(std::string_view platform) {
-  std::string canonical;
-  canonical.reserve(platform.size());
-  for (const char c : platform) {
-    if (absl::ascii_isspace(static_cast<unsigned char>(c))) continue;
-    canonical.push_back(c == '.' ? '_' : absl::ascii_toupper(static_cast<unsigned char>(c)));
-  }
-  return canonical;
-}
-
-namespace {
-
-PlatformArchives Canonicalised(PlatformArchives registered) {
-  PlatformArchives by_platform;
-  by_platform.reserve(registered.size());
-  for (auto& [platform, archive] : registered) {
-    by_platform.emplace(CanonicalPlatform(platform), archive);
-  }
-  return by_platform;
-}
-
-}  // namespace
-
 Poller::Run MakeRun(PlatformArchives archives, TitleRoster& titles, SinkFactory make_sink,
                     RunObserver& observer, std::function<bool()> stopping) {
-  return [archives = Canonicalised(std::move(archives)), &titles, &observer,
-          make_sink = std::move(make_sink), stopping = std::move(stopping)](
-             const Claim& claim, LeaseKeeper& keeper) -> absl::StatusOr<RunReport> {
-    const auto found = archives.find(CanonicalPlatform(claim.job.platform));
+  return [archives = std::move(archives), &titles, &observer, make_sink = std::move(make_sink),
+          stopping = std::move(stopping)](const Claim& claim,
+                                          LeaseKeeper& keeper) -> absl::StatusOr<RunReport> {
+    const auto found = archives.find(claim.job.platform);
     if (found == archives.end()) {
       return absl::InvalidArgumentError(
           absl::StrCat("no archive serves platform ", claim.job.platform));

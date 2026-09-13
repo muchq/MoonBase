@@ -21,17 +21,13 @@ namespace one_d4_worker {
 /// per run and not one per process.
 using SinkFactory = std::function<std::unique_ptr<GameSink>(const Claim&)>;
 
-/// The spelling the API stores in {@code indexing_requests.platform}:
-/// uppercased with dots as underscores, so "chess.com" is "CHESS_COM".
+/// Which archive serves which platform.
 ///
-/// IndexRequestService.canonicalPlatform is what actually writes the column;
-/// this mirrors that rule so a registry keyed either way answers a claimed
-/// row. The two are not compiled together, so changing one means changing
-/// both.
-std::string CanonicalPlatform(std::string_view platform);
-
-/// Which archive serves which platform. Keys are canonicalised on lookup,
-/// so registering under either spelling works.
+/// Keys are the spelling stored in indexing_requests.platform, which
+/// IndexRequestService normalises before the row exists — CHESS_COM, not
+/// chess.com. Matched exactly: the stored form is the contract, and a
+/// registry that also answered friendlier spellings would hide a key that
+/// no row will ever carry.
 using PlatformArchives = absl::flat_hash_map<std::string, ArchiveSource*>;
 
 /// What the poller calls with each claimed request.
