@@ -1,26 +1,10 @@
 #include "domains/games/libs/lichess_cpp/client.h"
 
 #include <chrono>
-#include <memory>
 #include <string>
 #include <utility>
 
-#include "opal/client/interceptor.h"
-#include "opal/http/message.h"
-
 namespace lichess {
-namespace {
-
-/// Sets Accept after the generated client has written its own. Runs per
-/// attempt, so a retry asks for PGN too.
-class PgnAccept final : public opal::Interceptor {
- public:
-  void ModifyBeforeTransmit(opal::http::HttpRequest& request, int /*attempt*/) override {
-    request.headers.Set("accept", std::string(kPgnAccept));
-  }
-};
-
-}  // namespace
 
 opal::ClientConfig DefaultClientConfig() {
   opal::ClientConfig config;
@@ -43,7 +27,6 @@ opal::ClientConfig DefaultClientConfig() {
   // observed to outlast 75 seconds, so the ceiling is higher than
   // chess.com's. Retry-After, when sent, raises the floor above this.
   config.retry.max_backoff = std::chrono::seconds(90);
-  config.interceptors.push_back(std::make_shared<PgnAccept>());
   return config;
 }
 
@@ -69,6 +52,7 @@ opal::Outcome<moonbase::lichess::ExportGamesOutput> Client::ExportGames(
   input.username = std::string(username);
   input.since = since_ms;
   input.until = until_ms;
+  input.accept = std::string(kPgnAccept);
   return client_.ExportGames(input);
 }
 

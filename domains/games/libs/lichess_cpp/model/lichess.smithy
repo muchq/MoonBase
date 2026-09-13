@@ -38,14 +38,15 @@ operation ExportGames {
         /// Epoch milliseconds, exclusive.
         @httpQuery("until")
         until: Long
+
+        /// The format selector, and the reason PGN arrives rather than
+        /// whatever the server would otherwise choose. The payload's own
+        /// content type is only a default since opal-cpp #220, so a modeled
+        /// value now survives to the wire.
+        @httpHeader("Accept")
+        accept: String
     }
 
-    /// Accept is not modeled, because it cannot be: for a blob payload the
-    /// generated client sets "application/octet-stream" unconditionally,
-    /// after applying any modeled @httpHeader("Accept"). The document path
-    /// next to it only defaults when unset, so this is an asymmetry rather
-    /// than a rule. Client::DefaultClientConfig installs an interceptor that
-    /// sets it instead; see client.h.
     output := {
         @required
         @httpPayload

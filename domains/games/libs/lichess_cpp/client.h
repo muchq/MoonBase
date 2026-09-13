@@ -19,12 +19,6 @@ inline constexpr std::string_view kPgnAccept = "application/x-chess-pgn";
 ///
 /// Carries no token. `WithBearerToken` is how one is added, so a caller that
 /// has none still builds a client that makes the right anonymous request.
-///
-/// Installs an interceptor that sets Accept to PGN. That cannot be modeled:
-/// for a blob payload the generated client sets "application/octet-stream"
-/// after applying any modeled @httpHeader("Accept"), so the modeled value is
-/// written and then overwritten. Worth removing once opal-cpp defaults that
-/// header only when unset, the way it already does for document responses.
 opal::ClientConfig DefaultClientConfig();
 
 /// Returns `config` with `token` on every request as `Authorization: Bearer`.
