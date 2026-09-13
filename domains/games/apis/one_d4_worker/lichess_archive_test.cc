@@ -3,9 +3,12 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -28,10 +31,21 @@ class ScriptedHttpClient final : public opal::http::HttpClient {
       : responses_(std::move(responses)) {}
 
   opal::Outcome<opal::http::HttpResponse> Send(const opal::http::HttpRequest& request) override {
+    const int concurrent = ++inside_;
+    int seen = peak_.load();
+    while (concurrent > seen && !peak_.compare_exchange_weak(seen, concurrent)) {
+    }
+    // Long enough that a second caller would be inside this one if nothing
+    // kept it out.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     requests_.push_back(request);
-    if (next_ == responses_.size()) return opal::Error::Unknown("no scripted response");
-    return responses_[next_++];
+    const std::size_t index = next_ < responses_.size() ? next_++ : responses_.size();
+    --inside_;
+    if (index == responses_.size()) return opal::Error::Unknown("no scripted response");
+    return responses_[index];
   }
+
+  int peak_concurrency() const { return peak_.load(); }
 
   const std::vector<opal::http::HttpRequest>& requests() const { return requests_; }
 
@@ -39,6 +53,8 @@ class ScriptedHttpClient final : public opal::http::HttpClient {
   std::vector<opal::http::HttpResponse> responses_;
   std::vector<opal::http::HttpRequest> requests_;
   std::size_t next_ = 0;
+  std::atomic<int> inside_{0};
+  std::atomic<int> peak_{0};
 };
 
 /// One Lichess game, spelled as Lichess spells them.
@@ -236,6 +252,53 @@ TEST(LichessArchive, AGameWithNoUtcTagsHasNoEndTimeRatherThanAWrongOne) {
   EXPECT_EQ((*games)[0].end_time, 0);
 }
 
+// ---- openings ----
+
+// Lichess states the opening; chess.com states neither name nor code, which
+// is why the run scrapes its ECOUrl slug. Leaving this unmapped gave every
+// Lichess row a blank opening name while the PGN carried one.
+TEST(LichessArchive, ReadsTheOpeningNameFromTheTag) {
+  Fixture fixture =
+      ArchiveOver({Pgn(AGame("Rated Blitz game", "https://lichess.org/a", "alice", "bob", "1-0"))});
+
+  const auto games = fixture.archive->FetchMonth("alice", January());
+
+  ASSERT_TRUE(games.ok()) << games.status();
+  EXPECT_EQ((*games)[0].opening_name, "Goldsmith Defense");
+  EXPECT_TRUE((*games)[0].eco_url.empty()) << "eco_url is chess.com's slug and has no analogue";
+}
+
+// ---- games that will not parse ----
+
+// IndexRun writes a row for a PGN it cannot parse rather than dropping it
+// (RecordsAGameWhosePgnWillNotEvenParse). Skipping here would pre-empt that
+// policy from a layer that does not own it.
+TEST(LichessArchive, KeepsAGameWhosePgnWillNotParse) {
+  // An unterminated tag value: the reader rejects the whole block rather
+  // than reading a game out of it.
+  Fixture fixture = ArchiveOver({Pgn("[Event \"unterminated\n1. e4 e5 1-0\n")});
+
+  const auto games = fixture.archive->FetchMonth("alice", January());
+
+  ASSERT_TRUE(games.ok()) << games.status();
+  ASSERT_EQ(games->size(), 1u);
+  EXPECT_THAT((*games)[0].pgn, HasSubstr("unterminated"));
+}
+
+// The failure this exists to prevent: if every block were dropped, the month
+// would come back an empty success, and a quiet month is recorded complete —
+// so a parser that drifted would cache "indexed, no games" over a month full
+// of them, and nothing would fetch it again (#1360).
+TEST(LichessArchive, AMonthOfUnparseableGamesIsNotAQuietMonth) {
+  Fixture fixture = ArchiveOver(
+      {Pgn("[Event \"Rated Blitz game\"]\nnot a pgn\n\n[Event \"Rated Blitz game\"]\nalso not\n")});
+
+  const auto games = fixture.archive->FetchMonth("alice", January());
+
+  ASSERT_TRUE(games.ok()) << games.status();
+  EXPECT_EQ(games->size(), 2u) << "the month read as empty and would be cached complete";
+}
+
 // ---- the port's contract ----
 
 // A month the player was quiet in is an empty vector, not an error. Failing
@@ -276,6 +339,28 @@ TEST(LichessArchive, ARateLimitIsUnavailableNotAnEmptyMonth) {
   const auto games = fixture.archive->FetchMonth("alice", January());
 
   EXPECT_TRUE(absl::IsUnavailable(games.status())) << games.status();
+}
+
+// ---- the one-at-a-time rule ----
+
+// Lichess refuses concurrent exports with 429 "Please only run 1 request(s)
+// at a time", and the cooldown outlasts the backoff. The worker runs
+// ONE_D4_INDEX_SLOTS requests at once — four in the deployed compose —
+// against one archive, so without the gate four LICHESS claims would race
+// into that refusal and spend their attempts finding it out.
+TEST(LichessArchive, RunsOneExportAtATime) {
+  Fixture fixture = ArchiveOver({Pgn(""), Pgn(""), Pgn(""), Pgn("")});
+
+  std::vector<std::thread> threads;
+  threads.reserve(4);
+  for (int i = 0; i < 4; ++i) {
+    threads.emplace_back(
+        [&fixture] { EXPECT_TRUE(fixture.archive->FetchMonth("alice", January()).ok()); });
+  }
+  for (std::thread& thread : threads) thread.join();
+
+  EXPECT_EQ(fixture.transport->peak_concurrency(), 1)
+      << "concurrent exports are the 429 this gate exists to avoid";
 }
 
 // ---- splitting ----

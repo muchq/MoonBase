@@ -812,9 +812,11 @@ cc_library(
         ":job",
         "//domains/games/libs/chess_cpp:pgn",
         "//domains/games/libs/lichess_cpp:client",
+        "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
     ],
 )

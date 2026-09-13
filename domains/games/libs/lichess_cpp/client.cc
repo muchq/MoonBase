@@ -26,9 +26,17 @@ opal::ClientConfig DefaultClientConfig() {
   opal::ClientConfig config;
   config.endpoint = "https://lichess.org";
   config.user_agent = "MoonBase indexer/1.0";
-  // Per attempt, as opal applies it. A month of a prolific bullet player is
-  // the large case and it is still one response.
-  config.request_timeout_ms = 60'000;
+  // Per attempt, as opal applies it — and sized from Lichess's throttle
+  // rather than from habit. The export streams at about 20 games/second
+  // anonymously and 30 authenticated, so a minute only covers a month of
+  // roughly 1,200 games: an active bullet player exceeds that, and the
+  // retry would restart the same response rather than resume it, so the
+  // month could never finish. Ten minutes covers about 12,000 games
+  // anonymous, 18,000 with a token.
+  //
+  // It also sets what shutdown has to drain: a run cannot interrupt an
+  // export it is already inside.
+  config.request_timeout_ms = 600'000;
   config.retry.max_attempts = 3;
   config.retry.initial_backoff = std::chrono::seconds(1);
   // Lichess asks for one request at a time and its 429 cooldown has been

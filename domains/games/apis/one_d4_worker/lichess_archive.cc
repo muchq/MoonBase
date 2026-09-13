@@ -12,6 +12,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
+#include "absl/synchronization/mutex.h"
 #include "absl/time/time.h"
 #include "domains/games/libs/chess_cpp/pgn.h"
 
@@ -116,7 +117,10 @@ absl::StatusOr<std::vector<ArchivedGame>> LichessArchive::FetchMonth(std::string
                                                                      YearMonth month) {
   const int64_t since_ms = month.FirstInstant() * 1000;
   const int64_t until_ms = month.Next().FirstInstant() * 1000;
-  const auto exported = client_.ExportGames(player, since_ms, until_ms);
+  const auto exported = [&] {
+    const absl::MutexLock lock(one_at_a_time_);
+    return client_.ExportGames(player, since_ms, until_ms);
+  }();
   if (!exported.ok()) {
     const std::string message =
         absl::StrCat("lichess games ", player, " ", month.ToString(), ": ", exported.error().code(),
@@ -131,24 +135,28 @@ absl::StatusOr<std::vector<ArchivedGame>> LichessArchive::FetchMonth(std::string
   const std::string pgn = exported->games.ToString();
   std::vector<ArchivedGame> games;
   for (const std::string_view block : SplitPgnGames(pgn)) {
-    const auto parsed = chess_cpp::ParseGame(block);
-    // One unreadable game must not cost the month, which is the same rule
-    // the chess.com side keeps by letting every field be empty.
-    if (!parsed.ok()) continue;
-    const chess_cpp::Headers& headers = parsed->headers;
-
     ArchivedGame game;
     game.pgn = std::string(block);
-    game.url = Tag(headers, "Site");
-    game.white_username = Tag(headers, "White");
-    game.black_username = Tag(headers, "Black");
-    game.white_rating = TagAsInt(headers, "WhiteElo");
-    game.black_rating = TagAsInt(headers, "BlackElo");
-    game.time_class = TimeClassFrom(Tag(headers, "Event"));
-    ResultWords(Tag(headers, "Result"), game.white_result, game.black_result);
-    game.end_time = EndTimeFrom(headers);
-    // eco_url stays empty: it is chess.com's opening-name slug, and Lichess
-    // states ECO and Opening as tags the run reads for itself.
+    // A block that will not parse is still a game, and the run already has a
+    // policy for one: IndexRun writes the row with no moves rather than
+    // dropping it. Skipping here would pre-empt that — and if every block
+    // failed, the month would come back an empty success and be recorded
+    // complete, which is the quiet-month lie #1360 exists to prevent.
+    const auto parsed = chess_cpp::ParseGame(block);
+    if (parsed.ok()) {
+      const chess_cpp::Headers& headers = parsed->headers;
+      game.url = Tag(headers, "Site");
+      game.white_username = Tag(headers, "White");
+      game.black_username = Tag(headers, "Black");
+      game.white_rating = TagAsInt(headers, "WhiteElo");
+      game.black_rating = TagAsInt(headers, "BlackElo");
+      game.time_class = TimeClassFrom(Tag(headers, "Event"));
+      ResultWords(Tag(headers, "Result"), game.white_result, game.black_result);
+      game.end_time = EndTimeFrom(headers);
+      // eco_url stays empty — it is chess.com's slug. Lichess states the
+      // name outright, which is what opening_name carries.
+      game.opening_name = Tag(headers, "Opening");
+    }
     games.push_back(std::move(game));
   }
   return games;
