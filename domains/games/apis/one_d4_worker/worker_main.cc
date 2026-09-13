@@ -175,8 +175,10 @@ int main(int /*argc*/, char** argv) {
   std::signal(SIGTERM, RequestShutdown);
 
   const auto stopping = [] { return g_stopping.load(std::memory_order_relaxed); };
+  // One entry today. A request naming anything else fails rather than
+  // completing empty, so adding a platform is adding a line here (#1527).
   const one_d4_worker::Poller::Run run = one_d4_worker::MakeRun(
-      archive, titles,
+      {{"CHESS_COM", &archive}}, titles,
       // A connection per run: one pg::Client is one connection serialised
       // by a mutex, so runs sharing one would queue every flush behind
       // every other run's and leave nothing to overlap.

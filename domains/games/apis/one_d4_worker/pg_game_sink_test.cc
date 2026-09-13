@@ -96,7 +96,7 @@ class PgGameSinkTest : public testing::Test {
 IndexedGame AGame(std::string_view url = "https://chess.com/game/1") {
   IndexedGame game;
   game.url = std::string(url);
-  game.platform = "chess.com";
+  game.platform = "CHESS_COM";
   game.white_username = "alice";
   game.black_username = "bob";
   game.white_elo = 2800;
@@ -293,7 +293,7 @@ TEST_F(PgGameSinkTest, WritesEveryGameOfABatch) {
 IndexedMonth AMonth() {
   IndexedMonth month;
   month.player = "alice";
-  month.platform = "chess.com";
+  month.platform = "CHESS_COM";
   month.month = "2026-01";
   month.fetched_at = 1'700'000'000;
   month.games = 12;

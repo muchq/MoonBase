@@ -6,6 +6,7 @@
 #include <string>
 #include <string_view>
 
+#include "absl/container/flat_hash_map.h"
 #include "domains/games/apis/one_d4_worker/archive.h"
 #include "domains/games/apis/one_d4_worker/game_sink.h"
 #include "domains/games/apis/one_d4_worker/index_run.h"
@@ -20,14 +21,28 @@ namespace one_d4_worker {
 /// per run and not one per process.
 using SinkFactory = std::function<std::unique_ptr<GameSink>(const Claim&)>;
 
+/// Which archive serves which platform.
+///
+/// Keys are the spelling stored in indexing_requests.platform, which
+/// IndexRequestService normalises before the row exists — CHESS_COM, not
+/// chess.com. Matched exactly: the stored form is the contract, and a
+/// registry that also answered friendlier spellings would hide a key that
+/// no row will ever carry.
+using PlatformArchives = absl::flat_hash_map<std::string, ArchiveSource*>;
+
 /// What the poller calls with each claimed request.
+///
+/// The archive is chosen per job, because a request names the platform it
+/// is for. A platform no archive serves fails the run: returning ok having
+/// read nothing would complete the request and cache every month in it as
+/// empty, which is #1360's rule one level up.
 ///
 /// The roster arrives by reference and is never built in here. That is
 /// the whole difference between ten requests to chess.com for the life of
 /// the process and ten per claim, and it is a difference nothing else
 /// would notice: a per-claim roster answers every question correctly and
 /// only costs.
-Poller::Run MakeRun(ArchiveSource& archive, TitleRoster& titles, SinkFactory make_sink,
+Poller::Run MakeRun(PlatformArchives archives, TitleRoster& titles, SinkFactory make_sink,
                     RunObserver& observer, std::function<bool()> stopping);
 
 /// Names this process in the owner column, for whoever reads it while
