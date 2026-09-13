@@ -1,6 +1,7 @@
 #include "domains/games/apis/one_d4_worker/pg_game_sink.h"
 
 #include <algorithm>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -105,6 +106,30 @@ constexpr char kStatedSource[] = "pgn";
 
 }  // namespace
 
+std::map<std::string, std::vector<TitleObservation>> TitleObservationsOf(
+    absl::Span<const IndexedGame* const> games) {
+  // Keyed by (platform, username) so the newest wins and the result is
+  // already in the order the rows will be locked.
+  std::map<std::string, std::map<std::string, TitleObservation>> newest;
+  for (const IndexedGame* game : games) {
+    for (const TitleObservation& stated : game->stated_titles) {
+      auto& slot = newest[game->platform];
+      const auto found = slot.find(stated.username);
+      if (found == slot.end() || found->second.observed_at < stated.observed_at) {
+        slot[stated.username] = stated;
+      }
+    }
+  }
+
+  std::map<std::string, std::vector<TitleObservation>> collected;
+  for (const auto& [platform, by_username] : newest) {
+    std::vector<TitleObservation>& out = collected[platform];
+    out.reserve(by_username.size());
+    for (const auto& [username, observation] : by_username) out.push_back(observation);
+  }
+  return collected;
+}
+
 absl::Status PgGameSink::Write(absl::Span<const IndexedGame> games) {
   if (games.empty()) return absl::OkStatus();
 
@@ -142,11 +167,11 @@ absl::Status PgGameSink::Write(absl::Span<const IndexedGame> games) {
     // In this transaction rather than after it: the observation and the row
     // it was read from land together or not at all. Only titles a game
     // stated itself get here — a roster-derived one describes now, not the
-    // date this game was played.
-    for (const IndexedGame* game : ordered) {
-      if (game->stated_titles.empty()) continue;
-      const absl::Status observed =
-          UpsertTitles(tx, game->platform, game->stated_titles, kStatedSource);
+    // date this game was played. Collected and key-ordered rather than sent
+    // per game, so two flushes cannot take player_titles rows in opposite
+    // orders; see TitleObservationsOf.
+    for (const auto& [platform, observations] : TitleObservationsOf(ordered)) {
+      const absl::Status observed = UpsertTitles(tx, platform, observations, kStatedSource);
       if (!observed.ok()) return observed;
     }
     return absl::OkStatus();

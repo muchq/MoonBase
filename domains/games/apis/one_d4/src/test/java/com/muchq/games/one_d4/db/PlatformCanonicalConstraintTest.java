@@ -59,6 +59,19 @@ public class PlatformCanonicalConstraintTest {
           .isInstanceOf(SQLException.class)
           .hasMessageContaining("platform_canonical");
 
+      // Tabs, not just spaces. Java's strip() takes both; Postgres btrim with
+      // no character set takes only spaces, so a rule written that way accepts
+      // this row and no query can ever reach it.
+      assertThatThrownBy(() -> insertWithPlatform(table, "\tCHESS_COM\t"))
+          .as("%s should refuse a tab-padded platform", table)
+          .isInstanceOf(SQLException.class)
+          .hasMessageContaining("platform_canonical");
+
+      assertThatThrownBy(() -> insertWithPlatform(table, "\nCHESS_COM"))
+          .as("%s should refuse a newline-padded platform", table)
+          .isInstanceOf(SQLException.class)
+          .hasMessageContaining("platform_canonical");
+
       assertThatThrownBy(() -> insertWithPlatform(table, ""))
           .as("%s should refuse an empty platform", table)
           .isInstanceOf(SQLException.class)
@@ -95,6 +108,8 @@ public class PlatformCanonicalConstraintTest {
             "LiChess",
             "chess24.com",
             "a.b.c",
+            "\tchess.com\t",
+            "\n LICHESS \r",
             "ALREADY_CANONICAL");
 
     for (String input : inputs) {

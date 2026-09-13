@@ -830,6 +830,24 @@ cc_library(
 )
 
 cc_test(
+    name = "lichess_corpus_test",
+    size = "small",
+    srcs = ["lichess_corpus_test.cc"],
+    data = ["testdata/lichess_alireza_corpus.pgn"],
+    deps = [
+        ":archive",
+        ":lichess_archive",
+        "//domains/games/libs/chess_cpp:parsed_game",
+        "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/one_d4_motifs:extract",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
+cc_test(
     name = "lichess_archive_test",
     size = "small",
     srcs = ["lichess_archive_test.cc"],

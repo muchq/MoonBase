@@ -39,6 +39,14 @@ operation ExportGames {
         @httpQuery("until")
         until: Long
 
+        /// Whether the export names the opening. Off by default, which a
+        /// real archive settles: seven games fetched without it carry no
+        /// [ECO] and no [Opening] at all, so index_run has nothing to read
+        /// and nothing to fall back to — OpeningNameFromEcoUrl only knows
+        /// how to scrape chess.com's slug (#1527).
+        @httpQuery("opening")
+        opening: Boolean
+
         /// The format selector, and the reason PGN arrives rather than
         /// whatever the server would otherwise choose. The payload's own
         /// content type is only a default since opal-cpp #220, so a modeled

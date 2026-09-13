@@ -138,6 +138,104 @@ TEST_F(PgGameSinkTest, StatedTitlesArePersistedAsObservations) {
       << "a roster observation and a stated one are not the same evidence";
 }
 
+// Two games in one batch can name the same titled player. Sent as separate
+// statements that is merely wasteful; collected into one INSERT it is an
+// error — Postgres refuses an ON CONFLICT that would touch a row twice — so
+// the batch is deduped, and the newest observation is the one that counts.
+TEST_F(PgGameSinkTest, OnePlayerTitledInTwoGamesOfABatchIsOneObservation) {
+  IndexedGame older = AGame("https://lichess.org/older");
+  older.platform = "LICHESS";
+  older.played_at = 1'600'000'000;
+  older.stated_titles = {{"alice", "IM", older.played_at}};
+
+  IndexedGame newer = AGame("https://lichess.org/newer");
+  newer.platform = "LICHESS";
+  newer.played_at = 1'700'000'000;
+  newer.stated_titles = {{"alice", "GM", newer.played_at}};
+
+  const IndexedGame batch[] = {older, newer};
+  ASSERT_TRUE(sink_->Write({batch, 2}).ok());
+
+  EXPECT_EQ(One("SELECT count(*)::text FROM player_titles WHERE username = $1", {"alice"}), "1");
+  EXPECT_EQ(One("SELECT title FROM player_titles WHERE username = $1", {"alice"}), "GM");
+}
+
+// Deadlock avoidance, the same reason the game upserts are sorted by url:
+// two flushes touching the same titled players in opposite source order
+// would each hold a row the other wants. Sorting the games does not order
+// player_titles, so the observations get their own order, by the key the
+// rows are locked under.
+TEST_F(PgGameSinkTest, ObservationsAreWrittenInKeyOrderWhateverOrderTheGamesArrive) {
+  IndexedGame first = AGame("https://lichess.org/zzz");
+  first.platform = "LICHESS";
+  first.stated_titles = {{"zoe", "GM", first.played_at}};
+
+  IndexedGame second = AGame("https://lichess.org/aaa");
+  second.platform = "LICHESS";
+  second.stated_titles = {{"adam", "IM", second.played_at}};
+
+  const IndexedGame batch[] = {first, second};
+  ASSERT_TRUE(sink_->Write({batch, 2}).ok());
+
+  EXPECT_EQ(One("SELECT title FROM player_titles WHERE username = $1", {"adam"}), "IM");
+  EXPECT_EQ(One("SELECT title FROM player_titles WHERE username = $1", {"zoe"}), "GM");
+}
+
+// The order itself, where it can be seen without racing two flushes: the
+// games arrive url-descending and the observations come back key-ascending.
+TEST(TitleObservationsOf, OrdersByTheKeyTheRowsAreLockedUnder) {
+  IndexedGame zzz;
+  zzz.platform = "LICHESS";
+  zzz.stated_titles = {{"zoe", "GM", 100}, {"mallory", "IM", 100}};
+  IndexedGame aaa;
+  aaa.platform = "LICHESS";
+  aaa.stated_titles = {{"adam", "CM", 100}};
+  const IndexedGame* games[] = {&zzz, &aaa};
+
+  const auto collected = TitleObservationsOf({games, 2});
+
+  ASSERT_EQ(collected.size(), 1u);
+  std::vector<std::string> usernames;
+  for (const TitleObservation& observation : collected.at("LICHESS")) {
+    usernames.push_back(observation.username);
+  }
+  EXPECT_THAT(usernames, ElementsAre("adam", "mallory", "zoe"));
+}
+
+// A batch spanning platforms keeps them apart: a username means a different
+// player on each, so the two never dedupe into one row.
+TEST(TitleObservationsOf, KeepsTheSameUsernameOnTwoPlatformsApart) {
+  IndexedGame lichess;
+  lichess.platform = "LICHESS";
+  lichess.stated_titles = {{"alice", "GM", 100}};
+  IndexedGame chess_com;
+  chess_com.platform = "CHESS_COM";
+  chess_com.stated_titles = {{"alice", "IM", 100}};
+  const IndexedGame* games[] = {&lichess, &chess_com};
+
+  const auto collected = TitleObservationsOf({games, 2});
+
+  ASSERT_EQ(collected.size(), 2u);
+  EXPECT_EQ(collected.at("LICHESS").front().title, "GM");
+  EXPECT_EQ(collected.at("CHESS_COM").front().title, "IM");
+}
+
+// Newest wins, whichever order the games arrive in.
+TEST(TitleObservationsOf, KeepsTheNewestObservationRegardlessOfArrivalOrder) {
+  IndexedGame newer;
+  newer.platform = "LICHESS";
+  newer.stated_titles = {{"alice", "GM", 200}};
+  IndexedGame older;
+  older.platform = "LICHESS";
+  older.stated_titles = {{"alice", "IM", 100}};
+
+  const IndexedGame* newest_first[] = {&newer, &older};
+  const IndexedGame* oldest_first[] = {&older, &newer};
+
+  EXPECT_EQ(TitleObservationsOf({newest_first, 2}).at("LICHESS").front().title, "GM");
+  EXPECT_EQ(TitleObservationsOf({oldest_first, 2}).at("LICHESS").front().title, "GM");
+}
+
 // observed_at is the game's date, not now(). Indexing is not chronological:
 // keyed on insert time, a backfill of 2019 running after 2026 silently
 // demotes a current GM.
