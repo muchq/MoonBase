@@ -111,6 +111,18 @@ func (h *MetricsHandler) HealthHandler(w http.ResponseWriter, r *http.Request) {
 	mucks.JsonOk(w, response)
 }
 
+// The collector stamps its own version onto every series it exports, so
+// upgrading it mints a new series for every host metric and splits the history
+// in two. Both halves are real and they tile the window, but a caller reading
+// one sees its chart stop at the upgrade.
+//
+// avg, not sum: where the two overlap they are duplicate readings of one host,
+// not two hosts to add up. Outside the overlap avg over a single series is the
+// series.
+func dedupeScope(selector string) string {
+	return "avg without(otel_scope_name,otel_scope_version,otel_scope_schema_url)(" + selector + ")"
+}
+
 func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics, error) {
 	metrics := &SystemMetrics{
 		Timestamp: time.Now().UTC(),
@@ -128,8 +140,11 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 		}
 	}
 
-	// Fetch CPU by core
-	cpuCoreQuery := `rate(system_cpu_time_seconds_total[5m])*100`
+	// Fetch CPU by core. Busy time, not every state: system_cpu_time_seconds_total
+	// carries one series per (cpu, state), and ByCore is keyed on cpu alone, so an
+	// unfiltered query writes all eight states to the same key and keeps whichever
+	// came back last.
+	cpuCoreQuery := "100-" + dedupeScope(`rate(system_cpu_time_seconds_total{state="idle"}[5m])`) + "*100"
 	cpuCoreResp, err := h.promClient.Query(ctx, cpuCoreQuery)
 	if err == nil {
 		for _, result := range cpuCoreResp.Data.Result {
@@ -279,10 +294,10 @@ func (h *MetricsHandler) fetchSystemMetricsTimeSeries(ctx context.Context, timeR
 	// Define key system metrics queries
 	queries := map[string]string{
 		"cpu_utilization":    `100-avg(rate(system_cpu_time_seconds_total{state="idle"}[5m]))*100`,
-		"memory_utilization": `system_memory_usage_bytes{state="used"}/on()group_left()(sum(system_memory_usage_bytes))*100`,
-		"disk_io_rate":       `rate(system_disk_io_bytes_total[5m])`,
-		"network_rx_rate":    `rate(system_network_io_bytes_total{direction="receive"}[5m])`,
-		"network_tx_rate":    `rate(system_network_io_bytes_total{direction="transmit"}[5m])`,
+		"memory_utilization": dedupeScope(`system_memory_usage_bytes{state="used"}`) + `/on()group_left()sum(` + dedupeScope(`system_memory_usage_bytes`) + `)*100`,
+		"disk_io_rate":       dedupeScope(`rate(system_disk_io_bytes_total[5m])`),
+		"network_rx_rate":    dedupeScope(`rate(system_network_io_bytes_total{direction="receive"}[5m])`),
+		"network_tx_rate":    dedupeScope(`rate(system_network_io_bytes_total{direction="transmit"}[5m])`),
 	}
 
 	// Execute each query as a range query
