@@ -153,6 +153,11 @@ absl::StatusOr<std::vector<ArchivedGame>> LichessArchive::FetchMonth(std::string
       game.time_class = TimeClassFrom(Tag(headers, "Event"));
       ResultWords(Tag(headers, "Result"), game.white_result, game.black_result);
       game.end_time = EndTimeFrom(headers);
+      // Free here, unlike chess.com: the game states who was titled, so no
+      // roster and no per-player lookup. Absent means untitled or unstated,
+      // and empty carries that unchanged.
+      game.white_title = Tag(headers, "WhiteTitle");
+      game.black_title = Tag(headers, "BlackTitle");
       // eco_url stays empty — it is chess.com's slug. Lichess states the
       // name outright, which is what opening_name carries.
       game.opening_name = Tag(headers, "Opening");

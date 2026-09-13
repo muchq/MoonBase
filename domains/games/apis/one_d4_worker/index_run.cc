@@ -6,6 +6,7 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/ascii.h"
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/openings.h"
@@ -191,8 +192,29 @@ absl::StatusOr<RunReport> IndexRun::Execute(const IndexJob& job, LeaseKeeper& le
       row.black_username = game.black_username;
       row.white_elo = game.white_rating;
       row.black_elo = game.black_rating;
-      row.white_title = TitleOf(game.white_username, complete);
-      row.black_title = TitleOf(game.black_username, complete);
+      // A stated title beats a looked-up one, the same way a stated opening
+      // name beats a scraped slug: Lichess writes [WhiteTitle], and the
+      // roster only knows chess.com. A side the game said nothing about
+      // still falls back, so a source that states some and not others keeps
+      // the rest.
+      row.white_title =
+          game.white_title.empty() ? TitleOf(game.white_username, complete) : game.white_title;
+      row.black_title =
+          game.black_title.empty() ? TitleOf(game.black_username, complete) : game.black_title;
+      // Only what the game stated, and only when the archive dated it: an
+      // undated observation would read as older than everything stored and
+      // lose every ordered upsert it took part in. A roster-derived title
+      // is deliberately absent — it describes now, not this game's date.
+      if (game.end_time != 0) {
+        if (!game.white_title.empty()) {
+          row.stated_titles.push_back(
+              {absl::AsciiStrToLower(game.white_username), game.white_title, game.end_time});
+        }
+        if (!game.black_title.empty()) {
+          row.stated_titles.push_back(
+              {absl::AsciiStrToLower(game.black_username), game.black_title, game.end_time});
+        }
+      }
       row.time_class = game.time_class;
       row.eco = parsed.ok() ? EcoFrom(parsed->headers) : "";
       // A stated name beats a scraped one: Lichess writes [Opening], and

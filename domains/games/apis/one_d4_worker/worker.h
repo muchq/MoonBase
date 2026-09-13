@@ -30,6 +30,17 @@ using SinkFactory = std::function<std::unique_ptr<GameSink>(const Claim&)>;
 /// no row will ever carry.
 using PlatformArchives = absl::flat_hash_map<std::string, ArchiveSource*>;
 
+/// Which roster answers for which platform, keyed the same way.
+///
+/// A platform absent from here has no roster, which is not a roster that
+/// failed to load: Lichess states a title on the game itself and has no
+/// roster endpoint to read. A month indexed without one is complete.
+///
+/// Separate maps rather than one entry per platform because the two are
+/// not paired: every platform has an archive, and only chess.com has a
+/// roster.
+using PlatformRosters = absl::flat_hash_map<std::string, TitleRoster*>;
+
 /// What the poller calls with each claimed request.
 ///
 /// The archive is chosen per job, because a request names the platform it
@@ -37,12 +48,18 @@ using PlatformArchives = absl::flat_hash_map<std::string, ArchiveSource*>;
 /// read nothing would complete the request and cache every month in it as
 /// empty, which is #1360's rule one level up.
 ///
-/// The roster arrives by reference and is never built in here. That is
-/// the whole difference between ten requests to chess.com for the life of
-/// the process and ten per claim, and it is a difference nothing else
-/// would notice: a per-claim roster answers every question correctly and
-/// only costs.
-Poller::Run MakeRun(PlatformArchives archives, TitleRoster& titles, SinkFactory make_sink,
+/// The roster is chosen per job too, and for the same reason the archive
+/// is: a username means a different player on another platform. One roster
+/// serving both would let chess.com's GM list title a Lichess player who
+/// merely shares the handle — the mirror of the bug that keys player_titles
+/// on (platform, username).
+///
+/// Rosters arrive by reference and are never built in here. That is the
+/// whole difference between ten requests to chess.com for the life of the
+/// process and ten per claim, and it is a difference nothing else would
+/// notice: a per-claim roster answers every question correctly and only
+/// costs.
+Poller::Run MakeRun(PlatformArchives archives, PlatformRosters rosters, SinkFactory make_sink,
                     RunObserver& observer, std::function<bool()> stopping);
 
 /// Names this process in the owner column, for whoever reads it while

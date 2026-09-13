@@ -62,7 +62,7 @@ class PgQueueTest : public testing::Test {
     ASSERT_TRUE(
         client_
             ->Exec("INSERT INTO indexing_requests (id, player, platform, start_month,"
-                   " end_month, status, created_at, updated_at) VALUES ($1, $2, 'chess.com',"
+                   " end_month, status, created_at, updated_at) VALUES ($1, $2, 'CHESS_COM',"
                    " '2026-01', '2026-02', $3, NOW(), NOW())",
                    {id, player, status})
             .ok());

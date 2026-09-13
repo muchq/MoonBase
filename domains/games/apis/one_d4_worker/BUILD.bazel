@@ -515,6 +515,7 @@ cc_library(
     hdrs = ["game_sink.h"],
     visibility = ["//visibility:public"],
     deps = [
+        ":title_store",
         "//domains/games/libs/one_d4_motifs:occurrence",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/types:span",
@@ -538,6 +539,7 @@ cc_library(
         "//domains/games/libs/one_d4_motifs:extract",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
     ],
 )
@@ -599,6 +601,7 @@ cc_library(
     deps = [
         ":game_sink",
         ":occurrence_writer",
+        ":pg_title_store",
         "//domains/games/libs/chess_cpp:side",
         "//domains/games/libs/one_d4_motifs:motif",
         "//domains/platform/libs/pg",
@@ -823,6 +826,24 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "lichess_corpus_test",
+    size = "small",
+    srcs = ["lichess_corpus_test.cc"],
+    data = ["testdata/lichess_alireza_corpus.pgn"],
+    deps = [
+        ":archive",
+        ":lichess_archive",
+        "//domains/games/libs/chess_cpp:parsed_game",
+        "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/one_d4_motifs:extract",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
     ],
 )
 

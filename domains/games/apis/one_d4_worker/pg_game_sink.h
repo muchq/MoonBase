@@ -1,9 +1,11 @@
 #ifndef DOMAINS_GAMES_APIS_ONE_D4_WORKER_PG_GAME_SINK_H
 #define DOMAINS_GAMES_APIS_ONE_D4_WORKER_PG_GAME_SINK_H
 
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -12,6 +14,18 @@
 #include "domains/platform/libs/pg/pg.h"
 
 namespace one_d4_worker {
+
+/// A batch's stated titles, by platform, deduped on (platform, username)
+/// keeping the newest observation and ordered by that key.
+///
+/// Ordered because player_titles is a second table two flushes can contend
+/// over, and sorting the games by url does not order rows in it: two runs
+/// meeting the same titled players through different games, in opposite
+/// order, would each hold a row the other wants. Deduped because Postgres
+/// refuses an ON CONFLICT that would touch one row twice, which is what a
+/// player titled in two games of the same batch would do.
+std::map<std::string, std::vector<TitleObservation>> TitleObservationsOf(
+    absl::Span<const IndexedGame* const> games);
 
 /// Writes `game_features` and `motif_occurrences` for one request.
 ///

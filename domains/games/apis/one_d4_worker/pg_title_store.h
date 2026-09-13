@@ -6,10 +6,21 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
+#include "absl/types/span.h"
 #include "domains/games/apis/one_d4_worker/title_store.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace one_d4_worker {
+
+/// The ordered upsert into player_titles, inside a caller's transaction.
+///
+/// Two writers share it and must not drift: TitleRoster's periodic Save,
+/// which stamps a whole roster with one moment, and PgGameSink, which
+/// records what an individual game stated and dates it by that game. Both
+/// go through the same never-empty rule and the same observed_at guard, so
+/// neither can demote what the other recorded.
+absl::Status UpsertTitles(pg::Transaction& tx, std::string_view platform,
+                          absl::Span<const TitleObservation> observations, std::string_view source);
 
 /// player_titles, as TitleRoster wants it.
 class PgTitleStore : public TitleStore {

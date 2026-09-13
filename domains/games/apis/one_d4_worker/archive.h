@@ -24,6 +24,14 @@ struct ArchivedGame {
   /// chess.com's words, not notation. See result.h.
   std::string white_result;
   std::string black_result;
+
+  /// The title each side held when the game was played, when the source
+  /// states it. Lichess writes [WhiteTitle] / [BlackTitle]; chess.com
+  /// writes neither for anyone, so these stay empty there and the run
+  /// falls back to the roster. Empty means "not stated", which is also
+  /// every untitled player — never evidence that somebody holds none.
+  std::string white_title;
+  std::string black_title;
   /// chess.com's ECOUrl — a slug carrying the opening name, not a code.
   /// Empty on platforms that state the opening outright; see opening_name.
   std::string eco_url;

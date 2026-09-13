@@ -9,6 +9,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
+#include "domains/games/apis/one_d4_worker/title_store.h"
 #include "domains/games/libs/one_d4_motifs/occurrence.h"
 
 namespace one_d4_worker {
@@ -16,6 +17,10 @@ namespace one_d4_worker {
 /// One extracted game: a `game_features` row and the `motif_occurrences`
 /// rows that hang off it.
 struct IndexedGame {
+  /// Titles this game stated about its own players, if any — Lichess writes
+  /// them, chess.com writes none. Only stated ones travel here: a title the
+  /// roster supplied is true now, not as of this game.
+  std::vector<TitleObservation> stated_titles;
   std::string url;
   std::string platform;
   std::string white_username;
