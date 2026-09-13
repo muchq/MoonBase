@@ -260,6 +260,39 @@ func TestHostMetricsReadsTheHostAndNotTheCollectorContainer(t *testing.T) {
 	}
 }
 
+// The `cpu` attribute on system.cpu.time is opt-in, and left off the metrics
+// builder writes only `state` — so every core's datapoint carries identical
+// attributes and the default aggregation_strategy of `sum` folds them into one
+// series. Nothing errors; the series keeps its name and a plausible shape.
+// prom_proxy then finds no `cpu` label to fill by_core from, and reads
+// utilization as 100-avg(rate(idle))*100, which assumes a per-core rate in
+// [0,1] — against the summed form that went to -74% on a two-core host.
+//
+// Pinned rather than left to the query because no rewrite of that PromQL
+// recovers per-core numbers that were summed before Prometheus saw them.
+func TestCPUTimeKeepsThePerCoreAttribute(t *testing.T) {
+	block := blockLines(t, "o11y/otel-collector.yml", "system.cpu.time:")
+	if block == nil {
+		t.Fatalf("hostmetrics does not configure system.cpu.time, so the opt-in `cpu` attribute" +
+			" is off: the Host page's CPU Cores chart is empty and its CPU percentage is negative")
+	}
+	for _, line := range block {
+		if !strings.HasPrefix(line, "attributes:") {
+			continue
+		}
+		for _, attr := range strings.FieldsFunc(strings.TrimPrefix(line, "attributes:"), func(r rune) bool {
+			return r == '[' || r == ']' || r == ',' || r == ' '
+		}) {
+			if attr == "cpu" {
+				return
+			}
+		}
+	}
+	t.Errorf("system.cpu.time does not enable the `cpu` attribute (%q): every core is summed into"+
+		" one series, emptying by_core and driving reported CPU utilization below zero",
+		strings.Join(block, " "))
+}
+
 // Config lines with comments and blanks removed, so an assertion cannot be
 // satisfied by a directive somebody commented out.
 func activeLines(t *testing.T, name string) []string {
@@ -292,6 +325,36 @@ func hasLinePrefix(lines []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// blockLines returns the lines nested under the first occurrence of key, keyed
+// on indentation so it works at any depth. nil when the key is absent, which
+// callers distinguish from a key present but empty.
+func blockLines(t *testing.T, name, key string) []string {
+	t.Helper()
+	block := []string{}
+	indent := -1
+	for _, line := range strings.Split(readConfig(t, name), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		depth := len(line) - len(strings.TrimLeft(line, " "))
+		if indent < 0 {
+			if trimmed == key {
+				indent = depth
+			}
+			continue
+		}
+		if depth <= indent {
+			break
+		}
+		block = append(block, trimmed)
+	}
+	if indent < 0 {
+		return nil
+	}
+	return block
 }
 
 // The collector rejects a match_type it does not know, and the rejection is not

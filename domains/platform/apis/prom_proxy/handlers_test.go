@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -391,4 +392,44 @@ func TestFetchContainerMetrics_SurfacesCrashLoop(t *testing.T) {
 	// A healthy neighbour must not be tarred by it.
 	assert.Equal(t, 0.0, byName["games_hub"].RestartsLastHour)
 	assert.False(t, byName["games_hub"].CrashLooping)
+}
+
+// ByCore is keyed on cpu alone, and system_cpu_time_seconds_total carries one
+// series per (cpu, state) — so a query that does not pick a state writes eight
+// values to each key and keeps whichever Prometheus returned last. That read as
+// 0.3% per core on a host the scalar put at 11%.
+func TestCPUByCoreReportsBusyTimeNotWhicheverStateCameLast(t *testing.T) {
+	want := `100-avg without(otel_scope_name,otel_scope_version,otel_scope_schema_url)(rate(system_cpu_time_seconds_total{state="idle"}[5m]))*100`
+	mock := &mockPrometheusClient{queryResponses: map[string]*QueryResponse{
+		want: {Data: struct {
+			ResultType string   `json:"resultType"`
+			Result     []Result `json:"result"`
+		}{Result: []Result{
+			{Metric: map[string]string{"cpu": "cpu0"}, Value: []interface{}{0.0, "11.5"}},
+			{Metric: map[string]string{"cpu": "cpu1"}, Value: []interface{}{0.0, "12.5"}},
+		}}},
+	}}
+
+	metrics, err := NewMetricsHandler(mock).fetchSystemMetrics(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, map[string]float64{"cpu0": 11.5, "cpu1": 12.5}, metrics.CPU.ByCore)
+}
+
+// The collector stamps otel_scope_version onto every series, so an upgrade
+// forks each host metric into two that tile the window rather than overlap.
+// A caller that reads one of them charts history up to the upgrade and nothing
+// after it.
+func TestHostTimeSeriesAggregatesAwayTheCollectorsOwnVersion(t *testing.T) {
+	mock := &mockPrometheusClient{queryRangeResponses: map[string]*QueryResponse{}}
+	_, err := NewMetricsHandler(mock).fetchSystemMetricsTimeSeries(context.Background(), LastWeek)
+	require.NoError(t, err)
+	require.NotEmpty(t, mock.misses)
+
+	for _, query := range mock.misses {
+		if strings.Contains(query, "avg(rate(system_cpu_time_seconds_total") {
+			continue // already aggregated across every label
+		}
+		assert.Contains(t, query, "without(otel_scope_name,otel_scope_version,otel_scope_schema_url)",
+			"%q keeps the collector's version in the series identity, so an upgrade splits its history", query)
+	}
 }
