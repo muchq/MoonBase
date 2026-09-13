@@ -256,7 +256,10 @@ cc_test(
     env_inherit = ["GAMES_HUB_TEST_DB_URL"],
     # One shared scratch database: concurrent DB tests truncate each
     # other mid-flight.
-    tags = ["exclusive"],
+    tags = [
+        "exclusive",
+        "requires-postgres",
+    ],
     deps = [
         ":chat_store",
         ":pg_chat_store",
@@ -279,7 +282,10 @@ cc_test(
     env_inherit = ["GAMES_HUB_TEST_DB_URL"],
     # One shared scratch database: concurrent DB tests truncate each
     # other mid-flight.
-    tags = ["exclusive"],
+    tags = [
+        "exclusive",
+        "requires-postgres",
+    ],
     deps = [
         ":hosted_game",
         ":pg_hub_store",
@@ -307,7 +313,10 @@ cc_test(
     env_inherit = ["GAMES_HUB_TEST_DB_URL"],
     # One shared scratch database: concurrent DB tests truncate each
     # other mid-flight.
-    tags = ["exclusive"],
+    tags = [
+        "exclusive",
+        "requires-postgres",
+    ],
     deps = [
         "//domains/games/libs/cards",
         "//domains/games/libs/cards/golf:game_state",
@@ -327,7 +336,10 @@ cc_test(
     env_inherit = ["GAMES_HUB_TEST_DB_URL"],
     # One shared scratch database: concurrent DB tests truncate each
     # other mid-flight.
-    tags = ["exclusive"],
+    tags = [
+        "exclusive",
+        "requires-postgres",
+    ],
     deps = [
         ":pg_ticket_vault",
         "//domains/platform/libs/pg",
@@ -443,7 +455,10 @@ cc_test(
     env_inherit = ["GAMES_HUB_TEST_DB_URL"],
     # One shared scratch database: concurrent DB tests truncate each
     # other mid-flight.
-    tags = ["exclusive"],
+    tags = [
+        "exclusive",
+        "requires-postgres",
+    ],
     deps = [
         ":games_hub_handler",
         ":games_hub_smithy_client",

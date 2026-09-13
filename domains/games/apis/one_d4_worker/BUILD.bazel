@@ -276,6 +276,7 @@ cc_test(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     deps = [
         ":migration_files",
         ":pg_queue",
@@ -355,6 +356,7 @@ cc_test(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     deps = [
         ":migration_files",
         ":pg_reanalysis",
@@ -422,6 +424,7 @@ cc_test(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     deps = [
         ":migration_files",
         ":pg_test_db",
@@ -614,6 +617,7 @@ cc_test(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     deps = [
         ":migration_files",
         ":pg_game_sink",
@@ -752,6 +756,7 @@ cc_test(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     deps = [
         ":db_options",
         ":pg_test_db",
@@ -911,6 +916,7 @@ cc_test(
         "CI",
         "PG_TEST_DB_URL",
     ],
+    tags = ["requires-postgres"],
     deps = [
         ":migration_files",
         ":pg_test_db",

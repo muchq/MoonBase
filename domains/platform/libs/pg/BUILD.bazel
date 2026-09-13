@@ -36,6 +36,7 @@ cc_test(
     size = "small",
     srcs = ["listener_test.cc"],
     env_inherit = ["PG_TEST_DB_URL"],
+    tags = ["requires-postgres"],
     deps = [
         ":listener",
         ":pg",
@@ -48,6 +49,7 @@ cc_test(
     size = "small",
     srcs = ["pg_test.cc"],
     env_inherit = ["PG_TEST_DB_URL"],
+    tags = ["requires-postgres"],
     deps = [
         ":pg",
         "@com_google_absl//absl/status",

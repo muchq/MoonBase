@@ -2584,3 +2584,27 @@ func TestCaddyAccessLogRollsSmallEnoughToShipDaily(t *testing.T) {
 		}
 	}
 }
+
+// The postgres-gated suites are excluded from a bare `bazel test` and switched
+// back on by --config=ci. Both halves live in different files and losing the
+// second is silent: the suites simply stop running, everywhere, and a laptop
+// run looks exactly as green as it did when they were passing.
+func TestPostgresSuitesStillRunInCI(t *testing.T) {
+	rc := activeLines(t, "../../.bazelrc")
+	if !hasLine(rc, "test --test_tag_filters=-requires-postgres") {
+		t.Error("`bazel test` no longer excludes requires-postgres, so a laptop without a" +
+			" database goes red on suites that are CI's to run")
+	}
+	if !hasLine(rc, "test:ci --test_tag_filters=") {
+		t.Fatal("--config=ci does not clear the tag filter, so the postgres suites run nowhere")
+	}
+	for _, entry := range []struct{ file, want string }{
+		{"../../scripts/diff-build", "bazel test --config=ci"},
+		{"../../.github/workflows/publish.yml", "bazel test --config=ci"},
+	} {
+		if !strings.Contains(readConfig(t, entry.file), entry.want) {
+			t.Errorf("%s does not run bazel test under --config=ci; the postgres suites are"+
+				" filtered out there too", entry.file)
+		}
+	}
+}

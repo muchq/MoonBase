@@ -50,6 +50,19 @@ build:debug -c dbg
 build --compilation_mode=opt
 test --compilation_mode=opt
 
+# Suites that need a real Postgres. They read the URL from the environment, and
+# one_d4's fail rather than skip without it (#1532), so a bare `bazel test //...`
+# on a laptop went red on a dozen targets that were never the developer's
+# problem. Excluded by default and switched back on by --config=ci, which is
+# what CI runs; `bazel test --config=ci //...` with a database is the local way
+# to see them.
+#
+# --test_tag_filters takes the last value, not the union, so :ci clears rather
+# than appends. A second tag filter anywhere in a :ci invocation replaces this
+# one and quietly lets the postgres suites back in.
+test --test_tag_filters=-requires-postgres
+test:ci --test_tag_filters=
+
 common --java_language_version=25
 common --java_runtime_version=remotejdk_25
 common --tool_java_language_version=25
