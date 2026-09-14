@@ -121,9 +121,9 @@ std::string_view ToString(RunOutcome outcome) {
 Poller::Poller(IndexQueue& queue, Run run, Options options)
     : queue_(queue), run_(std::move(run)), options_(std::move(options)) {}
 
-absl::StatusOr<std::optional<Claim>> PlatformAdmission::Claim(
-    absl::FunctionRef<absl::StatusOr<std::optional<IndexJob>>(absl::Span<const std::string>)> claim,
-    std::string_view owner) {
+absl::StatusOr<std::optional<Admitted>> PlatformAdmission::Claim(
+    absl::FunctionRef<absl::StatusOr<std::optional<IndexJob>>(absl::Span<const std::string>)>
+        claim) {
   const absl::MutexLock lock(mu_);
   std::vector<std::string> at_capacity;
   for (const auto& [platform, limit] : limits_) {
@@ -143,8 +143,7 @@ absl::StatusOr<std::optional<Claim>> PlatformAdmission::Claim(
   // Owns nothing; the deleter is the whole point. It runs when the last
   // copy of the claim is destroyed, wherever that happens to be.
   PlatformSlot slot(nullptr, [this, platform](void*) { Release(platform); });
-  return one_d4_worker::Claim{
-      .job = **claimed, .owner = std::string(owner), .slot = std::move(slot)};
+  return Admitted{.job = **claimed, .slot = std::move(slot)};
 }
 
 void PlatformAdmission::Release(const std::string& platform) {
@@ -160,12 +159,24 @@ absl::StatusOr<std::optional<Claim>> Poller::ClaimOne() {
   const auto take = [&](absl::Span<const std::string> at_capacity) {
     return queue_.ClaimNext(owner, options_.lease, at_capacity);
   };
-  if (options_.admission != nullptr) return options_.admission->Claim(take, owner);
-
-  const absl::StatusOr<std::optional<IndexJob>> claimed = take({});
-  if (!claimed.ok()) return claimed.status();
-  if (!claimed->has_value()) return std::nullopt;
-  return Claim{.job = **claimed, .owner = std::move(owner), .slot = nullptr};
+  // Either way the queue reads `owner` in place and it is moved once, here,
+  // after the last read — the Claim is assembled by the one function that
+  // holds the string.
+  absl::StatusOr<std::optional<Admitted>> admitted;
+  if (options_.admission != nullptr) {
+    admitted = options_.admission->Claim(take);
+  } else {
+    absl::StatusOr<std::optional<IndexJob>> claimed = take({});
+    if (!claimed.ok()) return claimed.status();
+    admitted = claimed->has_value()
+                   ? std::optional<Admitted>(Admitted{.job = std::move(**claimed), .slot = nullptr})
+                   : std::nullopt;
+  }
+  if (!admitted.ok()) return admitted.status();
+  if (!admitted->has_value()) return std::nullopt;
+  return Claim{.job = std::move((*admitted)->job),
+               .owner = std::move(owner),
+               .slot = std::move((*admitted)->slot)};
 }
 
 absl::StatusOr<RunOutcome> Poller::RunClaimed(const Claim& claim) {

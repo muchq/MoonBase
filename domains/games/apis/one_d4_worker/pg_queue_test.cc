@@ -3,6 +3,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <string>
 
@@ -10,8 +11,13 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/time/clock.h"
+#include "domains/games/apis/one_d4_worker/index_pool.h"
+#include "domains/games/apis/one_d4_worker/metrics.h"
 #include "domains/games/apis/one_d4_worker/migration_files.h"
 #include "domains/games/apis/one_d4_worker/pg_test_db.h"
+#include "domains/games/apis/one_d4_worker/poller.h"
+#include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace one_d4_worker {
@@ -420,6 +426,67 @@ TEST_F(PgQueueTest, ProgressIsRefusedOnceTheLeaseHasExpired) {
   ASSERT_TRUE(refused.ok()) << refused.status();
   EXPECT_FALSE(*refused);
   EXPECT_EQ(Column(Id(1), "games_indexed"), "0");
+}
+
+// The production wiring over the production statements: a pool of owned
+// connections, the platform gate in front of the claim, a heartbeat and a
+// progress report inside the run, and the terminal write after it. Every one
+// of those is fenced on the id the row was claimed under, so this is where a
+// claim made under any other id shows up — as a lease nobody took.
+TEST_F(PgQueueTest, ARunTakenThroughTheGateIsFencedAllTheWayToCompleted) {
+  InsertOn(Id(1), "alireza", "LICHESS");
+
+  std::atomic<bool> kept{false};
+  std::atomic<bool> reported{false};
+  std::atomic<int> runs{0};
+  const Poller::Run run = [&](const Claim&, LeaseKeeper& lease) -> absl::StatusOr<RunReport> {
+    kept = lease.Keep();
+    reported = lease.Report(7);
+    ++runs;
+    RunReport report;
+    report.games_indexed = 7;
+    return report;
+  };
+
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options poller;
+  poller.owner = "cpp/test/1";
+  poller.lease = absl::Minutes(5);
+  poller.admission = &admission;
+  futility::otel::CapturingMetricsRecorder recorder;
+  WorkerMetrics metrics(recorder);
+  IndexPool::Options pool_options;
+  pool_options.slots = 2;
+  pool_options.idle_wait = absl::Milliseconds(10);
+  IndexPool pool([this] { return NewOwnedPgQueue(conninfo_, kMaxAttempts); }, run, poller, metrics,
+                 pool_options);
+
+  // Bounded, so a run that never completes fails here rather than as a
+  // timeout on the whole target with the reason buried in the log.
+  const absl::Time deadline = absl::Now() + absl::Seconds(10);
+  pool.Run([&] { return runs.load() >= 1 || absl::Now() > deadline; },
+           [](absl::Duration wait) { absl::SleepFor(wait); });
+
+  ASSERT_EQ(runs.load(), 1) << "no run completed before the deadline";
+  EXPECT_TRUE(kept.load()) << "the heartbeat did not match the row the claim wrote";
+  EXPECT_TRUE(reported.load());
+  EXPECT_EQ(Column(Id(1), "status"), "COMPLETED");
+  EXPECT_EQ(Column(Id(1), "games_indexed"), "7");
+  EXPECT_EQ(Column(Id(1), "owner_id"), "(null)");
+  EXPECT_EQ(Column(Id(1), "attempts"), "1");
+}
+
+// An owner is what every later write is fenced on, so a blank one is refused
+// before the row is touched rather than written and then matched by nobody.
+TEST_F(PgQueueTest, RefusesToClaimUnderABlankOwner) {
+  Insert(Id(1), "hikaru");
+
+  const auto claimed = queue_->ClaimNext("", absl::Minutes(5));
+
+  EXPECT_EQ(claimed.status().code(), absl::StatusCode::kInvalidArgument) << claimed.status();
+  EXPECT_EQ(Column(Id(1), "status"), "PENDING");
+  EXPECT_EQ(Column(Id(1), "owner_id"), "(null)");
+  EXPECT_EQ(Column(Id(1), "attempts"), "0");
 }
 
 }  // namespace

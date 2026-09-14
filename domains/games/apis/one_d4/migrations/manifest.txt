@@ -7,3 +7,4 @@
 V001__initial_schema
 V002__player_titles
 V003__platform_canonical
+V004__owner_never_blank

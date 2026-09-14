@@ -68,6 +68,7 @@ filegroup(
         "migrations/V001__initial_schema.sql",
         "migrations/V002__player_titles.sql",
         "migrations/V003__platform_canonical.sql",
+        "migrations/V004__owner_never_blank.sql",
     ],
 )
 
@@ -559,6 +560,7 @@ java_test_suite(
         "src/test/java/com/muchq/games/one_d4/db/MigrationFilesTest.java",
         "src/test/java/com/muchq/games/one_d4/db/MigrationRunnerTest.java",
         "src/test/java/com/muchq/games/one_d4/db/MigrationTest.java",
+        "src/test/java/com/muchq/games/one_d4/db/OwnerNeverBlankConstraintTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PgTestUrlsTest.java",
         "src/test/java/com/muchq/games/one_d4/db/PlatformCanonicalConstraintTest.java",
         "src/test/java/com/muchq/games/one_d4/db/ReanalysisRequestDaoTest.java",
