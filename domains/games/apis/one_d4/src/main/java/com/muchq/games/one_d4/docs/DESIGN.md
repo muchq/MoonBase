@@ -165,7 +165,7 @@ com.muchq.indexer/
 | error_message | TEXT         | Populated on FAILED            |
 | games_indexed | INT          | Running count during processing|
 | exclude_bullet | BOOLEAN     | Part of the live-request key    |
-| owner_id      | VARCHAR(128) | Who holds the lease; the fencing token every write is conditioned on. The Java worker claims as a process, the C++ worker mints one per run so several of its runs can be in flight at once |
+| owner_id      | VARCHAR(128) | Who holds the lease; the fencing token every write is conditioned on, NULL or never blank (V004 CHECK). The Java worker claims as a process, the C++ worker mints one per run so several of its runs can be in flight at once |
 | lease_expires_at | TIMESTAMP | Renewed every 75s while the owner is alive. Past this the request is reclaimable. Deliberately survives a terminal write, as the record of when a worker last held the row |
 | skip_cache    | BOOLEAN      | Persisted so a worker on any instance honours what the submitter asked for |
 | attempts      | INT          | Claims so far. Bounds the requeue loop for a request that keeps killing its worker |

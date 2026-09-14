@@ -461,8 +461,13 @@ TEST_F(PgQueueTest, ARunTakenThroughTheGateIsFencedAllTheWayToCompleted) {
   IndexPool pool([this] { return NewOwnedPgQueue(conninfo_, kMaxAttempts); }, run, poller, metrics,
                  pool_options);
 
-  pool.Run([&] { return runs.load() >= 1; }, [](absl::Duration wait) { absl::SleepFor(wait); });
+  // Bounded, so a run that never completes fails here rather than as a
+  // timeout on the whole target with the reason buried in the log.
+  const absl::Time deadline = absl::Now() + absl::Seconds(10);
+  pool.Run([&] { return runs.load() >= 1 || absl::Now() > deadline; },
+           [](absl::Duration wait) { absl::SleepFor(wait); });
 
+  ASSERT_EQ(runs.load(), 1) << "no run completed before the deadline";
   EXPECT_TRUE(kept.load()) << "the heartbeat did not match the row the claim wrote";
   EXPECT_TRUE(reported.load());
   EXPECT_EQ(Column(Id(1), "status"), "COMPLETED");
