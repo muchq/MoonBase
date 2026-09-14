@@ -67,8 +67,8 @@ void IndexPool::Work(const std::function<bool()>& stopping,
 
     const IndexJob& job = (*claim)->job;
     LOG(INFO) << "Claimed request_id=" << job.id << " player=" << job.player
-              << " months=" << job.start_month << ".." << job.end_month
-              << " owner=" << (*claim)->owner;
+              << " platform=" << job.platform << " months=" << job.start_month << ".."
+              << job.end_month << " owner=" << (*claim)->owner;
 
     const absl::Time started = absl::Now();
     const absl::StatusOr<RunOutcome> outcome = poller.RunClaimed(**claim);

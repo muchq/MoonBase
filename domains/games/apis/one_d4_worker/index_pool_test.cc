@@ -498,8 +498,14 @@ TEST(IndexPool, NoTwoRunsClaimUnderTheSameId) {
   runs.Release();
   futility::otel::CapturingMetricsRecorder recorder;
   WorkerMetrics metrics(recorder);
-  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(),
-                 PollerOptions(), metrics, PoolOptions(4));
+  // Through the admission gate, which is the only path worker_main builds:
+  // the token has to survive the gate as well as be minted per run. The cap
+  // never binds — the fake serves CHESS_COM.
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options poller = PollerOptions();
+  poller.admission = &admission;
+  IndexPool pool([&queue] { return std::make_unique<SharedQueue>(queue); }, runs.AsRun(), poller,
+                 metrics, PoolOptions(4));
 
   pool.Run(StopAfter(queue, 40), [](absl::Duration) {});
 
@@ -528,7 +534,11 @@ TEST(IndexPool, SaysWhatItClaimed) {
       log, Log(absl::LogSeverity::kInfo, testing::_,
                testing::AllOf(
                    testing::HasSubstr("request_id=job-1"), testing::HasSubstr("player=hikaru"),
-                   testing::HasSubstr("months=2026-01"), testing::HasSubstr("owner=cpp/test/"))));
+                   // A handle means a different player on each platform, and
+                   // the archives behave differently enough that "which one"
+                   // is the first question asked of a row that misbehaves.
+                   testing::HasSubstr("platform=CHESS_COM"), testing::HasSubstr("months=2026-01"),
+                   testing::HasSubstr("owner=cpp/test/"))));
   log.StartCapturingLogs();
   pool.Run(StopAfter(queue, 2), [](absl::Duration) {});
   log.StopCapturingLogs();

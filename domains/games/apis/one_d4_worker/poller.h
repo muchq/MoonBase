@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
@@ -82,8 +83,11 @@ struct Claim {
   IndexJob job;
   std::string owner;
 
-  /// Null when nothing caps this platform. Last field, so it is released
-  /// after everything that might still name the job.
+  /// The place this claim holds in its platform's cap, and nothing when the
+  /// platform is uncapped. Never truthy either way — a held place is a null
+  /// pointer carrying a deleter, so only use_count() tells the two apart.
+  /// Last field and therefore released first, which the deleter is written
+  /// for: it names the platform and nothing else that lives here.
   PlatformSlot slot;
 
   ClaimRef ref() const { return {.id = job.id, .owner = owner}; }
@@ -117,12 +121,19 @@ class PlatformAdmission {
   ///
   /// The lock spans the claim rather than just the read of what is in
   /// flight: two slots that each saw "none running" would each claim, and
-  /// the cap would hold by luck. It costs nothing — a claim is one statement
-  /// on a pg::Client, which serialises its connection behind a mutex anyway.
+  /// the cap would hold by luck. The price is that claims are serialised
+  /// across the worker where nothing else serialises them — a slot has a
+  /// pg::Client of its own — so a claim statement stalled in Postgres holds
+  /// every other slot, and every slot finishing a run, for up to the
+  /// statement timeout. Accepted because the alternative races the cap.
+  ///
+  /// `owner` is the id `claim` must claim the row under. A view and not a
+  /// value, so a `std::move` at the call site cannot empty the string
+  /// `claim` reads.
   absl::StatusOr<std::optional<Claim>> Claim(
       absl::FunctionRef<absl::StatusOr<std::optional<IndexJob>>(absl::Span<const std::string>)>
           claim,
-      std::string owner);
+      std::string_view owner);
 
   /// Gives a finished run's place back. Called by the slot the claim
   /// carries rather than by hand.
