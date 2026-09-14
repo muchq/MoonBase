@@ -209,8 +209,8 @@ Every run's lines are tied together by the request id, which matters
 because slots interleave:
 
 ```
-Claimed 4f3c… hikaru 2026-01..2026-03 as cpp/indexer-7/1234/9a1f…
-Finished 4f3c… completed in 84213ms
+Claimed request_id=4f3c… player=hikaru platform=CHESS_COM months=2026-01..2026-03 owner=cpp/indexer-7/1234/9a1f…
+Finished request_id=4f3c… outcome=completed duration_ms=84213
 ```
 
 A reanalysis pass says where it resumed from and what it got through:

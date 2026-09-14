@@ -777,14 +777,45 @@ TEST(PollerPlatformLimits, ClaimsUnderTheOwnerTheRunWillFenceOn) {
   options.admission = &admission;
   Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
 
-  queue.queued = {AJobFor("only", "LICHESS")};
-  const absl::StatusOr<std::optional<Claim>> claim = poller.ClaimOne();
+  // CHESS_COM, so the cap never binds and a second claim is admitted: the
+  // per-run token has to survive the gate too, and two runs sharing one both
+  // pass every fence.
+  queue.queued = {AJobFor("first", "CHESS_COM")};
+  const absl::StatusOr<std::optional<Claim>> first = poller.ClaimOne();
+  queue.queued = {AJobFor("second", "CHESS_COM")};
+  const absl::StatusOr<std::optional<Claim>> second = poller.ClaimOne();
 
-  ASSERT_TRUE(claim.ok()) << claim.status();
-  ASSERT_TRUE(claim->has_value());
-  ASSERT_EQ(queue.owners.size(), 1u);
-  EXPECT_EQ(queue.owners[0], (*claim)->owner);
+  ASSERT_TRUE(first.ok()) << first.status();
+  ASSERT_TRUE(first->has_value());
+  ASSERT_TRUE(second.ok()) << second.status();
+  ASSERT_TRUE(second->has_value());
+  ASSERT_EQ(queue.owners.size(), 2u);
+  EXPECT_EQ(queue.owners[0], (*first)->owner);
+  EXPECT_EQ(queue.owners[1], (*second)->owner);
   EXPECT_THAT(queue.owners[0], ::testing::StartsWith("worker-1/"));
+  EXPECT_NE(queue.owners[0], queue.owners[1]);
+}
+
+// The claim is where the id is minted, but the heartbeat and the terminal
+// write are where a wrong one is discovered — as a lease nobody took.
+TEST(PollerPlatformLimits, FencesEveryWriteOnTheClaimItTookThroughTheGate) {
+  FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options options = Options();
+  options.admission = &admission;
+  Poller poller(
+      queue,
+      [](const Claim&, LeaseKeeper& lease) {
+        lease.Keep();
+        return RunReport{};
+      },
+      options);
+
+  queue.queued = {AJobFor("only", "LICHESS")};
+  ASSERT_TRUE(poller.PollOnce().ok());
+
+  EXPECT_EQ(poller.last_outcome(), RunOutcome::kCompleted);
+  ExpectEveryWriteFencedOnTheClaim(queue);
 }
 
 // Lichess asks for one request at a time and LichessArchive holds a mutex to
