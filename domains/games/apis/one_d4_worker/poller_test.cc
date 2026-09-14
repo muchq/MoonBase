@@ -765,6 +765,28 @@ TEST(Poller, LeavesARunInsideItsCeilingAlone) {
 
 // ---- platform capacity ----
 
+// The owner the queue is claimed under is the one every later write is fenced
+// on, and the admission gate sits between the two. A gate that claims under a
+// different string leaves owner_id naming nobody: the first heartbeat matches
+// no row, the run reports a lease it never lost, and the request sits in
+// PROCESSING having indexed nothing.
+TEST(PollerPlatformLimits, ClaimsUnderTheOwnerTheRunWillFenceOn) {
+  FakeQueue queue;
+  PlatformAdmission admission({{"LICHESS", 1}});
+  Poller::Options options = Options();
+  options.admission = &admission;
+  Poller poller(queue, [](const Claim&, LeaseKeeper&) { return RunReport{}; }, options);
+
+  queue.queued = {AJobFor("only", "LICHESS")};
+  const absl::StatusOr<std::optional<Claim>> claim = poller.ClaimOne();
+
+  ASSERT_TRUE(claim.ok()) << claim.status();
+  ASSERT_TRUE(claim->has_value());
+  ASSERT_EQ(queue.owners.size(), 1u);
+  EXPECT_EQ(queue.owners[0], (*claim)->owner);
+  EXPECT_THAT(queue.owners[0], ::testing::StartsWith("worker-1/"));
+}
+
 // Lichess asks for one request at a time and LichessArchive holds a mutex to
 // honour it. A second LICHESS claim would park on that mutex holding a lease
 // and two Postgres connections for as long as the export ahead of it takes.

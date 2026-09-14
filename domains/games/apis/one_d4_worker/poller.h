@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
@@ -119,10 +120,14 @@ class PlatformAdmission {
   /// flight: two slots that each saw "none running" would each claim, and
   /// the cap would hold by luck. It costs nothing — a claim is one statement
   /// on a pg::Client, which serialises its connection behind a mutex anyway.
+  /// The owner is a view rather than a value on purpose: `claim` reads the
+  /// caller's string, and a parameter is constructed before this body runs —
+  /// so an owner taken by value could be moved out from under the claim it is
+  /// about to be written with, and the row would name nobody.
   absl::StatusOr<std::optional<Claim>> Claim(
       absl::FunctionRef<absl::StatusOr<std::optional<IndexJob>>(absl::Span<const std::string>)>
           claim,
-      std::string owner);
+      std::string_view owner);
 
   /// Gives a finished run's place back. Called by the slot the claim
   /// carries rather than by hand.

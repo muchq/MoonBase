@@ -123,7 +123,7 @@ Poller::Poller(IndexQueue& queue, Run run, Options options)
 
 absl::StatusOr<std::optional<Claim>> PlatformAdmission::Claim(
     absl::FunctionRef<absl::StatusOr<std::optional<IndexJob>>(absl::Span<const std::string>)> claim,
-    std::string owner) {
+    std::string_view owner) {
   const absl::MutexLock lock(mu_);
   std::vector<std::string> at_capacity;
   for (const auto& [platform, limit] : limits_) {
@@ -143,7 +143,8 @@ absl::StatusOr<std::optional<Claim>> PlatformAdmission::Claim(
   // Owns nothing; the deleter is the whole point. It runs when the last
   // copy of the claim is destroyed, wherever that happens to be.
   PlatformSlot slot(nullptr, [this, platform](void*) { Release(platform); });
-  return one_d4_worker::Claim{.job = **claimed, .owner = std::move(owner), .slot = std::move(slot)};
+  return one_d4_worker::Claim{
+      .job = **claimed, .owner = std::string(owner), .slot = std::move(slot)};
 }
 
 void PlatformAdmission::Release(const std::string& platform) {
@@ -159,7 +160,7 @@ absl::StatusOr<std::optional<Claim>> Poller::ClaimOne() {
   const auto take = [&](absl::Span<const std::string> at_capacity) {
     return queue_.ClaimNext(owner, options_.lease, at_capacity);
   };
-  if (options_.admission != nullptr) return options_.admission->Claim(take, std::move(owner));
+  if (options_.admission != nullptr) return options_.admission->Claim(take, owner);
 
   const absl::StatusOr<std::optional<IndexJob>> claimed = take({});
   if (!claimed.ok()) return claimed.status();
