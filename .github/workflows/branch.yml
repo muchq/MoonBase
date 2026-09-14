@@ -45,9 +45,10 @@ jobs:
         run: ./scripts/test-mutation-check
 
       # diff-build's full-build escape hatch is what stops a shared-macro edit
-      # from trusting an impact set that may only name //bazel/rules:* (#1378).
-      # Exercise scripts/diff-build-decide (test-only); no bazel.
-      - name: Test diff-build full-build decision
+      # from trusting an impact set that may only name //bazel/rules:* (#1378),
+      # and its impacted set has to reach bazel through files. Exercises
+      # scripts/diff-build-decide and diff-build-lib.sh against a fake bazel.
+      - name: Test diff-build
         run: ./scripts/test-diff-build
 
       # The service labels a PR gets (#1214) are a claim about blast radius

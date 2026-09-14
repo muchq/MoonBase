@@ -1,11 +1,13 @@
 #!/bin/bash
-# Pins which path changes force scripts/diff-build onto the full //... path
-# instead of trusting bazel-diff (#1378).
+# Pins two things about scripts/diff-build: which path changes force it onto
+# the full //... path instead of trusting bazel-diff (#1378), and that the
+# impacted set reaches bazel through files rather than its command line.
 #
-# The subject under test is a decision over a git diff, so the fixture is a
-# throwaway repo with a base commit and a HEAD that touches one file. No bazel
-# and no real workspace — scripts/diff-build-decide shares the pathspec list
-# and never reaches a build.
+# No real workspace and no real bazel. The pathspec decision is a function of
+# a git diff, so its fixture is a throwaway repo with a base commit and a HEAD
+# that touches one file, driven through scripts/diff-build-decide. The
+# impacted-set checks source diff-build-lib.sh and put a recording bazel on
+# PATH.
 set -uo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -34,6 +36,8 @@ cd "$FIXTURE"
 git init -q
 git config user.email "test@example.com"
 git config user.name "test"
+# A global commit.gpgsign=true would demand the developer's key for fixture commits.
+git config commit.gpgsign false
 
 # Minimal tree so every pathspec we care about exists on the base.
 mkdir -p bazel/rules/testdata domains/games
@@ -150,6 +154,143 @@ check "an unresolvable base does not report diff" \
   out_lacks_line 'diff' "$BAD_OUT"
 check "an unresolvable base names the failure" \
   grep -q 'does not resolve' "$BAD_OUT"
+
+echo "impact queries"
+
+# A bazel that records every call and answers as told: call n's argv lands
+# in args.n, any --query_file or --target_pattern_file it was handed is
+# copied to query.n or patterns.n, and answers/n[.status|.stderr] say what
+# it prints and returns. The subject is what reaches its argv: the label
+# set must not, because at a few hundred labels an inlined set() exceeds
+# the kernel's per-argument limit and the query fails before it runs.
+BIN=$WORK/bin
+mkdir -p "$BIN"
+cat > "$BIN/bazel" <<'EOF'
+#!/bin/bash
+d=$FAKE_BAZEL_DIR
+n=$(( $(cat "$d/calls" 2>/dev/null || echo 0) + 1 ))
+echo "$n" > "$d/calls"
+printf '%s\n' "$@" > "$d/args.$n"
+for arg in "$@"; do
+  case $arg in
+    --query_file=*) cp "${arg#--query_file=}" "$d/query.$n" ;;
+    --target_pattern_file=*) cp "${arg#--target_pattern_file=}" "$d/patterns.$n" ;;
+  esac
+done
+[ -f "$d/answers/$n.stderr" ] && cat "$d/answers/$n.stderr" >&2
+[ -f "$d/answers/$n" ] && cat "$d/answers/$n"
+exit "$(cat "$d/answers/$n.status" 2>/dev/null || echo 0)"
+EOF
+chmod +x "$BIN/bazel"
+export FAKE_BAZEL_DIR=$WORK/bazel
+export PATH="$BIN:$PATH"
+reset_bazel() {
+  rm -rf "$FAKE_BAZEL_DIR"
+  mkdir -p "$FAKE_BAZEL_DIR/answers"
+}
+answer_call() { # answer_call <n> <stdout> [status] [stderr]
+  printf '%s' "$2" > "$FAKE_BAZEL_DIR/answers/$1"
+  [ -n "${3:-}" ] && echo "$3" > "$FAKE_BAZEL_DIR/answers/$1.status"
+  [ -n "${4:-}" ] && echo "$4" > "$FAKE_BAZEL_DIR/answers/$1.stderr"
+  return 0
+}
+calls() { cat "$FAKE_BAZEL_DIR/calls" 2>/dev/null || echo 0; }
+# shellcheck source=diff-build-lib.sh
+source "$REPO/scripts/diff-build-lib.sh"
+
+# Six hundred labels of the length a domains/ target has.
+TARGETS=$WORK/targets.txt
+: > "$TARGETS"
+for i in $(seq 1 600); do
+  printf '//domains/some/rather/long/package/path/number/%d:a_target_with_a_long_name_%d\n' \
+    "$i" "$i" >> "$TARGETS"
+done
+QUERY=$WORK/query.txt
+write_impact_query "$TARGETS" "kind(test, SET) except attr(tags, 'manual', SET)" "$QUERY"
+check "the query file names every impacted target, once per SET" \
+  test "$(grep -o '//domains' "$QUERY" | wc -l | tr -d ' ')" = "1200"
+check "every SET in the template becomes the set" \
+  test "$(grep -o 'set(' "$QUERY" | wc -l | tr -d ' ')" = "2"
+check "the query is one expression" test "$(wc -l < "$QUERY" | tr -d ' ')" = "1"
+
+reset_bazel
+answer_call 1 $'//a:t\n//b:u'
+OUT=$(run_impact_query "$QUERY")
+check "nothing on bazel's command line names a target" \
+  test "$(grep -c '//domains' "$FAKE_BAZEL_DIR/args.1")" = "0"
+check "bazel reads the query from the file" \
+  grep -qx -- "--query_file=$QUERY" "$FAKE_BAZEL_DIR/args.1"
+check "the query bazel read is the one written" cmp -s "$QUERY" "$FAKE_BAZEL_DIR/query.1"
+check "matching labels are printed one per line" test "$OUT" = $'//a:t\n//b:u'
+
+reset_bazel
+answer_call 1 $'Loading: 3 packages loaded\n//a:t'
+OUT=$(run_impact_query "$QUERY")
+check "only labels are printed, not bazel's progress" test "$OUT" = '//a:t'
+
+reset_bazel
+answer_call 1 ''
+OUT=$(run_impact_query "$QUERY")
+STATUS=$?
+check "no match is success" test "$STATUS" -eq 0
+check "no match prints nothing" test -z "$OUT"
+
+reset_bazel
+answer_call 1 '' 1 'bazel: Argument list too long'
+OUT=$(run_impact_query "$QUERY" 2> "$WORK/query.err")
+STATUS=$?
+check "a query bazel refused is a failure, not an empty set" test "$STATUS" -ne 0
+check "the refusal reaches the log" grep -q 'Argument list too long' "$WORK/query.err"
+
+echo "impacted build and test"
+
+# The wiring diff-build runs, under the set -e it runs with.
+build_and_test() { (set -e; build_and_test_impacted "$TARGETS" "$WORK/tests.txt" "$WORK/builds.txt"); }
+
+reset_bazel
+answer_call 1 $'//a:t\n//b:u'
+answer_call 2 '//a:lib'
+build_and_test > "$WORK/bt.out"
+STATUS=$?
+check "two queries, a build and a test" test "$STATUS" -eq 0 -a "$(calls)" = "4"
+check "the tests query is the script's, over the whole set" \
+  test "$(grep -o 'set(' "$FAKE_BAZEL_DIR/query.1" | wc -l | tr -d ' ')" = "3"
+check "the builds query is the script's, over the whole set" \
+  test "$(grep -o 'set(' "$FAKE_BAZEL_DIR/query.2" | wc -l | tr -d ' ')" = "4"
+check "the second query is one expression, not appended to the first" \
+  test "$(wc -l < "$FAKE_BAZEL_DIR/query.2" | tr -d ' ')" = "1"
+# 131072 is Linux's limit on one argument, and this set is past it: the
+# expression could only ever have reached bazel through a file.
+check "the builds query over this set exceeds the per-argument limit" \
+  test "$(wc -c < "$FAKE_BAZEL_DIR/query.2")" -gt 131072
+check "the build reads its targets from a file" \
+  grep -qx -- "--target_pattern_file=$WORK/builds.txt" "$FAKE_BAZEL_DIR/args.3"
+check "and builds what the query answered" \
+  test "$(cat "$FAKE_BAZEL_DIR/patterns.3")" = '//a:lib'
+check "the test run reads its targets from a file" \
+  grep -qx -- "--target_pattern_file=$WORK/tests.txt" "$FAKE_BAZEL_DIR/args.4"
+check "the test run is under --config=ci, which turns the postgres suites on" \
+  grep -qx -- "--config=ci" "$FAKE_BAZEL_DIR/args.4"
+check "and tests what the query answered" \
+  test "$(cat "$FAKE_BAZEL_DIR/patterns.4")" = $'//a:t\n//b:u'
+check "the log says how many tests" grep -q 'tests to run: 2' "$WORK/bt.out"
+check "the log says how many build targets" grep -q 'targets to build: 1' "$WORK/bt.out"
+
+reset_bazel
+answer_call 1 ''
+answer_call 2 ''
+build_and_test > "$WORK/bt.out"
+STATUS=$?
+check "nothing to build and nothing to test runs neither" test "$STATUS" -eq 0 -a "$(calls)" = "2"
+check "and says so" grep -q 'tests to run: 0' "$WORK/bt.out"
+
+reset_bazel
+answer_call 1 '' 1 'bazel: Argument list too long'
+build_and_test > "$WORK/bt.out" 2> "$WORK/bt.err"
+STATUS=$?
+check "a refused query stops the run" test "$STATUS" -ne 0
+check "and nothing runs after it" test "$(calls)" = "1"
+check "the refusal is in the log" grep -q 'Argument list too long' "$WORK/bt.err"
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
