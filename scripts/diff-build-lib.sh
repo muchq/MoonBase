@@ -43,6 +43,27 @@ paths_forcing_full_build() {
   git diff --name-only "$base" HEAD -- "${FULL_BUILD_PATHSPECS[@]}"
 }
 
+# A bazel query over the impacted set, written to a file for --query_file
+# rather than passed inline: a few hundred labels in one argument exceed
+# the kernel's per-argument limit, and the query fails before it runs.
+# `template` names the set as SET; every occurrence becomes set(...).
+write_impact_query() { # write_impact_query <targets-file> <template> <query-file>
+  local targets=$1 template=$2 out=$3
+  local labels
+  labels=$(tr '\n' ' ' < "$targets")
+  printf '%s\n' "${template//SET/set(${labels})}" > "$out"
+}
+
+# Runs a written query and prints the matching labels, one per line. No
+# match is success with nothing printed. A query bazel refuses is a
+# failure, and stays one: read as an empty set, it would run no tests and
+# report green.
+run_impact_query() { # run_impact_query <query-file>
+  local out
+  out=$(bazel query --query_file="$1") || return $?
+  printf '%s\n' "$out" | grep '^//' || true
+}
+
 # Labels a PR carries for its impacted services. One label per service, all
 # under one prefix, so the sync below can retire a stale one without touching
 # the hand-applied labels beside it.

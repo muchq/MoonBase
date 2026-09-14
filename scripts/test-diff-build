@@ -34,6 +34,8 @@ cd "$FIXTURE"
 git init -q
 git config user.email "test@example.com"
 git config user.name "test"
+# The fixture is its own repo; a signing key configured for this machine is not.
+git config commit.gpgsign false
 
 # Minimal tree so every pathspec we care about exists on the base.
 mkdir -p bazel/rules/testdata domains/games
@@ -150,6 +152,73 @@ check "an unresolvable base does not report diff" \
   out_lacks_line 'diff' "$BAD_OUT"
 check "an unresolvable base names the failure" \
   grep -q 'does not resolve' "$BAD_OUT"
+
+echo "impact queries"
+
+# A bazel that records how it was called and answers as told. The subject is
+# what reaches its argv: the label set must not, because at a few hundred
+# labels an inlined set() exceeds ARG_MAX and the query fails before it runs.
+BIN=$WORK/bin
+mkdir -p "$BIN"
+cat > "$BIN/bazel" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$@" > "$FAKE_BAZEL_ARGS"
+for arg in "$@"; do
+  case $arg in --query_file=*) cp "${arg#--query_file=}" "$FAKE_BAZEL_QUERY" ;; esac
+done
+[ -n "${FAKE_BAZEL_STDERR:-}" ] && echo "$FAKE_BAZEL_STDERR" >&2
+[ -n "${FAKE_BAZEL_STDOUT:-}" ] && printf '%s\n' "$FAKE_BAZEL_STDOUT"
+exit "${FAKE_BAZEL_STATUS:-0}"
+EOF
+chmod +x "$BIN/bazel"
+export FAKE_BAZEL_ARGS=$WORK/bazel.args FAKE_BAZEL_QUERY=$WORK/bazel.query
+export PATH="$BIN:$PATH"
+answer() { # answer <stdout> [status] [stderr]
+  export FAKE_BAZEL_STDOUT=$1 FAKE_BAZEL_STATUS=${2:-0} FAKE_BAZEL_STDERR=${3:-}
+}
+# shellcheck source=diff-build-lib.sh
+source "$REPO/scripts/diff-build-lib.sh"
+
+TARGETS=$WORK/targets.txt
+: > "$TARGETS"
+for i in $(seq 1 600); do
+  printf '//domains/some/rather/long/package/path/number/%d:a_target_with_a_long_name_%d\n' \
+    "$i" "$i" >> "$TARGETS"
+done
+QUERY=$WORK/query.txt
+write_impact_query "$TARGETS" "kind(test, SET) except attr(tags, 'manual', SET)" "$QUERY"
+check "the query file names every impacted target, once per SET" \
+  test "$(grep -o '//domains' "$QUERY" | wc -l | tr -d ' ')" = "1200"
+check "every SET in the template becomes the set" \
+  test "$(grep -o 'set(' "$QUERY" | wc -l | tr -d ' ')" = "2"
+check "the query is one expression" test "$(wc -l < "$QUERY" | tr -d ' ')" = "1"
+
+answer $'//a:t\n//b:u'
+OUT=$(run_impact_query "$QUERY")
+check "the labels stay off bazel's command line" \
+  out_lacks_line "kind(test, set(//domains" "$FAKE_BAZEL_ARGS"
+check "nothing on bazel's command line names a target" \
+  test "$(grep -c '//domains' "$FAKE_BAZEL_ARGS")" = "0"
+check "bazel reads the query from the file" \
+  grep -qx -- "--query_file=$QUERY" "$FAKE_BAZEL_ARGS"
+check "the query bazel read is the one written" cmp -s "$QUERY" "$FAKE_BAZEL_QUERY"
+check "matching labels are printed one per line" test "$OUT" = $'//a:t\n//b:u'
+
+answer $'Loading: 3 packages loaded\n//a:t'
+OUT=$(run_impact_query "$QUERY")
+check "only labels are printed, not bazel's progress" test "$OUT" = '//a:t'
+
+answer ''
+OUT=$(run_impact_query "$QUERY")
+STATUS=$?
+check "no match is success" test "$STATUS" -eq 0
+check "no match prints nothing" test -z "$OUT"
+
+answer '' 1 'bazel: Argument list too long'
+OUT=$(run_impact_query "$QUERY" 2> "$WORK/query.err")
+STATUS=$?
+check "a query bazel refused is a failure, not an empty set" test "$STATUS" -ne 0
+check "the refusal reaches the log" grep -q 'Argument list too long' "$WORK/query.err"
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
