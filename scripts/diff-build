@@ -85,36 +85,8 @@ if [ -s /tmp/impacted_targets.txt ]; then
     grep '^//' /tmp/impacted_targets.txt > /tmp/impacted_targets_filtered.txt || true
     echo "--- [diff-build] first-party impacted targets: $(wc -l < /tmp/impacted_targets_filtered.txt)"
 
-    # Both queries and both bazel invocations read the set from a file. See
-    # write_impact_query: inlined, a few hundred labels fail before they run.
-    QUERY=/tmp/impact_query.txt
-    TESTS=/tmp/impacted_tests.txt
-    BUILDS=/tmp/impacted_builds.txt
-
-    # Every test that is not tagged 'manual' and not an internal generated target
-    echo "--- [diff-build] querying for tests..."
-    write_impact_query /tmp/impacted_targets_filtered.txt \
-      "kind(test, SET) except attr(tags, 'manual', SET) except filter('.*__internal__.*', SET)" \
-      "$QUERY"
-    run_impact_query "$QUERY" > "$TESTS"
-    echo "--- [diff-build] tests to run: $(grep -c . "$TESTS" || true)"
-
-    # Every buildable rule target that is not a test, not manual, and not internal
-    echo "--- [diff-build] querying for build targets..."
-    write_impact_query /tmp/impacted_targets_filtered.txt \
-      "kind(rule, SET) except kind(test, SET) except attr(tags, 'manual', SET) except filter('.*__internal__.*', SET)" \
-      "$QUERY"
-    run_impact_query "$QUERY" > "$BUILDS"
-    echo "--- [diff-build] targets to build: $(grep -c . "$BUILDS" || true)"
-
-    if [ -s "$BUILDS" ]; then
-      echo "--- [diff-build] running bazel build..."
-      bazel build --skip_incompatible_explicit_targets --target_pattern_file="$BUILDS"
-    fi
-    if [ -s "$TESTS" ]; then
-      echo "--- [diff-build] running bazel test..."
-      bazel test --config=ci --skip_incompatible_explicit_targets --target_pattern_file="$TESTS"
-    fi
+    build_and_test_impacted /tmp/impacted_targets_filtered.txt \
+      /tmp/impacted_tests.txt /tmp/impacted_builds.txt
 else
     echo "No changes detected."
 fi

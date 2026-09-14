@@ -2622,6 +2622,7 @@ func TestPostgresSuitesStillRunInCI(t *testing.T) {
 	}
 	for _, entry := range []struct{ file, want string }{
 		{"../../scripts/diff-build", "bazel test --config=ci"},
+		{"../../scripts/diff-build-lib.sh", "bazel test --config=ci"},
 		{"../../.github/workflows/publish.yml", "bazel test --config=ci"},
 	} {
 		if !strings.Contains(readConfig(t, entry.file), entry.want) {

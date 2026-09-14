@@ -375,7 +375,7 @@ Run these, and don't report success on a step that didn't run.
 | Affected build + test | `scripts/diff-build origin/main` | yes — `build-and-test` |
 | Web app | `npm run typecheck && npm test && npm run build` in the app dir | yes — `test-1d4-web`, `test-iili-web`, `test-ast-lol`, on every PR |
 | Deploy scripts | `scripts/test-deploy` | yes — `test-deploy`, `test-deploy-macos` |
-| diff-build full-build decision | `scripts/test-diff-build` | yes — `test-deploy` |
+| diff-build decision and wiring | `scripts/test-diff-build` | yes — `test-deploy` |
 | mutation-check harness | `scripts/test-mutation-check` | yes — `test-deploy` |
 | impacted services | `scripts/test-impacted-services` | yes — `test-deploy` |
 | service labels | `scripts/test-label-services` | yes — `test-deploy` |

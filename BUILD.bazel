@@ -62,5 +62,6 @@ exports_files([
     ".github/workflows/branch.yml",
     ".github/workflows/publish.yml",
     "scripts/diff-build",
+    "scripts/diff-build-lib.sh",
     "scripts/validate-otel-config",
 ])

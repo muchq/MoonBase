@@ -51,6 +51,8 @@ write_impact_query() { # write_impact_query <targets-file> <template> <query-fil
   local targets=$1 template=$2 out=$3
   local labels
   labels=$(tr '\n' ' ' < "$targets")
+  # bash 5.2 reads & in a replacement as "the match" unless told not to.
+  shopt -u patsub_replacement 2>/dev/null || true
   printf '%s\n' "${template//SET/set(${labels})}" > "$out"
 }
 
@@ -62,6 +64,40 @@ run_impact_query() { # run_impact_query <query-file>
   local out
   out=$(bazel query --query_file="$1") || return $?
   printf '%s\n' "$out" | grep '^//' || true
+}
+
+# What diff-build asks of the impacted set: every test, and every other
+# rule, that is neither tagged manual nor an internal generated target.
+IMPACT_TESTS_QUERY="kind(test, SET) except attr(tags, 'manual', SET) except filter('.*__internal__.*', SET)"
+IMPACT_BUILDS_QUERY="kind(rule, SET) except kind(test, SET) except attr(tags, 'manual', SET) except filter('.*__internal__.*', SET)"
+
+# Builds and tests what the impacted set reaches. <targets-file> is one
+# first-party label per line; what it resolved to is left in <tests-file>
+# and <builds-file>. Every bazel invocation reads its labels from a file,
+# for the reason write_impact_query gives, and the tests run under
+# --config=ci, which is what switches the postgres-gated suites back on.
+build_and_test_impacted() { # build_and_test_impacted <targets-file> <tests-file> <builds-file>
+  local targets=$1 tests=$2 builds=$3
+  local query=$tests.query
+
+  echo "--- [diff-build] querying for tests..."
+  write_impact_query "$targets" "$IMPACT_TESTS_QUERY" "$query"
+  run_impact_query "$query" > "$tests"
+  echo "--- [diff-build] tests to run: $(grep -c . "$tests" || true)"
+
+  echo "--- [diff-build] querying for build targets..."
+  write_impact_query "$targets" "$IMPACT_BUILDS_QUERY" "$query"
+  run_impact_query "$query" > "$builds"
+  echo "--- [diff-build] targets to build: $(grep -c . "$builds" || true)"
+
+  if [ -s "$builds" ]; then
+    echo "--- [diff-build] running bazel build..."
+    bazel build --skip_incompatible_explicit_targets --target_pattern_file="$builds"
+  fi
+  if [ -s "$tests" ]; then
+    echo "--- [diff-build] running bazel test..."
+    bazel test --config=ci --skip_incompatible_explicit_targets --target_pattern_file="$tests"
+  fi
 }
 
 # Labels a PR carries for its impacted services. One label per service, all
