@@ -30,6 +30,9 @@ int ToInt(const std::optional<std::string>& value) {
 
 absl::StatusOr<std::optional<ReanalysisJob>> PgReanalysisQueue::ClaimNext(std::string_view owner,
                                                                           absl::Duration lease) {
+  // Same refusal PgQueue makes, for the same reason: every fence keys on
+  // the owner, and a blank is one nobody's matches.
+  if (owner.empty()) return absl::InvalidArgumentError("a claim needs an owner to fence on");
   // Retire what the budget has exhausted before looking for work. Merely
   // not claiming it is not enough: a row left PROCESSING holds the
   // single-live slot forever — never claimable, never history, and every

@@ -357,5 +357,17 @@ TEST_F(ReanalysisQueueTest, AnOwnedQueueFailsUnderTheRightOwner) {
   EXPECT_EQ(Column(id, "error_message"), "pg went away");
 }
 
+// The same refusal PgQueue makes, for the same reason: a blank is an owner no
+// heartbeat matches, and a re-claim under it spends no attempt.
+TEST_F(ReanalysisQueueTest, RefusesToClaimUnderABlankOwner) {
+  const std::string id = Enqueue();
+
+  const auto claimed = queue_->ClaimNext("", absl::Minutes(5));
+
+  EXPECT_EQ(claimed.status().code(), absl::StatusCode::kInvalidArgument) << claimed.status();
+  EXPECT_EQ(Column(id, "status"), "PENDING");
+  EXPECT_EQ(Column(id, "attempts"), "0");
+}
+
 }  // namespace
 }  // namespace one_d4_worker

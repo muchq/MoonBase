@@ -50,6 +50,12 @@ std::string TextArray(absl::Span<const std::string> values) {
 
 absl::StatusOr<std::optional<IndexJob>> PgQueue::ClaimNext(
     std::string_view owner, absl::Duration lease, absl::Span<const std::string> at_capacity) {
+  // Every write after this one is fenced on the owner, and a re-claim
+  // under the id already on the row spends no attempt. A blank would be
+  // an owner nobody's fence matches and nobody's re-claim spends — so it
+  // is refused here, before the row is touched, and the schema refuses it
+  // too (V004).
+  if (owner.empty()) return absl::InvalidArgumentError("a claim needs an owner to fence on");
   // One conditional UPDATE, so two workers racing for the same row cannot
   // both win: the row lock decides, and the loser's WHERE no longer
   // matches. FOR UPDATE SKIP LOCKED picks the candidate without the two of

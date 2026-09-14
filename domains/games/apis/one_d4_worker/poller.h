@@ -78,6 +78,13 @@ class PlatformAdmission;
 /// one until the process restarted.
 using PlatformSlot = std::shared_ptr<void>;
 
+/// What the gate let through: a job, and the place it holds in its
+/// platform's cap.
+struct Admitted {
+  IndexJob job;
+  PlatformSlot slot;
+};
+
 /// A claim, and the id it is fenced on.
 struct Claim {
   IndexJob job;
@@ -127,13 +134,12 @@ class PlatformAdmission {
   /// every other slot, and every slot finishing a run, for up to the
   /// statement timeout. Accepted because the alternative races the cap.
   ///
-  /// `owner` is the id `claim` must claim the row under. A view and not a
-  /// value, so a `std::move` at the call site cannot empty the string
-  /// `claim` reads.
-  absl::StatusOr<std::optional<Claim>> Claim(
+  /// Returns the job and the place it holds, not a Claim: the owner is the
+  /// caller's, minted before the claim and moved into the Claim after it,
+  /// and nothing here ever needs to see it.
+  absl::StatusOr<std::optional<Admitted>> Claim(
       absl::FunctionRef<absl::StatusOr<std::optional<IndexJob>>(absl::Span<const std::string>)>
-          claim,
-      std::string_view owner);
+          claim);
 
   /// Gives a finished run's place back. Called by the slot the claim
   /// carries rather than by hand.
