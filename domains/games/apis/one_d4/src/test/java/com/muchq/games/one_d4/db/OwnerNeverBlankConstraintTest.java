@@ -71,14 +71,16 @@ public class OwnerNeverBlankConstraintTest {
    */
   @Test
   public void rerunningTheMigrationClearsABlankOwnerStoredBeforeTheConstraint() throws Exception {
-    exec("ALTER TABLE indexing_requests DROP CONSTRAINT indexing_requests_owner_never_blank");
-    UUID id = insertRequest("indexing_requests");
-    setOwner("indexing_requests", id, "");
+    for (String table : REQUEST_TABLES) {
+      exec("ALTER TABLE " + table + " DROP CONSTRAINT " + table + "_owner_never_blank");
+      UUID id = insertRequest(table);
+      setOwner(table, id, "");
 
-    new Migration(testDb.dataSource()).run();
+      new Migration(testDb.dataSource()).run();
 
-    assertThat(ownerOf("indexing_requests", id)).isNull();
-    assertThat(constraintNames()).contains("indexing_requests_owner_never_blank");
+      assertThat(ownerOf(table, id)).as("%s blank owner after re-run", table).isNull();
+      assertThat(constraintNames()).contains(table + "_owner_never_blank");
+    }
   }
 
   /** Re-run safe, like every step here: the file executes on every deploy. */
