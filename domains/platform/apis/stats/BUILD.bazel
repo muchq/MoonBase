@@ -56,14 +56,14 @@ go_test(
     ],
     embed = [":stats_lib"],
     env_inherit = ["STATS_TEST_DB_URL"],
-    deps = [
-        "@com_github_stretchr_testify//assert",
-        "@com_github_stretchr_testify//require",
-    ],
     # One shared scratch database, and the version-bump test drops every
     # aggregate table: concurrent runs would pull the tables out from under
     # each other mid-flight.
     tags = ["exclusive"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
 )
 
 go_binary(
