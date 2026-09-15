@@ -1,0 +1,30 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+
+# Read as text by //domains/platform/libs/otel_contract, which pins the
+# marker lists and probe families equal to stats' classify.go.
+exports_files(["src/classify.rs"])
+
+rust_library(
+    name = "caddylog",
+    srcs = [
+        "src/classify.rs",
+        "src/lib.rs",
+        "src/line.rs",
+        "src/route.rs",
+    ],
+    crate_name = "caddylog",
+    visibility = ["//visibility:public"],
+    deps = all_crate_deps(),
+)
+
+rust_test(
+    name = "caddylog_test",
+    size = "small",
+    # route.rs includes the Caddyfile at compile time and asserts ROUTES is
+    # exactly its path matchers, so a gateway route change fails this target.
+    compile_data = ["//deploy/consolidated:Caddyfile"],
+    crate = ":caddylog",
+    deps = all_crate_deps(normal_dev = True),
+)

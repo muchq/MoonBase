@@ -2,8 +2,13 @@ load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 load("//bazel/rules:oci.bzl", "linux_oci_go")
 
-# otel_contract pins the query-event vocabulary here against QueryEvent.java.
-exports_files(["queries.go"])
+# otel_contract pins the query-event vocabulary in queries.go against
+# QueryEvent.java, and the agent and probe vocabularies in classify.go
+# against caddylog's Rust twin.
+exports_files([
+    "classify.go",
+    "queries.go",
+])
 
 go_library(
     name = "stats_lib",
