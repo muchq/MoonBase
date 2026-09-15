@@ -3,9 +3,10 @@ load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 load("//bazel/rules:oci.bzl", "linux_oci_go")
 
 # otel_contract pins the query-event vocabulary in queries.go against
-# QueryEvent.java, and the agent and probe vocabularies in classify.go
-# against caddylog's Rust twin.
+# QueryEvent.java, and the agent, probe and method vocabularies in
+# classify.go and aggregate.go against caddylog's Rust twin.
 exports_files([
+    "aggregate.go",
     "classify.go",
     "queries.go",
 ])
@@ -47,8 +48,18 @@ go_test(
         "queries_test.go",
         "store_test.go",
     ],
+    # classify_test.go replays caddylog's corpus, the behavioral half of
+    # the pin otel_contract keeps on the two classifiers' source.
+    data = [
+        "//domains/platform/libs/caddylog:testdata/agents.tsv",
+        "//domains/platform/libs/caddylog:testdata/probes.tsv",
+    ],
     embed = [":stats_lib"],
     env_inherit = ["STATS_TEST_DB_URL"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
     # One shared scratch database, and the version-bump test drops every
     # aggregate table: concurrent runs would pull the tables out from under
     # each other mid-flight.

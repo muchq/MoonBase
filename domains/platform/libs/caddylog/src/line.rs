@@ -1,45 +1,58 @@
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 /// The slice of Caddy's JSON access log this crate reads; everything else
-/// in the line is ignored on decode, and a missing field reads as empty
-/// rather than as an error, because older lines carry fewer of them.
+/// in the line is ignored on decode, and a field that is missing or `null`
+/// reads as empty rather than as an error, as it does through Go's decoder
+/// in the stats aggregator, because older lines carry fewer of them.
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct CaddyLine {
     /// Epoch seconds, Caddy's default log timestamp.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "or_default")]
     pub ts: f64,
-    #[serde(default)]
-    pub status: u16,
-    #[serde(default)]
+    /// Any integer, as Go reads it; a real line carries an HTTP status.
+    #[serde(default, deserialize_with = "or_default")]
+    pub status: i64,
+    #[serde(default, deserialize_with = "or_default")]
     pub request: Request,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
 pub struct Request {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "or_default")]
     pub host: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "or_default")]
     pub method: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "or_default")]
     pub uri: String,
-    #[serde(default)]
-    pub client_ip: String,
-    #[serde(default)]
-    pub remote_ip: String,
-    #[serde(default)]
-    pub headers: HashMap<String, Vec<String>>,
+    // Read through the accessors below, which know which of the two
+    // address fields a line of a given age carries.
+    #[serde(default, deserialize_with = "or_default")]
+    client_ip: String,
+    #[serde(default, deserialize_with = "or_default")]
+    remote_ip: String,
+    #[serde(default, deserialize_with = "or_default")]
+    headers: HashMap<String, Vec<String>>,
+}
+
+fn or_default<'de, D: Deserializer<'de>, T: Default + Deserialize<'de>>(
+    deserializer: D,
+) -> Result<T, D::Error> {
+    Option::<T>::deserialize(deserializer).map(Option::unwrap_or_default)
 }
 
 impl CaddyLine {
-    /// One line of the log, without its newline.
+    /// One line of the log, without its newline. The caller bounds the
+    /// line: a reader that never finds a newline hands this the rest of
+    /// the file, and the stats pipeline caps a line at 1 MiB.
     pub fn parse(line: &[u8]) -> Result<Self, serde_json::Error> {
         serde_json::from_slice(line)
     }
 
     /// Caddy is the edge, so `client_ip` and `remote_ip` agree; older lines
-    /// carry only `remote_ip`.
+    /// carry only `remote_ip`. An owned copy of what the line says: the
+    /// caller decides where it goes, and nothing here keeps it.
     pub fn client_ip(&self) -> &str {
         if self.request.client_ip.is_empty() {
             &self.request.remote_ip
@@ -112,9 +125,39 @@ mod tests {
         assert_eq!(line.request, Request::default());
     }
 
+    // Go's decoder treats null as "leave the zero value"; a line that says
+    // so explicitly is counted, not skipped as corrupt.
+    #[test]
+    fn null_fields_read_as_empty_like_missing_ones() {
+        let line = CaddyLine::parse(
+            br#"{"ts":null,"status":null,"request":{"host":null,"method":null,"uri":null,"client_ip":null,"remote_ip":null,"headers":null}}"#,
+        )
+        .unwrap();
+        assert_eq!(line, CaddyLine::default());
+        let line = CaddyLine::parse(br#"{"request":null,"status":204}"#).unwrap();
+        assert_eq!(line.status, 204);
+        assert_eq!(line.request, Request::default());
+    }
+
+    // Any integer Go's int takes, so a line with a nonsense status is still
+    // a line and not the corrupt-object alarm.
+    #[test]
+    fn status_is_any_integer() {
+        assert_eq!(CaddyLine::parse(br#"{"status":-1}"#).unwrap().status, -1);
+        assert_eq!(
+            CaddyLine::parse(br#"{"status":70000}"#).unwrap().status,
+            70000
+        );
+        assert_eq!(
+            CaddyLine::parse(br#"{"ts":1789500000}"#).unwrap().ts,
+            1789500000.0
+        );
+    }
+
     #[test]
     fn a_corrupt_line_is_an_error() {
         assert!(CaddyLine::parse(b"{not json").is_err());
         assert!(CaddyLine::parse(b"").is_err());
+        assert!(CaddyLine::parse(br#"{"status":"200"}"#).is_err());
     }
 }

@@ -1,0 +1,53 @@
+# Request target → scanner family, or empty when the path is not a probe,
+# as both stats/classify.go (Go) and caddylog (Rust) must answer it.
+
+/wp-login.php	wordpress
+/wp-admin/	wordpress
+/xmlrpc.php	wordpress
+/blog/wp-includes/wlwmanifest.xml	wordpress
+/WP-LOGIN.PHP	wordpress
+/.env	env
+/.env.production?x=1	env
+/api/.env.bak	env
+/.envrc	env
+/.git/config	git
+/.git/HEAD	git
+/phpmyadmin/index.php	phpmyadmin
+/PMA/	phpmyadmin
+/adminer.php	phpmyadmin
+/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php	php
+/index.php?s=/Index/think/app/invokefunction	php
+/.aws/credentials	secrets
+/.ssh/id_rsa	secrets
+/.htpasswd	secrets
+/backup.sql	backup
+/site.tar.gz	backup
+/db.zip	backup
+/../../etc/passwd	traversal
+/cgi-bin/%2e%2e/%2e%2e/bin/sh	traversal
+/cgi-bin/luci	cgi
+/manager/html	java
+/actuator/health	java
+/solr/admin/info/system	java
+/boaform/admin/formLogin	router
+/HNAP1/	router
+/GponForm/diag_Form	router
+
+# Real routes on these hosts are not probes, however they are spelled.
+/	
+/mcp	
+/iili/v1/r/abc	
+/stats/v1/summary?days=7	
+/.well-known/acme-challenge/token	
+/muchq/moonbase/src/branch/main/README.md	
+/index.html	
+# one_d4's real admin route; "admin" is not a family.
+/admin/reanalyze	
+/environment	
+/gitignore	
+# An HTTP clone, not a dotdir probe.
+/muchq/MoonBase.git/info/refs	
+# Forgejo serves archives and raw files with backup-looking extensions,
+# always several segments deep; backups probe the root.
+/muchq/MoonBase/archive/main.tar.gz	
+/muchq/MoonBase/raw/branch/main/migrations/V004__x.sql	

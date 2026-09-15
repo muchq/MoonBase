@@ -107,17 +107,36 @@ pub const BOT_MARKERS: &[&str] = &[
     "censys",
 ];
 
-/// Buckets a User-Agent header and names the agent within the bucket,
-/// bounded per class: AI scrapers and named bots are named by the marker
-/// that matched, so those vocabularies are exactly the lists above;
-/// anonymous bots and the unclassified tail keep their product token (one
-/// run of `[a-z0-9._-]`, max 32 bytes) so a new crawler is readable before
-/// it has a marker. A browser-shaped generic bot would be "mozilla" like
-/// every browser, so the marker it tripped names it instead. Browsers are
-/// one unnamed bucket. Order matters: AI scrapers self-identify with names
-/// that also match the generic bot markers.
+/// Lowercase the way Go's `strings.ToLower` does: one char to one char.
+/// Rust's `str::to_lowercase` applies the full mapping, under which `İ`
+/// becomes two chars and a marker straddling it stops matching; the stats
+/// aggregator reads the same lines through Go, and the two must agree.
+pub(crate) fn fold(s: &str) -> String {
+    s.chars()
+        .map(|c| c.to_lowercase().next().unwrap_or(c))
+        .collect()
+}
+
+/// The lowercased path of a request target, query string dropped.
+fn path_of(uri: &str) -> String {
+    fold(uri.split('?').next().unwrap_or_default())
+}
+
+/// Buckets a User-Agent header and names the agent within the bucket. AI
+/// scrapers and named bots are named by the marker that matched, so those
+/// two name vocabularies are exactly the lists above. Anonymous bots and
+/// the unclassified tail keep their product token, one run of
+/// `[a-z0-9._-]` cut at 32 bytes, so a new crawler is readable before it
+/// has a marker; that bounds the name's length and not its cardinality,
+/// which a scanner rotating tokens can make as wide as it likes, so a
+/// consumer that keys anything on those two classes' names caps them
+/// itself, as the stats aggregator does. A browser-shaped generic bot
+/// would be "mozilla" like every browser, so the marker it tripped names
+/// it instead. Browsers are one unnamed bucket. Order matters: AI
+/// scrapers self-identify with names that also match the generic bot
+/// markers.
 pub fn agent_of(user_agent: &str) -> (AgentClass, String) {
-    let ua = user_agent.to_lowercase();
+    let ua = fold(user_agent);
     if let Some(marker) = AI_SCRAPER_MARKERS.iter().find(|m| ua.contains(*m)) {
         return (AgentClass::AiScraper, marker.to_string());
     }
@@ -161,15 +180,15 @@ fn product_token(lower_ua: &str) -> String {
 /// The nine RFC 9110 methods pass through, anything else collapses: the
 /// bounding rule every metrics rail uses, because a scanner spraying
 /// invented verbs must not mint a row per token.
-pub fn bounded_method(method: &str) -> &str {
+pub fn bounded_method(method: &str) -> &'static str {
     const KNOWN: [&str; 9] = [
         "GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH",
     ];
-    if KNOWN.contains(&method) {
-        method
-    } else {
-        "CUSTOM"
-    }
+    KNOWN
+        .iter()
+        .copied()
+        .find(|known| *known == method)
+        .unwrap_or("CUSTOM")
 }
 
 /// The bounded scanner-path vocabulary, ordered: the first family to match
@@ -216,7 +235,7 @@ static PROBE_MATCHERS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
 /// path is not a known probe shape. Matching is on the lowercased path with
 /// the query string removed.
 pub fn probe_of(uri: &str) -> Option<&'static str> {
-    let path = uri.split('?').next().unwrap_or_default().to_lowercase();
+    let path = path_of(uri);
     PROBE_MATCHERS
         .iter()
         .find(|(_, matcher)| matcher.is_match(&path))
@@ -225,135 +244,76 @@ pub fn probe_of(uri: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::*;
 
+    // The behavioral pin shared with stats' classify_test.go: the same
+    // corpus replayed through both classifiers, so a request lands in the
+    // same bucket whichever language reads the line. Tab-separated, `#`
+    // comments, blank lines ignored.
+    const AGENTS: &str = include_str!("../testdata/agents.tsv");
+    const PROBES: &str = include_str!("../testdata/probes.tsv");
+
+    fn rows(corpus: &'static str, columns: usize) -> Vec<Vec<&'static str>> {
+        let rows: Vec<Vec<&str>> = corpus
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| line.split('\t').collect())
+            .collect();
+        assert!(rows.len() > 10, "corpus too small to mean anything");
+        for row in &rows {
+            assert_eq!(row.len(), columns, "malformed corpus row {row:?}");
+        }
+        rows
+    }
+
+    fn class_named(name: &str) -> AgentClass {
+        [
+            AgentClass::AiScraper,
+            AgentClass::Bot,
+            AgentClass::Browser,
+            AgentClass::Other,
+        ]
+        .into_iter()
+        .find(|class| class.as_str() == name)
+        .unwrap_or_else(|| panic!("corpus names an unknown class {name:?}"))
+    }
+
     #[test]
-    fn agent_classification_covers_the_vocabulary() {
-        let cases: &[(&str, AgentClass)] = &[
-            // AI scrapers win over the generic bot markers they also match.
-            (
-                "Mozilla/5.0 AppleWebKit/537.36; compatible; GPTBot/1.2; +https://openai.com/gptbot",
-                AgentClass::AiScraper,
-            ),
-            (
-                "Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)",
-                AgentClass::AiScraper,
-            ),
-            (
-                "meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)",
-                AgentClass::AiScraper,
-            ),
-            (
-                "Bytespider; spider-feedback@bytedance.com",
-                AgentClass::AiScraper,
-            ),
-            ("PerplexityBot/1.0", AgentClass::AiScraper),
-            (
-                "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-                AgentClass::Bot,
-            ),
-            ("curl/8.6.0", AgentClass::Bot),
-            ("python-requests/2.32.0", AgentClass::Bot),
-            ("Go-http-client/2.0", AgentClass::Bot),
-            (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-                AgentClass::Browser,
-            ),
-            ("", AgentClass::Other),
-            ("definitely-not-a-browser", AgentClass::Other),
-        ];
-        for (ua, want) in cases {
-            assert_eq!(agent_of(ua).0, *want, "agent_of({ua:?})");
+    fn agents_corpus_lands_every_line_where_stats_does() {
+        let mut classes = BTreeSet::new();
+        for row in rows(AGENTS, 3) {
+            let (ua, class, name) = (row[0], class_named(row[1]), row[2]);
+            assert_eq!(agent_of(ua), (class, name.to_string()), "agent_of({ua:?})");
+            classes.insert(class.as_str());
+        }
+        assert_eq!(classes.len(), 4, "the corpus reaches every class");
+    }
+
+    #[test]
+    fn probes_corpus_lands_every_line_where_stats_does() {
+        let mut reached = BTreeSet::new();
+        for row in rows(PROBES, 2) {
+            let (uri, want) = (row[0], (!row[1].is_empty()).then_some(row[1]));
+            let got = probe_of(uri);
+            assert_eq!(got, want, "probe_of({uri:?})");
+            reached.extend(got);
+        }
+        // Every family is reached by a case, so a pattern that stops
+        // matching fails here rather than silently never firing again.
+        for (name, _) in PROBE_FAMILIES {
+            assert!(
+                reached.contains(name),
+                "no corpus row reaches the {name:?} family"
+            );
         }
     }
 
     #[test]
-    fn agent_names_are_bounded_per_class() {
-        let long = "a".repeat(200) + "/1.0";
-        let cases: &[(&str, AgentClass, &str)] = &[
-            // AI scrapers name themselves by marker, whatever else the UA says.
-            (
-                "Mozilla/5.0 AppleWebKit/537.36; compatible; GPTBot/1.2; +https://openai.com/gptbot",
-                AgentClass::AiScraper,
-                "gptbot",
-            ),
-            (
-                "meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)",
-                AgentClass::AiScraper,
-                "meta-externalagent",
-            ),
-            // Named bots by marker; anonymous tooling by its product token.
-            (
-                "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
-                AgentClass::Bot,
-                "googlebot",
-            ),
-            (
-                "Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)",
-                AgentClass::Bot,
-                "ahrefsbot",
-            ),
-            ("curl/8.6.0", AgentClass::Bot, "curl"),
-            ("python-requests/2.32.0", AgentClass::Bot, "python-requests"),
-            ("Go-http-client/2.0", AgentClass::Bot, "go-http-client"),
-            (
-                "my-crawler/0.1 (+https://example.com)",
-                AgentClass::Bot,
-                "my-crawler",
-            ),
-            // Telegram quotes Twitter's marker in its own UA; the real one wins.
-            (
-                "TelegramBot (like TwitterBot)",
-                AgentClass::Bot,
-                "telegrambot",
-            ),
-            ("Twitterbot/1.0", AgentClass::Bot, "twitterbot"),
-            // A browser-shaped generic bot would be "mozilla" like every
-            // browser, so the marker it tripped names it instead.
-            (
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/120.0.0.0 Safari/537.36",
-                AgentClass::Bot,
-                "headless",
-            ),
-            (
-                "Mozilla/5.0 (compatible; SomeNewBot/1.0)",
-                AgentClass::Bot,
-                "bot",
-            ),
-            // Browsers are one bucket: the token would be "mozilla" for all of them.
-            (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-                AgentClass::Browser,
-                "",
-            ),
-            // A browser is one whose UA opens with Mozilla; quoting it later
-            // does not make a client one.
-            (
-                "something/1.0 (compatible; Mozilla/5.0)",
-                AgentClass::Other,
-                "something",
-            ),
-            // "other" keeps its product token so the unclassified tail is readable.
-            ("", AgentClass::Other, "(empty)"),
-            (
-                "definitely-not-a-browser",
-                AgentClass::Other,
-                "definitely-not-a-browser",
-            ),
-            ("Weird Client 3.0", AgentClass::Other, "weird"),
-            ("<script>alert(1)</script>", AgentClass::Other, "script"),
-            (
-                long.as_str(),
-                AgentClass::Other,
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            ),
-            ("/////", AgentClass::Other, "(empty)"),
-        ];
-        for (ua, class, name) in cases {
-            assert_eq!(agent_of(ua), (*class, name.to_string()), "agent_of({ua:?})");
-        }
-        // Every marker names itself, so the agent vocabulary for the two
-        // marker classes is exactly the lists and cannot drift from them.
+    fn every_marker_names_itself() {
+        // So the agent vocabulary for the two marker classes is exactly the
+        // lists and cannot drift from them; a misordered list fails here.
         for marker in AI_SCRAPER_MARKERS {
             let ua = format!("Mozilla/5.0 (compatible; {}/1.0)", marker.to_uppercase());
             assert_eq!(
@@ -385,6 +345,27 @@ mod tests {
         assert_eq!(agent_of(ua), (AgentClass::Bot, "bot".to_string()));
     }
 
+    // Go lowercases İ (U+0130) to a plain i; the full Unicode mapping
+    // appends a combining dot that splits any marker it sits in.
+    #[test]
+    fn folding_is_go_simple_lowercasing() {
+        assert_eq!(fold("PERPLEXİTYBOT"), "perplexitybot");
+        assert_eq!(fold("Straße É"), "straße é");
+        assert_eq!(
+            agent_of("PERPLEXİTYBOT/1.0"),
+            (AgentClass::AiScraper, "perplexitybot".to_string())
+        );
+        assert_eq!(probe_of("/WP-LOGİN.PHP"), Some("wordpress"));
+    }
+
+    #[test]
+    fn class_spellings_are_the_stats_columns() {
+        assert_eq!(AgentClass::AiScraper.as_str(), "ai_scraper");
+        assert_eq!(AgentClass::Bot.as_str(), "bot");
+        assert_eq!(AgentClass::Browser.as_str(), "browser");
+        assert_eq!(AgentClass::Other.as_str(), "other");
+    }
+
     #[test]
     fn methods_are_bounded_to_the_nine_verbs() {
         for verb in [
@@ -394,80 +375,6 @@ mod tests {
         }
         for other in ["get", "PROPFIND", "", "GET /"] {
             assert_eq!(bounded_method(other), "CUSTOM", "{other:?}");
-        }
-    }
-
-    #[test]
-    fn probe_families_are_bounded_and_route_scoped() {
-        let cases: &[(&str, Option<&str>)] = &[
-            ("/wp-login.php", Some("wordpress")),
-            ("/wp-admin/", Some("wordpress")),
-            ("/xmlrpc.php", Some("wordpress")),
-            ("/blog/wp-includes/wlwmanifest.xml", Some("wordpress")),
-            ("/.env", Some("env")),
-            ("/.env.production?x=1", Some("env")),
-            ("/api/.env.bak", Some("env")),
-            ("/.envrc", Some("env")),
-            ("/.git/config", Some("git")),
-            ("/.git/HEAD", Some("git")),
-            ("/phpmyadmin/index.php", Some("phpmyadmin")),
-            ("/PMA/", Some("phpmyadmin")),
-            ("/adminer.php", Some("phpmyadmin")),
-            (
-                "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
-                Some("php"),
-            ),
-            ("/index.php?s=/Index/think/app/invokefunction", Some("php")),
-            ("/.aws/credentials", Some("secrets")),
-            ("/.ssh/id_rsa", Some("secrets")),
-            ("/.htpasswd", Some("secrets")),
-            ("/backup.sql", Some("backup")),
-            ("/site.tar.gz", Some("backup")),
-            ("/db.zip", Some("backup")),
-            ("/../../etc/passwd", Some("traversal")),
-            ("/cgi-bin/%2e%2e/%2e%2e/bin/sh", Some("traversal")),
-            ("/cgi-bin/luci", Some("cgi")),
-            ("/manager/html", Some("java")),
-            ("/actuator/health", Some("java")),
-            ("/solr/admin/info/system", Some("java")),
-            ("/boaform/admin/formLogin", Some("router")),
-            ("/HNAP1/", Some("router")),
-            ("/GponForm/diag_Form", Some("router")),
-            ("/WP-LOGIN.PHP", Some("wordpress")), // case-insensitive
-            // Real routes on these hosts are not probes, however they are spelled.
-            ("/", None),
-            ("/mcp", None),
-            ("/iili/v1/r/abc", None),
-            ("/stats/v1/summary?days=7", None),
-            ("/.well-known/acme-challenge/token", None),
-            ("/muchq/moonbase/src/branch/main/README.md", None),
-            ("/index.html", None),
-            ("/admin/reanalyze", None), // one_d4's real admin route; "admin" is not a family
-            ("/environment", None),
-            ("/gitignore", None),
-            ("/muchq/MoonBase.git/info/refs", None), // an HTTP clone, not a dotdir probe
-            // Forgejo serves archives and raw files with backup-looking
-            // extensions, always several segments deep; backups probe the root.
-            ("/muchq/MoonBase/archive/main.tar.gz", None),
-            (
-                "/muchq/MoonBase/raw/branch/main/migrations/V004__x.sql",
-                None,
-            ),
-        ];
-        let mut reached = std::collections::BTreeSet::new();
-        for (uri, want) in cases {
-            let got = probe_of(uri);
-            assert_eq!(got, *want, "probe_of({uri:?})");
-            reached.extend(got);
-        }
-        // Every family is reached by a case above, so a pattern that stops
-        // matching is a failure here rather than a family that silently
-        // never fires again.
-        for (name, _) in PROBE_FAMILIES {
-            assert!(
-                reached.contains(name),
-                "no case above reaches the {name:?} family"
-            );
         }
     }
 }
