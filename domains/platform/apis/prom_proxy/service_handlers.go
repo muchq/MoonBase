@@ -116,6 +116,11 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 	}
 	window := timeRange.Window()
 
+	if cached, ok := h.cache.get(scalarCacheKey(name, view, timeRange)); ok {
+		mucks.JsonOk(w, cached)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
@@ -127,34 +132,54 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 		Custom:    []CustomMetricGroup{},
 	}
 
+	// The standard block and the custom tiles are one fan-out, so a service
+	// with many tiles doesn't wait for the standard block to finish first.
+	// Each job writes only its own slot; the response is assembled below.
+	//
+	// A slot nobody filled stays zero, which is the value both halves of the
+	// assembly want for a query that failed or returned nothing — so there is
+	// no "was this answered" flag to carry: it would draw a distinction the
+	// response cannot express anyway.
+	standard := standardScalarQueries(name, window)
+	custom := entry.CustomScalars
+	values := make([]float64, len(standard)+len(custom))
+
 	// A query Prometheus refuses — a week-long lookback past its sample
 	// budget, say — leaves its tile at zero, which is the outage contract
 	// below; the log is the one place that zero is told apart from a real
 	// one.
-	for _, q := range standardScalarQueries(name, window) {
-		resp, err := h.promClient.Query(ctx, q.Query)
-		if err != nil {
-			log.Printf("service %s: %s: %v", name, q.Query, err)
-		} else if len(resp.Data.Result) > 0 {
-			if val, err := extractFloatValue(&resp.Data.Result[0]); err == nil {
-				*q.Field(&response.Standard) = val
-			}
+	runBounded(len(values), func(i int) {
+		query := ""
+		if i < len(standard) {
+			query = standard[i].Query
+		} else {
+			query = custom[i-len(standard)].QueryFor(view, window)
 		}
+		resp, err := h.promClient.Query(ctx, query)
+		if err != nil {
+			if i < len(standard) {
+				log.Printf("service %s: %s: %v", name, query, err)
+			} else {
+				log.Printf("service %s tile %s: %v", name, custom[i-len(standard)].Label, err)
+			}
+			return
+		}
+		if len(resp.Data.Result) == 0 {
+			return
+		}
+		if val, err := extractFloatValue(&resp.Data.Result[0]); err == nil {
+			values[i] = val
+		}
+	})
+
+	for i, q := range standard {
+		*q.Field(&response.Standard) = values[i]
 	}
 
 	// Groups keep registry order; a failed query leaves its descriptor in
 	// place with a zero value, so the page shape is stable under outages.
 	groupIndex := map[string]int{}
-	for _, def := range entry.CustomScalars {
-		value := 0.0
-		resp, err := h.promClient.Query(ctx, def.QueryFor(view, window))
-		if err != nil {
-			log.Printf("service %s tile %s: %v", name, def.Label, err)
-		} else if len(resp.Data.Result) > 0 {
-			if val, err := extractFloatValue(&resp.Data.Result[0]); err == nil {
-				value = val
-			}
-		}
+	for j, def := range custom {
 		i, seen := groupIndex[def.Group]
 		if !seen {
 			i = len(response.Custom)
@@ -163,12 +188,13 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 		}
 		response.Custom[i].Metrics = append(response.Custom[i].Metrics, CustomMetricValue{
 			Label:      def.Label,
-			Value:      value,
+			Value:      values[len(standard)+j],
 			Unit:       def.UnitFor(view),
 			Toggleable: def.Toggleable(),
 		})
 	}
 
+	h.cache.put(scalarCacheKey(name, view, timeRange), response)
 	mucks.JsonOk(w, response)
 }
 
@@ -184,6 +210,11 @@ func (h *MetricsHandler) GetServiceMetricsTimeSeries(w http.ResponseWriter, r *h
 	if !ValidTimeRange(timeRange) {
 		problem := mucks.NewBadRequest(badTimeRangeDetail)
 		mucks.JsonError(w, problem)
+		return
+	}
+
+	if cached, ok := h.cache.get(seriesCacheKey(name, timeRange)); ok {
+		mucks.JsonOk(w, cached)
 		return
 	}
 
@@ -211,27 +242,38 @@ func (h *MetricsHandler) GetServiceMetricsTimeSeries(w http.ResponseWriter, r *h
 		queries[metricName] = query
 	}
 
-	for metricName, query := range queries {
-		resp, err := h.promClient.QueryRange(ctx, query, startTime, endTime, step)
+	// Sorted names, then one bucket of series per name, concatenated in that
+	// order. Map iteration would otherwise put the series in a fresh random
+	// order every request — and a concurrent fan-out appending to one slice
+	// would be worse still, ordered by which query answered first — while the
+	// UI's generic Trends grid renders custom series in payload order with
+	// position-indexed colors, so charts would swap places and recolor on
+	// every refresh poll.
+	metricNames := make([]string, 0, len(queries))
+	for metricName := range queries {
+		metricNames = append(metricNames, metricName)
+	}
+	sort.Strings(metricNames)
+
+	perName := make([][]TimeSeries, len(metricNames))
+	runBounded(len(metricNames), func(i int) {
+		resp, err := h.promClient.QueryRange(ctx, queries[metricNames[i]], startTime, endTime, step)
 		if err != nil {
-			continue
+			return
 		}
 		for _, result := range resp.Data.Result {
 			ts, err := extractTimeSeries(&result)
 			if err != nil {
 				continue
 			}
-			ts.MetricName = metricName
-			response.Series = append(response.Series, ts)
+			ts.MetricName = metricNames[i]
+			perName[i] = append(perName[i], ts)
 		}
-	}
-	// The map iteration above would otherwise put the series in a fresh
-	// random order every request, and the UI's generic Trends grid renders
-	// custom series in payload order with position-indexed colors — charts
-	// would swap places and recolor on every refresh poll.
-	sort.Slice(response.Series, func(i, j int) bool {
-		return response.Series[i].MetricName < response.Series[j].MetricName
 	})
+	for _, series := range perName {
+		response.Series = append(response.Series, series...)
+	}
 
+	h.cache.put(seriesCacheKey(name, timeRange), response)
 	mucks.JsonOk(w, response)
 }

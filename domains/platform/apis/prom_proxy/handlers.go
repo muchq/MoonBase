@@ -94,11 +94,16 @@ type PrometheusQuerier interface {
 
 type MetricsHandler struct {
 	promClient PrometheusQuerier
+	// Only the per-service routes are cached; see responseCache. Nil is a
+	// working handler that always queries, which is what the tests building
+	// this struct directly rely on.
+	cache *responseCache
 }
 
 func NewMetricsHandler(promClient PrometheusQuerier) *MetricsHandler {
 	return &MetricsHandler{
 		promClient: promClient,
+		cache:      newResponseCache(),
 	}
 }
 
