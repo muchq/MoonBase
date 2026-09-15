@@ -175,17 +175,18 @@ fn trace_id_of(traceparent: &str) -> &str {
     }
 }
 
-/// One access-log line per request: a single JSON event in the metrics
-/// vocabulary (#1459) — http_method and route are the bounded labels the
-/// instruments carry, so a dashboard-to-logs pivot is a copy-paste; the raw
-/// path-and-query rides in "target" where an unbounded value is data, not a
-/// label. duration_us matches the histogram's unit. client is the address
-/// the limiter keys on — the socket peer, reported as client_source
-/// "direct_peer" (see RateLimit: this rail has no trusted-proxy boundary
-/// yet, so behind Caddy that is Caddy) — never the raw x-forwarded-for a
-/// client can forge; "unknown" when the request carried no peer at all.
-/// Same spelling as opal-cpp's FormatAccessLog, so a query keyed on the
-/// C++ rail's line reads this one.
+/// One access-log line per request except health probes, which are metered
+/// but not logged: a single JSON event in the metrics vocabulary (#1459) —
+/// http_method and route are the bounded labels the instruments carry, so a
+/// dashboard-to-logs pivot is a copy-paste; the raw path-and-query rides in
+/// "target" where an unbounded value is data, not a label. duration_us
+/// matches the histogram's unit. client is the address the limiter keys on
+/// — the socket peer, reported as client_source "direct_peer" (see
+/// RateLimit: this rail has no trusted-proxy boundary yet, so behind Caddy
+/// that is Caddy) — never the raw x-forwarded-for a client can forge;
+/// "unknown" when the request carried no peer at all. Same spelling as
+/// opal-cpp's FormatAccessLog, so a query keyed on the C++ rail's line
+/// reads this one.
 async fn access_log_middleware(req: Request, next: Next) -> Response {
     let start = std::time::Instant::now();
     let http_method = bounded_method_label(req.method());
@@ -203,6 +204,11 @@ async fn access_log_middleware(req: Request, next: Next) -> Response {
         .to_string();
 
     let resp = next.run(req).await;
+
+    // route_label is MatchedPath, so /health?probe=1 still equals "/health".
+    if route == "/health" {
+        return resp;
+    }
 
     tracing::info!(
         // "event", not "log": docker's json-file driver wraps container
@@ -1034,11 +1040,12 @@ mod tests {
         access_line(path, expected_status, true).await
     }
 
-    async fn access_line(
+    /// Subscriber output for one request through the stock access-log stack.
+    async fn access_log_capture(
         path: &str,
         expected_status: StatusCode,
         with_headers: bool,
-    ) -> serde_json::Value {
+    ) -> String {
         let buf: Arc<std::sync::Mutex<Vec<u8>>> = Arc::default();
         let writer_buf = buf.clone();
         let subscriber = log_subscriber_builder()
@@ -1078,8 +1085,15 @@ mod tests {
         }
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), expected_status);
+        String::from_utf8(buf.lock().unwrap().clone()).unwrap()
+    }
 
-        let output = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+    async fn access_line(
+        path: &str,
+        expected_status: StatusCode,
+        with_headers: bool,
+    ) -> serde_json::Value {
+        let output = access_log_capture(path, expected_status, with_headers).await;
         let line = output
             .lines()
             .find(|l| l.contains("\"event\":\"access\""))
@@ -1168,14 +1182,18 @@ mod tests {
         assert_eq!(v["target"], "/no/such/path");
     }
 
-    /// The probe path is deliberately access-logged (the layer sits outside
-    /// the health/limited split); a layer move that silences — or floods —
-    /// it should fail a test, not surprise an operator.
+    /// Probes are metered but never logged: with a probe every few seconds
+    /// per replica the access log would be mostly health lines. Same contract
+    /// as aura's HealthProbesAreNotAccessLogged.
     #[tokio::test]
-    async fn access_log_covers_the_health_route() {
-        let v = access_line_for("/health", StatusCode::OK).await;
-        assert_eq!(v["route"], "/health");
-        assert_eq!(v["status"], 200);
+    async fn health_probes_are_not_access_logged() {
+        for path in ["/health", "/health?probe=1"] {
+            let output = access_log_capture(path, StatusCode::OK, false).await;
+            assert!(
+                !output.lines().any(|l| l.contains("\"event\":\"access\"")),
+                "health probes must not emit an access line, got: {output}"
+            );
+        }
     }
 
     /// Parse-don't-trust is the whole contract, so the rejection branches
