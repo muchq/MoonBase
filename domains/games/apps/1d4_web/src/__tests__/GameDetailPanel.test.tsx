@@ -5,8 +5,17 @@ import GameDetailPanel from '../components/GameDetailPanel';
 import type { GameRow, OccurrenceRow } from '../types';
 
 vi.mock('react-chessboard', () => ({
-  Chessboard: ({ options }: { options: { position: string } }) => (
-    <div data-testid="chessboard" data-fen={options?.position} />
+  Chessboard: ({
+    options,
+  }: {
+    options: { position: string; arrows?: unknown; squareStyles?: unknown };
+  }) => (
+    <div
+      data-testid="chessboard"
+      data-fen={options?.position}
+      data-arrows={JSON.stringify(options?.arrows ?? [])}
+      data-square-styles={JSON.stringify(options?.squareStyles ?? {})}
+    />
   ),
 }));
 
@@ -243,5 +252,140 @@ describe('platform', () => {
     );
 
     expect(screen.getByText(/lichess/)).toBeInTheDocument();
+  });
+});
+
+// #1102: the board explains the active motif with arrows read from the row's
+// attacker/target notation ("Nf3" is a white knight on f3), not inferred from
+// the position.
+describe('motif arrows', () => {
+  const at2 = { gameUrl: 'https://chess.com/game/1', moveNumber: 2, side: 'white' as const };
+  const forkRows: OccurrenceRow[] = [
+    { ...at2, motif: 'fork', description: 'Fork', attacker: 'Nf3', target: 'pe5' },
+    { ...at2, motif: 'fork', description: 'Fork', attacker: 'Nf3', target: 'qd8' },
+  ];
+  const checkRow: OccurrenceRow = {
+    ...at2,
+    motif: 'check',
+    description: 'Check',
+    attacker: 'Nf3',
+    target: 'ke8',
+  };
+
+  function arrows(): unknown {
+    return JSON.parse(screen.getByTestId('chessboard').getAttribute('data-arrows')!);
+  }
+  function squareStyles(): Record<string, { backgroundColor: string }> {
+    return JSON.parse(screen.getByTestId('chessboard').getAttribute('data-square-styles')!);
+  }
+
+  it('draws nothing until an occurrence is selected', () => {
+    render(<GameDetailPanel game={{ ...mockGame, occurrences: { fork: forkRows } }} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Next move' }));
+    expect(arrows()).toEqual([]);
+  });
+
+  it('draws one arrow per row of the active motif, attacker to target, in the motif color', () => {
+    render(<GameDetailPanel game={{ ...mockGame, occurrences: { fork: forkRows } }} onClose={() => {}} />);
+    fireEvent.click(screen.getAllByText('fork')[0]);
+    expect(arrows()).toEqual([
+      { startSquare: 'f3', endSquare: 'e5', color: '#f6c90e' },
+      { startSquare: 'f3', endSquare: 'd8', color: '#f6c90e' },
+    ]);
+  });
+
+  it('uses the list accent grey for a motif with no color of its own', () => {
+    const rows: OccurrenceRow[] = [
+      { ...at2, motif: 'overloaded_piece', description: 'Overloaded', attacker: 'Nf3', target: 'Pe4' },
+    ];
+    render(<GameDetailPanel game={{ ...mockGame, occurrences: { overloaded_piece: rows } }} onClose={() => {}} />);
+    fireEvent.click(screen.getByText('overloaded piece'));
+    expect(arrows()).toEqual([{ startSquare: 'f3', endSquare: 'e4', color: '#aaaaaa' }]);
+    // The tint appends an alpha byte, so the color has to be 6-digit hex; a
+    // 3-digit one becomes 5 digits, which the browser drops.
+    expect(squareStyles().g1.backgroundColor).toBe('#aaaaaa66');
+    expect(squareStyles().f3.backgroundColor).toBe('#aaaaaaaa');
+  });
+
+  it('starts a discovered attack from the revealed piece, not the one that moved', () => {
+    const rows: OccurrenceRow[] = [
+      {
+        ...at2,
+        motif: 'discovered_attack',
+        description: 'Discovered attack',
+        movedPiece: 'Ng1f3',
+        attacker: 'Bc4',
+        target: 'qd8',
+        isDiscovered: true,
+      },
+    ];
+    render(<GameDetailPanel game={{ ...mockGame, occurrences: { discovered_attack: rows } }} onClose={() => {}} />);
+    fireEvent.click(screen.getByText('discovered attack'));
+    expect(arrows()).toEqual([{ startSquare: 'c4', endSquare: 'd8', color: '#66b2ff' }]);
+  });
+
+  it('leaves out rows of the same motif and move made by another piece', () => {
+    // Castling lands two pieces, so one move can pin with each.
+    const rows: OccurrenceRow[] = [
+      { ...at2, motif: 'pin', description: 'Pin', attacker: 'Rf1', target: 'nf6' },
+      { ...at2, motif: 'pin', description: 'Pin', attacker: 'Kg1', target: 'pg2' },
+    ];
+    render(<GameDetailPanel game={{ ...mockGame, occurrences: { pin: rows } }} onClose={() => {}} />);
+    fireEvent.click(screen.getAllByText('pin')[1]);
+    expect(arrows()).toEqual([{ startSquare: 'g1', endSquare: 'g2', color: '#e84393' }]);
+  });
+
+  it('leaves out rows of other motifs on the same move', () => {
+    render(
+      <GameDetailPanel
+        game={{ ...mockGame, occurrences: { fork: forkRows, check: [checkRow] } }}
+        onClose={() => {}}
+      />
+    );
+    fireEvent.click(screen.getByText('check'));
+    expect(arrows()).toEqual([{ startSquare: 'f3', endSquare: 'e8', color: '#ff4444' }]);
+  });
+
+  it('leaves out rows of the same motif on another move', () => {
+    const later: OccurrenceRow = { ...forkRows[0], moveNumber: 1, side: 'black', attacker: 'nc6', target: 'Pd4' };
+    render(
+      <GameDetailPanel
+        game={{ ...mockGame, occurrences: { fork: [later, ...forkRows] } }}
+        onClose={() => {}}
+      />
+    );
+    fireEvent.click(screen.getByText('1...'));
+    expect(arrows()).toEqual([{ startSquare: 'c6', endSquare: 'd4', color: '#f6c90e' }]);
+  });
+
+  // double_check rows name the king but no attacker; rows written before the
+  // detectors recorded squares carry neither.
+  it('draws no arrow for a row missing attacker or target, and still tints the move', () => {
+    const rows: OccurrenceRow[] = [
+      { ...at2, motif: 'double_check', description: 'Double check', attacker: null, target: 'ke8' },
+      { ...at2, motif: 'double_check', description: 'Double check' },
+    ];
+    render(<GameDetailPanel game={{ ...mockGame, occurrences: { double_check: rows } }} onClose={() => {}} />);
+    fireEvent.click(screen.getAllByText('double check')[0]);
+    expect(arrows()).toEqual([]);
+    expect(squareStyles().f3.backgroundColor).toBe('#ff4444aa');
+  });
+
+  it('draws no arrow for notation that does not end in a square', () => {
+    const rows: OccurrenceRow[] = [{ ...at2, motif: 'fork', description: 'Fork', attacker: 'N??', target: 'pe5' }];
+    render(<GameDetailPanel game={{ ...mockGame, occurrences: { fork: rows } }} onClose={() => {}} />);
+    fireEvent.click(screen.getByText('fork'));
+    expect(arrows()).toEqual([]);
+  });
+
+  it('drops the arrows and the motif tint once the board leaves the occurrence move', () => {
+    render(<GameDetailPanel game={{ ...mockGame, occurrences: { fork: forkRows } }} onClose={() => {}} />);
+    fireEvent.click(screen.getAllByText('fork')[0]);
+    expect(squareStyles().f3.backgroundColor).toBe('#f6c90eaa');
+    fireEvent.click(screen.getByRole('button', { name: 'Next move' }));
+    expect(arrows()).toEqual([]);
+    expect(squareStyles().c6.backgroundColor).toBe('rgba(255,255,0,0.55)');
+    // The occurrence stays selected, so the counter still reads as a position in the list.
+    expect(screen.getByText('1 / 2')).toBeInTheDocument();
   });
 });
