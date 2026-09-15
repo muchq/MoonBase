@@ -10,4 +10,4 @@ mod route;
 
 pub use classify::{AgentClass, agent_of, bounded_method, probe_of};
 pub use line::CaddyLine;
-pub use route::{OTHER_ROUTE, ROUTES, route_of};
+pub use route::{OTHER_ROUTE, OTHER_SITE, ROUTES, SITES, route_of, site_of};

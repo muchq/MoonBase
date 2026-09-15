@@ -1,0 +1,34 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
+
+rust_binary(
+    name = "deja",
+    srcs = [
+        "src/api.rs",
+        "src/bigram.rs",
+        "src/checkpoint.rs",
+        "src/engine.rs",
+        "src/lanes.rs",
+        "src/main.rs",
+        "src/metrics.rs",
+        "src/score.rs",
+        "src/tail.rs",
+        "src/token.rs",
+    ],
+    crate_name = "deja",
+    deps = [
+        "//domains/platform/libs/caddylog",
+        "//domains/platform/libs/server_pal",
+    ] + all_crate_deps(cargo_only = True),
+)
+
+rust_test(
+    name = "test_deja",
+    size = "small",
+    crate = ":deja",
+    deps = all_crate_deps(normal_dev = True),
+)
+
+linux_amd64_oci_binary(bin_name = "deja")

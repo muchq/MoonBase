@@ -27,6 +27,7 @@ pub const ROUTES: &[(&str, &[&str])] = &[
             "/1d4/v1/index",
             "/1d4/v1/index/*",
             "/1d4/v1/query",
+            "/deja/v1/*",
             "/games/v2/play",
             "/games/v2/session",
             "/iili/v1/r/*",
@@ -50,6 +51,35 @@ pub const ROUTES: &[(&str, &[&str])] = &[
     ("mcp.1d4.net", &["/mcp"]),
 ];
 
+/// Every site block in `deploy/consolidated/Caddyfile`, folded: the bounded
+/// host vocabulary, since a request's `host` is whatever the client sent
+/// and only these addresses are ones Caddy serves a site for. Pinned to
+/// the Caddyfile by the test below, like `ROUTES`.
+pub const SITES: &[&str] = &[
+    "api.1d4.net",
+    "api.muchq.com",
+    "consolidated.cmptr.info",
+    "git.muchq.com",
+    "gpt.muchq.com",
+    "i.iili.uk",
+    "mcp.1d4.net",
+];
+
+/// The host of a request nothing in the Caddyfile serves: one token for
+/// every address a scanner spells into the Host header.
+pub const OTHER_SITE: &str = "other";
+
+/// The Caddyfile site a request's host names, port and case dropped, or
+/// `OTHER_SITE`.
+pub fn site_of(host: &str) -> &'static str {
+    let host = fold(host.split(':').next().unwrap_or_default());
+    SITES
+        .iter()
+        .copied()
+        .find(|site| *site == host)
+        .unwrap_or(OTHER_SITE)
+}
+
 /// The route of a request no matcher claims on its site: a scanner's path,
 /// a typo, a Forgejo page, a site with no matchers. One token for all of
 /// them, so the unrouted tail cannot mint a vocabulary entry per path.
@@ -61,8 +91,8 @@ pub const OTHER_ROUTE: &str = "other";
 /// trailing slash kept, then compared case-insensitively. The host loses
 /// any port and its case.
 pub fn route_of(host: &str, uri: &str) -> &'static str {
-    let host = fold(host.split(':').next().unwrap_or_default());
-    let Some((_, routes)) = ROUTES.iter().find(|(site, _)| *site == host) else {
+    let site = site_of(host);
+    let Some((_, routes)) = ROUTES.iter().find(|(candidate, _)| *candidate == site) else {
         return OTHER_ROUTE;
     };
     let Some(target) = origin_path(uri) else {
@@ -209,6 +239,26 @@ mod tests {
         assert_eq!(route_of("", "/mcp"), OTHER_ROUTE);
     }
 
+    #[test]
+    fn sites_are_the_caddyfile_addresses_and_everything_else_is_other() {
+        assert_eq!(site_of("git.muchq.com"), "git.muchq.com");
+        assert_eq!(site_of("GIT.muchq.com:443"), "git.muchq.com");
+        assert_eq!(
+            site_of("consolidated.cmptr.info"),
+            "consolidated.cmptr.info"
+        );
+        for host in [
+            "",
+            "example.com",
+            "muchq.com",
+            "api.muchq.com.evil.example",
+            "1.2.3.4",
+        ] {
+            assert_eq!(site_of(host), OTHER_SITE, "{host:?}");
+        }
+        assert!(!SITES.contains(&OTHER_SITE));
+    }
+
     // Caddy matches the decoded, cleaned path, so the spellings a scanner
     // uses to slip past a matcher land on the route Caddy actually served.
     #[test]
@@ -295,6 +345,8 @@ mod tests {
     // this vocabulary names.
     const CADDYFILE: &str = include_str!("../../../../../deploy/consolidated/Caddyfile");
 
+    // Every site in the Caddyfile and its `path` matchers, an empty set for
+    // a site that has none.
     fn caddyfile_path_matchers() -> BTreeMap<&'static str, BTreeSet<&'static str>> {
         let mut by_site = BTreeMap::new();
         let mut site = None;
@@ -302,7 +354,9 @@ mod tests {
             // A site block opens at column zero with its address; a snippet
             // opens with a parenthesised name and is not a site.
             if !line.starts_with(['\t', ' ', '#', '(', '}']) && line.ends_with(" {") {
-                site = Some(line.trim_end_matches(" {"));
+                let address = line.trim_end_matches(" {");
+                by_site.entry(address).or_insert_with(BTreeSet::new);
+                site = Some(address);
                 continue;
             }
             if line.starts_with('}') {
@@ -327,14 +381,24 @@ mod tests {
         let in_caddyfile = caddyfile_path_matchers();
         let matchers: usize = in_caddyfile.values().map(BTreeSet::len).sum();
         assert!(matchers > 10, "parsed too few matchers: {in_caddyfile:?}");
-        let here: BTreeMap<&str, BTreeSet<&str>> = ROUTES
+        let mut here: BTreeMap<&str, BTreeSet<&str>> = ROUTES
             .iter()
             .map(|(site, routes)| (*site, routes.iter().copied().collect()))
             .collect();
+        // A site with no matcher is in SITES and not in ROUTES.
+        for site in SITES {
+            here.entry(site).or_default();
+        }
+        assert_eq!(here, in_caddyfile, "ROUTES, SITES and the Caddyfile differ");
+        let sites: BTreeSet<&str> = SITES.iter().copied().collect();
         assert_eq!(
-            here, in_caddyfile,
-            "ROUTES and the Caddyfile's path matchers differ"
+            sites,
+            in_caddyfile.keys().copied().collect(),
+            "SITES and the Caddyfile's sites differ"
         );
+        for site in SITES {
+            assert_eq!(fold(site), *site, "{site} is not folded");
+        }
         // Requests are folded before matching and the table is compared as
         // spelled, so an entry that is not already folded could never match.
         for (site, routes) in ROUTES {

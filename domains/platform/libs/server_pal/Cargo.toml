@@ -23,7 +23,7 @@ tracing-subscriber = { workspace = true, features = ["json"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util", "time"] }
 tower = "0.5"
 # The in-memory exporter behind the label-set and unit tests. Costs one new
 # Cargo.lock edge (opentelemetry_sdk -> tokio) and, because crate_universe

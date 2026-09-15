@@ -532,6 +532,7 @@ async fn fallback(_: Uri) -> (StatusCode, String) {
 
 pub struct RouterBuilder<S: Clone + Send + Sync + 'static> {
     router: Router<S>,
+    streams: Router<S>,
     rate_limit: Option<RateLimit>,
 }
 
@@ -556,9 +557,22 @@ fn common_layers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<
         .layer(CatchPanicLayer::new())
 }
 
+/// The middleware a long-lived response carries: the common stack minus the
+/// three layers that assume a request answers once and soon. The Accept
+/// check would refuse `text/event-stream`, the timeout would cut the stream
+/// at ten seconds, and compression would buffer what has to flush per
+/// event. Rate limiting, metrics and the access log still apply: they wrap
+/// the merged router in `build_with_cell`.
+fn stream_layers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> {
+    router
+        .layer(TraceLayer::new_for_http())
+        .layer(CatchPanicLayer::new())
+}
+
 pub fn router_builder<S: Clone + Send + Sync + 'static>() -> RouterBuilder<S> {
     RouterBuilder {
         router: Router::new(),
+        streams: Router::new(),
         rate_limit: Some(DEFAULT_RATE_LIMIT),
     }
 }
@@ -566,6 +580,13 @@ pub fn router_builder<S: Clone + Send + Sync + 'static>() -> RouterBuilder<S> {
 impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
     pub fn route(mut self, path: &str, method_router: MethodRouter<S>) -> Self {
         self.router = self.router.route(path, method_router);
+        self
+    }
+
+    /// A route whose response stays open, such as a server-sent event
+    /// stream: served under `stream_layers` rather than the common stack.
+    pub fn stream_route(mut self, path: &str, method_router: MethodRouter<S>) -> Self {
+        self.streams = self.streams.route(path, method_router);
         self
     }
 
@@ -595,7 +616,9 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
         // /health is served from its own router so the governor can wrap the
         // service's routes without wrapping the probe. Both carry the identical
         // stack below, so the exemption is the only difference between them.
-        let limited = common_layers(self.router.fallback(fallback));
+        let limited = common_layers(self.router)
+            .merge(stream_layers(self.streams))
+            .fallback(fallback);
         let limited = if let Some(RateLimit { per_second, burst }) = self.rate_limit {
             assert!(burst > 0, "rate_limit burst must be at least 1");
             let config = Arc::new(
@@ -777,6 +800,89 @@ mod tests {
         );
     }
 
+    fn make_request_accepting(path: &str, accept: &str) -> Request<Body> {
+        let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let mut req = Request::builder()
+            .method("GET")
+            .uri(path)
+            .header("Accept", accept)
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut().insert(ConnectInfo(peer));
+        req
+    }
+
+    /// One router with a plain route and a stream route, the handlers
+    /// identical, so every difference between the two answers is the stack.
+    fn two_lane_app() -> Router {
+        router_builder::<NoState>()
+            .route("/plain", get(|| async { "plain" }))
+            .stream_route("/stream", get(|| async { "stream" }))
+            .rate_limit(None)
+            .build()
+            .with_state(NoState)
+    }
+
+    // A browser's EventSource sends `Accept: text/event-stream` and nothing
+    // else; the common stack answers that 406.
+    #[tokio::test]
+    async fn a_stream_route_accepts_an_event_stream_client() {
+        let app = two_lane_app();
+        let resp = app
+            .clone()
+            .oneshot(make_request_accepting("/plain", "text/event-stream"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_ACCEPTABLE);
+        let resp = app
+            .oneshot(make_request_accepting("/stream", "text/event-stream"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // The common stack cuts a response at ten seconds; a stream outlives
+    // that by design.
+    #[tokio::test(start_paused = true)]
+    async fn a_stream_route_is_not_cut_at_the_request_timeout() {
+        let slow = || async {
+            tokio::time::sleep(Duration::from_secs(11)).await;
+            "done"
+        };
+        let app = router_builder::<NoState>()
+            .route("/plain", get(slow))
+            .stream_route("/stream", get(slow))
+            .rate_limit(None)
+            .build()
+            .with_state(NoState);
+        let resp = app.clone().oneshot(make_request("/plain")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::REQUEST_TIMEOUT);
+        let resp = app.oneshot(make_request("/stream")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // A stream route is still a route: unmatched paths beside it 404, and
+    // the limiter still meters it.
+    #[tokio::test]
+    async fn a_stream_route_keeps_the_fallback_and_the_limiter() {
+        let app = two_lane_app();
+        let resp = app.oneshot(make_request("/nope")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        let app = router_builder::<NoState>()
+            .stream_route("/stream", get(|| async { "stream" }))
+            .rate_limit(Some(RateLimit {
+                per_second: 0.0001,
+                burst: 1,
+            }))
+            .build()
+            .with_state(NoState);
+        let resp = app.clone().oneshot(make_request("/stream")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp = app.oneshot(make_request("/stream")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
     #[tokio::test]
     async fn rate_limiter_blocks_after_burst() {
         // Replenish one element per second, burst of 2
@@ -876,6 +982,20 @@ mod tests {
             .rate_limit(None)
             .build()
             .with_state(NoState);
+        // tracing caches each callsite's interest process-wide, computed
+        // from whatever subscriber the thread that first hits the callsite
+        // has, and the subscriber here is set per thread. A parallel test
+        // with no subscriber can be the first to hit the access-log
+        // callsite and cache "never", which this thread's `info!` then
+        // honours: nothing is written and the buffer reads empty. Hitting
+        // the callsite from here first and rebuilding pins its interest
+        // under this subscriber, after which no later registration flips it.
+        app.clone()
+            .oneshot(make_request("/widgets/warm"))
+            .await
+            .unwrap();
+        tracing::callsite::rebuild_interest_cache();
+        buf.lock().unwrap().clear();
         let mut req = make_request(path);
         if with_headers {
             req.headers_mut()

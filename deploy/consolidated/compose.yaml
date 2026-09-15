@@ -578,6 +578,39 @@ services:
       retries: 3
       start_period: 15s
 
+  deja:
+    image: ghcr.io/muchq/deja:${DEJA_SHA:-${DEPLOY_SHA:-latest}}
+    labels:
+      com.muchq.description: "Next-request predictor over Caddy's access log (Rust)"
+    restart: always
+    logging: *default-logging
+    environment:
+      - PORT=8093
+      - ACCESS_LOG=/var/log/caddy/access.log
+      - CHECKPOINT=/var/lib/deja/checkpoint.json
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
+      - OTEL_SERVICE_NAME=deja
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=deja,service.version=${DEJA_SHA:-${DEPLOY_SHA:-latest}}
+    volumes:
+      # Read-only: deja observes the live log Caddy writes and log_shipper
+      # rolls away, and writes nothing but its own checkpoint (#1150).
+      - /var/log/caddy:/var/log/caddy:ro
+      - deja_state:/var/lib/deja
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    healthcheck:
+      # Steady /health probe (#1307); see games_hub's for the full rationale.
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8093 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   log_shipper:
     image: ghcr.io/muchq/log_shipper:${LOG_SHIPPER_SHA:-${DEPLOY_SHA:-latest}}
     labels:
@@ -696,6 +729,7 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  deja_state:
   forgejo_data:
   # Compose prefixes this with the project name, so the cluster is
   # ubuntu_shared_pgdata on the deploy host. Renaming this key does not rename
