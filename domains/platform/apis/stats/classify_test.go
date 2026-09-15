@@ -1,78 +1,48 @@
 package stats
 
 import (
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestAgentClassificationCoversTheVocabulary(t *testing.T) {
-	cases := []struct {
-		ua   string
-		want string
-	}{
-		// AI scrapers win over the generic bot markers they also match.
-		{"Mozilla/5.0 AppleWebKit/537.36; compatible; GPTBot/1.2; +https://openai.com/gptbot", AgentAIScraper},
-		{"Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)", AgentAIScraper},
-		{"meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)", AgentAIScraper},
-		{"Bytespider; spider-feedback@bytedance.com", AgentAIScraper},
-		{"PerplexityBot/1.0", AgentAIScraper},
-
-		{"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", AgentBot},
-		{"curl/8.6.0", AgentBot},
-		{"python-requests/2.32.0", AgentBot},
-		{"Go-http-client/2.0", AgentBot},
-
-		{"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36", AgentBrowser},
-
-		{"", AgentOther},
-		{"definitely-not-a-browser", AgentOther},
-	}
-	for _, c := range cases {
-		if got, _ := AgentOf(c.ua); got != c.want {
-			t.Errorf("AgentOf(%q) = %s, want %s", c.ua, got, c.want)
+// The corpus under caddylog/testdata is the behavioral pin shared with the
+// Rust classifier (#1150): tab-separated rows, `#` comments, blank lines
+// ignored, read from the package dir where rules_go runs the test.
+func corpusRows(t *testing.T, path string, columns int) [][]string {
+	t.Helper()
+	source, err := os.ReadFile(path)
+	require.NoError(t, err, "cannot read %s — has the data dependency been dropped?", path)
+	var rows [][]string
+	for _, line := range strings.Split(string(source), "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
 		}
+		row := strings.Split(line, "\t")
+		require.Len(t, row, columns, "malformed corpus row %q", line)
+		rows = append(rows, row)
 	}
+	require.Greater(t, len(rows), 10, "corpus too small to mean anything")
+	return rows
+}
+
+func TestAgentsCorpusLandsEveryLineWhereCaddylogDoes(t *testing.T) {
+	classes := map[string]bool{}
+	for _, row := range corpusRows(t, "../../libs/caddylog/testdata/agents.tsv", 3) {
+		ua, wantClass, wantName := row[0], row[1], row[2]
+		class, name := AgentOf(ua)
+		if class != wantClass || name != wantName {
+			t.Errorf("AgentOf(%q) = (%s, %q), want (%s, %q)", ua, class, name, wantClass, wantName)
+		}
+		classes[class] = true
+	}
+	require.Len(t, classes, 4, "the corpus reaches every class")
 }
 
 func TestAgentNamesAreBoundedPerClass(t *testing.T) {
-	cases := []struct {
-		ua        string
-		wantClass string
-		wantName  string
-	}{
-		// AI scrapers name themselves by marker, whatever else the UA says.
-		{"Mozilla/5.0 AppleWebKit/537.36; compatible; GPTBot/1.2; +https://openai.com/gptbot", AgentAIScraper, "gptbot"},
-		{"meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)", AgentAIScraper, "meta-externalagent"},
-		// Named bots by marker; anonymous tooling by its product token.
-		{"Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", AgentBot, "googlebot"},
-		{"Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)", AgentBot, "ahrefsbot"},
-		{"curl/8.6.0", AgentBot, "curl"},
-		{"python-requests/2.32.0", AgentBot, "python-requests"},
-		{"Go-http-client/2.0", AgentBot, "go-http-client"},
-		{"my-crawler/0.1 (+https://example.com)", AgentBot, "my-crawler"},
-		// Telegram quotes Twitter's marker in its own UA; the real one wins.
-		{"TelegramBot (like TwitterBot)", AgentBot, "telegrambot"},
-		{"Twitterbot/1.0", AgentBot, "twitterbot"},
-		// A browser-shaped generic bot would be "mozilla" like every browser,
-		// so the marker it tripped names it instead.
-		{"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/120.0.0.0 Safari/537.36", AgentBot, "headless"},
-		{"Mozilla/5.0 (compatible; SomeNewBot/1.0)", AgentBot, "bot"},
-		// Browsers are one bucket: the token would be "mozilla" for all of them.
-		{"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36", AgentBrowser, ""},
-		// "other" keeps its product token so the unclassified tail is readable.
-		{"", AgentOther, "(empty)"},
-		{"definitely-not-a-browser", AgentOther, "definitely-not-a-browser"},
-		{"Weird Client 3.0", AgentOther, "weird"},
-		{"<script>alert(1)</script>", AgentOther, "script"},
-		{strings.Repeat("a", 200) + "/1.0", AgentOther, strings.Repeat("a", 32)},
-		{"/////", AgentOther, "(empty)"},
-	}
-	for _, c := range cases {
-		class, name := AgentOf(c.ua)
-		if class != c.wantClass || name != c.wantName {
-			t.Errorf("AgentOf(%q) = (%s, %q), want (%s, %q)", c.ua, class, name, c.wantClass, c.wantName)
-		}
-	}
 	// Every marker names itself, so the agent column's vocabulary for the
 	// two marker classes is exactly the lists and cannot drift from them —
 	// and markerNames knows every one of them.
@@ -112,64 +82,22 @@ func TestBotSubstringHasNoWordBoundaryOnPurpose(t *testing.T) {
 	}
 }
 
-func TestProbeFamiliesAreBoundedAndRouteScoped(t *testing.T) {
-	cases := []struct {
-		uri  string
-		want string
-	}{
-		{"/wp-login.php", ProbeWordpress},
-		{"/wp-admin/", ProbeWordpress},
-		{"/xmlrpc.php", ProbeWordpress},
-		{"/blog/wp-includes/wlwmanifest.xml", ProbeWordpress},
-		{"/.env", ProbeEnv},
-		{"/.env.production?x=1", ProbeEnv},
-		{"/api/.env.bak", ProbeEnv},
-		{"/.envrc", ProbeEnv},
-		{"/.git/config", ProbeGit},
-		{"/.git/HEAD", ProbeGit},
-		{"/phpmyadmin/index.php", ProbePhpmyadmin},
-		{"/PMA/", ProbePhpmyadmin},
-		{"/adminer.php", ProbePhpmyadmin},
-		{"/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php", ProbePhp},
-		{"/index.php?s=/Index/think/app/invokefunction", ProbePhp},
-		{"/.aws/credentials", ProbeSecrets},
-		{"/.ssh/id_rsa", ProbeSecrets},
-		{"/.htpasswd", ProbeSecrets},
-		{"/backup.sql", ProbeBackup},
-		{"/site.tar.gz", ProbeBackup},
-		{"/db.zip", ProbeBackup},
-		{"/../../etc/passwd", ProbeTraversal},
-		{"/cgi-bin/%2e%2e/%2e%2e/bin/sh", ProbeTraversal},
-		{"/cgi-bin/luci", ProbeCgi},
-		{"/manager/html", ProbeJava},
-		{"/actuator/health", ProbeJava},
-		{"/solr/admin/info/system", ProbeJava},
-		{"/boaform/admin/formLogin", ProbeRouter},
-		{"/HNAP1/", ProbeRouter},
-		{"/GponForm/diag_Form", ProbeRouter},
-		{"/WP-LOGIN.PHP", ProbeWordpress}, // case-insensitive
-
-		// Real routes on these hosts are not probes, however they are spelled.
-		{"/", ""},
-		{"/mcp", ""},
-		{"/iili/v1/r/abc", ""},
-		{"/stats/v1/summary?days=7", ""},
-		{"/.well-known/acme-challenge/token", ""},
-		{"/muchq/moonbase/src/branch/main/README.md", ""},
-		{"/index.html", ""},
-		{"/admin/reanalyze", ""}, // one_d4's real admin route; "admin" is not a family
-		{"/environment", ""},
-		{"/gitignore", ""},
-		{"/muchq/MoonBase.git/info/refs", ""}, // an HTTP clone, not a dotdir probe
-		// Forgejo serves archives and raw files with backup-looking
-		// extensions, always several segments deep; backups probe the root.
-		{"/muchq/MoonBase/archive/main.tar.gz", ""},
-		{"/muchq/MoonBase/raw/branch/main/migrations/V004__x.sql", ""},
-	}
-	for _, c := range cases {
-		if got := ProbeOf(c.uri); got != c.want {
-			t.Errorf("ProbeOf(%q) = %q, want %q", c.uri, got, c.want)
+func TestProbesCorpusLandsEveryLineWhereCaddylogDoes(t *testing.T) {
+	reached := map[string]bool{}
+	for _, row := range corpusRows(t, "../../libs/caddylog/testdata/probes.tsv", 2) {
+		uri, want := row[0], row[1]
+		got := ProbeOf(uri)
+		if got != want {
+			t.Errorf("ProbeOf(%q) = %q, want %q", uri, got, want)
 		}
+		if got != "" {
+			reached[got] = true
+		}
+	}
+	// Every family is reached by a row, so a pattern that stops matching
+	// fails here rather than silently never firing again.
+	for _, family := range probeFamilies {
+		assert.True(t, reached[family.name], "no corpus row reaches the %q family", family.name)
 	}
 }
 

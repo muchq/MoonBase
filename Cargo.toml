@@ -9,6 +9,7 @@ members = [
     "domains/graphics/libs/imagine_rust",
     "domains/games/apis/mithril",
     "domains/graphics/apis/posterize",
+    "domains/platform/libs/caddylog",
     "domains/platform/libs/server_pal",
     "domains/games/libs/wordchains",
     "domains/games/apps/wordchains",
@@ -31,6 +32,7 @@ image = { version = "0.25.9", default-features = false, features = ["png", "jpeg
 imagine = { path = "domains/graphics/libs/imagine_rust" }
 log = "0.4.29"
 half = "2.7.1"
+regex = "1.13.1"
 reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls-no-provider", "query"] }
 rustls = { version = "0.23.36", default-features = false, features = ["std", "tls12", "ring", "logging"] }
 webpki-root-certs = "1"

@@ -1,0 +1,39 @@
+# User-Agent → agent class → bounded name, as both stats/classify.go (Go) and
+# caddylog (Rust) must answer it. Tab-separated; a leading tab is an empty UA.
+
+# AI scrapers name themselves by marker, whatever else the UA says, and win
+# over the generic bot markers they also match.
+Mozilla/5.0 AppleWebKit/537.36; compatible; GPTBot/1.2; +https://openai.com/gptbot	ai_scraper	gptbot
+Mozilla/5.0 (compatible; ClaudeBot/1.0; +claudebot@anthropic.com)	ai_scraper	claudebot
+meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)	ai_scraper	meta-externalagent
+Bytespider; spider-feedback@bytedance.com	ai_scraper	bytespider
+PerplexityBot/1.0	ai_scraper	perplexitybot
+
+# Named bots by marker; anonymous tooling by its product token.
+Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)	bot	googlebot
+Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)	bot	ahrefsbot
+curl/8.6.0	bot	curl
+python-requests/2.32.0	bot	python-requests
+Go-http-client/2.0	bot	go-http-client
+my-crawler/0.1 (+https://example.com)	bot	my-crawler
+# Telegram quotes Twitter's marker in its own UA; the real one wins.
+TelegramBot (like TwitterBot)	bot	telegrambot
+Twitterbot/1.0	bot	twitterbot
+# A browser-shaped generic bot would be "mozilla" like every browser, so
+# the marker it tripped names it instead.
+Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/120.0.0.0 Safari/537.36	bot	headless
+Mozilla/5.0 (compatible; SomeNewBot/1.0)	bot	bot
+
+# Browsers are one bucket: the token would be "mozilla" for all of them.
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36	browser	
+# A browser is one whose UA opens with Mozilla; quoting it later does not
+# make a client one.
+something/1.0 (compatible; Mozilla/5.0)	other	something
+
+# "other" keeps its product token so the unclassified tail is readable.
+	other	(empty)
+definitely-not-a-browser	other	definitely-not-a-browser
+Weird Client 3.0	other	weird
+<script>alert(1)</script>	other	script
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/1.0	other	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+/////	other	(empty)

@@ -1,0 +1,41 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+
+# classify.rs is read as text by //domains/platform/libs/otel_contract, which
+# pins its marker lists, probe families, class spellings and method list
+# equal to stats'. The corpus is replayed by stats' classify_test.go as well
+# as by this crate's tests, the behavioral half of the same pin.
+exports_files([
+    "src/classify.rs",
+    "testdata/agents.tsv",
+    "testdata/probes.tsv",
+])
+
+rust_library(
+    name = "caddylog",
+    srcs = [
+        "src/classify.rs",
+        "src/lib.rs",
+        "src/line.rs",
+        "src/route.rs",
+    ],
+    crate_name = "caddylog",
+    visibility = ["//visibility:public"],
+    deps = all_crate_deps(),
+)
+
+rust_test(
+    name = "caddylog_test",
+    size = "small",
+    # route.rs includes the Caddyfile at compile time and asserts ROUTES is
+    # exactly its path matchers by site, so a gateway route change fails
+    # this target; classify.rs includes the corpus stats replays too.
+    compile_data = [
+        "testdata/agents.tsv",
+        "testdata/probes.tsv",
+        "//deploy/consolidated:Caddyfile",
+    ],
+    crate = ":caddylog",
+    deps = all_crate_deps(normal_dev = True),
+)
