@@ -108,6 +108,11 @@ api.muchq.com {
 		path /stats/v1/*
 	}
 
+	@get_deja {
+		method GET
+		path /deja/v1/*
+	}
+
 	@post_iili_shorten {
 		method POST
 		path /iili/v1/shorten
@@ -221,6 +226,11 @@ api.muchq.com {
 	# stats (#1460): read-only aggregates, unrewritten like the rest.
 	handle @get_stats {
 		reverse_proxy stats:8092
+	}
+	# deja (#1150): the live tape, read-only. Its stream is server-sent
+	# events, which Caddy flushes per event on its own.
+	handle @get_deja {
+		reverse_proxy deja:8093
 	}
 	handle @get_iili_redirect {
 		reverse_proxy iili:8091

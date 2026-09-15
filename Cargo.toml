@@ -4,6 +4,7 @@ resolver = "2"
 members = [
     "domains/ai/apps/impact_mcp",
     "domains/ai/apps/microgpt_cli",
+    "domains/ai/apis/deja",
     "domains/ai/apis/microgpt_serve",
     "domains/ai/libs/microgpt",
     "domains/graphics/libs/imagine_rust",
@@ -39,9 +40,11 @@ webpki-root-certs = "1"
 safetensors = "0.8.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+caddylog = { path = "domains/platform/libs/caddylog" }
 server_pal = { path = "domains/platform/libs/server_pal" }
 sha2 = "0.11.0-rc.5"
 simplelog = { version = "0.12.2", features = ["paris"] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
 tokio = { version = "1.50.0", default-features = false, features = ["macros", "net", "rt-multi-thread", "signal"] }
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.7.0", features = ["full"] }

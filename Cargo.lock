@@ -791,6 +791,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "deja"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "caddylog",
+ "http-body-util",
+ "opentelemetry",
+ "opentelemetry_sdk",
+ "serde",
+ "serde_json",
+ "server_pal",
+ "tempfile",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3900,6 +3919,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

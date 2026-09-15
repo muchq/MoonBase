@@ -77,6 +77,11 @@
 		path /games/v2/play
 	}
 
+	@get_deja {
+		method GET
+		path /deja/v1/*
+	}
+
 	@options {
 		method OPTIONS
 	}
@@ -118,6 +123,9 @@
 	}
 	handle @post_posterize_edges {
 		reverse_proxy localhost:8084
+	}
+	handle @get_deja {
+		reverse_proxy localhost:8093
 	}
 
 	# Nothing else is routed: an unmatched path (or a HEAD on a GET-only
