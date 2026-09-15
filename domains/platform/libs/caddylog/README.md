@@ -17,12 +17,15 @@ the Caddyfile in and reads every `path` matcher out of it by site, so a
 `path` matcher added to or removed from a site is a test failure here
 until the table follows. Only `path` matchers: a site routed by
 `path_regexp` or a bare `handle`, which is all of git.muchq.com, is
-route-blind on purpose.
+route-blind on purpose. `SITES` is pinned the same way, to the Caddyfile's
+site blocks, so `site_of` is a host factor for every site, route-blind ones
+included.
 
 ```rust
 let line = caddylog::CaddyLine::parse(bytes)?;
 let (class, name) = caddylog::agent_of(line.user_agent());
 let probe = caddylog::probe_of(&line.request.uri); // Option<&str>
+let site = caddylog::site_of(&line.request.host); // a Caddyfile site or "other"
 let route = caddylog::route_of(&line.request.host, &line.request.uri); // a matcher or "other"
 let method = caddylog::bounded_method(&line.request.method);
 ```

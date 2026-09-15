@@ -10,10 +10,10 @@ mod token;
 
 use std::{
     env,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
     thread,
@@ -27,7 +27,7 @@ use tracing::{Level, event};
 
 use crate::{
     api::AppState,
-    engine::Engine,
+    engine::{Engine, Snapshot},
     metrics::AppMetrics,
     tail::{Start, Tailer},
 };
@@ -86,6 +86,7 @@ async fn main() {
     });
 
     let state = AppState::new(engine, AppMetrics::new());
+    let checkpointer = Arc::new(Checkpointer::new(checkpoint_path));
     let stopping = Arc::new(AtomicBool::new(false));
     let reader = thread::spawn({
         let state = Arc::clone(&state);
@@ -94,15 +95,15 @@ async fn main() {
     });
     tokio::spawn({
         let state = Arc::clone(&state);
-        let path = checkpoint_path.clone();
+        let checkpointer = Arc::clone(&checkpointer);
         async move {
             let mut ticks = tokio::time::interval(checkpoint_every);
             ticks.tick().await;
             loop {
                 ticks.tick().await;
-                let (state, path) = (Arc::clone(&state), path.clone());
+                let (state, checkpointer) = (Arc::clone(&state), Arc::clone(&checkpointer));
                 // Serializing and writing the file is blocking work.
-                let _ = tokio::task::spawn_blocking(move || save(&state, &path)).await;
+                let _ = tokio::task::spawn_blocking(move || checkpointer.save(&state)).await;
             }
         }
     });
@@ -117,7 +118,7 @@ async fn main() {
             event!(Level::INFO, "stopping; writing the checkpoint");
             stopping.store(true, Ordering::SeqCst);
             let _ = reader.join();
-            save(&state, &checkpoint_path);
+            checkpointer.save(&state);
         }
     }
 }
@@ -145,12 +146,46 @@ fn follow(mut tailer: Tailer, state: &AppState, stopping: &AtomicBool, poll: Dur
     }
 }
 
-fn save(state: &AppState, path: &Path) {
-    let snapshot = state.engine.lock().expect("engine lock").snapshot();
-    match checkpoint::save(path, &snapshot) {
-        Ok(()) => event!(Level::INFO, seq = snapshot.seq, "checkpoint written"),
-        Err(error) => {
-            event!(Level::ERROR, %error, path = %path.display(), "checkpoint not written")
+/// Writes checkpoints in sequence order. A snapshot older than one already
+/// on disk is dropped, so a periodic save that took its snapshot before the
+/// reader stopped cannot land after the final one and rewind the next boot.
+struct Checkpointer {
+    path: PathBuf,
+    written: Mutex<u64>,
+}
+
+impl Checkpointer {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            written: Mutex::new(0),
+        }
+    }
+
+    fn save(&self, state: &AppState) {
+        let snapshot = state.engine.lock().expect("engine lock").snapshot();
+        self.write(&snapshot);
+    }
+
+    fn write(&self, snapshot: &Snapshot) {
+        let mut written = self.written.lock().expect("checkpoint lock");
+        if snapshot.seq < *written {
+            event!(
+                Level::INFO,
+                seq = snapshot.seq,
+                newer = *written,
+                "checkpoint skipped"
+            );
+            return;
+        }
+        match checkpoint::save(&self.path, snapshot) {
+            Ok(()) => {
+                *written = snapshot.seq;
+                event!(Level::INFO, seq = snapshot.seq, "checkpoint written");
+            }
+            Err(error) => {
+                event!(Level::ERROR, %error, path = %self.path.display(), "checkpoint not written")
+            }
         }
     }
 }
@@ -197,5 +232,38 @@ mod tests {
         stopping.store(true, Ordering::SeqCst);
         reader.join().unwrap();
         assert_eq!(state.engine.lock().unwrap().state().seq, 1);
+    }
+
+    // The final checkpoint at shutdown is the newest; a periodic save whose
+    // snapshot predates it must not replace it however late it writes.
+    #[test]
+    fn an_older_snapshot_never_overwrites_a_newer_checkpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("checkpoint.json");
+        let checkpointer = Checkpointer::new(path.clone());
+        let mut engine = Engine::default();
+        engine.ingest(&crate::engine::fixtures::request(
+            1.0,
+            "1.1.1.1",
+            "GET",
+            "/",
+            200,
+            crate::engine::fixtures::BROWSER,
+        ));
+        let older = engine.snapshot();
+        engine.ingest(&crate::engine::fixtures::request(
+            2.0,
+            "1.1.1.1",
+            "GET",
+            "/",
+            200,
+            crate::engine::fixtures::BROWSER,
+        ));
+        let newer = engine.snapshot();
+        checkpointer.write(&newer);
+        checkpointer.write(&older);
+        let on_disk = checkpoint::load_or_quarantine(&path).unwrap().unwrap();
+        assert_eq!(on_disk.seq, newer.seq);
+        assert_eq!(on_disk, newer);
     }
 }

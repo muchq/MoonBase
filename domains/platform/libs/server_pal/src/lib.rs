@@ -558,11 +558,12 @@ fn common_layers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<
 }
 
 /// The middleware a long-lived response carries: the common stack minus the
-/// three layers that assume a request answers once and soon. The Accept
-/// check would refuse `text/event-stream`, the timeout would cut the stream
-/// at ten seconds, and compression would buffer what has to flush per
-/// event. Rate limiting, metrics and the access log still apply: they wrap
-/// the merged router in `build_with_cell`.
+/// three layers that have no place on it. The Accept check would refuse
+/// `text/event-stream` and the timeout would cut the stream at ten
+/// seconds; compression is left out because it is dead weight here,
+/// tower-http's default predicate never compressing `text/event-stream`
+/// anyway. Rate limiting, metrics and the access log still apply: they
+/// wrap the merged router in `build_with_cell`.
 fn stream_layers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> {
     router
         .layer(TraceLayer::new_for_http())
@@ -864,6 +865,33 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::REQUEST_TIMEOUT);
         let resp = app.oneshot(make_request("/stream")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // The stream lane carries no compression, and the common lane does.
+    #[tokio::test]
+    async fn a_stream_route_is_never_compressed() {
+        let app = router_builder::<NoState>()
+            .route("/plain", get(|| async { "x".repeat(4096) }))
+            .stream_route("/stream", get(|| async { "x".repeat(4096) }))
+            .rate_limit(None)
+            .build()
+            .with_state(NoState);
+        let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let gzip_ok = |path: &str| {
+            let mut req = Request::builder()
+                .uri(path)
+                .header("Accept", "application/json")
+                .header("Accept-Encoding", "gzip")
+                .body(Body::empty())
+                .unwrap();
+            req.extensions_mut().insert(ConnectInfo(peer));
+            req
+        };
+        let resp = app.clone().oneshot(gzip_ok("/plain")).await.unwrap();
+        assert_eq!(resp.headers().get("content-encoding").unwrap(), "gzip");
+        let resp = app.oneshot(gzip_ok("/stream")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(resp.headers().get("content-encoding").is_none());
     }
 
     // The stream lane keeps the request body limit: what a client may send

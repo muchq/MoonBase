@@ -1,8 +1,10 @@
 //! Follows Caddy's live access log a line at a time, across the rolls
 //! Caddy makes by size: a roll renames the file away and starts a new one,
-//! so the reader watches the inode, drains what it still holds, and
-//! reopens from the top when the inode changes or the file shrinks under
-//! it.
+//! so the reader keeps its handle, drains what that handle still holds,
+//! and reopens from the top when the inode changes or the file shrinks
+//! under it. The path can be missing for a moment between the rename and
+//! the create; the handle is drained then too and kept until the new
+//! file is there.
 
 use std::{
     fs::File,
@@ -18,6 +20,9 @@ pub const MAX_LINE: usize = 1024 * 1024;
 
 pub struct Tailer {
     path: PathBuf,
+    /// Where to start in a file opened with no handle held: at construction,
+    /// or when the path was missing then and appears later.
+    start: Start,
     file: Option<Open>,
     partial: Vec<u8>,
     /// The current line already overran `MAX_LINE`; the rest of it is
@@ -52,6 +57,7 @@ impl Tailer {
         };
         Ok(Self {
             path,
+            start,
             file,
             partial: Vec::new(),
             skipping: false,
@@ -63,16 +69,22 @@ impl Tailer {
     }
 
     /// The complete lines written since the last poll, newline stripped.
-    /// A line still being written waits for its newline; a file that was
-    /// rolled away is drained and then the new one is read from the top; a
-    /// truncated file is read from the top; a missing one yields nothing
-    /// until it appears.
+    /// A line still being written waits for its newline. A file that was
+    /// rolled away is drained through the handle still held, whether or
+    /// not the new file exists yet, and the new one is then read from the
+    /// top; a truncated file is read from the top; a file that was never
+    /// held yields nothing until it appears, and is then read from `start`.
     pub fn poll(&mut self) -> io::Result<Vec<Vec<u8>>> {
         let mut lines = Vec::new();
         let current = match std::fs::metadata(&self.path) {
             Ok(meta) => meta,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                self.file = None;
+                // Between the rename and the create: the held handle is the
+                // only way to what was written before the rename.
+                if let Some(open) = self.file.as_mut() {
+                    let chunk = open.read_new()?;
+                    self.split(&chunk, &mut lines);
+                }
                 return Ok(lines);
             }
             Err(error) => return Err(error),
@@ -88,7 +100,14 @@ impl Tailer {
                 let chunk = open.read_new()?;
                 self.split(&chunk, &mut lines);
             }
-            self.file = Some(Open::at(File::open(&self.path)?, Start::Beginning)?);
+            // A file replacing a held one is new content; only a file the
+            // tailer never held honours `start`.
+            let start = if self.file.is_some() {
+                Start::Beginning
+            } else {
+                self.start
+            };
+            self.file = Some(Open::at(File::open(&self.path)?, start)?);
             self.partial.clear();
             self.skipping = false;
         }
@@ -219,6 +238,21 @@ mod tests {
         assert_eq!(lines(&mut tailer), ["new-2"]);
     }
 
+    // Caddy renames first and creates second; a poll that lands between
+    // the two still reads what the old file got before the rename.
+    #[test]
+    fn a_roll_is_drained_while_the_new_file_is_still_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("access.log");
+        append(&path, "old-1\n");
+        let mut tailer = Tailer::new(&path, Start::End).unwrap();
+        append(&path, "old-2\n");
+        fs::rename(&path, dir.path().join("access-rolled.log")).unwrap();
+        assert_eq!(lines(&mut tailer), ["old-2"]);
+        append(&path, "new-1\n");
+        assert_eq!(lines(&mut tailer), ["new-1"]);
+    }
+
     // A partial line at the moment of the roll belongs to the old file;
     // Caddy finishes it there before it opens the new one.
     #[test]
@@ -273,13 +307,27 @@ mod tests {
     fn a_missing_file_yields_nothing_until_it_appears() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("access.log");
-        let mut tailer = Tailer::new(&path, Start::End).unwrap();
+        let mut tailer = Tailer::new(&path, Start::Beginning).unwrap();
         assert!(lines(&mut tailer).is_empty());
         append(&path, "first\n");
         assert_eq!(lines(&mut tailer), ["first"]);
         fs::remove_file(&path).unwrap();
         assert!(lines(&mut tailer).is_empty());
+        // A file replacing a held one is new content, read from the top.
         append(&path, "again\n");
         assert_eq!(lines(&mut tailer), ["again"]);
+    }
+
+    // A restart with a checkpoint wants only what is written from now on,
+    // and that holds when the log is not there yet at boot.
+    #[test]
+    fn a_file_that_appears_after_a_resume_is_read_from_its_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("access.log");
+        let mut tailer = Tailer::new(&path, Start::End).unwrap();
+        append(&path, "before\n");
+        assert!(lines(&mut tailer).is_empty());
+        append(&path, "after\n");
+        assert_eq!(lines(&mut tailer), ["after"]);
     }
 }
