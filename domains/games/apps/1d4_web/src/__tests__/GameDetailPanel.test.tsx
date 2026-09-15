@@ -300,8 +300,39 @@ describe('motif arrows', () => {
     ];
     render(<GameDetailPanel game={{ ...mockGame, occurrences: { overloaded_piece: rows } }} onClose={() => {}} />);
     fireEvent.click(screen.getByText('overloaded piece'));
-    expect(arrows()).toEqual([{ startSquare: 'f3', endSquare: 'e4', color: '#aaa' }]);
-    expect(squareStyles().f3.backgroundColor).toBe('#aaaaa');
+    expect(arrows()).toEqual([{ startSquare: 'f3', endSquare: 'e4', color: '#aaaaaa' }]);
+    // The tint appends an alpha byte, so the color has to be 6-digit hex; a
+    // 3-digit one becomes 5 digits, which the browser drops.
+    expect(squareStyles().g1.backgroundColor).toBe('#aaaaaa66');
+    expect(squareStyles().f3.backgroundColor).toBe('#aaaaaaaa');
+  });
+
+  it('starts a discovered attack from the revealed piece, not the one that moved', () => {
+    const rows: OccurrenceRow[] = [
+      {
+        ...at2,
+        motif: 'discovered_attack',
+        description: 'Discovered attack',
+        movedPiece: 'Ng1f3',
+        attacker: 'Bc4',
+        target: 'qd8',
+        isDiscovered: true,
+      },
+    ];
+    render(<GameDetailPanel game={{ ...mockGame, occurrences: { discovered_attack: rows } }} onClose={() => {}} />);
+    fireEvent.click(screen.getByText('discovered attack'));
+    expect(arrows()).toEqual([{ startSquare: 'c4', endSquare: 'd8', color: '#66b2ff' }]);
+  });
+
+  it('leaves out rows of the same motif and move made by another piece', () => {
+    // Castling lands two pieces, so one move can pin with each.
+    const rows: OccurrenceRow[] = [
+      { ...at2, motif: 'pin', description: 'Pin', attacker: 'Rf1', target: 'nf6' },
+      { ...at2, motif: 'pin', description: 'Pin', attacker: 'Kg1', target: 'pg2' },
+    ];
+    render(<GameDetailPanel game={{ ...mockGame, occurrences: { pin: rows } }} onClose={() => {}} />);
+    fireEvent.click(screen.getAllByText('pin')[1]);
+    expect(arrows()).toEqual([{ startSquare: 'g1', endSquare: 'g2', color: '#e84393' }]);
   });
 
   it('leaves out rows of other motifs on the same move', () => {

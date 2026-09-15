@@ -20,8 +20,11 @@ const MOTIF_COLORS: Record<string, string> = {
   promotion: '#44cc44',
   promotion_with_check: '#44cc44',
   promotion_with_checkmate: '#44cc44',
-
 };
+
+// For a motif with no entry above. 6-digit hex, because the square tint
+// appends an alpha byte and a 3-digit color would become an invalid 5-digit one.
+const DEFAULT_MOTIF_COLOR = '#aaaaaa';
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -53,13 +56,16 @@ function squareOf(notation: string | null | undefined): string | null {
   return /^[a-h][1-8]$/.test(square) ? square : null;
 }
 
-// One arrow per row of the active motif on this move, attacker to target. A
-// fork is one row per victim, so it fans out from the forking piece; a
-// discovered attack points from the revealed piece, not the one that moved.
-function motifArrows(rows: OccurrenceRow[], ply: number, color: string): Arrow[] {
+// One arrow per row of the selected occurrence's motif, move, and piece,
+// linking the two squares the row names. A fork is one row per victim, so it
+// fans out from the forking piece; a discovered attack starts from the
+// revealed piece, not the one that moved. Rows that name fewer than two
+// squares (double_check, promotion, zugzwang) draw nothing.
+function motifArrows(rows: OccurrenceRow[], selected: OccurrenceRow, color: string): Arrow[] {
+  const ply = occurrencePly(selected);
   const arrows: Arrow[] = [];
   for (const row of rows) {
-    if (occurrencePly(row) !== ply) continue;
+    if (occurrencePly(row) !== ply || row.attacker !== selected.attacker) continue;
     const startSquare = squareOf(row.attacker);
     const endSquare = squareOf(row.target);
     if (startSquare && endSquare) arrows.push({ startSquare, endSquare, color });
@@ -129,15 +135,13 @@ export default function GameDetailPanel({ game, onClose }: Props) {
 
   // The motif is drawn only while the board shows the move that produced it;
   // stepping away leaves it selected in the list but off the board.
-  const shownMotif =
+  const shown =
     activeOccurrence && currentPly === occurrencePly(activeOccurrence) + 1
-      ? sortedOccurrences[activeIndex].motif
+      ? activeOccurrence
       : null;
-  const motifColor = shownMotif != null ? (MOTIF_COLORS[shownMotif] ?? '#aaa') : null;
+  const motifColor = shown ? (MOTIF_COLORS[shown.motif] ?? DEFAULT_MOTIF_COLOR) : null;
   const arrows =
-    shownMotif != null && motifColor != null
-      ? motifArrows(game.occurrences?.[shownMotif] ?? [], currentPly - 1, motifColor)
-      : [];
+    shown && motifColor ? motifArrows(game.occurrences?.[shown.motif] ?? [], shown, motifColor) : [];
 
   const squareStyles: Record<string, React.CSSProperties> = {};
   if (lastMove) {
@@ -388,7 +392,7 @@ export default function GameDetailPanel({ game, onClose }: Props) {
                   // Accent color: use the active badge's color, or the first badge's color
                   const accentMotif =
                     (items.find(({ occ }) => occ === activeOccurrence) ?? items[0]).motif;
-                  const accentColor = MOTIF_COLORS[accentMotif] ?? '#aaa';
+                  const accentColor = MOTIF_COLORS[accentMotif] ?? DEFAULT_MOTIF_COLOR;
                   return (
                     <li
                       key={ply}
@@ -418,7 +422,7 @@ export default function GameDetailPanel({ game, onClose }: Props) {
                       </span>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
                         {items.map(({ motif, occ }, j) => {
-                          const color = MOTIF_COLORS[motif] ?? '#aaa';
+                          const color = MOTIF_COLORS[motif] ?? DEFAULT_MOTIF_COLOR;
                           const isBadgeActive = occ === activeOccurrence;
                           return (
                             <span
