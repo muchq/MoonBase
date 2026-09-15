@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 
 use serde::{Deserialize, Deserializer};
 
@@ -18,7 +18,7 @@ pub struct CaddyLine {
     pub request: Request,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Default, Deserialize, PartialEq)]
 pub struct Request {
     #[serde(default, deserialize_with = "or_default")]
     pub host: String,
@@ -34,6 +34,19 @@ pub struct Request {
     remote_ip: String,
     #[serde(default, deserialize_with = "or_default")]
     headers: HashMap<String, Vec<String>>,
+}
+
+// The address and the headers stay out of the debug form, so a line
+// logged on a parse or classification error carries neither a client
+// identifier nor a Cookie or Authorization value.
+impl fmt::Debug for Request {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Request")
+            .field("host", &self.host)
+            .field("method", &self.method)
+            .field("uri", &self.uri)
+            .finish_non_exhaustive()
+    }
 }
 
 fn or_default<'de, D: Deserializer<'de>, T: Default + Deserialize<'de>>(
@@ -152,6 +165,28 @@ mod tests {
             CaddyLine::parse(br#"{"ts":1789500000}"#).unwrap().ts,
             1789500000.0
         );
+    }
+
+    #[test]
+    fn debug_output_carries_no_address_and_no_header_values() {
+        let line = CaddyLine::parse(
+            br#"{"status":401,"request":{"host":"h","method":"GET","uri":"/x","client_ip":"1.0.0.7","remote_ip":"1.0.0.7","headers":{"Cookie":["session=secret"],"Authorization":["Bearer token"],"User-Agent":["curl/8.6.0"]}}}"#,
+        )
+        .unwrap();
+        let debug = format!("{line:?}");
+        for shown in ["401", "\"h\"", "GET", "/x"] {
+            assert!(debug.contains(shown), "{shown} missing from {debug}");
+        }
+        for hidden in [
+            "1.0.0.7",
+            "secret",
+            "token",
+            "curl",
+            "Cookie",
+            "Authorization",
+        ] {
+            assert!(!debug.contains(hidden), "{hidden} leaked into {debug}");
+        }
     }
 
     #[test]

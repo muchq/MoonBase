@@ -16,6 +16,6 @@ Core infrastructure, shared services, and foundational libraries.
 - [**Server Pal**](libs/server_pal): Rust HTTP server utilities.
 - [**HTTP Client**](libs/http_client): Shared HTTP client utilities.
 - [**Logging**](libs/logging): Common logging infrastructure.
-- [**caddylog**](libs/caddylog): Caddy access-log lines and the bounded agent, probe and route vocabulary (Rust), pinned equal to the stats service's classifier.
+- [**caddylog**](libs/caddylog): Caddy access-log lines and the bounded agent, probe, method and route vocabulary (Rust). The agent, probe and method lists are pinned equal to the stats service's; the routes are pinned to the Caddyfile's `path` matchers.
 - [**Clock**](libs/clock): Time and clock utilities for Go.
 - [**JSON**](libs/json): JSON processing utilities.

@@ -65,9 +65,10 @@ pub fn route_of(host: &str, uri: &str) -> &'static str {
     let Some((_, routes)) = ROUTES.iter().find(|(site, _)| *site == host) else {
         return OTHER_ROUTE;
     };
-    let path = fold(&clean(&percent_decode(
-        uri.split('?').next().unwrap_or_default(),
-    )));
+    let Some(target) = origin_path(uri) else {
+        return OTHER_ROUTE;
+    };
+    let path = fold(&clean(&percent_decode(target)));
     routes
         .iter()
         .copied()
@@ -76,6 +77,20 @@ pub fn route_of(host: &str, uri: &str) -> &'static str {
             None => path == *route,
         })
         .unwrap_or(OTHER_ROUTE)
+}
+
+/// The path of a request target as Caddy's matcher sees it, query string
+/// dropped: origin-form (`/a/b`) as is, absolute-form (`https://host/a/b`)
+/// from the first slash after the authority, and nothing for the asterisk
+/// and authority forms, or an absolute-form with no path, which carry no
+/// path for a matcher to claim.
+fn origin_path(target: &str) -> Option<&str> {
+    let target = target.split('?').next().unwrap_or_default();
+    if target.starts_with('/') {
+        return Some(target);
+    }
+    let (_, after_scheme) = target.split_once("://")?;
+    after_scheme.find('/').map(|slash| &after_scheme[slash..])
 }
 
 /// `%XX` to the byte it names; a `%` not followed by two hex digits stays
@@ -214,6 +229,29 @@ mod tests {
         assert_eq!(route_of("mcp.1d4.net", "/mcp%4"), OTHER_ROUTE);
     }
 
+    // Caddy routes by the URL's path whatever form the request line took,
+    // and the log carries the request-target as the client sent it.
+    #[test]
+    fn absolute_form_targets_route_by_their_path() {
+        assert_eq!(route_of("mcp.1d4.net", "https://mcp.1d4.net/mcp"), "/mcp");
+        assert_eq!(
+            route_of("mcp.1d4.net", "http://mcp.1d4.net:80/mcp?x=1"),
+            "/mcp"
+        );
+        assert_eq!(route_of("mcp.1d4.net", "HTTPS://MCP.1D4.NET/MCP"), "/mcp");
+        assert_eq!(route_of("mcp.1d4.net", "https://other.example/mcp"), "/mcp");
+        // No path to match: absolute-form without one, asterisk-form,
+        // authority-form, and a bare word.
+        assert_eq!(route_of("mcp.1d4.net", "https://mcp.1d4.net"), OTHER_ROUTE);
+        assert_eq!(
+            route_of("mcp.1d4.net", "https://mcp.1d4.net?x=1"),
+            OTHER_ROUTE
+        );
+        assert_eq!(route_of("mcp.1d4.net", "*"), OTHER_ROUTE);
+        assert_eq!(route_of("mcp.1d4.net", "mcp.1d4.net:443"), OTHER_ROUTE);
+        assert_eq!(route_of("mcp.1d4.net", "mcp"), OTHER_ROUTE);
+    }
+
     #[test]
     fn clean_is_go_path_clean_with_the_trailing_slash_kept() {
         for (raw, want) in [
@@ -297,8 +335,14 @@ mod tests {
             here, in_caddyfile,
             "ROUTES and the Caddyfile's path matchers differ"
         );
+        // Requests are folded before matching and the table is compared as
+        // spelled, so an entry that is not already folded could never match.
         for (site, routes) in ROUTES {
             assert_eq!(here[site].len(), routes.len(), "{site} repeats a matcher");
+            assert_eq!(fold(site), *site, "{site} is not folded");
+            for route in *routes {
+                assert_eq!(fold(route), *route, "{route} is not folded");
+            }
         }
     }
 
