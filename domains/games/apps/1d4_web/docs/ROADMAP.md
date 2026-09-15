@@ -96,7 +96,7 @@ function seekToPly(ply: number) {
 
 **Motif annotations:**
 
-Each motif type maps to a characteristic arrow color rendered by `react-chessboard`'s `customArrows` prop:
+Each motif type maps to a characteristic arrow color rendered by `react-chessboard`'s `arrows` option:
 
 | Motif type       | Arrow color  | Notes                               |
 |-----------------|--------------|-------------------------------------|
@@ -107,7 +107,7 @@ Each motif type maps to a characteristic arrow color rendered by `react-chessboa
 | `check`          | `#ff4444`    | Red — attacker → king               |
 | `promotion`      | `#44cc44`    | Green — promotion square            |
 
-Arrows are built from `OccurrenceRow` fields (`moveNumber`, `side`, `description`). Phase 2 can use heuristic square extraction from `description`; richer data (source/destination squares per piece) can be added to `OccurrenceRow` in a follow-on.
+Arrows are built from `OccurrenceRow.attacker` and `.target`, which the detectors write as piece-on-square notation (`Nf3`, `ke8`): one arrow per row of the active motif on the shown move, attacker to target. A fork is stored as one row per victim, so it fans out from the forking piece. Rows without both squares (`double_check` names only the king) draw no arrow and keep the square tint (#1102).
 
 **Wiring `onRowClick`:**
 

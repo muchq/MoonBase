@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { Chess, type Move } from 'chess.js';
-import { Chessboard } from 'react-chessboard';
+import { Chessboard, type Arrow } from 'react-chessboard';
 import type { GameRow, OccurrenceRow } from '../types';
 import { platformLabel } from '../platforms';
 
@@ -20,8 +20,11 @@ const MOTIF_COLORS: Record<string, string> = {
   promotion: '#44cc44',
   promotion_with_check: '#44cc44',
   promotion_with_checkmate: '#44cc44',
-
 };
+
+// For a motif with no entry above. 6-digit hex, because the square tint
+// appends an alpha byte and a 3-digit color would become an invalid 5-digit one.
+const DEFAULT_MOTIF_COLOR = '#aaaaaa';
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -44,6 +47,30 @@ function parsePgn(pgn: string): { fens: string[]; moves: Move[] } {
 // fens[ply + 1] is the resulting board position to display.
 function occurrencePly(occ: OccurrenceRow): number {
   return (occ.moveNumber - 1) * 2 + (occ.side === 'black' ? 1 : 0);
+}
+
+// attacker/target are piece-on-square notation from the detectors: "Nf3",
+// "ke8". The square is what the arrow needs.
+function squareOf(notation: string | null | undefined): string | null {
+  const square = notation?.slice(-2) ?? '';
+  return /^[a-h][1-8]$/.test(square) ? square : null;
+}
+
+// One arrow per row of the selected occurrence's motif, move, and piece,
+// linking the two squares the row names. A fork is one row per victim, so it
+// fans out from the forking piece; a discovered attack starts from the
+// revealed piece, not the one that moved. Rows that name fewer than two
+// squares (double_check, promotion, zugzwang) draw nothing.
+function motifArrows(rows: OccurrenceRow[], selected: OccurrenceRow, color: string): Arrow[] {
+  const ply = occurrencePly(selected);
+  const arrows: Arrow[] = [];
+  for (const row of rows) {
+    if (occurrencePly(row) !== ply || row.attacker !== selected.attacker) continue;
+    const startSquare = squareOf(row.attacker);
+    const endSquare = squareOf(row.target);
+    if (startSquare && endSquare) arrows.push({ startSquare, endSquare, color });
+  }
+  return arrows;
 }
 
 function formatMoveLabel(occ: OccurrenceRow): string {
@@ -106,8 +133,15 @@ export default function GameDetailPanel({ game, onClose }: Props) {
     ? sortedOccurrences.findIndex(({ occ }) => occ === activeOccurrence)
     : -1;
 
-  const activeMotifKey = activeIndex >= 0 ? sortedOccurrences[activeIndex].motif : null;
-  const motifColor = activeMotifKey != null ? (MOTIF_COLORS[activeMotifKey] ?? null) : null;
+  // The motif is drawn only while the board shows the move that produced it;
+  // stepping away leaves it selected in the list but off the board.
+  const shown =
+    activeOccurrence && currentPly === occurrencePly(activeOccurrence) + 1
+      ? activeOccurrence
+      : null;
+  const motifColor = shown ? (MOTIF_COLORS[shown.motif] ?? DEFAULT_MOTIF_COLOR) : null;
+  const arrows =
+    shown && motifColor ? motifArrows(game.occurrences?.[shown.motif] ?? [], shown, motifColor) : [];
 
   const squareStyles: Record<string, React.CSSProperties> = {};
   if (lastMove) {
@@ -233,6 +267,7 @@ export default function GameDetailPanel({ game, onClose }: Props) {
                   position: fen,
                   boardOrientation: orientation,
                   squareStyles: squareStyles,
+                  arrows,
                   allowDragging: false,
                 }}
               />
@@ -357,7 +392,7 @@ export default function GameDetailPanel({ game, onClose }: Props) {
                   // Accent color: use the active badge's color, or the first badge's color
                   const accentMotif =
                     (items.find(({ occ }) => occ === activeOccurrence) ?? items[0]).motif;
-                  const accentColor = MOTIF_COLORS[accentMotif] ?? '#aaa';
+                  const accentColor = MOTIF_COLORS[accentMotif] ?? DEFAULT_MOTIF_COLOR;
                   return (
                     <li
                       key={ply}
@@ -387,7 +422,7 @@ export default function GameDetailPanel({ game, onClose }: Props) {
                       </span>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
                         {items.map(({ motif, occ }, j) => {
-                          const color = MOTIF_COLORS[motif] ?? '#aaa';
+                          const color = MOTIF_COLORS[motif] ?? DEFAULT_MOTIF_COLOR;
                           const isBadgeActive = occ === activeOccurrence;
                           return (
                             <span

@@ -4,7 +4,7 @@ React + TypeScript frontend for the [one_d4](https://github.com/muchq/MoonBase/t
 
 ## Features
 
-- **Games** — Browse indexed games with sortable columns (player, ELO, time class, ECO, result, motifs), motif badges with occurrence tooltips, and click-through to chess.com. Pagination.
+- **Games** — Browse indexed games with sortable columns (player, ELO, time class, ECO, result, motifs), motif badges with occurrence tooltips, and click-through to chess.com. Pagination. Clicking a row opens a board that replays the game; selecting a motif jumps to its move and draws one arrow per row of that motif, from the row's `attacker` square to its `target` square, in the motif's color (a fork fans out from the forking piece). Rows that name fewer than two squares — `double_check`, `promotion`, `zugzwang` — get the move tint only.
 - **Index** — Enqueue index requests (username, platform, start/end month). Auto-polls `GET /v1/index` while any request is pending/processing.
 - **Query** — ChessQL query input with syntax help and example chips; results table and limit selector.
 - **MCP** — Documentation for the MCP server at `mcp.1d4.net`: the tool roster, the index-before-you-query ordering, how to connect, and a worked example. Static documentation, not an interactive client: `mcp.1d4.net` allows this origin, so the browser could call it, but the roster is checked in so drift fails in CI rather than in production.
