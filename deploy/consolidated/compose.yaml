@@ -587,7 +587,7 @@ services:
     environment:
       - PORT=8093
       - ACCESS_LOG=/var/log/caddy/access.log
-      - CHECKPOINT=/var/lib/deja/checkpoint.json
+      - DEJA_STATE=/var/lib/deja
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=deja
       - OTEL_RESOURCE_ATTRIBUTES=service.name=deja,service.version=${DEJA_SHA:-${DEPLOY_SHA:-latest}}

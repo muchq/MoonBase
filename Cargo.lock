@@ -798,6 +798,7 @@ dependencies = [
  "caddylog",
  "http-body-util",
  "opentelemetry",
+ "opentelemetry_sdk",
  "serde",
  "serde_json",
  "server_pal",

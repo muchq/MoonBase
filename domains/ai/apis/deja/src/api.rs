@@ -2,23 +2,27 @@
 
 use std::{
     convert::Infallible,
+    pin::Pin,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
+    task::{Context, Poll},
+    time::Duration,
 };
 
 use axum::{
-    Json,
+    Json, Router,
     extract::{Query, State},
     http::StatusCode,
     response::{
         IntoResponse, Response,
         sse::{Event as SseEvent, KeepAlive, Sse},
     },
+    routing::get,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
+use tokio::{sync::broadcast, time::Sleep};
 use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
 
 use crate::{
@@ -26,13 +30,31 @@ use crate::{
     metrics::AppMetrics,
 };
 
-/// Concurrent stream subscribers; the page is the one consumer, the hub
-/// polls `recent`, and the rest is headroom against a page left open in
-/// many tabs.
-pub const MAX_SUBSCRIBERS: usize = 32;
-/// Events a slow subscriber may fall behind before it is dropped to
-/// reconnect through `recent?after=`.
+pub const STATE_PATH: &str = "/deja/v1/state";
+pub const RECENT_PATH: &str = "/deja/v1/recent";
+pub const STREAM_PATH: &str = "/deja/v1/stream";
+
+/// Concurrent stream subscribers. The page is the one consumer and the hub
+/// polls `recent`; the cap is what a page left open in many tabs, or a
+/// client that never closes, can hold at once.
+pub const MAX_SUBSCRIBERS: usize = 256;
+/// A stream ends after this long and the client reconnects, so a seat is
+/// never held forever by a connection nobody is reading.
+pub const STREAM_LIFETIME: Duration = Duration::from_secs(10 * 60);
+/// Events a subscriber may fall behind before its stream ends. Fewer than
+/// the ring holds, so the reconnect through `recent?after=` closes the gap.
 const STREAM_BACKLOG: usize = 64;
+
+/// The routes under server_pal's stack; `stream` skips the Accept check,
+/// the timeout and compression, which would each break a stream.
+pub fn app(state: Arc<AppState>) -> Router {
+    server_pal::router_builder()
+        .route(STATE_PATH, get(get_state))
+        .route(RECENT_PATH, get(get_recent))
+        .stream_route(STREAM_PATH, get(get_stream))
+        .build()
+        .with_state(state)
+}
 
 pub struct AppState {
     pub engine: Mutex<Engine>,
@@ -92,29 +114,57 @@ pub async fn get_recent(
 
 /// Server-sent events, one per request, `id` the sequence number so a
 /// reconnecting page resumes through `recent?after=` from where it was.
+/// The stream ends when the client falls `STREAM_BACKLOG` behind or after
+/// `STREAM_LIFETIME`; either way the client reconnects and resumes.
 pub async fn get_stream(State(state): State<Arc<AppState>>) -> Response {
     let Some(seat) = Seat::take(&state) else {
         return (StatusCode::SERVICE_UNAVAILABLE, "stream is full").into_response();
     };
-    let stream = event_stream(state.events.subscribe(), seat);
-    Sse::new(stream)
+    let events = BroadcastStream::new(state.events.subscribe())
+        .take_while(Result::is_ok)
+        .map(|item| -> Result<SseEvent, Infallible> {
+            let event = item.expect("errors end the stream above");
+            let data = serde_json::to_string(&*event).expect("an Event serializes");
+            Ok(SseEvent::default().id(event.seq.to_string()).data(data))
+        });
+    Sse::new(Bounded::new(events, STREAM_LIFETIME, seat))
         .keep_alive(KeepAlive::default())
         .into_response()
 }
 
-fn event_stream(
-    receiver: broadcast::Receiver<Arc<Event>>,
-    seat: Seat,
-) -> impl Stream<Item = Result<SseEvent, Infallible>> {
-    BroadcastStream::new(receiver).filter_map(move |item| {
-        // The seat is released when the stream is dropped with the client.
-        let _held = &seat;
-        // A lagged receiver missed events; the client's next reconnect
-        // fills the gap from `recent`, so the lag itself is not an event.
-        let event = item.ok()?;
-        let data = serde_json::to_string(&*event).ok()?;
-        Some(Ok(SseEvent::default().id(event.seq.to_string()).data(data)))
-    })
+/// A stream that ends at its deadline whatever its source has left. The
+/// seat is given back the moment the stream ends, or when the client
+/// drops it, whichever is first.
+struct Bounded<T> {
+    inner: Pin<Box<dyn Stream<Item = T> + Send>>,
+    deadline: Pin<Box<Sleep>>,
+    seat: Option<Seat>,
+}
+
+impl<T> Bounded<T> {
+    fn new(inner: impl Stream<Item = T> + Send + 'static, lifetime: Duration, seat: Seat) -> Self {
+        Self {
+            inner: Box::pin(inner),
+            deadline: Box::pin(tokio::time::sleep(lifetime)),
+            seat: Some(seat),
+        }
+    }
+}
+
+impl<T> Stream for Bounded<T> {
+    type Item = T;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<T>> {
+        let next = if self.deadline.as_mut().poll(cx).is_ready() {
+            Poll::Ready(None)
+        } else {
+            self.inner.as_mut().poll_next(cx)
+        };
+        if matches!(next, Poll::Ready(None)) {
+            self.seat = None;
+        }
+        next
+    }
 }
 
 /// One of the `MAX_SUBSCRIBERS` seats, given back on drop.
@@ -140,11 +190,12 @@ impl Drop for Seat {
 
 #[cfg(test)]
 mod tests {
+    use std::net::SocketAddr;
+
     use axum::{
-        Router,
         body::Body,
+        extract::ConnectInfo,
         http::{Request, header},
-        routing::get,
     };
     use http_body_util::BodyExt;
     use tower::ServiceExt;
@@ -152,11 +203,12 @@ mod tests {
     use super::*;
     use crate::engine::fixtures::*;
 
-    fn app(state: Arc<AppState>) -> Router {
+    /// The handlers without server_pal's stack, for the seat-cap test:
+    /// the stack's limiter would refuse the 257th request from one peer
+    /// before the cap could.
+    fn bare(state: Arc<AppState>) -> Router {
         Router::new()
-            .route("/deja/v1/state", get(get_state))
-            .route("/deja/v1/recent", get(get_recent))
-            .route("/deja/v1/stream", get(get_stream))
+            .route(STREAM_PATH, get(get_stream))
             .with_state(state)
     }
 
@@ -169,10 +221,29 @@ mod tests {
         String::from_utf8(bytes.to_vec()).unwrap()
     }
 
-    async fn fetch(app: Router, uri: &str) -> Response {
-        app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
-            .await
-            .unwrap()
+    /// As a client sends it: the stack wants a peer for the limiter and an
+    /// Accept for the JSON routes; `EventSource` sends `text/event-stream`.
+    async fn fetch(app: Router, uri: &str, accept: &str) -> Response {
+        let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let mut request = Request::builder()
+            .uri(uri)
+            .header(header::ACCEPT, accept)
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(peer));
+        app.oneshot(request).await.unwrap()
+    }
+
+    async fn json(app: Router, uri: &str) -> Response {
+        fetch(app, uri, "application/json").await
+    }
+
+    async fn stream(app: Router) -> Response {
+        fetch(app, STREAM_PATH, "text/event-stream").await
+    }
+
+    fn redirect(ts: f64) -> caddylog::CaddyLine {
+        request(ts, "1.1.1.1", "GET", "/iili/v1/r/abc", 302, BROWSER)
     }
 
     // The consumer boundary games_hub polls from C++ (#1554): the raw
@@ -181,85 +252,53 @@ mod tests {
     #[tokio::test]
     async fn recent_is_pinned_on_the_wire() {
         let state = fresh();
-        state.ingest(&request(
-            1789500000.25,
-            "1.1.1.1",
-            "GET",
-            "/iili/v1/r/abc",
-            302,
-            BROWSER,
-        ));
-        state.ingest(&request(
-            1789500001.5,
-            "1.1.1.1",
-            "GET",
-            "/iili/v1/r/abc",
-            302,
-            BROWSER,
-        ));
-        let response = fetch(app(state), "/deja/v1/recent?after=1").await;
+        state.ingest(&redirect(1789500000.25));
+        state.ingest(&redirect(1789500001.5));
+        let response = json(app(state), "/deja/v1/recent?after=1").await;
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
         assert_eq!(
             body_text(response).await,
-            r#"{"events":[{"seq":2,"ts":1789500001.5,"lane":0,"step":1,"context":["api.muchq.com GET /iili/v1/r/* 302 browser"],"actual":"api.muchq.com GET /iili/v1/r/* 302 browser","predictions":{"bigram":[],"net":null},"surprise":{"bigram":1.0986122886681098,"net":null},"threshold":{"mean":1.0986122886681098,"sigma":0.0},"verdict":"warmup","novel":false,"ewma_loss":{"bigram":1.0986122886681098,"net":null},"vocab_size":3}]}"#
+            r#"{"events":[{"seq":2,"ts":1789500001.5,"lane":0,"step":0,"context":["api.muchq.com GET /iili/v1/r/* 302 browser"],"actual":"api.muchq.com GET /iili/v1/r/* 302 browser","predictions":{"bigram":[],"net":null},"surprise":{"bigram":1.0986122886681098,"net":null},"threshold":null,"verdict":"warmup","ewma_loss":{"bigram":0.0,"net":null},"vocab_size":3}]}"#
         );
     }
 
     #[tokio::test]
     async fn recent_defaults_to_everything_and_state_counts() {
         let state = fresh();
-        state.ingest(&request(
-            1.0,
-            "1.1.1.1",
-            "GET",
-            "/iili/v1/r/abc",
-            302,
-            BROWSER,
-        ));
-        state.ingest(&request(
-            2.0,
-            "1.1.1.1",
-            "GET",
-            "/iili/v1/r/abc",
-            302,
-            BROWSER,
-        ));
+        state.ingest(&redirect(1.0));
+        state.ingest(&redirect(2.0));
         let all: serde_json::Value = serde_json::from_str(
-            &body_text(fetch(app(Arc::clone(&state)), "/deja/v1/recent").await).await,
+            &body_text(json(app(Arc::clone(&state)), RECENT_PATH).await).await,
         )
         .unwrap();
         assert_eq!(all["events"].as_array().unwrap().len(), 2);
         let none: serde_json::Value = serde_json::from_str(
-            &body_text(fetch(app(Arc::clone(&state)), "/deja/v1/recent?after=2").await).await,
+            &body_text(json(app(Arc::clone(&state)), "/deja/v1/recent?after=2").await).await,
         )
         .unwrap();
         assert_eq!(none["events"].as_array().unwrap().len(), 0);
-        let view = body_text(fetch(app(state), "/deja/v1/state").await).await;
+        let view = body_text(json(app(state), STATE_PATH).await).await;
         assert_eq!(
             view,
-            r#"{"seq":2,"step":1,"vocab_size":3,"warmup":{"steps":1,"needed":1000},"ewma_loss":{"bigram":1.0986122886681098,"net":null},"threshold":{"mean":1.0986122886681098,"sigma":0.0},"anomalies":0,"novelties":1}"#
+            r#"{"seq":2,"step":1,"vocab_size":3,"vocab_cap":2048,"warmup_needed":1000,"ewma_loss":{"bigram":1.0986122886681098,"net":null},"threshold":null,"anomalies":0,"novelties":1}"#
         );
     }
 
+    // Through the whole stack: the JSON routes' Accept check does not
+    // apply to the stream, and nothing between the handler and the client
+    // holds a frame back.
     #[tokio::test]
     async fn the_stream_carries_each_event_with_its_sequence_as_the_id() {
         let state = fresh();
-        let response = fetch(app(Arc::clone(&state)), "/deja/v1/stream").await;
+        let response = stream(app(Arc::clone(&state))).await;
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.headers()[header::CONTENT_TYPE],
             "text/event-stream"
         );
         assert_eq!(state.subscribers.load(Ordering::SeqCst), 1);
-        state.ingest(&request(
-            1.0,
-            "1.1.1.1",
-            "GET",
-            "/iili/v1/r/abc",
-            302,
-            BROWSER,
-        ));
+        state.ingest(&redirect(1.0));
         let mut body = response.into_body().into_data_stream();
         let frame = String::from_utf8(body.next().await.unwrap().unwrap().to_vec()).unwrap();
         assert!(frame.starts_with("id: 1\ndata: {\"seq\":1,"), "{frame}");
@@ -272,19 +311,54 @@ mod tests {
         );
     }
 
+    // A subscriber that stops reading is not kept: once it is a backlog
+    // behind, its stream ends and its seat is freed. The events it missed
+    // are in the ring for the reconnect.
+    #[tokio::test]
+    async fn a_lagging_subscriber_is_ended_not_skipped_over() {
+        let state = fresh();
+        let response = stream(app(Arc::clone(&state))).await;
+        for i in 0..=STREAM_BACKLOG {
+            state.ingest(&redirect(i as f64));
+        }
+        let mut body = response.into_body().into_data_stream();
+        assert!(body.next().await.is_none(), "the stream did not end");
+        assert_eq!(state.subscribers.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            state.engine.lock().unwrap().recent(0).len(),
+            STREAM_BACKLOG + 1
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stream_ends_at_its_lifetime_and_frees_its_seat() {
+        let state = fresh();
+        let response = stream(app(Arc::clone(&state))).await;
+        let mut body = response.into_body().into_data_stream();
+        state.ingest(&redirect(1.0));
+        assert!(body.next().await.is_some());
+        tokio::time::advance(STREAM_LIFETIME).await;
+        state.ingest(&redirect(2.0));
+        assert!(
+            body.next().await.is_none(),
+            "the stream outlived its lifetime"
+        );
+        assert_eq!(state.subscribers.load(Ordering::SeqCst), 0);
+    }
+
     #[tokio::test]
     async fn the_stream_refuses_a_subscriber_past_the_cap() {
         let state = fresh();
         let mut held = Vec::new();
         for _ in 0..MAX_SUBSCRIBERS {
-            let response = fetch(app(Arc::clone(&state)), "/deja/v1/stream").await;
+            let response = stream(bare(Arc::clone(&state))).await;
             assert_eq!(response.status(), StatusCode::OK);
             held.push(response);
         }
-        let response = fetch(app(Arc::clone(&state)), "/deja/v1/stream").await;
+        let response = stream(bare(Arc::clone(&state))).await;
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
         held.pop();
-        let response = fetch(app(state), "/deja/v1/stream").await;
+        let response = stream(bare(state)).await;
         assert_eq!(
             response.status(),
             StatusCode::OK,

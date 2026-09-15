@@ -1,7 +1,8 @@
 //! Follows Caddy's live access log a line at a time, across the rolls
 //! Caddy makes by size: a roll renames the file away and starts a new one,
-//! so the reader watches the inode and reopens from the top when it
-//! changes, or when the file it holds shrinks under it.
+//! so the reader watches the inode, drains what it still holds, and
+//! reopens from the top when the inode changes or the file shrinks under
+//! it.
 
 use std::{
     fs::File,
@@ -10,10 +11,18 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// Bytes a line may run to before it is dropped rather than buffered;
+/// Caddy's lines are a few hundred bytes, and a file that is not a log at
+/// all must not grow `partial` without bound.
+pub const MAX_LINE: usize = 1024 * 1024;
+
 pub struct Tailer {
     path: PathBuf,
     file: Option<Open>,
     partial: Vec<u8>,
+    /// The current line already overran `MAX_LINE`; the rest of it is
+    /// dropped up to its newline.
+    skipping: bool,
 }
 
 struct Open {
@@ -45,6 +54,7 @@ impl Tailer {
             path,
             file,
             partial: Vec::new(),
+            skipping: false,
         })
     }
 
@@ -54,14 +64,16 @@ impl Tailer {
 
     /// The complete lines written since the last poll, newline stripped.
     /// A line still being written waits for its newline; a file that was
-    /// rolled or truncated is reopened from the top, and one that is
-    /// missing yields nothing until it appears.
+    /// rolled away is drained and then the new one is read from the top; a
+    /// truncated file is read from the top; a missing one yields nothing
+    /// until it appears.
     pub fn poll(&mut self) -> io::Result<Vec<Vec<u8>>> {
+        let mut lines = Vec::new();
         let current = match std::fs::metadata(&self.path) {
             Ok(meta) => meta,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 self.file = None;
-                return Ok(Vec::new());
+                return Ok(lines);
             }
             Err(error) => return Err(error),
         };
@@ -70,22 +82,50 @@ impl Tailer {
             None => true,
         };
         if stale {
+            // A rolled file was renamed, not truncated: whatever Caddy wrote
+            // to it between the last poll and the rename is still there.
+            if let Some(open) = self.file.as_mut().filter(|open| open.ino != current.ino()) {
+                let chunk = open.read_new()?;
+                self.split(&chunk, &mut lines);
+            }
             self.file = Some(Open::at(File::open(&self.path)?, Start::Beginning)?);
             self.partial.clear();
+            self.skipping = false;
         }
-        let open = self.file.as_mut().expect("opened above");
-        let mut chunk = Vec::new();
-        open.file.read_to_end(&mut chunk)?;
-        open.offset += chunk.len() as u64;
-        self.partial.extend_from_slice(&chunk);
+        let chunk = self.file.as_mut().expect("opened above").read_new()?;
+        self.split(&chunk, &mut lines);
+        Ok(lines)
+    }
 
-        let mut lines = Vec::new();
-        while let Some(newline) = self.partial.iter().position(|&b| b == b'\n') {
-            let mut line: Vec<u8> = self.partial.drain(..=newline).collect();
-            line.pop();
+    /// Appends the complete lines in `chunk` (with what `partial` held) to
+    /// `lines`, keeping the trailing incomplete one, and dropping any line
+    /// past `MAX_LINE` bytes.
+    fn split(&mut self, chunk: &[u8], lines: &mut Vec<Vec<u8>>) {
+        let mut rest = chunk;
+        while let Some(newline) = rest.iter().position(|&b| b == b'\n') {
+            let (head, tail) = rest.split_at(newline);
+            rest = &tail[1..];
+            if self.skipping {
+                self.skipping = false;
+                continue;
+            }
+            if self.partial.len() + head.len() > MAX_LINE {
+                self.partial.clear();
+                continue;
+            }
+            let mut line = std::mem::take(&mut self.partial);
+            line.extend_from_slice(head);
             lines.push(line);
         }
-        Ok(lines)
+        if self.skipping {
+            return;
+        }
+        if self.partial.len() + rest.len() > MAX_LINE {
+            self.partial.clear();
+            self.skipping = true;
+        } else {
+            self.partial.extend_from_slice(rest);
+        }
     }
 }
 
@@ -101,6 +141,14 @@ impl Open {
             ino: meta.ino(),
             offset,
         })
+    }
+
+    /// Everything written since the last read.
+    fn read_new(&mut self) -> io::Result<Vec<u8>> {
+        let mut chunk = Vec::new();
+        self.file.read_to_end(&mut chunk)?;
+        self.offset += chunk.len() as u64;
+        Ok(chunk)
     }
 }
 
@@ -155,10 +203,10 @@ mod tests {
     }
 
     // Caddy's roller renames the live file and creates a new one at the
-    // same path; the lines it wrote to the old one before the rename are
-    // read, and the new file is read from its start.
+    // same path; the lines it wrote to the old one between the last poll
+    // and the rename are read first, then the new file from its start.
     #[test]
-    fn a_roll_is_followed_to_the_new_file() {
+    fn a_roll_is_drained_and_followed_to_the_new_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("access.log");
         append(&path, "old-1\n");
@@ -166,9 +214,46 @@ mod tests {
         append(&path, "old-2\n");
         fs::rename(&path, dir.path().join("access-2026-09-15-size.log")).unwrap();
         append(&path, "new-1\n");
-        assert_eq!(lines(&mut tailer), ["new-1"]);
+        assert_eq!(lines(&mut tailer), ["old-2", "new-1"]);
         append(&path, "new-2\n");
         assert_eq!(lines(&mut tailer), ["new-2"]);
+    }
+
+    // A partial line at the moment of the roll belongs to the old file;
+    // Caddy finishes it there before it opens the new one.
+    #[test]
+    fn a_partial_line_is_completed_from_the_rolled_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("access.log");
+        let mut tailer = Tailer::new(&path, Start::Beginning).unwrap();
+        append(&path, "old-");
+        assert!(lines(&mut tailer).is_empty());
+        append(&path, "1\n");
+        fs::rename(&path, dir.path().join("access-rolled.log")).unwrap();
+        append(&path, "new-1\n");
+        assert_eq!(lines(&mut tailer), ["old-1", "new-1"]);
+    }
+
+    // An oversized line is dropped whole, however it arrives, and the
+    // lines around it are not.
+    #[test]
+    fn a_line_past_max_line_is_dropped_and_the_next_one_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("access.log");
+        let mut tailer = Tailer::new(&path, Start::Beginning).unwrap();
+        let huge = "x".repeat(MAX_LINE + 1);
+        append(&path, &format!("before\n{huge}\nafter\n"));
+        assert_eq!(lines(&mut tailer), ["before", "after"]);
+        // The same line arriving in pieces across polls.
+        append(&path, &huge[..MAX_LINE / 2]);
+        assert!(lines(&mut tailer).is_empty());
+        append(&path, &huge[MAX_LINE / 2..]);
+        assert!(lines(&mut tailer).is_empty());
+        append(&path, "\nlast\n");
+        assert_eq!(lines(&mut tailer), ["last"]);
+        // Exactly MAX_LINE bytes is a line.
+        append(&path, &format!("{}\n", &huge[..MAX_LINE]));
+        assert_eq!(lines(&mut tailer)[0].len(), MAX_LINE);
     }
 
     // A file shorter than where the reader was is a new file with the same

@@ -566,6 +566,8 @@ fn common_layers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<
 fn stream_layers<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> {
     router
         .layer(TraceLayer::new_for_http())
+        .layer(DefaultBodyLimit::disable())
+        .layer(RequestBodyLimitLayer::new(4 * 1024 * 1024))
         .layer(CatchPanicLayer::new())
 }
 
@@ -616,9 +618,12 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
         // /health is served from its own router so the governor can wrap the
         // service's routes without wrapping the probe. Both carry the identical
         // stack below, so the exemption is the only difference between them.
-        let limited = common_layers(self.router)
-            .merge(stream_layers(self.streams))
-            .fallback(fallback);
+        // The fallback goes in under the common stack, not beside the
+        // merge: a merged router's fallback would answer an unmatched path
+        // with none of the layers, so a probe for /nope would skip the
+        // Accept check and the timeout.
+        let limited =
+            common_layers(self.router.fallback(fallback)).merge(stream_layers(self.streams));
         let limited = if let Some(RateLimit { per_second, burst }) = self.rate_limit {
             assert!(burst > 0, "rate_limit burst must be at least 1");
             let config = Arc::new(
@@ -861,13 +866,49 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
-    // A stream route is still a route: unmatched paths beside it 404, and
-    // the limiter still meters it.
+    // The stream lane keeps the request body limit: what a client may send
+    // does not change because the response is long-lived.
+    #[tokio::test]
+    async fn a_stream_route_keeps_the_body_limit() {
+        let app = router_builder::<NoState>()
+            .stream_route(
+                "/up",
+                axum::routing::post(
+                    |body: axum::body::Bytes| async move { body.len().to_string() },
+                ),
+            )
+            .rate_limit(None)
+            .build()
+            .with_state(NoState);
+        let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let post = |size: usize| {
+            let mut req = Request::builder()
+                .method("POST")
+                .uri("/up")
+                .body(Body::from(vec![b'x'; size]))
+                .unwrap();
+            req.extensions_mut().insert(ConnectInfo(peer));
+            req
+        };
+        let resp = app.clone().oneshot(post(4 * 1024 * 1024)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp = app.oneshot(post(4 * 1024 * 1024 + 1)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    // A stream route is still a route: unmatched paths beside it 404 under
+    // the common stack (an Accept the API does not serve is refused before
+    // the 404), and the limiter still meters it.
     #[tokio::test]
     async fn a_stream_route_keeps_the_fallback_and_the_limiter() {
         let app = two_lane_app();
-        let resp = app.oneshot(make_request("/nope")).await.unwrap();
+        let resp = app.clone().oneshot(make_request("/nope")).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let resp = app
+            .oneshot(make_request_accepting("/nope", "text/html"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_ACCEPTABLE);
 
         let app = router_builder::<NoState>()
             .stream_route("/stream", get(|| async { "stream" }))

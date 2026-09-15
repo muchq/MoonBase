@@ -4,14 +4,16 @@
 use std::collections::HashMap;
 
 use caddylog::{CaddyLine, agent_of, bounded_method, probe_of, route_of, site_of};
-use serde::{Deserialize, Serialize};
 
 /// The id of every token the vocabulary had no room for.
 pub const UNK: u16 = 0;
 /// The token before a client's first request.
 pub const BOS: u16 = 1;
 /// How many distinct tokens the vocabulary holds before the rest read as
-/// `<unk>`; every factor is bounded, so the realized set is far smaller.
+/// `<unk>`. The factors are bounded, but their product is not small, and a
+/// client that walks every route with every method can fill the table; a
+/// vocabulary at its cap is itself the signal, and `<unk>` is what the
+/// model says about everything after.
 pub const DEFAULT_CAP: usize = 2048;
 
 /// `site method route status agent_class[ probe]`, every factor bounded
@@ -36,11 +38,10 @@ pub fn token_text(line: &CaddyLine) -> String {
 
 /// Token ids by first sight, capped. `names[id]` is the token's text; the
 /// two reserved ids come first.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct Vocab {
     names: Vec<String>,
     cap: usize,
-    #[serde(skip)]
     ids: HashMap<String, u16>,
 }
 
@@ -49,7 +50,8 @@ impl Vocab {
         Self::from_names(vec!["<unk>".into(), "<bos>".into()], cap)
     }
 
-    /// Rebuilds the index a checkpoint does not carry.
+    /// The names in id order, as a checkpoint carries them; the index is
+    /// rebuilt from them.
     pub fn from_names(names: Vec<String>, cap: usize) -> Self {
         let ids = names
             .iter()
@@ -80,6 +82,10 @@ impl Vocab {
 
     pub fn len(&self) -> usize {
         self.names.len()
+    }
+
+    pub fn cap(&self) -> usize {
+        self.cap
     }
 
     pub fn names(&self) -> &[String] {
@@ -136,14 +142,13 @@ mod tests {
     }
 
     #[test]
-    fn the_index_survives_a_checkpoint_round_trip() {
+    fn from_names_resumes_the_ids_without_minting_them_again() {
         let mut vocab = Vocab::new(DEFAULT_CAP);
         vocab.intern("a");
         vocab.intern("b");
-        let json = serde_json::to_string(&vocab).unwrap();
-        let raw: Vocab = serde_json::from_str(&json).unwrap();
-        let mut restored = Vocab::from_names(raw.names().to_vec(), DEFAULT_CAP);
+        let mut restored = Vocab::from_names(vocab.names().to_vec(), DEFAULT_CAP);
         assert_eq!(restored.intern("b"), (3, false));
         assert_eq!(restored.intern("c"), (4, true));
+        assert_eq!(restored.cap(), DEFAULT_CAP);
     }
 }

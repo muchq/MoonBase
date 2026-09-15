@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     bigram::Bigram,
     lanes::{DEFAULT_LANES, Lanes},
-    score::{Scorer, Verdict},
+    score::{Scorer, Verdict, WARMUP},
     token::{BOS, DEFAULT_CAP, Vocab, token_text},
 };
 
@@ -19,8 +19,10 @@ pub const TOP_K: usize = 5;
 
 /// The event every consumer reads: the muchq.com page over the stream,
 /// games_hub through `recent`. Field names are the wire; `api.rs` pins
-/// the raw JSON.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+/// the raw JSON. `step`, `threshold` and `ewma_loss` are the baseline the
+/// verdict was judged against, before the event itself was learned, so
+/// `verdict` is `anomaly` exactly when `surprise.bigram > threshold`.
+#[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Event {
     pub seq: u64,
     pub ts: f64,
@@ -28,57 +30,40 @@ pub struct Event {
     pub step: u64,
     pub context: Vec<String>,
     pub actual: String,
-    pub predictions: Predictions,
-    pub surprise: PerPredictor,
-    pub threshold: Threshold,
-    pub verdict: &'static str,
-    pub novel: bool,
-    pub ewma_loss: PerPredictor,
+    pub predictions: PerPredictor<Vec<Guess>>,
+    pub surprise: PerPredictor<f64>,
+    /// `None` while the scorer is warming up.
+    pub threshold: Option<f64>,
+    pub verdict: Verdict,
+    pub ewma_loss: PerPredictor<f64>,
     pub vocab_size: usize,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Predictions {
-    pub bigram: Vec<Guess>,
-    pub net: Option<Vec<Guess>>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct Guess {
     pub token: String,
     pub p: f64,
 }
 
-/// The network's column is null until it exists.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct PerPredictor {
-    pub bigram: f64,
-    pub net: Option<f64>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Threshold {
-    pub mean: f64,
-    pub sigma: f64,
+/// One value per predictor; the network's column is null until it exists.
+#[derive(Clone, Debug, Serialize, PartialEq)]
+pub struct PerPredictor<T> {
+    pub bigram: T,
+    pub net: Option<T>,
 }
 
 /// What `state` reports.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct StateView {
     pub seq: u64,
     pub step: u64,
     pub vocab_size: usize,
-    pub warmup: Warmup,
-    pub ewma_loss: PerPredictor,
-    pub threshold: Threshold,
+    pub vocab_cap: usize,
+    pub warmup_needed: u64,
+    pub ewma_loss: PerPredictor<f64>,
+    pub threshold: Option<f64>,
     pub anomalies: u64,
     pub novelties: u64,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Warmup {
-    pub steps: u64,
-    pub needed: u64,
 }
 
 /// The learned state a checkpoint carries; lanes and the ring are not in
@@ -173,16 +158,19 @@ impl Engine {
             })
             .collect();
         let surprise = -self.bigram.probability(prev, token, vocab_size).ln();
+        let step = self.scorer.steps();
+        let threshold = self.scorer.threshold();
+        let ewma_loss = self.ewma_loss();
         let verdict = if novel {
             self.novelties += 1;
-            "novel"
+            Verdict::Novel
         } else {
             let verdict = self.scorer.judge(surprise);
             if verdict == Verdict::Anomaly {
                 self.anomalies += 1;
             }
             self.scorer.observe(surprise);
-            verdict.as_str()
+            verdict
         };
 
         self.bigram.observe(prev, token);
@@ -193,10 +181,10 @@ impl Engine {
             seq: self.seq,
             ts: line.ts,
             lane,
-            step: self.scorer.steps(),
+            step,
             context,
             actual: self.vocab.name(token).to_string(),
-            predictions: Predictions {
+            predictions: PerPredictor {
                 bigram: guesses,
                 net: None,
             },
@@ -204,10 +192,9 @@ impl Engine {
                 bigram: surprise,
                 net: None,
             },
-            threshold: self.threshold(),
+            threshold,
             verdict,
-            novel,
-            ewma_loss: self.ewma_loss(),
+            ewma_loss,
             vocab_size,
         });
         if self.ring.len() == RING {
@@ -231,25 +218,16 @@ impl Engine {
             seq: self.seq,
             step: self.scorer.steps(),
             vocab_size: self.vocab.len(),
-            warmup: Warmup {
-                steps: self.scorer.steps().min(crate::score::WARMUP),
-                needed: crate::score::WARMUP,
-            },
+            vocab_cap: self.vocab.cap(),
+            warmup_needed: WARMUP,
             ewma_loss: self.ewma_loss(),
-            threshold: self.threshold(),
+            threshold: self.scorer.threshold(),
             anomalies: self.anomalies,
             novelties: self.novelties,
         }
     }
 
-    fn threshold(&self) -> Threshold {
-        Threshold {
-            mean: self.scorer.mean(),
-            sigma: self.scorer.sigma(),
-        }
-    }
-
-    fn ewma_loss(&self) -> PerPredictor {
+    fn ewma_loss(&self) -> PerPredictor<f64> {
         PerPredictor {
             bigram: self.scorer.mean(),
             net: None,
@@ -276,7 +254,6 @@ pub(crate) mod fixtures {
 #[cfg(test)]
 mod tests {
     use super::{fixtures::*, *};
-    use crate::score::WARMUP;
 
     fn browser_redirect(ts: f64, ip: &str) -> CaddyLine {
         request(ts, ip, "GET", "/iili/v1/r/abc", 302, BROWSER)
@@ -286,18 +263,17 @@ mod tests {
     fn the_first_sight_of_a_token_is_novel_and_the_second_is_judged() {
         let mut engine = Engine::default();
         let first = engine.ingest(&browser_redirect(1.0, "1.1.1.1"));
-        assert_eq!(first.verdict, "novel");
-        assert!(first.novel);
+        assert_eq!(first.verdict, Verdict::Novel);
         assert_eq!(first.actual, "api.muchq.com GET /iili/v1/r/* 302 browser");
         assert!(first.context.is_empty(), "a new lane has no history");
-        assert_eq!(first.step, 0, "novelty stays out of the baseline");
         let second = engine.ingest(&browser_redirect(2.0, "1.1.1.1"));
-        assert_eq!(second.verdict, "warmup");
-        assert!(!second.novel);
+        assert_eq!(second.verdict, Verdict::Warmup);
         assert_eq!(second.context, std::slice::from_ref(&first.actual));
-        assert_eq!(second.step, 1);
+        assert_eq!(second.step, 0, "novelty stays out of the baseline");
         assert_eq!(second.seq, 2);
-        assert_eq!(engine.state().novelties, 1);
+        let state = engine.state();
+        assert_eq!(state.novelties, 1);
+        assert_eq!(state.step, 1);
     }
 
     #[test]
@@ -323,7 +299,7 @@ mod tests {
         engine.ingest(&request(22.0, "9.9.9.9", "GET", "/.env", 404, CURL));
         engine.ingest(&request(23.0, "9.9.9.9", "GET", "/wp-login.php", 404, CURL));
         let odd = engine.ingest(&request(24.0, "1.1.1.1", "GET", "/wp-login.php", 404, CURL));
-        assert!(!odd.novel, "the token exists by now");
+        assert_ne!(odd.verdict, Verdict::Novel, "the token exists by now");
         assert!(odd.surprise.bigram > expected.surprise.bigram);
     }
 
@@ -359,13 +335,23 @@ mod tests {
         for i in 0..(WARMUP + 5) {
             last = Some(engine.ingest(&browser_redirect(i as f64, "1.1.1.1")));
         }
-        assert_eq!(last.unwrap().verdict, "expected");
+        let last = last.unwrap();
+        assert_eq!(last.verdict, Verdict::Expected);
+        assert!(last.surprise.bigram <= last.threshold.unwrap());
         // Teach the vocabulary the probe on another lane first, so the
         // anomaly is the transition and not the novelty.
         engine.ingest(&request(9000.0, "9.9.9.9", "GET", "/.env", 404, CURL));
+        let before = engine.state();
         let broken = engine.ingest(&request(9001.0, "1.1.1.1", "GET", "/.env", 404, CURL));
-        assert_eq!(broken.verdict, "anomaly");
-        assert_eq!(engine.state().anomalies, 1);
+        assert_eq!(broken.verdict, Verdict::Anomaly);
+        // The threshold on the event is the one that judged it, not the one
+        // the event moved.
+        assert!(broken.surprise.bigram > broken.threshold.unwrap());
+        assert_eq!(broken.threshold, before.threshold);
+        assert_eq!(broken.step, before.step);
+        let after = engine.state();
+        assert!(after.threshold > before.threshold);
+        assert_eq!(after.anomalies, 1);
     }
 
     #[test]
@@ -405,7 +391,7 @@ mod tests {
         );
         let next = back.ingest(&browser_redirect(32.0, "1.1.1.1"));
         assert_eq!(next.seq, 32);
-        assert!(!next.novel, "the vocabulary came back");
+        assert_ne!(next.verdict, Verdict::Novel, "the vocabulary came back");
         assert!(next.context.is_empty(), "lanes did not");
         assert_eq!(
             next.predictions.bigram[0].token, next.actual,

@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 
 /// Additive smoothing: the mass an unseen next token gets, in counts.
 pub const ALPHA: f64 = 0.1;
+/// Successors a row keeps. A row that is full forgets its rarest successor
+/// to admit a new one, which bounds the table at `vocab × MAX_SUCCESSORS`
+/// however a scanner sequences its requests.
+pub const MAX_SUCCESSORS: usize = 64;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Bigram {
@@ -49,6 +53,15 @@ impl Bigram {
 
     pub fn observe(&mut self, prev: u16, next: u16) {
         let row = self.rows.entry(prev).or_default();
+        if !row.next.contains_key(&next) && row.next.len() >= MAX_SUCCESSORS {
+            let (&rarest, &count) = row
+                .next
+                .iter()
+                .min_by_key(|&(&id, &count)| (count, id))
+                .expect("a full row is not empty");
+            row.next.remove(&rarest);
+            row.total -= count;
+        }
         row.total += 1;
         *row.next.entry(next).or_default() += 1;
     }
@@ -87,6 +100,37 @@ mod tests {
         assert_eq!(ids, [5, 2, 7]);
         assert!(top[0].1 > top[1].1 && top[1].1 == top[2].1);
         assert_eq!(bigram.top(1, 8, 2).len(), 2);
+    }
+
+    // Eviction keeps the row's total honest: the forgotten successor's
+    // count leaves with it, so the survivors' probabilities still sum to one
+    // with the smoothing mass.
+    #[test]
+    fn a_full_row_forgets_its_rarest_successor() {
+        let mut bigram = Bigram::default();
+        let v = 4096;
+        for id in 0..MAX_SUCCESSORS as u16 {
+            bigram.observe(1, id);
+            bigram.observe(1, id);
+        }
+        bigram.observe(1, 7);
+        // Every successor has count 2 except 7 at 3; the rarest by (count,
+        // id) is 0, and only a new successor evicts.
+        bigram.observe(1, 7);
+        assert_eq!(bigram.top(1, v, 1)[0].0, 7);
+        assert!(bigram.probability(1, 0, v) > bigram.probability(1, 9999, v));
+        bigram.observe(1, 4000);
+        assert_eq!(
+            bigram.probability(1, 0, v),
+            bigram.probability(1, 9999, v),
+            "successor 0 was not forgotten"
+        );
+        let row = &bigram.rows[&1];
+        assert_eq!(row.next.len(), MAX_SUCCESSORS);
+        assert_eq!(row.total, row.next.values().sum::<u32>());
+        let seen: f64 = row.next.keys().map(|&n| bigram.probability(1, n, v)).sum();
+        let unseen = (v - MAX_SUCCESSORS) as f64 * bigram.probability(1, 9999, v);
+        assert!((seen + unseen - 1.0).abs() < 1e-9, "{}", seen + unseen);
     }
 
     #[test]

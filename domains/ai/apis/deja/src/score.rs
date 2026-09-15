@@ -9,19 +9,32 @@ pub const WARMUP: u64 = 1000;
 pub const EWMA_ALPHA: f64 = 0.01;
 pub const SIGMAS: f64 = 3.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// What the engine says about one step. `Novel` is a first-sight token,
+/// which the scorer has no baseline for; the other three are its call.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Verdict {
     Warmup,
     Expected,
     Anomaly,
+    Novel,
 }
 
 impl Verdict {
+    /// Every verdict, for anything that declares a series per verdict.
+    pub const ALL: [Verdict; 4] = [
+        Verdict::Warmup,
+        Verdict::Expected,
+        Verdict::Anomaly,
+        Verdict::Novel,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Verdict::Warmup => "warmup",
             Verdict::Expected => "expected",
             Verdict::Anomaly => "anomaly",
+            Verdict::Novel => "novel",
         }
     }
 }
@@ -158,6 +171,18 @@ mod tests {
             narrow.judge(narrow.mean() + 2.0 * narrow.sigma()),
             Verdict::Expected
         );
+    }
+
+    // The wire spelling and the label spelling are the same string, so a
+    // dashboard can key a metrics series by what it read off the stream.
+    #[test]
+    fn a_verdict_serializes_as_its_label() {
+        for verdict in Verdict::ALL {
+            assert_eq!(
+                serde_json::to_string(&verdict).unwrap(),
+                format!("\"{}\"", verdict.as_str())
+            );
+        }
     }
 
     #[test]
