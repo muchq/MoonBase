@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { Chess, type Move } from 'chess.js';
-import { Chessboard } from 'react-chessboard';
+import { Chessboard, type Arrow } from 'react-chessboard';
 import type { GameRow, OccurrenceRow } from '../types';
 import { platformLabel } from '../platforms';
 
@@ -44,6 +44,27 @@ function parsePgn(pgn: string): { fens: string[]; moves: Move[] } {
 // fens[ply + 1] is the resulting board position to display.
 function occurrencePly(occ: OccurrenceRow): number {
   return (occ.moveNumber - 1) * 2 + (occ.side === 'black' ? 1 : 0);
+}
+
+// attacker/target are piece-on-square notation from the detectors: "Nf3",
+// "ke8". The square is what the arrow needs.
+function squareOf(notation: string | null | undefined): string | null {
+  const square = notation?.slice(-2) ?? '';
+  return /^[a-h][1-8]$/.test(square) ? square : null;
+}
+
+// One arrow per row of the active motif on this move, attacker to target. A
+// fork is one row per victim, so it fans out from the forking piece; a
+// discovered attack points from the revealed piece, not the one that moved.
+function motifArrows(rows: OccurrenceRow[], ply: number, color: string): Arrow[] {
+  const arrows: Arrow[] = [];
+  for (const row of rows) {
+    if (occurrencePly(row) !== ply) continue;
+    const startSquare = squareOf(row.attacker);
+    const endSquare = squareOf(row.target);
+    if (startSquare && endSquare) arrows.push({ startSquare, endSquare, color });
+  }
+  return arrows;
 }
 
 function formatMoveLabel(occ: OccurrenceRow): string {
@@ -106,8 +127,17 @@ export default function GameDetailPanel({ game, onClose }: Props) {
     ? sortedOccurrences.findIndex(({ occ }) => occ === activeOccurrence)
     : -1;
 
-  const activeMotifKey = activeIndex >= 0 ? sortedOccurrences[activeIndex].motif : null;
-  const motifColor = activeMotifKey != null ? (MOTIF_COLORS[activeMotifKey] ?? null) : null;
+  // The motif is drawn only while the board shows the move that produced it;
+  // stepping away leaves it selected in the list but off the board.
+  const shownMotif =
+    activeOccurrence && currentPly === occurrencePly(activeOccurrence) + 1
+      ? sortedOccurrences[activeIndex].motif
+      : null;
+  const motifColor = shownMotif != null ? (MOTIF_COLORS[shownMotif] ?? '#aaa') : null;
+  const arrows =
+    shownMotif != null && motifColor != null
+      ? motifArrows(game.occurrences?.[shownMotif] ?? [], currentPly - 1, motifColor)
+      : [];
 
   const squareStyles: Record<string, React.CSSProperties> = {};
   if (lastMove) {
@@ -233,6 +263,7 @@ export default function GameDetailPanel({ game, onClose }: Props) {
                   position: fen,
                   boardOrientation: orientation,
                   squareStyles: squareStyles,
+                  arrows,
                   allowDragging: false,
                 }}
               />
