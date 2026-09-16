@@ -530,4 +530,34 @@ ssh "$HOST" << EOF
   sudo -E docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --address 127.0.0.1:2019
 EOF
 
+# Reap our own per-SHA images, once the new one is already serving. compose
+# pins tags from ~/.env, so each deploy leaves its predecessor resident and
+# referenced by nothing. Everything reaped is still in ghcr: the cost of
+# reaping too eagerly is a pull on the next rollback, not a lost rollback,
+# which is what makes a window this short safe.
+#
+# In-use images are subtracted explicitly rather than left to `docker rmi` to
+# refuse. {{.CreatedAt}} is build time, not deploy time, so every service not
+# rebuilt this week has a live image older than the window — without the
+# subtraction each deploy would attempt a dozen removals it expects to fail,
+# and the only thing standing between a live image and removal would be that
+# refusal.
+ssh "$HOST" 'bash -s' << 'PRUNE' || echo "warning: image prune failed; the deploy is unaffected" >&2
+  set -u
+  cutoff=$(date -u -d '7 days ago' +%s)
+  in_use=$(sudo docker ps -aq | xargs -r sudo docker inspect -f '{{.Image}}' | sort -u)
+  reaped=$(sudo docker images --no-trunc --filter 'reference=ghcr.io/muchq/*' \
+             --format '{{.ID}}|{{.CreatedAt}}' \
+    | while IFS='|' read -r id created; do
+        # `date` rejects docker's trailing " UTC"; the rest of the stamp it takes.
+        ts=$(date -u -d "${created% UTC}" +%s 2> /dev/null) || continue
+        [ "$ts" -lt "$cutoff" ] || continue
+        printf '%s\n' "$in_use" | grep -qxF "$id" && continue
+        echo "$id"
+      done | sort -u)
+  [ -n "$reaped" ] || { echo "no images older than the rollback window"; exit 0; }
+  printf '%s\n' "$reaped" | xargs -r sudo docker rmi > /dev/null
+  echo "reaped $(printf '%s\n' "$reaped" | wc -l) image(s) older than the rollback window"
+PRUNE
+
 echo "Deployment complete! $target_desc running $short_sha"

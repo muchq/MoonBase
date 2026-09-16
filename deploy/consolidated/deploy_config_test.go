@@ -2638,3 +2638,107 @@ func TestPostgresSuitesStillRunInCI(t *testing.T) {
 		}
 	}
 }
+
+// Image retention on the deploy host.
+//
+// compose pins image tags from ~/.env, so a deploy leaves its predecessor's
+// per-SHA image resident and referenced by nothing. Nothing collected them,
+// and the root filesystem is 58G. The prune in deploy.sh is that collector,
+// and every property below is silent when lost: a prune in the wrong place
+// still exits 0, a window of the wrong length still reclaims something, and
+// a prune that reaps volumes reports the space it freed rather than the
+// database it freed it from.
+//
+// What a reaped image costs is a pull, not a rollback — every tag is still in
+// ghcr. That is why a window this short is safe at all.
+
+// The prune runs on a stack that is already serving. Ordered before the `up`,
+// it would reap the image a failed deploy needs to roll back to — and would do
+// it on exactly the deploys where rollback is the point.
+func TestDeployPrunesOnlyAfterTheStackIsUp(t *testing.T) {
+	deploy := readConfig(t, "deploy.sh")
+	prune := strings.Index(deploy, "docker rmi")
+	if prune < 0 {
+		t.Fatal("deploy.sh removes no images: every deploy leaves the previous per-SHA image" +
+			" resident, referenced by nothing, and the root filesystem is 58G")
+	}
+	up := strings.LastIndex(deploy, "up -d")
+	if up < 0 {
+		t.Fatal("deploy.sh no longer brings the stack up with `up -d`; the ordering guard here has lost its anchor")
+	}
+	if prune < up {
+		t.Error("deploy.sh prunes before `up -d`: a deploy that fails to come up has already" +
+			" discarded the image it would have rolled back to")
+	}
+}
+
+// Seven days of rollback targets. Shorter is not a correctness bug — the image
+// is still in ghcr — but it turns a restart into a pull at the moment someone
+// is trying to undo a bad deploy.
+func TestDeployPruneKeepsAWeekOfRollbackTargets(t *testing.T) {
+	deploy := readConfig(t, "deploy.sh")
+	window := regexp.MustCompile(`(\d+) days ago`).FindStringSubmatch(deploy)
+	if window == nil {
+		t.Fatal("deploy.sh names no retention window; the prune either keeps everything or keeps nothing")
+	}
+	days, err := strconv.Atoi(window[1])
+	if err != nil {
+		t.Fatalf("retention window %q is not a number of days", window[1])
+	}
+	if days < 7 {
+		t.Errorf("the prune keeps %d days of images; under a week a routine rollback re-pulls"+
+			" from ghcr instead of restarting what is already on disk", days)
+	}
+}
+
+// `docker system prune --volumes` would take the postgres data with it. The
+// deploy scripts reap images by id and nothing else.
+func TestTheDeployScriptsNeverPruneVolumes(t *testing.T) {
+	for _, name := range []string{"deploy.sh", "local_deploy.sh", "initialize_host.sh"} {
+		script := readConfig(t, name)
+		if strings.Contains(script, "--volumes") {
+			t.Errorf("%s passes --volumes to a prune: the postgres data is a local volume"+
+				" and a prune that reaps it reports only the space it freed", name)
+		}
+		if strings.Contains(script, "system prune") {
+			t.Errorf("%s runs `docker system prune`, which is not scoped to images and takes"+
+				" whatever else the daemon considers unused", name)
+		}
+	}
+}
+
+// The prune is cleanup, not deployment. deploy.sh runs under `set -e` and the
+// prune lands after the stack is up, so an unguarded failure would take ssh's
+// exit status with it and report a serving deploy as a failed one.
+func TestDeployPruneFailureDoesNotFailTheDeploy(t *testing.T) {
+	deploy := readConfig(t, "deploy.sh")
+	var opener string
+	for _, line := range strings.Split(deploy, "\n") {
+		if strings.Contains(line, "<< 'PRUNE'") {
+			opener = line
+			break
+		}
+	}
+	if opener == "" {
+		t.Fatal("deploy.sh opens no PRUNE block; the guard here has lost its anchor")
+	}
+	if !strings.Contains(opener, "||") {
+		t.Errorf("the prune is unguarded (%q): under `set -e` a failed cleanup aborts the"+
+			" script after the stack is already serving, and the deploy reports as failed", strings.TrimSpace(opener))
+	}
+}
+
+// dockerd answers `docker image prune --filter reference=...` with
+// `invalid filter 'reference'` — the filter is valid for `docker images` and
+// not for the prune. A prune written that way does not run at all, and the
+// deploy that carries it still exits 0.
+func TestImagePruneIsNotFilteredByReference(t *testing.T) {
+	for _, name := range []string{"deploy.sh", "local_deploy.sh", "initialize_host.sh"} {
+		for _, line := range strings.Split(readConfig(t, name), "\n") {
+			if strings.Contains(line, "image prune") && strings.Contains(line, "reference") {
+				t.Errorf("%s filters `image prune` by reference: dockerd rejects that filter"+
+					" as invalid and prunes nothing", name)
+			}
+		}
+	}
+}
