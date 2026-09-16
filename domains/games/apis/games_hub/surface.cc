@@ -12,8 +12,8 @@ using nlohmann::json;
 
 std::optional<std::string> Surface::RadiusProblem(double radius) {
   // NaN fails the comparison, so it is refused with the rest.
-  if (!(radius >= kMinRadius) || !std::isfinite(radius)) {
-    return absl::StrCat("sphere radius must be at least ", kMinRadius);
+  if (!(radius >= kMinRadius) || !(radius <= kMaxRadius)) {
+    return absl::StrCat("sphere radius must be within ", kMinRadius, "..", kMaxRadius);
   }
   return std::nullopt;
 }
@@ -29,11 +29,9 @@ std::optional<std::string> Surface::Settle(std::vector<double>& position) const 
     }
     return std::nullopt;
   }
+  // NaN and infinity fail the band check on their own.
   const std::string off_the_wall =
       absl::StrCat("position must be on the sphere (radius ", radius, ")");
-  for (const double component : position) {
-    if (!std::isfinite(component)) return off_the_wall;
-  }
   const double length = std::hypot(position[0], position[1], position[2]);
   if (!(std::abs(length - radius) <= kSnap)) return off_the_wall;
   const double onto = radius / length;

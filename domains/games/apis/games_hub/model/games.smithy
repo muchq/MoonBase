@@ -147,6 +147,11 @@ structure RoomState {
 
     @required
     games: GameSummaries
+
+    /// The surface the room's world stands on, so a joiner knows what to
+    /// draw and where to stand before its first lobby join.
+    @required
+    geometry: Geometry
 }
 
 list PlayerInfos {

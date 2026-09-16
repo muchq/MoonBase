@@ -132,7 +132,11 @@ TEST_F(LobbyWireTest, SphereRoomPinsGeometrySnapAndRefusalBytes) {
   auto creator = DialReady(creator_session);
   ASSERT_TRUE(
       creator->Send(CommandFrame("createRoom", R"({"geometry":{"sphere":{"radius":53}}})")).ok());
-  (void)EventPayload(NextFrame(*creator), "roomState");
+  // The room names its sphere before anyone has to guess a position.
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
+            R"({"games":[],"geometry":{"sphere":{"radius":53.0}},"players":[{"connected":true,)"
+            R"("gamesPlayed":0,"gamesWon":0,"playerId":"player-1","totalScore":0}],)"
+            R"("roomId":"room-1"})");
   ASSERT_TRUE(creator
                   ->Send(CommandFrame("lobby", R"({"action":{"join":{"roomId":"room-1",)"
                                                R"("position":[0,0,-52.5],"color":[0.8,0.2,0.6],)"
@@ -173,7 +177,7 @@ TEST_F(LobbyWireTest, SphereRoomPinsGeometrySnapAndRefusalBytes) {
   ASSERT_TRUE(
       other->Send(CommandFrame("createRoom", R"({"geometry":{"sphere":{"radius":1}}})")).ok());
   EXPECT_EQ(EventPayload(NextFrame(*other), "commandRejected"),
-            R"({"reason":"sphere radius must be at least 2"})");
+            R"({"reason":"sphere radius must be within 2..1000"})");
 }
 
 // Consumer: the client's dial error handling — the terminal

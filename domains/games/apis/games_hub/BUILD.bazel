@@ -162,6 +162,7 @@ cc_test(
     srcs = ["hub_store_test.cc"],
     deps = [
         ":hub_store",
+        ":surface",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards/golf:game_state",
         "@googletest//:gtest_main",
@@ -219,6 +220,7 @@ cc_library(
     deps = [
         ":hosted_game",
         ":hub_store",
+        ":surface",
         "//domains/games/libs/cards/castle:game_state_serde",
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:game_state_serde",
@@ -291,6 +293,7 @@ cc_test(
         ":hosted_game",
         ":pg_hub_store",
         ":pg_ticket_vault",
+        ":surface",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:dealer",
         "//domains/games/libs/cards/castle:game_state",

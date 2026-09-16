@@ -63,12 +63,14 @@ TEST(Surface, TheSphereSnapsNearTheWallAndRefusesTheRest) {
 TEST(Surface, ARadiusMustLeaveRoomToStand) {
   EXPECT_FALSE(Surface::RadiusProblem(2).has_value());
   EXPECT_FALSE(Surface::RadiusProblem(53).has_value());
-  EXPECT_EQ(Surface::RadiusProblem(1.99), "sphere radius must be at least 2");
-  EXPECT_EQ(Surface::RadiusProblem(0), "sphere radius must be at least 2");
-  EXPECT_EQ(Surface::RadiusProblem(-53), "sphere radius must be at least 2");
-  EXPECT_EQ(Surface::RadiusProblem(std::nan("")), "sphere radius must be at least 2");
+  EXPECT_FALSE(Surface::RadiusProblem(1000).has_value());
+  EXPECT_EQ(Surface::RadiusProblem(1000.01), "sphere radius must be within 2..1000");
+  EXPECT_EQ(Surface::RadiusProblem(1.99), "sphere radius must be within 2..1000");
+  EXPECT_EQ(Surface::RadiusProblem(0), "sphere radius must be within 2..1000");
+  EXPECT_EQ(Surface::RadiusProblem(-53), "sphere radius must be within 2..1000");
+  EXPECT_EQ(Surface::RadiusProblem(std::nan("")), "sphere radius must be within 2..1000");
   EXPECT_EQ(Surface::RadiusProblem(std::numeric_limits<double>::infinity()),
-            "sphere radius must be at least 2");
+            "sphere radius must be within 2..1000");
 }
 
 TEST(Surface, StoredFormRoundTripsAndRefusesWhatItCannotRead) {
@@ -89,7 +91,7 @@ TEST(Surface, StoredFormRoundTripsAndRefusesWhatItCannotRead) {
     EXPECT_FALSE(SurfaceFromJson(bad).ok()) << bad;
   }
   EXPECT_EQ(SurfaceFromJson(R"({"sphere":{"radius":1}})").status().message(),
-            "sphere radius must be at least 2");
+            "sphere radius must be within 2..1000");
 }
 
 }  // namespace

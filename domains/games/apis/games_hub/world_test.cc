@@ -254,7 +254,7 @@ TEST(World, GeometryAndSurfaceSpellEachOther) {
   moonbase::games::SphereGeometry tiny;
   tiny.radius = 1;
   const auto refused = SurfaceFromGeometry(moonbase::games::Geometry::FromSphere(std::move(tiny)));
-  EXPECT_EQ(refused.status().message(), "sphere radius must be at least 2");
+  EXPECT_EQ(refused.status().message(), "sphere radius must be within 2..1000");
 }
 
 }  // namespace

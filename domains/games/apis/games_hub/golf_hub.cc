@@ -405,7 +405,7 @@ absl::Status GolfHub::RestoreFromStore() {
   if (!snapshot.ok()) return snapshot.status();
   const std::lock_guard<std::mutex> lock(mu_);
   for (const HubStore::RoomRow& row : snapshot->rooms) {
-    rooms_[row.room_id].surface = row.surface;
+    rooms_[row.room_id];
     world_.SetSurface(row.room_id, row.surface);
   }
   for (const HubStore::MemberRow& row : snapshot->members) {
@@ -723,11 +723,11 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
 
   const bool materialized = !rooms_.contains(room_id);
   Room& room = rooms_[room_id];
-  if (materialized) {
-    // Another instance's room, on the surface it chose.
-    room.surface = rows.surface;
-    world_.SetSurface(room_id, rows.surface);
-  }
+  // The row's surface is the room's, every time: the row never changes
+  // it, and a room this instance conjured from a member row in a torn
+  // boot snapshot (the room row landing between the snapshot's reads)
+  // has no surface until a read like this one hands it over.
+  world_.SetSurface(room_id, rows.surface);
   ListenRoomLocked(room_id);  // idempotent; covers a room just materialized
   // A cursor born in the same critical section that makes the room held:
   // no member exists locally yet, so no append can commit behind it and
@@ -1016,7 +1016,6 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
       if (!player_room_.contains(player_id)) {
         room_id = ids_->RoomId();
         while (rooms_.contains(room_id)) room_id = ids_->RoomId();
-        rooms_[room_id].surface = surface;
         world_.SetSurface(room_id, surface);
         const auto [member, inserted] = rooms_[room_id].members.emplace(player_id, Member{});
         // Born at zero with its room: it provably has no rows, and the
@@ -2259,6 +2258,7 @@ moonbase::games::RoomState GolfHub::RoomStateLocked(const std::string& room_id,
                                                     const Room& room) const {
   moonbase::games::RoomState state;
   state.roomId = room_id;
+  state.geometry = GeometryOf(world_.SurfaceOf(room_id));
   for (const auto& [member_id, member] : room.members) {
     moonbase::games::PlayerInfo info;
     info.playerId = member_id;

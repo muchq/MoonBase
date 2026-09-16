@@ -6,8 +6,8 @@ namespace moonbase.lobby
 // (and /thoughts), on the games hub. A world per room: each joined player
 // is a position on the room's surface (#1554), a color, and a shape, and
 // every change reaches everyone else in the same world. The hub relays
-// and settles positions onto the surface; it simulates nothing and
-// remembers nothing past the connection.
+// and settles positions onto the surface; it simulates nothing, and the
+// surface is the only thing it remembers past the connection.
 //
 // The way in is the `lobby` member of the room's Play stream
 // (games.smithy): the world is the session's room's, or the plaza's while

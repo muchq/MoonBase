@@ -26,12 +26,16 @@ struct Surface {
 
   /// The plane's half extent: x and z within ±50.
   static constexpr double kHalfExtent = 50.0;
-  /// A sphere's smallest radius: room for an avatar to stand in.
+  /// A sphere's radius: at least room for an avatar to stand in, at
+  /// most one where doubles still resolve kSnap and the UI can draw it.
   static constexpr double kMinRadius = 2.0;
+  static constexpr double kMaxRadius = 1000.0;
   /// How far off a sphere's wall a position may arrive and still be put
   /// on it: an avatar's radius. A client steps along the tangent, so a
-  /// step lands just inside the wall; anything farther is malformed.
+  /// step lands just outside the wall; anything farther is malformed.
   static constexpr double kSnap = 1.0;
+  static_assert(kMinRadius > kSnap,
+                "an admitted position is never at the origin, so the snap never divides by zero");
 
   /// The reason a sphere of this radius is refused, else nullopt.
   static std::optional<std::string> RadiusProblem(double radius);
