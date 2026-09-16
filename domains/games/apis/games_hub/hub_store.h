@@ -58,11 +58,17 @@ class HubStore {
     std::vector<GameRow> games;
   };
 
-  /// The first upsert of a room fixes its surface; a later one for the
-  /// same room changes nothing. A room that chose nothing is a plane.
+  /// Creates the room on its surface; an upsert of a room that exists
+  /// changes nothing (two instances minting one code keep the first).
+  /// A room that chose nothing is a plane.
   struct UpsertRoom {
     std::string room_id;
     Surface surface = Surface::Plane();
+  };
+  /// Changes an existing room's surface; nothing for a room that is not.
+  struct SetRoomSurface {
+    std::string room_id;
+    Surface surface;
   };
   struct DeleteRoom {
     std::string room_id;
@@ -82,7 +88,8 @@ class HubStore {
     std::string channel;
     std::string payload;
   };
-  using Op = std::variant<UpsertRoom, DeleteRoom, UpsertMember, DeleteMember, DeleteGame, Notify>;
+  using Op = std::variant<UpsertRoom, SetRoomSurface, DeleteRoom, UpsertMember, DeleteMember,
+                          DeleteGame, Notify>;
 
   struct StatsDelta {
     std::string player_id;

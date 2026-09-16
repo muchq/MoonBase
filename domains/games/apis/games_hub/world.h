@@ -67,6 +67,11 @@ class World {
   /// plane, the plaza among them. Set when a room is created or adopted,
   /// forgotten when it is deleted.
   void SetSurface(const std::string& room_id, const Surface& surface);
+  /// Changes a world's surface under whoever stands in it: each is placed
+  /// at the nearest point of the new surface, and everyone in the world,
+  /// the actor included, is staged one geometryChanged naming the
+  /// surface and every player where they now stand.
+  void Reshape(const std::string& room_id, const Surface& surface, Deliveries& out);
   void ForgetSurface(const std::string& room_id);
   Surface SurfaceOf(const std::string& room_id) const;
 

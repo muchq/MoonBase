@@ -24,6 +24,7 @@ union LobbyAction {
     move: MoveTo
     shape: ChangeShape
     leave: LeaveWorld
+    setGeometry: SetGeometry
 }
 
 /// The lobby envelope on the event stream: exactly one update. The
@@ -38,6 +39,7 @@ union LobbyUpdate {
     playerJoined: PlayerJoined
     playerMoved: PlayerMoved
     shapeChanged: ShapeChanged
+    geometryChanged: GeometryChanged
     playerLeft: PlayerLeft
 }
 
@@ -74,6 +76,15 @@ structure ChangeShape {
 /// Leave the world but keep the session; join again to respawn.
 structure LeaveWorld {}
 
+/// Reshape the session's room for everyone in it (#1554): the room's
+/// world takes this surface, and everyone standing in it is placed at
+/// the nearest point of the new one. Any member may, standing or not;
+/// refused for a geometry the hub cannot host.
+structure SetGeometry {
+    @required
+    geometry: Geometry
+}
+
 /// Everyone already in the joined world, sent once to a joiner — before
 /// anyone else hears their playerJoined, and never listing the joiner.
 /// Empty when the world is. A full replacement: a client that respawns
@@ -82,13 +93,16 @@ structure WorldState {
     @required
     players: WorldPlayers
 
-    /// The surface this world stands on, the room's choice at creation.
+    /// The surface this world stands on: the room's choice at creation,
+    /// until a setGeometry changes it.
     @required
     geometry: Geometry
 }
 
-/// The shape of a room's world: where its players stand. A room chooses
-/// one at createRoom and keeps it; the plaza is a plane.
+/// The shape of a room's world: where its players stand. A room starts
+/// with the one createRoom names (absent: the plane) and any member can
+/// change it with setGeometry; the plaza starts flat and changes the
+/// same way, for everyone in it, until the hub restarts.
 union Geometry {
     /// The ground plane: positions are [x, 0, z] with x and z within ±50.
     plane: PlaneGeometry
@@ -151,6 +165,18 @@ structure ShapeChanged {
 
     @required
     shape: Integer
+}
+
+/// The world changed shape under everyone standing in it, the actor
+/// included: the new surface, and every player where the hub placed
+/// them on it (the nearest point of the new surface to where they
+/// stood). Replaces every position the client holds.
+structure GeometryChanged {
+    @required
+    geometry: Geometry
+
+    @required
+    players: WorldPlayers
 }
 
 /// A deliberate leave or a closed socket, alike.

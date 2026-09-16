@@ -1,5 +1,6 @@
 #include "domains/games/apis/games_hub/surface.h"
 
+#include <algorithm>
 #include <cmath>
 #include <nlohmann/json.hpp>
 
@@ -37,6 +38,17 @@ std::optional<std::string> Surface::Settle(std::vector<double>& position) const 
   const double onto = radius / length;
   for (double& component : position) component *= onto;
   return std::nullopt;
+}
+
+std::vector<double> Surface::Place(const std::vector<double>& position) const {
+  if (kind == Kind::kPlane) {
+    return {std::clamp(position[0], -kHalfExtent, kHalfExtent), 0.0,
+            std::clamp(position[2], -kHalfExtent, kHalfExtent)};
+  }
+  const double length = std::hypot(position[0], position[1], position[2]);
+  if (!(length > 0.0)) return {0.0, 0.0, -radius};
+  const double onto = radius / length;
+  return {position[0] * onto, position[1] * onto, position[2] * onto};
 }
 
 std::string SurfaceJson(const Surface& surface) {

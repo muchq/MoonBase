@@ -241,6 +241,55 @@ TEST(World, ASphereRoomSnapsToItsWallRefusesOffItAndNamesItself) {
   EXPECT_EQ(world.SurfaceOf("S"), Surface::Plane());
 }
 
+// A world changes shape under whoever stands in it (#1554): every
+// player is placed at the nearest point of the new surface, everyone in
+// that world (the actor is not special: any member may reshape, standing
+// or not) hears one geometryChanged carrying the surface and every
+// placement, other worlds hear nothing, and the new rules apply to the
+// next move. A later joiner's snapshot has the placed positions.
+TEST(World, ReshapePlacesEveryoneAndTellsTheWholeWorld) {
+  World world;
+  World::Deliveries out;
+  ASSERT_FALSE(world.Join("alice", "R", Join({10, 0, -5}, {1, 0, 0}, 0), out).has_value());
+  ASSERT_FALSE(world.Join("bob", "R", Join({0, 0, 0}, {0, 1, 0}, 1), out).has_value());
+  ASSERT_FALSE(world.Join("carol", World::kPlaza, FixtureJoin(), out).has_value());
+  out.clear();
+
+  world.Reshape("R", Surface::Sphere(53), out);
+  EXPECT_EQ(Staged(out),
+            (std::vector<std::string>{"alice:geometryChanged", "bob:geometryChanged"}));
+  const auto* changed = out.at(0).update.as_geometryChanged_or_null();
+  ASSERT_NE(changed, nullptr);
+  ASSERT_NE(changed->geometry.as_sphere_or_null(), nullptr);
+  ASSERT_EQ(changed->players.size(), 2u);
+  EXPECT_EQ(changed->players[0].playerId, "alice");
+  EXPECT_NEAR(std::hypot(changed->players[0].position[0], changed->players[0].position[1],
+                         changed->players[0].position[2]),
+              53, 1e-9);
+  EXPECT_EQ(changed->players[1].playerId, "bob");
+  EXPECT_EQ(changed->players[1].position, (std::vector<double>{0, 0, -53}));
+  out.clear();
+
+  const auto flat = world.Move("bob", MoveTo({1, 0, 1}), out);
+  ASSERT_TRUE(flat.has_value());
+  EXPECT_EQ(flat->reason, "position must be on the sphere (radius 53)");
+  ASSERT_FALSE(world.Move("bob", MoveTo({0, 0, -52.5}), out).has_value());
+  out.clear();
+  ASSERT_FALSE(world.Join("dave", "R", Join({53, 0, 0}, {0, 0, 1}, 2), out).has_value());
+  const auto* seen = out.at(0).update.as_worldState_or_null();
+  ASSERT_NE(seen->geometry.as_sphere_or_null(), nullptr);
+  EXPECT_EQ(seen->players[1].position, (std::vector<double>{0, 0, -53}));
+  out.clear();
+
+  // Back to the plane: the sphere's positions clamp into its bounds.
+  world.Reshape("R", Surface::Plane(), out);
+  ASSERT_EQ(out.size(), 3u);
+  const auto* back = out.at(2).update.as_geometryChanged_or_null();
+  ASSERT_NE(back, nullptr);
+  EXPECT_EQ(back->players[2].position, (std::vector<double>{50, 0, 0}));
+  EXPECT_EQ(world.SurfaceOf("R"), Surface::Plane());
+}
+
 // The wire's Geometry and the Surface it means, both ways; a sphere too
 // small to stand in is refused before it becomes a room.
 TEST(World, GeometryAndSurfaceSpellEachOther) {

@@ -1314,6 +1314,55 @@ TEST_F(PgGamesHubFixture, AMaterializedRoomStandsOnItsSphere) {
             "position must be on the sphere (radius 53)");
 }
 
+// A room changes shape on every instance (#1554): alice's setGeometry
+// on the primary reaches bob, standing in the world on the remote,
+// as a geometryChanged with his placement on the sphere — no rejoin —
+// and his next move obeys the sphere; her own join then lands on it.
+TEST_F(PgGamesHubFixture, SetGeometryReshapesTheRoomOnEveryInstance) {
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  CrossSeats seats;
+  QuiesceOnScopeExit quiesce{this, remote.get(), nullptr};
+  const std::string room_id = SeatedCrossRoom(*remote, seats);
+  ASSERT_FALSE(room_id.empty());
+
+  moonbase::games::JoinWorld join_world;
+  join_world.position = {0, 0, 0};
+  join_world.color = {1, 1, 1};
+  join_world.shape = 0;
+  ASSERT_TRUE(
+      seats.bob->stream.Send(Lobby(moonbase::games::LobbyAction::FromJoin(join_world))).ok());
+  ASSERT_TRUE(ReceiveLobby(seats.bob->stream, "worldState").has_value());
+
+  moonbase::games::SphereGeometry sphere;
+  sphere.radius = 53;
+  moonbase::games::SetGeometry set;
+  set.geometry = moonbase::games::Geometry::FromSphere(std::move(sphere));
+  ASSERT_TRUE(
+      seats.alice->stream.Send(Lobby(moonbase::games::LobbyAction::FromSetgeometry(set))).ok());
+  auto changed = ReceiveLobby(seats.bob->stream, "geometryChanged");
+  ASSERT_TRUE(changed.has_value());
+  const auto* reshaped = changed->as_geometryChanged_or_null();
+  ASSERT_NE(reshaped->geometry.as_sphere_or_null(), nullptr);
+  ASSERT_EQ(reshaped->players.size(), 1u);
+  EXPECT_EQ(reshaped->players[0].position, (std::vector<double>{0, 0, -53}));
+
+  moonbase::games::MoveTo move;
+  move.position = {0, 0, -40};
+  ASSERT_TRUE(seats.bob->stream.Send(Lobby(moonbase::games::LobbyAction::FromMove(move))).ok());
+  auto refused = ReceiveCase(seats.bob->stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
+            "position must be on the sphere (radius 53)");
+
+  join_world.position = {53, 0, 0};
+  ASSERT_TRUE(
+      seats.alice->stream.Send(Lobby(moonbase::games::LobbyAction::FromJoin(join_world))).ok());
+  auto world = ReceiveLobby(seats.alice->stream, "worldState");
+  ASSERT_TRUE(world.has_value());
+  EXPECT_NE(world->as_worldState_or_null()->geometry.as_sphere_or_null(), nullptr);
+}
+
 TEST_F(PgGamesHubFixture, EmptiedRoomVanishesFromTheDatabase) {
   auto alice = OpenSeat();
   ASSERT_TRUE(alice.has_value());

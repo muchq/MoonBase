@@ -60,6 +60,29 @@ TEST(Surface, TheSphereSnapsNearTheWallAndRefusesTheRest) {
   EXPECT_EQ(Settled(sphere, {10, 0, -5}), "position must be on the sphere (radius 53)");
 }
 
+// Where a player lands when their world changes shape: the nearest
+// point of the new surface, always a settled one.
+TEST(Surface, PlacePutsAnyPointOnTheSurface) {
+  const Surface plane = Surface::Plane();
+  EXPECT_EQ(plane.Place({10, 0, -5}), (std::vector<double>{10, 0, -5}));
+  EXPECT_EQ(plane.Place({0, 53, 0}), (std::vector<double>{0, 0, 0}));
+  EXPECT_EQ(plane.Place({53, 0, -53}), (std::vector<double>{50, 0, -50}));
+  const Surface sphere = Surface::Sphere(53);
+  EXPECT_EQ(sphere.Place({0, 0, -53}), (std::vector<double>{0, 0, -53}));
+  EXPECT_EQ(sphere.Place({0, 0, -5}), (std::vector<double>{0, 0, -53}));
+  EXPECT_EQ(sphere.Place({0, 0, 0}), (std::vector<double>{0, 0, -53}));
+  std::vector<double> placed = sphere.Place({30, 30, 30});
+  EXPECT_NEAR(std::hypot(placed[0], placed[1], placed[2]), 53, 1e-9);
+  EXPECT_NEAR(placed[0], placed[1], 1e-9);
+  for (const auto& surface : {plane, sphere}) {
+    for (std::vector<double> from :
+         {std::vector<double>{10, 0, -5}, std::vector<double>{0, 53, 0}}) {
+      std::vector<double> settled = surface.Place(from);
+      EXPECT_FALSE(surface.Settle(settled).has_value());
+    }
+  }
+}
+
 TEST(Surface, ARadiusMustLeaveRoomToStand) {
   EXPECT_FALSE(Surface::RadiusProblem(2).has_value());
   EXPECT_FALSE(Surface::RadiusProblem(53).has_value());

@@ -80,6 +80,10 @@ bool MemoryHubStore::CommitGameLocked(const GameRow& row) {
 void MemoryHubStore::ApplyLocked(const Op& op) {
   if (const auto* upsert = std::get_if<UpsertRoom>(&op)) {
     rooms_.emplace(upsert->room_id, upsert->surface);
+  } else if (const auto* set = std::get_if<SetRoomSurface>(&op)) {
+    if (const auto room = rooms_.find(set->room_id); room != rooms_.end()) {
+      room->second = set->surface;
+    }
   } else if (const auto* erase = std::get_if<DeleteRoom>(&op)) {
     rooms_.erase(erase->room_id);
     std::erase_if(members_, [&](const auto& entry) { return entry.first.first == erase->room_id; });

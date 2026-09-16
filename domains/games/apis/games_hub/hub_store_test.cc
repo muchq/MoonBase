@@ -57,16 +57,20 @@ TEST(MemoryHubStoreTest, OpsRoundTripAndRoomDeleteCascades) {
   EXPECT_TRUE(snapshot->games.empty());
 }
 
-// The surface a room chose rides its row (#1554): the first upsert fixes
-// it, LoadRoom and LoadSnapshot hand it back, and a later upsert of the
-// same room (another instance's create racing, a reconcile) changes
-// nothing. A room that chose nothing is a plane.
-TEST(MemoryHubStoreTest, RoomSurfaceIsFixedByTheFirstUpsert) {
+// The surface a room stands on rides its row (#1554): the create sets
+// it, LoadRoom and LoadSnapshot hand it back, a second create of the
+// same room (two instances minting one code) keeps the first, and
+// SetRoomSurface changes it — for a room that exists; one that does not
+// stays absent. A room that chose nothing is a plane.
+TEST(MemoryHubStoreTest, RoomSurfaceIsSetByCreateAndChangedBySetRoomSurface) {
   MemoryHubStore store;
-  store.Enqueue({HubStore::UpsertRoom{"S", Surface::Sphere(53)}, HubStore::UpsertRoom{"P"}});
+  store.Enqueue({HubStore::UpsertRoom{"S", Surface::Sphere(2)}, HubStore::UpsertRoom{"P"}});
   store.Flush();
-  store.Enqueue({HubStore::UpsertRoom{"S", Surface::Plane()}});
+  store.Enqueue({HubStore::UpsertRoom{"S", Surface::Plane()},
+                 HubStore::SetRoomSurface{"S", Surface::Sphere(53)},
+                 HubStore::SetRoomSurface{"ghost", Surface::Sphere(53)}});
   store.Flush();
+  EXPECT_FALSE(store.LoadRoom("ghost")->exists);
 
   auto sphere = store.LoadRoom("S");
   ASSERT_TRUE(sphere.ok());

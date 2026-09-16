@@ -180,6 +180,49 @@ TEST_F(LobbyWireTest, SphereRoomPinsGeometrySnapAndRefusalBytes) {
             R"({"reason":"sphere radius must be within 2..1000"})");
 }
 
+// Consumer: the room changing shape under everyone (#1554). A member's
+// setGeometry reaches every seat standing in the world, the actor
+// included, as one geometryChanged carrying the surface and everyone's
+// placement on it; a move then obeys the new surface; a geometry the
+// hub cannot host is refused in band and changes nothing.
+TEST_F(LobbyWireTest, SetGeometryPinsGeometryChangedBytes) {
+  json first_session;
+  auto first = DialReady(first_session);
+  ASSERT_TRUE(first->Send(CommandFrame("lobby", kJoinPayload)).ok());
+  (void)EventPayload(NextFrame(*first), "lobby");
+  json second_session;
+  auto second = DialReady(second_session);
+  ASSERT_TRUE(second
+                  ->Send(CommandFrame("lobby", R"({"action":{"join":{"position":[0,0,0],)"
+                                               R"("color":[0.3,0.9,0.4],"shape":1}}})"))
+                  .ok());
+  (void)EventPayload(NextFrame(*second), "lobby");
+  (void)EventPayload(NextFrame(*first), "lobby");
+
+  ASSERT_TRUE(first
+                  ->Send(CommandFrame("lobby", R"({"action":{"setGeometry":{"geometry":)"
+                                               R"({"sphere":{"radius":5}}}}})"))
+                  .ok());
+  const std::string changed =
+      R"({"update":{"geometryChanged":{"geometry":{"sphere":{"radius":5.0}},"players":[)"
+      R"({"color":[0.8,0.2,0.6],"playerId":"player-1","position":[4.47213595499958,0.0,)"
+      R"(-2.23606797749979],"shape":0},{"color":[0.3,0.9,0.4],"playerId":"player-2",)"
+      R"("position":[0.0,0.0,-5.0],"shape":1}]}}})";
+  EXPECT_EQ(EventPayload(NextFrame(*first), "lobby"), changed);
+  EXPECT_EQ(EventPayload(NextFrame(*second), "lobby"), changed);
+
+  ASSERT_TRUE(
+      second->Send(CommandFrame("lobby", R"({"action":{"move":{"position":[0,0,-4.5]}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*first), "lobby"),
+            R"({"update":{"playerMoved":{"playerId":"player-2","position":[0.0,0.0,-5.0]}}})");
+  ASSERT_TRUE(second
+                  ->Send(CommandFrame("lobby", R"({"action":{"setGeometry":{"geometry":)"
+                                               R"({"sphere":{"radius":1}}}}})"))
+                  .ok());
+  EXPECT_EQ(EventPayload(NextFrame(*second), "commandRejected"),
+            R"({"reason":"sphere radius must be within 2..1000"})");
+}
+
 // Consumer: the client's dial error handling — the terminal
 // Unauthenticated frame and a clean close.
 TEST_F(LobbyWireTest, InvalidTicketRefusesWithTerminalUnauthenticatedFrame) {

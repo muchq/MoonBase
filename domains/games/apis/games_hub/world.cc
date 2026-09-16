@@ -116,6 +116,21 @@ void World::SetSurface(const std::string& room_id, const Surface& surface) {
   surfaces_[room_id] = surface;
 }
 
+void World::Reshape(const std::string& room_id, const Surface& surface, Deliveries& out) {
+  SetSurface(room_id, surface);
+  moonbase::games::GeometryChanged changed;
+  changed.geometry = GeometryOf(surface);
+  for (auto& [id, standing] : world_) {
+    if (standing.room_id != room_id) continue;
+    standing.player.position = surface.Place(standing.player.position);
+    changed.players.push_back(standing.player);
+  }
+  const LobbyUpdate update = LobbyUpdate::FromGeometrychanged(std::move(changed));
+  for (const auto& [id, standing] : world_) {
+    if (standing.room_id == room_id) out.push_back({id, update});
+  }
+}
+
 void World::ForgetSurface(const std::string& room_id) { surfaces_.erase(room_id); }
 
 Surface World::SurfaceOf(const std::string& room_id) const {

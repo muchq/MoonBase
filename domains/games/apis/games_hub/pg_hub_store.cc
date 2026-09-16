@@ -17,6 +17,7 @@ using nlohmann::json;
 constexpr char kUpsertRoom[] = R"sql(
     INSERT INTO rooms (room_id, geometry) VALUES ($1, $2::jsonb)
     ON CONFLICT (room_id) DO NOTHING)sql";
+constexpr char kSetRoomSurface[] = "UPDATE rooms SET geometry = $2::jsonb WHERE room_id = $1";
 constexpr char kDeleteRoom[] = "DELETE FROM rooms WHERE room_id = $1";
 constexpr char kUpsertMember[] = R"sql(
     INSERT INTO room_members (room_id, player_id, connected, games_played, games_won, total_score)
@@ -157,6 +158,8 @@ std::optional<int> PgHubStore::ExecOrWarn(const char* what, const char* sql,
 void PgHubStore::Apply(const Op& op) {
   if (const auto* upsert = std::get_if<UpsertRoom>(&op)) {
     ExecOrWarn("UpsertRoom", kUpsertRoom, {upsert->room_id, SurfaceJson(upsert->surface)});
+  } else if (const auto* set = std::get_if<SetRoomSurface>(&op)) {
+    ExecOrWarn("SetRoomSurface", kSetRoomSurface, {set->room_id, SurfaceJson(set->surface)});
   } else if (const auto* erase = std::get_if<DeleteRoom>(&op)) {
     ExecOrWarn("DeleteRoom", kDeleteRoom, {erase->room_id});
   } else if (const auto* upsert = std::get_if<UpsertMember>(&op)) {

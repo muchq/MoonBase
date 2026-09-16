@@ -45,6 +45,13 @@ struct Surface {
   /// surface. A sphere snaps it to the wall; the plane takes it as is.
   std::optional<std::string> Settle(std::vector<double>& position) const;
 
+  /// The nearest point of the surface to `position`, a settled point of
+  /// any surface: where a player stands after their world changes
+  /// shape. The plane clamps x and z and drops y; the sphere scales
+  /// onto the wall, and puts a position with no direction (the origin)
+  /// at [0, 0, -radius].
+  std::vector<double> Place(const std::vector<double>& position) const;
+
   bool operator==(const Surface&) const = default;
 };
 

@@ -330,16 +330,20 @@ TEST_F(PgHubStoreTest, FinishCommitAppliesStatsExactlyOnce) {
   expect_stats();
 }
 
-// The surface a room chose rides its row (#1554): stored in the wire's
-// spelling, the first insert fixes it, and both loads hand it back. A
-// row from before the column (the migration's default) and a row whose
-// geometry nothing here can read are the plane, so a bad row costs the
-// room its shape and never the boot.
+// The surface a room stands on rides its row (#1554): stored in the
+// wire's spelling, set by the create, kept against a second create,
+// changed by SetRoomSurface (a no-op for a room that is not), and read
+// back by both loads. A row from before the column (the migration's
+// default) and a row whose geometry nothing here can read are the
+// plane, so a bad row costs the room its shape and never the boot.
 TEST_F(PgHubStoreTest, RoomGeometryRoundTripsAndUnreadableRowsAreFlat) {
-  store_->Enqueue({PgHubStore::UpsertRoom{"S", Surface::Sphere(53)}});
+  store_->Enqueue({PgHubStore::UpsertRoom{"S", Surface::Sphere(2)}});
   store_->Flush();
-  store_->Enqueue({PgHubStore::UpsertRoom{"S", Surface::Plane()}});
+  store_->Enqueue({PgHubStore::UpsertRoom{"S", Surface::Plane()},
+                   PgHubStore::SetRoomSurface{"S", Surface::Sphere(53)},
+                   PgHubStore::SetRoomSurface{"ghost", Surface::Sphere(53)}});
   store_->Flush();
+  EXPECT_FALSE(store_->LoadRoom("ghost")->exists);
   ASSERT_TRUE(db_->Exec("INSERT INTO rooms (room_id) VALUES ('P')").ok());
   ASSERT_TRUE(
       db_->Exec(R"(INSERT INTO rooms (room_id, geometry) VALUES ('T', '{"torus":{}}'))").ok());
