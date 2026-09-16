@@ -81,3 +81,29 @@ func TestRunBounded_ContainsAPanickingJob(t *testing.T) {
 		assert.Equal(t, i%3 != 0, done[i], "index %d", i)
 	}
 }
+
+// Every other assertion about the ceiling is written in terms of the ceiling,
+// so the constant itself is the one thing they cannot hold: raise it to 40 and
+// a games_hub page fires all 31 of its queries at once, against the one small
+// Prometheus the number was measured on, with the suite still green. The same
+// reason cacheTTL is pinned next door.
+func TestRunBounded_TheCeilingIsTheMeasuredOne(t *testing.T) {
+	assert.Equal(t, 4, maxConcurrentQueries,
+		"measured against the deployed Prometheus (#1556) — raising it is a deliberate act")
+}
+
+// Containment without a trace is its own failure: the job's slot stays at the
+// zero a real answer could have had, so the log line is all that separates a
+// crashed query from a quiet one.
+func TestRunBounded_LogsThePanicItContains(t *testing.T) {
+	logged := captureLog(t, func() {
+		runBounded(3, func(i int) {
+			if i == 2 {
+				panic("query blew up")
+			}
+		})
+	})
+	assert.Contains(t, logged, "panicked")
+	assert.Contains(t, logged, "query blew up")
+	assert.Contains(t, logged, "2", "the log does not say which query it was")
+}

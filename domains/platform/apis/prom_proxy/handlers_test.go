@@ -1,10 +1,13 @@
 package prom_proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -245,6 +248,25 @@ func TestMetricsHandler_HealthHandler(t *testing.T) {
 	// Verify timestamp is valid RFC3339 format
 	_, err = time.Parse(time.RFC3339, response["timestamp"])
 	assert.NoError(t, err)
+}
+
+// captureLog collects what the standard logger writes while fn runs.
+//
+// A zero tile means "the query failed" or "the number is zero" and the payload
+// cannot tell them apart — the log line is the whole difference, which both
+// the fan-out and the handlers say in as many words. Asserting on tiles without
+// asserting on this leaves the distinction they describe untested, and since
+// runBounded contains panics, it also leaves a panicking query looking exactly
+// like a healthy idle service.
+func captureLog(t *testing.T, fn func()) string {
+	t.Helper()
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	fn()
+	// Safe unsynchronized: log.Logger serializes its writes, and every
+	// goroutine runBounded started has finished before fn returns.
+	return buf.String()
 }
 
 // Mock Prometheus client for testing handlers

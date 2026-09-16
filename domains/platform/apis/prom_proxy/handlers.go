@@ -92,12 +92,28 @@ type PrometheusQuerier interface {
 	QueryRange(ctx context.Context, query string, start, end time.Time, step string) (*QueryResponse, error)
 }
 
+// How long a handler gives its whole fan-out. Long enough that only a wedged
+// Prometheus reaches it, which is why hitting it means the page is zeros and
+// must not be cached — see cacheIfComplete.
+const defaultQueryTimeout = 30 * time.Second
+
 type MetricsHandler struct {
 	promClient PrometheusQuerier
 	// Only the per-service routes are cached; see responseCache. Nil is a
 	// working handler that always queries, which is what the tests building
 	// this struct directly rely on.
 	cache *responseCache
+	// Zero means defaultQueryTimeout, so a handler built as a struct literal
+	// gets the production budget rather than a context that is already over.
+	// Set in tests that need the deadline to arrive before the answers do.
+	queryTimeout time.Duration
+}
+
+func (h *MetricsHandler) timeout() time.Duration {
+	if h.queryTimeout <= 0 {
+		return defaultQueryTimeout
+	}
+	return h.queryTimeout
 }
 
 func NewMetricsHandler(promClient PrometheusQuerier) *MetricsHandler {

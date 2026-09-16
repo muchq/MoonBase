@@ -28,7 +28,7 @@ func (h *MetricsHandler) GetServiceCatalog(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *MetricsHandler) GetHostMetrics(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), h.timeout())
 	defer cancel()
 
 	response := &HostMetricsResponse{
@@ -56,7 +56,7 @@ func (h *MetricsHandler) GetHostMetricsTimeSeries(w http.ResponseWriter, r *http
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), h.timeout())
 	defer cancel()
 
 	response, err := h.fetchSystemMetricsTimeSeries(ctx, TimeRange(timeRange))
@@ -131,7 +131,7 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), h.timeout())
 	defer cancel()
 
 	response := &ServiceMetricsResponse{
@@ -228,7 +228,7 @@ func (h *MetricsHandler) GetServiceMetricsTimeSeries(w http.ResponseWriter, r *h
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), h.timeout())
 	defer cancel()
 
 	duration, step := GetTimeRangeConfig(TimeRange(timeRange))
