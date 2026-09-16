@@ -216,6 +216,38 @@ class NotAMemberChatStore final : public ChatStore {
   std::shared_ptr<ChatStore> delegate_;
 };
 
+// A HubStore whose boot snapshot has lost its room rows: what a Postgres
+// LoadSnapshot (three reads, no transaction) sees when a room is created
+// between its rooms read and its members read.
+class TornSnapshotStore final : public HubStore {
+ public:
+  explicit TornSnapshotStore(std::shared_ptr<HubStore> delegate) : delegate_(std::move(delegate)) {}
+  void Enqueue(std::vector<Op> ops) override { delegate_->Enqueue(std::move(ops)); }
+  void Flush() override { delegate_->Flush(); }
+  absl::StatusOr<Snapshot> LoadSnapshot() override {
+    auto snapshot = delegate_->LoadSnapshot();
+    if (snapshot.ok()) snapshot->rooms.clear();
+    return snapshot;
+  }
+  absl::StatusOr<bool> CommitGameSave(const GameRow& row, const std::string& payload) override {
+    return delegate_->CommitGameSave(row, payload);
+  }
+  absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& stats,
+                                        const std::string& payload) override {
+    return delegate_->CommitGameFinish(row, stats, payload);
+  }
+  absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
+                                                  const std::string& game_id) override {
+    return delegate_->LoadGame(room_id, game_id);
+  }
+  absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override {
+    return delegate_->LoadRoom(room_id);
+  }
+
+ private:
+  std::shared_ptr<HubStore> delegate_;
+};
+
 std::unique_ptr<SecondInstance> BuildSecondInstance(
     std::shared_ptr<TicketVault> vault, std::shared_ptr<HubStore> store,
     std::shared_ptr<ChatStore> chat_store,
@@ -906,6 +938,100 @@ TEST_F(GamesHubStreamFixture, ResumingOnAFreshInstanceReplaysChatHistory) {
   EXPECT_TRUE(world->as_worldState_or_null()->players.empty());
 }
 
+// A room's surface survives the process (#1554): a fresh instance
+// restoring from the store puts the room's world back on its sphere,
+// so a resumed seat's join lands on the wall, its worldState names the
+// sphere, and a move off the wall is refused by the sphere's rule, not
+// the plane's.
+TEST_F(GamesHubStreamFixture, ASphereRoomSurvivesARestart) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  moonbase::games::SphereGeometry sphere;
+  sphere.radius = 53;
+  moonbase::games::CreateRoom create;
+  create.geometry = moonbase::games::Geometry::FromSphere(std::move(sphere));
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(std::move(create))).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+  moonbase::games::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto resumed = OpenSeatVia(*instance->client, bob->resume_token);
+  ASSERT_TRUE(resumed.has_value());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "roomChatHistory").has_value());
+
+  moonbase::games::JoinWorld join_world;
+  join_world.position = {0, 0, -52.5};
+  join_world.color = {1, 1, 1};
+  join_world.shape = 0;
+  ASSERT_TRUE(resumed->stream.Send(Lobby(moonbase::games::LobbyAction::FromJoin(join_world))).ok());
+  auto world = ReceiveLobby(resumed->stream, "worldState");
+  ASSERT_TRUE(world.has_value());
+  const auto* geometry = world->as_worldState_or_null()->geometry.as_sphere_or_null();
+  ASSERT_NE(geometry, nullptr);
+  EXPECT_EQ(geometry->radius, 53);
+  moonbase::games::MoveTo move;
+  move.position = {0, 0, -40};
+  ASSERT_TRUE(resumed->stream.Send(Lobby(moonbase::games::LobbyAction::FromMove(move))).ok());
+  auto refused = ReceiveCase(resumed->stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
+            "position must be on the sphere (radius 53)");
+}
+
+// A room conjured from a member row alone (#1554) — the boot snapshot
+// missed its room row — stands on the plane only until the next read of
+// its rows: a wake's reconcile adopts the row's sphere for a room this
+// instance already holds, so a later joiner's world is the sphere the
+// creator chose, not the plane the torn boot guessed.
+TEST_F(GamesHubStreamFixture, AHeldRoomAdoptsItsRowsSurfaceOnReconcile) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  moonbase::games::SphereGeometry sphere;
+  sphere.radius = 53;
+  moonbase::games::CreateRoom create;
+  create.geometry = moonbase::games::Geometry::FromSphere(std::move(sphere));
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(std::move(create))).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+
+  auto instance =
+      BuildSecondInstance(vault_, std::make_shared<TornSnapshotStore>(store_), chat_store_);
+  ASSERT_NE(instance, nullptr);
+  // The wake any sibling's write sends: the held room re-reads its rows.
+  instance->golf->OnNotify(RoomChannel(room_id), "remote-instance");
+  auto carol = OpenSeatVia(*instance->client, std::nullopt);
+  ASSERT_TRUE(carol.has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  moonbase::games::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(carol->stream.Send(GameCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "roomChatHistory").has_value());
+
+  moonbase::games::JoinWorld join_world;
+  join_world.position = {0, 0, -53};
+  join_world.color = {1, 1, 1};
+  join_world.shape = 0;
+  ASSERT_TRUE(carol->stream.Send(Lobby(moonbase::games::LobbyAction::FromJoin(join_world))).ok());
+  auto world = ReceiveLobby(carol->stream, "worldState");
+  ASSERT_TRUE(world.has_value());
+  ASSERT_NE(world->as_worldState_or_null()->geometry.as_sphere_or_null(), nullptr);
+}
+
 // The boot-time twin of ActiveSignalRefreshesHeldRoom's contract: a
 // channel-active with nothing new in the rows projects nothing. A fresh
 // instance restores members from the same rows the catch-up re-reads, so
@@ -1585,11 +1711,13 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"lobby_commands", {{"command", "move"}}},
       {"lobby_commands", {{"command", "shape"}}},
       {"lobby_commands", {{"command", "leave"}}},
+      {"lobby_commands", {{"command", "setGeometry"}}},
       {"lobby_events", {{"event", "worldState"}}},
       {"lobby_events", {{"event", "playerJoined"}}},
       {"lobby_events", {{"event", "playerMoved"}}},
       {"lobby_events", {{"event", "shapeChanged"}}},
       {"lobby_events", {{"event", "playerLeft"}}},
+      {"lobby_events", {{"event", "geometryChanged"}}},
       {"hub_rate_limited", {{"kind", "chat"}}},
       {"hub_rate_limited", {{"kind", "command"}}},
       {"hub_rate_limited", {{"kind", "lobby"}}},

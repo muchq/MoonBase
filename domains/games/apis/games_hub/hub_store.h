@@ -13,6 +13,7 @@
 
 #include "absl/status/statusor.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
+#include "domains/games/apis/games_hub/surface.h"
 
 namespace games_hub {
 
@@ -45,14 +46,29 @@ class HubStore {
     GameKind kind = GameKind::kGolf;
   };
 
+  /// A room and the surface it chose at creation (#1554).
+  struct RoomRow {
+    std::string room_id;
+    Surface surface;
+  };
+
   struct Snapshot {
-    std::vector<std::string> rooms;
+    std::vector<RoomRow> rooms;
     std::vector<MemberRow> members;
     std::vector<GameRow> games;
   };
 
+  /// Creates the room on its surface; an upsert of a room that exists
+  /// changes nothing (two instances minting one code keep the first).
+  /// A room that chose nothing is a plane.
   struct UpsertRoom {
     std::string room_id;
+    Surface surface = Surface::Plane();
+  };
+  /// Changes an existing room's surface; nothing for a room that is not.
+  struct SetRoomSurface {
+    std::string room_id;
+    Surface surface;
   };
   struct DeleteRoom {
     std::string room_id;
@@ -72,7 +88,8 @@ class HubStore {
     std::string channel;
     std::string payload;
   };
-  using Op = std::variant<UpsertRoom, DeleteRoom, UpsertMember, DeleteMember, DeleteGame, Notify>;
+  using Op = std::variant<UpsertRoom, SetRoomSurface, DeleteRoom, UpsertMember, DeleteMember,
+                          DeleteGame, Notify>;
 
   struct StatsDelta {
     std::string player_id;
@@ -83,6 +100,7 @@ class HubStore {
 
   struct RoomRows {
     bool exists = false;
+    Surface surface;
     std::vector<MemberRow> members;
     std::vector<GameRow> games;
   };
@@ -124,7 +142,7 @@ class MemoryHubStore final : public HubStore {
   void ApplyLocked(const Op& op);
 
   std::mutex mu_;
-  std::set<std::string> rooms_;
+  std::map<std::string, Surface> rooms_;
   std::map<Key, MemberRow> members_;
   std::map<Key, GameRow> games_;
 };

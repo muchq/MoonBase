@@ -279,7 +279,8 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
 
   // alice on the primary, bob on `remote`, both in one room whose every
   // cross-instance step has landed. Empty on failure.
-  std::string SeatedCrossRoom(Instance& remote, CrossSeats& seats) {
+  std::string SeatedCrossRoom(Instance& remote, CrossSeats& seats,
+                              moonbase::games::CreateRoom create = {}) {
     seats.alice = OpenSeat();
     if (!seats.alice.has_value()) return "";
     if (!ReceiveCase(seats.alice->stream, "sessionReady").has_value()) return "";
@@ -287,8 +288,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     if (!seats.bob.has_value()) return "";
     if (!ReceiveCase(seats.bob->stream, "sessionReady").has_value()) return "";
 
-    if (!seats.alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{}))
-             .ok()) {
+    if (!seats.alice->stream.Send(GameCommands::FromCreateroom(std::move(create))).ok()) {
       return "";
     }
     auto created = ReceiveCase(seats.alice->stream, "roomState");
@@ -1276,6 +1276,91 @@ TEST_F(PgGamesHubFixture, ChatCommittedDuringListenerOutageArrivesAfterReconnect
   auto healed = ReceiveCase(alice->stream, "roomChat");
   ASSERT_TRUE(healed.has_value());
   EXPECT_EQ(healed->as_roomChat_or_null()->text, "during outage");
+}
+
+// A room's surface crosses instances with its row (#1554): the instance
+// that materializes another's room adopts its sphere, so a seat joining
+// the world there lands on the wall, hears the sphere named, and is
+// refused off it by the sphere's rule.
+TEST_F(PgGamesHubFixture, AMaterializedRoomStandsOnItsSphere) {
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  CrossSeats seats;
+  QuiesceOnScopeExit quiesce{this, remote.get(), nullptr};
+  moonbase::games::SphereGeometry sphere;
+  sphere.radius = 53;
+  moonbase::games::CreateRoom create;
+  create.geometry = moonbase::games::Geometry::FromSphere(std::move(sphere));
+  const std::string room_id = SeatedCrossRoom(*remote, seats, std::move(create));
+  ASSERT_FALSE(room_id.empty());
+
+  moonbase::games::JoinWorld join_world;
+  join_world.position = {0, 0, -52.5};
+  join_world.color = {1, 1, 1};
+  join_world.shape = 0;
+  ASSERT_TRUE(
+      seats.bob->stream.Send(Lobby(moonbase::games::LobbyAction::FromJoin(join_world))).ok());
+  auto world = ReceiveLobby(seats.bob->stream, "worldState");
+  ASSERT_TRUE(world.has_value());
+  const auto* geometry = world->as_worldState_or_null()->geometry.as_sphere_or_null();
+  ASSERT_NE(geometry, nullptr);
+  EXPECT_EQ(geometry->radius, 53);
+  moonbase::games::MoveTo move;
+  move.position = {0, 0, -40};
+  ASSERT_TRUE(seats.bob->stream.Send(Lobby(moonbase::games::LobbyAction::FromMove(move))).ok());
+  auto refused = ReceiveCase(seats.bob->stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
+            "position must be on the sphere (radius 53)");
+}
+
+// A room changes shape on every instance (#1554): alice's setGeometry
+// on the primary reaches bob, standing in the world on the remote,
+// as a geometryChanged with his placement on the sphere — no rejoin —
+// and his next move obeys the sphere; her own join then lands on it.
+TEST_F(PgGamesHubFixture, SetGeometryReshapesTheRoomOnEveryInstance) {
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  CrossSeats seats;
+  QuiesceOnScopeExit quiesce{this, remote.get(), nullptr};
+  const std::string room_id = SeatedCrossRoom(*remote, seats);
+  ASSERT_FALSE(room_id.empty());
+
+  moonbase::games::JoinWorld join_world;
+  join_world.position = {0, 0, 0};
+  join_world.color = {1, 1, 1};
+  join_world.shape = 0;
+  ASSERT_TRUE(
+      seats.bob->stream.Send(Lobby(moonbase::games::LobbyAction::FromJoin(join_world))).ok());
+  ASSERT_TRUE(ReceiveLobby(seats.bob->stream, "worldState").has_value());
+
+  moonbase::games::SphereGeometry sphere;
+  sphere.radius = 53;
+  moonbase::games::SetGeometry set;
+  set.geometry = moonbase::games::Geometry::FromSphere(std::move(sphere));
+  ASSERT_TRUE(
+      seats.alice->stream.Send(Lobby(moonbase::games::LobbyAction::FromSetgeometry(set))).ok());
+  auto changed = ReceiveLobby(seats.bob->stream, "geometryChanged");
+  ASSERT_TRUE(changed.has_value());
+  const auto* reshaped = changed->as_geometryChanged_or_null();
+  ASSERT_NE(reshaped->geometry.as_sphere_or_null(), nullptr);
+  ASSERT_EQ(reshaped->players.size(), 1u);
+  EXPECT_EQ(reshaped->players[0].position, (std::vector<double>{0, 0, -53}));
+
+  moonbase::games::MoveTo move;
+  move.position = {0, 0, -40};
+  ASSERT_TRUE(seats.bob->stream.Send(Lobby(moonbase::games::LobbyAction::FromMove(move))).ok());
+  auto refused = ReceiveCase(seats.bob->stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
+            "position must be on the sphere (radius 53)");
+
+  join_world.position = {53, 0, 0};
+  ASSERT_TRUE(
+      seats.alice->stream.Send(Lobby(moonbase::games::LobbyAction::FromJoin(join_world))).ok());
+  auto world = ReceiveLobby(seats.alice->stream, "worldState");
+  ASSERT_TRUE(world.has_value());
+  EXPECT_NE(world->as_worldState_or_null()->geometry.as_sphere_or_null(), nullptr);
 }
 
 TEST_F(PgGamesHubFixture, EmptiedRoomVanishesFromTheDatabase) {

@@ -44,15 +44,15 @@ class LobbyWireTest : public HubWireFixture {
 
 // Consumer: the lobby's join and the world it draws, under the `lobby`
 // event with the update nested under "update". The first joiner hears an
-// empty worldState; the second hears the first as a WorldPlayer (the
-// double spelling included — 10.0, not 10), and the first hears the
-// second arrive as a playerJoined.
+// empty worldState naming the plaza's plane; the second hears the first
+// as a WorldPlayer (the double spelling included — 10.0, not 10), and
+// the first hears the second arrive as a playerJoined.
 TEST_F(LobbyWireTest, JoinPinsWorldStateAndPlayerJoinedBytes) {
   json first_session;
   auto first = DialReady(first_session);
   ASSERT_TRUE(first->Send(CommandFrame("lobby", kJoinPayload)).ok());
   EXPECT_EQ(EventPayload(NextFrame(*first), "lobby"),
-            R"({"update":{"worldState":{"players":[]}}})");
+            R"({"update":{"worldState":{"geometry":{"plane":{}},"players":[]}}})");
 
   json second_session;
   auto second = DialReady(second_session);
@@ -61,7 +61,7 @@ TEST_F(LobbyWireTest, JoinPinsWorldStateAndPlayerJoinedBytes) {
                                                R"("color":[0.3,0.9,0.4],"shape":1}}})"))
                   .ok());
   EXPECT_EQ(EventPayload(NextFrame(*second), "lobby"),
-            R"({"update":{"worldState":{"players":[{"color":[0.8,0.2,0.6],)"
+            R"({"update":{"worldState":{"geometry":{"plane":{}},"players":[{"color":[0.8,0.2,0.6],)"
             R"("playerId":"player-1","position":[10.0,0.0,-5.0],"shape":0}]}}})");
   EXPECT_EQ(EventPayload(NextFrame(*first), "lobby"),
             R"({"update":{"playerJoined":{"player":{"color":[0.3,0.9,0.4],)"
@@ -118,7 +118,109 @@ TEST_F(LobbyWireTest, RejectedLobbyCommandsYieldCommandRejectedEvents) {
             R"({"reason":"the world is your room's; join the room first"})");
   ASSERT_TRUE(socket->Send(CommandFrame("lobby", kJoinPayload)).ok());
   EXPECT_EQ(EventPayload(NextFrame(*socket), "lobby"),
-            R"({"update":{"worldState":{"players":[]}}})");
+            R"({"update":{"worldState":{"geometry":{"plane":{}},"players":[]}}})");
+}
+
+// Consumer: a room created on a sphere (#1554). The creator's worldState
+// names the sphere and its radius; a join or move within an avatar's
+// reach of the wall lands ON it (the fan-out carries the snapped
+// position, not the sent one), one farther off is refused with the
+// radius in the reason, and a radius too small to stand in refuses the
+// createRoom itself.
+TEST_F(LobbyWireTest, SphereRoomPinsGeometrySnapAndRefusalBytes) {
+  json creator_session;
+  auto creator = DialReady(creator_session);
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("createRoom", R"({"geometry":{"sphere":{"radius":53}}})")).ok());
+  // The room names its sphere before anyone has to guess a position.
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
+            R"({"games":[],"geometry":{"sphere":{"radius":53.0}},"players":[{"connected":true,)"
+            R"("gamesPlayed":0,"gamesWon":0,"playerId":"player-1","totalScore":0}],)"
+            R"("roomId":"room-1"})");
+  ASSERT_TRUE(creator
+                  ->Send(CommandFrame("lobby", R"({"action":{"join":{"roomId":"room-1",)"
+                                               R"("position":[0,0,-52.5],"color":[0.8,0.2,0.6],)"
+                                               R"("shape":0}}})"))
+                  .ok());
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "lobby"),
+            R"({"update":{"worldState":{"geometry":{"sphere":{"radius":53.0}},"players":[]}}})");
+
+  json joiner_session;
+  auto joiner = DialReady(joiner_session);
+  ASSERT_TRUE(joiner->Send(CommandFrame("joinRoom", R"({"roomId":"room-1"})")).ok());
+  (void)EventPayload(NextFrame(*joiner), "roomState");
+  (void)EventPayload(NextFrame(*joiner), "roomChatHistory");
+  (void)EventPayload(NextFrame(*creator), "roomState");
+  ASSERT_TRUE(joiner
+                  ->Send(CommandFrame("lobby", R"({"action":{"join":{"roomId":"room-1",)"
+                                               R"("position":[53,0,0],"color":[0.3,0.9,0.4],)"
+                                               R"("shape":1}}})"))
+                  .ok());
+  // The creator stands where the wall is, not where the join said.
+  EXPECT_EQ(EventPayload(NextFrame(*joiner), "lobby"),
+            R"({"update":{"worldState":{"geometry":{"sphere":{"radius":53.0}},)"
+            R"("players":[{"color":[0.8,0.2,0.6],"playerId":"player-1",)"
+            R"("position":[0.0,0.0,-53.0],"shape":0}]}}})");
+  (void)EventPayload(NextFrame(*creator), "lobby");
+
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("lobby", R"({"action":{"move":{"position":[0,0,-52]}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*joiner), "lobby"),
+            R"({"update":{"playerMoved":{"playerId":"player-1","position":[0.0,0.0,-53.0]}}})");
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("lobby", R"({"action":{"move":{"position":[0,0,-40]}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
+            R"~({"reason":"position must be on the sphere (radius 53)"})~");
+
+  json other_session;
+  auto other = DialReady(other_session);
+  ASSERT_TRUE(
+      other->Send(CommandFrame("createRoom", R"({"geometry":{"sphere":{"radius":1}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*other), "commandRejected"),
+            R"({"reason":"sphere radius must be within 2..1000"})");
+}
+
+// Consumer: the room changing shape under everyone (#1554). A member's
+// setGeometry reaches every seat standing in the world, the actor
+// included, as one geometryChanged carrying the surface and everyone's
+// placement on it; a move then obeys the new surface; a geometry the
+// hub cannot host is refused in band and changes nothing.
+TEST_F(LobbyWireTest, SetGeometryPinsGeometryChangedBytes) {
+  json first_session;
+  auto first = DialReady(first_session);
+  ASSERT_TRUE(first->Send(CommandFrame("lobby", kJoinPayload)).ok());
+  (void)EventPayload(NextFrame(*first), "lobby");
+  json second_session;
+  auto second = DialReady(second_session);
+  ASSERT_TRUE(second
+                  ->Send(CommandFrame("lobby", R"({"action":{"join":{"position":[0,0,0],)"
+                                               R"("color":[0.3,0.9,0.4],"shape":1}}})"))
+                  .ok());
+  (void)EventPayload(NextFrame(*second), "lobby");
+  (void)EventPayload(NextFrame(*first), "lobby");
+
+  ASSERT_TRUE(first
+                  ->Send(CommandFrame("lobby", R"({"action":{"setGeometry":{"geometry":)"
+                                               R"({"sphere":{"radius":5}}}}})"))
+                  .ok());
+  const std::string changed =
+      R"({"update":{"geometryChanged":{"geometry":{"sphere":{"radius":5.0}},"players":[)"
+      R"({"color":[0.8,0.2,0.6],"playerId":"player-1","position":[4.47213595499958,0.0,)"
+      R"(-2.23606797749979],"shape":0},{"color":[0.3,0.9,0.4],"playerId":"player-2",)"
+      R"("position":[0.0,0.0,-5.0],"shape":1}]}}})";
+  EXPECT_EQ(EventPayload(NextFrame(*first), "lobby"), changed);
+  EXPECT_EQ(EventPayload(NextFrame(*second), "lobby"), changed);
+
+  ASSERT_TRUE(
+      second->Send(CommandFrame("lobby", R"({"action":{"move":{"position":[0,0,-4.5]}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*first), "lobby"),
+            R"({"update":{"playerMoved":{"playerId":"player-2","position":[0.0,0.0,-5.0]}}})");
+  ASSERT_TRUE(second
+                  ->Send(CommandFrame("lobby", R"({"action":{"setGeometry":{"geometry":)"
+                                               R"({"sphere":{"radius":1}}}}})"))
+                  .ok());
+  EXPECT_EQ(EventPayload(NextFrame(*second), "commandRejected"),
+            R"({"reason":"sphere radius must be within 2..1000"})");
 }
 
 // Consumer: the client's dial error handling — the terminal

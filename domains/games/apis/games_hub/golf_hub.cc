@@ -355,11 +355,13 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"lobby_commands", {{"command", "move"}}},
       {"lobby_commands", {{"command", "shape"}}},
       {"lobby_commands", {{"command", "leave"}}},
+      {"lobby_commands", {{"command", "setGeometry"}}},
       {"lobby_events", {{"event", "worldState"}}},
       {"lobby_events", {{"event", "playerJoined"}}},
       {"lobby_events", {{"event", "playerMoved"}}},
       {"lobby_events", {{"event", "shapeChanged"}}},
       {"lobby_events", {{"event", "playerLeft"}}},
+      {"lobby_events", {{"event", "geometryChanged"}}},
       {"hub_rate_limited", {{"kind", "chat"}}},
       {"hub_rate_limited", {{"kind", "command"}}},
       {"hub_rate_limited", {{"kind", "lobby"}}},
@@ -404,7 +406,10 @@ absl::Status GolfHub::RestoreFromStore() {
   auto snapshot = store_->LoadSnapshot();
   if (!snapshot.ok()) return snapshot.status();
   const std::lock_guard<std::mutex> lock(mu_);
-  for (const std::string& room_id : snapshot->rooms) rooms_[room_id];
+  for (const HubStore::RoomRow& row : snapshot->rooms) {
+    rooms_[row.room_id];
+    world_.SetSurface(row.room_id, row.surface);
+  }
   for (const HubStore::MemberRow& row : snapshot->members) {
     // Presence seeds from the row, the fleet truth ReconcileRoomLocked
     // already adopts on every wake. Seeding false here instead made the
@@ -708,6 +713,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
       }
     }
     rooms_.erase(room);
+    world_.ForgetSurface(room_id);
     // Under mu_ on purpose. The membership guard holds this lock for the
     // whole of an append, so no append can be mid-flight here and land a
     // message after the drop.
@@ -719,13 +725,24 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
 
   const bool materialized = !rooms_.contains(room_id);
   Room& room = rooms_[room_id];
+  // The row's surface is the room's, every time: a sibling's setGeometry
+  // reaches this instance as the row, and a room conjured from a member
+  // row in a torn boot snapshot (the room row landing between the
+  // snapshot's reads) has no surface until a read like this one hands
+  // it over. Standing players are placed on the new surface either way.
+  const bool reshaped = rows.surface != world_.SurfaceOf(room_id);
+  if (reshaped) {
+    World::Deliveries deliveries;
+    world_.Reshape(room_id, rows.surface, deliveries);
+    SendWorldLocked(deliveries);
+  }
   ListenRoomLocked(room_id);  // idempotent; covers a room just materialized
   // A cursor born in the same critical section that makes the room held:
   // no member exists locally yet, so no append can commit behind it and
   // then be stepped over — the adoption race a wake-time seed would have.
   if (materialized) SeedChatCursorLocked(room_id);
 
-  bool changed = materialized;
+  bool changed = materialized || reshaped;
 
   // Members mirror the rows: every instance writes its own players'
   // rows, and the refresh flush made ours current.
@@ -988,7 +1005,17 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
 
 void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& command) {
   CountCommand(command);
-  if (command.as_createRoom_or_null() != nullptr) {
+  if (const auto* create = command.as_createRoom_or_null()) {
+    // The room's surface, chosen once here; absent is the plane.
+    Surface surface;
+    if (create->geometry.has_value()) {
+      auto chosen = SurfaceFromGeometry(*create->geometry);
+      if (!chosen.ok()) {
+        Reject(player_id, RejectKind::kInvalid, std::string(chosen.status().message()));
+        return;
+      }
+      surface = *chosen;
+    }
     std::string room_id;
     Outbox outbox;
     Writes writes;
@@ -997,6 +1024,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
       if (!player_room_.contains(player_id)) {
         room_id = ids_->RoomId();
         while (rooms_.contains(room_id)) room_id = ids_->RoomId();
+        world_.SetSurface(room_id, surface);
         const auto [member, inserted] = rooms_[room_id].members.emplace(player_id, Member{});
         // Born at zero with its room: it provably has no rows, and the
         // creator's first message must pump from the very beginning.
@@ -1004,7 +1032,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
         LeaveWorldLocked(player_id);  // out of the plaza's world
         player_room_[player_id] = room_id;
         ListenRoomLocked(room_id);
-        StageLocked(writes, HubStore::UpsertRoom{room_id});
+        StageLocked(writes, HubStore::UpsertRoom{room_id, surface});
         StageMemberLocked(room_id, player_id, member->second, writes);
         StageRoomStateLocked(room_id, outbox);
         EnqueueWritesLocked(writes);
@@ -1195,6 +1223,23 @@ void GolfHub::HandleLobby(const std::string& player_id,
     } else if (action.as_leave_or_null() != nullptr) {
       if (!world_.Leave(player_id, deliveries)) {
         refusal = World::Refusal{RejectKind::kState, "not in the world"};
+      }
+    } else if (const auto* set = action.as_setGeometry_or_null()) {
+      auto surface = SurfaceFromGeometry(set->geometry);
+      if (!surface.ok()) {
+        refusal = World::Refusal{RejectKind::kInvalid, std::string(surface.status().message())};
+      } else {
+        // The room's for everyone: the row carries it to other instances,
+        // whose reconcile reshapes their standing players; the plaza has
+        // no row, so its shape is this instance's until it restarts.
+        const std::string world = WorldOfLocked(player_id);
+        world_.Reshape(world, *surface, deliveries);
+        if (rooms_.contains(world)) {
+          Writes writes;
+          StageLocked(writes, HubStore::SetRoomSurface{world, *surface});
+          StageWakeLocked(world, writes);
+          EnqueueWritesLocked(writes);
+        }
       }
     } else {
       refusal = World::Refusal{RejectKind::kUnknown, "unknown command"};
@@ -1916,6 +1961,7 @@ void GolfHub::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writ
   room->second.members.erase(player_id);
   if (room->second.members.empty()) {
     rooms_.erase(room);
+    world_.ForgetSurface(room_id);
     // Chat dies with its room. PostgreSQL gets this from the cascade on
     // the DeleteRoom below, but MemoryChatStore reclaims only here, and
     // it is what production runs today — without this an emptied room
@@ -2237,6 +2283,7 @@ moonbase::games::RoomState GolfHub::RoomStateLocked(const std::string& room_id,
                                                     const Room& room) const {
   moonbase::games::RoomState state;
   state.roomId = room_id;
+  state.geometry = GeometryOf(world_.SurfaceOf(room_id));
   for (const auto& [member_id, member] : room.members) {
     moonbase::games::PlayerInfo info;
     info.playerId = member_id;
