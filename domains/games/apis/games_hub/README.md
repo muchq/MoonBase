@@ -42,9 +42,14 @@ name appended, which nothing here wants).
 
 ## The lobby's world
 
-A world per room (#1490): a joined player is a position on the ground
-plane (`[x, 0, z]`, x and z within ±50), an RGB color in 0..1, and a
-shape (0 sphere, 1 cube, 2 pyramid), standing in one room's world.
+A world per room (#1490): a joined player is a position on the room's
+surface, an RGB color in 0..1, and a shape (0 sphere, 1 cube, 2
+pyramid), standing in one room's world. The surface is the room's
+choice at `createRoom` (#1554): the ground plane (`[x, 0, z]`, x and z
+within ±50), or the inside of a sphere, where a position is a point on
+the wall and the hub snaps one within a unit of it into place and
+refuses one farther off. The plaza is a plane; `worldState` says which
+a joiner landed in, and the row remembers it (`rooms.geometry`).
 `join` answers the joiner with a `worldState` of everyone else in that
 world and tells the rest of it `playerJoined`; `move` and `shape` fan
 out as `playerMoved` and `shapeChanged`, never echoed and never past the

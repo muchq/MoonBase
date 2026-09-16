@@ -254,6 +254,8 @@ class GolfHub final {
   struct Room {
     std::map<std::string, Member> members;
     std::map<std::string, GameEntry> games;
+    /// Where its world stands; fixed at creation, adopted with the row.
+    Surface surface;
     /// Stamp of the last local change to what this instance holds for
     /// the room: a write to its rows (member upserts and drops, game
     /// commits and deletes) or a reconcile that adopted rows. Drawn from

@@ -6,15 +6,18 @@
 #include <string>
 #include <vector>
 
+#include "absl/status/statusor.h"
 #include "domains/games/apis/games_hub/hub_metrics.h"
+#include "domains/games/apis/games_hub/surface.h"
 #include "moonbase/games/types.h"
 
 namespace games_hub {
 
 /// The lobby's worlds (#79, #1490): every joined player is a position on
-/// the ground plane, a color, and a shape, standing in the world of one
+/// the room's surface, a color, and a shape, standing in the world of one
 /// room; each change fans out to everyone else in the same world and to
-/// nobody outside it. No persistence: a world is exactly its players.
+/// nobody outside it. No persistence: a world is exactly its players,
+/// standing on the surface its room chose (#1554).
 ///
 /// This is the rules and the map, and nothing about wires: it stages
 /// what each session is owed, in delivery order, and GolfHub, which
@@ -22,15 +25,16 @@ namespace games_hub {
 /// registry under its lock. Not thread-safe; the owner's lock covers
 /// every call.
 ///
-/// The rules match the muchq.com world UI's own bounds, so retune
-/// them together: position is [x, 0, z] with x and z within
-/// ±kHalfExtent, color is three components in 0..1, shape is 0, 1 or 2.
-/// A command that breaks one is refused (kInvalid) and changes nothing,
-/// as is move/shape before join (kState). Refused rather than swallowed,
-/// so a client can tell a rejected move from a lost one.
+/// The rules match the muchq.com world UI's own, so retune them
+/// together: position settles on the room's Surface (the plane's [x, 0,
+/// z] within ±kHalfExtent, or a sphere's wall), color is three
+/// components in 0..1, shape is 0, 1 or 2. A command that breaks one is
+/// refused (kInvalid) and changes nothing, as is move/shape before join
+/// (kState). Refused rather than swallowed, so a client can tell a
+/// rejected move from a lost one.
 class World {
  public:
-  static constexpr double kHalfExtent = 50.0;
+  static constexpr double kHalfExtent = Surface::kHalfExtent;
   /// The unroomed join's world. Lowercase, so no generated room code
   /// (IdGenerator's uppercase alphanumerics) can name it.
   static constexpr const char* kPlaza = "plaza";
@@ -59,6 +63,13 @@ class World {
   /// closed socket alike.
   bool Leave(const std::string& player_id, Deliveries& out);
 
+  /// The surface a room's world stands on; a room never told of is a
+  /// plane, the plaza among them. Set when a room is created or adopted,
+  /// forgotten when it is deleted.
+  void SetSurface(const std::string& room_id, const Surface& surface);
+  void ForgetSurface(const std::string& room_id);
+  Surface SurfaceOf(const std::string& room_id) const;
+
  private:
   struct Standing {
     std::string room_id;
@@ -72,7 +83,13 @@ class World {
   /// to manage; a fan-out scans every joined player, not only the
   /// room's — fine at the tens of players this hub sees.
   std::map<std::string, Standing> world_;
+  std::map<std::string, Surface> surfaces_;
 };
+
+/// The wire's geometry as a Surface, validated; the refusal names why.
+absl::StatusOr<Surface> SurfaceFromGeometry(const moonbase::games::Geometry& geometry);
+/// A Surface as the wire spells it.
+moonbase::games::Geometry GeometryOf(const Surface& surface);
 
 }  // namespace games_hub
 

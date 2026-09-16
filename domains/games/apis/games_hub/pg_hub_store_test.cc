@@ -24,6 +24,8 @@
 
 namespace {
 
+using games_hub::Surface;
+
 using games_hub::PgHubStore;
 
 // A real engine state for the started-game rows — the store owns the
@@ -182,7 +184,8 @@ TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
   auto snapshot = store_->LoadSnapshot();
   ASSERT_TRUE(snapshot.ok()) << snapshot.status();
   ASSERT_EQ(snapshot->rooms.size(), 1u);
-  EXPECT_EQ(snapshot->rooms[0], "R1");
+  EXPECT_EQ(snapshot->rooms[0].room_id, "R1");
+  EXPECT_EQ(snapshot->rooms[0].surface, Surface::Plane());
   ASSERT_EQ(snapshot->members.size(), 2u);
   ASSERT_EQ(snapshot->games.size(), 2u);
   for (const auto& game : snapshot->games) {
@@ -325,6 +328,42 @@ TEST_F(PgHubStoreTest, FinishCommitAppliesStatsExactlyOnce) {
   ASSERT_TRUE(landed.ok());
   EXPECT_FALSE(*landed);
   expect_stats();
+}
+
+// The surface a room chose rides its row (#1554): stored in the wire's
+// spelling, the first insert fixes it, and both loads hand it back. A
+// row from before the column (the migration's default) and a row whose
+// geometry nothing here can read are the plane, so a bad row costs the
+// room its shape and never the boot.
+TEST_F(PgHubStoreTest, RoomGeometryRoundTripsAndUnreadableRowsAreFlat) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"S", Surface::Sphere(53)}});
+  store_->Flush();
+  store_->Enqueue({PgHubStore::UpsertRoom{"S", Surface::Plane()}});
+  store_->Flush();
+  ASSERT_TRUE(db_->Exec("INSERT INTO rooms (room_id) VALUES ('P')").ok());
+  ASSERT_TRUE(
+      db_->Exec(R"(INSERT INTO rooms (room_id, geometry) VALUES ('T', '{"torus":{}}'))").ok());
+  auto stored = db_->Exec("SELECT geometry::text FROM rooms WHERE room_id = 'S'");
+  ASSERT_TRUE(stored.ok());
+  EXPECT_EQ(stored->Get(0, 0).value_or(""), R"({"sphere": {"radius": 53.0}})");
+
+  auto sphere = store_->LoadRoom("S");
+  ASSERT_TRUE(sphere.ok()) << sphere.status();
+  EXPECT_EQ(sphere->surface, Surface::Sphere(53));
+  auto plane = store_->LoadRoom("P");
+  ASSERT_TRUE(plane.ok()) << plane.status();
+  EXPECT_EQ(plane->surface, Surface::Plane());
+  auto torus = store_->LoadRoom("T");
+  ASSERT_TRUE(torus.ok()) << torus.status();
+  EXPECT_EQ(torus->surface, Surface::Plane());
+
+  auto snapshot = store_->LoadSnapshot();
+  ASSERT_TRUE(snapshot.ok()) << snapshot.status();
+  ASSERT_EQ(snapshot->rooms.size(), 3u);
+  for (const auto& room : snapshot->rooms) {
+    EXPECT_EQ(room.surface, room.room_id == "S" ? Surface::Sphere(53) : Surface::Plane())
+        << room.room_id;
+  }
 }
 
 TEST_F(PgHubStoreTest, LoadRoomScopesToOneRoom) {

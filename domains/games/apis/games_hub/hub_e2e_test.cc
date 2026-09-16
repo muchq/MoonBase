@@ -906,6 +906,58 @@ TEST_F(GamesHubStreamFixture, ResumingOnAFreshInstanceReplaysChatHistory) {
   EXPECT_TRUE(world->as_worldState_or_null()->players.empty());
 }
 
+// A room's surface survives the process (#1554): a fresh instance
+// restoring from the store puts the room's world back on its sphere,
+// so a resumed seat's join lands on the wall, its worldState names the
+// sphere, and a move off the wall is refused by the sphere's rule, not
+// the plane's.
+TEST_F(GamesHubStreamFixture, ASphereRoomSurvivesARestart) {
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  moonbase::games::SphereGeometry sphere;
+  sphere.radius = 53;
+  moonbase::games::CreateRoom create;
+  create.geometry = moonbase::games::Geometry::FromSphere(std::move(sphere));
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(std::move(create))).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+  moonbase::games::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto resumed = OpenSeatVia(*instance->client, bob->resume_token);
+  ASSERT_TRUE(resumed.has_value());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "roomChatHistory").has_value());
+
+  moonbase::games::JoinWorld join_world;
+  join_world.position = {0, 0, -52.5};
+  join_world.color = {1, 1, 1};
+  join_world.shape = 0;
+  ASSERT_TRUE(resumed->stream.Send(Lobby(moonbase::games::LobbyAction::FromJoin(join_world))).ok());
+  auto world = ReceiveLobby(resumed->stream, "worldState");
+  ASSERT_TRUE(world.has_value());
+  const auto* geometry = world->as_worldState_or_null()->geometry.as_sphere_or_null();
+  ASSERT_NE(geometry, nullptr);
+  EXPECT_EQ(geometry->radius, 53);
+  moonbase::games::MoveTo move;
+  move.position = {0, 0, -40};
+  ASSERT_TRUE(resumed->stream.Send(Lobby(moonbase::games::LobbyAction::FromMove(move))).ok());
+  auto refused = ReceiveCase(resumed->stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
+            "position must be on the sphere (radius 53)");
+}
+
 // The boot-time twin of ActiveSignalRefreshesHeldRoom's contract: a
 // channel-active with nothing new in the rows projects nothing. A fresh
 // instance restores members from the same rows the catch-up re-reads, so

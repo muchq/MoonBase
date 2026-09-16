@@ -13,6 +13,7 @@
 
 #include "absl/status/statusor.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
+#include "domains/games/apis/games_hub/surface.h"
 
 namespace games_hub {
 
@@ -45,14 +46,23 @@ class HubStore {
     GameKind kind = GameKind::kGolf;
   };
 
+  /// A room and the surface it chose at creation (#1554).
+  struct RoomRow {
+    std::string room_id;
+    Surface surface;
+  };
+
   struct Snapshot {
-    std::vector<std::string> rooms;
+    std::vector<RoomRow> rooms;
     std::vector<MemberRow> members;
     std::vector<GameRow> games;
   };
 
+  /// The first upsert of a room fixes its surface; a later one for the
+  /// same room changes nothing. A room that chose nothing is a plane.
   struct UpsertRoom {
     std::string room_id;
+    Surface surface = Surface::Plane();
   };
   struct DeleteRoom {
     std::string room_id;
@@ -83,6 +93,7 @@ class HubStore {
 
   struct RoomRows {
     bool exists = false;
+    Surface surface;
     std::vector<MemberRow> members;
     std::vector<GameRow> games;
   };
@@ -124,7 +135,7 @@ class MemoryHubStore final : public HubStore {
   void ApplyLocked(const Op& op);
 
   std::mutex mu_;
-  std::set<std::string> rooms_;
+  std::map<std::string, Surface> rooms_;
   std::map<Key, MemberRow> members_;
   std::map<Key, GameRow> games_;
 };

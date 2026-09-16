@@ -12,7 +12,7 @@ void MemoryHubStore::Enqueue(std::vector<Op> ops) {
 absl::StatusOr<HubStore::Snapshot> MemoryHubStore::LoadSnapshot() {
   const std::lock_guard<std::mutex> lock(mu_);
   Snapshot snapshot;
-  snapshot.rooms.assign(rooms_.begin(), rooms_.end());
+  for (const auto& [room_id, surface] : rooms_) snapshot.rooms.push_back({room_id, surface});
   for (const auto& [key, member] : members_) snapshot.members.push_back(member);
   for (const auto& [key, game] : games_) snapshot.games.push_back(game);
   return snapshot;
@@ -50,8 +50,10 @@ absl::StatusOr<std::optional<HubStore::GameRow>> MemoryHubStore::LoadGame(
 absl::StatusOr<HubStore::RoomRows> MemoryHubStore::LoadRoom(const std::string& room_id) {
   const std::lock_guard<std::mutex> lock(mu_);
   RoomRows rows;
-  rows.exists = rooms_.contains(room_id);
+  const auto room = rooms_.find(room_id);
+  rows.exists = room != rooms_.end();
   if (!rows.exists) return rows;
+  rows.surface = room->second;
   for (const auto& [key, member] : members_) {
     if (key.first == room_id) rows.members.push_back(member);
   }
@@ -77,7 +79,7 @@ bool MemoryHubStore::CommitGameLocked(const GameRow& row) {
 
 void MemoryHubStore::ApplyLocked(const Op& op) {
   if (const auto* upsert = std::get_if<UpsertRoom>(&op)) {
-    rooms_.insert(upsert->room_id);
+    rooms_.emplace(upsert->room_id, upsert->surface);
   } else if (const auto* erase = std::get_if<DeleteRoom>(&op)) {
     rooms_.erase(erase->room_id);
     std::erase_if(members_, [&](const auto& entry) { return entry.first.first == erase->room_id; });
