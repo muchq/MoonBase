@@ -51,8 +51,10 @@ impl Vocab {
     }
 
     /// The names in id order, as a checkpoint carries them; the index is
-    /// rebuilt from them.
-    pub fn from_names(names: Vec<String>, cap: usize) -> Self {
+    /// rebuilt from them. A list longer than `cap` is cut to it: an id past
+    /// the cap has no row in the net and no name here to answer with.
+    pub fn from_names(mut names: Vec<String>, cap: usize) -> Self {
+        names.truncate(cap);
         let ids = names
             .iter()
             .enumerate()
@@ -78,6 +80,10 @@ impl Vocab {
 
     pub fn name(&self, id: u16) -> &str {
         &self.names[usize::from(id)]
+    }
+
+    pub fn id(&self, name: &str) -> Option<u16> {
+        self.ids.get(name).copied()
     }
 
     pub fn len(&self) -> usize {
@@ -139,6 +145,20 @@ mod tests {
         assert_eq!(vocab.intern("b"), (UNK, false));
         assert_eq!(vocab.intern("a"), (2, false));
         assert_eq!(vocab.len(), 3);
+    }
+
+    #[test]
+    fn from_names_cuts_a_longer_list_to_the_cap() {
+        let names: Vec<String> = (0..6).map(|i| format!("t{i}")).collect();
+        let vocab = Vocab::from_names(names.clone(), 4);
+        assert_eq!(vocab.len(), 4);
+        assert_eq!(vocab.name(3), "t3");
+        assert_eq!(vocab.id("t4"), None, "an id the net has no row for");
+        assert_eq!(
+            Vocab::from_names(names, DEFAULT_CAP).len(),
+            6,
+            "a list within the cap is kept whole"
+        );
     }
 
     #[test]

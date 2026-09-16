@@ -310,7 +310,7 @@ const (
 )
 
 // Catalog order doubles as the UI's tab order.
-var serviceOrder = []string{"games_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "one_d4_v2", "portrait", "posterize", "iili"}
+var serviceOrder = []string{"games_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "one_d4_v2", "portrait", "posterize", "iili", "deja"}
 
 var serviceRegistry = map[string]serviceEntry{
 	"games_hub": {
@@ -561,6 +561,34 @@ var serviceRegistry = map[string]serviceEntry{
 	"one_d4_v2": {
 		CustomScalars: []customScalarDef{
 			probesTile("one_d4_v2"),
+		},
+	},
+	// deja (#1150): the tape's counters. Surprise is a running sum by
+	// predictor, declared at zero beside the event count, so mean surprise
+	// is the ratio of rates the way microgpt's inference mean is; the EWMA
+	// loss is each predictor's own baseline, a gauge the service records
+	// per event, and the two side by side are the learning curve.
+	"deja": {
+		CustomScalars: []customScalarDef{
+			probesTile("deja"),
+			counter("Events by verdict", "warmup", "", `deja_events_total{verdict="warmup"}`),
+			counter("Events by verdict", "expected", "", `deja_events_total{verdict="expected"}`),
+			counter("Events by verdict", "anomaly", "", `deja_events_total{verdict="anomaly"}`),
+			counter("Events by verdict", "novel", "", `deja_events_total{verdict="novel"}`),
+			scalar("Surprise", "bigram_mean", "nats",
+				`sum(rate(deja_surprise_total{predictor="bigram"}[w]))/sum(rate(deja_events_total[w]))`),
+			scalar("Surprise", "net_mean", "nats",
+				`sum(rate(deja_surprise_total{predictor="net"}[w]))/sum(rate(deja_events_total[w]))`),
+			scalar("Baseline", "bigram_ewma_loss", "nats", `sum(deja_ewma_loss{predictor="bigram"})`),
+			scalar("Baseline", "net_ewma_loss", "nats", `sum(deja_ewma_loss{predictor="net"})`),
+			scalar("Vocabulary", "vocab_size", "tokens", `sum(deja_vocab_size)`),
+		},
+		CustomTimeseries: map[string]customTimeseriesDef{
+			"events":          tsCounter(`deja_events_total`),
+			"anomalies":       tsCounter(`deja_events_total{verdict="anomaly"}`),
+			"novelties":       tsCounter(`deja_events_total{verdict="novel"}`),
+			"bigram_surprise": tsMean(`deja_surprise_total{predictor="bigram"}`, `deja_events_total`),
+			"net_surprise":    tsMean(`deja_surprise_total{predictor="net"}`, `deja_events_total`),
 		},
 	},
 	// iili (#1359): standard instruments, Probes, and the URL cache.

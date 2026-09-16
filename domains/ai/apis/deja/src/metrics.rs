@@ -3,8 +3,8 @@ use opentelemetry::{KeyValue, global};
 
 use crate::{engine::Event, score::Verdict};
 
-/// The predictors whose surprise is summed; `net` joins in Phase 3.
-const PREDICTORS: [&str; 1] = ["bigram"];
+/// The predictors whose surprise is summed and whose baseline is gauged.
+const PREDICTORS: [&str; 2] = ["bigram", "net"];
 
 pub struct AppMetrics {
     pub events_total: Counter<u64>,
@@ -12,6 +12,9 @@ pub struct AppMetrics {
     /// microgpt's inference_ms: mean surprise is rate(surprise)/rate(events),
     /// and a counter can be declared at zero without biasing that.
     pub surprise_total: Counter<f64>,
+    /// Each predictor's own EWMA of surprise, the baseline an event is
+    /// judged against; the learning curve, as the page plots it.
+    pub ewma_loss: Gauge<f64>,
     pub vocab_size: Gauge<u64>,
 }
 
@@ -29,6 +32,10 @@ impl AppMetrics {
             surprise_total: meter
                 .f64_counter("deja_surprise")
                 .with_description("Cumulative surprise (-ln p) by predictor")
+                .build(),
+            ewma_loss: meter
+                .f64_gauge("deja_ewma_loss")
+                .with_description("EWMA of surprise by predictor")
                 .build(),
             vocab_size: meter
                 .u64_gauge("deja_vocab_size")
@@ -51,6 +58,8 @@ impl AppMetrics {
         for predictor in PREDICTORS {
             self.surprise_total
                 .add(0.0, &[KeyValue::new("predictor", predictor)]);
+            self.ewma_loss
+                .record(0.0, &[KeyValue::new("predictor", predictor)]);
         }
         self.vocab_size.record(0, &[]);
     }
@@ -58,10 +67,14 @@ impl AppMetrics {
     pub fn record(&self, event: &Event) {
         self.events_total
             .add(1, &[KeyValue::new("verdict", event.verdict.as_str())]);
-        self.surprise_total.add(
-            event.surprise.bigram,
-            &[KeyValue::new("predictor", "bigram")],
-        );
+        for (predictor, surprise, ewma_loss) in [
+            ("bigram", event.surprise.bigram, event.ewma_loss.bigram),
+            ("net", event.surprise.net, event.ewma_loss.net),
+        ] {
+            let labels = [KeyValue::new("predictor", predictor)];
+            self.surprise_total.add(surprise, &labels);
+            self.ewma_loss.record(ewma_loss, &labels);
+        }
         self.vocab_size.record(event.vocab_size as u64, &[]);
     }
 }
@@ -135,6 +148,11 @@ mod tests {
                             out.push((label(metric.name(), dp.attributes()), dp.value()));
                         }
                     }
+                    AggregatedMetrics::F64(MetricData::Gauge(gauge)) => {
+                        for dp in gauge.data_points() {
+                            out.push((label(metric.name(), dp.attributes()), dp.value()));
+                        }
+                    }
                     other => panic!("{}: unexpected aggregation {other:?}", metric.name()),
                 }
             }
@@ -143,14 +161,32 @@ mod tests {
         out
     }
 
-    fn expected(verdicts: [f64; 4], surprise: f64, vocab: f64) -> Vec<(String, f64)> {
+    /// Every series, `surprise` and `ewma_loss` as `(bigram, net)`.
+    fn expected(
+        verdicts: [f64; 4],
+        surprise: (f64, f64),
+        ewma_loss: (f64, f64),
+        vocab: f64,
+    ) -> Vec<(String, f64)> {
         let [warmup, expected, anomaly, novel] = verdicts;
         let mut out = vec![
             (r#"deja_events{verdict="anomaly"}"#.to_string(), anomaly),
             (r#"deja_events{verdict="expected"}"#.to_string(), expected),
             (r#"deja_events{verdict="novel"}"#.to_string(), novel),
             (r#"deja_events{verdict="warmup"}"#.to_string(), warmup),
-            (r#"deja_surprise{predictor="bigram"}"#.to_string(), surprise),
+            (
+                r#"deja_surprise{predictor="bigram"}"#.to_string(),
+                surprise.0,
+            ),
+            (r#"deja_surprise{predictor="net"}"#.to_string(), surprise.1),
+            (
+                r#"deja_ewma_loss{predictor="bigram"}"#.to_string(),
+                ewma_loss.0,
+            ),
+            (
+                r#"deja_ewma_loss{predictor="net"}"#.to_string(),
+                ewma_loss.1,
+            ),
             ("deja_vocab_size".to_string(), vocab),
         ];
         out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -160,7 +196,10 @@ mod tests {
     #[test]
     fn building_the_metrics_declares_every_series_at_zero() {
         let rig = rig();
-        assert_eq!(series(&rig), expected([0.0; 4], 0.0, 0.0));
+        assert_eq!(
+            series(&rig),
+            expected([0.0; 4], (0.0, 0.0), (0.0, 0.0), 0.0)
+        );
     }
 
     #[test]
@@ -173,11 +212,21 @@ mod tests {
         assert_eq!(warmup.verdict, Verdict::Warmup);
         rig.metrics.record(&novel);
         rig.metrics.record(&warmup);
+        let judged = engine.ingest(&request(3.0, "1.1.1.1", "GET", "/", 200, BROWSER));
+        rig.metrics.record(&judged);
+        assert!(
+            judged.ewma_loss.net > 0.0,
+            "the gauge reads the net's baseline"
+        );
         assert_eq!(
             series(&rig),
             expected(
-                [1.0, 0.0, 0.0, 1.0],
-                novel.surprise.bigram + warmup.surprise.bigram,
+                [2.0, 0.0, 0.0, 1.0],
+                (
+                    novel.surprise.bigram + warmup.surprise.bigram + judged.surprise.bigram,
+                    novel.surprise.net + warmup.surprise.net + judged.surprise.net
+                ),
+                (judged.ewma_loss.bigram, judged.ewma_loss.net),
                 3.0
             )
         );
@@ -198,6 +247,6 @@ mod tests {
                 assert_eq!(metric.unit(), "", "{} declares a unit", metric.name());
             }
         }
-        assert_eq!(swept, 3);
+        assert_eq!(swept, 4);
     }
 }

@@ -82,6 +82,11 @@
 		path /deja/v1/*
 	}
 
+	@post_deja_next {
+		method POST
+		path /deja/v1/next
+	}
+
 	@options {
 		method OPTIONS
 	}
@@ -125,6 +130,9 @@
 		reverse_proxy localhost:8084
 	}
 	handle @get_deja {
+		reverse_proxy localhost:8093
+	}
+	handle @post_deja_next {
 		reverse_proxy localhost:8093
 	}
 

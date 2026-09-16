@@ -13,6 +13,7 @@ rust_binary(
         "src/lanes.rs",
         "src/main.rs",
         "src/metrics.rs",
+        "src/net.rs",
         "src/score.rs",
         "src/tail.rs",
         "src/token.rs",
@@ -28,6 +29,10 @@ rust_test(
     name = "test_deja",
     size = "small",
     crate = ":deja",
+    # candle's gemm splits its reductions across rayon threads, so the last
+    # digits of a surprise depend on how many the machine has. The float
+    # assertions carry margins; this makes them reproducible as well.
+    env = {"RAYON_NUM_THREADS": "1"},
     deps = all_crate_deps(normal_dev = True),
 )
 
