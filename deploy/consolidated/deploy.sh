@@ -9,6 +9,11 @@ COMPOSE_FILE=deploy/consolidated/compose.yaml
 REGISTRY=${IMAGE_REGISTRY:-https://ghcr.io}
 # How far back --list --service looks for commits that changed the image.
 LIST_SCAN=${DEPLOY_LIST_SCAN:-100}
+# Per-SHA images kept per service after a deploy. Rollback depth is counted in
+# deploys because that is what the host can tell: image timestamps are build
+# time, so an age window reaps a service's predecessor in the run that
+# replaces it.
+KEEP_PER_SERVICE=${DEPLOY_KEEP:-2}
 
 usage() {
   cat <<'USAGE'
@@ -482,6 +487,8 @@ fi
 # Pull images and restart services
 echo "Pulling images and restarting services..."
 ssh "$HOST" << EOF
+  set -e
+
   # Set up Forgejo config directory
   sudo mkdir -p /etc/forgejo
   sudo cp ~/forgejo-app.ini /etc/forgejo/app.ini
@@ -530,34 +537,42 @@ ssh "$HOST" << EOF
   sudo -E docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --address 127.0.0.1:2019
 EOF
 
-# Reap our own per-SHA images, once the new one is already serving. compose
-# pins tags from ~/.env, so each deploy leaves its predecessor resident and
-# referenced by nothing. Everything reaped is still in ghcr: the cost of
-# reaping too eagerly is a pull on the next rollback, not a lost rollback,
-# which is what makes a window this short safe.
+# Reap superseded per-SHA images once the new stack is serving, keeping the
+# newest $KEEP_PER_SERVICE of each service so a rollback restarts what is on
+# disk instead of pulling it back.
 #
-# In-use images are subtracted explicitly rather than left to `docker rmi` to
-# refuse. {{.CreatedAt}} is build time, not deploy time, so every service not
-# rebuilt this week has a live image older than the window — without the
-# subtraction each deploy would attempt a dozen removals it expects to fail,
-# and the only thing standing between a live image and removal would be that
-# refusal.
-ssh "$HOST" 'bash -s' << 'PRUNE' || echo "warning: image prune failed; the deploy is unaffected" >&2
-  set -u
-  cutoff=$(date -u -d '7 days ago' +%s)
+# Depth is counted in deploys, not days: {{.CreatedAt}} is build time, so a
+# service rebuilt after a quiet month has a month-old predecessor the instant
+# it stops serving, and an age window would reap it in the very run that
+# replaced it.
+#
+# Serving images are subtracted explicitly rather than left to `docker rmi` to
+# refuse, so a live image is never offered for removal in the first place.
+ssh "$HOST" "KEEP=$KEEP_PER_SERVICE bash -s" << 'PRUNE' || echo "warning: image prune failed; the deploy is unaffected" >&2
+  set -euo pipefail
+  case "$KEEP" in '' | *[!0-9]*) echo "KEEP must be a count, got '$KEEP'" >&2; exit 1 ;; esac
+
   in_use=$(sudo docker ps -aq | xargs -r sudo docker inspect -f '{{.Image}}' | sort -u)
-  reaped=$(sudo docker images --no-trunc --filter 'reference=ghcr.io/muchq/*' \
-             --format '{{.ID}}|{{.CreatedAt}}' \
-    | while IFS='|' read -r id created; do
-        # `date` rejects docker's trailing " UTC"; the rest of the stamp it takes.
-        ts=$(date -u -d "${created% UTC}" +%s 2> /dev/null) || continue
-        [ "$ts" -lt "$cutoff" ] || continue
-        printf '%s\n' "$in_use" | grep -qxF "$id" && continue
-        echo "$id"
-      done | sort -u)
-  [ -n "$reaped" ] || { echo "no images older than the rollback window"; exit 0; }
-  printf '%s\n' "$reaped" | xargs -r sudo docker rmi > /dev/null
-  echo "reaped $(printf '%s\n' "$reaped" | wc -l) image(s) older than the rollback window"
+
+  # {{.CreatedAt}} is a fixed-width stamp from one daemon in one zone, so it
+  # sorts lexicographically into chronological order and no date parsing is
+  # needed. Newest first within each repository; everything past $KEEP is a
+  # candidate.
+  candidates=$(sudo docker images --no-trunc --filter 'reference=ghcr.io/muchq/*' \
+                 --format '{{.Repository}}|{{.CreatedAt}}|{{.ID}}' \
+    | sort -t'|' -k1,1 -k2,2r \
+    | awk -F'|' -v keep="$KEEP" '{ if ($1 == repo) n++; else { repo = $1; n = 1 } if (n > keep) print $3 }')
+
+  reap=$(printf '%s\n' "$candidates" | while IFS= read -r id; do
+           [ -n "$id" ] || continue
+           # Full 64-hex digests; a substring hit is an identity.
+           case "$in_use" in (*"$id"*) continue ;; esac
+           printf '%s\n' "$id"
+         done)
+
+  [ -n "$reap" ] || { echo "nothing superseded beyond the newest $KEEP per service"; exit 0; }
+  printf '%s\n' "$reap" | xargs -r sudo docker rmi > /dev/null
+  echo "reaped $(printf '%s\n' "$reap" | wc -l | tr -d ' ') image(s), keeping the newest $KEEP per service"
 PRUNE
 
 echo "Deployment complete! $target_desc running $short_sha"

@@ -575,6 +575,153 @@ check "rejects an unknown commit" test $? -ne 0
 deploy --bogus
 check "rejects an unknown flag" test $? -ne 0
 
+# ---------------------------------------------------------------- retention
+# The prune is a quoted heredoc, so the outer `bash -n` never parses it — a
+# syntax error in there is invisible until a deploy runs it. Running it is the
+# only way to find out, so it gets its own stub docker: an image store rather
+# than the compose recorder above.
+echo "image retention"
+
+PRUNE_BIN=$WORK/prunebin
+PRUNE_IMAGES=$WORK/prune_images
+PRUNE_CONTAINERS=$WORK/prune_containers
+PRUNE_REMOVED=$WORK/prune_removed
+mkdir -p "$PRUNE_BIN"
+
+cat > "$PRUNE_BIN/sudo" <<'STUB'
+#!/bin/bash
+exec "$@"
+STUB
+cat > "$PRUNE_BIN/docker" <<'STUB'
+#!/bin/bash
+if [ -n "${PRUNE_DOCKER_FAILS:-}" ]; then
+  echo "Cannot connect to the Docker daemon" >&2
+  exit 1
+fi
+case "$1" in
+  ps)
+    cut -d' ' -f1 "$PRUNE_CONTAINERS"
+    ;;
+  inspect)
+    shift 3 # past `inspect -f <template>`
+    for c in "$@"; do awk -v c="$c" '$1 == c { print $2 }' "$PRUNE_CONTAINERS"; done
+    ;;
+  images)
+    # Honour --filter reference=, so the ghcr.io/muchq scoping is exercised
+    # rather than assumed.
+    pat= prev=
+    for a in "$@"; do
+      if [ "$prev" = --filter ]; then
+        case "$a" in reference=*) pat=${a#reference=} ;; esac
+      fi
+      prev=$a
+    done
+    while IFS='|' read -r repo created id; do
+      case "$repo" in $pat) printf '%s|%s|%s\n' "$repo" "$created" "$id" ;; esac
+    done < "$PRUNE_IMAGES"
+    ;;
+  rmi)
+    if [ -n "${PRUNE_RMI_FAILS:-}" ]; then
+      echo "conflict: unable to delete (must be forced)" >&2
+      exit 1
+    fi
+    shift
+    printf '%s\n' "$@" >> "$PRUNE_REMOVED"
+    ;;
+esac
+exit 0
+STUB
+chmod +x "$PRUNE_BIN/sudo" "$PRUNE_BIN/docker"
+
+prune_body() {
+  sed -n "/<< 'PRUNE'/,/^PRUNE\$/p" "$REPO/deploy/consolidated/deploy.sh" | sed '1d;$d'
+}
+
+run_prune() { # run_prune <keep>
+  : > "$PRUNE_REMOVED"
+  PATH="$PRUNE_BIN:$PATH" KEEP="$1" \
+    PRUNE_IMAGES="$PRUNE_IMAGES" PRUNE_CONTAINERS="$PRUNE_CONTAINERS" \
+    PRUNE_REMOVED="$PRUNE_REMOVED" PRUNE_DOCKER_FAILS="${PRUNE_DOCKER_FAILS:-}" \
+    PRUNE_RMI_FAILS="${PRUNE_RMI_FAILS:-}" \
+    bash -c "$(prune_body)" > "$WORK/prune.out" 2>&1
+}
+
+reaped() { grep -qxF "$1" "$PRUNE_REMOVED"; }
+
+# mithril went a month without a rebuild, then shipped twice today. Its
+# month-old image is the one a rollback wants, and it is the one an age-based
+# window would take in the very run that stopped it serving.
+cat > "$PRUNE_IMAGES" <<'FIX'
+ghcr.io/muchq/mithril|2026-09-16 10:00:00 +0000 UTC|sha256:mithril_live
+ghcr.io/muchq/mithril|2026-08-01 10:00:00 +0000 UTC|sha256:mithril_prev
+ghcr.io/muchq/mithril|2026-07-01 10:00:00 +0000 UTC|sha256:mithril_older
+ghcr.io/muchq/iili|2026-09-16 10:00:00 +0000 UTC|sha256:iili_live
+ghcr.io/muchq/iili|2026-09-15 10:00:00 +0000 UTC|sha256:iili_prev
+postgres|2026-01-01 10:00:00 +0000 UTC|sha256:postgres_ancient
+FIX
+cat > "$PRUNE_CONTAINERS" <<'FIX'
+c1 sha256:mithril_live
+c2 sha256:iili_live
+FIX
+
+run_prune 2
+check "keeps the predecessor of a service rebuilt after a long gap" \
+  bash -c '! grep -qxF sha256:mithril_prev "$0"' "$PRUNE_REMOVED"
+check "reaps what is older than the kept depth" reaped sha256:mithril_older
+check "keeps a serving image however old" \
+  bash -c '! grep -qxF sha256:mithril_live "$0"' "$PRUNE_REMOVED"
+check "leaves images outside our registry alone" \
+  bash -c '! grep -qxF sha256:postgres_ancient "$0"' "$PRUNE_REMOVED"
+check "counts depth per service, not across the host" \
+  bash -c '! grep -qxF sha256:iili_prev "$0"' "$PRUNE_REMOVED"
+
+run_prune 1
+check "a shallower depth reaps the predecessor too" reaped sha256:mithril_prev
+check "still never reaps what is serving" \
+  bash -c '! grep -qxF sha256:iili_live "$0"' "$PRUNE_REMOVED"
+
+# After a rollback the serving image is no longer the newest of its
+# repository, so depth alone offers it for removal. This is the case the
+# in-use subtraction exists for, and the only one that distinguishes it from
+# relying on `docker rmi` to refuse.
+cat > "$PRUNE_CONTAINERS" <<'FIX'
+c1 sha256:mithril_older
+c2 sha256:iili_live
+FIX
+
+run_prune 2
+check "keeps a rolled-back image that depth alone would reap" \
+  bash -c '! grep -qxF sha256:mithril_older "$0"' "$PRUNE_REMOVED"
+
+# At depth 1 the rolled-back image is still held by its container while the
+# image above it is not: the subtraction and the depth have to both apply.
+run_prune 1
+check "keeps the rolled-back image at a shallower depth too" \
+  bash -c '! grep -qxF sha256:mithril_older "$0"' "$PRUNE_REMOVED"
+check "reaps the unheld image above it" reaped sha256:mithril_prev
+
+# Back to a stack serving its newest images, so the failure cases below have
+# something to remove.
+cat > "$PRUNE_CONTAINERS" <<'FIX'
+c1 sha256:mithril_live
+c2 sha256:iili_live
+FIX
+
+PRUNE_DOCKER_FAILS=1 run_prune 2
+check "fails when the daemon cannot be reached" test $? -ne 0
+check "does not claim to have reaped anything" \
+  bash -c '! grep -q reaped "$0"' "$WORK/prune.out"
+PRUNE_DOCKER_FAILS=
+
+PRUNE_RMI_FAILS=1 run_prune 2
+check "fails when removal is refused" test $? -ne 0
+check "does not report a refused removal as reaped" \
+  bash -c '! grep -q "^reaped" "$0"' "$WORK/prune.out"
+PRUNE_RMI_FAILS=
+
+run_prune ""
+check "refuses a depth that is not a count" test $? -ne 0
+
 echo
 if [ "$FAILURES" -eq 0 ]; then
   echo "all deploy.sh checks passed"

@@ -2641,104 +2641,136 @@ func TestPostgresSuitesStillRunInCI(t *testing.T) {
 
 // Image retention on the deploy host.
 //
-// compose pins image tags from ~/.env, so a deploy leaves its predecessor's
-// per-SHA image resident and referenced by nothing. Nothing collected them,
-// and the root filesystem is 58G. The prune in deploy.sh is that collector,
-// and every property below is silent when lost: a prune in the wrong place
-// still exits 0, a window of the wrong length still reclaims something, and
-// a prune that reaps volumes reports the space it freed rather than the
-// database it freed it from.
+// compose pins image tags from ~/.env, so a deploy leaves its predecessor
+// resident and referenced by nothing. deploy.sh reaps them, keeping a fixed
+// depth per service.
 //
-// What a reaped image costs is a pull, not a rollback — every tag is still in
-// ghcr. That is why a window this short is safe at all.
+// What the prune actually selects is behaviour, and it lives in a quoted
+// heredoc that no Go string scan and no `bash -n` can reach — scripts/test-deploy
+// executes it against a stub image store, and that is where the depth, the
+// in-use subtraction, the registry scoping and the error propagation are
+// pinned. What is left here are the properties that are about the file rather
+// than the run.
 
-// The prune runs on a stack that is already serving. Ordered before the `up`,
-// it would reap the image a failed deploy needs to roll back to — and would do
-// it on exactly the deploys where rollback is the point.
-func TestDeployPrunesOnlyAfterTheStackIsUp(t *testing.T) {
-	deploy := readConfig(t, "deploy.sh")
-	prune := strings.Index(deploy, "docker rmi")
-	if prune < 0 {
-		t.Fatal("deploy.sh removes no images: every deploy leaves the previous per-SHA image" +
-			" resident, referenced by nothing, and the root filesystem is 58G")
-	}
-	up := strings.LastIndex(deploy, "up -d")
-	if up < 0 {
-		t.Fatal("deploy.sh no longer brings the stack up with `up -d`; the ordering guard here has lost its anchor")
-	}
-	if prune < up {
-		t.Error("deploy.sh prunes before `up -d`: a deploy that fails to come up has already" +
-			" discarded the image it would have rolled back to")
-	}
-}
-
-// Seven days of rollback targets. Shorter is not a correctness bug — the image
-// is still in ghcr — but it turns a restart into a pull at the moment someone
-// is trying to undo a bad deploy.
-func TestDeployPruneKeepsAWeekOfRollbackTargets(t *testing.T) {
-	deploy := readConfig(t, "deploy.sh")
-	window := regexp.MustCompile(`(\d+) days ago`).FindStringSubmatch(deploy)
-	if window == nil {
-		t.Fatal("deploy.sh names no retention window; the prune either keeps everything or keeps nothing")
-	}
-	days, err := strconv.Atoi(window[1])
-	if err != nil {
-		t.Fatalf("retention window %q is not a number of days", window[1])
-	}
-	if days < 7 {
-		t.Errorf("the prune keeps %d days of images; under a week a routine rollback re-pulls"+
-			" from ghcr instead of restarting what is already on disk", days)
-	}
-}
-
-// `docker system prune --volumes` would take the postgres data with it. The
-// deploy scripts reap images by id and nothing else.
+// `docker rmi` takes images. The three spellings that would take more are all
+// one word away, and the postgres data is a local volume.
 func TestTheDeployScriptsNeverPruneVolumes(t *testing.T) {
 	for _, name := range []string{"deploy.sh", "local_deploy.sh", "initialize_host.sh"} {
 		script := readConfig(t, name)
-		if strings.Contains(script, "--volumes") {
-			t.Errorf("%s passes --volumes to a prune: the postgres data is a local volume"+
-				" and a prune that reaps it reports only the space it freed", name)
+		for _, banned := range []string{"--volumes", "system prune", "volume prune"} {
+			if strings.Contains(script, banned) {
+				t.Errorf("%s contains %q: that reaches past images, and a prune that takes"+
+					" the postgres volume reports only the space it freed", name, banned)
+			}
 		}
-		if strings.Contains(script, "system prune") {
-			t.Errorf("%s runs `docker system prune`, which is not scoped to images and takes"+
-				" whatever else the daemon considers unused", name)
-		}
-	}
-}
-
-// The prune is cleanup, not deployment. deploy.sh runs under `set -e` and the
-// prune lands after the stack is up, so an unguarded failure would take ssh's
-// exit status with it and report a serving deploy as a failed one.
-func TestDeployPruneFailureDoesNotFailTheDeploy(t *testing.T) {
-	deploy := readConfig(t, "deploy.sh")
-	var opener string
-	for _, line := range strings.Split(deploy, "\n") {
-		if strings.Contains(line, "<< 'PRUNE'") {
-			opener = line
-			break
-		}
-	}
-	if opener == "" {
-		t.Fatal("deploy.sh opens no PRUNE block; the guard here has lost its anchor")
-	}
-	if !strings.Contains(opener, "||") {
-		t.Errorf("the prune is unguarded (%q): under `set -e` a failed cleanup aborts the"+
-			" script after the stack is already serving, and the deploy reports as failed", strings.TrimSpace(opener))
 	}
 }
 
 // dockerd answers `docker image prune --filter reference=...` with
-// `invalid filter 'reference'` — the filter is valid for `docker images` and
-// not for the prune. A prune written that way does not run at all, and the
-// deploy that carries it still exits 0.
+// `invalid filter 'reference'`: the filter is valid for `docker images` and not
+// for the prune. Written that way the prune does not run at all, and the deploy
+// carrying it still exits 0. Continuations are joined first — the scripts wrap
+// their docker invocations, so a line-scoped check would miss the split form.
 func TestImagePruneIsNotFilteredByReference(t *testing.T) {
+	joiner := regexp.MustCompile(`\\\n\s*`)
 	for _, name := range []string{"deploy.sh", "local_deploy.sh", "initialize_host.sh"} {
-		for _, line := range strings.Split(readConfig(t, name), "\n") {
+		for _, line := range strings.Split(joiner.ReplaceAllString(readConfig(t, name), " "), "\n") {
 			if strings.Contains(line, "image prune") && strings.Contains(line, "reference") {
-				t.Errorf("%s filters `image prune` by reference: dockerd rejects that filter"+
+				t.Errorf("%s filters `image prune` by reference; dockerd rejects that filter"+
 					" as invalid and prunes nothing", name)
 			}
 		}
+	}
+}
+
+// The prune is cleanup, not deployment: it runs after the stack is already
+// serving, so its failure must not decide the deploy's exit status. deploy.sh
+// runs under `set -e`, which makes the fallback on the opening line the whole
+// guard — and a fallback that exits is not one.
+func TestThePruneFailureIsNotFatalToTheDeploy(t *testing.T) {
+	var opener string
+	for _, line := range strings.Split(readConfig(t, "deploy.sh"), "\n") {
+		if strings.Contains(line, "<< 'PRUNE'") {
+			opener = strings.TrimSpace(line)
+			break
+		}
+	}
+	if opener == "" {
+		t.Fatal("deploy.sh opens no PRUNE block; this guard has lost its anchor")
+	}
+	if !strings.Contains(opener, "||") {
+		t.Errorf("the prune is unguarded (%q): under `set -e` a failed cleanup aborts the"+
+			" script after the stack is serving, and a good deploy reports as failed", opener)
+	}
+	if strings.Contains(opener, "exit") {
+		t.Errorf("the prune's fallback exits (%q), which is the failure it is supposed to"+
+			" absorb", opener)
+	}
+}
+
+// Ordering, on the commands rather than the prose about them: the comment above
+// the block names `docker rmi` too, and a guard that reads it is satisfied by a
+// paragraph.
+func TestThePruneRunsAfterTheStackIsUp(t *testing.T) {
+	var code []string
+	for _, line := range strings.Split(readConfig(t, "deploy.sh"), "\n") {
+		if trimmed := strings.TrimSpace(line); !strings.HasPrefix(trimmed, "#") {
+			code = append(code, line)
+		}
+	}
+	deploy := strings.Join(code, "\n")
+	prune := strings.Index(deploy, "docker rmi")
+	if prune < 0 {
+		t.Fatal("deploy.sh removes no images: every deploy leaves the previous per-SHA" +
+			" image resident, referenced by nothing")
+	}
+	if up := strings.LastIndex(deploy, "up -d"); up < 0 {
+		t.Fatal("deploy.sh no longer brings the stack up with `up -d`; this guard has lost its anchor")
+	} else if prune < up {
+		t.Error("deploy.sh prunes before `up -d`: a deploy that fails to come up has already" +
+			" discarded what it would have rolled back to")
+	}
+}
+
+// The remote block is a script on bash's stdin, which exits with the status of
+// its last command — the Caddy reload. Without `set -e` a failed `compose up`
+// leaves ssh at 0, the outer `set -e` never fires, and both the prune and the
+// completion message run over a stack that did not come up.
+func TestTheRemoteDeployBlockStopsAtTheFirstFailure(t *testing.T) {
+	deploy := readConfig(t, "deploy.sh")
+	open := strings.Index(deploy, `ssh "$HOST" << EOF`)
+	if open < 0 {
+		t.Fatal("deploy.sh no longer opens the remote block with an EOF heredoc")
+	}
+	body := deploy[open:]
+	if end := strings.Index(body, "\nEOF\n"); end >= 0 {
+		body = body[:end]
+	}
+	if !regexp.MustCompile(`(?m)^\s*set -e\s*$`).MatchString(body) {
+		t.Error("the remote deploy block does not `set -e`, so a failed compose step still" +
+			" exits 0 and the deploy reports success over a stack that is not serving")
+	}
+}
+
+// The retention depth follows the LIST_SCAN idiom: declared at the top with the
+// other settings and overridable from the environment, rather than buried as a
+// number inside the heredoc that uses it.
+func TestTheRetentionDepthIsDeclaredWithTheOtherSettings(t *testing.T) {
+	deploy := readConfig(t, "deploy.sh")
+	decl := regexp.MustCompile(`(?m)^KEEP_PER_SERVICE=\$\{DEPLOY_KEEP:-(\d+)\}$`).FindStringSubmatch(deploy)
+	if decl == nil {
+		t.Fatal("no top-level KEEP_PER_SERVICE=${DEPLOY_KEEP:-N}: the depth is either not" +
+			" declared with the other settings or not overridable")
+	}
+	depth, err := strconv.Atoi(decl[1])
+	if err != nil || depth < 1 {
+		t.Fatalf("retention depth %q keeps nothing; every rollback becomes a pull", decl[1])
+	}
+	if !strings.Contains(deploy, `"KEEP=$KEEP_PER_SERVICE bash -s"`) {
+		t.Error("the prune is not handed $KEEP_PER_SERVICE, so the declared depth and" +
+			" DEPLOY_KEEP are both inert and the applied depth is whatever is inlined")
+	}
+	if body := deploy[strings.Index(deploy, "<< 'PRUNE'"):]; !strings.Contains(body, `"$KEEP"`) {
+		t.Error("the prune does not read $KEEP, so the declared depth is not the one it applies")
 	}
 }
