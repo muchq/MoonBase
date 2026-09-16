@@ -16,8 +16,14 @@ import (
 // and it is not the kind of number to guess at: the sweep behind it, and why
 // it buys nothing at all on a 7d page, are in #1556.
 //
-// Per request, not per process: N concurrent page requests put 4N queries in
-// flight. The cache is what keeps N small.
+// Per fan-out, not per process. The dashboard asks for tiles and charts
+// together, so one cold page load is already two of these — eight streams,
+// wider than the optimum above — and each additional viewer multiplies that
+// again. A process-wide ceiling would match the measurement more exactly, at
+// the cost of queueing viewers behind one another against the handlers' 30s
+// deadline. Throughput past four is flat rather than collapsing, so the lever
+// taken here is the cache, which removes whole fan-outs rather than narrowing
+// them.
 const maxConcurrentQueries = 4
 
 // runBounded calls fn for every index below n, at most maxConcurrentQueries at

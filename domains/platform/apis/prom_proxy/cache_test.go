@@ -79,7 +79,11 @@ func keysOf(c *responseCache) []string {
 }
 
 // The handlers hold no lock while fanning out, so two requests for different
-// services can write at once. Only meaningful under -race, which CI runs.
+// services can write at once. What proves that safe is the race detector, and
+// nothing in CI runs it here: prom_proxy_test goes through Bazel with no race
+// config, and the sanitize jobs select kind(cc_test, ...). Unraced, this only
+// shows the calls don't panic — drop responseCache's mutex and CI stays green.
+// Run `go test -race` on the package by hand.
 func TestResponseCache_ConcurrentUse(t *testing.T) {
 	cache, _ := testCache()
 	var wg sync.WaitGroup
