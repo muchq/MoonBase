@@ -1,11 +1,14 @@
 package prom_proxy
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -749,4 +752,521 @@ func TestMetricsHandler_GetServiceMetrics_JsonKeysAreStable(t *testing.T) {
 	_, present := gauge["toggleable"]
 	assert.False(t, present,
 		"a fixed-form tile must omit the key entirely, not send false: %v", gauge)
+}
+
+// --- Fan-out and caching (#1556) ----------------------------------------
+//
+// A service page costs games_hub 31 instant and 38 range queries, and at 7d
+// each one scans a week. What keeps that off the page's latency is that the
+// queries overlap and that a repeat read does not run them — so these pin
+// those two properties, rather than a wall-clock number CI cannot hold
+// steady.
+
+// Records how many queries were in flight at once, and blocks each one until
+// every caller has had a chance to arrive, so a serial handler is caught by
+// max == 1 rather than by timing luck.
+type concurrencyProbeClient struct {
+	mu       sync.Mutex
+	inFlight int
+	maxSeen  int
+	total    int
+	// Each query sleeps this long while holding its slot; long enough that
+	// a concurrent handler overlaps and short enough to keep the suite fast.
+	hold time.Duration
+}
+
+func (c *concurrencyProbeClient) enter() {
+	c.mu.Lock()
+	c.inFlight++
+	c.total++
+	if c.inFlight > c.maxSeen {
+		c.maxSeen = c.inFlight
+	}
+	c.mu.Unlock()
+	time.Sleep(c.hold)
+	c.mu.Lock()
+	c.inFlight--
+	c.mu.Unlock()
+}
+
+func (c *concurrencyProbeClient) Query(_ context.Context, _ string) (*QueryResponse, error) {
+	c.enter()
+	return &QueryResponse{}, nil
+}
+
+func (c *concurrencyProbeClient) QueryRange(_ context.Context, _ string, _, _ time.Time, _ string) (*QueryResponse, error) {
+	c.enter()
+	return &QueryResponse{}, nil
+}
+
+func (c *concurrencyProbeClient) peak() (peak, total int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.maxSeen, c.total
+}
+
+func TestMetricsHandler_GetServiceMetrics_FansOutConcurrently(t *testing.T) {
+	probe := &concurrencyProbeClient{hold: 5 * time.Millisecond}
+	handler := NewMetricsHandler(probe)
+
+	logged := captureLog(t, func() {
+		req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil)
+		req.SetPathValue("name", "games_hub")
+		handler.GetServiceMetrics(httptest.NewRecorder(), req)
+	})
+	// runBounded swallows a panic so one bad query cannot take the process
+	// down, which also means a panicking query is otherwise indistinguishable
+	// from a healthy idle service: zero tiles, green suite. This is the only
+	// thing that tells them apart.
+	assert.NotContains(t, logged, "panicked", "a query panicked: %s", logged)
+
+	peak, total := probe.peak()
+	assert.Greater(t, peak, 1, "the scalar fan-out ran one query at a time")
+	assert.LessOrEqual(t, peak, maxConcurrentQueries,
+		"the fan-out is unbounded; this is one small Prometheus, not a fleet")
+	// Nothing dropped on the way to concurrency: every tile still asks.
+	entry := serviceRegistry["games_hub"]
+	assert.Equal(t, len(standardScalarQueries("games_hub", DefaultRange.Window()))+len(entry.CustomScalars),
+		total)
+}
+
+func TestMetricsHandler_GetServiceMetricsTimeSeries_FansOutConcurrently(t *testing.T) {
+	probe := &concurrencyProbeClient{hold: 5 * time.Millisecond}
+	handler := NewMetricsHandler(probe)
+
+	logged := captureLog(t, func() {
+		req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/7d", nil)
+		req.SetPathValue("name", "games_hub")
+		req.SetPathValue("range", "7d")
+		handler.GetServiceMetricsTimeSeries(httptest.NewRecorder(), req)
+	})
+	assert.NotContains(t, logged, "panicked", "a query panicked: %s", logged)
+
+	peak, total := probe.peak()
+	assert.Greater(t, peak, 1, "the range fan-out ran one query at a time")
+	assert.LessOrEqual(t, peak, maxConcurrentQueries, "the fan-out is unbounded")
+	_, step := GetTimeRangeConfig("7d")
+	entry := serviceRegistry["games_hub"]
+	assert.Equal(t, len(standardTimeseriesQueries("games_hub", step))+
+		len(expandCustomTimeseries(entry.CustomTimeseries, step)), total)
+}
+
+// A second identical request inside the TTL would re-derive numbers no fresher
+// than one scrape interval — the floor on how current any of them can be. The
+// dashboard polls every 30s per open tab, which is what made that worth
+// spending.
+func TestMetricsHandler_GetServiceMetrics_CachesWithinTheScrapeInterval(t *testing.T) {
+	probe := &concurrencyProbeClient{}
+	handler := NewMetricsHandler(probe)
+
+	get := func() {
+		req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil)
+		req.SetPathValue("name", "games_hub")
+		handler.GetServiceMetrics(httptest.NewRecorder(), req)
+	}
+	get()
+	_, afterFirst := probe.peak()
+	require.NotZero(t, afterFirst, "the first request queried nothing")
+
+	get()
+	_, afterSecond := probe.peak()
+	assert.Equal(t, afterFirst, afterSecond,
+		"the second identical request re-queried Prometheus inside the scrape interval")
+}
+
+// The negative half: a cache that ignored any of these would serve one
+// service's numbers for another, or a 30m window's numbers on the 7d page.
+func TestMetricsHandler_GetServiceMetrics_CacheSeparatesServiceViewAndRange(t *testing.T) {
+	probe := &concurrencyProbeClient{}
+	handler := NewMetricsHandler(probe)
+
+	get := func(target, name string) {
+		req := httptest.NewRequest("GET", target, nil)
+		req.SetPathValue("name", name)
+		handler.GetServiceMetrics(httptest.NewRecorder(), req)
+	}
+	get("/metrics/v1/service/games_hub", "games_hub")
+	_, base := probe.peak()
+
+	for _, next := range []struct{ target, name, what string }{
+		{"/metrics/v1/service/one_d4", "one_d4", "a different service"},
+		{"/metrics/v1/service/games_hub?view=rate", "games_hub", "a different view"},
+		{"/metrics/v1/service/games_hub?range=7d", "games_hub", "a different range"},
+	} {
+		before := func() int { _, n := probe.peak(); return n }()
+		get(next.target, next.name)
+		after := func() int { _, n := probe.peak(); return n }()
+		assert.Greater(t, after, before, "%s was served from another key's cache entry", next.what)
+	}
+	_, total := probe.peak()
+	assert.Greater(t, total, base, "nothing after the first request queried at all")
+}
+
+func TestMetricsHandler_GetServiceMetrics_CacheExpires(t *testing.T) {
+	probe := &concurrencyProbeClient{}
+	handler := NewMetricsHandler(probe)
+	now := time.Now()
+	handler.cache.now = func() time.Time { return now }
+
+	get := func() {
+		req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil)
+		req.SetPathValue("name", "games_hub")
+		handler.GetServiceMetrics(httptest.NewRecorder(), req)
+	}
+	get()
+	_, first := probe.peak()
+
+	// Still inside the TTL: no new queries.
+	now = now.Add(cacheTTL - time.Millisecond)
+	get()
+	_, warm := probe.peak()
+	require.Equal(t, first, warm, "the entry expired early")
+
+	// Past it: the data can have moved, so the queries run again.
+	now = now.Add(2 * time.Millisecond)
+	get()
+	_, cold := probe.peak()
+	assert.Greater(t, cold, warm, "the entry never expired")
+}
+
+// The UI's generic Trends grid renders custom series in payload order with
+// position-indexed colors, so an order that varies between requests makes
+// charts swap places and recolor on every 30s poll. Map iteration is random,
+// and a concurrent fan-out appending to one slice would order by whichever
+// query answered first — two independent ways to lose this, which is why it
+// is asserted rather than commented.
+func TestMetricsHandler_GetServiceMetricsTimeSeries_SeriesOrderIsStable(t *testing.T) {
+	order := func() []string {
+		handler := &MetricsHandler{
+			promClient: &mockPrometheusClient{queryRangeResponse: rangeResponse("series")},
+		}
+		req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/30m", nil)
+		req.SetPathValue("name", "games_hub")
+		req.SetPathValue("range", "30m")
+		w := httptest.NewRecorder()
+		handler.GetServiceMetricsTimeSeries(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var response TimeSeriesResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		require.NotEmpty(t, response.Series, "no series to order")
+		names := make([]string, 0, len(response.Series))
+		for _, series := range response.Series {
+			names = append(names, series.MetricName)
+		}
+		return names
+	}
+
+	first := order()
+	assert.True(t, sort.StringsAreSorted(first), "series are not in name order: %v", first)
+	// Ten requests, because a random order can agree with a sorted one by
+	// chance on any single one of them.
+	for i := 0; i < 10; i++ {
+		assert.Equal(t, first, order(), "the series order changed between requests")
+	}
+}
+
+// The charts route caches on its own key, and the 7d chart call is the second
+// most expensive request the dashboard makes — so it gets the same three
+// assertions the tiles route does, rather than inheriting them by proximity.
+func TestMetricsHandler_GetServiceMetricsTimeSeries_CachesWithinTheScrapeInterval(t *testing.T) {
+	probe := &concurrencyProbeClient{}
+	handler := NewMetricsHandler(probe)
+
+	get := func(name, timeRange string) {
+		req := httptest.NewRequest("GET", "/metrics/v1/service/"+name+"/timeseries/"+timeRange, nil)
+		req.SetPathValue("name", name)
+		req.SetPathValue("range", timeRange)
+		handler.GetServiceMetricsTimeSeries(httptest.NewRecorder(), req)
+	}
+
+	get("games_hub", "7d")
+	_, afterFirst := probe.peak()
+	require.NotZero(t, afterFirst, "the first request queried nothing")
+
+	get("games_hub", "7d")
+	_, afterSecond := probe.peak()
+	assert.Equal(t, afterFirst, afterSecond,
+		"the second identical request re-queried Prometheus inside the scrape interval")
+
+	// The negative half: neither of the two inputs may be collapsed.
+	get("one_d4", "7d")
+	_, afterService := probe.peak()
+	assert.Greater(t, afterService, afterSecond, "a different service hit the same cache entry")
+
+	get("games_hub", "30m")
+	_, afterRange := probe.peak()
+	assert.Greater(t, afterRange, afterService, "a different range hit the same cache entry")
+}
+
+// The two routes answer different shapes over the same (service, range). A
+// shared key would hand a tiles request a payload of charts — 200 with a body
+// the UI cannot read, which is the one cache bug that would not look like a
+// cache bug.
+func TestMetricsHandler_ServiceRoutesDoNotShareCacheEntries(t *testing.T) {
+	handler := NewMetricsHandler(&mockPrometheusClient{
+		queryResponse:      scalarResponse("7"),
+		queryRangeResponse: rangeResponse("series"),
+	})
+
+	series := httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/1d", nil)
+	series.SetPathValue("name", "games_hub")
+	series.SetPathValue("range", "1d")
+	w := httptest.NewRecorder()
+	handler.GetServiceMetricsTimeSeries(w, series)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// Same service, and 1d is what a scalar request with no ?range= reads.
+	scalars := httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil)
+	scalars.SetPathValue("name", "games_hub")
+	w = httptest.NewRecorder()
+	handler.GetServiceMetrics(w, scalars)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response ServiceMetricsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.Equal(t, "games_hub", response.Service, "the tiles route was served the charts payload")
+	assert.Equal(t, string(DefaultRange), response.Window)
+	assert.NotEmpty(t, response.Custom, "no tiles came back")
+}
+
+// Fails every query while the request's context is done, the way the real
+// client does — prometheus_client.go threads ctx into the HTTP request — and
+// answers normally otherwise.
+type contextAwareClient struct {
+	mu      sync.Mutex
+	queries int
+}
+
+func (c *contextAwareClient) seen() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.queries
+}
+
+func (c *contextAwareClient) enter(ctx context.Context) error {
+	c.mu.Lock()
+	c.queries++
+	c.mu.Unlock()
+	return ctx.Err()
+}
+
+func (c *contextAwareClient) Query(ctx context.Context, _ string) (*QueryResponse, error) {
+	if err := c.enter(ctx); err != nil {
+		return nil, err
+	}
+	return scalarResponse("42"), nil
+}
+
+func (c *contextAwareClient) QueryRange(ctx context.Context, _ string, _, _ time.Time, _ string) (*QueryResponse, error) {
+	if err := c.enter(ctx); err != nil {
+		return nil, err
+	}
+	return rangeResponse("series"), nil
+}
+
+// A viewer who switches service tabs mid-load, reloads, or closes the tab
+// cancels the request's context, and every query in flight and every one not
+// yet started fails. That assembles a page of zeros — which is the outage
+// contract, and was that one request's problem until the cache made it
+// everyone's. Caching it would serve a dead-looking service to the next
+// viewer for a full TTL, with a fresh Timestamp attached, and the 30s
+// deadline does the same thing with no client involved at all.
+func TestMetricsHandler_GetServiceMetrics_DoesNotCacheAnAbandonedRequest(t *testing.T) {
+	client := &contextAwareClient{}
+	handler := NewMetricsHandler(client)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil).WithContext(ctx)
+	req.SetPathValue("name", "games_hub")
+	handler.GetServiceMetrics(httptest.NewRecorder(), req)
+	abandoned := client.seen()
+	require.NotZero(t, abandoned, "the abandoned request issued no queries at all")
+
+	req = httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil)
+	req.SetPathValue("name", "games_hub")
+	w := httptest.NewRecorder()
+	handler.GetServiceMetrics(w, req)
+
+	assert.Greater(t, client.seen(), abandoned,
+		"the next viewer was served the abandoned request's zeros instead of querying")
+	var response ServiceMetricsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.NotZero(t, response.Standard.RequestsTotal, "the tiles came back zeroed")
+}
+
+func TestMetricsHandler_GetServiceMetricsTimeSeries_DoesNotCacheAnAbandonedRequest(t *testing.T) {
+	client := &contextAwareClient{}
+	handler := NewMetricsHandler(client)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/7d", nil).WithContext(ctx)
+	req.SetPathValue("name", "games_hub")
+	req.SetPathValue("range", "7d")
+	handler.GetServiceMetricsTimeSeries(httptest.NewRecorder(), req)
+	abandoned := client.seen()
+	require.NotZero(t, abandoned, "the abandoned request issued no queries at all")
+
+	req = httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/7d", nil)
+	req.SetPathValue("name", "games_hub")
+	req.SetPathValue("range", "7d")
+	w := httptest.NewRecorder()
+	handler.GetServiceMetricsTimeSeries(w, req)
+
+	assert.Greater(t, client.seen(), abandoned,
+		"the next viewer was served the abandoned request's empty charts")
+	var response TimeSeriesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.NotEmpty(t, response.Series, "the charts came back with no series")
+}
+
+// Every other cache test counts queries and throws the recorder away, which
+// leaves the hit path — the one most requests take, once the cache is doing
+// its job — asserting nothing about what it serves. A hit that writes an empty
+// body, or hands back the wrong object, is a 200 the UI cannot read for a
+// whole TTL while the first request still looks fine.
+func TestMetricsHandler_GetServiceMetrics_ServesTheCachedBody(t *testing.T) {
+	mock := &mockPrometheusClient{queryResponse: scalarResponse("7")}
+	handler := NewMetricsHandler(mock)
+
+	get := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil)
+		req.SetPathValue("name", "games_hub")
+		w := httptest.NewRecorder()
+		handler.GetServiceMetrics(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		return w
+	}
+
+	first := get()
+	queried := len(mock.instantQueries)
+	require.NotZero(t, queried)
+
+	second := get()
+	require.Len(t, mock.instantQueries, queried, "the second request was not a hit")
+	assert.Equal(t, first.Body.String(), second.Body.String(),
+		"the hit served a different body than the request that filled the cache")
+
+	var response ServiceMetricsResponse
+	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &response))
+	assert.Equal(t, "games_hub", response.Service)
+	assert.Equal(t, 7.0, response.Standard.RequestsTotal, "the hit served an empty payload")
+}
+
+func TestMetricsHandler_GetServiceMetricsTimeSeries_ServesTheCachedBody(t *testing.T) {
+	mock := &mockPrometheusClient{queryRangeResponse: rangeResponse("series")}
+	handler := NewMetricsHandler(mock)
+
+	get := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/30m", nil)
+		req.SetPathValue("name", "games_hub")
+		req.SetPathValue("range", "30m")
+		w := httptest.NewRecorder()
+		handler.GetServiceMetricsTimeSeries(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+		return w
+	}
+
+	first := get()
+	second := get()
+	assert.Equal(t, first.Body.String(), second.Body.String(),
+		"the hit served a different body than the request that filled the cache")
+
+	var response TimeSeriesResponse
+	require.NoError(t, json.Unmarshal(second.Body.Bytes(), &response))
+	assert.NotEmpty(t, response.Series, "the hit served an empty payload")
+}
+
+// The cancellation twin above covers a viewer who walks away. This is the
+// other half cacheIfComplete exists for, and the one with no client involved:
+// a wedged Prometheus that outlasts the handler's own deadline assembles the
+// same page of zeros. Distinguishing ctx from r.Context() at the put is the
+// only thing either test turns on.
+func TestMetricsHandler_GetServiceMetrics_DoesNotCacheAfterItsDeadline(t *testing.T) {
+	client := &contextAwareClient{}
+	handler := NewMetricsHandler(client)
+
+	// The client is never cancelled here; only the handler's own budget runs
+	// out. That is what separates ctx from r.Context() at the put — with the
+	// request's context still live, gating on the wrong one caches the zeros.
+	handler.queryTimeout = time.Nanosecond
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil)
+	req.SetPathValue("name", "games_hub")
+	handler.GetServiceMetrics(httptest.NewRecorder(), req)
+	expiredRun := client.seen()
+	require.NotZero(t, expiredRun)
+
+	handler.queryTimeout = 0
+	req = httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil)
+	req.SetPathValue("name", "games_hub")
+	w := httptest.NewRecorder()
+	handler.GetServiceMetrics(w, req)
+
+	assert.Greater(t, client.seen(), expiredRun,
+		"a request that outlived its deadline was cached and served on")
+	var response ServiceMetricsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.NotZero(t, response.Standard.RequestsTotal)
+}
+
+// One query, several series: cacheHitPercent is a ratio of two rates with no
+// aggregation wrapper (iili and portrait chart it), so a service running two
+// containers through a rolling deploy answers it with one series per instance.
+// Keeping only the last would drop a line off the chart exactly when someone
+// is watching a deploy.
+func TestMetricsHandler_GetServiceMetricsTimeSeries_KeepsEverySeriesForOneQuery(t *testing.T) {
+	multi := &QueryResponse{
+		Status: "success",
+		Data: struct {
+			ResultType string   `json:"resultType"`
+			Result     []Result `json:"result"`
+		}{
+			ResultType: "matrix",
+			Result: []Result{
+				{Metric: map[string]string{"instance": "a"}, Values: [][]interface{}{{1609459200.0, "1"}}},
+				{Metric: map[string]string{"instance": "b"}, Values: [][]interface{}{{1609459200.0, "2"}}},
+			},
+		},
+	}
+	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryRangeResponse: multi}}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/service/iili/timeseries/30m", nil)
+	req.SetPathValue("name", "iili")
+	req.SetPathValue("range", "30m")
+	w := httptest.NewRecorder()
+	handler.GetServiceMetricsTimeSeries(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var response TimeSeriesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+
+	perName := map[string][]string{}
+	for _, series := range response.Series {
+		perName[series.MetricName] = append(perName[series.MetricName], series.Labels["instance"])
+	}
+	require.NotEmpty(t, perName)
+	for name, instances := range perName {
+		assert.Equal(t, []string{"a", "b"}, instances,
+			"%s dropped a series, or reordered the ones the query returned", name)
+	}
+}
+
+// A tile's query is unreadable PromQL; its label is the only thing that says
+// which tile went quiet. That is what scalarJob.subject carries, and a zero
+// tile is indistinguishable from a real zero without it.
+func TestMetricsHandler_GetServiceMetrics_NamesTheFailingTile(t *testing.T) {
+	handler := &MetricsHandler{promClient: &mockPrometheusClient{queryError: assert.AnError}}
+	label := serviceRegistry["games_hub"].CustomScalars[0].Label
+
+	logged := captureLog(t, func() {
+		req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil)
+		req.SetPathValue("name", "games_hub")
+		handler.GetServiceMetrics(httptest.NewRecorder(), req)
+	})
+
+	assert.Contains(t, logged, "tile "+label,
+		"a failing tile logged its query instead of its name")
+	assert.Contains(t, logged, "service games_hub")
 }

@@ -1254,3 +1254,50 @@ func TestRegistry_BothViewsShareOneSelector(t *testing.T) {
 		}
 	}
 }
+
+// The budget a registry entry spends on Prometheus. Not a record of today's
+// worst case — games_hub sits at 31 instant and 38 range — but a ceiling, so
+// that adding twenty tiles to an entry fails here rather than quietly costing
+// another second on the 7d page, where every query is ~34ms and (measured, see
+// maxConcurrentQueries) fanning them out does not make them cheaper.
+//
+// Raising it is a legitimate change; doing it deliberately, with the latency
+// in view, is the point.
+const maxQueriesPerServicePage = 48
+
+func TestRegistry_NoServicePageExceedsItsQueryBudget(t *testing.T) {
+	// Counts are range-independent — a toggleable chart expands to two keys at
+	// every step, and the standard blocks are fixed — while the cost per query
+	// is not. One range is enough to count; 7d is where it hurts.
+	_, step := GetTimeRangeConfig(LastWeek)
+	for _, name := range serviceOrder {
+		entry := serviceRegistry[name]
+		instant := len(standardScalarQueries(name, LastWeek.Window())) + len(entry.CustomScalars)
+		ranged := len(standardTimeseriesQueries(name, step)) + len(expandCustomTimeseries(entry.CustomTimeseries, step))
+
+		assert.LessOrEqual(t, instant, maxQueriesPerServicePage,
+			"%s's tiles cost %d instant queries", name, instant)
+		assert.LessOrEqual(t, ranged, maxQueriesPerServicePage,
+			"%s's charts cost %d range queries", name, ranged)
+	}
+}
+
+// The budget above is only a budget if something is actually near it: a
+// ceiling of 500 would never fail and would read as if it had been considered.
+func TestRegistry_TheQueryBudgetIsBinding(t *testing.T) {
+	_, step := GetTimeRangeConfig(LastWeek)
+	worst := 0
+	for _, name := range serviceOrder {
+		entry := serviceRegistry[name]
+		for _, count := range []int{
+			len(standardScalarQueries(name, LastWeek.Window())) + len(entry.CustomScalars),
+			len(standardTimeseriesQueries(name, step)) + len(expandCustomTimeseries(entry.CustomTimeseries, step)),
+		} {
+			if count > worst {
+				worst = count
+			}
+		}
+	}
+	assert.Greater(t, worst*2, maxQueriesPerServicePage,
+		"the budget is more than twice the worst page (%d); it would never catch anything", worst)
+}

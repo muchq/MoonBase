@@ -1,11 +1,15 @@
 package prom_proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -246,6 +250,25 @@ func TestMetricsHandler_HealthHandler(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// captureLog collects what the standard logger writes while fn runs.
+//
+// A zero tile means "the query failed" or "the number is zero" and the payload
+// cannot tell them apart — the log line is the whole difference, which both
+// the fan-out and the handlers say in as many words. Asserting on tiles without
+// asserting on this leaves the distinction they describe untested, and since
+// runBounded contains panics, it also leaves a panicking query looking exactly
+// like a healthy idle service.
+func captureLog(t *testing.T, fn func()) string {
+	t.Helper()
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	fn()
+	// Safe unsynchronized: log.Logger serializes its writes, and every
+	// goroutine runBounded started has finished before fn returns.
+	return buf.String()
+}
+
 // Mock Prometheus client for testing handlers
 type mockPrometheusClient struct {
 	queryResponse      *QueryResponse
@@ -259,22 +282,40 @@ type mockPrometheusClient struct {
 	// Same for range queries. Without this a handler can build the wrong
 	// query — or none at all — and every assertion still passes.
 	queryRangeResponses map[string]*QueryResponse
+	// Guards the recording fields below. The service handlers fan their
+	// queries out across goroutines (#1556), so a mock that appended without
+	// it would be a data race — and `go test -race` would fail the suite it
+	// was meant to serve. The fixture maps are written before the handler
+	// runs and only read after, so they stay outside it.
+	mu sync.Mutex
 	// Queries with no fixture entry, so a test can prove nothing was
 	// silently answered with an empty result.
 	misses []string
-	// Every instant query issued, so a test can bound the fan-out.
+	// Every instant query issued, so a test can bound the fan-out. Recorded
+	// in completion order, which under a concurrent fan-out is not the order
+	// the handler built them in: assert on the set, not the sequence.
 	instantQueries []string
 }
 
-func (m *mockPrometheusClient) Query(ctx context.Context, query string) (*QueryResponse, error) {
+func (m *mockPrometheusClient) record(query string, missed bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.instantQueries = append(m.instantQueries, query)
+	if missed {
+		m.misses = append(m.misses, query)
+	}
+}
+
+func (m *mockPrometheusClient) Query(ctx context.Context, query string) (*QueryResponse, error) {
 	if m.queryResponses != nil {
-		if resp, ok := m.queryResponses[query]; ok {
+		resp, ok := m.queryResponses[query]
+		m.record(query, !ok)
+		if ok {
 			return resp, nil
 		}
-		m.misses = append(m.misses, query)
 		return &QueryResponse{}, nil
 	}
+	m.record(query, false)
 	return m.queryResponse, m.queryError
 }
 
@@ -283,7 +324,9 @@ func (m *mockPrometheusClient) QueryRange(ctx context.Context, query string, sta
 		if resp, ok := m.queryRangeResponses[query]; ok {
 			return resp, nil
 		}
+		m.mu.Lock()
 		m.misses = append(m.misses, query)
+		m.mu.Unlock()
 		return &QueryResponse{}, nil
 	}
 	return m.queryRangeResponse, m.queryRangeError
