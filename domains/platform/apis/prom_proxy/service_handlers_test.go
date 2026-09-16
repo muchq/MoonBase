@@ -756,10 +756,11 @@ func TestMetricsHandler_GetServiceMetrics_JsonKeysAreStable(t *testing.T) {
 
 // --- Fan-out and caching (#1556) ----------------------------------------
 //
-// A service page's queries used to run one at a time: games_hub is 33 instant
-// and 40 range queries, and at a 7d range each instant query scans a week, so
-// the measured cost was ~1.3s per call. These pin the two properties that
-// produce the latency, rather than a wall-clock number CI cannot hold steady.
+// A service page costs games_hub 31 instant and 38 range queries, and at 7d
+// each one scans a week. What keeps that off the page's latency is that the
+// queries overlap and that a repeat read does not run them — so these pin
+// those two properties, rather than a wall-clock number CI cannot hold
+// steady.
 
 // Records how many queries were in flight at once, and blocks each one until
 // every caller has had a chance to arrive, so a serial handler is caught by
@@ -840,9 +841,10 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_FansOutConcurrently(t *testi
 		len(expandCustomTimeseries(entry.CustomTimeseries, step)), total)
 }
 
-// Prometheus is scraped every 15s, so a second identical request inside that
-// window can only re-derive numbers that cannot have changed. The dashboard
-// polls every 30s per open tab, which is what made this worth caching.
+// A second identical request inside the TTL would re-derive numbers no fresher
+// than one scrape interval — the floor on how current any of them can be. The
+// dashboard polls every 30s per open tab, which is what made that worth
+// spending.
 func TestMetricsHandler_GetServiceMetrics_CachesWithinTheScrapeInterval(t *testing.T) {
 	probe := &concurrencyProbeClient{}
 	handler := NewMetricsHandler(probe)
@@ -1016,4 +1018,96 @@ func TestMetricsHandler_ServiceRoutesDoNotShareCacheEntries(t *testing.T) {
 	assert.Equal(t, "games_hub", response.Service, "the tiles route was served the charts payload")
 	assert.Equal(t, string(DefaultRange), response.Window)
 	assert.NotEmpty(t, response.Custom, "no tiles came back")
+}
+
+// Fails every query while the request's context is done, the way the real
+// client does — prometheus_client.go threads ctx into the HTTP request — and
+// answers normally otherwise.
+type contextAwareClient struct {
+	mu      sync.Mutex
+	queries int
+}
+
+func (c *contextAwareClient) seen() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.queries
+}
+
+func (c *contextAwareClient) enter(ctx context.Context) error {
+	c.mu.Lock()
+	c.queries++
+	c.mu.Unlock()
+	return ctx.Err()
+}
+
+func (c *contextAwareClient) Query(ctx context.Context, _ string) (*QueryResponse, error) {
+	if err := c.enter(ctx); err != nil {
+		return nil, err
+	}
+	return scalarResponse("42"), nil
+}
+
+func (c *contextAwareClient) QueryRange(ctx context.Context, _ string, _, _ time.Time, _ string) (*QueryResponse, error) {
+	if err := c.enter(ctx); err != nil {
+		return nil, err
+	}
+	return rangeResponse("series"), nil
+}
+
+// A viewer who switches service tabs mid-load, reloads, or closes the tab
+// cancels the request's context, and every query in flight and every one not
+// yet started fails. That assembles a page of zeros — which is the outage
+// contract, and was that one request's problem until the cache made it
+// everyone's. Caching it would serve a dead-looking service to the next
+// viewer for a full TTL, with a fresh Timestamp attached, and the 30s
+// deadline does the same thing with no client involved at all.
+func TestMetricsHandler_GetServiceMetrics_DoesNotCacheAnAbandonedRequest(t *testing.T) {
+	client := &contextAwareClient{}
+	handler := NewMetricsHandler(client)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil).WithContext(ctx)
+	req.SetPathValue("name", "games_hub")
+	handler.GetServiceMetrics(httptest.NewRecorder(), req)
+	abandoned := client.seen()
+	require.NotZero(t, abandoned, "the abandoned request issued no queries at all")
+
+	req = httptest.NewRequest("GET", "/metrics/v1/service/games_hub", nil)
+	req.SetPathValue("name", "games_hub")
+	w := httptest.NewRecorder()
+	handler.GetServiceMetrics(w, req)
+
+	assert.Greater(t, client.seen(), abandoned,
+		"the next viewer was served the abandoned request's zeros instead of querying")
+	var response ServiceMetricsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.NotZero(t, response.Standard.RequestsTotal, "the tiles came back zeroed")
+}
+
+func TestMetricsHandler_GetServiceMetricsTimeSeries_DoesNotCacheAnAbandonedRequest(t *testing.T) {
+	client := &contextAwareClient{}
+	handler := NewMetricsHandler(client)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/7d", nil).WithContext(ctx)
+	req.SetPathValue("name", "games_hub")
+	req.SetPathValue("range", "7d")
+	handler.GetServiceMetricsTimeSeries(httptest.NewRecorder(), req)
+	abandoned := client.seen()
+	require.NotZero(t, abandoned, "the abandoned request issued no queries at all")
+
+	req = httptest.NewRequest("GET", "/metrics/v1/service/games_hub/timeseries/7d", nil)
+	req.SetPathValue("name", "games_hub")
+	req.SetPathValue("range", "7d")
+	w := httptest.NewRecorder()
+	handler.GetServiceMetricsTimeSeries(w, req)
+
+	assert.Greater(t, client.seen(), abandoned,
+		"the next viewer was served the abandoned request's empty charts")
+	var response TimeSeriesResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.NotEmpty(t, response.Series, "the charts came back with no series")
 }

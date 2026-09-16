@@ -62,3 +62,22 @@ func TestRunBounded_ZeroJobs(t *testing.T) {
 	runBounded(0, func(int) { called = true })
 	assert.False(t, called, "runBounded called fn with no jobs to run")
 }
+
+// net/http recovers a panic on the goroutine it runs the handler on, and
+// nowhere else: a panic on a goroutine runBounded spawned would take the
+// process down, and every other in-flight request with it. Containing it
+// leaves the job's slot untouched, which is the same "no answer" a failed
+// query leaves.
+func TestRunBounded_ContainsAPanickingJob(t *testing.T) {
+	const n = 3 * maxConcurrentQueries
+	done := make([]bool, n)
+	runBounded(n, func(i int) {
+		if i%3 == 0 {
+			panic("query blew up")
+		}
+		done[i] = true
+	})
+	for i := range done {
+		assert.Equal(t, i%3 != 0, done[i], "index %d", i)
+	}
+}

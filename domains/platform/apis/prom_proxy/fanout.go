@@ -1,26 +1,23 @@
 package prom_proxy
 
-import "sync"
+import (
+	"log"
+	"sync"
+)
 
-// A service page is 30-40 Prometheus queries, and they used to run one at a
-// time: the page's latency was the sum of every query's (#1556). They are
-// independent, so the sum was a choice.
+// A service page is 30-40 independent Prometheus queries. This is how many of
+// them run at once.
 //
-// Four, from measuring the deployed Prometheus rather than from taste. Firing
-// N of these query streams at api.muchq.com at once and dividing total
-// queries by wall time, aggregate throughput on the default range went
-// 82 q/s at N=1, 105 at N=2, 131 at N=4, 128 at N=8: about 1.6x available in
-// total, all of it collected by four in flight, and nothing past that. A
-// wider fan-out would not make a page faster — it would only take the same
-// fixed capacity in bigger bites, so that one viewer's page load slows every
-// other tile on the dashboard. That ceiling belongs to one small Prometheus
-// on a shared host, which is why it is measured here and not assumed.
+// Four, measured against the deployed Prometheus rather than chosen: aggregate
+// throughput rises to four in flight and is flat at eight. Past four a wider
+// fan-out cannot make a page faster — it only takes the same fixed capacity in
+// bigger bites, so one viewer's page load slows every other tile on the
+// dashboard. That capacity belongs to one small Prometheus on a shared host,
+// and it is not the kind of number to guess at: the sweep behind it, and why
+// it buys nothing at all on a 7d page, are in #1556.
 //
-// It buys nothing on a 7d page, where the same sweep is flat at ~30 q/s from
-// one in flight to eight: that Prometheus serializes week-long scans on
-// something other than CPU, so 31 of them cost ~1.1s however they are
-// scheduled. Scheduling is not the lever there; cheaper queries are. See the
-// PR for #1556.
+// Per request, not per process: N concurrent page requests put 4N queries in
+// flight. The cache is what keeps N small.
 const maxConcurrentQueries = 4
 
 // runBounded calls fn for every index below n, at most maxConcurrentQueries at
@@ -40,6 +37,16 @@ func runBounded(n int, fn func(i int)) {
 		go func(i int) {
 			defer wg.Done()
 			defer func() { <-slots }()
+			// net/http recovers a panic on the goroutine it runs the handler
+			// on, and nowhere else. Uncontained here, one bad query would take
+			// the process down and every other in-flight request with it,
+			// where inline it cost a single connection. The job's slot is left
+			// as it was, which the callers already read as "no answer".
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("prometheus query %d panicked: %v", i, r)
+				}
+			}()
 			fn(i)
 		}(i)
 	}

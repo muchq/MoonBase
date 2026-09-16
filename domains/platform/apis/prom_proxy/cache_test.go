@@ -24,6 +24,14 @@ func testCache() (*responseCache, *fakeClock) {
 	return cache, clock
 }
 
+// The TTL's whole justification is that it does not outlast the interval at
+// which the data behind it can change. Every other test here takes cacheTTL as
+// given, so this is the only place that value is pinned to anything.
+func TestResponseCache_TTLIsOneScrapeInterval(t *testing.T) {
+	assert.Equal(t, scrapeInterval, cacheTTL,
+		"the cache may not hold a response longer than it takes for a newer one to exist")
+}
+
 func TestResponseCache_HitMissAndExpiry(t *testing.T) {
 	cache, clock := testCache()
 
@@ -35,8 +43,8 @@ func TestResponseCache_HitMissAndExpiry(t *testing.T) {
 	require.True(t, ok, "the value just written was not found")
 	assert.Equal(t, "v", value)
 
-	// The last instant the entry is still good. An off-by-one here would
-	// serve a tile from the previous scrape as if it were current.
+	// The last instant the entry is still good. An off-by-one here widens the
+	// staleness bound past the scrape interval the TTL is pinned to.
 	clock.add(cacheTTL - time.Nanosecond)
 	_, ok = cache.get("k")
 	assert.True(t, ok, "the entry expired inside its TTL")

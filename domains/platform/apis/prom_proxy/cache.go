@@ -1,19 +1,25 @@
 package prom_proxy
 
 import (
+	"context"
 	"sync"
 	"time"
 )
 
-// Prometheus is scraped every 15s (scrapeInterval), so a response assembled
-// less than one interval ago cannot differ from one assembled now — every
-// query behind it reads the same samples. The dashboard fires three requests
-// per page and re-polls every 30s in every open tab, so without this a second
-// viewer doubles the query load to re-derive numbers already on hand (#1556).
+// A tile at most one scrape interval behind is current enough for a live view:
+// that is already the floor on how fresh any of these numbers can be. The
+// cache spends up to that much staleness to keep a second viewer from
+// re-deriving numbers that are on hand — the dashboard fires three requests
+// per page and re-polls every 30s in every open tab (#1556).
 //
-// One interval and no more: the page is a live view, and a stale tile is
-// worse than a slow one.
-const cacheTTL = 15 * time.Second
+// It is a bound, not an identity: scrapes are staggered per target, and the
+// windowed queries behind a tile move with the clock even between samples. So
+// one interval and no more, because the page is a live view and a stale tile
+// is worse than a slow one.
+//
+// Tied to the scrape interval rather than spelling 15s again, so the two
+// cannot drift apart when prometheus.yml changes.
+const cacheTTL = scrapeInterval
 
 // responseCache memoizes assembled responses, keyed by everything that
 // changes the answer — see scalarCacheKey and seriesCacheKey.
@@ -39,9 +45,8 @@ func newResponseCache() *responseCache {
 	return &responseCache{entries: map[string]cacheEntry{}, now: time.Now}
 }
 
-// get reports a live entry. A nil cache always misses: tests construct a
-// MetricsHandler directly, and every one of them expects its request to reach
-// Prometheus rather than a neighbour's cached answer.
+// get reports a live entry. A nil cache always misses, which makes a
+// MetricsHandler built without one a working handler that always queries.
 func (c *responseCache) get(key string) (any, bool) {
 	if c == nil {
 		return nil, false
@@ -55,6 +60,9 @@ func (c *responseCache) get(key string) (any, bool) {
 	return entry.value, true
 }
 
+// put takes ownership: the value is handed to every later get, so callers
+// must treat it as frozen once it is in here. Nothing enforces that, and the
+// uncached host handler next door does post-process a response in place.
 func (c *responseCache) put(key string, value any) {
 	if c == nil {
 		return
@@ -78,6 +86,34 @@ func (c *responseCache) put(key string, value any) {
 // the key: the service, the view a counter tile is read in, and the range
 // every windowed tile now reads over (#1507). Miss one and the dashboard
 // serves one window's numbers on another window's page.
+//
+// Only the per-service routes are keyed here. The host and container routes
+// are polled by every tab too and would benefit, but the host timeseries
+// route answers a failed scrape with a 500 rather than the zeros-with-200 the
+// service routes promise, so caching it needs a rule about which failures are
+// storable that this pair never had to state.
+// cacheIfComplete stores a response unless the request it was assembled for
+// was abandoned or ran out of time.
+//
+// Those two are the one failure the cache must not keep. A viewer who switches
+// service tabs mid-load, reloads, or closes the tab cancels the request's
+// context, and every query in flight and every one not yet started fails at
+// once — which assembles a whole page of zeros. That is the outage contract,
+// and it was that one request's problem until the cache made it everyone's: a
+// service that is serving fine would read as dead, instantly and with a fresh
+// timestamp, for the next viewer and the whole TTL. The 30s deadline does the
+// same thing with no client involved at all.
+//
+// An ordinary failed query is different and is stored: a single tile whose
+// query always fails would otherwise disable the cache for that page forever,
+// and one unlucky assembly costs at most one interval.
+func cacheIfComplete(ctx context.Context, cache *responseCache, key string, response any) {
+	if ctx.Err() != nil {
+		return
+	}
+	cache.put(key, response)
+}
+
 func scalarCacheKey(service string, view MetricView, timeRange TimeRange) string {
 	return "scalar|" + service + "|" + string(view) + "|" + string(timeRange)
 }

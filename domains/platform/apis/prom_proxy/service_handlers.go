@@ -81,6 +81,13 @@ func (h *MetricsHandler) GetHostMetricsTimeSeries(w http.ResponseWriter, r *http
 	mucks.JsonOk(w, response)
 }
 
+// One scalar query and what to call it if it fails: the standard block's
+// queries describe themselves, a tile's does not.
+type scalarJob struct {
+	query   string
+	subject string
+}
+
 func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	entry, known := serviceRegistry[name]
@@ -116,7 +123,10 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 	}
 	window := timeRange.Window()
 
-	if cached, ok := h.cache.get(scalarCacheKey(name, view, timeRange)); ok {
+	// One key, built once: a get and a put that drift apart fail silently —
+	// the cache simply stops hitting, and nothing about the response is wrong.
+	cacheKey := scalarCacheKey(name, view, timeRange)
+	if cached, ok := h.cache.get(cacheKey); ok {
 		mucks.JsonOk(w, cached)
 		return
 	}
@@ -134,7 +144,9 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 
 	// The standard block and the custom tiles are one fan-out, so a service
 	// with many tiles doesn't wait for the standard block to finish first.
-	// Each job writes only its own slot; the response is assembled below.
+	// Flattening them into jobs first means the index arithmetic that maps a
+	// slot back to its tile is written once, here, rather than restated inside
+	// the closure and again in each assembly loop below.
 	//
 	// A slot nobody filled stays zero, which is the value both halves of the
 	// assembly want for a query that failed or returned nothing — so there is
@@ -142,38 +154,35 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 	// response cannot express anyway.
 	standard := standardScalarQueries(name, window)
 	custom := entry.CustomScalars
-	values := make([]float64, len(standard)+len(custom))
+	jobs := make([]scalarJob, 0, len(standard)+len(custom))
+	for _, q := range standard {
+		jobs = append(jobs, scalarJob{query: q.Query, subject: q.Query})
+	}
+	for _, def := range custom {
+		jobs = append(jobs, scalarJob{query: def.QueryFor(view, window), subject: "tile " + def.Label})
+	}
+	scalarValues := make([]float64, len(jobs))
 
 	// A query Prometheus refuses — a week-long lookback past its sample
 	// budget, say — leaves its tile at zero, which is the outage contract
 	// below; the log is the one place that zero is told apart from a real
 	// one.
-	runBounded(len(values), func(i int) {
-		query := ""
-		if i < len(standard) {
-			query = standard[i].Query
-		} else {
-			query = custom[i-len(standard)].QueryFor(view, window)
-		}
-		resp, err := h.promClient.Query(ctx, query)
+	runBounded(len(jobs), func(i int) {
+		resp, err := h.promClient.Query(ctx, jobs[i].query)
 		if err != nil {
-			if i < len(standard) {
-				log.Printf("service %s: %s: %v", name, query, err)
-			} else {
-				log.Printf("service %s tile %s: %v", name, custom[i-len(standard)].Label, err)
-			}
+			log.Printf("service %s: %s: %v", name, jobs[i].subject, err)
 			return
 		}
 		if len(resp.Data.Result) == 0 {
 			return
 		}
 		if val, err := extractFloatValue(&resp.Data.Result[0]); err == nil {
-			values[i] = val
+			scalarValues[i] = val
 		}
 	})
 
 	for i, q := range standard {
-		*q.Field(&response.Standard) = values[i]
+		*q.Field(&response.Standard) = scalarValues[i]
 	}
 
 	// Groups keep registry order; a failed query leaves its descriptor in
@@ -188,13 +197,13 @@ func (h *MetricsHandler) GetServiceMetrics(w http.ResponseWriter, r *http.Reques
 		}
 		response.Custom[i].Metrics = append(response.Custom[i].Metrics, CustomMetricValue{
 			Label:      def.Label,
-			Value:      values[len(standard)+j],
+			Value:      scalarValues[len(standard)+j],
 			Unit:       def.UnitFor(view),
 			Toggleable: def.Toggleable(),
 		})
 	}
 
-	h.cache.put(scalarCacheKey(name, view, timeRange), response)
+	cacheIfComplete(ctx, h.cache, cacheKey, response)
 	mucks.JsonOk(w, response)
 }
 
@@ -213,7 +222,8 @@ func (h *MetricsHandler) GetServiceMetricsTimeSeries(w http.ResponseWriter, r *h
 		return
 	}
 
-	if cached, ok := h.cache.get(seriesCacheKey(name, timeRange)); ok {
+	cacheKey := seriesCacheKey(name, timeRange)
+	if cached, ok := h.cache.get(cacheKey); ok {
 		mucks.JsonOk(w, cached)
 		return
 	}
@@ -274,6 +284,6 @@ func (h *MetricsHandler) GetServiceMetricsTimeSeries(w http.ResponseWriter, r *h
 		response.Series = append(response.Series, series...)
 	}
 
-	h.cache.put(seriesCacheKey(name, timeRange), response)
+	cacheIfComplete(ctx, h.cache, cacheKey, response)
 	mucks.JsonOk(w, response)
 }
