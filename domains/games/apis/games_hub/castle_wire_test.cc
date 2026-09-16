@@ -56,7 +56,7 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
             R"({"update":{"gameJoined":{)" + waiting_one + R"(}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
             R"({"games":[{"game":"castle","gameId":"GAME01","playerCount":1,"status":"waiting"}],)"
-            R"("players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
+            R"("geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
             R"("playerId":"player-1","table":{"game":"castle","gameId":"GAME01"},)"
             R"("totalScore":0}],"roomId":"room-1"})");
 
@@ -111,7 +111,7 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
 
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
             R"({"games":[{"game":"castle","gameId":"GAME01","playerCount":2,"status":"setup"}],)"
-            R"("players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
+            R"("geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
             R"("playerId":"player-1","table":{"game":"castle","gameId":"GAME01"},)"
             R"("totalScore":0},)"
             R"({"connected":true,"gamesPlayed":0,"gamesWon":0,"playerId":"player-2",)"

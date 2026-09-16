@@ -1,8 +1,9 @@
 #include "domains/games/apis/games_hub/world.h"
 
-#include <cmath>
 #include <cstdint>
 #include <utility>
+
+#include "absl/status/status.h"
 
 namespace games_hub {
 
@@ -10,19 +11,10 @@ using moonbase::games::LobbyUpdate;
 
 namespace {
 
-// The world's rules, each answering with the reason a client is told.
-// NaN fails every comparison, so it is refused by the bounds checks
-// themselves rather than by a separate finiteness rule.
-std::optional<std::string> PositionProblem(const std::vector<double>& position) {
-  if (position.size() != 3) return "position must be [x, y, z]";
-  if (!(position[1] == 0.0)) return "y must be 0";
-  const double limit = World::kHalfExtent;
-  if (!(std::abs(position[0]) <= limit) || !(std::abs(position[2]) <= limit)) {
-    return "position out of bounds (±50)";
-  }
-  return std::nullopt;
-}
-
+// The world's rules, each answering with the reason a client is told;
+// the position's is the room's Surface. NaN fails every comparison, so
+// it is refused by the checks themselves rather than by a separate
+// finiteness rule.
 std::optional<std::string> ColorProblem(const std::vector<double>& color) {
   if (color.size() != 3) return "color must be [r, g, b]";
   for (const double component : color) {
@@ -40,8 +32,10 @@ std::optional<std::string> ShapeProblem(std::int32_t shape) {
 
 std::optional<World::Refusal> World::Join(const std::string& player_id, const std::string& room_id,
                                           const moonbase::games::JoinWorld& join, Deliveries& out) {
+  std::vector<double> position = join.position;
+  const Surface surface = SurfaceOf(room_id);
   for (const auto& problem :
-       {PositionProblem(join.position), ColorProblem(join.color), ShapeProblem(join.shape)}) {
+       {surface.Settle(position), ColorProblem(join.color), ShapeProblem(join.shape)}) {
     if (problem.has_value()) return Refusal{RejectKind::kInvalid, *problem};
   }
   if (world_.contains(player_id)) {
@@ -50,11 +44,12 @@ std::optional<World::Refusal> World::Join(const std::string& player_id, const st
   Standing standing;
   standing.room_id = room_id;
   standing.player.playerId = player_id;
-  standing.player.position = join.position;
+  standing.player.position = std::move(position);
   standing.player.color = join.color;
   standing.player.shape = join.shape;
 
   moonbase::games::WorldState snapshot;
+  snapshot.geometry = GeometryOf(surface);
   for (const auto& [id, other] : world_) {
     if (other.room_id == room_id) snapshot.players.push_back(other.player);
   }
@@ -68,15 +63,17 @@ std::optional<World::Refusal> World::Join(const std::string& player_id, const st
 
 std::optional<World::Refusal> World::Move(const std::string& player_id,
                                           const moonbase::games::MoveTo& move, Deliveries& out) {
-  if (const auto problem = PositionProblem(move.position)) {
-    return Refusal{RejectKind::kInvalid, *problem};
-  }
+  // The surface is the room's, so who is moving comes first.
   const auto it = world_.find(player_id);
   if (it == world_.end()) return Refusal{RejectKind::kState, "join the world first"};
-  it->second.player.position = move.position;
+  std::vector<double> position = move.position;
+  if (const auto problem = SurfaceOf(it->second.room_id).Settle(position)) {
+    return Refusal{RejectKind::kInvalid, *problem};
+  }
+  it->second.player.position = position;
   moonbase::games::PlayerMoved moved;
   moved.playerId = player_id;
-  moved.position = move.position;
+  moved.position = std::move(position);
   FanOut(it->second.room_id, player_id, LobbyUpdate::FromPlayermoved(std::move(moved)), out);
   return std::nullopt;
 }
@@ -113,6 +110,52 @@ void World::FanOut(const std::string& room_id, const std::string& actor_id,
   for (const auto& [id, standing] : world_) {
     if (id != actor_id && standing.room_id == room_id) out.push_back({id, update});
   }
+}
+
+void World::SetSurface(const std::string& room_id, const Surface& surface) {
+  surfaces_[room_id] = surface;
+}
+
+void World::Reshape(const std::string& room_id, const Surface& surface, Deliveries& out) {
+  SetSurface(room_id, surface);
+  moonbase::games::GeometryChanged changed;
+  changed.geometry = GeometryOf(surface);
+  for (auto& [id, standing] : world_) {
+    if (standing.room_id != room_id) continue;
+    standing.player.position = surface.Place(standing.player.position);
+    changed.players.push_back(standing.player);
+  }
+  const LobbyUpdate update = LobbyUpdate::FromGeometrychanged(std::move(changed));
+  for (const auto& [id, standing] : world_) {
+    if (standing.room_id == room_id) out.push_back({id, update});
+  }
+}
+
+void World::ForgetSurface(const std::string& room_id) { surfaces_.erase(room_id); }
+
+Surface World::SurfaceOf(const std::string& room_id) const {
+  const auto it = surfaces_.find(room_id);
+  return it != surfaces_.end() ? it->second : Surface::Plane();
+}
+
+absl::StatusOr<Surface> SurfaceFromGeometry(const moonbase::games::Geometry& geometry) {
+  if (geometry.as_plane_or_null() != nullptr) return Surface::Plane();
+  if (const auto* sphere = geometry.as_sphere_or_null()) {
+    if (const auto problem = Surface::RadiusProblem(sphere->radius)) {
+      return absl::InvalidArgumentError(*problem);
+    }
+    return Surface::Sphere(sphere->radius);
+  }
+  return absl::InvalidArgumentError("geometry must be plane or sphere");
+}
+
+moonbase::games::Geometry GeometryOf(const Surface& surface) {
+  if (surface.kind == Surface::Kind::kSphere) {
+    moonbase::games::SphereGeometry sphere;
+    sphere.radius = surface.radius;
+    return moonbase::games::Geometry::FromSphere(std::move(sphere));
+  }
+  return moonbase::games::Geometry::FromPlane(moonbase::games::PlaneGeometry{});
 }
 
 }  // namespace games_hub

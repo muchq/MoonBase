@@ -51,6 +51,10 @@ absl::Status RunMigrations(pg::Client& db) {
       // the column are golf's, which the default says.
       R"sql(ALTER TABLE games
           ADD COLUMN IF NOT EXISTS game text NOT NULL DEFAULT 'golf')sql",
+      // The surface a room's world stands on (#1554), in the wire's
+      // spelling; rows from before the column are the plane they were.
+      R"sql(ALTER TABLE rooms
+          ADD COLUMN IF NOT EXISTS geometry jsonb NOT NULL DEFAULT '{"plane":{}}'::jsonb)sql",
       // Room chat (#1226). message_id is the ordering key and the
       // identity is global, not per-room, so one sequence orders every
       // room's history; sent_at is for display. Bodies are bounded here

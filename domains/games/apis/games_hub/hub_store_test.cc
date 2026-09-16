@@ -29,7 +29,9 @@ TEST(MemoryHubStoreTest, OpsRoundTripAndRoomDeleteCascades) {
 
   auto snapshot = store.LoadSnapshot();
   ASSERT_TRUE(snapshot.ok());
-  ASSERT_EQ(snapshot->rooms, (std::vector<std::string>{"R1"}));
+  ASSERT_EQ(snapshot->rooms.size(), 1u);
+  EXPECT_EQ(snapshot->rooms[0].room_id, "R1");
+  EXPECT_EQ(snapshot->rooms[0].surface, Surface::Plane());
   ASSERT_EQ(snapshot->members.size(), 1u);
   EXPECT_EQ(snapshot->members[0].player_id, "alice");
   ASSERT_EQ(snapshot->games.size(), 1u);
@@ -53,6 +55,36 @@ TEST(MemoryHubStoreTest, OpsRoundTripAndRoomDeleteCascades) {
   ASSERT_TRUE(snapshot.ok());
   EXPECT_TRUE(snapshot->members.empty());
   EXPECT_TRUE(snapshot->games.empty());
+}
+
+// The surface a room stands on rides its row (#1554): the create sets
+// it, LoadRoom and LoadSnapshot hand it back, a second create of the
+// same room (two instances minting one code) keeps the first, and
+// SetRoomSurface changes it — for a room that exists; one that does not
+// stays absent. A room that chose nothing is a plane.
+TEST(MemoryHubStoreTest, RoomSurfaceIsSetByCreateAndChangedBySetRoomSurface) {
+  MemoryHubStore store;
+  store.Enqueue({HubStore::UpsertRoom{"S", Surface::Sphere(2)}, HubStore::UpsertRoom{"P"}});
+  store.Flush();
+  store.Enqueue({HubStore::UpsertRoom{"S", Surface::Plane()},
+                 HubStore::SetRoomSurface{"S", Surface::Sphere(53)},
+                 HubStore::SetRoomSurface{"ghost", Surface::Sphere(53)}});
+  store.Flush();
+  EXPECT_FALSE(store.LoadRoom("ghost")->exists);
+
+  auto sphere = store.LoadRoom("S");
+  ASSERT_TRUE(sphere.ok());
+  EXPECT_EQ(sphere->surface, Surface::Sphere(53));
+  auto plane = store.LoadRoom("P");
+  ASSERT_TRUE(plane.ok());
+  EXPECT_EQ(plane->surface, Surface::Plane());
+  auto snapshot = store.LoadSnapshot();
+  ASSERT_TRUE(snapshot.ok());
+  ASSERT_EQ(snapshot->rooms.size(), 2u);
+  EXPECT_EQ(snapshot->rooms[0].room_id, "P");
+  EXPECT_EQ(snapshot->rooms[0].surface, Surface::Plane());
+  EXPECT_EQ(snapshot->rooms[1].room_id, "S");
+  EXPECT_EQ(snapshot->rooms[1].surface, Surface::Sphere(53));
 }
 
 TEST(MemoryHubStoreTest, FinishCommitIsConditionalAtomicAndRetained) {
