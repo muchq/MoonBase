@@ -7,8 +7,11 @@ use crate::classify::fold;
 /// all of git.muchq.com, is route-blind on purpose, and its status and probe
 /// factors carry what signal there is. The test below pins this table equal
 /// to the Caddyfile in both directions. A trailing `/*` is a prefix matcher,
-/// anything else is exact. No site's matchers overlap, so the first match
-/// is the only one; the shape test below is what says so.
+/// anything else is exact. No two entries overlap, so the first match is the
+/// only one; the shape test below is what says so. Where the Caddyfile splits
+/// a path out of a prefix to route it by method — `POST /deja/v1/next` under
+/// `GET /deja/v1/*` — the table keeps the prefix that claims the path, since
+/// the method is already a factor of its own.
 pub const ROUTES: &[(&str, &[&str])] = &[
     (
         "api.1d4.net",
@@ -206,6 +209,13 @@ mod tests {
         assert_eq!(route_of(API, "/metrics/v10/x"), OTHER_ROUTE);
     }
 
+    // A path the Caddyfile splits out to route by method reads as the
+    // prefix that claims it; the method factor carries the split.
+    #[test]
+    fn a_method_split_path_reads_as_the_prefix_that_claims_it() {
+        assert_eq!(route_of(API, "/deja/v1/next"), "/deja/v1/*");
+    }
+
     #[test]
     fn exact_and_prefix_matchers_on_one_site_are_disjoint() {
         assert_eq!(route_of(API, "/1d4/v1/index"), "/1d4/v1/index");
@@ -376,11 +386,44 @@ mod tests {
         by_site
     }
 
+    /// The matcher on a site that claims `path` as a prefix, when another
+    /// one does. `ROUTES` keeps the claimer alone: a shadowed entry could
+    /// never be reached through `route_of`.
+    fn shadowed_by<'a>(matchers: &BTreeSet<&'a str>, path: &str) -> Option<&'a str> {
+        matchers
+            .iter()
+            .copied()
+            .filter(|matcher| *matcher != path)
+            .find(|matcher| match matcher.strip_suffix('*') {
+                Some(prefix) => path.starts_with(prefix),
+                None => false,
+            })
+    }
+
     #[test]
     fn routes_are_exactly_the_caddyfile_path_matchers_by_site() {
-        let in_caddyfile = caddyfile_path_matchers();
+        let mut in_caddyfile = caddyfile_path_matchers();
         let matchers: usize = in_caddyfile.values().map(BTreeSet::len).sum();
         assert!(matchers > 10, "parsed too few matchers: {in_caddyfile:?}");
+        // Every method-split path, named: one appearing without a line here
+        // is the same mistake as a matcher appearing without one.
+        let mut shadowed: Vec<(&str, &str, &str)> = Vec::new();
+        for (site, site_matchers) in &mut in_caddyfile {
+            let claimed: Vec<(&str, &str)> = site_matchers
+                .iter()
+                .copied()
+                .filter_map(|path| shadowed_by(site_matchers, path).map(|by| (path, by)))
+                .collect();
+            for (path, by) in claimed {
+                site_matchers.remove(path);
+                shadowed.push((site, path, by));
+            }
+        }
+        assert_eq!(
+            shadowed,
+            [("api.muchq.com", "/deja/v1/next", "/deja/v1/*")],
+            "the Caddyfile's method-split paths"
+        );
         let mut here: BTreeMap<&str, BTreeSet<&str>> = ROUTES
             .iter()
             .map(|(site, routes)| (*site, routes.iter().copied().collect()))

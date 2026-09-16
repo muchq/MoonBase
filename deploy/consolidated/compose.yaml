@@ -601,7 +601,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.25'
+          # A candle forward and an AdamW step per request, and another two
+          # forwards per question: the same budget microgpt-serve gets.
+          cpus: '0.5'
           memory: 256M
     healthcheck:
       # Steady /health probe (#1307); see games_hub's for the full rationale.

@@ -1,7 +1,7 @@
 //! The network predictor: a window MLP over the lane's last eight tokens,
-//! trained one step per request, with replay so a night of scanners does
-//! not erase the daytime grammar. CPU, f32, ~174k parameters at the
-//! default vocabulary cap.
+//! trained one step per request, with a FIFO replay ring of the last 512
+//! non-anomalous pairs learned alongside. CPU, f32, ~174k parameters at
+//! the default vocabulary cap.
 
 use std::collections::VecDeque;
 
@@ -15,7 +15,7 @@ pub const CONTEXT: usize = WINDOW;
 pub const EMBED: usize = 16;
 pub const HIDDEN: usize = 64;
 pub const LEARNING_RATE: f64 = 0.01;
-/// Non-anomalous pairs the replay ring holds.
+/// Non-anomalous pairs the replay ring holds, oldest evicted first.
 pub const REPLAY: usize = 512;
 /// Replayed pairs learned beside each new one.
 pub const REPLAYED: usize = 2;
@@ -34,7 +34,8 @@ pub struct Net {
     replayed: usize,
 }
 
-/// The net's distribution over the next token for one context.
+/// The net's distribution over the next token for one context, one entry
+/// per live token id.
 pub struct Prediction {
     logp: Vec<f32>,
 }
@@ -45,16 +46,19 @@ impl Prediction {
         -f64::from(self.logp[usize::from(actual)])
     }
 
-    /// The `k` likeliest of the first `vocab_size` tokens, likeliest first,
-    /// ties by id. BOS is never next, so it is never guessed.
-    pub fn top(&self, vocab_size: usize, k: usize) -> Vec<(u16, f64)> {
-        let mut ranked: Vec<(u16, f32)> = self.logp[..vocab_size.min(self.logp.len())]
+    /// The `k` likeliest tokens, likeliest first, ties by id. BOS is never
+    /// next, so it is never guessed. A log-prob that is not finite is not
+    /// ranked and `total_cmp` orders the rest, so a diverged net reports
+    /// fewer guesses rather than `NaN` on the wire or a panic in the sort.
+    pub fn top(&self, k: usize) -> Vec<(u16, f64)> {
+        let mut ranked: Vec<(u16, f32)> = self
+            .logp
             .iter()
             .enumerate()
             .map(|(id, &lp)| (id as u16, lp))
-            .filter(|&(id, _)| id != BOS)
+            .filter(|&(id, lp)| id != BOS && lp.is_finite())
             .collect();
-        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().then(a.0.cmp(&b.0)));
+        ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
         ranked
             .into_iter()
             .take(k)
@@ -65,12 +69,6 @@ impl Prediction {
 
 impl Net {
     pub fn new(vocab_cap: usize, seed: u64) -> Self {
-        Self::with_replay(vocab_cap, seed, REPLAYED)
-    }
-
-    /// `replayed` pairs from the ring learned beside each new one; zero is
-    /// the no-replay control.
-    pub fn with_replay(vocab_cap: usize, seed: u64, replayed: usize) -> Self {
         let mut rng = XorShift::new(seed);
         let varmap = VarMap::new();
         let input = CONTEXT * EMBED;
@@ -96,36 +94,28 @@ impl Net {
             (vocab_cap, HIDDEN),
         );
         insert(&varmap, "out.bias", vec![0.0; vocab_cap], vocab_cap);
-        Self::over(varmap, vocab_cap, rng, replayed)
+        Self::over(varmap, vocab_cap, rng, REPLAYED)
+    }
+
+    /// `replayed` pairs from the ring learned beside each new one; zero is
+    /// the no-replay control.
+    #[cfg(test)]
+    pub fn with_replay(vocab_cap: usize, seed: u64, replayed: usize) -> Self {
+        let mut net = Self::new(vocab_cap, seed);
+        net.replayed = replayed;
+        net
     }
 
     /// Every weight zero: the forward pass is exact arithmetic, and only
     /// the output bias ever learns. The fixture for wire pins.
     #[cfg(test)]
     pub fn zeroed(vocab_cap: usize) -> Self {
-        let varmap = VarMap::new();
-        let input = CONTEXT * EMBED;
-        insert(
-            &varmap,
-            "embed.weight",
-            vec![0.0; vocab_cap * EMBED],
-            (vocab_cap, EMBED),
-        );
-        insert(
-            &varmap,
-            "hidden.weight",
-            vec![0.0; HIDDEN * input],
-            (HIDDEN, input),
-        );
-        insert(&varmap, "hidden.bias", vec![0.0; HIDDEN], HIDDEN);
-        insert(
-            &varmap,
-            "out.weight",
-            vec![0.0; vocab_cap * HIDDEN],
-            (vocab_cap, HIDDEN),
-        );
-        insert(&varmap, "out.bias", vec![0.0; vocab_cap], vocab_cap);
-        Self::over(varmap, vocab_cap, XorShift::new(DEFAULT_SEED), REPLAYED)
+        let net = Self::new(vocab_cap, DEFAULT_SEED);
+        for var in net.varmap.all_vars() {
+            let zeros = var.zeros_like().expect("a zeroed tensor");
+            var.set(&zeros).expect("zeroing a var");
+        }
+        net
     }
 
     fn over(varmap: VarMap, vocab_cap: usize, rng: XorShift, replayed: usize) -> Self {
@@ -205,39 +195,63 @@ impl Net {
     }
 
     /// The distribution over the next token after `context`, the lane's
-    /// history oldest first.
-    pub fn predict(&self, context: &[u16]) -> Prediction {
-        let logp = self
-            .log_probs(&[padded(context)])
+    /// history oldest first, over the first `vocab_size` ids. `None` when
+    /// the forward pass fails — an id or a vocabulary past the net's cap —
+    /// which is logged and leaves the caller to carry on without the net.
+    pub fn predict(&self, context: &[u16], vocab_size: usize) -> Option<Prediction> {
+        match self
+            .log_probs(&[padded(context)], vocab_size)
             .and_then(|t| t.squeeze(0)?.to_vec1::<f32>())
-            .expect("a forward pass over fixed shapes");
-        Prediction { logp }
-    }
-
-    /// One AdamW step on `(context, actual)` and `replayed` pairs drawn
-    /// from the ring; the pair then joins the ring when `keep` is set,
-    /// which the engine does for every verdict but anomaly.
-    pub fn learn(&mut self, context: &[u16], actual: u16, keep: bool) {
-        let pair = (padded(context), actual);
-        let mut batch = vec![pair];
-        batch.extend(self.replay.sample(self.replayed));
-        self.step(&batch)
-            .expect("a training step over fixed shapes");
-        if keep {
-            self.replay.push(pair);
+        {
+            Ok(logp) => Some(Prediction { logp }),
+            Err(error) => {
+                tracing::error!(%error, "the net could not predict; skipping it");
+                None
+            }
         }
     }
 
-    fn step(&mut self, batch: &[Pair]) -> Result<()> {
-        let contexts: Vec<[u16; CONTEXT]> = batch.iter().map(|&(context, _)| context).collect();
-        let targets: Vec<u32> = batch.iter().map(|&(_, actual)| u32::from(actual)).collect();
-        let logp = self.log_probs(&contexts)?;
-        let targets = Tensor::from_vec(targets, batch.len(), &Device::Cpu)?;
-        let loss = candle_nn::loss::nll(&logp, &targets)?;
-        self.optimizer.backward_step(&loss)
+    /// One AdamW step on `(context, actual)` and `replayed` pairs drawn
+    /// from the ring, and the distribution the net held for `context`
+    /// before the step — the one the event reports, from the same forward
+    /// the step already ran. `None` on the same terms as `predict`.
+    pub fn learn(&mut self, context: &[u16], actual: u16, vocab_size: usize) -> Option<Prediction> {
+        let mut batch = vec![(padded(context), actual)];
+        batch.extend(self.replay.sample(self.replayed));
+        match self.step(&batch, vocab_size) {
+            Ok(logp) => Some(Prediction { logp }),
+            Err(error) => {
+                tracing::error!(%error, "the net could not learn this event; skipping it");
+                None
+            }
+        }
     }
 
-    fn log_probs(&self, contexts: &[[u16; CONTEXT]]) -> Result<Tensor> {
+    /// The pair joins the replay ring, which the engine does for every
+    /// verdict but anomaly.
+    pub fn remember(&mut self, context: &[u16], actual: u16) {
+        self.replay.push((padded(context), actual));
+    }
+
+    /// The step, and the batch's first row of log-probabilities as it was
+    /// before the step.
+    fn step(&mut self, batch: &[Pair], vocab_size: usize) -> Result<Vec<f32>> {
+        let contexts: Vec<[u16; CONTEXT]> = batch.iter().map(|&(context, _)| context).collect();
+        let targets: Vec<u32> = batch.iter().map(|&(_, actual)| u32::from(actual)).collect();
+        let logp = self.log_probs(&contexts, vocab_size)?;
+        let first = logp.narrow(0, 0, 1)?.squeeze(0)?.to_vec1::<f32>()?;
+        let targets = Tensor::from_vec(targets, batch.len(), &Device::Cpu)?;
+        let loss = candle_nn::loss::nll(&logp, &targets)?;
+        self.optimizer.backward_step(&loss)?;
+        Ok(first)
+    }
+
+    /// Log-probabilities over the first `vocab_size` ids. The output layer
+    /// spans the whole cap; the ids no request has minted are dropped
+    /// before the softmax, so the net normalises over the live vocabulary
+    /// exactly as the bigram does instead of spreading `p` across rows
+    /// that stand for nothing.
+    fn log_probs(&self, contexts: &[[u16; CONTEXT]], vocab_size: usize) -> Result<Tensor> {
         let ids: Vec<u32> = contexts.iter().flatten().map(|&t| u32::from(t)).collect();
         let ids = Tensor::from_vec(ids, (contexts.len(), CONTEXT), &Device::Cpu)?;
         let x = self
@@ -246,8 +260,9 @@ impl Net {
             .reshape((contexts.len(), CONTEXT * EMBED))?;
         let h = self.hidden.forward(&x)?.relu()?;
         let logits = self.out.forward(&h)?;
-        debug_assert_eq!(logits.dims(), [contexts.len(), self.vocab_cap]);
-        candle_nn::ops::log_softmax(&logits, D::Minus1)
+        assert_eq!(logits.dims(), [contexts.len(), self.vocab_cap]);
+        let live = logits.narrow(D::Minus1, 0, vocab_size)?;
+        candle_nn::ops::log_softmax(&live, D::Minus1)
     }
 }
 
@@ -358,25 +373,27 @@ pub(crate) mod fixtures {
 
     /// Runs `steps` of a deterministic cycle over `tokens` through the net,
     /// each token predicted from the true history before it is learned,
-    /// and hands back every surprise in order. `observe` is told each one.
+    /// and hands back every surprise in order.
     pub fn run_cycle(
         net: &mut Net,
         tokens: &[u16],
+        vocab_size: usize,
         steps: usize,
         learn: bool,
-        mut observe: impl FnMut(f64),
     ) -> Vec<f64> {
         let mut history: Vec<u16> = Vec::new();
         let mut out = Vec::with_capacity(steps);
         for i in 0..steps {
             let actual = tokens[i % tokens.len()];
             let context = &history[history.len().saturating_sub(CONTEXT)..];
-            let surprise = net.predict(context).surprise(actual);
-            if learn {
-                net.learn(context, actual, true);
-            }
-            observe(surprise);
-            out.push(surprise);
+            let prediction = if learn {
+                let prediction = net.learn(context, actual, vocab_size);
+                net.remember(context, actual);
+                prediction
+            } else {
+                net.predict(context, vocab_size)
+            };
+            out.push(prediction.expect("the net answers").surprise(actual));
             history.push(actual);
         }
         out
@@ -409,15 +426,79 @@ mod tests {
     #[test]
     fn a_fresh_net_is_near_uniform_and_seeded() {
         let net = Net::new(CAP, 7);
-        let p = net.predict(&[]);
+        let p = net.predict(&[], CAP).unwrap();
         let uniform = -(CAP as f64).ln();
         for lp in &p.logp {
             assert!((f64::from(*lp) - uniform).abs() < 1.0, "{lp}");
         }
-        let again = Net::new(CAP, 7).predict(&[]);
+        let again = Net::new(CAP, 7).predict(&[], CAP).unwrap();
         assert_eq!(p.logp, again.logp, "the same seed is the same net");
-        let other = Net::new(CAP, 8).predict(&[]);
+        let other = Net::new(CAP, 8).predict(&[], CAP).unwrap();
         assert_ne!(p.logp, other.logp, "a different seed is a different net");
+    }
+
+    // The output layer spans the cap; the distribution does not. `p` over
+    // the live ids is a distribution in its own right, and an id no
+    // request has minted cannot be guessed.
+    #[test]
+    fn the_distribution_covers_the_live_vocabulary_and_nothing_past_it() {
+        const LIVE: usize = 6;
+        let mut net = Net::new(crate::token::DEFAULT_CAP, 3);
+        run_cycle(&mut net, &[2, 3, 4, 5], LIVE, 60, true);
+        let p = net.predict(&[2, 3], LIVE).unwrap();
+        assert_eq!(p.logp.len(), LIVE);
+        let total: f64 = p.logp.iter().map(|&lp| f64::from(lp).exp()).sum();
+        assert!((total - 1.0).abs() < 1e-5, "p sums to {total}");
+        let ranked = p.top(crate::token::DEFAULT_CAP);
+        assert_eq!(ranked.len(), LIVE - 1, "every live id but BOS");
+        assert!(
+            ranked.iter().all(|&(id, _)| usize::from(id) < LIVE),
+            "{ranked:?}"
+        );
+        // The control: the same weights normalised over the whole cap put
+        // almost all of that mass on ids the vocabulary has never minted.
+        let diluted = net.predict(&[2, 3], crate::token::DEFAULT_CAP).unwrap();
+        assert!(
+            diluted.top(1)[0].1 < ranked[0].1 / 10.0,
+            "live {} diluted {}",
+            ranked[0].1,
+            diluted.top(1)[0].1
+        );
+    }
+
+    // A window MLP that read its context as a bag would answer both of
+    // these the same way.
+    #[test]
+    fn the_net_reads_the_window_in_order() {
+        let mut net = Net::new(CAP, 13);
+        run_cycle(&mut net, &GRAMMAR_A, CAP, 300, true);
+        let ordered = [4, 5, 6, 7, 8, 9, 10, 2];
+        let mut shuffled = ordered;
+        shuffled.reverse();
+        let forward = net.predict(&ordered, CAP).unwrap();
+        let backward = net.predict(&shuffled, CAP).unwrap();
+        assert_eq!(forward.top(1)[0].0, 3, "the true order predicts 3");
+        assert!(
+            backward.surprise(3) > forward.surprise(3) + 1.0,
+            "a permutation of the same tokens reads the same: {} vs {}",
+            backward.surprise(3),
+            forward.surprise(3)
+        );
+    }
+
+    // An id the net has no row for is a logged skip, not a panic that
+    // takes the tailer thread with it.
+    #[test]
+    fn an_id_past_the_cap_is_skipped_rather_than_panicking() {
+        let mut net = Net::new(CAP, 1);
+        assert!(net.predict(&[2], CAP).is_some(), "the control answers");
+        assert!(net.predict(&[CAP as u16], CAP).is_none(), "a context id");
+        assert!(net.learn(&[2], CAP as u16, CAP).is_none(), "a target");
+        assert!(net.predict(&[2], CAP + 1).is_none(), "a vocabulary");
+        assert!(
+            net.predict(&[2], CAP).is_some(),
+            "and the net still answers"
+        );
     }
 
     #[test]
@@ -431,33 +512,44 @@ mod tests {
     }
 
     #[test]
-    fn top_ranks_the_first_vocab_size_tokens_without_bos() {
+    fn top_ranks_every_token_but_bos() {
         let p = Prediction {
-            logp: vec![-3.0, 0.0, -1.0, -0.5, -2.0, -0.1],
+            logp: vec![-3.0, 0.0, -1.0, -0.5, -2.0],
         };
         assert_eq!(
-            p.top(5, 3)
-                .into_iter()
-                .map(|(id, _)| id)
-                .collect::<Vec<_>>(),
+            p.top(3).into_iter().map(|(id, _)| id).collect::<Vec<_>>(),
             [3, 2, 4],
-            "BOS has the highest log-prob and is skipped; id 5 is past the vocabulary"
+            "BOS has the highest log-prob and is skipped"
         );
-        let (_, p3) = p.top(5, 1)[0];
+        let (_, p3) = p.top(1)[0];
         assert!((p3 - (-0.5f32).exp() as f64).abs() < 1e-9);
         assert_eq!(p.surprise(2), 1.0);
+    }
+
+    // The obvious `partial_cmp().unwrap()` panics on this, and the panic
+    // poisons the engine's lock for every later request.
+    #[test]
+    fn a_nan_log_prob_neither_panics_nor_wins_the_ranking() {
+        let p = Prediction {
+            logp: vec![-3.0, 0.0, f32::NAN, -0.5, -2.0],
+        };
+        assert_eq!(
+            p.top(4).into_iter().map(|(id, _)| id).collect::<Vec<_>>(),
+            [3, 4, 0],
+            "the NaN is not ranked and the rest are"
+        );
     }
 
     #[test]
     fn loss_falls_on_a_seeded_synthetic_grammar() {
         let mut net = Net::new(CAP, 3);
-        let surprise = run_cycle(&mut net, &GRAMMAR_A, 300, true, |_| {});
+        let surprise = run_cycle(&mut net, &GRAMMAR_A, CAP, 300, true);
         let early = mean(&surprise[..9]);
         let late = mean(&surprise[270..]);
         assert!(early > 2.0, "a fresh net is surprised: {early}");
         assert!(late < 0.2, "a trained net is not: {late}");
         // Prediction, not just loss: the next token is the top guess.
-        let top = net.predict(&[4, 5, 6, 7, 8, 9, 10, 2]).top(CAP, 1);
+        let top = net.predict(&[4, 5, 6, 7, 8, 9, 10, 2], CAP).unwrap().top(1);
         assert_eq!(top[0].0, 3);
         assert!(top[0].1 > 0.8, "{}", top[0].1);
     }
@@ -465,34 +557,47 @@ mod tests {
     #[test]
     fn learning_does_not_happen_in_predict() {
         let mut net = Net::new(CAP, 3);
-        let before = net.predict(&[2, 3]).logp.clone();
-        let _ = net.predict(&[2, 3]);
-        assert_eq!(net.predict(&[2, 3]).logp, before);
-        net.learn(&[2, 3], 4, true);
-        assert_ne!(net.predict(&[2, 3]).logp, before);
+        let before = net.predict(&[2, 3], CAP).unwrap().logp;
+        let _ = net.predict(&[2, 3], CAP);
+        assert_eq!(net.predict(&[2, 3], CAP).unwrap().logp, before);
+        net.learn(&[2, 3], 4, CAP);
+        assert_ne!(net.predict(&[2, 3], CAP).unwrap().logp, before);
+    }
+
+    // The step's own forward is what the caller reports, so an event's
+    // surprise is the baseline the step started from, not its result.
+    #[test]
+    fn learn_hands_back_the_distribution_from_before_the_step() {
+        let mut net = Net::new(CAP, 3);
+        let before = net.predict(&[2, 3], CAP).unwrap().logp;
+        let learned = net.learn(&[2, 3], 4, CAP).unwrap().logp;
+        assert_eq!(learned, before);
+        assert_ne!(net.predict(&[2, 3], CAP).unwrap().logp, before);
     }
 
     #[test]
     fn an_injected_transition_scores_above_the_nets_own_threshold() {
         let mut net = Net::new(CAP, 5);
         let mut scorer = Scorer::default();
-        run_cycle(&mut net, &GRAMMAR_A, WARMUP as usize + 50, true, |s| {
-            scorer.observe(s);
-        });
+        for surprise in run_cycle(&mut net, &GRAMMAR_A, CAP, WARMUP as usize + 50, true) {
+            scorer.observe(surprise);
+        }
         let threshold = scorer.threshold().expect("warmed up");
-        let regular = net.predict(&[4, 5, 6, 7, 8, 9, 10, 2]);
-        assert_eq!(
-            scorer.judge(regular.surprise(3)),
-            Verdict::Expected,
-            "surprise {} mean {} sigma {}",
+        let regular = net.predict(&[4, 5, 6, 7, 8, 9, 10, 2], CAP).unwrap();
+        // Margins, not the boundary: gemm's reduction order moves the last
+        // digits, and a verdict that flips on those is a flaky test.
+        assert!(
+            regular.surprise(3) < threshold / 2.0,
+            "expected {} against {threshold} (mean {} sigma {})",
             regular.surprise(3),
             scorer.mean(),
             scorer.sigma()
         );
+        assert_eq!(scorer.judge(regular.surprise(3)), Verdict::Expected);
         assert_eq!(scorer.judge(regular.surprise(12)), Verdict::Anomaly);
         assert!(
-            regular.surprise(12) > threshold,
-            "{} <= {threshold}",
+            regular.surprise(12) > threshold * 2.0,
+            "{} against {threshold}",
             regular.surprise(12)
         );
     }
@@ -504,18 +609,20 @@ mod tests {
     fn replay_keeps_grammar_a_alive_through_grammar_b() {
         let loss_on_a_after_b = |replayed: usize| {
             let mut net = Net::with_replay(CAP, 11, replayed);
-            run_cycle(&mut net, &GRAMMAR_A, 300, true, |_| {});
-            let learned = mean(&run_cycle(&mut net, &GRAMMAR_A, 90, false, |_| {}));
-            run_cycle(&mut net, &GRAMMAR_B, 300, true, |_| {});
-            let after = mean(&run_cycle(&mut net, &GRAMMAR_A, 90, false, |_| {}));
+            run_cycle(&mut net, &GRAMMAR_A, CAP, 300, true);
+            let learned = mean(&run_cycle(&mut net, &GRAMMAR_A, CAP, 90, false));
+            run_cycle(&mut net, &GRAMMAR_B, CAP, 300, true);
+            let after = mean(&run_cycle(&mut net, &GRAMMAR_A, CAP, 90, false));
             (learned, after)
         };
         let (learned, without) = loss_on_a_after_b(0);
         let (_, with) = loss_on_a_after_b(REPLAYED);
         assert!(learned < 0.2, "A was learned: {learned}");
         assert!(without > 1.0, "the control forgot A: {without}");
+        // An order-of-magnitude margin: the gap is one the reduction order
+        // cannot account for.
         assert!(
-            with < without / 2.0,
+            with < without / 10.0,
             "with replay {with}, without {without}"
         );
     }
@@ -575,23 +682,24 @@ mod tests {
     }
 
     #[test]
-    fn learning_a_pair_keeps_it_only_when_told() {
+    fn learning_a_pair_is_not_remembering_it() {
         let mut net = Net::new(CAP, 1);
-        net.learn(&[2], 3, false);
+        net.learn(&[2], 3, CAP);
         assert_eq!(net.replay.len(), 0, "an anomaly stays out of the ring");
-        net.learn(&[2], 3, true);
+        net.remember(&[2], 3);
         assert_eq!(net.replay.len(), 1);
+        assert_eq!(net.replay_newest(), Some((padded(&[2]), 3)));
     }
 
     #[test]
     fn weights_round_trip_through_safetensors_and_a_wrong_shape_is_refused() {
         let mut net = Net::new(CAP, 9);
-        run_cycle(&mut net, &GRAMMAR_A, 50, true, |_| {});
+        run_cycle(&mut net, &GRAMMAR_A, CAP, 50, true);
         let bytes = net.weights();
         let restored = Net::from_weights(CAP, 1, &bytes).unwrap();
         assert_eq!(
-            restored.predict(&[2, 3, 4]).logp,
-            net.predict(&[2, 3, 4]).logp,
+            restored.predict(&[2, 3, 4], CAP).unwrap().logp,
+            net.predict(&[2, 3, 4], CAP).unwrap().logp,
             "the weights came back, whatever the seed"
         );
         assert!(
@@ -615,9 +723,12 @@ mod tests {
     }
 
     #[test]
-    fn a_zeroed_net_is_exactly_uniform() {
+    fn a_zeroed_net_is_exactly_uniform_over_the_live_vocabulary() {
         let net = Net::zeroed(CAP);
-        let p = net.predict(&[2, 3]);
-        assert_eq!(p.surprise(2), f64::from((CAP as f32).ln()));
+        assert_eq!(net.param_count(), Net::new(CAP, 1).param_count());
+        for live in [3, CAP] {
+            let p = net.predict(&[2, 3], live).unwrap();
+            assert_eq!(p.surprise(2), f64::from((live as f32).ln()), "{live}");
+        }
     }
 }

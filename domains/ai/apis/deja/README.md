@@ -20,12 +20,21 @@ yardstick the net is measured against.
 
 **net**: a window MLP in candle, CPU, f32. The lane's last eight tokens,
 left-padded with `<bos>`, each through a 16-wide embedding, concatenated
-(128) → 64 ReLU → the vocabulary (2048) → log-softmax; 174,144
-parameters. Every request is first predicted from its context, then
-learned with one AdamW step (lr 0.01) on that pair plus two pairs drawn
-from a replay ring of the last 512 non-anomalous pairs, so a night of
-scanners does not erase the daytime grammar. The net keeps its own
-baseline over its own surprise on the same terms as the bigram's.
+(128) → 64 ReLU → the vocabulary cap (2048) → log-softmax; 174,144
+parameters. The output layer spans the cap, but the softmax is taken over
+the live vocabulary only, so `p` is a distribution over the tokens that
+exist rather than one diluted across rows no request has minted — the
+same denominator the bigram uses. One AdamW step (lr 0.01) per request,
+on that pair plus two drawn uniformly from a replay ring holding the last
+512 non-anomalous pairs, oldest evicted first; the step's own forward is
+what the event reports, so a request costs one pass, not two. The net
+keeps its own baseline over its own surprise on the same terms as the
+bigram's.
+
+AdamW's moments are not checkpointed. At 174k parameters and one step per
+event — well under a request per second — a restarted net re-warms them
+in seconds, which is why the moments are not worth carrying in the
+checkpoint's JSON.
 
 **The control decides.** The wire `verdict` and `threshold` are the
 bigram's. The net's baseline is reported (`ewma_loss.net`, the
@@ -43,6 +52,13 @@ Switching the verdict over is a later decision, made on that evidence.
 | `GET /deja/v1/state` | Sequence, steps, vocabulary size and cap, warmup length, both baselines, the threshold and counts. |
 | `POST /deja/v1/next` | `{"context":["token", ...]}`, one to eight token names → `{"predictions":{"bigram":[...],"net":[...]}}`, each predictor's top five. A name the vocabulary lacks, or a context of the wrong length, is a 400 with `{"error":"..."}` saying which. Asking teaches nothing and makes no event. |
 | `GET /health` | server_pal's probe. |
+
+Every route shares one token bucket at 20 requests a second, burst 40.
+The limiter keys on the peer address, which behind Caddy is Caddy — so
+the page, the hub's two-per-second `recent` poll and anyone asking `next`
+draw on the same budget. `next` is the expensive one: a forward pass per
+predictor under the engine's lock, run off the async workers so a
+question cannot stall the stream or the tailer.
 
 An event carries the lane (a slot number, never an address), the lane's
 last eight tokens, each predictor's top five guesses with probabilities,
@@ -73,10 +89,12 @@ starts the net fresh; so does one whose `net` will not load, with an error
 logged. AdamW's moments are not checkpointed: a restarted net resumes
 its weights with a cold optimizer, and the replay ring starts empty.
 
-The vocabulary is capped at 2048 tokens. The factors are bounded but their
-product is not small, so a client that walks every route with every method
-can fill it; a `vocab_size` at the cap is the signal, and everything after
-reads as `<unk>`. Each bigram row keeps its 64 commonest successors.
+The vocabulary is capped at 2048 tokens, and a checkpoint carrying more
+is cut to it on the way in — the net has no row past the cap. The factors
+are bounded but their product is not small, so a client that walks every
+route with every method can fill it; a `vocab_size` at the cap is the
+signal, and everything after reads as `<unk>`. Each bigram row keeps its
+64 commonest successors.
 
 ## Metrics
 

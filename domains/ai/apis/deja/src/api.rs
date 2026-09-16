@@ -46,10 +46,21 @@ pub const STREAM_LIFETIME: Duration = Duration::from_secs(10 * 60);
 /// the ring holds, so the reconnect through `recent?after=` closes the gap.
 const STREAM_BACKLOG: usize = 64;
 
+/// Sustained requests per second and burst, per peer address. The peer
+/// is Caddy, so this is one bucket for every caller: the page, the hub's
+/// two-per-second `recent` poll, and anyone asking `next`, which is a
+/// forward pass under the engine's lock. Well above what those need and
+/// far below what a scraper would cost.
+const RATE_LIMIT: server_pal::RateLimit = server_pal::RateLimit {
+    per_second: 20.0,
+    burst: 40,
+};
+
 /// The routes under server_pal's stack; `stream` skips the Accept check,
 /// the timeout and compression, which would each break a stream.
 pub fn app(state: Arc<AppState>) -> Router {
     server_pal::router_builder()
+        .rate_limit(Some(RATE_LIMIT))
         .route(STATE_PATH, get(get_state))
         .route(RECENT_PATH, get(get_recent))
         .route(NEXT_PATH, post(post_next))
@@ -141,11 +152,18 @@ pub async fn post_next(
         Ok(body) => body,
         Err(rejection) => return refuse(rejection.body_text()),
     };
-    let answer = state
-        .engine
-        .lock()
-        .expect("engine lock")
-        .next(&request.context);
+    // A candle forward under the engine's lock is real CPU; off the async
+    // worker, so a question cannot stall the runtime the tailer and every
+    // open stream share.
+    let answer = tokio::task::spawn_blocking(move || {
+        state
+            .engine
+            .lock()
+            .expect("engine lock")
+            .next(&request.context)
+    })
+    .await
+    .expect("the engine answers without panicking");
     match answer {
         Ok(predictions) => Json(Next { predictions }).into_response(),
         Err(error) => refuse(error.to_string()),
@@ -252,8 +270,9 @@ mod tests {
             .with_state(state)
     }
 
-    /// An engine whose net starts at zero, so the net's numbers on the
-    /// wire are exact arithmetic rather than a seed's.
+    /// An engine whose net starts from a fixed point rather than the
+    /// initializer's draw, so the pinned floats below move only when the
+    /// arithmetic that produced them does.
     fn fresh() -> Arc<AppState> {
         AppState::new(crate::engine::fixtures::zeroed(), AppMetrics::new())
     }
@@ -314,7 +333,7 @@ mod tests {
         assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
         assert_eq!(
             body_text(response).await,
-            r#"{"events":[{"seq":2,"ts":1789500001.5,"lane":0,"step":0,"context":["api.muchq.com GET /iili/v1/r/* 302 browser"],"actual":"api.muchq.com GET /iili/v1/r/* 302 browser","predictions":{"bigram":[],"net":[{"token":"api.muchq.com GET /iili/v1/r/* 302 browser","p":0.0004981309175491333},{"token":"<unk>","p":0.00048826728016138077}]},"surprise":{"bigram":1.0986122886681098,"net":7.604647636413574},"threshold":null,"verdict":"warmup","ewma_loss":{"bigram":0.0,"net":0.0},"vocab_size":3}]}"#
+            r#"{"events":[{"seq":2,"ts":1789500001.5,"lane":0,"step":0,"context":["api.muchq.com GET /iili/v1/r/* 302 browser"],"actual":"api.muchq.com GET /iili/v1/r/* 302 browser","predictions":{"bigram":[],"net":[{"token":"api.muchq.com GET /iili/v1/r/* 302 browser","p":0.3377925157546997},{"token":"<unk>","p":0.33110377192497253}]},"surprise":{"bigram":1.0986122886681098,"net":1.085323452949524},"threshold":null,"verdict":"warmup","ewma_loss":{"bigram":0.0,"net":0.0},"vocab_size":3}]}"#
         );
     }
 
@@ -325,6 +344,7 @@ mod tests {
         let state = fresh();
         state.ingest(&redirect(1.0));
         state.ingest(&redirect(2.0));
+        let before = state.engine.lock().unwrap().snapshot();
         let response = post_json(
             app(Arc::clone(&state)),
             NEXT_PATH,
@@ -335,12 +355,12 @@ mod tests {
         assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
         assert_eq!(
             body_text(response).await,
-            r#"{"predictions":{"bigram":[{"token":"api.muchq.com GET /iili/v1/r/* 302 browser","p":0.8461538461538461}],"net":[{"token":"api.muchq.com GET /iili/v1/r/* 302 browser","p":0.0005081885028630495},{"token":"<unk>","p":0.00048826332204043865}]}}"#
+            r#"{"predictions":{"bigram":[{"token":"api.muchq.com GET /iili/v1/r/* 302 browser","p":0.8461538461538461}],"net":[{"token":"api.muchq.com GET /iili/v1/r/* 302 browser","p":0.34227943420410156},{"token":"<unk>","p":0.3288603127002716}]}}"#
         );
         assert_eq!(
-            state.engine.lock().unwrap().state().seq,
-            2,
-            "asking is not an event"
+            state.engine.lock().unwrap().snapshot(),
+            before,
+            "asking is not an event: the same weights, vocabulary and baselines"
         );
     }
 
@@ -392,7 +412,7 @@ mod tests {
         let view = body_text(json(app(state), STATE_PATH).await).await;
         assert_eq!(
             view,
-            r#"{"seq":2,"step":1,"vocab_size":3,"vocab_cap":2048,"warmup_needed":1000,"ewma_loss":{"bigram":1.0986122886681098,"net":7.604647636413574},"threshold":null,"anomalies":0,"novelties":1}"#
+            r#"{"seq":2,"step":1,"vocab_size":3,"vocab_cap":2048,"warmup_needed":1000,"ewma_loss":{"bigram":1.0986122886681098,"net":1.085323452949524},"threshold":null,"anomalies":0,"novelties":1}"#
         );
     }
 
