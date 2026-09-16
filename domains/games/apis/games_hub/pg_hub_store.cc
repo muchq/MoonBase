@@ -15,8 +15,9 @@ namespace {
 using nlohmann::json;
 
 constexpr char kUpsertRoom[] = R"sql(
-    INSERT INTO rooms (room_id) VALUES ($1)
+    INSERT INTO rooms (room_id, geometry) VALUES ($1, $2::jsonb)
     ON CONFLICT (room_id) DO NOTHING)sql";
+constexpr char kSetRoomSurface[] = "UPDATE rooms SET geometry = $2::jsonb WHERE room_id = $1";
 constexpr char kDeleteRoom[] = "DELETE FROM rooms WHERE room_id = $1";
 constexpr char kUpsertMember[] = R"sql(
     INSERT INTO room_members (room_id, player_id, connected, games_played, games_won, total_score)
@@ -65,6 +66,15 @@ constexpr char kCommitFinish[] = R"sql(
       WHERE m.room_id = $1 AND m.player_id = s.player_id
         AND EXISTS (SELECT 1 FROM save))
     SELECT pg_notify($7, $8) FROM save)sql";
+
+// An unreadable geometry costs the room its shape, not the boot: it
+// reads as the plane, which is what every row before the column was.
+Surface SurfaceFromColumn(const std::string& room_id, const std::string& text) {
+  auto surface = SurfaceFromJson(text);
+  if (surface.ok()) return *surface;
+  LOG(ERROR) << "room " << room_id << " geometry unreadable, drawing it flat: " << surface.status();
+  return Surface::Plane();
+}
 
 std::string RosterJson(const std::vector<std::string>& roster) {
   json names = json::array();
@@ -147,7 +157,9 @@ std::optional<int> PgHubStore::ExecOrWarn(const char* what, const char* sql,
 
 void PgHubStore::Apply(const Op& op) {
   if (const auto* upsert = std::get_if<UpsertRoom>(&op)) {
-    ExecOrWarn("UpsertRoom", kUpsertRoom, {upsert->room_id});
+    ExecOrWarn("UpsertRoom", kUpsertRoom, {upsert->room_id, SurfaceJson(upsert->surface)});
+  } else if (const auto* set = std::get_if<SetRoomSurface>(&op)) {
+    ExecOrWarn("SetRoomSurface", kSetRoomSurface, {set->room_id, SurfaceJson(set->surface)});
   } else if (const auto* erase = std::get_if<DeleteRoom>(&op)) {
     ExecOrWarn("DeleteRoom", kDeleteRoom, {erase->room_id});
   } else if (const auto* upsert = std::get_if<UpsertMember>(&op)) {
@@ -218,10 +230,11 @@ absl::StatusOr<std::optional<PgHubStore::GameRow>> PgHubStore::LoadGame(
 
 absl::StatusOr<PgHubStore::RoomRows> PgHubStore::LoadRoom(const std::string& room_id) {
   RoomRows out;
-  auto room = db_->Exec("SELECT 1 FROM rooms WHERE room_id = $1", {room_id});
+  auto room = db_->Exec("SELECT geometry::text FROM rooms WHERE room_id = $1", {room_id});
   if (!room.ok()) return room.status();
   out.exists = room->rows() > 0;
   if (!out.exists) return out;
+  out.surface = SurfaceFromColumn(room_id, room->Get(0, 0).value_or(""));
 
   auto members = db_->Exec(
       "SELECT player_id, connected, games_played, games_won, total_score"
@@ -260,10 +273,11 @@ absl::StatusOr<PgHubStore::RoomRows> PgHubStore::LoadRoom(const std::string& roo
 
 absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
   Snapshot snapshot;
-  auto rooms = db_->Exec("SELECT room_id FROM rooms");
+  auto rooms = db_->Exec("SELECT room_id, geometry::text FROM rooms");
   if (!rooms.ok()) return rooms.status();
   for (int i = 0; i < rooms->rows(); ++i) {
-    snapshot.rooms.push_back(rooms->Get(i, 0).value_or(""));
+    const std::string room_id = rooms->Get(i, 0).value_or("");
+    snapshot.rooms.push_back({room_id, SurfaceFromColumn(room_id, rooms->Get(i, 1).value_or(""))});
   }
 
   auto members = db_->Exec(

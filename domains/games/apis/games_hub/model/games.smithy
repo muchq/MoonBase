@@ -7,6 +7,7 @@ use moonbase.castle#CastleCommand
 use moonbase.castle#CastleEvent
 use moonbase.golf#GolfCommand
 use moonbase.golf#GolfEvent
+use moonbase.lobby#Geometry
 use moonbase.lobby#LobbyCommand
 use moonbase.lobby#LobbyEvent
 
@@ -104,7 +105,11 @@ structure SessionCredentials {
     resumeToken: String
 }
 
-structure CreateRoom {}
+structure CreateRoom {
+    /// The surface the room's world stands on (lobby.smithy's Geometry);
+    /// absent is the plane. Refused for a sphere too small to stand in.
+    geometry: Geometry
+}
 
 structure JoinRoom {
     @required
@@ -142,6 +147,11 @@ structure RoomState {
 
     @required
     games: GameSummaries
+
+    /// The surface the room's world stands on, so a joiner knows what to
+    /// draw and where to stand before its first lobby join.
+    @required
+    geometry: Geometry
 }
 
 list PlayerInfos {

@@ -150,6 +150,7 @@ cc_library(
     hdrs = ["hub_store.h"],
     deps = [
         ":hosted_game",
+        ":surface",
         "//domains/games/libs/cards/golf:game_state",
         "@com_google_absl//absl/status:statusor",
     ],
@@ -161,6 +162,7 @@ cc_test(
     srcs = ["hub_store_test.cc"],
     deps = [
         ":hub_store",
+        ":surface",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards/golf:game_state",
         "@googletest//:gtest_main",
@@ -218,6 +220,7 @@ cc_library(
     deps = [
         ":hosted_game",
         ":hub_store",
+        ":surface",
         "//domains/games/libs/cards/castle:game_state_serde",
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:game_state_serde",
@@ -290,6 +293,7 @@ cc_test(
         ":hosted_game",
         ":pg_hub_store",
         ":pg_ticket_vault",
+        ":surface",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:dealer",
         "//domains/games/libs/cards/castle:game_state",
@@ -356,6 +360,30 @@ cc_library(
     deps = ["//domains/platform/libs/futility/rate_limiter:token_bucket"],
 )
 
+# The shape of a room's world: the plane's bounds, a sphere's wall, and
+# the stored spelling of either.
+cc_library(
+    name = "surface",
+    srcs = ["surface.cc"],
+    hdrs = ["surface.h"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_test(
+    name = "surface_test",
+    size = "small",
+    srcs = ["surface_test.cc"],
+    deps = [
+        ":surface",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The lobby's world, its rules and map (#79, #1490): staged deliveries,
 # no wire, hosted by GolfHub as the room stream's lobby member.
 cc_library(
@@ -365,6 +393,9 @@ cc_library(
     deps = [
         ":games_hub_smithy_server",
         ":hub_metrics",
+        ":surface",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
     ],
 )
 
@@ -377,6 +408,7 @@ cc_test(
     deps = [
         ":games_hub_smithy_server",
         ":hub_metrics",
+        ":surface",
         ":world",
         "@googletest//:gtest_main",
     ],
@@ -397,6 +429,7 @@ cc_library(
         ":id_generator",
         ":protocol_input",
         ":rate_limiter",
+        ":surface",
         ":ticket_vault",
         ":wire_cards",
         ":world",

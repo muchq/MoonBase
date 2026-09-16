@@ -154,9 +154,10 @@ TEST_F(GolfWireTest, ValidSessionStreamsSessionReadyAndRoomStateFrames) {
   EXPECT_EQ(HeaderText(*room, ":message-type"), "event");
   EXPECT_EQ(HeaderText(*room, ":event-type"), "roomState");
   EXPECT_EQ(HeaderText(*room, ":content-type"), "application/json");
-  EXPECT_EQ(room->payload.ToString(),
-            R"({"games":[],"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
-            R"("playerId":"player-1","totalScore":0}],"roomId":"room-1"})");
+  EXPECT_EQ(
+      room->payload.ToString(),
+      R"({"games":[],"geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
+      R"("playerId":"player-1","totalScore":0}],"roomId":"room-1"})");
 }
 
 // Consumer: the golf web client's in-band error toast. A syntactically
@@ -215,7 +216,7 @@ TEST_F(GolfWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
             R"("revealedIndexes":[]}]}}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
             R"({"games":[{"game":"golf","gameId":"GAME01","playerCount":1,"status":"waiting"}],)"
-            R"("players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
+            R"("geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
             R"("playerId":"player-1","table":{"game":"golf","gameId":"GAME01"},)"
             R"("totalScore":0}],"roomId":"room-1"})");
 
@@ -274,7 +275,7 @@ TEST_F(GolfWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
   // members read as at it (#1490): the table key is the lobby's.
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
             R"({"games":[{"game":"golf","gameId":"GAME01","playerCount":2,"status":"playing"}],)"
-            R"("players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
+            R"("geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
             R"("playerId":"player-1","table":{"game":"golf","gameId":"GAME01"},)"
             R"("totalScore":0},)"
             R"({"connected":true,"gamesPlayed":0,"gamesWon":0,"playerId":"player-2",)"
@@ -298,11 +299,12 @@ TEST_F(GolfWireTest, JoinerHearsRoomStateThenEmptyChatHistoryAndChatCarriesServe
   auto joiner = DialReady(joiner_session);
   ASSERT_TRUE(joiner->Send(CommandFrame("joinRoom", R"({"roomId":"room-1"})")).ok());
 
-  EXPECT_EQ(EventPayload(NextFrame(*joiner), "roomState"),
-            R"({"games":[],"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
-            R"("playerId":"player-1","totalScore":0},)"
-            R"({"connected":true,"gamesPlayed":0,"gamesWon":0,"playerId":"player-2",)"
-            R"("totalScore":0}],"roomId":"room-1"})");
+  EXPECT_EQ(
+      EventPayload(NextFrame(*joiner), "roomState"),
+      R"({"games":[],"geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
+      R"("playerId":"player-1","totalScore":0},)"
+      R"({"connected":true,"gamesPlayed":0,"gamesWon":0,"playerId":"player-2",)"
+      R"("totalScore":0}],"roomId":"room-1"})");
   EXPECT_EQ(EventPayload(NextFrame(*joiner), "roomChatHistory"), R"({"messages":[]})");
   (void)EventPayload(NextFrame(*creator), "roomState");
 

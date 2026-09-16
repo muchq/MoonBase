@@ -4,9 +4,10 @@ namespace moonbase.lobby
 
 // The lobby's world (#79, #1490): the chill 3D vibe at muchq.com/games
 // (and /thoughts), on the games hub. A world per room: each joined player
-// is a position on the ground plane, a color, and a shape, and every
-// change reaches everyone else in the same world. The hub relays; it
-// simulates nothing and remembers nothing past the connection.
+// is a position on the room's surface (#1554), a color, and a shape, and
+// every change reaches everyone else in the same world. The hub relays
+// and settles positions onto the surface; it simulates nothing, and the
+// surface is the only thing it remembers past the connection.
 //
 // The way in is the `lobby` member of the room's Play stream
 // (games.smithy): the world is the session's room's, or the plaza's while
@@ -23,6 +24,7 @@ union LobbyAction {
     move: MoveTo
     shape: ChangeShape
     leave: LeaveWorld
+    setGeometry: SetGeometry
 }
 
 /// The lobby envelope on the event stream: exactly one update. The
@@ -37,6 +39,7 @@ union LobbyUpdate {
     playerJoined: PlayerJoined
     playerMoved: PlayerMoved
     shapeChanged: ShapeChanged
+    geometryChanged: GeometryChanged
     playerLeft: PlayerLeft
 }
 
@@ -73,6 +76,15 @@ structure ChangeShape {
 /// Leave the world but keep the session; join again to respawn.
 structure LeaveWorld {}
 
+/// Reshape the session's room for everyone in it (#1554): the room's
+/// world takes this surface, and everyone standing in it is placed at
+/// the nearest point of the new one. Any member may, standing or not;
+/// refused for a geometry the hub cannot host.
+structure SetGeometry {
+    @required
+    geometry: Geometry
+}
+
 /// Everyone already in the joined world, sent once to a joiner — before
 /// anyone else hears their playerJoined, and never listing the joiner.
 /// Empty when the world is. A full replacement: a client that respawns
@@ -80,14 +92,42 @@ structure LeaveWorld {}
 structure WorldState {
     @required
     players: WorldPlayers
+
+    /// The surface this world stands on: the room's choice at creation,
+    /// until a setGeometry changes it.
+    @required
+    geometry: Geometry
+}
+
+/// The shape of a room's world: where its players stand. A room starts
+/// with the one createRoom names (absent: the plane) and any member can
+/// change it with setGeometry; the plaza starts flat and changes the
+/// same way, for everyone in it, until the hub restarts.
+union Geometry {
+    /// The ground plane: positions are [x, 0, z] with x and z within ±50.
+    plane: PlaneGeometry
+
+    /// The inside of a sphere centred on the origin: positions are points
+    /// on its wall. The hub snaps a position within one unit of the wall
+    /// onto it and refuses one farther off.
+    sphere: SphereGeometry
+}
+
+structure PlaneGeometry {}
+
+structure SphereGeometry {
+    /// At least 2, so an avatar can stand.
+    @required
+    radius: Double
 }
 
 list WorldPlayers {
     member: WorldPlayer
 }
 
-/// Position is [x, 0, z] with x and z within ±50; color is [r, g, b] in
-/// 0..1; shape is 0 (sphere), 1 (cube) or 2 (pyramid). The hub refuses
+/// Position is on the world's surface (see Geometry: the plane's [x, 0,
+/// z] within ±50, or a point on the sphere's wall); color is [r, g, b]
+/// in 0..1; shape is 0 (sphere), 1 (cube) or 2 (pyramid). The hub refuses
 /// anything else, so a value here is always inside these bounds.
 structure WorldPlayer {
     @required
@@ -125,6 +165,18 @@ structure ShapeChanged {
 
     @required
     shape: Integer
+}
+
+/// The world changed shape under everyone standing in it, the actor
+/// included: the new surface, and every player where the hub placed
+/// them on it (the nearest point of the new surface to where they
+/// stood). Replaces every position the client holds.
+structure GeometryChanged {
+    @required
+    geometry: Geometry
+
+    @required
+    players: WorldPlayers
 }
 
 /// A deliberate leave or a closed socket, alike.
