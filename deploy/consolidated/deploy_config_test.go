@@ -1123,8 +1123,10 @@ var publicRoutes = []struct {
 	// api.1d4.net, the host whose CORS grant covers the app — only the
 	// one_d4 prefix, since the rest of the stats API is muchq.com's.
 	{"@get_one_d4_stats", []string{"method GET", "path /stats/v1/one_d4/*"}, "stats:8092"},
-	// deja (#1150): the tape, GET-only and read-only like stats.
+	// deja (#1150): the tape, read-only like stats, and the one question
+	// the page asks it, which learns nothing.
 	{"@get_deja", []string{"method GET", "path /deja/v1/*"}, "deja:8093"},
+	{"@post_deja_next", []string{"method POST", "path /deja/v1/next"}, "deja:8093"},
 }
 
 func TestPublicRoutesAreDeliberatelyExact(t *testing.T) {
@@ -2350,6 +2352,7 @@ func catchAllIsLastHandle(site []string, terminal string) (found bool, problem s
 // a rewrite of the block does not ship.
 var localRoutes = map[string]string{
 	"@get_deja":             "localhost:8093",
+	"@post_deja_next":       "localhost:8093",
 	"@post_golf_v2_session": "localhost:8089",
 	"@ws_play_v2":           "localhost:8089",
 	"@post_portrait":        "localhost:8081",

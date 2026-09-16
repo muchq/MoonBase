@@ -13,6 +13,7 @@ rust_binary(
         "src/lanes.rs",
         "src/main.rs",
         "src/metrics.rs",
+        "src/net.rs",
         "src/score.rs",
         "src/tail.rs",
         "src/token.rs",

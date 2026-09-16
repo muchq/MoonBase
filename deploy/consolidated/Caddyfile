@@ -113,6 +113,11 @@ api.muchq.com {
 		path /deja/v1/*
 	}
 
+	@post_deja_next {
+		method POST
+		path /deja/v1/next
+	}
+
 	@post_iili_shorten {
 		method POST
 		path /iili/v1/shorten
@@ -228,8 +233,12 @@ api.muchq.com {
 		reverse_proxy stats:8092
 	}
 	# deja (#1150): the live tape, read-only. Its stream is server-sent
-	# events, which Caddy flushes per event on its own.
+	# events, which Caddy flushes per event on its own. The one POST asks
+	# the predictors a question and learns nothing.
 	handle @get_deja {
+		reverse_proxy deja:8093
+	}
+	handle @post_deja_next {
 		reverse_proxy deja:8093
 	}
 	handle @get_iili_redirect {

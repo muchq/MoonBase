@@ -795,10 +795,14 @@ name = "deja"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.23.1",
  "caddylog",
+ "candle-core",
+ "candle-nn",
  "http-body-util",
  "opentelemetry",
  "opentelemetry_sdk",
+ "safetensors 0.8.0",
  "serde",
  "serde_json",
  "server_pal",

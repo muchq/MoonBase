@@ -80,6 +80,10 @@ impl Vocab {
         &self.names[usize::from(id)]
     }
 
+    pub fn id(&self, name: &str) -> Option<u16> {
+        self.ids.get(name).copied()
+    }
+
     pub fn len(&self) -> usize {
         self.names.len()
     }

@@ -65,6 +65,7 @@ func TestMetricsHandler_GetServiceCatalog(t *testing.T) {
 		{"portrait", true},
 		{"posterize", true},
 		{"iili", true},
+		{"deja", true},
 	}
 	require.Len(t, catalog.Services, len(wantCustom))
 	for i, want := range wantCustom {

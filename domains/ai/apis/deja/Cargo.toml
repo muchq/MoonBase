@@ -12,8 +12,12 @@ path = "src/main.rs"
 
 [dependencies]
 axum = { workspace = true }
+base64 = { workspace = true }
 caddylog = { workspace = true }
+candle-core = { workspace = true }
+candle-nn = { workspace = true }
 opentelemetry = { workspace = true }
+safetensors = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 server_pal = { workspace = true }

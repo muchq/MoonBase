@@ -4,6 +4,7 @@ mod checkpoint;
 mod engine;
 mod lanes;
 mod metrics;
+mod net;
 mod score;
 mod tail;
 mod token;

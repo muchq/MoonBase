@@ -1,13 +1,15 @@
 //! One request in, one event out: tokenize, predict, score, learn.
 
-use std::{collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, fmt, sync::Arc};
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use caddylog::CaddyLine;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     bigram::Bigram,
-    lanes::{DEFAULT_LANES, Lanes},
+    lanes::{DEFAULT_LANES, Lanes, WINDOW},
+    net::{DEFAULT_SEED, Net},
     score::{Scorer, Verdict, WARMUP},
     token::{BOS, DEFAULT_CAP, Vocab, token_text},
 };
@@ -45,11 +47,11 @@ pub struct Guess {
     pub p: f64,
 }
 
-/// One value per predictor; the network's column is null until it exists.
+/// One value per predictor.
 #[derive(Clone, Debug, Serialize, PartialEq)]
 pub struct PerPredictor<T> {
     pub bigram: T,
-    pub net: Option<T>,
+    pub net: T,
 }
 
 /// What `state` reports.
@@ -67,7 +69,9 @@ pub struct StateView {
 }
 
 /// The learned state a checkpoint carries; lanes and the ring are not in
-/// it, since a restart's clients and its page both start fresh.
+/// it, since a restart's clients and its page both start fresh. The net
+/// rides in the same file as the vocabulary so token ids and weights
+/// cannot drift apart; a checkpoint without one starts the net fresh.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Snapshot {
     pub seq: u64,
@@ -76,6 +80,31 @@ pub struct Snapshot {
     pub scorer: Scorer,
     pub anomalies: u64,
     pub novelties: u64,
+    #[serde(default)]
+    pub net: Option<NetSnapshot>,
+}
+
+/// The net's weights as base64 safetensors, and its own baseline.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct NetSnapshot {
+    pub weights: String,
+    pub scorer: Scorer,
+}
+
+/// Why `next` refused a context.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NextError {
+    UnknownToken(String),
+    Length(usize),
+}
+
+impl fmt::Display for NextError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NextError::UnknownToken(name) => write!(f, "unknown token {name:?}"),
+            NextError::Length(n) => write!(f, "context has {n} tokens; 1 to {WINDOW} are allowed"),
+        }
+    }
 }
 
 pub struct Engine {
@@ -83,6 +112,8 @@ pub struct Engine {
     lanes: Lanes,
     bigram: Bigram,
     scorer: Scorer,
+    net: Net,
+    net_scorer: Scorer,
     seq: u64,
     anomalies: u64,
     novelties: u64,
@@ -97,11 +128,17 @@ impl Default for Engine {
 
 impl Engine {
     pub fn new(vocab_cap: usize, lanes: usize) -> Self {
+        Self::with_net(vocab_cap, lanes, Net::new(vocab_cap, DEFAULT_SEED))
+    }
+
+    fn with_net(vocab_cap: usize, lanes: usize, net: Net) -> Self {
         Self {
             vocab: Vocab::new(vocab_cap),
             lanes: Lanes::new(lanes),
             bigram: Bigram::default(),
             scorer: Scorer::default(),
+            net,
+            net_scorer: Scorer::default(),
             seq: 0,
             anomalies: 0,
             novelties: 0,
@@ -109,12 +146,33 @@ impl Engine {
         }
     }
 
+    /// A net that will not load — none in the checkpoint, or weights that
+    /// are not this net's — starts fresh with its baseline; the rest of
+    /// the checkpoint is kept either way.
     pub fn from_snapshot(snapshot: Snapshot, vocab_cap: usize, lanes: usize) -> Self {
+        let (net, net_scorer) = match snapshot.net {
+            None => (Net::new(vocab_cap, DEFAULT_SEED), Scorer::default()),
+            Some(saved) => match BASE64
+                .decode(&saved.weights)
+                .map_err(|error| error.to_string())
+                .and_then(|bytes| {
+                    Net::from_weights(vocab_cap, DEFAULT_SEED, &bytes)
+                        .map_err(|error| error.to_string())
+                }) {
+                Ok(net) => (net, saved.scorer),
+                Err(error) => {
+                    tracing::error!(%error, "checkpoint's net unusable; starting it fresh");
+                    (Net::new(vocab_cap, DEFAULT_SEED), Scorer::default())
+                }
+            },
+        };
         Self {
             vocab: Vocab::from_names(snapshot.vocab, vocab_cap),
             lanes: Lanes::new(lanes),
             bigram: snapshot.bigram,
             scorer: snapshot.scorer,
+            net,
+            net_scorer,
             seq: snapshot.seq,
             anomalies: snapshot.anomalies,
             novelties: snapshot.novelties,
@@ -130,34 +188,65 @@ impl Engine {
             scorer: self.scorer.clone(),
             anomalies: self.anomalies,
             novelties: self.novelties,
+            net: Some(NetSnapshot {
+                weights: BASE64.encode(self.net.weights()),
+                scorer: self.net_scorer.clone(),
+            }),
         }
     }
 
-    /// Scores the request against what the client's last token predicted,
+    /// Both predictors' guesses after `context`, a list of one to
+    /// `WINDOW` token names. Nothing is learned and no event is made.
+    pub fn next(&self, context: &[String]) -> Result<PerPredictor<Vec<Guess>>, NextError> {
+        if context.is_empty() || context.len() > WINDOW {
+            return Err(NextError::Length(context.len()));
+        }
+        let ids = context
+            .iter()
+            .map(|name| {
+                self.vocab
+                    .id(name)
+                    .ok_or_else(|| NextError::UnknownToken(name.clone()))
+            })
+            .collect::<Result<Vec<u16>, _>>()?;
+        let prev = *ids.last().expect("at least one token");
+        Ok(PerPredictor {
+            bigram: self.guesses(self.bigram.top(prev, self.vocab.len(), TOP_K)),
+            net: self.guesses(self.net.predict(&ids).top(self.vocab.len(), TOP_K)),
+        })
+    }
+
+    fn guesses(&self, ranked: Vec<(u16, f64)>) -> Vec<Guess> {
+        ranked
+            .into_iter()
+            .map(|(id, p)| Guess {
+                token: self.vocab.name(id).to_string(),
+                p,
+            })
+            .collect()
+    }
+
+    /// Scores the request against what the client's history predicted,
     /// then learns it. A token seen for the first time is novel rather than
-    /// judged, and stays out of the baseline: its surprise says nothing
-    /// about the sequence, only about the vocabulary.
+    /// judged, and stays out of both baselines: its surprise says nothing
+    /// about the sequence, only about the vocabulary. The bigram's scorer
+    /// decides the verdict; the net's only keeps its own baseline.
     pub fn ingest(&mut self, line: &CaddyLine) -> Arc<Event> {
         let (token, novel) = self.vocab.intern(&token_text(line));
         let lane = self.lanes.touch(line.client_ip());
-        let window = self.lanes.window(lane);
-        let prev = window.back().copied().unwrap_or(BOS);
+        let window: Vec<u16> = self.lanes.window(lane).iter().copied().collect();
+        let prev = window.last().copied().unwrap_or(BOS);
         let context = window
             .iter()
             .map(|&id| self.vocab.name(id).to_string())
             .collect();
 
         let vocab_size = self.vocab.len();
-        let guesses = self
-            .bigram
-            .top(prev, vocab_size, TOP_K)
-            .into_iter()
-            .map(|(id, p)| Guess {
-                token: self.vocab.name(id).to_string(),
-                p,
-            })
-            .collect();
+        let guesses = self.guesses(self.bigram.top(prev, vocab_size, TOP_K));
         let surprise = -self.bigram.probability(prev, token, vocab_size).ln();
+        let net_prediction = self.net.predict(&window);
+        let net_guesses = self.guesses(net_prediction.top(vocab_size, TOP_K));
+        let net_surprise = net_prediction.surprise(token);
         let step = self.scorer.steps();
         let threshold = self.scorer.threshold();
         let ewma_loss = self.ewma_loss();
@@ -170,10 +259,12 @@ impl Engine {
                 self.anomalies += 1;
             }
             self.scorer.observe(surprise);
+            self.net_scorer.observe(net_surprise);
             verdict
         };
 
         self.bigram.observe(prev, token);
+        self.net.learn(&window, token, verdict != Verdict::Anomaly);
         self.lanes.push(lane, token);
         self.seq += 1;
 
@@ -186,11 +277,11 @@ impl Engine {
             actual: self.vocab.name(token).to_string(),
             predictions: PerPredictor {
                 bigram: guesses,
-                net: None,
+                net: net_guesses,
             },
             surprise: PerPredictor {
                 bigram: surprise,
-                net: None,
+                net: net_surprise,
             },
             threshold,
             verdict,
@@ -230,7 +321,7 @@ impl Engine {
     fn ewma_loss(&self) -> PerPredictor<f64> {
         PerPredictor {
             bigram: self.scorer.mean(),
-            net: None,
+            net: self.net_scorer.mean(),
         }
     }
 }
@@ -238,6 +329,13 @@ impl Engine {
 #[cfg(test)]
 pub(crate) mod fixtures {
     use caddylog::CaddyLine;
+
+    use super::*;
+
+    /// The default engine with a zeroed net: its numbers are exact.
+    pub fn zeroed() -> Engine {
+        Engine::with_net(DEFAULT_CAP, DEFAULT_LANES, Net::zeroed(DEFAULT_CAP))
+    }
 
     /// A request line as Caddy writes it, for one client.
     pub fn request(ts: f64, ip: &str, method: &str, uri: &str, status: u16, ua: &str) -> CaddyLine {
@@ -292,8 +390,12 @@ mod tests {
         let expected = engine.ingest(&browser_redirect(21.0, "1.1.1.1"));
         assert_eq!(expected.predictions.bigram[0].token, expected.actual);
         assert!(expected.predictions.bigram[0].p > 0.9);
-        assert_eq!(expected.predictions.net, None);
-        assert_eq!(expected.surprise.net, None);
+        assert_eq!(
+            expected.predictions.net.len(),
+            2,
+            "top five of the three known tokens, BOS never guessed"
+        );
+        assert!(expected.surprise.net.is_finite() && expected.surprise.net >= 0.0);
         // The scanner's first probe is novel; its second, in a lane whose
         // history is a probe, is judged against the probe's row.
         engine.ingest(&request(22.0, "9.9.9.9", "GET", "/.env", 404, CURL));
@@ -344,6 +446,12 @@ mod tests {
         let before = engine.state();
         let broken = engine.ingest(&request(9001.0, "1.1.1.1", "GET", "/.env", 404, CURL));
         assert_eq!(broken.verdict, Verdict::Anomaly);
+        // Learned once, never replayed: the ring's newest pair is still the
+        // probe's novel sighting on the fresh lane, whose context is all
+        // BOS; the anomaly's context of redirects never went in.
+        let (context, target) = engine.net.replay_newest().unwrap();
+        assert_eq!(target, engine.vocab.id(&broken.actual).unwrap());
+        assert_eq!(context, [BOS; crate::net::CONTEXT]);
         // The threshold on the event is the one that judged it, not the one
         // the event moved.
         assert!(broken.surprise.bigram > broken.threshold.unwrap());
@@ -352,6 +460,96 @@ mod tests {
         let after = engine.state();
         assert!(after.threshold > before.threshold);
         assert_eq!(after.anomalies, 1);
+    }
+
+    // The net's baseline is its own scorer over its own surprise, on the
+    // same terms as the bigram's: judged events only, first sight is not
+    // an observation. The bigram's threshold is the one the verdict uses.
+    #[test]
+    fn the_net_scorer_observes_judged_events_and_skips_novelty() {
+        let mut engine = Engine::default();
+        let novel = engine.ingest(&browser_redirect(1.0, "1.1.1.1"));
+        assert_eq!(novel.verdict, Verdict::Novel);
+        assert!(novel.surprise.net > 0.0);
+        assert_eq!(engine.state().ewma_loss.net, 0.0, "novelty is not observed");
+        let judged = engine.ingest(&browser_redirect(2.0, "1.1.1.1"));
+        assert_eq!(
+            judged.ewma_loss,
+            PerPredictor {
+                bigram: 0.0,
+                net: 0.0
+            },
+            "the baseline the event was judged against"
+        );
+        let state = engine.state();
+        assert_eq!(state.ewma_loss.bigram, judged.surprise.bigram);
+        assert_eq!(
+            state.ewma_loss.net, judged.surprise.net,
+            "the first observation is the baseline"
+        );
+        assert_ne!(state.ewma_loss.net, state.ewma_loss.bigram);
+    }
+
+    #[test]
+    fn the_net_learns_a_lane_and_predicts_its_next_token() {
+        let mut engine = Engine::default();
+        let mut last = None;
+        for i in 0..120 {
+            let (uri, status) = if i % 2 == 0 {
+                ("/iili/v1/r/x", 302)
+            } else {
+                ("/iili/v1/shorten", 200)
+            };
+            last = Some(engine.ingest(&request(
+                f64::from(i),
+                "1.1.1.1",
+                "GET",
+                uri,
+                status,
+                BROWSER,
+            )));
+        }
+        let last = last.unwrap();
+        assert_eq!(last.predictions.net[0].token, last.actual);
+        assert!(
+            last.predictions.net[0].p > 0.5,
+            "{}",
+            last.predictions.net[0].p
+        );
+        assert!(last.surprise.net < 1.0, "{}", last.surprise.net);
+        assert!(
+            last.predictions.net.iter().all(|g| g.token != "<bos>"),
+            "{:?}",
+            last.predictions.net
+        );
+    }
+
+    #[test]
+    fn next_answers_both_predictors_for_a_context_of_names() {
+        let mut engine = Engine::default();
+        for i in 0..20 {
+            engine.ingest(&browser_redirect(f64::from(i), "1.1.1.1"));
+        }
+        let name = "api.muchq.com GET /iili/v1/r/* 302 browser".to_string();
+        let both = engine.next(&[name.clone(), name.clone()]).unwrap();
+        assert_eq!(both.bigram[0].token, name);
+        assert_eq!(both.bigram.len(), 1, "the bigram lists what it has seen");
+        assert_eq!(both.net[0].token, name);
+        assert_eq!(both.net.len(), 2, "<unk> and the token; never <bos>");
+        assert_eq!(
+            engine.next(&["nope".to_string()]),
+            Err(NextError::UnknownToken("nope".to_string()))
+        );
+        assert_eq!(engine.next(&[]), Err(NextError::Length(0)));
+        assert_eq!(
+            engine.next(&vec![name; WINDOW + 1]),
+            Err(NextError::Length(WINDOW + 1))
+        );
+        assert_eq!(
+            engine.state().seq,
+            20,
+            "asking is not an event and teaches nothing"
+        );
     }
 
     #[test]
@@ -389,13 +587,84 @@ mod tests {
             back.recent(0).is_empty(),
             "the ring is not in the checkpoint"
         );
-        let next = back.ingest(&browser_redirect(32.0, "1.1.1.1"));
-        assert_eq!(next.seq, 32);
+        // The weights came back: a lane with no history reads the same in
+        // both engines before either learns again. (After that they part:
+        // the replay ring and the optimizer's moments are not checkpointed.)
+        let fresh_lane = engine.ingest(&browser_redirect(32.0, "2.2.2.2"));
+        let same_lane = back.ingest(&browser_redirect(32.0, "2.2.2.2"));
+        assert_eq!(fresh_lane.predictions.net, same_lane.predictions.net);
+        assert_eq!(fresh_lane.surprise.net, same_lane.surprise.net);
+        let next = back.ingest(&browser_redirect(33.0, "1.1.1.1"));
+        assert_eq!(next.seq, 33);
         assert_ne!(next.verdict, Verdict::Novel, "the vocabulary came back");
         assert!(next.context.is_empty(), "lanes did not");
         assert_eq!(
             next.predictions.bigram[0].token, next.actual,
             "the counts came back"
         );
+    }
+
+    // Phase 2's checkpoint, verbatim: no `net` key. The bigram and the
+    // vocabulary are kept and the net starts fresh beside them.
+    #[test]
+    fn a_checkpoint_without_a_net_keeps_the_bigram_and_starts_the_net_fresh() {
+        let json = r#"{"seq":3,"vocab":["<unk>","<bos>","api.muchq.com GET /iili/v1/r/* 302 browser"],"bigram":{"rows":{"1":{"total":1,"next":{"2":1}},"2":{"total":2,"next":{"2":2}}}},"scorer":{"steps":2,"mean":0.4,"var":0.0},"anomalies":0,"novelties":1}"#;
+        let snapshot: Snapshot = serde_json::from_str(json).unwrap();
+        assert_eq!(snapshot.net, None);
+        let mut engine = Engine::from_snapshot(snapshot, DEFAULT_CAP, DEFAULT_LANES);
+        let state = engine.state();
+        assert_eq!(state.seq, 3);
+        assert_eq!(state.vocab_size, 3);
+        assert_eq!(state.ewma_loss.bigram, 0.4);
+        assert_eq!(state.ewma_loss.net, 0.0);
+        let next = engine.ingest(&browser_redirect(4.0, "1.1.1.1"));
+        assert_ne!(next.verdict, Verdict::Novel);
+        assert_eq!(next.predictions.bigram[0].token, next.actual);
+        assert_eq!(next.predictions.net.len(), 2);
+        assert!(
+            (next.surprise.net - (DEFAULT_CAP as f64).ln()).abs() < 1.0,
+            "a fresh net is near uniform: {}",
+            next.surprise.net
+        );
+        assert!(
+            engine.snapshot().net.is_some(),
+            "the next checkpoint carries it"
+        );
+    }
+
+    // A net blob that will not load is the same as none: the bigram is
+    // kept and the net starts fresh, rather than the service staying down.
+    #[test]
+    fn a_net_that_will_not_load_starts_fresh_and_keeps_the_rest() {
+        let mut engine = Engine::default();
+        for i in 0..10 {
+            engine.ingest(&browser_redirect(f64::from(i), "1.1.1.1"));
+        }
+        let mut snapshot = engine.snapshot();
+        snapshot.net.as_mut().unwrap().weights = "bm90IHNhZmV0ZW5zb3Jz".into();
+        let mut back = Engine::from_snapshot(snapshot, DEFAULT_CAP, DEFAULT_LANES);
+        assert_eq!(
+            back.state().ewma_loss.net,
+            0.0,
+            "the net's scorer went with it"
+        );
+        assert_eq!(
+            back.state().ewma_loss.bigram,
+            engine.state().ewma_loss.bigram
+        );
+        let next = back.ingest(&browser_redirect(11.0, "1.1.1.1"));
+        assert_eq!(next.predictions.bigram[0].token, next.actual);
+        assert!(
+            (next.surprise.net - (DEFAULT_CAP as f64).ln()).abs() < 1.0,
+            "{}",
+            next.surprise.net
+        );
+    }
+
+    #[test]
+    fn a_zeroed_engine_is_exactly_uniform_for_the_wire_pins() {
+        let mut engine = fixtures::zeroed();
+        let first = engine.ingest(&browser_redirect(1.0, "1.1.1.1"));
+        assert_eq!(first.surprise.net, f64::from((DEFAULT_CAP as f32).ln()));
     }
 }

@@ -668,6 +668,72 @@ func TestMicrogptQueriesNameRealInstruments(t *testing.T) {
 	}
 }
 
+// What deja exports, as the collector names it: _total on the two OTLP
+// counters (metrics.rs declares them without the suffix), the two gauges
+// as they are. The emitting end is pinned by AppMetrics' own tests, which
+// enumerate every series.
+var dejaSelectorPattern = regexp.MustCompile(`\b(deja_[a-z_]*)(\{[^}]*\})?`)
+
+var dejaExportedNames = map[string]bool{
+	"deja_events_total":   true,
+	"deja_surprise_total": true,
+	"deja_ewma_loss":      true,
+	"deja_vocab_size":     true,
+}
+
+func TestDejaQueriesNameRealInstruments(t *testing.T) {
+	entry := serviceRegistry["deja"]
+	require.NotEmpty(t, entry.CustomScalars)
+	require.NotEmpty(t, entry.CustomTimeseries)
+
+	seen := map[string]int{}
+	joined := ""
+	for what, queries := range labelledCustomQueries(entry) {
+		for _, query := range queries {
+			joined += query + "\n"
+			if strings.Contains(query, `route="/health"`) {
+				assert.Contains(t, query, `service_name="deja"`,
+					"%s reads the standard family unscoped: %s", what, query)
+				continue
+			}
+			matches := dejaSelectorPattern.FindAllStringSubmatch(query, -1)
+			assert.NotEmpty(t, matches, "%s queries no deja instrument: %s", what, query)
+			for _, match := range matches {
+				seen[match[1]]++
+				assert.True(t, dejaExportedNames[match[1]],
+					"%s reads %q, which deja does not export", what, match[1])
+			}
+		}
+	}
+	for _, name := range promSeriesToken.FindAllString(joined, -1) {
+		if strings.HasPrefix(name, "http_server_") {
+			continue
+		}
+		assert.True(t, dejaExportedNames[name],
+			"a query reads %q, which deja does not export", name)
+	}
+	for name := range dejaExportedNames {
+		assert.NotZero(t, seen[name], "nothing in the deja entry reads %s", name)
+	}
+
+	// The label vocabularies, mirrored from Verdict::ALL and PREDICTORS in
+	// deja's score.rs and metrics.rs.
+	for _, match := range regexp.MustCompile(`verdict="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
+		assert.Contains(t, []string{"warmup", "expected", "anomaly", "novel"}, match[1],
+			"deja declares no verdict=%q", match[1])
+	}
+	for _, match := range regexp.MustCompile(`predictor="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
+		assert.Contains(t, []string{"bigram", "net"}, match[1],
+			"deja declares no predictor=%q", match[1])
+	}
+	// Both predictors are on the page, as a mean and as a baseline: the
+	// comparison is the point of the control.
+	for _, predictor := range []string{"bigram", "net"} {
+		assert.Contains(t, joined, `deja_surprise_total{predictor="`+predictor+`"}`)
+		assert.Contains(t, joined, `deja_ewma_loss{predictor="`+predictor+`"}`)
+	}
+}
+
 // What portrait exports: aura's standard cache family plus the scene
 // complexity counters #1452 put in place of the two scene histograms. The
 // recording end is TracerServiceTest, whose construction test holds the

@@ -1,4 +1,4 @@
-//! The three ways out: the live stream, the ring, and the counters.
+//! The ways out: the live stream, the ring, the counters, and a question.
 
 use std::{
     convert::Infallible,
@@ -13,26 +13,27 @@ use std::{
 
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::{Query, State, rejection::JsonRejection},
     http::StatusCode,
     response::{
         IntoResponse, Response,
         sse::{Event as SseEvent, KeepAlive, Sse},
     },
-    routing::get,
+    routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use tokio::{sync::broadcast, time::Sleep};
 use tokio_stream::{Stream, StreamExt, wrappers::BroadcastStream};
 
 use crate::{
-    engine::{Engine, Event},
+    engine::{Engine, Event, Guess, PerPredictor},
     metrics::AppMetrics,
 };
 
 pub const STATE_PATH: &str = "/deja/v1/state";
 pub const RECENT_PATH: &str = "/deja/v1/recent";
 pub const STREAM_PATH: &str = "/deja/v1/stream";
+pub const NEXT_PATH: &str = "/deja/v1/next";
 
 /// Concurrent stream subscribers. The page is the one consumer and the hub
 /// polls `recent`; the cap is what a page left open in many tabs, or a
@@ -51,6 +52,7 @@ pub fn app(state: Arc<AppState>) -> Router {
     server_pal::router_builder()
         .route(STATE_PATH, get(get_state))
         .route(RECENT_PATH, get(get_recent))
+        .route(NEXT_PATH, post(post_next))
         .stream_route(STREAM_PATH, get(get_stream))
         .build()
         .with_state(state)
@@ -110,6 +112,44 @@ pub async fn get_recent(
         .expect("engine lock")
         .recent(query.after);
     Json(Recent { events }).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct NextRequest {
+    context: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct Next {
+    predictions: PerPredictor<Vec<Guess>>,
+}
+
+#[derive(Serialize)]
+struct Refusal {
+    error: String,
+}
+
+/// Both predictors' top five after a context of one to eight token names.
+/// A body that is not that, or names a token the vocabulary lacks, is a
+/// 400 whose body says which.
+pub async fn post_next(
+    State(state): State<Arc<AppState>>,
+    body: Result<Json<NextRequest>, JsonRejection>,
+) -> Response {
+    let refuse = |error: String| (StatusCode::BAD_REQUEST, Json(Refusal { error })).into_response();
+    let Json(request) = match body {
+        Ok(body) => body,
+        Err(rejection) => return refuse(rejection.body_text()),
+    };
+    let answer = state
+        .engine
+        .lock()
+        .expect("engine lock")
+        .next(&request.context);
+    match answer {
+        Ok(predictions) => Json(Next { predictions }).into_response(),
+        Err(error) => refuse(error.to_string()),
+    }
 }
 
 /// Server-sent events, one per request, `id` the sequence number so a
@@ -212,8 +252,10 @@ mod tests {
             .with_state(state)
     }
 
+    /// An engine whose net starts at zero, so the net's numbers on the
+    /// wire are exact arithmetic rather than a seed's.
     fn fresh() -> Arc<AppState> {
-        AppState::new(Engine::default(), AppMetrics::new())
+        AppState::new(crate::engine::fixtures::zeroed(), AppMetrics::new())
     }
 
     async fn body_text(response: Response) -> String {
@@ -238,6 +280,19 @@ mod tests {
         fetch(app, uri, "application/json").await
     }
 
+    async fn post_json(app: Router, uri: &str, body: &'static str) -> Response {
+        let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::ACCEPT, "application/json")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(peer));
+        app.oneshot(request).await.unwrap()
+    }
+
     async fn stream(app: Router) -> Response {
         fetch(app, STREAM_PATH, "text/event-stream").await
     }
@@ -259,8 +314,64 @@ mod tests {
         assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
         assert_eq!(
             body_text(response).await,
-            r#"{"events":[{"seq":2,"ts":1789500001.5,"lane":0,"step":0,"context":["api.muchq.com GET /iili/v1/r/* 302 browser"],"actual":"api.muchq.com GET /iili/v1/r/* 302 browser","predictions":{"bigram":[],"net":null},"surprise":{"bigram":1.0986122886681098,"net":null},"threshold":null,"verdict":"warmup","ewma_loss":{"bigram":0.0,"net":null},"vocab_size":3}]}"#
+            r#"{"events":[{"seq":2,"ts":1789500001.5,"lane":0,"step":0,"context":["api.muchq.com GET /iili/v1/r/* 302 browser"],"actual":"api.muchq.com GET /iili/v1/r/* 302 browser","predictions":{"bigram":[],"net":[{"token":"api.muchq.com GET /iili/v1/r/* 302 browser","p":0.0004981309175491333},{"token":"<unk>","p":0.00048826728016138077}]},"surprise":{"bigram":1.0986122886681098,"net":7.604647636413574},"threshold":null,"verdict":"warmup","ewma_loss":{"bigram":0.0,"net":0.0},"vocab_size":3}]}"#
         );
+    }
+
+    // The "ask it" panel's boundary: a context of token names in, both
+    // predictors' top five out, and a refusal that names the token.
+    #[tokio::test]
+    async fn next_is_pinned_on_the_wire() {
+        let state = fresh();
+        state.ingest(&redirect(1.0));
+        state.ingest(&redirect(2.0));
+        let response = post_json(
+            app(Arc::clone(&state)),
+            NEXT_PATH,
+            r#"{"context":["api.muchq.com GET /iili/v1/r/* 302 browser"]}"#,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+        assert_eq!(
+            body_text(response).await,
+            r#"{"predictions":{"bigram":[{"token":"api.muchq.com GET /iili/v1/r/* 302 browser","p":0.8461538461538461}],"net":[{"token":"api.muchq.com GET /iili/v1/r/* 302 browser","p":0.0005081885028630495},{"token":"<unk>","p":0.00048826332204043865}]}}"#
+        );
+        assert_eq!(
+            state.engine.lock().unwrap().state().seq,
+            2,
+            "asking is not an event"
+        );
+    }
+
+    #[tokio::test]
+    async fn next_refuses_a_bad_context_with_a_json_error() {
+        let state = fresh();
+        state.ingest(&redirect(1.0));
+        let refused = |body: &'static str| post_json(app(Arc::clone(&state)), NEXT_PATH, body);
+        let response = refused(r#"{"context":["api.muchq.com GET /nope 200 browser"]}"#).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+        assert_eq!(
+            body_text(response).await,
+            r#"{"error":"unknown token \"api.muchq.com GET /nope 200 browser\""}"#
+        );
+        let response = refused(r#"{"context":[]}"#).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body_text(response).await,
+            r#"{"error":"context has 0 tokens; 1 to 8 are allowed"}"#
+        );
+        let response = refused(r#"{"context":["<bos>","<bos>","<bos>","<bos>","<bos>","<bos>","<bos>","<bos>","<bos>"]}"#).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            body_text(response).await,
+            r#"{"error":"context has 9 tokens; 1 to 8 are allowed"}"#
+        );
+        let response = refused(r#"{"context":"not a list"}"#).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "application/json");
+        assert!(body_text(response).await.starts_with(r#"{"error":""#));
     }
 
     #[tokio::test]
@@ -281,7 +392,7 @@ mod tests {
         let view = body_text(json(app(state), STATE_PATH).await).await;
         assert_eq!(
             view,
-            r#"{"seq":2,"step":1,"vocab_size":3,"vocab_cap":2048,"warmup_needed":1000,"ewma_loss":{"bigram":1.0986122886681098,"net":null},"threshold":null,"anomalies":0,"novelties":1}"#
+            r#"{"seq":2,"step":1,"vocab_size":3,"vocab_cap":2048,"warmup_needed":1000,"ewma_loss":{"bigram":1.0986122886681098,"net":7.604647636413574},"threshold":null,"anomalies":0,"novelties":1}"#
         );
     }
 
