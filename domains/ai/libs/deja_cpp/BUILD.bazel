@@ -47,6 +47,7 @@ cc_test(
     srcs = ["client_test.cc"],
     deps = [
         ":client",
+        ":deja_smithy_client",
         "@googletest//:gtest_main",
         "@opal_cpp//runtime:client",
         "@opal_cpp//runtime:core",
