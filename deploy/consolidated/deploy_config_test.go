@@ -2766,7 +2766,7 @@ func TestTheRetentionDepthIsDeclaredWithTheOtherSettings(t *testing.T) {
 	if err != nil || depth < 1 {
 		t.Fatalf("retention depth %q keeps nothing; every rollback becomes a pull", decl[1])
 	}
-	if !strings.Contains(deploy, `"KEEP=$KEEP_PER_SERVICE bash -s"`) {
+	if !regexp.MustCompile(`ssh "\$HOST" "KEEP=\$KEEP_PER_SERVICE[^"]*bash -s"`).MatchString(deploy) {
 		t.Error("the prune is not handed $KEEP_PER_SERVICE, so the declared depth and" +
 			" DEPLOY_KEEP are both inert and the applied depth is whatever is inlined")
 	}

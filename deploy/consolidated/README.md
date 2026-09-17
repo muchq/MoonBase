@@ -178,6 +178,11 @@ reliable — every per-commit tag stays in the registry. `DEPLOY_KEEP=5
 ./deploy/consolidated/deploy.sh ...` keeps more if you want deeper instant
 rollbacks; the cost is disk.
 
+Which images those are is recorded in `~/.image-keep` on the host, written by
+each deploy. The image store cannot answer it: `oci_image` stamps no `created`,
+so every per-SHA tag of a service carries its base image's timestamp and they
+all tie.
+
 Note this rolls back **images only**. Config — `compose.yaml`, the `Caddyfile`,
 and `o11y/*` — is always copied from your working tree,
 so it stays at whatever you have checked out. Deploy from a clean checkout of
