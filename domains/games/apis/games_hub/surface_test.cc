@@ -20,6 +20,18 @@ std::string Settled(const Surface& surface, std::vector<double> position) {
   return problem.has_value() ? *problem : "<settled>";
 }
 
+// Where a surface places a position, rendered so NaN compares equal to
+// itself: two surfaces that place a malformed position identically must
+// read as agreeing, and `==` on doubles says they do not.
+std::string Placed(const Surface& surface, const std::vector<double>& position) {
+  std::string rendered;
+  for (const double component : surface.Place(position)) {
+    rendered += std::isnan(component) ? "nan" : std::to_string(component);
+    rendered += ",";
+  }
+  return rendered;
+}
+
 TEST(Surface, ThePlaneKeepsTheLobbysOriginalRules) {
   const Surface plane = Surface::Plane();
   EXPECT_EQ(Settled(plane, {10, 0, -5}), "<settled>");
@@ -98,7 +110,7 @@ TEST(Surface, TheGlasshouseFloorIsThePlanesAndTheGlassIsNotStandable) {
         std::vector<double>{10, 1, -5}, std::vector<double>{-50, 0, 50},
         std::vector<double>{std::nan(""), 0, 0}}) {
     EXPECT_EQ(Settled(glass, at), Settled(plane, at));
-    EXPECT_EQ(glass.Place(at), plane.Place(at));
+    EXPECT_EQ(Placed(glass, at), Placed(plane, at));
   }
   EXPECT_EQ(Settled(glass, {10, 0}), "position must be [x, y, z]");
   // Standing halfway up the glass is standing on nothing.
