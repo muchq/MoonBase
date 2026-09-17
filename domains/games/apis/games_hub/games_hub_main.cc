@@ -21,6 +21,7 @@
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
+#include "domains/ai/libs/deja_cpp/production_client.h"
 #include "domains/games/apis/games_hub/games_hub_handler.h"
 #include "domains/games/apis/games_hub/golf_hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
@@ -134,6 +135,26 @@ int main() {
         },
         [&golf](const std::string& channel) { golf->OnChannelActive(channel); });
     golf->AttachListener(listener.get());
+  }
+
+  // deja's tape on the glasshouse walls (#1554, #1150). DEJA_URL names
+  // deja on the app network; unset, glasshouses simply have blank walls.
+  // The poll thread only reaches the network while somebody is standing
+  // in one, so this costs nothing on an idle instance.
+  const char* deja_url = std::getenv("DEJA_URL");
+  if (deja_url != nullptr && *deja_url != '\0') {
+    auto tape = deja::CreateProductionClient(deja_url);
+    if (!tape.ok()) {
+      LOG(ERROR) << "Failed to build the deja client: " << tape.error().message();
+      return 1;
+    }
+    // std::move(*tape), not *std::move(tape): Outcome has no rvalue
+    // operator*, so the latter binds the const& overload and copies — and
+    // deja::Client is move-only.
+    golf->StartTapePolling(std::make_shared<deja::Client>(std::move(*tape)));
+    LOG(INFO) << "Tape: polling deja at " << deja_url;
+  } else {
+    LOG(INFO) << "Tape: off (DEJA_URL unset; glasshouse walls stay blank)";
   }
 
   // Block shutdown signals before the transport spawns its thread pool.

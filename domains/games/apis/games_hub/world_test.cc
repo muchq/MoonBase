@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -304,6 +305,159 @@ TEST(World, GeometryAndSurfaceSpellEachOther) {
   tiny.radius = 1;
   const auto refused = SurfaceFromGeometry(moonbase::games::Geometry::FromSphere(std::move(tiny)));
   EXPECT_EQ(refused.status().message(), "sphere radius must be within 2..1000");
+
+  const auto glass = SurfaceFromGeometry(GeometryOf(Surface::Glasshouse()));
+  ASSERT_TRUE(glass.ok());
+  EXPECT_EQ(*glass, Surface::Glasshouse());
+  // A glasshouse is not a plane on the wire either, or a room that asked
+  // for glass would come back flat.
+  EXPECT_NE(GeometryOf(Surface::Glasshouse()).as_glasshouse_or_null(), nullptr);
+  EXPECT_EQ(GeometryOf(Surface::Glasshouse()).as_plane_or_null(), nullptr);
+  EXPECT_EQ(GeometryOf(Surface::Plane()).as_glasshouse_or_null(), nullptr);
+}
+
+// The gate on deja's tape (#1554): standing in a glasshouse is what makes
+// the hub poll at all, and nothing else does.
+TEST(World, OnlyAGlasshouseOccupantOpensTheTape) {
+  World world;
+  World::Deliveries out;
+  world.SetSurface("FLAT", Surface::Plane());
+  world.SetSurface("ROUND", Surface::Sphere(53));
+  world.SetSurface("GLASS", Surface::Glasshouse());
+
+  // Glass with nobody in it is still no reason to ask deja anything.
+  EXPECT_FALSE(world.AnyoneInAGlasshouse());
+  ASSERT_FALSE(world.Join("alice", "FLAT", FixtureJoin(), out).has_value());
+  ASSERT_FALSE(world.Join("bob", "ROUND", Join({0, 0, -53}, {1, 0, 0}, 0), out).has_value());
+  EXPECT_FALSE(world.AnyoneInAGlasshouse()) << "a plane and a sphere have no glass between them";
+
+  // The first joiner opens it, and the last leaver closes it.
+  ASSERT_FALSE(world.Join("carol", "GLASS", FixtureJoin(), out).has_value());
+  EXPECT_TRUE(world.AnyoneInAGlasshouse());
+  ASSERT_FALSE(world.Join("dave", "GLASS", Join({0, 0, 0}, {0, 1, 0}, 1), out).has_value());
+  EXPECT_TRUE(world.Leave("carol", out));
+  EXPECT_TRUE(world.AnyoneInAGlasshouse()) << "dave is still standing in it";
+  EXPECT_TRUE(world.Leave("dave", out));
+  EXPECT_FALSE(world.AnyoneInAGlasshouse());
+
+  // Reshaping the room alice stands in opens it under her, with no join.
+  world.Reshape("FLAT", Surface::Glasshouse(), out);
+  EXPECT_TRUE(world.AnyoneInAGlasshouse());
+  world.Reshape("FLAT", Surface::Plane(), out);
+  EXPECT_FALSE(world.AnyoneInAGlasshouse());
+}
+
+// A splat is the world's, not a player's: everyone standing on glass gets
+// it, with no actor to skip, and nobody on a plane or a sphere hears it.
+TEST(World, SplatsReachEveryGlasshouseAndNowhereElse) {
+  World world;
+  World::Deliveries out;
+  world.SetSurface("FLAT", Surface::Plane());
+  world.SetSurface("GLASS", Surface::Glasshouse());
+  world.SetSurface("ATRIUM", Surface::Glasshouse());
+  ASSERT_FALSE(world.Join("alice", "FLAT", FixtureJoin(), out).has_value());
+  ASSERT_FALSE(world.Join("bob", "GLASS", FixtureJoin(), out).has_value());
+  ASSERT_FALSE(world.Join("carol", "GLASS", Join({0, 0, 0}, {0, 1, 0}, 1), out).has_value());
+  ASSERT_FALSE(world.Join("dave", "ATRIUM", FixtureJoin(), out).has_value());
+  out.clear();
+
+  moonbase::games::TapeSplat splat;
+  splat.seq = 42;
+  splat.wall = 1;
+  splat.actual = "muchq.com GET / 200 browser";
+  splat.verdict = "expected";
+  world.Splat(splat, out);
+
+  EXPECT_EQ(Staged(out), (std::vector<std::string>{"bob:tape", "carol:tape", "dave:tape"}));
+  const auto* fanned = out.at(0).update.as_tape_or_null();
+  ASSERT_NE(fanned, nullptr);
+  EXPECT_EQ(fanned->seq, 42);
+  EXPECT_EQ(fanned->wall, 1);
+  EXPECT_EQ(fanned->actual, "muchq.com GET / 200 browser");
+}
+
+// A joiner walks into a wall that already has something on it, bounded at
+// kTapeMemory and oldest first; a joiner to a plane gets no tape at all.
+TEST(World, AJoinerIsHandedTheGlassAsItStands) {
+  World world;
+  World::Deliveries out;
+  world.SetSurface("GLASS", Surface::Glasshouse());
+  world.SetSurface("FLAT", Surface::Plane());
+  ASSERT_FALSE(world.Join("alice", "GLASS", FixtureJoin(), out).has_value());
+  out.clear();
+
+  // Nothing on the glass yet: the member is absent, not an empty list.
+  ASSERT_FALSE(world.Join("early", "GLASS", FixtureJoin(), out).has_value());
+  EXPECT_FALSE(out.at(0).update.as_worldState_or_null()->tape.has_value());
+  ASSERT_TRUE(world.Leave("early", out));
+  out.clear();
+
+  const std::size_t splatted = World::kTapeMemory + 5;
+  for (std::size_t i = 1; i <= splatted; ++i) {
+    moonbase::games::TapeSplat splat;
+    splat.seq = static_cast<std::int64_t>(i);
+    world.Splat(splat, out);
+  }
+  out.clear();
+
+  ASSERT_FALSE(world.Join("bob", "GLASS", FixtureJoin(), out).has_value());
+  const auto* glass = out.at(0).update.as_worldState_or_null();
+  ASSERT_NE(glass, nullptr);
+  ASSERT_TRUE(glass->tape.has_value());
+  ASSERT_EQ(glass->tape->size(), World::kTapeMemory);
+  // Oldest first, and the oldest is the newest minus the ring.
+  EXPECT_EQ(glass->tape->front().seq, static_cast<std::int64_t>(splatted - World::kTapeMemory + 1));
+  EXPECT_EQ(glass->tape->back().seq, static_cast<std::int64_t>(splatted));
+  out.clear();
+
+  // The plane has no glass to hand anyone, however much tape has run.
+  ASSERT_FALSE(world.Join("carol", "FLAT", FixtureJoin(), out).has_value());
+  EXPECT_FALSE(out.at(0).update.as_worldState_or_null()->tape.has_value());
+}
+
+// A room that becomes a glasshouse fills its walls for the people already
+// standing in it, not only for whoever joins next — otherwise the member
+// who reshaped sees blank glass while the next arrival sees a full wall.
+TEST(World, ReshapingOntoGlassHandsTheTapeToWhoeverIsAlreadyStanding) {
+  World world;
+  World::Deliveries out;
+  world.SetSurface("GLASS", Surface::Glasshouse());
+  ASSERT_FALSE(world.Join("watcher", "GLASS", FixtureJoin(), out).has_value());
+  ASSERT_FALSE(world.Join("alice", World::kPlaza, FixtureJoin(), out).has_value());
+  for (std::size_t i = 1; i <= 3; ++i) {
+    moonbase::games::TapeSplat splat;
+    splat.seq = static_cast<std::int64_t>(i);
+    world.Splat(splat, out);
+  }
+  out.clear();
+
+  world.Reshape(World::kPlaza, Surface::Glasshouse(), out);
+
+  ASSERT_EQ(out.size(), 1u);
+  const auto* changed = out.at(0).update.as_geometryChanged_or_null();
+  ASSERT_NE(changed, nullptr);
+  ASSERT_NE(changed->geometry.as_glasshouse_or_null(), nullptr);
+  ASSERT_TRUE(changed->tape.has_value());
+  ASSERT_EQ(changed->tape->size(), 3u);
+  EXPECT_EQ(changed->tape->front().seq, 1);
+  EXPECT_EQ(changed->tape->back().seq, 3);
+  // And it is the same wall a joiner would be handed a moment later.
+  out.clear();
+  ASSERT_FALSE(world.Join("bob", World::kPlaza, FixtureJoin(), out).has_value());
+  const auto* snapshot = out.at(0).update.as_worldState_or_null();
+  ASSERT_TRUE(snapshot->tape.has_value());
+  EXPECT_EQ(snapshot->tape->size(), changed->tape->size());
+  EXPECT_EQ(snapshot->tape->back().seq, changed->tape->back().seq);
+  out.clear();
+
+  // Reshaping onto a surface with no glass hands over nothing.
+  world.Reshape(World::kPlaza, Surface::Sphere(53), out);
+  ASSERT_FALSE(out.empty());
+  EXPECT_FALSE(out.at(0).update.as_geometryChanged_or_null()->tape.has_value());
+  out.clear();
+  world.Reshape("GLASS", Surface::Plane(), out);
+  ASSERT_FALSE(out.empty());
+  EXPECT_FALSE(out.at(0).update.as_geometryChanged_or_null()->tape.has_value());
 }
 
 }  // namespace

@@ -46,11 +46,12 @@ pub const STREAM_LIFETIME: Duration = Duration::from_secs(10 * 60);
 /// the ring holds, so the reconnect through `recent?after=` closes the gap.
 const STREAM_BACKLOG: usize = 64;
 
-/// Sustained requests per second and burst, per peer address. The peer
-/// is Caddy, so this is one bucket for every caller: the page, the hub's
-/// two-per-second `recent` poll, and anyone asking `next`, which is a
-/// forward pass under the engine's lock. Well above what those need and
-/// far below what a scraper would cost.
+/// Sustained requests per second and burst, per peer address. Everything
+/// arriving through Caddy shares one bucket, since Caddy is the peer: the
+/// page and anyone asking `next`, which is a forward pass under the
+/// engine's lock. games_hub reaches `recent` across the app network, so
+/// its poll is its own peer. Well above what those need and far below
+/// what a scraper would cost.
 const RATE_LIMIT: server_pal::RateLimit = server_pal::RateLimit {
     per_second: 20.0,
     burst: 40,

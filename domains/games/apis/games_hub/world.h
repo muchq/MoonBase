@@ -1,6 +1,8 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_WORLD_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_WORLD_H
 
+#include <cstddef>
+#include <deque>
 #include <map>
 #include <optional>
 #include <string>
@@ -26,7 +28,7 @@ namespace games_hub {
 /// every call.
 ///
 /// The rules match the muchq.com world UI's own, so retune them
-/// together: position settles on the room's Surface (the plane's [x, 0,
+/// together: position settles on the room's Surface (a flat one's [x, 0,
 /// z] within ±kHalfExtent, or a sphere's wall), color is three
 /// components in 0..1, shape is 0, 1 or 2. A command that breaks one is
 /// refused (kInvalid) and changes nothing, as is move/shape before join
@@ -63,6 +65,23 @@ class World {
   /// closed socket alike.
   bool Leave(const std::string& player_id, Deliveries& out);
 
+  /// Whether anyone is standing in a world whose surface is a glasshouse
+  /// (#1554). The gate on deja's tape and the whole of its cost: false
+  /// means the hub sends deja no HTTP at all, and the first joiner and
+  /// the last leaver are what flip it.
+  [[nodiscard]] bool AnyoneInAGlasshouse() const;
+
+  /// Stages one tape splat to everyone standing in a glasshouse — the
+  /// actor-less fan-out, since the event is the world's and nobody sent
+  /// it — and remembers it for the next joiner's worldState. Kept
+  /// whatever the worlds are doing, so a room that becomes a glasshouse
+  /// has something on its glass at once (Reshape hands it over).
+  void Splat(const moonbase::games::TapeSplat& splat, Deliveries& out);
+
+  /// How much of the tape a joiner is handed; see WorldState.tape in
+  /// lobby.smithy for why it is this and not deja's 200.
+  static constexpr std::size_t kTapeMemory = 32;
+
   /// The surface a room's world stands on; a room never told of is a
   /// plane, the plaza among them. Set when a room is created or adopted,
   /// forgotten when it is deleted.
@@ -70,7 +89,10 @@ class World {
   /// Changes a world's surface under whoever stands in it: each is placed
   /// at the nearest point of the new surface, and everyone in the world,
   /// the actor included, is staged one geometryChanged naming the
-  /// surface and every player where they now stand.
+  /// surface, every player where they now stand, and — when the new
+  /// surface has glass — what is already on it, so a room that becomes a
+  /// glasshouse fills its walls for the people already there rather than
+  /// only for whoever joins next.
   void Reshape(const std::string& room_id, const Surface& surface, Deliveries& out);
   void ForgetSurface(const std::string& room_id);
   Surface SurfaceOf(const std::string& room_id) const;
@@ -82,6 +104,9 @@ class World {
   };
   void FanOut(const std::string& room_id, const std::string& actor_id,
               const moonbase::games::LobbyUpdate& update, Deliveries& out) const;
+  /// The remembered tape, oldest first, or nullopt when there is none —
+  /// what both a joiner's worldState and a reshape onto glass carry.
+  std::optional<std::vector<moonbase::games::TapeSplat>> RememberedTape() const;
 
   /// Every joined player by id, with the room whose world they stand in.
   /// One map rather than one per world, so there is no world lifecycle
@@ -89,6 +114,11 @@ class World {
   /// room's — fine at the tens of players this hub sees.
   std::map<std::string, Standing> world_;
   std::map<std::string, Surface> surfaces_;
+  /// The last kTapeMemory splats, oldest first. One ring for the whole
+  /// hub rather than one per room: every glasshouse shows the same tape
+  /// on the same spots, so a per-room copy would hold identical events
+  /// and still leave a room that has just become glass with blank walls.
+  std::deque<moonbase::games::TapeSplat> tape_;
 };
 
 /// The wire's geometry as a Surface, validated; the refusal names why.

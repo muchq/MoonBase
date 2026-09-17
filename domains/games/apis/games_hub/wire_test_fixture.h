@@ -73,7 +73,7 @@ inline void ExpectOnlyDeclaredCounterSeriesOnTheWire(
     const futility::otel::CapturingMetricsRecorder& recorder) {
   const auto& declared = GolfHub::DeclaredCounterSeries();
   for (const auto& entry : recorder.Entries()) {
-    if (entry.name == "hub_sessions_active") {
+    if (entry.name == "hub_sessions_active" || entry.name == "lobby_tape_poller_active") {
       continue;  // the gauges
     }
     const bool found = std::any_of(declared.begin(), declared.end(), [&](const auto& series) {

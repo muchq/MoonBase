@@ -11,6 +11,11 @@ namespace games_hub {
 
 using nlohmann::json;
 
+namespace {
+constexpr char kStoredForm[] =
+    "geometry must be {\"plane\":{}}, {\"sphere\":{\"radius\":R}} or {\"glasshouse\":{}}";
+}  // namespace
+
 std::optional<std::string> Surface::RadiusProblem(double radius) {
   // NaN fails the comparison, so it is refused with the rest.
   if (!(radius >= kMinRadius) || !(radius <= kMaxRadius)) {
@@ -21,7 +26,7 @@ std::optional<std::string> Surface::RadiusProblem(double radius) {
 
 std::optional<std::string> Surface::Settle(std::vector<double>& position) const {
   if (position.size() != 3) return "position must be [x, y, z]";
-  if (kind == Kind::kPlane) {
+  if (is_flat()) {
     // NaN fails every comparison, so it is refused by the bounds checks
     // themselves rather than by a separate finiteness rule.
     if (!(position[1] == 0.0)) return "y must be 0";
@@ -41,7 +46,7 @@ std::optional<std::string> Surface::Settle(std::vector<double>& position) const 
 }
 
 std::vector<double> Surface::Place(const std::vector<double>& position) const {
-  if (kind == Kind::kPlane) {
+  if (is_flat()) {
     return {std::clamp(position[0], -kHalfExtent, kHalfExtent), 0.0,
             std::clamp(position[2], -kHalfExtent, kHalfExtent)};
   }
@@ -55,6 +60,8 @@ std::string SurfaceJson(const Surface& surface) {
   json out;
   if (surface.kind == Surface::Kind::kSphere) {
     out["sphere"] = {{"radius", surface.radius}};
+  } else if (surface.kind == Surface::Kind::kGlasshouse) {
+    out["glasshouse"] = json::object();
   } else {
     out["plane"] = json::object();
   }
@@ -64,15 +71,14 @@ std::string SurfaceJson(const Surface& surface) {
 absl::StatusOr<Surface> SurfaceFromJson(std::string_view text) {
   const json parsed = json::parse(text, /*cb=*/nullptr, /*allow_exceptions=*/false);
   if (!parsed.is_object() || parsed.size() != 1) {
-    return absl::InvalidArgumentError(
-        "geometry must be {\"plane\":{}} or {\"sphere\":{\"radius\":R}}");
+    return absl::InvalidArgumentError(kStoredForm);
   }
   if (parsed.contains("plane")) return Surface::Plane();
+  if (parsed.contains("glasshouse")) return Surface::Glasshouse();
   const auto sphere = parsed.find("sphere");
   if (sphere == parsed.end() || !sphere->is_object() || !sphere->contains("radius") ||
       !(*sphere)["radius"].is_number()) {
-    return absl::InvalidArgumentError(
-        "geometry must be {\"plane\":{}} or {\"sphere\":{\"radius\":R}}");
+    return absl::InvalidArgumentError(kStoredForm);
   }
   const double radius = (*sphere)["radius"].get<double>();
   if (const auto problem = Surface::RadiusProblem(radius)) {

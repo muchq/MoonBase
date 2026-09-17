@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "domains/ai/libs/deja_cpp/client.h"
 #include "domains/games/apis/games_hub/chat_store.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/hub_metrics.h"
@@ -223,6 +224,36 @@ class GolfHub final {
   /// Off-lock room reads a catch-up tries before it reads under the lock.
   static constexpr int kCatchUpReadAttempts = 3;
 
+  /// Wires deja's tape onto the glasshouse walls (#1554, #1150) and
+  /// starts polling for it. The hub is deja's second consumer and the
+  /// tape is world state it owns: it polls, dedupes, picks the splat
+  /// point, and fans out; no browser ever talks to deja. Call before
+  /// serving. The thread is PollTapeOnce on a one-to-two-second jittered
+  /// tick, and with no glasshouse occupied it reaches no network at all.
+  /// A second call changes nothing — the running thread reads the client
+  /// without a lock, so it is not swapped underneath.
+  void StartTapePolling(std::shared_ptr<deja::Client> tape);
+
+  /// The client without the thread, for tests that drive PollTapeOnce
+  /// themselves so no assertion waits on a clock.
+  void AttachTape(std::shared_ptr<deja::Client> tape);
+
+  /// One poll cycle. Returns whether deja was asked at all: false means
+  /// nobody is standing in a glasshouse, and not a byte left the process.
+  ///
+  /// Called from the poll thread, or from a test, but from exactly one at
+  /// a time — it owns tape_seq_ and the priming flag without a lock. mu_
+  /// is taken twice and held across neither the round trip nor the
+  /// decode, the same rule CatchUpRoom follows: deja slow, deja down, or
+  /// deja talking nonsense must not reach the hub's lock or a socket.
+  bool PollTapeOnce();
+
+  /// The tick between polls. deja scores roughly a request a second, so
+  /// this is "about as often as there is something to show"; the jitter
+  /// keeps a fleet of instances off a single second.
+  static constexpr std::chrono::milliseconds kTapePollMin{1000};
+  static constexpr std::chrono::milliseconds kTapePollMax{2000};
+
  private:
   struct Member {
     bool connected = true;
@@ -415,6 +446,8 @@ class GolfHub final {
   /// stale membership is what turns a share-link join into "room
   /// unavailable or already in a room" (muchq.github.io#260).
   void BootReaperMain();
+  /// The poll thread's body: PollTapeOnce on the jittered tick above.
+  void TapePollerMain();
   void Deliver(Outbox& outbox);
   /// Hands staged ops to the store's writer queue. Callers hold mu_ (see
   /// Writes above). Asynchronous — clients may be told before the row
@@ -552,6 +585,21 @@ class GolfHub final {
   std::condition_variable reaper_cv_;
   bool reaper_stop_ = false;
   std::thread boot_reaper_;
+
+  /// deja's tape (#1554). The client is set once before serving and read
+  /// without a lock thereafter. tape_seq_ (the newest seq fanned out) and
+  /// tape_priming_ (whether the next poll's events are dropped rather than
+  /// shown) belong to whoever calls PollTapeOnce and to nobody else;
+  /// tape_polling_ mirrors the gauge's level and moves under mu_, with the
+  /// occupancy it answers.
+  std::shared_ptr<deja::Client> tape_;
+  std::int64_t tape_seq_ = 0;
+  bool tape_priming_ = true;
+  bool tape_polling_ = false;
+  std::mutex tape_mu_;
+  std::condition_variable tape_cv_;
+  bool tape_stop_ = false;
+  std::thread tape_poller_;
 
   // Declared last: destroyed first, joining registry threads before the
   // maps its on_expired callback touches go away. (The boot reaper is

@@ -61,7 +61,8 @@ inline std::string SeriesLabel(const CounterSeries& series) {
 // The non-counter instruments the hub emits (the live-session gauge).
 // Entry carries no instrument kind, so they are named rather than filtered.
 inline const std::set<std::string>& NonCounterInstruments() {
-  static const auto* kNames = new std::set<std::string>{"hub_sessions_active"};
+  static const auto* kNames =
+      new std::set<std::string>{"hub_sessions_active", "lobby_tape_poller_active"};
   return *kNames;
 }
 

@@ -1,0 +1,82 @@
+load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# deja's tape, for C++ consumers (#1554, #1150). It lives beside the
+# service it speaks for rather than beside games_hub, its one consumer,
+# because the thing that rots is deja's own wire: the model and the pin
+# that guards it belong within sight of the Rust struct they mirror.
+# chess_com_cpp sits under the consumer's domain for the opposite reason —
+# nothing in this repo owns chess.com's API.
+smithy_cpp_client_library(
+    name = "deja_smithy_client",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/deja.smithy",
+    ],
+    namespace = "moonbase::deja",
+    service = "moonbase.deja#Deja",
+)
+
+cc_library(
+    name = "client",
+    srcs = ["client.cc"],
+    hdrs = ["client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":deja_smithy_client",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+    ],
+)
+
+cc_library(
+    name = "production_client",
+    srcs = ["production_client.cc"],
+    hdrs = ["production_client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
+cc_test(
+    name = "client_test",
+    size = "small",
+    srcs = ["client_test.cc"],
+    deps = [
+        ":client",
+        ":deja_smithy_client",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
+# The consumer-tier pin: deja's own recent fixture, byte for byte, through
+# the real generated client.
+cc_test(
+    name = "recent_wire_test",
+    size = "small",
+    srcs = ["recent_wire_test.cc"],
+    deps = [
+        ":client",
+        ":deja_smithy_client",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
+cc_test(
+    name = "production_client_test",
+    size = "small",
+    srcs = ["production_client_test.cc"],
+    deps = [
+        ":production_client",
+        "@googletest//:gtest_main",
+    ],
+)

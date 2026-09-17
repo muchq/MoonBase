@@ -14,5 +14,6 @@ Artificial Intelligence and Machine Learning libraries and services.
 
 ## Libraries
 
+- [**deja_cpp**](libs/deja_cpp): deja's tape for C++ consumers — a smithy model of `GET /deja/v1/recent`, a client on the opal-cpp transport, and a wire test pinning deja's own `recent` fixture byte for byte (#1554).
 - [**Neuro**](libs/neuro): A pure Go implementation of a deep neural network library suitable for training classification models on images, text, and audio data. Features support for various layer types, optimizers, and inference utilities.
 - [**microgpt**](libs/microgpt): A minimal GPT implementation in Rust using candle for tensor ops and BPE tokenization. Ported from [karpathy's microgpt.py](https://gist.github.com/aaylward/f9cfa5bff5aada3dcce46db0110eb34e) — the complete algorithm; everything else is just efficiency.

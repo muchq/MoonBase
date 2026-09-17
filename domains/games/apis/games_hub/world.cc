@@ -53,6 +53,7 @@ std::optional<World::Refusal> World::Join(const std::string& player_id, const st
   for (const auto& [id, other] : world_) {
     if (other.room_id == room_id) snapshot.players.push_back(other.player);
   }
+  if (surface.has_glass()) snapshot.tape = RememberedTape();
   out.push_back({player_id, LobbyUpdate::FromWorldstate(std::move(snapshot))});
   moonbase::games::PlayerJoined joined;
   joined.player = standing.player;
@@ -112,6 +113,27 @@ void World::FanOut(const std::string& room_id, const std::string& actor_id,
   }
 }
 
+bool World::AnyoneInAGlasshouse() const {
+  for (const auto& [id, standing] : world_) {
+    if (SurfaceOf(standing.room_id).has_glass()) return true;
+  }
+  return false;
+}
+
+void World::Splat(const moonbase::games::TapeSplat& splat, Deliveries& out) {
+  tape_.push_back(splat);
+  if (tape_.size() > kTapeMemory) tape_.pop_front();
+  const LobbyUpdate update = LobbyUpdate::FromTape(splat);
+  for (const auto& [id, standing] : world_) {
+    if (SurfaceOf(standing.room_id).has_glass()) out.push_back({id, update});
+  }
+}
+
+std::optional<std::vector<moonbase::games::TapeSplat>> World::RememberedTape() const {
+  if (tape_.empty()) return std::nullopt;
+  return std::vector<moonbase::games::TapeSplat>(tape_.begin(), tape_.end());
+}
+
 void World::SetSurface(const std::string& room_id, const Surface& surface) {
   surfaces_[room_id] = surface;
 }
@@ -120,6 +142,7 @@ void World::Reshape(const std::string& room_id, const Surface& surface, Deliveri
   SetSurface(room_id, surface);
   moonbase::games::GeometryChanged changed;
   changed.geometry = GeometryOf(surface);
+  if (surface.has_glass()) changed.tape = RememberedTape();
   for (auto& [id, standing] : world_) {
     if (standing.room_id != room_id) continue;
     standing.player.position = surface.Place(standing.player.position);
@@ -140,20 +163,27 @@ Surface World::SurfaceOf(const std::string& room_id) const {
 
 absl::StatusOr<Surface> SurfaceFromGeometry(const moonbase::games::Geometry& geometry) {
   if (geometry.as_plane_or_null() != nullptr) return Surface::Plane();
+  if (geometry.as_glasshouse_or_null() != nullptr) return Surface::Glasshouse();
   if (const auto* sphere = geometry.as_sphere_or_null()) {
     if (const auto problem = Surface::RadiusProblem(sphere->radius)) {
       return absl::InvalidArgumentError(*problem);
     }
     return Surface::Sphere(sphere->radius);
   }
-  return absl::InvalidArgumentError("geometry must be plane or sphere");
+  return absl::InvalidArgumentError("geometry must be plane, sphere or glasshouse");
 }
 
 moonbase::games::Geometry GeometryOf(const Surface& surface) {
-  if (surface.kind == Surface::Kind::kSphere) {
-    moonbase::games::SphereGeometry sphere;
-    sphere.radius = surface.radius;
-    return moonbase::games::Geometry::FromSphere(std::move(sphere));
+  switch (surface.kind) {
+    case Surface::Kind::kSphere: {
+      moonbase::games::SphereGeometry sphere;
+      sphere.radius = surface.radius;
+      return moonbase::games::Geometry::FromSphere(std::move(sphere));
+    }
+    case Surface::Kind::kGlasshouse:
+      return moonbase::games::Geometry::FromGlasshouse(moonbase::games::GlasshouseGeometry{});
+    case Surface::Kind::kPlane:
+      break;
   }
   return moonbase::games::Geometry::FromPlane(moonbase::games::PlaneGeometry{});
 }
