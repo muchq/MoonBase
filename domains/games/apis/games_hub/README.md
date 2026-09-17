@@ -91,6 +91,12 @@ The round trip never happens under `mu_`, one attempt with a two-second
 deadline, and deja being down, slow or wrong costs a counted poll and
 nothing else. `DEJA_URL` unset leaves the walls blank.
 
+The ring lives in the process, like the rest of the world. Live fan-out
+agrees across instances because the placement follows from `seq`, but two
+instances that started polling at different times hold different last-32
+windows, so what a joiner finds already on the glass depends on which one
+answered them. A wall is a mood rather than a log, so that is left alone.
+
 Hosted by `GolfHub` (`golf_hub.cc`) as the room stream's `lobby` member,
 the world is the session's: its room's, or the plaza's — the well-known
 room `plaza` — while unroomed; a `roomId` on `join` can only agree with

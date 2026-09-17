@@ -21,8 +21,10 @@ inline constexpr std::int32_t kGlassWalls = 4;
 
 /// Where `seq` splats. A pure function of deja's sequence number and
 /// nothing else, because that number is the only thing every hub instance
-/// and every client in the room already agrees on — so they all put the
-/// same event on the same spot without the placement riding the wire.
+/// already agrees on: two instances polling deja separately place the
+/// same event on the same spot, so a player sees one wall whichever
+/// instance they are on. The answer rides the wire in `TapeSplat`; the
+/// client draws what it is handed rather than recomputing this.
 Splat SplatFor(std::int64_t seq);
 
 }  // namespace games_hub
