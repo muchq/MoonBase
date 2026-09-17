@@ -2638,3 +2638,114 @@ func TestPostgresSuitesStillRunInCI(t *testing.T) {
 		}
 	}
 }
+
+// Image retention on the deploy host.
+//
+// compose pins image tags from ~/.env, so a deploy leaves its predecessor
+// resident and referenced by nothing. deploy.sh reaps them with `docker image
+// prune -af`, which keeps only what a container holds — stopped containers
+// included. Nothing is kept for a fast rollback; the tags are all still in
+// ghcr.
+//
+// Whether the prune reports honestly is behaviour, and it runs on the host —
+// scripts/test-deploy exercises it. What is pinned here is about the file.
+
+// `docker image prune` takes images. The three spellings that would take more
+// are one word away, and the postgres data is a local volume.
+func TestTheDeployScriptsNeverPruneVolumes(t *testing.T) {
+	for _, name := range []string{"deploy.sh", "local_deploy.sh", "initialize_host.sh"} {
+		script := readConfig(t, name)
+		for _, banned := range []string{"--volumes", "system prune", "volume prune"} {
+			if strings.Contains(script, banned) {
+				t.Errorf("%s contains %q: that reaches past images, and a prune that takes"+
+					" the postgres volume reports only the space it freed", name, banned)
+			}
+		}
+	}
+}
+
+// dockerd answers `docker image prune --filter reference=...` with
+// `invalid filter 'reference'`: the filter is valid for `docker images` and not
+// for the prune. Written that way the prune does not run at all, and the deploy
+// carrying it still exits 0. Continuations are joined first — the scripts wrap
+// their docker invocations, so a line-scoped check would miss the split form.
+func TestImagePruneIsNotFilteredByReference(t *testing.T) {
+	joiner := regexp.MustCompile(`\\\n\s*`)
+	for _, name := range []string{"deploy.sh", "local_deploy.sh", "initialize_host.sh"} {
+		for _, line := range strings.Split(joiner.ReplaceAllString(readConfig(t, name), " "), "\n") {
+			if strings.Contains(line, "image prune") && strings.Contains(line, "reference") {
+				t.Errorf("%s filters `image prune` by reference; dockerd rejects that filter"+
+					" as invalid and prunes nothing", name)
+			}
+		}
+	}
+}
+
+// The prune is cleanup, not deployment: it runs after the stack is already
+// serving, so its failure must not decide the deploy's exit status. deploy.sh
+// runs under `set -e`, which makes the fallback on that line the whole guard —
+// and a fallback that exits is not one.
+func TestThePruneFailureIsNotFatalToTheDeploy(t *testing.T) {
+	var line string
+	for _, l := range strings.Split(readConfig(t, "deploy.sh"), "\n") {
+		if strings.Contains(l, "image prune") && strings.HasPrefix(strings.TrimSpace(l), "ssh ") {
+			line = strings.TrimSpace(l)
+			break
+		}
+	}
+	if line == "" {
+		t.Fatal("deploy.sh runs no prune over ssh; this guard has lost its anchor")
+	}
+	if !strings.Contains(line, "||") {
+		t.Errorf("the prune is unguarded (%q): under `set -e` a failed cleanup aborts the"+
+			" script after the stack is serving, and a good deploy reports as failed", line)
+	}
+	if strings.Contains(line, "|| exit") {
+		t.Errorf("the prune's fallback exits (%q), which is the failure it is supposed to"+
+			" absorb", line)
+	}
+}
+
+// Ordering, on the commands rather than the prose about them: the comment above
+// the prune names it too, and a guard that reads that is satisfied by a
+// paragraph.
+func TestThePruneRunsAfterTheStackIsUp(t *testing.T) {
+	var code []string
+	for _, line := range strings.Split(readConfig(t, "deploy.sh"), "\n") {
+		if trimmed := strings.TrimSpace(line); !strings.HasPrefix(trimmed, "#") {
+			code = append(code, line)
+		}
+	}
+	deploy := strings.Join(code, "\n")
+	prune := strings.Index(deploy, "image prune")
+	if prune < 0 {
+		t.Fatal("deploy.sh removes no images: every deploy leaves the previous per-SHA" +
+			" image resident, referenced by nothing")
+	}
+	if up := strings.LastIndex(deploy, "up -d"); up < 0 {
+		t.Fatal("deploy.sh no longer brings the stack up with `up -d`; this guard has lost its anchor")
+	} else if prune < up {
+		t.Error("deploy.sh prunes before `up -d`: a deploy that fails to come up has already" +
+			" discarded what it would have rolled back to")
+	}
+}
+
+// The remote block is a script on bash's stdin, which exits with the status of
+// its last command — the Caddy reload. Without `set -e` a failed `compose up`
+// leaves ssh at 0, the outer `set -e` never fires, and both the prune and the
+// completion message run over a stack that did not come up.
+func TestTheRemoteDeployBlockStopsAtTheFirstFailure(t *testing.T) {
+	deploy := readConfig(t, "deploy.sh")
+	open := strings.Index(deploy, `ssh "$HOST" << EOF`)
+	if open < 0 {
+		t.Fatal("deploy.sh no longer opens the remote block with an EOF heredoc")
+	}
+	body := deploy[open:]
+	if end := strings.Index(body, "\nEOF\n"); end >= 0 {
+		body = body[:end]
+	}
+	if !regexp.MustCompile(`(?m)^\s*set -e\s*$`).MatchString(body) {
+		t.Error("the remote deploy block does not `set -e`, so a failed compose step still" +
+			" exits 0 and the deploy reports success over a stack that is not serving")
+	}
+}

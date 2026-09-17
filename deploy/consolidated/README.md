@@ -101,6 +101,7 @@ Add `-y` to skip the confirmation. The deploy itself will:
 3. Copy observability configuration
 4. Pull the images for that commit
 5. Restart the affected services
+6. Reap every image no container holds
 
 ### Deploying one service
 
@@ -169,6 +170,12 @@ Deploy an earlier commit — pick one with `--list`, then:
 ```
 
 The whole stack moves together rather than leaving a hand-edited pin behind.
+
+The host keeps no images beyond what its containers are running, so `--sha`
+pulls the older image from ghcr rather than restarting one already on disk.
+That is slower but no less reliable — every per-commit tag stays in the
+registry. Keeping a few back for faster rollbacks is a change worth making
+when something actually needs the speed.
 
 Note this rolls back **images only**. Config — `compose.yaml`, the `Caddyfile`,
 and `o11y/*` — is always copied from your working tree,

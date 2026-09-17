@@ -482,6 +482,8 @@ fi
 # Pull images and restart services
 echo "Pulling images and restarting services..."
 ssh "$HOST" << EOF
+  set -e
+
   # Set up Forgejo config directory
   sudo mkdir -p /etc/forgejo
   sudo cp ~/forgejo-app.ini /etc/forgejo/app.ini
@@ -529,5 +531,17 @@ ssh "$HOST" << EOF
   # listens only on 127.0.0.1:2019, so the default localhost reload is refused.
   sudo -E docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --address 127.0.0.1:2019
 EOF
+
+# Reap images no container holds, once the new stack is serving. `docker image
+# prune` already computes exactly that set, counting stopped containers as
+# holders, so there is nothing here to hand-roll.
+#
+# -a, not the default: dangling images are not what accumulates. Every deploy
+# leaves a fully tagged predecessor behind, and without -a none of them go.
+#
+# Nothing is kept for a fast rollback. Every per-commit tag is still in ghcr,
+# so `--sha` pulls one back; the trade is a slower rollback for a host that
+# does not grow, and it holds until something needs the speed.
+ssh "$HOST" 'sudo docker image prune -af' || echo "warning: image prune failed; the deploy is unaffected" >&2
 
 echo "Deployment complete! $target_desc running $short_sha"

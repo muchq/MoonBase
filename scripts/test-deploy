@@ -575,6 +575,59 @@ check "rejects an unknown commit" test $? -ne 0
 deploy --bogus
 check "rejects an unknown flag" test $? -ne 0
 
+# ---------------------------------------------------------------- retention
+# The prune runs on the host through its own ssh, so its failure handling is
+# the part worth exercising: a cleanup that cannot reach the daemon must not
+# report success, and must not fail a deploy that is already serving.
+echo "image retention"
+
+PRUNE_BIN=$WORK/prunebin
+PRUNE_LOG=$WORK/prune_docker.log
+mkdir -p "$PRUNE_BIN"
+
+cat > "$PRUNE_BIN/sudo" <<'STUB'
+#!/bin/bash
+exec "$@"
+STUB
+cat > "$PRUNE_BIN/docker" <<'STUB'
+#!/bin/bash
+echo "docker $*" >> "$PRUNE_LOG"
+if [ -n "${PRUNE_DOCKER_FAILS:-}" ]; then
+  echo "Cannot connect to the Docker daemon" >&2
+  exit 1
+fi
+echo "Total reclaimed space: 1.2GB"
+exit 0
+STUB
+chmod +x "$PRUNE_BIN/sudo" "$PRUNE_BIN/docker"
+
+# The prune line as deploy.sh runs it, with ssh reduced to "run it here".
+run_prune() {
+  : > "$PRUNE_LOG"
+  local line
+  line=$(grep -n "docker image prune" "$REPO/deploy/consolidated/deploy.sh" | head -1 | cut -d: -f2-)
+  HOST=ignored PATH="$PRUNE_BIN:$PATH" PRUNE_LOG="$PRUNE_LOG" \
+    PRUNE_DOCKER_FAILS="${PRUNE_DOCKER_FAILS:-}" \
+    bash -c "ssh() { shift; bash -c \"\$*\"; }; $line" > "$WORK/prune.out" 2>&1
+}
+
+run_prune
+check "exits 0 when the prune succeeds" test $? -eq 0
+check "prunes images rather than anything wider" \
+  grep -q "docker image prune" "$PRUNE_LOG"
+# Without -a only dangling images go, and dangling is not what accumulates:
+# every deploy leaves a fully tagged predecessor behind.
+check "asks for every unused image, not just dangling ones" \
+  grep -qE -- "docker image prune .*(-[a-z]*a|--all)" "$PRUNE_LOG"
+check "never reaches volumes" \
+  bash -c '! grep -qE -- "--volumes|system prune|volume prune" "$0"' "$PRUNE_LOG"
+
+PRUNE_DOCKER_FAILS=1 run_prune
+check "does not fail the deploy when the daemon is unreachable" test $? -eq 0
+check "says so rather than reporting a silent success" \
+  grep -q "warning: image prune failed" "$WORK/prune.out"
+PRUNE_DOCKER_FAILS=
+
 echo
 if [ "$FAILURES" -eq 0 ]; then
   echo "all deploy.sh checks passed"
