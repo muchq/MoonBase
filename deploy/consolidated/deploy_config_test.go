@@ -2642,18 +2642,16 @@ func TestPostgresSuitesStillRunInCI(t *testing.T) {
 // Image retention on the deploy host.
 //
 // compose pins image tags from ~/.env, so a deploy leaves its predecessor
-// resident and referenced by nothing. deploy.sh reaps them, keeping a fixed
-// depth per service.
+// resident and referenced by nothing. deploy.sh reaps them with `docker image
+// prune -af`, which keeps only what a container holds — stopped containers
+// included. Nothing is kept for a fast rollback; the tags are all still in
+// ghcr.
 //
-// What the prune actually selects is behaviour, and it lives in a quoted
-// heredoc that no Go string scan and no `bash -n` can reach — scripts/test-deploy
-// executes it against a stub image store, and that is where the depth, the
-// in-use subtraction, the registry scoping and the error propagation are
-// pinned. What is left here are the properties that are about the file rather
-// than the run.
+// Whether the prune reports honestly is behaviour, and it runs on the host —
+// scripts/test-deploy exercises it. What is pinned here is about the file.
 
-// `docker rmi` takes images. The three spellings that would take more are all
-// one word away, and the postgres data is a local volume.
+// `docker image prune` takes images. The three spellings that would take more
+// are one word away, and the postgres data is a local volume.
 func TestTheDeployScriptsNeverPruneVolumes(t *testing.T) {
 	for _, name := range []string{"deploy.sh", "local_deploy.sh", "initialize_host.sh"} {
 		script := readConfig(t, name)
@@ -2685,31 +2683,31 @@ func TestImagePruneIsNotFilteredByReference(t *testing.T) {
 
 // The prune is cleanup, not deployment: it runs after the stack is already
 // serving, so its failure must not decide the deploy's exit status. deploy.sh
-// runs under `set -e`, which makes the fallback on the opening line the whole
-// guard — and a fallback that exits is not one.
+// runs under `set -e`, which makes the fallback on that line the whole guard —
+// and a fallback that exits is not one.
 func TestThePruneFailureIsNotFatalToTheDeploy(t *testing.T) {
-	var opener string
-	for _, line := range strings.Split(readConfig(t, "deploy.sh"), "\n") {
-		if strings.Contains(line, "<< 'PRUNE'") {
-			opener = strings.TrimSpace(line)
+	var line string
+	for _, l := range strings.Split(readConfig(t, "deploy.sh"), "\n") {
+		if strings.Contains(l, "image prune") && strings.HasPrefix(strings.TrimSpace(l), "ssh ") {
+			line = strings.TrimSpace(l)
 			break
 		}
 	}
-	if opener == "" {
-		t.Fatal("deploy.sh opens no PRUNE block; this guard has lost its anchor")
+	if line == "" {
+		t.Fatal("deploy.sh runs no prune over ssh; this guard has lost its anchor")
 	}
-	if !strings.Contains(opener, "||") {
+	if !strings.Contains(line, "||") {
 		t.Errorf("the prune is unguarded (%q): under `set -e` a failed cleanup aborts the"+
-			" script after the stack is serving, and a good deploy reports as failed", opener)
+			" script after the stack is serving, and a good deploy reports as failed", line)
 	}
-	if strings.Contains(opener, "exit") {
+	if strings.Contains(line, "|| exit") {
 		t.Errorf("the prune's fallback exits (%q), which is the failure it is supposed to"+
-			" absorb", opener)
+			" absorb", line)
 	}
 }
 
 // Ordering, on the commands rather than the prose about them: the comment above
-// the block names `docker rmi` too, and a guard that reads it is satisfied by a
+// the prune names it too, and a guard that reads that is satisfied by a
 // paragraph.
 func TestThePruneRunsAfterTheStackIsUp(t *testing.T) {
 	var code []string
@@ -2719,7 +2717,7 @@ func TestThePruneRunsAfterTheStackIsUp(t *testing.T) {
 		}
 	}
 	deploy := strings.Join(code, "\n")
-	prune := strings.Index(deploy, "docker rmi")
+	prune := strings.Index(deploy, "image prune")
 	if prune < 0 {
 		t.Fatal("deploy.sh removes no images: every deploy leaves the previous per-SHA" +
 			" image resident, referenced by nothing")
@@ -2749,28 +2747,5 @@ func TestTheRemoteDeployBlockStopsAtTheFirstFailure(t *testing.T) {
 	if !regexp.MustCompile(`(?m)^\s*set -e\s*$`).MatchString(body) {
 		t.Error("the remote deploy block does not `set -e`, so a failed compose step still" +
 			" exits 0 and the deploy reports success over a stack that is not serving")
-	}
-}
-
-// The retention depth follows the LIST_SCAN idiom: declared at the top with the
-// other settings and overridable from the environment, rather than buried as a
-// number inside the heredoc that uses it.
-func TestTheRetentionDepthIsDeclaredWithTheOtherSettings(t *testing.T) {
-	deploy := readConfig(t, "deploy.sh")
-	decl := regexp.MustCompile(`(?m)^KEEP_PER_SERVICE=\$\{DEPLOY_KEEP:-(\d+)\}$`).FindStringSubmatch(deploy)
-	if decl == nil {
-		t.Fatal("no top-level KEEP_PER_SERVICE=${DEPLOY_KEEP:-N}: the depth is either not" +
-			" declared with the other settings or not overridable")
-	}
-	depth, err := strconv.Atoi(decl[1])
-	if err != nil || depth < 1 {
-		t.Fatalf("retention depth %q keeps nothing; every rollback becomes a pull", decl[1])
-	}
-	if !regexp.MustCompile(`ssh "\$HOST" "KEEP=\$KEEP_PER_SERVICE[^"]*bash -s"`).MatchString(deploy) {
-		t.Error("the prune is not handed $KEEP_PER_SERVICE, so the declared depth and" +
-			" DEPLOY_KEEP are both inert and the applied depth is whatever is inlined")
-	}
-	if body := deploy[strings.Index(deploy, "<< 'PRUNE'"):]; !strings.Contains(body, `"$KEEP"`) {
-		t.Error("the prune does not read $KEEP, so the declared depth is not the one it applies")
 	}
 }

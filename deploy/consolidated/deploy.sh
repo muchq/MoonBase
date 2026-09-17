@@ -9,11 +9,6 @@ COMPOSE_FILE=deploy/consolidated/compose.yaml
 REGISTRY=${IMAGE_REGISTRY:-https://ghcr.io}
 # How far back --list --service looks for commits that changed the image.
 LIST_SCAN=${DEPLOY_LIST_SCAN:-100}
-# Per-SHA images kept per service after a deploy. Rollback depth is counted in
-# deploys because that is what the host can tell: image timestamps are build
-# time, so an age window reaps a service's predecessor in the run that
-# replaces it.
-KEEP_PER_SERVICE=${DEPLOY_KEEP:-2}
 
 usage() {
   cat <<'USAGE'
@@ -537,68 +532,16 @@ ssh "$HOST" << EOF
   sudo -E docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --address 127.0.0.1:2019
 EOF
 
-# Reap superseded per-SHA images once the new stack is serving, keeping the
-# newest $KEEP_PER_SERVICE deploys of each service so a rollback restarts what
-# is on disk instead of pulling it back.
+# Reap images no container holds, once the new stack is serving. `docker image
+# prune` already computes exactly that set, counting stopped containers as
+# holders, so there is nothing here to hand-roll.
 #
-# Retention is by tag, against a ledger the deploy keeps, because the image
-# store cannot order per-SHA tags at all: oci_image stamps no `created`, so
-# every tag of a service inherits its base image's timestamp and they all tie.
-# (Stamping one is not the fix — scripts/image-lib.sh compares config digests
-# to recognise a rebuild as the same image, and a per-publish `created` would
-# dirty every one of them.) The ledger records what was pinned, which is the
-# deploy order docker does not have.
+# -a, not the default: dangling images are not what accumulates. Every deploy
+# leaves a fully tagged predecessor behind, and without -a none of them go.
 #
-# Serving images are subtracted as well, which is what covers a rollback: the
-# tag in use is then not among the newest, and depth alone would offer it up.
-all_images=$(grep -o 'ghcr\.io/muchq/[a-z0-9_-]*' "$COMPOSE_FILE" | sort -u | tr '\n' ' ')
-ssh "$HOST" "KEEP=$KEEP_PER_SERVICE REPOS='$all_images' bash -s" << 'PRUNE' || echo "warning: image prune failed; the deploy is unaffected" >&2
-  set -euo pipefail
-  case "$KEEP" in ('' | *[!0-9]*) echo "KEEP must be a count, got '$KEEP'" >&2; exit 1 ;; esac
-  LEDGER=~/.image-keep
-
-  # What each service is pinned to now that .env has been rewritten. A service
-  # this deploy did not touch keeps its existing pin, so its predecessor stays
-  # in the ledger rather than being dropped by a targeted deploy.
-  live=$(for repo in $REPOS; do
-           var=$(echo "${repo##*/}" | tr 'a-z-' 'A-Z_' | sed 's/$/_SHA/')
-           sha=$(sed -n "s/^$var=//p" ~/.env | tail -1)
-           [ -n "$sha" ] || sha=$(sed -n 's/^DEPLOY_SHA=//p' ~/.env | tail -1)
-           # `continue`, not `&&`: a service with no pin must skip, and a
-           # falsy last command in the loop would take `set -e` with it.
-           [ -n "$sha" ] || continue
-           echo "$repo:$sha"
-         done)
-
-  # Newest first, one entry per tag, at most $KEEP per repository.
-  { printf '%s\n' "$live"; cat "$LEDGER" 2> /dev/null || true; } \
-    | grep -v '^$' \
-    | awk '!seen[$0]++' \
-    | awk -F: -v keep="$KEEP" '{ if (++n[$1] <= keep) print }' > "$LEDGER.next"
-  mv "$LEDGER.next" "$LEDGER"
-
-  in_use=$(sudo docker ps -aq | xargs -r sudo docker inspect -f '{{.Image}}' | sort -u)
-  ledger=$(cat "$LEDGER")
-
-  # An image is kept if any of its tags is in the ledger, so a digest carrying
-  # several tags is counted once rather than filling the depth twice.
-  keep_ids=$(sudo docker images --no-trunc --filter 'reference=ghcr.io/muchq/*' \
-               --format '{{.Repository}}:{{.Tag}}|{{.ID}}' \
-    | while IFS='|' read -r tag id; do
-        case "$ledger" in (*"$tag"*) printf '%s\n' "$id" ;; esac
-      done | sort -u)
-
-  reap=$(sudo docker images --no-trunc --filter 'reference=ghcr.io/muchq/*' --format '{{.ID}}' \
-    | sort -u | while IFS= read -r id; do
-        [ -n "$id" ] || continue
-        case "$keep_ids" in (*"$id"*) continue ;; esac
-        case "$in_use" in (*"$id"*) continue ;; esac
-        printf '%s\n' "$id"
-      done)
-
-  [ -n "$reap" ] || { echo "nothing superseded beyond the newest $KEEP per service"; exit 0; }
-  printf '%s\n' "$reap" | xargs -r sudo docker rmi > /dev/null
-  echo "reaped $(printf '%s\n' "$reap" | wc -l | tr -d ' ') image(s), keeping the newest $KEEP per service"
-PRUNE
+# Nothing is kept for a fast rollback. Every per-commit tag is still in ghcr,
+# so `--sha` pulls one back; the trade is a slower rollback for a host that
+# does not grow, and it holds until something needs the speed.
+ssh "$HOST" 'sudo docker image prune -af' || echo "warning: image prune failed; the deploy is unaffected" >&2
 
 echo "Deployment complete! $target_desc running $short_sha"

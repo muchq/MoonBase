@@ -576,22 +576,14 @@ deploy --bogus
 check "rejects an unknown flag" test $? -ne 0
 
 # ---------------------------------------------------------------- retention
-# The prune is a quoted heredoc, so the outer `bash -n` never parses it — a
-# syntax error in there is invisible until a deploy runs it. Running it is the
-# only way to find out what it does.
-#
-# Every image below shares one CreatedAt on purpose: that is what the real
-# store looks like, because oci_image stamps no `created` and each tag
-# inherits its base image's timestamp. Anything that ordered by it would be
-# ordering by a tie.
+# The prune runs on the host through its own ssh, so its failure handling is
+# the part worth exercising: a cleanup that cannot reach the daemon must not
+# report success, and must not fail a deploy that is already serving.
 echo "image retention"
 
 PRUNE_BIN=$WORK/prunebin
-PRUNE_IMAGES=$WORK/prune_images
-PRUNE_CONTAINERS=$WORK/prune_containers
-PRUNE_REMOVED=$WORK/prune_removed
-PRUNE_HOME=$WORK/prunehome
-mkdir -p "$PRUNE_BIN" "$PRUNE_HOME"
+PRUNE_LOG=$WORK/prune_docker.log
+mkdir -p "$PRUNE_BIN"
 
 cat > "$PRUNE_BIN/sudo" <<'STUB'
 #!/bin/bash
@@ -599,143 +591,42 @@ exec "$@"
 STUB
 cat > "$PRUNE_BIN/docker" <<'STUB'
 #!/bin/bash
+echo "docker $*" >> "$PRUNE_LOG"
 if [ -n "${PRUNE_DOCKER_FAILS:-}" ]; then
   echo "Cannot connect to the Docker daemon" >&2
   exit 1
 fi
-case "$1" in
-  ps)
-    cut -d' ' -f1 "$PRUNE_CONTAINERS"
-    ;;
-  inspect)
-    shift 3 # past `inspect -f <template>`
-    for c in "$@"; do awk -v c="$c" '$1 == c { print $2 }' "$PRUNE_CONTAINERS"; done
-    ;;
-  images)
-    # Honour --filter reference= and the two --format shapes the prune asks
-    # for, so the scoping and the tag/id join are exercised, not assumed.
-    pat= fmt= prev=
-    for a in "$@"; do
-      case "$prev" in
-        --filter) case "$a" in reference=*) pat=${a#reference=} ;; esac ;;
-        --format) fmt=$a ;;
-      esac
-      prev=$a
-    done
-    while IFS='|' read -r repo tag id; do
-      case "$repo" in $pat) ;; *) continue ;; esac
-      case "$fmt" in
-        '{{.ID}}') printf '%s\n' "$id" ;;
-        *) printf '%s:%s|%s\n' "$repo" "$tag" "$id" ;;
-      esac
-    done < "$PRUNE_IMAGES"
-    ;;
-  rmi)
-    if [ -n "${PRUNE_RMI_FAILS:-}" ]; then
-      echo "conflict: unable to delete (must be forced)" >&2
-      exit 1
-    fi
-    shift
-    printf '%s\n' "$@" >> "$PRUNE_REMOVED"
-    ;;
-esac
+echo "Total reclaimed space: 1.2GB"
 exit 0
 STUB
 chmod +x "$PRUNE_BIN/sudo" "$PRUNE_BIN/docker"
 
-prune_body() {
-  sed -n "/<< 'PRUNE'/,/^PRUNE\$/p" "$REPO/deploy/consolidated/deploy.sh" | sed '1d;$d'
+# The prune line as deploy.sh runs it, with ssh reduced to "run it here".
+run_prune() {
+  : > "$PRUNE_LOG"
+  local line
+  line=$(grep -n "docker image prune" "$REPO/deploy/consolidated/deploy.sh" | head -1 | cut -d: -f2-)
+  HOST=ignored PATH="$PRUNE_BIN:$PATH" PRUNE_LOG="$PRUNE_LOG" \
+    PRUNE_DOCKER_FAILS="${PRUNE_DOCKER_FAILS:-}" \
+    bash -c "ssh() { shift; bash -c \"\$*\"; }; $line" > "$WORK/prune.out" 2>&1
 }
 
-run_prune() { # run_prune <keep> <repos>
-  : > "$PRUNE_REMOVED"
-  HOME="$PRUNE_HOME" PATH="$PRUNE_BIN:$PATH" KEEP="$1" REPOS="$2" \
-    PRUNE_IMAGES="$PRUNE_IMAGES" PRUNE_CONTAINERS="$PRUNE_CONTAINERS" \
-    PRUNE_REMOVED="$PRUNE_REMOVED" PRUNE_DOCKER_FAILS="${PRUNE_DOCKER_FAILS:-}" \
-    PRUNE_RMI_FAILS="${PRUNE_RMI_FAILS:-}" \
-    bash -c "$(prune_body)" > "$WORK/prune.out" 2>&1
-}
+run_prune
+check "exits 0 when the prune succeeds" test $? -eq 0
+check "prunes images rather than anything wider" \
+  grep -q "docker image prune" "$PRUNE_LOG"
+# Without -a only dangling images go, and dangling is not what accumulates:
+# every deploy leaves a fully tagged predecessor behind.
+check "asks for every unused image, not just dangling ones" \
+  grep -qE -- "docker image prune .*(-[a-z]*a|--all)" "$PRUNE_LOG"
+check "never reaches volumes" \
+  bash -c '! grep -qE -- "--volumes|system prune|volume prune" "$0"' "$PRUNE_LOG"
 
-reaped() { grep -qxF "$1" "$PRUNE_REMOVED"; }
-not_reaped() { ! grep -qxF "$1" "$PRUNE_REMOVED"; }
-
-MREPO=ghcr.io/muchq/mithril
-IREPO=ghcr.io/muchq/iili
-ALL="$MREPO $IREPO"
-
-cat > "$PRUNE_IMAGES" <<'FIX'
-ghcr.io/muchq/mithril|shaC|sha256:mithril_c
-ghcr.io/muchq/mithril|shaB|sha256:mithril_b
-ghcr.io/muchq/mithril|shaA|sha256:mithril_a
-ghcr.io/muchq/iili|shaC|sha256:iili_c
-ghcr.io/muchq/iili|shaB|sha256:iili_b
-postgres|18|sha256:postgres_ancient
-FIX
-cat > "$PRUNE_CONTAINERS" <<'FIX'
-c1 sha256:mithril_c
-c2 sha256:iili_c
-FIX
-
-# Three successive deploys of mithril, so the ledger has an order the image
-# store does not.
-rm -f "$PRUNE_HOME/.image-keep"
-echo "DEPLOY_SHA=shaA" > "$PRUNE_HOME/.env"; run_prune 2 "$ALL"
-echo "DEPLOY_SHA=shaB" > "$PRUNE_HOME/.env"; run_prune 2 "$ALL"
-echo "DEPLOY_SHA=shaC" > "$PRUNE_HOME/.env"; run_prune 2 "$ALL"
-
-check "keeps the tag pinned now" not_reaped sha256:mithril_c
-check "keeps the tag pinned before it" not_reaped sha256:mithril_b
-check "reaps the deploy before that" reaped sha256:mithril_a
-check "orders by the ledger, not by tied image timestamps" reaped sha256:mithril_a
-check "leaves images outside our registry alone" not_reaped sha256:postgres_ancient
-
-# A targeted deploy rewrites one service's pin and leaves the rest on the
-# stack-wide one. Every other service keeps the ledger it already had, rather
-# than collapsing to the single tag it is pinned to now.
-printf 'DEPLOY_SHA=shaC\nMITHRIL_SHA=shaC\n' > "$PRUNE_HOME/.env"
-run_prune 2 "$ALL"
-check "a targeted deploy does not drop another service's predecessor" \
-  not_reaped sha256:iili_b
-
-# One digest under two tags must not fill the depth twice.
-cat >> "$PRUNE_IMAGES" <<'FIX'
-ghcr.io/muchq/iili|shaB_dup|sha256:iili_b
-FIX
-printf 'DEPLOY_SHA=shaC\n' > "$PRUNE_HOME/.env"; run_prune 2 "$ALL"
-check "counts a digest once however many tags it carries" not_reaped sha256:iili_b
-
-# After a rollback the serving tag is not the newest, so the ledger alone would
-# offer it up; the in-use subtraction is what keeps it.
-cat > "$PRUNE_CONTAINERS" <<'FIX'
-c1 sha256:mithril_a
-c2 sha256:iili_c
-FIX
-rm -f "$PRUNE_HOME/.image-keep"
-echo "DEPLOY_SHA=shaC" > "$PRUNE_HOME/.env"; run_prune 1 "$ALL"
-check "keeps a rolled-back image the ledger would reap" not_reaped sha256:mithril_a
-
-# Back to a stack serving its newest images for the failure cases.
-cat > "$PRUNE_CONTAINERS" <<'FIX'
-c1 sha256:mithril_c
-c2 sha256:iili_c
-FIX
-
-PRUNE_DOCKER_FAILS=1 run_prune 2 "$ALL"
-check "fails when the daemon cannot be reached" test $? -ne 0
-check "does not claim to have reaped anything" \
-  bash -c '! grep -q "^reaped" "$0"' "$WORK/prune.out"
+PRUNE_DOCKER_FAILS=1 run_prune
+check "does not fail the deploy when the daemon is unreachable" test $? -eq 0
+check "says so rather than reporting a silent success" \
+  grep -q "warning: image prune failed" "$WORK/prune.out"
 PRUNE_DOCKER_FAILS=
-
-rm -f "$PRUNE_HOME/.image-keep"
-echo "DEPLOY_SHA=shaC" > "$PRUNE_HOME/.env"
-PRUNE_RMI_FAILS=1 run_prune 1 "$ALL"
-check "fails when removal is refused" test $? -ne 0
-check "does not report a refused removal as reaped" \
-  bash -c '! grep -q "^reaped" "$0"' "$WORK/prune.out"
-PRUNE_RMI_FAILS=
-
-run_prune "" "$ALL"
-check "refuses a depth that is not a count" test $? -ne 0
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

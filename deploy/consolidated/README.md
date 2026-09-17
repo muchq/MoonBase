@@ -101,7 +101,7 @@ Add `-y` to skip the confirmation. The deploy itself will:
 3. Copy observability configuration
 4. Pull the images for that commit
 5. Restart the affected services
-6. Reap superseded images, keeping the newest two per service
+6. Reap every image no container holds
 
 ### Deploying one service
 
@@ -171,17 +171,11 @@ Deploy an earlier commit — pick one with `--list`, then:
 
 The whole stack moves together rather than leaving a hand-edited pin behind.
 
-The host keeps the newest two images per service, so rolling back one deploy
-restarts what is already on disk. Further back than that the image has been
-reaped and `--sha` pulls it from ghcr again, which is slower but no less
-reliable — every per-commit tag stays in the registry. `DEPLOY_KEEP=5
-./deploy/consolidated/deploy.sh ...` keeps more if you want deeper instant
-rollbacks; the cost is disk.
-
-Which images those are is recorded in `~/.image-keep` on the host, written by
-each deploy. The image store cannot answer it: `oci_image` stamps no `created`,
-so every per-SHA tag of a service carries its base image's timestamp and they
-all tie.
+The host keeps no images beyond what its containers are running, so `--sha`
+pulls the older image from ghcr rather than restarting one already on disk.
+That is slower but no less reliable — every per-commit tag stays in the
+registry. Keeping a few back for faster rollbacks is a change worth making
+when something actually needs the speed.
 
 Note this rolls back **images only**. Config — `compose.yaml`, the `Caddyfile`,
 and `o11y/*` — is always copied from your working tree,
