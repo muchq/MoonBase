@@ -45,23 +45,48 @@ name appended, which nothing here wants).
 A world per room (#1490): a joined player is a position on the room's
 surface, an RGB color in 0..1, and a shape (0 sphere, 1 cube, 2
 pyramid), standing in one room's world. The surface is the room's
-(#1554): the ground plane (`[x, 0, z]`, x and z within ±50), or the
-inside of a sphere, where a position is a point on the wall and the hub
-snaps one within a unit of it into place and refuses one farther off.
-`createRoom` names the first one (absent: the plane), and any member
-changes it with the lobby's `setGeometry`: everyone standing is placed
-at the nearest point of the new surface and hears `geometryChanged`
-with every placement, on every instance (the row carries it,
-`rooms.geometry`). The plaza starts flat and changes the same way, for
-this instance's life. `roomState` and `worldState` name the surface.
-`join` answers the joiner with a `worldState` of everyone else in that
-world and tells the rest of it `playerJoined`; `move` and `shape` fan
-out as `playerMoved` and `shapeChanged`, never echoed and never past the
-world's edge; `leave` — or a closed socket, alike — fans out
-`playerLeft`. A session that has not joined hears nothing. Out-of-bounds
-values and commands before a join are refused in-band as
-`commandRejected`. No persistence: presence is the whole game. The
-rules and the map are `World` (`world.cc`), pinned by `world_test`.
+(#1554): the ground plane (`[x, 0, z]`, x and z within ±50); the inside
+of a sphere, where a position is a point on the wall and the hub snaps
+one within a unit of it into place and refuses one farther off; or the
+glasshouse, that same plane inside four glass walls at its edges — the
+floor's rules to the letter, since the glass is the boundary the plane
+already had rather than somewhere to stand, and it is where the tape
+lands (below). `createRoom` names the first one (absent: the plane), and
+any member changes it with the lobby's `setGeometry`: everyone standing
+is placed at the nearest point of the new surface and hears
+`geometryChanged` with every placement, on every instance (the row
+carries it, `rooms.geometry`). The plaza starts flat and changes the
+same way, for this instance's life. `roomState` and `worldState` name
+the surface. `join` answers the joiner with a `worldState` of everyone
+else in that world and tells the rest of it `playerJoined`; `move` and
+`shape` fan out as `playerMoved` and `shapeChanged`, never echoed and
+never past the world's edge; `leave` — or a closed socket, alike — fans
+out `playerLeft`. A session that has not joined hears nothing.
+Out-of-bounds values and commands before a join are refused in-band as
+`commandRejected`. No persistence: presence is the whole game. The rules
+and the map are `World` (`world.cc`), pinned by `world_test`.
+
+## deja on the walls
+
+A glasshouse's glass shows deja's tape (#1554, #1150). The hub is deja's
+second consumer, and the tape is world state the hub owns: it polls
+`GET /deja/v1/recent?after=<seq>` over `//domains/ai/libs/deja_cpp`
+roughly once a second, dedupes by `seq`, and fans each new event to the
+world as a `tape` `LobbyUpdate` the way `playerMoved` goes out. A browser
+never talks to deja and never asks where a splat goes: the splat point —
+which wall, and where on it as two fractions — is a pure function of
+`seq` (`splat.h`), so every client in the room draws the same event on
+the same square inch, and no wall height rides the wire. `worldState`
+hands a joiner the last 32, so a late arrival walks into a wall with
+something on it.
+
+The poll is gated on occupancy and best-effort. With nobody standing in a
+glasshouse the hub sends deja no HTTP at all — the first joiner opens it,
+the last leaver closes it, and a resume after an idle stretch starts from
+the newest `seq` rather than replaying the backlog nobody watched. The
+round trip never happens under `mu_`, one attempt with a two-second
+deadline, and deja being down, slow or wrong costs a counted poll and
+nothing else. `DEJA_URL` unset leaves the walls blank.
 
 Hosted by `GolfHub` (`golf_hub.cc`) as the room stream's `lobby` member,
 the world is the session's: its room's, or the plaza's — the well-known
@@ -115,7 +140,9 @@ lobby-safe summaries only.
   expiries, and the command/event flow (`hub_*` for the room layer —
   sessions, seats, refusals, its own commands and events — `golf_*`,
   `castle_*` and `lobby_*` for each tenant's envelope, `chat_*` for
-  chat).
+  chat). The tape rides the lobby's prefix: `lobby_tape_polls{result}`,
+  `lobby_tape_splats`, and the `lobby_tape_poller_active` gauge, which is
+  1 exactly while a glasshouse is occupied.
 - `ALLOWED_ORIGINS` unset admits all origins (local dev); production
   sets the allowlist.
 - Deployed behind Caddy at `/games/v2/*` (`deploy/consolidated`); the

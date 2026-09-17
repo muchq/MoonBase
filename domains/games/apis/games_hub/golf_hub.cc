@@ -20,6 +20,7 @@
 #include "absl/strings/str_join.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
+#include "domains/games/apis/games_hub/splat.h"
 #include "domains/games/apis/games_hub/wire_cards.h"
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/golf/player.h"
@@ -362,6 +363,13 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"lobby_events", {{"event", "shapeChanged"}}},
       {"lobby_events", {{"event", "playerLeft"}}},
       {"lobby_events", {{"event", "geometryChanged"}}},
+      {"lobby_events", {{"event", "tape"}}},
+      // deja's tape (#1554): what was asked for, what came back, and how
+      // much of it reached a wall. lobby_tape_poller_active is the gauge
+      // beside them, and gauges are not declared.
+      {"lobby_tape_polls", {{"result", "ok"}}},
+      {"lobby_tape_polls", {{"result", "failed"}}},
+      {"lobby_tape_splats", {}},
       {"hub_rate_limited", {{"kind", "chat"}}},
       {"hub_rate_limited", {{"kind", "command"}}},
       {"hub_rate_limited", {{"kind", "lobby"}}},
@@ -394,6 +402,12 @@ GolfHub::~GolfHub() {
   }
   reaper_cv_.notify_all();
   if (boot_reaper_.joinable()) boot_reaper_.join();
+  {
+    const std::lock_guard<std::mutex> lock(tape_mu_);
+    tape_stop_ = true;
+  }
+  tape_cv_.notify_all();
+  if (tape_poller_.joinable()) tape_poller_.join();
 }
 
 absl::Status GolfHub::RestoreFromStore() {
@@ -490,6 +504,98 @@ void GolfHub::BootReaperMain() {
     // resuming a moment after the deadline.
     if (ReapUnlessResumedElsewhere(player_id)) Count("hub_restored_seats_reaped");
   }
+}
+
+namespace {
+
+moonbase::games::TapeGuess TopGuess(const moonbase::deja::Guess& guess) {
+  moonbase::games::TapeGuess top;
+  top.token = guess.token;
+  top.p = guess.p;
+  return top;
+}
+
+// deja's event as the wall shows it: the chips, both predictors' best
+// guess, what actually happened, and the verdict — plus the spot, which
+// the hub derives rather than carries, so two clients in a room draw the
+// same event in the same place without a word about it on the wire.
+moonbase::games::TapeSplat SplatOf(const moonbase::deja::DejaEvent& event) {
+  const Splat spot = SplatFor(event.seq);
+  moonbase::games::TapeSplat splat;
+  splat.seq = event.seq;
+  splat.wall = spot.wall;
+  splat.u = spot.u;
+  splat.v = spot.v;
+  splat.context = event.context;
+  splat.actual = event.actual;
+  splat.verdict = event.verdict;
+  if (!event.predictions.bigram.empty()) splat.bigram = TopGuess(event.predictions.bigram.front());
+  if (!event.predictions.net.empty()) splat.net = TopGuess(event.predictions.net.front());
+  return splat;
+}
+
+}  // namespace
+
+void GolfHub::AttachTape(std::shared_ptr<deja::Client> tape) { tape_ = std::move(tape); }
+
+void GolfHub::StartTapePolling() {
+  if (!tape_ || tape_poller_.joinable()) return;
+  tape_poller_ = std::thread([this] { TapePollerMain(); });
+}
+
+void GolfHub::TapePollerMain() {
+  absl::BitGen gen;
+  while (true) {
+    PollTapeOnce();
+    std::unique_lock<std::mutex> lock(tape_mu_);
+    const auto tick =
+        std::chrono::milliseconds(absl::Uniform(gen, kTapePollMin.count(), kTapePollMax.count()));
+    tape_cv_.wait_for(lock, tick, [this] { return tape_stop_; });
+    if (tape_stop_) return;
+  }
+}
+
+bool GolfHub::PollTapeOnce() {
+  if (!tape_) return false;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    const bool occupied = world_.AnyoneInAGlasshouse();
+    if (occupied != tape_polling_) {
+      tape_polling_ = occupied;
+      // Delta form, like hub_sessions_active: 1 while this instance is
+      // asking deja for tape, 0 while no glass is occupied.
+      if (metrics_) metrics_->RecordGauge("lobby_tape_poller_active", occupied ? 1 : -1);
+      // An idle stretch is not a backlog owed to the next occupant: the
+      // poll that resumes takes the newest seq and shows nothing.
+      if (!occupied) tape_priming_ = true;
+    }
+    if (!occupied) return false;
+  }
+  // Off mu_. deja can be slow, dead, or wrong, and none of that may touch
+  // the hub's lock or stall a socket.
+  auto recent = tape_->Recent(tape_seq_);
+  Count("lobby_tape_polls", {{"result", recent.ok() ? "ok" : "failed"}});
+  if (!recent.ok()) return true;
+
+  const bool priming = tape_priming_;
+  tape_priming_ = false;
+  int splats = 0;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    World::Deliveries deliveries;
+    for (const auto& event : recent->events) {
+      // deja answers "after N" from a ring it may have re-served; seq is
+      // the identity, and it only ever moves forward.
+      if (event.seq <= tape_seq_) continue;
+      tape_seq_ = event.seq;
+      if (priming) continue;
+      world_.Splat(SplatOf(event), deliveries);
+      ++splats;
+    }
+    SendWorldLocked(deliveries);
+  }
+  if (splats > 0 && metrics_) metrics_->RecordCounter("lobby_tape_splats", splats);
+  return true;
 }
 
 void GolfHub::SeedChatCursorLocked(const std::string& room_id) {

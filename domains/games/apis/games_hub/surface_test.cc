@@ -1,6 +1,7 @@
 // A room's surface: what it refuses, what it settles, and how it is
 // stored. The plane keeps the lobby's original rules to the letter; the
-// sphere puts a near-enough position on its wall and refuses the rest.
+// sphere puts a near-enough position on its wall and refuses the rest;
+// the glasshouse is the plane's floor inside glass that is not standable.
 
 #include "domains/games/apis/games_hub/surface.h"
 
@@ -83,6 +84,39 @@ TEST(Surface, PlacePutsAnyPointOnTheSurface) {
   }
 }
 
+// The glasshouse (#1554) is the plane's floor inside four glass walls at
+// the edges it already had: the same positions settle, the same ones are
+// refused, and the glass is not somewhere to stand — a position off the
+// floor is refused exactly as it is on the plane, however tall the walls
+// are drawn.
+TEST(Surface, TheGlasshouseFloorIsThePlanesAndTheGlassIsNotStandable) {
+  const Surface glass = Surface::Glasshouse();
+  const Surface plane = Surface::Plane();
+  for (const std::vector<double>& at :
+       {std::vector<double>{10, 0, -5}, std::vector<double>{50, 0, -50},
+        std::vector<double>{100, 0, -5}, std::vector<double>{10, 0, -51},
+        std::vector<double>{10, 1, -5}, std::vector<double>{-50, 0, 50},
+        std::vector<double>{std::nan(""), 0, 0}}) {
+    EXPECT_EQ(Settled(glass, at), Settled(plane, at));
+    EXPECT_EQ(glass.Place(at), plane.Place(at));
+  }
+  EXPECT_EQ(Settled(glass, {10, 0}), "position must be [x, y, z]");
+  // Standing halfway up the glass is standing on nothing.
+  EXPECT_EQ(Settled(glass, {50, 12, 0}), "y must be 0");
+  // Against the glass, on the floor, is a legal place to stand.
+  EXPECT_EQ(Settled(glass, {50, 0, 17}), "<settled>");
+
+  // Only the glasshouse has glass; that flag is the poller's whole gate.
+  EXPECT_TRUE(glass.has_glass());
+  EXPECT_FALSE(plane.has_glass());
+  EXPECT_FALSE(Surface::Sphere(53).has_glass());
+  EXPECT_TRUE(glass.is_flat());
+  EXPECT_FALSE(Surface::Sphere(53).is_flat());
+  // And it is a different surface from the plane, or reshaping to it
+  // would announce nothing.
+  EXPECT_NE(glass, plane);
+}
+
 TEST(Surface, ARadiusMustLeaveRoomToStand) {
   EXPECT_FALSE(Surface::RadiusProblem(2).has_value());
   EXPECT_FALSE(Surface::RadiusProblem(53).has_value());
@@ -99,7 +133,9 @@ TEST(Surface, ARadiusMustLeaveRoomToStand) {
 TEST(Surface, StoredFormRoundTripsAndRefusesWhatItCannotRead) {
   EXPECT_EQ(SurfaceJson(Surface::Plane()), R"({"plane":{}})");
   EXPECT_EQ(SurfaceJson(Surface::Sphere(53)), R"({"sphere":{"radius":53.0}})");
-  for (const Surface& surface : {Surface::Plane(), Surface::Sphere(53), Surface::Sphere(2.5)}) {
+  EXPECT_EQ(SurfaceJson(Surface::Glasshouse()), R"({"glasshouse":{}})");
+  for (const Surface& surface :
+       {Surface::Plane(), Surface::Sphere(53), Surface::Sphere(2.5), Surface::Glasshouse()}) {
     const auto back = SurfaceFromJson(SurfaceJson(surface));
     ASSERT_TRUE(back.ok()) << back.status();
     EXPECT_EQ(*back, surface);

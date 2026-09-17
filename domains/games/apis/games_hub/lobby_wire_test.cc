@@ -7,7 +7,8 @@
 // The pinned surface, exactly: the lobby command frames as the client
 // mints them, and the lobby events as it reads them; and the terminal
 // Unauthenticated frame. The route, the session mint and resume bodies,
-// and the room layer's own frames are golf_wire_test's pins.
+// and the room layer's own frames are golf_wire_test's pins; the tape on
+// a glasshouse's glass is tape_test's, which needs a deja to poll.
 //
 // The harness is wire_test_fixture.h's; non-Beast, so it runs with no
 // sandbox setup at all.
@@ -221,6 +222,70 @@ TEST_F(LobbyWireTest, SetGeometryPinsGeometryChangedBytes) {
                   .ok());
   EXPECT_EQ(EventPayload(NextFrame(*second), "commandRejected"),
             R"({"reason":"sphere radius must be within 2..1000"})");
+}
+
+// Consumer: a room on the glasshouse (#1554). The geometry rides the wire
+// as its own empty case — no wall height, because the client picks that —
+// and the floor underneath is the plane's to the byte: the same positions
+// land, and the same ones come back refused with the plane's reason.
+TEST_F(LobbyWireTest, GlasshouseRoomPinsGeometryAndKeepsThePlanesFloor) {
+  json creator_session;
+  auto creator = DialReady(creator_session);
+  ASSERT_TRUE(creator->Send(CommandFrame("createRoom", R"({"geometry":{"glasshouse":{}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
+            R"({"games":[],"geometry":{"glasshouse":{}},"players":[{"connected":true,)"
+            R"("gamesPlayed":0,"gamesWon":0,"playerId":"player-1","totalScore":0}],)"
+            R"("roomId":"room-1"})");
+  ASSERT_TRUE(creator
+                  ->Send(CommandFrame("lobby", R"({"action":{"join":{"roomId":"room-1",)"
+                                               R"("position":[10,0,-5],"color":[0.8,0.2,0.6],)"
+                                               R"("shape":0}}})"))
+                  .ok());
+  // No tape has run, so the wall is absent rather than an empty list.
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "lobby"),
+            R"({"update":{"worldState":{"geometry":{"glasshouse":{}},"players":[]}}})");
+
+  // The floor is the plane's: the edge stands, past it does not, and the
+  // glass is not a place to be.
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("lobby", R"({"action":{"move":{"position":[50,0,-50]}}})")).ok());
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("lobby", R"({"action":{"move":{"position":[51,0,0]}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
+            R"({"reason":"position out of bounds (±50)"
+})");
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("lobby", R"({"action":{"move":{"position":[50,12,0]}}})")).ok());
+EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"), R"({"reason":"y must be 0"})");
+}
+
+// Consumer: a room becoming a glasshouse under everyone standing in it.
+// The floor does not move, so every placement is where the player already
+// was — the client redraws the walls, not the crowd.
+TEST_F(LobbyWireTest, SetGeometryToGlasshouseKeepsEveryoneWhereTheyStand) {
+  json first_session;
+  auto first = DialReady(first_session);
+  ASSERT_TRUE(first->Send(CommandFrame("lobby", kJoinPayload)).ok());
+  (void)EventPayload(NextFrame(*first), "lobby");
+  json second_session;
+  auto second = DialReady(second_session);
+  ASSERT_TRUE(second
+                  ->Send(CommandFrame("lobby", R"({"action":{"join":{"position":[20,0,15],)"
+                                               R"("color":[0.3,0.9,0.4],"shape":1}}})"))
+                  .ok());
+  (void)EventPayload(NextFrame(*second), "lobby");
+  (void)EventPayload(NextFrame(*first), "lobby");
+
+  ASSERT_TRUE(first
+                  ->Send(CommandFrame("lobby", R"({"action":{"setGeometry":{"geometry":)"
+                                               R"({"glasshouse":{}}}}})"))
+                  .ok());
+  const std::string changed =
+      R"({"update":{"geometryChanged":{"geometry":{"glasshouse":{}},"players":[)"
+      R"({"color":[0.8,0.2,0.6],"playerId":"player-1","position":[10.0,0.0,-5.0],"shape":0},)"
+      R"({"color":[0.3,0.9,0.4],"playerId":"player-2","position":[20.0,0.0,15.0],"shape":1}]}}})";
+  EXPECT_EQ(EventPayload(NextFrame(*first), "lobby"), changed);
+  EXPECT_EQ(EventPayload(NextFrame(*second), "lobby"), changed);
 }
 
 // Consumer: the client's dial error handling — the terminal

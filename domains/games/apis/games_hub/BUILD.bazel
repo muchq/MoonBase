@@ -360,8 +360,27 @@ cc_library(
     deps = ["//domains/platform/libs/futility/rate_limiter:token_bucket"],
 )
 
-# The shape of a room's world: the plane's bounds, a sphere's wall, and
-# the stored spelling of either.
+# Where a tape event lands on a glasshouse's glass (#1554): a pure
+# function of deja's seq, which is the only thing every instance and every
+# client in a room already agrees on.
+cc_library(
+    name = "splat",
+    srcs = ["splat.cc"],
+    hdrs = ["splat.h"],
+)
+
+cc_test(
+    name = "splat_test",
+    size = "small",
+    srcs = ["splat_test.cc"],
+    deps = [
+        ":splat",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The shape of a room's world: the plane's bounds, a sphere's wall, the
+# glasshouse's floor, and the stored spelling of each.
 cc_library(
     name = "surface",
     srcs = ["surface.cc"],
@@ -429,10 +448,12 @@ cc_library(
         ":id_generator",
         ":protocol_input",
         ":rate_limiter",
+        ":splat",
         ":surface",
         ":ticket_vault",
         ":wire_cards",
         ":world",
+        "//domains/ai/libs/deja_cpp:client",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:dealer",
         "//domains/games/libs/cards/castle:game_state",
@@ -760,6 +781,38 @@ cc_test(
     ],
 )
 
+# deja on the walls (#1554, #1150): the poller through the raw wire with a
+# scripted deja under it — the occupancy gate, the splat bytes, the same
+# spot for every client in the room, dedupe, resume, and a deja having a
+# bad day. Non-Beast like the other wire suites.
+cc_test(
+    name = "tape_test",
+    size = "small",
+    srcs = [
+        "tape_test.cc",
+        "wire_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_server",
+        ":golf_hub",
+        ":id_generator",
+        ":rate_limiter",
+        ":splat",
+        ":ticket_vault",
+        "//domains/ai/libs/deja_cpp:client",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:eventstream",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
 cc_binary(
     name = "games_hub",
     srcs = ["games_hub_main.cc"],
@@ -775,6 +828,7 @@ cc_binary(
         ":pg_ticket_vault",
         ":protocol_input",
         ":ticket_vault",
+        "//domains/ai/libs/deja_cpp:production_client",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/aura",
         "//domains/platform/libs/futility/env",

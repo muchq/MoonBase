@@ -48,17 +48,19 @@ Switching the verdict over is a later decision, made on that evidence.
 | Route | What |
 | --- | --- |
 | `GET /deja/v1/stream` | Server-sent events, one per request, `id` the sequence number. 256 seats; a stream ends after ten minutes or when its client falls 64 events behind, and the client reconnects and resumes through `recent`. |
-| `GET /deja/v1/recent?after=<seq>` | The last 200 events after `seq`, oldest first. The boundary games_hub will poll (#1554); its raw JSON is pinned by `recent_is_pinned_on_the_wire`. |
+| `GET /deja/v1/recent?after=<seq>` | The last 200 events after `seq`, oldest first. The boundary games_hub polls (#1554); its raw JSON is pinned by `recent_is_pinned_on_the_wire`, and again on the consumer's side by `domains/ai/libs/deja_cpp`'s `recent_wire_test` — edit the three together. |
 | `GET /deja/v1/state` | Sequence, steps, vocabulary size and cap, warmup length, both baselines, the threshold and counts. |
 | `POST /deja/v1/next` | `{"context":["token", ...]}`, one to eight token names → `{"predictions":{"bigram":[...],"net":[...]}}`, each predictor's top five. A name the vocabulary lacks, or a context of the wrong length, is a 400 with `{"error":"..."}` saying which. Asking teaches nothing and makes no event. |
 | `GET /health` | server_pal's probe. |
 
 Every route shares one token bucket at 20 requests a second, burst 40.
 The limiter keys on the peer address, which behind Caddy is Caddy — so
-the page, the hub's two-per-second `recent` poll and anyone asking `next`
-draw on the same budget. `next` is the expensive one: a forward pass per
-predictor under the engine's lock, run off the async workers so a
-question cannot stall the stream or the tailer.
+the page and anyone asking `next` draw on one budget between them. The
+hub reaches `recent` across the app network instead, so its poll is its
+own peer and its own bucket; it polls about once a second, and only while
+somebody is standing in a glasshouse world. `next` is the expensive one:
+a forward pass per predictor under the engine's lock, run off the async
+workers so a question cannot stall the stream or the tailer.
 
 An event carries the lane (a slot number, never an address), the lane's
 last eight tokens, each predictor's top five guesses with probabilities,
