@@ -53,9 +53,7 @@ std::optional<World::Refusal> World::Join(const std::string& player_id, const st
   for (const auto& [id, other] : world_) {
     if (other.room_id == room_id) snapshot.players.push_back(other.player);
   }
-  if (surface.has_glass() && !tape_.empty()) {
-    snapshot.tape = std::vector<moonbase::games::TapeSplat>(tape_.begin(), tape_.end());
-  }
+  if (surface.has_glass()) snapshot.tape = RememberedTape();
   out.push_back({player_id, LobbyUpdate::FromWorldstate(std::move(snapshot))});
   moonbase::games::PlayerJoined joined;
   joined.player = standing.player;
@@ -131,6 +129,11 @@ void World::Splat(const moonbase::games::TapeSplat& splat, Deliveries& out) {
   }
 }
 
+std::optional<std::vector<moonbase::games::TapeSplat>> World::RememberedTape() const {
+  if (tape_.empty()) return std::nullopt;
+  return std::vector<moonbase::games::TapeSplat>(tape_.begin(), tape_.end());
+}
+
 void World::SetSurface(const std::string& room_id, const Surface& surface) {
   surfaces_[room_id] = surface;
 }
@@ -139,6 +142,7 @@ void World::Reshape(const std::string& room_id, const Surface& surface, Deliveri
   SetSurface(room_id, surface);
   moonbase::games::GeometryChanged changed;
   changed.geometry = GeometryOf(surface);
+  if (surface.has_glass()) changed.tape = RememberedTape();
   for (auto& [id, standing] : world_) {
     if (standing.room_id != room_id) continue;
     standing.player.position = surface.Place(standing.player.position);

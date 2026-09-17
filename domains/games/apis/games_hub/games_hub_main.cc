@@ -148,8 +148,10 @@ int main() {
       LOG(ERROR) << "Failed to build the deja client: " << tape.error().message();
       return 1;
     }
-    golf->AttachTape(std::make_shared<deja::Client>(*std::move(tape)));
-    golf->StartTapePolling();
+    // std::move(*tape), not *std::move(tape): Outcome has no rvalue
+    // operator*, so the latter binds the const& overload and copies — and
+    // deja::Client is move-only.
+    golf->StartTapePolling(std::make_shared<deja::Client>(std::move(*tape)));
     LOG(INFO) << "Tape: polling deja at " << deja_url;
   } else {
     LOG(INFO) << "Tape: off (DEJA_URL unset; glasshouse walls stay blank)";

@@ -415,5 +415,50 @@ TEST(World, AJoinerIsHandedTheGlassAsItStands) {
   EXPECT_FALSE(out.at(0).update.as_worldState_or_null()->tape.has_value());
 }
 
+// A room that becomes a glasshouse fills its walls for the people already
+// standing in it, not only for whoever joins next — otherwise the member
+// who reshaped sees blank glass while the next arrival sees a full wall.
+TEST(World, ReshapingOntoGlassHandsTheTapeToWhoeverIsAlreadyStanding) {
+  World world;
+  World::Deliveries out;
+  world.SetSurface("GLASS", Surface::Glasshouse());
+  ASSERT_FALSE(world.Join("watcher", "GLASS", FixtureJoin(), out).has_value());
+  ASSERT_FALSE(world.Join("alice", World::kPlaza, FixtureJoin(), out).has_value());
+  for (std::size_t i = 1; i <= 3; ++i) {
+    moonbase::games::TapeSplat splat;
+    splat.seq = static_cast<std::int64_t>(i);
+    world.Splat(splat, out);
+  }
+  out.clear();
+
+  world.Reshape(World::kPlaza, Surface::Glasshouse(), out);
+
+  ASSERT_EQ(out.size(), 1u);
+  const auto* changed = out.at(0).update.as_geometryChanged_or_null();
+  ASSERT_NE(changed, nullptr);
+  ASSERT_NE(changed->geometry.as_glasshouse_or_null(), nullptr);
+  ASSERT_TRUE(changed->tape.has_value());
+  ASSERT_EQ(changed->tape->size(), 3u);
+  EXPECT_EQ(changed->tape->front().seq, 1);
+  EXPECT_EQ(changed->tape->back().seq, 3);
+  // And it is the same wall a joiner would be handed a moment later.
+  out.clear();
+  ASSERT_FALSE(world.Join("bob", World::kPlaza, FixtureJoin(), out).has_value());
+  const auto* snapshot = out.at(0).update.as_worldState_or_null();
+  ASSERT_TRUE(snapshot->tape.has_value());
+  EXPECT_EQ(snapshot->tape->size(), changed->tape->size());
+  EXPECT_EQ(snapshot->tape->back().seq, changed->tape->back().seq);
+  out.clear();
+
+  // Reshaping onto a surface with no glass hands over nothing.
+  world.Reshape(World::kPlaza, Surface::Sphere(53), out);
+  ASSERT_FALSE(out.empty());
+  EXPECT_FALSE(out.at(0).update.as_geometryChanged_or_null()->tape.has_value());
+  out.clear();
+  world.Reshape("GLASS", Surface::Plane(), out);
+  ASSERT_FALSE(out.empty());
+  EXPECT_FALSE(out.at(0).update.as_geometryChanged_or_null()->tape.has_value());
+}
+
 }  // namespace
 }  // namespace games_hub

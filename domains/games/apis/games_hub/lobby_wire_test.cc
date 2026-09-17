@@ -251,12 +251,12 @@ TEST_F(LobbyWireTest, GlasshouseRoomPinsGeometryAndKeepsThePlanesFloor) {
       creator->Send(CommandFrame("lobby", R"({"action":{"move":{"position":[50,0,-50]}}})")).ok());
   ASSERT_TRUE(
       creator->Send(CommandFrame("lobby", R"({"action":{"move":{"position":[51,0,0]}}})")).ok());
+  // The ~ delimiter, because the reason itself ends in `)"`.
   EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
-            R"({"reason":"position out of bounds (±50)"
-})");
+            R"~({"reason":"position out of bounds (±50)"})~");
   ASSERT_TRUE(
       creator->Send(CommandFrame("lobby", R"({"action":{"move":{"position":[50,12,0]}}})")).ok());
-EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"), R"({"reason":"y must be 0"})");
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"), R"({"reason":"y must be 0"})");
 }
 
 // Consumer: a room becoming a glasshouse under everyone standing in it.

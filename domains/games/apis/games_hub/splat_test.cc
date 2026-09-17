@@ -25,15 +25,14 @@ std::string Spot(std::int64_t seq) {
   return buffer;
 }
 
+// Two hub instances share no state at all — only the number deja stamped
+// on the event — so a spot that drew on anything else would differ
+// between them. ThePlacementIsPinned is what fixes which spot it is.
 TEST(Splat, TheSameSeqAlwaysLandsOnTheSameSpot) {
   for (const std::int64_t seq : {std::int64_t{0}, std::int64_t{1}, std::int64_t{7},
                                  std::int64_t{1'000'003}, std::int64_t{9'007'199'254'740'993}}) {
     EXPECT_EQ(Spot(seq), Spot(seq));
   }
-  // Two instances of the hub hold no shared state at all, so a spot that
-  // depended on anything but seq would differ here.
-  EXPECT_EQ(Spot(42), "1/0.187186/0.932519");
-  EXPECT_EQ(Spot(43), "0/0.919188/0.825430");
 }
 
 // The golden block: a change to the mixer moves every splat on every

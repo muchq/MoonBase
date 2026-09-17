@@ -800,6 +800,7 @@ cc_test(
         ":rate_limiter",
         ":splat",
         ":ticket_vault",
+        ":world",
         "//domains/ai/libs/deja_cpp:client",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",

@@ -77,14 +77,17 @@ never talks to deja and never asks where a splat goes: the splat point —
 which wall, and where on it as two fractions — is a pure function of
 `seq` (`splat.h`), so every client in the room draws the same event on
 the same square inch, and no wall height rides the wire. `worldState`
-hands a joiner the last 32, so a late arrival walks into a wall with
-something on it.
+hands a joiner the last 32 and `geometryChanged` hands the same 32 to
+whoever was already standing in a room that has just become glass, so
+nobody watches a blank wall the rest of the room can see.
 
 The poll is gated on occupancy and best-effort. With nobody standing in a
 glasshouse the hub sends deja no HTTP at all — the first joiner opens it,
 the last leaver closes it, and a resume after an idle stretch starts from
-the newest `seq` rather than replaying the backlog nobody watched. The
-round trip never happens under `mu_`, one attempt with a two-second
+the newest `seq` rather than replaying the backlog nobody watched. A poll
+that comes back from an outage while somebody *is* standing there shows
+the newest 32 and advances past the rest, so a recovery is never a burst.
+The round trip never happens under `mu_`, one attempt with a two-second
 deadline, and deja being down, slow or wrong costs a counted poll and
 nothing else. `DEJA_URL` unset leaves the walls blank.
 

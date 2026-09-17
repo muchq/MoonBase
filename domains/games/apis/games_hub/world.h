@@ -75,7 +75,7 @@ class World {
   /// actor-less fan-out, since the event is the world's and nobody sent
   /// it — and remembers it for the next joiner's worldState. Kept
   /// whatever the worlds are doing, so a room that becomes a glasshouse
-  /// has something on its glass at once.
+  /// has something on its glass at once (Reshape hands it over).
   void Splat(const moonbase::games::TapeSplat& splat, Deliveries& out);
 
   /// How much of the tape a joiner is handed; see WorldState.tape in
@@ -89,7 +89,10 @@ class World {
   /// Changes a world's surface under whoever stands in it: each is placed
   /// at the nearest point of the new surface, and everyone in the world,
   /// the actor included, is staged one geometryChanged naming the
-  /// surface and every player where they now stand.
+  /// surface, every player where they now stand, and — when the new
+  /// surface has glass — what is already on it, so a room that becomes a
+  /// glasshouse fills its walls for the people already there rather than
+  /// only for whoever joins next.
   void Reshape(const std::string& room_id, const Surface& surface, Deliveries& out);
   void ForgetSurface(const std::string& room_id);
   Surface SurfaceOf(const std::string& room_id) const;
@@ -101,6 +104,9 @@ class World {
   };
   void FanOut(const std::string& room_id, const std::string& actor_id,
               const moonbase::games::LobbyUpdate& update, Deliveries& out) const;
+  /// The remembered tape, oldest first, or nullopt when there is none —
+  /// what both a joiner's worldState and a reshape onto glass carry.
+  std::optional<std::vector<moonbase::games::TapeSplat>> RememberedTape() const;
 
   /// Every joined player by id, with the room whose world they stand in.
   /// One map rather than one per world, so there is no world lifecycle

@@ -55,6 +55,20 @@ std::string Event(int seq, const std::string& actual, const std::string& verdict
          verdict + R"(","ewma_loss":{"bigram":1.75,"net":1.5},"vocab_size":41})";
 }
 
+// deja's first-sighting shape, straight out of its own pinned fixture:
+// the bigram has never seen the lane's previous token, so it offers
+// nothing. The net offers nothing either unless `net_guesses`.
+std::string NoGuess(int seq, bool net_guesses) {
+  const std::string net =
+      net_guesses ? R"([{"token":"muchq.com GET /golf 200 browser","p":0.5}])" : "[]";
+  return R"({"seq":)" + std::to_string(seq) +
+         R"(,"ts":1789500001.5,"lane":0,"step":0,"context":["muchq.com GET / 200 browser"],)"
+         R"("actual":"muchq.com GET /new 200 browser","predictions":{"bigram":[],"net":)" +
+         net +
+         R"(},"surprise":{"bigram":1.09,"net":1.08},"threshold":null,"verdict":"novel",)"
+         R"("ewma_loss":{"bigram":0.0,"net":0.0},"vocab_size":3})";
+}
+
 std::string Tape(const std::vector<std::string>& events) {
   std::string body = R"({"events":[)";
   for (std::size_t i = 0; i < events.size(); ++i) {
@@ -149,11 +163,17 @@ class TapeTest : public HubWireFixture {
  protected:
   void SetUp() override {
     HubWireFixture::SetUp();
+    golf_->AttachTape(TapeClient(deja_));
+  }
+
+  // A deja::Client speaking to `transport`.
+  static std::shared_ptr<deja::Client> TapeClient(
+      const std::shared_ptr<opal::http::HttpClient>& transport) {
     opal::ClientConfig config = deja::DefaultClientConfig("http://deja:8093");
-    config.http_client = deja_;
+    config.http_client = transport;
     auto client = deja::Client::Create(std::move(config));
-    ASSERT_TRUE(client.ok()) << client.error().message();
-    golf_->AttachTape(std::make_shared<deja::Client>(std::move(*client)));
+    EXPECT_TRUE(client.ok()) << client.error().message();
+    return std::make_shared<deja::Client>(std::move(*client));
   }
 
   std::shared_ptr<opal::http::WebSocket> DialReady(json& session) {
@@ -234,8 +254,35 @@ TEST_F(TapeTest, ATapeSplatPinsItsBytes) {
             R"("bigram":{"p":0.75,"token":"muchq.com GET / 200 browser"},)"
             R"("context":["muchq.com GET / 200 browser"],)"
             R"("net":{"p":0.5,"token":"muchq.com GET /golf 200 browser"},"seq":2,)"
-            R"("u":0.11168384552001953,"v":0.7295174598693848,"verdict":"anomaly","wall":2}}})");
+            R"("ts":1789500001.5,"u":0.11168384552001953,"v":0.7295174598693848,)"
+            R"("verdict":"anomaly","wall":2}}})");
   EXPECT_EQ(deja_->asked().back(), "/deja/v1/recent?after=1");
+}
+
+// deja's bigram has no opinion on a token it is seeing for the first
+// time, which is exactly the shape of its own pinned fixture. The guess
+// members are absent rather than empty or invented, and reading the front
+// of that empty list would be undefined behaviour no assertion catches.
+TEST_F(TapeTest, AnEventWithNoGuessesOmitsThePredictorMembers) {
+  json session;
+  auto socket = StandOnGlass(session);
+  deja_->Answer(Tape({NoGuess(1, /*net_guesses=*/true)}));
+  ASSERT_TRUE(golf_->PollTapeOnce());  // priming
+  deja_->Answer(Tape({NoGuess(2, /*net_guesses=*/true)}));
+
+  EXPECT_EQ(PollAndRead(*socket),
+            R"({"update":{"tape":{"actual":"muchq.com GET /new 200 browser",)"
+            R"("context":["muchq.com GET / 200 browser"],)"
+            R"("net":{"p":0.5,"token":"muchq.com GET /golf 200 browser"},"seq":2,)"
+            R"("ts":1789500001.5,"u":0.11168384552001953,"v":0.7295174598693848,)"
+            R"("verdict":"novel","wall":2}}})");
+
+  // And when neither predictor has anything, neither member is there.
+  deja_->Answer(Tape({NoGuess(3, /*net_guesses=*/false)}));
+  const json bare = json::parse(PollAndRead(*socket))["update"]["tape"];
+  EXPECT_FALSE(bare.contains("bigram"));
+  EXPECT_FALSE(bare.contains("net"));
+  EXPECT_EQ(bare["seq"], 3);
 }
 
 // The determinism that makes the wall a shared object rather than two
@@ -321,6 +368,39 @@ TEST_F(TapeTest, AnEventAlreadyOnTheWallIsNotSplattedTwice) {
   EXPECT_EQ(json::parse(EventPayload(NextFrame(*socket), "lobby"))["update"]["tape"]["seq"], 3);
 }
 
+// deja's ring holds 200 and the wall holds 32. A poll that comes back
+// from an outage while somebody is standing there must not fire the whole
+// backlog at them in one frame-dropping burst — it shows the newest
+// wallful and advances past the rest.
+TEST_F(TapeTest, ARecoveryPollShowsAtMostAWallful) {
+  json session;
+  auto socket = StandOnGlass(session);
+  deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected")}));
+  ASSERT_TRUE(golf_->PollTapeOnce());  // priming
+
+  std::vector<std::string> backlog;
+  for (int seq = 2; seq <= 201; ++seq) {
+    backlog.push_back(Event(seq, "muchq.com GET / 200 browser", "expected"));
+  }
+  deja_->Answer(Tape(backlog));
+  ASSERT_TRUE(golf_->PollTapeOnce());
+
+  EXPECT_EQ(metrics_->CounterTotal("lobby_tape_splats", {}),
+            static_cast<double>(World::kTapeMemory));
+  // The newest wallful, in order: the oldest shown is the 32nd from the end.
+  const int first = 201 - static_cast<int>(World::kTapeMemory) + 1;
+  EXPECT_EQ(json::parse(EventPayload(NextFrame(*socket), "lobby"))["update"]["tape"]["seq"], first);
+  json last;
+  for (std::size_t i = 1; i < World::kTapeMemory; ++i) {
+    last = json::parse(EventPayload(NextFrame(*socket), "lobby"))["update"]["tape"];
+  }
+  EXPECT_EQ(last["seq"], 201);
+  // Everything skipped was still consumed, so the next ask starts past it.
+  deja_->Answer(Tape({}));
+  ASSERT_TRUE(golf_->PollTapeOnce());
+  EXPECT_EQ(deja_->asked().back(), "/deja/v1/recent?after=201");
+}
+
 // An empty room is not a debt. When the glass fills again the wall starts
 // from what is happening now, not from the minutes nobody watched.
 TEST_F(TapeTest, ResumingAfterAnEmptyRoomStartsFromTheNewestSeq) {
@@ -337,10 +417,15 @@ TEST_F(TapeTest, ResumingAfterAnEmptyRoomStartsFromTheNewestSeq) {
   for (int seq = 2; seq <= 60; ++seq) {
     backlog.push_back(Event(seq, "muchq.com GET / 200 browser", "expected"));
   }
-  deja_->Answer(Tape(backlog));
 
   ASSERT_TRUE(socket->Send(CommandFrame("lobby", kJoinPayload)).ok());
   (void)EventPayload(NextFrame(*socket), "lobby");
+  // The first poll back fails. Only an answered poll may spend the
+  // priming flag: spending it here would leave the next one treating the
+  // whole backlog as news.
+  deja_->Die();
+  ASSERT_TRUE(golf_->PollTapeOnce());
+  deja_->Answer(Tape(backlog));
   ASSERT_TRUE(golf_->PollTapeOnce());
 
   // Nothing from the backlog reaches the glass...
@@ -444,19 +529,54 @@ TEST_F(TapeTest, TheTapeCountsWhatItAsksForAndWhatItShows) {
       << "an unoccupied cycle is not a poll";
 }
 
-// The poll thread is PollTapeOnce on a tick, and the hub joins it: a hub
-// torn down mid-poll must not leave a thread holding a dead `this`.
-TEST_F(TapeTest, TheThreadPollsAndTheHubJoinsIt) {
+// StartTapePolling starts one poller, and starting it twice starts one.
+// With deja gated, each live poller parks a request inside it, so the
+// count of parked asks is the count of threads.
+TEST_F(TapeTest, StartTapePollingStartsExactlyOnePoller) {
   json session;
   auto socket = StandOnGlass(session);
   ASSERT_NE(socket, nullptr);
   deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected")}));
+  deja_->Gate();
 
-  golf_->StartTapePolling();
-  golf_->StartTapePolling();  // idempotent; a second thread would double-poll
+  golf_->StartTapePolling(TapeClient(deja_));
+  golf_->StartTapePolling(TapeClient(deja_));
 
-  EXPECT_TRUE(WaitFor([this] { return !deja_->asked().empty(); }))
+  ASSERT_TRUE(WaitFor([this] { return deja_->parked(); }))
       << "the poll thread never asked deja anything";
+  // A second poller would be parked beside the first by now.
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  EXPECT_EQ(deja_->asked().size(), 1u) << "more than one poller is running";
+  deja_->Release();
+}
+
+// The destructor wakes the poll thread rather than waiting out its tick.
+// Dropping the teardown notify only makes teardown slow, never red, so
+// the budget is the assertion. Its own hub, since this one dies here.
+TEST(TapeShutdown, TheDestructorWakesThePollThreadInsteadOfWaitingForIt) {
+  auto scripted = std::make_shared<ScriptedDeja>();
+  opal::ClientConfig config = deja::DefaultClientConfig("http://deja:8093");
+  config.http_client = scripted;
+  auto client = deja::Client::Create(std::move(config));
+  ASSERT_TRUE(client.ok()) << client.error().message();
+
+  auto hub = std::make_unique<GolfHub>(
+      std::make_shared<InMemoryTicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
+                                            /*resume_ttl=*/std::chrono::seconds(60)),
+      std::make_shared<cards::NoShuffleDealer>(), std::make_shared<SequentialIdGenerator>(),
+      /*grace_period=*/std::chrono::seconds(0));
+  hub->StartTapePolling(std::make_shared<deja::Client>(std::move(*client)));
+  // Nobody is standing anywhere, so the first cycle returns without
+  // touching the network and the thread is in its wait almost at once.
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+  const auto started = std::chrono::steady_clock::now();
+  hub.reset();
+  const auto took = std::chrono::steady_clock::now() - started;
+
+  EXPECT_TRUE(scripted->asked().empty()) << "an empty hub polled deja";
+  EXPECT_LT(took, std::chrono::milliseconds(400))
+      << "the destructor waited out the poll tick instead of waking the thread";
 }
 
 }  // namespace

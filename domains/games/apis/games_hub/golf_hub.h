@@ -224,17 +224,19 @@ class GolfHub final {
   /// Off-lock room reads a catch-up tries before it reads under the lock.
   static constexpr int kCatchUpReadAttempts = 3;
 
-  /// Wires deja's tape onto the glasshouse walls (#1554, #1150). The hub
-  /// is deja's second consumer and the tape is world state it owns: it
-  /// polls, dedupes, picks the splat point, and fans out; no browser ever
-  /// talks to deja. Call before serving. Without a client, and with no
-  /// glasshouse occupied, nothing here costs anything.
-  void AttachTape(std::shared_ptr<deja::Client> tape);
+  /// Wires deja's tape onto the glasshouse walls (#1554, #1150) and
+  /// starts polling for it. The hub is deja's second consumer and the
+  /// tape is world state it owns: it polls, dedupes, picks the splat
+  /// point, and fans out; no browser ever talks to deja. Call before
+  /// serving. The thread is PollTapeOnce on a one-to-two-second jittered
+  /// tick, and with no glasshouse occupied it reaches no network at all.
+  /// A second call changes nothing — the running thread reads the client
+  /// without a lock, so it is not swapped underneath.
+  void StartTapePolling(std::shared_ptr<deja::Client> tape);
 
-  /// Starts the poll thread, which is PollTapeOnce on a one-to-two-second
-  /// jittered tick until the hub goes away. Separate from AttachTape so
-  /// tests drive the cycle themselves and no assertion waits on a clock.
-  void StartTapePolling();
+  /// The client without the thread, for tests that drive PollTapeOnce
+  /// themselves so no assertion waits on a clock.
+  void AttachTape(std::shared_ptr<deja::Client> tape);
 
   /// One poll cycle. Returns whether deja was asked at all: false means
   /// nobody is standing in a glasshouse, and not a byte left the process.

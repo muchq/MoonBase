@@ -200,6 +200,13 @@ structure GeometryChanged {
 
     @required
     players: WorldPlayers
+
+    /// What is already on the glass, on the same terms as WorldState.tape
+    /// — a room that becomes a glasshouse gets its walls filled for the
+    /// people already standing in it, not only for whoever joins next.
+    /// Absent when the new surface has no glass, and until the first
+    /// event lands.
+    tape: TapeSplats
 }
 
 /// A deliberate leave or a closed socket, alike.
@@ -231,6 +238,12 @@ structure TapeSplat {
     /// Up the glass, in [0, 1) of however tall the client draws it.
     @required
     v: Double
+
+    /// When deja scored it, in epoch seconds. A joiner is handed a ring
+    /// that may be minutes old, so the age of a splat is the client's
+    /// business and has to reach it.
+    @required
+    ts: Double
 
     /// The lane's recent tokens, oldest first — the context chips.
     @required

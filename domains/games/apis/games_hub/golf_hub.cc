@@ -523,6 +523,7 @@ moonbase::games::TapeSplat SplatOf(const moonbase::deja::DejaEvent& event) {
   const Splat spot = SplatFor(event.seq);
   moonbase::games::TapeSplat splat;
   splat.seq = event.seq;
+  splat.ts = event.ts;
   splat.wall = spot.wall;
   splat.u = spot.u;
   splat.v = spot.v;
@@ -538,8 +539,10 @@ moonbase::games::TapeSplat SplatOf(const moonbase::deja::DejaEvent& event) {
 
 void GolfHub::AttachTape(std::shared_ptr<deja::Client> tape) { tape_ = std::move(tape); }
 
-void GolfHub::StartTapePolling() {
-  if (!tape_ || tape_poller_.joinable()) return;
+void GolfHub::StartTapePolling(std::shared_ptr<deja::Client> tape) {
+  if (tape_poller_.joinable()) return;
+  AttachTape(std::move(tape));
+  if (!tape_) return;
   tape_poller_ = std::thread([this] { TapePollerMain(); });
 }
 
@@ -577,8 +580,20 @@ bool GolfHub::PollTapeOnce() {
   Count("lobby_tape_polls", {{"result", recent.ok() ? "ok" : "failed"}});
   if (!recent.ok()) return true;
 
+  // Only a poll that got an answer consumes the priming flag. A failed
+  // first poll that cleared it would leave the next one dumping deja's
+  // whole ring onto glass somebody just walked up to.
   const bool priming = tape_priming_;
   tape_priming_ = false;
+  // A poll that comes back from an outage can carry deja's whole ring,
+  // and no wall wants more than it holds. Everything past the newest
+  // kTapeMemory is advanced over rather than drawn.
+  std::size_t fresh = 0;
+  for (const auto& event : recent->events) {
+    if (event.seq > tape_seq_) ++fresh;
+  }
+  const std::size_t skipped = fresh > World::kTapeMemory ? fresh - World::kTapeMemory : 0;
+  std::size_t seen = 0;
   int splats = 0;
   {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -589,6 +604,7 @@ bool GolfHub::PollTapeOnce() {
       if (event.seq <= tape_seq_) continue;
       tape_seq_ = event.seq;
       if (priming) continue;
+      if (seen++ < skipped) continue;
       world_.Splat(SplatOf(event), deliveries);
       ++splats;
     }
