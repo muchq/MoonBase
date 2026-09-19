@@ -23,6 +23,10 @@ flowchart LR
     one_d4_net["1d4.net"]
   end
 
+  subgraph ext["Other sites"]
+    tty1_uk["tty1.uk"]
+  end
+
   subgraph ingress["Host ingress"]
     api_muchq["api.muchq.com"]
     i_iili_uk["i.iili.uk"]
@@ -106,7 +110,10 @@ flowchart LR
   ui_metrics -.->|ui| prom_proxy
 
   iili_uk -->|http| api_muchq
+  iili_uk -->|http| i_iili_uk
   one_d4_net -->|http| api_1d4
+  one_d4_net -->|http| mcp_1d4
+  tty1_uk -->|http| gpt_muchq
 
   api_muchq -->|http| caddy
   i_iili_uk -->|http| caddy
@@ -211,6 +218,20 @@ states the mapping.
 | `/stats` | stats |
 | `/deja` | deja |
 | `/metrics` | prom_proxy |
+
+## Callers outside this repo
+
+The muchq.com nav links eleven other sites. Three of them call in:
+
+| Site | Calls |
+| --- | --- |
+| `1d4.net` | `api.1d4.net`, `mcp.1d4.net/mcp` |
+| `iili.uk` | `api.muchq.com`, `i.iili.uk/r/` |
+| `tty1.uk` | `gpt.muchq.com/microgpt/v1/chat` |
+
+The other eight — snowbonk.com, hovercrap.com, 3xe.org, bitfear.net,
+smallcat.dog, 2n-1.org, sato-ni-haru-ga-kimashita.uk, p2bx.uk — are
+self-contained and reach nothing here.
 
 ## Routes on api.muchq.com
 
