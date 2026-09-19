@@ -2,6 +2,7 @@ load("@rules_java//java:defs.bzl", "java_plugin")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load(":java_rules_test.bzl", "java_rules_test_suite")
+load(":rust_rules_test.bzl", "rust_rules_test_suite")
 
 exports_files([
     "java_image_test.yaml",
@@ -161,3 +162,7 @@ java_plugin(
 # Guards NullAway's scope, which nothing else would notice losing: the analysis
 # fails silently by definition — narrow it and every build stays green.
 java_rules_test_suite(name = "rules_test")
+
+# Guards the flag that keeps rustc's linker_messages lint reporting only what a
+# linker actually has to say (#1564).
+rust_rules_test_suite(name = "rust_rules_test")

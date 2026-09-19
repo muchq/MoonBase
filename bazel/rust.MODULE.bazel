@@ -1,8 +1,26 @@
 bazel_dep(name = "rules_rs", version = "0.0.110")
 
+# One list: crates resolved for a triple rustc is not configured for, or the
+# reverse, covers a different set of targets than it looks like.
+TARGET_TRIPLES = [
+    "aarch64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+]
+
+# rustc links with -nodefaultlibs, under which clang consumes neither the
+# toolchain's -rtlib= nor its --unwindlib= and warns about both; the
+# linker_messages lint reprints that on every Rust link (#1564). Narrower than
+# allowing the lint, which would cover every other linker diagnostic too.
+# Guarded by //bazel/rules:rust_rules_test.
+QUIET_UNUSED_LINK_ARGS = ["-Clink-arg=-Wno-unused-command-line-argument"]
+
 toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
 toolchains.toolchain(
     edition = "2024",
+    # rules_rust reads one list or the other, never both.
+    extra_exec_rustc_flags = {triple: QUIET_UNUSED_LINK_ARGS for triple in TARGET_TRIPLES},
+    extra_rustc_flags = {triple: QUIET_UNUSED_LINK_ARGS for triple in TARGET_TRIPLES},
     version = "1.97.1",
 )
 use_repo(toolchains, "default_rust_toolchains")
@@ -14,10 +32,6 @@ crate.from_cargo(
     name = "crates",
     cargo_lock = "//:Cargo.lock",
     cargo_toml = "//:Cargo.toml",
-    platform_triples = [
-        "aarch64-apple-darwin",
-        "aarch64-unknown-linux-gnu",
-        "x86_64-unknown-linux-gnu",
-    ],
+    platform_triples = TARGET_TRIPLES,
 )
 use_repo(crate, "crates")

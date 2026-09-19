@@ -23,9 +23,10 @@ The three rules that change behavior most:
   as commits on a judged baseline rather than invisible inside the first diff.
   If it didn't run, say so rather than letting the reader assume it did.
 - **Write the conclusion, not the journey.** Comments state the live rule and
-  never narrate deleted code. Commit messages stay under 100 words and usually
-  well under — squash-merge concatenates them onto `main`, so they outlive the
-  PR. PR bodies are terse.
+  never narrate deleted code. A commit subject is ten words at most and most
+  commits need no body at all; squash-merge concatenates them onto `main`, so
+  a review's fixup commits are squashed and reworded before merge rather than
+  shipped as a changelog of the review. PR bodies are terse.
 
 Other docs: [`docs/TESTING.md`](docs/TESTING.md) (mutation checking and the
 traps that only surface in CI), [`docs/BUILD_AND_IDE.md`](docs/BUILD_AND_IDE.md),
@@ -78,6 +79,14 @@ Bazel formatting do.
   `build --per_file_copt=^domains/.*@-Wno-error=<check>` **below** that line;
   later flags win. Reaching for `copts` on the target does not reliably work,
   because the `-Wall` from this flag comes after and re-enables the check.
+
+- **Rust toolchain flags are keyed by target triple and by configuration.**
+  `extra_rustc_flags` in `bazel/rust.MODULE.bazel` is a select whose
+  `//conditions:default` is empty, and `extra_exec_rustc_flags` is read
+  *instead* of it for tool binaries — set both, or exec-config links go
+  uncovered and only a cold build says so. `@rules_rust` is not visible from
+  this module, so `--@rules_rust//...` in `.bazelrc` does not resolve.
+  Guarded by `//bazel/rules:rust_rules_test`.
 
 - **NullAway is on by default for all of `com.muchq`**, with exemptions listed
   one by one in `_NULLAWAY_LEGACY_OPT_OUTS` (`bazel/rules/java.bzl`). A new
