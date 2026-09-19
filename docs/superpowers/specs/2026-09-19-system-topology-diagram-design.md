@@ -54,10 +54,17 @@ Containers from `compose.yaml`: `caddy`, `games_hub`, `portrait`, `prom_proxy`,
 
 From `docker-compose.observability.yml`: `otelcol`, `prometheus`.
 
-Not containers, but required for the edges to make sense: `s3` (the stats
-bucket, external), and the muchq.com routes that are the only way a given
-service is reached — `ui_tracy`, `ui_lobby`, `ui_posterize`, `ui_wordchains`,
-`ui_iili`, `ui_stats`, `ui_deja`.
+The public names traffic actually enters by: `api.muchq.com`, `i.iili.uk`,
+`gpt.muchq.com`, `git.muchq.com`, `api.1d4.net`, `mcp.1d4.net` and
+`consolidated.cmptr.info` on caddy, plus `muchq.com` and `iili.uk` on
+Cloudflare. Which name reaches which service is the first thing a reader wants
+and the one thing neither repo states in one place — `api.1d4.net` reaches only
+one_d4 and stats, `mcp.1d4.net` only mcpserver.
+
+Also not containers: `s3` (the stats bucket, external), and the muchq.com
+routes that are the only way a given service is reached — `ui_games`,
+`ui_tracy`, `ui_posterize`, `ui_wordchains`, `ui_iili`, `ui_stats`, `ui_deja`,
+`ui_metrics`.
 
 The `ui_` prefix is load-bearing in two ways. It carries the fact that the
 UI's route names and the service names disagree — `/tracy` reaches `portrait`,
@@ -144,8 +151,8 @@ reliably match — `microgpt-serve` is hyphenated where its siblings are not, an
 mcpserver's own env refers to `one-d4` where the service is `one_d4`. The
 mapping is an explicit table in `topology.ts` with a unit test, not string
 normalization that silently mismatches and reports a live service as unknown.
-`ui_` nodes and `s3` are absent from the table by design, and the join treats
-absence as "not a container" rather than "unknown".
+`ui_` nodes, the public names and `s3` are absent from the table by design, and
+the join treats absence as "not a container" rather than "unknown".
 
 ## Syncing the copy
 
@@ -169,7 +176,7 @@ was explicitly not to gate it.
 
 Two PRs, MoonBase first so the UI has something to copy.
 
-1. **MoonBase:** `docs/ARCHITECTURE.md` with the diagram and the route/jobs
-   tables. Link it from `CLAUDE.md`'s docs list.
+1. **MoonBase:** `docs/ARCHITECTURE.md` with the diagram and the public-name,
+   route and jobs tables. Link it from `CLAUDE.md`'s docs list.
 2. **muchq.com:** `src/apps/topology/`, the `/topology` route, the sync script,
    and the tests.

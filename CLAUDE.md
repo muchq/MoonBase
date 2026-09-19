@@ -28,8 +28,10 @@ The three rules that change behavior most:
   a review's fixup commits are squashed and reworded before merge rather than
   shipped as a changelog of the review. PR bodies are terse.
 
-Other docs: [`docs/TESTING.md`](docs/TESTING.md) (mutation checking and the
-traps that only surface in CI), [`docs/BUILD_AND_IDE.md`](docs/BUILD_AND_IDE.md),
+Other docs: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (what is deployed,
+which public name reaches it, and how data moves between them),
+[`docs/TESTING.md`](docs/TESTING.md) (mutation checking and the traps that only
+surface in CI), [`docs/BUILD_AND_IDE.md`](docs/BUILD_AND_IDE.md),
 [`docs/IMPORTING.md`](docs/IMPORTING.md).
 
 ## Commands
