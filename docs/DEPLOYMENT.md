@@ -1,30 +1,37 @@
-# System and Dataflow
+# Deployment topology
 
 Every container in the consolidated deployment, every public name that reaches
 one, and how data moves between them.
 
-Hand-maintained. Nothing checks it against `deploy/consolidated/compose.yaml`,
-so a service added there is a service missing here until somebody adds it.
+Hand-maintained; nothing checks it against `deploy/consolidated/compose.yaml`.
 
-Node ids are compose service names. `ui_*` nodes are muchq.com routes, not
-containers — they exist because several services are only ever reached through
-a page whose name is different from theirs.
+Node ids are compose service names wherever a container exists. `ui_*` are
+muchq.com routes; the public names and `S3` are not containers either.
+
+Arrow direction follows the label: `http`, `sql` and `ssh` point the way the
+call goes, `logs`, `metrics` and `events` the way the data moves. `games_hub`
+calls `deja` (`DEJA_URL`), and what comes back is deja's prediction.
+
+Dashed borders mark the `stats` compose profile: `stats` and `log_shipper` need
+S3 credentials, so `docker compose up -d` leaves them out.
 
 ```mermaid
 flowchart LR
   subgraph dns["Public names"]
     muchq_com["muchq.com"]
     iili_uk["iili.uk"]
+    one_d4_net["1d4.net"]
     api_muchq["api.muchq.com"]
     i_iili_uk["i.iili.uk"]
     gpt_muchq["gpt.muchq.com"]
     git_muchq["git.muchq.com"]
+    git_ssh["host :222"]
     api_1d4["api.1d4.net"]
     mcp_1d4["mcp.1d4.net"]
     cmptr["consolidated.cmptr.info"]
   end
 
-  subgraph ui["muchq.com routes (Cloudflare)"]
+  subgraph ui["muchq.com routes"]
     ui_games["/games"]
     ui_tracy["/tracy"]
     ui_posterize["/posterize"]
@@ -48,7 +55,7 @@ flowchart LR
     portrait["portrait"]
     mithril["mithril"]
     posterize["posterize"]
-    microgpt["microgpt-serve"]
+    microgpt-serve["microgpt-serve"]
     iili["iili"]
     deja["deja"]
     stats["stats"]:::gated
@@ -65,6 +72,7 @@ flowchart LR
   subgraph obs["Observability"]
     otelcol["otelcol"]
     prometheus["prometheus"]
+    cadvisor["cadvisor"]
   end
 
   muchq_com -->|ui| ui_games
@@ -85,7 +93,8 @@ flowchart LR
   ui_deja -->|http| api_muchq
   ui_metrics -->|http| api_muchq
 
-  iili_uk -->|ui| ui_iili
+  iili_uk -->|http| api_muchq
+  one_d4_net -->|http| api_1d4
 
   api_muchq -->|http| caddy
   i_iili_uk -->|http| caddy
@@ -94,12 +103,13 @@ flowchart LR
   api_1d4 -->|http| caddy
   mcp_1d4 -->|http| caddy
   cmptr -->|http| caddy
+  git_ssh -->|ssh| forgejo
 
   caddy -->|http| games_hub
   caddy -->|http| portrait
   caddy -->|http| mithril
   caddy -->|http| posterize
-  caddy -->|http| microgpt
+  caddy -->|http| microgpt-serve
   caddy -->|http| one_d4
   caddy -->|http| one_d4_v2
   caddy -->|http| iili
@@ -133,10 +143,11 @@ flowchart LR
   portrait -.->|metrics| otelcol
   mithril -.->|metrics| otelcol
   posterize -.->|metrics| otelcol
-  microgpt -.->|metrics| otelcol
+  microgpt-serve -.->|metrics| otelcol
   iili -.->|metrics| otelcol
   deja -.->|metrics| otelcol
   otelcol -.->|metrics| prometheus
+  cadvisor -.->|metrics| prometheus
   prometheus -.->|metrics| prom_proxy
 
   classDef gated stroke-dasharray: 5 5
@@ -151,62 +162,69 @@ flowchart LR
   click prom_proxy "/metrics"
 ```
 
-Arrows point the way data moves, which is not always the way the call goes:
-`games_hub` holds `DEJA_URL` and calls `deja`, but what crosses the wire is
-deja's prediction, and the lobby is what displays it.
-
-Dashed node borders mark services behind the `stats` compose profile. They do
-not start on a plain `docker compose up -d`, because both need S3 credentials
-and would otherwise crash-loop.
-
 ## Public names
+
+Three SPAs on Cloudflare Workers, seven caddy vhosts, and one SSH port.
 
 | Name | Served by | Reaches |
 | --- | --- | --- |
-| `muchq.com` | Cloudflare Workers | the SPA; its routes call `api.muchq.com` |
-| `iili.uk` | Cloudflare Workers | the iili SPA |
+| `muchq.com` | Workers, `muchq.github.io` repo | its routes call `api.muchq.com` |
+| `iili.uk` | Workers, `domains/iili/apps/iili_web` | calls `api.muchq.com` |
+| `1d4.net` | Workers, `domains/games/apps/1d4_web` | calls `api.1d4.net` |
 | `api.muchq.com` | caddy | games_hub, portrait, prom_proxy, mithril, posterize, microgpt-serve, one_d4, one_d4_v2, iili, stats, deja |
-| `i.iili.uk` | caddy | iili — `GET /r/*` short-link redirects only |
+| `i.iili.uk` | caddy | iili — `GET`/`HEAD` `/r/*` short links. HEAD is the contract: link unfurlers use it |
 | `gpt.muchq.com` | caddy | microgpt-serve |
-| `git.muchq.com` | caddy | forgejo |
-| `api.1d4.net` | caddy | one_d4, stats |
-| `mcp.1d4.net` | caddy | mcpserver — `POST /mcp` |
+| `git.muchq.com` | caddy | forgejo, HTTP only |
+| host `:222` | published by forgejo | forgejo, git over SSH — the one ingress that skips caddy |
+| `api.1d4.net` | caddy | one_d4; stats for `GET /stats/v1/one_d4/*` only |
+| `mcp.1d4.net` | caddy | mcpserver — `/mcp`, any method |
 | `consolidated.cmptr.info` | caddy | nothing; static placeholder response |
+
+`mcp.1d4.net` takes any method on purpose. GET opens the SSE probe and DELETE
+ends a session, and both have to reach mcpserver to get a parseable 405 rather
+than Caddy's empty 200 (#1325).
 
 ## Routes on api.muchq.com
 
-| Path | Backend |
-| --- | --- |
-| `/games/v2/session`, `/games/v2/play` | games_hub |
-| `/portrait/v1/trace` | portrait |
-| `/metrics/v1/*` | prom_proxy |
-| `/mithril/v1/wordchain` | mithril |
-| `/imagine/v1/blur`, `/imagine/v1/edges` | posterize |
-| `/microgpt/v1/generate`, `/microgpt/v1/chat` | microgpt-serve |
-| `/1d4/v1/health`, `/1d4/v1/index`, `/1d4/v1/index/*`, `/1d4/v1/query` | one_d4 |
-| `/v2/analyze` | one_d4_v2 |
-| `/iili/v1/shorten`, `/iili/v1/r/*` | iili |
-| `/stats/v1/*` | stats |
-| `/deja/v1/*`, `/deja/v1/next` | deja |
+A request with the wrong method is a 404, not a fall-through to another
+matcher (#1468).
+
+| Method | Path | Backend |
+| --- | --- | --- |
+| POST | `/games/v2/session` | games_hub |
+| any | `/games/v2/play` | games_hub — websocket upgrade |
+| POST | `/portrait/v1/trace` | portrait |
+| GET | `/metrics/v1/*` | prom_proxy |
+| POST | `/mithril/v1/wordchain` | mithril |
+| POST | `/imagine/v1/blur`, `/imagine/v1/edges` | posterize |
+| POST | `/microgpt/v1/generate`, `/microgpt/v1/chat` | microgpt-serve |
+| GET | `/1d4/v1/health` | one_d4 |
+| POST | `/1d4/v1/index` | one_d4 |
+| GET | `/1d4/v1/index/*` | one_d4 |
+| POST | `/1d4/v1/query` | one_d4 |
+| POST | `/v2/analyze` | one_d4_v2 |
+| POST | `/iili/v1/shorten` | iili |
+| GET | `/iili/v1/r/*` | iili |
+| GET | `/stats/v1/*` | stats |
+| GET | `/deja/v1/*` | deja |
+| POST | `/deja/v1/next` | deja |
 
 ## The log path
 
-The one route through the system that no config file states in one place:
-
 ```
-caddy writes /var/log/caddy/access.log
-  ├── deja tails it read-only, predicting the next request
-  └── log_shipper rolls it to S3 and deletes the rolled file
+caddy writes /var/log/caddy/access.log and rolls it (roll_size 4mb, roll_keep 5)
+  ├── deja tails the live file read-only, predicting the next request
+  └── log_shipper uploads rolled files to S3 and deletes each one it uploads
         └── stats reads S3, aggregates into shared_postgres, serves /stats/v1
 ```
 
-`one_d4` query events ride the same shipper under their own S3 partition.
-Rolled files are deleted after upload, which is what keeps the host disk
-bounded once shipping owns retention.
+Caddy owns the rolling; the shipper never touches the live log. Retention is
+tuned in the Caddyfile, not in log_shipper. `one_d4` query events ride the same
+shipper under their own S3 partition.
 
 ## One-shot jobs
 
-Not in the diagram: they order a deploy rather than carry data.
+Not in the diagram: they sequence a deploy rather than carry data.
 
 | Job | Runs before |
 | --- | --- |
