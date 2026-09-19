@@ -17,10 +17,13 @@ S3 credentials, so `docker compose up -d` leaves them out.
 
 ```mermaid
 flowchart LR
-  subgraph dns["Public names"]
+  subgraph cf["Cloudflare"]
     muchq_com["muchq.com"]
     iili_uk["iili.uk"]
     one_d4_net["1d4.net"]
+  end
+
+  subgraph ingress["Host ingress"]
     api_muchq["api.muchq.com"]
     i_iili_uk["i.iili.uk"]
     gpt_muchq["gpt.muchq.com"]
@@ -93,6 +96,15 @@ flowchart LR
   ui_deja -->|http| api_muchq
   ui_metrics -->|http| api_muchq
 
+  ui_games -.->|ui| games_hub
+  ui_tracy -.->|ui| portrait
+  ui_posterize -.->|ui| posterize
+  ui_wordchains -.->|ui| mithril
+  ui_iili -.->|ui| iili
+  ui_stats -.->|ui| stats
+  ui_deja -.->|ui| deja
+  ui_metrics -.->|ui| prom_proxy
+
   iili_uk -->|http| api_muchq
   one_d4_net -->|http| api_1d4
 
@@ -152,14 +164,14 @@ flowchart LR
 
   classDef gated stroke-dasharray: 5 5
 
-  click games_hub "/games"
-  click portrait "/tracy"
-  click posterize "/posterize"
-  click mithril "/wordchains"
-  click iili "/iili"
-  click stats "/stats"
-  click deja "/deja"
-  click prom_proxy "/metrics"
+  click games_hub "https://muchq.com/games"
+  click portrait "https://muchq.com/tracy"
+  click posterize "https://muchq.com/posterize"
+  click mithril "https://muchq.com/wordchains"
+  click iili "https://muchq.com/iili"
+  click stats "https://muchq.com/stats"
+  click deja "https://muchq.com/deja"
+  click prom_proxy "https://muchq.com/metrics"
 ```
 
 ## Public names
@@ -183,6 +195,22 @@ Three SPAs on Cloudflare Workers, seven caddy vhosts, and one SSH port.
 `mcp.1d4.net` takes any method on purpose. GET opens the SSE probe and DELETE
 ends a session, and both have to reach mcpserver to get a parseable 405 rather
 than Caddy's empty 200 (#1325).
+
+## muchq.com routes
+
+The route names and the service names disagree, and nothing else in either repo
+states the mapping.
+
+| Route | Service |
+| --- | --- |
+| `/games` | games_hub |
+| `/tracy` | portrait |
+| `/posterize` | posterize |
+| `/wordchains` | mithril |
+| `/iili` | iili |
+| `/stats` | stats |
+| `/deja` | deja |
+| `/metrics` | prom_proxy |
 
 ## Routes on api.muchq.com
 

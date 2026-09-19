@@ -62,14 +62,21 @@ src/apps/topology/
 **Rendering.** `await import('mermaid')` inside the route component, so mermaid
 stays out of every other route's bundle.
 
-**Click-through.** `click` directives in the mermaid source itself. GitHub
-ignores them; the UI gets navigation from the same file that draws the picture.
+**Click-through.** `click` directives in the mermaid source, with absolute
+`https://muchq.com/...` targets: GitHub renders mermaid in an iframe on its own
+origin, so a relative href resolves against github.com. Mermaid emits a native
+anchor rather than a callback, which react-router does not intercept, so the
+page needs a delegated click handler that strips the origin and pushes the
+route — otherwise every click is a full reload.
 
 **Hover.** Hovering a node dims every node and edge not incident to it, by
 walking the parsed edge list and toggling a class on mermaid's rendered SVG.
 
 **Layer toggles.** A checkbox per edge kind, filtering `.mmd` lines by label
-and re-rendering. Sixty-odd edges at once is a hairball.
+and re-rendering. Seventy-odd edges at once is a hairball. Filtering must also
+prune nodes that lose all their edges; node declarations sit inside subgraphs,
+so dropping a kind otherwise leaves empty boxes — a `sql`-only view strands 31
+of 37 nodes.
 
 **Status overlay.** Node colour by container state, reusing
 `metrics-systems/api.ts` (`fetchJson`, `containerState`, `containerDisplayName`).
