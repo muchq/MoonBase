@@ -2489,9 +2489,11 @@ func TestOneD4KnowsTheUiOriginCaddyGrants(t *testing.T) {
 // vhost rather than one. An origin Caddy starts granting without its twin
 // here reads as a direct API call in every per-caller rollup.
 func TestStatsKnowsEveryUiOriginCaddyGrants(t *testing.T) {
-	// Two spellings reach a browser: bare inside a header block, and
-	// header @matcher <name> "..." for the per-origin grants.
-	grant := regexp.MustCompile(`Access-Control-Allow-Origin\s+"([^"]+)"`)
+	// Three spellings reach a browser: bare inside a header block,
+	// header @matcher <name> "..." for the per-origin grants, and either
+	// with the value unquoted, which Caddy accepts and a quoted-only
+	// pattern would skip without failing.
+	grant := regexp.MustCompile(`Access-Control-Allow-Origin\s+"?([^"\s]+)"?`)
 	granted := map[string]bool{}
 	for _, line := range directiveLines(t, "Caddyfile") {
 		if match := grant.FindStringSubmatch(line); match != nil {
