@@ -117,11 +117,6 @@ pub(crate) fn fold(s: &str) -> String {
         .collect()
 }
 
-/// The lowercased path of a request target, query string dropped.
-fn path_of(uri: &str) -> String {
-    fold(uri.split('?').next().unwrap_or_default())
-}
-
 /// Buckets a User-Agent header and names the agent within the bucket. AI
 /// scrapers and named bots are named by the marker that matched, so those
 /// two name vocabularies are exactly the lists above. Anonymous bots and
@@ -232,10 +227,12 @@ static PROBE_MATCHERS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
 });
 
 /// Names the scanner family a request path belongs to, or `None` when the
-/// path is not a known probe shape. Matching is on the lowercased path with
-/// the query string removed.
+/// path is not a known probe shape. Matching is on the decoded path,
+/// lowercased, so a scanner cannot dodge a family by spelling `/.env` as
+/// `/%2Eenv`. The path is not cleaned: the dot segments a scanner sends are
+/// what the traversal family is looking for.
 pub fn probe_of(uri: &str) -> Option<&'static str> {
-    let path = path_of(uri);
+    let path = fold(&crate::route::decoded_target(uri)?);
     PROBE_MATCHERS
         .iter()
         .find(|(_, matcher)| matcher.is_match(&path))

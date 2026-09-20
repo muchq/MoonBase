@@ -4,9 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Real-database coverage for the store: schema, the processed-marker
@@ -44,13 +48,29 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	date, host, key := uniqueFixture(t)
 
 	rollup := NewRollup()
-	rollup.Requests[RequestKey{date, host, 200, "GET", AgentBrowser, ""}] = 5
-	rollup.Requests[RequestKey{date, host, 403, "GET", AgentAIScraper, "gptbot"}] = 2
-	rollup.Requests[RequestKey{date, host, 200, "GET", AgentAIScraper, "gptbot"}] = 1
-	rollup.Requests[RequestKey{date, host, 404, "GET", AgentOther, "(empty)"}] = 4
+	row := func(status int, class, agent, route, source string) RequestKey {
+		return RequestKey{
+			Date: date, Host: host, Route: route, Source: source,
+			Status: status, Method: "GET", AgentClass: class, Agent: agent,
+		}
+	}
+	rollup.Requests[row(200, AgentBrowser, "", "/games/v2/session", SourceUI)] = 5
+	// And two rows differing only in route: the column names the backend
+	// that served the request, so folding these loses which one did.
+	rollup.Requests[row(200, AgentBot, "curl", "/games/v2/play", SourceAPI)] = 7
+	rollup.Requests[row(200, AgentBot, "curl", "/games/v2/session", SourceAPI)] = 3
+	// Same row but for the caller: the widened primary key has to keep the
+	// two apart rather than summing them.
+	rollup.Requests[row(200, AgentBrowser, "", "/games/v2/session", SourceAPI)] = 3
+	rollup.Requests[row(403, AgentAIScraper, "gptbot", OtherRoute, SourceAPI)] = 2
+	rollup.Requests[row(200, AgentAIScraper, "gptbot", OtherRoute, SourceAPI)] = 1
+	rollup.Requests[row(404, AgentOther, "(empty)", OtherRoute, SourceAPI)] = 4
 	rollup.Slugs[SlugKey{date, host + "-slug", 302}] = 3
-	rollup.Probes[ProbeKey{date, host, ProbeEnv, 404}] = 4
-	rollup.Probes[ProbeKey{date, host, ProbeEnv, 200}] = 1
+	rollup.Probes[ProbeKey{Date: date, Host: host, Route: OtherRoute, Probe: ProbeEnv, Status: 404}] = 4
+	rollup.Probes[ProbeKey{Date: date, Host: host, Route: OtherRoute, Probe: ProbeEnv, Status: 200}] = 1
+	// Same probe, same status, a different backend: the route is in this
+	// key too, so it has to keep these apart the way source does above.
+	rollup.Probes[ProbeKey{Date: date, Host: host, Route: "/deja/v1/*", Probe: ProbeEnv, Status: 404}] = 2
 	// The query rollup has no host; the store applies any entry, so this run's
 	// unique host serves as one and keeps the rows tellable and the counts exact.
 	rollup.Queries[QueryKey{date, host, "ui", "ok", "live"}] = 2
@@ -74,6 +94,44 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 		t.Fatalf("Unprocessed after apply = (%v, %v), want none", pending, err)
 	}
 
+	// What keeps these rows apart is the widened primary key. No read
+	// exposes route or source yet — the endpoints all group across them —
+	// so this is the one place that says the upsert filed them as separate
+	// rows rather than folding them into one.
+	byColumn := func(column, table, class string) map[string]int64 {
+		t.Helper()
+		out := map[string]int64{}
+		rows, err := store.pool.Query(ctx,
+			"SELECT "+column+", requests FROM "+table+" WHERE host = $1 AND "+class, host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var value string
+			var requests int64
+			if err := rows.Scan(&value, &requests); err != nil {
+				t.Fatal(err)
+			}
+			out[value] = requests
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if got := byColumn("source", "request_stats", "agent_class = '"+AgentBrowser+"'"); len(got) != 2 ||
+		got[SourceUI] != 5 || got[SourceAPI] != 3 {
+		t.Errorf("browser rows by source = %v, want ui 5 and api 3 kept apart", got)
+	}
+	if got := byColumn("route", "request_stats", "agent_class = '"+AgentBot+"'"); len(got) != 2 ||
+		got["/games/v2/play"] != 7 || got["/games/v2/session"] != 3 {
+		t.Errorf("bot rows by route = %v, want the two backends kept apart", got)
+	}
+	if got := byColumn("route", "probe_stats", "status = 404"); len(got) != 2 ||
+		got[OtherRoute] != 4 || got["/deja/v1/*"] != 2 {
+		t.Errorf("probe rows by route = %v, want the two backends kept apart", got)
+	}
+
 	summary, err := store.Summary(ctx, 2)
 	if err != nil {
 		t.Fatal(err)
@@ -84,8 +142,9 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 			got[row.AgentClass] = row
 		}
 	}
-	if row := got[AgentBrowser]; row.Requests != 5 || row.Errors != 0 {
-		t.Errorf("browser row = %+v, want 5 requests and no errors", row)
+	// Every read groups across source, so the browser's two rows arrive summed.
+	if row := got[AgentBrowser]; row.Requests != 8 || row.Errors != 0 {
+		t.Errorf("browser row = %+v, want 5 + 3 requests and no errors", row)
 	}
 	if row := got[AgentAIScraper]; row.Requests != 3 || row.Errors != 2 {
 		t.Errorf("scraper row = %+v, want 3 requests with the 403s as errors", row)
@@ -127,7 +186,7 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	if row := named[AgentOther+" (empty)"]; row.Requests != 4 || row.Blocked != 0 {
 		t.Errorf("empty-UA row = %+v; a 404 is not a block", row)
 	}
-	if row := named[AgentBrowser+" "]; row.Requests != 5 {
+	if row := named[AgentBrowser+" "]; row.Requests != 8 {
 		t.Errorf("browser row = %+v, want the unnamed bucket carried through", row)
 	}
 
@@ -141,8 +200,9 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 			env = &probes[i]
 		}
 	}
-	if env == nil || env.Requests != 5 || env.Served != 1 {
-		t.Errorf("env probe row = %+v; want 5 across statuses with the one 200 served", env)
+	// The endpoint groups across route, so the two backends' rows arrive summed.
+	if env == nil || env.Requests != 7 || env.Served != 1 {
+		t.Errorf("env probe row = %+v; want 7 across statuses and routes with the one 200 served", env)
 	}
 
 	if row := queryRowFor(t, store, host); row == nil || row.Requests != 2 || row.Cache != "live" {
@@ -226,8 +286,8 @@ func TestAgentsHonoursTheLimitBusiestFirst(t *testing.T) {
 	date, host, key := uniqueFixture(t)
 
 	rollup := NewRollup()
-	rollup.Requests[RequestKey{date, host, 200, "GET", AgentBot, "curl"}] = 50
-	rollup.Requests[RequestKey{date, host, 200, "GET", AgentBot, "wget"}] = 5
+	rollup.Requests[RequestKey{Date: date, Host: host, Route: OtherRoute, Source: SourceAPI, Status: 200, Method: "GET", AgentClass: AgentBot, Agent: "curl"}] = 50
+	rollup.Requests[RequestKey{Date: date, Host: host, Route: OtherRoute, Source: SourceAPI, Status: 200, Method: "GET", AgentClass: AgentBot, Agent: "wget"}] = 5
 	if err := store.ApplyRollup(ctx, key, rollup); err != nil {
 		t.Fatal(err)
 	}
@@ -246,14 +306,144 @@ func TestAgentsHonoursTheLimitBusiestFirst(t *testing.T) {
 	}
 }
 
+// rollupTables is what a version bump drops, and its comment says every
+// aggregate table in schema belongs to it. Nothing enforced that: an
+// eighth table would be created by the schema, missed by the drop, and
+// left holding rows keyed the old way — double-counted against the rows
+// recomputed beside them. This reads the DDL instead of naming the tables
+// by hand, so the list cannot fall behind the schema it describes.
+// Two boots of a database that has never recorded a version serialize,
+// and the second one reads what the first wrote.
+//
+// FOR UPDATE locks nothing when there is no row to lock, so unseeded both
+// boots read "no version", both decide to drop, and the later one drops
+// the tables the earlier had already recreated and filled. Seeding the row
+// first puts the second boot behind the first on the key's unique index.
+//
+// Both halves are asserted, because either alone would pass on the broken
+// code: that the second boot waits at all — observed as its own backend
+// holding an ungranted lock, not as elapsed time — and that what it reads
+// once released is the version the first recorded rather than nothing.
+func TestASecondBootWaitsForTheFirstToRecordItsVersion(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	if _, err := store.pool.Exec(ctx, `DELETE FROM stats_meta WHERE key = 'rollup_version'`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = store.pool.Exec(context.Background(),
+			`INSERT INTO stats_meta (key, value) VALUES ('rollup_version', $1)
+			 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, currentRollupVersion())
+	})
+
+	first, err := store.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Rollback(ctx)
+	recorded, err := lockRollupVersion(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recorded != "" {
+		t.Fatalf("first boot read %q, want the empty string on a cold database", recorded)
+	}
+
+	pids, second := make(chan int32, 1), make(chan string, 1)
+	go func() {
+		background := context.Background()
+		conn, err := store.pool.Acquire(background)
+		if err != nil {
+			pids <- 0
+			second <- "acquire: " + err.Error()
+			return
+		}
+		defer conn.Release()
+		var pid int32
+		if err := conn.QueryRow(background, "SELECT pg_backend_pid()").Scan(&pid); err != nil {
+			pids <- 0
+			second <- "pid: " + err.Error()
+			return
+		}
+		pids <- pid
+		tx, err := conn.Begin(background)
+		if err != nil {
+			second <- "begin: " + err.Error()
+			return
+		}
+		defer tx.Rollback(background)
+		got, err := lockRollupVersion(background, tx)
+		if err != nil {
+			second <- "lock: " + err.Error()
+			return
+		}
+		second <- got
+	}()
+
+	pid := <-pids
+	waited := false
+	for deadline := time.Now().Add(20 * time.Second); !waited && time.Now().Before(deadline); {
+		var blocked int
+		if err := store.pool.QueryRow(ctx,
+			"SELECT count(*) FROM pg_locks WHERE pid = $1 AND NOT granted", pid).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		waited = blocked > 0
+		if !waited {
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	if !waited {
+		t.Fatal("the second boot never waited for the first: on a cold database both read no " +
+			"version, both drop, and the later drop takes the tables the earlier one filled")
+	}
+
+	if _, err := first.Exec(ctx,
+		`INSERT INTO stats_meta (key, value) VALUES ('rollup_version', 'first')
+		 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case got := <-second:
+		if got != "first" {
+			t.Errorf("second boot read %q, want the version the first recorded; reading "+
+				"anything else is deciding to drop the tables the first just filled", got)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the second boot never returned")
+	}
+}
+
+func TestRollupTablesIsEveryTableTheSchemaCreates(t *testing.T) {
+	created := map[string]bool{}
+	for _, ddl := range schema {
+		for _, match := range regexp.MustCompile(`CREATE TABLE IF NOT EXISTS (\w+)`).
+			FindAllStringSubmatch(ddl, -1) {
+			created[match[1]] = true
+		}
+	}
+	require.NotEmpty(t, created, "no CREATE TABLE found in schema; has its shape changed?")
+	listed := map[string]bool{}
+	for _, table := range rollupTables {
+		listed[table] = true
+	}
+	assert.Equal(t, created, listed,
+		"rollupTables and schema disagree. A table the schema creates and the list omits "+
+			"survives a version bump holding rows keyed the old way.")
+}
+
 func TestAVersionBumpDropsAggregatesAndMarkersForReaggregation(t *testing.T) {
 	store := testStore(t)
 	ctx := context.Background()
 	date, host, key := uniqueFixture(t)
 	rollup := NewRollup()
-	rollup.Requests[RequestKey{date, host, 200, "GET", AgentBot, "curl"}] = 1
+	rollup.Requests[RequestKey{Date: date, Host: host, Route: OtherRoute, Source: SourceAPI, Status: 200, Method: "GET", AgentClass: AgentBot, Agent: "curl"}] = 1
 	rollup.Slugs[SlugKey{date, host + "-slug", 302}] = 1
-	rollup.Probes[ProbeKey{date, host, ProbeGit, 404}] = 1
+	rollup.Probes[ProbeKey{Date: date, Host: host, Route: OtherRoute, Probe: ProbeGit, Status: 404}] = 1
 	rollup.Queries[QueryKey{date, host, "ui", "ok", "live"}] = 1
 	rollup.Terms[TermKey{date, host, KindField, "eco"}] = 1
 	rollup.Countries[GeoKey{date, host, AgentBot, "GB"}] = GeoStat{1, 0, 0}
@@ -383,7 +573,7 @@ func TestAVersionChangeRecreatesTablesInTheirNewShape(t *testing.T) {
 	}
 	t.Cleanup(reopened.Close)
 	rollup := NewRollup()
-	rollup.Requests[RequestKey{date, host, 200, "GET", AgentBot, "curl"}] = 1
+	rollup.Requests[RequestKey{Date: date, Host: host, Route: OtherRoute, Source: SourceAPI, Status: 200, Method: "GET", AgentClass: AgentBot, Agent: "curl"}] = 1
 	if err := reopened.ApplyRollup(ctx, key, rollup); err != nil {
 		t.Errorf("the new-shape insert failed after the version change: %v", err)
 	}

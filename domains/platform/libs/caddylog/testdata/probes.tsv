@@ -51,3 +51,10 @@
 # always several segments deep; backups probe the root.
 /muchq/MoonBase/archive/main.tar.gz	
 /muchq/MoonBase/raw/branch/main/migrations/V004__x.sql	
+# An escape is only a spelling, so it does not hide a family. Dot segments
+# are the opposite: they are what traversal is looking for, which is why
+# the path these read is decoded and not cleaned.
+/%2Eenv	env
+/cgi-bin%2f	cgi
+//wp-login.php	wordpress
+/a/../.git/config	traversal

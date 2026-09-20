@@ -21,12 +21,14 @@ var schema = []string{
 	`CREATE TABLE IF NOT EXISTS request_stats (
 		dt date NOT NULL,
 		host text NOT NULL,
+		route text NOT NULL,
+		source text NOT NULL,
 		status int NOT NULL,
 		http_method text NOT NULL,
 		agent_class text NOT NULL,
 		agent text NOT NULL,
 		requests bigint NOT NULL,
-		PRIMARY KEY (dt, host, status, http_method, agent_class, agent)
+		PRIMARY KEY (dt, host, route, source, status, http_method, agent_class, agent)
 	)`,
 	`CREATE TABLE IF NOT EXISTS iili_slug_stats (
 		dt date NOT NULL,
@@ -38,10 +40,11 @@ var schema = []string{
 	`CREATE TABLE IF NOT EXISTS probe_stats (
 		dt date NOT NULL,
 		host text NOT NULL,
+		route text NOT NULL,
 		probe text NOT NULL,
 		status int NOT NULL,
 		requests bigint NOT NULL,
-		PRIMARY KEY (dt, host, probe, status)
+		PRIMARY KEY (dt, host, route, probe, status)
 	)`,
 	`CREATE TABLE IF NOT EXISTS query_stats (
 		dt date NOT NULL,
@@ -82,8 +85,10 @@ var schema = []string{
 // change is a re-aggregation" costs — one full pass, during which the
 // served counts climb back up from zero — and what makes it never data
 // loss. Version 2 named agents and added probe_stats; version 3 dates
-// every row by its line's own timestamp rather than the object's.
-const RollupVersion = "3"
+// every row by its line's own timestamp rather than the object's; version
+// 4 keys requests by the backend that served them and the caller behind
+// them, and folds the Host header to the site it addressed.
+const RollupVersion = "4"
 
 func rollupVersionFor(meaning string, ddl []string) string {
 	sum := sha256.Sum256([]byte(strings.Join(ddl, "\n")))
@@ -131,6 +136,30 @@ func NewStore(ctx context.Context, databaseURL string) (*Store, error) {
 	return store, nil
 }
 
+// lockRollupVersion takes the row lock the drop decision is made under and
+// returns the version recorded there, the empty string on a database that
+// has never recorded one.
+//
+// The row is seeded first because FOR UPDATE locks nothing when there is no
+// row to lock: on a cold database two boots would both read no version,
+// both decide to drop, and the later one would drop the tables the earlier
+// had already recreated and filled. Seeding makes the lock real, and every
+// boot after the first takes it against a row that exists anyway.
+func lockRollupVersion(ctx context.Context, tx pgx.Tx) (string, error) {
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO stats_meta (key, value) VALUES ('rollup_version', '')
+		 ON CONFLICT DO NOTHING`); err != nil {
+		return "", fmt.Errorf("seeding rollup version: %w", err)
+	}
+	var recorded string
+	if err := tx.QueryRow(ctx,
+		`SELECT value FROM stats_meta WHERE key = 'rollup_version' FOR UPDATE`).
+		Scan(&recorded); err != nil {
+		return "", fmt.Errorf("reading rollup version: %w", err)
+	}
+	return recorded, nil
+}
+
 // dropAggregatesOnVersionChange runs before the schema so that a version
 // bump which changed a table's columns recreates it: DROP rather than
 // TRUNCATE is what makes a column change and a new table the same
@@ -144,11 +173,9 @@ func (s *Store) dropAggregatesOnVersionChange(ctx context.Context) error {
 	}
 	defer tx.Rollback(ctx)
 
-	var recorded string
-	err = tx.QueryRow(ctx,
-		`SELECT value FROM stats_meta WHERE key = 'rollup_version' FOR UPDATE`).Scan(&recorded)
-	if err != nil && err != pgx.ErrNoRows {
-		return fmt.Errorf("reading rollup version: %w", err)
+	recorded, err := lockRollupVersion(ctx, tx)
+	if err != nil {
+		return err
 	}
 	if recorded == currentRollupVersion() {
 		return nil
@@ -214,11 +241,11 @@ func (s *Store) ApplyRollup(ctx context.Context, key string, rollup *Rollup) err
 	}
 	for k, count := range rollup.Requests {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO request_stats (dt, host, status, http_method, agent_class, agent, requests)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7)
-			 ON CONFLICT (dt, host, status, http_method, agent_class, agent)
+			`INSERT INTO request_stats (dt, host, route, source, status, http_method, agent_class, agent, requests)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			 ON CONFLICT (dt, host, route, source, status, http_method, agent_class, agent)
 			 DO UPDATE SET requests = request_stats.requests + EXCLUDED.requests`,
-			k.Date, k.Host, k.Status, k.Method, k.AgentClass, k.Agent, count); err != nil {
+			k.Date, k.Host, k.Route, k.Source, k.Status, k.Method, k.AgentClass, k.Agent, count); err != nil {
 			return err
 		}
 	}
@@ -234,11 +261,11 @@ func (s *Store) ApplyRollup(ctx context.Context, key string, rollup *Rollup) err
 	}
 	for k, count := range rollup.Probes {
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO probe_stats (dt, host, probe, status, requests)
-			 VALUES ($1, $2, $3, $4, $5)
-			 ON CONFLICT (dt, host, probe, status)
+			`INSERT INTO probe_stats (dt, host, route, probe, status, requests)
+			 VALUES ($1, $2, $3, $4, $5, $6)
+			 ON CONFLICT (dt, host, route, probe, status)
 			 DO UPDATE SET requests = probe_stats.requests + EXCLUDED.requests`,
-			k.Date, k.Host, k.Probe, k.Status, count); err != nil {
+			k.Date, k.Host, k.Route, k.Probe, k.Status, count); err != nil {
 			return err
 		}
 	}

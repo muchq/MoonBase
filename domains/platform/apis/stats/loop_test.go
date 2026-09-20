@@ -101,7 +101,7 @@ func TestRunOnceAggregatesNewObjectsAndSkipsProcessedAndForeignKeys(t *testing.T
 		t.Fatal("the new object was not applied")
 	}
 	// The partition date keys the rollup — the object's own dt=, not today.
-	if got := rollup.Requests[RequestKey{"2026-08-31", "api.1d4.net", 200, "GET", AgentOther, "(empty)"}]; got != 1 {
+	if got := requestsOn(rollup, "2026-08-31", "api.1d4.net", 200, "GET", AgentOther, "(empty)"); got != 1 {
 		t.Errorf("rollup rows = %v", rollup.Requests)
 	}
 }
@@ -120,7 +120,7 @@ func TestRunOnceHandsTheAggregatorsLocatorToEveryRollup(t *testing.T) {
 	}
 
 	rollup := store.applied["logs/source=caddy/dt=2026-08-30/a.log.gz"]
-	if rollup.Countries[GeoKey{"2026-08-30", "h", AgentOther, "AU"}].Requests != 1 {
+	if rollup.Countries[GeoKey{"2026-08-30", OtherSite, AgentOther, "AU"}].Requests != 1 {
 		t.Errorf("geo rows = %v; the locator did not reach the rollup", rollup.Countries)
 	}
 }

@@ -21,7 +21,23 @@ object's partition: Caddy rolls by size, so an object spans whatever days
 it took to fill. That roll size (`roll_size` in the Caddyfile) is the
 pipeline's latency, and `deploy_config_test` bounds it.
 
-Aggregates are bounded per row, on purpose: hosts are Caddy's vhosts,
+`route` and `source` are narrower than they look. A route names the
+matcher that claimed the path, which on a site that has matchers is the
+backend that served it — but `git.muchq.com` is a bare reverse proxy with
+no path matchers at all, so every Forgejo page is `other`, sharing the
+token with the 404s nothing served. Grouping by route answers "which
+matcher", not "which backend", and the difference is all of Forgejo.
+`source` is `mcp` for anything that reached the MCP endpoint and `ui` for
+a browser arriving from an origin the Caddyfile grants CORS to; `api` is
+everything else, so it is the residue rather than a caller class — a
+human reading `git.muchq.com` and a scanner walking it are both `api`.
+
+Aggregates are bounded per row, on purpose: hosts fold to the Caddyfile
+site the request addressed and everything else to `other`, so a port, a
+case or an invented Host mints no row of its own; routes are the
+Caddyfile's own path matchers, and `other` for anything no matcher
+claimed; sources are one of `mcp`, `ui` and `api`, the words one_d4 uses
+for the same question;
 methods collapse through the nine-verb rule the metrics rails use, and
 user agents collapse to four classes (`ai_scraper`, `bot`, `browser`,
 `other`). Each request row also carries a bounded agent name (#1458): the

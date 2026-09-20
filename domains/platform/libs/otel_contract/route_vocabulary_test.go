@@ -89,14 +89,13 @@ func TestSourceVocabularyAgreesBetweenStatsAndOneD4(t *testing.T) {
 		"the caller vocabularies differ. stats books gateway arrivals and one_d4 books its own "+
 			"work; the two only read beside each other while they spell the words the same.")
 
-	// Both recognise mcpserver by the same product token.
-	javaAgent := regexp.MustCompile(`MCPSERVER_AGENT = "([^"]+)"`).
-		FindSubmatch(codeLines(t, javaEvent, "MCPSERVER_AGENT"))
-	goAgent := regexp.MustCompile(`mcpserverAgent\s+= "([^"]+)"`).
-		FindSubmatch(codeLines(t, goSource, "mcpserverAgent"))
-	if assert.NotNil(t, javaAgent) && assert.NotNil(t, goAgent) {
-		assert.Equal(t, string(javaAgent[1]), string(goAgent[1]),
-			"the mcpserver product token is spelled differently, so one side books its calls "+
-				"as a direct API caller")
-	}
+	// The words are shared; the evidence is not, and only one side has a
+	// product token to read. one_d4 knows mcpserver by its User-Agent
+	// because mcpserver calls it directly; at the gateway those calls
+	// appear in no log at all, so a request carrying that token there is
+	// by construction something else wearing it. stats keys on the route
+	// instead, which is why it has no token for this pin to hold.
+	assert.NotContains(t, string(codeLines(t, goSource, "SourceOf")), "mcpserver",
+		"stats reads mcpserver's product token again. The gateway never sees mcpserver, "+
+			"so the only caller that token can name there is one claiming it.")
 }

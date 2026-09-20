@@ -87,7 +87,10 @@ func SiteOf(host string) string {
 	if colon := strings.IndexByte(host, ':'); colon >= 0 {
 		host = host[:colon]
 	}
-	host = strings.ToLower(host)
+	// The port, the case and the FQDN's trailing dot are the client's to
+	// vary; Caddy's host matcher ignores all three, so the same vhost is
+	// reached under any of them and the column has to fold them all.
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
 	for _, site := range sites {
 		if site == host {
 			return site
@@ -102,11 +105,11 @@ func SiteOf(host string) string {
 // trailing slash kept, then compared case-insensitively.
 func RouteOf(host, uri string) string {
 	site := SiteOf(host)
-	target, ok := originPath(uri)
+	target, ok := matchTarget(uri)
 	if !ok {
 		return OtherRoute
 	}
-	path := strings.ToLower(clean(percentDecode(target)))
+	path := strings.ToLower(target)
 	for _, candidate := range routes {
 		if candidate.Site != site {
 			continue
@@ -122,6 +125,32 @@ func RouteOf(host, uri string) string {
 		}
 	}
 	return OtherRoute
+}
+
+// What the client asked for: the request target's path with its percent
+// escapes decoded, case left alone. Probe classification reads this rather
+// than the cleaned path below, because a scanner's dot segments are the
+// evidence — cleaning them away is precisely what destroys the traversal
+// family's signal — while an escape is only a spelling, so /%2Eenv has to
+// land in the same family as /.env.
+func decodedTarget(uri string) (string, bool) {
+	target, ok := originPath(uri)
+	if !ok {
+		return "", false
+	}
+	return percentDecode(target), true
+}
+
+// The path Caddy's matcher compares against: decodedTarget with its dot
+// segments and doubled slashes cleaned. Route and slug both read this, so
+// a row cannot name a route the request never reached, or miss a slug the
+// backend was handed.
+func matchTarget(uri string) (string, bool) {
+	target, ok := decodedTarget(uri)
+	if !ok {
+		return "", false
+	}
+	return clean(target), true
 }
 
 // The path of a request target as Caddy's matcher sees it, query string
