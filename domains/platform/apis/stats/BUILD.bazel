@@ -2,15 +2,17 @@ load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 load("//bazel/rules:oci.bzl", "linux_oci_go")
 
-# otel_contract pins the query-event vocabulary in queries.go against
-# QueryEvent.java, and the agent, probe and method vocabularies in
-# classify.go and aggregate.go, and the site and route tables in route.go,
-# against caddylog's Rust twin.
+# otel_contract pins the query-event vocabulary in queries.go and the caller
+# vocabulary in source.go against QueryEvent.java, and the agent, probe and
+# method vocabularies in classify.go and aggregate.go, and the site and route
+# tables in route.go, against caddylog's Rust twin. deploy_config_test reads
+# source.go for the CORS origins.
 exports_files([
     "aggregate.go",
     "classify.go",
     "queries.go",
     "route.go",
+    "source.go",
 ])
 
 go_library(
@@ -23,6 +25,7 @@ go_library(
         "loop.go",
         "queries.go",
         "route.go",
+        "source.go",
         "store.go",
     ],
     importpath = "github.com/muchq/moonbase/domains/platform/apis/stats",
@@ -50,6 +53,7 @@ go_test(
         "loop_test.go",
         "queries_test.go",
         "route_test.go",
+        "source_test.go",
         "store_test.go",
     ],
     # classify_test.go and route_test.go replay caddylog's corpora, the

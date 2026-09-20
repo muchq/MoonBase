@@ -26,6 +26,7 @@ go_test(
         "//domains/platform/apis/stats:classify.go",
         "//domains/platform/apis/stats:queries.go",
         "//domains/platform/apis/stats:route.go",
+        "//domains/platform/apis/stats:source.go",
         "//domains/platform/libs/aura:middleware.cc",
         "//domains/platform/libs/aura:middleware.h",
         "//domains/platform/libs/aura:middleware_test.cc",

@@ -65,3 +65,38 @@ func TestUnroutedSentinelsAgreeBetweenStatsAndCaddylog(t *testing.T) {
 		}
 	}
 }
+
+// The caller vocabulary: one_d4 books its own queries as mcp, ui or api
+// from its QueryEvent constants, and stats books every gateway request
+// with the same three words. A word spelled differently on one side is a
+// column that cannot be read beside the other.
+func TestSourceVocabularyAgreesBetweenStatsAndOneD4(t *testing.T) {
+	const goSource = "../../apis/stats/source.go"
+	const javaEvent = "../../../games/apis/one_d4/src/main/java/com/muchq/games/one_d4/api/QueryEvent.java"
+
+	fromJava := map[string]bool{}
+	for _, match := range regexp.MustCompile(`static final String SOURCE_\w+ = "([^"]+)"`).
+		FindAllStringSubmatch(string(codeLines(t, javaEvent, "SOURCE_")), -1) {
+		fromJava[match[1]] = true
+	}
+	fromGo := map[string]bool{}
+	for _, match := range regexp.MustCompile(`Source\w+\s+= "([^"]+)"`).
+		FindAllStringSubmatch(string(codeLines(t, goSource, "Source")), -1) {
+		fromGo[match[1]] = true
+	}
+	assert.NotEmpty(t, fromJava, "no SOURCE_ constants in %s", javaEvent)
+	assert.Equal(t, fromJava, fromGo,
+		"the caller vocabularies differ. stats books gateway arrivals and one_d4 books its own "+
+			"work; the two only read beside each other while they spell the words the same.")
+
+	// Both recognise mcpserver by the same product token.
+	javaAgent := regexp.MustCompile(`MCPSERVER_AGENT = "([^"]+)"`).
+		FindSubmatch(codeLines(t, javaEvent, "MCPSERVER_AGENT"))
+	goAgent := regexp.MustCompile(`mcpserverAgent\s+= "([^"]+)"`).
+		FindSubmatch(codeLines(t, goSource, "mcpserverAgent"))
+	if assert.NotNil(t, javaAgent) && assert.NotNil(t, goAgent) {
+		assert.Equal(t, string(javaAgent[1]), string(goAgent[1]),
+			"the mcpserver product token is spelled differently, so one side books its calls "+
+				"as a direct API caller")
+	}
+}

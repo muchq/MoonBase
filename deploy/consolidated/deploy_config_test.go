@@ -2485,6 +2485,45 @@ func TestOneD4KnowsTheUiOriginCaddyGrants(t *testing.T) {
 	}
 }
 
+// stats books a request as the web app's by the same Origin, across every
+// vhost rather than one. An origin Caddy starts granting without its twin
+// here reads as a direct API call in every per-caller rollup.
+func TestStatsKnowsEveryUiOriginCaddyGrants(t *testing.T) {
+	// Two spellings reach a browser: bare inside a header block, and
+	// header @matcher <name> "..." for the per-origin grants.
+	grant := regexp.MustCompile(`Access-Control-Allow-Origin\s+"([^"]+)"`)
+	granted := map[string]bool{}
+	for _, line := range directiveLines(t, "Caddyfile") {
+		if match := grant.FindStringSubmatch(line); match != nil {
+			granted[match[1]] = true
+		}
+	}
+	if len(granted) == 0 {
+		t.Fatal("no site grants Access-Control-Allow-Origin; no browser can call the api")
+	}
+	source, err := os.ReadFile("../../domains/platform/apis/stats/source.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]bool{}
+	for _, match := range regexp.MustCompile(`"(https?://[^"]+)":\s+true`).
+		FindAllStringSubmatch(string(source), -1) {
+		listed[match[1]] = true
+	}
+	for origin := range granted {
+		if !listed[origin] {
+			t.Errorf("Caddy grants origin %s but stats' uiOrigins does not list it; its "+
+				"requests would be counted as direct API calls.", origin)
+		}
+	}
+	for origin := range listed {
+		if !granted[origin] {
+			t.Errorf("stats' uiOrigins lists %s but Caddy grants it nowhere; either the grant "+
+				"was dropped or the entry never matched a real caller.", origin)
+		}
+	}
+}
+
 // TLM-Audit-Scanner (#1458) walks every vhost for exposed credentials and
 // ignores robots.txt. The refusals are a snippet each site imports first, so a
 // new site block cannot forget it and no site answers a refused guest before

@@ -145,6 +145,14 @@ func (l *caddyLine) userAgent() string {
 	return values[0]
 }
 
+func (l *caddyLine) origin() string {
+	values := l.Request.Headers["Origin"]
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
 // The nine RFC 9110 methods pass through, anything else collapses —
 // the same bounding rule as every metrics rail (#1305), because a scanner
 // spraying invented verbs must not mint a row per token.
