@@ -20,6 +20,7 @@ func TestSourceOfNamesTheCaller(t *testing.T) {
 		{"an mcp client is known by the endpoint it reached", "/mcp", "", "node", SourceMCP},
 		{"mcpserver by its user agent, wherever it lands", "/1d4/v1/query", "", "mcpserver/1.0", SourceMCP},
 		{"and it wins over an origin, which it never sends", "/1d4/v1/query", "https://1d4.net", "mcpserver/1.0", SourceMCP},
+		{"and the mcp endpoint wins over one too", mcpRoute, "https://1d4.net", "Mozilla/5.0", SourceMCP},
 		{"a direct caller has neither", "/1d4/v1/query", "", "curl/8.6.0", SourceAPI},
 		{"an origin nobody granted is not the web app", "/1d4/v1/query", "https://evil.example.com", "Mozilla/5.0", SourceAPI},
 		{"nor is a near miss", "/1d4/v1/query", "https://1d4.net.evil.example.com", "Mozilla/5.0", SourceAPI},
