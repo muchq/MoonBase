@@ -77,6 +77,10 @@ const (
 	OtherRoute = "other"
 )
 
+// The MCP endpoint, which is how a request reaching it is known at the
+// gateway. The only matcher on mcp.1d4.net, so the route alone names it.
+const mcpRoute = "/mcp"
+
 // SiteOf names the Caddyfile site a request's host addresses, port and case
 // dropped, or OtherSite.
 func SiteOf(host string) string {
