@@ -12,6 +12,10 @@ Arrow direction follows the label: `http`, `sql` and `ssh` point the way the
 call goes, `logs`, `metrics` and `events` the way the data moves. `games_hub`
 calls `deja` (`DEJA_URL`), and what comes back is deja's prediction.
 
+Every HTTP request reaches a service through caddy. The single exception is
+git over SSH on host `:222`, which the forgejo container publishes itself —
+if another edge looks like it skips caddy, the diagram is wrong.
+
 Dashed borders mark the `stats` compose profile: `stats` and `log_shipper` need
 S3 credentials, so `docker compose up -d` leaves them out.
 
@@ -99,15 +103,6 @@ flowchart LR
   ui_stats -->|http| api_muchq
   ui_deja -->|http| api_muchq
   ui_metrics -->|http| api_muchq
-
-  ui_games -.->|ui| games_hub
-  ui_tracy -.->|ui| portrait
-  ui_posterize -.->|ui| posterize
-  ui_wordchains -.->|ui| mithril
-  ui_iili -.->|ui| iili
-  ui_stats -.->|ui| stats
-  ui_deja -.->|ui| deja
-  ui_metrics -.->|ui| prom_proxy
 
   iili_uk -->|http| api_muchq
   iili_uk -->|http| i_iili_uk
@@ -206,7 +201,8 @@ than Caddy's empty 200 (#1325).
 ## muchq.com routes
 
 The route names and the service names disagree, and nothing else in either repo
-states the mapping.
+states the mapping. These are names, not a network path: the request still goes
+out to `api.muchq.com` and through caddy.
 
 | Route | Service |
 | --- | --- |
