@@ -2,14 +2,17 @@ load("@crates//:defs.bzl", "all_crate_deps")
 load("@rules_rs//rs:rust_library.bzl", "rust_library")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 
-# classify.rs is read as text by //domains/platform/libs/otel_contract, which
-# pins its marker lists, probe families, class spellings and method list
-# equal to stats'. The corpus is replayed by stats' classify_test.go as well
-# as by this crate's tests, the behavioral half of the same pin.
+# classify.rs and route.rs are read as text by
+# //domains/platform/libs/otel_contract, which pins their marker lists, probe
+# families, class spellings, method list, sites and route table equal to
+# stats'. The corpora are replayed by stats' own suites as well as by this
+# crate's tests, the behavioral half of the same pins.
 exports_files([
     "src/classify.rs",
+    "src/route.rs",
     "testdata/agents.tsv",
     "testdata/probes.tsv",
+    "testdata/routes.tsv",
 ])
 
 rust_library(
@@ -34,6 +37,7 @@ rust_test(
     compile_data = [
         "testdata/agents.tsv",
         "testdata/probes.tsv",
+        "testdata/routes.tsv",
         "//deploy/consolidated:Caddyfile",
     ],
     crate = ":caddylog",

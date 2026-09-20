@@ -1,0 +1,76 @@
+# Host and request target → the Caddyfile path matcher that claims it, or
+# "other", as both stats/route.go (Go) and caddylog's route.rs (Rust) must
+# answer it. Tab-separated: host, target, route.
+#
+# Every matcher in the table has a row, so one going missing fails here.
+api.muchq.com	/deja/v1/state	/deja/v1/*
+api.muchq.com	/deja/v1/next	/deja/v1/*
+api.muchq.com	/games/v2/session	/games/v2/session
+api.muchq.com	/games/v2/play	/games/v2/play
+api.muchq.com	/iili/v1/r/abc	/iili/v1/r/*
+api.muchq.com	/iili/v1/shorten	/iili/v1/shorten
+api.muchq.com	/stats/v1/summary	/stats/v1/*
+api.muchq.com	/portrait/v1/trace	/portrait/v1/trace
+api.muchq.com	/v2/analyze	/v2/analyze
+api.1d4.net	/v1/query	/v1/query
+api.1d4.net	/stats/v1/one_d4/queries	/stats/v1/one_d4/*
+mcp.1d4.net	/mcp	/mcp
+i.iili.uk	/r/abc	/r/*
+gpt.muchq.com	/microgpt/v1/chat	/microgpt/v1/chat
+# The query string is not part of the path.
+api.muchq.com	/iili/v1/r/abc?utm=x	/iili/v1/r/*
+# The host loses its port and its case.
+API.MUCHQ.COM:443	/games/v2/session	/games/v2/session
+# An absolute-form target routes by its path; the asterisk and authority
+# forms carry no path for a matcher to claim.
+api.muchq.com	https://api.muchq.com/games/v2/session	/games/v2/session
+api.muchq.com	*	other
+api.muchq.com	api.muchq.com:443	other
+api.muchq.com	https://api.muchq.com	other
+# Dot segments pop and doubled slashes collapse before matching.
+api.muchq.com	//games//v2/session	/games/v2/session
+api.muchq.com	/games/v2/../v2/session	/games/v2/session
+api.muchq.com	/./games/v2/session	/games/v2/session
+api.muchq.com	/../games/v2/session	/games/v2/session
+# A trailing slash survives cleaning, so it is not the exact matcher.
+api.muchq.com	/games/v2/session/	other
+# but a prefix matcher still claims it.
+api.muchq.com	/deja/v1/	/deja/v1/*
+# Percent escapes decode before matching, including an encoded slash.
+api.muchq.com	/games/v2/%73ession	/games/v2/session
+api.muchq.com	/games%2Fv2%2Fsession	/games/v2/session
+# A bad escape stays literal rather than failing the target.
+api.muchq.com	/deja/v1/%zz	/deja/v1/*
+api.muchq.com	/deja/v1/%2Fa%zz	/deja/v1/*
+# And it does not stop the good escapes decoding: here the good one is
+# what reaches the matcher at all.
+api.muchq.com	/iili/v1/%72/abc%zz	/iili/v1/r/*
+api.muchq.com	/%64eja/v1/%zz	/deja/v1/*
+api.muchq.com	/%zzgames/v2/session	other
+# Matching is case-insensitive on the path too.
+api.muchq.com	/GAMES/v2/SESSION	/games/v2/session
+# A host no site serves is route-blind, whatever the path looks like.
+git.muchq.com	/games/v2/session	other
+evil.example.com	/games/v2/session	other
+# A matcher belongs to its own site: 1d4's own paths are not muchq's.
+api.muchq.com	/v1/query	other
+api.1d4.net	/games/v2/session	other
+# Unrouted paths on a served site share one token.
+api.muchq.com	/.env	other
+api.muchq.com	/wp-login.php	other
+api.muchq.com	/	other
+# The matchers the rows above do not reach.
+api.1d4.net	/health	/health
+api.1d4.net	/v1/index	/v1/index
+api.1d4.net	/v1/index/abc	/v1/index/*
+api.muchq.com	/1d4/v1/health	/1d4/v1/health
+api.muchq.com	/1d4/v1/index	/1d4/v1/index
+api.muchq.com	/1d4/v1/index/abc	/1d4/v1/index/*
+api.muchq.com	/1d4/v1/query	/1d4/v1/query
+api.muchq.com	/imagine/v1/blur	/imagine/v1/blur
+api.muchq.com	/imagine/v1/edges	/imagine/v1/edges
+api.muchq.com	/metrics/v1/summary	/metrics/v1/*
+api.muchq.com	/microgpt/v1/chat	/microgpt/v1/chat
+api.muchq.com	/microgpt/v1/generate	/microgpt/v1/generate
+api.muchq.com	/mithril/v1/wordchain	/mithril/v1/wordchain
+gpt.muchq.com	/microgpt/v1/generate	/microgpt/v1/generate

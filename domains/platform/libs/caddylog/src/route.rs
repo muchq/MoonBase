@@ -209,6 +209,40 @@ mod tests {
         assert_eq!(route_of(API, "/metrics/v10/x"), OTHER_ROUTE);
     }
 
+    // The behavioral pin shared with stats' route_test.go: the corpus
+    // replayed through both, so a log line names the same backend
+    // whichever language reads it. The vocabulary half is in otel_contract.
+    const ROUTES_CORPUS: &str = include_str!("../testdata/routes.tsv");
+
+    #[test]
+    fn routes_corpus_lands_every_line_where_stats_does() {
+        let mut claimed = BTreeSet::new();
+        let rows: Vec<Vec<&str>> = ROUTES_CORPUS
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(|line| line.split('\t').collect())
+            .collect();
+        assert!(rows.len() > 10, "corpus too small to mean anything");
+        for row in &rows {
+            assert_eq!(row.len(), 3, "malformed corpus row {row:?}");
+            let (host, uri, route) = (row[0], row[1], row[2]);
+            assert_eq!(route_of(host, uri), route, "route_of({host:?}, {uri:?})");
+            claimed.insert(route);
+        }
+        assert!(
+            claimed.contains(OTHER_ROUTE),
+            "corpus never reaches the unrouted token"
+        );
+        for (site, routes) in ROUTES {
+            for route in *routes {
+                assert!(
+                    claimed.contains(route),
+                    "{route} on {site} has no corpus row"
+                );
+            }
+        }
+    }
+
     // A path the Caddyfile splits out to route by method reads as the
     // prefix that claims it; the method factor carries the split.
     #[test]

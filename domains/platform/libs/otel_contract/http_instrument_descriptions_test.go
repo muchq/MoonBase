@@ -117,15 +117,46 @@ func descriptionsFrom(t *testing.T, path string, patterns []*regexp.Regexp) map[
 // describes it, and both tests below still pass while the service exports an
 // empty description. Lines are blanked rather than removed so that patterns
 // spanning a newline cannot bridge across the gap a deleted line would leave.
+// A line's code, up to the comment that trails it. An entry quoted in a
+// trailing comment would otherwise be harvested as a declaration. Quotes
+// are tracked, so a "//" inside a string is code.
+func withoutCommentTail(line string) string {
+	var quote byte
+	escaped := false
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		switch {
+		case escaped:
+			escaped = false
+		case quote != 0 && c == '\\':
+			escaped = true
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '`' || c == '\'':
+			quote = c
+		case c == '/' && i+1 < len(line) && line[i+1] == '/':
+			return line[:i]
+		}
+	}
+	return line
+}
+
 func withoutCommentLines(source []byte) []byte {
 	lines := strings.Split(string(source), "\n")
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		blanked := false
 		for _, marker := range []string{"//", "/*", "*/", "*"} {
 			if strings.HasPrefix(trimmed, marker) {
 				lines[i] = ""
+				blanked = true
 				break
 			}
+		}
+		if !blanked {
+			lines[i] = withoutCommentTail(line)
 		}
 	}
 	return []byte(strings.Join(lines, "\n"))
