@@ -13,6 +13,7 @@ go_test(
         "http_latency_buckets_test.go",
         "query_event_vocabulary_test.go",
         "request_log_fields_test.go",
+        "route_vocabulary_test.go",
     ],
     # Read as text rather than linked. There is no build configuration in which
     # a Go test could link all three, and the declaration site is what has to
@@ -24,10 +25,12 @@ go_test(
         "//domains/platform/apis/stats:aggregate.go",
         "//domains/platform/apis/stats:classify.go",
         "//domains/platform/apis/stats:queries.go",
+        "//domains/platform/apis/stats:route.go",
         "//domains/platform/libs/aura:middleware.cc",
         "//domains/platform/libs/aura:middleware.h",
         "//domains/platform/libs/aura:middleware_test.cc",
         "//domains/platform/libs/caddylog:src/classify.rs",
+        "//domains/platform/libs/caddylog:src/route.rs",
         "//domains/platform/libs/futility/otel:http_instrument_descriptions.h",
         "//domains/platform/libs/futility/otel:otel_provider.h",
         "//domains/platform/libs/server_pal:src/lib.rs",

@@ -4,11 +4,13 @@ load("//bazel/rules:oci.bzl", "linux_oci_go")
 
 # otel_contract pins the query-event vocabulary in queries.go against
 # QueryEvent.java, and the agent, probe and method vocabularies in
-# classify.go and aggregate.go against caddylog's Rust twin.
+# classify.go and aggregate.go, and the site and route tables in route.go,
+# against caddylog's Rust twin.
 exports_files([
     "aggregate.go",
     "classify.go",
     "queries.go",
+    "route.go",
 ])
 
 go_library(
@@ -20,6 +22,7 @@ go_library(
         "geo.go",
         "loop.go",
         "queries.go",
+        "route.go",
         "store.go",
     ],
     importpath = "github.com/muchq/moonbase/domains/platform/apis/stats",
@@ -46,13 +49,15 @@ go_test(
         "geo_test.go",
         "loop_test.go",
         "queries_test.go",
+        "route_test.go",
         "store_test.go",
     ],
-    # classify_test.go replays caddylog's corpus, the behavioral half of
-    # the pin otel_contract keeps on the two classifiers' source.
+    # classify_test.go and route_test.go replay caddylog's corpora, the
+    # behavioral half of the pins otel_contract keeps on the two sources.
     data = [
         "//domains/platform/libs/caddylog:testdata/agents.tsv",
         "//domains/platform/libs/caddylog:testdata/probes.tsv",
+        "//domains/platform/libs/caddylog:testdata/routes.tsv",
     ],
     embed = [":stats_lib"],
     env_inherit = ["STATS_TEST_DB_URL"],
