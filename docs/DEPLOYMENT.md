@@ -1,20 +1,20 @@
 # Deployment topology
 
-Every container in the consolidated deployment, every public name that reaches
-one, and how data moves between them.
+Every container in the production flow, every public name that reaches one, and
+how data moves between them. `forgejo` and its `git.muchq.com` vhost run on the
+same host but sit outside that flow, so they are not drawn.
 
 Hand-maintained; nothing checks it against `deploy/consolidated/compose.yaml`.
 
 Node ids are compose service names wherever a container exists. `ui_*` are
 muchq.com routes; the public names and `S3` are not containers either.
 
-Arrow direction follows the label: `http`, `sql` and `ssh` point the way the
-call goes, `logs`, `metrics` and `events` the way the data moves. `games_hub`
+Arrow direction follows the label: `http` and `sql` point the way the call
+goes, `logs`, `metrics` and `events` the way the data moves. `games_hub`
 calls `deja` (`DEJA_URL`), and what comes back is deja's prediction.
 
-Every HTTP request reaches a service through caddy. The single exception is
-git over SSH on host `:222`, which the forgejo container publishes itself —
-if another edge looks like it skips caddy, the diagram is wrong.
+Every request reaches a service through caddy. An edge that looks like it
+skips caddy is a mistake in the diagram.
 
 Dashed borders mark the `stats` compose profile: `stats` and `log_shipper` need
 S3 credentials, so `docker compose up -d` leaves them out.
@@ -35,8 +35,6 @@ flowchart LR
     api_muchq["api.muchq.com"]
     i_iili_uk["i.iili.uk"]
     gpt_muchq["gpt.muchq.com"]
-    git_muchq["git.muchq.com"]
-    git_ssh["host :222"]
     api_1d4["api.1d4.net"]
     mcp_1d4["mcp.1d4.net"]
     cmptr["consolidated.cmptr.info"]
@@ -71,7 +69,6 @@ flowchart LR
     deja["deja"]
     stats["stats"]:::gated
     log_shipper["log_shipper"]:::gated
-    forgejo["forgejo"]
     prom_proxy["prom_proxy"]
   end
 
@@ -113,11 +110,9 @@ flowchart LR
   api_muchq -->|http| caddy
   i_iili_uk -->|http| caddy
   gpt_muchq -->|http| caddy
-  git_muchq -->|http| caddy
   api_1d4 -->|http| caddy
   mcp_1d4 -->|http| caddy
   cmptr -->|http| caddy
-  git_ssh -->|ssh| forgejo
 
   caddy -->|http| games_hub
   caddy -->|http| portrait
@@ -131,7 +126,6 @@ flowchart LR
   caddy -->|http| deja
   caddy -->|http| mcpserver
   caddy -->|http| prom_proxy
-  caddy -->|http| forgejo
 
   mcpserver -->|http| one_d4
   mcpserver -->|http| one_d4_v2
@@ -178,7 +172,7 @@ flowchart LR
 
 ## Public names
 
-Three SPAs on Cloudflare Workers, seven caddy vhosts, and one SSH port.
+Three SPAs on Cloudflare Workers and six caddy vhosts.
 
 | Name | Served by | Reaches |
 | --- | --- | --- |
@@ -188,8 +182,6 @@ Three SPAs on Cloudflare Workers, seven caddy vhosts, and one SSH port.
 | `api.muchq.com` | caddy | games_hub, portrait, prom_proxy, mithril, posterize, microgpt-serve, one_d4, one_d4_v2, iili, stats, deja |
 | `i.iili.uk` | caddy | iili — `GET`/`HEAD` `/r/*` short links. HEAD is the contract: link unfurlers use it |
 | `gpt.muchq.com` | caddy | microgpt-serve |
-| `git.muchq.com` | caddy | forgejo, HTTP only |
-| host `:222` | published by forgejo | forgejo, git over SSH — the one ingress that skips caddy |
 | `api.1d4.net` | caddy | one_d4; stats for `GET /stats/v1/one_d4/*` only |
 | `mcp.1d4.net` | caddy | mcpserver — `/mcp`, any method |
 | `consolidated.cmptr.info` | caddy | nothing; static placeholder response |
