@@ -15,11 +15,12 @@ namespace games_hub {
 /// stats pipeline. Not metrics — Prometheus keeps the aggregate and drops
 /// the rows, and the rows are the point.
 ///
-/// Five events, which together are the shape of an evening: somebody
-/// made a room, somebody else walked into it, they talked, a table
-/// started, the table ended. The access log sees none of it — a session
-/// opens one socket and every room, table, game and message rides that
-/// one connection — so this is the only place it is recorded.
+/// Six events, which together are the shape of an evening: somebody made
+/// a room, somebody else walked into it, they reshaped the world they
+/// were standing in, they talked, a table started, the table ended. The
+/// access log sees none of it — a session opens one socket and every
+/// room, world, table, game and message rides that one connection — so
+/// this is the only place it is recorded.
 ///
 /// Every value is a closed vocabulary or a count, for the same reason
 /// one_d4's query events are (QueryEvent.java): the reader keys rollup
@@ -30,6 +31,7 @@ namespace games_hub {
 inline constexpr std::string_view kRoomCreated = "room_created";
 inline constexpr std::string_view kRoomJoined = "room_joined";
 inline constexpr std::string_view kChatMessage = "chat_message";
+inline constexpr std::string_view kGeometryChanged = "geometry_changed";
 inline constexpr std::string_view kGameStarted = "game_started";
 inline constexpr std::string_view kGameFinished = "game_finished";
 
@@ -55,9 +57,15 @@ struct GameFinished {
 /// How `state` ended, for a roster of `players` seats.
 GameFinished FinishedOf(const HostedState& state, std::size_t players);
 
-/// A room was made. Its creator is the only one in it, so there is
-/// nothing to count yet.
-std::string RoomCreatedLine(absl::Time when);
+/// A room was made, on the surface it chose — SurfaceKindName's
+/// spelling, which is the wire's and the stored row's. Its creator is
+/// the only one in it, so there is nothing to count yet.
+std::string RoomCreatedLine(absl::Time when, std::string_view surface);
+/// A world was reshaped under whoever was standing in it (#1554), onto
+/// `surface`. Nothing records the sphere's radius: the question this
+/// answers is which shapes people reach for, and a radius is a number
+/// per room rather than a word to group by.
+std::string GeometryChangedLine(absl::Time when, std::string_view surface);
 /// Somebody walked into a room somebody else had made — `players` is the
 /// room's size once they were in it, so 2 is the first one that matters.
 /// Creating a room is `room_created`, not a join, and a refused join is

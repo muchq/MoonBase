@@ -109,25 +109,28 @@ mints sessions itself and forwards the stream to the hub.
 
 ## Game events
 
-Five events, one JSON line each, written to `GAME_EVENT_LOG_DIR` for the
-stats pipeline to read back out of S3 (#1571): `room_created`,
-`room_joined` (the room's size once the joiner was in it), `chat_message`
-(the room's size when it was said), `game_started` (variant, seats dealt)
-and `game_finished` (variant, outcome, seats still held). Together they
-are the shape of an evening — somebody made a room, somebody else walked
-in, they talked, a table started, the table ended.
+Six events, one JSON line each, written to `GAME_EVENT_LOG_DIR` for the
+stats pipeline to read back out of S3 (#1571): `room_created` (the
+surface it chose), `room_joined` (the room's size once the joiner was in
+it), `geometry_changed` (the surface it became), `chat_message` (the
+room's size when it was said), `game_started` (variant, seats dealt) and
+`game_finished` (variant, outcome, seats still held). Together they are
+the shape of an evening — somebody made a room, somebody else walked in,
+they reshaped the world they were standing in, they talked, a table
+started, the table ended.
 
-No message text, no player, room or game id. A refused chat or a refused
-join is no event: the counters carry the rejections, the archive carries
-what happened. Counters answer "how is the hub
+No message text, no sphere radius, no player, room or game id. A refused
+chat, join or geometry is no event: the counters carry the rejections,
+the archive carries what happened. `surface` is `SurfaceKindName`'s
+word, the same one the wire and the stored row use. Counters answer "how is the hub
 doing right now"; these answer "what was played last March", which
 Prometheus drops. `game_events.h` is the vocabulary and
 `//domains/platform/libs/event_log` the writer; unset, the hub records
 nothing.
 
 Nothing here is visible at the edge. A session opens one socket and every
-room, table, game and message rides that one connection, so the access
-log counts a connection and never a game.
+room, world, table, game and message rides that one connection, so the
+access log counts a connection and never a game.
 
 `game_started` is the only place a table's size is recorded while it is
 still whole. `game_finished`'s `players` is the seats *still held*, which

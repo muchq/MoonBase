@@ -39,6 +39,7 @@ using moonbase::games::GameEvents;
 
 using moonbase::games::GolfMove;
 using moonbase::games::GolfUpdate;
+using moonbase::games::LobbyAction;
 
 std::string WithNul(std::string prefix, std::string suffix) {
   prefix.push_back('\0');
@@ -2276,6 +2277,57 @@ TEST_F(GameEventFixture, ARefusedJoinIsNoEvent) {
 // A message that was stored is one line, and nothing of what was said
 // is in it. A message the store refused is no line at all — the counter
 // still has the rejection; the archive is for things that happened.
+// A room records the surface it chose, and every reshape after it
+// (#1554), in the one spelling the wire and the stored row also use.
+// The radius is not in the line: the question is which shapes people
+// reach for, and a number per room is not a word to group by.
+TEST_F(GameEventFixture, AWorldRecordsTheShapeItChoseAndEveryReshapeAfterIt) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_FALSE(CreateRoomFor(*alice).empty());
+
+  ASSERT_THAT(Names(), ::testing::ElementsAre("room_created"));
+  EXPECT_THAT(events_[0], ::testing::HasSubstr(R"("surface":"plane")"));
+
+  moonbase::games::JoinWorld join;
+  join.position = {0.0, 0.0, 0.0};
+  join.color = {0.5, 0.5, 0.5};
+  join.shape = 0;
+  ASSERT_TRUE(alice->stream.Send(Lobby(LobbyAction::FromJoin(join))).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "worldState").has_value());
+
+  moonbase::games::SphereGeometry sphere;
+  sphere.radius = 10.0;
+  moonbase::games::SetGeometry to_sphere;
+  to_sphere.geometry = moonbase::games::Geometry::FromSphere(sphere);
+  ASSERT_TRUE(alice->stream.Send(Lobby(LobbyAction::FromSetgeometry(to_sphere))).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "geometryChanged").has_value());
+
+  moonbase::games::SetGeometry to_glass;
+  to_glass.geometry =
+      moonbase::games::Geometry::FromGlasshouse(moonbase::games::GlasshouseGeometry{});
+  ASSERT_TRUE(alice->stream.Send(Lobby(LobbyAction::FromSetgeometry(to_glass))).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "geometryChanged").has_value());
+
+  ASSERT_THAT(Names(),
+              ::testing::ElementsAre("room_created", "geometry_changed", "geometry_changed"));
+  EXPECT_THAT(events_[1], ::testing::HasSubstr(R"("surface":"sphere")"));
+  EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("surface":"glasshouse")"));
+  EXPECT_THAT(events_[1], ::testing::Not(::testing::HasSubstr("10")));
+
+  // A geometry the rules refuse reshapes nothing, so it records nothing.
+  moonbase::games::SphereGeometry tiny;
+  tiny.radius = 0.1;
+  moonbase::games::SetGeometry refused;
+  refused.geometry = moonbase::games::Geometry::FromSphere(tiny);
+  ASSERT_TRUE(alice->stream.Send(Lobby(LobbyAction::FromSetgeometry(refused))).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "commandRejected").has_value());
+
+  EXPECT_THAT(Names(),
+              ::testing::ElementsAre("room_created", "geometry_changed", "geometry_changed"));
+}
+
 TEST_F(GameEventFixture, AStoredMessageIsOneLineAndARefusedOneIsNone) {
   auto room = SeatedRoom(2);
   ASSERT_TRUE(room.has_value());

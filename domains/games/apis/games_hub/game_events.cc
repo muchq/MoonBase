@@ -41,7 +41,13 @@ GameFinished FinishedOf(const HostedState& state, std::size_t players) {
   return finished;
 }
 
-std::string RoomCreatedLine(absl::Time when) { return Line(when, kRoomCreated, ""); }
+std::string RoomCreatedLine(absl::Time when, std::string_view surface) {
+  return Line(when, kRoomCreated, absl::StrFormat(R"(,"surface":"%s")", surface));
+}
+
+std::string GeometryChangedLine(absl::Time when, std::string_view surface) {
+  return Line(when, kGeometryChanged, absl::StrFormat(R"(,"surface":"%s")", surface));
+}
 
 std::string RoomJoinedLine(absl::Time when, std::size_t players) {
   return Line(when, kRoomJoined, absl::StrFormat(R"(,"players":%d)", players));

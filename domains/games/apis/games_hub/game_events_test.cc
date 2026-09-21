@@ -111,7 +111,10 @@ absl::Time When() {
 }
 
 TEST(GameEvents, EachLineIsOneJsonObjectNamingItsEventAndWhenItHappened) {
-  EXPECT_EQ(RoomCreatedLine(When()), R"({"ts":1789998000000,"event":"room_created"})");
+  EXPECT_EQ(RoomCreatedLine(When(), "plane"),
+            R"({"ts":1789998000000,"event":"room_created","surface":"plane"})");
+  EXPECT_EQ(GeometryChangedLine(When(), "glasshouse"),
+            R"({"ts":1789998000000,"event":"geometry_changed","surface":"glasshouse"})");
   EXPECT_EQ(RoomJoinedLine(When(), 2), R"({"ts":1789998000000,"event":"room_joined","players":2})");
   EXPECT_EQ(GameStartedLine(When(), "castle", 4),
             R"({"ts":1789998000000,"event":"game_started","variant":"castle","players":4})");
@@ -129,7 +132,9 @@ TEST(GameEvents, EachLineIsOneJsonObjectNamingItsEventAndWhenItHappened) {
 TEST(GameEvents, EveryEventsLineIsTextWithNothingToEscape) {
   const absl::Time when = absl::Now();
   std::vector<std::pair<std::string, int>> lines{
-      {RoomCreatedLine(when), 6},
+      {RoomCreatedLine(when, "plane"), 10},
+      {GeometryChangedLine(when, "sphere"), 10},
+      {GeometryChangedLine(when, "glasshouse"), 10},
       {RoomJoinedLine(when, 2), 8},
       {ChatMessageLine(when, 3), 8},
       {GameStartedLine(when, "golf", 2), 12},

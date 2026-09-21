@@ -1180,7 +1180,9 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
         StageMemberLocked(room_id, player_id, member->second, writes);
         StageRoomStateLocked(room_id, outbox);
         EnqueueWritesLocked(writes);
-        RecordLocked(RoomCreatedLine);
+        RecordLocked([surface = SurfaceKindName(surface)](absl::Time now) {
+          return RoomCreatedLine(now, surface);
+        });
       }
     }
     if (room_id.empty()) {
@@ -1392,6 +1394,9 @@ void GolfHub::HandleLobby(const std::string& player_id,
         // no row, so its shape is this instance's until it restarts.
         const std::string world = WorldOfLocked(player_id);
         world_.Reshape(world, *surface, deliveries);
+        RecordLocked([kind = SurfaceKindName(*surface)](absl::Time now) {
+          return GeometryChangedLine(now, kind);
+        });
         if (rooms_.contains(world)) {
           Writes writes;
           StageLocked(writes, HubStore::SetRoomSurface{world, *surface});
