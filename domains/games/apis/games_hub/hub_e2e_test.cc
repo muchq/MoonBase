@@ -2273,6 +2273,32 @@ TEST_F(GameEventFixture, ARefusedJoinIsNoEvent) {
   EXPECT_THAT(events_, ::testing::IsEmpty());
 }
 
+// A message that was stored is one line, and nothing of what was said
+// is in it. A message the store refused is no line at all — the counter
+// still has the rejection; the archive is for things that happened.
+TEST_F(GameEventFixture, AStoredMessageIsOneLineAndARefusedOneIsNone) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined"));
+
+  moonbase::games::Chat chat;
+  chat.text = "deal me in";
+  ASSERT_TRUE(room->seats[1].stream.Send(GameCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(room->seats[1].stream, "roomChat").has_value());
+
+  ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "chat_message"));
+  EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("players":2)"));
+  EXPECT_THAT(events_[2], ::testing::Not(::testing::HasSubstr("deal me in")));
+
+  // Empty text never reaches a store, so nothing happened to record.
+  moonbase::games::Chat empty;
+  empty.text = "";
+  ASSERT_TRUE(room->seats[0].stream.Send(GameCommands::FromChat(empty)).ok());
+  ASSERT_TRUE(ReceiveCase(room->seats[0].stream, "commandRejected").has_value());
+
+  EXPECT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "chat_message"));
+}
+
 TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNothing) {
   auto table = SeatedTable();
   ASSERT_TRUE(table.has_value());

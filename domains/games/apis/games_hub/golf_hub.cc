@@ -1320,6 +1320,16 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
       return;
     }
     Count("chat_appends", {{"result", "stored"}});
+    {
+      // That a room was talking, and how many were in it (#1571). The
+      // text never leaves the process. This path dropped mu_ before the
+      // append — the store re-takes it — so it is taken back here, for
+      // the room's size and for the writer it guards.
+      const std::lock_guard<std::mutex> lock(mu_);
+      const auto room = rooms_.find(room_id);
+      const std::size_t members = room == rooms_.end() ? 0 : room->second.members.size();
+      RecordLocked([members](absl::Time now) { return ChatMessageLine(now, members); });
+    }
 
     // The committed row reaches locals through the pump, like every
     // other row. That is not indirection for its own sake: a remote

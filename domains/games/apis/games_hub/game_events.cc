@@ -47,6 +47,10 @@ std::string RoomJoinedLine(absl::Time when, std::size_t players) {
   return Line(when, kRoomJoined, absl::StrFormat(R"(,"players":%d)", players));
 }
 
+std::string ChatMessageLine(absl::Time when, std::size_t players) {
+  return Line(when, kChatMessage, absl::StrFormat(R"(,"players":%d)", players));
+}
+
 std::string GameStartedLine(absl::Time when, std::string_view variant, std::size_t players) {
   return Line(when, kGameStarted,
               absl::StrFormat(R"(,"variant":"%s","players":%d)", variant, players));

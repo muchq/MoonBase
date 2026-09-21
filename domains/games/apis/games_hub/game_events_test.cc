@@ -131,6 +131,7 @@ TEST(GameEvents, EveryEventsLineIsTextWithNothingToEscape) {
   std::vector<std::pair<std::string, int>> lines{
       {RoomCreatedLine(when), 6},
       {RoomJoinedLine(when, 2), 8},
+      {ChatMessageLine(when, 3), 8},
       {GameStartedLine(when, "golf", 2), 12},
       {GameStartedLine(when, "castle", 4), 12},
   };
