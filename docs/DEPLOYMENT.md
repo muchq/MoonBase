@@ -6,9 +6,10 @@ same host but sit outside that flow, so they are not drawn.
 
 Hand-maintained. Nothing checks most of it against
 `deploy/consolidated/compose.yaml`; the exception is the service-to-service
-HTTP calls compose declares, which `deploy_config_test` pins. The `sql`
-edges and prometheus's own scrape targets are not pinned — those live in
-`o11y/prometheus.yml`, which this test does not read.
+HTTP calls compose declares, which `deploy_config_test` pins, along with
+every `LOG_DIRS` source having a mount to read. The `sql` edges are compose's
+too, as libpq URLs, which that pin does not match; prometheus's own scrape
+targets live in `o11y/prometheus.yml`, which it does not read.
 
 Node ids are compose service names wherever a container exists. `ui_*` are
 muchq.com routes; the public names and `S3` are not containers either.
