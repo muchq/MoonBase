@@ -2314,7 +2314,9 @@ TEST_F(GameEventFixture, AWorldRecordsTheShapeItChoseAndEveryReshapeAfterIt) {
               ::testing::ElementsAre("room_created", "geometry_changed", "geometry_changed"));
   EXPECT_THAT(events_[1], ::testing::HasSubstr(R"("surface":"sphere")"));
   EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("surface":"glasshouse")"));
-  EXPECT_THAT(events_[1], ::testing::Not(::testing::HasSubstr("10")));
+  // Named, not by its digits: a radius of 10 is a substring of half the
+  // timestamps this could run at. game_events_test pins the whole line.
+  EXPECT_THAT(events_[1], ::testing::Not(::testing::HasSubstr("radius")));
 
   // A geometry the rules refuse reshapes nothing, so it records nothing.
   moonbase::games::SphereGeometry tiny;
