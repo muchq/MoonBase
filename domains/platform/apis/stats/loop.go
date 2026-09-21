@@ -34,8 +34,9 @@ var objectKey = regexp.MustCompile(`^logs/source=([a-z0-9_]+)/dt=(\d{4}-\d{2}-\d
 // read: Caddy's access logs and one_d4's query events (#1465). Adding a
 // source is one entry here and nothing else.
 var sources = map[string]func(*Rollup, io.Reader, string) (int, error){
-	"caddy":  (*Rollup).Consume,
-	"one_d4": (*Rollup).ConsumeQueryEvents,
+	"caddy":     (*Rollup).Consume,
+	"one_d4":    (*Rollup).ConsumeQueryEvents,
+	"games_hub": (*Rollup).ConsumeGameEvents,
 }
 
 func sourcePrefixes() []string {

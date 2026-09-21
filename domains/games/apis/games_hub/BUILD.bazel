@@ -77,7 +77,12 @@ cc_test(
 
 # Read as text by //domains/platform/libs/otel_contract, which pins this
 # vocabulary against the stats pipeline's reader.
-exports_files(["game_events.cc"])
+exports_files([
+    "game_events.cc",
+    "game_events.h",
+    "hosted_game.h",
+    "surface.h",
+])
 
 # The hub's domain events (#1571): one JSON line per game that ended,
 # for the stats pipeline to read out of S3 months later. The engine

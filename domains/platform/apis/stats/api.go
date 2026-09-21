@@ -19,6 +19,7 @@ type Reader interface {
 	Agents(ctx context.Context, days, limit int) ([]AgentRow, error)
 	Probes(ctx context.Context, days int) ([]ProbeRow, error)
 	Queries(ctx context.Context, days int) ([]QueryRow, error)
+	HubEvents(ctx context.Context, days int) ([]HubEventRow, error)
 	QueryTerms(ctx context.Context, days, limit int) ([]TermRow, error)
 	Countries(ctx context.Context, days, limit int) ([]CountryRow, error)
 }
@@ -43,6 +44,7 @@ func NewRouter(h *Handlers) http.Handler {
 	router.HandleFunc("GET /stats/v1/agents", h.GetAgents)
 	router.HandleFunc("GET /stats/v1/probes", h.GetProbes)
 	router.HandleFunc("GET /stats/v1/one_d4/queries", h.GetQueries)
+	router.HandleFunc("GET /stats/v1/games_hub/events", h.GetHubEvents)
 	router.HandleFunc("GET /stats/v1/one_d4/terms", h.GetQueryTerms)
 	router.HandleFunc("GET /stats/v1/countries", h.GetCountries)
 	return router
@@ -131,6 +133,19 @@ func (h *Handlers) GetQueries(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.reader.Queries(r.Context(), days)
 	if err != nil {
 		h.serverError(w, "queries", err)
+		return
+	}
+	writeJSON(w, map[string]any{"days": days, "rows": emptyIfNil(rows)})
+}
+
+// The games_hub funnel (#1571). A window rather than a top-N: at this
+// volume every shape of every day fits, and which shapes are absent is
+// as much of the answer as which are busy.
+func (h *Handlers) GetHubEvents(w http.ResponseWriter, r *http.Request) {
+	days := queryInt(r, "days", 30, 365)
+	rows, err := h.reader.HubEvents(r.Context(), days)
+	if err != nil {
+		h.serverError(w, "hub events", err)
 		return
 	}
 	writeJSON(w, map[string]any{"days": days, "rows": emptyIfNil(rows)})

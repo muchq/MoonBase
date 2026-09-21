@@ -48,6 +48,12 @@ func (b memoryBucket) Get(key string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(body)), nil
 }
 
+// One games_hub event line, stamped now so it lands on today's rows —
+// the hub writes plain JSON, not logback's envelope.
+func hubLine(fields string) string {
+	return fmt.Sprintf(`{"ts":%d,%s}`, time.Now().UnixMilli(), fields)
+}
+
 func gzipObject(t *testing.T, lines ...string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -123,7 +129,9 @@ func sum(rows []map[string]any, match map[string]any, field string) float64 {
 
 // The five endpoints keyed by host, read together so an assertion can be a
 // delta between two reads rather than an absolute count.
-type endpointRows struct{ summary, services, agents, probes, countries []map[string]any }
+type endpointRows struct {
+	summary, services, agents, probes, countries, hubEvents []map[string]any
+}
 
 func readEndpoints(t *testing.T, server *httptest.Server) endpointRows {
 	t.Helper()
@@ -133,6 +141,7 @@ func readEndpoints(t *testing.T, server *httptest.Server) endpointRows {
 		agents:    getJSON(t, server, "/stats/v1/agents?days=2&limit=2000"),
 		probes:    getJSON(t, server, "/stats/v1/probes?days=2"),
 		countries: getJSON(t, server, "/stats/v1/countries?days=2&limit=5000"),
+		hubEvents: getJSON(t, server, "/stats/v1/games_hub/events?days=2"),
 	}
 }
 
@@ -179,6 +188,19 @@ func TestEndToEndFromShippedObjectsToEveryEndpoint(t *testing.T) {
 				"order_by", "", "player", "true", "group_by", "eco", "order", "count",
 				"min_games", "0", "limit", "20", "rows", "2", "outcome", "ok", "duration_us", "9000"),
 		),
+		// games_hub's own events (#1571): one room's evening, which the
+		// access log above sees only as the single /games/v2/session that
+		// opened the socket.
+		fmt.Sprintf("logs/source=games_hub/dt=%s/%s-hub.log.gz", date, run): gzipObject(t,
+			hubLine(`"event":"room_created","room":"`+run+`","surface":"plane"`),
+			hubLine(`"event":"room_joined","room":"`+run+`","players":2`),
+			hubLine(`"event":"geometry_changed","room":"`+run+`","surface":"glasshouse"`),
+			hubLine(`"event":"chat_message","room":"`+run+`","players":2`),
+			hubLine(`"event":"game_started","room":"`+run+`","variant":"castle","players":2`),
+			hubLine(`"event":"game_finished","room":"`+run+`","variant":"castle",`+
+				`"outcome":"abandoned","players":1`),
+			hubLine(`"event":"room_closed","room":"`+run+`"`),
+		),
 	}
 
 	store, err := NewStore(ctx, url)
@@ -194,8 +216,8 @@ func TestEndToEndFromShippedObjectsToEveryEndpoint(t *testing.T) {
 	before := readEndpoints(t, server)
 
 	processed, err := aggregator.RunOnce(ctx)
-	if err != nil || processed != 3 {
-		t.Fatalf("RunOnce = (%d, %v), want all three objects", processed, err)
+	if err != nil || processed != 4 {
+		t.Fatalf("RunOnce = (%d, %v), want all four objects", processed, err)
 	}
 	// A second pass finds nothing new: the markers hold, and nothing is
 	// counted twice.
@@ -271,6 +293,28 @@ func TestEndToEndFromShippedObjectsToEveryEndpoint(t *testing.T) {
 	unserved := map[string]any{"host": site, "service": OtherService, "source": SourceAPI}
 	grew("what nothing served", before.services, after.services, unserved, "requests", 4)
 	grew("what nothing served", before.services, after.services, unserved, "errors", 3)
+
+	// games_hub: the evening, one row per event shape. The room is on
+	// every line in S3 and on no row here, so these are the day's shared
+	// rows and the assertions are this run's deltas.
+	for _, want := range []struct {
+		event  string
+		match  map[string]any
+		grewBy float64
+	}{
+		{"room_created", map[string]any{"event": "room_created", "surface": "plane"}, 1},
+		{"room_joined", map[string]any{"event": "room_joined", "players": float64(2)}, 1},
+		{"geometry_changed",
+			map[string]any{"event": "geometry_changed", "surface": "glasshouse"}, 1},
+		{"chat_message", map[string]any{"event": "chat_message", "players": float64(2)}, 1},
+		{"game_started",
+			map[string]any{"event": "game_started", "variant": "castle", "players": float64(2)}, 1},
+		{"game_finished", map[string]any{"event": "game_finished", "variant": "castle",
+			"outcome": "abandoned", "players": float64(1)}, 1},
+		{"room_closed", map[string]any{"event": "room_closed"}, 1},
+	} {
+		grew("hub "+want.event, before.hubEvents, after.hubEvents, want.match, "events", want.grewBy)
+	}
 
 	// Short links: the redirect on i.iili.uk, keyed by this run's own slug.
 	slugs := rowsWhere(getJSON(t, server, "/stats/v1/iili/top?days=2&limit=200"), map[string]any{"slug": run})

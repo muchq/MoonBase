@@ -7,16 +7,18 @@ passes.
 
 ## The loop
 
-Every `AGGREGATE_INTERVAL` (default `15m`): list the two source prefixes,
-`s3://$S3_BUCKET/logs/source=caddy/` (Caddy's access logs) and
-`logs/source=one_d4/` (one_d4's query events, #1465), and for every object
+Every `AGGREGATE_INTERVAL` (default `15m`): list the three source prefixes,
+`s3://$S3_BUCKET/logs/source=caddy/` (Caddy's access logs),
+`logs/source=one_d4/` (one_d4's query events, #1465) and
+`logs/source=games_hub/` (the hub's domain events, #1571), and for every object
 no successful pass has marked processed, stream it (gunzip included), roll
 up its lines with the parser its source names, and apply the rollup plus
 the processed marker in one transaction. A crash between the two
 re-processes the object; the marker's conflict arm makes a duplicate
 application a no-op — so counts survive crashes without double-counting.
 Per-object failures are logged and retried next pass. Rows are dated by
-each line's own timestamp (Caddy's `ts`, logback's `timestamp`), not the
+each line's own timestamp (Caddy's `ts`, logback's `timestamp`, the hub's
+own `ts`), not the
 object's partition: Caddy rolls by size, so an object spans whatever days
 it took to fill. That roll size (`roll_size` in the Caddyfile) is the
 pipeline's latency, and `deploy_config_test` bounds it.
@@ -141,6 +143,19 @@ unbounded — which is one query over the raw partitions in S3, keeping
   day/entry/source/outcome/cache
 - `GET /stats/v1/one_d4/terms?days=30&limit=200` — which fields, motifs,
   and group-by terms queries used, busiest first
+- `GET /stats/v1/games_hub/events?days=30` — the hub's funnel per day:
+  rooms made and closed, joins, reshapes, messages, tables dealt and games
+  ended. One row per event shape, and the columns are the event's own
+  fields — an event that carries no variant leaves it empty, so filter on
+  `event` first. A window rather than a top-N: at this volume every shape
+  of every day fits, and which shapes are absent is as much of the answer
+  as which are busy.
+
+  The room is on every line in S3 and on no row here. An aggregate keyed
+  by it would be one row per room per day forever; the questions it
+  answers — how long a room lasted, how long a game took, how many tables
+  it got through — are pairs across lines, which live in the archive and
+  not in a per-day count.
 - `GET /health`
 
 Public through Caddy at `api.muchq.com/stats/v1/*`; the reasons for 500s

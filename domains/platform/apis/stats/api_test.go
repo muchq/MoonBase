@@ -20,6 +20,7 @@ type fakeReader struct {
 	agents       []AgentRow
 	probes       []ProbeRow
 	queries      []QueryRow
+	hubEvents    []HubEventRow
 	terms        []TermRow
 	countries    []CountryRow
 	lastDays     int
@@ -73,6 +74,14 @@ func (f *fakeReader) Queries(_ context.Context, days int) ([]QueryRow, error) {
 	}
 	f.lastDays = days
 	return f.queries, nil
+}
+
+func (f *fakeReader) HubEvents(_ context.Context, days int) ([]HubEventRow, error) {
+	if f.fail {
+		return nil, errors.New("db is having a day")
+	}
+	f.lastDays = days
+	return f.hubEvents, nil
 }
 
 func (f *fakeReader) QueryTerms(_ context.Context, days, limit int) ([]TermRow, error) {
@@ -321,6 +330,45 @@ func TestOneD4QueryEndpointsShareTheWindowRules(t *testing.T) {
 		if recorder, _ := get(t, handler, "/x"); recorder.Code != http.StatusInternalServerError {
 			t.Errorf("%s on a failing store = %d, want 500", name, recorder.Code)
 		}
+	}
+}
+
+func TestHubEventsSharesTheWindowRules(t *testing.T) {
+	reader := &fakeReader{hubEvents: []HubEventRow{
+		{Date: "2026-09-21", Event: "game_finished", Variant: "golf", Outcome: "abandoned",
+			Players: 1, Events: 3},
+	}}
+	handlers := handlersWith(reader)
+
+	_, body := get(t, handlers.GetHubEvents, "/stats/v1/games_hub/events")
+	if reader.lastDays != 30 {
+		t.Errorf("default hub events window = %d, want 30", reader.lastDays)
+	}
+	// The page groups on these, so they are the response shape and not
+	// incidental — including the empty surface a finished game has none of.
+	row := body["rows"].([]any)[0].(map[string]any)
+	for field, want := range map[string]any{
+		"event": "game_finished", "variant": "golf", "outcome": "abandoned",
+		"surface": "", "players": float64(1), "events": float64(3),
+	} {
+		if row[field] != want {
+			t.Errorf("row[%q] = %v, want %v", field, row[field], want)
+		}
+	}
+
+	get(t, handlers.GetHubEvents, "/stats/v1/games_hub/events?days=99999")
+	if reader.lastDays != 365 {
+		t.Errorf("hub events days clamped to %d, want 365", reader.lastDays)
+	}
+	if _, body := get(t, handlersWith(&fakeReader{}).GetHubEvents, "/x"); body["rows"] == nil {
+		t.Error("hub event rows serialized as null; want []")
+	}
+	recorder, _ := get(t, handlersWith(&fakeReader{fail: true}).GetHubEvents, "/x")
+	if recorder.Code != http.StatusInternalServerError {
+		t.Errorf("hub events on a failing store = %d, want 500", recorder.Code)
+	}
+	if strings.Contains(recorder.Body.String(), "db is having a day") {
+		t.Error("the failure reason leaked to a public endpoint")
 	}
 }
 

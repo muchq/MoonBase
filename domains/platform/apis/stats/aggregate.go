@@ -74,6 +74,7 @@ type Rollup struct {
 	Slugs     map[SlugKey]int64
 	Probes    map[ProbeKey]int64
 	Queries   map[QueryKey]int64
+	HubEvents map[HubEventKey]int64
 	Terms     map[TermKey]int64
 	Countries map[GeoKey]GeoStat
 
@@ -89,6 +90,7 @@ func NewRollup() *Rollup {
 		Slugs:      map[SlugKey]int64{},
 		Probes:     map[ProbeKey]int64{},
 		Queries:    map[QueryKey]int64{},
+		HubEvents:  map[HubEventKey]int64{},
 		Terms:      map[TermKey]int64{},
 		Countries:  map[GeoKey]GeoStat{},
 		Geo:        NoLocator{},

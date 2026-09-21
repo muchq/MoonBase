@@ -12,6 +12,7 @@ go_test(
         "http_instrument_descriptions_test.go",
         "http_instrument_labels_test.go",
         "http_latency_buckets_test.go",
+        "hub_event_vocabulary_test.go",
         "query_event_vocabulary_test.go",
         "request_log_fields_test.go",
         "route_vocabulary_test.go",
@@ -22,9 +23,13 @@ go_test(
     # named-constant declarations are pinned this way; label sets and units
     # are pinned per rail against real exported payloads instead.
     data = [
+        "//domains/games/apis/games_hub:game_events.h",
+        "//domains/games/apis/games_hub:hosted_game.h",
+        "//domains/games/apis/games_hub:surface.h",
         "//domains/games/apis/one_d4:src/main/java/com/muchq/games/one_d4/api/QueryEvent.java",
         "//domains/platform/apis/stats:aggregate.go",
         "//domains/platform/apis/stats:classify.go",
+        "//domains/platform/apis/stats:games.go",
         "//domains/platform/apis/stats:queries.go",
         "//domains/platform/apis/stats:route.go",
         "//domains/platform/apis/stats:source.go",

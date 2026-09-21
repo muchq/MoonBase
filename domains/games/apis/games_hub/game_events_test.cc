@@ -68,7 +68,7 @@ TEST(GameEvents, AGolfGamePlayedOutIsCompleted) {
   EXPECT_EQ(finished.players, 2u);
 }
 
-// Golf's forced finish supersedes any knock with the kAbandoned
+// Golf's forced finish supersedes any knock with the kOutcomeAbandoned
 // sentinel, which is the only thing that tells the two endings apart:
 // the scorecard keeps every seat either way.
 TEST(GameEvents, AGolfGameLeftBelowTwoSeatsIsAbandoned) {
@@ -125,7 +125,7 @@ TEST(GameEvents, EachLineIsOneJsonObjectNamingItsEventItsRoomAndWhenItHappened) 
   EXPECT_EQ(
       GameStartedLine(When(), "AB12CD", "castle", 4),
       R"({"ts":1789998000000,"event":"game_started","room":"AB12CD","variant":"castle","players":4})");
-  EXPECT_EQ(GameFinishedLine(When(), "AB12CD", GameFinished{"golf", kCompleted, 3}),
+  EXPECT_EQ(GameFinishedLine(When(), "AB12CD", GameFinished{"golf", kOutcomeCompleted, 3}),
             R"({"ts":1789998000000,"event":"game_finished","room":"AB12CD","variant":"golf",)"
             R"("outcome":"completed","players":3})");
   EXPECT_EQ(RoomClosedLine(When(), "AB12CD"),
@@ -184,7 +184,7 @@ TEST(GameEvents, EveryEventsLineIsTextWithNothingToEscape) {
     for (const HostedState& state : endings) {
       for (std::size_t players = 1; players <= 4; ++players) {
         const GameFinished finished = FinishedOf(state, players);
-        EXPECT_TRUE(finished.outcome == kCompleted || finished.outcome == kAbandoned)
+        EXPECT_TRUE(finished.outcome == kOutcomeCompleted || finished.outcome == kOutcomeAbandoned)
             << finished.outcome;
         EXPECT_TRUE(finished.variant == "golf" || finished.variant == "castle") << finished.variant;
         lines.emplace_back(GameFinishedLine(when, room, finished), 20);

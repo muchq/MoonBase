@@ -10,6 +10,7 @@ load("//bazel/rules:oci.bzl", "linux_oci_go")
 # is proxied to.
 exports_files([
     "aggregate.go",
+    "games.go",
     "classify.go",
     "queries.go",
     "route.go",
@@ -23,6 +24,7 @@ go_library(
         "aggregate.go",
         "api.go",
         "classify.go",
+        "games.go",
         "geo.go",
         "loop.go",
         "queries.go",
@@ -52,6 +54,7 @@ go_test(
         "api_test.go",
         "classify_test.go",
         "fixtures_test.go",
+        "games_test.go",
         "geo_test.go",
         "loop_test.go",
         "queries_test.go",

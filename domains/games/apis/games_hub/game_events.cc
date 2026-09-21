@@ -40,47 +40,48 @@ std::string RoomTag(std::string_view room) {
 }
 
 GameFinished FinishedOf(const HostedState& state, std::size_t players) {
-  GameFinished finished{GameKindName(KindOf(state)), kCompleted, players};
+  GameFinished finished{GameKindName(KindOf(state)), kOutcomeCompleted, players};
   if (const auto* golf_state = std::get_if<golf::GameState>(&state)) {
     // The engine supersedes any knock with this sentinel when a leave
     // drops the table below two seats.
-    if (golf_state->getWhoKnocked() == golf::GameState::kAbandoned) finished.outcome = kAbandoned;
+    if (golf_state->getWhoKnocked() == golf::GameState::kAbandoned)
+      finished.outcome = kOutcomeAbandoned;
     return finished;
   }
   if (std::get<castle::GameState>(state).getPhase() == castle::Phase::Abandoned) {
-    finished.outcome = kAbandoned;
+    finished.outcome = kOutcomeAbandoned;
   }
   return finished;
 }
 
 std::string RoomCreatedLine(absl::Time when, std::string_view room, std::string_view surface) {
-  return Line(when, kRoomCreated, room, absl::StrFormat(R"(,"surface":"%s")", surface));
+  return Line(when, kEventRoomCreated, room, absl::StrFormat(R"(,"surface":"%s")", surface));
 }
 
 std::string GeometryChangedLine(absl::Time when, std::string_view room, std::string_view surface) {
-  return Line(when, kGeometryChanged, room, absl::StrFormat(R"(,"surface":"%s")", surface));
+  return Line(when, kEventGeometryChanged, room, absl::StrFormat(R"(,"surface":"%s")", surface));
 }
 
 std::string RoomJoinedLine(absl::Time when, std::string_view room, std::size_t players) {
-  return Line(when, kRoomJoined, room, absl::StrFormat(R"(,"players":%d)", players));
+  return Line(when, kEventRoomJoined, room, absl::StrFormat(R"(,"players":%d)", players));
 }
 
 std::string RoomClosedLine(absl::Time when, std::string_view room) {
-  return Line(when, kRoomClosed, room, "");
+  return Line(when, kEventRoomClosed, room, "");
 }
 
 std::string ChatMessageLine(absl::Time when, std::string_view room, std::size_t players) {
-  return Line(when, kChatMessage, room, absl::StrFormat(R"(,"players":%d)", players));
+  return Line(when, kEventChatMessage, room, absl::StrFormat(R"(,"players":%d)", players));
 }
 
 std::string GameStartedLine(absl::Time when, std::string_view room, std::string_view variant,
                             std::size_t players) {
-  return Line(when, kGameStarted, room,
+  return Line(when, kEventGameStarted, room,
               absl::StrFormat(R"(,"variant":"%s","players":%d)", variant, players));
 }
 
 std::string GameFinishedLine(absl::Time when, std::string_view room, const GameFinished& finished) {
-  return Line(when, kGameFinished, room,
+  return Line(when, kEventGameFinished, room,
               absl::StrFormat(R"(,"variant":"%s","outcome":"%s","players":%d)", finished.variant,
                               finished.outcome, finished.players));
 }
