@@ -3,6 +3,7 @@
 // over the in-memory pair. Wire-level details (JSON-text framing, real
 // sockets) are upstream-tested; these pin the hub's behavior.
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -18,6 +19,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_set>
 #include <utility>
@@ -25,6 +27,7 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/time/time.h"
 #include "domains/games/apis/games_hub/chat_store.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 
@@ -2180,6 +2183,68 @@ TEST_F(GolfGameFixture, AbandoningALiveGameResolvesIt) {
 // absent player within seconds. A close parks the seat instead: the
 // table sees the disconnect, nothing ends, and the resume token reclaims
 // the seat with the game intact.
+// The hub's domain events (#1571). A game is played once, so its line
+// is written once — by the instance whose commit finished it. Every
+// other instance runs the same ceremony off the durable terminal row,
+// which is why the line comes from the finisher and not the ceremony.
+class GameEventFixture : public GolfGameFixture {
+ protected:
+  void SetUp() override {
+    GolfGameFixture::SetUp();
+    golf_->SetEventWriter(
+        [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
+  }
+  std::vector<std::string> events_;
+};
+
+TEST_F(GameEventFixture, AGameThatEndsWritesOneLineNamingWhatWasPlayed) {
+  auto table = SeatedTable();
+  ASSERT_TRUE(table.has_value());
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
+  EXPECT_THAT(events_, ::testing::IsEmpty()) << "a game in play is not a game played";
+
+  ASSERT_TRUE(
+      table->bob.stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameEnded").has_value());
+
+  ASSERT_EQ(events_.size(), 1u) << "a game ended once";
+  EXPECT_THAT(events_[0], ::testing::HasSubstr(R"("event":"game_finished")"));
+  EXPECT_THAT(events_[0], ::testing::HasSubstr(R"("variant":"golf")"));
+  // Bob left; alice is the seat still held, and the game ended because
+  // one seat cannot go on.
+  EXPECT_THAT(events_[0], ::testing::HasSubstr(R"("outcome":"abandoned")"));
+  EXPECT_THAT(events_[0], ::testing::HasSubstr(R"("players":1)"));
+}
+
+TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNothing) {
+  auto table = SeatedTable();
+  ASSERT_TRUE(table.has_value());
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
+  store_->Flush();
+
+  // A sibling holding the same live game off the same rows.
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  std::vector<std::string> sibling_events;
+  instance->golf->SetEventWriter(
+      [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
+
+  ASSERT_TRUE(
+      table->bob.stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameEnded").has_value());
+  store_->Flush();
+
+  // The wake the sibling would get from the finish commit's NOTIFY: it
+  // reads the terminal row and runs the ceremony from it.
+  instance->golf->OnChannelActive(RoomChannel(table->room_id));
+
+  EXPECT_EQ(events_.size(), 1u) << "the finishing instance records the game";
+  EXPECT_THAT(sibling_events, ::testing::IsEmpty())
+      << "the ceremony ran twice, so the game would be counted twice";
+}
+
 TEST_F(GolfGameFixture, MidGameBrowserCloseParksTheSeatAndTheGameSurvives) {
   auto table = SeatedTable();
   ASSERT_TRUE(table.has_value());

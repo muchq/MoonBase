@@ -18,6 +18,8 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "absl/time/clock.h"
+#include "domains/games/apis/games_hub/game_events.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
 #include "domains/games/apis/games_hub/splat.h"
@@ -719,6 +721,11 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
   if (state.has_value()) entry.state.emplace(*state);
   entry.version = version;
   return Commit::kCommitted;
+}
+
+void GolfHub::SetEventWriter(EventWriter writer) {
+  const std::lock_guard<std::mutex> lock(mu_);
+  event_writer_ = std::move(writer);
 }
 
 void GolfHub::AttachListener(pg::Listener* listener) {
@@ -2659,6 +2666,15 @@ void GolfHub::FinalizeGameLocked(const std::string& room_id, Room& room, const s
                                  Outbox& outbox) {
   const auto game = room.games.find(game_id);
   if (game == room.games.end() || !game->second.started()) return;
+
+  // The domain event, before the ceremony erases the entry, and only
+  // here: StageGameOverLocked also runs on the instances catching up to
+  // a finish another one committed, and a game is played once.
+  if (event_writer_) {
+    const absl::Time now = absl::Now();
+    event_writer_(
+        now, GameFinishedLine(now, FinishedOf(*game->second.state, game->second.roster.size())));
+  }
 
   // Room-scoped running stats: every roster seat played, every winner
   // won. With a store these same deltas already rode the finish commit;

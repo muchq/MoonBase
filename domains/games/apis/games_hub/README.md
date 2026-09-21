@@ -107,6 +107,22 @@ seat parks for grace. Lobby traffic counts on `lobby_commands` and
 the registry. `GamesHubHandler` implements the generated service: it
 mints sessions itself and forwards the stream to the hub.
 
+## Game events
+
+A finished game writes one JSON line to `GAME_EVENT_LOG_DIR` — variant,
+outcome, seats — for the stats pipeline to read back out of S3 (#1571).
+Counters answer "how is the hub doing right now"; this answers "what was
+played last March", which Prometheus drops. `game_events.h` is the
+vocabulary and `//domains/platform/libs/event_log` the writer; unset, the
+hub records nothing.
+
+The line comes from `FinalizeGameLocked`, the instance whose commit
+finished the game, and never from `StageGameOverLocked`, which every
+instance holding the room runs off the terminal row. A play is not a
+game either: a `game_finished` line is one table reaching an ending,
+which is the only thing the access log cannot see — the socket was
+opened once and carries every game on it.
+
 ## The rules
 
 Four-card golf for 2–4 players: each player peeks at two own cards, a

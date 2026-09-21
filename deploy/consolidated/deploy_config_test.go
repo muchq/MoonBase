@@ -2304,6 +2304,63 @@ func TestOneD4QueryEventsAreRolledWhereTheShipperReads(t *testing.T) {
 	}
 }
 
+// LOG_DIRS is the shipper's whole source list, and a label whose
+// directory it cannot see ships nothing while looking configured: the
+// files sit on the host counted only in the pass log's `skipped`. Read
+// off LOG_DIRS rather than listed here, so a source added there is
+// covered the day it exists.
+func TestEveryShippedLogDirIsMountedWritableOnTheShipper(t *testing.T) {
+	block := serviceBlock(t, "compose.yaml", "log_shipper")
+	logDirs := regexp.MustCompile(`LOG_DIRS=(\S+)`).FindStringSubmatch(block)
+	if logDirs == nil {
+		t.Fatalf("log_shipper has no LOG_DIRS; it would ship nothing. Block was:\n%s", block)
+	}
+	pairs := strings.Split(logDirs[1], ",")
+	if len(pairs) < 2 {
+		t.Fatalf("LOG_DIRS names %d source(s); this test is reading the wrong thing", len(pairs))
+	}
+	for _, pair := range pairs {
+		label, dir, ok := strings.Cut(pair, "=")
+		if !ok || label == "" || dir == "" {
+			t.Errorf("LOG_DIRS entry %q is not label=dir; the shipper skips the whole "+
+				"variable rather than the entry", pair)
+			continue
+		}
+		if !strings.Contains(block, "- "+dir+":"+dir+"\n") {
+			t.Errorf("log_shipper names %s=%s in LOG_DIRS but does not bind-mount %s; that "+
+				"source ships nothing and says so only as a `skipped` count. Block was:\n%s",
+				label, dir, dir, block)
+		}
+		if strings.Contains(block, dir+":"+dir+":ro") {
+			t.Errorf("log_shipper mounts %s read-only; it deletes rolled files after upload, "+
+				"so every pass would re-upload the same rolls forever", dir)
+		}
+	}
+}
+
+// games_hub rolls one line per finished game into a host directory the
+// shipper reads (#1571), the same shape as one_d4's query events. The
+// mount on the shipper's side is covered by the LOG_DIRS sweep above;
+// what is specific here is that the hub is told where to write at all,
+// and that the directory survives the container.
+func TestGamesHubEventsAreRolledWhereTheShipperReads(t *testing.T) {
+	hub := serviceBlock(t, "compose.yaml", "games_hub")
+	if !strings.Contains(hub, "GAME_EVENT_LOG_DIR: /var/log/games_hub") {
+		t.Errorf("games_hub does not set GAME_EVENT_LOG_DIR; the hub records no events at "+
+			"all and the games are played uncounted. Block was:\n%s", hub)
+	}
+	if !strings.Contains(hub, "- /var/log/games_hub:/var/log/games_hub") {
+		t.Errorf("games_hub does not bind-mount /var/log/games_hub; every event it writes "+
+			"dies with the container. Block was:\n%s", hub)
+	}
+
+	shipper := serviceBlock(t, "compose.yaml", "log_shipper")
+	if !strings.Contains(shipper, "games_hub=/var/log/games_hub") {
+		t.Errorf("log_shipper's LOG_DIRS does not name games_hub=/var/log/games_hub; the "+
+			"rolls pile up on the host unshipped. Block was:\n%s", shipper)
+	}
+}
+
 // The stats pair is profile-gated together: the aggregator needs the same
 // S3 credentials the shipper does, so a default `up -d` must start
 // neither the service nor its db-init — half the pair running is a

@@ -10,12 +10,14 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "domains/ai/libs/deja_cpp/client.h"
 #include "domains/games/apis/games_hub/chat_store.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
@@ -110,6 +112,12 @@ struct GolfTestHooks {
 class GolfHub final {
  public:
   using Registry = opal::server::SessionRegistry<moonbase::games::GameEvents>;
+
+  /// Takes one game event: the moment it happened, and the line
+  /// (game_events.h) that records it. The time is handed over rather
+  /// than read again downstream, so the file an event rolls into and
+  /// the timestamp inside it can never disagree.
+  using EventWriter = std::function<void(absl::Time when, std::string_view line)>;
 
   /// One counter series, name and exact attributes (hub_metrics.h); the
   /// alias keeps the golf-era spelling every test uses.
@@ -233,6 +241,16 @@ class GolfHub final {
   /// A second call changes nothing — the running thread reads the client
   /// without a lock, so it is not swapped underneath.
   void StartTapePolling(std::shared_ptr<deja::Client> tape);
+
+  /// Where finished games are recorded for the stats pipeline (#1571):
+  /// one line per game that ended, written under mu_ on the finishing
+  /// instance only. Unset — the default, and what every test that does
+  /// not care gets — writes nothing at all; main sets it when
+  /// GAME_EVENT_LOG_DIR names a directory. Call before serving.
+  ///
+  /// A line sink rather than the event struct, so a test sees the text
+  /// that would ship rather than an intermediate nobody archives.
+  void SetEventWriter(EventWriter writer);
 
   /// The client without the thread, for tests that drive PollTapeOnce
   /// themselves so no assertion waits on a clock.
@@ -550,6 +568,7 @@ class GolfHub final {
   const std::string instance_id_;
   std::mutex mu_;
   pg::Listener* listener_ = nullptr;  // owned by the caller; guarded by mu_
+  EventWriter event_writer_;          // guarded by mu_; unset writes nothing
   std::unordered_map<std::string, Room> rooms_;
   /// Source of Room::revision stamps.
   uint64_t room_revisions_ = 0;
