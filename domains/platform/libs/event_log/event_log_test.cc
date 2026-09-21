@@ -182,6 +182,28 @@ TEST_F(EventLogTest, ARollOntoANameAlreadyTakenKeepsBothFiles) {
 // Two events can be handed over out of order — the timestamp is the
 // caller's, not the writer's. Rolling backwards would name a file for an
 // hour that already rolled, so a late line is simply filed where it is.
+// A roll can fail part way: the active file is closed, and then the
+// rename or the reopen does not happen. What it must not do is leave the
+// log holding a closed handle — the next event would write through it,
+// and games_hub's writer is built to log an unwritable event and carry
+// on, not to take the hub down with it.
+TEST_F(EventLogTest, AFailedRollLeavesTheLogWritableRatherThanUnusable) {
+  auto log = EventLog::Open(Dir(), "game_events");
+  ASSERT_TRUE(log.ok()) << log.status();
+  ASSERT_TRUE((*log)->Append(At(2026, 9, 21, 13, 5), R"({"n":1})").ok());
+
+  // The active file is taken out from under the log, so the roll's
+  // rename has nothing to move.
+  ASSERT_TRUE(std::filesystem::remove(dir_ / "game_events.log"));
+
+  const absl::Status rolled = (*log)->Append(At(2026, 9, 21, 14, 5), R"({"n":2})");
+  EXPECT_FALSE(rolled.ok()) << "a roll that moved nothing is not a roll";
+
+  // And the next event still lands, in a file the log took back.
+  EXPECT_TRUE((*log)->Append(At(2026, 9, 21, 14, 6), R"({"n":3})").ok());
+  EXPECT_THAT(LinesOf("game_events.log"), ElementsAre(R"({"n":3})"));
+}
+
 TEST_F(EventLogTest, AnOlderTimestampAppendsWhereItIsRatherThanRollingBackwards) {
   auto log = EventLog::Open(Dir(), "game_events");
   ASSERT_TRUE(log.ok()) << log.status();

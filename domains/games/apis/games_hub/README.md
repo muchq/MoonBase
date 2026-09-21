@@ -160,6 +160,15 @@ would count one game twice. `room_closed` is the same rule one level up:
 the instance that empties a room writes it, and the ones that later read
 the row gone drop the room in silence.
 
+It is not the same guarantee, though. A finish is recorded only once its
+commit has landed; a close is recorded before the `DeleteRoom` it stages
+has flushed. A crash in that window restores the room, and its next
+emptying writes a second `room_closed` under the same id. Making it
+durable would mean a synchronous delete on the room teardown path, which
+is a lot to ask of the hub for an archive line — so a reader counting
+rooms should treat a repeated close as the one thing here that can
+repeat.
+
 ## The rules
 
 Four-card golf for 2–4 players: each player peeks at two own cards, a

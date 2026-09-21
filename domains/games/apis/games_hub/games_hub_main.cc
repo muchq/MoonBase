@@ -166,7 +166,10 @@ int main() {
   // and what every local run gets. A directory that cannot be opened is
   // fatal rather than silent: an event log nobody notices is missing is
   // a month of games nobody can count.
-  std::unique_ptr<event_log::EventLog> game_events;
+  // Shared, and captured by value below: a hub joins its boot reaper as
+  // it goes, a reaped seat can end a game, and that game records one. A
+  // raw pointer here would be to an object this scope destroys first.
+  std::shared_ptr<event_log::EventLog> game_events;
   const char* event_dir = std::getenv("GAME_EVENT_LOG_DIR");
   if (event_dir != nullptr && *event_dir != '\0') {
     auto opened = event_log::EventLog::Open(event_dir, "game_events");
@@ -175,7 +178,7 @@ int main() {
       return 1;
     }
     game_events = *std::move(opened);
-    golf->SetEventWriter([log = game_events.get()](absl::Time when, std::string_view line) {
+    golf->SetEventWriter([log = game_events](absl::Time when, std::string_view line) {
       // A game is not failed over an unwritable log; it is only lost
       // from the archive, loudly.
       if (const absl::Status wrote = log->Append(when, line); !wrote.ok()) {

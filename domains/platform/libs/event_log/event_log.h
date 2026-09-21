@@ -66,6 +66,10 @@ class EventLog {
  private:
   EventLog(std::string dir, std::string name, std::FILE* file,
            std::optional<absl::Time> active_hour);
+  /// Rolls the active file away and opens a fresh one. Needs an open
+  /// handle, and leaves none behind on any failure — Append takes that
+  /// as "reopen before writing", which is how a roll that failed part
+  /// way costs one event rather than every event after it.
   absl::Status RollLocked() ABSL_EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   const std::string dir_;

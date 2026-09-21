@@ -80,14 +80,25 @@ EventLog::~EventLog() {
 absl::Status EventLog::Append(absl::Time when, std::string_view line) {
   const absl::MutexLock lock(mu_);
   const absl::Time hour = HourOf(when);
-  if (active_hour_.has_value() && hour > *active_hour_) {
+  if (file_ != nullptr && active_hour_.has_value() && hour > *active_hour_) {
     if (const absl::Status rolled = RollLocked(); !rolled.ok()) return rolled;
+  }
+
+  const std::string path = (std::filesystem::path(dir_) / ActiveName(name_)).string();
+  // A roll that failed part way closed the active file and did not get
+  // another open, so there is nothing to write through. Take one back
+  // rather than carry the loss forward: the caller was told its own
+  // event failed, and the events after it are not that event's to lose.
+  // Whatever is opened here is empty, so it belongs to this line's hour.
+  if (file_ == nullptr) {
+    file_ = std::fopen(path.c_str(), "a");
+    if (file_ == nullptr) return FromErrno("reopening", path);
+    active_hour_.reset();
   }
   // An hour earlier than the active file's lands in it unchanged: rolling
   // backwards would name a file for an hour that has already been shipped.
   if (!active_hour_.has_value()) active_hour_ = hour;
 
-  const std::string path = (std::filesystem::path(dir_) / ActiveName(name_)).string();
   if (std::fwrite(line.data(), 1, line.size(), file_) != line.size() ||
       std::fputc('\n', file_) == EOF || std::fflush(file_) != 0) {
     return FromErrno("writing", path);
@@ -108,6 +119,9 @@ absl::Status EventLog::RollLocked() {
     rolled = absl::StrCat(stem, "-", n, kSuffix);
   }
 
+  // Every return below this point leaves file_ null, which Append takes
+  // as "reopen before writing" rather than as a handle — and which is
+  // why Append is the only caller and checks for one first.
   if (std::fclose(file_) != 0) {
     file_ = nullptr;
     return FromErrno("closing", active.string());
