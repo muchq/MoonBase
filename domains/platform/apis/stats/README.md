@@ -21,7 +21,14 @@ object's partition: Caddy rolls by size, so an object spans whatever days
 it took to fill. That roll size (`roll_size` in the Caddyfile) is the
 pipeline's latency, and `deploy_config_test` bounds it.
 
-`route` and `source` are narrower than they look. A route names the
+`service` is the column that answers "which backend the route goes to",
+and `route` is how it is computed rather than a synonym for it. It is not
+the same as which backend answered: Caddy answers some requests itself
+above the handle that would have proxied them — a CORS preflight is a 204
+from the gateway, and `refuse_bots` 403s a scraper — and those rows carry
+the backend's name, with the refusals landing in its errors. Worst on
+`git.muchq.com`, where every crawler refusal reads as forgejo. `route` and `source` are
+narrower than they look. A route names the
 matcher that claimed the path, which on a site that has matchers is the
 backend that served it — but `git.muchq.com` is a bare reverse proxy with
 no path matchers at all, so every Forgejo page is `other`, sharing the
@@ -102,6 +109,19 @@ unbounded — which is one query over the raw partitions in S3, keeping
 
 - `GET /stats/v1/summary?days=7` — per day/host/agent-class request and
   error counts
+- `GET /stats/v1/services?days=7&limit=2000` — per day/host/service/caller/
+  agent-class request and error counts, busiest rows first, with `total`
+  saying how many there were before the limit: which backend, for whom,
+  and whether the whom was a person or a crawler. The service is the
+  container the Caddyfile proxies the route to, named at read time rather
+  than stored, so re-pointing a matcher costs no re-aggregation — and
+  rewrites how the past reads, since every old row is named by today's
+  table. A path no matcher claimed reached no backend and is `other`,
+  except on a site whose handle carries no path matcher at all, where
+  every path reaches the one service behind it. Rows are folded from
+  route to service before the limit applies, so a truncated read drops
+  whole quiet services rather than slicing a busy one's routes off its
+  own total
 - `GET /stats/v1/iili/top?days=30&limit=20` — most-followed short links
 - `GET /stats/v1/agents?days=30&limit=500` — per day/host/class/agent
   request and 403 counts, busiest rows first: which scrapers and bots hit

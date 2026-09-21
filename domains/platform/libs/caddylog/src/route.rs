@@ -430,15 +430,31 @@ mod tests {
                 site = None;
                 continue;
             }
-            let mut words = line.split_whitespace();
-            if words.next() != Some("path") {
+            // Three spellings reach the gateway. A `path` line inside a
+            // matcher block; a matcher written inline, `@ws_play path
+            // /games/v2/play`, which is what a block holding nothing but a
+            // path collapses to; and `handle_path`, which carries its
+            // paths as arguments and has no matcher at all. A parser that
+            // reads only the first files the other two under the unrouted
+            // token with nothing red.
+            let mut words = line.split_whitespace().peekable();
+            let paths: Vec<&str> = match words.next() {
+                Some("path") => words.filter(|word| *word != "{").collect(),
+                Some("handle_path") => words.take_while(|word| *word != "{").collect(),
+                Some(first) if first.starts_with('@') && words.peek() == Some(&"path") => {
+                    words.next();
+                    words.filter(|word| *word != "{").collect()
+                }
+                _ => continue,
+            };
+            if paths.is_empty() {
                 continue;
             }
             let site = site.expect("a path matcher outside every site block");
             by_site
                 .entry(site)
                 .or_insert_with(BTreeSet::new)
-                .extend(words);
+                .extend(paths);
         }
         by_site
     }

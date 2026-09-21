@@ -6,12 +6,14 @@ load("//bazel/rules:oci.bzl", "linux_oci_go")
 # vocabulary in source.go against QueryEvent.java, and the agent, probe and
 # method vocabularies in classify.go and aggregate.go, and the site and route
 # tables in route.go, against caddylog's Rust twin. deploy_config_test reads
-# source.go for the CORS origins.
+# source.go for the CORS origins and service.go for the backend each route
+# is proxied to.
 exports_files([
     "aggregate.go",
     "classify.go",
     "queries.go",
     "route.go",
+    "service.go",
     "source.go",
 ])
 
@@ -25,6 +27,7 @@ go_library(
         "loop.go",
         "queries.go",
         "route.go",
+        "service.go",
         "source.go",
         "store.go",
     ],
@@ -53,6 +56,7 @@ go_test(
         "loop_test.go",
         "queries_test.go",
         "route_test.go",
+        "service_test.go",
         "source_test.go",
         "store_test.go",
     ],

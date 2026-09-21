@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -338,6 +339,98 @@ type ProbeRow struct {
 	Probe    string `json:"probe"`
 	Requests int64  `json:"requests"`
 	Served   int64  `json:"served"`
+}
+
+// One service's traffic on one day, from one caller, of one agent class.
+//
+// Agent class is here because source does not separate people from
+// crawlers and does not claim to — api is its residue. The service most
+// likely to top this list is forgejo, and every one of its rows is api,
+// because git.muchq.com grants no origin. Without the class, the headline
+// row is the least informative one.
+type ServiceRow struct {
+	Date       string `json:"date"`
+	Host       string `json:"host"`
+	Service    string `json:"service"`
+	Source     string `json:"source"`
+	AgentClass string `json:"agent_class"`
+	Requests   int64  `json:"requests"`
+	Errors     int64  `json:"errors"`
+}
+
+// Services is the per-backend, per-caller breakdown the route and source
+// columns were added for. It returns the busiest rows first, at most limit
+// of them, and the number there were before truncating.
+//
+// The fold from route to service happens here rather than in SQL, and
+// before the limit rather than after. The mapping belongs to the Caddyfile
+// and a query carrying its own copy is a copy the gateway pin does not
+// read — but the ordering is the real reason. A service reached through
+// nine routes sheds its small rows first under a row-grain limit, while a
+// service reached through one keeps all of it, so a reader summing per
+// service would get one_d4 low and forgejo whole with nothing saying so.
+// Truncating folded rows drops quiet services instead, which is a short
+// list rather than a wrong number. The grouping vocabulary is closed, so
+// what this reads before folding is bounded whatever the window.
+func (s *Store) Services(ctx context.Context, days, limit int) ([]ServiceRow, int, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT dt::text, host, route, source, agent_class,
+		        SUM(requests) AS requests,
+		        COALESCE(SUM(requests) FILTER (WHERE status >= 400), 0) AS errors
+		 FROM request_stats
+		 WHERE dt >= current_date - $1::int
+		 GROUP BY dt, host, route, source, agent_class`, days)
+	if err != nil {
+		return nil, 0, err
+	}
+	folded := map[ServiceRow]struct{ requests, errors int64 }{}
+	var date, host, route, source, agentClass string
+	var requests, errors int64
+	if _, err := pgx.ForEachRow(rows,
+		[]any{&date, &host, &route, &source, &agentClass, &requests, &errors},
+		func() error {
+			at := ServiceRow{
+				Date: date, Host: host, Service: ServiceOf(host, route),
+				Source: source, AgentClass: agentClass,
+			}
+			was := folded[at]
+			folded[at] = struct{ requests, errors int64 }{was.requests + requests, was.errors + errors}
+			return nil
+		}); err != nil {
+		return nil, 0, err
+	}
+
+	out := make([]ServiceRow, 0, len(folded))
+	for at, counts := range folded {
+		at.Requests, at.Errors = counts.requests, counts.errors
+		out = append(out, at)
+	}
+	// Busiest first, like the other limited reads, and fully ordered after
+	// that so the truncation point does not move between identical reads.
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Requests != b.Requests {
+			return a.Requests > b.Requests
+		}
+		if a.Date != b.Date {
+			return a.Date > b.Date
+		}
+		if a.Host != b.Host {
+			return a.Host < b.Host
+		}
+		if a.Service != b.Service {
+			return a.Service < b.Service
+		}
+		if a.Source != b.Source {
+			return a.Source < b.Source
+		}
+		return a.AgentClass < b.AgentClass
+	})
+	total := len(out)
+	if total > limit {
+		out = out[:limit]
+	}
+	return out, total, nil
 }
 
 func (s *Store) Summary(ctx context.Context, days int) ([]SummaryRow, error) {

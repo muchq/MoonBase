@@ -121,14 +121,15 @@ func sum(rows []map[string]any, match map[string]any, field string) float64 {
 	return total
 }
 
-// The four endpoints keyed by host, read together so an assertion can be a
+// The five endpoints keyed by host, read together so an assertion can be a
 // delta between two reads rather than an absolute count.
-type endpointRows struct{ summary, agents, probes, countries []map[string]any }
+type endpointRows struct{ summary, services, agents, probes, countries []map[string]any }
 
 func readEndpoints(t *testing.T, server *httptest.Server) endpointRows {
 	t.Helper()
 	return endpointRows{
 		summary:   getJSON(t, server, "/stats/v1/summary?days=2"),
+		services:  getJSON(t, server, "/stats/v1/services?days=2&limit=5000"),
 		agents:    getJSON(t, server, "/stats/v1/agents?days=2&limit=2000"),
 		probes:    getJSON(t, server, "/stats/v1/probes?days=2"),
 		countries: getJSON(t, server, "/stats/v1/countries?days=2&limit=5000"),
@@ -254,19 +255,22 @@ func TestEndToEndFromShippedObjectsToEveryEndpoint(t *testing.T) {
 		grew(what, before.countries, after.countries, match, "probes", want.probes)
 	}
 
-	// The two new columns, read straight from the table: no endpoint
-	// exposes them yet, so this is the only thing that says a real log
-	// line carried a route and a caller all the way to a row.
-	var routed int64
-	if err := store.pool.QueryRow(ctx,
-		`SELECT COALESCE(SUM(requests), 0) FROM request_stats
-		 WHERE host = $1 AND route = $2 AND source = $3`,
-		site, "/games/v2/session", SourceUI).Scan(&routed); err != nil {
-		t.Fatal(err)
+	// Services: the web app's one routed request, named for the backend
+	// that answered it. This is the whole path — a log line's Host and URI
+	// through the classifiers, into the route and source columns, back out
+	// as the service behind them.
+	webApp := map[string]any{
+		"host": site, "service": "games_hub", "source": SourceUI, "agent_class": AgentBrowser,
 	}
-	if routed != 1 {
-		t.Errorf("the web app's routed request landed %d times, want 1", routed)
-	}
+	grew("the web app on games_hub", before.services, after.services, webApp, "requests", 1)
+	grew("the web app on games_hub", before.services, after.services, webApp, "errors", 0)
+
+	// And what no backend saw: the browser's unrouted GET, the scraper's
+	// two 403s and the scanner's 404. Three of the four are errors, and
+	// the fourth is why requests is asserted beside them.
+	unserved := map[string]any{"host": site, "service": OtherService, "source": SourceAPI}
+	grew("what nothing served", before.services, after.services, unserved, "requests", 4)
+	grew("what nothing served", before.services, after.services, unserved, "errors", 3)
 
 	// Short links: the redirect on i.iili.uk, keyed by this run's own slug.
 	slugs := rowsWhere(getJSON(t, server, "/stats/v1/iili/top?days=2&limit=200"), map[string]any{"slug": run})

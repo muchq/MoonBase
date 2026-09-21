@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -2483,6 +2484,236 @@ func TestOneD4KnowsTheUiOriginCaddyGrants(t *testing.T) {
 				"would be counted as direct API calls.", origin)
 		}
 	}
+}
+
+// stats names the backend that answered a request from the Caddyfile's own
+// reverse_proxy upstreams, so "which service" is a question the rollup can
+// answer. Route names the matcher instead, and the two part company exactly
+// where a site has no path matchers: git.muchq.com proxies its whole vhost
+// to forgejo, so every Forgejo page is the unrouted token.
+//
+// The table lives in stats and the truth lives here, so this reads both and
+// compares them in both directions. A matcher re-pointed at a different
+// container, or a new one added, files that traffic under the old service
+// or under "other" until the table follows.
+func TestStatsNamesTheServiceEveryCaddyfileMatcherProxiesTo(t *testing.T) {
+	proxied, siteDefaults := caddyUpstreams(t)
+	// A parser this file has stopped reading is a pin it has stopped
+	// keeping, and the shape it reads is the shape someone edits.
+	matchers := 0
+	for _, byPath := range proxied {
+		matchers += len(byPath)
+	}
+	if matchers < 20 {
+		t.Fatalf("parsed only %d proxied path matchers; has the Caddyfile's shape changed?", matchers)
+	}
+	listed, listedDefaults := statsServiceTable(t)
+
+	for site, byPath := range proxied {
+		for path, upstream := range byPath {
+			// The table keys on the route that claims the path, which is
+			// how the Caddyfile's method-split matchers (POST /deja/v1/next
+			// under GET /deja/v1/*) collapse onto one entry.
+			route, got := claims(listed[site], path)
+			if got != upstream {
+				t.Errorf("Caddy proxies %s%s to %s; stats files it under %q (route %q)",
+					site, path, upstream, got, route)
+			}
+		}
+	}
+	for site, upstream := range siteDefaults {
+		if got := listedDefaults[site]; got != upstream {
+			t.Errorf("Caddy proxies everything on %s to %s; stats files it under %q",
+				site, upstream, got)
+		}
+	}
+	for site, byRoute := range listed {
+		for route, service := range byRoute {
+			claimed := false
+			for path := range proxied[site] {
+				if at, _ := claims(byRoute, path); at == route {
+					claimed = true
+				}
+			}
+			if !claimed {
+				t.Errorf("stats files %s on %s under %s, but no Caddyfile matcher there "+
+					"proxies a path that route claims", route, site, service)
+			}
+		}
+	}
+	for site := range listedDefaults {
+		if _, ok := siteDefaults[site]; !ok {
+			t.Errorf("stats gives %s a whole-vhost service, but the Caddyfile gives it no "+
+				"bare reverse_proxy", site)
+		}
+	}
+}
+
+// The table entry that claims a path, and the service it names. Caddy's
+// path matcher is what decides: a trailing * is a prefix, anything else is
+// exact, matched without regard to case. Reading the rule here rather than
+// calling stats' router keeps this a config test, and the two spellings of
+// the rule are already held together by route_test and caddylog's own pin
+// against this same file.
+func claims(byRoute map[string]string, path string) (string, string) {
+	// Sorted, longest first: a map's order is random, so two entries that
+	// ever did overlap would pick a winner per run and flake rather than
+	// fail. route.go's table has no overlap and caddylog pins that, but a
+	// test that guards an invariant should not depend on it.
+	candidates := make([]string, 0, len(byRoute))
+	for route := range byRoute {
+		candidates = append(candidates, route)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if len(candidates[i]) != len(candidates[j]) {
+			return len(candidates[i]) > len(candidates[j])
+		}
+		return candidates[i] < candidates[j]
+	})
+	for _, route := range candidates {
+		if prefix, isPrefix := strings.CutSuffix(route, "*"); isPrefix {
+			if strings.HasPrefix(strings.ToLower(path), prefix) {
+				return route, byRoute[route]
+			}
+		} else if strings.EqualFold(path, route) {
+			return route, byRoute[route]
+		}
+	}
+	return "", ""
+}
+
+// The Caddyfile's reverse_proxy upstreams: per site, the service each path
+// matcher is proxied to, plus the service a bare handle proxies the whole
+// vhost to. Upstreams are read without their port, which is the container
+// name and so the service.
+//
+// Three spellings declare a path and all three reach the gateway: a `path`
+// line inside a matcher block, a matcher written inline (`@ws_play path
+// /games/v2/play`, which is what a block holding nothing but a path
+// collapses to), and `handle_path`, which carries its paths as arguments
+// and has no matcher at all. A site can also proxy everything with no
+// handle at all, which is the plainest way to add a vhost.
+func caddyUpstreams(t *testing.T) (map[string]map[string]string, map[string]string) {
+	t.Helper()
+	site := ""
+	depth := 0
+	matcher := ""
+	handling := ""
+	handlingAt := 0
+	paths := map[string][]string{}
+	proxied := map[string]map[string]string{}
+	defaults := map[string]string{}
+	header := regexp.MustCompile(`^([a-z0-9.\-]+\.[a-z]+) \{$`)
+	// The synthetic matcher a handle_path or a bare handle stands in for.
+	const wholeVhost = " (whole vhost)"
+
+	for _, line := range directiveLines(t, "Caddyfile") {
+		fields := strings.Fields(line)
+		switch {
+		case depth == 0 && header.MatchString(line):
+			site = header.FindStringSubmatch(line)[1]
+			paths = map[string][]string{}
+		case strings.HasPrefix(line, "@"):
+			matcher = strings.TrimPrefix(fields[0], "@")
+			// An inline matcher declares its path on the same line.
+			if len(fields) > 2 && fields[1] == "path" {
+				paths[matcher] = append(paths[matcher], pathArgs(fields[2:])...)
+			}
+		case fields[0] == "path" && matcher != "":
+			paths[matcher] = append(paths[matcher], pathArgs(fields[1:])...)
+		case fields[0] == "handle_path" && site != "":
+			handling, handlingAt = "handle_path "+line, depth
+			paths[handling] = pathArgs(fields[1:])
+		case fields[0] == "handle" && site != "":
+			handling, handlingAt = wholeVhost, depth
+			if len(fields) > 1 && strings.HasPrefix(fields[1], "@") {
+				handling = strings.TrimPrefix(fields[1], "@")
+			}
+		case fields[0] == "reverse_proxy" && site != "":
+			upstreams := pathArgs(fields[1:])
+			if len(upstreams) > 1 {
+				t.Errorf("%s proxies to a pool (%v); the service table names one container "+
+					"per route and cannot say which", site, upstreams)
+			}
+			if len(upstreams) == 0 {
+				continue
+			}
+			service, _, _ := strings.Cut(upstreams[0], ":")
+			// No handle at all: the site proxies every path here.
+			if handling == "" || handling == wholeVhost {
+				defaults[site] = service
+				continue
+			}
+			for _, path := range paths[handling] {
+				if proxied[site] == nil {
+					proxied[site] = map[string]string{}
+				}
+				proxied[site][path] = service
+			}
+		}
+		depth += strings.Count(line, "{") - strings.Count(line, "}")
+		// A handle's upstream is inside its own block, so the name stops
+		// applying when that block closes; otherwise the next
+		// reverse_proxy under a different directive is filed under it.
+		if handling != "" && depth <= handlingAt {
+			handling = ""
+		}
+		if depth <= 0 {
+			site, matcher, handling, depth = "", "", "", 0
+		}
+	}
+	return proxied, defaults
+}
+
+// A directive's arguments up to any opening brace.
+func pathArgs(fields []string) []string {
+	var out []string
+	for _, field := range fields {
+		if field == "{" {
+			break
+		}
+		out = append(out, field)
+	}
+	return out
+}
+
+// stats' table, read as text like the origin pin above: the package is
+// built for the service, not for this test, and the table is not part of
+// what it offers callers.
+func statsServiceTable(t *testing.T) (map[string]map[string]string, map[string]string) {
+	t.Helper()
+	source, err := os.ReadFile("../../domains/platform/apis/stats/service.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byRoute := map[string]map[string]string{}
+	defaults := map[string]string{}
+	// Split on the entry marker rather than matching a closing shape: the
+	// entries do not all close alike, and a pattern that spans from one
+	// site to the next silently gives the first site the second's routes.
+	entries := strings.Split(string(source), `{Site: "`)[1:]
+	if len(entries) == 0 {
+		t.Fatal("no service entries parsed out of service.go; has the table been reshaped?")
+	}
+	for _, entry := range entries {
+		site, body, found := strings.Cut(entry, `"`)
+		if !found {
+			t.Fatalf("unparseable service entry beginning %.40q", entry)
+		}
+		if end := strings.Index(body, "\n}"); end >= 0 {
+			body = body[:end]
+		}
+		if match := regexp.MustCompile(`Default: "([^"]+)"`).FindStringSubmatch(body); match != nil {
+			defaults[site] = match[1]
+		}
+		for _, pair := range regexp.MustCompile(`"(/[^"]*)":\s*"([^"]+)"`).FindAllStringSubmatch(body, -1) {
+			if byRoute[site] == nil {
+				byRoute[site] = map[string]string{}
+			}
+			byRoute[site][pair[1]] = pair[2]
+		}
+	}
+	return byRoute, defaults
 }
 
 // stats books a request as the web app's by the same Origin, across every
