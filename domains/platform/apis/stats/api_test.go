@@ -13,16 +13,18 @@ import (
 )
 
 type fakeReader struct {
-	summary   []SummaryRow
-	slugs     []SlugRow
-	agents    []AgentRow
-	probes    []ProbeRow
-	queries   []QueryRow
-	terms     []TermRow
-	countries []CountryRow
-	lastDays  int
-	lastLimit int
-	fail      bool
+	summary      []SummaryRow
+	services     []ServiceRow
+	serviceTotal int
+	slugs        []SlugRow
+	agents       []AgentRow
+	probes       []ProbeRow
+	queries      []QueryRow
+	terms        []TermRow
+	countries    []CountryRow
+	lastDays     int
+	lastLimit    int
+	fail         bool
 }
 
 func (f *fakeReader) Summary(_ context.Context, days int) ([]SummaryRow, error) {
@@ -31,6 +33,14 @@ func (f *fakeReader) Summary(_ context.Context, days int) ([]SummaryRow, error) 
 	}
 	f.lastDays = days
 	return f.summary, nil
+}
+
+func (f *fakeReader) Services(_ context.Context, days, limit int) ([]ServiceRow, int, error) {
+	if f.fail {
+		return nil, 0, errors.New("db is having a day")
+	}
+	f.lastDays, f.lastLimit = days, limit
+	return f.services, f.serviceTotal, nil
 }
 
 func (f *fakeReader) TopSlugs(_ context.Context, days, limit int) ([]SlugRow, error) {
@@ -121,6 +131,63 @@ func TestSummaryClampsDaysAndReturnsRows(t *testing.T) {
 	get(t, handlers.GetSummary, "/stats/v1/summary?days=banana")
 	if reader.lastDays != 7 {
 		t.Errorf("garbage days = %d, want the default 7", reader.lastDays)
+	}
+}
+
+func TestServicesPassesWindowAndLimitAndNamesTheBackend(t *testing.T) {
+	reader := &fakeReader{serviceTotal: 42, services: []ServiceRow{
+		{Date: "2026-08-30", Host: "api.muchq.com", Service: "one_d4",
+			Source: SourceUI, AgentClass: AgentBrowser, Requests: 9, Errors: 1},
+	}}
+	_, body := get(t, handlersWith(reader).GetServices, "/stats/v1/services?days=30&limit=5")
+	if reader.lastDays != 30 || reader.lastLimit != 5 {
+		t.Errorf("(days, limit) = (%d, %d)", reader.lastDays, reader.lastLimit)
+	}
+	rows := body["rows"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %v", body["rows"])
+	}
+	// The page groups on these three, so they are part of the response
+	// shape and not incidental.
+	row := rows[0].(map[string]any)
+	for field, want := range map[string]any{
+		"service": "one_d4", "source": SourceUI, "agent_class": AgentBrowser,
+	} {
+		if row[field] != want {
+			t.Errorf("row[%q] = %v, want %v", field, row[field], want)
+		}
+	}
+	// And the count before the limit, so a reader summing a truncated
+	// list can tell that it got one.
+	if body["total"] != float64(42) {
+		t.Errorf("total = %v, want 42", body["total"])
+	}
+}
+
+// The window rules, on the same terms as every neighbour: a default
+// window, a ceiling well below what an uncompressed public response can
+// afford, [] rather than null for a reader that maps the rows, and a
+// store failure that is a 500 and not a 200 holding nothing.
+func TestServicesSharesTheWindowRules(t *testing.T) {
+	reader := &fakeReader{}
+	get(t, handlersWith(reader).GetServices, "/stats/v1/services")
+	if reader.lastDays != 7 || reader.lastLimit != 2000 {
+		t.Errorf("default services (days, limit) = (%d, %d), want (7, 2000)",
+			reader.lastDays, reader.lastLimit)
+	}
+	get(t, handlersWith(reader).GetServices, "/stats/v1/services?limit=99999")
+	if reader.lastLimit != 5000 {
+		t.Errorf("limit clamped to %d, want 5000", reader.lastLimit)
+	}
+	if _, body := get(t, handlersWith(&fakeReader{}).GetServices, "/stats/v1/services"); body["rows"] == nil {
+		t.Error("services rows serialized as null; want []")
+	}
+	recorder, _ := get(t, handlersWith(&fakeReader{fail: true}).GetServices, "/stats/v1/services")
+	if recorder.Code != http.StatusInternalServerError {
+		t.Errorf("services on a failing store = %d, want 500", recorder.Code)
+	}
+	if strings.Contains(recorder.Body.String(), "db is having a day") {
+		t.Error("the failure reason leaked to a public endpoint")
 	}
 }
 

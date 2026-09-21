@@ -418,6 +418,190 @@ func TestASecondBootWaitsForTheFirstToRecordItsVersion(t *testing.T) {
 	}
 }
 
+type cell struct{ requests, errors int64 }
+
+// Every service row, keyed by the four columns a reader groups on.
+func serviceTotals(ctx context.Context, store *Store) (map[string]cell, error) {
+	rows, _, err := store.Services(ctx, 2, 5000)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]cell{}
+	for _, r := range rows {
+		at := r.Host + " " + r.Service + " " + r.Source + " " + r.AgentClass
+		out[at] = cell{out[at].requests + r.Requests, out[at].errors + r.Errors}
+	}
+	return out, nil
+}
+
+// The per-backend read: the two routes that reach one_d4 arrive folded
+// into one service, and a route-blind site's unrouted rows arrive named
+// rather than pooled with the paths nothing served.
+func TestServicesNamesTheBackendBehindEachRouteRow(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	date, host, key := uniqueFixture(t)
+
+	rollup := NewRollup()
+	row := func(host, route, source string, status int) RequestKey {
+		return RequestKey{
+			Date: date, Host: host, Route: route, Source: source,
+			Status: status, Method: "GET", AgentClass: AgentBrowser, Agent: "",
+		}
+	}
+	rollup.Requests[row("api.muchq.com", "/1d4/v1/query", SourceUI, 200)] = 5
+	rollup.Requests[row("api.muchq.com", "/1d4/v1/index", SourceUI, 200)] = 3
+	rollup.Requests[row("api.muchq.com", "/1d4/v1/query", SourceAPI, 500)] = 2
+	rollup.Requests[row("git.muchq.com", OtherRoute, SourceAPI, 200)] = 7
+	rollup.Requests[row("api.muchq.com", OtherRoute, SourceAPI, 404)] = 4
+	// The fixture's own host keeps this run's rows tellable from the rest
+	// of the shared database.
+	rollup.Requests[row(host, OtherRoute, SourceAPI, 200)] = 1
+	// The rows below land on sites every other run shares, so the counts
+	// are deltas across this one apply rather than totals.
+	before, err := serviceTotals(ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ApplyRollup(ctx, key, rollup); err != nil {
+		t.Fatal(err)
+	}
+	after, err := serviceTotals(ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]cell{}
+	for at, cells := range after {
+		got[at] = cell{cells.requests - before[at].requests, cells.errors - before[at].errors}
+	}
+	for at, want := range map[string]cell{
+		// 5 + 3, folded across the two routes that reach one_d4. A reader
+		// summing per service must not have to know there were two.
+		"api.muchq.com one_d4 " + SourceUI + " " + AgentBrowser:                {8, 0},
+		"api.muchq.com one_d4 " + SourceAPI + " " + AgentBrowser:               {2, 2},
+		"git.muchq.com forgejo " + SourceAPI + " " + AgentBrowser:              {7, 0},
+		"api.muchq.com " + OtherService + " " + SourceAPI + " " + AgentBrowser: {4, 4},
+		host + " " + OtherService + " " + SourceAPI + " " + AgentBrowser:       {1, 0},
+	} {
+		if got[at] != want {
+			t.Errorf("%s = %+v, want %+v", at, got[at], want)
+		}
+	}
+}
+
+// The limit truncates the busiest-first list and says what it truncated
+// from. Both halves are what a reader summing a service depends on: the
+// fold happens before this, so what is dropped is whole quiet services
+// rather than a slice out of a busy one.
+func TestServicesHonoursTheLimitBusiestFirst(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	date, host, key := uniqueFixture(t)
+
+	rollup := NewRollup()
+	for i, count := range []int64{9, 7, 5} {
+		rollup.Requests[RequestKey{
+			Date: date, Host: host, Route: OtherRoute, Source: SourceAPI,
+			Status: 200, Method: "GET", AgentClass: AgentBrowser,
+			Agent: fmt.Sprintf("%s-%d", host, i),
+		}] = count
+	}
+	if err := store.ApplyRollup(ctx, key, rollup); err != nil {
+		t.Fatal(err)
+	}
+
+	full, total, err := store.Services(ctx, 2, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != len(full) {
+		t.Errorf("total = %d with %d rows returned; an untruncated read reports its own length",
+			total, len(full))
+	}
+	if len(full) < 2 {
+		t.Fatalf("only %d service rows; the fixture cannot show an ordering", len(full))
+	}
+	for i := 1; i < len(full); i++ {
+		if full[i-1].Requests < full[i].Requests {
+			t.Fatalf("row %d (%d requests) precedes row %d (%d); want busiest first",
+				i-1, full[i-1].Requests, i, full[i].Requests)
+		}
+	}
+
+	// The limit cuts the list and leaves the count of what there was.
+	cut, total, err := store.Services(ctx, 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cut) != 1 {
+		t.Errorf("limit 1 returned %d rows", len(cut))
+	}
+	if total != len(full) {
+		t.Errorf("truncated total = %d, want the %d there were", total, len(full))
+	}
+	if len(cut) == 1 && cut[0] != full[0] {
+		t.Errorf("limit 1 returned %+v, want the busiest row %+v", cut[0], full[0])
+	}
+}
+
+// Two rows the busiest-first rule cannot separate, across two days.
+//
+// The date is a column of its own: fold it away and a week of traffic
+// reads as one day at seven times the volume. And the comparator's
+// tiebreakers are what keep the truncation point still between identical
+// reads — with only the request count, two equal rows order by whatever
+// the map handed the sort.
+func TestServicesKeepsTheDaysApartAndBreaksTiesTheSameWayTwice(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	_, host, key := uniqueFixture(t)
+	today := time.Now().UTC().Format("2006-01-02")
+	yesterday := time.Now().UTC().AddDate(0, 0, -1).Format("2006-01-02")
+
+	rollup := NewRollup()
+	for _, at := range []struct{ date, source string }{
+		{today, SourceAPI}, {today, SourceUI}, {yesterday, SourceAPI},
+	} {
+		rollup.Requests[RequestKey{
+			Date: at.date, Host: host, Route: OtherRoute, Source: at.source,
+			Status: 200, Method: "GET", AgentClass: AgentBrowser, Agent: "",
+		}] = 5
+	}
+	if err := store.ApplyRollup(ctx, key, rollup); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, _, err := store.Services(ctx, 2, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mine []ServiceRow
+	for _, row := range rows {
+		if row.Host == host {
+			mine = append(mine, row)
+		}
+	}
+	// Three rows, not two: the two days do not merge.
+	want := []ServiceRow{
+		{Date: today, Host: host, Service: OtherService, Source: SourceAPI,
+			AgentClass: AgentBrowser, Requests: 5},
+		{Date: today, Host: host, Service: OtherService, Source: SourceUI,
+			AgentClass: AgentBrowser, Requests: 5},
+		{Date: yesterday, Host: host, Service: OtherService, Source: SourceAPI,
+			AgentClass: AgentBrowser, Requests: 5},
+	}
+	if len(mine) != len(want) {
+		t.Fatalf("got %d rows for this run, want %d: %+v", len(mine), len(want), mine)
+	}
+	// Equal counts, so the order is entirely the tiebreakers: the later
+	// day first, then the caller alphabetically.
+	for i := range want {
+		if mine[i] != want[i] {
+			t.Errorf("row %d = %+v, want %+v", i, mine[i], want[i])
+		}
+	}
+}
+
 func TestRollupTablesIsEveryTableTheSchemaCreates(t *testing.T) {
 	created := map[string]bool{}
 	for _, ddl := range schema {

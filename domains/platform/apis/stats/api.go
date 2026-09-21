@@ -14,6 +14,7 @@ import (
 // the handler tests run against a map instead of a database.
 type Reader interface {
 	Summary(ctx context.Context, days int) ([]SummaryRow, error)
+	Services(ctx context.Context, days, limit int) ([]ServiceRow, int, error)
 	TopSlugs(ctx context.Context, days, limit int) ([]SlugRow, error)
 	Agents(ctx context.Context, days, limit int) ([]AgentRow, error)
 	Probes(ctx context.Context, days int) ([]ProbeRow, error)
@@ -37,6 +38,7 @@ func NewRouter(h *Handlers) http.Handler {
 	router := mucks.NewJsonMucks()
 	router.HandleFunc("GET /health", h.Health)
 	router.HandleFunc("GET /stats/v1/summary", h.GetSummary)
+	router.HandleFunc("GET /stats/v1/services", h.GetServices)
 	router.HandleFunc("GET /stats/v1/iili/top", h.GetTopSlugs)
 	router.HandleFunc("GET /stats/v1/agents", h.GetAgents)
 	router.HandleFunc("GET /stats/v1/probes", h.GetProbes)
@@ -76,6 +78,20 @@ func (h *Handlers) GetSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"days": days, "rows": emptyIfNil(rows)})
+}
+
+func (h *Handlers) GetServices(w http.ResponseWriter, r *http.Request) {
+	days := queryInt(r, "days", 7, 365)
+	limit := queryInt(r, "limit", 2000, 5000)
+	rows, total, err := h.reader.Services(r.Context(), days, limit)
+	if err != nil {
+		h.serverError(w, "services", err)
+		return
+	}
+	// total is what there was before the limit. Rows are folded per
+	// service, so a truncated read is a short list and not a wrong total
+	// — but a reader summing them still needs to know it got one.
+	writeJSON(w, map[string]any{"days": days, "total": total, "rows": emptyIfNil(rows)})
 }
 
 func (h *Handlers) GetTopSlugs(w http.ResponseWriter, r *http.Request) {

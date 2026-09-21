@@ -17,7 +17,10 @@ go_test(
         "compose.yaml",
         # TestOneD4KnowsTheUiOriginCaddyGrants ties the CORS origin to the one one_d4 reads,
         # and TestStatsKnowsEveryUiOriginCaddyGrants ties every grant to stats'.
+        # TestStatsNamesTheServiceEveryCaddyfileMatcherProxiesTo reads service.go
+        # for the backend behind each route.
         "//domains/games/apis/one_d4:src/main/java/com/muchq/games/one_d4/api/QueryEvent.java",
+        "//domains/platform/apis/stats:service.go",
         "//domains/platform/apis/stats:source.go",
         # Run, not read, by TestTheServicesListingMatchesWhatCanBeDeployed: the
         # --services listing is awk and sed, and asserting on their text is not
