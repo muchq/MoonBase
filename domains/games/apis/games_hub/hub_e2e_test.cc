@@ -2218,6 +2218,17 @@ class GameEventFixture : public GolfGameFixture {
     return names;
   }
 
+  // The room each line names, so a funnel can assert it is one room's.
+  std::vector<std::string> Rooms() const {
+    std::vector<std::string> rooms;
+    for (const std::string& line : events_) {
+      const std::size_t at = line.find(R"("room":")");
+      rooms.push_back(
+          at == std::string::npos ? line : line.substr(at + 8, line.find('"', at + 8) - at - 8));
+    }
+    return rooms;
+  }
+
   std::vector<std::string> events_;
 };
 
@@ -2253,6 +2264,9 @@ TEST_F(GameEventFixture, TheFunnelIsRecordedFromTheRoomToTheGameThatEndedIt) {
 
   EXPECT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "game_started",
                                               "game_finished", "room_closed"));
+  // One room's evening, and the id is what says so: five lines a reader
+  // can join into a session rather than five counters.
+  EXPECT_THAT(Rooms(), ::testing::Each(table->room_id));
 }
 
 // The same funnel at a bigger table, so every count in it is a
@@ -2298,6 +2312,8 @@ TEST_F(GameEventFixture, AWorldRecordsTheShapeItChoseAndEveryReshapeAfterIt) {
 
   ASSERT_THAT(Names(), ::testing::ElementsAre("room_created"));
   EXPECT_THAT(events_[0], ::testing::HasSubstr(R"("surface":"plane")"));
+  const std::string room_id = Rooms()[0];
+  EXPECT_FALSE(room_id.empty());
 
   moonbase::games::JoinWorld join;
   join.position = {0.0, 0.0, 0.0};
@@ -2326,6 +2342,9 @@ TEST_F(GameEventFixture, AWorldRecordsTheShapeItChoseAndEveryReshapeAfterIt) {
   // Named, not by its digits: a radius of 10 is a substring of half the
   // timestamps this could run at. game_events_test pins the whole line.
   EXPECT_THAT(events_[1], ::testing::Not(::testing::HasSubstr("radius")));
+  // A reshape names the world it reshaped, which for a seated player is
+  // their room and not the plaza they left to join it.
+  EXPECT_THAT(Rooms(), ::testing::Each(room_id));
 
   // A geometry the rules refuse reshapes nothing, so it records nothing.
   moonbase::games::SphereGeometry tiny;
@@ -2352,6 +2371,7 @@ TEST_F(GameEventFixture, AStoredMessageIsOneLineAndARefusedOneIsNone) {
   ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "chat_message"));
   EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("players":2)"));
   EXPECT_THAT(events_[2], ::testing::Not(::testing::HasSubstr("deal me in")));
+  EXPECT_THAT(Rooms(), ::testing::Each(room->room_id));
 
   // Empty text never reaches a store, so nothing happened to record.
   moonbase::games::Chat empty;

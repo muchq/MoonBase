@@ -22,10 +22,23 @@ namespace games_hub {
 /// opens one socket and every room, world, table, game and message rides
 /// that one connection — so this is the only place it is recorded.
 ///
-/// Every value is a closed vocabulary or a count, for the same reason
-/// one_d4's query events are (QueryEvent.java): the reader keys rollup
-/// rows on them, and an unbounded value is a table that grows without
-/// bound. Nothing here identifies a player, a room or a game.
+/// Every line carries the room it happened in, which is what makes this
+/// a session rather than seven counters: one room's evening reads back
+/// in order, and the pairs a single line cannot answer — how long a room
+/// lasted, how long a game took, how many tables a room got through —
+/// are a join away. High-cardinality on purpose, so a rollup groups by
+/// the other fields and keys on this one only to stitch lines together.
+///
+/// Every other value is a closed vocabulary or a count, for the same
+/// reason one_d4's query events are (QueryEvent.java): the reader keys
+/// rollup rows on them, and an unbounded value is a table that grows
+/// without bound. Nothing here identifies a player, and no message text,
+/// sphere radius or game code appears at all.
+///
+/// A room id is also a share link. It reaches S3 an hour or more after
+/// the fact, by which time an emptied room is gone and the code is dead
+/// — but it is the one field here that would let its reader walk into a
+/// room that is somehow still open.
 
 /// The event names, the field every reader filters on first.
 inline constexpr std::string_view kRoomCreated = "room_created";
@@ -55,38 +68,45 @@ struct GameFinished {
   std::size_t players;
 };
 
+/// A room id as it appears in a line: every character outside
+/// [A-Za-z0-9_-] replaced, so a line stays text with nothing to escape
+/// whatever reaches here. Every id the hub mints already passes through
+/// unchanged; this is the guarantee, not a transformation.
+std::string RoomTag(std::string_view room);
+
 /// How `state` ended, for a roster of `players` seats.
 GameFinished FinishedOf(const HostedState& state, std::size_t players);
 
 /// A room was made, on the surface it chose — SurfaceKindName's
 /// spelling, which is the wire's and the stored row's. Its creator is
 /// the only one in it, so there is nothing to count yet.
-std::string RoomCreatedLine(absl::Time when, std::string_view surface);
+std::string RoomCreatedLine(absl::Time when, std::string_view room, std::string_view surface);
 /// A world was reshaped under whoever was standing in it (#1554), onto
 /// `surface`. Nothing records the sphere's radius: the question this
 /// answers is which shapes people reach for, and a radius is a number
 /// per room rather than a word to group by.
-std::string GeometryChangedLine(absl::Time when, std::string_view surface);
+std::string GeometryChangedLine(absl::Time when, std::string_view room, std::string_view surface);
 /// Somebody walked into a room somebody else had made — `players` is the
 /// room's size once they were in it, so 2 is the first one that matters.
 /// Creating a room is `room_created`, not a join, and a refused join is
 /// no event at all.
-std::string RoomJoinedLine(absl::Time when, std::size_t players);
+std::string RoomJoinedLine(absl::Time when, std::string_view room, std::size_t players);
 /// The last member left, so the room is gone — with its games, its chat
 /// and its world. Nothing to count: a room closes empty by definition,
 /// and what it held is the lines before this one. Paired with
 /// `room_created`, the difference over a day is the rooms still open.
-std::string RoomClosedLine(absl::Time when);
+std::string RoomClosedLine(absl::Time when, std::string_view room);
 /// Somebody said something, and it was stored — a refused message is no
 /// event. `players` is the room's size at the time, which is the whole
 /// difference between two people talking and a room of four. The text
 /// never leaves the process, and nothing here says who spoke.
-std::string ChatMessageLine(absl::Time when, std::size_t players);
+std::string ChatMessageLine(absl::Time when, std::string_view room, std::size_t players);
 /// A table was dealt: which game, and how many seats it was dealt to.
 /// The one place the size of a table is recorded while it is still whole.
-std::string GameStartedLine(absl::Time when, std::string_view variant, std::size_t players);
+std::string GameStartedLine(absl::Time when, std::string_view room, std::string_view variant,
+                            std::size_t players);
 /// A table ended. One JSON object, no newline: the log adds it.
-std::string GameFinishedLine(absl::Time when, const GameFinished& finished);
+std::string GameFinishedLine(absl::Time when, std::string_view room, const GameFinished& finished);
 
 }  // namespace games_hub
 

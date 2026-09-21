@@ -732,8 +732,9 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
   // an unavailable store leaves a live row somebody finishes again —
   // either would count the game twice.
   if (finish != nullptr && !was_over) {
-    RecordLocked(
-        [&](absl::Time now) { return GameFinishedLine(now, FinishedOf(*state, roster.size())); });
+    RecordLocked([&](absl::Time now) {
+      return GameFinishedLine(now, room_id, FinishedOf(*state, roster.size()));
+    });
   }
   return Commit::kCommitted;
 }
@@ -1180,8 +1181,8 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
         StageMemberLocked(room_id, player_id, member->second, writes);
         StageRoomStateLocked(room_id, outbox);
         EnqueueWritesLocked(writes);
-        RecordLocked([surface = SurfaceKindName(surface)](absl::Time now) {
-          return RoomCreatedLine(now, surface);
+        RecordLocked([&room_id, surface = SurfaceKindName(surface)](absl::Time now) {
+          return RoomCreatedLine(now, room_id, surface);
         });
       }
     }
@@ -1223,8 +1224,8 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
           StageRoomStateLocked(join->roomId, outbox);
           EnqueueWritesLocked(writes);
           joined = true;
-          RecordLocked([members = room->second.members.size()](absl::Time now) {
-            return RoomJoinedLine(now, members);
+          RecordLocked([&id = join->roomId, members = room->second.members.size()](absl::Time now) {
+            return RoomJoinedLine(now, id, members);
           });
         }
       }
@@ -1330,7 +1331,8 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
       const std::lock_guard<std::mutex> lock(mu_);
       const auto room = rooms_.find(room_id);
       const std::size_t members = room == rooms_.end() ? 0 : room->second.members.size();
-      RecordLocked([members](absl::Time now) { return ChatMessageLine(now, members); });
+      RecordLocked(
+          [&room_id, members](absl::Time now) { return ChatMessageLine(now, room_id, members); });
     }
 
     // The committed row reaches locals through the pump, like every
@@ -1394,8 +1396,8 @@ void GolfHub::HandleLobby(const std::string& player_id,
         // no row, so its shape is this instance's until it restarts.
         const std::string world = WorldOfLocked(player_id);
         world_.Reshape(world, *surface, deliveries);
-        RecordLocked([kind = SurfaceKindName(*surface)](absl::Time now) {
-          return GeometryChangedLine(now, kind);
+        RecordLocked([&world, kind = SurfaceKindName(*surface)](absl::Time now) {
+          return GeometryChangedLine(now, world, kind);
         });
         if (rooms_.contains(world)) {
           Writes writes;
@@ -1850,8 +1852,10 @@ void GolfHub::StartGameMove(const std::string& player_id) {
           break;
         }
         started = true;
-        RecordLocked([variant = GameKindName(ref->entry->kind), seats = ref->entry->roster.size()](
-                         absl::Time now) { return GameStartedLine(now, variant, seats); });
+        RecordLocked([&id = ref->room_id, variant = GameKindName(ref->entry->kind),
+                      seats = ref->entry->roster.size()](absl::Time now) {
+          return GameStartedLine(now, id, variant, seats);
+        });
         for (const std::string& recipient : ref->entry->roster) {
           outbox.To(recipient, StartedEvent(ref->entry->kind));
         }
@@ -2136,7 +2140,7 @@ void GolfHub::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writ
     // The room's last line (#1571), from the instance that emptied it and
     // not from the ones that later read the row gone — RefreshRoomLocked
     // drops a remotely deleted room the same way, and a room closes once.
-    RecordLocked(RoomClosedLine);
+    RecordLocked([&room_id](absl::Time now) { return RoomClosedLine(now, room_id); });
     // One DeleteRoom; the row's cascade takes members and games with it.
     // The wake rider tells any instance that still holds the room (a
     // race, not the norm — an emptied room has no members anywhere).

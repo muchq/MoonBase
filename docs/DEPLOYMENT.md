@@ -41,8 +41,9 @@ session opens one socket and every room, world, table, game and message
 rides it, so the access log counts a connection and never a game.
 `/var/log/games_hub/game_events.log` gets a line for each room made, each
 join, each reshape of a world, each thing said, each table dealt, each
-game that ended and each room that emptied, and rides the shipper under
-its own partition (#1571).
+game that ended and each room that emptied — every line tagged with the
+room it happened in, so an evening reads back as a session — and rides the
+shipper under its own partition (#1571).
 
 `deploy_config_test` checks the service-to-service HTTP calls compose
 declares, both ways: that each names something the network resolves, and

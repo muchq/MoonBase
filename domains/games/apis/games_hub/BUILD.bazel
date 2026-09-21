@@ -102,6 +102,8 @@ cc_test(
     deps = [
         ":game_events",
         ":hosted_game",
+        ":id_generator",
+        ":world",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards/castle:game_state",
         "//domains/games/libs/cards/castle:player",

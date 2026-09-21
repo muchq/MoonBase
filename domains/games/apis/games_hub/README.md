@@ -119,7 +119,17 @@ Together they are the shape of an evening — somebody made a room,
 somebody else walked in, they reshaped the world they were standing in,
 they talked, a table started, the table ended, the last of them left.
 
-No message text, no sphere radius, no player, room or game id. A refused
+Every line carries the room it happened in, which is what makes this a
+session rather than seven counters: one room's evening reads back in
+order, and what no single line can say — how long a room lasted, how long
+a game took, how many tables it got through — is a join away. It is the
+one high-cardinality field, for stitching lines together and not for
+grouping, and the one that has to be made safe rather than assumed to be:
+`RoomTag` reduces anything outside `[A-Za-z0-9_-]`, and every id the hub
+mints passes through it unchanged. A room id is also a share link — it
+reaches S3 an hour or more later, by which time an emptied room is gone.
+
+No message text, no sphere radius, no player id, no game code. A refused
 chat, join or geometry is no event: the counters carry the rejections,
 the archive carries what happened. `surface` is `SurfaceKindName`'s
 word, the same one the wire and the stored row use. Counters answer "how is the hub
