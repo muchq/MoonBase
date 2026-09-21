@@ -528,19 +528,23 @@ func TestServicesHonoursTheLimitBusiestFirst(t *testing.T) {
 		}
 	}
 
-	// The limit cuts the list and leaves the count of what there was.
+	// The limit cuts the list and leaves the count of what there was. It
+	// cuts by service rather than by row, so a limit of one still answers
+	// with the busiest service whole — what it must not do is answer with
+	// part of one, which TestServicesTruncatesWholeServicesAgainstTheDatabase
+	// is what pins.
 	cut, total, err := store.Services(ctx, 2, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cut) != 1 {
-		t.Errorf("limit 1 returned %d rows", len(cut))
+	if len(cut) == 0 {
+		t.Fatal("limit 1 returned nothing; the busiest service is answered whole or not at all")
 	}
 	if total != len(full) {
 		t.Errorf("truncated total = %d, want the %d there were", total, len(full))
 	}
-	if len(cut) == 1 && cut[0] != full[0] {
-		t.Errorf("limit 1 returned %+v, want the busiest row %+v", cut[0], full[0])
+	if cut[0] != full[0] {
+		t.Errorf("limit 1 led with %+v, want the busiest row %+v", cut[0], full[0])
 	}
 }
 
@@ -599,6 +603,143 @@ func TestServicesKeepsTheDaysApartAndBreaksTiesTheSameWayTwice(t *testing.T) {
 		if mine[i] != want[i] {
 			t.Errorf("row %d = %+v, want %+v", i, mine[i], want[i])
 		}
+	}
+}
+
+// Truncation takes whole services, so what a reader sums is exact for
+// every service present.
+//
+// A row is one day of one caller of one class, and a service spans many.
+// Cutting the row list instead would leave a service its busy days and
+// take its quiet ones, and nothing in the response would say that the
+// total under its name is short — which is the shape this replaced.
+func TestTruncationTakesWholeServices(t *testing.T) {
+	// Busiest first, as Services has already sorted them: big spans three
+	// rows, middle two, small one.
+	row := func(service string, requests int64) ServiceRow {
+		return ServiceRow{
+			Date: "2026-08-30", Host: "api.muchq.com", Service: service,
+			Source: SourceAPI, AgentClass: AgentBrowser, Requests: requests,
+		}
+	}
+	// noisy has the most rows and the least traffic, so a selection that
+	// ranked by row count rather than requests would take it first.
+	rows := []ServiceRow{
+		row("big", 50), row("big", 30), row("big", 10),
+		row("middle", 40), row("middle", 5),
+		row("noisy", 3), row("noisy", 3), row("noisy", 2), row("noisy", 1),
+		row("small", 20),
+	}
+
+	// Four leaves room for big (3) and not middle (2), and stops there
+	// rather than reaching past middle for small.
+	kept := wholeServicesWithin(rows, 4)
+	if len(kept) != 3 {
+		t.Fatalf("kept %d rows, want big's three: %+v", len(kept), kept)
+	}
+	for _, at := range kept {
+		if at.Service != "big" {
+			t.Errorf("kept %s, want only big", at.Service)
+		}
+	}
+
+	// Five holds big and middle whole, and noisy's four rows do not buy
+	// it a place ahead of them.
+	kept = wholeServicesWithin(rows, 5)
+	if len(kept) != 5 {
+		t.Errorf("limit 5 kept %d rows, want big and middle whole", len(kept))
+	}
+	for _, at := range kept {
+		if at.Service == "noisy" {
+			t.Errorf("kept noisy, which has the most rows and the least traffic")
+		}
+	}
+
+	// A service larger than the whole limit is still answered, because a
+	// read that returns nothing is worse than one that returns too much.
+	if kept := wholeServicesWithin(rows, 1); len(kept) != 3 {
+		t.Errorf("limit 1 kept %d rows, want the busiest service whole", len(kept))
+	}
+
+	// And every row of a kept service survives in its original order.
+	var order []int64
+	for _, at := range kept {
+		order = append(order, at.Requests)
+	}
+	want := []int64{50, 30, 10, 40, 5}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Errorf("kept order = %v, want %v", order, want)
+			break
+		}
+	}
+}
+
+// Services itself truncates by service, not just the helper it calls.
+//
+// Read twice, once past the ceiling and once under it, and compare: every
+// service the short read returns must carry all the rows the long read
+// gave it. A row-grain slice passes the helper's own test and fails this
+// one, which is the regression worth pinning — the page sums these.
+func TestServicesTruncatesWholeServicesAgainstTheDatabase(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	date, host, key := uniqueFixture(t)
+
+	// Three services, so there is something to drop whatever else the
+	// window holds: one_d4 over several rows, forgejo, and this run's own
+	// host, which no site serves and so reaches no backend.
+	rollup := NewRollup()
+	at := func(host, route, source string, requests int64) {
+		rollup.Requests[RequestKey{
+			Date: date, Host: host, Route: route, Source: source,
+			Status: 200, Method: "GET", AgentClass: AgentBrowser, Agent: "",
+		}] = requests
+	}
+	at("api.muchq.com", "/1d4/v1/query", SourceUI, 90)
+	at("api.muchq.com", "/1d4/v1/query", SourceAPI, 40)
+	at("api.muchq.com", "/1d4/v1/index", SourceAPI, 20)
+	at("git.muchq.com", OtherRoute, SourceAPI, 50)
+	at(host, OtherRoute, SourceAPI, 5)
+	if err := store.ApplyRollup(ctx, key, rollup); err != nil {
+		t.Fatal(err)
+	}
+
+	full, _, err := store.Services(ctx, 2, 100000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rowsPerService := map[string]int{}
+	for _, row := range full {
+		rowsPerService[row.Service]++
+	}
+	if len(rowsPerService) < 2 {
+		t.Fatalf("only %d services in the window; this cannot show a cut", len(rowsPerService))
+	}
+
+	// A ceiling that has to drop something, whatever else is in the window.
+	cut, total, err := store.Services(ctx, 2, len(full)-1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != len(full) {
+		t.Errorf("total = %d, want the %d rows there were", total, len(full))
+	}
+	if len(cut) >= len(full) {
+		t.Fatalf("a limit below the row count returned %d of %d rows", len(cut), len(full))
+	}
+	cutPerService := map[string]int{}
+	for _, row := range cut {
+		cutPerService[row.Service]++
+	}
+	for service, count := range cutPerService {
+		if count != rowsPerService[service] {
+			t.Errorf("%s came back with %d of its %d rows; a service is returned whole or "+
+				"not at all, or its total is silently short", service, count, rowsPerService[service])
+		}
+	}
+	if len(cutPerService) == 0 {
+		t.Error("the truncated read returned no service at all")
 	}
 }
 

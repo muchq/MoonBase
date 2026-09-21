@@ -4,7 +4,11 @@ Every container in the production flow, every public name that reaches one, and
 how data moves between them. `forgejo` and its `git.muchq.com` vhost run on the
 same host but sit outside that flow, so they are not drawn.
 
-Hand-maintained; nothing checks it against `deploy/consolidated/compose.yaml`.
+Hand-maintained. Nothing checks most of it against
+`deploy/consolidated/compose.yaml`; the exception is the service-to-service
+HTTP calls compose declares, which `deploy_config_test` pins. The `sql`
+edges and prometheus's own scrape targets are not pinned — those live in
+`o11y/prometheus.yml`, which this test does not read.
 
 Node ids are compose service names wherever a container exists. `ui_*` are
 muchq.com routes; the public names and `S3` are not containers either.
@@ -13,8 +17,28 @@ Arrow direction follows the label: `http` and `sql` point the way the call
 goes, `logs`, `metrics` and `events` the way the data moves. `games_hub`
 calls `deja` (`DEJA_URL`), and what comes back is deja's prediction.
 
-Every request reaches a service through caddy. An edge that looks like it
-skips caddy is a mistake in the diagram.
+Every request *from outside* reaches a service through caddy. Plenty of
+traffic inside does not, because it is made between containers on
+`app_network`. Four of those are application calls: mcpserver to one_d4
+(`ONE_D4_BASE_URL`) and to one_d4_v2 (`ONE_D4_V2_BASE_URL`), games_hub to
+deja (`DEJA_URL`), and prom_proxy to prometheus (`PROMETHEUS_URL`). Every
+service's OTLP export to otelcol is another, and prometheus scrapes otelcol
+and cadvisor on top. The diagram draws all of them.
+
+That matters beyond the picture, but narrowly: a call that skips caddy is in
+no *access log*, so it reaches no rollup computed from one — `/stats/v1`'s
+summary, services, agents and countries — and no deja event. It does not
+follow that the work is unrecorded. one_d4 writes its own query events, the
+shipper carries them under their own partition, and `/stats/v1/one_d4/queries`
+reports them with mcpserver's calls tagged `source=mcp`. So the MCP number on
+the services rollup is arrivals at `mcp.1d4.net`, and the MCP number on the
+query rollup is the work one_d4 did; `source.go` puts it as edge source
+counts arrivals, service-local source counts work.
+
+`deploy_config_test` checks the service-to-service HTTP calls compose
+declares, both ways: that each names something the network resolves, and
+that the diagram draws the edge — pointing caller to callee where the label
+says `http`.
 
 Dashed borders mark the `stats` compose profile: `stats` and `log_shipper` need
 S3 credentials, so `docker compose up -d` leaves them out.

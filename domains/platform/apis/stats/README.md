@@ -118,10 +118,11 @@ unbounded — which is one query over the raw partitions in S3, keeping
   rewrites how the past reads, since every old row is named by today's
   table. A path no matcher claimed reached no backend and is `other`,
   except on a site whose handle carries no path matcher at all, where
-  every path reaches the one service behind it. Rows are folded from
-  route to service before the limit applies, so a truncated read drops
-  whole quiet services rather than slicing a busy one's routes off its
-  own total
+  every path reaches the one service behind it. A truncated read returns
+  the busiest services complete and drops the rest whole, so every total
+  it does report is exact — a row is one day of one caller of one class,
+  and cutting the row list instead would leave a service its busy days
+  and take its quiet ones
 - `GET /stats/v1/iili/top?days=30&limit=20` — most-followed short links
 - `GET /stats/v1/agents?days=30&limit=500` — per day/host/class/agent
   request and 403 counts, busiest rows first: which scrapers and bots hit

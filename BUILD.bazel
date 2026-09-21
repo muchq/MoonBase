@@ -61,6 +61,7 @@ exports_files([
     ".bazelrc",
     ".github/workflows/branch.yml",
     ".github/workflows/publish.yml",
+    "docs/DEPLOYMENT.md",
     "scripts/diff-build",
     "scripts/diff-build-lib.sh",
     "scripts/validate-otel-config",
