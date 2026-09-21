@@ -2133,6 +2133,10 @@ void GolfHub::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writ
     // keeps its last hundred messages for the life of the process.
     chat_store_->DropRoom(room_id);
     chat_cursors_.erase(room_id);
+    // The room's last line (#1571), from the instance that emptied it and
+    // not from the ones that later read the row gone — RefreshRoomLocked
+    // drops a remotely deleted room the same way, and a room closes once.
+    RecordLocked(RoomClosedLine);
     // One DeleteRoom; the row's cascade takes members and games with it.
     // The wake rider tells any instance that still holds the room (a
     // race, not the norm — an emptied room has no members anywhere).

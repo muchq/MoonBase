@@ -15,12 +15,12 @@ namespace games_hub {
 /// stats pipeline. Not metrics — Prometheus keeps the aggregate and drops
 /// the rows, and the rows are the point.
 ///
-/// Six events, which together are the shape of an evening: somebody made
-/// a room, somebody else walked into it, they reshaped the world they
-/// were standing in, they talked, a table started, the table ended. The
-/// access log sees none of it — a session opens one socket and every
-/// room, world, table, game and message rides that one connection — so
-/// this is the only place it is recorded.
+/// Seven events, which together are the shape of an evening: somebody
+/// made a room, somebody else walked into it, they reshaped the world
+/// they were standing in, they talked, a table started, the table ended,
+/// and the last of them left. The access log sees none of it — a session
+/// opens one socket and every room, world, table, game and message rides
+/// that one connection — so this is the only place it is recorded.
 ///
 /// Every value is a closed vocabulary or a count, for the same reason
 /// one_d4's query events are (QueryEvent.java): the reader keys rollup
@@ -30,6 +30,7 @@ namespace games_hub {
 /// The event names, the field every reader filters on first.
 inline constexpr std::string_view kRoomCreated = "room_created";
 inline constexpr std::string_view kRoomJoined = "room_joined";
+inline constexpr std::string_view kRoomClosed = "room_closed";
 inline constexpr std::string_view kChatMessage = "chat_message";
 inline constexpr std::string_view kGeometryChanged = "geometry_changed";
 inline constexpr std::string_view kGameStarted = "game_started";
@@ -71,6 +72,11 @@ std::string GeometryChangedLine(absl::Time when, std::string_view surface);
 /// Creating a room is `room_created`, not a join, and a refused join is
 /// no event at all.
 std::string RoomJoinedLine(absl::Time when, std::size_t players);
+/// The last member left, so the room is gone — with its games, its chat
+/// and its world. Nothing to count: a room closes empty by definition,
+/// and what it held is the lines before this one. Paired with
+/// `room_created`, the difference over a day is the rooms still open.
+std::string RoomClosedLine(absl::Time when);
 /// Somebody said something, and it was stored — a refused message is no
 /// event. `players` is the room's size at the time, which is the whole
 /// difference between two people talking and a room of four. The text

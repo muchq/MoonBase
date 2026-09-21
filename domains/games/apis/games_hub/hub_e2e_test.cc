@@ -2244,6 +2244,15 @@ TEST_F(GameEventFixture, TheFunnelIsRecordedFromTheRoomToTheGameThatEndedIt) {
   // Bob left; alice is the seat still held, and one seat cannot go on.
   EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("outcome":"abandoned")"));
   EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("players":1)"));
+
+  // Bob is still in the room, so his going is a membership change and
+  // not the end of it. Alice leaving after him empties the room.
+  table->bob.stream.Close();
+  table->alice.stream.Close();
+  golf_->registry().Drain(std::chrono::seconds(1));
+
+  EXPECT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "game_started",
+                                              "game_finished", "room_closed"));
 }
 
 // The same funnel at a bigger table, so every count in it is a
@@ -2351,6 +2360,33 @@ TEST_F(GameEventFixture, AStoredMessageIsOneLineAndARefusedOneIsNone) {
   ASSERT_TRUE(ReceiveCase(room->seats[0].stream, "commandRejected").has_value());
 
   EXPECT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "chat_message"));
+}
+
+// A room is closed by whoever empties it. Every other instance holding
+// it drops it on the next read of the vanished row, which is the same
+// teardown and must not be a second line.
+TEST_F(GameEventFixture, TheInstanceCatchingUpToAClosedRoomWritesNothing) {
+  std::vector<std::string> sibling_events;  // outlives the hub, as below
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  store_->Flush();
+
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  instance->golf->SetEventWriter(
+      [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
+
+  alice->stream.Close();
+  golf_->registry().Drain(std::chrono::seconds(1));
+  store_->Flush();
+  ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_closed"));
+
+  instance->golf->OnChannelActive(RoomChannel(room_id));
+
+  EXPECT_THAT(sibling_events, ::testing::IsEmpty()) << "the room would be counted closed twice";
 }
 
 TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNothing) {

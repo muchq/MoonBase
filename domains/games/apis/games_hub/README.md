@@ -109,15 +109,15 @@ mints sessions itself and forwards the stream to the hub.
 
 ## Game events
 
-Six events, one JSON line each, written to `GAME_EVENT_LOG_DIR` for the
+Seven events, one JSON line each, written to `GAME_EVENT_LOG_DIR` for the
 stats pipeline to read back out of S3 (#1571): `room_created` (the
 surface it chose), `room_joined` (the room's size once the joiner was in
 it), `geometry_changed` (the surface it became), `chat_message` (the
-room's size when it was said), `game_started` (variant, seats dealt) and
-`game_finished` (variant, outcome, seats still held). Together they are
-the shape of an evening — somebody made a room, somebody else walked in,
-they reshaped the world they were standing in, they talked, a table
-started, the table ended.
+room's size when it was said), `game_started` (variant, seats dealt),
+`game_finished` (variant, outcome, seats still held) and `room_closed`.
+Together they are the shape of an evening — somebody made a room,
+somebody else walked in, they reshaped the world they were standing in,
+they talked, a table started, the table ended, the last of them left.
 
 No message text, no sphere radius, no player, room or game id. A refused
 chat, join or geometry is no event: the counters carry the rejections,
@@ -137,12 +137,18 @@ still whole. `game_finished`'s `players` is the seats *still held*, which
 for an abandonment is the moment the second-to-last one left — so it
 reads 1 for nearly every abandoned game, and is not the table's size.
 
+`room_closed` carries nothing: a room closes empty by definition, and
+what it held is the lines before it. Against `room_created`, the
+difference over a day is the rooms still open.
+
 The finished line comes from `CommitEntryLocked`, the one place that
 knows both that the finish landed and that this instance is what ended
 the game. Not from `StageGameOverLocked`, which every instance holding
 the room runs off the terminal row; and not after a commit that came back
 unavailable, which leaves a live row somebody finishes again. Either
-would count one game twice.
+would count one game twice. `room_closed` is the same rule one level up:
+the instance that empties a room writes it, and the ones that later read
+the row gone drop the room in silence.
 
 ## The rules
 

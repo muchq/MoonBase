@@ -136,6 +136,7 @@ TEST(GameEvents, EveryEventsLineIsTextWithNothingToEscape) {
       {GeometryChangedLine(when, "sphere"), 10},
       {GeometryChangedLine(when, "glasshouse"), 10},
       {RoomJoinedLine(when, 2), 8},
+      {RoomClosedLine(when), 6},
       {ChatMessageLine(when, 3), 8},
       {GameStartedLine(when, "golf", 2), 12},
       {GameStartedLine(when, "castle", 4), 12},
