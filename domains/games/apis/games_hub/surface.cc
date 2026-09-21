@@ -58,12 +58,11 @@ std::vector<double> Surface::Place(const std::vector<double>& position) const {
 
 std::string SurfaceJson(const Surface& surface) {
   json out;
+  const std::string kind(SurfaceKindName(surface));
   if (surface.kind == Surface::Kind::kSphere) {
-    out["sphere"] = {{"radius", surface.radius}};
-  } else if (surface.kind == Surface::Kind::kGlasshouse) {
-    out["glasshouse"] = json::object();
+    out[kind] = {{"radius", surface.radius}};
   } else {
-    out["plane"] = json::object();
+    out[kind] = json::object();
   }
   return out.dump();
 }

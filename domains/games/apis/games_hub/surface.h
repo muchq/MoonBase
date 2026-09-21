@@ -68,6 +68,21 @@ struct Surface {
   bool operator==(const Surface&) const = default;
 };
 
+/// A surface's kind as one word — the spelling the wire, the stored row
+/// and the hub's events all use. One function, so the three cannot
+/// diverge into two vocabularies for one shape.
+inline std::string_view SurfaceKindName(const Surface& surface) {
+  switch (surface.kind) {
+    case Surface::Kind::kSphere:
+      return "sphere";
+    case Surface::Kind::kGlasshouse:
+      return "glasshouse";
+    case Surface::Kind::kPlane:
+      break;
+  }
+  return "plane";
+}
+
 /// The stored form, in the wire's spelling: {"plane":{}},
 /// {"sphere":{"radius":R}} or {"glasshouse":{}}.
 std::string SurfaceJson(const Surface& surface);

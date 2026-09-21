@@ -18,6 +18,8 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "absl/time/clock.h"
+#include "domains/games/apis/games_hub/game_events.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
 #include "domains/games/apis/games_hub/splat.h"
@@ -679,6 +681,11 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
                                            const std::optional<HostedState>& state,
                                            const std::vector<HubStore::StatsDelta>* finish) {
   const int64_t version = entry.version + 1;
+  // Whether the table was already over before this transition — a commit
+  // loop that rebased onto another instance's finish holds its ended
+  // state, and the retry then commits over the terminal row. That game
+  // was played once, and was recorded by whoever ended it.
+  const bool was_over = entry.started() && IsOver(*entry.state);
   // Stamped before the outcome is known: a commit whose fate is unknown
   // may still have landed.
   TouchRoomLocked(room_id);
@@ -718,7 +725,23 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
   entry.roster = roster;
   if (state.has_value()) entry.state.emplace(*state);
   entry.version = version;
+  // The game-finished event (#1571), here and nowhere downstream: this
+  // is the one place that knows the finish landed and that this instance
+  // is what ended it. StageGameOverLocked runs the same ceremony on
+  // every instance holding the room, off the durable terminal row, and
+  // an unavailable store leaves a live row somebody finishes again —
+  // either would count the game twice.
+  if (finish != nullptr && !was_over) {
+    RecordLocked([&](absl::Time now) {
+      return GameFinishedLine(now, room_id, FinishedOf(*state, roster.size()));
+    });
+  }
   return Commit::kCommitted;
+}
+
+void GolfHub::SetEventWriter(EventWriter writer) {
+  const std::lock_guard<std::mutex> lock(mu_);
+  event_writer_ = std::move(writer);
 }
 
 void GolfHub::AttachListener(pg::Listener* listener) {
@@ -1158,6 +1181,9 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
         StageMemberLocked(room_id, player_id, member->second, writes);
         StageRoomStateLocked(room_id, outbox);
         EnqueueWritesLocked(writes);
+        RecordLocked([&room_id, surface = SurfaceKindName(surface)](absl::Time now) {
+          return RoomCreatedLine(now, room_id, surface);
+        });
       }
     }
     if (room_id.empty()) {
@@ -1198,6 +1224,9 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
           StageRoomStateLocked(join->roomId, outbox);
           EnqueueWritesLocked(writes);
           joined = true;
+          RecordLocked([&id = join->roomId, members = room->second.members.size()](absl::Time now) {
+            return RoomJoinedLine(now, id, members);
+          });
         }
       }
     }
@@ -1294,6 +1323,17 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
       return;
     }
     Count("chat_appends", {{"result", "stored"}});
+    {
+      // That a room was talking, and how many were in it (#1571). The
+      // text never leaves the process. This path dropped mu_ before the
+      // append — the store re-takes it — so it is taken back here, for
+      // the room's size and for the writer it guards.
+      const std::lock_guard<std::mutex> lock(mu_);
+      const auto room = rooms_.find(room_id);
+      const std::size_t members = room == rooms_.end() ? 0 : room->second.members.size();
+      RecordLocked(
+          [&room_id, members](absl::Time now) { return ChatMessageLine(now, room_id, members); });
+    }
 
     // The committed row reaches locals through the pump, like every
     // other row. That is not indirection for its own sake: a remote
@@ -1356,6 +1396,9 @@ void GolfHub::HandleLobby(const std::string& player_id,
         // no row, so its shape is this instance's until it restarts.
         const std::string world = WorldOfLocked(player_id);
         world_.Reshape(world, *surface, deliveries);
+        RecordLocked([&world, kind = SurfaceKindName(*surface)](absl::Time now) {
+          return GeometryChangedLine(now, world, kind);
+        });
         if (rooms_.contains(world)) {
           Writes writes;
           StageLocked(writes, HubStore::SetRoomSurface{world, *surface});
@@ -1809,6 +1852,10 @@ void GolfHub::StartGameMove(const std::string& player_id) {
           break;
         }
         started = true;
+        RecordLocked([&id = ref->room_id, variant = GameKindName(ref->entry->kind),
+                      seats = ref->entry->roster.size()](absl::Time now) {
+          return GameStartedLine(now, id, variant, seats);
+        });
         for (const std::string& recipient : ref->entry->roster) {
           outbox.To(recipient, StartedEvent(ref->entry->kind));
         }
@@ -2090,6 +2137,10 @@ void GolfHub::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writ
     // keeps its last hundred messages for the life of the process.
     chat_store_->DropRoom(room_id);
     chat_cursors_.erase(room_id);
+    // The room's last line (#1571), from the instance that emptied it and
+    // not from the ones that later read the row gone — RefreshRoomLocked
+    // drops a remotely deleted room the same way, and a room closes once.
+    RecordLocked([&room_id](absl::Time now) { return RoomClosedLine(now, room_id); });
     // One DeleteRoom; the row's cascade takes members and games with it.
     // The wake rider tells any instance that still holds the room (a
     // race, not the norm — an emptied room has no members anywhere).

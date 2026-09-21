@@ -1,11 +1,19 @@
 # log_shipper
 
-Moves rolled logs to S3 on an interval — Caddy's access logs (#1457) and
+Moves rolled logs to S3 on an interval — Caddy's access logs (#1457),
 one_d4's query events (#1465), which logback rolls as
-`query_events-<date>T<hour>.log.gz`, the same name shape — the first stage
-of the stats pipeline (#1365). No streaming infra on purpose: at this
-volume a cron-shaped upload is the whole job, and Kinesis carries a fixed
-hourly fee that batch stats have no use for.
+`query_events-<date>T<hour>.log.gz`, and games_hub's finished games
+(#1571), which `//domains/platform/libs/event_log` rolls under the same
+name shape — the first stage of the stats pipeline (#1365). No streaming
+infra on purpose: at this volume a cron-shaped upload is the whole job,
+and Kinesis carries a fixed hourly fee that batch stats have no use for.
+
+A new source is a `LOG_DIRS` entry, a writable bind mount of that directory
+on both sides, and a writer that obeys one rule: the file being appended to
+carries no timestamp, a rolled one does. That asymmetry is the whole safety
+property here, because this program deletes what it uploads. `deploy_config_test`
+pins the mount against `LOG_DIRS`; nothing pins the rule but each writer's own
+tests — `//domains/platform/libs/otel_contract` does it for `event_log`.
 
 ## What it does
 
@@ -45,7 +53,7 @@ and anything that is not a rolled log are never touched.
 | `S3_BUCKET` | Destination bucket (required) |
 | `S3_REGION` | Bucket's region (required) |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | The stats IAM user: `s3:PutObject` for this shipper, plus `s3:GetObject`/`s3:ListBucket` for the aggregator, all scoped to the bucket's `logs/*` prefix (required) |
-| `LOG_DIRS` | `label=dir` pairs, comma-separated: each directory ships under `logs/source=<label>/` (`caddy=/var/log/caddy,one_d4=/var/log/one_d4` in compose) |
+| `LOG_DIRS` | `label=dir` pairs, comma-separated: each directory ships under `logs/source=<label>/` (`caddy=/var/log/caddy,one_d4=/var/log/one_d4,games_hub=/var/log/games_hub` in compose) |
 | `SHIP_INTERVAL` | Go duration between passes, default `1h` |
 
 ## Deploying

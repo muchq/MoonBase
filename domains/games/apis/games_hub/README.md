@@ -107,6 +107,68 @@ seat parks for grace. Lobby traffic counts on `lobby_commands` and
 the registry. `GamesHubHandler` implements the generated service: it
 mints sessions itself and forwards the stream to the hub.
 
+## Game events
+
+Seven events, one JSON line each, written to `GAME_EVENT_LOG_DIR` for the
+stats pipeline to read back out of S3 (#1571): `room_created` (the
+surface it chose), `room_joined` (the room's size once the joiner was in
+it), `geometry_changed` (the surface it became), `chat_message` (the
+room's size when it was said), `game_started` (variant, seats dealt),
+`game_finished` (variant, outcome, seats still held) and `room_closed`.
+Together they are the shape of an evening — somebody made a room,
+somebody else walked in, they reshaped the world they were standing in,
+they talked, a table started, the table ended, the last of them left.
+
+Every line carries the room it happened in, which is what makes this a
+session rather than seven counters: one room's evening reads back in
+order, and what no single line can say — how long a room lasted, how long
+a game took, how many tables it got through — is a join away. It is the
+one high-cardinality field, for stitching lines together and not for
+grouping, and the one that has to be made safe rather than assumed to be:
+`RoomTag` reduces anything outside `[A-Za-z0-9_-]`, and every id the hub
+mints passes through it unchanged. A room id is also a share link — it
+reaches S3 an hour or more later, by which time an emptied room is gone.
+
+No message text, no sphere radius, no player id, no game code. A refused
+chat, join or geometry is no event: the counters carry the rejections,
+the archive carries what happened. `surface` is `SurfaceKindName`'s
+word, the same one the wire and the stored row use. Counters answer "how is the hub
+doing right now"; these answer "what was played last March", which
+Prometheus drops. `game_events.h` is the vocabulary and
+`//domains/platform/libs/event_log` the writer; unset, the hub records
+nothing.
+
+Nothing here is visible at the edge. A session opens one socket and every
+room, world, table, game and message rides that one connection, so the
+access log counts a connection and never a game.
+
+`game_started` is the only place a table's size is recorded while it is
+still whole. `game_finished`'s `players` is the seats *still held*, which
+for an abandonment is the moment the second-to-last one left — so it
+reads 1 for nearly every abandoned game, and is not the table's size.
+
+`room_closed` carries nothing: a room closes empty by definition, and
+what it held is the lines before it. Against `room_created`, the
+difference over a day is the rooms still open.
+
+The finished line comes from `CommitEntryLocked`, the one place that
+knows both that the finish landed and that this instance is what ended
+the game. Not from `StageGameOverLocked`, which every instance holding
+the room runs off the terminal row; and not after a commit that came back
+unavailable, which leaves a live row somebody finishes again. Either
+would count one game twice. `room_closed` is the same rule one level up:
+the instance that empties a room writes it, and the ones that later read
+the row gone drop the room in silence.
+
+It is not the same guarantee, though. A finish is recorded only once its
+commit has landed; a close is recorded before the `DeleteRoom` it stages
+has flushed. A crash in that window restores the room, and its next
+emptying writes a second `room_closed` under the same id. Making it
+durable would mean a synchronous delete on the room teardown path, which
+is a lot to ask of the hub for an archive line — so a reader counting
+rooms should treat a repeated close as the one thing here that can
+repeat.
+
 ## The rules
 
 Four-card golf for 2–4 players: each player peeks at two own cards, a

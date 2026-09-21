@@ -3,6 +3,7 @@
 // over the in-memory pair. Wire-level details (JSON-text framing, real
 // sockets) are upstream-tested; these pin the hub's behavior.
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -18,6 +19,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_set>
 #include <utility>
@@ -25,6 +27,7 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/time/time.h"
 #include "domains/games/apis/games_hub/chat_store.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 
@@ -36,6 +39,7 @@ using moonbase::games::GameEvents;
 
 using moonbase::games::GolfMove;
 using moonbase::games::GolfUpdate;
+using moonbase::games::LobbyAction;
 
 std::string WithNul(std::string prefix, std::string suffix) {
   prefix.push_back('\0');
@@ -2180,6 +2184,298 @@ TEST_F(GolfGameFixture, AbandoningALiveGameResolvesIt) {
 // absent player within seconds. A close parks the seat instead: the
 // table sees the disconnect, nothing ends, and the resume token reclaims
 // the seat with the game intact.
+// The hub's domain events (#1571): the funnel a room goes through, and
+// the once-ness of the game that ends it. A game is played once, so its
+// line comes from the commit that ended it — never from the ceremony,
+// which every instance holding the room runs off the durable terminal
+// row, and never from a finish that did not land.
+class GameEventFixture : public GolfGameFixture {
+ protected:
+  void SetUp() override {
+    GolfGameFixture::SetUp();
+    golf_->SetEventWriter(
+        [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
+  }
+
+  // The writer goes before anything else does. A hub tears down by
+  // joining its boot reaper, which reaps parked seats — a leave, which
+  // can end a game, which records one; and `events_` is a member of this
+  // class, so it is already gone by the time the base's `golf_` is.
+  void TearDown() override {
+    if (golf_ != nullptr) golf_->SetEventWriter(nullptr);
+    GolfGameFixture::TearDown();
+  }
+
+  // The event names in order, with their fields, for an assertion that
+  // reads like the evening it describes.
+  std::vector<std::string> Names() const {
+    std::vector<std::string> names;
+    for (const std::string& line : events_) {
+      const std::size_t at = line.find(R"("event":")");
+      names.push_back(
+          at == std::string::npos ? line : line.substr(at + 9, line.find('"', at + 9) - at - 9));
+    }
+    return names;
+  }
+
+  // The room each line names, so a funnel can assert it is one room's.
+  std::vector<std::string> Rooms() const {
+    std::vector<std::string> rooms;
+    for (const std::string& line : events_) {
+      const std::size_t at = line.find(R"("room":")");
+      rooms.push_back(
+          at == std::string::npos ? line : line.substr(at + 8, line.find('"', at + 8) - at - 8));
+    }
+    return rooms;
+  }
+
+  std::vector<std::string> events_;
+};
+
+TEST_F(GameEventFixture, TheFunnelIsRecordedFromTheRoomToTheGameThatEndedIt) {
+  auto table = SeatedTable();
+  ASSERT_TRUE(table.has_value());
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
+
+  EXPECT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "game_started"));
+  // Creating a room is not a join, so the first join is the second
+  // person — and the table is recorded whole, before anyone can leave it.
+  EXPECT_THAT(events_[1], ::testing::HasSubstr(R"("players":2)"));
+  EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("variant":"golf")"));
+  EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("players":2)"));
+
+  ASSERT_TRUE(
+      table->bob.stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameEnded").has_value());
+
+  ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "game_started",
+                                              "game_finished"));
+  EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("variant":"golf")"));
+  // Bob left; alice is the seat still held, and one seat cannot go on.
+  EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("outcome":"abandoned")"));
+  EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("players":1)"));
+
+  // Bob is still in the room, so his going is a membership change and
+  // not the end of it. Alice leaving after him empties the room.
+  table->bob.stream.Close();
+  table->alice.stream.Close();
+  golf_->registry().Drain(std::chrono::seconds(1));
+
+  EXPECT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "game_started",
+                                              "game_finished", "room_closed"));
+  // One room's evening, and the id is what says so: five lines a reader
+  // can join into a session rather than five counters.
+  EXPECT_THAT(Rooms(), ::testing::Each(table->room_id));
+}
+
+// The same funnel at a bigger table, so every count in it is a
+// different number: two joins, three seats dealt, and castle rather
+// than golf.
+TEST_F(GameEventFixture, ABiggerTableIsRecordedAtTheSizeItWasDealt) {
+  auto table = MultiSeatCastleTable(3);
+  ASSERT_TRUE(table.has_value());
+
+  ASSERT_THAT(Names(),
+              ::testing::ElementsAre("room_created", "room_joined", "room_joined", "game_started"));
+  EXPECT_THAT(events_[1], ::testing::HasSubstr(R"("players":2)"));
+  EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("players":3)"));
+  EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("variant":"castle")"));
+  EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("players":3)"));
+}
+
+TEST_F(GameEventFixture, ARefusedJoinIsNoEvent) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+
+  moonbase::games::JoinRoom join;
+  join.roomId = "NOSUCHROOM";
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "commandRejected").has_value());
+
+  EXPECT_THAT(events_, ::testing::IsEmpty());
+}
+
+// A message that was stored is one line, and nothing of what was said
+// is in it. A message the store refused is no line at all — the counter
+// still has the rejection; the archive is for things that happened.
+// A room records the surface it chose, and every reshape after it
+// (#1554), in the one spelling the wire and the stored row also use.
+// The radius is not in the line: the question is which shapes people
+// reach for, and a number per room is not a word to group by.
+TEST_F(GameEventFixture, AWorldRecordsTheShapeItChoseAndEveryReshapeAfterIt) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_FALSE(CreateRoomFor(*alice).empty());
+
+  ASSERT_THAT(Names(), ::testing::ElementsAre("room_created"));
+  EXPECT_THAT(events_[0], ::testing::HasSubstr(R"("surface":"plane")"));
+  const std::string room_id = Rooms()[0];
+  EXPECT_FALSE(room_id.empty());
+
+  moonbase::games::JoinWorld join;
+  join.position = {0.0, 0.0, 0.0};
+  join.color = {0.5, 0.5, 0.5};
+  join.shape = 0;
+  ASSERT_TRUE(alice->stream.Send(Lobby(LobbyAction::FromJoin(join))).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "worldState").has_value());
+
+  moonbase::games::SphereGeometry sphere;
+  sphere.radius = 10.0;
+  moonbase::games::SetGeometry to_sphere;
+  to_sphere.geometry = moonbase::games::Geometry::FromSphere(sphere);
+  ASSERT_TRUE(alice->stream.Send(Lobby(LobbyAction::FromSetgeometry(to_sphere))).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "geometryChanged").has_value());
+
+  moonbase::games::SetGeometry to_glass;
+  to_glass.geometry =
+      moonbase::games::Geometry::FromGlasshouse(moonbase::games::GlasshouseGeometry{});
+  ASSERT_TRUE(alice->stream.Send(Lobby(LobbyAction::FromSetgeometry(to_glass))).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "geometryChanged").has_value());
+
+  ASSERT_THAT(Names(),
+              ::testing::ElementsAre("room_created", "geometry_changed", "geometry_changed"));
+  EXPECT_THAT(events_[1], ::testing::HasSubstr(R"("surface":"sphere")"));
+  EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("surface":"glasshouse")"));
+  // Named, not by its digits: a radius of 10 is a substring of half the
+  // timestamps this could run at. game_events_test pins the whole line.
+  EXPECT_THAT(events_[1], ::testing::Not(::testing::HasSubstr("radius")));
+  // A reshape names the world it reshaped, which for a seated player is
+  // their room and not the plaza they left to join it.
+  EXPECT_THAT(Rooms(), ::testing::Each(room_id));
+
+  // A geometry the rules refuse reshapes nothing, so it records nothing.
+  moonbase::games::SphereGeometry tiny;
+  tiny.radius = 0.1;
+  moonbase::games::SetGeometry refused;
+  refused.geometry = moonbase::games::Geometry::FromSphere(tiny);
+  ASSERT_TRUE(alice->stream.Send(Lobby(LobbyAction::FromSetgeometry(refused))).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "commandRejected").has_value());
+
+  EXPECT_THAT(Names(),
+              ::testing::ElementsAre("room_created", "geometry_changed", "geometry_changed"));
+}
+
+TEST_F(GameEventFixture, AStoredMessageIsOneLineAndARefusedOneIsNone) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined"));
+
+  moonbase::games::Chat chat;
+  chat.text = "deal me in";
+  ASSERT_TRUE(room->seats[1].stream.Send(GameCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(room->seats[1].stream, "roomChat").has_value());
+
+  ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "chat_message"));
+  EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("players":2)"));
+  EXPECT_THAT(events_[2], ::testing::Not(::testing::HasSubstr("deal me in")));
+  EXPECT_THAT(Rooms(), ::testing::Each(room->room_id));
+
+  // Empty text never reaches a store, so nothing happened to record.
+  moonbase::games::Chat empty;
+  empty.text = "";
+  ASSERT_TRUE(room->seats[0].stream.Send(GameCommands::FromChat(empty)).ok());
+  ASSERT_TRUE(ReceiveCase(room->seats[0].stream, "commandRejected").has_value());
+
+  EXPECT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "chat_message"));
+}
+
+// A room is closed by whoever empties it. Every other instance holding
+// it drops it on the next read of the vanished row, which is the same
+// teardown and must not be a second line.
+TEST_F(GameEventFixture, TheInstanceCatchingUpToAClosedRoomWritesNothing) {
+  std::vector<std::string> sibling_events;  // outlives the hub, as below
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  store_->Flush();
+
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  instance->golf->SetEventWriter(
+      [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
+
+  alice->stream.Close();
+  golf_->registry().Drain(std::chrono::seconds(1));
+  store_->Flush();
+  ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_closed"));
+
+  instance->golf->OnChannelActive(RoomChannel(room_id));
+
+  EXPECT_THAT(sibling_events, ::testing::IsEmpty()) << "the room would be counted closed twice";
+}
+
+TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNothing) {
+  auto table = SeatedTable();
+  ASSERT_TRUE(table.has_value());
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
+  store_->Flush();
+
+  // Declared before the instance, so it outlives the hub that writes
+  // into it — a hub joins its boot reaper as it goes, and a reaped seat
+  // can end a game.
+  std::vector<std::string> sibling_events;
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  instance->golf->SetEventWriter(
+      [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
+
+  ASSERT_TRUE(
+      table->bob.stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameEnded").has_value());
+  store_->Flush();
+
+  // The wake the sibling would get from the finish commit's NOTIFY: it
+  // reads the terminal row and runs the ceremony from it.
+  instance->golf->OnChannelActive(RoomChannel(table->room_id));
+
+  EXPECT_THAT(Names(), ::testing::Contains("game_finished"))
+      << "the finishing instance records the game";
+  EXPECT_THAT(sibling_events, ::testing::IsEmpty())
+      << "the ceremony ran twice, so the game would be counted twice";
+}
+
+// A sibling that rebased onto the finisher's ended state then commits
+// over the terminal row — golf's removePlayer has no isOver() guard, so
+// the leave goes through — and runs the whole ceremony again. The game
+// it would record is one nobody was sitting at.
+TEST_F(GameEventFixture, ASiblingThatRebasedOntoAFinishRecordsNothing) {
+  auto table = SeatedTable();
+  ASSERT_TRUE(table.has_value());
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
+  store_->Flush();
+
+  std::vector<std::string> sibling_events;  // outlives the hub, as above
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  instance->golf->SetEventWriter(
+      [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
+  // Alice moves to the sibling, which now holds the game as live.
+  auto resumed = OpenSeatVia(*instance->client, table->alice.resume_token);
+  ASSERT_TRUE(resumed.has_value());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "sessionReady").has_value());
+
+  // Bob's leave finishes the game on the first instance. The sibling is
+  // deliberately never woken — the window the terminal row covers.
+  ASSERT_TRUE(
+      table->bob.stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  store_->Flush();
+  ASSERT_THAT(Names(), ::testing::Contains("game_finished"));
+
+  ASSERT_TRUE(
+      resumed->stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "roomState").has_value());
+
+  EXPECT_THAT(sibling_events, ::testing::IsEmpty())
+      << "the sibling recorded a game the finisher already recorded";
+}
+
 TEST_F(GolfGameFixture, MidGameBrowserCloseParksTheSeatAndTheGameSurvives) {
   auto table = SeatedTable();
   ASSERT_TRUE(table.has_value());

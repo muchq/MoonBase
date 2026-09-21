@@ -21,6 +21,8 @@
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "absl/time/time.h"
 #include "domains/ai/libs/deja_cpp/production_client.h"
 #include "domains/games/apis/games_hub/games_hub_handler.h"
 #include "domains/games/apis/games_hub/golf_hub.h"
@@ -34,6 +36,7 @@
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/aura/middleware.h"
+#include "domains/platform/libs/event_log/event_log.h"
 #include "domains/platform/libs/futility/env/env.h"
 #include "domains/platform/libs/futility/otel/http_metrics.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
@@ -155,6 +158,36 @@ int main() {
     LOG(INFO) << "Tape: polling deja at " << deja_url;
   } else {
     LOG(INFO) << "Tape: off (DEJA_URL unset; glasshouse walls stay blank)";
+  }
+
+  // The hub's domain events (#1571): one line per game that ended, in
+  // the directory log_shipper takes to S3 and the stats pipeline reads
+  // back. Unset, the hub records nothing — the same shape as DEJA_URL,
+  // and what every local run gets. A directory that cannot be opened is
+  // fatal rather than silent: an event log nobody notices is missing is
+  // a month of games nobody can count.
+  // Shared, and captured by value below: a hub joins its boot reaper as
+  // it goes, a reaped seat can end a game, and that game records one. A
+  // raw pointer here would be to an object this scope destroys first.
+  std::shared_ptr<event_log::EventLog> game_events;
+  const char* event_dir = std::getenv("GAME_EVENT_LOG_DIR");
+  if (event_dir != nullptr && *event_dir != '\0') {
+    auto opened = event_log::EventLog::Open(event_dir, "game_events");
+    if (!opened.ok()) {
+      LOG(ERROR) << "Failed to open the game event log: " << opened.status();
+      return 1;
+    }
+    game_events = *std::move(opened);
+    golf->SetEventWriter([log = game_events](absl::Time when, std::string_view line) {
+      // A game is not failed over an unwritable log; it is only lost
+      // from the archive, loudly.
+      if (const absl::Status wrote = log->Append(when, line); !wrote.ok()) {
+        LOG(ERROR) << "game event not recorded: " << wrote;
+      }
+    });
+    LOG(INFO) << "Game events: " << event_dir << "/game_events.log";
+  } else {
+    LOG(INFO) << "Game events: off (GAME_EVENT_LOG_DIR unset)";
   }
 
   // Block shutdown signals before the transport spawns its thread pool.

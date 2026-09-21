@@ -75,6 +75,46 @@ cc_test(
     ],
 )
 
+# Read as text by //domains/platform/libs/otel_contract, which pins this
+# vocabulary against the stats pipeline's reader.
+exports_files(["game_events.cc"])
+
+# The hub's domain events (#1571): one JSON line per game that ended,
+# for the stats pipeline to read out of S3 months later. The engine
+# states are the only input, so this is testable without a hub.
+cc_library(
+    name = "game_events",
+    srcs = ["game_events.cc"],
+    hdrs = ["game_events.h"],
+    deps = [
+        ":hosted_game",
+        "//domains/games/libs/cards/castle:game_state",
+        "//domains/games/libs/cards/golf:game_state",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "game_events_test",
+    size = "small",
+    srcs = ["game_events_test.cc"],
+    deps = [
+        ":game_events",
+        ":hosted_game",
+        ":id_generator",
+        ":world",
+        "//domains/games/libs/cards",
+        "//domains/games/libs/cards/castle:game_state",
+        "//domains/games/libs/cards/castle:player",
+        "//domains/games/libs/cards/golf:game_state",
+        "//domains/games/libs/cards/golf:player",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The counter-series and rejection-kind vocabulary the hub declares and
 # emits with (#1327, #1384).
 cc_library(
@@ -441,6 +481,7 @@ cc_library(
     hdrs = ["golf_hub.h"],
     deps = [
         ":chat_store",
+        ":game_events",
         ":games_hub_smithy_server",
         ":hosted_game",
         ":hub_metrics",
@@ -465,6 +506,7 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@opal_cpp//runtime:eventstream",
         "@opal_cpp//runtime:server",
     ],
@@ -656,6 +698,7 @@ cc_test(
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
         "@opal_cpp//runtime:client",
         "@opal_cpp//runtime:core",
@@ -832,6 +875,7 @@ cc_binary(
         "//domains/ai/libs/deja_cpp:production_client",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/aura",
+        "//domains/platform/libs/event_log",
         "//domains/platform/libs/futility/env",
         "//domains/platform/libs/futility/otel:http_metrics",
         "//domains/platform/libs/futility/otel:metrics",
@@ -842,6 +886,8 @@ cc_binary(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:globals",
         "@com_google_absl//absl/log:initialize",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/time",
         "@opal_cpp//runtime:http",
         "@opal_cpp//runtime:http_beast",
         "@opal_cpp//runtime:server",

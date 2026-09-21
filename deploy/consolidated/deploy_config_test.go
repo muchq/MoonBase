@@ -2304,6 +2304,90 @@ func TestOneD4QueryEventsAreRolledWhereTheShipperReads(t *testing.T) {
 	}
 }
 
+// activeLines for one compose service. serviceBlock keeps comments, and
+// `strings.Contains` on the joined block cannot tell a mount from a mount
+// somebody commented out — nor a real `LOG_DIRS=` from an illustrative one
+// written above it.
+func activeServiceLines(t *testing.T, file, service string) []string {
+	t.Helper()
+	var live []string
+	for _, line := range strings.Split(serviceBlock(t, file, service), "\n") {
+		if !strings.HasPrefix(line, "#") {
+			live = append(live, line)
+		}
+	}
+	return live
+}
+
+// A host directory bound into a container at the same path, writable. The
+// shipper deletes what it uploads and the hub writes what it rolls, so a
+// `:ro` on either is the failure this catches.
+func mountsWritable(t *testing.T, file, service, dir string) bool {
+	t.Helper()
+	return hasLine(activeServiceLines(t, file, service), "- "+dir+":"+dir)
+}
+
+// LOG_DIRS is the shipper's whole source list, and a label whose
+// directory it cannot see ships nothing while looking configured: the
+// files sit on the host counted only in the pass log's `skipped`. Read
+// off LOG_DIRS rather than listed here, so a source added there is
+// covered the day it exists.
+func TestEveryShippedLogDirIsMountedWritableOnTheShipper(t *testing.T) {
+	lines := activeServiceLines(t, "compose.yaml", "log_shipper")
+	logDirs := regexp.MustCompile(`^- LOG_DIRS=(\S+)$`)
+	var pairs []string
+	for _, line := range lines {
+		if match := logDirs.FindStringSubmatch(line); match != nil {
+			pairs = strings.Split(match[1], ",")
+		}
+	}
+	if pairs == nil {
+		t.Fatalf("log_shipper has no LOG_DIRS; it would ship nothing. Lines were:\n%s",
+			strings.Join(lines, "\n"))
+	}
+	if len(pairs) < 2 {
+		t.Fatalf("LOG_DIRS names %d source(s); this test is reading the wrong thing", len(pairs))
+	}
+	for _, pair := range pairs {
+		label, dir, ok := strings.Cut(pair, "=")
+		if !ok || label == "" || dir == "" {
+			t.Errorf("LOG_DIRS entry %q is not label=dir; the shipper skips the whole "+
+				"variable rather than the entry", pair)
+			continue
+		}
+		if !mountsWritable(t, "compose.yaml", "log_shipper", dir) {
+			t.Errorf("log_shipper names %s=%s in LOG_DIRS but does not bind-mount %s "+
+				"writable; that source either ships nothing — said only as a `skipped` "+
+				"count — or fails its delete every pass and re-uploads forever. Lines "+
+				"were:\n%s", label, dir, dir, strings.Join(lines, "\n"))
+		}
+	}
+}
+
+// games_hub rolls one line per finished game into a host directory the
+// shipper reads (#1571), the same shape as one_d4's query events. Its own
+// mount has to be writable too, and for a louder reason than the
+// shipper's: the hub treats an unopenable event log as fatal, so a `:ro`
+// here is a crash loop of a live gameplay service.
+func TestGamesHubEventsAreRolledWhereTheShipperReads(t *testing.T) {
+	lines := activeServiceLines(t, "compose.yaml", "games_hub")
+	if !hasLine(lines, "GAME_EVENT_LOG_DIR: /var/log/games_hub") {
+		t.Errorf("games_hub does not set GAME_EVENT_LOG_DIR; the hub records no events at "+
+			"all and the games are played uncounted. Lines were:\n%s", strings.Join(lines, "\n"))
+	}
+	if !mountsWritable(t, "compose.yaml", "games_hub", "/var/log/games_hub") {
+		t.Errorf("games_hub does not bind-mount /var/log/games_hub writable; read-only it "+
+			"crash-loops on the event log it cannot open, and unmounted every event it "+
+			"writes dies with the container. Lines were:\n%s", strings.Join(lines, "\n"))
+	}
+
+	shipper := activeServiceLines(t, "compose.yaml", "log_shipper")
+	if !strings.Contains(strings.Join(shipper, "\n"), "games_hub=/var/log/games_hub") {
+		t.Errorf("log_shipper's LOG_DIRS does not name games_hub=/var/log/games_hub; the "+
+			"rolls pile up on the host unshipped. Lines were:\n%s", strings.Join(shipper, "\n"))
+	}
+}
+
 // The stats pair is profile-gated together: the aggregator needs the same
 // S3 credentials the shipper does, so a default `up -d` must start
 // neither the service nor its db-init — half the pair running is a

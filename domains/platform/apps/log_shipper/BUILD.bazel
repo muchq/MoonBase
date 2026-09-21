@@ -1,6 +1,10 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("//bazel/rules:oci.bzl", "linux_oci_go")
 
+# Read as text by //domains/platform/libs/otel_contract, which pins the
+# names event_log rolls under against the pattern shipped here.
+exports_files(["shipper.go"])
+
 go_library(
     name = "log_shipper_lib",
     srcs = [

@@ -1,0 +1,34 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# Read as text by //domains/platform/libs/otel_contract, which pins the
+# names rolled here against the pattern log_shipper ships.
+exports_files(["event_log.cc"])
+
+# event_log: the C++ half of the domain-event path (#1571) — one JSON
+# object per line, on disk, under the names log_shipper takes to S3.
+# No transport, no formatting, no levels: application logs stay on stdout
+# under the container's json-file driver.
+cc_library(
+    name = "event_log",
+    srcs = ["event_log.cc"],
+    hdrs = ["event_log.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "event_log_test",
+    size = "small",
+    srcs = ["event_log_test.cc"],
+    deps = [
+        ":event_log",
+        "@googletest//:gtest_main",
+    ],
+)

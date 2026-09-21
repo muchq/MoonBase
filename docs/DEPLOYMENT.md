@@ -6,9 +6,10 @@ same host but sit outside that flow, so they are not drawn.
 
 Hand-maintained. Nothing checks most of it against
 `deploy/consolidated/compose.yaml`; the exception is the service-to-service
-HTTP calls compose declares, which `deploy_config_test` pins. The `sql`
-edges and prometheus's own scrape targets are not pinned — those live in
-`o11y/prometheus.yml`, which this test does not read.
+HTTP calls compose declares, which `deploy_config_test` pins, along with
+every `LOG_DIRS` source having a mount to read. The `sql` edges are compose's
+too, as libpq URLs, which that pin does not match; prometheus's own scrape
+targets live in `o11y/prometheus.yml`, which it does not read.
 
 Node ids are compose service names wherever a container exists. `ui_*` are
 muchq.com routes; the public names and `S3` are not containers either.
@@ -34,6 +35,15 @@ reports them with mcpserver's calls tagged `source=mcp`. So the MCP number on
 the services rollup is arrivals at `mcp.1d4.net`, and the MCP number on the
 query rollup is the work one_d4 did; `source.go` puts it as edge source
 counts arrivals, service-local source counts work.
+
+games_hub writes its own events for the same reason, and a stronger one: a
+session opens one socket and every room, world, table, game and message
+rides it, so the access log counts a connection and never a game.
+`/var/log/games_hub/game_events.log` gets a line for each room made, each
+join, each reshape of a world, each thing said, each table dealt, each
+game that ended and each room that emptied — every line tagged with the
+room it happened in, so an evening reads back as a session — and rides the
+shipper under its own partition (#1571).
 
 `deploy_config_test` checks the service-to-service HTTP calls compose
 declares, both ways: that each names something the network resolves, and
@@ -164,6 +174,7 @@ flowchart LR
   caddy -.->|logs| deja
   caddy -.->|logs| log_shipper
   one_d4 -.->|logs| log_shipper
+  games_hub -.->|logs| log_shipper
   log_shipper -.->|logs| s3
   s3 -.->|logs| stats
 
@@ -280,8 +291,14 @@ caddy writes /var/log/caddy/access.log and rolls it (roll_size 4mb, roll_keep 5)
 ```
 
 Caddy owns the rolling; the shipper never touches the live log. Retention is
-tuned in the Caddyfile, not in log_shipper. `one_d4` query events ride the same
-shipper under their own S3 partition.
+tuned in the Caddyfile, not in log_shipper.
+
+Two services write domain events down the same pipe, each under its own S3
+partition and each rolling hourly into a host directory `LOG_DIRS` names:
+`one_d4` its query events, `games_hub` its finished games. The rule every
+writer obeys is the shipper's: the file being appended to carries no
+timestamp in its name, and a rolled one does — that asymmetry is the only
+thing keeping the shipper from uploading and deleting a live file.
 
 ## One-shot jobs
 
