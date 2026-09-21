@@ -681,6 +681,11 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
                                            const std::optional<HostedState>& state,
                                            const std::vector<HubStore::StatsDelta>* finish) {
   const int64_t version = entry.version + 1;
+  // Whether the table was already over before this transition — a commit
+  // loop that rebased onto another instance's finish holds its ended
+  // state, and the retry then commits over the terminal row. That game
+  // was played once, and was recorded by whoever ended it.
+  const bool was_over = entry.started() && IsOver(*entry.state);
   // Stamped before the outcome is known: a commit whose fate is unknown
   // may still have landed.
   TouchRoomLocked(room_id);
@@ -720,6 +725,16 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
   entry.roster = roster;
   if (state.has_value()) entry.state.emplace(*state);
   entry.version = version;
+  // The game-finished event (#1571), here and nowhere downstream: this
+  // is the one place that knows the finish landed and that this instance
+  // is what ended it. StageGameOverLocked runs the same ceremony on
+  // every instance holding the room, off the durable terminal row, and
+  // an unavailable store leaves a live row somebody finishes again —
+  // either would count the game twice.
+  if (finish != nullptr && !was_over) {
+    RecordLocked(
+        [&](absl::Time now) { return GameFinishedLine(now, FinishedOf(*state, roster.size())); });
+  }
   return Commit::kCommitted;
 }
 
@@ -1165,6 +1180,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
         StageMemberLocked(room_id, player_id, member->second, writes);
         StageRoomStateLocked(room_id, outbox);
         EnqueueWritesLocked(writes);
+        RecordLocked(RoomCreatedLine);
       }
     }
     if (room_id.empty()) {
@@ -1205,6 +1221,9 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
           StageRoomStateLocked(join->roomId, outbox);
           EnqueueWritesLocked(writes);
           joined = true;
+          RecordLocked([members = room->second.members.size()](absl::Time now) {
+            return RoomJoinedLine(now, members);
+          });
         }
       }
     }
@@ -1816,6 +1835,8 @@ void GolfHub::StartGameMove(const std::string& player_id) {
           break;
         }
         started = true;
+        RecordLocked([variant = GameKindName(ref->entry->kind), seats = ref->entry->roster.size()](
+                         absl::Time now) { return GameStartedLine(now, variant, seats); });
         for (const std::string& recipient : ref->entry->roster) {
           outbox.To(recipient, StartedEvent(ref->entry->kind));
         }
@@ -2666,15 +2687,6 @@ void GolfHub::FinalizeGameLocked(const std::string& room_id, Room& room, const s
                                  Outbox& outbox) {
   const auto game = room.games.find(game_id);
   if (game == room.games.end() || !game->second.started()) return;
-
-  // The domain event, before the ceremony erases the entry, and only
-  // here: StageGameOverLocked also runs on the instances catching up to
-  // a finish another one committed, and a game is played once.
-  if (event_writer_) {
-    const absl::Time now = absl::Now();
-    event_writer_(
-        now, GameFinishedLine(now, FinishedOf(*game->second.state, game->second.roster.size())));
-  }
 
   // Room-scoped running stats: every roster seat played, every winner
   // won. With a store these same deltas already rode the finish commit;

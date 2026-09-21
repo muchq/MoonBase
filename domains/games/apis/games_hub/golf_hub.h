@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "domains/ai/libs/deja_cpp/client.h"
 #include "domains/games/apis/games_hub/chat_store.h"
@@ -546,6 +547,16 @@ class GolfHub final {
   /// the game is erased locally. Shared by the local finisher and the
   /// refresh path (a game another instance finished).
   void StageGameOverLocked(Room& room, const std::string& game_id, Outbox& outbox);
+  /// Writes one domain event (game_events.h), if this deployment records
+  /// them. `build` renders the line under the same instant the log files
+  /// it by, so an event's timestamp and the hour it rolls into cannot
+  /// disagree. Called under mu_, where every emit site already is.
+  template <typename Build>
+  void RecordLocked(Build&& build) {
+    if (!event_writer_) return;
+    const absl::Time now = absl::Now();
+    event_writer_(now, build(now));
+  }
   /// The local finisher: mirrors the stat deltas the finish commit
   /// already applied (or, without a store, applies them — same code)
   /// and runs the ceremony.

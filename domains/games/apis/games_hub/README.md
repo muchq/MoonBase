@@ -109,19 +109,32 @@ mints sessions itself and forwards the stream to the hub.
 
 ## Game events
 
-A finished game writes one JSON line to `GAME_EVENT_LOG_DIR` — variant,
-outcome, seats — for the stats pipeline to read back out of S3 (#1571).
-Counters answer "how is the hub doing right now"; this answers "what was
-played last March", which Prometheus drops. `game_events.h` is the
-vocabulary and `//domains/platform/libs/event_log` the writer; unset, the
-hub records nothing.
+Four events, one JSON line each, written to `GAME_EVENT_LOG_DIR` for the
+stats pipeline to read back out of S3 (#1571): `room_created`,
+`room_joined` (the room's size once the joiner was in it), `game_started`
+(variant, seats dealt) and `game_finished` (variant, outcome, seats still
+held). Together they are the funnel a room goes through — somebody made
+a room, somebody else walked in, a table started, the table ended. Counters answer "how is the hub
+doing right now"; these answer "what was played last March", which
+Prometheus drops. `game_events.h` is the vocabulary and
+`//domains/platform/libs/event_log` the writer; unset, the hub records
+nothing.
 
-The line comes from `FinalizeGameLocked`, the instance whose commit
-finished the game, and never from `StageGameOverLocked`, which every
-instance holding the room runs off the terminal row. A play is not a
-game either: a `game_finished` line is one table reaching an ending,
-which is the only thing the access log cannot see — the socket was
-opened once and carries every game on it.
+Nothing here is visible at the edge. A session opens one socket and every
+room, table and game rides that one connection, so the access log counts
+a connection and never a game.
+
+`game_started` is the only place a table's size is recorded while it is
+still whole. `game_finished`'s `players` is the seats *still held*, which
+for an abandonment is the moment the second-to-last one left — so it
+reads 1 for nearly every abandoned game, and is not the table's size.
+
+The finished line comes from `CommitEntryLocked`, the one place that
+knows both that the finish landed and that this instance is what ended
+the game. Not from `StageGameOverLocked`, which every instance holding
+the room runs off the terminal row; and not after a commit that came back
+unavailable, which leaves a live row somebody finishes again. Either
+would count one game twice.
 
 ## The rules
 

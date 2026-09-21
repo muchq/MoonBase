@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <string>
+#include <string_view>
 #include <variant>
 
 #include "absl/strings/str_format.h"
@@ -11,6 +12,20 @@
 #include "domains/games/libs/cards/golf/game_state.h"
 
 namespace games_hub {
+namespace {
+
+// One line: the timestamp, the name, and whatever fields that event has,
+// already rendered with their leading comma.
+//
+// Formatted rather than encoded: every value is a word from a closed
+// vocabulary or a count, so there is nothing here to escape and a JSON
+// dependency would only hide that. EveryEventsLineIsTextWithNothingToEscape
+// holds it to that.
+std::string Line(absl::Time when, std::string_view event, std::string_view fields) {
+  return absl::StrFormat(R"({"ts":%d,"event":"%s"%s})", absl::ToUnixMillis(when), event, fields);
+}
+
+}  // namespace
 
 GameFinished FinishedOf(const HostedState& state, std::size_t players) {
   GameFinished finished{GameKindName(KindOf(state)), kCompleted, players};
@@ -26,14 +41,21 @@ GameFinished FinishedOf(const HostedState& state, std::size_t players) {
   return finished;
 }
 
+std::string RoomCreatedLine(absl::Time when) { return Line(when, kRoomCreated, ""); }
+
+std::string RoomJoinedLine(absl::Time when, std::size_t players) {
+  return Line(when, kRoomJoined, absl::StrFormat(R"(,"players":%d)", players));
+}
+
+std::string GameStartedLine(absl::Time when, std::string_view variant, std::size_t players) {
+  return Line(when, kGameStarted,
+              absl::StrFormat(R"(,"variant":"%s","players":%d)", variant, players));
+}
+
 std::string GameFinishedLine(absl::Time when, const GameFinished& finished) {
-  // Formatted rather than encoded: every value is a word from a closed
-  // vocabulary or a count, so there is nothing here to escape and a JSON
-  // dependency would only hide that. GameEventsCarryNoUnescapedText holds
-  // it to that.
-  return absl::StrFormat(R"({"ts":%d,"event":"%s","variant":"%s","outcome":"%s","players":%d})",
-                         absl::ToUnixMillis(when), kGameFinished, finished.variant,
-                         finished.outcome, finished.players);
+  return Line(when, kGameFinished,
+              absl::StrFormat(R"(,"variant":"%s","outcome":"%s","players":%d)", finished.variant,
+                              finished.outcome, finished.players));
 }
 
 }  // namespace games_hub

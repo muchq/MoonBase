@@ -2183,10 +2183,11 @@ TEST_F(GolfGameFixture, AbandoningALiveGameResolvesIt) {
 // absent player within seconds. A close parks the seat instead: the
 // table sees the disconnect, nothing ends, and the resume token reclaims
 // the seat with the game intact.
-// The hub's domain events (#1571). A game is played once, so its line
-// is written once — by the instance whose commit finished it. Every
-// other instance runs the same ceremony off the durable terminal row,
-// which is why the line comes from the finisher and not the ceremony.
+// The hub's domain events (#1571): the funnel a room goes through, and
+// the once-ness of the game that ends it. A game is played once, so its
+// line comes from the commit that ended it — never from the ceremony,
+// which every instance holding the room runs off the durable terminal
+// row, and never from a finish that did not land.
 class GameEventFixture : public GolfGameFixture {
  protected:
   void SetUp() override {
@@ -2194,27 +2195,82 @@ class GameEventFixture : public GolfGameFixture {
     golf_->SetEventWriter(
         [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
   }
+
+  // The writer goes before anything else does. A hub tears down by
+  // joining its boot reaper, which reaps parked seats — a leave, which
+  // can end a game, which records one; and `events_` is a member of this
+  // class, so it is already gone by the time the base's `golf_` is.
+  void TearDown() override {
+    if (golf_ != nullptr) golf_->SetEventWriter(nullptr);
+    GolfGameFixture::TearDown();
+  }
+
+  // The event names in order, with their fields, for an assertion that
+  // reads like the evening it describes.
+  std::vector<std::string> Names() const {
+    std::vector<std::string> names;
+    for (const std::string& line : events_) {
+      const std::size_t at = line.find(R"("event":")");
+      names.push_back(
+          at == std::string::npos ? line : line.substr(at + 9, line.find('"', at + 9) - at - 9));
+    }
+    return names;
+  }
+
   std::vector<std::string> events_;
 };
 
-TEST_F(GameEventFixture, AGameThatEndsWritesOneLineNamingWhatWasPlayed) {
+TEST_F(GameEventFixture, TheFunnelIsRecordedFromTheRoomToTheGameThatEndedIt) {
   auto table = SeatedTable();
   ASSERT_TRUE(table.has_value());
   ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
   ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
-  EXPECT_THAT(events_, ::testing::IsEmpty()) << "a game in play is not a game played";
+
+  EXPECT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "game_started"));
+  // Creating a room is not a join, so the first join is the second
+  // person — and the table is recorded whole, before anyone can leave it.
+  EXPECT_THAT(events_[1], ::testing::HasSubstr(R"("players":2)"));
+  EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("variant":"golf")"));
+  EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("players":2)"));
 
   ASSERT_TRUE(
       table->bob.stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
   ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameEnded").has_value());
 
-  ASSERT_EQ(events_.size(), 1u) << "a game ended once";
-  EXPECT_THAT(events_[0], ::testing::HasSubstr(R"("event":"game_finished")"));
-  EXPECT_THAT(events_[0], ::testing::HasSubstr(R"("variant":"golf")"));
-  // Bob left; alice is the seat still held, and the game ended because
-  // one seat cannot go on.
-  EXPECT_THAT(events_[0], ::testing::HasSubstr(R"("outcome":"abandoned")"));
-  EXPECT_THAT(events_[0], ::testing::HasSubstr(R"("players":1)"));
+  ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "game_started",
+                                              "game_finished"));
+  EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("variant":"golf")"));
+  // Bob left; alice is the seat still held, and one seat cannot go on.
+  EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("outcome":"abandoned")"));
+  EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("players":1)"));
+}
+
+// The same funnel at a bigger table, so every count in it is a
+// different number: two joins, three seats dealt, and castle rather
+// than golf.
+TEST_F(GameEventFixture, ABiggerTableIsRecordedAtTheSizeItWasDealt) {
+  auto table = MultiSeatCastleTable(3);
+  ASSERT_TRUE(table.has_value());
+
+  ASSERT_THAT(Names(),
+              ::testing::ElementsAre("room_created", "room_joined", "room_joined", "game_started"));
+  EXPECT_THAT(events_[1], ::testing::HasSubstr(R"("players":2)"));
+  EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("players":3)"));
+  EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("variant":"castle")"));
+  EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("players":3)"));
+}
+
+TEST_F(GameEventFixture, ARefusedJoinIsNoEvent) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+
+  moonbase::games::JoinRoom join;
+  join.roomId = "NOSUCHROOM";
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "commandRejected").has_value());
+
+  EXPECT_THAT(events_, ::testing::IsEmpty());
 }
 
 TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNothing) {
@@ -2224,10 +2280,12 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNoth
   ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
   store_->Flush();
 
-  // A sibling holding the same live game off the same rows.
+  // Declared before the instance, so it outlives the hub that writes
+  // into it — a hub joins its boot reaper as it goes, and a reaped seat
+  // can end a game.
+  std::vector<std::string> sibling_events;
   auto instance = BuildSecondInstance(vault_, store_, chat_store_);
   ASSERT_NE(instance, nullptr);
-  std::vector<std::string> sibling_events;
   instance->golf->SetEventWriter(
       [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
 
@@ -2240,9 +2298,46 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNoth
   // reads the terminal row and runs the ceremony from it.
   instance->golf->OnChannelActive(RoomChannel(table->room_id));
 
-  EXPECT_EQ(events_.size(), 1u) << "the finishing instance records the game";
+  EXPECT_THAT(Names(), ::testing::Contains("game_finished"))
+      << "the finishing instance records the game";
   EXPECT_THAT(sibling_events, ::testing::IsEmpty())
       << "the ceremony ran twice, so the game would be counted twice";
+}
+
+// A sibling that rebased onto the finisher's ended state then commits
+// over the terminal row — golf's removePlayer has no isOver() guard, so
+// the leave goes through — and runs the whole ceremony again. The game
+// it would record is one nobody was sitting at.
+TEST_F(GameEventFixture, ASiblingThatRebasedOntoAFinishRecordsNothing) {
+  auto table = SeatedTable();
+  ASSERT_TRUE(table.has_value());
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
+  store_->Flush();
+
+  std::vector<std::string> sibling_events;  // outlives the hub, as above
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  instance->golf->SetEventWriter(
+      [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
+  // Alice moves to the sibling, which now holds the game as live.
+  auto resumed = OpenSeatVia(*instance->client, table->alice.resume_token);
+  ASSERT_TRUE(resumed.has_value());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "sessionReady").has_value());
+
+  // Bob's leave finishes the game on the first instance. The sibling is
+  // deliberately never woken — the window the terminal row covers.
+  ASSERT_TRUE(
+      table->bob.stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  store_->Flush();
+  ASSERT_THAT(Names(), ::testing::Contains("game_finished"));
+
+  ASSERT_TRUE(
+      resumed->stream.Send(Move(GolfMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  ASSERT_TRUE(ReceiveCase(resumed->stream, "roomState").has_value());
+
+  EXPECT_THAT(sibling_events, ::testing::IsEmpty())
+      << "the sibling recorded a game the finisher already recorded";
 }
 
 TEST_F(GolfGameFixture, MidGameBrowserCloseParksTheSeatAndTheGameSurvives) {

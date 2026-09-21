@@ -37,10 +37,11 @@ query rollup is the work one_d4 did; `source.go` puts it as edge source
 counts arrivals, service-local source counts work.
 
 games_hub writes its own events for the same reason, and a stronger one: a
-game is played over a socket that was opened once, so the access log counts
-the connection and never the games. `/var/log/games_hub/game_events.log` gets
-one line per game that ended — variant, outcome, seats — and rides the shipper
-under its own partition (#1571).
+session opens one socket and every room, table and game rides it, so the
+access log counts a connection and never a game.
+`/var/log/games_hub/game_events.log` gets a line for each room made, each
+join, each table dealt and each game that ended, and rides the shipper under
+its own partition (#1571).
 
 `deploy_config_test` checks the service-to-service HTTP calls compose
 declares, both ways: that each names something the network resolves, and
