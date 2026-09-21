@@ -9,16 +9,23 @@ import (
 	"time"
 )
 
-// RequestKey is one row of the per-day request rollup. Host is one of
-// Caddy's configured vhosts, the method collapses through the same
-// nine-verb rule the metrics rails use, the agent class is the four-value
-// vocabulary in classify.go, and the agent is the bounded name AgentOf
-// pairs with it — so a host's traffic can be opened up into which
-// scrapers, which bots, and what the unclassified tail actually sends,
-// from the same rows the class totals come from.
+// RequestKey is one row of the per-day request rollup. Every column is a
+// bounded vocabulary: the site the request addressed, the Caddyfile
+// matcher that claimed the path, the caller behind it, the nine-verb
+// method rule the metrics rails use, the four-value agent class, and the
+// bounded name AgentOf pairs with it. So a site's traffic opens up into
+// which service, which caller, which scrapers and what the unclassified
+// tail sends, from the same rows the class totals come from.
+//
+// Route names the matcher and not the backend, which are the same thing
+// only on a site that has matchers: git.muchq.com proxies everything from
+// one bare handle, so all of Forgejo shares OtherRoute with the paths
+// nothing served.
 type RequestKey struct {
 	Date       string
 	Host       string
+	Route      string
+	Source     string
 	Status     int
 	Method     string
 	AgentClass string
@@ -36,10 +43,12 @@ type SlugKey struct {
 
 // ProbeKey is one row of the scanner rollup. Rows exist only for requests
 // whose path matched a family in ProbeOf, so the key is bounded by that
-// vocabulary and ordinary traffic mints nothing here.
+// vocabulary and ordinary traffic mints nothing here. The route says which
+// service a scanner reached, which is nearly always none of them.
 type ProbeKey struct {
 	Date   string
 	Host   string
+	Route  string
 	Probe  string
 	Status int
 }
@@ -191,9 +200,15 @@ func (r *Rollup) Consume(reader io.Reader, objectDate string) (skipped int, err 
 		date := parsed.date(objectDate)
 		method := boundedMethod(parsed.Request.Method)
 		agentClass, agent := AgentOf(parsed.userAgent())
+		// The Host header is the client's to spell; the column is the site
+		// it addressed.
+		site := SiteOf(parsed.Request.Host)
+		route := RouteOf(parsed.Request.Host, parsed.Request.URI)
 		r.Requests[RequestKey{
 			Date:       date,
-			Host:       parsed.Request.Host,
+			Host:       site,
+			Route:      route,
+			Source:     SourceOf(route, parsed.origin(), agentClass),
 			Status:     parsed.Status,
 			Method:     method,
 			AgentClass: agentClass,
@@ -201,9 +216,9 @@ func (r *Rollup) Consume(reader io.Reader, objectDate string) (skipped int, err 
 		}]++
 		probe := ProbeOf(parsed.Request.URI)
 		if probe != "" {
-			r.Probes[ProbeKey{Date: date, Host: parsed.Request.Host, Probe: probe, Status: parsed.Status}]++
+			r.Probes[ProbeKey{Date: date, Host: site, Route: route, Probe: probe, Status: parsed.Status}]++
 		}
-		r.addGeo(date, parsed.Request.Host, agentClass, parsed.clientIP(), parsed.Status, probe != "")
+		r.addGeo(date, site, agentClass, parsed.clientIP(), parsed.Status, probe != "")
 		if slug := SlugOf(parsed.Request.Host, parsed.Request.Method, parsed.Request.URI); slug != "" {
 			r.Slugs[SlugKey{Date: date, Slug: slug, Status: parsed.Status}]++
 		}

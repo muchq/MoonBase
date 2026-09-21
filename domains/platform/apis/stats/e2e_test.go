@@ -62,8 +62,17 @@ func gzipObject(t *testing.T, lines ...string) []byte {
 }
 
 func caddyLineFor(host, method, uri, ip, agent string, status int) string {
-	return fmt.Sprintf(`{"status":%d,"request":{"host":%q,"method":%q,"uri":%q,"client_ip":%q,"headers":{"User-Agent":[%q]}}}`,
-		status, host, method, uri, ip, agent)
+	return caddyLineFrom(host, method, uri, ip, agent, "", status)
+}
+
+// The same line with an Origin, which is what tells the caller apart.
+func caddyLineFrom(host, method, uri, ip, agent, origin string, status int) string {
+	headers := fmt.Sprintf(`"User-Agent":[%q]`, agent)
+	if origin != "" {
+		headers += fmt.Sprintf(`,"Origin":[%q]`, origin)
+	}
+	return fmt.Sprintf(`{"status":%d,"request":{"host":%q,"method":%q,"uri":%q,"client_ip":%q,"headers":{%s}}}`,
+		status, host, method, uri, ip, headers)
 }
 
 func getJSON(t *testing.T, server *httptest.Server, path string) []map[string]any {
@@ -86,7 +95,7 @@ func getJSON(t *testing.T, server *httptest.Server, path string) []map[string]an
 }
 
 // rowsWhere keeps the rows whose fields all match; the database is shared
-// across runs, so every assertion is scoped to this run's own host.
+// across runs, so no assertion may read a bare total.
 func rowsWhere(rows []map[string]any, match map[string]any) []map[string]any {
 	var out []map[string]any
 	for _, row := range rows {
@@ -103,6 +112,29 @@ func rowsWhere(rows []map[string]any, match map[string]any) []map[string]any {
 	return out
 }
 
+// sum adds one numeric field over the rows whose fields all match.
+func sum(rows []map[string]any, match map[string]any, field string) float64 {
+	var total float64
+	for _, row := range rowsWhere(rows, match) {
+		total += row[field].(float64)
+	}
+	return total
+}
+
+// The four endpoints keyed by host, read together so an assertion can be a
+// delta between two reads rather than an absolute count.
+type endpointRows struct{ summary, agents, probes, countries []map[string]any }
+
+func readEndpoints(t *testing.T, server *httptest.Server) endpointRows {
+	t.Helper()
+	return endpointRows{
+		summary:   getJSON(t, server, "/stats/v1/summary?days=2"),
+		agents:    getJSON(t, server, "/stats/v1/agents?days=2&limit=2000"),
+		probes:    getJSON(t, server, "/stats/v1/probes?days=2"),
+		countries: getJSON(t, server, "/stats/v1/countries?days=2&limit=5000"),
+	}
+}
+
 func TestEndToEndFromShippedObjectsToEveryEndpoint(t *testing.T) {
 	url := os.Getenv("STATS_TEST_DB_URL")
 	if url == "" {
@@ -110,7 +142,13 @@ func TestEndToEndFromShippedObjectsToEveryEndpoint(t *testing.T) {
 	}
 	ctx := context.Background()
 	date := time.Now().UTC().Format("2006-01-02")
-	host := fmt.Sprintf("e2e-%d.example", time.Now().UnixNano())
+	// The host column holds the site now, so a run can no longer isolate
+	// itself by inventing a host: the fixtures address a vhost caddy really
+	// serves, and every count below is a delta across this run's one
+	// aggregation. The run's own token still keys the objects, which is what
+	// keeps the processed markers and the short-link row its own.
+	const site = "api.muchq.com"
+	run := fmt.Sprintf("e2e-%d", time.Now().UnixNano())
 
 	geo, _, err := Locate(vendorFile(t))
 	if err != nil {
@@ -119,17 +157,20 @@ func TestEndToEndFromShippedObjectsToEveryEndpoint(t *testing.T) {
 	bucket := memoryBucket{
 		// Two caddy rolls for the same day, so the day's rows accumulate
 		// across objects the way hourly rolls do in production.
-		fmt.Sprintf("logs/source=caddy/dt=%s/%s-a.log.gz", date, host): gzipObject(t,
-			caddyLineFor(host, "GET", "/", "8.8.8.8", "Mozilla/5.0 (Macintosh) Chrome/126.0", 200),
-			caddyLineFor(host, "GET", "/", "8.8.8.8", "Mozilla/5.0 (Macintosh) Chrome/126.0", 200),
-			caddyLineFor(host, "GET", "/x", "57.141.3.4", "meta-externalagent/1.1", 403),
-			caddyLineFor(host, "GET", "/.env", "10.1.2.3", "TLM-Audit-Scanner/1.0", 404),
+		fmt.Sprintf("logs/source=caddy/dt=%s/%s-a.log.gz", date, run): gzipObject(t,
+			// The web app on a route the Caddyfile claims, which is the one
+			// line here that carries a route and a caller worth naming.
+			caddyLineFrom(site, "GET", "/games/v2/session", "8.8.8.8",
+				"Mozilla/5.0 (Macintosh) Chrome/126.0", "https://muchq.com", 200),
+			caddyLineFor(site, "GET", "/", "8.8.8.8", "Mozilla/5.0 (Macintosh) Chrome/126.0", 200),
+			caddyLineFor(site, "GET", "/x", "57.141.3.4", "meta-externalagent/1.1", 403),
+			caddyLineFor(site, "GET", "/.env", "10.1.2.3", "TLM-Audit-Scanner/1.0", 404),
 		),
-		fmt.Sprintf("logs/source=caddy/dt=%s/%s-b.log.gz", date, host): gzipObject(t,
-			caddyLineFor(host, "GET", "/.git/config", "57.141.3.4", "meta-externalagent/1.1", 403),
-			caddyLineFor("i.iili.uk", "GET", "/r/"+host, "8.8.8.8", "curl/8.6.0", 302),
+		fmt.Sprintf("logs/source=caddy/dt=%s/%s-b.log.gz", date, run): gzipObject(t,
+			caddyLineFor(site, "GET", "/.git/config", "57.141.3.4", "meta-externalagent/1.1", 403),
+			caddyLineFor("i.iili.uk", "GET", "/r/"+run, "8.8.8.8", "curl/8.6.0", 302),
 		),
-		fmt.Sprintf("logs/source=one_d4/dt=%s/%s-events.log.gz", date, host): gzipObject(t,
+		fmt.Sprintf("logs/source=one_d4/dt=%s/%s-events.log.gz", date, run): gzipObject(t,
 			eventLine("entry", "query", "source", "ui", "fields", "white.elo", "motifs", "fork",
 				"order_by", "", "player", "false", "limit", "10", "offset", "0", "cache", "live",
 				"rows", "3", "outcome", "ok", "duration_us", "1500"),
@@ -147,6 +188,10 @@ func TestEndToEndFromShippedObjectsToEveryEndpoint(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	aggregator := &Aggregator{Objects: bucket, Store: store, Logger: logger, Geo: geo}
 
+	server := httptest.NewServer(NewRouter(NewHandlers(store, logger)))
+	t.Cleanup(server.Close)
+	before := readEndpoints(t, server)
+
 	processed, err := aggregator.RunOnce(ctx)
 	if err != nil || processed != 3 {
 		t.Fatalf("RunOnce = (%d, %v), want all three objects", processed, err)
@@ -157,56 +202,74 @@ func TestEndToEndFromShippedObjectsToEveryEndpoint(t *testing.T) {
 		t.Fatalf("second RunOnce = (%d, %v), want nothing to do", processed, err)
 	}
 
-	server := httptest.NewServer(NewRouter(NewHandlers(store, logger)))
-	t.Cleanup(server.Close)
-
-	// Summary: the host's five requests across three classes, the two 403s
-	// and the 404 as errors.
-	summary := rowsWhere(getJSON(t, server, "/stats/v1/summary?days=2"), map[string]any{"host": host})
-	byClass := map[string][2]float64{}
-	for _, row := range summary {
-		byClass[row["agent_class"].(string)] = [2]float64{row["requests"].(float64), row["errors"].(float64)}
+	after := readEndpoints(t, server)
+	grew := func(what string, before, after []map[string]any, match map[string]any, field string, want float64) {
+		t.Helper()
+		if got := sum(after, match, field) - sum(before, match, field); got != want {
+			t.Errorf("%s: %s grew by %v, want %v", what, field, got, want)
+		}
 	}
-	if byClass["browser"] != [2]float64{2, 0} || byClass["ai_scraper"] != [2]float64{2, 2} || byClass["bot"] != [2]float64{1, 1} {
-		t.Errorf("summary by class = %v", byClass)
+
+	// Summary: the site's five requests across three classes, the two 403s
+	// and the 404 as errors.
+	for _, want := range []struct {
+		class            string
+		requests, errors float64
+	}{
+		{AgentBrowser, 2, 0},
+		{AgentAIScraper, 2, 2},
+		{AgentBot, 1, 1},
+	} {
+		match := map[string]any{"host": site, "agent_class": want.class}
+		grew("summary "+want.class, before.summary, after.summary, match, "requests", want.requests)
+		grew("summary "+want.class, before.summary, after.summary, match, "errors", want.errors)
 	}
 
 	// Agents: the scraper by name, both of its requests refused.
-	meta := rowsWhere(getJSON(t, server, "/stats/v1/agents?days=2&limit=2000"),
-		map[string]any{"host": host, "agent": "meta-externalagent"})
-	if len(meta) != 1 || meta[0]["requests"] != float64(2) || meta[0]["blocked"] != float64(2) {
-		t.Errorf("meta rows = %v", meta)
-	}
+	meta := map[string]any{"host": site, "agent": "meta-externalagent"}
+	grew("meta-externalagent", before.agents, after.agents, meta, "requests", 2)
+	grew("meta-externalagent", before.agents, after.agents, meta, "blocked", 2)
 
-	// Probes: two families on this host, neither served.
-	probes := rowsWhere(getJSON(t, server, "/stats/v1/probes?days=2"), map[string]any{"host": host})
-	families := map[string][2]float64{}
-	for _, row := range probes {
-		families[row["probe"].(string)] = [2]float64{row["requests"].(float64), row["served"].(float64)}
-	}
-	if families[ProbeEnv] != [2]float64{1, 0} || families[ProbeGit] != [2]float64{1, 0} {
-		t.Errorf("probe families = %v", families)
+	// Probes: two families on this site, neither served.
+	for _, probe := range []string{ProbeEnv, ProbeGit} {
+		match := map[string]any{"host": site, "probe": probe}
+		grew("probe "+probe, before.probes, after.probes, match, "requests", 1)
+		grew("probe "+probe, before.probes, after.probes, match, "served", 0)
 	}
 
 	// Countries, through the real vendor file: Google's resolver and
 	// Meta's range in the US, the private scanner unplaced.
-	countries := rowsWhere(getJSON(t, server, "/stats/v1/countries?days=2&limit=5000"), map[string]any{"host": host})
-	placed := map[string]map[string]any{}
-	for _, row := range countries {
-		placed[row["agent_class"].(string)+"/"+row["country"].(string)] = row
-	}
-	if row := placed["ai_scraper/US"]; row == nil || row["requests"] != float64(2) || row["blocked"] != float64(2) || row["probes"] != float64(1) {
-		t.Errorf("scraper from US = %v", row)
-	}
-	if row := placed["browser/US"]; row == nil || row["requests"] != float64(2) {
-		t.Errorf("browsers from US = %v", row)
-	}
-	if row := placed["bot/"+UnknownCountry]; row == nil || row["requests"] != float64(1) || row["probes"] != float64(1) {
-		t.Errorf("private-address bot = %v", row)
+	for _, want := range []struct {
+		class, country            string
+		requests, blocked, probes float64
+	}{
+		{AgentAIScraper, "US", 2, 2, 1},
+		{AgentBrowser, "US", 2, 0, 0},
+		{AgentBot, UnknownCountry, 1, 0, 1},
+	} {
+		match := map[string]any{"host": site, "agent_class": want.class, "country": want.country}
+		what := want.class + " from " + want.country
+		grew(what, before.countries, after.countries, match, "requests", want.requests)
+		grew(what, before.countries, after.countries, match, "blocked", want.blocked)
+		grew(what, before.countries, after.countries, match, "probes", want.probes)
 	}
 
-	// Short links: the redirect on i.iili.uk, keyed by this run's slug.
-	slugs := rowsWhere(getJSON(t, server, "/stats/v1/iili/top?days=2&limit=200"), map[string]any{"slug": host})
+	// The two new columns, read straight from the table: no endpoint
+	// exposes them yet, so this is the only thing that says a real log
+	// line carried a route and a caller all the way to a row.
+	var routed int64
+	if err := store.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(requests), 0) FROM request_stats
+		 WHERE host = $1 AND route = $2 AND source = $3`,
+		site, "/games/v2/session", SourceUI).Scan(&routed); err != nil {
+		t.Fatal(err)
+	}
+	if routed != 1 {
+		t.Errorf("the web app's routed request landed %d times, want 1", routed)
+	}
+
+	// Short links: the redirect on i.iili.uk, keyed by this run's own slug.
+	slugs := rowsWhere(getJSON(t, server, "/stats/v1/iili/top?days=2&limit=200"), map[string]any{"slug": run})
 	if len(slugs) != 1 || slugs[0]["requests"] != float64(1) {
 		t.Errorf("slug rows = %v", slugs)
 	}

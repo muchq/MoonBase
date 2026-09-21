@@ -16,14 +16,16 @@ func TestRoutesCorpusLandsEveryLineWhereCaddylogDoes(t *testing.T) {
 	for _, row := range corpusRows(t, "../../libs/caddylog/testdata/routes.tsv", 3) {
 		host, uri, want := row[0], row[1], row[2]
 		assert.Equal(t, want, RouteOf(host, uri), "host %q target %q", host, uri)
-		seen[want] = true
+		seen[SiteOf(host)+"\t"+want] = true
 	}
-	require.True(t, seen[OtherRoute], "corpus never reaches the unrouted token")
-	// Every matcher has a row, so an entry missing from the table fails
-	// here and not only in the text-reading vocabulary pin.
+	require.True(t, seen[OtherSite+"\t"+OtherRoute], "corpus never reaches the unrouted token")
+	// Every matcher has a row on its own site, so an entry missing from the
+	// table fails here and not only in the text-reading vocabulary pin. The
+	// site is part of the key because two sites share a spelling: covering
+	// /microgpt/v1/chat on api.muchq.com says nothing about gpt.muchq.com.
 	for _, site := range routes {
 		for _, route := range site.Routes {
-			assert.True(t, seen[route], "%s on %s has no corpus row", route, site.Site)
+			assert.True(t, seen[site.Site+"\t"+route], "%s on %s has no corpus row", route, site.Site)
 		}
 	}
 }
@@ -32,6 +34,10 @@ func TestSiteOfFoldsTheHostAndBoundsIt(t *testing.T) {
 	assert.Equal(t, "api.muchq.com", SiteOf("API.muchq.com:443"))
 	assert.Equal(t, OtherSite, SiteOf("evil.example.com"))
 	assert.Equal(t, OtherSite, SiteOf(""))
+	// A trailing dot names the same vhost, and Caddy's host matcher reads
+	// it as one; unfolded it would file real traffic under "other".
+	assert.Equal(t, "api.muchq.com", SiteOf("api.muchq.com."))
+	assert.Equal(t, "api.muchq.com", SiteOf("API.MUCHQ.COM.:443"))
 }
 
 // No entry is shadowed by an earlier prefix on its own site. First match

@@ -196,14 +196,16 @@ var probeFamilies = []struct {
 }
 
 // ProbeOf names the scanner family a request path belongs to, or "" when
-// the path is not a known probe shape. Matching is on the lowercased path
-// with the query string removed.
+// the path is not a known probe shape. Matching is on the decoded path,
+// lowercased, so a scanner cannot dodge a family by spelling /.env as
+// /%2Eenv. The path is not cleaned: the dot segments a scanner sends are
+// what the traversal family is looking for.
 func ProbeOf(uri string) string {
-	path := uri
-	if q := strings.IndexByte(path, '?'); q >= 0 {
-		path = path[:q]
+	target, ok := decodedTarget(uri)
+	if !ok {
+		return ""
 	}
-	path = strings.ToLower(path)
+	path := strings.ToLower(target)
 	for _, family := range probeFamilies {
 		if family.match.MatchString(path) {
 			return family.name
@@ -218,18 +220,23 @@ func ProbeOf(uri string) string {
 // api.muchq.com/iili/v1/r/{slug} route. The same path on another vhost, or
 // a HEAD on the api one, never reaches iili — Caddy answers it itself — so
 // it is not a follow.
+// The host and the path are read the way the route column reads them —
+// folded host, decoded and cleaned path, matched case-insensitively —
+// because a slug row and a request row describe the same request. Only
+// the slug itself keeps its case, being an identifier and not a matcher.
 func SlugOf(host, method, uri string) string {
-	path := uri
-	if q := strings.IndexByte(path, '?'); q >= 0 {
-		path = path[:q]
+	path, ok := matchTarget(uri)
+	if !ok {
+		return ""
 	}
+	site, lower := SiteOf(host), strings.ToLower(path)
 	var rest string
 	switch {
-	case strings.HasPrefix(host, "i.iili.uk") && (method == "GET" || method == "HEAD") &&
-		strings.HasPrefix(path, "/r/"):
+	case site == "i.iili.uk" && (method == "GET" || method == "HEAD") &&
+		strings.HasPrefix(lower, "/r/"):
 		rest = path[len("/r/"):]
-	case strings.HasPrefix(host, "api.muchq.com") && method == "GET" &&
-		strings.HasPrefix(path, "/iili/v1/r/"):
+	case site == "api.muchq.com" && method == "GET" &&
+		strings.HasPrefix(lower, "/iili/v1/r/"):
 		rest = path[len("/iili/v1/r/"):]
 	default:
 		return ""

@@ -75,7 +75,11 @@ pub const OTHER_SITE: &str = "other";
 /// The Caddyfile site a request's host names, port and case dropped, or
 /// `OTHER_SITE`.
 pub fn site_of(host: &str) -> &'static str {
-    let host = fold(host.split(':').next().unwrap_or_default());
+    // The port, the case and the FQDN's trailing dot are the client's to
+    // vary; Caddy's host matcher ignores all three, so the same vhost is
+    // reached under any of them and the column has to fold them all.
+    let folded = fold(host.split(':').next().unwrap_or_default());
+    let host = folded.strip_suffix('.').unwrap_or(&folded);
     SITES
         .iter()
         .copied()
@@ -92,16 +96,16 @@ pub const OTHER_ROUTE: &str = "other";
 /// path is matched the way Caddy's `path` matcher matches it: percent
 /// escapes decoded, `.` and `..` segments and doubled slashes cleaned, a
 /// trailing slash kept, then compared case-insensitively. The host loses
-/// any port and its case.
+/// any port, its case and any trailing dot.
 pub fn route_of(host: &str, uri: &str) -> &'static str {
     let site = site_of(host);
     let Some((_, routes)) = ROUTES.iter().find(|(candidate, _)| *candidate == site) else {
         return OTHER_ROUTE;
     };
-    let Some(target) = origin_path(uri) else {
+    let Some(target) = match_target(uri) else {
         return OTHER_ROUTE;
     };
-    let path = fold(&clean(&percent_decode(target)));
+    let path = fold(&target);
     routes
         .iter()
         .copied()
@@ -110,6 +114,22 @@ pub fn route_of(host: &str, uri: &str) -> &'static str {
             None => path == *route,
         })
         .unwrap_or(OTHER_ROUTE)
+}
+
+/// What the client asked for: the request target's path with its percent
+/// escapes decoded, case left alone. Probe classification reads this rather
+/// than the cleaned path below, because a scanner's dot segments are the
+/// evidence — cleaning them away is precisely what destroys the traversal
+/// family's signal — while an escape is only a spelling, so `/%2Eenv` has
+/// to land in the same family as `/.env`.
+pub(crate) fn decoded_target(uri: &str) -> Option<String> {
+    origin_path(uri).map(percent_decode)
+}
+
+/// The path Caddy's matcher compares against: `decoded_target` with its dot
+/// segments and doubled slashes cleaned.
+pub(crate) fn match_target(uri: &str) -> Option<String> {
+    decoded_target(uri).map(|target| clean(&target))
 }
 
 /// The path of a request target as Caddy's matcher sees it, query string
@@ -227,16 +247,19 @@ mod tests {
             assert_eq!(row.len(), 3, "malformed corpus row {row:?}");
             let (host, uri, route) = (row[0], row[1], row[2]);
             assert_eq!(route_of(host, uri), route, "route_of({host:?}, {uri:?})");
-            claimed.insert(route);
+            claimed.insert((site_of(host), route));
         }
         assert!(
-            claimed.contains(OTHER_ROUTE),
+            claimed.contains(&(OTHER_SITE, OTHER_ROUTE)),
             "corpus never reaches the unrouted token"
         );
+        // The site is part of the key because two sites share a spelling:
+        // covering /microgpt/v1/chat on api.muchq.com says nothing about
+        // gpt.muchq.com.
         for (site, routes) in ROUTES {
             for route in *routes {
                 assert!(
-                    claimed.contains(route),
+                    claimed.contains(&(*site, *route)),
                     "{route} on {site} has no corpus row"
                 );
             }

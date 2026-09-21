@@ -19,6 +19,33 @@ not json at all
 {"status":404,"request":{"host":"api.muchq.com","method":"GET","uri":"/.env","headers":{"User-Agent":["Mozilla/5.0 (compatible; GPTBot/1.2)"]}}}
 `
 
+// The counts for one old-style row, summed across the columns a test is
+// not about. Route and source are dimensions of their own; a test asking
+// "how many did this agent send" should not have to name them, and should
+// not break when another column is added. The date is not one of those
+// columns — which object's partition a row landed in is a thing tests here
+// assert — so it is named like the rest of the key.
+func requestsOn(rollup *Rollup, date, host string, status int, method, class, agent string) int64 {
+	var total int64
+	for key, count := range rollup.Requests {
+		if key.Date == date && key.Host == host && key.Status == status && key.Method == method &&
+			key.AgentClass == class && key.Agent == agent {
+			total += count
+		}
+	}
+	return total
+}
+
+func probesOn(rollup *Rollup, date, host, probe string, status int) int64 {
+	var total int64
+	for key, count := range rollup.Probes {
+		if key.Date == date && key.Host == host && key.Probe == probe && key.Status == status {
+			total += count
+		}
+	}
+	return total
+}
+
 func TestConsumeAggregatesRequestsSlugsAndSkipsCorruptLines(t *testing.T) {
 	rollup := NewRollup()
 
@@ -34,20 +61,20 @@ func TestConsumeAggregatesRequestsSlugsAndSkipsCorruptLines(t *testing.T) {
 	// Browsers are one unnamed bucket; every other row carries its agent's
 	// bounded name, so "did meta back off after the 403" is a query over the
 	// same rows the class totals come from rather than a re-aggregation.
-	if got := rollup.Requests[RequestKey{"2026-08-30", "api.1d4.net", 200, "POST", AgentBrowser, ""}]; got != 2 {
-		t.Errorf("mcp browser POSTs = %d, want 2", got)
+	if got := requestsOn(rollup, "2026-08-30", "api.1d4.net", 200, "POST", AgentBrowser, ""); got != 2 {
+		t.Errorf("browser POSTs = %d, want 2", got)
 	}
-	if got := rollup.Requests[RequestKey{"2026-08-30", "git.muchq.com", 403, "GET", AgentAIScraper, "meta-externalagent"}]; got != 1 {
+	if got := requestsOn(rollup, "2026-08-30", "git.muchq.com", 403, "GET", AgentAIScraper, "meta-externalagent"); got != 1 {
 		t.Errorf("blocked ai scraper = %d, want 1", got)
 	}
-	if got := rollup.Requests[RequestKey{"2026-08-30", "i.iili.uk", 302, "GET", AgentBot, "curl"}]; got != 1 {
+	if got := requestsOn(rollup, "2026-08-30", "i.iili.uk", 302, "GET", AgentBot, "curl"); got != 1 {
 		t.Errorf("curl redirects = %d, want 1", got)
 	}
-	if got := rollup.Requests[RequestKey{"2026-08-30", "i.iili.uk", 404, "GET", AgentOther, "(empty)"}]; got != 1 {
+	if got := requestsOn(rollup, "2026-08-30", "i.iili.uk", 404, "GET", AgentOther, "(empty)"); got != 1 {
 		t.Errorf("empty-UA rows = %d, want 1", got)
 	}
 	// An invented verb collapses like every metrics rail's method label.
-	if got := rollup.Requests[RequestKey{"2026-08-30", "api.muchq.com", 200, "CUSTOM", AgentOther, "(empty)"}]; got != 1 {
+	if got := requestsOn(rollup, "2026-08-30", "api.muchq.com", 200, "CUSTOM", AgentOther, "(empty)"); got != 1 {
 		t.Errorf("CUSTOM-method row = %d, want 1", got)
 	}
 	// The redirect rollup counts per slug and status, across agent classes.
@@ -58,10 +85,10 @@ func TestConsumeAggregatesRequestsSlugsAndSkipsCorruptLines(t *testing.T) {
 		t.Errorf("gone-slug 404s = %d, want 1", got)
 	}
 	// Probe rows exist only for paths that match a scanner family.
-	if got := rollup.Probes[ProbeKey{"2026-08-30", "api.muchq.com", ProbeWordpress, 404}]; got != 1 {
+	if got := probesOn(rollup, "2026-08-30", "api.muchq.com", ProbeWordpress, 404); got != 1 {
 		t.Errorf("wordpress probes = %d, want 1", got)
 	}
-	if got := rollup.Probes[ProbeKey{"2026-08-30", "api.muchq.com", ProbeEnv, 404}]; got != 1 {
+	if got := probesOn(rollup, "2026-08-30", "api.muchq.com", ProbeEnv, 404); got != 1 {
 		t.Errorf("env probes = %d, want 1", got)
 	}
 	if len(rollup.Probes) != 2 {
@@ -105,10 +132,11 @@ func TestConsumeCapsTheAnonymousAgentTailPerObject(t *testing.T) {
 	if len(names) != maxTailAgentsPerObject+1 {
 		t.Errorf("distinct other-class names = %d, want the cap plus the overflow row", len(names))
 	}
-	if rollup.Requests[RequestKey{"2026-08-30", "h", 200, "GET", AgentAIScraper, "gptbot"}] != 1 ||
-		rollup.Requests[RequestKey{"2026-08-30", "h", 200, "GET", AgentBot, "curl"}] != 1 ||
-		rollup.Requests[RequestKey{"2026-08-30", "h", 200, "GET", AgentBrowser, ""}] != 1 {
-		t.Errorf("marker-named and browser rows were caught by the cap: %v", rollup.Requests)
+	// The fixture host is no Caddyfile site, so every row folds under one.
+	if requestsOn(rollup, "2026-08-30", OtherSite, 200, "GET", AgentAIScraper, "gptbot") != 1 ||
+		requestsOn(rollup, "2026-08-30", OtherSite, 200, "GET", AgentBot, "curl") != 1 ||
+		requestsOn(rollup, "2026-08-30", OtherSite, 200, "GET", AgentBrowser, "") != 1 {
+		t.Error("marker-named and browser rows were caught by the cap")
 	}
 }
 
@@ -135,10 +163,10 @@ func TestConsumeRollsUpWhereEachClassCameFromWithBlocksAndProbes(t *testing.T) {
 	}
 
 	want := map[GeoKey]GeoStat{
-		{"2026-08-30", "h", AgentBrowser, "AU"}:   {1, 0, 0},
-		{"2026-08-30", "h", AgentAIScraper, "US"}: {1, 1, 0},
-		{"2026-08-30", "h", AgentBot, "GB"}:       {3, 1, 3},
-		{"2026-08-30", "h", AgentBot, "--"}:       {1, 0, 0},
+		{"2026-08-30", OtherSite, AgentBrowser, "AU"}:   {1, 0, 0},
+		{"2026-08-30", OtherSite, AgentAIScraper, "US"}: {1, 1, 0},
+		{"2026-08-30", OtherSite, AgentBot, "GB"}:       {3, 1, 3},
+		{"2026-08-30", OtherSite, AgentBot, "--"}:       {1, 0, 0},
 	}
 	if len(rollup.Countries) != len(want) {
 		t.Errorf("geo rows = %v, want %v", rollup.Countries, want)
@@ -215,5 +243,90 @@ func TestConsumeDatesEachLineByItsOwnTimestamp(t *testing.T) {
 		if key.Date == "" {
 			t.Errorf("geo row with no date: %v", key)
 		}
+	}
+}
+
+// The Host header is whatever the client sent: a port, a case, or an
+// address Caddy serves no site for. The column is the site it addressed,
+// so one vhost is one row (#1577).
+const hostVariantLines = `{"status":200,"request":{"host":"API.MUCHQ.COM:443","method":"GET","uri":"/games/v2/session","headers":{}}}
+{"status":200,"request":{"host":"api.muchq.com","method":"GET","uri":"/games/v2/session","headers":{}}}
+{"status":404,"request":{"host":"evil.example.com","method":"GET","uri":"/games/v2/session","headers":{}}}
+{"status":403,"request":{"host":"evil.example.com:8443","method":"GET","uri":"/.env","headers":{}}}
+`
+
+func TestConsumeFoldsTheHostToTheSiteItAddressed(t *testing.T) {
+	rollup := NewRollup()
+	if _, err := rollup.Consume(strings.NewReader(hostVariantLines), "2026-08-30"); err != nil {
+		t.Fatal(err)
+	}
+	folded := RequestKey{
+		Date: "2026-08-30", Host: "api.muchq.com", Route: "/games/v2/session", Source: SourceAPI,
+		Status: 200, Method: "GET", AgentClass: AgentOther, Agent: "(empty)",
+	}
+	if got := rollup.Requests[folded]; got != 2 {
+		t.Errorf("port and case landed in %d rows, want one row of 2", got)
+	}
+	// A host no site serves reaches no matcher either.
+	unserved := folded
+	unserved.Host, unserved.Route, unserved.Status = OtherSite, OtherRoute, 404
+	if got := rollup.Requests[unserved]; got != 1 {
+		t.Errorf("a host no site serves = %d, want 1 under %q", got, OtherSite)
+	}
+	// The probe rollup folds too, or an invented Host mints a probe row per
+	// spelling in a table the endpoint groups by host and does not limit.
+	scanned := ProbeKey{
+		Date: "2026-08-30", Host: OtherSite, Route: OtherRoute, Probe: ProbeEnv, Status: 403,
+	}
+	if got := rollup.Probes[scanned]; got != 1 {
+		t.Errorf("a scanner's probe = %d, want 1 under %q", got, OtherSite)
+	}
+	for key := range rollup.Requests {
+		if key.Host != "api.muchq.com" && key.Host != OtherSite {
+			t.Errorf("unbounded host %q reached a rollup key", key.Host)
+		}
+	}
+	for key := range rollup.Probes {
+		if key.Host != OtherSite {
+			t.Errorf("unbounded host %q reached a probe key", key.Host)
+		}
+	}
+	for key := range rollup.Countries {
+		if key.Host != "api.muchq.com" && key.Host != OtherSite {
+			t.Errorf("unbounded host %q reached a geo key", key.Host)
+		}
+	}
+}
+
+// Which backend served it and who asked, on the same row as the counts.
+const callerLines = `{"status":200,"request":{"host":"api.muchq.com","method":"POST","uri":"/games/v2/session","headers":{"Origin":["https://muchq.com"],"User-Agent":["Mozilla/5.0 Chrome"]}}}
+{"status":200,"request":{"host":"mcp.1d4.net","method":"POST","uri":"/mcp","headers":{"User-Agent":["node"]}}}
+{"status":404,"request":{"host":"api.muchq.com","method":"GET","uri":"/.env","headers":{"User-Agent":["python-requests/2.32.0"]}}}
+`
+
+func TestConsumeKeysRequestsByRouteAndCaller(t *testing.T) {
+	rollup := NewRollup()
+	if _, err := rollup.Consume(strings.NewReader(callerLines), "2026-08-30"); err != nil {
+		t.Fatal(err)
+	}
+	web := RequestKey{
+		Date: "2026-08-30", Host: "api.muchq.com", Route: "/games/v2/session", Source: SourceUI,
+		Status: 200, Method: "POST", AgentClass: AgentBrowser, Agent: "",
+	}
+	if got := rollup.Requests[web]; got != 1 {
+		t.Errorf("the web app's own call = %d, want 1 as %s", got, SourceUI)
+	}
+	mcp := RequestKey{
+		Date: "2026-08-30", Host: "mcp.1d4.net", Route: "/mcp", Source: SourceMCP,
+		Status: 200, Method: "POST", AgentClass: AgentOther, Agent: "node",
+	}
+	if got := rollup.Requests[mcp]; got != 1 {
+		t.Errorf("the mcp endpoint = %d, want 1 as %s", got, SourceMCP)
+	}
+	// A scanner reaches no matcher, so its row carries the unrouted token
+	// rather than the path it invented.
+	probe := ProbeKey{Date: "2026-08-30", Host: "api.muchq.com", Route: OtherRoute, Probe: ProbeEnv, Status: 404}
+	if got := rollup.Probes[probe]; got != 1 {
+		t.Errorf("env probe row = %d, want 1 under %q", got, OtherRoute)
 	}
 }

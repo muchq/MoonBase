@@ -108,15 +108,6 @@ func descriptionsFrom(t *testing.T, path string, patterns []*regexp.Regexp) map[
 	return found
 }
 
-// withoutCommentLines blanks whole-line comments in C++, Java and Rust source.
-//
-// Every rail's declaration file explains this contract in prose, and the prose
-// quotes the strings — the C++ header reproduces a table entry in its own doc
-// comment. Matching over comments lets a rail satisfy the pin with an example
-// while declaring nothing: delete the real entry, leave the sentence that
-// describes it, and both tests below still pass while the service exports an
-// empty description. Lines are blanked rather than removed so that patterns
-// spanning a newline cannot bridge across the gap a deleted line would leave.
 // A line's code, up to the comment that trails it. An entry quoted in a
 // trailing comment would otherwise be harvested as a declaration. Quotes
 // are tracked, so a "//" inside a string is code.
@@ -143,6 +134,16 @@ func withoutCommentTail(line string) string {
 	return line
 }
 
+// withoutCommentLines blanks comments in C++, Java and Rust source, whole
+// lines and trailing tails alike.
+//
+// Every rail's declaration file explains this contract in prose, and the prose
+// quotes the strings — the C++ header reproduces a table entry in its own doc
+// comment. Matching over comments lets a rail satisfy the pin with an example
+// while declaring nothing: delete the real entry, leave the sentence that
+// describes it, and both tests below still pass while the service exports an
+// empty description. Lines are blanked rather than removed so that patterns
+// spanning a newline cannot bridge across the gap a deleted line would leave.
 func withoutCommentLines(source []byte) []byte {
 	lines := strings.Split(string(source), "\n")
 	for i, line := range lines {
