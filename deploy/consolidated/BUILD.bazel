@@ -34,6 +34,9 @@ go_test(
         "o11y/otel-collector.yml",
         # Read by TestCIStillRunsTheCollectorDryRun, which checks that CI has not
         # quietly stopped invoking the collector dry-run.
+        # TestEveryInternalHttpCallIsAnEdgeInTheTopologyDiagram reads the
+        # topology diagram and pins it to compose's own wiring.
+        "//:docs/DEPLOYMENT.md",
         "//:.bazelrc",
         "//:.github/workflows/branch.yml",
         "//:.github/workflows/publish.yml",

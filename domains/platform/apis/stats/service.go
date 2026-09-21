@@ -26,6 +26,10 @@ type siteServices struct {
 	ByRoute map[string]string
 }
 
+// consolidated.cmptr.info is a site with no entry on purpose: it answers
+// every path itself and proxies nothing, so ServiceOf is right to call it
+// OtherService. Give it a reverse_proxy and the gateway pin goes red until
+// it gets one here.
 var services = []siteServices{
 	{Site: "api.1d4.net", ByRoute: map[string]string{
 		"/health":            "one_d4",

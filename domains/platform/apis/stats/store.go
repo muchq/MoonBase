@@ -359,19 +359,21 @@ type ServiceRow struct {
 }
 
 // Services is the per-backend, per-caller breakdown the route and source
-// columns were added for. It returns the busiest rows first, at most limit
-// of them, and the number there were before truncating.
+// columns were added for. It returns the busiest services first, complete,
+// as many as the limit holds, and the number of rows there were before
+// truncating.
 //
-// The fold from route to service happens here rather than in SQL, and
-// before the limit rather than after. The mapping belongs to the Caddyfile
-// and a query carrying its own copy is a copy the gateway pin does not
-// read — but the ordering is the real reason. A service reached through
-// nine routes sheds its small rows first under a row-grain limit, while a
-// service reached through one keeps all of it, so a reader summing per
-// service would get one_d4 low and forgejo whole with nothing saying so.
-// Truncating folded rows drops quiet services instead, which is a short
-// list rather than a wrong number. The grouping vocabulary is closed, so
-// what this reads before folding is bounded whatever the window.
+// The fold from route to service happens here rather than in SQL. The
+// mapping belongs to the Caddyfile and a query carrying its own copy is a
+// copy the gateway pin does not read. The grouping vocabulary is closed,
+// so what this reads before folding is bounded whatever the window.
+//
+// Truncation takes whole services, which is the only way the numbers mean
+// anything. A row is one day of one caller of one class, so a service
+// spans many: cut the list by row and a service reached often keeps its
+// busy days and loses its quiet ones, and a reader summing per service
+// gets a total that is silently short. Cutting by service instead makes a
+// truncated read a shorter list of exact numbers.
 func (s *Store) Services(ctx context.Context, days, limit int) ([]ServiceRow, int, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT dt::text, host, route, source, agent_class,
@@ -428,9 +430,61 @@ func (s *Store) Services(ctx context.Context, days, limit int) ([]ServiceRow, in
 	})
 	total := len(out)
 	if total > limit {
-		out = out[:limit]
+		out = wholeServicesWithin(out, limit)
 	}
 	return out, total, nil
+}
+
+// The rows of the busiest services that fit, in the order they came in.
+//
+// Services are taken whole and in order, stopping at the first that does
+// not fit rather than skipping it for a smaller one further down: "the
+// busiest N services, complete" is a thing a reader can reason about, and
+// "some services, chosen by how well they packed" is not. The busiest is
+// always taken, even alone over the limit, because a read that answers
+// nothing is worse than one that answers past its ceiling.
+func wholeServicesWithin(rows []ServiceRow, limit int) []ServiceRow {
+	type service struct {
+		name     string
+		requests int64
+		rows     int
+	}
+	byName := map[string]*service{}
+	var order []*service
+	for _, row := range rows {
+		at, ok := byName[row.Service]
+		if !ok {
+			at = &service{name: row.Service}
+			byName[row.Service] = at
+			order = append(order, at)
+		}
+		at.requests += row.Requests
+		at.rows++
+	}
+	sort.Slice(order, func(i, j int) bool {
+		if order[i].requests != order[j].requests {
+			return order[i].requests > order[j].requests
+		}
+		return order[i].name < order[j].name
+	})
+
+	keep := map[string]bool{}
+	taken := 0
+	for _, at := range order {
+		if taken > 0 && taken+at.rows > limit {
+			break
+		}
+		keep[at.name] = true
+		taken += at.rows
+	}
+
+	out := make([]ServiceRow, 0, taken)
+	for _, row := range rows {
+		if keep[row.Service] {
+			out = append(out, row)
+		}
+	}
+	return out
 }
 
 func (s *Store) Summary(ctx context.Context, days int) ([]SummaryRow, error) {

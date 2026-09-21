@@ -2486,6 +2486,200 @@ func TestOneD4KnowsTheUiOriginCaddyGrants(t *testing.T) {
 	}
 }
 
+// The calls compose wires service to service, as caller → callee host.
+// A host here is whatever the URL names, which is not always the service
+// key: one_d4 and one_d4_v2 carry hyphenated aliases because java.net.URI
+// gives a hostname containing an underscore a null host.
+func internalHTTPCalls(t *testing.T) map[string][]string {
+	t.Helper()
+	// Any URL, then the host out of it. Matching the scheme first and the
+	// host second is what lets this refuse a host it cannot read instead
+	// of not matching at all: `http://${ONE_D4_HOST:-one-d4}:8080` is a
+	// legal thing to write and would otherwise drop the call from this
+	// pin and the diagram pin together, silently.
+	url := regexp.MustCompile(`https?://([^\s"',]+)`)
+	literal := regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+	calls := map[string][]string{}
+	for _, file := range []string{"compose.yaml", "docker-compose.observability.yml"} {
+		for service, lines := range composeServiceLines(t, file) {
+			for _, line := range lines {
+				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					continue
+				}
+				for _, match := range url.FindAllStringSubmatch(line, -1) {
+					host, _, _ := strings.Cut(match[1], "/")
+					host, _, _ = strings.Cut(host, ":")
+					switch {
+					case host == service || host == "localhost" || host == "127.0.0.1":
+						// A service calling itself is not an edge.
+					case strings.Contains(host, "."):
+						// A public name, not a container: compose reaches
+						// services by a bare DNS label on app_network, and
+						// every name here that carries a dot is an origin
+						// or an upstream out on the internet.
+					case !literal.MatchString(host):
+						t.Errorf("%s calls %s, whose host this test cannot read; it pins only "+
+							"literal hosts, so a computed one silently leaves the pin",
+							service, match[0])
+					default:
+						calls[service] = append(calls[service], host)
+					}
+				}
+			}
+		}
+	}
+	return calls
+}
+
+// Every name a container can be reached by on app_network: the service key,
+// plus any alias declared under it.
+func composeNames(t *testing.T) map[string]string {
+	t.Helper()
+	item := regexp.MustCompile(`^-\s*["']?([a-zA-Z0-9._-]+)["']?$`)
+	flow := regexp.MustCompile(`^aliases:\s*\[(.*)\]$`)
+	names := map[string]string{}
+	for _, file := range []string{"compose.yaml", "docker-compose.observability.yml"} {
+		for service, lines := range composeServiceLines(t, file) {
+			names[service] = service
+			inAliases := false
+			for _, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				// The flow form is the same list on one line.
+				if match := flow.FindStringSubmatch(trimmed); match != nil {
+					for _, alias := range strings.Split(match[1], ",") {
+						names[strings.Trim(strings.TrimSpace(alias), `"'`)] = service
+					}
+					continue
+				}
+				if trimmed == "aliases:" {
+					inAliases = true
+					continue
+				}
+				if !inAliases {
+					continue
+				}
+				// A comment or a blank line inside the list does not end it;
+				// treating either as the end would drop the alias and report
+				// a break that is not there.
+				if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+					continue
+				}
+				if match := item.FindStringSubmatch(trimmed); match != nil {
+					names[match[1]] = service
+					continue
+				}
+				inAliases = false
+			}
+		}
+	}
+	return names
+}
+
+// A service-to-service URL names something on the network, or the call
+// fails at DNS and the caller finds out in production.
+//
+// This is not hypothetical bookkeeping: mcpserver reaches one_d4 at
+// http://one-d4:8080, which resolves only because one_d4 declares that
+// alias, and the alias exists only because a Java URI rejects the
+// underscore in the service key. Delete the alias and compose still
+// starts, caddy still works, and only mcpserver breaks.
+func TestEveryInternalHttpUrlNamesSomethingOnTheNetwork(t *testing.T) {
+	names := composeNames(t)
+	calls := internalHTTPCalls(t)
+	reached := 0
+	for caller, callees := range calls {
+		for _, callee := range callees {
+			reached++
+			if _, ok := names[callee]; !ok {
+				t.Errorf("%s calls http://%s, which is neither a compose service nor an "+
+					"alias of one; the call cannot resolve", caller, callee)
+			}
+		}
+	}
+	if reached < 10 {
+		t.Fatalf("parsed only %d internal URLs; has compose's shape changed?", reached)
+	}
+
+	// The four the topology doc names as application calls. The floor above
+	// is mostly OTLP exports, so it would still be met with every one of
+	// these deleted — and deleting one is exactly the edit that makes the
+	// doc's paragraph wrong.
+	for _, call := range [][2]string{
+		{"mcpserver", "one_d4"},
+		{"mcpserver", "one_d4_v2"},
+		{"games_hub", "deja"},
+		{"prom_proxy", "prometheus"},
+	} {
+		found := false
+		for _, callee := range calls[call[0]] {
+			if names[callee] == call[1] {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("compose no longer wires %s → %s; docs/DEPLOYMENT.md names it as one of "+
+				"the calls that skip caddy", call[0], call[1])
+		}
+	}
+}
+
+// And every one of them is an edge in the topology diagram.
+//
+// docs/DEPLOYMENT.md is hand-maintained and says so. It also used to say
+// that every request reaches a service through caddy, which these calls
+// are the counterexample to (#1575) — they are on no access log, so they
+// are in no rollup and no deja event. A call the diagram does not draw is
+// one a reader reasoning about the log will not know to exclude.
+func TestEveryInternalHttpCallIsAnEdgeInTheTopologyDiagram(t *testing.T) {
+	names := composeNames(t)
+	edge := regexp.MustCompile(`^([A-Za-z0-9_-]+)\s*-\.?->\|([a-z]+)\|\s*([A-Za-z0-9_-]+)$`)
+	drawn := map[string]bool{}
+	edges := 0
+	// Only inside the diagram. Reading the whole file would let a line of
+	// prose that happens to look like an edge satisfy the pin, and would
+	// pool any second diagram the doc grows.
+	inDiagram := false
+	for _, line := range strings.Split(readConfig(t, "../../docs/DEPLOYMENT.md"), "\n") {
+		if strings.HasPrefix(line, "```") {
+			inDiagram = strings.TrimSpace(line) == "```mermaid"
+			continue
+		}
+		if !inDiagram {
+			continue
+		}
+		match := edge.FindStringSubmatch(strings.TrimSpace(line))
+		if match == nil {
+			continue
+		}
+		edges++
+		from, label, to := match[1], match[2], match[3]
+		drawn[from+" "+to] = true
+		// The doc's own rule: http points the way the call goes, and the
+		// data labels point the way the data moves, which for a call
+		// answered by a stream is the other way. So only those reverse.
+		if label != "http" {
+			drawn[to+" "+from] = true
+		}
+	}
+	if edges < 30 {
+		t.Fatalf("parsed only %d edges inside the mermaid block; has the diagram's shape changed?", edges)
+	}
+
+	for caller, callees := range internalHTTPCalls(t) {
+		for _, callee := range callees {
+			service, ok := names[callee]
+			if !ok {
+				continue // the resolvability test above reports this one.
+			}
+			if !drawn[caller+" "+service] {
+				t.Errorf("compose wires %s → %s and the diagram draws no edge that way; "+
+					"a call that skips caddy is in no access log, so a reader has to be able "+
+					"to see it, pointing the way the call goes", caller, service)
+			}
+		}
+	}
+}
+
 // stats names the backend that answered a request from the Caddyfile's own
 // reverse_proxy upstreams, so "which service" is a question the rollup can
 // answer. Route names the matcher instead, and the two part company exactly
