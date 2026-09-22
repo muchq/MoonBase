@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -2385,6 +2386,56 @@ func TestGamesHubEventsAreRolledWhereTheShipperReads(t *testing.T) {
 	if !strings.Contains(strings.Join(shipper, "\n"), "games_hub=/var/log/games_hub") {
 		t.Errorf("log_shipper's LOG_DIRS does not name games_hub=/var/log/games_hub; the "+
 			"rolls pile up on the host unshipped. Lines were:\n%s", strings.Join(shipper, "\n"))
+	}
+}
+
+// deja tails what it observes and writes nothing but its own checkpoint
+// (#1150), so every log it reads is mounted read-only — and the two are
+// derived from its own env rather than listed here, so a third source
+// added there is covered the day it exists. A writable mount on the
+// observer would let a bug in it corrupt the log a live service is
+// appending to and the shipper is about to upload.
+func TestEveryLogDejaReadsIsMountedReadOnly(t *testing.T) {
+	lines := activeServiceLines(t, "compose.yaml", "deja")
+	paths := regexp.MustCompile(`^- (?:ACCESS_LOG|HUB_EVENT_LOG)=(\S+)$`)
+	var dirs []string
+	for _, line := range lines {
+		if match := paths.FindStringSubmatch(line); match != nil {
+			dirs = append(dirs, path.Dir(match[1]))
+		}
+	}
+	if len(dirs) < 2 {
+		t.Fatalf("deja names %d log(s) in its env; #1572 gave it caddy's and the hub's. "+
+			"Lines were:\n%s", len(dirs), strings.Join(lines, "\n"))
+	}
+	for _, dir := range dirs {
+		if !hasLine(lines, "- "+dir+":"+dir+":ro") {
+			t.Errorf("deja reads a log under %s but does not bind-mount it read-only; "+
+				"unmounted it sees nothing and tails a file that never appears, and "+
+				"writable it can damage what a live service is appending to. Lines "+
+				"were:\n%s", dir, strings.Join(lines, "\n"))
+		}
+	}
+}
+
+// The hub writes its events and deja reads them, in two containers that
+// agree only through this file: event_log names the active file after the
+// logger, so the path deja tails is the hub's directory plus that name.
+func TestDejaTailsTheFileTheHubWrites(t *testing.T) {
+	hub := activeServiceLines(t, "compose.yaml", "games_hub")
+	var dir string
+	for _, line := range hub {
+		if value, ok := strings.CutPrefix(line, "GAME_EVENT_LOG_DIR: "); ok {
+			dir = value
+		}
+	}
+	if dir == "" {
+		t.Fatal("games_hub sets no GAME_EVENT_LOG_DIR; there is nothing for deja to tail")
+	}
+	want := "- HUB_EVENT_LOG=" + path.Join(dir, "game_events.log")
+	if !hasLine(activeServiceLines(t, "compose.yaml", "deja"), want) {
+		t.Errorf("deja does not tail %q; it would follow a path nothing writes and "+
+			"report a stream that never moves", want)
 	}
 }
 

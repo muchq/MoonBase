@@ -1,16 +1,44 @@
 # deja
 
-Phase 3 of #1150: a next-request predictor over Caddy's access log that
-learns online and shows its work. It tails the live log, turns each
-request into one token from caddylog's bounded vocabulary
-(`site method route status agent_class[ probe]`), predicts the next token
-for that client with two predictors, scores the actual request as
-surprise (`-ln p`) under each, and judges it against an exponentially
-weighted baseline: `warmup` for the first 1000 scored requests, then
-`expected` or `anomaly` at three deviations, and `novel` for a token's
-first sight, which stays out of the baseline. Then both predictors learn
-the request and move on. Read-only observer: nothing here touches Caddy,
-and the only thing written is the checkpoint.
+Phase 3 of #1150: a next-event predictor over the site's logs that learns
+online and shows its work. It tails them live, turns each event into one
+token from a bounded vocabulary, predicts the next token for that lane
+with two predictors, scores the actual event as surprise (`-ln p`) under
+each, and judges it against an exponentially weighted baseline: `warmup`
+for the first 1000 scored events, then `expected` or `anomaly` at three
+deviations, and `novel` for a token's first sight, which stays out of the
+baseline. Then both predictors learn the event and move on. Read-only
+observer: nothing here touches what it reads, and the only thing written
+is the checkpoint.
+
+## The two sources
+
+**Caddy's access log**, every public request: one token of caddylog's
+vocabulary, `site method route status agent_class[ probe]`, lanes keyed
+by the client's address.
+
+**games_hub's domain events** (#1572, `HUB_EVENT_LOG`): one token per
+thing that happened in a room — `hub <event>` plus the words that event
+carries, a surface, a variant, an outcome, a table's seats. The access
+log stops at the socket a session opens, so this is the only way what
+rode it reaches the model whose tape is painted on the glasshouse walls.
+Lanes are keyed by the **room**, which is why this source needed no
+lane-keying decision: a room's evening already is a sequence. A room's
+*size* is deliberately not in the token — it is a count, and a count in a
+vocabulary mints a token per value and crowds out the grammar.
+
+Both sources share one vocabulary, one lane table and one net: the
+grammar deja learns is of the site, not of a log file. Each bounds its
+own factors, because each producer is another process that may ship
+ahead of this one — a word deja does not know reads as `other`, and
+otel_contract pins both vocabularies against the hub's own names. An
+event name deja does not know is still an event (`hub other`), where
+stats skips it: a per-day count has no row shape for one, but a sequence
+model would have a hole where the line should have been.
+
+Unset `HUB_EVENT_LOG` and deja reads Caddy alone, exactly as before —
+which is also how #1572's bigram control gets its yardstick, the curve
+with the source and without.
 
 ## The two predictors
 

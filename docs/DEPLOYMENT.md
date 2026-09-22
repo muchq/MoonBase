@@ -28,7 +28,8 @@ and cadvisor on top. The diagram draws all of them.
 
 That matters beyond the picture, but narrowly: a call that skips caddy is in
 no *access log*, so it reaches no rollup computed from one — `/stats/v1`'s
-summary, services, agents and countries — and no deja event. It does not
+summary, services, agents and countries — and no deja event from that
+source. It does not
 follow that the work is unrecorded. one_d4 writes its own query events, the
 shipper carries them under their own partition, and `/stats/v1/one_d4/queries`
 reports them with mcpserver's calls tagged `source=mcp`. So the MCP number on
@@ -173,6 +174,7 @@ flowchart LR
   stats -->|sql| shared_postgres
 
   caddy -.->|logs| deja
+  games_hub -.->|events| deja
   caddy -.->|logs| log_shipper
   one_d4 -.->|logs| log_shipper
   games_hub -.->|logs| log_shipper

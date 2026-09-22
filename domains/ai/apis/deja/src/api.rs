@@ -88,9 +88,23 @@ impl AppState {
         })
     }
 
-    /// Scores one line, records it, and fans it out to the stream.
+    /// Scores one caddy line, records it, and fans it out to the stream.
     pub fn ingest(&self, line: &caddylog::CaddyLine) -> Arc<Event> {
         let event = self.engine.lock().expect("engine lock").ingest(line);
+        self.publish(event)
+    }
+
+    /// The same for an observation any other source made.
+    pub fn observe(&self, observation: &crate::engine::Observation) -> Arc<Event> {
+        let event = self
+            .engine
+            .lock()
+            .expect("engine lock")
+            .observe(observation);
+        self.publish(event)
+    }
+
+    fn publish(&self, event: Arc<Event>) -> Arc<Event> {
         self.metrics.record(&event);
         // No subscriber is not an error.
         let _ = self.events.send(Arc::clone(&event));

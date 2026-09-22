@@ -2,6 +2,7 @@ mod api;
 mod bigram;
 mod checkpoint;
 mod engine;
+mod hub;
 mod lanes;
 mod metrics;
 mod net;
@@ -85,6 +86,16 @@ async fn main() {
         eprintln!("error: cannot open {}: {error}", log_path.display());
         process::exit(1);
     });
+    // games_hub's domain events (#1572), the second source. Unset, deja
+    // reads the access log alone exactly as before — which is also how
+    // the bigram control gets its yardstick: the curve with and without.
+    let hub_path = env::var("HUB_EVENT_LOG").ok().map(PathBuf::from);
+    let hub_tailer = hub_path.map(|path| {
+        Tailer::new(&path, start).unwrap_or_else(|error| {
+            eprintln!("error: cannot open {}: {error}", path.display());
+            process::exit(1);
+        })
+    });
 
     let state = AppState::new(engine, AppMetrics::new());
     let checkpointer = Arc::new(Checkpointer::new(checkpoint_path));
@@ -93,6 +104,16 @@ async fn main() {
         let state = Arc::clone(&state);
         let stopping = Arc::clone(&stopping);
         move || follow(tailer, &state, &stopping, POLL)
+    });
+    // Its own thread, because a tail is blocking IO; they meet at the
+    // engine's mutex, which is where one vocabulary and one lane table
+    // make the two sources one stream.
+    let hub_reader = hub_tailer.map(|tailer| {
+        thread::spawn({
+            let state = Arc::clone(&state);
+            let stopping = Arc::clone(&stopping);
+            move || follow_hub(tailer, &state, &stopping, POLL)
+        })
     });
     tokio::spawn({
         let state = Arc::clone(&state);
@@ -119,6 +140,9 @@ async fn main() {
             event!(Level::INFO, "stopping; writing the checkpoint");
             stopping.store(true, Ordering::SeqCst);
             let _ = reader.join();
+            if let Some(hub_reader) = hub_reader {
+                let _ = hub_reader.join();
+            }
             checkpointer.save(&state);
         }
     }
@@ -138,6 +162,29 @@ fn follow(mut tailer: Tailer, state: &AppState, stopping: &AtomicBool, poll: Dur
                             state.ingest(&line);
                         }
                         Err(error) => event!(Level::WARN, %error, "skipping an unreadable line"),
+                    }
+                }
+            }
+            Err(error) => event!(Level::WARN, %error, path = %tailer.path().display(), "tail"),
+        }
+        thread::sleep(poll);
+    }
+}
+
+/// The same for games_hub's event log, whose lines are its own and not
+/// Caddy's. A line this build cannot read at all is skipped and logged;
+/// an event it does not recognise is not — `hub other` is a token, so a
+/// hub that grew an eighth event leaves no hole in the sequence.
+fn follow_hub(mut tailer: Tailer, state: &AppState, stopping: &AtomicBool, poll: Duration) {
+    while !stopping.load(Ordering::SeqCst) {
+        match tailer.poll() {
+            Ok(batch) => {
+                for line in batch {
+                    match hub::observation(&line) {
+                        Some(observation) => {
+                            state.observe(&observation);
+                        }
+                        None => event!(Level::WARN, "skipping an unreadable hub event"),
                     }
                 }
             }

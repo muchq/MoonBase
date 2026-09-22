@@ -591,20 +591,26 @@ services:
   deja:
     image: ghcr.io/muchq/deja:${DEJA_SHA:-${DEPLOY_SHA:-latest}}
     labels:
-      com.muchq.description: "Next-request predictor over Caddy's access log (Rust)"
+      com.muchq.description: "Next-request predictor over Caddy's access log and the hub's events (Rust)"
     restart: always
     logging: *default-logging
     environment:
       - PORT=8093
       - ACCESS_LOG=/var/log/caddy/access.log
+      # games_hub's domain events as a second source (#1572). The access
+      # log stops at the socket a session opens; this is what rode it.
+      # Unset, deja reads caddy alone.
+      - HUB_EVENT_LOG=/var/log/games_hub/game_events.log
       - DEJA_STATE=/var/lib/deja
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=deja
       - OTEL_RESOURCE_ATTRIBUTES=service.name=deja,service.version=${DEJA_SHA:-${DEPLOY_SHA:-latest}}
     volumes:
-      # Read-only: deja observes the live log Caddy writes and log_shipper
-      # rolls away, and writes nothing but its own checkpoint (#1150).
+      # Read-only: deja observes the live logs Caddy and games_hub write
+      # and log_shipper rolls away, and writes nothing but its own
+      # checkpoint (#1150).
       - /var/log/caddy:/var/log/caddy:ro
+      - /var/log/games_hub:/var/log/games_hub:ro
       - deja_state:/var/lib/deja
     networks:
       - app_network
