@@ -71,7 +71,9 @@ source, outcome, and cache — one_d4's own vocabulary, pinned against it
 in `otel_contract`, with a word this build does not know collapsing to
 `other` so the request still counts and the drift shows as a row; and
 `query_term_stats`, which fields, motifs, order-by motifs, and group-by
-columns queries used, all the compiler's names. Latency is not here: the
+columns queries used, all the compiler's names. That table keys on the
+entry point as well, which the read folds away — the storage keeps the
+finer grain in case a later question wants it. Latency is not here: the
 tsdb holds one_d4's query histogram (#1460).
 
 The raw lines stay in S3, so a better classifier is a re-aggregation,
@@ -142,7 +144,13 @@ unbounded — which is one query over the raw partitions in S3, keeping
 - `GET /stats/v1/one_d4/queries?days=30` — one_d4 queries per
   day/entry/source/outcome/cache
 - `GET /stats/v1/one_d4/terms?days=30&limit=200` — which fields, motifs,
-  and group-by terms queries used, busiest first
+  and group-by terms queries used, busiest first, with `total` saying how
+  many there were before the limit — both from one statement, so the count
+  describes the row list it arrives with rather than a set the loop may
+  have added to in between. Not per entry point: `query` and `aggregate`
+  are two doors onto one language, and the fold happens in the query
+  rather than in a reader so that the limit cuts between whole totals. Folding after a per-entry cut would drop one half of a term
+  used at both and rank the other half as though it were the whole.
 - `GET /stats/v1/games_hub/events?days=30` — the hub's funnel per day:
   rooms made and closed, joins, reshapes, messages, tables dealt and games
   ended. One row per event shape, and the columns are the event's own
@@ -159,6 +167,15 @@ unbounded — which is one query over the raw partitions in S3, keeping
   bounded by its own event. A `players` of **-1** is a count past that
   bound: not a count, and not to be summed or averaged with its
   neighbours.
+
+  The table bound is the engine's four seats, pinned against
+  `golf_hub.cc` in `otel_contract` so raising one raises the other. The
+  room bound of 16 is **this reader's alone** — nothing caps a room, and
+  a room hosting several tables plus its chat and its world holds more
+  than a table does. It is a ceiling on how many rows one room shape may
+  mint, not a fact about the hub, so a room of 17 reading -1 is the
+  aggregate declining to grow rather than the hub misbehaving. Give the
+  hub a real room cap and this becomes a pin like the other.
 
   The room is on every line in S3 and on no row here. An aggregate keyed
   by it would be one row per room per day forever; the questions it
