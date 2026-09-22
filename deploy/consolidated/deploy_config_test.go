@@ -20,7 +20,9 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -2385,6 +2387,83 @@ func TestGamesHubEventsAreRolledWhereTheShipperReads(t *testing.T) {
 	if !strings.Contains(strings.Join(shipper, "\n"), "games_hub=/var/log/games_hub") {
 		t.Errorf("log_shipper's LOG_DIRS does not name games_hub=/var/log/games_hub; the "+
 			"rolls pile up on the host unshipped. Lines were:\n%s", strings.Join(shipper, "\n"))
+	}
+}
+
+// deja tails what it observes and writes nothing but its own checkpoint
+// (#1150), so every log it reads is mounted read-only — and the two are
+// derived from its own env rather than listed here, so a third source
+// added there is covered the day it exists. A writable mount on the
+// observer would let a bug in it corrupt the log a live service is
+// appending to and the shipper is about to upload.
+func TestEveryLogDejaReadsIsMountedReadOnly(t *testing.T) {
+	lines := activeServiceLines(t, "compose.yaml", "deja")
+	// Any *_LOG variable, not a list of the two that exist: an allowlist
+	// would pass a third source by not recognising it.
+	paths := regexp.MustCompile(`^- \w*_LOG=(\S+)$`)
+	var dirs []string
+	for _, line := range lines {
+		if match := paths.FindStringSubmatch(line); match != nil {
+			dirs = append(dirs, path.Dir(match[1]))
+		}
+	}
+	if len(dirs) < 2 {
+		t.Fatalf("deja names %d log(s) in its env; #1572 gave it caddy's and the hub's. "+
+			"Lines were:\n%s", len(dirs), strings.Join(lines, "\n"))
+	}
+	// DEJA_STATE is a directory deja writes, not a log it reads, and the
+	// pattern above must not have swept it in.
+	if slices.Contains(dirs, "/var/lib/deja") {
+		t.Error("the *_LOG pattern matched deja's own state directory; it is checking " +
+			"the wrong thing and would demand a read-only mount on the checkpoint")
+	}
+	for _, dir := range dirs {
+		if !hasLine(lines, "- "+dir+":"+dir+":ro") {
+			t.Errorf("deja reads a log under %s but does not bind-mount it read-only; "+
+				"unmounted it sees nothing and tails a file that never appears, and "+
+				"writable it can damage what a live service is appending to. Lines "+
+				"were:\n%s", dir, strings.Join(lines, "\n"))
+		}
+	}
+}
+
+// The hub writes its events and deja reads them, in two containers that
+// agree only through this file: event_log names the active file after the
+// logger, so the path deja tails is the hub's directory plus that name.
+func TestDejaTailsTheFileTheHubWrites(t *testing.T) {
+	hub := activeServiceLines(t, "compose.yaml", "games_hub")
+	var dir string
+	for _, line := range hub {
+		if value, ok := strings.CutPrefix(line, "GAME_EVENT_LOG_DIR: "); ok {
+			dir = value
+		}
+	}
+	if dir == "" {
+		t.Fatal("games_hub sets no GAME_EVENT_LOG_DIR; there is nothing for deja to tail")
+	}
+	// The name and the suffix are the hub's, read where they are declared:
+	// hardcoding "game_events.log" here would compare two constants
+	// nobody owns and pass while the hub wrote something else.
+	main, err := os.ReadFile("../../domains/games/apis/games_hub/games_hub_main.cc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened := regexp.MustCompile(`EventLog::Open\(event_dir, "(\w+)"\)`).FindSubmatch(main)
+	if opened == nil {
+		t.Fatal("no EventLog::Open in games_hub_main.cc; if it moved, follow it here")
+	}
+	logCc, err := os.ReadFile("../../domains/platform/libs/event_log/event_log.cc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := regexp.MustCompile(`constexpr char kSuffix\[\] = "([^"]+)"`).FindSubmatch(logCc)
+	if suffix == nil {
+		t.Fatal("no kSuffix in event_log.cc; if it moved, follow it here")
+	}
+	want := "- HUB_EVENT_LOG=" + path.Join(dir, string(opened[1])+string(suffix[1]))
+	if !hasLine(activeServiceLines(t, "compose.yaml", "deja"), want) {
+		t.Errorf("deja does not tail %q; it would follow a path nothing writes and "+
+			"report a stream that never moves", want)
 	}
 }
 

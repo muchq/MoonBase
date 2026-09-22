@@ -3,6 +3,10 @@ load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
+# Read as text by //domains/platform/libs/otel_contract, which pins the
+# games_hub vocabulary hub.rs bounds against the hub's own names.
+exports_files(["src/hub.rs"])
+
 rust_binary(
     name = "deja",
     srcs = [
@@ -10,6 +14,7 @@ rust_binary(
         "src/bigram.rs",
         "src/checkpoint.rs",
         "src/engine.rs",
+        "src/hub.rs",
         "src/lanes.rs",
         "src/main.rs",
         "src/metrics.rs",

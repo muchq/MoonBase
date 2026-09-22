@@ -1,21 +1,63 @@
 # deja
 
-Phase 3 of #1150: a next-request predictor over Caddy's access log that
-learns online and shows its work. It tails the live log, turns each
-request into one token from caddylog's bounded vocabulary
-(`site method route status agent_class[ probe]`), predicts the next token
-for that client with two predictors, scores the actual request as
-surprise (`-ln p`) under each, and judges it against an exponentially
-weighted baseline: `warmup` for the first 1000 scored requests, then
-`expected` or `anomaly` at three deviations, and `novel` for a token's
-first sight, which stays out of the baseline. Then both predictors learn
-the request and move on. Read-only observer: nothing here touches Caddy,
-and the only thing written is the checkpoint.
+Phase 3 of #1150: a next-event predictor over the site's logs that learns
+online and shows its work. It tails them live, turns each event into one
+token from a bounded vocabulary, predicts the next token for that lane
+with two predictors, scores the actual event as surprise (`-ln p`) under
+each, and judges it against an exponentially weighted baseline: `warmup`
+for the first 1000 scored events, then `expected` or `anomaly` at three
+deviations, and `novel` for a token's first sight, which stays out of the
+baseline. Then both predictors learn the event and move on. Read-only
+observer: nothing here touches what it reads, and the only thing written
+is the checkpoint.
+
+## The two sources
+
+**Caddy's access log**, every public request: one token of caddylog's
+vocabulary, `site method route status agent_class[ probe]`, lanes keyed
+by the client's address.
+
+**games_hub's domain events** (#1572, `HUB_EVENT_LOG`): one token per
+thing that happened in a room — `hub <event>` plus the words that event
+carries, a surface, a variant, an outcome, a table's seats. The access
+log stops at the socket a session opens, so this is the only way what
+rode it reaches the model whose tape is painted on the glasshouse walls.
+Lanes are keyed by the **room**, which is why this source needed no
+lane-keying decision: a room's evening already is a sequence. The one
+exception is the hub's own: `geometry_changed` names the world it
+reshaped, and a player in no room is in the plaza, so `hub:plaza` is one
+lane of every lobby reshape by everybody. Kept rather than dropped — the
+plaza is a single shared world, and which shapes people reach for in it
+is a real question — but it is the one lane here that is not a session. A room's
+*size* is deliberately not in the token — it is a count, and a count in a
+vocabulary mints a token per value and crowds out the grammar.
+
+Both sources share one vocabulary, one net and one baseline, and one
+lane table with a share each: the grammar deja learns is of the site, not of a log file.
+Each bounds its own factors, because each producer is another process
+that may ship ahead of this one — a word the hub source does not know
+reads as `other`, and otel_contract pins its four vocabularies and its
+JSON field names against the hub's own. An event name deja does not know
+is still an event (`hub other`), where stats skips it: a per-day count
+has no row shape for one, but a sequence model would have a hole where
+the line should have been.
+
+Unset `HUB_EVENT_LOG` and deja reads Caddy alone: no tailer, no thread,
+and the caddy path is byte-for-byte what it was. That switches the
+source **off**, which is not the same as never having had it. The
+learned state in the checkpoint is not reversible — the bigram evicts
+its rarest successor when a row reaches 64 and subtracts its count, so
+hub tokens entering the `<bos>` row cost caddy counts that do not come
+back, and the net's weights and the vocabulary are one-way too. To
+compare deja with the source and without, wipe `deja_state` between the
+two runs; turning the variable off does not do it.
 
 ## The two predictors
 
-**bigram**, the control: next-token counts keyed by the client's previous
-token, add-α smoothed, 64 successors per row. Cheap, transparent, and the
+**bigram**, the control: next-token counts keyed by the lane's previous
+token, add-α smoothed, 64 successors per row — so a row at 64 evicts its
+rarest successor to make room, which is what makes learned state one-way
+across sources. Cheap, transparent, and the
 yardstick the net is measured against.
 
 **net**: a window MLP in candle, CPU, f32. The lane's last eight tokens,
@@ -72,16 +114,23 @@ The net never guesses `<bos>`.
 
 | Variable | Meaning |
 | --- | --- |
-| `ACCESS_LOG` | The live log, default `/var/log/caddy/access.log` |
+| `ACCESS_LOG` | Caddy's live log, default `/var/log/caddy/access.log` |
+| `HUB_EVENT_LOG` | games_hub's live event log; unset, that source is off. A path that is a directory is refused at boot rather than tailed, since a directory opens and seeks like a file and fails every read |
 | `DEJA_STATE` | The directory the checkpoint lives in, default `/var/lib/deja`; written every `CHECKPOINT_INTERVAL_SECS` (default 600, at least 1) and on SIGTERM |
 | `PORT` | Listen port |
 
-With no checkpoint the current log is learned from its top; with one, only
-what is written from then on, so lines written while the process was down
-are not learned. A checkpoint that will not parse is moved aside to
+With no checkpoint every log is learned from its top; with one, only what
+is written from then on, so lines written while the process was down are
+not learned. A checkpoint that will not parse is moved aside to
 `checkpoint.json.corrupt` and the process starts fresh. Client addresses
-live only in the lane table in memory, bounded at 4096 clients, and never
-leave it.
+and room ids live only in the lane table in memory and never leave it.
+Its bound is **per source** — 4096 lanes for caddy, 512 for the hub —
+and a source at its share evicts its own idle longest and nobody else's.
+One shared quota would let caddy's churn take the lane of any room quiet
+for longer than the rest of the stream needs to touch every slot, which
+is every gap a room's evening is made of; the room would come back with
+an empty window and the sequence this source exists to model would never
+form.
 
 The checkpoint is one JSON file: sequence, vocabulary, bigram counts,
 both baselines, and the net's weights as base64 safetensors under `net`,

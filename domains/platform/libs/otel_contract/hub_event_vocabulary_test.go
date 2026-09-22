@@ -29,6 +29,7 @@ const (
 	hubHostedGameH  = "../../../games/apis/games_hub/hosted_game.h"
 	hubGolfHubCc    = "../../../games/apis/games_hub/golf_hub.cc"
 	statsGames      = "../../apis/stats/games.go"
+	dejaHub         = "../../../ai/apis/deja/src/hub.rs"
 )
 
 // The quoted values of `inline constexpr std::string_view <prefix>… = "…"`.
@@ -196,4 +197,105 @@ func TestTheRoomCeilingIsTheReadersAlone(t *testing.T) {
 	assert.NotRegexp(t, `kMaxMembers|kMaxRoomSize`, string(hub),
 		"the hub grew a room cap; hubMaxMembers should be pinned to it rather than "+
 			"documented as a reader-side ceiling")
+}
+
+// deja reads the same lines as a second source (#1572), and bounds the
+// same four vocabularies itself — it is another process again, and a word
+// it does not know becomes a token rather than a grammar the hub can grow
+// behind its back. Same pin, third language.
+func TestHubEventVocabularyAgreesWithDeja(t *testing.T) {
+	header, err := os.ReadFile(hubEventsHeader)
+	require.NoError(t, err)
+	surface, err := os.ReadFile(hubSurfaceH)
+	require.NoError(t, err)
+	hosted, err := os.ReadFile(hubHostedGameH)
+	require.NoError(t, err)
+	reader, err := os.ReadFile(dejaHub)
+	require.NoError(t, err)
+
+	// const NAME: [&str; N] = ["a", "b"];
+	rustWords := func(name string) []string {
+		block := regexp.MustCompile(`(?s)const ` + name + `: \[&str; \d+\] = \[(.*?)\];`).
+			FindSubmatch(reader)
+		require.NotNil(t, block, "no %s in %s; if it was renamed, rename it here too", name, dejaHub)
+		var values []string
+		for _, match := range regexp.MustCompile(`"([^"]+)"`).FindAllSubmatch(block[1], -1) {
+			values = append(values, string(match[1]))
+		}
+		require.NotEmpty(t, values, "parsed an empty %s out of %s", name, dejaHub)
+		sort.Strings(values)
+		return values
+	}
+
+	assert.Equal(t, cppConstants(t, header, "kEvent"), rustWords("EVENTS"),
+		"an event the hub can write that deja would read as \"other\"")
+	assert.Equal(t, cppConstants(t, header, "kOutcome"), rustWords("OUTCOMES"),
+		"an ending the hub can write that deja would read as \"other\"")
+
+	var surfaces []string
+	for _, match := range regexp.MustCompile(`return "([a-z_]+)";`).FindAllSubmatch(
+		surfaceKindNameBody(t, surface), -1) {
+		surfaces = append(surfaces, string(match[1]))
+	}
+	sort.Strings(surfaces)
+	assert.Equal(t, surfaces, rustWords("SURFACES"),
+		"a shape a room can be that deja would read as \"other\"")
+
+	kindName := regexp.MustCompile(`(?s)GameKindName\(GameKind kind\) \{(.*?)\n\}`).
+		FindSubmatch(hosted)
+	require.NotNil(t, kindName, "no GameKindName in %s", hubHostedGameH)
+	var kinds []string
+	for _, match := range regexp.MustCompile(`"([a-z_]+)"`).FindAllSubmatch(kindName[1], -1) {
+		kinds = append(kinds, string(match[1]))
+	}
+	sort.Strings(kinds)
+	assert.Equal(t, kinds, rustWords("VARIANTS"),
+		"a game the hub can host that deja would read as \"other\"")
+}
+
+// The field names are the sharper pin for deja too, and sharper still
+// than they are for stats: `ts`, `event` and `room` carry no serde
+// default, so renaming one in game_events.cc fails every parse and the
+// whole source goes dead behind a warning per line. The rest default, so
+// a rename there collapses an event class to "other" forever. Neither is
+// caught by the stats pin when the C++ and the Go reader are renamed
+// together, which is the realistic way it happens.
+func TestHubEventFieldNamesAgreeBetweenGamesHubAndDeja(t *testing.T) {
+	writer, err := os.ReadFile(hubEventsCc)
+	require.NoError(t, err)
+	reader, err := os.ReadFile(dejaHub)
+	require.NoError(t, err)
+
+	read := map[string]bool{}
+	line := regexp.MustCompile(`(?s)struct HubLine \{(.*?)\n\}`).FindSubmatch(reader)
+	require.NotNil(t, line, "no HubLine in %s", dejaHub)
+	for _, match := range regexp.MustCompile(`(?m)^\s+(\w+): `).FindAllSubmatch(line[1], -1) {
+		read[string(match[1])] = true
+	}
+	require.NotEmpty(t, read, "parsed no fields out of HubLine")
+
+	for _, match := range regexp.MustCompile(`"(\w+)":`).FindAllSubmatch(writer, -1) {
+		key := string(match[1])
+		assert.True(t, read[key],
+			"games_hub writes %q and deja's HubLine has no field for it: the column "+
+				"arrives as a zero, or the whole line fails to parse and the source "+
+				"goes quiet", key)
+	}
+}
+
+// deja calls a table's seats a word, bounded by what the engine deals, so
+// the same drift that would make stats say -1 would make deja mint a
+// token per size instead.
+func TestTheTableCapAgreesBetweenGamesHubAndDeja(t *testing.T) {
+	hub, err := os.ReadFile(hubGolfHubCc)
+	require.NoError(t, err)
+	reader, err := os.ReadFile(dejaHub)
+	require.NoError(t, err)
+
+	seats := regexp.MustCompile(`constexpr std::size_t kMaxSeats = (\d+);`).FindSubmatch(hub)
+	require.NotNil(t, seats, "no kMaxSeats in %s", hubGolfHubCc)
+	bound := regexp.MustCompile(`const MAX_SEATS: i64 = (\d+);`).FindSubmatch(reader)
+	require.NotNil(t, bound, "no MAX_SEATS in %s", dejaHub)
+	assert.Equal(t, string(seats[1]), string(bound[1]),
+		"the hub seats a table differently than deja will name one")
 }

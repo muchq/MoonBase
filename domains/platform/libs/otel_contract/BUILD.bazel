@@ -23,6 +23,7 @@ go_test(
     # named-constant declarations are pinned this way; label sets and units
     # are pinned per rail against real exported payloads instead.
     data = [
+        "//domains/ai/apis/deja:src/hub.rs",
         "//domains/games/apis/games_hub:game_events.cc",
         "//domains/games/apis/games_hub:game_events.h",
         "//domains/games/apis/games_hub:golf_hub.cc",

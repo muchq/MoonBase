@@ -8,11 +8,26 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     bigram::Bigram,
-    lanes::{DEFAULT_LANES, Lanes, WINDOW},
+    lanes::{DEFAULT_LANES, Lanes, Source, WINDOW},
     net::{DEFAULT_SEED, Net},
     score::{Scorer, Verdict, WARMUP},
     token::{BOS, DEFAULT_CAP, Vocab, token_text},
 };
+
+/// What a source hands the engine: this event's bounded token, the lane
+/// whose sequence it belongs to, and when it happened. The engine knows
+/// nothing else about where an event came from — producing these three
+/// from a line is a source's whole job, and bounding the token is its
+/// whole responsibility.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Observation {
+    pub token: String,
+    /// Which stream this came from: lanes are shared but their shares
+    /// are not, so a busy source cannot evict a quiet one's sequence.
+    pub source: Source,
+    pub lane_key: String,
+    pub ts: f64,
+}
 
 /// How many past events `recent` can hand back.
 pub const RING: usize = 200;
@@ -236,9 +251,22 @@ impl Engine {
     /// judged, and stays out of both baselines: its surprise says nothing
     /// about the sequence, only about the vocabulary. The bigram's scorer
     /// decides the verdict; the net's only keeps its own baseline.
+    /// One caddy line in, one event out.
     pub fn ingest(&mut self, line: &CaddyLine) -> Arc<Event> {
-        let (token, novel) = self.vocab.intern(&token_text(line));
-        let lane = self.lanes.touch(line.client_ip());
+        self.observe(&Observation {
+            token: token_text(line),
+            source: Source::Caddy,
+            lane_key: line.client_ip().to_string(),
+            ts: line.ts,
+        })
+    }
+
+    /// One observation in, one event out, whichever source made it. Every
+    /// source shares one vocabulary, one lane table and one net: the
+    /// grammar deja learns is of the site, not of a log file.
+    pub fn observe(&mut self, observation: &Observation) -> Arc<Event> {
+        let (token, novel) = self.vocab.intern(&observation.token);
+        let lane = self.lanes.touch(observation.source, &observation.lane_key);
         let window: Vec<u16> = self.lanes.window(lane).iter().copied().collect();
         let prev = window.last().copied().unwrap_or(BOS);
         let context = window
@@ -288,7 +316,7 @@ impl Engine {
 
         let event = Arc::new(Event {
             seq: self.seq,
-            ts: line.ts,
+            ts: observation.ts,
             lane,
             step,
             context,

@@ -15,6 +15,11 @@ go_test(
         "Caddyfile",
         "Caddyfile.local",
         "compose.yaml",
+        # TestDejaTailsTheFileTheHubWrites reads the logger name the hub
+        # opens and the suffix event_log gives it, rather than spelling
+        # the filename it expects deja to tail.
+        "//domains/games/apis/games_hub:games_hub_main.cc",
+        "//domains/platform/libs/event_log:event_log.cc",
         # TestOneD4KnowsTheUiOriginCaddyGrants ties the CORS origin to the one one_d4 reads,
         # and TestStatsKnowsEveryUiOriginCaddyGrants ties every grant to stats'.
         # TestStatsNamesTheServiceEveryCaddyfileMatcherProxiesTo reads service.go

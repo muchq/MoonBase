@@ -9,7 +9,7 @@ Artificial Intelligence and Machine Learning libraries and services.
 
 ## APIs
 
-- [**deja**](apis/deja): Next-request predictor over Caddy's access log. Tails the live log, scores each request against what the client's history predicted — a smoothed bigram as the control and a small candle MLP beside it, both learning online — and streams the tape (#1150).
+- [**deja**](apis/deja): Next-event predictor over Caddy's access log and the hub's events. Tails the live log, scores each request against what the client's history predicted — a smoothed bigram as the control and a small candle MLP beside it, both learning online — and streams the tape (#1150).
 - [**microgpt-serve**](apis/microgpt_serve): HTTP inference service for microgpt. Loads a trained checkpoint and serves generation requests via a JSON API, built on server_pal.
 
 ## Libraries
