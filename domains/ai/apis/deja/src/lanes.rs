@@ -15,8 +15,9 @@ use std::collections::{HashMap, VecDeque};
 pub const WINDOW: usize = 8;
 /// Caddy's share: every client the site sees between evictions.
 pub const DEFAULT_LANES: usize = 4096;
-/// The hub's, far above the rooms it can have open at once — a room is a
-/// handful of people and there are not thousands of them.
+/// The hub's. Not a count of open rooms: like caddy's, it is an LRU over
+/// the keys touched, so a room that closed holds its slot until 512 more
+/// rooms have been seen. Sized so an evening's rooms all keep theirs.
 pub const HUB_LANES: usize = 512;
 
 /// Which stream a lane belongs to, and how many lanes that stream gets.
