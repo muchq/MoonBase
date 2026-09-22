@@ -111,7 +111,6 @@ impl AppState {
         score: impl FnOnce(&mut Engine) -> Arc<Event>,
     ) -> Arc<Event> {
         let event = score(&mut engine);
-        drop(engine);
         self.metrics.record(&event);
         // No subscriber is not an error.
         let _ = self.events.send(Arc::clone(&event));
@@ -290,6 +289,47 @@ mod tests {
         Router::new()
             .route(STREAM_PATH, get(get_stream))
             .with_state(state)
+    }
+
+    // Two sources on two threads, both publishing as fast as they can.
+    // Scoring assigns `seq` under the lock, and the stream's `id` is what
+    // a reconnecting page resumes `recent?after=` from — so the send has
+    // to happen under the same hold, or the thread that got the later
+    // seq can send first and the page re-renders one event or drops
+    // another. Dropping the guard before the send fails this.
+    #[test]
+    fn the_stream_delivers_seq_in_order_under_two_sources() {
+        use crate::engine::Observation;
+
+        let state = fresh();
+        let mut stream = state.events.subscribe();
+        // Under the channel's backlog, so a lagged receiver cannot be
+        // what drops an event and hide the ordering this is about.
+        let sources = 2;
+        let each = STREAM_BACKLOG / 4;
+        std::thread::scope(|scope| {
+            for source in 0..sources {
+                let state = Arc::clone(&state);
+                scope.spawn(move || {
+                    for n in 0..each {
+                        state.observe(&Observation {
+                            token: format!("s{source} t{}", n % 4),
+                            lane_key: format!("s{source}"),
+                            ts: 0.0,
+                        });
+                    }
+                });
+            }
+        });
+
+        let mut seen = Vec::with_capacity(sources * each);
+        while let Ok(event) = stream.try_recv() {
+            seen.push(event.seq);
+        }
+        assert_eq!(seen.len(), sources * each, "every event reached the stream");
+        let mut ordered = seen.clone();
+        ordered.sort_unstable();
+        assert_eq!(seen, ordered, "the stream delivered seq out of order");
     }
 
     /// An engine whose net starts from a fixed point rather than the
