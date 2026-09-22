@@ -76,10 +76,14 @@ cc_test(
 )
 
 # Read as text by //domains/platform/libs/otel_contract, which pins this
-# vocabulary against the stats pipeline's reader.
+# vocabulary against the stats pipeline's reader: the event names and
+# outcomes in the header, the JSON keys the line builders format, the
+# game and surface spellings, and golf_hub's seat cap against the bound
+# the reader counts a table by.
 exports_files([
     "game_events.cc",
     "game_events.h",
+    "golf_hub.cc",
     "hosted_game.h",
     "surface.h",
 ])

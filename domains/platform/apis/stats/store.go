@@ -617,9 +617,10 @@ type QueryRow struct {
 }
 
 // TermRow is one field, motif, order-by motif, or group-by term and how
-// many queries of that entry used it over the window.
+// many queries used it over the window. Not per entry point: `query` and
+// `aggregate` are two doors onto one language, and which door a field was
+// asked through is not what these rows are for.
 type TermRow struct {
-	Entry    string `json:"entry"`
 	Kind     string `json:"kind"`
 	Term     string `json:"term"`
 	Requests int64  `json:"requests"`
@@ -680,25 +681,41 @@ func (s *Store) HubEvents(ctx context.Context, days int) ([]HubEventRow, error) 
 	return out, err
 }
 
-func (s *Store) QueryTerms(ctx context.Context, days, limit int) ([]TermRow, error) {
+// QueryTerms returns the busiest terms over the window and how many there
+// were before the limit. The fold across entry points happens here rather
+// than in a reader, which is what makes the limit safe to cut on: every
+// total it returns is that term's whole total, so the busiest rows arrive
+// complete and the rest are dropped whole. Folding after a per-entry cut
+// would instead drop one half of a split term and rank the other half as
+// though it were the whole.
+func (s *Store) QueryTerms(ctx context.Context, days, limit int) ([]TermRow, int, error) {
+	var total int
+	if err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM (
+		   SELECT 1 FROM query_term_stats
+		   WHERE dt >= current_date - $1::int
+		   GROUP BY kind, term
+		 ) folded`, days).Scan(&total); err != nil {
+		return nil, 0, err
+	}
 	rows, err := s.pool.Query(ctx,
-		`SELECT entry, kind, term, SUM(requests) AS requests
+		`SELECT kind, term, SUM(requests) AS requests
 		 FROM query_term_stats
 		 WHERE dt >= current_date - $1::int
-		 GROUP BY entry, kind, term
-		 ORDER BY requests DESC, entry, kind, term
+		 GROUP BY kind, term
+		 ORDER BY requests DESC, kind, term
 		 LIMIT $2`, days, limit)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var out []TermRow
 	var row TermRow
-	_, err = pgx.ForEachRow(rows, []any{&row.Entry, &row.Kind, &row.Term, &row.Requests},
+	_, err = pgx.ForEachRow(rows, []any{&row.Kind, &row.Term, &row.Requests},
 		func() error {
 			out = append(out, row)
 			return nil
 		})
-	return out, err
+	return out, total, err
 }
 
 // CountryRow is one host's traffic of one class from one country over the

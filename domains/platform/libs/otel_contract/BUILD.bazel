@@ -23,7 +23,9 @@ go_test(
     # named-constant declarations are pinned this way; label sets and units
     # are pinned per rail against real exported payloads instead.
     data = [
+        "//domains/games/apis/games_hub:game_events.cc",
         "//domains/games/apis/games_hub:game_events.h",
+        "//domains/games/apis/games_hub:golf_hub.cc",
         "//domains/games/apis/games_hub:hosted_game.h",
         "//domains/games/apis/games_hub:surface.h",
         "//domains/games/apis/one_d4:src/main/java/com/muchq/games/one_d4/api/QueryEvent.java",

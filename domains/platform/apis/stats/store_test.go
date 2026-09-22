@@ -74,9 +74,25 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	// The query rollup has no host; the store applies any entry, so this run's
 	// unique host serves as one and keeps the rows tellable and the counts exact.
 	rollup.Queries[QueryKey{date, host, "ui", "ok", "live"}] = 2
-	rollup.Terms[TermKey{date, host, KindField, "white.elo"}] = 2
+	rollup.Terms[TermKey{date, host, KindField, host}] = 2
 	rollup.Countries[GeoKey{date, host, AgentBot, "GB"}] = GeoStat{5, 1, 4}
 	rollup.Countries[GeoKey{date, host, AgentBot, "--"}] = GeoStat{2, 0, 0}
+	// Two hub rows that differ only in players, and two that differ only
+	// in outcome: both are in the primary key, so the upsert has to keep
+	// all four apart rather than folding them into one row.
+	hub := func(event, outcome string, players int) HubEventKey {
+		return HubEventKey{
+			Date: date, Event: event, Variant: host, Surface: "plane",
+			Outcome: outcome, Players: players,
+		}
+	}
+	rollup.HubEvents[hub("game_started", "", 2)] = 6
+	rollup.HubEvents[hub("game_started", "", 4)] = 1
+	rollup.HubEvents[hub("game_finished", "completed", 2)] = 4
+	rollup.HubEvents[hub("game_finished", "abandoned", 1)] = 3
+	// And the over-cap sentinel, which is a row like any other here: the
+	// store has no opinion about it, and a round trip must not clamp it.
+	rollup.HubEvents[hub("game_started", "", playersOverCap)] = 2
 
 	if pending, err := store.Unprocessed(ctx, []string{key}); err != nil || len(pending) != 1 {
 		t.Fatalf("Unprocessed = (%v, %v), want the fresh key pending", pending, err)
@@ -217,13 +233,27 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	if row := termRowFor(t, store, host); row == nil || row.Requests != 2 || row.Kind != KindField {
 		t.Errorf("term row = %+v, want exactly the 2 applied once", row)
 	}
+	// Five rows, each its own: two game_started sizes, two outcomes, and
+	// the over-cap sentinel unclamped. Read back ordered by the query's
+	// own ORDER BY, which puts players ascending within an event.
+	if got := hubRowsFor(t, store, host); len(got) != 5 ||
+		got[0] != (HubEventRow{date, "game_finished", host, "plane", "abandoned", 1, 3}) ||
+		got[1] != (HubEventRow{date, "game_finished", host, "plane", "completed", 2, 4}) ||
+		got[2] != (HubEventRow{date, "game_started", host, "plane", "", playersOverCap, 2}) ||
+		got[3] != (HubEventRow{date, "game_started", host, "plane", "", 2, 6}) ||
+		got[4] != (HubEventRow{date, "game_started", host, "plane", "", 4, 1}) {
+		t.Errorf("hub rows = %+v, want the five applied once and kept apart", got)
+	}
 
 	// A second object sharing the keys accumulates: that is the production path, one
 	// hourly roll after another into the same day's rows.
 	second := NewRollup()
 	second.Queries[QueryKey{date, host, "ui", "ok", "live"}] = 3
-	second.Terms[TermKey{date, host, KindField, "white.elo"}] = 1
+	second.Terms[TermKey{date, host, KindField, host}] = 1
 	second.Countries[GeoKey{date, host, AgentBot, "GB"}] = GeoStat{1, 1, 0}
+	second.HubEvents[HubEventKey{
+		Date: date, Event: "game_started", Variant: host, Surface: "plane", Players: 2,
+	}] = 5
 	if err := store.ApplyRollup(ctx, key+".second", second); err != nil {
 		t.Fatal(err)
 	}
@@ -235,6 +265,14 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	}
 	if row := termRowFor(t, store, host); row == nil || row.Requests != 3 {
 		t.Errorf("term row after a second object = %+v, want 3", row)
+	}
+	// The second hour's six two-seat tables land on the first hour's row;
+	// the other four are untouched, so the upsert added rather than
+	// replaced and it added to the right row.
+	if got := hubRowsFor(t, store, host); len(got) != 5 ||
+		got[3] != (HubEventRow{date, "game_started", host, "plane", "", 2, 11}) ||
+		got[4] != (HubEventRow{date, "game_started", host, "plane", "", 4, 1}) {
+		t.Errorf("hub rows after a second object = %+v, want 6 + 5 on the two-seat row alone", got)
 	}
 }
 
@@ -266,18 +304,84 @@ func queryRowFor(t *testing.T, store *Store, entry string) *QueryRow {
 	return nil
 }
 
-func termRowFor(t *testing.T, store *Store, entry string) *TermRow {
+// hub_event_stats has no host column — the hub's events are not per
+// vhost — so a run tells its rows apart by putting its unique word in
+// the variant. ApplyRollup stores what it is given; the vocabulary is
+// ConsumeGameEvents' business, not the store's.
+func hubRowsFor(t *testing.T, store *Store, variant string) []HubEventRow {
 	t.Helper()
-	rows, err := store.QueryTerms(context.Background(), 2, 1000)
+	rows, err := store.HubEvents(context.Background(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mine []HubEventRow
+	for _, row := range rows {
+		if row.Variant == variant {
+			mine = append(mine, row)
+		}
+	}
+	return mine
+}
+
+func termRowFor(t *testing.T, store *Store, term string) *TermRow {
+	t.Helper()
+	rows, _, err := store.QueryTerms(context.Background(), 2, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := range rows {
-		if rows[i].Entry == entry {
+		if rows[i].Term == term {
 			return &rows[i]
 		}
 	}
 	return nil
+}
+
+// A term is one term whichever entry point asked for it: the question
+// these rows answer is which parts of the query language get used, and
+// `query` and `aggregate` are two doors onto the same language. Folding
+// in SQL rather than in the reader is what makes the limit honest — cut
+// after the fold and every total that survives is complete, where cutting
+// per entry could drop half of a term and leave the other half ranked as
+// if that were all of it.
+func TestQueryTermsFoldEntryPointsBeforeTheLimit(t *testing.T) {
+	store := testStore(t)
+	ctx := context.Background()
+	date, host, key := uniqueFixture(t)
+
+	rollup := NewRollup()
+	// One term at both entry points, and two more at one each. Ordered so
+	// that the folded term outranks them only once its halves are summed.
+	rollup.Terms[TermKey{date, "query", KindField, host + "-shared"}] = 4
+	rollup.Terms[TermKey{date, "aggregate", KindField, host + "-shared"}] = 3
+	rollup.Terms[TermKey{date, "query", KindField, host + "-solo"}] = 5
+	rollup.Terms[TermKey{date, "query", KindMotif, host + "-motif"}] = 1
+	if err := store.ApplyRollup(ctx, key, rollup); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, total, err := store.QueryTerms(ctx, 2, 1000)
+	require.NoError(t, err)
+	mine := map[string]int64{}
+	for _, row := range rows {
+		if strings.HasPrefix(row.Term, host) {
+			mine[row.Term] = row.Requests
+		}
+	}
+	assert.Equal(t, map[string]int64{
+		host + "-shared": 7, host + "-solo": 5, host + "-motif": 1,
+	}, mine, "the two entry points' halves of one term should arrive summed")
+	assert.GreaterOrEqual(t, total, 3, "total should count the folded rows there were")
+
+	// Truncated, the fold is what makes the cut land between whole terms:
+	// the shared term's 7 outranks the solo 5, which it would not have
+	// before folding.
+	top, total, err := store.QueryTerms(ctx, 2, 1)
+	require.NoError(t, err)
+	require.Len(t, top, 1)
+	assert.Greater(t, total, 1, "a truncated read should say how many rows there were")
+	assert.GreaterOrEqual(t, top[0].Requests, int64(7),
+		"the busiest row should be a complete total, not one entry point's share")
 }
 
 func TestAgentsHonoursTheLimitBusiestFirst(t *testing.T) {
@@ -770,8 +874,11 @@ func TestAVersionBumpDropsAggregatesAndMarkersForReaggregation(t *testing.T) {
 	rollup.Slugs[SlugKey{date, host + "-slug", 302}] = 1
 	rollup.Probes[ProbeKey{Date: date, Host: host, Route: OtherRoute, Probe: ProbeGit, Status: 404}] = 1
 	rollup.Queries[QueryKey{date, host, "ui", "ok", "live"}] = 1
-	rollup.Terms[TermKey{date, host, KindField, "eco"}] = 1
+	rollup.Terms[TermKey{date, host, KindField, host}] = 1
 	rollup.Countries[GeoKey{date, host, AgentBot, "GB"}] = GeoStat{1, 0, 0}
+	rollup.HubEvents[HubEventKey{
+		Date: date, Event: "room_created", Variant: host, Surface: "plane",
+	}] = 1
 	if err := store.ApplyRollup(ctx, key, rollup); err != nil {
 		t.Fatal(err)
 	}
@@ -836,6 +943,11 @@ func TestAVersionBumpDropsAggregatesAndMarkersForReaggregation(t *testing.T) {
 	}
 	if row := countryRowFor(t, reopened, host, "GB"); row != nil {
 		t.Errorf("geo aggregates survived the version bump: %+v", row)
+	}
+	// The games_hub table is in rollupTables like the rest, which is what
+	// makes a new source's backfill free: editing this schema re-reads S3.
+	if rows := hubRowsFor(t, reopened, host); rows != nil {
+		t.Errorf("hub aggregates survived the version bump: %+v", rows)
 	}
 	var recorded string
 	if err := reopened.pool.QueryRow(ctx,

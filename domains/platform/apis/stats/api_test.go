@@ -22,6 +22,7 @@ type fakeReader struct {
 	queries      []QueryRow
 	hubEvents    []HubEventRow
 	terms        []TermRow
+	termTotal    int
 	countries    []CountryRow
 	lastDays     int
 	lastLimit    int
@@ -84,12 +85,12 @@ func (f *fakeReader) HubEvents(_ context.Context, days int) ([]HubEventRow, erro
 	return f.hubEvents, nil
 }
 
-func (f *fakeReader) QueryTerms(_ context.Context, days, limit int) ([]TermRow, error) {
+func (f *fakeReader) QueryTerms(_ context.Context, days, limit int) ([]TermRow, int, error) {
 	if f.fail {
-		return nil, errors.New("db is having a day")
+		return nil, 0, errors.New("db is having a day")
 	}
 	f.lastDays, f.lastLimit = days, limit
-	return f.terms, nil
+	return f.terms, f.termTotal, nil
 }
 
 func (f *fakeReader) Countries(_ context.Context, days, limit int) ([]CountryRow, error) {
@@ -293,8 +294,9 @@ func TestAgentsAndProbesShareTheWindowRules(t *testing.T) {
 
 func TestOneD4QueryEndpointsShareTheWindowRules(t *testing.T) {
 	reader := &fakeReader{
-		queries: []QueryRow{{Date: "2026-09-01", Entry: "query", Source: "ui", Outcome: "ok", Cache: "live", Requests: 4}},
-		terms:   []TermRow{{Entry: "query", Kind: KindField, Term: "white.elo", Requests: 9}},
+		queries:   []QueryRow{{Date: "2026-09-01", Entry: "query", Source: "ui", Outcome: "ok", Cache: "live", Requests: 4}},
+		terms:     []TermRow{{Kind: KindField, Term: "white.elo", Requests: 9}},
+		termTotal: 42,
 	}
 	handlers := handlersWith(reader)
 
@@ -314,6 +316,14 @@ func TestOneD4QueryEndpointsShareTheWindowRules(t *testing.T) {
 	row = body["rows"].([]any)[0].(map[string]any)
 	if row["kind"] != "field" || row["term"] != "white.elo" {
 		t.Errorf("term row = %v", row)
+	}
+	// The count before the limit, so a reader can tell a whole window from
+	// a truncated one. The rows themselves are complete totals either way.
+	if body["total"] != float64(42) {
+		t.Errorf("terms total = %v, want the reader's 42", body["total"])
+	}
+	if row["entry"] != nil {
+		t.Errorf("term row still carries an entry: %v", row)
 	}
 	get(t, handlers.GetQueryTerms, "/stats/v1/one_d4/terms?days=99999&limit=99999")
 	if reader.lastDays != 365 || reader.lastLimit != 1000 {

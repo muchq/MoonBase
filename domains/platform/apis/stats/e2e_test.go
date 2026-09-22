@@ -330,9 +330,11 @@ func TestEndToEndFromShippedObjectsToEveryEndpoint(t *testing.T) {
 		len(rowsWhere(queries, map[string]any{"entry": "aggregate", "source": "mcp", "outcome": "ok", "cache": "none"})) != 1 {
 		t.Errorf("query rows = %v", queries)
 	}
+	// The terms read folds the entry points away, so a term asked for at
+	// both is one row here however many entries wrote it.
 	terms := getJSON(t, server, "/stats/v1/one_d4/terms?days=2&limit=1000")
-	if len(rowsWhere(terms, map[string]any{"entry": "aggregate", "kind": KindGroupBy, "term": "eco"})) != 1 ||
-		len(rowsWhere(terms, map[string]any{"entry": "query", "kind": KindMotif, "term": "fork"})) != 1 {
+	if len(rowsWhere(terms, map[string]any{"kind": KindGroupBy, "term": "eco"})) != 1 ||
+		len(rowsWhere(terms, map[string]any{"kind": KindMotif, "term": "fork"})) != 1 {
 		t.Errorf("term rows = %v", terms)
 	}
 

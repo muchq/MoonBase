@@ -20,7 +20,7 @@ type Reader interface {
 	Probes(ctx context.Context, days int) ([]ProbeRow, error)
 	Queries(ctx context.Context, days int) ([]QueryRow, error)
 	HubEvents(ctx context.Context, days int) ([]HubEventRow, error)
-	QueryTerms(ctx context.Context, days, limit int) ([]TermRow, error)
+	QueryTerms(ctx context.Context, days, limit int) ([]TermRow, int, error)
 	Countries(ctx context.Context, days, limit int) ([]CountryRow, error)
 }
 
@@ -154,12 +154,15 @@ func (h *Handlers) GetHubEvents(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) GetQueryTerms(w http.ResponseWriter, r *http.Request) {
 	days := queryInt(r, "days", 30, 365)
 	limit := queryInt(r, "limit", 200, 1000)
-	rows, err := h.reader.QueryTerms(r.Context(), days, limit)
+	rows, total, err := h.reader.QueryTerms(r.Context(), days, limit)
 	if err != nil {
 		h.serverError(w, "query terms", err)
 		return
 	}
-	writeJSON(w, map[string]any{"days": days, "rows": emptyIfNil(rows)})
+	// `total` is how many folded rows there were, so a reader can tell a
+	// window that fits from one this truncated. The rows it does return
+	// are complete totals either way — the fold happens before the limit.
+	writeJSON(w, map[string]any{"days": days, "total": total, "rows": emptyIfNil(rows)})
 }
 
 func (h *Handlers) GetCountries(w http.ResponseWriter, r *http.Request) {
