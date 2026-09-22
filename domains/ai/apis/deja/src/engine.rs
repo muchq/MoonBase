@@ -403,6 +403,39 @@ mod tests {
         request(ts, ip, "GET", "/iili/v1/r/abc", 302, BROWSER)
     }
 
+    // The lane quota is per source, and this is the seam where that can
+    // be thrown away: an `observe` that touched one source's share for
+    // every event would put rooms back in caddy's pool, where its churn
+    // evicts them. The lanes unit test cannot see that — it is handed the
+    // source directly — so the context arriving intact is what says the
+    // engine passed the right one.
+    #[test]
+    fn a_rooms_context_survives_a_caddy_storm_through_observe() {
+        // Caddy's share is two; the hub's is its own.
+        let mut engine = Engine::new(DEFAULT_CAP, 2);
+        let room = Observation {
+            token: "hub room_created sphere".into(),
+            source: Source::Hub,
+            lane_key: "hub:ABC123".into(),
+            ts: 1.0,
+        };
+        engine.observe(&room);
+
+        for client in 0..50 {
+            engine.ingest(&browser_redirect(2.0, &format!("10.0.0.{client}")));
+        }
+
+        let next = engine.observe(&Observation {
+            token: "hub game_started golf 2".into(),
+            ..room.clone()
+        });
+        assert_eq!(
+            next.context,
+            vec!["hub room_created sphere".to_string()],
+            "the room's earlier event should still be its context"
+        );
+    }
+
     #[test]
     fn the_first_sight_of_a_token_is_novel_and_the_second_is_judged() {
         let mut engine = Engine::default();

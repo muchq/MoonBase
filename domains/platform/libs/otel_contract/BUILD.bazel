@@ -29,6 +29,7 @@ go_test(
         "//domains/games/apis/games_hub:golf_hub.cc",
         "//domains/games/apis/games_hub:hosted_game.h",
         "//domains/games/apis/games_hub:surface.h",
+        "//domains/games/apis/games_hub:world.h",
         "//domains/games/apis/one_d4:src/main/java/com/muchq/games/one_d4/api/QueryEvent.java",
         "//domains/platform/apis/stats:aggregate.go",
         "//domains/platform/apis/stats:classify.go",

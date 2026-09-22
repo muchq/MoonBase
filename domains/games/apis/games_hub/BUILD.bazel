@@ -87,6 +87,7 @@ exports_files([
     "golf_hub.cc",
     "hosted_game.h",
     "surface.h",
+    "world.h",
 ])
 
 # The hub's domain events (#1571): one JSON line per game that ended,

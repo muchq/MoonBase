@@ -28,6 +28,7 @@ const (
 	hubSurfaceH     = "../../../games/apis/games_hub/surface.h"
 	hubHostedGameH  = "../../../games/apis/games_hub/hosted_game.h"
 	hubGolfHubCc    = "../../../games/apis/games_hub/golf_hub.cc"
+	hubWorldH       = "../../../games/apis/games_hub/world.h"
 	statsGames      = "../../apis/stats/games.go"
 	dejaHub         = "../../../ai/apis/deja/src/hub.rs"
 )
@@ -298,4 +299,25 @@ func TestTheTableCapAgreesBetweenGamesHubAndDeja(t *testing.T) {
 	require.NotNil(t, bound, "no MAX_SEATS in %s", dejaHub)
 	assert.Equal(t, string(seats[1]), string(bound[1]),
 		"the hub seats a table differently than deja will name one")
+}
+
+// geometry_changed names the world it reshaped, and a player in no room
+// is in the plaza — so deja has one lane that is the lobby rather than a
+// session. It spells that name itself, and this is what keeps the two
+// spellings the same word.
+func TestThePlazaIsSpelledTheSameInGamesHubAndDeja(t *testing.T) {
+	world, err := os.ReadFile(hubWorldH)
+	require.NoError(t, err)
+	reader, err := os.ReadFile(dejaHub)
+	require.NoError(t, err)
+
+	plaza := regexp.MustCompile(`kPlaza = "([a-z_]+)"`).FindSubmatch(world)
+	require.NotNil(t, plaza, "no kPlaza in %s", hubWorldH)
+	// The lane key, not the bare word: deja's prose says "lobby" too, and
+	// a substring match on that would pass while the key it builds and
+	// the world the hub names had drifted apart.
+	want := "hub:" + string(plaza[1])
+	assert.Contains(t, string(reader), want,
+		"the hub calls the lobby world something deja does not build a lane for: its one "+
+			"non-session lane would go unremarked rather than documented")
 }
