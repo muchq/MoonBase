@@ -14,6 +14,12 @@ import (
 // variant leaves it empty because it has none, and a reader filtering on
 // `event` first never sees a column the event does not fill.
 //
+// `players` carries three things — a table's seats, the seats a finished
+// game still held, and a room's size — told apart by `event`, which is
+// in the key. They are never compared across events, and a reader that
+// filters on `event` first never has to. What they do not share is a
+// range, which is why the cap is the event's and not the column's.
+//
 // Room is deliberately absent. It is on every line in S3, where a reader
 // asking what one evening looked like can pair created with closed and
 // started with finished, but an aggregate keyed by it would be one row
@@ -34,25 +40,27 @@ type HubEventKey struct {
 }
 
 const (
-	hubRoomCreated     = "room_created"
-	hubRoomJoined      = "room_joined"
-	hubRoomClosed      = "room_closed"
-	hubChatMessage     = "chat_message"
-	hubGeometryChanged = "geometry_changed"
-	hubGameStarted     = "game_started"
-	hubGameFinished    = "game_finished"
-
-	// A table seats four at most, so a count past that is not a table —
-	// it is a line this build does not understand, and it is counted
-	// under a bucket rather than given a row of its own.
-	hubMaxPlayers = 4
+	// The largest count each event can carry and still key a row of its
+	// own. `players` is not one quantity: game_started and game_finished
+	// carry a table's seats, which the engine caps at four, while
+	// room_joined and chat_message carry the room's size, which nothing
+	// caps — a room hosts several tables at once, plus its chat and its
+	// world, so six people in one is an ordinary evening and not drift.
+	// One bound over all four would either lose real room sizes or stop
+	// bounding the table.
+	hubMaxSeats   = 4
+	hubMaxMembers = 16
 )
 
 var (
+	// Every event this reader knows, spelled once — this map is what
+	// gates ConsumeGameEvents, so it is what otel_contract pins against
+	// games_hub's own names. An event missing here is skipped outright
+	// rather than counted as "other": there is no row shape for it.
 	hubEvents = map[string]bool{
-		hubRoomCreated: true, hubRoomJoined: true, hubRoomClosed: true,
-		hubChatMessage: true, hubGeometryChanged: true,
-		hubGameStarted: true, hubGameFinished: true,
+		"room_created": true, "room_joined": true, "room_closed": true,
+		"chat_message": true, "geometry_changed": true,
+		"game_started": true, "game_finished": true,
 	}
 	hubVariants = map[string]bool{"golf": true, "castle": true}
 	hubOutcomes = map[string]bool{"completed": true, "abandoned": true}
@@ -80,18 +88,31 @@ func (l *hubEventLine) date(objectDate string) string {
 	return time.UnixMilli(l.Timestamp).UTC().Format("2006-01-02")
 }
 
-// A count this build is willing to key a row on: 0 for an event that
-// carries none, and otherSeats for one past a table's size.
-func hubPlayers(count int) int {
-	if count < 0 || count > hubMaxPlayers {
-		return otherSeats
+// What this event's count is bounded by: a table's seats for the two
+// that name a game, the room's size for the two that name a room.
+func hubPlayersCap(event string) int {
+	if event == "game_started" || event == "game_finished" {
+		return hubMaxSeats
+	}
+	return hubMaxMembers
+}
+
+// A count this build is willing to key a row on: the count itself when
+// it is one this event could carry, and playersOverCap when it is not.
+// Never clamped to the cap — a clamped count reads as a real one and
+// would be averaged as if it were, where a value that cannot be a count
+// is loud.
+func hubPlayers(event string, count int) int {
+	if count < 0 || count > hubPlayersCap(event) {
+		return playersOverCap
 	}
 	return count
 }
 
-// The seat count that is not one: a line claiming a table bigger than
-// the hub can deal, kept as a row rather than dropped.
-const otherSeats = -1
+// A count past what its event could carry, kept as a row rather than
+// dropped so the drift is visible. Deliberately not a count: it must
+// not be summed or averaged with the rows around it.
+const playersOverCap = -1
 
 // ConsumeGameEvents aggregates one object's worth of games_hub event
 // lines into the rollup, each line under its own day, objectDate for a
@@ -116,7 +137,7 @@ func (r *Rollup) ConsumeGameEvents(reader io.Reader, objectDate string) (skipped
 			Variant: hubWord(hubVariants, parsed.Variant),
 			Surface: hubWord(hubSurfaces, parsed.Surface),
 			Outcome: hubWord(hubOutcomes, parsed.Outcome),
-			Players: hubPlayers(parsed.Players),
+			Players: hubPlayers(parsed.Event, parsed.Players),
 		}]++
 	}
 	if err := scanner.Err(); err != nil {

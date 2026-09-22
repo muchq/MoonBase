@@ -117,18 +117,47 @@ func TestLinesThatAreNotHubEventsAreSkipped(t *testing.T) {
 	assert.Len(t, rollup.HubEvents, 1)
 }
 
-// A seat count past a table's size is not a table. It is kept as a row
-// rather than dropped, so a hub that starts dealing five is visible.
-func TestASeatCountNoTableCouldHaveIsKeptApart(t *testing.T) {
-	odd := `{"ts":1789998000000,"event":"game_started","room":"A","variant":"golf","players":9}
-{"ts":1789998000000,"event":"game_started","room":"A","variant":"golf","players":4}`
-	rollup, skipped := hubRollup(t, odd, "2026-09-21")
+// A room is not a table. Nothing caps its membership — it hosts several
+// tables at once plus its chat and its world — so six people in one is
+// the alpha's success case, and it has to read as six.
+func TestARoomBiggerThanATableIsStillARoom(t *testing.T) {
+	big := `{"ts":1789998000000,"event":"room_joined","room":"A","players":6}
+{"ts":1789998000000,"event":"chat_message","room":"A","players":6}`
+	rollup, skipped := hubRollup(t, big, "2026-09-21")
 	assert.Zero(t, skipped)
 
 	assert.Equal(t, int64(1), rollup.HubEvents[HubEventKey{
-		Date: "2026-09-21", Event: "game_started", Variant: "golf", Players: otherSeats}])
+		Date: "2026-09-21", Event: "room_joined", Players: 6}])
+	assert.Equal(t, int64(1), rollup.HubEvents[HubEventKey{
+		Date: "2026-09-21", Event: "chat_message", Players: 6}])
+}
+
+// A count past what its event could carry is kept as a row rather than
+// dropped, so a hub dealing five seats is visible — and the bound is the
+// event's, so the same number is ordinary for a room and impossible for
+// a table.
+func TestACountPastWhatItsEventCouldCarryIsKeptApart(t *testing.T) {
+	odd := `{"ts":1789998000000,"event":"game_started","room":"A","variant":"golf","players":6}
+{"ts":1789998000000,"event":"game_started","room":"A","variant":"golf","players":4}
+{"ts":1789998000000,"event":"room_joined","room":"A","players":6}
+{"ts":1789998000000,"event":"room_joined","room":"A","players":99}
+{"ts":1789998000000,"event":"game_finished","room":"A","variant":"golf","outcome":"completed","players":6}`
+	rollup, skipped := hubRollup(t, odd, "2026-09-21")
+	assert.Zero(t, skipped)
+
+	// Six at a table cannot happen; six in a room is a Friday night.
+	assert.Equal(t, int64(1), rollup.HubEvents[HubEventKey{
+		Date: "2026-09-21", Event: "game_started", Variant: "golf", Players: playersOverCap}])
 	assert.Equal(t, int64(1), rollup.HubEvents[HubEventKey{
 		Date: "2026-09-21", Event: "game_started", Variant: "golf", Players: 4}])
+	assert.Equal(t, int64(1), rollup.HubEvents[HubEventKey{
+		Date: "2026-09-21", Event: "room_joined", Players: 6}])
+	assert.Equal(t, int64(1), rollup.HubEvents[HubEventKey{
+		Date: "2026-09-21", Event: "room_joined", Players: playersOverCap}])
+	// Both table events share the seats bound, not just the one that deals.
+	assert.Equal(t, int64(1), rollup.HubEvents[HubEventKey{
+		Date: "2026-09-21", Event: "game_finished", Variant: "golf",
+		Outcome: "completed", Players: playersOverCap}])
 }
 
 // The same shape twice is one row with two events, which is the whole

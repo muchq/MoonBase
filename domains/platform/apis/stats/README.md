@@ -151,6 +151,15 @@ unbounded — which is one query over the raw partitions in S3, keeping
   of every day fits, and which shapes are absent is as much of the answer
   as which are busy.
 
+  `players` is three quantities told apart by `event`: the seats a table
+  was dealt (`game_started`), the seats it still held at the end
+  (`game_finished`, near enough always 1 for an abandonment), and the
+  room's size (`room_joined`, `chat_message`). They share a column and
+  not a range — a table seats four, a room has no cap — so each is
+  bounded by its own event. A `players` of **-1** is a count past that
+  bound: not a count, and not to be summed or averaged with its
+  neighbours.
+
   The room is on every line in S3 and on no row here. An aggregate keyed
   by it would be one row per room per day forever; the questions it
   answers — how long a room lasted, how long a game took, how many tables

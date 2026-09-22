@@ -64,10 +64,12 @@ func TestHubEventNamesAgreeBetweenGamesHubAndStats(t *testing.T) {
 	reader, err := os.ReadFile(statsGames)
 	require.NoError(t, err)
 
-	// const ( hubRoomCreated = "room_created" … )
+	// hubEvents = map[string]bool{hubRoomCreated: true, …} is what gates
+	// ConsumeGameEvents, so it is what has to agree — a const declared
+	// and never added to the map would pass a pin on the const block
+	// while the event it names went on being skipped.
 	fromGo := goWords(t, reader,
-		regexp.MustCompile(`(?s)const \(\n(.*?)\n\)`), "hub event name const block")
-	// The block also carries hubMaxPlayers, which has no string.
+		regexp.MustCompile(`(?s)hubEvents = map\[string\]bool\{(.*?)\n\t\}`), "hubEvents")
 	assert.Equal(t, cppConstants(t, header, "kEvent"), fromGo,
 		"the hub writes event names stats does not read, or the other way round. An event "+
 			"name this reader does not know is skipped outright, not counted as \"other\": "+
@@ -97,7 +99,7 @@ func TestHubEventValuesAgreeBetweenGamesHubAndStats(t *testing.T) {
 		FindSubmatch(hosted)
 	require.NotNil(t, kindName, "no GameKindName in %s", hubHostedGameH)
 	var fromKinds []string
-	for _, match := range regexp.MustCompile(`"([a-z]+)"`).FindAllSubmatch(kindName[1], -1) {
+	for _, match := range regexp.MustCompile(`"([a-z_]+)"`).FindAllSubmatch(kindName[1], -1) {
 		fromKinds = append(fromKinds, string(match[1]))
 	}
 	sort.Strings(fromKinds)

@@ -52,6 +52,10 @@ var schema = []string{
 	// variant leaves it '', and players is 0 for the events that count
 	// nobody. A reader filters on `event` first and never reads a column
 	// that event does not fill.
+	//
+	// players is -1 when the count was past what its event could carry —
+	// deliberately not a count, so it cannot be summed or averaged with
+	// the rows around it. See hubPlayers.
 	`CREATE TABLE IF NOT EXISTS hub_event_stats (
 		dt date NOT NULL,
 		event text NOT NULL,
@@ -643,7 +647,8 @@ func (s *Store) Queries(ctx context.Context, days int) ([]QueryRow, error) {
 
 // HubEventRow is one day of one games_hub event shape. Empty columns are
 // the fields that event does not carry, not unknowns: `room_closed` has
-// no variant because a closed room has none.
+// no variant because a closed room has none. `players` of -1 is not a
+// count — it is a count past what that event could carry.
 type HubEventRow struct {
 	Date    string `json:"date"`
 	Event   string `json:"event"`
