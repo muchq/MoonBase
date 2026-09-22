@@ -32,8 +32,8 @@ is a real question — but it is the one lane here that is not a session. A room
 *size* is deliberately not in the token — it is a count, and a count in a
 vocabulary mints a token per value and crowds out the grammar.
 
-Both sources share one vocabulary, one lane table, one net and one
-baseline: the grammar deja learns is of the site, not of a log file.
+Both sources share one vocabulary, one net and one baseline, and one
+lane table with a share each: the grammar deja learns is of the site, not of a log file.
 Each bounds its own factors, because each producer is another process
 that may ship ahead of this one — a word the hub source does not know
 reads as `other`, and otel_contract pins its four vocabularies and its
@@ -123,9 +123,14 @@ With no checkpoint every log is learned from its top; with one, only what
 is written from then on, so lines written while the process was down are
 not learned. A checkpoint that will not parse is moved aside to
 `checkpoint.json.corrupt` and the process starts fresh. Client addresses
-and room ids live only in the lane table in memory and never leave it;
-it holds 4096 lanes across both sources, evicting the one idle longest,
-so a quiet room and a quiet client compete for the same slots.
+and room ids live only in the lane table in memory and never leave it.
+Its bound is **per source** — 4096 lanes for caddy, 512 for the hub —
+and a source at its share evicts its own idle longest and nobody else's.
+One shared quota would let caddy's churn take the lane of any room quiet
+for longer than the rest of the stream needs to touch every slot, which
+is every gap a room's evening is made of; the room would come back with
+an empty window and the sequence this source exists to model would never
+form.
 
 The checkpoint is one JSON file: sequence, vocabulary, bigram counts,
 both baselines, and the net's weights as base64 safetensors under `net`,

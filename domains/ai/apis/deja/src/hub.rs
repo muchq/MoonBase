@@ -17,7 +17,7 @@
 
 use serde::Deserialize;
 
-use crate::engine::Observation;
+use crate::{engine::Observation, lanes::Source};
 
 /// Bytes a room id may run to as a lane key.
 const MAX_ROOM: usize = 64;
@@ -123,6 +123,7 @@ pub fn observation(line: &[u8]) -> Option<Observation> {
     };
     Some(Observation {
         token,
+        source: Source::Hub,
         lane_key: lane_key(&parsed.room),
         // Millis on the wire, seconds in an event, like every other source.
         ts: parsed.ts as f64 / 1000.0,

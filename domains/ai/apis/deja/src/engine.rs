@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     bigram::Bigram,
-    lanes::{DEFAULT_LANES, Lanes, WINDOW},
+    lanes::{DEFAULT_LANES, Lanes, Source, WINDOW},
     net::{DEFAULT_SEED, Net},
     score::{Scorer, Verdict, WARMUP},
     token::{BOS, DEFAULT_CAP, Vocab, token_text},
@@ -22,6 +22,9 @@ use crate::{
 #[derive(Clone, Debug, PartialEq)]
 pub struct Observation {
     pub token: String,
+    /// Which stream this came from: lanes are shared but their shares
+    /// are not, so a busy source cannot evict a quiet one's sequence.
+    pub source: Source,
     pub lane_key: String,
     pub ts: f64,
 }
@@ -252,6 +255,7 @@ impl Engine {
     pub fn ingest(&mut self, line: &CaddyLine) -> Arc<Event> {
         self.observe(&Observation {
             token: token_text(line),
+            source: Source::Caddy,
             lane_key: line.client_ip().to_string(),
             ts: line.ts,
         })
@@ -262,7 +266,7 @@ impl Engine {
     /// grammar deja learns is of the site, not of a log file.
     pub fn observe(&mut self, observation: &Observation) -> Arc<Event> {
         let (token, novel) = self.vocab.intern(&observation.token);
-        let lane = self.lanes.touch(&observation.lane_key);
+        let lane = self.lanes.touch(observation.source, &observation.lane_key);
         let window: Vec<u16> = self.lanes.window(lane).iter().copied().collect();
         let prev = window.last().copied().unwrap_or(BOS);
         let context = window

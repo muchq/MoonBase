@@ -314,6 +314,11 @@ mod tests {
                     for n in 0..each {
                         state.observe(&Observation {
                             token: format!("s{source} t{}", n % 4),
+                            source: if source == 0 {
+                                crate::lanes::Source::Caddy
+                            } else {
+                                crate::lanes::Source::Hub
+                            },
                             lane_key: format!("s{source}"),
                             ts: 0.0,
                         });
