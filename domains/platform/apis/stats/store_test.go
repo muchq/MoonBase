@@ -388,10 +388,14 @@ func TestQueryTermsFoldEntryPointsBeforeTheLimit(t *testing.T) {
 
 	// And a limit smaller than the window says how many rows it cut. The
 	// rows it kept are whole totals because the fold already happened.
+	whole := total
 	top, total, err := store.QueryTerms(ctx, 2, 1)
 	require.NoError(t, err)
 	require.Len(t, top, 1)
-	assert.Greater(t, total, 1, "a truncated read should say how many rows there were")
+	// The same count the untruncated read gave: it describes the folded
+	// set, not the rows that survived the limit, and it comes from the
+	// same statement as those rows rather than a second look at the table.
+	assert.Equal(t, whole, total, "a truncated read should count the window, not its own rows")
 }
 
 func TestAgentsHonoursTheLimitBusiestFirst(t *testing.T) {

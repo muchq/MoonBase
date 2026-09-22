@@ -145,10 +145,11 @@ unbounded — which is one query over the raw partitions in S3, keeping
   day/entry/source/outcome/cache
 - `GET /stats/v1/one_d4/terms?days=30&limit=200` — which fields, motifs,
   and group-by terms queries used, busiest first, with `total` saying how
-  many there were before the limit. Not per entry point: `query` and
-  `aggregate` are two doors onto one language, and the fold happens in
-  the query rather than in a reader so that the limit cuts between whole
-  totals. Folding after a per-entry cut would drop one half of a term
+  many there were before the limit — both from one statement, so the count
+  describes the row list it arrives with rather than a set the loop may
+  have added to in between. Not per entry point: `query` and `aggregate`
+  are two doors onto one language, and the fold happens in the query
+  rather than in a reader so that the limit cuts between whole totals. Folding after a per-entry cut would drop one half of a term
   used at both and rank the other half as though it were the whole.
 - `GET /stats/v1/games_hub/events?days=30` — the hub's funnel per day:
   rooms made and closed, joins, reshapes, messages, tables dealt and games

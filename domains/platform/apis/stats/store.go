@@ -689,20 +689,21 @@ func (s *Store) HubEvents(ctx context.Context, days int) ([]HubEventRow, error) 
 // would instead drop one half of a split term and rank the other half as
 // though it were the whole.
 func (s *Store) QueryTerms(ctx context.Context, days, limit int) ([]TermRow, int, error) {
-	var total int
-	if err := s.pool.QueryRow(ctx,
-		`SELECT count(*) FROM (
-		   SELECT 1 FROM query_term_stats
+	// One statement, so the count and the rows describe the same folded
+	// set. Counting separately would let the aggregation loop insert a
+	// (kind, term) between the two reads, and the count could then agree
+	// with a row list it no longer describes — a truncated window that
+	// says it is whole. COUNT(*) OVER () runs after the grouping, so it
+	// counts folded rows, and the LIMIT outside the subquery cannot reach
+	// it.
+	rows, err := s.pool.Query(ctx,
+		`SELECT kind, term, requests, total
+		 FROM (
+		   SELECT kind, term, SUM(requests) AS requests, COUNT(*) OVER () AS total
+		   FROM query_term_stats
 		   WHERE dt >= current_date - $1::int
 		   GROUP BY kind, term
-		 ) folded`, days).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-	rows, err := s.pool.Query(ctx,
-		`SELECT kind, term, SUM(requests) AS requests
-		 FROM query_term_stats
-		 WHERE dt >= current_date - $1::int
-		 GROUP BY kind, term
+		 ) folded
 		 ORDER BY requests DESC, kind, term
 		 LIMIT $2`, days, limit)
 	if err != nil {
@@ -710,7 +711,10 @@ func (s *Store) QueryTerms(ctx context.Context, days, limit int) ([]TermRow, int
 	}
 	var out []TermRow
 	var row TermRow
-	_, err = pgx.ForEachRow(rows, []any{&row.Kind, &row.Term, &row.Requests},
+	// Every row carries the same count; an empty window carries none, and
+	// zero is the right answer there.
+	var total int
+	_, err = pgx.ForEachRow(rows, []any{&row.Kind, &row.Term, &row.Requests, &total},
 		func() error {
 			out = append(out, row)
 			return nil
