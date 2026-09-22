@@ -3,10 +3,17 @@
 //! into the three things the engine wants — a bounded token, the lane its
 //! sequence belongs to, and when.
 //!
-//! The room is the lane, which is why this source is the one that needed
-//! no lane-keying decision: a room's evening already *is* a sequence, and
-//! the hub tags every line with the room it happened in. A client address
+//! The room is the lane, which is why this source needed no lane-keying
+//! decision: a room's evening already *is* a sequence. A client address
 //! is what a caddy line has instead; neither leaves the lane table.
+//!
+//! With one exception the hub itself writes. `geometry_changed` is
+//! tagged with the *world* it reshaped, and a player who is in no room
+//! is in the plaza — so `hub:plaza` is one lane holding every lobby
+//! reshape by everybody, not one session's sequence. It is kept rather
+//! than dropped: the plaza is a single shared world, so which shapes
+//! people reach for in it is a real question, and it is the room-shaped
+//! lane it is not. Nothing else the hub writes can carry it.
 
 use serde::Deserialize;
 
@@ -219,6 +226,18 @@ mod tests {
         assert_eq!(o.lane_key, "hub:abc");
     }
 
+    // The plaza is the lobby, not a room, so this lane is every lobby
+    // player's reshapes interleaved. Pinned because it is the one lane
+    // this source has that is not one session's sequence.
+    #[test]
+    fn the_lobbys_reshapes_share_one_lane_that_is_not_a_room() {
+        let o = obs(
+            r#"{"ts":1,"event":"geometry_changed","room":"plaza","surface":"glasshouse"}"#,
+        );
+        assert_eq!(o.lane_key, "hub:plaza");
+        assert_eq!(o.token, "hub geometry_changed glasshouse");
+    }
+
     // The room is the lane. It is namespaced because the lane table is
     // shared with caddy's clients, and a room id and an address must
     // never land in the same window — twice over, since an address's
@@ -236,8 +255,9 @@ mod tests {
     #[test]
     fn a_room_id_is_reduced_again_here_and_bounded() {
         assert_eq!(
-            obs(r#"{"ts":1,"event":"room_closed","room":"a b/../c"}"#).lane_key,
-            "hub:a_b____c"
+            obs(r#"{"ts":1,"event":"room_closed","room":"a b/../c-d_e"}"#).lane_key,
+            "hub:a_b____c-d_e",
+            "the two punctuation marks a room id may carry are kept"
         );
         let long = "z".repeat(200);
         let o = obs(&format!(r#"{{"ts":1,"event":"room_closed","room":"{long}"}}"#));

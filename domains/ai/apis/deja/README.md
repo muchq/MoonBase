@@ -23,27 +23,41 @@ carries, a surface, a variant, an outcome, a table's seats. The access
 log stops at the socket a session opens, so this is the only way what
 rode it reaches the model whose tape is painted on the glasshouse walls.
 Lanes are keyed by the **room**, which is why this source needed no
-lane-keying decision: a room's evening already is a sequence. A room's
+lane-keying decision: a room's evening already is a sequence. The one
+exception is the hub's own: `geometry_changed` names the world it
+reshaped, and a player in no room is in the plaza, so `hub:plaza` is one
+lane of every lobby reshape by everybody. Kept rather than dropped — the
+plaza is a single shared world, and which shapes people reach for in it
+is a real question — but it is the one lane here that is not a session. A room's
 *size* is deliberately not in the token — it is a count, and a count in a
 vocabulary mints a token per value and crowds out the grammar.
 
-Both sources share one vocabulary, one lane table and one net: the
-grammar deja learns is of the site, not of a log file. Each bounds its
-own factors, because each producer is another process that may ship
-ahead of this one — a word deja does not know reads as `other`, and
-otel_contract pins both vocabularies against the hub's own names. An
-event name deja does not know is still an event (`hub other`), where
-stats skips it: a per-day count has no row shape for one, but a sequence
-model would have a hole where the line should have been.
+Both sources share one vocabulary, one lane table, one net and one
+baseline: the grammar deja learns is of the site, not of a log file.
+Each bounds its own factors, because each producer is another process
+that may ship ahead of this one — a word the hub source does not know
+reads as `other`, and otel_contract pins its four vocabularies and its
+JSON field names against the hub's own. An event name deja does not know
+is still an event (`hub other`), where stats skips it: a per-day count
+has no row shape for one, but a sequence model would have a hole where
+the line should have been.
 
-Unset `HUB_EVENT_LOG` and deja reads Caddy alone, exactly as before —
-which is also how #1572's bigram control gets its yardstick, the curve
-with the source and without.
+Unset `HUB_EVENT_LOG` and deja reads Caddy alone: no tailer, no thread,
+and the caddy path is byte-for-byte what it was. That switches the
+source **off**, which is not the same as never having had it. The
+learned state in the checkpoint is not reversible — the bigram evicts
+its rarest successor when a row reaches 64 and subtracts its count, so
+hub tokens entering the `<bos>` row cost caddy counts that do not come
+back, and the net's weights and the vocabulary are one-way too. To
+compare deja with the source and without, wipe `deja_state` between the
+two runs; turning the variable off does not do it.
 
 ## The two predictors
 
-**bigram**, the control: next-token counts keyed by the client's previous
-token, add-α smoothed, 64 successors per row. Cheap, transparent, and the
+**bigram**, the control: next-token counts keyed by the lane's previous
+token, add-α smoothed, 64 successors per row — so a row at 64 evicts its
+rarest successor to make room, which is what makes learned state one-way
+across sources. Cheap, transparent, and the
 yardstick the net is measured against.
 
 **net**: a window MLP in candle, CPU, f32. The lane's last eight tokens,
@@ -100,16 +114,18 @@ The net never guesses `<bos>`.
 
 | Variable | Meaning |
 | --- | --- |
-| `ACCESS_LOG` | The live log, default `/var/log/caddy/access.log` |
+| `ACCESS_LOG` | Caddy's live log, default `/var/log/caddy/access.log` |
+| `HUB_EVENT_LOG` | games_hub's live event log; unset, that source is off. A path that is a directory is refused at boot rather than tailed, since a directory opens and seeks like a file and fails every read |
 | `DEJA_STATE` | The directory the checkpoint lives in, default `/var/lib/deja`; written every `CHECKPOINT_INTERVAL_SECS` (default 600, at least 1) and on SIGTERM |
 | `PORT` | Listen port |
 
-With no checkpoint the current log is learned from its top; with one, only
-what is written from then on, so lines written while the process was down
-are not learned. A checkpoint that will not parse is moved aside to
+With no checkpoint every log is learned from its top; with one, only what
+is written from then on, so lines written while the process was down are
+not learned. A checkpoint that will not parse is moved aside to
 `checkpoint.json.corrupt` and the process starts fresh. Client addresses
-live only in the lane table in memory, bounded at 4096 clients, and never
-leave it.
+and room ids live only in the lane table in memory and never leave it;
+it holds 4096 lanes across both sources, evicting the one idle longest,
+so a quiet room and a quiet client compete for the same slots.
 
 The checkpoint is one JSON file: sequence, vocabulary, bigram counts,
 both baselines, and the net's weights as base64 safetensors under `net`,

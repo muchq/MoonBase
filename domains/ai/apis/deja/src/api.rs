@@ -4,7 +4,7 @@ use std::{
     convert::Infallible,
     pin::Pin,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard,
         atomic::{AtomicUsize, Ordering},
     },
     task::{Context, Poll},
@@ -90,21 +90,28 @@ impl AppState {
 
     /// Scores one caddy line, records it, and fans it out to the stream.
     pub fn ingest(&self, line: &caddylog::CaddyLine) -> Arc<Event> {
-        let event = self.engine.lock().expect("engine lock").ingest(line);
-        self.publish(event)
+        let engine = self.engine.lock().expect("engine lock");
+        self.publish(engine, |engine| engine.ingest(line))
     }
 
     /// The same for an observation any other source made.
     pub fn observe(&self, observation: &crate::engine::Observation) -> Arc<Event> {
-        let event = self
-            .engine
-            .lock()
-            .expect("engine lock")
-            .observe(observation);
-        self.publish(event)
+        let engine = self.engine.lock().expect("engine lock");
+        self.publish(engine, |engine| engine.observe(observation))
     }
 
-    fn publish(&self, event: Arc<Event>) -> Arc<Event> {
+    /// Scores and fans out under one hold of the lock. The send has to be
+    /// inside it: with two sources, releasing between scoring and sending
+    /// lets the thread that got the later `seq` send first, and `id` on
+    /// the stream is what a reconnecting page resumes `recent?after=`
+    /// from — out of order it re-renders one event or drops another.
+    fn publish(
+        &self,
+        mut engine: MutexGuard<'_, Engine>,
+        score: impl FnOnce(&mut Engine) -> Arc<Event>,
+    ) -> Arc<Event> {
+        let event = score(&mut engine);
+        drop(engine);
         self.metrics.record(&event);
         // No subscriber is not an error.
         let _ = self.events.send(Arc::clone(&event));

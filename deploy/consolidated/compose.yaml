@@ -591,7 +591,7 @@ services:
   deja:
     image: ghcr.io/muchq/deja:${DEJA_SHA:-${DEPLOY_SHA:-latest}}
     labels:
-      com.muchq.description: "Next-request predictor over Caddy's access log and the hub's events (Rust)"
+      com.muchq.description: "Next-event predictor over Caddy's access log and the hub's events (Rust)"
     restart: always
     logging: *default-logging
     environment:
@@ -607,7 +607,7 @@ services:
       - OTEL_RESOURCE_ATTRIBUTES=service.name=deja,service.version=${DEJA_SHA:-${DEPLOY_SHA:-latest}}
     volumes:
       # Read-only: deja observes the live logs Caddy and games_hub write
-      # and log_shipper rolls away, and writes nothing but its own
+      # and roll for themselves, and writes nothing but its own
       # checkpoint (#1150).
       - /var/log/caddy:/var/log/caddy:ro
       - /var/log/games_hub:/var/log/games_hub:ro

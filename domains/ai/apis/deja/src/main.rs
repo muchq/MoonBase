@@ -89,8 +89,20 @@ async fn main() {
     // games_hub's domain events (#1572), the second source. Unset, deja
     // reads the access log alone exactly as before — which is also how
     // the bigram control gets its yardstick: the curve with and without.
-    let hub_path = env::var("HUB_EVENT_LOG").ok().map(PathBuf::from);
+    let hub_path = env::var("HUB_EVENT_LOG")
+        .ok()
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
     let hub_tailer = hub_path.map(|path| {
+        // A directory opens and seeks like a file and then fails every
+        // read, which a tail cannot tell from a log that will not settle:
+        // it would warn twice a second forever with the source dead and
+        // nothing else saying so. The name is one path component away
+        // from the directory it lives in, so this is the likely typo.
+        if path.is_dir() {
+            eprintln!("error: HUB_EVENT_LOG is a directory: {}", path.display());
+            process::exit(1);
+        }
         Tailer::new(&path, start).unwrap_or_else(|error| {
             eprintln!("error: cannot open {}: {error}", path.display());
             process::exit(1);

@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -2397,7 +2398,9 @@ func TestGamesHubEventsAreRolledWhereTheShipperReads(t *testing.T) {
 // appending to and the shipper is about to upload.
 func TestEveryLogDejaReadsIsMountedReadOnly(t *testing.T) {
 	lines := activeServiceLines(t, "compose.yaml", "deja")
-	paths := regexp.MustCompile(`^- (?:ACCESS_LOG|HUB_EVENT_LOG)=(\S+)$`)
+	// Any *_LOG variable, not a list of the two that exist: an allowlist
+	// would pass a third source by not recognising it.
+	paths := regexp.MustCompile(`^- \w*_LOG=(\S+)$`)
 	var dirs []string
 	for _, line := range lines {
 		if match := paths.FindStringSubmatch(line); match != nil {
@@ -2407,6 +2410,12 @@ func TestEveryLogDejaReadsIsMountedReadOnly(t *testing.T) {
 	if len(dirs) < 2 {
 		t.Fatalf("deja names %d log(s) in its env; #1572 gave it caddy's and the hub's. "+
 			"Lines were:\n%s", len(dirs), strings.Join(lines, "\n"))
+	}
+	// DEJA_STATE is a directory deja writes, not a log it reads, and the
+	// pattern above must not have swept it in.
+	if slices.Contains(dirs, "/var/lib/deja") {
+		t.Error("the *_LOG pattern matched deja's own state directory; it is checking " +
+			"the wrong thing and would demand a read-only mount on the checkpoint")
 	}
 	for _, dir := range dirs {
 		if !hasLine(lines, "- "+dir+":"+dir+":ro") {

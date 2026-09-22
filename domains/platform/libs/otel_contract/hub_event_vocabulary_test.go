@@ -253,6 +253,36 @@ func TestHubEventVocabularyAgreesWithDeja(t *testing.T) {
 		"a game the hub can host that deja would read as \"other\"")
 }
 
+// The field names are the sharper pin for deja too, and sharper still
+// than they are for stats: `ts`, `event` and `room` carry no serde
+// default, so renaming one in game_events.cc fails every parse and the
+// whole source goes dead behind a warning per line. The rest default, so
+// a rename there collapses an event class to "other" forever. Neither is
+// caught by the stats pin when the C++ and the Go reader are renamed
+// together, which is the realistic way it happens.
+func TestHubEventFieldNamesAgreeBetweenGamesHubAndDeja(t *testing.T) {
+	writer, err := os.ReadFile(hubEventsCc)
+	require.NoError(t, err)
+	reader, err := os.ReadFile(dejaHub)
+	require.NoError(t, err)
+
+	read := map[string]bool{}
+	line := regexp.MustCompile(`(?s)struct HubLine \{(.*?)\n\}`).FindSubmatch(reader)
+	require.NotNil(t, line, "no HubLine in %s", dejaHub)
+	for _, match := range regexp.MustCompile(`(?m)^\s+(\w+): `).FindAllSubmatch(line[1], -1) {
+		read[string(match[1])] = true
+	}
+	require.NotEmpty(t, read, "parsed no fields out of HubLine")
+
+	for _, match := range regexp.MustCompile(`"(\w+)":`).FindAllSubmatch(writer, -1) {
+		key := string(match[1])
+		assert.True(t, read[key],
+			"games_hub writes %q and deja's HubLine has no field for it: the column "+
+				"arrives as a zero, or the whole line fails to parse and the source "+
+				"goes quiet", key)
+	}
+}
+
 // deja calls a table's seats a word, bounded by what the engine deals, so
 // the same drift that would make stats say -1 would make deja mint a
 // token per size instead.

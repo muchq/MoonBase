@@ -174,7 +174,7 @@ flowchart LR
   stats -->|sql| shared_postgres
 
   caddy -.->|logs| deja
-  games_hub -.->|events| deja
+  games_hub -.->|logs| deja
   caddy -.->|logs| log_shipper
   one_d4 -.->|logs| log_shipper
   games_hub -.->|logs| log_shipper
