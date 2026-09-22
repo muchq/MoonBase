@@ -40,25 +40,28 @@ namespace games_hub {
 /// — but it is the one field here that would let its reader walk into a
 /// room that is somehow still open.
 
-/// The event names, the field every reader filters on first.
-inline constexpr std::string_view kRoomCreated = "room_created";
-inline constexpr std::string_view kRoomJoined = "room_joined";
-inline constexpr std::string_view kRoomClosed = "room_closed";
-inline constexpr std::string_view kChatMessage = "chat_message";
-inline constexpr std::string_view kGeometryChanged = "geometry_changed";
-inline constexpr std::string_view kGameStarted = "game_started";
-inline constexpr std::string_view kGameFinished = "game_finished";
+/// The event names, the field every reader filters on first. The
+/// prefix is the group: otel_contract pins kEvent* against the
+/// reader's event names and kOutcome* against its outcomes, and a
+/// bare k would make those two lists one.
+inline constexpr std::string_view kEventRoomCreated = "room_created";
+inline constexpr std::string_view kEventRoomJoined = "room_joined";
+inline constexpr std::string_view kEventRoomClosed = "room_closed";
+inline constexpr std::string_view kEventChatMessage = "chat_message";
+inline constexpr std::string_view kEventGeometryChanged = "geometry_changed";
+inline constexpr std::string_view kEventGameStarted = "game_started";
+inline constexpr std::string_view kEventGameFinished = "game_finished";
 
 /// The outcomes a game can have. Those are the only two ways one ends.
-inline constexpr std::string_view kCompleted = "completed";
-inline constexpr std::string_view kAbandoned = "abandoned";
+inline constexpr std::string_view kOutcomeCompleted = "completed";
+inline constexpr std::string_view kOutcomeAbandoned = "abandoned";
 
 /// A game that ended, as the event describes it.
 struct GameFinished {
   /// "golf" or "castle" — GameKindName's spelling, which is also the
   /// wire's and the stored row's.
   std::string_view variant;
-  /// kCompleted — the engine played it out — or kAbandoned: too few
+  /// kOutcomeCompleted — the engine played it out — or kOutcomeAbandoned: too few
   /// seats were left to go on.
   std::string_view outcome;
   /// Seats still held at the end. This is NOT the table's size: an

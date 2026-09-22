@@ -47,6 +47,25 @@ var schema = []string{
 		requests bigint NOT NULL,
 		PRIMARY KEY (dt, host, route, probe, status)
 	)`,
+	// The games_hub funnel (#1571), one row per day per event shape. The
+	// columns are the event's own fields: an event that carries no
+	// variant leaves it '', and players is 0 for the events that count
+	// nobody. A reader filters on `event` first and never reads a column
+	// that event does not fill.
+	//
+	// players is -1 when the count was past what its event could carry —
+	// deliberately not a count, so it cannot be summed or averaged with
+	// the rows around it. See hubPlayers.
+	`CREATE TABLE IF NOT EXISTS hub_event_stats (
+		dt date NOT NULL,
+		event text NOT NULL,
+		variant text NOT NULL,
+		surface text NOT NULL,
+		outcome text NOT NULL,
+		players int NOT NULL,
+		events bigint NOT NULL,
+		PRIMARY KEY (dt, event, variant, surface, outcome, players)
+	)`,
 	`CREATE TABLE IF NOT EXISTS query_stats (
 		dt date NOT NULL,
 		entry text NOT NULL,
@@ -102,7 +121,7 @@ func currentRollupVersion() string { return rollupVersionFor(RollupVersion, sche
 // belongs here, or a version bump leaves it double-counted.
 var rollupTables = []string{
 	"processed_log_objects", "request_stats", "iili_slug_stats", "probe_stats",
-	"query_stats", "query_term_stats", "geo_stats",
+	"query_stats", "query_term_stats", "geo_stats", "hub_event_stats",
 }
 
 const metaSchema = `CREATE TABLE IF NOT EXISTS stats_meta (
@@ -277,6 +296,16 @@ func (s *Store) ApplyRollup(ctx context.Context, key string, rollup *Rollup) err
 			 ON CONFLICT (dt, entry, source, outcome, cache)
 			 DO UPDATE SET requests = query_stats.requests + EXCLUDED.requests`,
 			k.Date, k.Entry, k.Source, k.Outcome, k.Cache, count); err != nil {
+			return err
+		}
+	}
+	for k, count := range rollup.HubEvents {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO hub_event_stats (dt, event, variant, surface, outcome, players, events)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)
+			 ON CONFLICT (dt, event, variant, surface, outcome, players)
+			 DO UPDATE SET events = hub_event_stats.events + EXCLUDED.events`,
+			k.Date, k.Event, k.Variant, k.Surface, k.Outcome, k.Players, count); err != nil {
 			return err
 		}
 	}
@@ -609,6 +638,41 @@ func (s *Store) Queries(ctx context.Context, days int) ([]QueryRow, error) {
 	var row QueryRow
 	_, err = pgx.ForEachRow(rows,
 		[]any{&row.Date, &row.Entry, &row.Source, &row.Outcome, &row.Cache, &row.Requests},
+		func() error {
+			out = append(out, row)
+			return nil
+		})
+	return out, err
+}
+
+// HubEventRow is one day of one games_hub event shape. Empty columns are
+// the fields that event does not carry, not unknowns: `room_closed` has
+// no variant because a closed room has none. `players` of -1 is not a
+// count — it is a count past what that event could carry.
+type HubEventRow struct {
+	Date    string `json:"date"`
+	Event   string `json:"event"`
+	Variant string `json:"variant"`
+	Surface string `json:"surface"`
+	Outcome string `json:"outcome"`
+	Players int    `json:"players"`
+	Events  int64  `json:"events"`
+}
+
+func (s *Store) HubEvents(ctx context.Context, days int) ([]HubEventRow, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT dt::text, event, variant, surface, outcome, players, events
+		 FROM hub_event_stats
+		 WHERE dt >= current_date - $1::int
+		 ORDER BY dt DESC, event, variant, surface, outcome, players`, days)
+	if err != nil {
+		return nil, err
+	}
+	var out []HubEventRow
+	var row HubEventRow
+	_, err = pgx.ForEachRow(rows,
+		[]any{&row.Date, &row.Event, &row.Variant, &row.Surface, &row.Outcome, &row.Players,
+			&row.Events},
 		func() error {
 			out = append(out, row)
 			return nil

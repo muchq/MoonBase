@@ -43,7 +43,8 @@ rides it, so the access log counts a connection and never a game.
 join, each reshape of a world, each thing said, each table dealt, each
 game that ended and each room that emptied — every line tagged with the
 room it happened in, so an evening reads back as a session — and rides the
-shipper under its own partition (#1571).
+shipper under its own partition (#1571), where `/stats/v1/games_hub/events`
+reports them per day.
 
 `deploy_config_test` checks the service-to-service HTTP calls compose
 declares, both ways: that each names something the network resolves, and
