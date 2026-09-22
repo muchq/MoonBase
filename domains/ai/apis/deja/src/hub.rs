@@ -192,6 +192,13 @@ mod tests {
                 .token,
             "hub game_started golf other"
         );
+        // `players` defaults, so a hub that stopped writing it would read
+        // as zero. A table of nobody is not a size, and minting a token
+        // from a field that is not there is the drift this bounds against.
+        assert_eq!(
+            obs(r#"{"ts":1,"event":"game_started","room":"a","variant":"golf"}"#).token,
+            "hub game_started golf other"
+        );
     }
 
     // Every factor is bounded here, not upstream: the hub is another
@@ -259,9 +266,11 @@ mod tests {
             "hub:a_b____c-d_e",
             "the two punctuation marks a room id may carry are kept"
         );
+        // Spelled out rather than computed from MAX_ROOM, so the bound
+        // cannot move with the assertion that is supposed to pin it.
         let long = "z".repeat(200);
         let o = obs(&format!(r#"{{"ts":1,"event":"room_closed","room":"{long}"}}"#));
-        assert_eq!(o.lane_key.len(), "hub:".len() + MAX_ROOM);
+        assert_eq!(o.lane_key, format!("hub:{}", "z".repeat(64)));
     }
 
     // Millis on the wire, seconds in an event, like every other source.

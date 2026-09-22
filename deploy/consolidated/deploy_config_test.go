@@ -2441,7 +2441,26 @@ func TestDejaTailsTheFileTheHubWrites(t *testing.T) {
 	if dir == "" {
 		t.Fatal("games_hub sets no GAME_EVENT_LOG_DIR; there is nothing for deja to tail")
 	}
-	want := "- HUB_EVENT_LOG=" + path.Join(dir, "game_events.log")
+	// The name and the suffix are the hub's, read where they are declared:
+	// hardcoding "game_events.log" here would compare two constants
+	// nobody owns and pass while the hub wrote something else.
+	main, err := os.ReadFile("../../domains/games/apis/games_hub/games_hub_main.cc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened := regexp.MustCompile(`EventLog::Open\(event_dir, "(\w+)"\)`).FindSubmatch(main)
+	if opened == nil {
+		t.Fatal("no EventLog::Open in games_hub_main.cc; if it moved, follow it here")
+	}
+	logCc, err := os.ReadFile("../../domains/platform/libs/event_log/event_log.cc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := regexp.MustCompile(`constexpr char kSuffix\[\] = "([^"]+)"`).FindSubmatch(logCc)
+	if suffix == nil {
+		t.Fatal("no kSuffix in event_log.cc; if it moved, follow it here")
+	}
+	want := "- HUB_EVENT_LOG=" + path.Join(dir, string(opened[1])+string(suffix[1]))
 	if !hasLine(activeServiceLines(t, "compose.yaml", "deja"), want) {
 		t.Errorf("deja does not tail %q; it would follow a path nothing writes and "+
 			"report a stream that never moves", want)
