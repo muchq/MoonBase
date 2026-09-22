@@ -266,9 +266,9 @@ func TestApplyRollupIsTransactionalIdempotentAndReadable(t *testing.T) {
 	if row := termRowFor(t, store, host); row == nil || row.Requests != 3 {
 		t.Errorf("term row after a second object = %+v, want 3", row)
 	}
-	// The second hour's six two-seat tables land on the first hour's row;
-	// the other four are untouched, so the upsert added rather than
-	// replaced and it added to the right row.
+	// The second object's five two-seat tables land on the first's six;
+	// the other four rows are untouched, so the upsert added rather than
+	// replaced, and added to the right row.
 	if got := hubRowsFor(t, store, host); len(got) != 5 ||
 		got[3] != (HubEventRow{date, "game_started", host, "plane", "", 2, 11}) ||
 		got[4] != (HubEventRow{date, "game_started", host, "plane", "", 4, 1}) {
@@ -362,26 +362,36 @@ func TestQueryTermsFoldEntryPointsBeforeTheLimit(t *testing.T) {
 
 	rows, total, err := store.QueryTerms(ctx, 2, 1000)
 	require.NoError(t, err)
-	mine := map[string]int64{}
+
+	// The database is shared, so the assertions are about this run's own
+	// terms: their values, and their order relative to each other, which a
+	// global sort preserves whatever else is in the window.
+	var ordered []TermRow
 	for _, row := range rows {
 		if strings.HasPrefix(row.Term, host) {
-			mine[row.Term] = row.Requests
+			ordered = append(ordered, row)
 		}
 	}
-	assert.Equal(t, map[string]int64{
-		host + "-shared": 7, host + "-solo": 5, host + "-motif": 1,
-	}, mine, "the two entry points' halves of one term should arrive summed")
-	assert.GreaterOrEqual(t, total, 3, "total should count the folded rows there were")
+	assert.Equal(t, []TermRow{
+		{Kind: KindField, Term: host + "-shared", Requests: 7},
+		{Kind: KindField, Term: host + "-solo", Requests: 5},
+		{Kind: KindMotif, Term: host + "-motif", Requests: 1},
+	}, ordered,
+		"the two entry points' halves of one term should arrive summed, and the summed 7 "+
+			"should outrank the solo 5 — unfolded it would be a 4 and a 3, both below it")
+	// total counts the rows this read would return untruncated, so on a
+	// window this limit did not cut it is exactly what came back. Counting
+	// the unfolded rows instead would overstate it, and a reader printing
+	// "the busiest 20 of N" would name terms that do not exist.
+	require.Less(t, len(rows), 1000, "the window filled the limit; this run cannot check total")
+	assert.Equal(t, len(rows), total, "total should count the folded rows, not the stored ones")
 
-	// Truncated, the fold is what makes the cut land between whole terms:
-	// the shared term's 7 outranks the solo 5, which it would not have
-	// before folding.
+	// And a limit smaller than the window says how many rows it cut. The
+	// rows it kept are whole totals because the fold already happened.
 	top, total, err := store.QueryTerms(ctx, 2, 1)
 	require.NoError(t, err)
 	require.Len(t, top, 1)
 	assert.Greater(t, total, 1, "a truncated read should say how many rows there were")
-	assert.GreaterOrEqual(t, top[0].Requests, int64(7),
-		"the busiest row should be a complete total, not one entry point's share")
 }
 
 func TestAgentsHonoursTheLimitBusiestFirst(t *testing.T) {
