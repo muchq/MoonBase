@@ -58,8 +58,12 @@ inline RateLimits WireRateLimits() {
   RateLimits limits;
   limits.command_burst = 1e9;
   limits.command_refill_per_sec = 1e9;
+  limits.lobby_burst = 1e9;
+  limits.lobby_refill_per_sec = 1e9;
   limits.chat_burst = 1e9;
   limits.chat_refill_per_sec = 1e9;
+  limits.voice_burst = 1e9;
+  limits.voice_refill_per_sec = 1e9;
   return limits;
 }
 

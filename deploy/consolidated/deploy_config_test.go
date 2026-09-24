@@ -17,6 +17,7 @@
 package deploy_test
 
 import (
+	"net/netip"
 	"net/url"
 	"os"
 	"os/exec"
@@ -3377,4 +3378,76 @@ func TestTheRemoteDeployBlockStopsAtTheFirstFailure(t *testing.T) {
 		t.Error("the remote deploy block does not `set -e`, so a failed compose step still" +
 			" exits 0 and the deploy reports success over a stack that is not serving")
 	}
+}
+
+// coturn's shared secret mints every voice joiner's credentials. It reaches
+// coturn through a file the entrypoint writes, never argv, which any user
+// on the host reads from /proc; the file is private to the container's
+// user, and the variable is unset before turnserver starts, so its
+// environment does not carry it either.
+func TestCoturnKeepsItsSecretOffArgvAndOutOfItsEnvironment(t *testing.T) {
+	lines := composeServiceLines(t, "compose.yaml")["coturn"]
+	if len(lines) == 0 {
+		t.Fatal("no coturn service in compose.yaml")
+	}
+	writer := ""
+	for _, line := range lines {
+		if strings.Contains(line, "--static-auth-secret") {
+			t.Errorf("coturn takes its secret on the command line: %q", strings.TrimSpace(line))
+		}
+		if strings.Contains(line, "static-auth-secret=") {
+			writer = line
+		}
+	}
+	if writer == "" {
+		t.Fatal("nothing in coturn's service writes static-auth-secret: TURN is on with no secret")
+	}
+	umask := strings.Index(writer, "umask 077")
+	write := strings.Index(writer, "static-auth-secret=")
+	unset := strings.Index(writer, "unset TURN_SECRET")
+	exec := strings.Index(writer, "exec turnserver")
+	if umask < 0 || !(umask < write && write < unset && unset < exec) {
+		t.Errorf("coturn's entrypoint must set umask 077, write the secret, unset TURN_SECRET, "+
+			"then exec turnserver, in that order: %q", strings.TrimSpace(writer))
+	}
+}
+
+// A relay that can reach the app network hands any voice joiner every
+// container on it: Postgres, the hubs, the collector. coturn runs on the
+// host network, so only its denied-peer-ip ranges keep it off.
+func TestCoturnCannotRelayIntoTheAppNetwork(t *testing.T) {
+	subnet := regexp.MustCompile(`subnet:\s*(\S+)`).FindStringSubmatch(readConfig(t, "compose.yaml"))
+	if subnet == nil {
+		t.Fatal("compose.yaml names no subnet for app_network")
+	}
+	network, err := netip.ParsePrefix(subnet[1])
+	if err != nil {
+		t.Fatalf("app_network subnet %q: %v", subnet[1], err)
+	}
+	first, last := network.Masked().Addr(), lastAddr(network)
+	for _, line := range composeServiceLines(t, "compose.yaml")["coturn"] {
+		_, spec, ok := strings.Cut(strings.Trim(strings.TrimPrefix(strings.TrimSpace(line), "- "), "'"), "--denied-peer-ip=")
+		if !ok {
+			continue
+		}
+		low, high, _ := strings.Cut(spec, "-")
+		if high == "" {
+			high = low
+		}
+		from, errFrom := netip.ParseAddr(low)
+		to, errTo := netip.ParseAddr(high)
+		if errFrom == nil && errTo == nil && from.Compare(first) <= 0 && to.Compare(last) >= 0 {
+			return
+		}
+	}
+	t.Errorf("no coturn --denied-peer-ip range covers app_network %s", network)
+}
+
+func lastAddr(prefix netip.Prefix) netip.Addr {
+	bytes := prefix.Masked().Addr().AsSlice()
+	for bit := prefix.Bits(); bit < len(bytes)*8; bit++ {
+		bytes[bit/8] |= 0x80 >> (bit % 8)
+	}
+	addr, _ := netip.AddrFromSlice(bytes)
+	return addr
 }

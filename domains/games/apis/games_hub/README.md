@@ -99,8 +99,14 @@ since the peer connections died with the socket. Voice frames draw from
 their own rate bucket, which holds a whole join's candidates. Like the
 world, voice is per instance and nothing is stored. `VOICE_STUN_URLS`
 (comma-separated) names the STUN servers every roster hands out; unset,
-browsers reach each other only on one network. TURN, for browsers STUN
-cannot connect, is still to come (#1590). The rules are `Voice`
+browsers reach each other only on one network. For browsers STUN cannot
+connect, `TURN_URLS` and `TURN_SECRET` add a TURN server to every roster
+with credentials minted for that joiner, good for a day and rounded to
+the hour so a rejoin keeps its coturn quota: username
+`<expiry>:<playerId>`, credential base64(HMAC-SHA1(secret, username)),
+which coturn's use-auth-secret checks (`turn_credentials.cc`, pinned by
+`turn_credentials_test`). Both or neither; `docs/DEPLOYMENT.md` has the
+host's side. The rules are `Voice`
 (`voice.cc`), pinned by `voice_test`; the bytes by `voice_wire_test`.
 
 ## deja on the walls

@@ -71,6 +71,11 @@ services:
       # so browsers behind NAT can find each other. Audio never touches
       # this host; browsers connect peer to peer.
       VOICE_STUN_URLS: stun:stun.l.google.com:19302
+      # TURN for browsers STUN cannot connect (#1590): coturn below, on this
+      # host. The hub mints each voice joiner a day's credentials from the
+      # secret coturn checks them against.
+      TURN_URLS: turn:turn.muchq.com:3478?transport=udp,turn:turn.muchq.com:3478?transport=tcp
+      TURN_SECRET: ${TURN_SECRET:?unset}
       # One line per game that ended (#1571), rolled hourly into a host
       # directory log_shipper reads. Unset, the hub keeps no event log at
       # all — the games are played and nothing counts them.
@@ -632,6 +637,70 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+
+  # TURN for a room's voice (#1590): relays audio between browsers STUN
+  # alone cannot connect (symmetric NAT, carrier-grade NAT). Host
+  # networking, so the relay port range is reachable as is; 3478 (UDP and
+  # TCP) and 49160-49300/udp are opened on the host's firewall by hand. The hub
+  # mints the credentials (use-auth-secret with TURN_SECRET), which reaches
+  # coturn through a private config file written at start: not its argv,
+  # and not its environment either, unset before turnserver runs.
+  # The relay is UDP only and denied loopback and every private range,
+  # this host's app network among them; the host's own public address
+  # stays allowed, since two relayed browsers talk relay to relay.
+  coturn:
+    image: coturn/coturn:4.18.0
+    labels:
+      com.muchq.description: "TURN relay for room voice"
+    restart: always
+    logging: *default-logging
+    network_mode: host
+    environment:
+      TURN_SECRET: ${TURN_SECRET:?unset}
+    entrypoint:
+      - sh
+      - -c
+      - umask 077 && printf 'static-auth-secret=%s\n' "$$TURN_SECRET" > /tmp/turnserver.conf && unset TURN_SECRET && exec turnserver -c /tmp/turnserver.conf "$$@"
+      - coturn
+    command:
+      - --listening-port=3478
+      - --min-port=49160
+      - --max-port=49300
+      - --use-auth-secret
+      - --realm=muchq.com
+      - --fingerprint
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --no-tcp-relay
+      - --no-multicast-peers
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=100.64.0.0-100.127.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      - '--denied-peer-ip=::'
+      - --denied-peer-ip=::1
+      - --denied-peer-ip=::ffff:0.0.0.0-::ffff:255.255.255.255
+      - --denied-peer-ip=64:ff9b::-64:ff9b::ffff:ffff
+      - --denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+      - --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+      # Browsers allocate once per TURN URL per peer: two URLs to each of
+      # five others is ten for one of six in a room's voice. The total fits
+      # the relay port range, and each session is capped at an audio call's
+      # bandwidth (bytes per second, each direction).
+      - --user-quota=12
+      - --total-quota=120
+      - --max-bps=16000
+      - --bps-capacity=1920000
+      - --log-file=stdout
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
 
   log_shipper:
     image: ghcr.io/muchq/log_shipper:${LOG_SHIPPER_SHA:-${DEPLOY_SHA:-latest}}
