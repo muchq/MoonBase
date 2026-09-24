@@ -471,6 +471,29 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "move_coalescing",
+    srcs = ["move_coalescing.cc"],
+    hdrs = ["move_coalescing.h"],
+    deps = [
+        ":games_hub_smithy_server",
+        "@com_google_absl//absl/strings",
+        "@opal_cpp//runtime:server",
+    ],
+)
+
+cc_test(
+    name = "move_coalescing_test",
+    size = "small",
+    srcs = ["move_coalescing_test.cc"],
+    deps = [
+        ":games_hub_smithy_server",
+        ":move_coalescing",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:server",
+    ],
+)
+
 # The world's rules on the World itself: bounds, join-before-move,
 # leave-first, and fan-out that stays in one room and never echoes.
 cc_test(
@@ -525,6 +548,7 @@ cc_library(
         ":hub_metrics",
         ":hub_store",
         ":id_generator",
+        ":move_coalescing",
         ":protocol_input",
         ":rate_limiter",
         ":splat",

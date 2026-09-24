@@ -80,27 +80,30 @@ structure ReceivedSignal {
     candidate: IceCandidate
 }
 
-/// An RTCSessionDescription: `type` is "offer" or "answer", and `sdp`
-/// is at most 16 KiB.
+/// An RTCSessionDescription: `type` is "offer" or "answer". The bounds
+/// here are enforced by the generated decoder, which refuses the one event.
 structure SessionDescription {
     @required
     type: String
 
     @required
+    @length(max: 16384)
     sdp: String
 }
 
 /// An RTCIceCandidate, as its toJSON() spells it; a null reads as absent.
-/// `candidate` is at most 1 KiB; empty marks the end of a peer's
-/// candidates.
+/// An empty `candidate` marks the end of a peer's candidates.
 structure IceCandidate {
     @required
+    @length(max: 1024)
     candidate: String
 
+    @length(max: 1024)
     sdpMid: String
 
     sdpMLineIndex: Integer
 
+    @length(max: 1024)
     usernameFragment: String
 }
 

@@ -19,9 +19,8 @@ bazel_dep(name = "opal_cpp", version = "0.0.0")
 #
 # Inbound stream events are validated against the model's constraints
 # (opal-cpp #228): a violation reaches the handler as Error::Validation, and
-# the session stays open. games_hub's model constrains no inbound member
-# yet, so nothing is refused. SessionRegistry sends take a delivery class
-# (#227): reliable, droppable, or coalesced by key.
+# the session stays open; games_hub refuses it in band. SessionRegistry
+# sends take a delivery class (#227): games_hub coalesces world moves.
 archive_override(
     module_name = "opal_cpp",
     integrity = "sha256-GbfEK1OnSztrVv2sAdvbFNtuc8hiRecmcuiF3jrj2Nc=",

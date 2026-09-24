@@ -1117,6 +1117,17 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
 
   while (true) {
     auto received = co_await stream.Receive();
+    if (!received.ok() && received.error().kind() == opal::ErrorKind::kValidation) {
+      // An event over the model's bounds (opal ADR-0025): refused in band,
+      // session kept, charged to the command bucket.
+      if (command_budget.Admit(std::chrono::steady_clock::now())) {
+        Reject(player_id, RejectKind::kInvalid, received.error().message());
+      } else {
+        Count("hub_rate_limited", {{"kind", "command"}});
+        Reject(player_id, RejectKind::kRateLimited, "slow down");
+      }
+      continue;
+    }
     if (!received.ok() || !received->has_value()) {
       // Any close parks the seat for the grace window (ADR-0020) —
       // expiry reaps it, a resume reclaims it. A clean close carries no
@@ -1408,6 +1419,8 @@ void GolfHub::HandleLobby(const std::string& player_id,
     } else if (action.as_leave_or_null() != nullptr) {
       if (!world_.Leave(player_id, deliveries)) {
         refusal = World::Refusal{RejectKind::kState, "not in the world"};
+      } else {
+        move_coalescing_.Forget(player_id);
       }
     } else if (const auto* set = action.as_setGeometry_or_null()) {
       auto surface = SurfaceFromGeometry(set->geometry);
@@ -1448,9 +1461,10 @@ std::string GolfHub::WorldOfLocked(const std::string& player_id) const {
 // next command under this lock can send.
 void GolfHub::SendWorldLocked(World::Deliveries& deliveries) {
   for (auto& delivery : deliveries) {
+    opal::server::DeliveryClass delivery_class = move_coalescing_.For(delivery.to, delivery.update);
     moonbase::games::LobbyEvent event;
     event.update = std::move(delivery.update);
-    Send(delivery.to, GameEvents::FromLobby(std::move(event)));
+    Send(delivery.to, GameEvents::FromLobby(std::move(event)), std::move(delivery_class));
   }
   deliveries.clear();
 }
@@ -1458,6 +1472,7 @@ void GolfHub::SendWorldLocked(World::Deliveries& deliveries) {
 void GolfHub::LeaveWorldLocked(const std::string& player_id) {
   World::Deliveries deliveries;
   world_.Leave(player_id, deliveries);
+  move_coalescing_.Forget(player_id);
   SendWorldLocked(deliveries);
 }
 
@@ -2508,7 +2523,8 @@ void GolfHub::CountCommand(const GameCommands& command) {
   }
 }
 
-void GolfHub::Send(const std::string& player_id, GameEvents event) {
+void GolfHub::Send(const std::string& player_id, GameEvents event,
+                   opal::server::DeliveryClass delivery) {
   if (metrics_) {
     if (const auto* golf = event.as_golf_or_null()) {
       metrics_->RecordCounter("golf_events", 1, {{"event", std::string(golf->update.case_name())}});
@@ -2525,7 +2541,8 @@ void GolfHub::Send(const std::string& player_id, GameEvents event) {
       metrics_->RecordCounter("hub_events", 1, {{"event", std::string(event.case_name())}});
     }
   }
-  registry_.SendTo(player_id, std::move(event));
+  if (hooks_.on_send) hooks_.on_send(player_id, event, delivery);
+  registry_.SendTo(player_id, std::move(event), std::move(delivery));
 }
 
 moonbase::games::RoomState GolfHub::RoomStateLocked(const std::string& room_id,

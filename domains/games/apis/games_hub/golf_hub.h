@@ -25,6 +25,7 @@
 #include "domains/games/apis/games_hub/hub_metrics.h"
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/id_generator.h"
+#include "domains/games/apis/games_hub/move_coalescing.h"
 #include "domains/games/apis/games_hub/rate_limiter.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/apis/games_hub/voice.h"
@@ -59,6 +60,11 @@ struct GolfTestHooks {
   /// Under mu_, after a lobby command's world deliveries have gone to the
   /// registry, before the lock is released.
   std::function<void()> after_world_sent;
+  /// For each event as it goes to the registry, with the delivery class
+  /// it rides. Under mu_ for the world's deliveries.
+  std::function<void(const std::string& to, const moonbase::games::GameEvents& event,
+                     const opal::server::DeliveryClass& delivery)>
+      on_send;
 };
 
 /// GolfHub is the room hub, phase 2 (#1187): seat admission, rooms,
@@ -200,6 +206,12 @@ class GolfHub final {
 
   /// For main's SIGTERM path: Drain, then transport Stop.
   Registry& registry() { return registry_; }
+
+  /// Readers the world's move coalescing tracks; for tests.
+  std::size_t MoveCoalescingReaders() {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return move_coalescing_.readers();
+  }
 
   /// Boot-time restore of the store's snapshot: rooms, members (presence
   /// seeded from their rows), and games. Call before the
@@ -404,7 +416,8 @@ class GolfHub final {
   void TrackActive(int delta);
   void CountCommand(const moonbase::games::GameCommands& command);
   /// Every event leaves through here so golf_events sees each send.
-  void Send(const std::string& player_id, moonbase::games::GameEvents event);
+  void Send(const std::string& player_id, moonbase::games::GameEvents event,
+            opal::server::DeliveryClass delivery = {});
 
   /// Loads the room's retained history and sends one roomChatHistory to
   /// the just-admitted player — nobody else; the room already has it.
@@ -597,6 +610,8 @@ class GolfHub final {
   uint64_t room_revisions_ = 0;
   /// The lobby's worlds, one per room and the plaza; guarded by mu_.
   World world_;
+  /// The delivery class of each world update (opal #227). Under mu_.
+  MoveCoalescing move_coalescing_;
   /// Each room's voice (#1590); guarded by mu_.
   Voice voice_;
 

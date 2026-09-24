@@ -140,6 +140,62 @@ TEST_F(VoiceWireTest, RefusalsArriveAsCommandRejected) {
             R"({"reason":"not in voice with that player"})");
 }
 
+// A signal over the model's @length bounds is refused in band by the
+// generated decoder (opal ADR-0025); the peer never sees it and the session
+// stays open.
+TEST_F(VoiceWireTest, ASignalOverTheModelsBoundsIsRefusedAndTheSessionStays) {
+  std::shared_ptr<opal::http::WebSocket> first, second;
+  TwoInVoice(first, second);
+  const std::string long_sdp(16 * 1024 + 1, 'x');
+  ASSERT_TRUE(
+      second
+          ->Send(CommandFrame("voice", R"({"action":{"signal":{"to":"player-1","toEpoch":1,)"
+                                       R"("description":{"type":"offer","sdp":")" +
+                                           long_sdp + R"("}}}})"))
+          .ok());
+  const json refused = json::parse(EventPayload(NextFrame(*second), "commandRejected"));
+  EXPECT_NE(refused["reason"].get<std::string>().find("sdp"), std::string::npos);
+  EXPECT_NE(refused["reason"].get<std::string>().find("failed to satisfy constraint"),
+            std::string::npos);
+  const std::string long_mid(1025, 'x');
+  ASSERT_TRUE(
+      second
+          ->Send(CommandFrame("voice", R"({"action":{"signal":{"to":"player-1","toEpoch":1,)"
+                                       R"("candidate":{"candidate":"c","sdpMid":")" +
+                                           long_mid + R"("}}}})"))
+          .ok());
+  (void)EventPayload(NextFrame(*second), "commandRejected");
+  ASSERT_TRUE(
+      second
+          ->Send(CommandFrame("voice", R"({"action":{"signal":{"to":"player-1","toEpoch":1,)"
+                                       R"("candidate":{"candidate":"c","usernameFragment":")" +
+                                           long_mid + R"("}}}})"))
+          .ok());
+  (void)EventPayload(NextFrame(*second), "commandRejected");
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "invalid"}}), 3);
+
+  ASSERT_TRUE(
+      second
+          ->Send(CommandFrame("voice", R"({"action":{"signal":{"to":"player-1","toEpoch":1,)"
+                                       R"("description":{"type":"offer","sdp":"v=0"}}}})"))
+          .ok());
+  EXPECT_EQ(EventPayload(NextFrame(*first), "voice"),
+            R"({"update":{"signal":{"description":{"sdp":"v=0","type":"offer"},)"
+            R"("from":"player-2"}}})");
+
+  // The bound itself is allowed.
+  const std::string at_sdp(16 * 1024, 'x');
+  ASSERT_TRUE(
+      second
+          ->Send(CommandFrame("voice", R"({"action":{"signal":{"to":"player-1","toEpoch":1,)"
+                                       R"("description":{"type":"offer","sdp":")" +
+                                           at_sdp + R"("}}}})"))
+          .ok());
+  const json relayed = json::parse(EventPayload(NextFrame(*first), "voice"));
+  EXPECT_EQ(relayed["update"]["signal"]["description"]["sdp"].get<std::string>().size(),
+            at_sdp.size());
+}
+
 // Voice is the room's: a deliberate leave, leaving the room, and a closed
 // socket each take the member out, and whoever is left hears it.
 TEST_F(VoiceWireTest, LeavingVoiceTheRoomOrTheSocketTellsTheRest) {
@@ -199,6 +255,31 @@ TEST_F(VoiceRateLimitedTest, ASignalFloodIsRefusedAfterVoicesOwnBurst) {
   (void)EventPayload(NextFrame(*first), "roomState");
   EXPECT_EQ(metrics_->CounterTotal("hub_rate_limited", {{"kind", "voice"}}), 1);
   EXPECT_EQ(metrics_->CounterTotal("hub_rate_limited", {{"kind", "command"}}), 0);
+}
+
+// Decoder refusals draw from the command bucket.
+class DecoderRefusalLimitedTest : public VoiceWireTest {
+ protected:
+  RateLimits MakeRateLimits() override {
+    RateLimits limits = WireRateLimits();
+    limits.command_burst = 1;
+    limits.command_refill_per_sec = 0;
+    return limits;
+  }
+};
+
+TEST_F(DecoderRefusalLimitedTest, AFloodOfOversizedEventsIsRateLimited) {
+  auto alone = DialReady();
+  const std::string oversized =
+      R"({"action":{"signal":{"to":"player-9","toEpoch":1,"candidate":{"candidate":")" +
+      std::string(1025, 'x') + R"("}}}})";
+  ASSERT_TRUE(alone->Send(CommandFrame("voice", oversized)).ok());
+  const json refused = json::parse(EventPayload(NextFrame(*alone), "commandRejected"));
+  EXPECT_NE(refused["reason"].get<std::string>().find("failed to satisfy constraint"),
+            std::string::npos);
+  ASSERT_TRUE(alone->Send(CommandFrame("voice", oversized)).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*alone), "commandRejected"), R"({"reason":"slow down"})");
+  EXPECT_EQ(metrics_->CounterTotal("hub_rate_limited", {{"kind", "command"}}), 1);
 }
 
 }  // namespace

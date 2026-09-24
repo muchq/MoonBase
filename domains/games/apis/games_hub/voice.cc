@@ -72,19 +72,6 @@ std::optional<Refusal> Voice::Signal(const std::string& player_id,
     if (type != "offer" && type != "answer") {
       return Refusal{RejectKind::kInvalid, "a description is an offer or an answer"};
     }
-    if (signal.description->sdp.size() > kMaxSdpBytes) {
-      return Refusal{RejectKind::kInvalid, "sdp is too long"};
-    }
-  }
-  if (signal.candidate.has_value()) {
-    const auto& ice = *signal.candidate;
-    const auto too_long = [](const std::optional<std::string>& field) {
-      return field.has_value() && field->size() > kMaxCandidateBytes;
-    };
-    if (ice.candidate.size() > kMaxCandidateBytes || too_long(ice.sdpMid) ||
-        too_long(ice.usernameFragment)) {
-      return Refusal{RejectKind::kInvalid, "candidate is too long"};
-    }
   }
 
   const auto sender = in_voice_.find(player_id);
