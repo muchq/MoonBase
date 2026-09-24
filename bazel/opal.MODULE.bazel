@@ -16,11 +16,17 @@ bazel_dep(name = "opal_cpp", version = "0.0.0")
 # with the payload's content type, so the member was set and then discarded on
 # every call. It is a default rather than an override, which is what lets the
 # lichess client state PGN in its model instead of from an interceptor.
+#
+# Inbound stream events are validated against the model's constraints
+# (opal-cpp #228): a violation reaches the handler as Error::Validation, and
+# the session stays open. games_hub's model constrains no inbound member
+# yet, so nothing is refused. SessionRegistry sends take a delivery class
+# (#227): reliable, droppable, or coalesced by key.
 archive_override(
     module_name = "opal_cpp",
-    integrity = "sha256-+zRdcJg2ivmRdDSE7FP9JlA0Z+psI8Kd6JtJ4hDRp74=",
-    strip_prefix = "opal-cpp-b829d71a82f178db0770d75d46e66816dd596e7c",
+    integrity = "sha256-GbfEK1OnSztrVv2sAdvbFNtuc8hiRecmcuiF3jrj2Nc=",
+    strip_prefix = "opal-cpp-5b2bd1182002e2118f26483ab11282196706b539",
     urls = [
-        "https://github.com/muchq/opal-cpp/archive/b829d71a82f178db0770d75d46e66816dd596e7c.tar.gz",
+        "https://github.com/muchq/opal-cpp/archive/5b2bd1182002e2118f26483ab11282196706b539.tar.gz",
     ],
 )
