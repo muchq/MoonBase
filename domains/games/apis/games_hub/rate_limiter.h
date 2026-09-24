@@ -15,8 +15,12 @@ using TokenBucket = futility::rate_limiter::TokenBucket;
 /// are far above human play and far below what it takes to hurt the hub
 /// mutex or the database (#1234).
 ///
-/// A lobby frame draws from the lobby bucket, every other frame from the
-/// command bucket, and chat frames from the chat bucket too. Game moves
+/// A lobby frame draws from the lobby bucket, a voice frame from the voice
+/// bucket, every other frame from the command bucket, and chat frames
+/// from the chat bucket too. A voice join is a burst of signals — an
+/// offer, a dozen or so candidates and their end to each of up to five
+/// peers, about 75 — so its bucket holds a whole join and refills slowly.
+/// Game moves
 /// are turn-gated and chat is typed; the world's moves are cursor-driven
 /// (the site sends up to twenty a second while a player walks), so the
 /// lobby's budget is an order of magnitude wider. Chat is tighter because
@@ -30,6 +34,8 @@ struct RateLimits {
   double lobby_refill_per_sec = 60;
   double chat_burst = 3;
   double chat_refill_per_sec = 1;
+  double voice_burst = 100;
+  double voice_refill_per_sec = 10;
 };
 
 }  // namespace games_hub

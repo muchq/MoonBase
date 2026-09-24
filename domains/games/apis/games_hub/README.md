@@ -7,13 +7,13 @@ streaming stack: a modeled protocol with generated async handlers
 (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018), and ticket
 auth ahead of the 101. One session identity opens the one stream.
 
-## The model (four namespaces)
+## The model (five namespaces)
 
 - `model/games.smithy` — `moonbase.games`: the service, session identity
   (`POST /games/v2/session`), the two terminal stream errors, the one
   stream — `Play` at `/games/v2/play`, its `GameCommands`/`GameEvents`
   unions carrying the room layer's own cases plus one envelope member
-  per tenant (`lobby`, `golf`, `castle`) — and the game-agnostic room
+  per tenant (`lobby`, `voice`, `golf`, `castle`) — and the game-agnostic room
   layer — rooms, chat, player info with room-scoped stats and the
   member's table (`PlayerInfo.table`: which game, which
   table, pending or in play, absent while idle — how the lobby tells who
@@ -33,11 +33,14 @@ auth ahead of the 101. One session identity opens the one stream.
 - `model/lobby.smithy` — `moonbase.lobby`: the world's shapes — the
   `lobby` member of the room stream (`LobbyAction`, `LobbyUpdate`) and
   what they carry.
+- `model/voice.smithy` — `moonbase.voice`: a room's voice (#1590) — the
+  `voice` member (`VoiceAction`, `VoiceUpdate`): joining and leaving it,
+  and the WebRTC signals between its members.
 
 A new game is one new model file and one more envelope member on the
 room stream's unions, the way castle and the lobby joined. Codegen
 flattens every namespace into `moonbase::games`, so shape names must be
-unique across the four files (a collision gets the foreign namespace's
+unique across the five files (a collision gets the foreign namespace's
 name appended, which nothing here wants).
 
 ## The lobby's world
@@ -65,6 +68,33 @@ out `playerLeft`. A session that has not joined hears nothing.
 Out-of-bounds values and commands before a join are refused in-band as
 `commandRejected`. No persistence: presence is the whole game. The rules
 and the map are `World` (`world.cc`), pinned by `world_test`.
+
+## A room's voice
+
+Voice for the people in a room (#1590). Audio never reaches the hub:
+browsers connect to each other over WebRTC, a full mesh capped at six
+(`Voice::kCapacity`). The hub keeps who is in each room's voice and relays
+each negotiation signal to the one peer it names. `join` answers the
+joiner with a `roster` (everyone already in voice, and the ICE servers)
+and tells each of them `joined`; the joiner offers to each member on its
+roster, and later renegotiation is perfect negotiation with the smaller
+playerId polite. Every join is a new epoch, carried on `roster` and
+`joined`, and a `signal` names the epoch of the join it is for, so an
+answer meant for someone who has since left and come back is refused
+rather than applied to their new connection. A signal carries exactly one
+of an offer/answer description (sdp ≤ 16 KiB) or a candidate (≤ 1 KiB,
+`RTCIceCandidate.toJSON()` as it is, nulls read as absent), and reaches
+its peer only if both are in the same room's voice — refused with one
+reason whoever the peer is, so a signal cannot ask who is online.
+Leaving voice, leaving the room (a sibling instance's drop included), and
+a closed socket each fan out `left`; a resume does not restore voice,
+since the peer connections died with the socket. Voice frames draw from
+their own rate bucket, which holds a whole join's candidates. Like the
+world, voice is per instance and nothing is stored. `VOICE_STUN_URLS`
+(comma-separated) names the STUN servers every roster hands out; unset,
+browsers reach each other only on one network. TURN, for browsers STUN
+cannot connect, is still to come (#1590). The rules are `Voice`
+(`voice.cc`), pinned by `voice_test`; the bytes by `voice_wire_test`.
 
 ## deja on the walls
 

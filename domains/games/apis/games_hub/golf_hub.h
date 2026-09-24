@@ -27,6 +27,7 @@
 #include "domains/games/apis/games_hub/id_generator.h"
 #include "domains/games/apis/games_hub/rate_limiter.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
+#include "domains/games/apis/games_hub/voice.h"
 #include "domains/games/apis/games_hub/world.h"
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/dealer.h"
@@ -253,6 +254,10 @@ class GolfHub final {
   /// that would ship rather than an intermediate nobody archives.
   void SetEventWriter(EventWriter writer);
 
+  /// The ICE servers every voice roster hands a joiner (#1590). Call
+  /// before serving; none leaves browsers to their host candidates.
+  void SetIceServers(std::vector<moonbase::games::IceServer> servers);
+
   /// The client without the thread, for tests that drive PollTapeOnce
   /// themselves so no assertion waits on a clock.
   void AttachTape(std::shared_ptr<deja::Client> tape);
@@ -364,6 +369,13 @@ class GolfHub final {
   /// callers hold mu_. Shared by every way of leaving: the close path,
   /// LeaveEverywhere, and a room change.
   void LeaveWorldLocked(const std::string& player_id);
+  /// The voice member: voice is the session's room's.
+  void HandleVoice(const std::string& player_id, const moonbase::games::VoiceAction& action);
+  /// Stages voice's deliveries as voice events; callers hold mu_.
+  void SendVoiceLocked(Voice::Deliveries& deliveries);
+  /// Out of the room's voice, the rest of it told; callers hold mu_.
+  /// Wherever a session leaves its world, it leaves voice too.
+  void LeaveVoiceLocked(const std::string& player_id);
   /// The lifecycle moves both games share. Create and join are told
   /// which game's envelope asked — a golf join of a castle table is
   /// refused, so nobody is seated at a table whose vocabulary they do not
@@ -585,6 +597,8 @@ class GolfHub final {
   uint64_t room_revisions_ = 0;
   /// The lobby's worlds, one per room and the plaza; guarded by mu_.
   World world_;
+  /// Each room's voice (#1590); guarded by mu_.
+  Voice voice_;
 
   /// Where live chat delivery stands for one held room. `delivered` is
   /// the highest message id every current local member has been staged.

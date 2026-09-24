@@ -366,6 +366,15 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"lobby_events", {{"event", "playerLeft"}}},
       {"lobby_events", {{"event", "geometryChanged"}}},
       {"lobby_events", {{"event", "tape"}}},
+      // A room's voice (#1590), the same way: VoiceAction and VoiceUpdate,
+      // pinned by VoiceSeriesMatchTheModelUnions.
+      {"voice_commands", {{"command", "join"}}},
+      {"voice_commands", {{"command", "leave"}}},
+      {"voice_commands", {{"command", "signal"}}},
+      {"voice_events", {{"event", "roster"}}},
+      {"voice_events", {{"event", "joined"}}},
+      {"voice_events", {{"event", "left"}}},
+      {"voice_events", {{"event", "signal"}}},
       // deja's tape (#1554): what was asked for, what came back, and how
       // much of it reached a wall. lobby_tape_poller_active is the gauge
       // beside them, and gauges are not declared.
@@ -375,6 +384,7 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"hub_rate_limited", {{"kind", "chat"}}},
       {"hub_rate_limited", {{"kind", "command"}}},
       {"hub_rate_limited", {{"kind", "lobby"}}},
+      {"hub_rate_limited", {{"kind", "voice"}}},
       // One entry per RejectKind, in enum order.
       {"hub_rejections", {{"kind", "rate_limited"}}},
       {"hub_rejections", {{"kind", "invalid"}}},
@@ -855,6 +865,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
         player_room_.erase(it);
         player_game_.erase(member_id);
         LeaveWorldLocked(member_id);  // its world goes with it
+        LeaveVoiceLocked(member_id);  // and its voice
       }
     }
     rooms_.erase(room);
@@ -933,6 +944,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
       player_room_.erase(it);
       player_game_.erase(member_id);
       LeaveWorldLocked(member_id);  // a sibling's drop takes the world too
+      LeaveVoiceLocked(member_id);  // and the room's voice
     }
   }
   room.members = std::move(members);
@@ -1101,6 +1113,7 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
   TokenBucket command_budget(limits_.command_burst, limits_.command_refill_per_sec);
   TokenBucket lobby_budget(limits_.lobby_burst, limits_.lobby_refill_per_sec);
   TokenBucket chat_budget(limits_.chat_burst, limits_.chat_refill_per_sec);
+  TokenBucket voice_budget(limits_.voice_burst, limits_.voice_refill_per_sec);
 
   while (true) {
     auto received = co_await stream.Receive();
@@ -1118,6 +1131,9 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
       {
         const std::lock_guard<std::mutex> lock(mu_);
         LeaveWorldLocked(player_id);
+        // Voice too: the peer connections died with the socket, and a
+        // resume joins again.
+        LeaveVoiceLocked(player_id);
       }
       if (hooks_.before_seat_release) hooks_.before_seat_release(player_id);
       if (registry_.Detach(player_id)) {
@@ -1130,12 +1146,14 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
     }
     const auto now = std::chrono::steady_clock::now();
     const bool lobby = (*received)->as_lobby_or_null() != nullptr;
-    if (!(lobby ? lobby_budget : command_budget).Admit(now)) {
+    const bool voice = (*received)->as_voice_or_null() != nullptr;
+    TokenBucket& budget = lobby ? lobby_budget : voice ? voice_budget : command_budget;
+    if (!budget.Admit(now)) {
       // Refused before any locked work: the whole point is that a flood
       // costs the hub almost nothing. The session stays open — the
       // buckets already bound the damage, and closing floods just
       // converts them into reconnect load.
-      Count("hub_rate_limited", {{"kind", lobby ? "lobby" : "command"}});
+      Count("hub_rate_limited", {{"kind", lobby ? "lobby" : voice ? "voice" : "command"}});
       Reject(player_id, RejectKind::kRateLimited, "slow down");
       continue;
     }
@@ -1359,6 +1377,11 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
     return;
   }
 
+  if (const auto* voice = command.as_voice_or_null()) {
+    HandleVoice(player_id, voice->action);
+    return;
+  }
+
   Reject(player_id, RejectKind::kUnknown, "unknown command");
 }
 
@@ -1436,6 +1459,52 @@ void GolfHub::LeaveWorldLocked(const std::string& player_id) {
   World::Deliveries deliveries;
   world_.Leave(player_id, deliveries);
   SendWorldLocked(deliveries);
+}
+
+void GolfHub::HandleVoice(const std::string& player_id,
+                          const moonbase::games::VoiceAction& action) {
+  std::optional<Refusal> refusal;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    Voice::Deliveries deliveries;
+    if (action.as_join_or_null() != nullptr) {
+      const auto room = player_room_.find(player_id);
+      if (room == player_room_.end()) {
+        refusal = Refusal{RejectKind::kState, "join a room first"};
+      } else {
+        refusal = voice_.Join(player_id, room->second, deliveries);
+      }
+    } else if (action.as_leave_or_null() != nullptr) {
+      if (!voice_.Leave(player_id, deliveries))
+        refusal = Refusal{RejectKind::kState, "not in voice"};
+    } else if (const auto* signal = action.as_signal_or_null()) {
+      refusal = voice_.Signal(player_id, *signal, deliveries);
+    } else {
+      refusal = Refusal{RejectKind::kUnknown, "unknown voice action"};
+    }
+    SendVoiceLocked(deliveries);
+  }
+  if (refusal.has_value()) Reject(player_id, std::move(*refusal));
+}
+
+void GolfHub::SendVoiceLocked(Voice::Deliveries& deliveries) {
+  for (auto& delivery : deliveries) {
+    moonbase::games::VoiceEvent event;
+    event.update = std::move(delivery.update);
+    Send(delivery.to, GameEvents::FromVoice(std::move(event)));
+  }
+  deliveries.clear();
+}
+
+void GolfHub::LeaveVoiceLocked(const std::string& player_id) {
+  Voice::Deliveries deliveries;
+  voice_.Leave(player_id, deliveries);
+  SendVoiceLocked(deliveries);
+}
+
+void GolfHub::SetIceServers(std::vector<moonbase::games::IceServer> servers) {
+  const std::lock_guard<std::mutex> lock(mu_);
+  voice_.SetIceServers(std::move(servers));
 }
 
 void GolfHub::HandleMove(const std::string& player_id, const GolfMove& move) {
@@ -2119,6 +2188,7 @@ std::optional<GolfHub::GameRef> GolfHub::FindGameLocked(const std::string& playe
 
 void GolfHub::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writes& writes) {
   LeaveWorldLocked(player_id);
+  LeaveVoiceLocked(player_id);
   LeaveGameLocked(player_id, outbox, writes);
 
   const auto it = player_room_.find(player_id);
@@ -2430,6 +2500,9 @@ void GolfHub::CountCommand(const GameCommands& command) {
   } else if (const auto* lobby = command.as_lobby_or_null()) {
     metrics_->RecordCounter("lobby_commands", 1,
                             {{"command", std::string(lobby->action.case_name())}});
+  } else if (const auto* voice = command.as_voice_or_null()) {
+    metrics_->RecordCounter("voice_commands", 1,
+                            {{"command", std::string(voice->action.case_name())}});
   } else {
     metrics_->RecordCounter("hub_commands", 1, {{"command", std::string(command.case_name())}});
   }
@@ -2445,6 +2518,9 @@ void GolfHub::Send(const std::string& player_id, GameEvents event) {
     } else if (const auto* lobby = event.as_lobby_or_null()) {
       metrics_->RecordCounter("lobby_events", 1,
                               {{"event", std::string(lobby->update.case_name())}});
+    } else if (const auto* voice = event.as_voice_or_null()) {
+      metrics_->RecordCounter("voice_events", 1,
+                              {{"event", std::string(voice->update.case_name())}});
     } else {
       metrics_->RecordCounter("hub_events", 1, {{"event", std::string(event.case_name())}});
     }
