@@ -29,8 +29,6 @@ class Voice {
   /// A full mesh: each member sends a stream to every other, so the cap
   /// is what one phone's uplink carries.
   static constexpr std::size_t kCapacity = 6;
-  static constexpr std::size_t kMaxSdpBytes = 16 * 1024;
-  static constexpr std::size_t kMaxCandidateBytes = 1024;
 
   using Refusal = games_hub::Refusal;
 

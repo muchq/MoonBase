@@ -66,8 +66,12 @@ else in that world and tells the rest of it `playerJoined`; `move` and
 never past the world's edge; `leave` — or a closed socket, alike — fans
 out `playerLeft`. A session that has not joined hears nothing.
 Out-of-bounds values and commands before a join are refused in-band as
-`commandRejected`. No persistence: presence is the whole game. The rules
-and the map are `World` (`world.cc`), pinned by `world_test`.
+`commandRejected`. No persistence: presence is the whole game. A slow
+reader's queue holds at most one move per walker (opal's coalescing
+delivery); any other update to that reader starts a new key, so a move
+never replaces one queued ahead of it (`MoveCoalescing`, pinned by
+`move_coalescing_test`; the hub's use of it by `lobby_e2e_test`). The
+rules and the map are `World` (`world.cc`), pinned by `world_test`.
 
 ## A room's voice
 
@@ -82,9 +86,12 @@ playerId polite. Every join is a new epoch, carried on `roster` and
 `joined`, and a `signal` names the epoch of the join it is for, so an
 answer meant for someone who has since left and come back is refused
 rather than applied to their new connection. A signal carries exactly one
-of an offer/answer description (sdp ≤ 16 KiB) or a candidate (≤ 1 KiB,
-`RTCIceCandidate.toJSON()` as it is, nulls read as absent), and reaches
-its peer only if both are in the same room's voice — refused with one
+of an offer/answer description (sdp ≤ 16384 characters) or a candidate
+(each field ≤ 1024, `RTCIceCandidate.toJSON()` as it is, nulls read as
+absent). Those bounds are the model's (`voice.smithy`): the generated
+decoder refuses an event over them, in band, and it costs the command
+bucket (opal ADR-0025). A signal reaches its
+peer only if both are in the same room's voice — refused with one
 reason whoever the peer is, so a signal cannot ask who is online.
 Leaving voice, leaving the room (a sibling instance's drop included), and
 a closed socket each fan out `left`; a resume does not restore voice,

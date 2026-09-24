@@ -544,6 +544,90 @@ TEST_F(LobbyFixture, ASiblingsRoomDeleteLeavesTheWorldToo) {
             std::vector<std::string>{alice->player_id});
 }
 
+// The delivery class the hub passes the registry for world updates: a
+// walker's moves to one reader coalesce under one key; a join is reliable.
+class LobbyDeliveryFixture : public LobbyFixture {
+ protected:
+  struct Handed {
+    std::string to;
+    std::string update;
+    opal::server::DeliveryClass delivery;
+  };
+
+  GolfTestHooks MakeGolfHooks() override {
+    GolfTestHooks hooks;
+    hooks.on_send = [this](const std::string& to, const moonbase::games::GameEvents& event,
+                           const opal::server::DeliveryClass& delivery) {
+      const auto* lobby = event.as_lobby_or_null();
+      if (lobby == nullptr) return;
+      const std::lock_guard<std::mutex> lock(handed_mu_);
+      handed_.push_back({to, std::string(lobby->update.case_name()), delivery});
+    };
+    return hooks;
+  }
+
+  std::vector<Handed> HandedTo(const std::string& to, const std::string& update) {
+    const std::lock_guard<std::mutex> lock(handed_mu_);
+    std::vector<Handed> matching;
+    for (const auto& handed : handed_) {
+      if (handed.to == to && handed.update == update) matching.push_back(handed);
+    }
+    return matching;
+  }
+
+ private:
+  std::mutex handed_mu_;
+  std::vector<Handed> handed_;
+};
+
+TEST_F(LobbyDeliveryFixture, AWalkersMovesReachTheRegistryCoalescedAndTheRestReliably) {
+  auto alice = Arrive();
+  auto bob = Arrive();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "worldState").has_value());
+  ASSERT_TRUE(bob->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(bob->stream, "worldState").has_value());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "playerJoined").has_value());
+  ASSERT_TRUE(bob->stream.Send(MoveTo({1, 0, 1})).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "playerMoved").has_value());
+  ASSERT_TRUE(bob->stream.Send(MoveTo({2, 0, 2})).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "playerMoved").has_value());
+
+  const auto moves = HandedTo(alice->player_id, "playerMoved");
+  ASSERT_EQ(moves.size(), 2u);
+  EXPECT_EQ(moves[0].delivery.kind, opal::server::DeliveryClass::Kind::kCoalesce);
+  EXPECT_EQ(moves[0].delivery.key, moves[1].delivery.key);
+  const auto joined = HandedTo(alice->player_id, "playerJoined");
+  ASSERT_EQ(joined.size(), 1u);
+  EXPECT_EQ(joined[0].delivery.kind, opal::server::DeliveryClass::Kind::kReliable);
+}
+
+// A reader that leaves the world, by command or by closing, is no longer
+// tracked.
+TEST_F(LobbyFixture, LeavingTheWorldDropsTheReadersCoalescingState) {
+  auto alice = Arrive();
+  auto bob = Arrive();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "worldState").has_value());
+  ASSERT_TRUE(bob->stream.Send(JoinWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(bob->stream, "worldState").has_value());
+  ASSERT_TRUE(ReceiveLobby(alice->stream, "playerJoined").has_value());
+  EXPECT_EQ(golf_->MoveCoalescingReaders(), 2u);
+
+  ASSERT_TRUE(alice->stream.Send(LeaveWorld()).ok());
+  ASSERT_TRUE(ReceiveLobby(bob->stream, "playerLeft").has_value());
+  EXPECT_EQ(golf_->MoveCoalescingReaders(), 1u);
+
+  bob->stream.Close();
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (golf_->MoveCoalescingReaders() != 0 && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_EQ(golf_->MoveCoalescingReaders(), 0u);
+}
+
 // The close path at its seam: the world entry goes and playerLeft fans
 // out while the seat is still held, and only then does the seat park.
 class LobbyRaceFixture : public LobbyFixture {

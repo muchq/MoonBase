@@ -232,22 +232,7 @@ TEST(VoiceTest, ASignalCarriesExactlyOneWellFormedPart) {
   rollback.description->type = "rollback";
   EXPECT_EQ(Reason(voice.Signal("alice", rollback, out)), "a description is an offer or an answer");
 
-  const std::string long_sdp(Voice::kMaxSdpBytes + 1, 'x');
-  const std::string long_candidate(Voice::kMaxCandidateBytes + 1, 'x');
-  EXPECT_EQ(Reason(voice.Signal("alice", Offer("bob", bob, long_sdp), out)), "sdp is too long");
-  EXPECT_EQ(Reason(voice.Signal("alice", Candidate("bob", bob, long_candidate), out)),
-            "candidate is too long");
-  SendSignal long_mid = Candidate("bob", bob, "c");
-  long_mid.candidate->sdpMid = std::string(Voice::kMaxCandidateBytes + 1, 'x');
-  EXPECT_EQ(Reason(voice.Signal("alice", long_mid, out)), "candidate is too long");
   EXPECT_TRUE(out.empty());
-
-  // The limits themselves are allowed.
-  const std::string at_sdp(Voice::kMaxSdpBytes, 'x');
-  const std::string at_candidate(Voice::kMaxCandidateBytes, 'x');
-  EXPECT_FALSE(voice.Signal("alice", Offer("bob", bob, at_sdp), out).has_value());
-  EXPECT_FALSE(voice.Signal("alice", Candidate("bob", bob, at_candidate), out).has_value());
-  EXPECT_EQ(out.size(), 2u);
 }
 
 TEST(VoiceTest, SomeoneWhoLeftIsNoLongerSignalled) {
