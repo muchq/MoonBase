@@ -12,6 +12,7 @@ smithy_cpp_server_library(
         "model/games.smithy",
         "model/golf.smithy",
         "model/lobby.smithy",
+        "model/voice.smithy",
     ],
     namespace = "moonbase::games",
     service = "moonbase.games#GamesHub",
@@ -24,6 +25,7 @@ smithy_cpp_client_library(
         "model/games.smithy",
         "model/golf.smithy",
         "model/lobby.smithy",
+        "model/voice.smithy",
     ],
     namespace = "moonbase::games",
     service = "moonbase.games#GamesHub",
@@ -484,6 +486,31 @@ cc_test(
     ],
 )
 
+# A room's voice (#1590): who is in it and the WebRTC signals between
+# them, staged, no wire, hosted by GolfHub as the room stream's voice member.
+cc_library(
+    name = "voice",
+    srcs = ["voice.cc"],
+    hdrs = ["voice.h"],
+    deps = [
+        ":games_hub_smithy_server",
+        ":hub_metrics",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "voice_test",
+    size = "small",
+    srcs = ["voice_test.cc"],
+    deps = [
+        ":games_hub_smithy_server",
+        ":hub_metrics",
+        ":voice",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The golf game: seats, rooms, chat, and the engine, behind the composite
 # handler's Play.
 cc_library(
@@ -503,6 +530,7 @@ cc_library(
         ":splat",
         ":surface",
         ":ticket_vault",
+        ":voice",
         ":wire_cards",
         ":world",
         "//domains/ai/libs/deja_cpp:client",
@@ -697,6 +725,7 @@ cc_test(
         "model/games.smithy",
         "model/golf.smithy",
         "model/lobby.smithy",
+        "model/voice.smithy",
     ],
     deps = [
         ":games_hub_smithy_client",
@@ -835,6 +864,33 @@ cc_test(
     ],
 )
 
+# A room's voice through the raw wire (#1590): the voice envelope's bytes
+# both ways, and voice ending with the room or the socket.
+cc_test(
+    name = "voice_wire_test",
+    size = "small",
+    srcs = [
+        "voice_wire_test.cc",
+        "wire_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_server",
+        ":golf_hub",
+        ":id_generator",
+        ":rate_limiter",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:eventstream",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
 # deja on the walls (#1554, #1150): the poller through the raw wire with a
 # scripted deja under it — the occupancy gate, the splat bytes, the same
 # spot for every client in the room, dedupe, resume, and a deja having a
@@ -883,6 +939,7 @@ cc_binary(
         ":pg_ticket_vault",
         ":protocol_input",
         ":ticket_vault",
+        ":voice",
         "//domains/ai/libs/deja_cpp:production_client",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/aura",

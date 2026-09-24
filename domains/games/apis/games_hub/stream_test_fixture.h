@@ -204,6 +204,14 @@ inline std::optional<moonbase::games::LobbyUpdate> ReceiveLobby(
       [](const moonbase::games::GameEvents& event) { return event.as_lobby_or_null(); }, budget);
 }
 
+inline std::optional<moonbase::games::VoiceUpdate> ReceiveVoice(
+    moonbase::games::PlayClientStream& stream, const std::string& wanted,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  return ReceiveEnvelope(
+      stream, wanted, "voice",
+      [](const moonbase::games::GameEvents& event) { return event.as_voice_or_null(); }, budget);
+}
+
 // Receives until a fetched value satisfies the predicate — flows that
 // converge on content, not frame counts, because a wake re-projects
 // everything and the frame count is timing-dependent. `fetch` receives
@@ -297,6 +305,8 @@ inline RateLimits UnlimitedRateLimits() {
   limits.lobby_refill_per_sec = 1e9;
   limits.chat_burst = 1e9;
   limits.chat_refill_per_sec = 1e9;
+  limits.voice_burst = 1e9;
+  limits.voice_refill_per_sec = 1e9;
   return limits;
 }
 

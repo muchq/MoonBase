@@ -67,6 +67,10 @@ services:
       # app network, not through Caddy — it is a service-to-service read
       # and only happens while somebody is standing in a glasshouse.
       DEJA_URL: http://deja:8093
+      # A room's voice (#1590): the STUN server each voice roster names,
+      # so browsers behind NAT can find each other. Audio never touches
+      # this host; browsers connect peer to peer.
+      VOICE_STUN_URLS: stun:stun.l.google.com:19302
       # One line per game that ended (#1571), rolled hourly into a host
       # directory log_shipper reads. Unset, the hub keeps no event log at
       # all — the games are played and nothing counts them.

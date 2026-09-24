@@ -37,6 +37,12 @@ GameCommands JoinWorld(std::optional<std::string> room_id = std::nullopt) {
   return Lobby(LobbyAction::FromJoin(std::move(join)));
 }
 
+GameCommands JoinVoice() {
+  moonbase::games::VoiceCommand command;
+  command.action = moonbase::games::VoiceAction::FromJoin(moonbase::games::JoinVoice{});
+  return GameCommands::FromVoice(std::move(command));
+}
+
 GameCommands MoveTo(std::vector<double> position) {
   moonbase::games::MoveTo move;
   move.position = std::move(position);
@@ -352,6 +358,120 @@ TEST_F(LobbyFixture, ASiblingsMemberDropLeavesTheWorldToo) {
 
   ASSERT_TRUE(bob->stream.Send(JoinWorld()).ok());
   EXPECT_EQ(Listed(ReceiveLobby(bob->stream, "worldState")), std::vector<std::string>{});
+}
+
+// Voice is the room's too (#1590): a sibling's drop that takes the member
+// out of the room takes them out of its voice, the rest of it told, and
+// they are free to join voice again in whatever room they go to next.
+TEST_F(LobbyFixture, ASiblingsMemberDropLeavesVoiceToo) {
+  auto alice = Arrive();
+  auto bob = Arrive();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+  moonbase::games::JoinRoom join_room;
+  join_room.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+  ASSERT_TRUE(alice->stream.Send(JoinVoice()).ok());
+  ASSERT_TRUE(ReceiveVoice(alice->stream, "roster").has_value());
+  ASSERT_TRUE(bob->stream.Send(JoinVoice()).ok());
+  ASSERT_TRUE(ReceiveVoice(bob->stream, "roster").has_value());
+  ASSERT_TRUE(ReceiveVoice(alice->stream, "joined").has_value());
+
+  store_->Enqueue({HubStore::DeleteMember{room_id, bob->player_id}});
+  golf_->OnNotify(RoomChannel(room_id), "sibling");
+  auto left = ReceiveVoice(alice->stream, "left");
+  ASSERT_TRUE(left.has_value());
+  EXPECT_EQ(left->as_left_or_null()->playerId, bob->player_id);
+
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(bob->stream.Send(JoinVoice()).ok());
+  auto roster = ReceiveVoice(bob->stream, "roster");
+  ASSERT_TRUE(roster.has_value());
+  EXPECT_TRUE(roster->as_roster_or_null()->members.empty());
+}
+
+// A closed socket leaves voice, and a resume does not restore it — the
+// peer connections died with the socket — but joins it afresh: the peer
+// hears left, then joined with a new epoch.
+TEST_F(LobbyFixture, AResumedSeatJoinsVoiceAfresh) {
+  auto alice = Arrive();
+  auto bob = Arrive();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  moonbase::games::JoinRoom join_room;
+  join_room.roomId = created->as_roomState_or_null()->roomId;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(bob->stream.Send(JoinVoice()).ok());
+  ASSERT_TRUE(ReceiveVoice(bob->stream, "roster").has_value());
+  ASSERT_TRUE(alice->stream.Send(JoinVoice()).ok());
+  auto first = ReceiveVoice(alice->stream, "roster");
+  ASSERT_TRUE(first.has_value());
+  ASSERT_TRUE(ReceiveVoice(bob->stream, "joined").has_value());
+
+  alice->stream.Close();
+  auto left = ReceiveVoice(bob->stream, "left");
+  ASSERT_TRUE(left.has_value());
+  EXPECT_EQ(left->as_left_or_null()->playerId, alice->player_id);
+
+  auto back = OpenSeat(alice->resume_token);
+  ASSERT_TRUE(back.has_value());
+  auto ready = ReceiveCase(back->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  ASSERT_TRUE(back->stream.Send(JoinVoice()).ok());
+  auto again = ReceiveVoice(back->stream, "roster");
+  ASSERT_TRUE(again.has_value());
+  ASSERT_EQ(again->as_roster_or_null()->members.size(), 1u);
+  EXPECT_EQ(again->as_roster_or_null()->members[0].playerId, bob->player_id);
+  auto rejoined = ReceiveVoice(bob->stream, "joined");
+  ASSERT_TRUE(rejoined.has_value());
+  EXPECT_EQ(rejoined->as_joined_or_null()->playerId, alice->player_id);
+  EXPECT_NE(rejoined->as_joined_or_null()->epoch, first->as_roster_or_null()->epoch);
+}
+
+// A room a sibling deleted takes its voice with it: both members are out,
+// and each can join voice afresh.
+TEST_F(LobbyFixture, ASiblingsRoomDeleteLeavesVoiceToo) {
+  auto alice = Arrive();
+  auto bob = Arrive();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  auto created = ReceiveCase(alice->stream, "roomState");
+  ASSERT_TRUE(created.has_value());
+  const std::string room_id = created->as_roomState_or_null()->roomId;
+  moonbase::games::JoinRoom join_room;
+  join_room.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
+  ASSERT_TRUE(alice->stream.Send(JoinVoice()).ok());
+  ASSERT_TRUE(ReceiveVoice(alice->stream, "roster").has_value());
+  ASSERT_TRUE(bob->stream.Send(JoinVoice()).ok());
+  ASSERT_TRUE(ReceiveVoice(bob->stream, "roster").has_value());
+  ASSERT_TRUE(ReceiveVoice(alice->stream, "joined").has_value());
+
+  store_->Enqueue({HubStore::DeleteRoom{room_id}});
+  golf_->OnNotify(RoomChannel(room_id), "sibling");
+  // Whoever is still in when the other goes hears one left.
+  EXPECT_EQ(metrics_->CounterTotal("voice_events", {{"event", "left"}}), 1);
+  for (auto* seat : {&*alice, &*bob}) {
+    ASSERT_TRUE(
+        seat->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+    ASSERT_TRUE(ReceiveCase(seat->stream, "roomState").has_value());
+    ASSERT_TRUE(seat->stream.Send(JoinVoice()).ok());
+    auto roster = ReceiveVoice(seat->stream, "roster");
+    ASSERT_TRUE(roster.has_value());
+    EXPECT_TRUE(roster->as_roster_or_null()->members.empty());
+  }
 }
 
 // A game join whose id is not local refreshes the room first, and that

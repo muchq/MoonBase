@@ -1723,12 +1723,20 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"lobby_events", {{"event", "playerLeft"}}},
       {"lobby_events", {{"event", "geometryChanged"}}},
       {"lobby_events", {{"event", "tape"}}},
+      {"voice_commands", {{"command", "join"}}},
+      {"voice_commands", {{"command", "leave"}}},
+      {"voice_commands", {{"command", "signal"}}},
+      {"voice_events", {{"event", "roster"}}},
+      {"voice_events", {{"event", "joined"}}},
+      {"voice_events", {{"event", "left"}}},
+      {"voice_events", {{"event", "signal"}}},
       {"lobby_tape_polls", {{"result", "ok"}}},
       {"lobby_tape_polls", {{"result", "failed"}}},
       {"lobby_tape_splats", {}},
       {"hub_rate_limited", {{"kind", "chat"}}},
       {"hub_rate_limited", {{"kind", "command"}}},
       {"hub_rate_limited", {{"kind", "lobby"}}},
+      {"hub_rate_limited", {{"kind", "voice"}}},
       {"hub_rejections", {{"kind", "rate_limited"}}},
       {"hub_rejections", {{"kind", "invalid"}}},
       {"hub_rejections", {{"kind", "state"}}},
@@ -1800,15 +1808,17 @@ TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
             outer_events.end());
   ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
 
-  // The room layer's own cases on hub_*; golf's envelope, like castle's
-  // and the lobby's (the tests below), on its own series.
+  // The room layer's own cases on hub_*; golf's envelope, like castle's,
+  // the lobby's and voice's (the tests below), on its own series.
   std::set<std::string> room_commands;
   for (const auto& name : outer_commands) {
-    if (name != "golf" && name != "castle" && name != "lobby") room_commands.insert(name);
+    if (name != "golf" && name != "castle" && name != "lobby" && name != "voice")
+      room_commands.insert(name);
   }
   std::set<std::string> room_events;
   for (const auto& name : outer_events) {
-    if (name != "golf" && name != "castle" && name != "lobby") room_events.insert(name);
+    if (name != "golf" && name != "castle" && name != "lobby" && name != "voice")
+      room_events.insert(name);
   }
   EXPECT_EQ(DeclaredLabelValues("hub_commands", "command"), room_commands);
   EXPECT_EQ(DeclaredLabelValues("hub_events", "event"), room_events);
@@ -1830,6 +1840,21 @@ TEST(StreamSeriesModelPin, LobbySeriesMatchTheModelUnions) {
   EXPECT_EQ(DeclaredLabelValues("lobby_commands", "command"),
             std::set<std::string>(actions.begin(), actions.end()));
   EXPECT_EQ(DeclaredLabelValues("lobby_events", "event"),
+            std::set<std::string>(updates.begin(), updates.end()));
+}
+
+// A room's voice (#1590) counts its inner case names on voice_commands and
+// voice_events, pinned against voice.smithy the same way.
+TEST(StreamSeriesModelPin, VoiceSeriesMatchTheModelUnions) {
+  const std::string model = ReadModel("domains/games/apis/games_hub/model/voice.smithy");
+  ASSERT_FALSE(model.empty());
+  const auto actions = ModelUnionCases(model, "VoiceAction");
+  const auto updates = ModelUnionCases(model, "VoiceUpdate");
+  ASSERT_NE(std::find(actions.begin(), actions.end(), "signal"), actions.end());
+  ASSERT_NE(std::find(updates.begin(), updates.end(), "roster"), updates.end());
+  EXPECT_EQ(DeclaredLabelValues("voice_commands", "command"),
+            std::set<std::string>(actions.begin(), actions.end()));
+  EXPECT_EQ(DeclaredLabelValues("voice_events", "event"),
             std::set<std::string>(updates.begin(), updates.end()));
 }
 

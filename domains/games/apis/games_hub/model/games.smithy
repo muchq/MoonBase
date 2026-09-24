@@ -10,6 +10,8 @@ use moonbase.golf#GolfEvent
 use moonbase.lobby#Geometry
 use moonbase.lobby#LobbyCommand
 use moonbase.lobby#LobbyEvent
+use moonbase.voice#VoiceCommand
+use moonbase.voice#VoiceEvent
 
 /// The games hub (#79): one service, one session identity, one room layer,
 /// and one stream, Play, on which the lobby (#1490), golf, and castle
@@ -44,7 +46,7 @@ operation Play {
 }
 
 /// The room layer's own commands, then one envelope per tenant: the
-/// lobby's world, golf's table, castle's table.
+/// lobby's world, the room's voice, golf's table, castle's table.
 @streaming
 union GameCommands {
     createRoom: CreateRoom
@@ -53,6 +55,7 @@ union GameCommands {
     getRoomState: GetRoomState
     chat: Chat
     lobby: LobbyCommand
+    voice: VoiceCommand
     golf: GolfCommand
     castle: CastleCommand
 }
@@ -66,6 +69,7 @@ union GameEvents {
     roomChatHistory: ChatHistory
     commandRejected: CommandRejected
     lobby: LobbyEvent
+    voice: VoiceEvent
     golf: GolfEvent
     castle: CastleEvent
 }

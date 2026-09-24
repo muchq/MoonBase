@@ -34,6 +34,7 @@
 #include "domains/games/apis/games_hub/pg_ticket_vault.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
+#include "domains/games/apis/games_hub/voice.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/aura/middleware.h"
 #include "domains/platform/libs/event_log/event_log.h"
@@ -159,6 +160,14 @@ int main() {
   } else {
     LOG(INFO) << "Tape: off (DEJA_URL unset; glasshouse walls stay blank)";
   }
+
+  // A room's voice (#1590): the STUN servers a voice roster hands each
+  // joiner, so browsers behind NAT can find each other. Unset, browsers
+  // get only their host candidates and reach each other on one network.
+  const char* stun_urls = std::getenv("VOICE_STUN_URLS");
+  const auto stun = games_hub::StunServersFromList(stun_urls == nullptr ? "" : stun_urls);
+  LOG(INFO) << "Voice: " << stun.size() << " STUN server(s)";
+  golf->SetIceServers(stun);
 
   // The hub's domain events (#1571): one line per game that ended, in
   // the directory log_shipper takes to S3 and the stats pipeline reads
