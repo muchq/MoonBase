@@ -73,6 +73,11 @@ absl::Status RunMigrations(pg::Client& db) {
           ALTER COLUMN sent_at SET DEFAULT clock_timestamp())sql",
       R"sql(CREATE INDEX IF NOT EXISTS idx_room_chat_messages_room
           ON room_chat_messages (room_id, message_id))sql",
+      // When a room was last written to, for the sweep that reaps rooms
+      // no live instance holds (#1295's residue). Every write naming the
+      // room stamps it; rows from before the column start at migration.
+      R"sql(ALTER TABLE rooms
+          ADD COLUMN IF NOT EXISTS last_active_at timestamptz NOT NULL DEFAULT now())sql",
   };
   for (const char* statement : kStatements) {
     if (auto result = db.Exec(statement); !result.ok()) return result.status();

@@ -32,11 +32,15 @@ constexpr char kInsert[] = R"sql(
     INSERT INTO room_chat_messages (room_id, player_id, body) VALUES ($1, $2, $3)
     RETURNING message_id, (EXTRACT(EPOCH FROM sent_at) * 1000)::bigint)sql";
 
-// Trims to the window and wakes listeners together. The row inserted
-// above is visible here — same transaction, later command — so the
-// window counts it, unlike the single-statement version this replaces.
+// Trims to the window, stamps the room active, and wakes listeners
+// together. The stamp takes no new lock: kLockRoomForMember already holds
+// the room row. The row inserted above is visible here — same
+// transaction, later command — so the window counts it, unlike the
+// single-statement version this replaces.
 constexpr char kPruneAndNotify[] = R"sql(
-    WITH pruned AS (
+    WITH touched AS (
+      UPDATE rooms SET last_active_at = now() WHERE room_id = $1),
+    pruned AS (
       DELETE FROM room_chat_messages c
       WHERE c.room_id = $1
         AND c.message_id < (
