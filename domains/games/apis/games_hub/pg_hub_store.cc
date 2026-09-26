@@ -27,6 +27,11 @@ constexpr char kUpsertMember[] = R"sql(
           games_won = EXCLUDED.games_won, total_score = EXCLUDED.total_score)sql";
 constexpr char kDeleteMember[] = "DELETE FROM room_members WHERE room_id = $1 AND player_id = $2";
 constexpr char kDeleteGame[] = "DELETE FROM games WHERE room_id = $1 AND game_id = $2";
+// Stamps a room active after a write that names it. Its own statement,
+// after the write commits, so it only ever waits on the room row: folded
+// into the write, it would take the room after the member or game row,
+// the reverse of DeleteRoom's cascade, and the two could deadlock.
+constexpr char kTouchRoom[] = "UPDATE rooms SET last_active_at = now() WHERE room_id = $1";
 
 // The step-3 commit statements: CTE-chained so the conditional write and
 // its NOTIFY are one atomic statement — the notify fires exactly when
@@ -155,11 +160,17 @@ std::optional<int> PgHubStore::ExecOrWarn(const char* what, const char* sql,
   return result->rows();
 }
 
+void PgHubStore::Touch(const std::string& room_id) {
+  ExecOrWarn("TouchRoom", kTouchRoom, {room_id});
+}
+
 void PgHubStore::Apply(const Op& op) {
   if (const auto* upsert = std::get_if<UpsertRoom>(&op)) {
     ExecOrWarn("UpsertRoom", kUpsertRoom, {upsert->room_id, SurfaceJson(upsert->surface)});
+    Touch(upsert->room_id);
   } else if (const auto* set = std::get_if<SetRoomSurface>(&op)) {
     ExecOrWarn("SetRoomSurface", kSetRoomSurface, {set->room_id, SurfaceJson(set->surface)});
+    Touch(set->room_id);
   } else if (const auto* erase = std::get_if<DeleteRoom>(&op)) {
     ExecOrWarn("DeleteRoom", kDeleteRoom, {erase->room_id});
   } else if (const auto* upsert = std::get_if<UpsertMember>(&op)) {
@@ -168,10 +179,13 @@ void PgHubStore::Apply(const Op& op) {
                {row.room_id, row.player_id, row.connected ? "true" : "false",
                 std::to_string(row.games_played), std::to_string(row.games_won),
                 std::to_string(row.total_score)});
+    Touch(row.room_id);
   } else if (const auto* erase = std::get_if<DeleteMember>(&op)) {
     ExecOrWarn("DeleteMember", kDeleteMember, {erase->room_id, erase->player_id});
+    Touch(erase->room_id);
   } else if (const auto* erase = std::get_if<DeleteGame>(&op)) {
     ExecOrWarn("DeleteGame", kDeleteGame, {erase->room_id, erase->game_id});
+    Touch(erase->room_id);
   } else if (const auto* notify = std::get_if<Notify>(&op)) {
     ExecOrWarn("Notify", "SELECT pg_notify($1, $2)", {notify->channel, notify->payload});
   }
@@ -195,6 +209,7 @@ absl::StatusOr<bool> PgHubStore::CommitGameSave(const GameRow& row,
   }
   auto result = db_->Exec(row.version == 1 ? kCommitInsert : kCommitUpdate, params);
   if (!result.ok()) return result.status();
+  Touch(row.room_id);
   return result->rows() == 1;
 }
 
@@ -206,6 +221,7 @@ absl::StatusOr<bool> PgHubStore::CommitGameFinish(const GameRow& row,
                                 std::to_string(row.version), StatsJson(stats),
                                 RoomChannel(row.room_id), notify_payload});
   if (!result.ok()) return result.status();
+  Touch(row.room_id);
   return result->rows() == 1;
 }
 

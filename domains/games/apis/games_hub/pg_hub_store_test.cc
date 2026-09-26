@@ -5,10 +5,12 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "domains/games/apis/games_hub/migrations.h"
@@ -424,6 +426,64 @@ TEST_F(PgHubStoreTest, DeleteRoomCascades) {
   EXPECT_TRUE(snapshot->rooms.empty());
   EXPECT_TRUE(snapshot->members.empty());
   EXPECT_TRUE(snapshot->games.empty());
+}
+
+// last_active_at is what the room sweep reads: every write that names a
+// room marks it active, and only that room. A crashed instance's ghost
+// room is the one nobody writes to, so its stamp is the one that ages.
+TEST_F(PgHubStoreTest, EveryWriteNamingARoomMarksItActive) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertRoom{"R2"},
+                   PgHubStore::UpsertMember{{"R1", "alice", true, 0, 0, 0}},
+                   PgHubStore::UpsertMember{{"R1", "bob", true, 0, 0, 0}}});
+  store_->Flush();
+  ASSERT_TRUE(*store_->CommitGameSave({"R1", "G1", {"alice"}, std::nullopt, 1}, ""));
+
+  const auto age_both = [this] {
+    ASSERT_TRUE(db_->Exec("UPDATE rooms SET last_active_at = '2000-01-01Z'").ok());
+  };
+  const auto is_fresh = [this](const std::string& room_id) {
+    auto result = db_->Exec(
+        "SELECT 1 FROM rooms WHERE room_id = $1 AND last_active_at > '2000-01-01Z'", {room_id});
+    EXPECT_TRUE(result.ok()) << result.status();
+    return result.ok() && result->rows() == 1;
+  };
+  const auto enqueued = [this](PgHubStore::Op op) {
+    return [this, op] {
+      store_->Enqueue({op});
+      store_->Flush();
+    };
+  };
+
+  const golf::GameState state = DealtState();
+  const std::vector<std::pair<std::string, std::function<void()>>> writes = {
+      {"UpsertRoom", enqueued(PgHubStore::UpsertRoom{"R1"})},
+      {"SetRoomSurface", enqueued(PgHubStore::SetRoomSurface{"R1", Surface::Sphere(53)})},
+      {"UpsertMember", enqueued(PgHubStore::UpsertMember{{"R1", "alice", false, 0, 0, 0}})},
+      {"DeleteMember", enqueued(PgHubStore::DeleteMember{"R1", "bob"})},
+      {"CommitGameSave",
+       [this] {
+         ASSERT_TRUE(*store_->CommitGameSave({"R1", "G2", {"alice"}, std::nullopt, 1}, ""));
+       }},
+      {"CommitGameFinish",
+       [&] { ASSERT_TRUE(*store_->CommitGameFinish({"R1", "G1", {"alice"}, state, 2}, {}, "")); }},
+      {"DeleteGame", enqueued(PgHubStore::DeleteGame{"R1", "G2"})},
+  };
+  for (const auto& [name, write] : writes) {
+    age_both();
+    write();
+    EXPECT_TRUE(is_fresh("R1")) << name << " left its room's stamp stale";
+    EXPECT_FALSE(is_fresh("R2")) << name << " touched a room it does not name";
+  }
+}
+
+// A new room starts active.
+TEST_F(PgHubStoreTest, NewRoomsStartActive) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  auto result = db_->Exec(
+      "SELECT 1 FROM rooms WHERE room_id = 'R1' AND last_active_at > now() - interval '1 minute'");
+  ASSERT_TRUE(result.ok()) << result.status();
+  EXPECT_EQ(result->rows(), 1);
 }
 
 }  // namespace

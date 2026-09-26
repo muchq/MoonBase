@@ -86,6 +86,8 @@ class PgHubStore final : public HubStore {
   /// not a gameplay error).
   std::optional<int> ExecOrWarn(const char* what, const char* sql,
                                 const std::vector<std::string>& params);
+  /// Stamps the room active; every write that names a room calls it.
+  void Touch(const std::string& room_id);
   absl::StatusOr<GameRow> RowFromColumns(const std::string& room_id, const std::string& game_id,
                                          const std::string& roster_json,
                                          const std::string& state_json, int64_t version,

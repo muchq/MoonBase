@@ -489,4 +489,16 @@ TEST_F(PgChatStoreTest, AppendRacingRoomDeletionRejectsWithoutOrphaning) {
   EXPECT_EQ(CountRows("R1"), 0) << "the cascade took the earlier message too";
 }
 
+// A message is activity: an append marks its room active for the sweep,
+// and a rejected one marks nothing.
+TEST_F(PgChatStoreTest, AppendMarksItsRoomActive) {
+  ASSERT_TRUE(db_->Exec("UPDATE rooms SET last_active_at = '2000-01-01Z'").ok());
+  ASSERT_FALSE(store_->Append("R2", "alice", "wrong room", "rejected").ok());
+  ASSERT_TRUE(store_->Append("R1", "alice", "still here", "instance-a").ok());
+  auto fresh = db_->Exec("SELECT room_id FROM rooms WHERE last_active_at > '2000-01-01Z'");
+  ASSERT_TRUE(fresh.ok()) << fresh.status();
+  ASSERT_EQ(fresh->rows(), 1);
+  EXPECT_EQ(fresh->Get(0, 0).value_or(""), "R1");
+}
+
 }  // namespace
