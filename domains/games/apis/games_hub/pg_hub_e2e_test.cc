@@ -1,11 +1,9 @@
-// The step-2/3 persistence e2e (#1194): the same client flows as
-// hub_e2e_test, but over durable credentials (step 1) and the rooms/games
-// write-through — then the process "dies" (RestartHub) and a fresh hub
-// over the same database has to seat everyone back into their live game.
-// The step-3 suite adds a second live instance (BuildInstance): one room
-// and one game shared across two hubs whose only channel is the database
-// and its NOTIFY wire. Real postgres via GAMES_HUB_TEST_DB_URL; skips
-// otherwise.
+// The persistence e2e (#1194): the same client flows as hub_e2e_test,
+// but over durable credentials and the rooms/games write-through — then the process "dies"
+// (RestartHub) and a fresh hub over the same database has to seat everyone back into their live
+// game. The multi-instance tests add a second live instance (BuildInstance): one room and one game
+// shared across two hubs whose only channel is the database and its NOTIFY wire. Real postgres via
+// GAMES_HUB_TEST_DB_URL; skips otherwise.
 
 #include <gtest/gtest.h>
 
@@ -96,7 +94,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     listener_ = MakeListener(golf_);
   }
 
-  // A second live hub over the same database — the step-3 subject. Its
+  // A second live hub over the same database. Its
   // destructor unblocks parked sessions and detaches the listener before
   // the members unwind (listener before golf, by declaration order).
   struct Instance {
@@ -497,7 +495,7 @@ TEST_F(PgGamesHubFixture, LiveGameSurvivesARestart) {
   ASSERT_GT(version_before, 0);
 
   // The deploy: this process's hub dies, a fresh one boots from the
-  // database. Resume tokens are rows (step 1), so the same identities
+  // database. Resume tokens are rows, so the same identities
   // walk back in.
   const std::string alice_token = alice.resume_token;
   const std::string bob_token = bob.resume_token;
@@ -983,7 +981,7 @@ TEST_F(PgGamesHubFixture, CrashedConnectedSeatsRoomIsSweptOnceStale) {
   EXPECT_FALSE(held) << "the sweep's wake never dropped the successor's copy";
 }
 
-// The step-3 headline (#1194): two live hubs, one game. alice plays on
+// Two live hubs (#1194), one game. alice plays on
 // the primary instance, bob on the second; every move is a conditional
 // commit whose NOTIFY wakes the other side into re-reading and
 // re-projecting. No instance ever talks to the other directly.

@@ -81,8 +81,8 @@ int main() {
   futility::otel::OtelConfig otel_config{.service_name = "games_hub", .service_version = "1.0.0"};
   futility::otel::OtelProvider otel_provider(otel_config);
 
-  // Persistence when GAMES_HUB_DB_URL is set (#1194): credentials (step 1)
-  // and the rooms/games write-through + boot restore (step 2) — tickets,
+  // Persistence when GAMES_HUB_DB_URL is set (#1194): credentials, rooms,
+  // games, and chat, restored at boot — tickets,
   // resume tokens, rooms, and live games survive deploys. Unset falls
   // back to all-in-memory — dev parity, same pattern as ALLOWED_ORIGINS
   // below. The vault and the store get their own connections so a slow
@@ -126,7 +126,7 @@ int main() {
     LOG(ERROR) << "Failed to restore hub state: " << restored;
     return 1;
   }
-  // The fan-out's LISTEN side (#1194 step 3): commits on other instances
+  // The fan-out's LISTEN side (#1194): commits on other instances
   // wake this one to re-read and re-broadcast. Declared after golf so
   // it is destroyed (thread joined) first; the detach at shutdown keeps
   // the hub's teardown from touching it.
@@ -173,9 +173,8 @@ int main() {
   golf->SetIceServers(stun);
 
   // The hub's domain events (#1571): one line per room, chat, and table
-  // milestone, in
-  // the directory log_shipper takes to S3 and the stats pipeline reads
-  // back. Unset, the hub records nothing — the same shape as DEJA_URL,
+  // milestone, in the directory log_shipper takes to S3 and the stats
+  // pipeline reads back. Unset, the hub records nothing — the same shape as DEJA_URL,
   // and what every local run gets. A directory that cannot be opened is
   // fatal rather than silent: an event log nobody notices is missing is
   // a month of games nobody can count.

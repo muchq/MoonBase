@@ -66,8 +66,8 @@ else in that world and tells the rest of it `playerJoined`; `move` and
 never past the world's edge; `leave` — or a closed socket, alike — fans
 out `playerLeft`. A session that has not joined hears nothing.
 Out-of-bounds values and commands before a join are refused in-band as
-`commandRejected`. Presence is never stored; only the room's surface is. A slow
-reader's queue holds at most one move per walker (opal's coalescing
+`commandRejected`. Presence is never stored; only the room's surface
+is. A slow reader's queue holds at most one move per walker (opal's coalescing
 delivery); any other update to that reader starts a new key, so a move
 never replaces one queued ahead of it (`MoveCoalescing`, pinned by
 `move_coalescing_test`; the hub's use of it by `lobby_e2e_test`). The
@@ -118,8 +118,8 @@ cannot connect, is still to come (#1590). The rules are `Voice`
 A glasshouse's glass shows deja's tape (#1554, #1150). The hub is deja's
 second consumer, and the tape is world state the hub owns: it polls
 `GET /deja/v1/recent?after=<seq>` over `//domains/ai/libs/deja_cpp`
-every one to two seconds (jittered), dedupes by `seq`, and fans each new event to the
-world as a `tape` `LobbyUpdate` the way `playerMoved` goes out. A browser
+every one to two seconds (jittered), dedupes by `seq`, and fans each
+new event to the world as a `tape` `LobbyUpdate` the way `playerMoved` goes out. A browser
 never talks to deja and never asks where a splat goes: the splat point —
 which wall, and where on it as two fractions — is a pure function of
 `seq` (`splat.h`), so every client in the room draws the same event on

@@ -242,8 +242,10 @@ TEST_F(PgChatStoreTest, RejectedAppendDoesNotPruneExistingHistory) {
   }
   ASSERT_EQ(CountRows("R1"), static_cast<int>(games_hub::kChatHistoryLimit));
 
-  // A rejected append writes nothing and prunes nothing: a room already
-  // at the limit keeps exactly its newest hundred.
+  // The prune is a data-modifying CTE, and postgres runs those whether
+  // or not anything reads them. Guard it wrong and a stranger's rejected
+  // message silently evicts a real one, which no other test would show:
+  // the row count only goes wrong when the room is already full.
   EXPECT_EQ(store_->Append("R1", "mallory", "not mine to send", "p").status().code(),
             absl::StatusCode::kFailedPrecondition);
   EXPECT_EQ(CountRows("R1"), static_cast<int>(games_hub::kChatHistoryLimit));

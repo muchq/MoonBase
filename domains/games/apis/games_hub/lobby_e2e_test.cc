@@ -1,4 +1,4 @@
-// The lobby member of the room stream (#1490 phase 3), driven through the
+// The lobby member of the room stream (#1490), driven through the
 // generated client over the in-memory pair: the world is the session's
 // room's, or the plaza's while unroomed; a room change and a closed
 // socket leave it; a roomId on this stream can only agree with that.

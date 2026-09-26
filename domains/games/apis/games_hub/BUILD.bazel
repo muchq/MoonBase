@@ -243,7 +243,7 @@ cc_test(
     ],
 )
 
-# The postgres-backed vault and the hub's schema (#1194 step 1).
+# The postgres-backed vault and the hub's schema (#1194).
 cc_library(
     name = "pg_ticket_vault",
     srcs = [
@@ -263,8 +263,8 @@ cc_library(
     ],
 )
 
-# PostgreSQL implementation of HubStore (#1194 step 2): staged writes
-# run FIFO on one writer thread; game commits stay synchronous and
+# PostgreSQL implementation of HubStore (#1194): staged writes run FIFO
+# on one writer thread; game commits are synchronous and
 # conditional so multiple instances share one authority.
 cc_library(
     name = "pg_hub_store",
@@ -359,8 +359,8 @@ cc_test(
     ],
 )
 
-# Phase-0 slice of the persistence integration suite (#1194): serialized
-# engine states must survive the step-2 storage target (jsonb normalizes
+# Serialized engine states must survive the games table's jsonb state
+# column (#1194; jsonb normalizes
 # keys and spacing, and refuses escaped NULs). Real postgres via
 # GAMES_HUB_TEST_DB_URL; skips otherwise.
 cc_test(
@@ -595,7 +595,7 @@ cc_library(
     ],
 )
 
-# The step-2 restart-survival e2e (#1194): same client flows, durable
+# The restart-survival and multi-instance e2e (#1194): same client flows, durable
 # hub, RestartHub between them. Real postgres via GAMES_HUB_TEST_DB_URL;
 # skips otherwise.
 cc_test(
@@ -829,7 +829,7 @@ cc_test(
     ],
 )
 
-# The lobby member of the room stream (#1490 phase 3) through the
+# The lobby member of the room stream (#1490) through the
 # generated client: the world is the session's room's, or the plaza's.
 cc_test(
     name = "lobby_e2e_test",

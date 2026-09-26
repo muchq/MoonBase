@@ -51,11 +51,12 @@ namespace games_hub {
                                                    const std::vector<std::string>& roster);
 
 /// Scheduling seams for the race tests, unset in production. A hook runs
-/// on the hub's thread, outside the hub's lock unless its note says
-/// otherwise, and must not call into the hub.
+/// on the hub's thread and must not call into the hub; each says whether
+/// it holds mu_.
 struct GolfTestHooks {
-  /// On the close path, after the world entry is gone and playerLeft has
-  /// fanned out, before the seat parks for a resume to reclaim.
+  /// Outside mu_, on the close path, after the world entry is gone and
+  /// playerLeft has fanned out, before the seat parks for a resume to
+  /// reclaim.
   std::function<void(const std::string& player_id)> before_seat_release;
   /// Under mu_, after a lobby command's world deliveries have gone to the
   /// registry, before the lock is released.
@@ -534,8 +535,8 @@ class GolfHub final {
 
   /// One synchronous conditional commit of the entry's next revision
   /// (#1194). kCommitted adopts the candidate roster/state at version+1
-  /// (with MemoryHubStore the commit is process-local and cannot lose a
-  /// race). kRebased means
+  /// (a MemoryHubStore only this hub writes cannot lose the race; tests
+  /// share one across hubs to drive kRebased). kRebased means
   /// another instance committed first: the entry now holds the stored
   /// truth — revalidate and retry. kGone: the game vanished remotely
   /// (the entry is untouched; the caller drops it). kUnavailable: the
@@ -607,8 +608,9 @@ class GolfHub final {
     const absl::Time now = absl::Now();
     event_writer_(now, build(now));
   }
-  /// The local finisher: mirrors into the local member rows the stat
-  /// deltas the finish commit already applied, and runs the ceremony.
+  /// The local finisher: mirrors the finish commit's stat deltas into the
+  /// local member rows (after a kUnavailable leave, with no known commit)
+  /// and runs the ceremony.
   void FinalizeGameLocked(const std::string& room_id, Room& room, const std::string& game_id,
                           Outbox& outbox);
 

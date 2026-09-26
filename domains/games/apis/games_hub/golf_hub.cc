@@ -2853,8 +2853,8 @@ void GolfHub::FinalizeGameLocked(const std::string& room_id, Room& room, const s
   if (game == room.games.end() || !game->second.started()) return;
 
   // Room-scoped running stats: every roster seat played, every winner
-  // won. These same deltas already rode the finish commit; this mirrors
-  // them into the local rows.
+  // won. These same deltas rode the finish commit, or its fate is unknown
+  // after a kUnavailable leave; either way this mirrors them locally.
   for (const HubStore::StatsDelta& delta :
        StatsDeltasOf(*game->second.state, game->second.roster)) {
     const auto member = room.members.find(delta.player_id);
