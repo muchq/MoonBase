@@ -23,9 +23,9 @@ bazel_dep(name = "opal_cpp", version = "0.0.0")
 # sends take a delivery class (#227): games_hub coalesces world moves.
 archive_override(
     module_name = "opal_cpp",
-    integrity = "sha256-GbfEK1OnSztrVv2sAdvbFNtuc8hiRecmcuiF3jrj2Nc=",
-    strip_prefix = "opal-cpp-5b2bd1182002e2118f26483ab11282196706b539",
+    integrity = "sha256-eY0B+bcEpX8y/bM24xQ96dWR5qcebcvQgxnkz2d/3Yk=",
+    strip_prefix = "opal-cpp-57d6842a4bd2f24ba54a2091703306c596aa8dd3",
     urls = [
-        "https://github.com/muchq/opal-cpp/archive/5b2bd1182002e2118f26483ab11282196706b539.tar.gz",
+        "https://github.com/muchq/opal-cpp/archive/57d6842a4bd2f24ba54a2091703306c596aa8dd3.tar.gz",
     ],
 )
