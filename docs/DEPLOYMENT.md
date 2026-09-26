@@ -20,9 +20,10 @@ calls `deja` (`DEJA_URL`), and what comes back is deja's prediction.
 
 Every request *from outside* reaches a service through caddy. Plenty of
 traffic inside does not, because it is made between containers on
-`app_network`. Four of those are application calls: mcpserver to one_d4
+`app_network`. Five of those are application calls: mcpserver to one_d4
 (`ONE_D4_BASE_URL`) and to one_d4_v2 (`ONE_D4_V2_BASE_URL`), games_hub to
-deja (`DEJA_URL`), and prom_proxy to prometheus (`PROMETHEUS_URL`). Every
+deja (`DEJA_URL`) and to microgpt-serve for the room bot (`MICROGPT_URL`),
+and prom_proxy to prometheus (`PROMETHEUS_URL`). Every
 service's OTLP export to otelcol is another, and prometheus scrapes otelcol
 and cadvisor on top. The diagram draws all of them.
 
@@ -168,6 +169,7 @@ flowchart LR
   deja -->|events| games_hub
 
   games_hub -->|sql| shared_postgres
+  games_hub -->|http| microgpt-serve
   one_d4 -->|sql| shared_postgres
   one_d4_worker -->|sql| shared_postgres
   iili -->|sql| shared_postgres

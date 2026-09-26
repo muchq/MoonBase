@@ -233,6 +233,40 @@ cc_library(
     ],
 )
 
+# The room bot (#1591): mention, prompt, budgets, and the worker that
+# calls microgpt off every stream thread and the hub's lock.
+cc_library(
+    name = "room_bot",
+    srcs = ["room_bot.cc"],
+    hdrs = ["room_bot.h"],
+    deps = [
+        ":chat_store",
+        ":rate_limiter",
+        "//domains/ai/libs/microgpt_cpp:client",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/strings",
+        "@opal_cpp//runtime:core",
+    ],
+)
+
+cc_test(
+    name = "room_bot_test",
+    size = "small",
+    srcs = ["room_bot_test.cc"],
+    deps = [
+        ":chat_store",
+        ":room_bot",
+        "//domains/ai/libs/microgpt_cpp:client",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
 cc_test(
     name = "chat_store_test",
     size = "small",
@@ -552,6 +586,7 @@ cc_library(
         ":move_coalescing",
         ":protocol_input",
         ":rate_limiter",
+        ":room_bot",
         ":splat",
         ":surface",
         ":ticket_vault",
@@ -559,6 +594,7 @@ cc_library(
         ":wire_cards",
         ":world",
         "//domains/ai/libs/deja_cpp:client",
+        "//domains/ai/libs/microgpt_cpp:client",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:dealer",
         "//domains/games/libs/cards/castle:game_state",
@@ -753,6 +789,7 @@ cc_test(
         "model/voice.smithy",
     ],
     deps = [
+        "//domains/ai/libs/microgpt_cpp:client",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
         ":games_hub_handler",
@@ -966,6 +1003,7 @@ cc_binary(
         ":ticket_vault",
         ":voice",
         "//domains/ai/libs/deja_cpp:production_client",
+        "//domains/ai/libs/microgpt_cpp:production_client",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/aura",
         "//domains/platform/libs/event_log",

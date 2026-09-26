@@ -67,6 +67,10 @@ services:
       # app network, not through Caddy — it is a service-to-service read
       # and only happens while somebody is standing in a glasshouse.
       DEJA_URL: http://deja:8093
+      # The room bot (#1591): "@bot" in room chat is answered by
+      # microgpt-serve, called across the app network. Unset, the bot is
+      # off and a mention is ordinary chat.
+      MICROGPT_URL: http://microgpt-serve:8087
       # A room's voice (#1590): the STUN server each voice roster names,
       # so browsers behind NAT can find each other. Audio never touches
       # this host; browsers connect peer to peer.
