@@ -18,19 +18,19 @@
 
 namespace games_hub {
 
-/// The hub's postgres component (#1194 steps 2-3), with two write paths
+/// The hub's postgres component (#1194), with two write paths
 /// matching what each kind of state can afford. Rooms and members ride
-/// the step-2 outbox: ops staged under the hub's lock and handed over
+/// an async outbox: ops staged under the hub's lock and handed over
 /// while still holding it — so queue order is the truth's order — then
 /// applied FIFO by one writer thread; a failed write degrades
 /// durability, never gameplay (each player's rows have one writer, so
 /// there is nothing to conflict with). Games are the multi-instance
-/// contended state, and step 3 makes PostgreSQL their authority:
+/// contended state, and PostgreSQL is their authority:
 /// CommitGameSave/CommitGameFinish run synchronously, conditional on
 /// version-1, with the NOTIFY riding the same statement.
 ///
 /// This component owns the row encodings end to end: game state
-/// serializes through the step-0 serde and deserializes in the loads.
+/// serializes through each game's game_state_serde and deserializes in the loads.
 class PgHubStore final : public HubStore {
  public:
   explicit PgHubStore(std::shared_ptr<pg::Client> db);
@@ -50,7 +50,7 @@ class PgHubStore final : public HubStore {
   /// bad game costs that game, not the boot.
   absl::StatusOr<Snapshot> LoadSnapshot() override;
 
-  /// The step-3 synchronous commit path (#1194: load -> pure transition
+  /// The synchronous commit path (#1194: load -> pure transition
   /// -> conditional update, retry on miss; NOTIFY rides the same
   /// commit). Returns whether the conditional write landed; false means
   /// the stored row didn't hold version-1 (or, for version 1, the code

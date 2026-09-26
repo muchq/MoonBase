@@ -53,7 +53,7 @@ TEST(Surface, TheSphereSnapsNearTheWallAndRefusesTheRest) {
   std::vector<double> on = {0, 0, -53};
   EXPECT_FALSE(sphere.Settle(on).has_value());
   EXPECT_EQ(on, (std::vector<double>{0, 0, -53}));
-  // A tangent step lands just inside: snapped back out along the radius.
+  // Just inside the wall, within kSnap: snapped out along the radius.
   std::vector<double> inside = {0, 0, -52.5};
   EXPECT_FALSE(sphere.Settle(inside).has_value());
   EXPECT_NEAR(inside[2], -53, 1e-9);

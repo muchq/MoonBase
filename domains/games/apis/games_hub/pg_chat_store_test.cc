@@ -53,7 +53,7 @@ std::vector<std::string> Texts(const std::vector<ChatRow>& rows) {
   return texts;
 }
 
-// The #1226 slice of the persistence integration suite: chat's SQL is
+// Chat's slice of the persistence integration suite (#1226): chat's SQL is
 // the risky code, so there is no in-memory double here. Gated on
 // GAMES_HUB_TEST_DB_URL like the rest of the suite.
 class PgChatStoreTest : public ::testing::Test {
@@ -242,10 +242,8 @@ TEST_F(PgChatStoreTest, RejectedAppendDoesNotPruneExistingHistory) {
   }
   ASSERT_EQ(CountRows("R1"), static_cast<int>(games_hub::kChatHistoryLimit));
 
-  // The prune is a data-modifying CTE, and postgres runs those whether
-  // or not anything reads them. Guard it wrong and a stranger's rejected
-  // message silently evicts a real one, which no other test would show:
-  // the row count only goes wrong when the room is already full.
+  // A rejected append writes nothing and prunes nothing: a room already
+  // at the limit keeps exactly its newest hundred.
   EXPECT_EQ(store_->Append("R1", "mallory", "not mine to send", "p").status().code(),
             absl::StatusCode::kFailedPrecondition);
   EXPECT_EQ(CountRows("R1"), static_cast<int>(games_hub::kChatHistoryLimit));

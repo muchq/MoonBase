@@ -46,7 +46,7 @@ constexpr char kTouchRooms[] = R"sql(
     UPDATE rooms SET last_active_at = now()
     WHERE room_id IN (SELECT jsonb_array_elements_text($1::jsonb)))sql";
 
-// The step-3 commit statements: CTE-chained so the conditional write and
+// The conditional commit statements: CTE-chained so the conditional write and
 // its NOTIFY are one atomic statement — the notify fires exactly when
 // the save lands, and a retried statement (pg::Client may run one twice
 // after a reconnect) misses the condition the second time, so nothing

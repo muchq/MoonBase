@@ -35,8 +35,7 @@ constexpr char kInsert[] = R"sql(
 // Trims to the window, stamps the room active, and wakes listeners
 // together. The stamp takes no new lock: kLockRoomForMember already holds
 // the room row. The row inserted above is visible here — same
-// transaction, later command — so the window counts it, unlike the
-// single-statement version this replaces.
+// transaction, later command — so the window counts it.
 constexpr char kPruneAndNotify[] = R"sql(
     WITH touched AS (
       UPDATE rooms SET last_active_at = now() WHERE room_id = $1),

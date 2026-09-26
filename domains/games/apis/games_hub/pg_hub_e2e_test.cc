@@ -156,9 +156,9 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     return instance;
   }
 
-  // LISTEN lands asynchronously. Foreign pokes on the room's channel
-  // force refreshes until one round-trips to the seat — after this, no
-  // commit's wake can slip past the seat's instance.
+  // LISTEN lands asynchronously. Ten foreign pokes on the room's channel
+  // over ~200ms; one roomState reaching the seat proves the LISTEN is live,
+  // so no later commit's wake can slip past the seat's instance.
   bool SyncListen(Seat& seat, const std::string& room_id) {
     pg::Client db(url_);
     for (int i = 0; i < 10; ++i) {
@@ -200,9 +200,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
   }
 
   // Pulls already-queued frames off a seat so the registry's async
-  // delivery chain can finish. opal-cpp#173 (send-before-receive on
-  // terminal transitions) fixed the End()/Close deadlock; draining here
-  // still keeps TearDown deterministic when wake frames are unread.
+  // delivery chain finishes and TearDown sees no unread wake frames.
   static void DrainPending(moonbase::games::PlayClientStream& stream) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
     while (std::chrono::steady_clock::now() < deadline) {
@@ -231,7 +229,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
 
   // Stop both instances' listeners, then drain unread wake frames. Call
   // before CrossTable/Instance go out of scope — a late OnChannelActive
-  // after DrainPending would refill the chain and TearDown hangs again.
+  // after DrainPending would leave an unread frame at TearDown.
   void QuiesceCrossTable(Instance& remote, CrossTable& table) {
     DetachListeners(remote);
     DrainPending(table.alice.stream);
@@ -246,7 +244,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
 
   // Holds an optional<CrossTable>* so it can be armed *before*
   // SeatedCrossTable returns — a lost wake during setup must still
-  // detach listeners, or named ADD_FAILURE text dies with a 60s SIGKILL.
+  // detach listeners and drain both seats.
   struct QuiesceOnScopeExit {
     PgGamesHubFixture* fixture = nullptr;
     Instance* remote = nullptr;
@@ -266,8 +264,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
   };
 
   // Seats opened by cross-table setup, drained if it fails mid-way —
-  // destroying the client stream while the server still has unread wake
-  // frames is the TearDown hang, and QuiesceOnScopeExit cannot see them.
+  // QuiesceOnScopeExit cannot see seats that never reached a CrossTable.
   struct CrossSeats {
     std::optional<Seat> alice;
     std::optional<Seat> bob;
@@ -938,7 +935,7 @@ TEST_F(PgGamesHubFixture, ConnectedFlagFollowsPresence) {
   EXPECT_TRUE(rows.members[0].connected);
 }
 
-// #1295's residue, reaped. A seat whose instance crashed while it was
+// A seat whose instance crashed while it was
 // connected keeps its row at connected, and the successor restores its
 // room from rows alone — so the successor's heartbeat never vouches for
 // it. Once its stamp is older than kRoomStaleAfter the sweep deletes it,
@@ -1188,8 +1185,8 @@ TEST_F(PgGamesHubFixture, ARebaseOntoARemoteFinishStillGetsTheCeremony) {
   ASSERT_TRUE(ReceiveCase(alice.stream, "roomState").has_value());
 }
 
-// Pins QuiesceCrossTable: an injected unread wake must be drained, or
-// deleting the QuiesceOnScopeExit lines would leave this red.
+// Pins QuiesceCrossTable: an injected unread wake is drained, so dropping
+// its DrainPending calls leaves this red.
 TEST_F(PgGamesHubFixture, QuiesceDrainsUnreadWakeFrames) {
   auto remote = BuildInstance();
   ASSERT_NE(remote, nullptr);

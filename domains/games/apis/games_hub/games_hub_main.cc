@@ -1,5 +1,5 @@
-// The games hub server (#79): sessions, rooms, chat, and the golf game
-// layer on opal-cpp's streaming stack — generated async
+// The games hub server (#79): sessions, rooms, chat, and every tenant
+// (lobby, voice, golf, castle) on opal-cpp's streaming stack — generated async
 // handlers (ADR-0021), SessionRegistry fan-out with reconnect grace
 // (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018).
 //
@@ -108,7 +108,7 @@ int main() {
   } else {
     vault = std::make_shared<games_hub::InMemoryTicketVault>(kTicketTtl, kResumeTtl);
     store = std::make_shared<games_hub::MemoryHubStore>();
-    // chat_store stays null: the handler builds its own MemoryChatStore
+    // chat_store stays null: GolfHub builds its own MemoryChatStore
     // wired to its membership guard.
     LOG(INFO) << "Persistence: in-memory (GAMES_HUB_DB_URL unset; restarts forget everything)";
   }
@@ -172,7 +172,8 @@ int main() {
   LOG(INFO) << "Voice: " << stun.size() << " STUN server(s)";
   golf->SetIceServers(stun);
 
-  // The hub's domain events (#1571): one line per game that ended, in
+  // The hub's domain events (#1571): one line per room, chat, and table
+  // milestone, in
   // the directory log_shipper takes to S3 and the stats pipeline reads
   // back. Unset, the hub records nothing — the same shape as DEJA_URL,
   // and what every local run gets. A directory that cannot be opened is

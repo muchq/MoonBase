@@ -13,7 +13,7 @@
 
 namespace games_hub {
 
-/// A fresh "<prefix>-<12 hex>" identifier (room ids, tokens).
+/// A fresh "<prefix>-<12 hex>" credential (tickets, resume tokens).
 /// absl::BitGen randomness — unguessable enough for a game hub's opaque
 /// ids; not a cryptographic claim.
 std::string RandomId(std::string_view prefix);

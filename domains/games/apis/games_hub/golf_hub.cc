@@ -281,9 +281,9 @@ GolfHub::GolfHub(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Deal
 // nothing ever emits, has no such guard: it costs a permanently flat line on a
 // dashboard, and the only thing in its way is the literal copy of this list in
 // BuildingAHandlerDeclaresEveryCounterSeriesAtZero, which has to be edited too
-// — except for the golf_commands/golf_events blocks, whose values are the
-// model's union cases and are pinned both ways against golf.smithy by
-// StreamSeriesMatchTheModelUnions.
+// — except for the stream command/event blocks, whose values are the model's
+// union cases and are pinned both ways by the *SeriesMatchTheModelUnions
+// tests in hub_e2e_test.
 const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
   static const auto* kSeries = new std::vector<CounterSeries>{
       {"castle_commands", {{"command", "createGame"}}},
@@ -430,8 +430,8 @@ GolfHub::~GolfHub() {
 
 absl::Status GolfHub::RestoreFromStore() {
   // Once, before serving. A second restore would stack a new cohort
-  // behind a reaper that never re-arms — forever-membership again, the
-  // exact silent shape #1295 closed — so refuse it loudly instead.
+  // behind a reaper that never re-arms, leaving those members in
+  // forever, so refuse it loudly.
   if (restored_) {
     return absl::FailedPreconditionError("RestoreFromStore already ran");
   }
@@ -444,9 +444,9 @@ absl::Status GolfHub::RestoreFromStore() {
   }
   for (const HubStore::MemberRow& row : snapshot->members) {
     // Presence seeds from the row, the fleet truth ReconcileRoomLocked
-    // already adopts on every wake. Seeding false here instead made the
-    // first channel-active after a boot see phantom movement and inject
-    // a roomState into a resuming seat's hydration (#1276 sighting #4).
+    // adopts on every wake; seeding false would make the first
+    // channel-active after a boot see phantom movement and inject a
+    // roomState into a resuming seat's hydration.
     // A member whose socket died with the old process reads connected
     // until they resume or leave; no one owns flipping a crashed
     // instance's rows, and inventing a local answer just diverges from
@@ -996,8 +996,8 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
 
   // Games: adopt rows that moved past us. A row that ended while we
   // hold the game is a remote finish — ceremony here, then it is gone
-  // locally (the finisher owns the deferred row delete); an ended row
-  // for a game we no longer hold is that delete still pending.
+  // locally; an ended row for a game we no longer hold was already
+  // ceremonied and stays until the room's cascade.
   std::set<std::string> stored_ids;
   for (const HubStore::GameRow& row : rows.games) {
     stored_ids.insert(row.game_id);
@@ -1047,7 +1047,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
       continue;
     }
     changed = true;
-    // Deleted remotely: a disbanded lobby or a finished game's cleanup.
+    // Deleted remotely: a pre-start table whose last player left.
     for (const std::string& member_id : game->second.roster) {
       if (auto it = player_game_.find(member_id);
           it != player_game_.end() && it->second == game->first) {
@@ -1116,7 +1116,7 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
   TrackActive(+1);
 
   // Membership decides the resync, not the registry: a player restored
-  // from the store (#1194 step 2) admits as new — their old process's
+  // from the store (#1194) admits as new — their old process's
   // registry died — but their room and game are right here.
   std::optional<std::string> room;
   Outbox resync;
@@ -1152,9 +1152,10 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
 
   // Per-session budgets (#1240), owned by this coroutine frame: frames
   // are handled sequentially per session, so no locking, and the state
-  // dies with the connection. Every frame draws from the command
-  // bucket; chat draws from its own tighter bucket too, because each
-  // message is a durable database transaction plus fleet-wide fan-out.
+  // dies with the connection. Every frame draws from its envelope's
+  // bucket (lobby, voice, or command); chat draws from its own tighter
+  // bucket too, because each message is a durable database transaction
+  // plus fleet-wide fan-out.
   TokenBucket command_budget(limits_.command_burst, limits_.command_refill_per_sec);
   TokenBucket lobby_budget(limits_.lobby_burst, limits_.lobby_refill_per_sec);
   TokenBucket chat_budget(limits_.chat_burst, limits_.chat_refill_per_sec);
@@ -1283,7 +1284,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
     {
       const std::lock_guard<std::mutex> lock(mu_);
       if (!player_room_.contains(player_id)) {
-        // The room may live on another instance (#1194 step 3): one
+        // The room may live on another instance (#1194): one
         // synchronous read materializes it here before refusing.
         if (!rooms_.contains(join->roomId)) {
           store_answered = RefreshRoomLocked(join->roomId, outbox, /*project_always=*/true);
@@ -2017,7 +2018,7 @@ void GolfHub::EngineMove(const std::string& player_id, const MoveFn& move, MoveE
       refusal = Refusal{RejectKind::kState, "game not started"};
     } else {
       bool landed = false;
-      // The issue's move loop: pure transition off the entry, then the
+      // The move loop: pure transition off the entry, then the
       // conditional commit; a miss adopts the stored truth and replays
       // the transition against it. The kind is re-read each attempt: a
       // rebase adopts whatever the store holds under this code.
@@ -2262,13 +2263,13 @@ void GolfHub::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writ
     rooms_.erase(room);
     world_.ForgetSurface(room_id);
     // Chat dies with its room. PostgreSQL gets this from the cascade on
-    // the DeleteRoom below, but MemoryChatStore reclaims only here, and
-    // it is what production runs today — without this an emptied room
-    // keeps its last hundred messages for the life of the process.
+    // the DeleteRoom below, but MemoryChatStore reclaims only here —
+    // without this an emptied room keeps its last kChatHistoryLimit
+    // messages for the life of the process.
     chat_store_->DropRoom(room_id);
     chat_cursors_.erase(room_id);
     // The room's last line (#1571), from the instance that emptied it and
-    // not from the ones that later read the row gone — RefreshRoomLocked
+    // not from the ones that later read the row gone — ReconcileRoomLocked
     // drops a remotely deleted room the same way, and a room closes once.
     RecordLocked([&room_id](absl::Time now) { return RoomClosedLine(now, room_id); });
     // One DeleteRoom; the row's cascade takes members and games with it.
@@ -2404,7 +2405,7 @@ bool GolfHub::ReapUnlessResumedElsewhere(const std::string& player_id) {
   bool reaped = false;
   {
     const std::lock_guard<std::mutex> lock(mu_);
-    // Cross-instance grace (#1194 step 3): the player may have resumed
+    // Cross-instance grace (#1194): the player may have resumed
     // on another instance while parked here. One fresh read decides —
     // a member row back at connected belongs to its new instance. The
     // boot reaper leans on the same check from the other side: a row
@@ -2551,7 +2552,7 @@ void GolfHub::TrackActive(int delta) {
 
 // The room layer's own cases count on hub_commands; each tenant's
 // envelope counts its inner case on its own series (golf_*, castle_*,
-// lobby_*).
+// lobby_*, voice_*).
 void GolfHub::CountCommand(const GameCommands& command) {
   if (!metrics_) return;
   if (const auto* golf = command.as_golf_or_null()) {
@@ -2852,8 +2853,8 @@ void GolfHub::FinalizeGameLocked(const std::string& room_id, Room& room, const s
   if (game == room.games.end() || !game->second.started()) return;
 
   // Room-scoped running stats: every roster seat played, every winner
-  // won. With a store these same deltas already rode the finish commit;
-  // this mirrors them into the local rows (and IS the update in-memory).
+  // won. These same deltas already rode the finish commit; this mirrors
+  // them into the local rows.
   for (const HubStore::StatsDelta& delta :
        StatsDeltasOf(*game->second.state, game->second.roster)) {
     const auto member = room.members.find(delta.player_id);

@@ -66,12 +66,22 @@ else in that world and tells the rest of it `playerJoined`; `move` and
 never past the world's edge; `leave` — or a closed socket, alike — fans
 out `playerLeft`. A session that has not joined hears nothing.
 Out-of-bounds values and commands before a join are refused in-band as
-`commandRejected`. No persistence: presence is the whole game. A slow
+`commandRejected`. Presence is never stored; only the room's surface is. A slow
 reader's queue holds at most one move per walker (opal's coalescing
 delivery); any other update to that reader starts a new key, so a move
 never replaces one queued ahead of it (`MoveCoalescing`, pinned by
 `move_coalescing_test`; the hub's use of it by `lobby_e2e_test`). The
 rules and the map are `World` (`world.cc`), pinned by `world_test`.
+
+Hosted by `GolfHub` (`golf_hub.cc`) as the room stream's `lobby` member,
+the world is the session's: its room's, or the plaza's — the well-known
+room `plaza` — while unroomed; a `roomId` on `join` can only agree with
+that. Joining, creating, or leaving a room leaves the world (the client
+joins the new one), and so does a closed socket, at once, while the
+seat parks for grace. Lobby traffic counts on `lobby_commands` and
+`lobby_events`, castle's precedent; the world is per instance, like
+the registry. `GamesHubHandler` implements the generated service: it
+mints sessions itself and forwards the stream to the hub.
 
 ## A room's voice
 
@@ -108,7 +118,7 @@ cannot connect, is still to come (#1590). The rules are `Voice`
 A glasshouse's glass shows deja's tape (#1554, #1150). The hub is deja's
 second consumer, and the tape is world state the hub owns: it polls
 `GET /deja/v1/recent?after=<seq>` over `//domains/ai/libs/deja_cpp`
-roughly once a second, dedupes by `seq`, and fans each new event to the
+every one to two seconds (jittered), dedupes by `seq`, and fans each new event to the
 world as a `tape` `LobbyUpdate` the way `playerMoved` goes out. A browser
 never talks to deja and never asks where a splat goes: the splat point —
 which wall, and where on it as two fractions — is a pure function of
@@ -133,16 +143,6 @@ agrees across instances because the placement follows from `seq`, but two
 instances that started polling at different times hold different last-32
 windows, so what a joiner finds already on the glass depends on which one
 answered them. A wall is a mood rather than a log, so that is left alone.
-
-Hosted by `GolfHub` (`golf_hub.cc`) as the room stream's `lobby` member,
-the world is the session's: its room's, or the plaza's — the well-known
-room `plaza` — while unroomed; a `roomId` on `join` can only agree with
-that. Joining, creating, or leaving a room leaves the world (the client
-joins the new one), and so does a closed socket, at once, while the
-seat parks for grace. Lobby traffic counts on `lobby_commands` and
-`lobby_events`, castle's precedent; the world is per instance, like
-the registry. `GamesHubHandler` implements the generated service: it
-mints sessions itself and forwards the stream to the hub.
 
 ## Game events
 
@@ -316,17 +316,16 @@ at the viewer's peeked indexes, the drawn card only to its holder, other
 hands always null slots, scores only at game end. Room state carries
 lobby-safe summaries only.
 
-## Scaffold notes / deferred
+## Notes
 
-- Persistence rides `GAMES_HUB_DB_URL` (#1194). Step 1: credentials in
-  postgres (`PgTicketVault`, hashed at rest, spend = single-row
-  `DELETE ... RETURNING`) — tickets and resume tokens survive deploys.
-  Step 2: rooms, membership stats, and live games write through
-  (`PgHubStore` — ops staged under the hub lock, applied FIFO by one
-  writer; games save serialized `GameState` with a version counter) and
-  restore at boot, so a deploy no longer kills games: players resume by
-  token into their seat. Memory stays authoritative single-instance;
-  fan-out is still process-local (step 3). Unset falls back to
+- Persistence rides `GAMES_HUB_DB_URL` (#1194): credentials
+  (`PgTicketVault`, hashed at rest, spend = single-row
+  `DELETE ... RETURNING`), rooms, membership stats and live games
+  (`PgHubStore` — rooms and members staged under the hub lock and applied
+  FIFO by one writer; game commits conditional on a version counter), and
+  chat (`PgChatStore`). A deploy keeps games: players resume by token into
+  their seat. The database is every game's authority; each commit's
+  NOTIFY wakes the other instances holding the room. Unset is
   all-in-memory — dev mode and the test harness.
 - Player ids are whimsical (`bouncy-coral-quokka-x9k2`) and double as
   display names. Room and game ids
@@ -335,7 +334,7 @@ lobby-safe summaries only.
   stream side counts admissions, live sessions, disconnects, grace
   expiries, and the command/event flow (`hub_*` for the room layer —
   sessions, seats, refusals, its own commands and events — `golf_*`,
-  `castle_*` and `lobby_*` for each tenant's envelope, `chat_*` for
+  `castle_*`, `lobby_*` and `voice_*` for each tenant's envelope, `chat_*` for
   chat). The tape rides the lobby's prefix: `lobby_tape_polls{result}`,
   `lobby_tape_splats`, and the `lobby_tape_poller_active` gauge, which is
   1 exactly while a glasshouse is occupied.

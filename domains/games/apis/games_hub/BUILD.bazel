@@ -2,9 +2,8 @@ load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_serve
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
-# The games hub (#79): golf, phase 2 of its rebuild on opal-cpp event streams (#1187),
-# the game-agnostic room layer (model/games.smithy, per #79) plus golf's
-# game vocabulary, on the reshaped libs/cards/golf engine.
+# The games hub's model (#79): the room layer (games.smithy) and one
+# envelope per tenant — lobby, voice, golf, castle.
 smithy_cpp_server_library(
     name = "games_hub_smithy_server",
     srcs = [
@@ -81,7 +80,8 @@ cc_test(
 # vocabulary against the stats pipeline's reader: the event names and
 # outcomes in the header, the JSON keys the line builders format, the
 # game and surface spellings, and golf_hub's seat cap against the bound
-# the reader counts a table by.
+# the reader counts a table by. games_hub_main.cc is read by
+# //deploy/consolidated:consolidated_test for the event log's file name.
 exports_files([
     "game_events.cc",
     "game_events.h",
@@ -92,9 +92,9 @@ exports_files([
     "world.h",
 ])
 
-# The hub's domain events (#1571): one JSON line per game that ended,
-# for the stats pipeline to read out of S3 months later. The engine
-# states are the only input, so this is testable without a hub.
+# The hub's domain events (#1571): one JSON line per room, chat, and
+# table milestone, for the stats pipeline to read out of S3 months later.
+# Pure line builders, testable without a hub.
 cc_library(
     name = "game_events",
     srcs = ["game_events.cc"],
@@ -534,8 +534,8 @@ cc_test(
     ],
 )
 
-# The golf game: seats, rooms, chat, and the engine, behind the composite
-# handler's Play.
+# The room host: rooms, seats, chat, and every tenant (lobby, voice, golf,
+# castle, the tape) behind GamesHubHandler's Play.
 cc_library(
     name = "golf_hub",
     srcs = ["golf_hub.cc"],
@@ -575,8 +575,8 @@ cc_library(
     ],
 )
 
-# The generated service's one handler (#79): session identity, and each
-# game's stream forwarded whole to its hub.
+# The generated service's one handler (#79): session identity, and the
+# one Play stream forwarded whole to GolfHub.
 cc_library(
     name = "games_hub_handler",
     srcs = ["games_hub_handler.cc"],
@@ -639,15 +639,6 @@ cc_test(
     ],
 )
 
-# Beyoncé Rule wire-contract tests (consumer tier): the raw HTTP bytes and
-# eventstream frames the golf web client depends on, pinned as golden
-# fixtures driven through the generated server WITHOUT the generated
-# client — a regeneration that renames what the web client reads (the
-# session bodies, the room-layer events and their ordering, the golf
-# command/update envelopes and GameView, the terminal exception frames)
-# fails here even though the typed e2e suites (which regenerate with it)
-# still pass. Non-Beast deps only, so it runs with no sandbox setup at all
-# (behind a blocking proxy, Beast needs scripts/make-git-overrides.sh first).
 # Castle's wire goldens (#77): the castle envelope's command and update
 # bytes and the dealt setup view, pinned as raw strings like golf's.
 cc_test(
@@ -675,6 +666,15 @@ cc_test(
     ],
 )
 
+# Beyoncé Rule wire-contract tests (consumer tier): the raw HTTP bytes and
+# eventstream frames the golf web client depends on, pinned as golden
+# fixtures driven through the generated server WITHOUT the generated
+# client — a regeneration that renames what the web client reads (the
+# session bodies, the room-layer events and their ordering, the golf
+# command/update envelopes and GameView, the terminal exception frames)
+# fails here even though the typed e2e suites (which regenerate with it)
+# still pass. Non-Beast deps only, so it runs with no sandbox setup at all
+# (behind a blocking proxy, Beast needs scripts/make-git-overrides.sh first).
 cc_test(
     name = "golf_wire_test",
     size = "small",

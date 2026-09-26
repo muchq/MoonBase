@@ -15,7 +15,7 @@ namespace {
 // SQL, so no in-memory double). Runs when GAMES_HUB_TEST_DB_URL points at
 // a scratch database — e.g.
 //   GAMES_HUB_TEST_DB_URL=postgresql://user:pass@localhost:5432/games_hub_test
-// and skips otherwise (CI has no postgres in the loop yet).
+// and skips otherwise; CI sets it.
 class PgTicketVaultTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -76,7 +76,7 @@ TEST_F(PgTicketVaultTest, ResumeTokenIsMultiUseUntilExpiry) {
   EXPECT_FALSE(expired.ResolveResumeToken(*dead).has_value());
 }
 
-// The point of #1194 step 1: a credential minted by one instance is
+// The point of the shared vault (#1194): a credential minted by one instance is
 // honored by another.
 TEST_F(PgTicketVaultTest, CredentialsAreVisibleAcrossVaultInstances) {
   auto minter = MakeVault();
@@ -154,7 +154,7 @@ TEST_F(PgTicketVaultTest, MintPurgesExpiredRows) {
 
 // Outside the fixture on purpose: fail-closed needs no database (the URL
 // points at a refusing port), so this one runs even where the gated
-// suite skips — CI included.
+// suite skips.
 TEST(PgTicketVaultOutageTest, UnavailableDatabaseFailsClosed) {
   auto dead_db = std::make_shared<pg::Client>("postgresql://127.0.0.1:1/nope?connect_timeout=2");
   games_hub::PgTicketVault vault(dead_db, std::chrono::seconds(60), std::chrono::seconds(60));
