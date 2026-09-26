@@ -71,17 +71,18 @@ absl::Status NotAMemberError() {
 
 MemoryChatStore::MemoryChatStore(MemberGuard with_member) : with_member_(std::move(with_member)) {}
 
-absl::StatusOr<ChatRow> MemoryChatStore::Append(const std::string& room_id,
-                                                const std::string& player_id,
-                                                const std::string& text,
-                                                const std::string& /*notify_payload*/) {
+absl::StatusOr<ChatRow> MemoryChatStore::AppendAs(const std::string& room_id,
+                                                  const std::string& member_id,
+                                                  const std::string& author_id,
+                                                  const std::string& text,
+                                                  const std::string& /*notify_payload*/) {
   if (const absl::Status valid = ValidateChatText(text); !valid.ok()) return valid;
   ChatRow row;
-  const bool appended = with_member_(room_id, player_id, [&] {
+  const bool appended = with_member_(room_id, member_id, [&] {
     const std::lock_guard<std::mutex> lock(mu_);
     row.message_id = next_message_id_++;
     row.room_id = room_id;
-    row.player_id = player_id;
+    row.player_id = author_id;
     row.text = text;
     row.sent_at_unix_millis = std::chrono::duration_cast<std::chrono::milliseconds>(
                                   std::chrono::system_clock::now().time_since_epoch())

@@ -8,7 +8,10 @@
 #include <gtest/gtest.h>
 
 #include <cctype>
+#include <initializer_list>
 #include <string>
+
+#include "domains/games/apis/games_hub/chat_store.h"
 
 namespace games_hub {
 namespace {
@@ -48,6 +51,21 @@ TEST(WhimsicalIdGenerator, PlayerIdIsLowercaseSlugWithThreeWords) {
     EXPECT_EQ(hyphens, 3) << id;
     // adjective-color-animal-xxxx: the final segment is the 4-char slug.
     EXPECT_EQ(id.rfind('-'), id.size() - 5) << id;
+  }
+}
+
+// The room bot posts as kBotPlayerId (#1591), and its replies are told
+// apart by that id alone: no generator may mint it. Every minted id has
+// a hyphen and the bot's has none.
+TEST(IdGenerators, NeverMintTheBotsId) {
+  ASSERT_EQ(std::string(kBotPlayerId).find('-'), std::string::npos);
+  WhimsicalIdGenerator whimsical;
+  SequentialIdGenerator sequential;
+  RemoteIdGenerator remote;
+  for (IdGenerator* ids : std::initializer_list<IdGenerator*>{&whimsical, &sequential, &remote}) {
+    for (int i = 0; i < 100; ++i) {
+      EXPECT_NE(ids->PlayerId().find('-'), std::string::npos);
+    }
   }
 }
 

@@ -87,26 +87,27 @@ absl::StatusOr<std::vector<ChatRow>> ReadRows(absl::StatusOr<pg::Result> result,
 
 PgChatStore::PgChatStore(std::shared_ptr<pg::Client> db) : db_(std::move(db)) {}
 
-absl::StatusOr<ChatRow> PgChatStore::Append(const std::string& room_id,
-                                            const std::string& player_id, const std::string& text,
-                                            const std::string& notify_payload) {
+absl::StatusOr<ChatRow> PgChatStore::AppendAs(const std::string& room_id,
+                                              const std::string& member_id,
+                                              const std::string& author_id, const std::string& text,
+                                              const std::string& notify_payload) {
   if (absl::Status valid = ValidateChatText(text); !valid.ok()) return valid;
 
   bool is_member = false;
   ChatRow row;
   row.room_id = room_id;
-  row.player_id = player_id;
+  row.player_id = author_id;
   row.text = text;
 
   const absl::Status committed = db_->InTransaction([&](pg::Transaction& txn) -> absl::Status {
-    absl::StatusOr<pg::Result> locked = txn.Exec(kLockRoomForMember, {room_id, player_id});
+    absl::StatusOr<pg::Result> locked = txn.Exec(kLockRoomForMember, {room_id, member_id});
     if (!locked.ok()) return locked.status();
     // Not an error: nothing was written, so committing an empty
     // transaction is cheaper than rolling one back.
     if (locked->rows() == 0) return absl::OkStatus();
     is_member = true;
 
-    absl::StatusOr<pg::Result> inserted = txn.Exec(kInsert, {room_id, player_id, text});
+    absl::StatusOr<pg::Result> inserted = txn.Exec(kInsert, {room_id, author_id, text});
     if (!inserted.ok()) return inserted.status();
     row.message_id = ToInt64(inserted->Get(0, 0));
     row.sent_at_unix_millis = ToInt64(inserted->Get(0, 1));

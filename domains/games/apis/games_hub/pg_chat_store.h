@@ -40,11 +40,11 @@ class PgChatStore final : public ChatStore {
 
   /// Commits one message and notifies ChatChannel(room_id) with
   /// notify_payload in the same transaction. FailedPrecondition means the
-  /// room is gone or the sender is not one of its members — the check
+  /// room is gone or `member_id` is not one of its members — the check
   /// is the durable room_members row, not the caller's word.
-  absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
-                                 const std::string& text,
-                                 const std::string& notify_payload) override;
+  absl::StatusOr<ChatRow> AppendAs(const std::string& room_id, const std::string& member_id,
+                                   const std::string& author_id, const std::string& text,
+                                   const std::string& notify_payload) override;
 
   absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
                                                   std::size_t limit) override;

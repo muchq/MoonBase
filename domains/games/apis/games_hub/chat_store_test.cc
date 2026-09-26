@@ -216,6 +216,22 @@ TEST_F(MemoryChatStoreTest, RejectsAppendsFromOutsideTheRoom) {
   EXPECT_TRUE(recent->empty());
 }
 
+// The bot's reply (#1591): stored under the bot's reserved id, authorized
+// by the asker's membership, since the bot is in no room itself.
+TEST_F(MemoryChatStoreTest, AppendAsStoresTheAuthorOnTheMembersAuthority) {
+  auto reply = store_.AppendAs("R1", "alice", kBotPlayerId, "beep", "ignored");
+  ASSERT_TRUE(reply.ok()) << reply.status();
+  EXPECT_EQ(reply->player_id, kBotPlayerId);
+  const auto recent = store_.LoadRecent("R1", 100);
+  ASSERT_TRUE(recent.ok());
+  ASSERT_EQ(recent->size(), 1u);
+  EXPECT_EQ((*recent)[0].player_id, kBotPlayerId);
+
+  // An asker who has left carries no authority: the reply is dropped.
+  EXPECT_EQ(store_.AppendAs("R1", "mallory", kBotPlayerId, "beep", "ignored").status().code(),
+            absl::StatusCode::kFailedPrecondition);
+}
+
 TEST_F(MemoryChatStoreTest, LeavingKeepsOldMessagesAndStopsNewOnes) {
   ASSERT_TRUE(store_.Append("R1", "alice", "before leaving", "ignored").ok());
   rooms_.Leave("R1", "alice");

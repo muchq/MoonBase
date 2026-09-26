@@ -151,6 +151,7 @@ cc_test(
     size = "small",
     srcs = ["id_generator_test.cc"],
     deps = [
+        ":chat_store",
         ":id_generator",
         "@googletest//:gtest_main",
     ],

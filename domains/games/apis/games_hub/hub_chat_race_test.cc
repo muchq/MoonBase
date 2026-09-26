@@ -72,10 +72,10 @@ class GatedChatStore final : public ChatStore {
  public:
   explicit GatedChatStore(std::shared_ptr<ChatStore> delegate) : delegate_(std::move(delegate)) {}
 
-  absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
-                                 const std::string& text,
-                                 const std::string& notify_payload) override {
-    return delegate_->Append(room_id, player_id, text, notify_payload);
+  absl::StatusOr<ChatRow> AppendAs(const std::string& room_id, const std::string& member_id,
+                                   const std::string& author_id, const std::string& text,
+                                   const std::string& notify_payload) override {
+    return delegate_->AppendAs(room_id, member_id, author_id, text, notify_payload);
   }
   absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
                                                   std::size_t limit) override {

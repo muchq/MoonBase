@@ -73,6 +73,7 @@ moonbase::games::ChatMessage ChatEvent(const ChatRow& row) {
   message.playerId = row.player_id;
   message.text = row.text;
   message.sentAtUnixMillis = row.sent_at_unix_millis;
+  if (row.player_id == kBotPlayerId) message.bot = true;
   return message;
 }
 

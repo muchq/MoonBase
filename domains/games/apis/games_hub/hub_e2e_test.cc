@@ -144,10 +144,10 @@ class FailingHistoryChatStore final : public ChatStore {
   explicit FailingHistoryChatStore(std::shared_ptr<ChatStore> delegate)
       : delegate_(std::move(delegate)) {}
 
-  absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
-                                 const std::string& text,
-                                 const std::string& notify_payload) override {
-    return delegate_->Append(room_id, player_id, text, notify_payload);
+  absl::StatusOr<ChatRow> AppendAs(const std::string& room_id, const std::string& member_id,
+                                   const std::string& author_id, const std::string& text,
+                                   const std::string& notify_payload) override {
+    return delegate_->AppendAs(room_id, member_id, author_id, text, notify_payload);
   }
   absl::StatusOr<std::vector<ChatRow>> LoadRecent([[maybe_unused]] const std::string& room_id,
                                                   [[maybe_unused]] std::size_t limit) override {
@@ -173,10 +173,11 @@ class FailingAppendChatStore final : public ChatStore {
   explicit FailingAppendChatStore(std::shared_ptr<ChatStore> delegate)
       : delegate_(std::move(delegate)) {}
 
-  absl::StatusOr<ChatRow> Append([[maybe_unused]] const std::string& room_id,
-                                 [[maybe_unused]] const std::string& player_id,
-                                 [[maybe_unused]] const std::string& text,
-                                 [[maybe_unused]] const std::string& notify_payload) override {
+  absl::StatusOr<ChatRow> AppendAs([[maybe_unused]] const std::string& room_id,
+                                   [[maybe_unused]] const std::string& member_id,
+                                   [[maybe_unused]] const std::string& author_id,
+                                   [[maybe_unused]] const std::string& text,
+                                   [[maybe_unused]] const std::string& notify_payload) override {
     return absl::UnavailableError("chat store unreachable");
   }
   absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
@@ -202,10 +203,11 @@ class NotAMemberChatStore final : public ChatStore {
   explicit NotAMemberChatStore(std::shared_ptr<ChatStore> delegate)
       : delegate_(std::move(delegate)) {}
 
-  absl::StatusOr<ChatRow> Append([[maybe_unused]] const std::string& room_id,
-                                 [[maybe_unused]] const std::string& player_id,
-                                 [[maybe_unused]] const std::string& text,
-                                 [[maybe_unused]] const std::string& notify_payload) override {
+  absl::StatusOr<ChatRow> AppendAs([[maybe_unused]] const std::string& room_id,
+                                   [[maybe_unused]] const std::string& member_id,
+                                   [[maybe_unused]] const std::string& author_id,
+                                   [[maybe_unused]] const std::string& text,
+                                   [[maybe_unused]] const std::string& notify_payload) override {
     return NotAMemberError();
   }
   absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
@@ -838,6 +840,36 @@ TEST_F(GamesHubStreamFixture, LastMemberLeavingDropsTheRoomsChatHistory) {
   const auto remaining = chat_store_->LoadRecent(room_id, 100);
   ASSERT_TRUE(remaining.ok());
   EXPECT_TRUE(remaining->empty()) << "the room is gone; its history must be too";
+}
+
+// The bot's replies (#1591) replay flagged as the bot's, so a client
+// never has to know its name; a player's message carries no flag.
+TEST_F(GamesHubStreamFixture, BotMessagesReplayFlaggedAsTheBots) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::games::Chat chat;
+  chat.text = "@bot hi";
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
+  ASSERT_TRUE(chat_store_->AppendAs(room_id, alice->player_id, kBotPlayerId, "beep", "").ok());
+
+  auto bob = OpenSeat();
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  moonbase::games::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
+  auto history = ReceiveCase(bob->stream, "roomChatHistory");
+  ASSERT_TRUE(history.has_value());
+  const auto& messages = history->as_roomChatHistory_or_null()->messages;
+  ASSERT_EQ(messages.size(), 2u);
+  EXPECT_EQ(messages[0].playerId, alice->player_id);
+  EXPECT_FALSE(messages[0].bot.has_value());
+  EXPECT_EQ(messages[1].playerId, kBotPlayerId);
+  EXPECT_EQ(messages[1].bot, std::optional<bool>(true));
 }
 
 TEST_F(GamesHubStreamFixture, JoiningReplaysChatHistoryAfterRoomState) {
