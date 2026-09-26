@@ -1,0 +1,65 @@
+load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# microgpt-serve's chat, for C++ consumers: games_hub's room bot (#1591).
+# Beside the service it speaks for, like deja_cpp, so the model sits in
+# sight of the Rust types it mirrors.
+smithy_cpp_client_library(
+    name = "microgpt_smithy_client",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/microgpt.smithy",
+    ],
+    namespace = "moonbase::microgpt",
+    service = "moonbase.microgpt#Microgpt",
+)
+
+cc_library(
+    name = "client",
+    srcs = ["client.cc"],
+    hdrs = ["client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":microgpt_smithy_client",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+    ],
+)
+
+cc_library(
+    name = "production_client",
+    srcs = ["production_client.cc"],
+    hdrs = ["production_client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
+# The consumer-tier pin: the request the hub sends and the answer
+# microgpt-serve gives, as the same bytes the Rust tests pin.
+cc_test(
+    name = "chat_wire_test",
+    size = "small",
+    srcs = ["chat_wire_test.cc"],
+    deps = [
+        ":client",
+        ":microgpt_smithy_client",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
+cc_test(
+    name = "production_client_test",
+    size = "small",
+    srcs = ["production_client_test.cc"],
+    deps = [
+        ":production_client",
+        "@googletest//:gtest_main",
+    ],
+)

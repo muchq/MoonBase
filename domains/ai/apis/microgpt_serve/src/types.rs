@@ -322,6 +322,37 @@ mod tests {
         assert_eq!(json["tokens_dropped"], 5);
     }
 
+    // The bytes games_hub's C++ client sends and reads
+    // (domains/ai/libs/microgpt_cpp/chat_wire_test.cc pins the same two
+    // strings). Change one side and the other fails; that is the contract.
+    const PINNED_CHAT_REQUEST: &str = concat!(
+        r#"{"max_tokens":60,"messages":[{"content":"bouncy-coral-quokka-x9k2: who wins?","#,
+        r#""role":"user"},{"content":"the one with the lowest score","role":"assistant"}]}"#
+    );
+    const PINNED_CHAT_RESPONSE: &str =
+        r#"{"role":"assistant","content":"whoever knocks last","tokens_dropped":3}"#;
+
+    #[test]
+    fn chat_request_is_pinned_on_the_wire() {
+        let req: ChatRequest = serde_json::from_str(PINNED_CHAT_REQUEST).unwrap();
+        assert!(req.validate().is_ok());
+        assert_eq!(req.max_tokens, Some(60));
+        assert_eq!(req.messages.len(), 2);
+        assert_eq!(req.messages[0].role, "user");
+        assert_eq!(req.messages[0].content, "bouncy-coral-quokka-x9k2: who wins?");
+        assert_eq!(req.messages[1].role, "assistant");
+    }
+
+    #[test]
+    fn chat_response_is_pinned_on_the_wire() {
+        let resp = ChatResponse {
+            role: "assistant".to_string(),
+            content: "whoever knocks last".to_string(),
+            tokens_dropped: 3,
+        };
+        assert_eq!(serde_json::to_string(&resp).unwrap(), PINNED_CHAT_RESPONSE);
+    }
+
     #[test]
     fn generate_response_serializes() {
         let resp = GenerateResponse {
