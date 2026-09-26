@@ -51,15 +51,20 @@ inline constexpr char kSessionPath[] = "/games/v2/session";
 
 inline constexpr std::chrono::milliseconds kWireReceiveBudget{5000};
 
-// Effectively-unlimited command and chat budgets (#1240): these suites pin
-// wire shapes, not the limiter; lobby and voice keep the production
-// defaults. Spelled here so this header stays free of the generated client.
+// Effectively-unlimited stream budgets (#1240), the same numbers as
+// stream_test_fixture.h's UnlimitedRateLimits; a limiter suite tightens one
+// family on top. Spelled here so this header stays free of the generated
+// client.
 inline RateLimits WireRateLimits() {
   RateLimits limits;
   limits.command_burst = 1e9;
   limits.command_refill_per_sec = 1e9;
+  limits.lobby_burst = 1e9;
+  limits.lobby_refill_per_sec = 1e9;
   limits.chat_burst = 1e9;
   limits.chat_refill_per_sec = 1e9;
+  limits.voice_burst = 1e9;
+  limits.voice_refill_per_sec = 1e9;
   return limits;
 }
 
