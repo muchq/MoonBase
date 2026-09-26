@@ -206,6 +206,94 @@ is a lot to ask of the hub for an archive line — so a reader counting
 rooms should treat a repeated close as the one thing here that can
 repeat.
 
+## Ops: rooms in Postgres
+
+What the instances have written, not what they hold in memory: world
+presence and voice are never stored. A room's `last_active_at` is stamped
+by every write naming it and by each holding instance's heartbeat
+(`kRoomHeartbeat`, 1 min); the sweep deletes rooms unstamped for
+`kRoomStaleAfter` (1 h), cascading to members, tables and chat. A room's
+channel is `room_<room_id>`.
+
+On the host, in the deploy user's home directory (where `deploy.sh` puts the
+compose files):
+
+```bash
+sudo docker compose -f compose.yaml -f docker-compose.observability.yml \
+  exec shared_postgres psql -U games_hub -d games_hub
+```
+
+Every room, newest stamp first:
+
+```sql
+SELECT r.room_id,
+       (SELECT k FROM jsonb_object_keys(r.geometry) k LIMIT 1) AS surface,
+       count(DISTINCT m.player_id) FILTER (WHERE m.connected) AS connected,
+       count(DISTINCT m.player_id) AS members,
+       count(DISTINCT g.game_id) AS tables,
+       date_trunc('second', now() - r.last_active_at) AS since_stamp
+FROM rooms r
+LEFT JOIN room_members m USING (room_id)
+LEFT JOIN games g USING (room_id)
+GROUP BY r.room_id
+ORDER BY r.last_active_at DESC;
+```
+
+One room's members, tables and recent chat (`dealt` is false for a table
+still waiting for players):
+
+```sql
+SELECT player_id, connected, games_played, games_won, total_score
+FROM room_members WHERE room_id = 'ABC123' ORDER BY player_id;
+
+SELECT game_id, game, version, state IS NOT NULL AS dealt,
+       jsonb_array_length(roster) AS seats, roster
+FROM games WHERE room_id = 'ABC123' ORDER BY game_id;
+
+SELECT message_id, sent_at, player_id, body
+FROM room_chat_messages WHERE room_id = 'ABC123'
+ORDER BY message_id DESC LIMIT 20;
+```
+
+Where a player is seated:
+
+```sql
+SELECT m.room_id, m.connected, g.game_id, g.game
+FROM room_members m
+LEFT JOIN games g ON g.room_id = m.room_id AND g.roster ? m.player_id
+WHERE m.player_id = 'bouncy-coral-quokka-x9k2';
+```
+
+What the next sweep takes:
+
+```sql
+SELECT room_id, last_active_at
+FROM rooms WHERE last_active_at < now() - interval '1 hour'
+ORDER BY last_active_at;
+```
+
+Live credentials:
+
+```sql
+SELECT 'tickets' AS kind, count(*) FILTER (WHERE expires_at > now()) AS live, count(*) AS total
+FROM tickets
+UNION ALL
+SELECT 'resume_tokens', count(*) FILTER (WHERE expires_at > now()), count(*)
+FROM resume_tokens;
+```
+
+Watch a room's wakes (commits, sweeps) from `psql`: `LISTEN room_ABC123;`,
+then any statement prints what arrived.
+
+Deleting a room by hand is the sweep's own statement for one room. The
+delete cascades; the notify makes every instance holding the room drop
+it and tell its players:
+
+```sql
+WITH gone AS (DELETE FROM rooms WHERE room_id = 'ABC123' RETURNING room_id)
+SELECT pg_notify('room_' || room_id, 'sweep') FROM gone;
+```
+
 ## The rules
 
 Four-card golf for 2–4 players: each player peeks at two own cards, a

@@ -357,6 +357,8 @@ method) still answer on any path; that is by design, not fall-through.
 `iili_db_init` provision their roles and databases on every deploy
 (idempotently — the `docker-entrypoint-initdb.d` hook only fires on a
 fresh volume).
+Queries for games_hub's rooms, members, tables and chat are in its
+[README](../../domains/games/apis/games_hub/README.md#ops-rooms-in-postgres).
 
 `one_d4_migrate` is the same one-shot shape for one_d4's schema (#1419): it
 applies the numbered `.sql` files in
