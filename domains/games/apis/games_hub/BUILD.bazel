@@ -509,6 +509,31 @@ cc_test(
     ],
 )
 
+# TURN's REST credentials for a voice roster (#1590): coturn's
+# use-auth-secret scheme, HMAC-SHA1 over BoringSSL.
+cc_library(
+    name = "turn_credentials",
+    srcs = ["turn_credentials.cc"],
+    hdrs = ["turn_credentials.h"],
+    deps = [
+        ":games_hub_smithy_server",
+        "@boringssl//:crypto",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_test(
+    name = "turn_credentials_test",
+    size = "small",
+    srcs = ["turn_credentials_test.cc"],
+    deps = [
+        ":turn_credentials",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # A room's voice (#1590): who is in it and the WebRTC signals between
 # them, staged, no wire, hosted by GolfHub as the room stream's voice member.
 cc_library(
@@ -518,7 +543,9 @@ cc_library(
     deps = [
         ":games_hub_smithy_server",
         ":hub_metrics",
+        ":turn_credentials",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
     ],
 )
 
@@ -529,7 +556,9 @@ cc_test(
     deps = [
         ":games_hub_smithy_server",
         ":hub_metrics",
+        ":turn_credentials",
         ":voice",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
     ],
 )
@@ -554,6 +583,7 @@ cc_library(
         ":splat",
         ":surface",
         ":ticket_vault",
+        ":turn_credentials",
         ":voice",
         ":wire_cards",
         ":world",
@@ -963,6 +993,7 @@ cc_binary(
         ":pg_ticket_vault",
         ":protocol_input",
         ":ticket_vault",
+        ":turn_credentials",
         ":voice",
         "//domains/ai/libs/deja_cpp:production_client",
         "//domains/games/libs/cards:dealer",

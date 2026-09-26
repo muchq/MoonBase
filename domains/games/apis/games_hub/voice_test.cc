@@ -12,7 +12,9 @@
 #include <utility>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "domains/games/apis/games_hub/hub_metrics.h"
+#include "domains/games/apis/games_hub/turn_credentials.h"
 
 namespace games_hub {
 namespace {
@@ -105,6 +107,32 @@ TEST(VoiceTest, AJoinerHearsWhoIsAlreadyInAndTheyHearTheJoiner) {
   EXPECT_EQ(out[1].update.as_joined().playerId, "bob");
   EXPECT_EQ(out[1].update.as_joined().epoch, EpochOf("bob", out));
   EXPECT_NE(EpochOf("bob", out), alice);
+}
+
+// With TURN configured, each joiner's roster carries the STUN servers and
+// then a TURN server with credentials minted for that joiner, now.
+TEST(VoiceTest, EachJoinerGetsTurnCredentialsOfItsOwn) {
+  Voice voice([] { return absl::FromUnixSeconds(1700000000); });
+  moonbase::games::IceServer stun;
+  stun.urls = {"stun:stun.example:3478"};
+  voice.SetIceServers({stun});
+  TurnConfig turn;
+  turn.urls = {"turn:turn.example:3478"};
+  turn.secret = "s3cret";
+  voice.SetTurn(turn);
+  Voice::Deliveries out;
+  ASSERT_FALSE(voice.Join("alice", "R1", out).has_value());
+  ASSERT_FALSE(voice.Join("bob", "R1", out).has_value());
+  const auto& alice = out[0].update.as_roster().iceServers;
+  ASSERT_EQ(alice.size(), 2u);
+  EXPECT_EQ(alice[0].urls, stun.urls);
+  EXPECT_EQ(alice[1].urls, turn.urls);
+  EXPECT_EQ(alice[1].username, "1700089200:alice");
+  EXPECT_EQ(alice[1].credential,
+            TurnServerFor(turn, "alice", absl::FromUnixSeconds(1700000000)).credential);
+  const auto& bob = out[1].update.as_roster().iceServers;
+  ASSERT_EQ(bob.size(), 2u);
+  EXPECT_EQ(bob[1].username, "1700089200:bob");
 }
 
 TEST(VoiceTest, WithNoIceServersSetARosterNamesNone) {

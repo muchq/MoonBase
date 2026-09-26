@@ -8,6 +8,10 @@ bazel_dep(name = "nlohmann_json", version = "3.12.0.bcr.2")
 bazel_dep(name = "opentelemetry-cpp", version = "1.28.0")
 bazel_dep(name = "curl", version = "8.21.0.bcr.2")
 
+# HMAC-SHA1 for TURN's REST credentials (#1590). The version opal_cpp already
+# brings, so the graph resolves the same module either way.
+bazel_dep(name = "boringssl", version = "0.20260813.0")
+
 # libpq for the games_hub persistence plan (#1194): the BCR's postgres
 # module builds the client library from source (rules_cc_autoconf, no
 # foreign_cc); consumers depend on @postgres//:libpq via the owned

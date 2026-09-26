@@ -210,7 +210,8 @@ flowchart LR
 
 ## Public names
 
-Three SPAs on Cloudflare Workers and six caddy vhosts.
+Three SPAs on Cloudflare Workers, six caddy vhosts, and one name that is
+not HTTP at all.
 
 | Name | Served by | Reaches |
 | --- | --- | --- |
@@ -223,6 +224,18 @@ Three SPAs on Cloudflare Workers and six caddy vhosts.
 | `api.1d4.net` | caddy | one_d4; stats for `GET /stats/v1/one_d4/*` only |
 | `mcp.1d4.net` | caddy | mcpserver — `/mcp`, any method |
 | `consolidated.cmptr.info` | caddy | nothing; static placeholder response |
+| `turn.muchq.com` | coturn, host network | relays room voice (#1590): 3478 UDP/TCP, relay ports 49160–49300/udp |
+
+`turn.muchq.com` is a plain A record at this host, not proxied: a CDN in
+front of it passes no UDP. Its ports are opened on the host's firewall by
+hand — nothing in this repo manages the firewall. coturn and games_hub share
+`TURN_SECRET` from `~/.env`, which the deploy refuses to run without; the hub
+mints each voice joiner a day's credentials from it (use-auth-secret). Put
+the secret in the deploying machine's `.env` too, if it has one: `deploy.sh`
+copies that file over the host's. A host behind 1:1 NAT (its public address
+not on an interface) also needs `--external-ip=<public>/<private>` on coturn.
+There is no TURN over TLS on 443, so a network that lets only 443 out gets
+no relay.
 
 `mcp.1d4.net` takes any method on purpose. GET opens the SSE probe and DELETE
 ends a session, and both have to reach mcpserver to get a parseable 405 rather

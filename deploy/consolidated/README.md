@@ -214,6 +214,9 @@ it, because renaming a role and database holding live rows is an operation, not 
 both URL-safe (no `@ / ? # %` or quotes): each rides in a libpq URL and a single-quoted SQL
 literal. Compose refuses to start the project if either is unset.
 
+**`TURN_SECRET`** in `~/.env` is shared by coturn and games_hub for room voice's TURN
+credentials (#1590); Compose refuses to start without it too. `docs/DEPLOYMENT.md` has the rest.
+
 ### The Lichess token
 
 **`ONE_D4_LICHESS_TOKEN`** in `~/.env` is a Lichess personal access token, and

@@ -28,6 +28,7 @@
 #include "domains/games/apis/games_hub/move_coalescing.h"
 #include "domains/games/apis/games_hub/rate_limiter.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
+#include "domains/games/apis/games_hub/turn_credentials.h"
 #include "domains/games/apis/games_hub/voice.h"
 #include "domains/games/apis/games_hub/world.h"
 #include "domains/games/libs/cards/castle/game_state.h"
@@ -269,6 +270,9 @@ class GolfHub final {
   /// The ICE servers every voice roster hands a joiner (#1590). Call
   /// before serving; none leaves browsers to their host candidates.
   void SetIceServers(std::vector<moonbase::games::IceServer> servers);
+  /// The TURN server every voice roster adds, with credentials minted per
+  /// joiner. Call before serving; nullopt is none.
+  void SetTurn(std::optional<TurnConfig> turn);
 
   /// Starts the room heartbeat: StampHeldRooms then SweepStaleRooms every
   /// `interval` until the hub is destroyed. main starts it when rooms persist; without a

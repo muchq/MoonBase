@@ -34,6 +34,7 @@
 #include "domains/games/apis/games_hub/pg_ticket_vault.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
+#include "domains/games/apis/games_hub/turn_credentials.h"
 #include "domains/games/apis/games_hub/voice.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/aura/middleware.h"
@@ -171,6 +172,15 @@ int main() {
   const auto stun = games_hub::StunServersFromList(stun_urls == nullptr ? "" : stun_urls);
   LOG(INFO) << "Voice: " << stun.size() << " STUN server(s)";
   golf->SetIceServers(stun);
+  // TURN, for browsers STUN cannot connect: coturn on this host, sharing
+  // TURN_SECRET with the hub, which mints each joiner a day's
+  // credentials. Both TURN_URLS and TURN_SECRET, or no TURN.
+  const char* turn_urls = std::getenv("TURN_URLS");
+  const char* turn_secret = std::getenv("TURN_SECRET");
+  auto turn = games_hub::TurnConfigFrom(turn_urls == nullptr ? "" : turn_urls,
+                                        turn_secret == nullptr ? "" : turn_secret);
+  LOG(INFO) << "Voice: TURN " << (turn.has_value() ? "on" : "off (TURN_URLS or TURN_SECRET unset)");
+  golf->SetTurn(std::move(turn));
 
   // The hub's domain events (#1571): one line per game that ended, in
   // the directory log_shipper takes to S3 and the stats pipeline reads

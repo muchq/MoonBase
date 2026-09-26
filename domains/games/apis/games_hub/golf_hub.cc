@@ -1567,6 +1567,11 @@ void GolfHub::SetIceServers(std::vector<moonbase::games::IceServer> servers) {
   voice_.SetIceServers(std::move(servers));
 }
 
+void GolfHub::SetTurn(std::optional<TurnConfig> turn) {
+  const std::lock_guard<std::mutex> lock(mu_);
+  voice_.SetTurn(std::move(turn));
+}
+
 void GolfHub::HandleMove(const std::string& player_id, const GolfMove& move) {
   if (move.as_createGame_or_null() != nullptr) {
     CreateGameMove(player_id, GameKind::kGolf);

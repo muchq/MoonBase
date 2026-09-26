@@ -3,13 +3,17 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 #include "domains/games/apis/games_hub/hub_metrics.h"
+#include "domains/games/apis/games_hub/turn_credentials.h"
 #include "moonbase/games/types.h"
 
 namespace games_hub {
@@ -39,8 +43,16 @@ class Voice {
   };
   using Deliveries = std::vector<Delivery>;
 
+  /// `clock` is when TURN credentials are minted from; tests fix it.
+  explicit Voice(std::function<absl::Time()> clock = absl::Now) : clock_(std::move(clock)) {}
+
   /// The ICE servers every roster hands a joiner. Set before serving.
   void SetIceServers(std::vector<moonbase::games::IceServer> servers);
+
+  /// A TURN server for every roster, after the ICE servers above, with
+  /// credentials minted for that joiner as it joins. Set before serving;
+  /// nullopt, the default, is none.
+  void SetTurn(std::optional<TurnConfig> turn);
 
   /// Enters `room_id`'s voice. Stages the joiner's roster (everyone
   /// already in it, and the ICE servers) first, then joined to each of
@@ -76,6 +88,8 @@ class Voice {
   /// Each join's epoch; never reused while the process lives.
   std::int64_t next_epoch_ = 1;
   std::vector<moonbase::games::IceServer> ice_servers_;
+  std::optional<TurnConfig> turn_;
+  std::function<absl::Time()> clock_;
 };
 
 /// VOICE_STUN_URLS as ICE servers: comma-separated STUN urls, one server
