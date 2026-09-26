@@ -27,6 +27,7 @@
 #include "domains/games/apis/games_hub/id_generator.h"
 #include "domains/games/apis/games_hub/move_coalescing.h"
 #include "domains/games/apis/games_hub/rate_limiter.h"
+#include "domains/games/apis/games_hub/room_bot.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/apis/games_hub/voice.h"
 #include "domains/games/apis/games_hub/world.h"
@@ -269,6 +270,12 @@ class GolfHub final {
   /// The ICE servers every voice roster hands a joiner (#1590). Call
   /// before serving; none leaves browsers to their host candidates.
   void SetIceServers(std::vector<moonbase::games::IceServer> servers);
+
+  /// Starts the room bot (#1591): "@bot" mentions in room chat are
+  /// answered by microgpt through `client`. main starts it when
+  /// MICROGPT_URL is set; unstarted, a mention is ordinary chat. Call
+  /// before serving; a second call changes nothing.
+  void StartRoomBot(std::shared_ptr<microgpt::Client> client, BotLimits limits = {});
 
   /// Starts the room heartbeat: StampHeldRooms then SweepStaleRooms every
   /// `interval` until the hub is destroyed. main starts it when rooms persist; without a
@@ -692,6 +699,11 @@ class GolfHub final {
   std::condition_variable heartbeat_cv_;
   bool heartbeat_stop_ = false;
   std::thread heartbeat_;
+
+  /// Set once before serving and read without a lock thereafter, like the
+  /// tape's client. Reset first in ~GolfHub: its worker delivers through
+  /// PumpChat, so it must be gone before anything that reaches.
+  std::unique_ptr<RoomBot> bot_;
 
   // Declared last: destroyed first, joining registry threads before the
   // maps its on_expired callback touches go away. (The boot reaper is

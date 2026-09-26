@@ -31,6 +31,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
+#include "domains/ai/libs/microgpt_cpp/client.h"
 #include "domains/games/apis/games_hub/chat_store.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 
@@ -144,10 +145,10 @@ class FailingHistoryChatStore final : public ChatStore {
   explicit FailingHistoryChatStore(std::shared_ptr<ChatStore> delegate)
       : delegate_(std::move(delegate)) {}
 
-  absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
-                                 const std::string& text,
-                                 const std::string& notify_payload) override {
-    return delegate_->Append(room_id, player_id, text, notify_payload);
+  absl::StatusOr<ChatRow> AppendAs(const std::string& room_id, const std::string& member_id,
+                                   const std::string& author_id, const std::string& text,
+                                   const std::string& notify_payload) override {
+    return delegate_->AppendAs(room_id, member_id, author_id, text, notify_payload);
   }
   absl::StatusOr<std::vector<ChatRow>> LoadRecent([[maybe_unused]] const std::string& room_id,
                                                   [[maybe_unused]] std::size_t limit) override {
@@ -173,10 +174,11 @@ class FailingAppendChatStore final : public ChatStore {
   explicit FailingAppendChatStore(std::shared_ptr<ChatStore> delegate)
       : delegate_(std::move(delegate)) {}
 
-  absl::StatusOr<ChatRow> Append([[maybe_unused]] const std::string& room_id,
-                                 [[maybe_unused]] const std::string& player_id,
-                                 [[maybe_unused]] const std::string& text,
-                                 [[maybe_unused]] const std::string& notify_payload) override {
+  absl::StatusOr<ChatRow> AppendAs([[maybe_unused]] const std::string& room_id,
+                                   [[maybe_unused]] const std::string& member_id,
+                                   [[maybe_unused]] const std::string& author_id,
+                                   [[maybe_unused]] const std::string& text,
+                                   [[maybe_unused]] const std::string& notify_payload) override {
     return absl::UnavailableError("chat store unreachable");
   }
   absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
@@ -202,10 +204,11 @@ class NotAMemberChatStore final : public ChatStore {
   explicit NotAMemberChatStore(std::shared_ptr<ChatStore> delegate)
       : delegate_(std::move(delegate)) {}
 
-  absl::StatusOr<ChatRow> Append([[maybe_unused]] const std::string& room_id,
-                                 [[maybe_unused]] const std::string& player_id,
-                                 [[maybe_unused]] const std::string& text,
-                                 [[maybe_unused]] const std::string& notify_payload) override {
+  absl::StatusOr<ChatRow> AppendAs([[maybe_unused]] const std::string& room_id,
+                                   [[maybe_unused]] const std::string& member_id,
+                                   [[maybe_unused]] const std::string& author_id,
+                                   [[maybe_unused]] const std::string& text,
+                                   [[maybe_unused]] const std::string& notify_payload) override {
     return NotAMemberError();
   }
   absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
@@ -838,6 +841,90 @@ TEST_F(GamesHubStreamFixture, LastMemberLeavingDropsTheRoomsChatHistory) {
   const auto remaining = chat_store_->LoadRecent(room_id, 100);
   ASSERT_TRUE(remaining.ok());
   EXPECT_TRUE(remaining->empty()) << "the room is gone; its history must be too";
+}
+
+// microgpt-serve answering every chat request with one reply.
+class OneReplyMicrogpt final : public opal::http::HttpClient {
+ public:
+  explicit OneReplyMicrogpt(std::string reply) : reply_(std::move(reply)) {}
+  opal::Outcome<opal::http::HttpResponse> Send(const opal::http::HttpRequest&) override {
+    opal::http::HttpResponse response;
+    response.status = 200;
+    response.body = R"({"role":"assistant","content":")" + reply_ + R"(","tokens_dropped":0})";
+    return response;
+  }
+
+ private:
+  std::string reply_;
+};
+
+// The room bot end to end (#1591): a mention is answered in the room,
+// the reply reaching every member after the asker's own message and
+// flagged as the bot's.
+TEST_F(GamesHubStreamFixture, ABotMentionIsAnsweredInTheRoomAfterTheAsker) {
+  opal::ClientConfig config = microgpt::DefaultClientConfig("http://microgpt-serve:8087");
+  config.http_client = std::make_shared<OneReplyMicrogpt>("whoever knocks last");
+  auto client = microgpt::Client::Create(std::move(config));
+  ASSERT_TRUE(client.ok());
+  golf_->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*client)));
+
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  moonbase::games::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChatHistory").has_value());
+
+  moonbase::games::Chat chat;
+  chat.text = "@bot who wins?";
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromChat(chat)).ok());
+  for (auto* seat : {&*alice, &*bob}) {
+    auto asked = ReceiveCase(seat->stream, "roomChat");
+    ASSERT_TRUE(asked.has_value());
+    EXPECT_EQ(asked->as_roomChat_or_null()->playerId, alice->player_id);
+    auto answered = ReceiveCase(seat->stream, "roomChat");
+    ASSERT_TRUE(answered.has_value()) << "no reply reached " << seat->player_id;
+    const auto* reply = answered->as_roomChat_or_null();
+    EXPECT_EQ(reply->playerId, kBotPlayerId);
+    EXPECT_EQ(reply->bot, std::optional<bool>(true));
+    EXPECT_EQ(reply->text, "whoever knocks last");
+  }
+}
+
+// The bot's replies (#1591) replay flagged as the bot's, so a client
+// never has to know its name; a player's message carries no flag. No bot
+// is started here, as when MICROGPT_URL is unset: the mention is only
+// chat, and the one reply is the one the test stores itself.
+TEST_F(GamesHubStreamFixture, BotMessagesReplayFlaggedAsTheBots) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::games::Chat chat;
+  chat.text = "@bot hi";
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
+  ASSERT_TRUE(chat_store_->AppendAs(room_id, alice->player_id, kBotPlayerId, "beep", "").ok());
+
+  auto bob = OpenSeat();
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  moonbase::games::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
+  auto history = ReceiveCase(bob->stream, "roomChatHistory");
+  ASSERT_TRUE(history.has_value());
+  const auto& messages = history->as_roomChatHistory_or_null()->messages;
+  ASSERT_EQ(messages.size(), 2u);
+  EXPECT_EQ(messages[0].playerId, alice->player_id);
+  EXPECT_FALSE(messages[0].bot.has_value());
+  EXPECT_EQ(messages[1].playerId, kBotPlayerId);
+  EXPECT_EQ(messages[1].bot, std::optional<bool>(true));
 }
 
 TEST_F(GamesHubStreamFixture, JoiningReplaysChatHistoryAfterRoomState) {
@@ -1900,6 +1987,12 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"hub_seats_expired", {}},
       {"hub_sessions", {{"resumed", "true"}}},
       {"hub_sessions", {{"resumed", "false"}}},
+      {"bot_requests", {{"result", "ok"}}},
+      {"bot_requests", {{"result", "empty"}}},
+      {"bot_requests", {{"result", "busy"}}},
+      {"bot_requests", {{"result", "rate_limited"}}},
+      {"bot_requests", {{"result", "unreachable"}}},
+      {"bot_requests", {{"result", "error"}}},
   };
 
   auto capture = MakeCapturingMetricsRecorder();

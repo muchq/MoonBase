@@ -24,6 +24,7 @@
 #include "absl/status/status.h"
 #include "absl/time/time.h"
 #include "domains/ai/libs/deja_cpp/production_client.h"
+#include "domains/ai/libs/microgpt_cpp/production_client.h"
 #include "domains/games/apis/games_hub/games_hub_handler.h"
 #include "domains/games/apis/games_hub/golf_hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
@@ -162,6 +163,21 @@ int main() {
     LOG(INFO) << "Tape: polling deja at " << deja_url;
   } else {
     LOG(INFO) << "Tape: off (DEJA_URL unset; glasshouse walls stay blank)";
+  }
+
+  // The room bot (#1591): "@bot" in room chat is answered by microgpt-serve
+  // on the app network. Unset, a mention is ordinary chat.
+  const char* microgpt_url = std::getenv("MICROGPT_URL");
+  if (microgpt_url != nullptr && *microgpt_url != '\0') {
+    auto bot = microgpt::CreateProductionClient(microgpt_url);
+    if (!bot.ok()) {
+      LOG(ERROR) << "Failed to build the microgpt client: " << bot.error().message();
+      return 1;
+    }
+    golf->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*bot)));
+    LOG(INFO) << "Room bot: asking microgpt at " << microgpt_url;
+  } else {
+    LOG(INFO) << "Room bot: off (MICROGPT_URL unset)";
   }
 
   // A room's voice (#1590): the STUN servers a voice roster hands each

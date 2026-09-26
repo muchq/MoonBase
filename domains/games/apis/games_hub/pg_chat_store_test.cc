@@ -489,6 +489,23 @@ TEST_F(PgChatStoreTest, AppendRacingRoomDeletionRejectsWithoutOrphaning) {
   EXPECT_EQ(CountRows("R1"), 0) << "the cascade took the earlier message too";
 }
 
+// The bot's reply (#1591): the asker's membership row authorizes it, the
+// bot's reserved id authors it, and a non-member asker stores nothing.
+TEST_F(PgChatStoreTest, AppendAsStoresTheAuthorOnTheMembersAuthority) {
+  auto reply = store_->AppendAs("R1", "alice", games_hub::kBotPlayerId, "beep", "bot");
+  ASSERT_TRUE(reply.ok()) << reply.status();
+  EXPECT_EQ(reply->player_id, games_hub::kBotPlayerId);
+  auto recent = store_->LoadRecent("R1", 100);
+  ASSERT_TRUE(recent.ok()) << recent.status();
+  ASSERT_EQ(recent->size(), 1u);
+  EXPECT_EQ((*recent)[0].player_id, games_hub::kBotPlayerId);
+
+  EXPECT_EQ(
+      store_->AppendAs("R1", "mallory", games_hub::kBotPlayerId, "beep", "bot").status().code(),
+      absl::StatusCode::kFailedPrecondition);
+  EXPECT_EQ(CountRows("R1"), 1);
+}
+
 // A message is activity: an append marks its room active for the sweep,
 // and a rejected one marks nothing.
 TEST_F(PgChatStoreTest, AppendMarksItsRoomActive) {

@@ -235,8 +235,14 @@ structure ChatMessage {
     @required
     messageId: Long
 
+    /// The author. The room bot's replies (#1591) carry the reserved id
+    /// "microgpt", which no player id can equal.
     @required
     playerId: String
+
+    /// True on the room bot's replies, absent on everyone else's, so a
+    /// client never has to know the bot's name.
+    bot: Boolean
 
     @required
     text: String

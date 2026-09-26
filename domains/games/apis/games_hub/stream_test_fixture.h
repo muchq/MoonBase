@@ -62,8 +62,8 @@ inline std::string SeriesLabel(const CounterSeries& series) {
 // tape-poller gauges).
 // Entry carries no instrument kind, so they are named rather than filtered.
 inline const std::set<std::string>& NonCounterInstruments() {
-  static const auto* kNames =
-      new std::set<std::string>{"hub_sessions_active", "lobby_tape_poller_active"};
+  static const auto* kNames = new std::set<std::string>{"bot_latency_us", "hub_sessions_active",
+                                                        "lobby_tape_poller_active"};
   return *kNames;
 }
 

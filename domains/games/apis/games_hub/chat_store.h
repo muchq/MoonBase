@@ -21,6 +21,9 @@ inline constexpr std::size_t kChatTextByteLimit = 500;
 /// yields the lock between pages, large enough that draining the whole
 /// retention window is a handful of reads.
 inline constexpr std::size_t kChatCatchUpPage = 16;
+/// The reserved author of the room bot's replies (#1591). No player can
+/// hold it: every minted player id has hyphens.
+inline constexpr char kBotPlayerId[] = "microgpt";
 inline std::string ChatChannel(const std::string& room_id) { return "chat_" + room_id; }
 
 /// Rejects text a room cannot store: empty or whitespace-only, over
@@ -79,9 +82,16 @@ class ChatStore {
   /// Commits one message and returns the row that readers will observe.
   /// NotAMemberError means the sender is not in the room (or the room is
   /// gone); other failures mean the store could not be reached.
-  virtual absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
-                                         const std::string& text,
-                                         const std::string& notify_payload) = 0;
+  absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
+                                 const std::string& text, const std::string& notify_payload) {
+    return AppendAs(room_id, player_id, player_id, text, notify_payload);
+  }
+
+  /// Append, stored as `author_id` on `member_id`'s authority: the room
+  /// bot's reply, which only a current member's request may post.
+  virtual absl::StatusOr<ChatRow> AppendAs(const std::string& room_id, const std::string& member_id,
+                                           const std::string& author_id, const std::string& text,
+                                           const std::string& notify_payload) = 0;
 
   /// The newest `limit` retained rows, ascending by message_id.
   virtual absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
@@ -115,9 +125,9 @@ class MemoryChatStore final : public ChatStore {
   /// append would accept messages nobody is authorized to send.
   explicit MemoryChatStore(MemberGuard with_member);
 
-  absl::StatusOr<ChatRow> Append(const std::string& room_id, const std::string& player_id,
-                                 const std::string& text,
-                                 const std::string& notify_payload) override;
+  absl::StatusOr<ChatRow> AppendAs(const std::string& room_id, const std::string& member_id,
+                                   const std::string& author_id, const std::string& text,
+                                   const std::string& notify_payload) override;
   absl::StatusOr<std::vector<ChatRow>> LoadRecent(const std::string& room_id,
                                                   std::size_t limit) override;
   absl::StatusOr<std::vector<ChatRow>> LoadAfter(const std::string& room_id,

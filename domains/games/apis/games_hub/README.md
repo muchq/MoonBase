@@ -144,6 +144,34 @@ instances that started polling at different times hold different last-32
 windows, so what a joiner finds already on the glass depends on which one
 answered them. A wall is a mood rather than a log, so that is left alone.
 
+## The room bot
+
+A room chat message that starts with `@bot` (any case, then whitespace or
+nothing) is answered by microgpt-serve (#1591), posted into the room's
+chat as the reserved player id `microgpt` with `bot: true`. The hub makes
+the call, not the browser, so every member sees one reply, it replays in
+history like any message, and microgpt is asked once per mention.
+
+`RoomBot` (`room_bot.h`) runs one worker thread, so no stream and never
+`mu_` waits on microgpt. After the asker's message commits and is pumped,
+the mention is refused if the room already has a request in flight
+(`busy`), or if the room's bucket (burst 2, one per 10 s) or the hub's
+(burst 4, 4/s — microgpt-serve limits each IP to 5 a second, and this
+instance is one IP) is empty (`rate_limited`). The prompt is the room's
+last 8 messages up to the mention, within 1500 bytes and never dropping
+the mention itself: a player's turn is `user` as `<playerId>: <text>` with
+any `@bot` stripped, and the bot's own replies are `assistant`. The call
+is `POST /microgpt/v1/chat` over `//domains/ai/libs/microgpt_cpp`, one
+attempt, 5 s, `max_tokens` 60.
+
+The reply is cut to 500 bytes on a character boundary and appended on the
+asker's membership, so an asker who left meanwhile gets nothing posted.
+microgpt down, slow, refusing or saying nothing posts nothing either:
+every outcome is a `bot_requests{result}` count (`ok`, `empty`, `busy`,
+`rate_limited`, `unreachable`, `error`) and `bot_latency_us`, never an
+error in chat. `MICROGPT_URL` unset leaves the bot off, and a mention is
+only chat.
+
 ## Game events
 
 Seven events, one JSON line each, written to `GAME_EVENT_LOG_DIR` for the

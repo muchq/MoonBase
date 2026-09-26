@@ -73,6 +73,7 @@ moonbase::games::ChatMessage ChatEvent(const ChatRow& row) {
   message.playerId = row.player_id;
   message.text = row.text;
   message.sentAtUnixMillis = row.sent_at_unix_millis;
+  if (row.player_id == kBotPlayerId) message.bot = true;
   return message;
 }
 
@@ -396,6 +397,12 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"hub_seats_expired", {}},
       {"hub_sessions", {{"resumed", "true"}}},
       {"hub_sessions", {{"resumed", "false"}}},
+      {"bot_requests", {{"result", "ok"}}},
+      {"bot_requests", {{"result", "empty"}}},
+      {"bot_requests", {{"result", "busy"}}},
+      {"bot_requests", {{"result", "rate_limited"}}},
+      {"bot_requests", {{"result", "unreachable"}}},
+      {"bot_requests", {{"result", "error"}}},
   };
   return *kSeries;
 }
@@ -408,6 +415,7 @@ void GolfHub::DeclareMetrics() {
 }
 
 GolfHub::~GolfHub() {
+  bot_.reset();
   {
     const std::lock_guard<std::mutex> lock(reaper_mu_);
     reaper_stop_ = true;
@@ -556,6 +564,13 @@ moonbase::games::TapeSplat SplatOf(const moonbase::deja::DejaEvent& event) {
 }  // namespace
 
 void GolfHub::AttachTape(std::shared_ptr<deja::Client> tape) { tape_ = std::move(tape); }
+
+void GolfHub::StartRoomBot(std::shared_ptr<microgpt::Client> client, BotLimits limits) {
+  if (bot_ != nullptr) return;
+  bot_ = std::make_unique<RoomBot>(
+      std::move(client), chat_store_, [this](const std::string& room_id) { PumpChat(room_id); },
+      metrics_, instance_id_, limits);
+}
 
 void GolfHub::StartRoomHeartbeat(std::chrono::milliseconds interval) {
   if (heartbeat_.joinable()) return;
@@ -1416,6 +1431,8 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
     // cursor walk delivers it before ours — staging just our own row
     // and advancing the cursor over it would skip it for good.
     PumpChat(room_id);
+    // After the asker's own row is out, so a reply can only follow it.
+    if (bot_ != nullptr) bot_->OnMessage(*appended);
     return;
   }
 
