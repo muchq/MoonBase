@@ -88,8 +88,14 @@ class HubStore {
     std::string channel;
     std::string payload;
   };
+  /// Vouches that these rooms are still held by a live instance: the
+  /// heartbeat's write, which keeps them out of the room sweep. A room
+  /// named here that no longer exists is not an error.
+  struct TouchRooms {
+    std::vector<std::string> room_ids;
+  };
   using Op = std::variant<UpsertRoom, SetRoomSurface, DeleteRoom, UpsertMember, DeleteMember,
-                          DeleteGame, Notify>;
+                          DeleteGame, Notify, TouchRooms>;
 
   struct StatsDelta {
     std::string player_id;

@@ -420,6 +420,12 @@ GolfHub::~GolfHub() {
   }
   tape_cv_.notify_all();
   if (tape_poller_.joinable()) tape_poller_.join();
+  {
+    const std::lock_guard<std::mutex> lock(heartbeat_mu_);
+    heartbeat_stop_ = true;
+  }
+  heartbeat_cv_.notify_all();
+  if (heartbeat_.joinable()) heartbeat_.join();
 }
 
 absl::Status GolfHub::RestoreFromStore() {
@@ -551,6 +557,36 @@ moonbase::games::TapeSplat SplatOf(const moonbase::deja::DejaEvent& event) {
 
 void GolfHub::AttachTape(std::shared_ptr<deja::Client> tape) { tape_ = std::move(tape); }
 
+void GolfHub::StartRoomHeartbeat(std::chrono::milliseconds interval) {
+  if (heartbeat_.joinable()) return;
+  heartbeat_ = std::thread([this, interval] {
+    while (true) {
+      StampHeldRooms();
+      std::unique_lock<std::mutex> lock(heartbeat_mu_);
+      heartbeat_cv_.wait_for(lock, interval, [this] { return heartbeat_stop_; });
+      if (heartbeat_stop_) return;
+    }
+  });
+}
+
+void GolfHub::StampHeldRooms() {
+  // Registry ids are the seats this instance owns: live sockets and ones
+  // parked inside its grace. Rooms seen only through rows are left out.
+  // Snapshotted before mu_, so the registry's lock never nests inside it.
+  const std::vector<std::string> seats = registry_.Ids();
+  std::set<std::string> held;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    for (const std::string& player_id : seats) {
+      if (const auto room = player_room_.find(player_id); room != player_room_.end()) {
+        held.insert(room->second);
+      }
+    }
+  }
+  if (held.empty()) return;
+  store_->Enqueue({HubStore::TouchRooms{{held.begin(), held.end()}}});
+}
+
 void GolfHub::StartTapePolling(std::shared_ptr<deja::Client> tape) {
   if (tape_poller_.joinable()) return;
   AttachTape(std::move(tape));
@@ -647,8 +683,9 @@ void GolfHub::EnqueueWritesLocked(Writes& writes) {
     std::visit(
         [this](const auto& write) {
           using Write = std::decay_t<decltype(write)>;
-          if constexpr (std::is_same_v<Write, HubStore::Notify>) {
-            // A wake changes no row.
+          if constexpr (std::is_same_v<Write, HubStore::Notify> ||
+                        std::is_same_v<Write, HubStore::TouchRooms>) {
+            // A wake changes no row; a stamp changes none a client sees.
           } else if constexpr (std::is_same_v<Write, HubStore::UpsertMember>) {
             TouchRoomLocked(write.row.room_id);
           } else {
@@ -2368,7 +2405,9 @@ bool GolfHub::ReapUnlessResumedElsewhere(const std::string& player_id) {
     // this leaves — only that seat's owner could have known better).
     bool resumed_elsewhere = false;
     if (const auto room_it = player_room_.find(player_id); room_it != player_room_.end()) {
-      RefreshRoomLocked(room_it->second, outbox, /*project_always=*/true);
+      // A copy: a refresh that finds the room deleted erases this entry.
+      const std::string room_id = room_it->second;
+      RefreshRoomLocked(room_id, outbox, /*project_always=*/true);
       if (Room* room = FindRoomLocked(player_id); room != nullptr) {
         const auto member = room->members.find(player_id);
         resumed_elsewhere = member != room->members.end() && member->second.connected;

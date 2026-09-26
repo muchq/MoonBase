@@ -32,6 +32,10 @@ constexpr char kDeleteGame[] = "DELETE FROM games WHERE room_id = $1 AND game_id
 // into the write, it would take the room after the member or game row,
 // the reverse of DeleteRoom's cascade, and the two could deadlock.
 constexpr char kTouchRoom[] = "UPDATE rooms SET last_active_at = now() WHERE room_id = $1";
+// The heartbeat's batch of the same stamp; $1 is a JSON array of ids.
+constexpr char kTouchRooms[] = R"sql(
+    UPDATE rooms SET last_active_at = now()
+    WHERE room_id IN (SELECT jsonb_array_elements_text($1::jsonb)))sql";
 
 // The step-3 commit statements: CTE-chained so the conditional write and
 // its NOTIFY are one atomic statement — the notify fires exactly when
@@ -188,6 +192,8 @@ void PgHubStore::Apply(const Op& op) {
     Touch(erase->room_id);
   } else if (const auto* notify = std::get_if<Notify>(&op)) {
     ExecOrWarn("Notify", "SELECT pg_notify($1, $2)", {notify->channel, notify->payload});
+  } else if (const auto* touch = std::get_if<TouchRooms>(&op)) {
+    ExecOrWarn("TouchRooms", kTouchRooms, {RosterJson(touch->room_ids)});
   }
 }
 
