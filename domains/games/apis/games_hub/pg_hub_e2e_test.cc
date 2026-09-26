@@ -938,6 +938,54 @@ TEST_F(PgGamesHubFixture, ConnectedFlagFollowsPresence) {
   EXPECT_TRUE(rows.members[0].connected);
 }
 
+// #1295's residue, reaped. A seat whose instance crashed while it was
+// connected keeps its row at connected, and the successor restores its
+// room from rows alone — so the successor's heartbeat never vouches for
+// it. Once its stamp is older than kRoomStaleAfter the sweep deletes it,
+// its chat goes with the cascade, and the wake drops the successor's
+// local copy.
+TEST_F(PgGamesHubFixture, CrashedConnectedSeatsRoomIsSweptOnceStale) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::games::Chat chat;
+  chat.text = "brb";
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromChat(chat)).ok());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
+
+  RestartHub();
+  ASSERT_TRUE(golf_->WithMember(room_id, alice->player_id, [] {}))
+      << "the successor never restored the ghost room";
+  ASSERT_TRUE(WaitForListenerCount(room_id, 1));
+  pg::Client db(url_);
+  ASSERT_TRUE(db.Exec("UPDATE rooms SET last_active_at = now() - interval '2 hours'"
+                      " WHERE room_id = $1",
+                      {room_id})
+                  .ok());
+
+  // One heartbeat tick, by hand: the stamp vouches for nothing here.
+  golf_->StampHeldRooms();
+  golf_->SweepStaleRooms();
+  store_->Flush();
+
+  auto room = db.Exec("SELECT 1 FROM rooms WHERE room_id = $1", {room_id});
+  ASSERT_TRUE(room.ok());
+  EXPECT_EQ(room->rows(), 0) << "the stale room survived the sweep";
+  auto messages = db.Exec("SELECT 1 FROM room_chat_messages WHERE room_id = $1", {room_id});
+  ASSERT_TRUE(messages.ok());
+  EXPECT_EQ(messages->rows(), 0) << "the room's chat outlived it";
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool held = true;
+  while (held && std::chrono::steady_clock::now() < deadline) {
+    held = golf_->WithMember(room_id, alice->player_id, [] {});
+    if (held) std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  }
+  EXPECT_FALSE(held) << "the sweep's wake never dropped the successor's copy";
+}
+
 // The step-3 headline (#1194): two live hubs, one game. alice plays on
 // the primary instance, bob on the second; every move is a conditional
 // commit whose NOTIFY wakes the other side into re-reading and

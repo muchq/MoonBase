@@ -270,8 +270,8 @@ class GolfHub final {
   /// before serving; none leaves browsers to their host candidates.
   void SetIceServers(std::vector<moonbase::games::IceServer> servers);
 
-  /// Starts the room heartbeat: StampHeldRooms every `interval` until
-  /// the hub is destroyed. main starts it when rooms persist; without a
+  /// Starts the room heartbeat: StampHeldRooms then SweepStaleRooms every
+  /// `interval` until the hub is destroyed. main starts it when rooms persist; without a
   /// store there is no fleet and nothing to vouch to. A second call
   /// changes nothing.
   void StartRoomHeartbeat(std::chrono::milliseconds interval = kRoomHeartbeat);
@@ -282,9 +282,17 @@ class GolfHub final {
   /// not stamped, so its last_active_at ages toward the sweep.
   void StampHeldRooms();
 
-  /// How often the heartbeat stamps. The sweep's staleness threshold is
-  /// a multiple of this.
+  /// Deletes the rooms no instance has stamped for kRoomStaleAfter — the
+  /// ones only a crashed instance held. Every instance sweeps; the delete
+  /// is idempotent, and its wake drops each swept room wherever it is
+  /// still held.
+  void SweepStaleRooms();
+
+  /// How often the heartbeat stamps and sweeps.
   static constexpr std::chrono::milliseconds kRoomHeartbeat{60000};
+  /// How long a room may go unstamped before the sweep takes it: sixty
+  /// missed heartbeats, so an instance has to be gone, not just slow.
+  static constexpr std::chrono::milliseconds kRoomStaleAfter = 60 * kRoomHeartbeat;
 
   /// The client without the thread, for tests that drive PollTapeOnce
   /// themselves so no assertion waits on a clock.

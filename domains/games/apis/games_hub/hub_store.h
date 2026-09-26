@@ -1,6 +1,7 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_HUB_STORE_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_HUB_STORE_H
 
+#include <chrono>
 #include <cstdint>
 #include <map>
 #include <mutex>
@@ -19,6 +20,9 @@ namespace games_hub {
 
 inline constexpr char kRoomsChannel[] = "golf_rooms";
 inline std::string RoomChannel(const std::string& room_id) { return "room_" + room_id; }
+/// The payload of the wake a sweep sends a deleted room's channel. It is
+/// no instance's id, so every instance holding the room acts on it.
+inline constexpr char kSweepWake[] = "sweep";
 
 /// The hub's authoritative room, member, and game persistence contract.
 /// Implementations serialize conditional game commits and retain terminal
@@ -94,8 +98,13 @@ class HubStore {
   struct TouchRooms {
     std::vector<std::string> room_ids;
   };
+  /// Deletes every room no instance has stamped for `older_than`, and
+  /// wakes each one's channel with kSweepWake so its holders drop it.
+  struct SweepRooms {
+    std::chrono::seconds older_than;
+  };
   using Op = std::variant<UpsertRoom, SetRoomSurface, DeleteRoom, UpsertMember, DeleteMember,
-                          DeleteGame, Notify, TouchRooms>;
+                          DeleteGame, Notify, TouchRooms, SweepRooms>;
 
   struct StatsDelta {
     std::string player_id;

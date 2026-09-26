@@ -562,11 +562,17 @@ void GolfHub::StartRoomHeartbeat(std::chrono::milliseconds interval) {
   heartbeat_ = std::thread([this, interval] {
     while (true) {
       StampHeldRooms();
+      SweepStaleRooms();
       std::unique_lock<std::mutex> lock(heartbeat_mu_);
       heartbeat_cv_.wait_for(lock, interval, [this] { return heartbeat_stop_; });
       if (heartbeat_stop_) return;
     }
   });
+}
+
+void GolfHub::SweepStaleRooms() {
+  store_->Enqueue(
+      {HubStore::SweepRooms{std::chrono::duration_cast<std::chrono::seconds>(kRoomStaleAfter)}});
 }
 
 void GolfHub::StampHeldRooms() {
@@ -684,8 +690,10 @@ void GolfHub::EnqueueWritesLocked(Writes& writes) {
         [this](const auto& write) {
           using Write = std::decay_t<decltype(write)>;
           if constexpr (std::is_same_v<Write, HubStore::Notify> ||
-                        std::is_same_v<Write, HubStore::TouchRooms>) {
-            // A wake changes no row; a stamp changes none a client sees.
+                        std::is_same_v<Write, HubStore::TouchRooms> ||
+                        std::is_same_v<Write, HubStore::SweepRooms>) {
+            // A wake changes no row; a stamp changes none a client sees;
+            // a sweep's deletes reach clients through its own wakes.
           } else if constexpr (std::is_same_v<Write, HubStore::UpsertMember>) {
             TouchRoomLocked(write.row.room_id);
           } else {

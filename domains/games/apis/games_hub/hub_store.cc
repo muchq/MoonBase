@@ -96,6 +96,9 @@ void MemoryHubStore::ApplyLocked(const Op& op) {
     members_.erase({erase->room_id, erase->player_id});
   } else if (const auto* erase = std::get_if<DeleteGame>(&op)) {
     games_.erase({erase->room_id, erase->game_id});
+  } else if (std::holds_alternative<TouchRooms>(op) || std::holds_alternative<SweepRooms>(op)) {
+    // One process holds every room here, and a crash takes them all with
+    // it: there is no fleet to vouch to and no ghost to sweep.
   }
 }
 

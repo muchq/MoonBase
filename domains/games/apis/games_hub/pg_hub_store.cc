@@ -32,6 +32,15 @@ constexpr char kDeleteGame[] = "DELETE FROM games WHERE room_id = $1 AND game_id
 // into the write, it would take the room after the member or game row,
 // the reverse of DeleteRoom's cascade, and the two could deadlock.
 constexpr char kTouchRoom[] = "UPDATE rooms SET last_active_at = now() WHERE room_id = $1";
+// The sweep. The delete and its wakes are one statement, so every room
+// it takes has its holders told. $1 is the threshold in seconds, $2 the
+// room-channel prefix, $3 kSweepWake.
+constexpr char kSweepRooms[] = R"sql(
+    WITH swept AS (
+      DELETE FROM rooms
+      WHERE last_active_at < now() - make_interval(secs => $1::double precision)
+      RETURNING room_id)
+    SELECT pg_notify($2 || room_id, $3) FROM swept)sql";
 // The heartbeat's batch of the same stamp; $1 is a JSON array of ids.
 constexpr char kTouchRooms[] = R"sql(
     UPDATE rooms SET last_active_at = now()
@@ -194,6 +203,11 @@ void PgHubStore::Apply(const Op& op) {
     ExecOrWarn("Notify", "SELECT pg_notify($1, $2)", {notify->channel, notify->payload});
   } else if (const auto* touch = std::get_if<TouchRooms>(&op)) {
     ExecOrWarn("TouchRooms", kTouchRooms, {RosterJson(touch->room_ids)});
+  } else if (const auto* sweep = std::get_if<SweepRooms>(&op)) {
+    const auto swept =
+        ExecOrWarn("SweepRooms", kSweepRooms,
+                   {std::to_string(sweep->older_than.count()), RoomChannel(""), kSweepWake});
+    if (swept.value_or(0) > 0) LOG(INFO) << "swept " << *swept << " stale rooms";
   }
 }
 
