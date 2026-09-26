@@ -1,4 +1,4 @@
-// The lobby member of the room stream (#1490 phase 3), driven through the
+// The lobby member of the room stream (#1490), driven through the
 // generated client over the in-memory pair: the world is the session's
 // room's, or the plaza's while unroomed; a room change and a closed
 // socket leave it; a roomId on this stream can only agree with that.
@@ -51,8 +51,6 @@ GameCommands MoveTo(std::vector<double> position) {
 
 GameCommands LeaveWorld() { return Lobby(LobbyAction::FromLeave(moonbase::games::LeaveWorld{})); }
 
-// On the seam fixture so the race test below can arm the hub's hooks;
-// unarmed, the seams are no-ops.
 // A fixture whose hub hooks park at a named seam until the test releases
 // them, so an interleaving is the test's and not the scheduler's. A
 // subclass installs the hooks (MakeGolfHooks) as
@@ -133,6 +131,8 @@ class SeamFixture : public GamesHubStreamFixture {
   bool released_ = false;
 };
 
+// On the seam fixture so the race test below can arm the hub's hooks;
+// unarmed, the seams are no-ops.
 class LobbyFixture : public SeamFixture {
  protected:
   // A seat past its sessionReady, in no room and no world.

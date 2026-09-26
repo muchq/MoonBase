@@ -14,8 +14,8 @@ use moonbase.voice#VoiceCommand
 use moonbase.voice#VoiceEvent
 
 /// The games hub (#79): one service, one session identity, one room layer,
-/// and one stream, Play, on which the lobby (#1490), golf, and castle
-/// (#77) each ride as one envelope member per direction.
+/// and one stream, Play, on which the lobby (#1490), voice (#1590), golf,
+/// and castle (#77) each ride as one envelope member per direction.
 @simpleRestJson
 @title("Games Hub")
 service GamesHub {
@@ -82,9 +82,9 @@ operation GetSession {
     output: SessionCredentials
 }
 
-/// The game-agnostic room layer (MoonBase#79 by way of #1187): session
-/// identity, room lifecycle, and chat. Apart from GameSummary.game — the
-/// one word that names a table's game for the lobby — nothing in this
+/// The game-agnostic room layer (#79): session identity, room lifecycle,
+/// and chat. Apart from GameSummary.game and Table.game — the word that
+/// names a table's game for the lobby — nothing in this
 /// namespace knows which game a table plays; a game contributes only its
 /// own vocabulary, the way moonbase.golf and moonbase.castle do.
 
@@ -330,8 +330,8 @@ structure SeatConflict {
     message: String
 }
 
-/// Ranks A 2..10 J Q K, suits ♠ ♥ ♦ ♣ — the v1 wire's card language,
-/// which the UI already renders. Castle's moves name cards in it too, so
+/// Ranks A 2..10 J Q K, suits ♠ ♥ ♦ ♣ — the glyphs the UI renders.
+/// Castle's moves name cards in it too, so
 /// it is written as well as read: the ten is "10" and not "T", the suit
 /// is the glyph and not a letter, and the ranks are upper case. A card
 /// spelled any other way names nothing and is refused as malformed.

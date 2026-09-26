@@ -53,7 +53,7 @@ std::vector<std::string> Texts(const std::vector<ChatRow>& rows) {
   return texts;
 }
 
-// The #1226 slice of the persistence integration suite: chat's SQL is
+// Chat's slice of the persistence integration suite (#1226): chat's SQL is
 // the risky code, so there is no in-memory double here. Gated on
 // GAMES_HUB_TEST_DB_URL like the rest of the suite.
 class PgChatStoreTest : public ::testing::Test {

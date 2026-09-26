@@ -1,6 +1,6 @@
-// Phase 1 e2e: session minting, ticket admission, room lifecycle, and the
-// reconnect-adjacent seat semantics, driven through the generated client
-// over the in-memory pair. Wire-level details (JSON-text framing, real
+// The hub's e2e suite: sessions and admission, rooms, games, chat, presence
+// and boot recovery, metrics, events and rate limits, driven through the
+// generated client over the in-memory pair. Wire-level details (JSON-text framing, real
 // sockets) are upstream-tested; these pin the hub's behavior.
 
 #include <gmock/gmock.h>
@@ -810,9 +810,9 @@ TEST_F(GolfGameFixture, ChatReachesTheRoom) {
 }
 
 // Chat dies with its room. PostgreSQL gets that from the cascade, but
-// MemoryChatStore — which is what production runs today — reclaims only
-// when the handler calls DropRoom, so a missed call is a leak of up to a
-// hundred messages per emptied room, invisible from the wire.
+// MemoryChatStore (the no-database configuration) reclaims only when the
+// hub calls DropRoom, so a missed call leaks up to kChatHistoryLimit
+// messages per emptied room, invisible from the wire.
 TEST_F(GamesHubStreamFixture, LastMemberLeavingDropsTheRoomsChatHistory) {
   auto alice = OpenSeat();
   ASSERT_TRUE(alice.has_value());
@@ -1108,12 +1108,9 @@ TEST_F(GamesHubStreamFixture, AHeldRoomAdoptsItsRowsSurfaceOnReconcile) {
 // The boot-time twin of ActiveSignalRefreshesHeldRoom's contract: a
 // channel-active with nothing new in the rows projects nothing. A fresh
 // instance restores members from the same rows the catch-up re-reads, so
-// its first LISTEN-landed signal must be a no-op — when the restore
-// instead seeded presence as disconnected, every boot manufactured a
-// memory-vs-rows mismatch and the "only when rows moved" guard projected
-// a roomState that could land inside a resuming seat's hydration,
-// between its snapshot and its chat replay (#1276 sighting #4, on
-// #1293's CI run of StatsSurviveARestart). The seed must copy the row in
+// its first LISTEN-landed signal is a no-op; any memory-vs-rows mismatch
+// would project a roomState into a resuming seat's hydration, between its
+// snapshot and its chat replay. The seed must copy the row in
 // both polarities — alice crashed connected, carol parked disconnected —
 // so neither "seed false" nor "seed true" can hide in a one-sided room.
 TEST_F(GamesHubStreamFixture, BootCatchUpProjectsNothingWhenRowsNeverMoved) {
@@ -1787,10 +1784,6 @@ TEST_F(GamesHubStreamFixture, ChatMetricsCountOutcomesWithoutIdentifiers) {
   }
 }
 
-// The unavailable side of the append counter: the store cannot be
-// reached, the sender is told so, and nothing counts as stored or
-// delivered.
-
 // The zero baseline (#1323): a handler must put its counters on the wire at 0
 // when it is built, before any session. Without it each series is born carrying
 // its first event's value and increase() shows nothing for that event, ever —
@@ -2132,7 +2125,7 @@ class FailingLoadRoomHubStore final : public HubStore {
 
 // The store answering "no such room" and the store not answering are
 // different rejection kinds: the first is the client's state, the second is
-// this hub's outage, and folding them (the pre-#1384 shape) makes a Postgres
+// this hub's outage, and folding them makes a Postgres
 // outage read as a spike of desynced clients. The healthy-store halves are
 // the positive controls proving the kUnavailable reads come from the outage
 // and not from the join shapes themselves.
@@ -2175,6 +2168,9 @@ TEST_F(GamesHubStreamFixture, AStoreOutageOnTheJoinPathsCountsAsUnavailable) {
   EXPECT_EQ(capture->CounterTotal("hub_rejections", {{"kind", "state"}}), 0);
 }
 
+// The unavailable side of the append counter: the store cannot be
+// reached, the sender is told so, and nothing counts as stored or
+// delivered.
 TEST_F(GamesHubStreamFixture, AnUnreachableStoreCountsTheAppendAsUnavailable) {
   auto capture = MakeCapturingMetricsRecorder();
   auto instance = BuildSecondInstance(
@@ -2364,11 +2360,6 @@ TEST_F(GolfGameFixture, AbandoningALiveGameResolvesIt) {
   EXPECT_TRUE(room->as_roomState_or_null()->games.empty());
 }
 
-// The reported bug (#1236): an accidental browser close mid-game arrives
-// as a clean websocket close, which used to resolve the game against the
-// absent player within seconds. A close parks the seat instead: the
-// table sees the disconnect, nothing ends, and the resume token reclaims
-// the seat with the game intact.
 // The hub's domain events (#1571): the funnel a room goes through, and
 // the once-ness of the game that ends it. A game is played once, so its
 // line comes from the commit that ended it — never from the ceremony,
@@ -2482,9 +2473,6 @@ TEST_F(GameEventFixture, ARefusedJoinIsNoEvent) {
   EXPECT_THAT(events_, ::testing::IsEmpty());
 }
 
-// A message that was stored is one line, and nothing of what was said
-// is in it. A message the store refused is no line at all — the counter
-// still has the rejection; the archive is for things that happened.
 // A room records the surface it chose, and every reshape after it
 // (#1554), in the one spelling the wire and the stored row also use.
 // The radius is not in the line: the question is which shapes people
@@ -2543,6 +2531,9 @@ TEST_F(GameEventFixture, AWorldRecordsTheShapeItChoseAndEveryReshapeAfterIt) {
               ::testing::ElementsAre("room_created", "geometry_changed", "geometry_changed"));
 }
 
+// A message that was stored is one line, and nothing of what was said
+// is in it. A message the store refused is no line at all — the counter
+// still has the rejection; the archive is for things that happened.
 TEST_F(GameEventFixture, AStoredMessageIsOneLineAndARefusedOneIsNone) {
   auto room = SeatedRoom(2);
   ASSERT_TRUE(room.has_value());
@@ -2661,6 +2652,9 @@ TEST_F(GameEventFixture, ASiblingThatRebasedOntoAFinishRecordsNothing) {
       << "the sibling recorded a game the finisher already recorded";
 }
 
+// An accidental browser close mid-game arrives as a clean websocket close
+// (#1236). A close parks the seat: the table sees the disconnect, nothing
+// ends, and the resume token reclaims the seat with the game intact.
 TEST_F(GolfGameFixture, MidGameBrowserCloseParksTheSeatAndTheGameSurvives) {
   auto table = SeatedTable();
   ASSERT_TRUE(table.has_value());
@@ -3096,7 +3090,7 @@ TEST_F(RateLimitedStreamFixture, ACommandFloodIsRefusedAfterTheBurst) {
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
 
-  // Six lobby-less getRoomState frames spend the burst; each earns the
+  // Six room-less getRoomState frames spend the burst; each earns the
   // ordinary rejection, proving real handling happened.
   for (int i = 0; i < 6; ++i) {
     ASSERT_TRUE(

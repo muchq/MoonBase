@@ -58,7 +58,8 @@ inline std::string SeriesLabel(const CounterSeries& series) {
   return label + "}";
 }
 
-// The non-counter instruments the hub emits (the live-session gauge).
+// The non-counter instruments the hub emits (the live-session and
+// tape-poller gauges).
 // Entry carries no instrument kind, so they are named rather than filtered.
 inline const std::set<std::string>& NonCounterInstruments() {
   static const auto* kNames =
@@ -414,8 +415,8 @@ class GamesHubStreamFixture : public testing::Test {
   virtual std::shared_ptr<ChatStore> MakeChatStore() { return nullptr; }
   /// The stream budgets (#1240). Tests get effectively-unlimited
   /// buckets: e2e flows blast frames far faster than any human, and only
-  /// the rate-limit suite wants refusals — it overrides with tiny
-  /// buckets whose refills are frozen.
+  /// the limiter suites want refusals — they override with tiny buckets
+  /// whose refills are frozen.
   virtual RateLimits MakeRateLimits() { return UnlimitedRateLimits(); }
   // The deal: NoShuffleDealer by default, so every card is known; a
   // suite that needs particular hands arranges the deck itself.
@@ -499,8 +500,8 @@ class GamesHubStreamFixture : public testing::Test {
   }
 
   // Mint a session and open its Play stream; fails the test on any step.
-  // The client-parameterized form serves multi-instance suites (#1194
-  // step 3), where each hub instance has its own client.
+  // The client-parameterized form serves multi-instance suites
+  // (#1194), where each hub instance has its own client.
   struct Seat {
     std::string player_id;
     std::string resume_token;
@@ -672,8 +673,9 @@ class GamesHubStreamFixture : public testing::Test {
   std::shared_ptr<TicketVault> vault_;
   std::shared_ptr<HubStore> store_;
   std::shared_ptr<ChatStore> chat_store_;
-  // Every suite gets capture; only the metrics tests assert on it. The
-  // no-op meter underneath means values still go nowhere.
+  // Every suite gets capture: TearDown's emit→declare sweep reads it for
+  // every test, and the metrics tests assert on it directly. The no-op
+  // meter underneath means values still go nowhere.
   std::shared_ptr<CapturingMetricsRecorder> metrics_ = MakeCapturingMetricsRecorder();
   std::shared_ptr<IdGenerator> ids_ = std::make_shared<SequentialIdGenerator>();
   std::shared_ptr<GolfHub> golf_;

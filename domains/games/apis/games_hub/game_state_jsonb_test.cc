@@ -16,9 +16,8 @@ namespace {
 
 using cards::Card;
 
-// Phase-0 slice of the persistence integration suite (#1194): serialized
-// engine states must survive the storage target step 2 will write them
-// to, and jsonb is not a byte-preserving container — it re-orders keys
+// Serialized engine states must survive the games table's jsonb state
+// column (#1194), and jsonb is not a byte-preserving container — it re-orders keys
 // (length-then-bytes, not alphabetical), re-spaces the text, and refuses
 // escaped NULs outright. Real postgres via GAMES_HUB_TEST_DB_URL (the
 // vault suite's pattern); skips otherwise.
@@ -121,7 +120,7 @@ TEST_F(GameStateJsonbTest, NameWithNulByteStillInserts) {
 }
 
 TEST_F(GameStateJsonbTest, StoredStateIsQueryable) {
-  // The reason step 2 wants jsonb rather than text: operators reach into
+  // Why the state column is jsonb rather than text: operators reach into
   // the stored state without deserializing it.
   ASSERT_TRUE(StoreAndFetch(golf::serializeGameState(playedState())).has_value());
   auto version = db_->Exec("SELECT state->>'v' FROM game_state_probe");

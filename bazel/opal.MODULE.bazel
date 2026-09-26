@@ -8,14 +8,12 @@ bazel_dep(name = "opal_cpp", version = "0.0.0")
 #
 # Generated clients stream a @streaming blob response payload, and the retry
 # loop honors Retry-After — both for the lichess archive (#1527). Responses
-# now cap at ClientConfig::max_response_bytes, 64 MiB; a 500-game chess.com
-# month is about 2 MB.
+# cap at ClientConfig::max_response_bytes, 64 MiB; a 500-game chess.com month
+# is about 2 MB.
 #
-# A modeled @httpHeader("Accept") also reaches the wire now (opal-cpp #220,
-# found here): an operation with a response @httpPayload used to overwrite it
-# with the payload's content type, so the member was set and then discarded on
-# every call. It is a default rather than an override, which is what lets the
-# lichess client state PGN in its model instead of from an interceptor.
+# A modeled @httpHeader("Accept") reaches the wire as a default that a response
+# @httpPayload's content type does not override (opal-cpp #220), so the
+# lichess client states PGN in its model instead of from an interceptor.
 #
 # Inbound stream events are validated against the model's constraints
 # (opal-cpp #228): a violation reaches the handler as Error::Validation, and
@@ -23,9 +21,9 @@ bazel_dep(name = "opal_cpp", version = "0.0.0")
 # sends take a delivery class (#227): games_hub coalesces world moves.
 archive_override(
     module_name = "opal_cpp",
-    integrity = "sha256-GbfEK1OnSztrVv2sAdvbFNtuc8hiRecmcuiF3jrj2Nc=",
-    strip_prefix = "opal-cpp-5b2bd1182002e2118f26483ab11282196706b539",
+    integrity = "sha256-eY0B+bcEpX8y/bM24xQ96dWR5qcebcvQgxnkz2d/3Yk=",
+    strip_prefix = "opal-cpp-57d6842a4bd2f24ba54a2091703306c596aa8dd3",
     urls = [
-        "https://github.com/muchq/opal-cpp/archive/5b2bd1182002e2118f26483ab11282196706b539.tar.gz",
+        "https://github.com/muchq/opal-cpp/archive/57d6842a4bd2f24ba54a2091703306c596aa8dd3.tar.gz",
     ],
 )

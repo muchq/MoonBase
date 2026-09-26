@@ -166,9 +166,9 @@ TEST(JsonFrameContract, HeadersBeyondTheEnvelopeAreRefusedNotDropped) {
 }
 
 // --- SessionRegistry: admission, grace, and fan-out (ADR-0020/21/22). ----
-// Mirrors the hub's exact configuration: async_delivery=true (falls back
-// to writer threads on sockets without async support, exactly as in the
-// in-memory harness), a grace period, and on_expired.
+// The hub runs async_delivery=true, a grace period, and on_expired. These
+// tests leave async_delivery off, which on the in-memory pair is the same
+// writer-thread path the hub falls back to.
 
 struct Note {
   std::string text;

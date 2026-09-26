@@ -5,9 +5,7 @@
 
 namespace games_hub {
 
-/// The bucket mechanism lives with its siblings in futility (promoted
-/// there once the hub became its second consumer); what stays here is
-/// the hub's policy.
+/// The bucket mechanism is futility's; this file holds the hub's policy.
 using TokenBucket = futility::rate_limiter::TokenBucket;
 
 /// The stream's budgets (#1240), injectable so tests pin behavior with

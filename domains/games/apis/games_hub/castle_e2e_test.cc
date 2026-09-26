@@ -405,11 +405,9 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
 
 // The point of naming cards (#1505): a move that names a card the row
 // does not hold is refused, in band, with the card it named — never the
-// card that happens to sit at that offset. Every integer in range used
-// to be a valid address, so the hub could not tell a good one from a
-// stale one. The two refusals are different spikes on the dashboard: a
-// card in the wrong row is a client out of sync with its view, a
-// spelling no card has is a client sending nonsense.
+// card that happens to sit at that offset. The two refusals are different spikes on the dashboard:
+// a card in the wrong row is a client out of sync with its view, a spelling no card has is a client
+// sending nonsense.
 TEST_F(CastleGameFixture, AMoveNamingACardTheRowDoesNotHoldIsRefused) {
   auto table = SeatedCastleTable();
   ASSERT_TRUE(table.has_value());

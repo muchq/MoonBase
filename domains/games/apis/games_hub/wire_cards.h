@@ -13,8 +13,8 @@ namespace games_hub {
 /// The wire's card language and the way back from it (#1505).
 ///
 /// Ranks are the canonical display strings (A 2..10 J Q K); suits are
-/// the v1 wire's glyphs, which the UI already renders and which
-/// CardMapper's letters are a different representation of.
+/// the glyphs the UI renders, a different representation of the same
+/// suits than CardMapper's letters.
 moonbase::games::Card WireCard(const cards::Card& card);
 
 /// The card that spelling names, or nothing if none does. Reads the deck
@@ -34,8 +34,7 @@ absl::StatusOr<std::vector<cards::Card>> CardsFromWire(
 /// two clients naming the same cards play the same thing.
 ///
 /// A card the row does not hold is absl::NotFound: a client acting on a
-/// view the table has moved past, which the hub could not tell from a
-/// good move while every integer in range was a valid address. A real
+/// view the table has moved past. A real
 /// deal holds no duplicates, so a card names one slot; a row that
 /// somehow holds two is refused the same way rather than guessed at,
 /// since either choice would be a card the player did not point to.

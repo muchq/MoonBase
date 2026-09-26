@@ -1,11 +1,9 @@
-// The step-2/3 persistence e2e (#1194): the same client flows as
-// hub_e2e_test, but over durable credentials (step 1) and the rooms/games
-// write-through — then the process "dies" (RestartHub) and a fresh hub
-// over the same database has to seat everyone back into their live game.
-// The step-3 suite adds a second live instance (BuildInstance): one room
-// and one game shared across two hubs whose only channel is the database
-// and its NOTIFY wire. Real postgres via GAMES_HUB_TEST_DB_URL; skips
-// otherwise.
+// The persistence e2e (#1194): the same client flows as hub_e2e_test,
+// but over durable credentials and the rooms/games write-through — then the process "dies"
+// (RestartHub) and a fresh hub over the same database has to seat everyone back into their live
+// game. The multi-instance tests add a second live instance (BuildInstance): one room and one game
+// shared across two hubs whose only channel is the database and its NOTIFY wire. Real postgres via
+// GAMES_HUB_TEST_DB_URL; skips otherwise.
 
 #include <gtest/gtest.h>
 
@@ -96,7 +94,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     listener_ = MakeListener(golf_);
   }
 
-  // A second live hub over the same database — the step-3 subject. Its
+  // A second live hub over the same database. Its
   // destructor unblocks parked sessions and detaches the listener before
   // the members unwind (listener before golf, by declaration order).
   struct Instance {
@@ -156,9 +154,9 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     return instance;
   }
 
-  // LISTEN lands asynchronously. Foreign pokes on the room's channel
-  // force refreshes until one round-trips to the seat — after this, no
-  // commit's wake can slip past the seat's instance.
+  // LISTEN lands asynchronously. Ten foreign pokes on the room's channel
+  // over ~200ms; one roomState reaching the seat proves the LISTEN is live,
+  // so no later commit's wake can slip past the seat's instance.
   bool SyncListen(Seat& seat, const std::string& room_id) {
     pg::Client db(url_);
     for (int i = 0; i < 10; ++i) {
@@ -199,18 +197,6 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     return false;
   }
 
-  // Pulls already-queued frames off a seat so the registry's async
-  // delivery chain can finish. opal-cpp#173 (send-before-receive on
-  // terminal transitions) fixed the End()/Close deadlock; draining here
-  // still keeps TearDown deterministic when wake frames are unread.
-  static void DrainPending(moonbase::games::PlayClientStream& stream) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
-    while (std::chrono::steady_clock::now() < deadline) {
-      auto received = stream.Receive(std::chrono::milliseconds(5));
-      if (!received.ok() || !received->has_value()) return;
-    }
-  }
-
   // alice on the primary instance, bob on `remote`, one room and one
   // started game between them. Every cross-instance step waits on the
   // events that prove the other instance caught up, so the flow is
@@ -229,52 +215,19 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     remote.listener.reset();
   }
 
-  // Stop both instances' listeners, then drain unread wake frames. Call
-  // before CrossTable/Instance go out of scope — a late OnChannelActive
-  // after DrainPending would refill the chain and TearDown hangs again.
-  void QuiesceCrossTable(Instance& remote, CrossTable& table) {
-    DetachListeners(remote);
-    DrainPending(table.alice.stream);
-    DrainPending(table.bob.stream);
-  }
-
-  void QuiesceSeats(Instance& remote, Seat& alice, Seat& bob) {
-    DetachListeners(remote);
-    DrainPending(alice.stream);
-    DrainPending(bob.stream);
-  }
-
-  // Holds an optional<CrossTable>* so it can be armed *before*
-  // SeatedCrossTable returns — a lost wake during setup must still
-  // detach listeners, or named ADD_FAILURE text dies with a 60s SIGKILL.
-  struct QuiesceOnScopeExit {
-    PgGamesHubFixture* fixture = nullptr;
-    Instance* remote = nullptr;
-    std::optional<CrossTable>* table = nullptr;
-    Seat* alice = nullptr;
-    Seat* bob = nullptr;
-    ~QuiesceOnScopeExit() {
-      if (fixture == nullptr || remote == nullptr) return;
-      if (table != nullptr && table->has_value()) {
-        fixture->QuiesceCrossTable(*remote, **table);
-      } else if (alice != nullptr && bob != nullptr) {
-        fixture->QuiesceSeats(*remote, *alice, *bob);
-      } else {
-        fixture->DetachListeners(*remote);
-      }
-    }
+  // Detaches both instances' listeners on scope exit, so a test that
+  // fails mid-flow stops taking wakes before its seats unwind.
+  struct DetachOnScopeExit {
+    PgGamesHubFixture* fixture;
+    Instance* remote;
+    ~DetachOnScopeExit() { fixture->DetachListeners(*remote); }
   };
 
-  // Seats opened by cross-table setup, drained if it fails mid-way —
-  // destroying the client stream while the server still has unread wake
-  // frames is the TearDown hang, and QuiesceOnScopeExit cannot see them.
+  // Seats opened by cross-table setup, held by the caller so a setup that
+  // fails mid-way still owns what it opened.
   struct CrossSeats {
     std::optional<Seat> alice;
     std::optional<Seat> bob;
-    ~CrossSeats() {
-      if (alice.has_value()) DrainPending(alice->stream);
-      if (bob.has_value()) DrainPending(bob->stream);
-    }
   };
 
   // alice on the primary, bob on `remote`, both in one room whose every
@@ -500,7 +453,7 @@ TEST_F(PgGamesHubFixture, LiveGameSurvivesARestart) {
   ASSERT_GT(version_before, 0);
 
   // The deploy: this process's hub dies, a fresh one boots from the
-  // database. Resume tokens are rows (step 1), so the same identities
+  // database. Resume tokens are rows, so the same identities
   // walk back in.
   const std::string alice_token = alice.resume_token;
   const std::string bob_token = bob.resume_token;
@@ -771,7 +724,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesShareOneCastleTable) {
   auto remote = BuildInstance();
   ASSERT_NE(remote, nullptr);
   std::optional<CrossTable> table;
-  QuiesceOnScopeExit quiesce{this, remote.get(), &table};
+  DetachOnScopeExit detach{this, remote.get()};
   table = SeatedCrossCastleTable(*remote);
   ASSERT_TRUE(table.has_value());
   Seat& alice = table->alice;
@@ -938,7 +891,7 @@ TEST_F(PgGamesHubFixture, ConnectedFlagFollowsPresence) {
   EXPECT_TRUE(rows.members[0].connected);
 }
 
-// #1295's residue, reaped. A seat whose instance crashed while it was
+// A seat whose instance crashed while it was
 // connected keeps its row at connected, and the successor restores its
 // room from rows alone — so the successor's heartbeat never vouches for
 // it. Once its stamp is older than kRoomStaleAfter the sweep deletes it,
@@ -986,7 +939,7 @@ TEST_F(PgGamesHubFixture, CrashedConnectedSeatsRoomIsSweptOnceStale) {
   EXPECT_FALSE(held) << "the sweep's wake never dropped the successor's copy";
 }
 
-// The step-3 headline (#1194): two live hubs, one game. alice plays on
+// Two live hubs (#1194), one game. alice plays on
 // the primary instance, bob on the second; every move is a conditional
 // commit whose NOTIFY wakes the other side into re-reading and
 // re-projecting. No instance ever talks to the other directly.
@@ -994,7 +947,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesShareOneGame) {
   auto remote = BuildInstance();
   ASSERT_NE(remote, nullptr);
   std::optional<CrossTable> table;
-  QuiesceOnScopeExit quiesce{this, remote.get(), &table};
+  DetachOnScopeExit detach{this, remote.get()};
   table = SeatedCrossTable(*remote);
   ASSERT_TRUE(table.has_value());
   Seat& alice = table->alice;
@@ -1070,7 +1023,7 @@ TEST_F(PgGamesHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
   auto remote = BuildInstance();
   ASSERT_NE(remote, nullptr);
   std::optional<CrossTable> table;
-  QuiesceOnScopeExit quiesce{this, remote.get(), &table};
+  DetachOnScopeExit detach{this, remote.get()};
   table = SeatedCrossTable(*remote);
   ASSERT_TRUE(table.has_value());
   Seat& alice = table->alice;
@@ -1140,7 +1093,7 @@ TEST_F(PgGamesHubFixture, ARebaseOntoARemoteFinishStillGetsTheCeremony) {
   auto remote = BuildInstance();
   ASSERT_NE(remote, nullptr);
   std::optional<CrossTable> table;
-  QuiesceOnScopeExit quiesce{this, remote.get(), &table};
+  DetachOnScopeExit detach{this, remote.get()};
   table = SeatedCrossTable(*remote);
   ASSERT_TRUE(table.has_value());
   Seat& alice = table->alice;
@@ -1188,27 +1141,6 @@ TEST_F(PgGamesHubFixture, ARebaseOntoARemoteFinishStillGetsTheCeremony) {
   ASSERT_TRUE(ReceiveCase(alice.stream, "roomState").has_value());
 }
 
-// Pins QuiesceCrossTable: an injected unread wake must be drained, or
-// deleting the QuiesceOnScopeExit lines would leave this red.
-TEST_F(PgGamesHubFixture, QuiesceDrainsUnreadWakeFrames) {
-  auto remote = BuildInstance();
-  ASSERT_NE(remote, nullptr);
-  std::optional<CrossTable> table;
-  QuiesceOnScopeExit quiesce{this, remote.get(), &table};
-  table = SeatedCrossTable(*remote);
-  ASSERT_TRUE(table.has_value());
-
-  // Extra foreign wake leaves a roomState alice has not read.
-  golf_->OnNotify(RoomChannel(table->room_id), "foreign-wake");
-  QuiesceCrossTable(*remote, *table);
-  // Disarm the scope guard — listeners are already detached.
-  quiesce.fixture = nullptr;
-
-  auto leftover = table->alice.stream.Receive(std::chrono::milliseconds(50));
-  EXPECT_TRUE(!leftover.ok() || !leftover->has_value())
-      << "unread wake frame survived QuiesceCrossTable";
-}
-
 // Chat across the real wire (#1226 task 5): a message committed on one
 // instance reaches the other's members via its NOTIFY — or, when the
 // commit raced the receiving side's LISTEN, via the channel-active
@@ -1223,7 +1155,7 @@ TEST_F(PgGamesHubFixture, ChatCrossesInstancesBothWays) {
   auto bob = OpenSeatVia(*remote->client);
   ASSERT_TRUE(bob.has_value());
   ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
-  QuiesceOnScopeExit quiesce{this, remote.get(), /*table=*/nullptr, &*alice, &*bob};
+  DetachOnScopeExit detach{this, remote.get()};
 
   ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
   auto created = ReceiveCase(alice->stream, "roomState");
@@ -1287,7 +1219,7 @@ TEST_F(PgGamesHubFixture, ChatCommittedDuringListenerOutageArrivesAfterReconnect
   auto bob = OpenSeatVia(*remote->client);
   ASSERT_TRUE(bob.has_value());
   ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
-  QuiesceOnScopeExit quiesce{this, remote.get(), /*table=*/nullptr, &*alice, &*bob};
+  DetachOnScopeExit detach{this, remote.get()};
 
   ASSERT_TRUE(alice->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
   auto created = ReceiveCase(alice->stream, "roomState");
@@ -1334,7 +1266,7 @@ TEST_F(PgGamesHubFixture, AMaterializedRoomStandsOnItsSphere) {
   auto remote = BuildInstance();
   ASSERT_NE(remote, nullptr);
   CrossSeats seats;
-  QuiesceOnScopeExit quiesce{this, remote.get(), nullptr};
+  DetachOnScopeExit detach{this, remote.get()};
   moonbase::games::SphereGeometry sphere;
   sphere.radius = 53;
   moonbase::games::CreateRoom create;
@@ -1370,7 +1302,7 @@ TEST_F(PgGamesHubFixture, SetGeometryReshapesTheRoomOnEveryInstance) {
   auto remote = BuildInstance();
   ASSERT_NE(remote, nullptr);
   CrossSeats seats;
-  QuiesceOnScopeExit quiesce{this, remote.get(), nullptr};
+  DetachOnScopeExit detach{this, remote.get()};
   const std::string room_id = SeatedCrossRoom(*remote, seats);
   ASSERT_FALSE(room_id.empty());
 
