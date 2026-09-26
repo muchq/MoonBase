@@ -2405,7 +2405,9 @@ bool GolfHub::ReapUnlessResumedElsewhere(const std::string& player_id) {
     // this leaves — only that seat's owner could have known better).
     bool resumed_elsewhere = false;
     if (const auto room_it = player_room_.find(player_id); room_it != player_room_.end()) {
-      RefreshRoomLocked(room_it->second, outbox, /*project_always=*/true);
+      // A copy: a refresh that finds the room deleted erases this entry.
+      const std::string room_id = room_it->second;
+      RefreshRoomLocked(room_id, outbox, /*project_always=*/true);
       if (Room* room = FindRoomLocked(player_id); room != nullptr) {
         const auto member = room->members.find(player_id);
         resumed_elsewhere = member != room->members.end() && member->second.connected;

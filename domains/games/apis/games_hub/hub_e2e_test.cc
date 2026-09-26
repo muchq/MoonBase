@@ -1400,6 +1400,37 @@ TEST_F(GamesHubStreamFixture, BootGraceNeverClaimsASeatRestoredConnected) {
       << "a seat restored connected was claimed by the sibling's boot cohort";
 }
 
+// A parked seat whose room a sibling deleted, unseen here, expires into a
+// refresh that finds the room gone. That reconcile erases the seat's own
+// player_room_ entry, so it must not be reading the room id out of it.
+TEST_F(GamesHubStreamFixture, ParkedSeatWhoseRoomASiblingDeletedExpiresCleanly) {
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_, MakeCapturingMetricsRecorder(),
+                                      /*grace=*/std::chrono::seconds(1));
+  ASSERT_NE(instance, nullptr);
+  auto carol = OpenSeatVia(*instance->client);
+  ASSERT_TRUE(carol.has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*carol);
+  ASSERT_FALSE(room_id.empty());
+  carol->stream.Close();
+  // The sibling's delete, with no wake: only the expiry's refresh sees it.
+  store_->Enqueue({HubStore::DeleteRoom{room_id}});
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool member = true;
+  while (member && std::chrono::steady_clock::now() < deadline) {
+    member = instance->golf->WithMember(room_id, carol->player_id, [] {});
+    if (member) std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  }
+  ASSERT_FALSE(member) << "the expiry never dropped the deleted room";
+
+  auto back = OpenSeatVia(*instance->client, carol->resume_token);
+  ASSERT_TRUE(back.has_value());
+  auto ready = ReceiveCase(back->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_FALSE(ready->as_sessionReady_or_null()->roomId.has_value());
+}
+
 // The heartbeat vouches for the rooms this instance holds a seat in —
 // live or parked within its own grace — and for nothing it only knows
 // from rows. alice's room, held by the other generation, is exactly what
