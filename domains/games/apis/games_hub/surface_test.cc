@@ -57,6 +57,11 @@ TEST(Surface, TheSphereSnapsNearTheWallAndRefusesTheRest) {
   std::vector<double> inside = {0, 0, -52.5};
   EXPECT_FALSE(sphere.Settle(inside).has_value());
   EXPECT_NEAR(inside[2], -53, 1e-9);
+  // A tangent step lands just outside, within kSnap: snapped back in.
+  std::vector<double> stepped = {0, 3, -53};  // length 53.08
+  EXPECT_FALSE(sphere.Settle(stepped).has_value());
+  EXPECT_NEAR(std::hypot(stepped[0], stepped[1], stepped[2]), 53, 1e-9);
+  EXPECT_NEAR(stepped[2] / stepped[1], -53.0 / 3, 1e-9);
   std::vector<double> slanted = {30.3, 30.3, 30.3};  // length 52.48
   EXPECT_FALSE(sphere.Settle(slanted).has_value());
   EXPECT_NEAR(std::hypot(slanted[0], slanted[1], slanted[2]), 53, 1e-9);
