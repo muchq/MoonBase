@@ -266,6 +266,8 @@ class TouchSpyStore final : public HubStore {
       for (const Op& op : ops) {
         if (const auto* touch = std::get_if<TouchRooms>(&op)) {
           touches_.emplace_back(touch->room_ids.begin(), touch->room_ids.end());
+        } else if (const auto* sweep = std::get_if<SweepRooms>(&op)) {
+          sweeps_.push_back(sweep->older_than);
         }
       }
     }
@@ -293,6 +295,13 @@ class TouchSpyStore final : public HubStore {
     const std::lock_guard<std::mutex> lock(mu_);
     return touches_;
   }
+  /// Whether a sweep was enqueued within `budget`, and the first one's
+  /// threshold.
+  std::optional<std::chrono::seconds> AwaitSweep(std::chrono::milliseconds budget) {
+    std::unique_lock<std::mutex> lock(mu_);
+    if (!cv_.wait_for(lock, budget, [&] { return !sweeps_.empty(); })) return std::nullopt;
+    return sweeps_.front();
+  }
   /// Whether some batch named `room_id` within `budget`.
   bool AwaitTouchOf(const std::string& room_id, std::chrono::milliseconds budget) {
     std::unique_lock<std::mutex> lock(mu_);
@@ -309,6 +318,7 @@ class TouchSpyStore final : public HubStore {
   std::mutex mu_;
   std::condition_variable cv_;
   std::vector<std::set<std::string>> touches_;
+  std::vector<std::chrono::seconds> sweeps_;
 };
 
 std::unique_ptr<SecondInstance> BuildSecondInstance(
@@ -1471,8 +1481,9 @@ TEST_F(GamesHubStreamFixture, HeartbeatStampsOnlyRoomsThisInstanceHoldsSeatsIn) 
   EXPECT_EQ(touches[0], (std::set<std::string>{live, parked}));
 }
 
-// The heartbeat thread is StampHeldRooms on its interval.
-TEST_F(GamesHubStreamFixture, RoomHeartbeatStampsOnItsInterval) {
+// The heartbeat thread is StampHeldRooms then SweepStaleRooms on its
+// interval, the sweep at kRoomStaleAfter.
+TEST_F(GamesHubStreamFixture, RoomHeartbeatStampsAndSweepsOnItsInterval) {
   auto spy = std::make_shared<TouchSpyStore>(store_);
   auto instance = BuildSecondInstance(vault_, spy, chat_store_);
   ASSERT_NE(instance, nullptr);
@@ -1485,61 +1496,9 @@ TEST_F(GamesHubStreamFixture, RoomHeartbeatStampsOnItsInterval) {
   instance->golf->StartRoomHeartbeat(std::chrono::milliseconds(20));
   EXPECT_TRUE(spy->AwaitTouchOf(room_id, std::chrono::seconds(5)))
       << "the heartbeat never stamped a room with a live seat";
-}
-
-// The leak #1295's residue leaves: a seat whose instance crashed while
-// it was connected keeps its row at connected, the boot cohort spares
-// it, and nothing else ever reaps it. Its room, member row and chat
-// outlive the deadline for good. Pins today's behavior; the room
-// activity sweep is what closes it, and flips this test.
-TEST_F(GamesHubStreamFixture, CrashedConnectedSeatKeepsItsRoomAndChatForever) {
-  auto alice = OpenSeat();
-  auto bob = OpenSeat();
-  ASSERT_TRUE(alice.has_value() && bob.has_value());
-  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
-  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
-  const std::string ghost_room = CreateRoomFor(*alice);
-  const std::string canary_room = CreateRoomFor(*bob);
-  ASSERT_FALSE(ghost_room.empty() || canary_room.empty());
-  moonbase::games::Chat chat;
-  chat.text = "brb";
-  ASSERT_TRUE(alice->stream.Send(GameCommands::FromChat(chat)).ok());
-  ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
-
-  // bob parks cleanly: the canary whose reap proves the drain ran.
-  bob->stream.Close();
-  AwaitSnapshot(*store_, [&](const HubStore::Snapshot& snapshot) {
-    for (const auto& member : snapshot.members) {
-      if (member.player_id == bob->player_id) return !member.connected;
-    }
-    return false;
-  });
-
-  // The "crash": alice's generation says no goodbyes, so her row stays
-  // connected while a successor boots over it.
-  auto instance = BuildSecondInstance(vault_, store_, chat_store_, MakeCapturingMetricsRecorder(),
-                                      /*grace=*/std::chrono::seconds(1));
-  ASSERT_NE(instance, nullptr);
-  auto after = AwaitSnapshot(
-      *store_,
-      [&](const HubStore::Snapshot& snapshot) {
-        for (const auto& room : snapshot.rooms) {
-          if (room.room_id == canary_room) return false;
-        }
-        return true;
-      },
-      std::chrono::seconds(6));
-
-  std::set<std::string> rooms;
-  for (const auto& room : after.rooms) rooms.insert(room.room_id);
-  ASSERT_FALSE(rooms.contains(canary_room)) << "the boot deadline never reaped";
-  EXPECT_TRUE(rooms.contains(ghost_room));
-  ASSERT_EQ(after.members.size(), 1u);
-  EXPECT_EQ(after.members[0].player_id, alice->player_id);
-  EXPECT_TRUE(after.members[0].connected);
-  const auto history = chat_store_->LoadRecent(ghost_room, kChatHistoryLimit);
-  ASSERT_TRUE(history.ok());
-  EXPECT_EQ(history->size(), 1u);
+  EXPECT_EQ(spy->AwaitSweep(std::chrono::seconds(5)),
+            std::chrono::duration_cast<std::chrono::seconds>(GolfHub::kRoomStaleAfter))
+      << "the heartbeat never swept, or swept at the wrong threshold";
 }
 
 // The same contract's second window: a seat that entered the cohort

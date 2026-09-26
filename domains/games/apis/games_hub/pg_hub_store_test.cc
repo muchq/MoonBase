@@ -493,6 +493,37 @@ TEST_F(PgHubStoreTest, TouchRoomsStampsExactlyTheNamedRooms) {
   EXPECT_EQ(fresh->Get(1, 0).value_or(""), "R3");
 }
 
+// The sweep: a room whose stamp is older than the threshold goes, with
+// everything that cascades from it, and its channel hears a wake so any
+// instance still holding it drops it too. A fresh room stays.
+TEST_F(PgHubStoreTest, SweepDeletesStaleRoomsAndWakesTheirHolders) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertRoom{"R2"},
+                   PgHubStore::UpsertMember{{"R1", "alice", true, 0, 0, 0}}});
+  store_->Flush();
+  ASSERT_TRUE(*store_->CommitGameSave({"R1", "G1", {"alice"}, std::nullopt, 1}, ""));
+  ASSERT_TRUE(
+      db_->Exec("UPDATE rooms SET last_active_at = now() - interval '2 hours' WHERE room_id = 'R1'")
+          .ok());
+
+  Received received;
+  pg::Listener listener(
+      url_, [&](const std::string&, const std::string& payload) { received.Add(payload); },
+      /*on_active=*/nullptr);
+  listener.Listen(games_hub::RoomChannel("R1"));
+  ConfirmSubscribed(games_hub::RoomChannel("R1"), received);
+
+  store_->Enqueue({PgHubStore::SweepRooms{std::chrono::hours(1)}});
+  store_->Flush();
+
+  auto snapshot = store_->LoadSnapshot();
+  ASSERT_TRUE(snapshot.ok()) << snapshot.status();
+  ASSERT_EQ(snapshot->rooms.size(), 1u);
+  EXPECT_EQ(snapshot->rooms[0].room_id, "R2");
+  EXPECT_TRUE(snapshot->members.empty());
+  EXPECT_TRUE(snapshot->games.empty());
+  EXPECT_TRUE(received.Saw(games_hub::kSweepWake)) << "the swept room's holders were never woken";
+}
+
 // A new room starts active.
 TEST_F(PgHubStoreTest, NewRoomsStartActive) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
