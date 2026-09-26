@@ -476,6 +476,23 @@ TEST_F(PgHubStoreTest, EveryWriteNamingARoomMarksItActive) {
   }
 }
 
+// The heartbeat's write: one batch stamps exactly the rooms it names,
+// and a name with no row is no error.
+TEST_F(PgHubStoreTest, TouchRoomsStampsExactlyTheNamedRooms) {
+  store_->Enqueue(
+      {PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertRoom{"R2"}, PgHubStore::UpsertRoom{"R3"}});
+  store_->Flush();
+  ASSERT_TRUE(db_->Exec("UPDATE rooms SET last_active_at = '2000-01-01Z'").ok());
+  store_->Enqueue({PgHubStore::TouchRooms{{"R1", "R3", "gone"}}});
+  store_->Flush();
+  auto fresh =
+      db_->Exec("SELECT room_id FROM rooms WHERE last_active_at > '2000-01-01Z' ORDER BY room_id");
+  ASSERT_TRUE(fresh.ok()) << fresh.status();
+  ASSERT_EQ(fresh->rows(), 2);
+  EXPECT_EQ(fresh->Get(0, 0).value_or(""), "R1");
+  EXPECT_EQ(fresh->Get(1, 0).value_or(""), "R3");
+}
+
 // A new room starts active.
 TEST_F(PgHubStoreTest, NewRoomsStartActive) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});

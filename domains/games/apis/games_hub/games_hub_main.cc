@@ -139,6 +139,9 @@ int main() {
         },
         [&golf](const std::string& channel) { golf->OnChannelActive(channel); });
     golf->AttachListener(listener.get());
+    // Vouches for the rooms this instance holds, so the ones only a
+    // crashed instance held go stale for the sweep.
+    golf->StartRoomHeartbeat();
   }
 
   // deja's tape on the glasshouse walls (#1554, #1150). DEJA_URL names

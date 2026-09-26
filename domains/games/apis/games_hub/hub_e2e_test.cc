@@ -9,12 +9,14 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -23,6 +25,7 @@
 #include <thread>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "absl/status/status.h"
@@ -250,6 +253,62 @@ class TornSnapshotStore final : public HubStore {
 
  private:
   std::shared_ptr<HubStore> delegate_;
+};
+
+// A HubStore that records every TouchRooms batch on its way through, so
+// heartbeat tests can see which rooms an instance vouches for.
+class TouchSpyStore final : public HubStore {
+ public:
+  explicit TouchSpyStore(std::shared_ptr<HubStore> delegate) : delegate_(std::move(delegate)) {}
+  void Enqueue(std::vector<Op> ops) override {
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      for (const Op& op : ops) {
+        if (const auto* touch = std::get_if<TouchRooms>(&op)) {
+          touches_.emplace_back(touch->room_ids.begin(), touch->room_ids.end());
+        }
+      }
+    }
+    cv_.notify_all();
+    delegate_->Enqueue(std::move(ops));
+  }
+  void Flush() override { delegate_->Flush(); }
+  absl::StatusOr<Snapshot> LoadSnapshot() override { return delegate_->LoadSnapshot(); }
+  absl::StatusOr<bool> CommitGameSave(const GameRow& row, const std::string& payload) override {
+    return delegate_->CommitGameSave(row, payload);
+  }
+  absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& stats,
+                                        const std::string& payload) override {
+    return delegate_->CommitGameFinish(row, stats, payload);
+  }
+  absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
+                                                  const std::string& game_id) override {
+    return delegate_->LoadGame(room_id, game_id);
+  }
+  absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override {
+    return delegate_->LoadRoom(room_id);
+  }
+
+  std::vector<std::set<std::string>> Touches() {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return touches_;
+  }
+  /// Whether some batch named `room_id` within `budget`.
+  bool AwaitTouchOf(const std::string& room_id, std::chrono::milliseconds budget) {
+    std::unique_lock<std::mutex> lock(mu_);
+    return cv_.wait_for(lock, budget, [&] {
+      for (const auto& touch : touches_) {
+        if (touch.contains(room_id)) return true;
+      }
+      return false;
+    });
+  }
+
+ private:
+  std::shared_ptr<HubStore> delegate_;
+  std::mutex mu_;
+  std::condition_variable cv_;
+  std::vector<std::set<std::string>> touches_;
 };
 
 std::unique_ptr<SecondInstance> BuildSecondInstance(
@@ -1339,6 +1398,62 @@ TEST_F(GamesHubStreamFixture, BootGraceNeverClaimsASeatRestoredConnected) {
   ASSERT_EQ(reaped.members.size(), 1u);
   EXPECT_EQ(reaped.members[0].player_id, alice->player_id)
       << "a seat restored connected was claimed by the sibling's boot cohort";
+}
+
+// The heartbeat vouches for the rooms this instance holds a seat in —
+// live or parked within its own grace — and for nothing it only knows
+// from rows. alice's room, held by the other generation, is exactly what
+// a crashed instance's ghost looks like from here, so it goes unstamped
+// and ages toward the sweep.
+TEST_F(GamesHubStreamFixture, HeartbeatStampsOnlyRoomsThisInstanceHoldsSeatsIn) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_FALSE(CreateRoomFor(*alice).empty());
+
+  auto spy = std::make_shared<TouchSpyStore>(store_);
+  auto instance = BuildSecondInstance(vault_, spy, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto carol = OpenSeatVia(*instance->client);
+  auto dave = OpenSeatVia(*instance->client);
+  auto erin = OpenSeatVia(*instance->client);
+  ASSERT_TRUE(carol.has_value() && dave.has_value() && erin.has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(dave->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(erin->stream, "sessionReady").has_value());
+  const std::string live = CreateRoomFor(*carol);
+  const std::string parked = CreateRoomFor(*dave);
+  ASSERT_FALSE(live.empty() || parked.empty());
+  // dave parks: his seat stays this instance's until its grace runs out.
+  dave->stream.Close();
+  AwaitSnapshot(*store_, [&](const HubStore::Snapshot& snapshot) {
+    for (const auto& member : snapshot.members) {
+      if (member.player_id == dave->player_id) return !member.connected;
+    }
+    return false;
+  });
+
+  instance->golf->StampHeldRooms();
+  const auto touches = spy->Touches();
+  ASSERT_EQ(touches.size(), 1u);
+  // erin holds a seat but no room, so she adds nothing.
+  EXPECT_EQ(touches[0], (std::set<std::string>{live, parked}));
+}
+
+// The heartbeat thread is StampHeldRooms on its interval.
+TEST_F(GamesHubStreamFixture, RoomHeartbeatStampsOnItsInterval) {
+  auto spy = std::make_shared<TouchSpyStore>(store_);
+  auto instance = BuildSecondInstance(vault_, spy, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto carol = OpenSeatVia(*instance->client);
+  ASSERT_TRUE(carol.has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*carol);
+  ASSERT_FALSE(room_id.empty());
+
+  instance->golf->StartRoomHeartbeat(std::chrono::milliseconds(20));
+  EXPECT_TRUE(spy->AwaitTouchOf(room_id, std::chrono::seconds(5)))
+      << "the heartbeat never stamped a room with a live seat";
 }
 
 // The leak #1295's residue leaves: a seat whose instance crashed while

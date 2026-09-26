@@ -270,6 +270,22 @@ class GolfHub final {
   /// before serving; none leaves browsers to their host candidates.
   void SetIceServers(std::vector<moonbase::games::IceServer> servers);
 
+  /// Starts the room heartbeat: StampHeldRooms every `interval` until
+  /// the hub is destroyed. main starts it when rooms persist; without a
+  /// store there is no fleet and nothing to vouch to. A second call
+  /// changes nothing.
+  void StartRoomHeartbeat(std::chrono::milliseconds interval = kRoomHeartbeat);
+
+  /// Vouches for every room this instance holds a seat in, live or parked
+  /// within its grace, with one TouchRooms write. A room this instance
+  /// only knows from rows — a crashed instance's ghost among them — is
+  /// not stamped, so its last_active_at ages toward the sweep.
+  void StampHeldRooms();
+
+  /// How often the heartbeat stamps. The sweep's staleness threshold is
+  /// a multiple of this.
+  static constexpr std::chrono::milliseconds kRoomHeartbeat{60000};
+
   /// The client without the thread, for tests that drive PollTapeOnce
   /// themselves so no assertion waits on a clock.
   void AttachTape(std::shared_ptr<deja::Client> tape);
@@ -659,6 +675,13 @@ class GolfHub final {
   std::condition_variable tape_cv_;
   bool tape_stop_ = false;
   std::thread tape_poller_;
+
+  /// The room heartbeat's stop flag and thread, apart from mu_ like the
+  /// other background threads.
+  std::mutex heartbeat_mu_;
+  std::condition_variable heartbeat_cv_;
+  bool heartbeat_stop_ = false;
+  std::thread heartbeat_;
 
   // Declared last: destroyed first, joining registry threads before the
   // maps its on_expired callback touches go away. (The boot reaper is
