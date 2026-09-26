@@ -68,7 +68,7 @@ TEST(GameEvents, AGolfGamePlayedOutIsCompleted) {
   EXPECT_EQ(finished.players, 2u);
 }
 
-// Golf's forced finish supersedes any knock with the kOutcomeAbandoned
+// Golf's forced finish supersedes any knock with the kAbandoned
 // sentinel, which is the only thing that tells the two endings apart:
 // the scorecard keeps every seat either way.
 TEST(GameEvents, AGolfGameLeftBelowTwoSeatsIsAbandoned) {

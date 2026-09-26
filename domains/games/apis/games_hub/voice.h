@@ -60,7 +60,8 @@ class Voice {
   /// (epoch), with one reason whoever the peer is, so a signal cannot
   /// probe who exists and never reaches a connection made after it was
   /// sent; and refused unless it carries exactly one of a description (an
-  /// offer or an answer) or a candidate, within the size limits.
+  /// offer or an answer) or a candidate. Size bounds are the model's: the
+  /// decoder refuses an oversized signal before it reaches here.
   std::optional<Refusal> Signal(const std::string& player_id,
                                 const moonbase::games::SendSignal& signal, Deliveries& out);
 

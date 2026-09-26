@@ -420,17 +420,15 @@ TEST_F(HubChatRaceFixture, RestoredInstanceSeedsTheCursorInsteadOfReplayingThePa
   EXPECT_GT(new_id, mid_id);
 }
 
-// The regression drill for the seed-at-birth rule, in the schedule the
-// pg suite once caught by chance (~1 in 10): a chat wake's store load is
-// in flight on an instance at the moment a local member's append
-// commits. Wake-time cursor creation used to adopt "the newest retained
-// id" from that off-lock read, which classified the raced append as the
-// past — consumed without delivery, so its sender never saw their own
-// message. With cursors born with the room, the parked drain reads
-// pages above the seed and must deliver the append when it resumes.
+// Pins the seed-at-birth rule: a chat wake's store load is in flight on
+// an instance at the moment a local member's append commits. The cursor
+// was seeded when the room became held, so the parked drain reads pages
+// above the seed and must deliver the append when it resumes. A cursor
+// seeded from this off-lock read would count the append as the past and
+// drop it — its sender would never see their own message.
 TEST_F(HubChatRaceFixture, AppendCommittingDuringAnInFlightWakeLoadIsStillDelivered) {
   // The room and both memberships predate the third instance; bob's
-  // seat arrives there by resume, the shape the pg flake had.
+  // seat arrives there by resume.
   auto alice = OpenSeat();
   auto bob = OpenSeat();
   ASSERT_TRUE(alice.has_value() && bob.has_value());

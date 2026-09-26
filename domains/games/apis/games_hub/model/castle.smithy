@@ -14,9 +14,9 @@ use moonbase.games#PlayerIds
 use moonbase.games#TurnChanged
 
 // Castle's vocabulary (#77): the shedding game also played as Palace, the
-// second game on the room layer. It rides golf's Play stream as one
-// `castle` member per direction — a room hosts tables of either game, so
-// the stream is the room's, not golf's — and reuses the shared lifecycle
+// second game on the room layer. It rides the room's Play stream as one
+// `castle` member per direction — a room hosts tables of either game —
+// and reuses the shared lifecycle
 // shapes (create/join/start/leave and their announcements).
 
 /// The castle envelope on the command stream.

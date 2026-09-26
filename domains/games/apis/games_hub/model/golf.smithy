@@ -16,8 +16,8 @@ use moonbase.games#TurnChanged
 
 // Golf's vocabulary (#79): the moves and updates nested under one `golf`
 // member per direction of the room's Play stream (games.smithy), so the
-// room layer never changes shape when a game joins the hub. Castle (#77)
-// and the lobby (#1490) are the other such members.
+// room layer never changes shape when a game joins the hub. Castle (#77),
+// the lobby (#1490) and voice (#1590) are the other such members.
 
 /// The game-specific envelope: exactly one move.
 structure GolfCommand {
@@ -133,8 +133,7 @@ structure FinalScore {
 /// One player's redacted view of a game. Own card faces appear only at
 /// the revealed indexes (and everything at game end); other hands are
 /// always nulls; the drawn card rides only to its holder. The server
-/// never sends a fact the viewer is not entitled to — tighter than v1,
-/// which shipped the whole hand to its owner during peek windows.
+/// never sends a fact the viewer is not entitled to.
 structure GameView {
     @required
     gameId: String

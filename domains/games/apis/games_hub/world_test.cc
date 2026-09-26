@@ -30,7 +30,7 @@ moonbase::games::JoinWorld Join(std::vector<double> position, std::vector<double
   return join;
 }
 
-// The Go server's fixture player: (10, 0, -5), magenta-ish, a sphere.
+// The fixture player: (10, 0, -5), magenta-ish, a sphere.
 moonbase::games::JoinWorld FixtureJoin() { return Join({10, 0, -5}, {0.8, 0.2, 0.6}, 0); }
 
 moonbase::games::MoveTo MoveTo(std::vector<double> position) {
@@ -196,7 +196,7 @@ TEST(World, FanOutStaysInTheRoomsWorldAndNeverEchoes) {
 // is the position everyone hears; one farther off is refused with the
 // radius in the reason; the snapshot names the sphere. A room never told
 // of is a plane, and stays one for the plane's own rules; a forgotten
-// room is a plane again. The plaza is never a sphere: its rules above
+// room is a plane again. The plaza starts a plane, so the rules above
 // are the plane's.
 TEST(World, ASphereRoomSnapsToItsWallRefusesOffItAndNamesItself) {
   World world;

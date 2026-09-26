@@ -31,7 +31,7 @@ using games_hub::Surface;
 using games_hub::PgHubStore;
 
 // A real engine state for the started-game rows — the store owns the
-// serde end to end now, so round-trip fidelity is asserted by canonical
+// serde end to end, so round-trip fidelity is asserted by canonical
 // re-serialization.
 golf::GameState DealtState() {
   std::deque<cards::Card> deck;
@@ -62,7 +62,7 @@ struct Received {
   }
 };
 
-// Step-2 slice of the persistence integration suite (#1194): the
+// The persistence integration suite's write-through ops (#1194): the
 // write-through ops against the real tables. GAMES_HUB_TEST_DB_URL gates
 // it like the rest of the suite.
 class PgHubStoreTest : public ::testing::Test {
@@ -220,7 +220,7 @@ TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
   EXPECT_EQ(snapshot->games[0].game_id, "G2");
 }
 
-// The step-3 commit path (#1194): the notify must ride exactly the
+// The commit path (#1194): the notify must ride exactly the
 // commits that land — a conflicted or replayed commit stays silent.
 TEST_F(PgHubStoreTest, CommitNotifiesExactlyTheSavesThatLand) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});

@@ -52,29 +52,30 @@ namespace games_hub {
                                                    const std::vector<std::string>& roster);
 
 /// Scheduling seams for the race tests, unset in production. A hook runs
-/// on the hub's thread, outside the hub's lock, and must not call into
-/// the hub.
+/// on the hub's thread and must not call into the hub; each says whether
+/// it holds mu_.
 struct GolfTestHooks {
-  /// On the close path, after the world entry is gone and playerLeft has
-  /// fanned out, before the seat parks for a resume to reclaim.
+  /// Outside mu_, on the close path, after the world entry is gone and
+  /// playerLeft has fanned out, before the seat parks for a resume to
+  /// reclaim.
   std::function<void(const std::string& player_id)> before_seat_release;
   /// Under mu_, after a lobby command's world deliveries have gone to the
   /// registry, before the lock is released.
   std::function<void()> after_world_sent;
   /// For each event as it goes to the registry, with the delivery class
-  /// it rides. Under mu_ for the world's deliveries.
+  /// it rides. Under mu_ for the world's and voice's deliveries.
   std::function<void(const std::string& to, const moonbase::games::GameEvents& event,
                      const opal::server::DeliveryClass& delivery)>
       on_send;
 };
 
-/// GolfHub is the room hub, phase 2 (#1187): seat admission, rooms,
+/// GolfHub is the room hub (#1187): seat admission, rooms,
 /// chat, and the game layer, behind GamesHubHandler::Play. The name is
 /// golf's; the room layer, castle (#77), and the lobby (#1490) live here
 /// too. A room hosts tables of either game (#79): golf on libs/cards/golf
 /// and castle on libs/cards/castle, each a member of the stream's unions
 /// with its own per-viewer view. Each tenant's envelope counts on its own
-/// series (golf_, castle_, lobby_); the room layer's own are hub_*.
+/// series (golf_, castle_, lobby_, voice_); the room layer's own are hub_*.
 ///
 /// The lobby member is the World (world.h) keyed by the session's room:
 /// a roomed session stands in its room's world, an unroomed one in the
@@ -105,19 +106,20 @@ struct GolfTestHooks {
 /// and stages only: room ids, player ids, and message text never reach a
 /// metric name or label, and the e2e suite sweeps for exactly that.
 ///
-/// With a store attached, instances are interchangeable (#1194 step 3):
+/// With a store attached, instances are interchangeable (#1194):
 /// the database is every game's authority. A move loads nothing extra —
 /// the local entry mirrors the stored row — but its result only counts
 /// once the conditional commit lands; a miss rebases the entry from the
 /// stored truth and retries the transition. Each commit's NOTIFY wakes
 /// the other instances holding that room; a woken instance re-reads the
 /// rows and re-projects views for its local players (redaction stays
-/// local — only wake-ups cross the wire). Rooms and members keep the
-/// step-2 async write-through (single writer per row, nothing to
+/// local — only wake-ups cross the wire). Rooms and members ride the
+/// async write-through (single writer per row, nothing to
 /// conflict with), with notify riders so remote rosters converge. Chat
 /// commits to its own ChatStore before it is echoed, so a message its
-/// sender sees is a message that was stored; cross-instance chat
-/// fan-out and join-time history replay are still to come (#1226).
+/// sender sees is a message that was stored; remote appends reach local
+/// members through PumpChat on the room's chat wake, and joiners get
+/// SendChatHistory.
 class GolfHub final {
  public:
   using Registry = opal::server::SessionRegistry<moonbase::games::GameEvents>;
@@ -128,8 +130,7 @@ class GolfHub final {
   /// the timestamp inside it can never disagree.
   using EventWriter = std::function<void(absl::Time when, std::string_view line)>;
 
-  /// One counter series, name and exact attributes (hub_metrics.h); the
-  /// alias keeps the golf-era spelling every test uses.
+  /// One counter series, name and exact attributes (hub_metrics.h).
   using CounterSeries = games_hub::CounterSeries;
 
   /// Every counter series this hub baselines at construction, listing
@@ -160,15 +161,14 @@ class GolfHub final {
   static const std::vector<CounterSeries>& DeclaredCounterSeries();
 
   /// Every rooms/members/games mutation goes through HubStore. A null
-  /// argument selects the production MemoryHubStore; PostgreSQL callers
-  /// inject PgHubStore. Call RestoreFromStore before serving to rebuild
-  /// rooms, members, and games.
+  /// argument selects MemoryHubStore (main's no-database mode); PostgreSQL
+  /// callers inject PgHubStore. Call RestoreFromStore before serving to
+  /// rebuild rooms, members, and games.
   ///
   /// Chat has its own store because its write path shares nothing with
   /// the others. A null chat_store selects a MemoryChatStore authorized
-  /// through WithMember below, which is what production runs today —
-  /// chat is process-local until #1226 wires PgChatStore into main, so
-  /// it neither survives a restart nor reaches another instance. A
+  /// through WithMember below: process-local, so it neither survives a
+  /// restart nor reaches another instance. A
   /// PgChatStore passed here authorizes against room_members in its own
   /// transaction and needs nothing from this handler.
   /// `limits` are the per-session stream budgets (#1240); the defaults
@@ -216,12 +216,12 @@ class GolfHub final {
 
   /// Boot-time restore of the store's snapshot: rooms, members (presence
   /// seeded from their rows), and games. Call before the
-  /// transport serves; no-op without a store. Undecodable rows were
-  /// already dropped (loudly) by the store — an error here means the
-  /// snapshot itself couldn't be read.
+  /// transport serves. Undecodable rows were already dropped (loudly) by
+  /// the store — an error here means the snapshot couldn't be read, or
+  /// restore already ran.
   absl::Status RestoreFromStore();
 
-  /// Wires the fan-out's LISTEN side (#1194 step 3): subscribes every
+  /// Wires the fan-out's LISTEN side (#1194): subscribes every
   /// room the hub holds and follows rooms as they come and go. Call
   /// after RestoreFromStore, before serving, with a listener whose
   /// callback forwards to OnNotify. The caller owns the listener and
@@ -435,7 +435,7 @@ class GolfHub final {
   /// turn order decides the turnChanged.
   void CastleEngineMove(const std::string& player_id, const CastleMoveFn& move);
 
-  /// Stream-side observability (#1187 phase 4): the aura chain instruments
+  /// Stream-side observability (#1187): the aura chain instruments
   /// only unary requests, so admissions, live-session count, disconnects,
   /// and the command/event flow are counted here. All no-ops when no
   /// recorder is injected.
@@ -526,7 +526,7 @@ class GolfHub final {
   void Deliver(Outbox& outbox);
   /// Hands staged ops to the store's writer queue. Callers hold mu_ (see
   /// Writes above). Asynchronous — clients may be told before the row
-  /// lands. No-op without a store; always leaves writes empty.
+  /// lands. Always leaves writes empty.
   void EnqueueWritesLocked(Writes& writes);
   /// Stamps the room with the next revision (see Room::revision). A
   /// room this instance no longer holds is skipped.
@@ -541,9 +541,9 @@ class GolfHub final {
   void StageWakeLocked(const std::string& room_id, Writes& writes) const;
 
   /// One synchronous conditional commit of the entry's next revision
-  /// (#1194 step 3). kCommitted adopts the candidate roster/state at
-  /// version+1 (without a store this is the whole operation — memory
-  /// stays the authority in single-instance mode). kRebased means
+  /// (#1194). kCommitted adopts the candidate roster/state at version+1
+  /// (a MemoryHubStore only this hub writes cannot lose the race; tests
+  /// share one across hubs to drive kRebased). kRebased means
   /// another instance committed first: the entry now holds the stored
   /// truth — revalidate and retry. kGone: the game vanished remotely
   /// (the entry is untouched; the caller drops it). kUnavailable: the
@@ -568,10 +568,12 @@ class GolfHub final {
   /// re-read under the lock.
   void CatchUpRoom(const std::string& room_id, bool project_always);
 
-  /// The wake handler's body: flush our own queue (so the read is never
+  /// The under-lock read: flush our own queue (so the read is never
   /// older than local truth), re-read the room's rows, reconcile, and
-  /// re-project views to local members. Also the join path's fallback —
-  /// it materializes a room another instance created. Callers hold mu_.
+  /// re-project views to local members. Join, joinGame and the reap path
+  /// call it directly, and CatchUpRoom falls back to it when a room keeps
+  /// moving; it materializes a room another instance created. Callers
+  /// hold mu_.
   ///
   /// Returns whether the store answered the read — false is an outage, not
   /// an absent room, and the join paths label their refusal kUnavailable on
@@ -613,8 +615,8 @@ class GolfHub final {
     const absl::Time now = absl::Now();
     event_writer_(now, build(now));
   }
-  /// The local finisher: mirrors the stat deltas the finish commit
-  /// already applied (or, without a store, applies them — same code)
+  /// The local finisher: mirrors the finish commit's stat deltas into the
+  /// local member rows (after a kUnavailable leave, with no known commit)
   /// and runs the ceremony.
   void FinalizeGameLocked(const std::string& room_id, Room& room, const std::string& game_id,
                           Outbox& outbox);

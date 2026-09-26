@@ -2,7 +2,7 @@
 #define DOMAINS_GAMES_APIS_GAMES_HUB_WIRE_TEST_FIXTURE_H
 
 // The raw-wire harness the Beyoncé Rule consumer-tier suites share
-// (golf_wire_test, castle_wire_test, lobby_wire_test): GamesHubHandler behind the generated
+// (golf, castle, lobby, voice, tape): GamesHubHandler behind the generated
 // GamesHubServer, unary requests through Loopback, streams through
 // StreamRouter()->ServeSession() over an InMemoryWebSocketPair whose near
 // end the test holds and drives with hand-built frames. No generated
@@ -51,15 +51,20 @@ inline constexpr char kSessionPath[] = "/games/v2/session";
 
 inline constexpr std::chrono::milliseconds kWireReceiveBudget{5000};
 
-// Effectively-unlimited stream budgets (#1240): these suites pin wire
-// shapes, not the limiter. The same numbers as stream_test_fixture.h's
-// helper, spelled here so this header stays free of the generated client.
+// Effectively-unlimited stream budgets (#1240), the same numbers as
+// stream_test_fixture.h's UnlimitedRateLimits; a limiter suite tightens one
+// family on top. Spelled here so this header stays free of the generated
+// client.
 inline RateLimits WireRateLimits() {
   RateLimits limits;
   limits.command_burst = 1e9;
   limits.command_refill_per_sec = 1e9;
+  limits.lobby_burst = 1e9;
+  limits.lobby_refill_per_sec = 1e9;
   limits.chat_burst = 1e9;
   limits.chat_refill_per_sec = 1e9;
+  limits.voice_burst = 1e9;
+  limits.voice_refill_per_sec = 1e9;
   return limits;
 }
 
@@ -85,7 +90,7 @@ inline void ExpectOnlyDeclaredCounterSeriesOnTheWire(
 }
 
 // A command frame exactly as a browser client mints it (the envelope
-// convention in smithy/eventstream/envelope.h): :message-type "event",
+// convention in opal/eventstream/envelope.h): :message-type "event",
 // :event-type naming the commands-union member, :content-type
 // "application/json", payload the member's JSON structure.
 inline opal::eventstream::Message CommandFrame(const std::string& event_type,

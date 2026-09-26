@@ -1,4 +1,4 @@
-// Beyoncé Rule wire-contract tests for the lobby (#1490 phase 3): golden
+// Beyoncé Rule wire-contract tests for the lobby (#1490): golden
 // fixtures pinning the one stream's route and the lobby envelope's exact
 // bytes, driven through the generated server WITHOUT the generated client
 // — a regeneration that renames what the client reads fails here even

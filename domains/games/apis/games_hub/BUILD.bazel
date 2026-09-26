@@ -2,9 +2,8 @@ load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_serve
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
-# The games hub (#79): golf, phase 2 of its rebuild on opal-cpp event streams (#1187),
-# the game-agnostic room layer (model/games.smithy, per #79) plus golf's
-# game vocabulary, on the reshaped libs/cards/golf engine.
+# The games hub's model (#79): the room layer (games.smithy) and one
+# envelope per tenant — lobby, voice, golf, castle.
 smithy_cpp_server_library(
     name = "games_hub_smithy_server",
     srcs = [
@@ -81,7 +80,8 @@ cc_test(
 # vocabulary against the stats pipeline's reader: the event names and
 # outcomes in the header, the JSON keys the line builders format, the
 # game and surface spellings, and golf_hub's seat cap against the bound
-# the reader counts a table by.
+# the reader counts a table by. games_hub_main.cc is read by
+# //deploy/consolidated:consolidated_test for the event log's file name.
 exports_files([
     "game_events.cc",
     "game_events.h",
@@ -92,9 +92,9 @@ exports_files([
     "world.h",
 ])
 
-# The hub's domain events (#1571): one JSON line per game that ended,
-# for the stats pipeline to read out of S3 months later. The engine
-# states are the only input, so this is testable without a hub.
+# The hub's domain events (#1571): one JSON line per room, chat, and
+# table milestone, for the stats pipeline to read out of S3 months later.
+# Pure line builders, testable without a hub.
 cc_library(
     name = "game_events",
     srcs = ["game_events.cc"],
@@ -278,7 +278,7 @@ cc_test(
     ],
 )
 
-# The postgres-backed vault and the hub's schema (#1194 step 1).
+# The postgres-backed vault and the hub's schema (#1194).
 cc_library(
     name = "pg_ticket_vault",
     srcs = [
@@ -298,8 +298,8 @@ cc_library(
     ],
 )
 
-# PostgreSQL implementation of HubStore (#1194 step 2): staged writes
-# run FIFO on one writer thread; game commits stay synchronous and
+# PostgreSQL implementation of HubStore (#1194): staged writes run FIFO
+# on one writer thread; game commits are synchronous and
 # conditional so multiple instances share one authority.
 cc_library(
     name = "pg_hub_store",
@@ -394,8 +394,8 @@ cc_test(
     ],
 )
 
-# Phase-0 slice of the persistence integration suite (#1194): serialized
-# engine states must survive the step-2 storage target (jsonb normalizes
+# Serialized engine states must survive the games table's jsonb state
+# column (#1194; jsonb normalizes
 # keys and spacing, and refuses escaped NULs). Real postgres via
 # GAMES_HUB_TEST_DB_URL; skips otherwise.
 cc_test(
@@ -569,8 +569,8 @@ cc_test(
     ],
 )
 
-# The golf game: seats, rooms, chat, and the engine, behind the composite
-# handler's Play.
+# The room host: rooms, seats, chat, and every tenant (lobby, voice, golf,
+# castle, the tape) behind GamesHubHandler's Play.
 cc_library(
     name = "golf_hub",
     srcs = ["golf_hub.cc"],
@@ -612,8 +612,8 @@ cc_library(
     ],
 )
 
-# The generated service's one handler (#79): session identity, and each
-# game's stream forwarded whole to its hub.
+# The generated service's one handler (#79): session identity, and the
+# one Play stream forwarded whole to GolfHub.
 cc_library(
     name = "games_hub_handler",
     srcs = ["games_hub_handler.cc"],
@@ -632,17 +632,14 @@ cc_library(
     ],
 )
 
-# The step-2 restart-survival e2e (#1194): same client flows, durable
+# The restart-survival and multi-instance e2e (#1194): same client flows, durable
 # hub, RestartHub between them. Real postgres via GAMES_HUB_TEST_DB_URL;
 # skips otherwise.
 cc_test(
     name = "pg_hub_e2e_test",
-    # Small on purpose (#1241, #1276): normal runtime is ~2s; the tight
-    # ceiling turns a recurrence into a loud red. Two hang shapes share
-    # the signature — a lost LISTEN/NOTIFY wakeup (fixed in pg::Listener)
-    # and a TearDown End() deadlock on unread wake frames (opal-cpp#173
-    # send-before-receive; QuiesceCrossTable still drains for deterministic
-    # teardown). Do not raise the ceiling.
+    # Small on purpose (#1241, #1276): normal runtime is ~2s, so a hang
+    # fails at the timeout as a loud red rather than passing slowly. Do not
+    # raise the ceiling.
     size = "small",
     srcs = [
         "pg_hub_e2e_test.cc",
@@ -679,15 +676,6 @@ cc_test(
     ],
 )
 
-# Beyoncé Rule wire-contract tests (consumer tier): the raw HTTP bytes and
-# eventstream frames the golf web client depends on, pinned as golden
-# fixtures driven through the generated server WITHOUT the generated
-# client — a regeneration that renames what the web client reads (the
-# session bodies, the room-layer events and their ordering, the golf
-# command/update envelopes and GameView, the terminal exception frames)
-# fails here even though the typed e2e suites (which regenerate with it)
-# still pass. Non-Beast deps only, so it runs with no sandbox setup at all
-# (behind a blocking proxy, Beast needs scripts/make-git-overrides.sh first).
 # Castle's wire goldens (#77): the castle envelope's command and update
 # bytes and the dealt setup view, pinned as raw strings like golf's.
 cc_test(
@@ -715,6 +703,15 @@ cc_test(
     ],
 )
 
+# Beyoncé Rule wire-contract tests (consumer tier): the raw HTTP bytes and
+# eventstream frames the golf web client depends on, pinned as golden
+# fixtures driven through the generated server WITHOUT the generated
+# client — a regeneration that renames what the web client reads (the
+# session bodies, the room-layer events and their ordering, the golf
+# command/update envelopes and GameView, the terminal exception frames)
+# fails here even though the typed e2e suites (which regenerate with it)
+# still pass. Non-Beast deps only, so it runs with no sandbox setup at all
+# (behind a blocking proxy, Beast needs scripts/make-git-overrides.sh first).
 cc_test(
     name = "golf_wire_test",
     size = "small",
@@ -870,7 +867,7 @@ cc_test(
     ],
 )
 
-# The lobby member of the room stream (#1490 phase 3) through the
+# The lobby member of the room stream (#1490) through the
 # generated client: the world is the session's room's, or the plaza's.
 cc_test(
     name = "lobby_e2e_test",
