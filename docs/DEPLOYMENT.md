@@ -38,6 +38,14 @@ the services rollup is arrivals at `mcp.1d4.net`, and the MCP number on the
 query rollup is the work one_d4 did; `source.go` puts it as edge source
 counts arrivals, service-local source counts work.
 
+The other callees count their callers the same way. aura and server_pal
+record `http_server_requests_by_caller`: `edge` for anything caddy
+forwarded, `games_hub` or `mcpserver` for a direct call whose User-Agent
+names it, `other` for any other. Each callee's page on `/metrics` has a
+Callers group — deja and microgpt-serve split the hub's calls from the
+public ones, one_d4_v2 mcpserver's — and `deploy_config_test` fails when
+compose wires a caller the rails do not name.
+
 games_hub writes its own events for the same reason, and a stronger one: a
 session opens one socket and every room, world, table, game and message
 rides it, so the access log counts a connection and never a game.

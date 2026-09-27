@@ -33,7 +33,10 @@ without `scripts/make-git-overrides.sh`.
     `kHealthRoute` for the health endpoint, or the `kUnmatchedRoute`
     sentinel — never the raw request path. The method label is bounded the
     same way: the nine RFC 9110 methods verbatim, any other wire token
-    collapsed to `CUSTOM`
+    collapsed to `CUSTOM`. `http_server_requests_by_caller` counts each
+    request by `CallerOf` its headers: `edge` for anything Caddy forwarded,
+    `games_hub` or `mcpserver` for a direct call whose User-Agent names it
+    first, `other` for any other direct call
   - `HealthEndpoint(kHealthRoute)` before the guard, so probes are never
     rate limited
   - `PerClientRateLimit` keyed on the ADR-0012 derived client address

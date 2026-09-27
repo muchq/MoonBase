@@ -50,6 +50,10 @@ moves at request start; the counters and histogram move at completion (a
 request abandoned mid-flight still counts, with its route, and records no
 outcome). Instruments bind lazily on the first request, so `init_otel()`
 just needs to have run by then — every main calls it before `serve`.
+`http_server_requests_by_caller` counts each request by who sent it:
+`edge` for anything Caddy forwarded (it carries `X-Forwarded-For`), the
+entry of `INTERNAL_CALLERS` a direct call's User-Agent names first, and
+`other` for any other direct call — the same rule and spelling as aura's.
 Descriptions, bucket bounds, and the route literals are pinned across the
 Java/C++/Rust rails by `//domains/platform/libs/otel_contract`; label sets
 and units are pinned by this crate's own tests against a real exporter.
