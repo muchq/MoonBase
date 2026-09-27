@@ -249,7 +249,7 @@ out to `api.muchq.com` and through caddy.
 
 ## Callers outside this repo
 
-The muchq.com nav links eleven other sites. Three of them call in:
+The muchq.com nav links ten other sites. Three of them call in:
 
 | Site | Calls |
 | --- | --- |
@@ -257,9 +257,9 @@ The muchq.com nav links eleven other sites. Three of them call in:
 | `iili.uk` | `api.muchq.com`, `i.iili.uk/r/` |
 | `tty1.uk` | `gpt.muchq.com/microgpt/v1/chat` |
 
-The other eight — snowbonk.com, hovercrap.com, 3xe.org, bitfear.net,
-smallcat.dog, 2n-1.org, sato-ni-haru-ga-kimashita.uk, p2bx.uk — are
-self-contained and reach nothing here.
+The other seven — snowbonk.com, hovercrap.com, 3xe.org, bitfear.net,
+2n-1.org, sato-ni-haru-ga-kimashita.uk, p2bx.uk — are self-contained and
+reach nothing here.
 
 ## Routes on api.muchq.com
 
