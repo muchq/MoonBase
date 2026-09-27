@@ -1401,8 +1401,16 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
       return;
     }
 
-    const absl::StatusOr<ChatRow> appended =
+    absl::StatusOr<ChatRow> appended =
         chat_store_->Append(room_id, player_id, chat->text, instance_id_);
+    if (appended.status().code() == absl::StatusCode::kFailedPrecondition &&
+        WithMember(room_id, player_id, [] {})) {
+      // The store's check reads rows this instance may not have written
+      // yet: a room or seat taken a moment ago is still in its queue.
+      // Once it lands, the store answers for the seat this hub holds.
+      store_->Flush();
+      appended = chat_store_->Append(room_id, player_id, chat->text, instance_id_);
+    }
     if (!appended.ok()) {
       // Nothing was stored, so nothing is echoed: the sender is told no
       // rather than shown a message no one else will ever receive.
