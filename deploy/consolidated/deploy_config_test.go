@@ -2843,11 +2843,12 @@ func TestEveryInternalHttpCallIsAnEdgeInTheTopologyDiagram(t *testing.T) {
 	}
 }
 
-// Every service-to-service application call is counted by its callee under
-// the caller's name, which the callee reads off the User-Agent: aura and
-// server_pal record http_server_requests_by_caller from a fixed list of
-// internal callers, and a caller missing from it counts as "other". The
-// collector and prometheus are infrastructure, not application callees.
+// Every service-to-service application caller is one the callees can name.
+// aura and server_pal record http_server_requests_by_caller from a fixed
+// list of internal callers read off the User-Agent, and a caller missing
+// from it counts as "other"; one_d4, on the Java rail, names the same
+// caller in its query events. The collector and prometheus are
+// infrastructure, not application callees.
 func TestEveryInternalApplicationCallerIsOneTheCalleesCount(t *testing.T) {
 	source := readConfig(t, "../../domains/platform/libs/server_pal/src/lib.rs")
 	list := regexp.MustCompile(`INTERNAL_CALLERS: \[&str; \d+\] = \[([^\]]*)\]`).FindStringSubmatch(source)
@@ -2868,7 +2869,8 @@ func TestEveryInternalApplicationCallerIsOneTheCalleesCount(t *testing.T) {
 			calls++
 			if !counted[caller] {
 				t.Errorf("%s calls %s directly, and server_pal's INTERNAL_CALLERS does not name "+
-					"it; the callee counts every one of those requests as \"other\"", caller, callee)
+					"it; a callee on aura or server_pal counts those requests as \"other\"",
+					caller, callee)
 			}
 		}
 	}

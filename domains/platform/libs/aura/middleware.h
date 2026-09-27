@@ -65,9 +65,11 @@ class HttpMetricsSink {
 /// anything the gateway forwarded, the internal caller a direct request's
 /// User-Agent names in its first product token, and kOtherCaller for any
 /// other direct request. The gateway always adds x-forwarded-for and
-/// internal callers never do, so a User-Agent can name a caller only from
-/// inside the compose network. server_pal's INTERNAL_CALLERS is the same
-/// list, pinned by //domains/platform/libs/otel_contract.
+/// internal callers never do; a request that reaches a published port
+/// without the gateway names whatever caller it claims. Transport
+/// rejections (RejectionMetrics) have no headers and are not counted.
+/// server_pal's INTERNAL_CALLERS is the same list, pinned by
+/// //domains/platform/libs/otel_contract.
 inline constexpr std::string_view kInternalCallers[] = {"games_hub", "mcpserver"};
 inline constexpr char kEdgeCaller[] = "edge";
 inline constexpr char kOtherCaller[] = "other";

@@ -159,6 +159,9 @@ std::string CallerOf(const opal::http::Headers& headers) {
 
 std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
     std::shared_ptr<futility::otel::HttpMetricsManager> metrics) {
+  std::vector<std::string> callers = {kEdgeCaller, kOtherCaller};
+  callers.insert(callers.end(), std::begin(kInternalCallers), std::end(kInternalCallers));
+  metrics->DeclareCallers(callers);
   return std::make_shared<OtelHttpMetricsSink>(std::move(metrics));
 }
 

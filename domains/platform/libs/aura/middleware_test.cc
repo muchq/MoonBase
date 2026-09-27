@@ -21,6 +21,8 @@
 
 #include "absl/base/log_severity.h"
 #include "absl/log/scoped_mock_log.h"
+#include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
+#include "domains/platform/libs/futility/otel/http_metrics.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "opal/http/beast_transport.h"
 #include "opal/http/forwarded.h"
@@ -258,6 +260,19 @@ TEST_F(AuraMiddlewareTest, ADirectRequestNamingNoInternalCallerFirstIsOther) {
   Send("POST", "/echo", "hello", "", {{"user-agent", "games_hubx/1.0"}});
 
   EXPECT_THAT(sink_->callers(), testing::ElementsAre("other", "other", "other", "other"));
+}
+
+TEST(MakeHttpMetricsSinkTest, DeclaresEveryCallerAtZero) {
+  auto recorder = std::make_unique<futility::otel::CapturingMetricsRecorder>("svc");
+  const auto* captured = recorder.get();
+  const auto sink = aura::MakeHttpMetricsSink(
+      std::make_shared<futility::otel::HttpMetricsManager>("svc", std::move(recorder)));
+
+  for (const std::string caller : {"edge", "games_hub", "mcpserver", "other"}) {
+    EXPECT_TRUE(captured->Declared("http_server_requests_by_caller",
+                                   {{"service_name", "svc"}, {"caller", caller}}))
+        << caller;
+  }
 }
 
 // Probes are metered (above) but never logged: with a probe every few

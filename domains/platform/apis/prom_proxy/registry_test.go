@@ -623,6 +623,13 @@ var microgptExportedNames = map[string]bool{
 	"microgpt_tokens_generated_total": true,
 }
 
+// The standard-family series a service entry reads by name: its Probes
+// tile and its Callers tiles. Any other http_server_ series there is a typo.
+func readsStandardFamily(query string) bool {
+	return strings.Contains(query, `route="/health"`) ||
+		strings.Contains(query, `http_server_requests_by_caller_total{`)
+}
+
 func TestMicrogptQueriesNameRealInstruments(t *testing.T) {
 	entry := serviceRegistry["microgpt-serve"]
 	require.NotEmpty(t, entry.CustomScalars)
@@ -633,7 +640,7 @@ func TestMicrogptQueriesNameRealInstruments(t *testing.T) {
 	for what, queries := range labelledCustomQueries(entry) {
 		for _, query := range queries {
 			joined += query + "\n"
-			if strings.Contains(query, "http_server_") {
+			if readsStandardFamily(query) {
 				assert.Contains(t, query, `service_name="microgpt-serve"`,
 					"%s reads the standard family unscoped: %s", what, query)
 				continue
@@ -691,7 +698,7 @@ func TestDejaQueriesNameRealInstruments(t *testing.T) {
 	for what, queries := range labelledCustomQueries(entry) {
 		for _, query := range queries {
 			joined += query + "\n"
-			if strings.Contains(query, "http_server_") {
+			if readsStandardFamily(query) {
 				assert.Contains(t, query, `service_name="deja"`,
 					"%s reads the standard family unscoped: %s", what, query)
 				continue

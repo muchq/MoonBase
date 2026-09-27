@@ -563,8 +563,8 @@ var serviceRegistry = map[string]serviceEntry{
 			"motif": tsCounter(`motif_occurrences_total{service_name=~"one_d4(_worker)?"}`),
 		},
 	},
-	// The C++ analyze service (#1389 phase 6): aura's standard instruments
-	// plus the standard Probes tile. Deliberately not folded into one_d4's
+	// The C++ analyze service (#1389 phase 6): aura's standard instruments,
+	// the standard Probes tile, and mcpserver's share of its callers. Deliberately not folded into one_d4's
 	// service_name=~"one_d4(_worker)?" selectors: those cover the two
 	// processes indexing into one table, and analyze writes nothing — its
 	// serving numbers answer a different question and belong on their own

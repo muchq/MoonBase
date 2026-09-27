@@ -60,9 +60,9 @@ pub const UNMATCHED_ROUTE: &str = "unmatched";
 /// anything the gateway forwarded, the internal caller a direct request's
 /// User-Agent names in its first product token, and `other` for any other
 /// direct request. The gateway always adds X-Forwarded-For and internal
-/// callers never do, so a User-Agent can name a caller only from inside the
-/// compose network. aura's kInternalCallers is the same list, pinned by
-/// //domains/platform/libs/otel_contract.
+/// callers never do; a request that reaches a published port without the
+/// gateway names whatever caller it claims. aura's kInternalCallers is the
+/// same list, pinned by //domains/platform/libs/otel_contract.
 pub const INTERNAL_CALLERS: [&str; 2] = ["games_hub", "mcpserver"];
 pub const EDGE_CALLER: &str = "edge";
 pub const OTHER_CALLER: &str = "other";
@@ -374,7 +374,7 @@ impl HttpInstruments {
     // no_shared_instrument_declares_a_unit below reads that off a real
     // export.
     fn new(meter: &Meter, service_name: String) -> Arc<Self> {
-        Arc::new(Self {
+        let instruments = Arc::new(Self {
             requests: meter
                 .u64_counter("http_server_requests")
                 .with_description("HTTP requests received")
@@ -400,7 +400,18 @@ impl HttpInstruments {
                 .with_description("HTTP requests received, by who sent them")
                 .build(),
             service_name,
-        })
+        });
+        // Baselined at zero, so increase() sees each caller's first request.
+        for caller in [EDGE_CALLER, OTHER_CALLER].into_iter().chain(INTERNAL_CALLERS) {
+            instruments.by_caller.add(
+                0,
+                &[
+                    KeyValue::new("caller", caller),
+                    KeyValue::new("service_name", instruments.service_name.clone()),
+                ],
+            );
+        }
+        instruments
     }
 }
 
@@ -1591,11 +1602,33 @@ mod http_metrics_label_tests {
         assert_eq!(status, StatusCode::OK);
     }
 
+    /// The caller series a request has moved; every caller is declared at zero.
+    fn counted_callers(rig: &Rig) -> Vec<(Vec<(String, String)>, u64)> {
+        u64_sum_points(&exported(rig), "http_server_requests_by_caller")
+            .into_iter()
+            .filter(|(_, count)| *count > 0)
+            .collect()
+    }
+
     fn caller_attrs(caller: &str) -> Vec<(String, String)> {
         vec![
             ("caller".to_string(), caller.to_string()),
             ("service_name".to_string(), TEST_SERVICE.to_string()),
         ]
+    }
+
+    #[tokio::test]
+    async fn every_caller_exports_at_zero_before_its_first_request() {
+        let rig = rig();
+        let mut callers = vec![EDGE_CALLER, OTHER_CALLER];
+        callers.extend(INTERNAL_CALLERS);
+        let mut expected: Vec<_> = callers.into_iter().map(|c| (caller_attrs(c), 0)).collect();
+        expected.sort();
+
+        assert_eq!(
+            u64_sum_points(&exported(&rig), "http_server_requests_by_caller"),
+            expected
+        );
     }
 
     #[tokio::test]
@@ -1609,7 +1642,7 @@ mod http_metrics_label_tests {
         .await;
 
         assert_eq!(
-            u64_sum_points(&exported(&rig), "http_server_requests_by_caller"),
+            counted_callers(&rig),
             vec![(caller_attrs(EDGE_CALLER), 2)]
         );
     }
@@ -1622,7 +1655,7 @@ mod http_metrics_label_tests {
         send_with(&rig, &[("User-Agent", "mcpserver")]).await;
 
         assert_eq!(
-            u64_sum_points(&exported(&rig), "http_server_requests_by_caller"),
+            counted_callers(&rig),
             vec![(caller_attrs("games_hub"), 2), (caller_attrs("mcpserver"), 1)]
         );
     }
@@ -1636,7 +1669,7 @@ mod http_metrics_label_tests {
         send_with(&rig, &[("User-Agent", "games_hubx/1.0")]).await;
 
         assert_eq!(
-            u64_sum_points(&exported(&rig), "http_server_requests_by_caller"),
+            counted_callers(&rig),
             vec![(caller_attrs(OTHER_CALLER), 4)]
         );
     }

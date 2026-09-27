@@ -82,6 +82,8 @@ cc_test(
     env = {"OTEL_SERVICE_NAME": "aura-under-test"},
     deps = [
         ":aura",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:http_metrics",
         "//domains/platform/libs/futility/rate_limiter:sliding_window_rate_limiter",
         "@com_google_absl//absl/base:log_severity",
         "@com_google_absl//absl/log:scoped_mock_log",

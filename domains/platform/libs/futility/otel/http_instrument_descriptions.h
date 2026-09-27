@@ -15,8 +15,9 @@
 /// just as loudly as two different sentences do, so a rail that declines to
 /// describe an instrument is not staying out of the argument.
 ///
-/// //domains/platform/libs/otel_contract pins these equal to yodel's and
-/// server_pal's declarations.
+/// //domains/platform/libs/otel_contract pins these equal to server_pal's,
+/// and all but http_server_requests_by_caller, which yodel does not record,
+/// equal to yodel's.
 
 #include <string_view>
 

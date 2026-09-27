@@ -56,6 +56,14 @@ void HttpMetricsManager::RecordRequestCaller(const std::string& caller) {
                            {{"service_name", service_name_}, {"caller", caller}});
 }
 
+void HttpMetricsManager::DeclareCallers(const std::vector<std::string>& callers) {
+  if (!recorder_) return;
+  for (const std::string& caller : callers) {
+    recorder_->DeclareCounter("http_server_requests_by_caller",
+                              {{"service_name", service_name_}, {"caller", caller}});
+  }
+}
+
 std::map<std::string, std::string> HttpMetricsManager::CreateGaugeAttributes(
     const std::string& method) const {
   return {{"service_name", service_name_}, {"http_method", method}};
