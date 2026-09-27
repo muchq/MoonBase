@@ -633,7 +633,7 @@ func TestMicrogptQueriesNameRealInstruments(t *testing.T) {
 	for what, queries := range labelledCustomQueries(entry) {
 		for _, query := range queries {
 			joined += query + "\n"
-			if strings.Contains(query, `route="/health"`) {
+			if strings.Contains(query, "http_server_") {
 				assert.Contains(t, query, `service_name="microgpt-serve"`,
 					"%s reads the standard family unscoped: %s", what, query)
 				continue
@@ -691,7 +691,7 @@ func TestDejaQueriesNameRealInstruments(t *testing.T) {
 	for what, queries := range labelledCustomQueries(entry) {
 		for _, query := range queries {
 			joined += query + "\n"
-			if strings.Contains(query, `route="/health"`) {
+			if strings.Contains(query, "http_server_") {
 				assert.Contains(t, query, `service_name="deja"`,
 					"%s reads the standard family unscoped: %s", what, query)
 				continue
@@ -1128,6 +1128,34 @@ func TestOneD4RunDurationQueriesConvertToTheUnitTheyClaim(t *testing.T) {
 // is probed (deploy's config test pins that side), so every service's Serving
 // numbers have probe traffic subtracted, and each needs its own scoped tile
 // showing it.
+// The callee of every compose-internal application call, with the callers
+// compose wires to it. one_d4 is absent: it tags its callers in its own
+// query events (source=mcp), which stats reports.
+var internalCallers = map[string][]string{
+	"deja":           {"games_hub"},
+	"microgpt-serve": {"games_hub"},
+	"one_d4_v2":      {"mcpserver"},
+}
+
+// A callee's page splits its traffic between the gateway and each internal
+// caller, the work the access-log rollups cannot see.
+func TestInternalCalleesChartEachCaller(t *testing.T) {
+	for service, callers := range internalCallers {
+		var queries []string
+		for _, def := range serviceRegistry[service].CustomScalars {
+			queries = append(queries, def.AllQueries()...)
+		}
+		for _, caller := range append([]string{"edge"}, callers...) {
+			want := fmt.Sprintf(`http_server_requests_by_caller_total{service_name=%q,caller=%q}`, service, caller)
+			found := false
+			for _, query := range queries {
+				found = found || strings.Contains(query, want)
+			}
+			assert.True(t, found, "%s charts no tile for requests from %s", service, caller)
+		}
+	}
+}
+
 func TestEveryProbedServiceKeepsItsProbesTile(t *testing.T) {
 	// Guards the guard: over an empty serviceOrder the loop asserts nothing.
 	require.NotEmpty(t, serviceOrder)

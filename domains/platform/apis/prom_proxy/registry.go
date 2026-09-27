@@ -85,6 +85,18 @@ func probesTile(service string) customScalarDef {
 		fmt.Sprintf(`http_server_requests_total{service_name=%q,route="/health"}`, service))
 }
 
+// callerTiles splits a service's requests by who sent them: the gateway, and
+// each internal caller compose wires to it (http_server_requests_by_caller,
+// counted by aura and server_pal from the User-Agent those callers send).
+func callerTiles(service string, callers ...string) []customScalarDef {
+	var tiles []customScalarDef
+	for _, caller := range append([]string{"edge"}, callers...) {
+		tiles = append(tiles, counter("Callers", caller, "",
+			fmt.Sprintf(`http_server_requests_by_caller_total{service_name=%q,caller=%q}`, service, caller)))
+	}
+	return tiles
+}
+
 // ValidView reports whether a client-supplied view is one this package builds
 // queries for. Callers must check before passing the value on: a view string
 // never reaches PromQL, but an unrecognised one would silently fall through to
@@ -400,7 +412,7 @@ var serviceRegistry = map[string]serviceEntry{
 		// duration divides it by the request count; tokens per second of
 		// inference divides the token count by it — the ratio-of-rates form,
 		// total tokens over total model time in the window.
-		CustomScalars: []customScalarDef{
+		CustomScalars: append([]customScalarDef{
 			probesTile("microgpt-serve"),
 			counter("Requests by endpoint", "generate", "", `microgpt_requests_total{endpoint="generate"}`),
 			counter("Requests by endpoint", "chat", "", `microgpt_requests_total{endpoint="chat"}`),
@@ -410,7 +422,7 @@ var serviceRegistry = map[string]serviceEntry{
 			scalar("Inference", "tokens_per_sec", "tok/s",
 				`sum(rate(microgpt_tokens_generated_total[w]))/sum(rate(microgpt_inference_ms_total[w]))*1000`),
 			counter("Inference", "conversations", "", `microgpt_conversations_total`),
-		},
+		}, callerTiles("microgpt-serve", "games_hub")...),
 		// "tokens" replaces the old "tokens_per_second" key: that name baked
 		// in one form the way request_rate used to, and toggling it points
 		// at tokens_rate/tokens_count instead. No other consumer names the
@@ -559,9 +571,9 @@ var serviceRegistry = map[string]serviceEntry{
 	// tab. Rate-limit rejections land in the standard failure counters
 	// (RejectionMetrics), so no custom tile is needed for them.
 	"one_d4_v2": {
-		CustomScalars: []customScalarDef{
+		CustomScalars: append([]customScalarDef{
 			probesTile("one_d4_v2"),
-		},
+		}, callerTiles("one_d4_v2", "mcpserver")...),
 	},
 	// deja (#1150): the tape's counters. Surprise is a running sum by
 	// predictor, declared at zero beside the event count, so mean surprise
@@ -569,7 +581,7 @@ var serviceRegistry = map[string]serviceEntry{
 	// loss is each predictor's own baseline, a gauge the service records
 	// per event, and the two side by side are the learning curve.
 	"deja": {
-		CustomScalars: []customScalarDef{
+		CustomScalars: append([]customScalarDef{
 			probesTile("deja"),
 			counter("Events by verdict", "warmup", "", `deja_events_total{verdict="warmup"}`),
 			counter("Events by verdict", "expected", "", `deja_events_total{verdict="expected"}`),
@@ -582,7 +594,7 @@ var serviceRegistry = map[string]serviceEntry{
 			scalar("Baseline", "bigram_ewma_loss", "nats", `sum(deja_ewma_loss{predictor="bigram"})`),
 			scalar("Baseline", "net_ewma_loss", "nats", `sum(deja_ewma_loss{predictor="net"})`),
 			scalar("Vocabulary", "vocab_size", "tokens", `sum(deja_vocab_size)`),
-		},
+		}, callerTiles("deja", "games_hub")...),
 		CustomTimeseries: map[string]customTimeseriesDef{
 			"events":          tsCounter(`deja_events_total`),
 			"anomalies":       tsCounter(`deja_events_total{verdict="anomaly"}`),
