@@ -146,5 +146,26 @@ TEST_F(HttpMetricsManagerTest, OutcomeSplitsAtFourHundred) {
   EXPECT_EQ(failures, 6);
 }
 
+TEST_F(HttpMetricsManagerTest, CallerCountsOnItsOwnInstrumentAndNothingElse) {
+  manager_->RecordRequestCaller("games_hub");
+
+  const auto entries = recorder_->Entries();
+  ASSERT_EQ(entries.size(), 1u);
+  EXPECT_EQ(entries[0].name, "http_server_requests_by_caller");
+  EXPECT_EQ(entries[0].value, 1);
+  EXPECT_EQ(entries[0].attributes,
+            (Attributes{{"service_name", "test_service"}, {"caller", "games_hub"}}));
+}
+
+TEST_F(HttpMetricsManagerTest, DeclaredCallersExportAtZeroBeforeAnyRequest) {
+  manager_->DeclareCallers({"edge", "other"});
+
+  for (const std::string caller : {"edge", "other"}) {
+    EXPECT_TRUE(recorder_->Declared("http_server_requests_by_caller",
+                                    {{"service_name", "test_service"}, {"caller", caller}}))
+        << caller;
+  }
+}
+
 }  // namespace
 }  // namespace futility::otel

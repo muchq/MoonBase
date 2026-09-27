@@ -78,7 +78,7 @@ int main() {
   // default is far more than this service ever needs.
   options.max_body_bytes = std::size_t{1} * 1024 * 1024;
   // 413/431s the transport writes itself land in the same instruments.
-  options.on_rejected = aura::RejectionMetrics(metrics);
+  aura::ObserveRejections(options, metrics);
   // Connections the transport terminates without a response get a WARNING
   // line (ADR-0013).
   options.on_connection_event = aura::ConnectionEventLog();

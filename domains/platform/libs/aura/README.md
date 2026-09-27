@@ -33,14 +33,18 @@ without `scripts/make-git-overrides.sh`.
     `kHealthRoute` for the health endpoint, or the `kUnmatchedRoute`
     sentinel — never the raw request path. The method label is bounded the
     same way: the nine RFC 9110 methods verbatim, any other wire token
-    collapsed to `CUSTOM`
+    collapsed to `CUSTOM`. `http_server_requests_by_caller` counts each
+    request by `CallerOf` its headers: `edge` for anything Caddy forwarded,
+    `games_hub` or `mcpserver` for a direct call whose User-Agent names it
+    first, `other` for any other direct call
   - `HealthEndpoint(kHealthRoute)` before the guard, so probes are never
     rate limited
   - `PerClientRateLimit` keyed on the ADR-0012 derived client address
     (trust boundary from `ChainOptions::trusted_proxies`), answering 429
     with Retry-After — skipped entirely when `allow_request` is unset
-- **`RejectionMetrics`** — `BeastServerTransport::Options::on_rejected`
-  adapter so transport-written 413/431s land in the same instruments
+- **`ObserveRejections`** — wires `BeastServerTransport::Options::on_rejected`
+  and `label_rejection` so transport-written 413/431s land in the same
+  instruments, counted under their caller
 - **`ConnectionEventLog`** — `on_connection_event` observer (ADR-0013): one
   WARNING line per connection the transport terminates without a response
 
@@ -61,7 +65,7 @@ auto handler = aura::ProductionChain(
     server.Handler());
 
 opal::http::BeastServerTransport::Options options;
-options.on_rejected = aura::RejectionMetrics(metrics);
+aura::ObserveRejections(options, metrics);
 options.on_connection_event = aura::ConnectionEventLog();
 ```
 

@@ -11,9 +11,11 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "opal/http/beast_transport.h"
 #include "opal/http/forwarded.h"
+#include "opal/http/headers.h"
 #include "opal/server/middleware.h"
 
 namespace futility::otel {
@@ -46,7 +48,7 @@ inline constexpr char kUnmatchedRoute[] = "unmatched";
 /// raw target — arrives at completion, which is where the counters and the
 /// histogram record (#1305). The method label is bounded too: the nine RFC
 /// 9110 methods verbatim, every other wire token collapsed to "CUSTOM" —
-/// plus "(unparsed)" from RejectionMetrics for requests the transport
+/// plus "(unparsed)" from ObserveRejections for requests the transport
 /// rejected before a method existed at all (a 431 can fire mid-headers),
 /// kept distinct because "never parsed" and "invented verb" are different
 /// diagnoses.
@@ -56,7 +58,25 @@ class HttpMetricsSink {
   virtual void RecordRequestStart(const std::string& method) = 0;
   virtual void RecordRequestComplete(const std::string& route, const std::string& method,
                                      int status_code, std::chrono::microseconds duration) = 0;
+  virtual void RecordRequestCaller(const std::string& caller) = 0;
 };
+
+/// Who sent a request, for http_server_requests_by_caller: kEdgeCaller for
+/// anything the gateway forwarded, the internal caller a direct request's
+/// User-Agent names in its first product token, and kOtherCaller for any
+/// other direct request. The gateway always adds x-forwarded-for and
+/// internal callers never do; a request that reaches a published port
+/// without the gateway names whatever caller it claims. server_pal's
+/// INTERNAL_CALLERS is the same list, pinned by
+/// //domains/platform/libs/otel_contract.
+inline constexpr std::string_view kInternalCallers[] = {"games_hub", "mcpserver"};
+inline constexpr char kEdgeCaller[] = "edge";
+inline constexpr char kOtherCaller[] = "other";
+std::string CallerOf(const opal::http::Headers& headers);
+
+/// CallerOf as the labeler opal's Observe and the transport's
+/// label_rejection take: {"caller", CallerOf(headers)}.
+opal::server::RequestLabels CallerLabels(const opal::http::Headers& headers);
 
 /// A sink forwarding to futility::otel::HttpMetricsManager, the shared HTTP
 /// serving instruments (http_server_requests,
@@ -74,6 +94,7 @@ std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
 ///     histogram at completion, labeled with the bounded route — the matched
 ///     Smithy operation name from the generated router, kHealthRoute for the
 ///     endpoint ProductionChain composes, kUnmatchedRoute for everything else
+///   - http_server_requests_by_caller at start, labeled with CallerOf
 ///   - one access-log line per request except health probes, which are
 ///     metered but not logged: the runtime's FormatAccessLog record
 ///     (opal/server/access_log.h — http_method, target, route, status,
@@ -111,12 +132,12 @@ opal::http::RequestHandler ProductionChain(ChainOptions options,
 /// than silently collapsing proxied traffic onto one client key.
 std::optional<opal::http::TrustedProxies> TrustedProxiesFromEnv();
 
-/// Sink callback for BeastServerTransport::Options::on_rejected, so the
-/// 413/431 rejections the transport writes before any handler chain exists
-/// land in the same instruments as everything else (an over-limit flood
-/// would otherwise be invisible to metrics).
-std::function<void(const opal::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
-    std::shared_ptr<HttpMetricsSink> metrics);
+/// Wires the 413/431 rejections a transport writes before any handler chain
+/// exists into `metrics`, so an over-limit flood lands in the same
+/// instruments as everything else, under kUnmatchedRoute and, through
+/// CallerLabels as label_rejection, under its caller.
+void ObserveRejections(opal::http::BeastServerTransport::Options& options,
+                       std::shared_ptr<HttpMetricsSink> metrics);
 
 /// Log-only observer for BeastServerTransport::Options::on_connection_event
 /// (opal-cpp ADR-0013, kinds in beast_transport.h): each connection the

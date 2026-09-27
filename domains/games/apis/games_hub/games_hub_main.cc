@@ -302,7 +302,7 @@ int main() {
   // 413/431s the transport writes itself land in the same instruments;
   // connections it terminates without a response get a WARNING line
   // (ADR-0013).
-  options.on_rejected = aura::RejectionMetrics(metrics);
+  aura::ObserveRejections(options, metrics);
   options.on_connection_event = aura::ConnectionEventLog();
   opal::http::BeastServerTransport transport(options);
 

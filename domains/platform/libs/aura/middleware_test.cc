@@ -21,6 +21,8 @@
 
 #include "absl/base/log_severity.h"
 #include "absl/log/scoped_mock_log.h"
+#include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"
+#include "domains/platform/libs/futility/otel/http_metrics.h"
 #include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "opal/http/beast_transport.h"
 #include "opal/http/forwarded.h"
@@ -55,6 +57,15 @@ class RecordingSink final : public aura::HttpMetricsSink {
     completes_.push_back({route, method, status_code, duration});
   }
 
+  void RecordRequestCaller(const std::string& caller) override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    callers_.push_back(caller);
+  }
+
+  std::vector<std::string> callers() {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return callers_;
+  }
   std::vector<StartCall> starts() {
     const std::lock_guard<std::mutex> lock(mu_);
     return starts_;
@@ -68,6 +79,7 @@ class RecordingSink final : public aura::HttpMetricsSink {
   std::mutex mu_;
   std::vector<StartCall> starts_;
   std::vector<CompleteCall> completes_;
+  std::vector<std::string> callers_;
 };
 
 // The innermost handler: echoes 200 for anything, so every observed status
@@ -223,6 +235,44 @@ TEST_F(AuraMiddlewareTest, CompletionCarriesTheMatchedOperationAsItsRoute) {
   EXPECT_EQ(completes[0].method, "POST");
   EXPECT_EQ(completes[0].status, 200);
   EXPECT_GE(completes[0].duration.count(), 0);
+}
+
+TEST_F(AuraMiddlewareTest, ARequestThroughTheGatewayIsFromTheEdgeWhateverItClaims) {
+  Send("POST", "/echo", "hello", kProxy, {{"x-forwarded-for", "203.0.113.7"}});
+  Send("POST", "/echo", "hello", kProxy,
+       {{"x-forwarded-for", "203.0.113.7"}, {"user-agent", "games_hub/1.0"}});
+
+  EXPECT_THAT(sink_->callers(), testing::ElementsAre("edge", "edge"));
+}
+
+TEST_F(AuraMiddlewareTest, ADirectRequestIsFromTheInternalCallerItsUserAgentNames) {
+  Send("POST", "/echo", "hello", "", {{"user-agent", "games_hub/1.0"}});
+  Send("POST", "/echo", "hello", "", {{"user-agent", "games_hub"}});
+  Send("POST", "/echo", "hello", "", {{"user-agent", "mcpserver"}});
+
+  EXPECT_THAT(sink_->callers(), testing::ElementsAre("games_hub", "games_hub", "mcpserver"));
+}
+
+TEST_F(AuraMiddlewareTest, ADirectRequestNamingNoInternalCallerFirstIsOther) {
+  Send("POST", "/echo", "hello");
+  Send("POST", "/echo", "hello", "", {{"user-agent", "curl/8.5.0"}});
+  Send("POST", "/echo", "hello", "", {{"user-agent", "MoonBase games_hub/1.0"}});
+  Send("POST", "/echo", "hello", "", {{"user-agent", "games_hubx/1.0"}});
+
+  EXPECT_THAT(sink_->callers(), testing::ElementsAre("other", "other", "other", "other"));
+}
+
+TEST(MakeHttpMetricsSinkTest, DeclaresEveryCallerAtZero) {
+  auto recorder = std::make_unique<futility::otel::CapturingMetricsRecorder>("svc");
+  const auto* captured = recorder.get();
+  const auto sink = aura::MakeHttpMetricsSink(
+      std::make_shared<futility::otel::HttpMetricsManager>("svc", std::move(recorder)));
+
+  for (const std::string caller : {"edge", "games_hub", "mcpserver", "other"}) {
+    EXPECT_TRUE(captured->Declared("http_server_requests_by_caller",
+                                   {{"service_name", "svc"}, {"caller", caller}}))
+        << caller;
+  }
 }
 
 // Probes are metered (above) but never logged: with a probe every few
@@ -567,9 +617,25 @@ TEST(ConnectionEventLogTest, LogsUpgradeFailureKind) {
 // drop. The route is the sentinel like every unrouted request — a rejection
 // never reached the router, and a 413 flood against distinct paths must not
 // mint a series per path (#1305).
-TEST(RejectionMetricsTest, UnparsedRejectionLandsOnStableLabels) {
+// The on_rejected ObserveRejections installs.
+std::function<void(const opal::http::BeastServerTransport::RejectedRequest&)> RejectionSink(
+    std::shared_ptr<RecordingSink> sink) {
+  opal::http::BeastServerTransport::Options options;
+  aura::ObserveRejections(options, std::move(sink));
+  return options.on_rejected;
+}
+
+TEST(ObserveRejectionsTest, ARejectionCountsUnderTheCallerItsLabelsName) {
   auto sink = std::make_shared<RecordingSink>();
-  aura::RejectionMetrics(sink)({.status = 431, .peer_address = "", .method = "", .target = ""});
+  RejectionSink(sink)({.status = 413, .labels = {{"caller", "mcpserver"}}});
+  RejectionSink(sink)({.status = 431});
+
+  EXPECT_THAT(sink->callers(), testing::ElementsAre("mcpserver", "other"));
+}
+
+TEST(ObserveRejectionsTest, UnparsedRejectionLandsOnStableLabels) {
+  auto sink = std::make_shared<RecordingSink>();
+  RejectionSink(sink)({.status = 431, .peer_address = "", .method = "", .target = ""});
   const auto completes = sink->completes();
   ASSERT_EQ(completes.size(), 1u);
   EXPECT_EQ(completes[0].route, aura::kUnmatchedRoute);
@@ -586,7 +652,7 @@ TEST_F(AuraMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   options.address = "127.0.0.1";
   options.port = 0;
   options.max_body_bytes = 2048;
-  options.on_rejected = aura::RejectionMetrics(sink_);
+  aura::ObserveRejections(options, sink_);
   // Production-shaped options; no event can fire in this test (the 413 is
   // on_rejected-only by design).
   options.on_connection_event = aura::ConnectionEventLog();
@@ -609,6 +675,7 @@ TEST_F(AuraMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   oversized.method = "POST";
   oversized.target = "/echo";
   oversized.headers.Set("content-type", "text/plain");
+  oversized.headers.Set("x-forwarded-for", "203.0.113.7");
   oversized.body = std::string(4096, 'x');
   const auto rejected = raw.Send(oversized);
   ASSERT_TRUE(rejected.ok()) << rejected.error().message();
@@ -618,6 +685,8 @@ TEST_F(AuraMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   // Rejected before routing, so the sentinel — not the target path (#1305).
   EXPECT_EQ(completes.back().route, aura::kUnmatchedRoute);
   EXPECT_EQ(completes.back().status, 413);
+  // Labeled from its headers inside the transport, like a served request.
+  EXPECT_EQ(sink_->callers().back(), "edge");
 
   transport.Stop();
 }

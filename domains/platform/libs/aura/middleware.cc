@@ -28,6 +28,9 @@ class OtelHttpMetricsSink final : public HttpMetricsSink {
                              std::chrono::microseconds duration) override {
     metrics_->RecordRequestComplete(route, method, status_code, duration);
   }
+  void RecordRequestCaller(const std::string& caller) override {
+    metrics_->RecordRequestCaller(caller);
+  }
 
  private:
   std::shared_ptr<futility::otel::HttpMetricsManager> metrics_;
@@ -143,8 +146,66 @@ void LogAccess(const opal::server::RequestObservation& observation) {
 
 }  // namespace
 
+std::string CallerOf(const opal::http::Headers& headers) {
+  if (headers.Get("x-forwarded-for").has_value()) return kEdgeCaller;
+  const std::string user_agent = headers.Get("user-agent").value_or("");
+  const std::string_view product =
+      std::string_view(user_agent).substr(0, user_agent.find_first_of("/ "));
+  for (const std::string_view caller : kInternalCallers) {
+    if (product == caller) return std::string(caller);
+  }
+  return kOtherCaller;
+}
+
+opal::server::RequestLabels CallerLabels(const opal::http::Headers& headers) {
+  return {{"caller", CallerOf(headers)}};
+}
+
+namespace {
+
+// The caller CallerLabels named, or kOtherCaller when the labels carry none
+// (a labeler that threw labels nothing).
+std::string CallerFrom(const opal::server::RequestLabels& labels) {
+  for (const auto& [key, value] : labels) {
+    if (key == "caller") return value;
+  }
+  return kOtherCaller;
+}
+
+std::function<void(const opal::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
+    std::shared_ptr<HttpMetricsSink> metrics) {
+  return [metrics = std::move(metrics)](
+             const opal::http::BeastServerTransport::RejectedRequest& rejected) {
+    // A rejection fires before any routing, so the route is always the
+    // sentinel — a 413 flood against distinct paths must not mint a series
+    // per path (#1305), and the method is bounded like everywhere else. The
+    // method may also be empty when the request never parsed that far (a 431
+    // can fire mid-headers); keep those series on a stable label rather than
+    // an empty string dashboards would drop or misgroup.
+    const std::string method =
+        rejected.method.empty() ? "(unparsed)" : MethodLabelOf(rejected.method);
+    // Start + complete keeps the active gauge symmetric; the rejection
+    // happens at parse time, so zero duration is accurate.
+    metrics->RecordRequestStart(method);
+    metrics->RecordRequestCaller(CallerFrom(rejected.labels));
+    metrics->RecordRequestComplete(kUnmatchedRoute, method, rejected.status,
+                                   std::chrono::microseconds{0});
+  };
+}
+
+}  // namespace
+
+void ObserveRejections(opal::http::BeastServerTransport::Options& options,
+                       std::shared_ptr<HttpMetricsSink> metrics) {
+  options.on_rejected = RejectionMetrics(std::move(metrics));
+  options.label_rejection = CallerLabels;
+}
+
 std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
     std::shared_ptr<futility::otel::HttpMetricsManager> metrics) {
+  std::vector<std::string> callers = {kEdgeCaller, kOtherCaller};
+  callers.insert(callers.end(), std::begin(kInternalCallers), std::end(kInternalCallers));
+  metrics->DeclareCallers(callers);
   return std::make_shared<OtelHttpMetricsSink>(std::move(metrics));
 }
 
@@ -165,8 +226,9 @@ opal::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> m
       },
       [metrics](const opal::server::RequestStart& start) {
         metrics->RecordRequestStart(MethodLabelOf(start.method));
+        metrics->RecordRequestCaller(CallerFrom(start.labels));
       },
-      /*now=*/nullptr, std::move(trusted_proxies));
+      /*now=*/nullptr, std::move(trusted_proxies), CallerLabels);
 }
 
 opal::http::RequestHandler ProductionChain(ChainOptions options,
@@ -179,26 +241,6 @@ opal::http::RequestHandler ProductionChain(ChainOptions options,
         std::move(options.allow_request), std::move(options.trusted_proxies), options.retry_after));
   }
   return opal::server::Chain(std::move(chain), std::move(handler));
-}
-
-std::function<void(const opal::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
-    std::shared_ptr<HttpMetricsSink> metrics) {
-  return [metrics = std::move(metrics)](
-             const opal::http::BeastServerTransport::RejectedRequest& rejected) {
-    // A rejection fires before any routing, so the route is always the
-    // sentinel — a 413 flood against distinct paths must not mint a series
-    // per path (#1305), and the method is bounded like everywhere else. The
-    // method may also be empty when the request never parsed that far (a 431
-    // can fire mid-headers); keep those series on a stable label rather than
-    // an empty string dashboards would drop or misgroup.
-    const std::string method =
-        rejected.method.empty() ? "(unparsed)" : MethodLabelOf(rejected.method);
-    // Start + complete keeps the active gauge symmetric; the rejection
-    // happens at parse time, so zero duration is accurate.
-    metrics->RecordRequestStart(method);
-    metrics->RecordRequestComplete(kUnmatchedRoute, method, rejected.status,
-                                   std::chrono::microseconds{0});
-  };
 }
 
 std::function<void(const opal::http::BeastServerTransport::ConnectionEvent&)> ConnectionEventLog() {

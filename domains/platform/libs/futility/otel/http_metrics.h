@@ -23,6 +23,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "domains/platform/libs/futility/otel/metrics.h"
 
@@ -48,6 +49,14 @@ class HttpMetricsManager {
   /// with the bounded route.
   void RecordRequestComplete(const std::string& route, const std::string& method, int status_code,
                              std::chrono::microseconds duration);
+
+  /// Called once per request with who sent it (aura's CallerOf), on a
+  /// counter of its own so the route-labeled instruments keep their shape.
+  void RecordRequestCaller(const std::string& caller);
+
+  /// Baselines each caller's series at zero, so increase() sees its first
+  /// request after a restart.
+  void DeclareCallers(const std::vector<std::string>& callers);
 
  private:
   std::string service_name_;

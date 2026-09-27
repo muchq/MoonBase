@@ -64,7 +64,7 @@ TEST(DefaultClientConfigTest, PollsOnceAndGivesUpFast) {
   const opal::ClientConfig config = deja::DefaultClientConfig("http://deja:8093");
 
   EXPECT_EQ(config.endpoint, "http://deja:8093");
-  EXPECT_EQ(config.user_agent, "MoonBase games_hub/1.0");
+  EXPECT_EQ(config.user_agent, "games_hub/1.0");
   EXPECT_EQ(config.request_timeout_ms, 2'000);
   EXPECT_EQ(config.retry.max_attempts, 1);
 }
@@ -82,8 +82,8 @@ TEST(ClientTest, RecentAsksForEverythingAfterTheSeqItWasGiven) {
   EXPECT_EQ(transport->requests()[0].target, "/deja/v1/recent?after=41");
   // Zero is a real ask — "everything the ring has" — not an omission.
   EXPECT_EQ(transport->requests()[1].target, "/deja/v1/recent?after=0");
-  EXPECT_EQ(transport->requests()[0].headers.Get("user-agent").value_or(""),
-            "MoonBase games_hub/1.0");
+  // deja counts its callers by this first product token.
+  EXPECT_EQ(transport->requests()[0].headers.Get("user-agent").value_or(""), "games_hub/1.0");
 }
 
 TEST(ClientTest, NothingNewIsASuccessWithNoEvents) {

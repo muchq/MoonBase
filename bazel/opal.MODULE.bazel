@@ -19,11 +19,14 @@ bazel_dep(name = "opal_cpp", version = "0.0.0")
 # (opal-cpp #228): a violation reaches the handler as Error::Validation, and
 # the session stays open; games_hub refuses it in band. SessionRegistry
 # sends take a delivery class (#227): games_hub coalesces world moves.
+#
+# Observe and the Beast transport's rejections take a header labeler
+# (opal-cpp #236), so a request can be labeled by who sent it.
 archive_override(
     module_name = "opal_cpp",
-    integrity = "sha256-eY0B+bcEpX8y/bM24xQ96dWR5qcebcvQgxnkz2d/3Yk=",
-    strip_prefix = "opal-cpp-57d6842a4bd2f24ba54a2091703306c596aa8dd3",
+    integrity = "sha256-7Yd/vroXCYd9f5oQx+RHwGdXiWOdlk/RFy1S0rFIZZM=",
+    strip_prefix = "opal-cpp-37d4303aa749fd52bdbcc4f5935fce98313ab41c",
     urls = [
-        "https://github.com/muchq/opal-cpp/archive/57d6842a4bd2f24ba54a2091703306c596aa8dd3.tar.gz",
+        "https://github.com/muchq/opal-cpp/archive/37d4303aa749fd52bdbcc4f5935fce98313ab41c.tar.gz",
     ],
 )

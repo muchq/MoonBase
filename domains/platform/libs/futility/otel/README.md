@@ -12,7 +12,7 @@ This module provides:
   (`http_server_requests`, `http_server_requests_active`,
   `http_server_request_duration`, `http_server_requests_success` /
   `_failure`), transport-agnostic so every service exports the same names
-  and labels
+  and labels, plus `http_server_requests_by_caller`, which aura records
 - **http_instrument_descriptions.h**: The descriptions those shared
   instruments are exported with, pinned equal to the Java and Rust rails
 

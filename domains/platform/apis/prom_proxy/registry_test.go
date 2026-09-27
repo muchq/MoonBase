@@ -623,6 +623,13 @@ var microgptExportedNames = map[string]bool{
 	"microgpt_tokens_generated_total": true,
 }
 
+// The standard-family series a service entry reads by name: its Probes
+// tile and its Callers tiles. Any other http_server_ series there is a typo.
+func readsStandardFamily(query string) bool {
+	return strings.Contains(query, `route="/health"`) ||
+		strings.Contains(query, `http_server_requests_by_caller_total{`)
+}
+
 func TestMicrogptQueriesNameRealInstruments(t *testing.T) {
 	entry := serviceRegistry["microgpt-serve"]
 	require.NotEmpty(t, entry.CustomScalars)
@@ -633,7 +640,7 @@ func TestMicrogptQueriesNameRealInstruments(t *testing.T) {
 	for what, queries := range labelledCustomQueries(entry) {
 		for _, query := range queries {
 			joined += query + "\n"
-			if strings.Contains(query, `route="/health"`) {
+			if readsStandardFamily(query) {
 				assert.Contains(t, query, `service_name="microgpt-serve"`,
 					"%s reads the standard family unscoped: %s", what, query)
 				continue
@@ -691,7 +698,7 @@ func TestDejaQueriesNameRealInstruments(t *testing.T) {
 	for what, queries := range labelledCustomQueries(entry) {
 		for _, query := range queries {
 			joined += query + "\n"
-			if strings.Contains(query, `route="/health"`) {
+			if readsStandardFamily(query) {
 				assert.Contains(t, query, `service_name="deja"`,
 					"%s reads the standard family unscoped: %s", what, query)
 				continue
@@ -1115,6 +1122,34 @@ func TestOneD4RunDurationQueriesConvertToTheUnitTheyClaim(t *testing.T) {
 		assert.Equal(t, want, got,
 			"query claims %s but divides the recorded microseconds by %d, not %d: %s",
 			unit, got, want, query)
+	}
+}
+
+// The callee of every compose-internal application call, with the callers
+// compose wires to it. The Java one_d4 is absent: it tags its callers in its own
+// query events (source=mcp), which stats reports.
+var internalCallers = map[string][]string{
+	"deja":           {"games_hub"},
+	"microgpt-serve": {"games_hub"},
+	"one_d4_v2":      {"mcpserver"},
+}
+
+// A callee's page splits its traffic between the gateway and each internal
+// caller, the work the access-log rollups cannot see.
+func TestInternalCalleesChartEachCaller(t *testing.T) {
+	for service, callers := range internalCallers {
+		var queries []string
+		for _, def := range serviceRegistry[service].CustomScalars {
+			queries = append(queries, def.AllQueries()...)
+		}
+		for _, caller := range append([]string{"edge"}, callers...) {
+			want := fmt.Sprintf(`http_server_requests_by_caller_total{service_name=%q,caller=%q}`, service, caller)
+			found := false
+			for _, query := range queries {
+				found = found || strings.Contains(query, want)
+			}
+			assert.True(t, found, "%s charts no tile for requests from %s", service, caller)
+		}
 	}
 }
 

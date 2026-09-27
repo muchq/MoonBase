@@ -36,6 +36,7 @@ constexpr char kScholarsMateJson[] =
 class RecordingSink final : public aura::HttpMetricsSink {
  public:
   void RecordRequestStart(const std::string& /*method*/) override {}
+  void RecordRequestCaller(const std::string& /*caller*/) override {}
   void RecordRequestComplete(const std::string& route, const std::string& /*method*/,
                              int status_code, std::chrono::microseconds /*duration*/) override {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -132,7 +133,7 @@ TEST_F(ProductionChainTest, TheTransportAndThePgnCapSplitTheOversizedSpace) {
   options.address = "127.0.0.1";
   options.port = 0;
   options.max_body_bytes = std::size_t{1} * 1024 * 1024;
-  options.on_rejected = aura::RejectionMetrics(sink_);
+  aura::ObserveRejections(options, sink_);
   options.on_connection_event = aura::ConnectionEventLog();
   opal::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(handler_).ok());
