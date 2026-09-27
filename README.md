@@ -13,6 +13,7 @@ a polyglot playground for experiments in application architecture, API design, l
 | **1d4**         | [1d4.net](https://1d4.net) | Chess game indexer web UI  |
 | **1d4.net MCP** | [mcp.1d4.net](https://mcp.1d4.net) | MCP server for chess tools |
 | **microgpt**    | [tty1.uk](https://tty1.uk)     | Minimal GPT implementation |
+| **ast.lol**     | [ast.lol](https://ast.lol) | AST parsing course         |
 
 ## Repository Structure
 
@@ -24,6 +25,7 @@ The repository is organized into **domains**, each containing its own libraries,
 - [**🔗 iili**](domains/iili/README.md): URL shortening ecosystem.
 - [**💬 Chat**](domains/chat/README.md): Real-time communication services.
 - [**🤖 AI**](domains/ai/README.md): Neural network and machine learning experiments.
+- [**🎓 Edu**](domains/edu/README.md): Learning applications.
 - [**🏆 Leet**](domains/leet/README.md): Algorithmic solutions and C utility libraries.
 
 ## Getting Started
