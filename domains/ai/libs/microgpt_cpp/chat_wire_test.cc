@@ -77,6 +77,8 @@ TEST(ChatWire, SendsThePinnedRequest) {
   EXPECT_EQ(request.method, "POST");
   EXPECT_EQ(request.target, "/microgpt/v1/chat");
   EXPECT_EQ(request.body, kPinnedRequest);
+  // microgpt-serve counts its callers by this first product token.
+  EXPECT_EQ(request.headers.Get("user-agent").value_or(""), "games_hub/1.0");
 }
 
 TEST(ChatWire, ParsesThePinnedResponse) {

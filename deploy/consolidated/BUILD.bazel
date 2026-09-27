@@ -27,6 +27,9 @@ go_test(
         "//domains/games/apis/one_d4:src/main/java/com/muchq/games/one_d4/api/QueryEvent.java",
         "//domains/platform/apis/stats:service.go",
         "//domains/platform/apis/stats:source.go",
+        # TestEveryInternalApplicationCallerIsOneTheCalleesCount reads the
+        # callers the rails count by name.
+        "//domains/platform/libs/server_pal:src/lib.rs",
         # Run, not read, by TestTheServicesListingMatchesWhatCanBeDeployed: the
         # --services listing is awk and sed, and asserting on their text is not
         # asserting on their output. The script self-locates and reads

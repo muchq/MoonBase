@@ -2843,6 +2843,40 @@ func TestEveryInternalHttpCallIsAnEdgeInTheTopologyDiagram(t *testing.T) {
 	}
 }
 
+// Every service-to-service application call is counted by its callee under
+// the caller's name, which the callee reads off the User-Agent: aura and
+// server_pal record http_server_requests_by_caller from a fixed list of
+// internal callers, and a caller missing from it counts as "other". The
+// collector and prometheus are infrastructure, not application callees.
+func TestEveryInternalApplicationCallerIsOneTheCalleesCount(t *testing.T) {
+	source := readConfig(t, "../../domains/platform/libs/server_pal/src/lib.rs")
+	list := regexp.MustCompile(`INTERNAL_CALLERS: \[&str; \d+\] = \[([^\]]*)\]`).FindStringSubmatch(source)
+	if list == nil {
+		t.Fatal("server_pal declares no INTERNAL_CALLERS list")
+	}
+	counted := map[string]bool{}
+	for _, name := range regexp.MustCompile(`"([^"]+)"`).FindAllStringSubmatch(list[1], -1) {
+		counted[name[1]] = true
+	}
+	names := composeNames(t)
+	calls := 0
+	for caller, callees := range internalHTTPCalls(t) {
+		for _, callee := range callees {
+			if service := names[callee]; service == "otelcol" || service == "prometheus" {
+				continue
+			}
+			calls++
+			if !counted[caller] {
+				t.Errorf("%s calls %s directly, and server_pal's INTERNAL_CALLERS does not name "+
+					"it; the callee counts every one of those requests as \"other\"", caller, callee)
+			}
+		}
+	}
+	if calls < 4 {
+		t.Fatalf("found only %d internal application calls; has compose's shape changed?", calls)
+	}
+}
+
 // stats names the backend that answered a request from the Caddyfile's own
 // reverse_proxy upstreams, so "which service" is a question the rollup can
 // answer. Route names the matcher instead, and the two part company exactly

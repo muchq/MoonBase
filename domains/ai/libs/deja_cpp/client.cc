@@ -7,7 +7,7 @@ namespace deja {
 opal::ClientConfig DefaultClientConfig(std::string endpoint) {
   opal::ClientConfig config;
   config.endpoint = std::move(endpoint);
-  config.user_agent = "MoonBase games_hub/1.0";
+  config.user_agent = "games_hub/1.0";
   config.request_timeout_ms = 2'000;
   config.retry.max_attempts = 1;
   return config;
