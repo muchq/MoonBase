@@ -164,7 +164,7 @@ TEST_F(ProductionChainTest, TheTransportAndTheUrlBoundSplitTheOversizedSpace) {
   options.address = "127.0.0.1";
   options.port = 0;
   options.max_body_bytes = std::size_t{16} * 1024;
-  options.on_rejected = aura::RejectionMetrics(sink_);
+  aura::ObserveRejections(options, sink_);
   options.on_connection_event = aura::ConnectionEventLog();
   opal::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(handler_).ok());

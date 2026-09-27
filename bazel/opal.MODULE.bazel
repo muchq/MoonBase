@@ -21,7 +21,7 @@ bazel_dep(name = "opal_cpp", version = "0.0.0")
 # sends take a delivery class (#227): games_hub coalesces world moves.
 #
 # Observe and the Beast transport's rejections take a header labeler
-# (opal-cpp #235), so a request can be labeled by who sent it.
+# (opal-cpp #236), so a request can be labeled by who sent it.
 archive_override(
     module_name = "opal_cpp",
     integrity = "sha256-7Yd/vroXCYd9f5oQx+RHwGdXiWOdlk/RFy1S0rFIZZM=",

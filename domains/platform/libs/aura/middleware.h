@@ -48,7 +48,7 @@ inline constexpr char kUnmatchedRoute[] = "unmatched";
 /// raw target — arrives at completion, which is where the counters and the
 /// histogram record (#1305). The method label is bounded too: the nine RFC
 /// 9110 methods verbatim, every other wire token collapsed to "CUSTOM" —
-/// plus "(unparsed)" from RejectionMetrics for requests the transport
+/// plus "(unparsed)" from ObserveRejections for requests the transport
 /// rejected before a method existed at all (a 431 can fire mid-headers),
 /// kept distinct because "never parsed" and "invented verb" are different
 /// diagnoses.
@@ -132,16 +132,10 @@ opal::http::RequestHandler ProductionChain(ChainOptions options,
 /// than silently collapsing proxied traffic onto one client key.
 std::optional<opal::http::TrustedProxies> TrustedProxiesFromEnv();
 
-/// Sink callback for BeastServerTransport::Options::on_rejected, so the
-/// 413/431 rejections the transport writes before any handler chain exists
-/// land in the same instruments as everything else (an over-limit flood
-/// would otherwise be invisible to metrics).
-std::function<void(const opal::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
-    std::shared_ptr<HttpMetricsSink> metrics);
-
-/// Wires a transport's rejections into `metrics`: RejectionMetrics as
-/// on_rejected, and CallerLabels as label_rejection so each rejection is
-/// counted under its caller like a served request.
+/// Wires the 413/431 rejections a transport writes before any handler chain
+/// exists into `metrics`, so an over-limit flood lands in the same
+/// instruments as everything else, under kUnmatchedRoute and, through
+/// CallerLabels as label_rejection, under its caller.
 void ObserveRejections(opal::http::BeastServerTransport::Options& options,
                        std::shared_ptr<HttpMetricsSink> metrics);
 

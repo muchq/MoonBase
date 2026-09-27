@@ -172,6 +172,27 @@ std::string CallerFrom(const opal::server::RequestLabels& labels) {
   return kOtherCaller;
 }
 
+std::function<void(const opal::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
+    std::shared_ptr<HttpMetricsSink> metrics) {
+  return [metrics = std::move(metrics)](
+             const opal::http::BeastServerTransport::RejectedRequest& rejected) {
+    // A rejection fires before any routing, so the route is always the
+    // sentinel — a 413 flood against distinct paths must not mint a series
+    // per path (#1305), and the method is bounded like everywhere else. The
+    // method may also be empty when the request never parsed that far (a 431
+    // can fire mid-headers); keep those series on a stable label rather than
+    // an empty string dashboards would drop or misgroup.
+    const std::string method =
+        rejected.method.empty() ? "(unparsed)" : MethodLabelOf(rejected.method);
+    // Start + complete keeps the active gauge symmetric; the rejection
+    // happens at parse time, so zero duration is accurate.
+    metrics->RecordRequestStart(method);
+    metrics->RecordRequestCaller(CallerFrom(rejected.labels));
+    metrics->RecordRequestComplete(kUnmatchedRoute, method, rejected.status,
+                                   std::chrono::microseconds{0});
+  };
+}
+
 }  // namespace
 
 void ObserveRejections(opal::http::BeastServerTransport::Options& options,
@@ -220,27 +241,6 @@ opal::http::RequestHandler ProductionChain(ChainOptions options,
         std::move(options.allow_request), std::move(options.trusted_proxies), options.retry_after));
   }
   return opal::server::Chain(std::move(chain), std::move(handler));
-}
-
-std::function<void(const opal::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
-    std::shared_ptr<HttpMetricsSink> metrics) {
-  return [metrics = std::move(metrics)](
-             const opal::http::BeastServerTransport::RejectedRequest& rejected) {
-    // A rejection fires before any routing, so the route is always the
-    // sentinel — a 413 flood against distinct paths must not mint a series
-    // per path (#1305), and the method is bounded like everywhere else. The
-    // method may also be empty when the request never parsed that far (a 431
-    // can fire mid-headers); keep those series on a stable label rather than
-    // an empty string dashboards would drop or misgroup.
-    const std::string method =
-        rejected.method.empty() ? "(unparsed)" : MethodLabelOf(rejected.method);
-    // Start + complete keeps the active gauge symmetric; the rejection
-    // happens at parse time, so zero duration is accurate.
-    metrics->RecordRequestStart(method);
-    metrics->RecordRequestCaller(CallerFrom(rejected.labels));
-    metrics->RecordRequestComplete(kUnmatchedRoute, method, rejected.status,
-                                   std::chrono::microseconds{0});
-  };
 }
 
 std::function<void(const opal::http::BeastServerTransport::ConnectionEvent&)> ConnectionEventLog() {

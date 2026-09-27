@@ -174,7 +174,7 @@ TEST_F(PortraitProductionChainTest, BeastTransportServesChainAndEnforcesBodyLimi
   options.address = "127.0.0.1";
   options.port = 0;
   options.max_body_bytes = 2048;
-  options.on_rejected = aura::RejectionMetrics(sink_);
+  aura::ObserveRejections(options, sink_);
   options.on_connection_event = aura::ConnectionEventLog();
   opal::http::BeastServerTransport transport(options);
   ASSERT_TRUE(transport.Start(harness_.handler()).ok());

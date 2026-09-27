@@ -42,8 +42,9 @@ without `scripts/make-git-overrides.sh`.
   - `PerClientRateLimit` keyed on the ADR-0012 derived client address
     (trust boundary from `ChainOptions::trusted_proxies`), answering 429
     with Retry-After — skipped entirely when `allow_request` is unset
-- **`RejectionMetrics`** — `BeastServerTransport::Options::on_rejected`
-  adapter so transport-written 413/431s land in the same instruments
+- **`ObserveRejections`** — wires `BeastServerTransport::Options::on_rejected`
+  and `label_rejection` so transport-written 413/431s land in the same
+  instruments, counted under their caller
 - **`ConnectionEventLog`** — `on_connection_event` observer (ADR-0013): one
   WARNING line per connection the transport terminates without a response
 
@@ -64,7 +65,7 @@ auto handler = aura::ProductionChain(
     server.Handler());
 
 opal::http::BeastServerTransport::Options options;
-options.on_rejected = aura::RejectionMetrics(metrics);
+aura::ObserveRejections(options, metrics);
 options.on_connection_event = aura::ConnectionEventLog();
 ```
 

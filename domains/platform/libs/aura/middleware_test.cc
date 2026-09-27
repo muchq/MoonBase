@@ -617,17 +617,25 @@ TEST(ConnectionEventLogTest, LogsUpgradeFailureKind) {
 // drop. The route is the sentinel like every unrouted request — a rejection
 // never reached the router, and a 413 flood against distinct paths must not
 // mint a series per path (#1305).
-TEST(RejectionMetricsTest, ARejectionCountsUnderTheCallerItsLabelsName) {
+// The on_rejected ObserveRejections installs.
+std::function<void(const opal::http::BeastServerTransport::RejectedRequest&)> RejectionSink(
+    std::shared_ptr<RecordingSink> sink) {
+  opal::http::BeastServerTransport::Options options;
+  aura::ObserveRejections(options, std::move(sink));
+  return options.on_rejected;
+}
+
+TEST(ObserveRejectionsTest, ARejectionCountsUnderTheCallerItsLabelsName) {
   auto sink = std::make_shared<RecordingSink>();
-  aura::RejectionMetrics(sink)({.status = 413, .labels = {{"caller", "mcpserver"}}});
-  aura::RejectionMetrics(sink)({.status = 431});
+  RejectionSink(sink)({.status = 413, .labels = {{"caller", "mcpserver"}}});
+  RejectionSink(sink)({.status = 431});
 
   EXPECT_THAT(sink->callers(), testing::ElementsAre("mcpserver", "other"));
 }
 
-TEST(RejectionMetricsTest, UnparsedRejectionLandsOnStableLabels) {
+TEST(ObserveRejectionsTest, UnparsedRejectionLandsOnStableLabels) {
   auto sink = std::make_shared<RecordingSink>();
-  aura::RejectionMetrics(sink)({.status = 431, .peer_address = "", .method = "", .target = ""});
+  RejectionSink(sink)({.status = 431, .peer_address = "", .method = "", .target = ""});
   const auto completes = sink->completes();
   ASSERT_EQ(completes.size(), 1u);
   EXPECT_EQ(completes[0].route, aura::kUnmatchedRoute);
