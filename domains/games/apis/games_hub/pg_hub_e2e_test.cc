@@ -10,9 +10,11 @@
 #include <chrono>
 #include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "domains/games/apis/games_hub/migrations.h"
@@ -1161,9 +1163,8 @@ TEST_F(PgGamesHubFixture, ChatCrossesInstancesBothWays) {
   auto created = ReceiveCase(alice->stream, "roomState");
   ASSERT_TRUE(created.has_value());
   const std::string room_id = created->as_roomState_or_null()->roomId;
-  // Room and membership rows are written through asynchronously; the
-  // remote's join needs the room row, and each sender's append
-  // authorizes against their member row.
+  // The room row is written through asynchronously; the remote's join
+  // needs it.
   store_->Flush();
 
   moonbase::games::JoinRoom join;
@@ -1369,6 +1370,93 @@ TEST_F(PgGamesHubFixture, EmptiedRoomVanishesFromTheDatabase) {
   ASSERT_TRUE(chat_rows.ok());
   ASSERT_TRUE(chat_rows->Get(0, 0).has_value());
   EXPECT_EQ(*chat_rows->Get(0, 0), "0");
+}
+
+// A writer that never catches up on its own: queued ops land only when
+// someone flushes. Everything else goes straight through.
+class LaggingHubStore final : public HubStore {
+ public:
+  explicit LaggingHubStore(std::shared_ptr<HubStore> inner) : inner_(std::move(inner)) {}
+
+  void Enqueue(std::vector<Op> ops) override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    for (auto& op : ops) held_.push_back(std::move(op));
+  }
+  void Flush() override {
+    std::vector<Op> ops;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      ops.swap(held_);
+    }
+    if (!ops.empty()) inner_->Enqueue(std::move(ops));
+    inner_->Flush();
+  }
+  absl::StatusOr<Snapshot> LoadSnapshot() override { return inner_->LoadSnapshot(); }
+  absl::StatusOr<bool> CommitGameSave(const GameRow& row,
+                                      const std::string& notify_payload) override {
+    return inner_->CommitGameSave(row, notify_payload);
+  }
+  absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& stats,
+                                        const std::string& notify_payload) override {
+    return inner_->CommitGameFinish(row, stats, notify_payload);
+  }
+  absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
+                                                  const std::string& game_id) override {
+    return inner_->LoadGame(room_id, game_id);
+  }
+  absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override {
+    return inner_->LoadRoom(room_id);
+  }
+
+ private:
+  const std::shared_ptr<HubStore> inner_;
+  std::mutex mu_;
+  std::vector<Op> held_;
+};
+
+// No listener: its catch-up on a new room's channel flushes the store,
+// landing the rows these tests hold back.
+class PgLaggingWriterFixture : public PgGamesHubFixture {
+ protected:
+  void SetUp() override {
+    PgGamesHubFixture::SetUp();
+    if (IsSkipped()) return;
+    golf_->AttachListener(nullptr);
+    listener_.reset();
+  }
+  std::shared_ptr<HubStore> MakeStore() override {
+    return std::make_shared<LaggingHubStore>(PgGamesHubFixture::MakeStore());
+  }
+};
+
+TEST_F(PgLaggingWriterFixture, ChatBeforeTheRoomIsWrittenIsEchoed) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_FALSE(CreateRoomFor(*alice).empty());
+
+  moonbase::games::Chat chat;
+  chat.text = "first";
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromChat(chat)).ok());
+  EXPECT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
+}
+
+TEST_F(PgLaggingWriterFixture, ChatBeforeTheSeatIsWrittenIsEchoed) {
+  auto room = SeatedRoom(1);
+  ASSERT_TRUE(room.has_value());
+  store_->Flush();  // the room and its creator are in; the joiner is not
+  auto bob = OpenSeat();
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  moonbase::games::JoinRoom join;
+  join.roomId = room->room_id;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomState").has_value());
+
+  moonbase::games::Chat chat;
+  chat.text = "hi";
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromChat(chat)).ok());
+  EXPECT_TRUE(ReceiveCase(bob->stream, "roomChat").has_value());
 }
 
 }  // namespace

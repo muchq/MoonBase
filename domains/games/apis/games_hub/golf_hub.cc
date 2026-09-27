@@ -1386,9 +1386,9 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
     }
 
     // Resolve the room, then drop the lock: MemoryChatStore re-takes it
-    // through WithMember, and mu_ is not recursive. Membership is not
-    // re-checked here either — the store's guard is that check, and it
-    // holds the lock across the append so the answer cannot go stale.
+    // through WithMember, and mu_ is not recursive. The store's guard is
+    // the membership check, and it holds the lock across the append so
+    // the answer cannot go stale.
     std::string room_id;
     {
       const std::lock_guard<std::mutex> lock(mu_);
@@ -1401,8 +1401,16 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
       return;
     }
 
-    const absl::StatusOr<ChatRow> appended =
+    absl::StatusOr<ChatRow> appended =
         chat_store_->Append(room_id, player_id, chat->text, instance_id_);
+    if (appended.status().code() == absl::StatusCode::kFailedPrecondition &&
+        WithMember(room_id, player_id, [] {})) {
+      // The store's check reads rows this instance may not have written
+      // yet: a room or seat taken a moment ago is still in its queue.
+      // Once it lands, the store answers for the seat this hub holds.
+      store_->Flush();
+      appended = chat_store_->Append(room_id, player_id, chat->text, instance_id_);
+    }
     if (!appended.ok()) {
       // Nothing was stored, so nothing is echoed: the sender is told no
       // rather than shown a message no one else will ever receive.
