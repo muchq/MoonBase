@@ -1386,9 +1386,9 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
     }
 
     // Resolve the room, then drop the lock: MemoryChatStore re-takes it
-    // through WithMember, and mu_ is not recursive. Membership is not
-    // re-checked here either — the store's guard is that check, and it
-    // holds the lock across the append so the answer cannot go stale.
+    // through WithMember, and mu_ is not recursive. The store's guard is
+    // the membership check, and it holds the lock across the append so
+    // the answer cannot go stale.
     std::string room_id;
     {
       const std::lock_guard<std::mutex> lock(mu_);

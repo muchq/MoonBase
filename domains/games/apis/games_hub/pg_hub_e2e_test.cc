@@ -1163,9 +1163,8 @@ TEST_F(PgGamesHubFixture, ChatCrossesInstancesBothWays) {
   auto created = ReceiveCase(alice->stream, "roomState");
   ASSERT_TRUE(created.has_value());
   const std::string room_id = created->as_roomState_or_null()->roomId;
-  // Room and membership rows are written through asynchronously; the
-  // remote's join needs the room row, and each sender's append
-  // authorizes against their member row.
+  // The room row is written through asynchronously; the remote's join
+  // needs it.
   store_->Flush();
 
   moonbase::games::JoinRoom join;
@@ -1415,8 +1414,16 @@ class LaggingHubStore final : public HubStore {
   std::vector<Op> held_;
 };
 
+// No listener: its catch-up on a new room's channel flushes the store,
+// landing the rows these tests hold back.
 class PgLaggingWriterFixture : public PgGamesHubFixture {
  protected:
+  void SetUp() override {
+    PgGamesHubFixture::SetUp();
+    if (IsSkipped()) return;
+    golf_->AttachListener(nullptr);
+    listener_.reset();
+  }
   std::shared_ptr<HubStore> MakeStore() override {
     return std::make_shared<LaggingHubStore>(PgGamesHubFixture::MakeStore());
   }
