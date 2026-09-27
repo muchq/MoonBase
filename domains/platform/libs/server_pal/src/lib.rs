@@ -56,6 +56,32 @@ pub const HTTP_LATENCY_BUCKET_BOUNDS_MICROS: [f64; 15] = [
 /// aura's `kUnmatchedRoute` (#1304, #1303).
 pub const UNMATCHED_ROUTE: &str = "unmatched";
 
+/// Who sent a request, for `http_server_requests_by_caller`: `edge` for
+/// anything the gateway forwarded, the internal caller a direct request's
+/// User-Agent names in its first product token, and `other` for any other
+/// direct request. The gateway always adds X-Forwarded-For and internal
+/// callers never do, so a User-Agent can name a caller only from inside the
+/// compose network. aura's kInternalCallers is the same list, pinned by
+/// //domains/platform/libs/otel_contract.
+pub const INTERNAL_CALLERS: [&str; 2] = ["games_hub", "mcpserver"];
+pub const EDGE_CALLER: &str = "edge";
+pub const OTHER_CALLER: &str = "other";
+
+fn caller_of(headers: &axum::http::HeaderMap) -> &'static str {
+    if headers.contains_key("x-forwarded-for") {
+        return EDGE_CALLER;
+    }
+    let user_agent = headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let product = user_agent.split(['/', ' ']).next().unwrap_or("");
+    INTERNAL_CALLERS
+        .into_iter()
+        .find(|caller| *caller == product)
+        .unwrap_or(OTHER_CALLER)
+}
+
 /// Whether an instrument of this name should get the explicit latency buckets.
 ///
 /// A free function rather than an inline condition purely so it can be tested:
@@ -320,6 +346,7 @@ struct HttpInstruments {
     failure: Counter<u64>,
     active: UpDownCounter<i64>,
     duration: Histogram<f64>,
+    by_caller: Counter<u64>,
     service_name: String,
 }
 
@@ -367,6 +394,10 @@ impl HttpInstruments {
             duration: meter
                 .f64_histogram("http_server_request_duration_microseconds")
                 .with_description("HTTP request duration in microseconds")
+                .build(),
+            by_caller: meter
+                .u64_counter("http_server_requests_by_caller")
+                .with_description("HTTP requests received, by who sent them")
                 .build(),
             service_name,
         })
@@ -445,6 +476,13 @@ async fn http_metrics_middleware(
     // template ("/widgets/{id}", never the raw path) is already in the
     // request extensions here (see route_label).
     let route = route_label(&req);
+    instruments.by_caller.add(
+        1,
+        &[
+            KeyValue::new("caller", caller_of(req.headers())),
+            KeyValue::new("service_name", instruments.service_name.clone()),
+        ],
+    );
 
     let gauge_attrs = [
         KeyValue::new("http_method", method.clone()),
@@ -1538,6 +1576,71 @@ mod http_metrics_label_tests {
         );
     }
 
+    async fn send_with(rig: &Rig, headers: &[(&str, &str)]) {
+        let mut builder = TestRequest::builder().method("GET").uri("/widgets/7");
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let status = rig
+            .router
+            .clone()
+            .oneshot(builder.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+            .status();
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    fn caller_attrs(caller: &str) -> Vec<(String, String)> {
+        vec![
+            ("caller".to_string(), caller.to_string()),
+            ("service_name".to_string(), TEST_SERVICE.to_string()),
+        ]
+    }
+
+    #[tokio::test]
+    async fn a_request_through_the_gateway_is_from_the_edge_whatever_it_claims() {
+        let rig = rig();
+        send_with(&rig, &[("X-Forwarded-For", "203.0.113.7")]).await;
+        send_with(
+            &rig,
+            &[("X-Forwarded-For", "203.0.113.7"), ("User-Agent", "games_hub/1.0")],
+        )
+        .await;
+
+        assert_eq!(
+            u64_sum_points(&exported(&rig), "http_server_requests_by_caller"),
+            vec![(caller_attrs(EDGE_CALLER), 2)]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_direct_request_is_from_the_internal_caller_its_user_agent_names() {
+        let rig = rig();
+        send_with(&rig, &[("User-Agent", "games_hub/1.0")]).await;
+        send_with(&rig, &[("User-Agent", "games_hub")]).await;
+        send_with(&rig, &[("User-Agent", "mcpserver")]).await;
+
+        assert_eq!(
+            u64_sum_points(&exported(&rig), "http_server_requests_by_caller"),
+            vec![(caller_attrs("games_hub"), 2), (caller_attrs("mcpserver"), 1)]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_direct_request_naming_no_internal_caller_first_is_other() {
+        let rig = rig();
+        send_with(&rig, &[]).await;
+        send_with(&rig, &[("User-Agent", "curl/8.5.0")]).await;
+        send_with(&rig, &[("User-Agent", "MoonBase games_hub/1.0")]).await;
+        send_with(&rig, &[("User-Agent", "games_hubx/1.0")]).await;
+
+        assert_eq!(
+            u64_sum_points(&exported(&rig), "http_server_requests_by_caller"),
+            vec![(caller_attrs(OTHER_CALLER), 4)]
+        );
+    }
+
     /// No shared instrument declares a unit (#1294). The collector's
     /// Prometheus exporter folds a non-empty unit into the metric *name*
     /// (http_server_requests_total would become
@@ -1569,6 +1672,7 @@ mod http_metrics_label_tests {
             "http_server_requests_failure",
             "http_server_requests_active_gauge",
             "http_server_request_duration_microseconds",
+            "http_server_requests_by_caller",
         ] {
             assert!(
                 seen.contains(&name.to_string()),
