@@ -84,7 +84,7 @@ int main() {
   // that is not a request this service answers, so the transport need not
   // read it first.
   options.max_body_bytes = std::size_t{1} * 1024 * 1024;
-  options.on_rejected = aura::RejectionMetrics(metrics);
+  aura::ObserveRejections(options, metrics);
   options.on_connection_event = aura::ConnectionEventLog();
   opal::http::BeastServerTransport transport(options);
 

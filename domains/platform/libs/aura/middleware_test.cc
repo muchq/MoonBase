@@ -617,6 +617,14 @@ TEST(ConnectionEventLogTest, LogsUpgradeFailureKind) {
 // drop. The route is the sentinel like every unrouted request — a rejection
 // never reached the router, and a 413 flood against distinct paths must not
 // mint a series per path (#1305).
+TEST(RejectionMetricsTest, ARejectionCountsUnderTheCallerItsLabelsName) {
+  auto sink = std::make_shared<RecordingSink>();
+  aura::RejectionMetrics(sink)({.status = 413, .labels = {{"caller", "mcpserver"}}});
+  aura::RejectionMetrics(sink)({.status = 431});
+
+  EXPECT_THAT(sink->callers(), testing::ElementsAre("mcpserver", "other"));
+}
+
 TEST(RejectionMetricsTest, UnparsedRejectionLandsOnStableLabels) {
   auto sink = std::make_shared<RecordingSink>();
   aura::RejectionMetrics(sink)({.status = 431, .peer_address = "", .method = "", .target = ""});
@@ -636,7 +644,7 @@ TEST_F(AuraMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   options.address = "127.0.0.1";
   options.port = 0;
   options.max_body_bytes = 2048;
-  options.on_rejected = aura::RejectionMetrics(sink_);
+  aura::ObserveRejections(options, sink_);
   // Production-shaped options; no event can fire in this test (the 413 is
   // on_rejected-only by design).
   options.on_connection_event = aura::ConnectionEventLog();
@@ -659,6 +667,7 @@ TEST_F(AuraMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   oversized.method = "POST";
   oversized.target = "/echo";
   oversized.headers.Set("content-type", "text/plain");
+  oversized.headers.Set("x-forwarded-for", "203.0.113.7");
   oversized.body = std::string(4096, 'x');
   const auto rejected = raw.Send(oversized);
   ASSERT_TRUE(rejected.ok()) << rejected.error().message();
@@ -668,6 +677,8 @@ TEST_F(AuraMiddlewareTest, BeastTransportServesChainAndEnforcesBodyLimit) {
   // Rejected before routing, so the sentinel — not the target path (#1305).
   EXPECT_EQ(completes.back().route, aura::kUnmatchedRoute);
   EXPECT_EQ(completes.back().status, 413);
+  // Labeled from its headers inside the transport, like a served request.
+  EXPECT_EQ(sink_->callers().back(), "edge");
 
   transport.Stop();
 }

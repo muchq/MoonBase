@@ -157,6 +157,29 @@ std::string CallerOf(const opal::http::Headers& headers) {
   return kOtherCaller;
 }
 
+opal::server::RequestLabels CallerLabels(const opal::http::Headers& headers) {
+  return {{"caller", CallerOf(headers)}};
+}
+
+namespace {
+
+// The caller CallerLabels named, or kOtherCaller when the labels carry none
+// (a labeler that threw labels nothing).
+std::string CallerFrom(const opal::server::RequestLabels& labels) {
+  for (const auto& [key, value] : labels) {
+    if (key == "caller") return value;
+  }
+  return kOtherCaller;
+}
+
+}  // namespace
+
+void ObserveRejections(opal::http::BeastServerTransport::Options& options,
+                       std::shared_ptr<HttpMetricsSink> metrics) {
+  options.on_rejected = RejectionMetrics(std::move(metrics));
+  options.label_rejection = CallerLabels;
+}
+
 std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
     std::shared_ptr<futility::otel::HttpMetricsManager> metrics) {
   std::vector<std::string> callers = {kEdgeCaller, kOtherCaller};
@@ -173,7 +196,7 @@ opal::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> m
   // handler the router annotated — which RouteLabelOf turns into the bounded
   // route label (#1305). The trust boundary is what lets the observation
   // derive the ADR-0012 client the log line reports.
-  opal::server::Middleware observe = opal::server::Observe(
+  return opal::server::Observe(
       [metrics](const opal::server::RequestObservation& observation) {
         metrics->RecordRequestComplete(RouteLabelOf(observation.operation, observation.target),
                                        MethodLabelOf(observation.method), observation.status,
@@ -182,14 +205,9 @@ opal::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> m
       },
       [metrics](const opal::server::RequestStart& start) {
         metrics->RecordRequestStart(MethodLabelOf(start.method));
+        metrics->RecordRequestCaller(CallerFrom(start.labels));
       },
-      /*now=*/nullptr, std::move(trusted_proxies));
-  return [metrics, observe = std::move(observe)](opal::http::RequestHandler next) {
-    return [metrics, observed = observe(std::move(next))](const opal::http::HttpRequest& request) {
-      metrics->RecordRequestCaller(CallerOf(request.headers));
-      return observed(request);
-    };
-  };
+      /*now=*/nullptr, std::move(trusted_proxies), CallerLabels);
 }
 
 opal::http::RequestHandler ProductionChain(ChainOptions options,
@@ -219,6 +237,7 @@ std::function<void(const opal::http::BeastServerTransport::RejectedRequest&)> Re
     // Start + complete keeps the active gauge symmetric; the rejection
     // happens at parse time, so zero duration is accurate.
     metrics->RecordRequestStart(method);
+    metrics->RecordRequestCaller(CallerFrom(rejected.labels));
     metrics->RecordRequestComplete(kUnmatchedRoute, method, rejected.status,
                                    std::chrono::microseconds{0});
   };

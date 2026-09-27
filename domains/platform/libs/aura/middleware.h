@@ -66,14 +66,17 @@ class HttpMetricsSink {
 /// User-Agent names in its first product token, and kOtherCaller for any
 /// other direct request. The gateway always adds x-forwarded-for and
 /// internal callers never do; a request that reaches a published port
-/// without the gateway names whatever caller it claims. Transport
-/// rejections (RejectionMetrics) have no headers and are not counted.
-/// server_pal's INTERNAL_CALLERS is the same list, pinned by
+/// without the gateway names whatever caller it claims. server_pal's
+/// INTERNAL_CALLERS is the same list, pinned by
 /// //domains/platform/libs/otel_contract.
 inline constexpr std::string_view kInternalCallers[] = {"games_hub", "mcpserver"};
 inline constexpr char kEdgeCaller[] = "edge";
 inline constexpr char kOtherCaller[] = "other";
 std::string CallerOf(const opal::http::Headers& headers);
+
+/// CallerOf as the labeler opal's Observe and the transport's
+/// label_rejection take: {"caller", CallerOf(headers)}.
+opal::server::RequestLabels CallerLabels(const opal::http::Headers& headers);
 
 /// A sink forwarding to futility::otel::HttpMetricsManager, the shared HTTP
 /// serving instruments (http_server_requests,
@@ -135,6 +138,12 @@ std::optional<opal::http::TrustedProxies> TrustedProxiesFromEnv();
 /// would otherwise be invisible to metrics).
 std::function<void(const opal::http::BeastServerTransport::RejectedRequest&)> RejectionMetrics(
     std::shared_ptr<HttpMetricsSink> metrics);
+
+/// Wires a transport's rejections into `metrics`: RejectionMetrics as
+/// on_rejected, and CallerLabels as label_rejection so each rejection is
+/// counted under its caller like a served request.
+void ObserveRejections(opal::http::BeastServerTransport::Options& options,
+                       std::shared_ptr<HttpMetricsSink> metrics);
 
 /// Log-only observer for BeastServerTransport::Options::on_connection_event
 /// (opal-cpp ADR-0013, kinds in beast_transport.h): each connection the

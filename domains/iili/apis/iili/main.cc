@@ -106,7 +106,7 @@ int main() {
   options.port = futility::env::ReadPort(8091);
   // A shorten body tops out near 1100 bytes; 16KB is headroom.
   options.max_body_bytes = std::size_t{16} * 1024;
-  options.on_rejected = aura::RejectionMetrics(metrics);
+  aura::ObserveRejections(options, metrics);
   options.on_connection_event = aura::ConnectionEventLog();
   opal::http::BeastServerTransport transport(options);
 
