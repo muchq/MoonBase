@@ -44,7 +44,9 @@ forwarded, `games_hub` or `mcpserver` for a direct call whose User-Agent
 names it, `other` for any other. Each callee's page on `/metrics` has a
 Callers group — deja and microgpt-serve split the hub's calls from the
 public ones, one_d4_v2 mcpserver's — and `deploy_config_test` fails when
-compose wires a caller the rails do not name.
+compose wires a caller the rails do not name. Prometheus keeps seven days,
+so this split is live, not history. Health probes are `other`, so edge and
+the named callers do not sum to Serving.
 
 games_hub writes its own events for the same reason, and a stronger one: a
 session opens one socket and every room, world, table, game and message

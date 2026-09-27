@@ -1118,18 +1118,8 @@ func TestOneD4RunDurationQueriesConvertToTheUnitTheyClaim(t *testing.T) {
 	}
 }
 
-// The Probes tile is the visible half of probeFilter's subtraction (#1303), and
-// the guards around it are one-sided without this: the per-selector exclusion
-// test and the carve-out above both pass with the tile deleted outright — the
-// carve-out only fires on queries that already contain the route literal. Pin
-// existence, so the subtracted traffic is charted somewhere by construction.
-//
-// Every registry service, not just one_d4: since #1307 every entry's container
-// is probed (deploy's config test pins that side), so every service's Serving
-// numbers have probe traffic subtracted, and each needs its own scoped tile
-// showing it.
 // The callee of every compose-internal application call, with the callers
-// compose wires to it. one_d4 is absent: it tags its callers in its own
+// compose wires to it. The Java one_d4 is absent: it tags its callers in its own
 // query events (source=mcp), which stats reports.
 var internalCallers = map[string][]string{
 	"deja":           {"games_hub"},
@@ -1156,6 +1146,16 @@ func TestInternalCalleesChartEachCaller(t *testing.T) {
 	}
 }
 
+// The Probes tile is the visible half of probeFilter's subtraction (#1303), and
+// the guards around it are one-sided without this: the per-selector exclusion
+// test and the carve-out above both pass with the tile deleted outright — the
+// carve-out only fires on queries that already contain the route literal. Pin
+// existence, so the subtracted traffic is charted somewhere by construction.
+//
+// Every registry service, not just one_d4: since #1307 every entry's container
+// is probed (deploy's config test pins that side), so every service's Serving
+// numbers have probe traffic subtracted, and each needs its own scoped tile
+// showing it.
 func TestEveryProbedServiceKeepsItsProbesTile(t *testing.T) {
 	// Guards the guard: over an empty serviceOrder the loop asserts nothing.
 	require.NotEmpty(t, serviceOrder)
