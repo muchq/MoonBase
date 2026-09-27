@@ -11,9 +11,11 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "opal/http/beast_transport.h"
 #include "opal/http/forwarded.h"
+#include "opal/http/headers.h"
 #include "opal/server/middleware.h"
 
 namespace futility::otel {
@@ -56,7 +58,20 @@ class HttpMetricsSink {
   virtual void RecordRequestStart(const std::string& method) = 0;
   virtual void RecordRequestComplete(const std::string& route, const std::string& method,
                                      int status_code, std::chrono::microseconds duration) = 0;
+  virtual void RecordRequestCaller(const std::string& caller) = 0;
 };
+
+/// Who sent a request, for http_server_requests_by_caller: kEdgeCaller for
+/// anything the gateway forwarded, the internal caller a direct request's
+/// User-Agent names in its first product token, and kOtherCaller for any
+/// other direct request. The gateway always adds x-forwarded-for and
+/// internal callers never do, so a User-Agent can name a caller only from
+/// inside the compose network. server_pal's INTERNAL_CALLERS is the same
+/// list, pinned by //domains/platform/libs/otel_contract.
+inline constexpr std::string_view kInternalCallers[] = {"games_hub", "mcpserver"};
+inline constexpr char kEdgeCaller[] = "edge";
+inline constexpr char kOtherCaller[] = "other";
+std::string CallerOf(const opal::http::Headers& headers);
 
 /// A sink forwarding to futility::otel::HttpMetricsManager, the shared HTTP
 /// serving instruments (http_server_requests,
@@ -74,6 +89,7 @@ std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
 ///     histogram at completion, labeled with the bounded route — the matched
 ///     Smithy operation name from the generated router, kHealthRoute for the
 ///     endpoint ProductionChain composes, kUnmatchedRoute for everything else
+///   - http_server_requests_by_caller at start, labeled with CallerOf
 ///   - one access-log line per request except health probes, which are
 ///     metered but not logged: the runtime's FormatAccessLog record
 ///     (opal/server/access_log.h — http_method, target, route, status,

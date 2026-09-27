@@ -28,6 +28,9 @@ class OtelHttpMetricsSink final : public HttpMetricsSink {
                              std::chrono::microseconds duration) override {
     metrics_->RecordRequestComplete(route, method, status_code, duration);
   }
+  void RecordRequestCaller(const std::string& caller) override {
+    metrics_->RecordRequestCaller(caller);
+  }
 
  private:
   std::shared_ptr<futility::otel::HttpMetricsManager> metrics_;
@@ -143,6 +146,17 @@ void LogAccess(const opal::server::RequestObservation& observation) {
 
 }  // namespace
 
+std::string CallerOf(const opal::http::Headers& headers) {
+  if (headers.Get("x-forwarded-for").has_value()) return kEdgeCaller;
+  const std::string user_agent = headers.Get("user-agent").value_or("");
+  const std::string_view product =
+      std::string_view(user_agent).substr(0, user_agent.find_first_of("/ "));
+  for (const std::string_view caller : kInternalCallers) {
+    if (product == caller) return std::string(caller);
+  }
+  return kOtherCaller;
+}
+
 std::shared_ptr<HttpMetricsSink> MakeHttpMetricsSink(
     std::shared_ptr<futility::otel::HttpMetricsManager> metrics) {
   return std::make_shared<OtelHttpMetricsSink>(std::move(metrics));
@@ -156,7 +170,7 @@ opal::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> m
   // handler the router annotated — which RouteLabelOf turns into the bounded
   // route label (#1305). The trust boundary is what lets the observation
   // derive the ADR-0012 client the log line reports.
-  return opal::server::Observe(
+  opal::server::Middleware observe = opal::server::Observe(
       [metrics](const opal::server::RequestObservation& observation) {
         metrics->RecordRequestComplete(RouteLabelOf(observation.operation, observation.target),
                                        MethodLabelOf(observation.method), observation.status,
@@ -167,6 +181,12 @@ opal::server::Middleware ServingObservability(std::shared_ptr<HttpMetricsSink> m
         metrics->RecordRequestStart(MethodLabelOf(start.method));
       },
       /*now=*/nullptr, std::move(trusted_proxies));
+  return [metrics, observe = std::move(observe)](opal::http::RequestHandler next) {
+    return [metrics, observed = observe(std::move(next))](const opal::http::HttpRequest& request) {
+      metrics->RecordRequestCaller(CallerOf(request.headers));
+      return observed(request);
+    };
+  };
 }
 
 opal::http::RequestHandler ProductionChain(ChainOptions options,

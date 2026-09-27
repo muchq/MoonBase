@@ -55,6 +55,15 @@ class RecordingSink final : public aura::HttpMetricsSink {
     completes_.push_back({route, method, status_code, duration});
   }
 
+  void RecordRequestCaller(const std::string& caller) override {
+    const std::lock_guard<std::mutex> lock(mu_);
+    callers_.push_back(caller);
+  }
+
+  std::vector<std::string> callers() {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return callers_;
+  }
   std::vector<StartCall> starts() {
     const std::lock_guard<std::mutex> lock(mu_);
     return starts_;
@@ -68,6 +77,7 @@ class RecordingSink final : public aura::HttpMetricsSink {
   std::mutex mu_;
   std::vector<StartCall> starts_;
   std::vector<CompleteCall> completes_;
+  std::vector<std::string> callers_;
 };
 
 // The innermost handler: echoes 200 for anything, so every observed status
@@ -223,6 +233,31 @@ TEST_F(AuraMiddlewareTest, CompletionCarriesTheMatchedOperationAsItsRoute) {
   EXPECT_EQ(completes[0].method, "POST");
   EXPECT_EQ(completes[0].status, 200);
   EXPECT_GE(completes[0].duration.count(), 0);
+}
+
+TEST_F(AuraMiddlewareTest, ARequestThroughTheGatewayIsFromTheEdgeWhateverItClaims) {
+  Send("POST", "/echo", "hello", kProxy, {{"x-forwarded-for", "203.0.113.7"}});
+  Send("POST", "/echo", "hello", kProxy,
+       {{"x-forwarded-for", "203.0.113.7"}, {"user-agent", "games_hub/1.0"}});
+
+  EXPECT_THAT(sink_->callers(), testing::ElementsAre("edge", "edge"));
+}
+
+TEST_F(AuraMiddlewareTest, ADirectRequestIsFromTheInternalCallerItsUserAgentNames) {
+  Send("POST", "/echo", "hello", "", {{"user-agent", "games_hub/1.0"}});
+  Send("POST", "/echo", "hello", "", {{"user-agent", "games_hub"}});
+  Send("POST", "/echo", "hello", "", {{"user-agent", "mcpserver"}});
+
+  EXPECT_THAT(sink_->callers(), testing::ElementsAre("games_hub", "games_hub", "mcpserver"));
+}
+
+TEST_F(AuraMiddlewareTest, ADirectRequestNamingNoInternalCallerFirstIsOther) {
+  Send("POST", "/echo", "hello");
+  Send("POST", "/echo", "hello", "", {{"user-agent", "curl/8.5.0"}});
+  Send("POST", "/echo", "hello", "", {{"user-agent", "MoonBase games_hub/1.0"}});
+  Send("POST", "/echo", "hello", "", {{"user-agent", "games_hubx/1.0"}});
+
+  EXPECT_THAT(sink_->callers(), testing::ElementsAre("other", "other", "other", "other"));
 }
 
 // Probes are metered (above) but never logged: with a probe every few

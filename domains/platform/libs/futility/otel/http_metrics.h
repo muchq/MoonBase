@@ -49,6 +49,10 @@ class HttpMetricsManager {
   void RecordRequestComplete(const std::string& route, const std::string& method, int status_code,
                              std::chrono::microseconds duration);
 
+  /// Called once per request with who sent it (aura's CallerOf), on a
+  /// counter of its own so the route-labeled instruments keep their shape.
+  void RecordRequestCaller(const std::string& caller);
+
  private:
   std::string service_name_;
   std::unique_ptr<MetricsRecorder> recorder_;

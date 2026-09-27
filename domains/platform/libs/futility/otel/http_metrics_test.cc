@@ -47,6 +47,17 @@ class HttpMetricsManagerTest : public ::testing::Test {
 // Routing hasn't happened at start, so only the gauge moves, and it carries
 // no route — a route label on the gauge would make prom_proxy's negative
 // probe matcher subtract in-flight probes on this rail and not the others.
+TEST_F(HttpMetricsManagerTest, CallerCountsOnItsOwnInstrumentAndNothingElse) {
+  manager_->RecordRequestCaller("games_hub");
+
+  const auto entries = recorder_->Entries();
+  ASSERT_EQ(entries.size(), 1u);
+  EXPECT_EQ(entries[0].name, "http_server_requests_by_caller");
+  EXPECT_EQ(entries[0].value, 1);
+  EXPECT_EQ(entries[0].attributes,
+            (Attributes{{"service_name", "test_service"}, {"caller", "games_hub"}}));
+}
+
 TEST_F(HttpMetricsManagerTest, StartMovesOnlyTheGaugeAndWithoutARoute) {
   manager_->RecordRequestStart("GET");
 

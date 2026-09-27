@@ -36,6 +36,7 @@ constexpr char kScholarsMateJson[] =
 class RecordingSink final : public aura::HttpMetricsSink {
  public:
   void RecordRequestStart(const std::string& /*method*/) override {}
+  void RecordRequestCaller(const std::string& /*caller*/) override {}
   void RecordRequestComplete(const std::string& route, const std::string& /*method*/,
                              int status_code, std::chrono::microseconds /*duration*/) override {
     const std::lock_guard<std::mutex> lock(mu_);

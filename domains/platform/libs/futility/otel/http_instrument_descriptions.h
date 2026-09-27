@@ -37,6 +37,7 @@ inline constexpr HttpInstrumentDescription kHttpInstrumentDescriptions[] = {
     {"http_server_requests_failure", "HTTP requests that returned 4xx or 5xx"},
     {"http_server_requests_active_gauge", "HTTP requests currently in flight"},
     {"http_server_request_duration_microseconds", "HTTP request duration in microseconds"},
+    {"http_server_requests_by_caller", "HTTP requests received, by who sent them"},
 };
 
 /// The canonical description for `instrument_name`, or "" when the name is not
