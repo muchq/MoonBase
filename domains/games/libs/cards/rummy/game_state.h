@@ -20,7 +20,8 @@ using std::string;
 /// The rules this engine plays:
 ///   - 2-4 players, one deck. Two seats are dealt ten cards each, three
 ///     or four seats seven. One card is turned up to start the discard
-///     pile; the rest is the stock. Seat 0 moves first.
+///     pile; the rest is the stock. The opener the table names moves
+///     first (TableState: the seat after the dealer).
 ///   - A turn opens with a draw: the top of the stock, or the top of the
 ///     discard pile. A stock that has run out is refilled by turning the
 ///     discard pile over, all but its top card; with nothing under the top
@@ -84,10 +85,11 @@ struct Player {
 
 /// Deals a fresh game from an already-shuffled deck (drawn from the
 /// back): one card a seat around the table until each has its hand, then
-/// one card face up to the discard pile. Play opens at seat 0's draw.
+/// one card face up to the discard pile. Play opens at `opener`'s draw.
 [[nodiscard]] absl::StatusOr<GameState> dealRummyGame(const string& game_id,
                                                       const std::vector<string>& player_ids,
-                                                      std::deque<Card> shuffled_deck);
+                                                      std::deque<Card> shuffled_deck,
+                                                      int opener = 0);
 
 class GameState {
  public:

@@ -697,21 +697,50 @@ class GamesHubStreamFixture : public testing::Test {
         });
   }
 
-  // A started rummy table. With the NoShuffleDealer the deck is dealt one
-  // card a seat from the back: at two seats alice holds A♠ A♦ K♠ K♦ Q♠
-  // Q♦ J♠ J♦ 10♠ 10♦ and bob the hearts and clubs of the same ranks, 9♠
-  // is turned up, and 9♥ tops the stock.
-  std::optional<ManySeats> MultiSeatRummyTable(int count) {
-    return MultiSeatTableOf<moonbase::games::RummyMove>(
+  // A started rummy table (#1609), between deals: every seat has read the
+  // opening choosing view, and the first seat — the table's creator — is
+  // the dealer.
+  std::optional<ManySeats> ChoosingRummyTable(int count) {
+    auto table = MultiSeatTableOf<moonbase::games::RummyMove>(
         count, Rummy, [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
           return ReceiveRummy(stream, wanted);
         });
+    if (!table.has_value()) return std::nullopt;
+    for (Seat& seat : table->seats) {
+      if (!ReceiveRummy(seat.stream, "gameState").has_value()) return std::nullopt;
+    }
+    return table;
+  }
+
+  // The same table with basic rummy dealt: each seat still has its dealt
+  // view to read. The NoShuffleDealer deals one card a seat from the back,
+  // seat 0 first; the seat after the dealer (seat 1) opens.
+  std::optional<ManySeats> MultiSeatRummyTable(int count) {
+    auto table = ChoosingRummyTable(count);
+    if (!table.has_value()) return std::nullopt;
+    moonbase::games::RummyChooseVariant basic;
+    basic.variant = "basic";
+    if (!table->seats.front()
+             .stream.Send(Rummy(moonbase::games::RummyMove::FromChoosevariant(basic)))
+             .ok()) {
+      return std::nullopt;
+    }
+    return table;
   }
 
   // The castle and rummy tables' twins of SeatedTable: two seats in
   // alice-and-bob form.
   std::optional<Table> SeatedCastleTable() { return AliceAndBob(MultiSeatCastleTable(2)); }
-  std::optional<Table> SeatedRummyTable() { return AliceAndBob(MultiSeatRummyTable(2)); }
+  // Rummy's alice is the seat that opens the deal — seat 1, after the
+  // dealer — and bob deals. At the pristine deck alice holds A♥ A♣ K♥ K♣
+  // Q♥ Q♣ J♥ J♣ 10♥ 10♣, bob the spades and diamonds of the same ranks,
+  // 9♠ is turned up, and 9♥ tops the stock.
+  std::optional<Table> SeatedRummyTable() {
+    auto table = MultiSeatRummyTable(2);
+    if (!table.has_value()) return std::nullopt;
+    return Table{std::move(table->seats[1]), std::move(table->seats[0]), table->room_id,
+                 table->game_id};
+  }
   static std::optional<Table> AliceAndBob(std::optional<ManySeats> table) {
     if (!table.has_value()) return std::nullopt;
     return Table{std::move(table->seats[0]), std::move(table->seats[1]), table->room_id,

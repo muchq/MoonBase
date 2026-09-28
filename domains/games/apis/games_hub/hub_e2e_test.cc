@@ -2049,6 +2049,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"rummy_commands", {{"command", "joinGame"}}},
       {"rummy_commands", {{"command", "startGame"}}},
       {"rummy_commands", {{"command", "leaveGame"}}},
+      {"rummy_commands", {{"command", "chooseVariant"}}},
       {"rummy_commands", {{"command", "drawStock"}}},
       {"rummy_commands", {{"command", "drawDiscard"}}},
       {"rummy_commands", {{"command", "meld"}}},

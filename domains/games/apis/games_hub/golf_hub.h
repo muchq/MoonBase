@@ -35,7 +35,7 @@
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
-#include "domains/games/libs/cards/rummy/game_state.h"
+#include "domains/games/libs/cards/rummy/table.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "moonbase/games/server.h"
@@ -360,8 +360,8 @@ class GolfHub final {
     [[nodiscard]] const castle::GameState& castle() const {
       return std::get<castle::GameState>(*state);
     }
-    [[nodiscard]] const rummy::GameState& rummy() const {
-      return std::get<rummy::GameState>(*state);
+    [[nodiscard]] const rummy::TableState& rummy() const {
+      return std::get<rummy::TableState>(*state);
     }
   };
 
@@ -646,6 +646,9 @@ class GolfHub final {
   /// The local finisher: mirrors the finish commit's stat deltas into the
   /// local member rows (after a kUnavailable leave, with no known commit)
   /// and runs the ceremony.
+  /// Adds a finish's stat deltas to the room's members; the same numbers
+  /// rode the finish commit.
+  void MirrorStatsLocked(Room& room, const std::vector<HubStore::StatsDelta>& deltas);
   void FinalizeGameLocked(const std::string& room_id, Room& room, const std::string& game_id,
                           Outbox& outbox);
 

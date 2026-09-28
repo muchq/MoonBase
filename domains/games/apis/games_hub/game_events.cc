@@ -12,6 +12,7 @@
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/rummy/game_state.h"
+#include "domains/games/libs/cards/rummy/table.h"
 
 namespace games_hub {
 namespace {
@@ -40,8 +41,8 @@ std::string RoomTag(std::string_view room) {
   return tag;
 }
 
-GameFinished FinishedOf(const HostedState& state, std::size_t players) {
-  GameFinished finished{GameKindName(KindOf(state)), kOutcomeCompleted, players};
+std::optional<GameFinished> FinishedOf(const HostedState& state, std::size_t players) {
+  GameFinished finished{VariantWordOf(state), kOutcomeCompleted, players};
   if (const auto* golf_state = std::get_if<golf::GameState>(&state)) {
     // The engine supersedes any knock with this sentinel when a leave
     // drops the table below two seats.
@@ -49,9 +50,20 @@ GameFinished FinishedOf(const HostedState& state, std::size_t players) {
       finished.outcome = kOutcomeAbandoned;
     return finished;
   }
-  if (const auto* rummy_state = std::get_if<rummy::GameState>(&state)) {
-    if (rummy_state->getPhase() == rummy::Phase::Abandoned) finished.outcome = kOutcomeAbandoned;
-    return finished;
+  if (const auto* table = std::get_if<rummy::TableState>(&state)) {
+    const auto& deal = table->getDeal();
+    if (!deal.has_value()) return std::nullopt;
+    if (deal->getPhase() == rummy::Phase::Abandoned) {
+      finished.outcome = kOutcomeAbandoned;
+      return finished;
+    }
+    // Won by play, and the table dealt on to choosing: the deal's end. A
+    // closed table's finished deal was recorded when it finished.
+    if (deal->getPhase() == rummy::Phase::Over &&
+        table->getPhase() == rummy::TablePhase::Choosing) {
+      return finished;
+    }
+    return std::nullopt;
   }
   if (std::get<castle::GameState>(state).getPhase() == castle::Phase::Abandoned) {
     finished.outcome = kOutcomeAbandoned;
