@@ -14,7 +14,34 @@ namespace {
 
 constexpr std::string_view kMention = "@bot";
 
+class Microgpt final : public Responder {
+ public:
+  Microgpt(std::shared_ptr<microgpt::Client> client, std::shared_ptr<ChatStore> store)
+      : client_(std::move(client)), store_(std::move(store)) {}
+
+  const char* Author() const override { return kBotPlayerId; }
+
+  bool Asks(std::string_view text) const override { return BotMention(text).has_value(); }
+
+  opal::Outcome<std::string> Reply(const ChatRow& trigger) const override {
+    auto rows = store_->LoadRecent(trigger.room_id, kChatHistoryLimit);
+    if (!rows.ok()) return opal::Error::Unknown("history load failed: " + rows.status().ToString());
+    auto reply = client_->Chat(BotPrompt(*rows, trigger.message_id), kBotMaxTokens);
+    if (!reply.ok()) return std::move(reply).error();
+    return std::move(reply->content);
+  }
+
+ private:
+  const std::shared_ptr<microgpt::Client> client_;
+  const std::shared_ptr<ChatStore> store_;
+};
+
 }  // namespace
+
+std::shared_ptr<Responder> MicrogptResponder(std::shared_ptr<microgpt::Client> client,
+                                             std::shared_ptr<ChatStore> store) {
+  return std::make_shared<Microgpt>(std::move(client), std::move(store));
+}
 
 std::optional<std::string> BotMention(std::string_view text) {
   if (text.size() < kMention.size()) return std::nullopt;
@@ -64,10 +91,10 @@ std::vector<moonbase::microgpt::Message> BotPrompt(const std::vector<ChatRow>& r
   return prompt;
 }
 
-RoomBot::RoomBot(std::shared_ptr<microgpt::Client> client, std::shared_ptr<ChatStore> store,
+RoomBot::RoomBot(std::shared_ptr<Responder> responder, std::shared_ptr<ChatStore> store,
                  Posted posted, std::shared_ptr<futility::otel::MetricsRecorder> metrics,
                  std::string notify_payload, BotLimits limits)
-    : client_(std::move(client)),
+    : responder_(std::move(responder)),
       store_(std::move(store)),
       posted_(std::move(posted)),
       metrics_(std::move(metrics)),
@@ -86,7 +113,7 @@ RoomBot::~RoomBot() {
 }
 
 void RoomBot::OnMessage(const ChatRow& row) {
-  if (row.player_id == kBotPlayerId || !BotMention(row.text).has_value()) return;
+  if (IsBotAuthor(row.player_id) || !responder_->Asks(row.text)) return;
   const char* refused = nullptr;
   {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -111,7 +138,7 @@ void RoomBot::OnMessage(const ChatRow& row) {
         refused = "rate_limited";
       } else {
         in_flight_.insert(row.room_id);
-        queue_.push_back({row.room_id, row.player_id, row.message_id});
+        queue_.push_back(row);
       }
     }
   }
@@ -129,44 +156,41 @@ void RoomBot::Drain() {
 
 void RoomBot::WorkerMain() {
   while (true) {
-    Job job;
+    ChatRow trigger;
     {
       std::unique_lock<std::mutex> lock(mu_);
       cv_.wait(lock, [this] { return stop_ || !queue_.empty(); });
       if (stop_) return;
-      job = std::move(queue_.front());
+      trigger = std::move(queue_.front());
       queue_.pop_front();
     }
-    Answer(job);
+    Answer(trigger);
     {
       const std::lock_guard<std::mutex> lock(mu_);
-      in_flight_.erase(job.room_id);
+      in_flight_.erase(trigger.room_id);
     }
     cv_.notify_all();
   }
 }
 
-void RoomBot::Answer(const Job& job) {
-  auto rows = store_->LoadRecent(job.room_id, kChatHistoryLimit);
-  if (!rows.ok()) {
-    LOG(WARNING) << "room bot history load failed: " << rows.status();
-    Count("error");
-    return;
-  }
+void RoomBot::Answer(const ChatRow& trigger) {
   const auto started = std::chrono::steady_clock::now();
-  auto reply = client_->Chat(BotPrompt(*rows, job.trigger_id), kBotMaxTokens);
+  auto reply = responder_->Reply(trigger);
   if (metrics_ != nullptr) {
-    metrics_->RecordLatency("bot_latency_us", std::chrono::duration_cast<std::chrono::microseconds>(
-                                                  std::chrono::steady_clock::now() - started));
+    metrics_->RecordLatency("bot_latency_us",
+                            std::chrono::duration_cast<std::chrono::microseconds>(
+                                std::chrono::steady_clock::now() - started),
+                            {{"bot", responder_->Author()}});
   }
   if (!reply.ok()) {
     // A timeout and a refused connection look alike from here: the
     // transport kind is everything short of an answer.
     const bool unreachable = reply.error().kind() == opal::ErrorKind::kTransport;
+    if (!unreachable) LOG(WARNING) << responder_->Author() << ": " << reply.error().message();
     Count(unreachable ? "unreachable" : "error");
     return;
   }
-  const std::string text = TruncateUtf8(reply->content, kChatTextByteLimit);
+  const std::string text = TruncateUtf8(*std::move(reply), kChatTextByteLimit);
   if (absl::StripAsciiWhitespace(text).empty()) {
     Count("empty");
     return;
@@ -177,18 +201,20 @@ void RoomBot::Answer(const Job& job) {
     Count("error");
     return;
   }
-  auto appended = store_->AppendAs(job.room_id, job.asker_id, kBotPlayerId, text, notify_payload_);
+  auto appended = store_->AppendAs(trigger.room_id, trigger.player_id, responder_->Author(), text,
+                                   notify_payload_);
   if (!appended.ok()) {
-    // Mostly an asker who left while microgpt was thinking.
+    // Mostly an asker who left while the service was thinking.
     Count("error");
     return;
   }
   Count("ok");
-  posted_(job.room_id);
+  posted_(trigger.room_id);
 }
 
 void RoomBot::Count(const char* result) {
-  if (metrics_ != nullptr) metrics_->RecordCounter("bot_requests", 1, {{"result", result}});
+  if (metrics_ != nullptr)
+    metrics_->RecordCounter("bot_requests", 1, {{"bot", responder_->Author()}, {"result", result}});
 }
 
 void RoomBot::PruneBudgetsLocked(std::chrono::steady_clock::time_point now) {

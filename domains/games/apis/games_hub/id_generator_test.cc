@@ -54,11 +54,12 @@ TEST(WhimsicalIdGenerator, PlayerIdIsLowercaseSlugWithThreeWords) {
   }
 }
 
-// The room bot posts as kBotPlayerId (#1591), and its replies are told
-// apart by that id alone: no generator may mint it. Every minted id has
-// a hyphen and the bot's has none.
-TEST(IdGenerators, NeverMintTheBotsId) {
+// The room bots post as kBotPlayerId (#1591) and kWordchainPlayerId, and
+// their replies are told apart by those ids alone: no generator may mint
+// one. Every minted id has a hyphen and the bots' have none.
+TEST(IdGenerators, NeverMintTheBotsIds) {
   ASSERT_EQ(std::string(kBotPlayerId).find('-'), std::string::npos);
+  ASSERT_EQ(std::string(kWordchainPlayerId).find('-'), std::string::npos);
   WhimsicalIdGenerator whimsical;
   SequentialIdGenerator sequential;
   RemoteIdGenerator remote;

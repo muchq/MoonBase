@@ -12,3 +12,6 @@ server_pal = {workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing = { workspace = true }
 wordchains = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

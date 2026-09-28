@@ -149,7 +149,7 @@ instances that started polling at different times hold different last-32
 windows, so what a joiner finds already on the glass depends on which one
 answered them. A wall is a mood rather than a log, so that is left alone.
 
-## The room bot
+## The room bots
 
 A room chat message that starts with `@bot` (any case, then whitespace or
 nothing) is answered by microgpt-serve (#1591), posted into the room's
@@ -172,10 +172,21 @@ attempt, 5 s, `max_tokens` 60.
 The reply is cut to 500 bytes on a character boundary and appended on the
 asker's membership, so an asker who left meanwhile gets nothing posted.
 microgpt down, slow, refusing or saying nothing posts nothing either:
-every outcome is a `bot_requests{result}` count (`ok`, `empty`, `busy`,
-`rate_limited`, `unreachable`, `error`) and `bot_latency_us`, never an
-error in chat. `MICROGPT_URL` unset leaves the bot off, and a mention is
-only chat.
+every outcome is a `bot_requests{bot="microgpt",result}` count (`ok`,
+`empty`, `busy`, `rate_limited`, `unreachable`, `error`) and
+`bot_latency_us{bot}`, never an error in chat. `MICROGPT_URL` unset leaves
+the bot off, and a mention is only chat.
+
+`/wordchain start end` is answered by mithril the same way, on its own
+worker with its own budgets, counted under `bot="mithril"`. The command is two
+words of 3 to 8 letters (the longest mithril's dictionary holds),
+lowercased; anything else is only chat. The call
+is `POST /mithril/v1/wordchain` over `//domains/games/libs/mithril_cpp`,
+one attempt, 2 s. The reply is posted as `mithril` and reads
+`cold → cord → card → ward → warm`, or `no ladder from cold to hot` (an
+unknown word included), or, past 500 bytes, how many rungs it has; its
+`roomChat` carries the same ladder as `wordchain`, read back out of the
+stored text, so a replay has it too. `MITHRIL_URL` unset leaves it off.
 
 ## Game events
 

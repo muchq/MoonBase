@@ -241,13 +241,14 @@ structure ChatMessage {
     @required
     messageId: Long
 
-    /// The author. The room bot's replies (#1591) carry the reserved id
-    /// "microgpt", which no player id can equal.
+    /// The author. A bot's replies carry its reserved id, which no player
+    /// id can equal: "microgpt" answering "@bot" (#1591), "mithril"
+    /// answering "/wordchain". Clients show it as the reply's source.
     @required
     playerId: String
 
-    /// True on the room bot's replies, absent on everyone else's, so a
-    /// client never has to know the bot's name.
+    /// True on a bot's replies, absent on everyone else's, so a client
+    /// never has to know the bots' names.
     bot: Boolean
 
     @required
@@ -255,6 +256,25 @@ structure ChatMessage {
 
     @required
     sentAtUnixMillis: Long
+
+    /// On mithril's replies, the ladder `text` spells out.
+    wordchain: Wordchain
+}
+
+/// A word ladder from `start` to `end`, one letter changed per rung.
+structure Wordchain {
+    @required
+    start: String
+
+    @required
+    end: String
+
+    /// Every rung, both ends included; absent when no ladder joins them.
+    path: WordchainRungs
+}
+
+list WordchainRungs {
+    member: String
 }
 
 list ChatMessages {

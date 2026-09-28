@@ -1131,6 +1131,7 @@ func TestOneD4RunDurationQueriesConvertToTheUnitTheyClaim(t *testing.T) {
 var internalCallers = map[string][]string{
 	"deja":           {"games_hub"},
 	"microgpt-serve": {"games_hub"},
+	"mithril":        {"games_hub"},
 	"one_d4_v2":      {"mcpserver"},
 }
 

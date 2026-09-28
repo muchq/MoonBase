@@ -20,10 +20,11 @@ calls `deja` (`DEJA_URL`), and what comes back is deja's prediction.
 
 Every request *from outside* reaches a service through caddy. Plenty of
 traffic inside does not, because it is made between containers on
-`app_network`. Five of those are application calls: mcpserver to one_d4
+`app_network`. Six of those are application calls: mcpserver to one_d4
 (`ONE_D4_BASE_URL`) and to one_d4_v2 (`ONE_D4_V2_BASE_URL`), games_hub to
-deja (`DEJA_URL`) and to microgpt-serve for the room bot (`MICROGPT_URL`),
-and prom_proxy to prometheus (`PROMETHEUS_URL`). Every
+deja (`DEJA_URL`), to microgpt-serve for the room bot (`MICROGPT_URL`) and
+to mithril for `/wordchain` in room chat (`MITHRIL_URL`), and prom_proxy to
+prometheus (`PROMETHEUS_URL`). Every
 service's OTLP export to otelcol is another, and prometheus scrapes otelcol
 and cadvisor on top. The diagram draws all of them.
 
@@ -42,8 +43,8 @@ The other callees count their callers the same way. aura and server_pal
 record `http_server_requests_by_caller`: `edge` for anything caddy
 forwarded, `games_hub` or `mcpserver` for a direct call whose User-Agent
 names it, `other` for any other. Each callee's page on `/metrics` has a
-Callers group — deja and microgpt-serve split the hub's calls from the
-public ones, one_d4_v2 mcpserver's — and `deploy_config_test` fails when
+Callers group — deja, microgpt-serve and mithril split the hub's calls
+from the public ones, one_d4_v2 mcpserver's — and `deploy_config_test` fails when
 compose wires a caller the rails do not name. A request that reaches a
 published port without caddy names whatever caller it claims. Prometheus
 keeps seven days,
@@ -182,6 +183,7 @@ flowchart LR
 
   games_hub -->|sql| shared_postgres
   games_hub -->|http| microgpt-serve
+  games_hub -->|http| mithril
   one_d4 -->|sql| shared_postgres
   one_d4_worker -->|sql| shared_postgres
   iili -->|sql| shared_postgres
