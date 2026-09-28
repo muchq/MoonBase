@@ -37,6 +37,7 @@
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/apis/games_hub/voice.h"
 #include "domains/games/libs/cards/dealer.h"
+#include "domains/games/libs/mithril_cpp/production_client.h"
 #include "domains/platform/libs/aura/middleware.h"
 #include "domains/platform/libs/event_log/event_log.h"
 #include "domains/platform/libs/futility/env/env.h"
@@ -178,6 +179,21 @@ int main() {
     LOG(INFO) << "Room bot: asking microgpt at " << microgpt_url;
   } else {
     LOG(INFO) << "Room bot: off (MICROGPT_URL unset)";
+  }
+
+  // The wordchain bot: "/wordchain start end" in room chat is answered by
+  // mithril on the app network. Unset, the command is ordinary chat.
+  const char* mithril_url = std::getenv("MITHRIL_URL");
+  if (mithril_url != nullptr && *mithril_url != '\0') {
+    auto wordchain = mithril::CreateProductionClient(mithril_url);
+    if (!wordchain.ok()) {
+      LOG(ERROR) << "Failed to build the mithril client: " << wordchain.error().message();
+      return 1;
+    }
+    golf->StartWordchain(std::make_shared<mithril::Client>(std::move(*wordchain)));
+    LOG(INFO) << "Wordchain bot: asking mithril at " << mithril_url;
+  } else {
+    LOG(INFO) << "Wordchain bot: off (MITHRIL_URL unset)";
   }
 
   // A room's voice (#1590): the STUN servers a voice roster hands each

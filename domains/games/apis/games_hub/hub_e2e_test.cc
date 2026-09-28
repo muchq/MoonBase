@@ -34,6 +34,7 @@
 #include "domains/ai/libs/microgpt_cpp/client.h"
 #include "domains/games/apis/games_hub/chat_store.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
+#include "domains/games/libs/mithril_cpp/client.h"
 
 namespace games_hub {
 namespace {
@@ -925,6 +926,90 @@ TEST_F(GamesHubStreamFixture, BotMessagesReplayFlaggedAsTheBots) {
   EXPECT_FALSE(messages[0].bot.has_value());
   EXPECT_EQ(messages[1].playerId, kBotPlayerId);
   EXPECT_EQ(messages[1].bot, std::optional<bool>(true));
+}
+
+// mithril answering every wordchain request with one ladder.
+class OneLadderMithril final : public opal::http::HttpClient {
+ public:
+  opal::Outcome<opal::http::HttpResponse> Send(const opal::http::HttpRequest&) override {
+    opal::http::HttpResponse response;
+    response.status = 200;
+    response.body = R"({"path":["cold","cord","card","ward","warm"]})";
+    return response;
+  }
+};
+
+// "/wordchain" end to end: mithril's ladder reaches every member after the
+// asker's command, attributed to mithril, with the rungs as structure.
+TEST_F(GamesHubStreamFixture, AWordchainCommandIsAnsweredByMithrilInTheRoom) {
+  opal::ClientConfig config = mithril::DefaultClientConfig("http://mithril:8083");
+  config.http_client = std::make_shared<OneLadderMithril>();
+  auto client = mithril::Client::Create(std::move(config));
+  ASSERT_TRUE(client.ok());
+  golf_->StartWordchain(std::make_shared<mithril::Client>(std::move(*client)));
+
+  auto alice = OpenSeat();
+  auto bob = OpenSeat();
+  ASSERT_TRUE(alice.has_value() && bob.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  moonbase::games::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "roomChatHistory").has_value());
+
+  moonbase::games::Chat chat;
+  chat.text = "/wordchain cold warm";
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromChat(chat)).ok());
+  for (auto* seat : {&*alice, &*bob}) {
+    auto asked = ReceiveCase(seat->stream, "roomChat");
+    ASSERT_TRUE(asked.has_value());
+    EXPECT_EQ(asked->as_roomChat_or_null()->playerId, alice->player_id);
+    EXPECT_FALSE(asked->as_roomChat_or_null()->wordchain.has_value());
+    auto answered = ReceiveCase(seat->stream, "roomChat");
+    ASSERT_TRUE(answered.has_value()) << "no ladder reached " << seat->player_id;
+    const auto* reply = answered->as_roomChat_or_null();
+    EXPECT_EQ(reply->playerId, kWordchainPlayerId);
+    EXPECT_EQ(reply->bot, std::optional<bool>(true));
+    EXPECT_EQ(reply->text, "cold → cord → card → ward → warm");
+    ASSERT_TRUE(reply->wordchain.has_value());
+    EXPECT_EQ(reply->wordchain->start, "cold");
+    EXPECT_EQ(reply->wordchain->end, "warm");
+    EXPECT_EQ(reply->wordchain->path,
+              std::optional<std::vector<std::string>>({"cold", "cord", "card", "ward", "warm"}));
+  }
+}
+
+// mithril's replies replay with their ladder, read back out of the stored
+// text; a "no ladder" reply replays with its ends and no path.
+TEST_F(GamesHubStreamFixture, WordchainRepliesReplayWithTheirLadder) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  ASSERT_TRUE(chat_store_
+                  ->AppendAs(room_id, alice->player_id, kWordchainPlayerId,
+                             "no ladder from cold to hot", "")
+                  .ok());
+
+  auto bob = OpenSeat();
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveCase(bob->stream, "sessionReady").has_value());
+  moonbase::games::JoinRoom join;
+  join.roomId = room_id;
+  ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
+  auto history = ReceiveCase(bob->stream, "roomChatHistory");
+  ASSERT_TRUE(history.has_value());
+  const auto& messages = history->as_roomChatHistory_or_null()->messages;
+  ASSERT_EQ(messages.size(), 1u);
+  EXPECT_EQ(messages[0].playerId, kWordchainPlayerId);
+  EXPECT_EQ(messages[0].bot, std::optional<bool>(true));
+  ASSERT_TRUE(messages[0].wordchain.has_value());
+  EXPECT_EQ(messages[0].wordchain->start, "cold");
+  EXPECT_EQ(messages[0].wordchain->end, "hot");
+  EXPECT_FALSE(messages[0].wordchain->path.has_value());
 }
 
 TEST_F(GamesHubStreamFixture, JoiningReplaysChatHistoryAfterRoomState) {
@@ -1987,12 +2072,18 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"hub_seats_expired", {}},
       {"hub_sessions", {{"resumed", "true"}}},
       {"hub_sessions", {{"resumed", "false"}}},
-      {"bot_requests", {{"result", "ok"}}},
-      {"bot_requests", {{"result", "empty"}}},
-      {"bot_requests", {{"result", "busy"}}},
-      {"bot_requests", {{"result", "rate_limited"}}},
-      {"bot_requests", {{"result", "unreachable"}}},
-      {"bot_requests", {{"result", "error"}}},
+      {"bot_requests", {{"bot", "microgpt"}, {"result", "ok"}}},
+      {"bot_requests", {{"bot", "microgpt"}, {"result", "empty"}}},
+      {"bot_requests", {{"bot", "microgpt"}, {"result", "busy"}}},
+      {"bot_requests", {{"bot", "microgpt"}, {"result", "rate_limited"}}},
+      {"bot_requests", {{"bot", "microgpt"}, {"result", "unreachable"}}},
+      {"bot_requests", {{"bot", "microgpt"}, {"result", "error"}}},
+      {"bot_requests", {{"bot", "mithril"}, {"result", "ok"}}},
+      {"bot_requests", {{"bot", "mithril"}, {"result", "empty"}}},
+      {"bot_requests", {{"bot", "mithril"}, {"result", "busy"}}},
+      {"bot_requests", {{"bot", "mithril"}, {"result", "rate_limited"}}},
+      {"bot_requests", {{"bot", "mithril"}, {"result", "unreachable"}}},
+      {"bot_requests", {{"bot", "mithril"}, {"result", "error"}}},
   };
 
   auto capture = MakeCapturingMetricsRecorder();

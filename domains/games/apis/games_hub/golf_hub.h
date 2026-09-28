@@ -30,6 +30,7 @@
 #include "domains/games/apis/games_hub/room_bot.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/apis/games_hub/voice.h"
+#include "domains/games/apis/games_hub/wordchain.h"
 #include "domains/games/apis/games_hub/world.h"
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/dealer.h"
@@ -274,8 +275,14 @@ class GolfHub final {
   /// Starts the room bot (#1591): "@bot" mentions in room chat are
   /// answered by microgpt through `client`. main starts it when
   /// MICROGPT_URL is set; unstarted, a mention is ordinary chat. Call
-  /// before serving; a second call changes nothing.
+  /// once, before serving.
   void StartRoomBot(std::shared_ptr<microgpt::Client> client, BotLimits limits = {});
+
+  /// Starts the wordchain bot: "/wordchain start end" in room chat is
+  /// answered by mithril through `client`. main starts it when MITHRIL_URL
+  /// is set; unstarted, the command is ordinary chat. Call once, before
+  /// serving.
+  void StartWordchain(std::shared_ptr<mithril::Client> client, BotLimits limits = {});
 
   /// Starts the room heartbeat: StampHeldRooms then SweepStaleRooms every
   /// `interval` until the hub is destroyed. main starts it when rooms persist; without a
@@ -322,6 +329,8 @@ class GolfHub final {
   static constexpr std::chrono::milliseconds kTapePollMax{2000};
 
  private:
+  void StartBot(std::shared_ptr<Responder> responder, BotLimits limits);
+
   struct Member {
     bool connected = true;
     int games_played = 0;
@@ -700,10 +709,11 @@ class GolfHub final {
   bool heartbeat_stop_ = false;
   std::thread heartbeat_;
 
-  /// Set once before serving and read without a lock thereafter, like the
-  /// tape's client. Reset first in ~GolfHub: its worker delivers through
-  /// PumpChat, so it must be gone before anything that reaches.
-  std::unique_ptr<RoomBot> bot_;
+  /// Set before serving and read without a lock thereafter, like the
+  /// tape's client; one per responder. Cleared first in ~GolfHub: their
+  /// workers deliver through PumpChat, so they must be gone before
+  /// anything that reaches.
+  std::vector<std::unique_ptr<RoomBot>> bots_;
 
   // Declared last: destroyed first, joining registry threads before the
   // maps its on_expired callback touches go away. (The boot reaper is

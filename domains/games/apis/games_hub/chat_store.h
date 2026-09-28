@@ -8,6 +8,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "absl/status/status.h"
@@ -21,9 +22,14 @@ inline constexpr std::size_t kChatTextByteLimit = 500;
 /// yields the lock between pages, large enough that draining the whole
 /// retention window is a handful of reads.
 inline constexpr std::size_t kChatCatchUpPage = 16;
-/// The reserved author of the room bot's replies (#1591). No player can
-/// hold it: every minted player id has hyphens.
+/// The reserved authors of the room bots' replies: microgpt's to "@bot"
+/// (#1591), mithril's to "/wordchain". No player can hold either: every
+/// minted player id has hyphens.
 inline constexpr char kBotPlayerId[] = "microgpt";
+inline constexpr char kWordchainPlayerId[] = "mithril";
+inline bool IsBotAuthor(std::string_view player_id) {
+  return player_id == kBotPlayerId || player_id == kWordchainPlayerId;
+}
 inline std::string ChatChannel(const std::string& room_id) { return "chat_" + room_id; }
 
 /// Rejects text a room cannot store: empty or whitespace-only, over
