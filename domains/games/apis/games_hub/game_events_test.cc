@@ -19,6 +19,7 @@
 #include "domains/games/libs/cards/castle/player.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/golf/player.h"
+#include "domains/games/libs/cards/rummy/game_state.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -56,6 +57,22 @@ castle::GameState Castle() {
   return castle::GameState{
       {},     {},  {CastleSeat("andy"), CastleSeat("mercy")}, 0, castle::Phase::Playing, {},
       "game", "v0"};
+}
+
+/// Two rummy seats, seat 0 holding one card after its draw: a discard
+/// goes out.
+rummy::GameState Rummy() {
+  return rummy::GameState{
+      {Card{Suit::Clubs, Rank::Two}},
+      {Card{Suit::Clubs, Rank::Three}},
+      {{"andy", {Card{Suit::Clubs, Rank::Five}}}, {"mercy", {Card{Suit::Clubs, Rank::Six}}}},
+      {},
+      0,
+      rummy::Stage::Play,
+      rummy::Phase::Playing,
+      std::nullopt,
+      "game",
+      "v0"};
 }
 
 TEST(GameEvents, AGolfGamePlayedOutIsCompleted) {
@@ -100,6 +117,28 @@ TEST(GameEvents, ACastleGameLeftBelowTwoSeatsIsAbandoned) {
 
   const GameFinished finished = FinishedOf(HostedState(*gone), 1);
   EXPECT_EQ(finished.variant, "castle");
+  EXPECT_EQ(finished.outcome, "abandoned");
+  EXPECT_EQ(finished.players, 1u);
+}
+
+TEST(GameEvents, ARummyGamePlayedOutIsCompleted) {
+  const absl::StatusOr<rummy::GameState> over = Rummy().discard(0, Card{Suit::Clubs, Rank::Five});
+  ASSERT_TRUE(over.ok()) << over.status();
+  ASSERT_EQ(over->getPhase(), rummy::Phase::Over);
+
+  const GameFinished finished = FinishedOf(HostedState(*over), 2);
+  EXPECT_EQ(finished.variant, "rummy");
+  EXPECT_EQ(finished.outcome, "completed");
+  EXPECT_EQ(finished.players, 2u);
+}
+
+TEST(GameEvents, ARummyGameLeftBelowTwoSeatsIsAbandoned) {
+  const absl::StatusOr<rummy::GameState> gone = Rummy().removePlayer(1);
+  ASSERT_TRUE(gone.ok()) << gone.status();
+  ASSERT_EQ(gone->getPhase(), rummy::Phase::Abandoned);
+
+  const GameFinished finished = FinishedOf(HostedState(*gone), 1);
+  EXPECT_EQ(finished.variant, "rummy");
   EXPECT_EQ(finished.outcome, "abandoned");
   EXPECT_EQ(finished.players, 1u);
 }

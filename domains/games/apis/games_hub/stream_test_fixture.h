@@ -197,6 +197,14 @@ inline std::optional<moonbase::games::CastleUpdate> ReceiveCastle(
       [](const moonbase::games::GameEvents& event) { return event.as_castle_or_null(); }, budget);
 }
 
+inline std::optional<moonbase::games::RummyUpdate> ReceiveRummy(
+    moonbase::games::PlayClientStream& stream, const std::string& wanted,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  return ReceiveEnvelope(
+      stream, wanted, "rummy",
+      [](const moonbase::games::GameEvents& event) { return event.as_rummy_or_null(); }, budget);
+}
+
 inline std::optional<moonbase::games::LobbyUpdate> ReceiveLobby(
     moonbase::games::PlayClientStream& stream, const std::string& wanted,
     std::chrono::milliseconds budget = kReceiveBudget) {
@@ -294,6 +302,19 @@ std::optional<moonbase::games::CastleView> AwaitCastleView(
       predicate, waiting_for, budget);
 }
 
+template <typename Predicate>
+std::optional<moonbase::games::RummyView> AwaitRummyView(
+    moonbase::games::PlayClientStream& stream, Predicate&& predicate,
+    const std::string& waiting_for, std::chrono::milliseconds budget = kReceiveBudget) {
+  return AwaitMatching(
+      [&](std::chrono::milliseconds remaining) -> std::optional<moonbase::games::RummyView> {
+        auto update = ReceiveRummy(stream, "gameState", remaining);
+        if (!update.has_value()) return std::nullopt;
+        return update->as_gameState_or_null()->view;
+      },
+      predicate, waiting_for, budget);
+}
+
 // Effectively-unlimited stream budgets (#1240) for suites whose flows
 // send at test speed, not human speed. Every direct GolfHub
 // construction in a test should pass this unless the test is about the
@@ -372,7 +393,7 @@ inline moonbase::games::GameCommands Lobby(moonbase::games::LobbyAction action) 
   return moonbase::games::GameCommands::FromLobby(std::move(command));
 }
 
-// A card the way a castle move names one (#1505) — the wire's own
+// A card the way a castle or rummy move names one (#1505) — the wire's own
 // spelling, spelled out here rather than borrowed from the hub.
 inline moonbase::games::Card Named(const std::string& rank, const std::string& suit) {
   moonbase::games::Card card;
@@ -386,6 +407,13 @@ inline moonbase::games::GameCommands Castle(moonbase::games::CastleMove move) {
   moonbase::games::CastleCommand command;
   command.move = std::move(move);
   return moonbase::games::GameCommands::FromCastle(std::move(command));
+}
+
+// And rummy's: a RummyMove in its envelope on the room stream.
+inline moonbase::games::GameCommands Rummy(moonbase::games::RummyMove move) {
+  moonbase::games::RummyCommand command;
+  command.move = std::move(move);
+  return moonbase::games::GameCommands::FromRummy(std::move(command));
 }
 
 // Captures every metric the hub records so tests can assert what is
@@ -617,12 +645,10 @@ class GamesHubStreamFixture : public testing::Test {
     return Table{std::move(alice), std::move(bob), room->room_id, game_id};
   }
 
-  // A started castle table of `count` seats, the first its creator; each
-  // seat has heard gameStarted and still has its setup view to read.
-  // With the NoShuffleDealer seat 0 holds the aces face down, A♣ K♠ K♥
-  // face up and K♦ K♣ Q♠ in hand; seat 1 the queens, jacks and J♣ 10♠
-  // 10♥; the rest follow down the deck.
-  struct CastleTable {
+  // A started table of `count` seats, the first its creator, in the
+  // envelope `wrap` puts a move in and `receive` reads an update out of;
+  // each seat has heard gameStarted and still has its first view to read.
+  struct ManySeats {
     std::vector<Seat> seats;
     std::string room_id;
     std::string game_id;
@@ -632,39 +658,61 @@ class GamesHubStreamFixture : public testing::Test {
       return ids;
     }
   };
-  std::optional<CastleTable> MultiSeatCastleTable(int count) {
-    using moonbase::games::CastleMove;
+  template <typename MoveUnion, typename Wrap, typename Receive>
+  std::optional<ManySeats> MultiSeatTableOf(int count, Wrap wrap, Receive receive) {
     auto room = SeatedRoom(count);
     if (!room.has_value()) return std::nullopt;
-    CastleTable table{std::move(room->seats), room->room_id, ""};
+    ManySeats table{std::move(room->seats), room->room_id, ""};
     Seat& host = table.seats.front();
-    if (!host.stream.Send(Castle(CastleMove::FromCreategame(moonbase::games::CreateGame{}))).ok()) {
+    if (!host.stream.Send(wrap(MoveUnion::FromCreategame(moonbase::games::CreateGame{}))).ok()) {
       return std::nullopt;
     }
-    auto created = ReceiveCastle(host.stream, "gameJoined");
+    auto created = receive(host.stream, "gameJoined");
     if (!created.has_value()) return std::nullopt;
     table.game_id = created->as_gameJoined_or_null()->view.gameId;
     moonbase::games::JoinGame join_game;
     join_game.gameId = table.game_id;
     for (std::size_t i = 1; i < table.seats.size(); ++i) {
-      if (!table.seats[i].stream.Send(Castle(CastleMove::FromJoingame(join_game))).ok()) {
+      if (!table.seats[i].stream.Send(wrap(MoveUnion::FromJoingame(join_game))).ok()) {
         return std::nullopt;
       }
-      if (!ReceiveCastle(table.seats[i].stream, "gameJoined").has_value()) return std::nullopt;
+      if (!receive(table.seats[i].stream, "gameJoined").has_value()) return std::nullopt;
     }
-    if (!host.stream.Send(Castle(CastleMove::FromStartgame(moonbase::games::StartGame{}))).ok()) {
+    if (!host.stream.Send(wrap(MoveUnion::FromStartgame(moonbase::games::StartGame{}))).ok()) {
       return std::nullopt;
     }
     for (Seat& seat : table.seats) {
-      if (!ReceiveCastle(seat.stream, "gameStarted").has_value()) return std::nullopt;
+      if (!receive(seat.stream, "gameStarted").has_value()) return std::nullopt;
     }
     return table;
   }
 
-  // The castle table's twin of SeatedTable: MultiSeatCastleTable(2) in
+  // A started castle table. With the NoShuffleDealer seat 0 holds the
+  // aces face down, A♣ K♠ K♥ face up and K♦ K♣ Q♠ in hand; seat 1 the
+  // queens, jacks and J♣ 10♠ 10♥; the rest follow down the deck.
+  std::optional<ManySeats> MultiSeatCastleTable(int count) {
+    return MultiSeatTableOf<moonbase::games::CastleMove>(
+        count, Castle, [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+          return ReceiveCastle(stream, wanted);
+        });
+  }
+
+  // A started rummy table. With the NoShuffleDealer the deck is dealt one
+  // card a seat from the back: at two seats alice holds A♠ A♦ K♠ K♦ Q♠
+  // Q♦ J♠ J♦ 10♠ 10♦ and bob the hearts and clubs of the same ranks, 9♠
+  // is turned up, and 9♥ tops the stock.
+  std::optional<ManySeats> MultiSeatRummyTable(int count) {
+    return MultiSeatTableOf<moonbase::games::RummyMove>(
+        count, Rummy, [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+          return ReceiveRummy(stream, wanted);
+        });
+  }
+
+  // The castle and rummy tables' twins of SeatedTable: two seats in
   // alice-and-bob form.
-  std::optional<Table> SeatedCastleTable() {
-    auto table = MultiSeatCastleTable(2);
+  std::optional<Table> SeatedCastleTable() { return AliceAndBob(MultiSeatCastleTable(2)); }
+  std::optional<Table> SeatedRummyTable() { return AliceAndBob(MultiSeatRummyTable(2)); }
+  static std::optional<Table> AliceAndBob(std::optional<ManySeats> table) {
     if (!table.has_value()) return std::nullopt;
     return Table{std::move(table->seats[0]), std::move(table->seats[1]), table->room_id,
                  table->game_id};

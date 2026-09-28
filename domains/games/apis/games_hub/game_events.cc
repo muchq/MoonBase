@@ -11,6 +11,7 @@
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/golf/game_state.h"
+#include "domains/games/libs/cards/rummy/game_state.h"
 
 namespace games_hub {
 namespace {
@@ -46,6 +47,10 @@ GameFinished FinishedOf(const HostedState& state, std::size_t players) {
     // drops the table below two seats.
     if (golf_state->getWhoKnocked() == golf::GameState::kAbandoned)
       finished.outcome = kOutcomeAbandoned;
+    return finished;
+  }
+  if (const auto* rummy_state = std::get_if<rummy::GameState>(&state)) {
+    if (rummy_state->getPhase() == rummy::Phase::Abandoned) finished.outcome = kOutcomeAbandoned;
     return finished;
   }
   if (std::get<castle::GameState>(state).getPhase() == castle::Phase::Abandoned) {

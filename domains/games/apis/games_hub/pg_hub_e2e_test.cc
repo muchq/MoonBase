@@ -719,6 +719,97 @@ TEST_F(PgGamesHubFixture, CastleTableSurvivesARestart) {
   EXPECT_EQ(rows.games[0].version, version_before + 1);
 }
 
+// A rummy table (#245) behind the same rows: a turn caught mid-way — the
+// discard's top taken, a meld down — survives a restart with the taken
+// card still barred from going back, and the turn finishes on the
+// restored table.
+TEST_F(PgGamesHubFixture, RummyTableSurvivesARestartMidTurn) {
+  using moonbase::games::RummyMove;
+  auto table = SeatedRummyTable();
+  ASSERT_TRUE(table.has_value());
+  Seat& alice = table->alice;
+  Seat& bob = table->bob;
+  ASSERT_TRUE(ReceiveRummy(alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveRummy(bob.stream, "gameState").has_value());
+
+  ASSERT_TRUE(
+      alice.stream.Send(Rummy(RummyMove::FromDrawdiscard(moonbase::games::RummyDrawDiscard{})))
+          .ok());
+  ASSERT_TRUE(ReceiveRummy(alice.stream, "gameState").has_value());
+  moonbase::games::RummyMeld meld;
+  meld.cards = {Named("A", "♠"), Named("K", "♠"), Named("Q", "♠")};
+  ASSERT_TRUE(alice.stream.Send(Rummy(RummyMove::FromMeld(meld))).ok());
+  auto before_update = ReceiveRummy(alice.stream, "gameState");
+  ASSERT_TRUE(before_update.has_value());
+  const moonbase::games::RummyView before = before_update->as_gameState_or_null()->view;
+  ASSERT_EQ(before.melds.size(), 1u);
+
+  const int64_t version_before = [&] {
+    auto rows = Rows();
+    EXPECT_EQ(rows.games.size(), 1u);
+    if (!rows.games.empty()) EXPECT_EQ(rows.games[0].kind, GameKind::kRummy);
+    return rows.games.empty() ? 0 : rows.games[0].version;
+  }();
+  ASSERT_GT(version_before, 0);
+
+  const std::string alice_token = alice.resume_token;
+  const std::string bob_token = bob.resume_token;
+  RestartHub();
+
+  auto alice_back = OpenSeat(alice_token);
+  ASSERT_TRUE(alice_back.has_value());
+  ASSERT_TRUE(ReceiveCase(alice_back->stream, "sessionReady").has_value());
+  auto resynced = ReceiveRummy(alice_back->stream, "gameJoined");
+  ASSERT_TRUE(resynced.has_value());
+  const auto& after = resynced->as_gameJoined_or_null()->view;
+  EXPECT_EQ(after.phase, "playing");
+  EXPECT_EQ(after.currentPlayerId.value_or(""), alice.player_id);
+  EXPECT_EQ(after.stage.value_or(""), "play");
+  EXPECT_EQ(after.stockCount, before.stockCount);
+  EXPECT_EQ(after.discardCount, 0);
+  ASSERT_TRUE(after.takenDiscard.has_value());
+  EXPECT_EQ(after.takenDiscard->rank + after.takenDiscard->suit, "9♠");
+  ASSERT_EQ(after.melds.size(), 1u);
+  EXPECT_EQ(after.melds[0].owner, alice.player_id);
+  ASSERT_EQ(after.melds[0].cards.size(), 3u);
+  EXPECT_EQ(after.melds[0].cards[0].rank + after.melds[0].cards[0].suit, "Q♠");
+  ASSERT_TRUE(after.lastMove.has_value());
+  EXPECT_EQ(after.lastMove->move, "meld");
+  EXPECT_EQ(after.lastMove->meldIndex.value_or(-1), 0);
+  ASSERT_EQ(after.players.size(), 2u);
+  ASSERT_EQ(after.players[0].hand.size(), before.players[0].hand.size());
+  for (std::size_t i = 0; i < after.players[0].hand.size(); ++i) {
+    EXPECT_EQ(after.players[0].hand[i].rank, before.players[0].hand[i].rank);
+    EXPECT_EQ(after.players[0].hand[i].suit, before.players[0].hand[i].suit);
+  }
+  EXPECT_TRUE(after.players[1].hand.empty());
+  EXPECT_EQ(after.players[1].handCount, 10);
+
+  auto bob_back = OpenSeat(bob_token);
+  ASSERT_TRUE(bob_back.has_value());
+  ASSERT_TRUE(ReceiveCase(bob_back->stream, "sessionReady").has_value());
+  ASSERT_TRUE(ReceiveRummy(bob_back->stream, "gameJoined").has_value());
+
+  // The rule the taken card carries came back with it.
+  moonbase::games::RummyDiscard straight_back;
+  straight_back.card = Named("9", "♠");
+  ASSERT_TRUE(alice_back->stream.Send(Rummy(RummyMove::FromDiscard(straight_back))).ok());
+  auto refused = ReceiveCase(alice_back->stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
+            "you took that card from the discard pile this turn");
+  moonbase::games::RummyDiscard other;
+  other.card = Named("A", "♦");
+  ASSERT_TRUE(alice_back->stream.Send(Rummy(RummyMove::FromDiscard(other))).ok());
+  auto next_turn = ReceiveRummy(bob_back->stream, "turnChanged");
+  ASSERT_TRUE(next_turn.has_value());
+  EXPECT_EQ(next_turn->as_turnChanged_or_null()->playerId, bob.player_id);
+
+  auto rows = Rows();
+  ASSERT_EQ(rows.games.size(), 1u);
+  EXPECT_EQ(rows.games[0].version, version_before + 1);
+}
+
 // A castle table shared across two instances: readies and plays from
 // either side land on the other as projected views, one commit each.
 TEST_F(PgGamesHubFixture, TwoInstancesShareOneCastleTable) {

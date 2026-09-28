@@ -8,6 +8,7 @@
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/libs/cards/castle/game_state_serde.h"
 #include "domains/games/libs/cards/golf/game_state_serde.h"
+#include "domains/games/libs/cards/rummy/game_state_serde.h"
 
 namespace games_hub {
 namespace {
@@ -371,6 +372,10 @@ absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(
   if (!state_json.empty()) {
     if (row.kind == GameKind::kCastle) {
       auto state = castle::deserializeGameState(state_json);
+      if (!state.ok()) return state.status();
+      row.state.emplace(*std::move(state));
+    } else if (row.kind == GameKind::kRummy) {
+      auto state = rummy::deserializeGameState(state_json);
       if (!state.ok()) return state.status();
       row.state.emplace(*std::move(state));
     } else {

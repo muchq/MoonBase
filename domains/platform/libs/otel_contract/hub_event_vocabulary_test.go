@@ -97,7 +97,7 @@ func TestHubEventValuesAgreeBetweenGamesHubAndStats(t *testing.T) {
 		regexp.MustCompile(`hubOutcomes = map\[string\]bool\{([^}]*)\}`), "hubOutcomes"),
 		"an ending the hub can write that stats would count as \"other\"")
 
-	// GameKindName: return kind == GameKind::kCastle ? "castle" : "golf";
+	// GameKindName: case GameKind::kCastle: return "castle"; ... return "golf";
 	hosted, err := os.ReadFile(hubHostedGameH)
 	require.NoError(t, err)
 	kindName := regexp.MustCompile(`(?s)GameKindName\(GameKind kind\) \{(.*?)\n\}`).
