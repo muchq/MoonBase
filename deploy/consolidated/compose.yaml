@@ -71,6 +71,10 @@ services:
       # microgpt-serve, called across the app network. Unset, the bot is
       # off and a mention is ordinary chat.
       MICROGPT_URL: http://microgpt-serve:8087
+      # The wordchain bot: "/wordchain start end" in room chat is answered
+      # by mithril, called across the app network. Unset, the command is
+      # ordinary chat.
+      MITHRIL_URL: http://mithril:8083
       # A room's voice (#1590): the STUN server each voice roster names,
       # so browsers behind NAT can find each other. Audio never touches
       # this host; browsers connect peer to peer.

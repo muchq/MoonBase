@@ -83,3 +83,32 @@ async fn main() {
     event!(Level::INFO, "listening on {}", listen_address);
     serve(app, &listen_address).await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Pinned byte for byte in mithril_cpp's wordchain_wire_test, the client
+    // behind games_hub's /wordchain chat command.
+    const PINNED_REQUEST: &str = r#"{"end":"warm","start":"cold"}"#;
+    const PINNED_FOUND: &str = r#"{"path":["cold","cord","card","ward","warm"]}"#;
+    const PINNED_NONE: &str = r#"{"path":null}"#;
+
+    #[test]
+    fn wordchain_request_is_pinned_on_the_wire() {
+        let req: WordchainRequest = serde_json::from_str(PINNED_REQUEST).unwrap();
+        assert_eq!(req.start, "cold");
+        assert_eq!(req.end, "warm");
+    }
+
+    #[test]
+    fn wordchain_response_is_pinned_on_the_wire() {
+        let path = ["cold", "cord", "card", "ward", "warm"]
+            .map(String::from)
+            .to_vec();
+        let found = WordchainResponse { path: Some(path) };
+        assert_eq!(serde_json::to_string(&found).unwrap(), PINNED_FOUND);
+        let none = WordchainResponse { path: None };
+        assert_eq!(serde_json::to_string(&none).unwrap(), PINNED_NONE);
+    }
+}

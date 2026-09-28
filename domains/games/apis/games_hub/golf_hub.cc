@@ -73,7 +73,8 @@ moonbase::games::ChatMessage ChatEvent(const ChatRow& row) {
   message.playerId = row.player_id;
   message.text = row.text;
   message.sentAtUnixMillis = row.sent_at_unix_millis;
-  if (row.player_id == kBotPlayerId) message.bot = true;
+  if (IsBotAuthor(row.player_id)) message.bot = true;
+  if (row.player_id == kWordchainPlayerId) message.wordchain = WordchainOfText(row.text);
   return message;
 }
 
@@ -397,12 +398,18 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"hub_seats_expired", {}},
       {"hub_sessions", {{"resumed", "true"}}},
       {"hub_sessions", {{"resumed", "false"}}},
-      {"bot_requests", {{"result", "ok"}}},
-      {"bot_requests", {{"result", "empty"}}},
-      {"bot_requests", {{"result", "busy"}}},
-      {"bot_requests", {{"result", "rate_limited"}}},
-      {"bot_requests", {{"result", "unreachable"}}},
-      {"bot_requests", {{"result", "error"}}},
+      {"bot_requests", {{"bot", "microgpt"}, {"result", "ok"}}},
+      {"bot_requests", {{"bot", "microgpt"}, {"result", "empty"}}},
+      {"bot_requests", {{"bot", "microgpt"}, {"result", "busy"}}},
+      {"bot_requests", {{"bot", "microgpt"}, {"result", "rate_limited"}}},
+      {"bot_requests", {{"bot", "microgpt"}, {"result", "unreachable"}}},
+      {"bot_requests", {{"bot", "microgpt"}, {"result", "error"}}},
+      {"bot_requests", {{"bot", "mithril"}, {"result", "ok"}}},
+      {"bot_requests", {{"bot", "mithril"}, {"result", "empty"}}},
+      {"bot_requests", {{"bot", "mithril"}, {"result", "busy"}}},
+      {"bot_requests", {{"bot", "mithril"}, {"result", "rate_limited"}}},
+      {"bot_requests", {{"bot", "mithril"}, {"result", "unreachable"}}},
+      {"bot_requests", {{"bot", "mithril"}, {"result", "error"}}},
   };
   return *kSeries;
 }
@@ -415,7 +422,7 @@ void GolfHub::DeclareMetrics() {
 }
 
 GolfHub::~GolfHub() {
-  bot_.reset();
+  bots_.clear();
   {
     const std::lock_guard<std::mutex> lock(reaper_mu_);
     reaper_stop_ = true;
@@ -566,10 +573,17 @@ moonbase::games::TapeSplat SplatOf(const moonbase::deja::DejaEvent& event) {
 void GolfHub::AttachTape(std::shared_ptr<deja::Client> tape) { tape_ = std::move(tape); }
 
 void GolfHub::StartRoomBot(std::shared_ptr<microgpt::Client> client, BotLimits limits) {
-  if (bot_ != nullptr) return;
-  bot_ = std::make_unique<RoomBot>(
-      std::move(client), chat_store_, [this](const std::string& room_id) { PumpChat(room_id); },
-      metrics_, instance_id_, limits);
+  StartBot(MicrogptResponder(std::move(client), chat_store_), limits);
+}
+
+void GolfHub::StartWordchain(std::shared_ptr<mithril::Client> client, BotLimits limits) {
+  StartBot(WordchainResponder(std::move(client)), limits);
+}
+
+void GolfHub::StartBot(std::shared_ptr<Responder> responder, BotLimits limits) {
+  bots_.push_back(std::make_unique<RoomBot>(
+      std::move(responder), chat_store_, [this](const std::string& room_id) { PumpChat(room_id); },
+      metrics_, instance_id_, limits));
 }
 
 void GolfHub::StartRoomHeartbeat(std::chrono::milliseconds interval) {
@@ -1440,7 +1454,7 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
     // and advancing the cursor over it would skip it for good.
     PumpChat(room_id);
     // After the asker's own row is out, so a reply can only follow it.
-    if (bot_ != nullptr) bot_->OnMessage(*appended);
+    for (const auto& bot : bots_) bot->OnMessage(*appended);
     return;
   }
 

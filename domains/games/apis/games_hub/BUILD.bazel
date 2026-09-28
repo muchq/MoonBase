@@ -233,8 +233,9 @@ cc_library(
     ],
 )
 
-# The room bot (#1591): mention, prompt, budgets, and the worker that
-# calls microgpt off every stream thread and the hub's lock.
+# The room bots: microgpt's mention and prompt (#1591), and the budgets
+# and worker every responder is called through, off every stream thread
+# and the hub's lock.
 cc_library(
     name = "room_bot",
     srcs = ["room_bot.cc"],
@@ -261,6 +262,36 @@ cc_test(
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
+# The /wordchain command: grammar, reply text, and mithril behind it.
+cc_library(
+    name = "wordchain",
+    srcs = ["wordchain.cc"],
+    hdrs = ["wordchain.h"],
+    deps = [
+        ":chat_store",
+        ":games_hub_smithy_server",
+        ":room_bot",
+        "//domains/games/libs/mithril_cpp:client",
+        "@com_google_absl//absl/strings",
+        "@opal_cpp//runtime:core",
+    ],
+)
+
+cc_test(
+    name = "wordchain_test",
+    size = "small",
+    srcs = ["wordchain_test.cc"],
+    deps = [
+        ":chat_store",
+        ":wordchain",
+        "//domains/games/libs/mithril_cpp:client",
+        "@googletest//:gtest_main",
         "@opal_cpp//runtime:client",
         "@opal_cpp//runtime:core",
         "@opal_cpp//runtime:http",
@@ -592,6 +623,7 @@ cc_library(
         ":ticket_vault",
         ":voice",
         ":wire_cards",
+        ":wordchain",
         ":world",
         "//domains/ai/libs/deja_cpp:client",
         "//domains/ai/libs/microgpt_cpp:client",
@@ -601,6 +633,7 @@ cc_library(
         "//domains/games/libs/cards/castle:player",
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:player",
+        "//domains/games/libs/mithril_cpp:client",
         "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/pg:listener",
         "@com_google_absl//absl/log",
@@ -727,10 +760,12 @@ cc_test(
         ":rate_limiter",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/mithril_cpp:client",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
+        "@opal_cpp//runtime:client",
         "@opal_cpp//runtime:core",
         "@opal_cpp//runtime:eventstream",
         "@opal_cpp//runtime:http",
@@ -787,6 +822,7 @@ cc_test(
     ],
     deps = [
         "//domains/ai/libs/microgpt_cpp:client",
+        "//domains/games/libs/mithril_cpp:client",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
         ":games_hub_handler",
@@ -1002,6 +1038,7 @@ cc_binary(
         "//domains/ai/libs/deja_cpp:production_client",
         "//domains/ai/libs/microgpt_cpp:production_client",
         "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/mithril_cpp:production_client",
         "//domains/platform/libs/aura",
         "//domains/platform/libs/event_log",
         "//domains/platform/libs/futility/env",

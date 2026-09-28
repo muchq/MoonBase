@@ -615,12 +615,12 @@ var serviceRegistry = map[string]serviceEntry{
 			"cache_operations": tsCounter(cacheOps("iili", "url_cache")),
 		},
 	},
-	// Wordchains: server_pal's standard instruments plus the standard
-	// Probes tile (#1307).
+	// Wordchains: server_pal's standard instruments, the standard Probes
+	// tile (#1307), and games_hub's share of its callers (/wordchain).
 	"mithril": {
-		CustomScalars: []customScalarDef{
+		CustomScalars: append([]customScalarDef{
 			probesTile("mithril"),
-		},
+		}, callerTiles("mithril", "games_hub")...),
 	},
 	// Image blur/edges: server_pal's standard instruments plus the standard
 	// Probes tile (#1307).
