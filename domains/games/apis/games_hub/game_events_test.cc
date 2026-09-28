@@ -214,18 +214,23 @@ TEST(GameEvents, EveryEventsLineIsTextWithNothingToEscape) {
     lines.emplace_back(ChatMessageLine(when, room, 3), 12);
     lines.emplace_back(GameStartedLine(when, room, "golf", 2), 16);
     lines.emplace_back(GameStartedLine(when, room, "castle", 4), 16);
+    lines.emplace_back(GameStartedLine(when, room, "rummy", 3), 16);
 
     std::vector<HostedState> endings;
     endings.emplace_back(Golf(0));
     endings.emplace_back(*Golf(golf::GameState::kNoKnock).removePlayer(1));
     endings.emplace_back(*Castle().playFromHand(0, {0}));
     endings.emplace_back(*Castle().removePlayer(1));
+    endings.emplace_back(*Rummy().discard(0, Card{Suit::Clubs, Rank::Five}));
+    endings.emplace_back(*Rummy().removePlayer(1));
     for (const HostedState& state : endings) {
       for (std::size_t players = 1; players <= 4; ++players) {
         const GameFinished finished = FinishedOf(state, players);
         EXPECT_TRUE(finished.outcome == kOutcomeCompleted || finished.outcome == kOutcomeAbandoned)
             << finished.outcome;
-        EXPECT_TRUE(finished.variant == "golf" || finished.variant == "castle") << finished.variant;
+        EXPECT_TRUE(finished.variant == "golf" || finished.variant == "castle" ||
+                    finished.variant == "rummy")
+            << finished.variant;
         lines.emplace_back(GameFinishedLine(when, room, finished), 20);
       }
     }
