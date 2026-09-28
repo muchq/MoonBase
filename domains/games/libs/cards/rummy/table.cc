@@ -26,6 +26,14 @@ std::string_view variantName(Variant variant) {
   return "basic";
 }
 
+std::string_view recordedName(Variant variant) {
+  switch (variant) {
+    case Variant::Basic:
+      return "rummy";
+  }
+  return "rummy";
+}
+
 std::optional<Variant> parseVariant(std::string_view name) {
   if (name == "basic") return Variant::Basic;
   return std::nullopt;
@@ -134,11 +142,15 @@ StatusOr<TableState> TableState::removePlayer(int seat) const {
                       gameId,
                       versionId};
   }
-  // The dealer's chair follows its holder; a dealer who left passes it to
-  // the seat after them, wrapping.
+  // The dealer's chair follows its holder. A dealer who left passes the
+  // next deal to the seat after them, wrapping: between deals that seat is
+  // the dealer now; mid-deal the deal's end advances the chair one seat,
+  // so it sits one seat back until then.
+  const int count = static_cast<int>(newSeats.size());
   int newDealer = dealer;
   if (dealer == seat) {
-    newDealer = seat % static_cast<int>(newSeats.size());
+    newDealer = seat % count;
+    if (phase == TablePhase::Playing) newDealer = (newDealer + count - 1) % count;
   } else if (dealer > seat) {
     newDealer--;
   }

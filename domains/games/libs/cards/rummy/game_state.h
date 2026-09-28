@@ -97,7 +97,7 @@ class GameState {
   /// whoseTurn once the game is over.
   static constexpr int kNoTurn = -1;
 
-  /// The hand each seat is dealt at a table of this size.
+  /// The hand each seat is dealt.
   static constexpr int kHandSize = 7;
 
   GameState(std::deque<Card> _stock, std::vector<Card> _discard, std::vector<Player> _players,

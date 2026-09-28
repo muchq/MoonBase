@@ -254,7 +254,9 @@ TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
     }
   }
 
-  // Upserts converge on the latest value; deletes remove exactly their row.
+  // Upserts converge on the latest presence and leave the stats the row
+  // was made with (only a finish's increments move those); deletes remove
+  // exactly their row.
   alice.total_score = 12;
   alice.connected = false;
   store_->Enqueue({PgHubStore::UpsertMember{alice}, PgHubStore::DeleteMember{"R1", "bob"},
@@ -263,7 +265,7 @@ TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
   snapshot = store_->LoadSnapshot();
   ASSERT_TRUE(snapshot.ok());
   ASSERT_EQ(snapshot->members.size(), 1u);
-  EXPECT_EQ(snapshot->members[0].total_score, 12);
+  EXPECT_EQ(snapshot->members[0].total_score, 9);
   EXPECT_FALSE(snapshot->members[0].connected);
   ASSERT_EQ(snapshot->games.size(), 1u);
   EXPECT_EQ(snapshot->games[0].game_id, "G2");
@@ -379,6 +381,32 @@ TEST_F(PgHubStoreTest, FinishCommitAppliesStatsExactlyOnce) {
   ASSERT_TRUE(landed.ok());
   EXPECT_FALSE(*landed);
   expect_stats();
+}
+
+// Stats move only by a finish's increments. A presence write from an
+// instance that has not yet heard of a finish carries stale stats, and a
+// rummy table finishes a deal every hand (#1609): the write updates
+// presence and leaves the counts to the increments that own them.
+TEST_F(PgHubStoreTest, PresenceWritesLeaveStatsToTheirIncrements) {
+  store_->Enqueue(
+      {PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertMember{{"R1", "alice", true, 3, 1, 10}}});
+  store_->Flush();
+  auto started = store_->CommitGameSave({"R1", "G1", {"alice"}, std::nullopt, 1}, "start");
+  ASSERT_TRUE(started.ok() && *started);
+  auto landed = store_->CommitGameFinish({"R1", "G1", {"alice"}, DealtState(), 2},
+                                         {{"alice", 1, 1, 4}}, "over");
+  ASSERT_TRUE(landed.ok() && *landed) << landed.status();
+
+  // The sibling's stale view of alice: her stats from before the finish.
+  store_->Enqueue({PgHubStore::UpsertMember{{"R1", "alice", false, 3, 1, 10}}});
+  store_->Flush();
+  auto room = store_->LoadRoom("R1");
+  ASSERT_TRUE(room.ok()) << room.status();
+  ASSERT_EQ(room->members.size(), 1u);
+  EXPECT_FALSE(room->members[0].connected);
+  EXPECT_EQ(room->members[0].games_played, 4);
+  EXPECT_EQ(room->members[0].games_won, 2);
+  EXPECT_EQ(room->members[0].total_score, 14);
 }
 
 // The surface a room stands on rides its row (#1554): stored in the

@@ -21,12 +21,14 @@ constexpr char kUpsertRoom[] = R"sql(
     ON CONFLICT (room_id) DO NOTHING)sql";
 constexpr char kSetRoomSurface[] = "UPDATE rooms SET geometry = $2::jsonb WHERE room_id = $1";
 constexpr char kDeleteRoom[] = "DELETE FROM rooms WHERE room_id = $1";
+// A member's stats are written once, when the row is made; after that
+// only a finish's increments move them (CommitGameFinish). A later upsert
+// is presence, from an instance whose copy of the stats may predate a
+// finish another instance committed.
 constexpr char kUpsertMember[] = R"sql(
     INSERT INTO room_members (room_id, player_id, connected, games_played, games_won, total_score)
     VALUES ($1, $2, $3::boolean, $4::integer, $5::integer, $6::integer)
-    ON CONFLICT (room_id, player_id) DO UPDATE
-      SET connected = EXCLUDED.connected, games_played = EXCLUDED.games_played,
-          games_won = EXCLUDED.games_won, total_score = EXCLUDED.total_score)sql";
+    ON CONFLICT (room_id, player_id) DO UPDATE SET connected = EXCLUDED.connected)sql";
 constexpr char kDeleteMember[] = "DELETE FROM room_members WHERE room_id = $1 AND player_id = $2";
 constexpr char kDeleteGame[] = "DELETE FROM games WHERE room_id = $1 AND game_id = $2";
 // Stamps a room active after a write that names it. Its own statement,

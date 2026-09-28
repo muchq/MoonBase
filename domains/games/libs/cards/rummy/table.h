@@ -17,8 +17,11 @@ namespace rummy {
 /// gin (#1610) and rummy 500 (#1611) join here.
 enum class Variant { Basic };
 
-/// The wire's and the stats pipeline's word for a variant.
+/// The wire's word for a variant.
 [[nodiscard]] std::string_view variantName(Variant variant);
+/// The word a deal of this variant is recorded under as a game (#1571):
+/// basic keeps "rummy", the word the game had before it had variants.
+[[nodiscard]] std::string_view recordedName(Variant variant);
 [[nodiscard]] std::optional<Variant> parseVariant(std::string_view name);
 /// The variants a table of this many seats may deal.
 [[nodiscard]] std::vector<Variant> variantsFor(int seats);

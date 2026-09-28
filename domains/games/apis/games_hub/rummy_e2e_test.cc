@@ -893,6 +893,8 @@ TEST_F(RummyGameFixture, TheNextDealIsTheNextDealersChoice) {
                     .has_value());
     ASSERT_TRUE(ReceiveCase(seat->stream, "roomState").has_value());
   }
+  // Between deals nobody is on turn, and that is no turn to announce.
+  ExpectNoEvent(bob.stream);
 
   // Bob dealt the first; alice deals the second.
   ASSERT_TRUE(bob.stream.Send(Choose("basic")).ok());

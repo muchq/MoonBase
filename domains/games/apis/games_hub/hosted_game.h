@@ -52,14 +52,10 @@ inline bool IsOver(const HostedState& state) {
 }
 
 /// The word a game is recorded under (#1571): the kind's, except that a
-/// rummy table's games are its deals, each under its own variant's word —
-/// basic rummy keeps "rummy".
+/// rummy table's games are its deals, each under its variant's word.
 inline std::string_view VariantWordOf(const HostedState& state) {
   if (const auto* table = std::get_if<rummy::TableState>(&state)) {
-    switch (table->getVariant()) {
-      case rummy::Variant::Basic:
-        return "rummy";
-    }
+    return rummy::recordedName(table->getVariant());
   }
   return GameKindName(KindOf(state));
 }

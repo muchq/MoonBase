@@ -643,12 +643,12 @@ class GolfHub final {
     const absl::Time now = absl::Now();
     event_writer_(now, build(now));
   }
-  /// The local finisher: mirrors the finish commit's stat deltas into the
-  /// local member rows (after a kUnavailable leave, with no known commit)
-  /// and runs the ceremony.
   /// Adds a finish's stat deltas to the room's members; the same numbers
   /// rode the finish commit.
   void MirrorStatsLocked(Room& room, const std::vector<HubStore::StatsDelta>& deltas);
+  /// The local finisher: mirrors the finish commit's stat deltas into the
+  /// local member rows (after a kUnavailable leave, with no known commit)
+  /// and runs the ceremony.
   void FinalizeGameLocked(const std::string& room_id, Room& room, const std::string& game_id,
                           Outbox& outbox);
 

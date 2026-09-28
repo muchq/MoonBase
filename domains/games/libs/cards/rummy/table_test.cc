@@ -41,6 +41,8 @@ TEST(Variants, NamesRoundTripAndFitTheSeats) {
   EXPECT_FALSE(parseVariant("gin").has_value());
   EXPECT_FALSE(parseVariant("").has_value());
   for (int seats : {2, 3, 4}) EXPECT_EQ(variantsFor(seats), vector<Variant>{Variant::Basic});
+  // Stats record basic rummy as the game it always was.
+  EXPECT_EQ(recordedName(Variant::Basic), "rummy");
   EXPECT_TRUE(variantsFor(1).empty());
   EXPECT_TRUE(variantsFor(5).empty());
 }
@@ -188,6 +190,61 @@ TEST(Table, ALeaveMidDealLeavesTheDealToo) {
   EXPECT_EQ(left->getSeats(), (vector<string>{"a", "b"}));
   EXPECT_EQ(left->getDeal()->getPlayers().size(), 2u);
   EXPECT_EQ(left->getWins().size(), 2u);
+}
+
+// Mid-deal the dealer is the seat that dealt the deal in play; its end
+// passes the deal to the seat after. A dealer who leaves mid-deal still
+// passes it to the seat after them, not the one after that.
+TEST(Table, TheDealerLeavingMidDealPassesTheNextDealToTheSeatAfter) {
+  // a dealt; b is on turn holding one card after drawing.
+  GameState deal{{Card{Suit::Clubs, Rank::Two}},
+                 {Card{Suit::Clubs, Rank::Three}},
+                 {{"a", {Card{Suit::Clubs, Rank::Four}}},
+                  {"b", {Card{Suit::Clubs, Rank::Five}}},
+                  {"c", {Card{Suit::Clubs, Rank::Six}}}},
+                 {},
+                 1,
+                 Stage::Play,
+                 Phase::Playing,
+                 std::nullopt,
+                 "T1",
+                 ""};
+  auto left = withDeal(opened(), deal).removePlayer(0);
+  ASSERT_TRUE(left.ok()) << left.status();
+  ASSERT_EQ(left->getPhase(), TablePhase::Playing);
+  auto out =
+      left->inDeal([](const GameState& d) { return d.discard(0, Card{Suit::Clubs, Rank::Five}); });
+  ASSERT_TRUE(out.ok()) << out.status();
+  ASSERT_EQ(out->getPhase(), TablePhase::Choosing);
+  EXPECT_EQ(out->getSeats().at(out->getDealer()), "b");
+
+  // The last seat dealing and leaving: the deal passes round to the first.
+  const TableState last_dealt{{"a", "b", "c"},
+                              {0, 0, 0},
+                              2,
+                              1,
+                              TablePhase::Playing,
+                              Variant::Basic,
+                              GameState{{Card{Suit::Clubs, Rank::Two}},
+                                        {Card{Suit::Clubs, Rank::Three}},
+                                        {{"a", {Card{Suit::Clubs, Rank::Four}}},
+                                         {"b", {Card{Suit::Clubs, Rank::Five}}},
+                                         {"c", {Card{Suit::Clubs, Rank::Six}}}},
+                                        {},
+                                        0,
+                                        Stage::Play,
+                                        Phase::Playing,
+                                        std::nullopt,
+                                        "T1",
+                                        ""},
+                              "T1",
+                              ""};
+  auto gone = last_dealt.removePlayer(2);
+  ASSERT_TRUE(gone.ok()) << gone.status();
+  auto ended =
+      gone->inDeal([](const GameState& d) { return d.discard(0, Card{Suit::Clubs, Rank::Four}); });
+  ASSERT_TRUE(ended.ok()) << ended.status();
+  EXPECT_EQ(ended->getSeats().at(ended->getDealer()), "a");
 }
 
 TEST(Table, BelowTwoSeatsTheTableClosesWithAnyDealInPlay) {

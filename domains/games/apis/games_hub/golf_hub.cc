@@ -3150,7 +3150,7 @@ moonbase::games::RummyView GolfHub::RummyViewLocked(const std::string& game_id,
   const std::optional<rummy::GameState>& deal = table.getDeal();
   // A deal that is over shows every hand: between deals the last one is
   // what the table looks at.
-  const bool shown = !deal.has_value() || deal->isOver();
+  const bool shown = deal.has_value() && deal->isOver();
   if (deal.has_value()) {
     if (!deal->isOver()) {
       view.currentPlayerId = CurrentTurnOf(*entry.state);
