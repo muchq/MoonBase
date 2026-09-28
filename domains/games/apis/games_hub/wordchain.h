@@ -18,7 +18,7 @@ namespace games_hub {
 using Wordchain = moonbase::games::Wordchain;
 
 /// The ask in "/wordchain start end": the command in any case, then
-/// exactly two words of 3 to 9 ASCII letters, lowercased. Nothing for any
+/// exactly two words of 3 to 8 ASCII letters, lowercased. Nothing for any
 /// other text, which stays ordinary chat.
 std::optional<Wordchain> WordchainCommand(std::string_view text);
 

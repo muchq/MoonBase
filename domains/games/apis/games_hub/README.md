@@ -174,7 +174,8 @@ the bot off, and a mention is only chat.
 
 `/wordchain start end` is answered by mithril the same way, on its own
 worker with its own budgets, counted under `bot="mithril"`. The command is two
-words of 3 to 9 letters, lowercased; anything else is only chat. The call
+words of 3 to 8 letters (the longest mithril's dictionary holds),
+lowercased; anything else is only chat. The call
 is `POST /mithril/v1/wordchain` over `//domains/games/libs/mithril_cpp`,
 one attempt, 2 s. The reply is posted as `mithril` and reads
 `cold → cord → card → ward → warm`, or `no ladder from cold to hot` (an

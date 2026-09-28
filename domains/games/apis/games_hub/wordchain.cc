@@ -19,9 +19,10 @@ constexpr std::string_view kRung = " → ";
 constexpr std::string_view kNoLadder = "no ladder from ";
 constexpr std::string_view kTo = " to ";
 
-// mithril's own bounds on a word, in ASCII.
+// The words mithril's graph holds: 3 to 8 ASCII letters. Its validator
+// takes 9, but its dictionary keeps none that long.
 bool IsWord(std::string_view word) {
-  if (word.size() < 3 || word.size() > 9) return false;
+  if (word.size() < 3 || word.size() > 8) return false;
   for (const char c : word) {
     if (!absl::ascii_isalpha(static_cast<unsigned char>(c))) return false;
   }

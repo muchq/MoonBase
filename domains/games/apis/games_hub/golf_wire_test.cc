@@ -17,7 +17,8 @@
 // through createGame → gameCreated/gameJoined, joinGame →
 // gameJoined/gameState, startGame → gameStarted plus the dealt opening
 // GameView (the full key set, card rank/suit spelling included); and the
-// two terminal exception frames (Unauthenticated, SeatConflict). Updates
+// two terminal exception frames (Unauthenticated, SeatConflict); and a
+// bot's reply with mithril's wordchain ladder, live and replayed. Updates
 // this suite does not drive (peek/draw/swap/knock, turnChanged,
 // gameEnded) share GameView's pinned shape but keep their byte-level
 // coverage in hub_e2e_test's typed assertions only.
@@ -37,7 +38,9 @@
 #include <string>
 
 #include "domains/games/apis/games_hub/wire_test_fixture.h"
+#include "domains/games/libs/mithril_cpp/client.h"
 #include "opal/http/message.h"
+#include "opal/http/transport.h"
 
 namespace games_hub {
 namespace {
@@ -322,6 +325,51 @@ TEST_F(GolfWireTest, JoinerHearsRoomStateThenEmptyChatHistoryAndChatCarriesServe
   EXPECT_EQ(KeysOf(message),
             (std::set<std::string>{"messageId", "playerId", "sentAtUnixMillis", "text"}));
   EXPECT_GT(message["sentAtUnixMillis"].get<int64_t>(), 0);
+}
+
+// mithril answering every wordchain request with one ladder.
+class OneLadderMithril final : public opal::http::HttpClient {
+ public:
+  opal::Outcome<opal::http::HttpResponse> Send(const opal::http::HttpRequest&) override {
+    opal::http::HttpResponse response;
+    response.status = 200;
+    response.body = R"({"path":["cold","cord","card","ward","warm"]})";
+    return response;
+  }
+};
+
+// Consumer: the web client's bot rows and wordchain ladder. A bot's reply
+// carries `bot` and its author as playerId; mithril's carries `wordchain`
+// too, the rungs as a list. Live and replayed, the same bytes.
+TEST_F(GolfWireTest, AWordchainReplyCarriesItsLadderOnTheWire) {
+  opal::ClientConfig config = mithril::DefaultClientConfig("http://mithril:8083");
+  config.http_client = std::make_shared<OneLadderMithril>();
+  auto client = mithril::Client::Create(std::move(config));
+  ASSERT_TRUE(client.ok());
+  golf_->StartWordchain(std::make_shared<mithril::Client>(std::move(*client)));
+
+  json creator_session;
+  auto creator = DialReady(creator_session);
+  ASSERT_TRUE(creator->Send(CommandFrame("createRoom", "{}")).ok());
+  (void)EventPayload(NextFrame(*creator), "roomState");
+  ASSERT_TRUE(creator->Send(CommandFrame("chat", R"({"text":"/wordchain cold warm"})")).ok());
+  (void)EventPayload(NextFrame(*creator), "roomChat");
+
+  const std::string reply = EventPayload(NextFrame(*creator), "roomChat");
+  EXPECT_TRUE(
+      reply.starts_with(R"({"bot":true,"messageId":2,"playerId":"mithril","sentAtUnixMillis":)"))
+      << reply;
+  constexpr char kLadderTail[] =
+      R"(,"text":"cold → cord → card → ward → warm",)"
+      R"("wordchain":{"end":"warm","path":["cold","cord","card","ward","warm"],"start":"cold"}})";
+  EXPECT_TRUE(reply.ends_with(kLadderTail)) << reply;
+
+  json joiner_session;
+  auto joiner = DialReady(joiner_session);
+  ASSERT_TRUE(joiner->Send(CommandFrame("joinRoom", R"({"roomId":"room-1"})")).ok());
+  (void)EventPayload(NextFrame(*joiner), "roomState");
+  const std::string history = EventPayload(NextFrame(*joiner), "roomChatHistory");
+  EXPECT_TRUE(history.ends_with(reply + "]}")) << history;
 }
 
 // Consumer: the golf web client's reconnect flow, this time all the way

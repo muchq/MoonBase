@@ -31,14 +31,14 @@ TEST(WordchainCommand, IsTheCommandThenTwoWordsLowercased) {
   EXPECT_TRUE(WordchainCommand("/WORDCHAIN cat dog").has_value());
 }
 
-TEST(WordchainCommand, AsksOnlyForTwoWordsOfThreeToNineLetters) {
+TEST(WordchainCommand, AsksOnlyForTwoWordsOfThreeToEightLetters) {
   for (const char* text :
        {"/wordchain", "/wordchain cold", "/wordchain cold warm hot", "/wordchaincold warm",
-        "/wordchain ox dog", "/wordchain cat abcdefghij", "/wordchain c4t dog",
+        "/wordchain ox dog", "/wordchain cat abcdefghi", "/wordchain c4t dog",
         "/wordchain café dog", "hi /wordchain cat dog", " /wordchain cat dog"}) {
     EXPECT_FALSE(WordchainCommand(text).has_value()) << text;
   }
-  EXPECT_TRUE(WordchainCommand("/wordchain abc abcdefghi").has_value());
+  EXPECT_TRUE(WordchainCommand("/wordchain abc abcdefgh").has_value());
 }
 
 TEST(WordchainCommand, AnyWhitespaceSeparatesTheWords) {
