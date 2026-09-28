@@ -53,7 +53,7 @@ GameState alicePlaying() {
 
 // --- The deal ---
 
-TEST(Deal, TwoSeatsGetTenOneCardIsTurnedUpAndTheRestIsStock) {
+TEST(Deal, TwoSeatsGetSevenOneCardIsTurnedUpAndTheRestIsStock) {
   NoShuffleDealer dealer;
   auto game = dealRummyGame("g1", {"a", "b"}, dealer.DealNewUnshuffledDeck());
   ASSERT_TRUE(game.ok()) << game.status();
@@ -62,10 +62,10 @@ TEST(Deal, TwoSeatsGetTenOneCardIsTurnedUpAndTheRestIsStock) {
   EXPECT_EQ(game->getWhoseTurn(), 0);
   EXPECT_EQ(game->getGameId(), "g1");
   ASSERT_EQ(game->getPlayers().size(), 2u);
-  EXPECT_EQ(game->getPlayer(0).hand.size(), 10u);
-  EXPECT_EQ(game->getPlayer(1).hand.size(), 10u);
+  EXPECT_EQ(game->getPlayer(0).hand.size(), 7u);
+  EXPECT_EQ(game->getPlayer(1).hand.size(), 7u);
   EXPECT_EQ(game->getDiscard().size(), 1u);
-  EXPECT_EQ(game->getStock().size(), 52u - 20u - 1u);
+  EXPECT_EQ(game->getStock().size(), 52u - 14u - 1u);
   EXPECT_TRUE(game->getMelds().empty());
   EXPECT_FALSE(game->getLastMove().has_value());
   EXPECT_FALSE(game->getTakenDiscard().has_value());
@@ -83,9 +83,10 @@ TEST(Deal, DealsOneCardASeatAroundTheTableFromTheBack) {
   EXPECT_EQ(b.at(0), c(Rank::Ace, Suit::Hearts));
   EXPECT_EQ(a.at(1), c(Rank::Ace, Suit::Diamonds));
   EXPECT_EQ(b.at(1), c(Rank::Ace, Suit::Clubs));
-  EXPECT_EQ(a.at(9), c(Rank::Ten, Suit::Diamonds));
-  EXPECT_EQ(game->getDiscard().back(), c(Rank::Nine, Suit::Spades));
-  EXPECT_EQ(game->getStock().back(), c(Rank::Nine, Suit::Hearts));
+  EXPECT_EQ(a.at(6), c(Rank::Jack, Suit::Spades));
+  EXPECT_EQ(b.at(6), c(Rank::Jack, Suit::Hearts));
+  EXPECT_EQ(game->getDiscard().back(), c(Rank::Jack, Suit::Diamonds));
+  EXPECT_EQ(game->getStock().back(), c(Rank::Jack, Suit::Clubs));
 }
 
 TEST(Deal, ThreeOrFourSeatsGetSeven) {
@@ -108,9 +109,9 @@ TEST(Deal, TakesTwoToFourSeats) {
 
 TEST(Deal, RefusesADeckTooSmallForTheHandsAndTheTurnedCard) {
   deque<Card> deck;
-  for (int i = 0; i < 20; i++) deck.emplace_back(i);
+  for (int i = 0; i < 14; i++) deck.emplace_back(i);
   EXPECT_FALSE(dealRummyGame("g", {"a", "b"}, deck).ok());
-  deck.emplace_back(20);
+  deck.emplace_back(14);
   EXPECT_TRUE(dealRummyGame("g", {"a", "b"}, deck).ok());
 }
 

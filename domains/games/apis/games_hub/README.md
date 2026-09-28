@@ -351,17 +351,23 @@ engine is `libs/cards/golf`'s immutable `GameState`, which also carries
 `libs/cards/castle`'s and rummy's `libs/cards/rummy`'s, stated on each
 engine's `GameState`.
 
-A rummy finish credits the seat that went out with a win and every seat
-with a game played; its points (what the others still held) ride
-`gameEnded` and stay out of the room's running total, which is golf's
-lower-is-better scale.
+A rummy table is dealer's choice (#1609, `libs/cards/rummy`'s
+`TableState`): `startGame` seats it between deals, the dealer's
+`chooseVariant` deals, and each deal's end passes the deal to the next
+seat. A dealer the room shows as not connected lets any seat deal. Each
+deal is a game to the room's stats and the event log: its end credits the
+seat that went out with a win and every seat with a game played. Its
+points (what the others still held) ride the view's `lastDeal` and stay
+out of the room's running total, which is golf's lower-is-better scale.
+The table ends only below two seats, and its `gameEnded` carries the hands
+each seat won.
 
 ## Redaction
 
 A castle table redacts by `CastleViewLocked`: own hand faces (everyone's
 once the game ends), every face-up row, face-down rows as counts. A rummy
-table by `RummyViewLocked`: own hand faces (everyone's once the game
-ends), other hands as counts, the stock as a count; the melds, the
+table by `RummyViewLocked`: own hand faces (everyone's once the deal
+ends, and between deals), other hands as counts, the stock as a count; the melds, the
 discard's top and the card taken from it this turn are public, and a
 stock draw's `lastMove` names no card. Golf's rules, below, are
 `ViewLocked`'s.

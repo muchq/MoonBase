@@ -2494,8 +2494,9 @@ void GolfHub::TableEngineMove(const std::string& player_id, GameKind kind,
           if (deal_ended) {
             // The hand is the room's too: its stats moved.
             MirrorStatsLocked(*ref->room, *deltas);
-            StageRoomStateLocked(ref->room_id, outbox);
           }
+          // Either way the table's status in the room's listing moved.
+          if (deal_ended || deal_started) StageRoomStateLocked(ref->room_id, outbox);
           // Between deals nobody is on turn, and that is no turn to announce.
           const std::string current_turn = CurrentTurnOf(*ref->entry->state);
           if (current_turn != previous_turn && !current_turn.empty()) {

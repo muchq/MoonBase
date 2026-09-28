@@ -733,8 +733,8 @@ class GamesHubStreamFixture : public testing::Test {
   std::optional<Table> SeatedCastleTable() { return AliceAndBob(MultiSeatCastleTable(2)); }
   // Rummy's alice is the seat that opens the deal — seat 1, after the
   // dealer — and bob deals. At the pristine deck alice holds A♥ A♣ K♥ K♣
-  // Q♥ Q♣ J♥ J♣ 10♥ 10♣, bob the spades and diamonds of the same ranks,
-  // 9♠ is turned up, and 9♥ tops the stock.
+  // Q♥ Q♣ J♥, bob A♠ A♦ K♠ K♦ Q♠ Q♦ J♠; J♦ is turned up, and J♣ tops the
+  // stock with the tens under it.
   std::optional<Table> SeatedRummyTable() {
     auto table = MultiSeatRummyTable(2);
     if (!table.has_value()) return std::nullopt;

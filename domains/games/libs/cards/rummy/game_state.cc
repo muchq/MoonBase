@@ -47,14 +47,13 @@ StatusOr<GameState> dealRummyGame(const string& game_id, const vector<string>& p
     return InvalidArgumentError("2 to 4 players");
   }
   if (opener < 0 || opener >= seats) return InvalidArgumentError("no such opener");
-  const int handSize = GameState::handSizeFor(seats);
-  if (static_cast<int>(shuffled_deck.size()) < seats * handSize + 1) {
+  if (static_cast<int>(shuffled_deck.size()) < seats * GameState::kHandSize + 1) {
     return InvalidArgumentError("deck too small");
   }
   vector<Player> players;
   players.reserve(player_ids.size());
   for (const string& id : player_ids) players.push_back(Player{id, {}});
-  for (int round = 0; round < handSize; round++) {
+  for (int round = 0; round < GameState::kHandSize; round++) {
     for (Player& player : players) {
       player.hand.push_back(shuffled_deck.back());
       shuffled_deck.pop_back();

@@ -737,7 +737,7 @@ TEST_F(PgGamesHubFixture, RummyTableSurvivesARestartMidTurn) {
           .ok());
   ASSERT_TRUE(ReceiveRummy(alice.stream, "gameState").has_value());
   moonbase::games::RummyMeld meld;
-  meld.cards = {Named("A", "♠"), Named("K", "♠"), Named("Q", "♠")};
+  meld.cards = {Named("A", "♥"), Named("K", "♥"), Named("Q", "♥")};
   ASSERT_TRUE(alice.stream.Send(Rummy(RummyMove::FromMeld(meld))).ok());
   auto before_update = ReceiveRummy(alice.stream, "gameState");
   ASSERT_TRUE(before_update.has_value());
@@ -768,22 +768,25 @@ TEST_F(PgGamesHubFixture, RummyTableSurvivesARestartMidTurn) {
   EXPECT_EQ(after.stockCount, before.stockCount);
   EXPECT_EQ(after.discardCount, 0);
   ASSERT_TRUE(after.takenDiscard.has_value());
-  EXPECT_EQ(after.takenDiscard->rank + after.takenDiscard->suit, "9♠");
+  EXPECT_EQ(after.takenDiscard->rank + after.takenDiscard->suit, "J♦");
   ASSERT_EQ(after.melds.size(), 1u);
   EXPECT_EQ(after.melds[0].owner, alice.player_id);
   ASSERT_EQ(after.melds[0].cards.size(), 3u);
-  EXPECT_EQ(after.melds[0].cards[0].rank + after.melds[0].cards[0].suit, "Q♠");
+  EXPECT_EQ(after.melds[0].cards[0].rank + after.melds[0].cards[0].suit, "Q♥");
   ASSERT_TRUE(after.lastMove.has_value());
   EXPECT_EQ(after.lastMove->move, "meld");
   EXPECT_EQ(after.lastMove->meldIndex.value_or(-1), 0);
+  // Alice opens from seat 1; bob, seat 0, dealt.
   ASSERT_EQ(after.players.size(), 2u);
-  ASSERT_EQ(after.players[0].hand.size(), before.players[0].hand.size());
-  for (std::size_t i = 0; i < after.players[0].hand.size(); ++i) {
-    EXPECT_EQ(after.players[0].hand[i].rank, before.players[0].hand[i].rank);
-    EXPECT_EQ(after.players[0].hand[i].suit, before.players[0].hand[i].suit);
+  ASSERT_EQ(after.players[1].hand.size(), before.players[1].hand.size());
+  for (std::size_t i = 0; i < after.players[1].hand.size(); ++i) {
+    EXPECT_EQ(after.players[1].hand[i].rank, before.players[1].hand[i].rank);
+    EXPECT_EQ(after.players[1].hand[i].suit, before.players[1].hand[i].suit);
   }
-  EXPECT_TRUE(after.players[1].hand.empty());
-  EXPECT_EQ(after.players[1].handCount, 10);
+  EXPECT_TRUE(after.players[0].hand.empty());
+  EXPECT_EQ(after.players[0].handCount, 7);
+  EXPECT_EQ(after.dealNumber, 1);
+  EXPECT_EQ(after.variant.value_or(""), "basic");
 
   auto bob_back = OpenSeat(bob_token);
   ASSERT_TRUE(bob_back.has_value());
@@ -792,14 +795,14 @@ TEST_F(PgGamesHubFixture, RummyTableSurvivesARestartMidTurn) {
 
   // The rule the taken card carries came back with it.
   moonbase::games::RummyDiscard straight_back;
-  straight_back.card = Named("9", "♠");
+  straight_back.card = Named("J", "♦");
   ASSERT_TRUE(alice_back->stream.Send(Rummy(RummyMove::FromDiscard(straight_back))).ok());
   auto refused = ReceiveCase(alice_back->stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
             "you took that card from the discard pile this turn");
   moonbase::games::RummyDiscard other;
-  other.card = Named("A", "♦");
+  other.card = Named("A", "♣");
   ASSERT_TRUE(alice_back->stream.Send(Rummy(RummyMove::FromDiscard(other))).ok());
   auto next_turn = ReceiveRummy(bob_back->stream, "turnChanged");
   ASSERT_TRUE(next_turn.has_value());

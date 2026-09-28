@@ -21,7 +21,8 @@
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/golf/game_state_serde.h"
 #include "domains/games/libs/cards/rummy/game_state.h"
-#include "domains/games/libs/cards/rummy/game_state_serde.h"
+#include "domains/games/libs/cards/rummy/table.h"
+#include "domains/games/libs/cards/rummy/table_serde.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "gtest/gtest.h"
@@ -151,8 +152,9 @@ TEST_F(PgHubStoreTest, CastleRowsKeepTheirKindAndDecodeWithCastleSerde) {
 }
 
 // A rummy table (#245) is the third engine behind the same rows: its kind
-// is stored, and a mid-turn state — melds, the card taken from the
-// discard, the last move — decodes with rummy's serde byte for byte.
+// is stored, and a table mid-deal (#1609) — melds, the card taken from
+// the discard, the last move — decodes with the table's serde byte for
+// byte.
 TEST_F(PgHubStoreTest, RummyRowsKeepTheirKindAndDecodeWithRummySerde) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
   store_->Flush();
@@ -167,12 +169,10 @@ TEST_F(PgHubStoreTest, RummyRowsKeepTheirKindAndDecodeWithRummySerde) {
                                cards::Card{cards::Suit::Spades, cards::Rank::King},
                                cards::Card{cards::Suit::Spades, cards::Rank::Queen}});
   ASSERT_TRUE(melded.ok()) << melded.status();
-  PgHubStore::GameRow started{"R1",
-                              "M2",
-                              {"alice", "bob"},
-                              games_hub::HostedState(*melded),
-                              1,
-                              games_hub::GameKind::kRummy};
+  const rummy::TableState table{{"alice", "bob"},      {0, 0},  1,  1, rummy::TablePhase::Playing,
+                                rummy::Variant::Basic, *melded, "", ""};
+  PgHubStore::GameRow started{
+      "R1", "M2", {"alice", "bob"}, games_hub::HostedState(table), 1, games_hub::GameKind::kRummy};
   ASSERT_TRUE(*store_->CommitGameSave(started, ""));
 
   auto rows = store_->LoadRoom("R1");
@@ -185,12 +185,12 @@ TEST_F(PgHubStoreTest, RummyRowsKeepTheirKindAndDecodeWithRummySerde) {
       continue;
     }
     ASSERT_TRUE(game.state.has_value());
-    ASSERT_TRUE(std::holds_alternative<rummy::GameState>(*game.state));
-    EXPECT_EQ(rummy::serializeGameState(std::get<rummy::GameState>(*game.state)),
-              rummy::serializeGameState(*melded));
+    ASSERT_TRUE(std::holds_alternative<rummy::TableState>(*game.state));
+    EXPECT_EQ(rummy::serializeTableState(std::get<rummy::TableState>(*game.state)),
+              rummy::serializeTableState(table));
   }
   // A started row's column follows its state, whatever the row said.
-  PgHubStore::GameRow mislabeled{"R1", "M3", {"alice", "bob"}, games_hub::HostedState(*melded), 1};
+  PgHubStore::GameRow mislabeled{"R1", "M3", {"alice", "bob"}, games_hub::HostedState(table), 1};
   ASSERT_TRUE(*store_->CommitGameSave(mislabeled, ""));
   auto relabeled = store_->LoadGame("R1", "M3");
   ASSERT_TRUE(relabeled.ok() && relabeled->has_value());
