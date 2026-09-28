@@ -278,7 +278,6 @@ cc_library(
         ":games_hub_smithy_server",
         ":room_bot",
         "//domains/games/libs/mithril_cpp:client",
-        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/strings",
         "@opal_cpp//runtime:core",
     ],
