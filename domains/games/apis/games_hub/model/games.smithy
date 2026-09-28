@@ -10,12 +10,15 @@ use moonbase.golf#GolfEvent
 use moonbase.lobby#Geometry
 use moonbase.lobby#LobbyCommand
 use moonbase.lobby#LobbyEvent
+use moonbase.rummy#RummyCommand
+use moonbase.rummy#RummyEvent
 use moonbase.voice#VoiceCommand
 use moonbase.voice#VoiceEvent
 
 /// The games hub (#79): one service, one session identity, one room layer,
 /// and one stream, Play, on which the lobby (#1490), voice (#1590), golf,
-/// and castle (#77) each ride as one envelope member per direction.
+/// castle (#77) and rummy (#245) each ride as one envelope member per
+/// direction.
 @simpleRestJson
 @title("Games Hub")
 service GamesHub {
@@ -46,7 +49,7 @@ operation Play {
 }
 
 /// The room layer's own commands, then one envelope per tenant: the
-/// lobby's world, the room's voice, golf's table, castle's table.
+/// lobby's world, the room's voice, golf's, castle's and rummy's tables.
 @streaming
 union GameCommands {
     createRoom: CreateRoom
@@ -58,6 +61,7 @@ union GameCommands {
     voice: VoiceCommand
     golf: GolfCommand
     castle: CastleCommand
+    rummy: RummyCommand
 }
 
 @streaming
@@ -72,6 +76,7 @@ union GameEvents {
     voice: VoiceEvent
     golf: GolfEvent
     castle: CastleEvent
+    rummy: RummyEvent
 }
 
 /// Session identity is game-agnostic: the route carries no game segment,
@@ -86,7 +91,8 @@ operation GetSession {
 /// and chat. Apart from GameSummary.game and Table.game — the word that
 /// names a table's game for the lobby — nothing in this
 /// namespace knows which game a table plays; a game contributes only its
-/// own vocabulary, the way moonbase.golf and moonbase.castle do.
+/// own vocabulary, the way moonbase.golf, moonbase.castle and moonbase.rummy
+/// do.
 
 /// GetSession's input: a resume token exchanges for a fresh ticket and
 /// the same playerId; absent or expired mints a fresh player.
@@ -189,7 +195,7 @@ structure PlayerInfo {
 
 /// A room member's table: which game, which table.
 structure Table {
-    /// golf | castle, as GameSummary.game spells it.
+    /// golf | castle | rummy, as GameSummary.game spells it.
     @required
     game: String
 
@@ -206,7 +212,7 @@ structure GameSummary {
     @required
     gameId: String
 
-    /// Which game the table plays: golf | castle.
+    /// Which game the table plays: golf | castle | rummy.
     @required
     game: String
 
@@ -357,7 +363,7 @@ structure SeatConflict {
 }
 
 /// Ranks A 2..10 J Q K, suits ♠ ♥ ♦ ♣ — the glyphs the UI renders.
-/// Castle's moves name cards in it too, so
+/// Castle's and rummy's moves name cards in it too, so
 /// it is written as well as read: the ten is "10" and not "T", the suit
 /// is the glyph and not a letter, and the ranks are upper case. A card
 /// spelled any other way names nothing and is refused as malformed.

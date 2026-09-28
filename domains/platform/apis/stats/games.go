@@ -62,7 +62,7 @@ var (
 		"chat_message": true, "geometry_changed": true,
 		"game_started": true, "game_finished": true,
 	}
-	hubVariants = map[string]bool{"golf": true, "castle": true}
+	hubVariants = map[string]bool{"golf": true, "castle": true, "rummy": true}
 	hubOutcomes = map[string]bool{"completed": true, "abandoned": true}
 	hubSurfaces = map[string]bool{"plane": true, "sphere": true, "glasshouse": true}
 )

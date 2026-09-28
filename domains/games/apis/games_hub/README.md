@@ -1,19 +1,19 @@
 # games_hub — the games hub on opal-cpp event streams
 
-The backend behind muchq.com/games — the lobby (#1490), golf, and castle
-(#77) — and its /golf and /thoughts pages (#79), on opal-cpp's
+The backend behind muchq.com/games — the lobby (#1490), golf, castle
+(#77) and rummy (#245) — and its /golf and /thoughts pages (#79), on opal-cpp's
 streaming stack: a modeled protocol with generated async handlers
 (ADR-0021), `SessionRegistry` fan-out with reconnect grace
 (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018), and ticket
 auth ahead of the 101. One session identity opens the one stream.
 
-## The model (five namespaces)
+## The model (six namespaces)
 
 - `model/games.smithy` — `moonbase.games`: the service, session identity
   (`POST /games/v2/session`), the two terminal stream errors, the one
   stream — `Play` at `/games/v2/play`, its `GameCommands`/`GameEvents`
   unions carrying the room layer's own cases plus one envelope member
-  per tenant (`lobby`, `voice`, `golf`, `castle`) — and the game-agnostic room
+  per tenant (`lobby`, `voice`, `golf`, `castle`, `rummy`) — and the game-agnostic room
   layer — rooms, chat, player info with room-scoped stats and the
   member's table (`PlayerInfo.table`: which game, which
   table, pending or in play, absent while idle — how the lobby tells who
@@ -23,13 +23,18 @@ auth ahead of the 101. One session identity opens the one stream.
 - `model/golf.smithy` — `moonbase.golf`: golf's vocabulary, nested under
   the `golf` member of each streaming union.
 - `model/castle.smithy` — `moonbase.castle`: castle's vocabulary (#77),
-  the `castle` member of the same unions. A room hosts tables of either
+  the `castle` member of the same unions. A room hosts tables of any
   game (`GameSummary.game` says which); the shared lifecycle shapes
   (create/join/start/leave and their announcements) are reused, and each
   game's join is refused on the other game's table, so nobody is seated
   at a table whose vocabulary they do not speak. The room-wide
   `gameCreated` is the one event that crosses: a room hears every table
   in that table's own envelope.
+- `model/rummy.smithy` — `moonbase.rummy`: rummy's vocabulary (#245),
+  the `rummy` member, on castle's terms: the shared lifecycle shapes, a
+  join refused at another game's table, and moves that name their cards.
+  Its shapes are all prefixed `Rummy`, since codegen flattens the
+  namespaces into one.
 - `model/lobby.smithy` — `moonbase.lobby`: the world's shapes — the
   `lobby` member of the room stream (`LobbyAction`, `LobbyUpdate`) and
   what they carry.
@@ -38,9 +43,9 @@ auth ahead of the 101. One session identity opens the one stream.
   and the WebRTC signals between its members.
 
 A new game is one new model file and one more envelope member on the
-room stream's unions, the way castle and the lobby joined. Codegen
+room stream's unions, the way castle, rummy and the lobby joined. Codegen
 flattens every namespace into `moonbase::games`, so shape names must be
-unique across the five files (a collision gets the foreign namespace's
+unique across the six files (a collision gets the foreign namespace's
 name appended, which nothing here wants).
 
 ## The lobby's world
@@ -342,13 +347,24 @@ public), a knock gives every other player one final turn, an exhausted
 draw pile ends the game, three of a kind scores exactly one card, and
 non-knocker ties are shared wins (the knocker takes ties alone). The
 engine is `libs/cards/golf`'s immutable `GameState`, which also carries
-`hideCards` and `removePlayer` for abandoned seats.
+`hideCards` and `removePlayer` for abandoned seats. Castle's rules are
+`libs/cards/castle`'s and rummy's `libs/cards/rummy`'s, stated on each
+engine's `GameState`.
+
+A rummy finish credits the seat that went out with a win and every seat
+with a game played; its points (what the others still held) ride
+`gameEnded` and stay out of the room's running total, which is golf's
+lower-is-better scale.
 
 ## Redaction
 
 A castle table redacts by `CastleViewLocked`: own hand faces (everyone's
-once the game ends), every face-up row, face-down rows as counts. Golf's
-rules, below, are `ViewLocked`'s.
+once the game ends), every face-up row, face-down rows as counts. A rummy
+table by `RummyViewLocked`: own hand faces (everyone's once the game
+ends), other hands as counts, the stock as a count; the melds, the
+discard's top and the card taken from it this turn are public, and a
+stock draw's `lastMove` names no card. Golf's rules, below, are
+`ViewLocked`'s.
 
 Every game broadcast is per-recipient (`ViewLocked`): own card faces only
 at the viewer's peeked indexes, the drawn card only to its holder, other
@@ -373,13 +389,13 @@ lobby-safe summaries only.
   stream side counts admissions, live sessions, disconnects, grace
   expiries, and the command/event flow (`hub_*` for the room layer —
   sessions, seats, refusals, its own commands and events — `golf_*`,
-  `castle_*`, `lobby_*` and `voice_*` for each tenant's envelope, `chat_*` for
+  `castle_*`, `rummy_*`, `lobby_*` and `voice_*` for each tenant's envelope, `chat_*` for
   chat). The tape rides the lobby's prefix: `lobby_tape_polls{result}`,
   `lobby_tape_splats`, and the `lobby_tape_poller_active` gauge, which is
   1 exactly while a glasshouse is occupied.
 - `ALLOWED_ORIGINS` unset admits all origins (local dev); production
   sets the allowlist.
 - Deployed behind Caddy at `/games/v2/*` (`deploy/consolidated`); the
-  muchq.com games, golf, castle and thoughts UIs' only backend. No game
+  muchq.com games, golf, castle, rummy and thoughts UIs' only backend. No game
   has a route of its own: all ride the one play stream, and the origin
   gate is per connection, not per game.

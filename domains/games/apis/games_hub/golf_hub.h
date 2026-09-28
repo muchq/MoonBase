@@ -35,6 +35,7 @@
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
+#include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "moonbase/games/server.h"
@@ -72,11 +73,12 @@ struct GolfTestHooks {
 
 /// GolfHub is the room hub (#1187): seat admission, rooms,
 /// chat, and the game layer, behind GamesHubHandler::Play. The name is
-/// golf's; the room layer, castle (#77), and the lobby (#1490) live here
-/// too. A room hosts tables of either game (#79): golf on libs/cards/golf
-/// and castle on libs/cards/castle, each a member of the stream's unions
-/// with its own per-viewer view. Each tenant's envelope counts on its own
-/// series (golf_, castle_, lobby_, voice_); the room layer's own are hub_*.
+/// golf's; the room layer, castle (#77), rummy (#245) and the lobby (#1490)
+/// live here too. A room hosts tables of any game (#79): golf on
+/// libs/cards/golf, castle on libs/cards/castle and rummy on
+/// libs/cards/rummy, each a member of the stream's unions with its own
+/// per-viewer view. Each tenant's envelope counts on its own series (golf_,
+/// castle_, rummy_, lobby_, voice_); the room layer's own are hub_*.
 ///
 /// The lobby member is the World (world.h) keyed by the session's room:
 /// a roomed session stands in its room's world, an unroomed one in the
@@ -96,8 +98,9 @@ struct GolfTestHooks {
 ///
 /// Redaction discipline: every game broadcast is staged per recipient
 /// (StageGameViewsLocked, JoinedEventLocked) with views built by each
-/// game's ViewLocked/CastleViewLocked — per-viewer state (golf's own peeks
-/// and held draw, castle's own hand faces) has exactly one place per game
+/// game's ViewLocked/CastleViewLocked/RummyViewLocked — per-viewer state
+/// (golf's own peeks and held draw, castle's and rummy's own hand faces)
+/// has exactly one place per game
 /// to land and no identical-bytes path can leak it.
 ///
 /// Chat observability (#1226): chat_appends{result}, chat_rows_delivered,
@@ -345,7 +348,8 @@ class GolfHub final {
   /// CommitEntryLocked (store or not), and with a store the commit only
   /// lands when the stored row holds the predecessor — that condition
   /// is what serializes instances. kind is fixed at creation and says
-  /// which engine the state is; golf()/castle() are the typed reads.
+  /// which engine the state is; golf()/castle()/rummy() are the typed
+  /// reads.
   struct GameEntry {
     GameKind kind = GameKind::kGolf;
     std::vector<std::string> roster;
@@ -355,6 +359,9 @@ class GolfHub final {
     [[nodiscard]] const golf::GameState& golf() const { return std::get<golf::GameState>(*state); }
     [[nodiscard]] const castle::GameState& castle() const {
       return std::get<castle::GameState>(*state);
+    }
+    [[nodiscard]] const rummy::GameState& rummy() const {
+      return std::get<rummy::GameState>(*state);
     }
   };
 
@@ -390,8 +397,10 @@ class GolfHub final {
   using Writes = std::vector<HubStore::Op>;
 
   using MoveFn = std::function<absl::StatusOr<golf::GameState>(const golf::GameState&, int seat)>;
-  using CastleMoveFn =
-      std::function<absl::StatusOr<castle::GameState>(const castle::GameState&, int seat)>;
+  /// A move of castle's or rummy's: the engine's next state, from the
+  /// mover's seat.
+  template <typename Engine>
+  using TableMoveFn = std::function<absl::StatusOr<Engine>(const Engine&, int seat)>;
   /// What a successful engine move announces beyond the state views.
   struct MoveEffects {
     bool announce_turn = false;   // turnChanged when the seat advances
@@ -411,6 +420,11 @@ class GolfHub final {
   void HandleCommand(const std::string& player_id, const moonbase::games::GameCommands& command);
   void HandleMove(const std::string& player_id, const moonbase::games::GolfMove& move);
   void HandleCastleMove(const std::string& player_id, const moonbase::games::CastleMove& move);
+  void HandleRummyMove(const std::string& player_id, const moonbase::games::RummyMove& move);
+  /// The lifecycle half of castle's and rummy's move unions, which share
+  /// its shapes: true when `move` was one and has been handled.
+  template <typename Move>
+  bool LifecycleMove(const std::string& player_id, const Move& move, GameKind kind);
   /// The lobby member: the session's world is its room's, or the plaza's.
   void HandleLobby(const std::string& player_id, const moonbase::games::LobbyAction& action);
   /// The world key a session stands in, or would: its room, else the plaza.
@@ -440,9 +454,12 @@ class GolfHub final {
   /// The shared shape of every in-game engine move: transition, then
   /// stage the fan-out (views, turn change, game end) the result implies.
   void EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects);
-  /// Castle's in-game moves: the same commit loop, and the engine's own
-  /// turn order decides the turnChanged.
-  void CastleEngineMove(const std::string& player_id, const CastleMoveFn& move);
+  /// Castle's and rummy's in-game moves: the same commit loop, and the
+  /// engine's own turn order decides the turnChanged. `kind` is the game
+  /// `Engine` plays; a move on another game's table is refused.
+  template <typename Engine>
+  void TableEngineMove(const std::string& player_id, GameKind kind,
+                       const TableMoveFn<Engine>& move);
 
   /// Stream-side observability (#1187): the aura chain instruments
   /// only unary requests, so admissions, live-session count, disconnects,
@@ -605,6 +622,8 @@ class GolfHub final {
                                        const std::string& viewer_id) const;
   moonbase::games::CastleView CastleViewLocked(const std::string& game_id, const GameEntry& entry,
                                                const std::string& viewer_id) const;
+  moonbase::games::RummyView RummyViewLocked(const std::string& game_id, const GameEntry& entry,
+                                             const std::string& viewer_id) const;
   /// One viewer's gameJoined in the table's own vocabulary.
   moonbase::games::GameEvents JoinedEventLocked(const std::string& game_id, const GameEntry& entry,
                                                 const std::string& viewer_id) const;

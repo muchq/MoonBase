@@ -54,7 +54,7 @@ const EVENTS: [&str; 7] = [
     "game_started",
     "game_finished",
 ];
-const VARIANTS: [&str; 2] = ["golf", "castle"];
+const VARIANTS: [&str; 3] = ["golf", "castle", "rummy"];
 const SURFACES: [&str; 3] = ["plane", "sphere", "glasshouse"];
 const OUTCOMES: [&str; 2] = ["completed", "abandoned"];
 /// The seats the engine deals a table, from golf_hub's kMaxSeats.

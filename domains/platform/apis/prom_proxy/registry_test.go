@@ -93,7 +93,7 @@ func TestRegistry_CustomTimeseriesPanelKeysAreUniquePerService(t *testing.T) {
 }
 
 // A tile's label is its identity across the whole service, not just its
-// group: the hub_/golf_/castle_/lobby_ prefixes on games_hub exist for this. Two
+// group: the hub_/golf_/castle_/rummy_/lobby_ prefixes on games_hub exist for this. Two
 // groups sharing a label ship two tiles nobody can tell apart, and every
 // byLabel map in these tests would read whichever came last.
 func TestRegistry_CustomScalarLabelsAreUniquePerService(t *testing.T) {
@@ -518,7 +518,7 @@ var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|c
 // shared artifact to pin them together (that is #1308's scope). What these
 // audits do close, on their own side: every tile reads only names in this
 // set, and every name in this set is read by some tile.
-var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:hub_|golf_|chat_|castle_|lobby_)[a-z_]*)(\{[^}]*\})?`)
+var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:hub_|golf_|chat_|castle_|rummy_|lobby_)[a-z_]*)(\{[^}]*\})?`)
 
 var gamesHubExportedNames = map[string]bool{
 	// The castle envelope (#77), from GolfHub::DeclaredCounterSeries().
@@ -543,6 +543,8 @@ var gamesHubExportedNames = map[string]bool{
 	// series.
 	"golf_commands_total":  true,
 	"golf_events_total":    true,
+	"rummy_commands_total": true,
+	"rummy_events_total":   true,
 	"lobby_commands_total": true,
 	"lobby_events_total":   true,
 }

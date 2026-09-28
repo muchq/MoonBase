@@ -20,6 +20,8 @@
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/golf/game_state_serde.h"
+#include "domains/games/libs/cards/rummy/game_state.h"
+#include "domains/games/libs/cards/rummy/game_state_serde.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "gtest/gtest.h"
@@ -146,6 +148,53 @@ TEST_F(PgHubStoreTest, CastleRowsKeepTheirKindAndDecodeWithCastleSerde) {
   ASSERT_TRUE(reread.ok() && reread->has_value());
   EXPECT_EQ((*reread)->kind, games_hub::GameKind::kCastle);
   EXPECT_EQ((*reread)->version, 2);
+}
+
+// A rummy table (#245) is the third engine behind the same rows: its kind
+// is stored, and a mid-turn state — melds, the card taken from the
+// discard, the last move — decodes with rummy's serde byte for byte.
+TEST_F(PgHubStoreTest, RummyRowsKeepTheirKindAndDecodeWithRummySerde) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  PgHubStore::GameRow waiting{"R1", "M1", {"alice"}, std::nullopt, 1, games_hub::GameKind::kRummy};
+  ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
+  cards::NoShuffleDealer dealer;
+  auto dealt = rummy::dealRummyGame("M2", {"alice", "bob"}, dealer.DealNewUnshuffledDeck());
+  ASSERT_TRUE(dealt.ok()) << dealt.status();
+  auto drew = dealt->drawDiscard(0);
+  ASSERT_TRUE(drew.ok());
+  auto melded = drew->meld(0, {cards::Card{cards::Suit::Spades, cards::Rank::Ace},
+                               cards::Card{cards::Suit::Spades, cards::Rank::King},
+                               cards::Card{cards::Suit::Spades, cards::Rank::Queen}});
+  ASSERT_TRUE(melded.ok()) << melded.status();
+  PgHubStore::GameRow started{"R1",
+                              "M2",
+                              {"alice", "bob"},
+                              games_hub::HostedState(*melded),
+                              1,
+                              games_hub::GameKind::kRummy};
+  ASSERT_TRUE(*store_->CommitGameSave(started, ""));
+
+  auto rows = store_->LoadRoom("R1");
+  ASSERT_TRUE(rows.ok()) << rows.status();
+  ASSERT_EQ(rows->games.size(), 2u);
+  for (const auto& game : rows->games) {
+    EXPECT_EQ(game.kind, games_hub::GameKind::kRummy) << game.game_id;
+    if (game.game_id == "M1") {
+      EXPECT_FALSE(game.state.has_value());
+      continue;
+    }
+    ASSERT_TRUE(game.state.has_value());
+    ASSERT_TRUE(std::holds_alternative<rummy::GameState>(*game.state));
+    EXPECT_EQ(rummy::serializeGameState(std::get<rummy::GameState>(*game.state)),
+              rummy::serializeGameState(*melded));
+  }
+  // A started row's column follows its state, whatever the row said.
+  PgHubStore::GameRow mislabeled{"R1", "M3", {"alice", "bob"}, games_hub::HostedState(*melded), 1};
+  ASSERT_TRUE(*store_->CommitGameSave(mislabeled, ""));
+  auto relabeled = store_->LoadGame("R1", "M3");
+  ASSERT_TRUE(relabeled.ok() && relabeled->has_value());
+  EXPECT_EQ((*relabeled)->kind, games_hub::GameKind::kRummy);
 }
 
 // A row written before the kind column reads as golf (the migration's
