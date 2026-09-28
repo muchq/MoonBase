@@ -2,6 +2,7 @@
 
 #include <utility>
 
+#include "absl/algorithm/container.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
@@ -71,7 +72,10 @@ std::optional<Wordchain> WordchainCommand(std::string_view text) {
 
 std::string WordchainText(const Wordchain& chain) {
   if (!chain.path.has_value()) return absl::StrCat(kNoLadder, chain.start, kTo, chain.end);
-  return absl::StrJoin(*chain.path, kRung);
+  std::string text = absl::StrJoin(*chain.path, kRung);
+  if (text.size() <= kChatTextByteLimit) return text;
+  return absl::StrCat("a ", chain.path->size(), "-rung ladder joins ", chain.start, " and ",
+                      chain.end, ", too long to show");
 }
 
 std::optional<Wordchain> WordchainOfText(std::string_view text) {

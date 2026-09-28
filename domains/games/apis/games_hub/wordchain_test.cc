@@ -1,5 +1,5 @@
 // The /wordchain command: what asks, what mithril is asked, and the reply
-// text a client reads the ladder back out of.
+// text the hub reads the ladder back out of on delivery and replay.
 
 #include "domains/games/apis/games_hub/wordchain.h"
 
@@ -41,6 +41,13 @@ TEST(WordchainCommand, AsksOnlyForTwoWordsOfThreeToNineLetters) {
   EXPECT_TRUE(WordchainCommand("/wordchain abc abcdefghi").has_value());
 }
 
+TEST(WordchainCommand, AnyWhitespaceSeparatesTheWords) {
+  const auto ask = WordchainCommand("/wordchain\tcold\r\nwarm");
+  ASSERT_TRUE(ask.has_value());
+  EXPECT_EQ(ask->start, "cold");
+  EXPECT_EQ(ask->end, "warm");
+}
+
 TEST(WordchainText, ALadderIsItsWordsInOrder) {
   EXPECT_EQ(WordchainText({"cold", "warm", Path{"cold", "cord", "card", "ward", "warm"}}),
             "cold → cord → card → ward → warm");
@@ -59,9 +66,25 @@ TEST(WordchainOfText, ReadsBackEveryReply) {
   }
 }
 
+// Chat holds kChatTextByteLimit bytes, and a ladder can be longer: the
+// reply says how long instead, and never reads back as a ladder cut short.
+TEST(WordchainText, ALadderTooLongForChatSaysSoInsteadOfBeingCut) {
+  Path path;
+  for (int i = 0; i < 60; ++i)
+    path.push_back("rung" + std::string(1, static_cast<char>('a' + i % 26)));
+  path.front() = "oppose";
+  path.back() = "chinik";
+  const std::string text = WordchainText({"oppose", "chinik", path});
+  EXPECT_LE(text.size(), kChatTextByteLimit);
+  EXPECT_EQ(text, "a 60-rung ladder joins oppose and chinik, too long to show");
+  EXPECT_FALSE(WordchainOfText(text).has_value());
+}
+
 TEST(WordchainOfText, IsNothingForTextNoReplyWouldHold) {
-  for (const char* text : {"", "hello there", "cold → ", "→ warm", "cold →  warm", "Cold → warm",
-                           "no ladder from cold", "no ladder from cold to warm!"}) {
+  for (const char* text :
+       {"", "hello there", "cold → ", "→ warm", "cold →  warm", "Cold → warm",
+        "no ladder from cold", "no ladder from cold to warm!", "no ladder from Cold to warm",
+        "no ladder from cold to Warm", "no ladder from cold to warm to hot"}) {
     EXPECT_FALSE(WordchainOfText(text).has_value()) << text;
   }
 }

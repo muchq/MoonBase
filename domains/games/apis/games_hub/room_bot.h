@@ -72,10 +72,10 @@ class Responder {
 std::shared_ptr<Responder> MicrogptResponder(std::shared_ptr<microgpt::Client> client,
                                              std::shared_ptr<ChatStore> store);
 
-/// Budgets for the bot's calls. A room's bucket keeps one conversation from
-/// monopolizing the bot; the hub's keeps every room together under
-/// microgpt-serve's per-IP limit (5 requests a second), which counts this
-/// whole instance as one client.
+/// Budgets for one bot's calls; each bot has its own. A room's bucket keeps
+/// one conversation from monopolizing the bot; the hub's keeps every room
+/// together under the tightest callee's per-IP limit, microgpt-serve's 5
+/// requests a second, which counts this whole instance as one client.
 struct BotLimits {
   double room_burst = 2;
   double room_refill_per_sec = 0.1;

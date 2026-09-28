@@ -91,4 +91,11 @@ TEST(WordchainWire, RefusalsAreErrorsAndAreNotRetried) {
   }
 }
 
+// An answer in chat that arrives late is no better than none.
+TEST(WordchainWire, OneAttemptWithinTwoSeconds) {
+  const opal::ClientConfig config = mithril::DefaultClientConfig("http://mithril:8083");
+  EXPECT_EQ(config.request_timeout_ms, 2'000);
+  EXPECT_EQ(config.retry.max_attempts, 1);
+}
+
 }  // namespace

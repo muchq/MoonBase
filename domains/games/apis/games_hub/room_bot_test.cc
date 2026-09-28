@@ -253,6 +253,26 @@ TEST_F(RoomBotTest, NoBotAnswersABot) {
   EXPECT_TRUE(microgpt_->bodies().empty());
 }
 
+// Any responder, counted and timed under its own name.
+class Pong final : public Responder {
+ public:
+  const char* Author() const override { return kWordchainPlayerId; }
+  bool Asks(std::string_view text) const override { return text == "ping"; }
+  opal::Outcome<std::string> Reply(const ChatRow&) const override { return std::string("pong"); }
+};
+
+TEST_F(RoomBotTest, AResponderIsCountedAndTimedUnderItsAuthor) {
+  bot_ = std::make_unique<RoomBot>(
+      std::make_shared<Pong>(), store_, [](const std::string&) {}, metrics_, "instance-a");
+  Say("R1", "alice", "ping");
+  bot_->Drain();
+
+  EXPECT_EQ(History("R1").back().player_id, kWordchainPlayerId);
+  EXPECT_EQ(History("R1").back().text, "pong");
+  EXPECT_EQ(metrics_->CounterTotal("bot_requests", {{"bot", "mithril"}, {"result", "ok"}}), 1);
+  EXPECT_EQ(metrics_->ObservationCount("bot_latency_us", {{"bot", "mithril"}}), 1);
+}
+
 TEST_F(RoomBotTest, AMentionWhileTheRoomsRequestIsInFlightIsDropped) {
   Start();
   microgpt_->Hold();

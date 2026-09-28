@@ -981,6 +981,58 @@ TEST_F(GamesHubStreamFixture, AWordchainCommandIsAnsweredByMithrilInTheRoom) {
   }
 }
 
+// Both bots at once, each answering only its own ask, once.
+TEST_F(GamesHubStreamFixture, BothBotsAnswerTheirOwnAsksInOneRoom) {
+  opal::ClientConfig gpt = microgpt::DefaultClientConfig("http://microgpt-serve:8087");
+  gpt.http_client = std::make_shared<OneReplyMicrogpt>("whoever knocks last");
+  auto microgpt_client = microgpt::Client::Create(std::move(gpt));
+  ASSERT_TRUE(microgpt_client.ok());
+  golf_->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*microgpt_client)));
+  opal::ClientConfig ladder = mithril::DefaultClientConfig("http://mithril:8083");
+  ladder.http_client = std::make_shared<OneLadderMithril>();
+  auto mithril_client = mithril::Client::Create(std::move(ladder));
+  ASSERT_TRUE(mithril_client.ok());
+  golf_->StartWordchain(std::make_shared<mithril::Client>(std::move(*mithril_client)));
+
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_FALSE(CreateRoomFor(*alice).empty());
+
+  std::vector<std::string> authors;
+  for (const char* text : {"@bot who wins?", "/wordchain cold warm"}) {
+    moonbase::games::Chat chat;
+    chat.text = text;
+    ASSERT_TRUE(alice->stream.Send(GameCommands::FromChat(chat)).ok());
+    for (int i = 0; i < 2; ++i) {
+      auto message = ReceiveCase(alice->stream, "roomChat");
+      ASSERT_TRUE(message.has_value()) << text;
+      authors.push_back(message->as_roomChat_or_null()->playerId);
+    }
+  }
+  EXPECT_EQ(authors, (std::vector<std::string>{alice->player_id, kBotPlayerId, alice->player_id,
+                                               kWordchainPlayerId}));
+  EXPECT_FALSE(ReceiveWithin(alice->stream,
+                             std::chrono::steady_clock::now() + std::chrono::milliseconds(200))
+                   .ok())
+      << "a bot answered twice, or answered the other's ask";
+}
+
+// Only mithril's rows are ladders: a player typing one sends only text.
+TEST_F(GamesHubStreamFixture, APlayersLadderShapedTextCarriesNoWordchain) {
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_FALSE(CreateRoomFor(*alice).empty());
+  moonbase::games::Chat chat;
+  chat.text = "cold → cord → card";
+  ASSERT_TRUE(alice->stream.Send(GameCommands::FromChat(chat)).ok());
+  auto message = ReceiveCase(alice->stream, "roomChat");
+  ASSERT_TRUE(message.has_value());
+  EXPECT_FALSE(message->as_roomChat_or_null()->wordchain.has_value());
+  EXPECT_FALSE(message->as_roomChat_or_null()->bot.has_value());
+}
+
 // mithril's replies replay with their ladder, read back out of the stored
 // text; a "no ladder" reply replays with its ends and no path.
 TEST_F(GamesHubStreamFixture, WordchainRepliesReplayWithTheirLadder) {

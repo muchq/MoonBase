@@ -74,15 +74,7 @@ moonbase::games::ChatMessage ChatEvent(const ChatRow& row) {
   message.text = row.text;
   message.sentAtUnixMillis = row.sent_at_unix_millis;
   if (IsBotAuthor(row.player_id)) message.bot = true;
-  if (row.player_id == kWordchainPlayerId) {
-    if (std::optional<Wordchain> chain = WordchainOfText(row.text)) {
-      moonbase::games::Wordchain wire;
-      wire.start = std::move(chain->start);
-      wire.end = std::move(chain->end);
-      wire.path = std::move(chain->path);
-      message.wordchain = std::move(wire);
-    }
-  }
+  if (row.player_id == kWordchainPlayerId) message.wordchain = WordchainOfText(row.text);
   return message;
 }
 

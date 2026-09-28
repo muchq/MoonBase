@@ -172,12 +172,13 @@ every outcome is a `bot_requests{bot="microgpt",result}` count (`ok`,
 `bot_latency_us{bot}`, never an error in chat. `MICROGPT_URL` unset leaves
 the bot off, and a mention is only chat.
 
-`/wordchain start end` is answered by mithril the same way, through the
-same worker, budgets and counts under `bot="mithril"`. The command is two
+`/wordchain start end` is answered by mithril the same way, on its own
+worker with its own budgets, counted under `bot="mithril"`. The command is two
 words of 3 to 9 letters, lowercased; anything else is only chat. The call
 is `POST /mithril/v1/wordchain` over `//domains/games/libs/mithril_cpp`,
 one attempt, 2 s. The reply is posted as `mithril` and reads
-`cold → cord → card → ward → warm`, or `no ladder from cold to hot`; its
+`cold → cord → card → ward → warm`, or `no ladder from cold to hot` (an
+unknown word included), or, past 500 bytes, how many rungs it has; its
 `roomChat` carries the same ladder as `wordchain`, read back out of the
 stored text, so a replay has it too. `MITHRIL_URL` unset leaves it off.
 
