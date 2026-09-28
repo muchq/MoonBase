@@ -27,7 +27,6 @@
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/golf/player.h"
 #include "domains/games/libs/cards/rummy/game_state.h"
-#include "domains/games/libs/cards/rummy/meld.h"
 
 namespace games_hub {
 
@@ -1939,8 +1938,8 @@ void GolfHub::HandleCastleMove(const std::string& player_id, const CastleMove& m
 
 // Rummy's moves. The ones that put cards down name them: a spelling no
 // card has never reaches the table, and a card the hand does not hold is
-// a NotFound — the same stale-view refusal castle's rows give — named in
-// the wire's spelling, ahead of anything the engine would say.
+// the engine's NotFound — the same stale-view refusal castle's rows give —
+// named here in the wire's spelling.
 void GolfHub::HandleRummyMove(const std::string& player_id, const RummyMove& move) {
   if (LifecycleMove(player_id, move, GameKind::kRummy)) return;
   using Next = absl::StatusOr<rummy::GameState>;
@@ -1952,13 +1951,18 @@ void GolfHub::HandleRummyMove(const std::string& player_id, const RummyMove& mov
       Reject(player_id, RejectKind::kInvalid, std::string(named.status().message()));
       return;
     }
-    TableEngineMove<rummy::GameState>(
-        player_id, GameKind::kRummy,
-        [cards = *std::move(named), laying = std::move(laying)](const rummy::GameState& state,
-                                                                int seat) -> Next {
-          if (auto held = HeldInHand(state.getPlayer(seat).hand, cards); !held.ok()) return held;
-          return laying(state, seat, cards);
-        });
+    TableEngineMove<rummy::GameState>(player_id, GameKind::kRummy,
+                                      [cards = *std::move(named), laying = std::move(laying)](
+                                          const rummy::GameState& state, int seat) -> Next {
+                                        // The engine's turn and stage come first; only a move it
+                                        // would make but for a card the hand lacks is stale, and
+                                        // that one is named in the wire's spelling.
+                                        Next next = laying(state, seat, cards);
+                                        if (next.status().code() == absl::StatusCode::kNotFound) {
+                                          return HeldInHand(state.getPlayer(seat).hand, cards);
+                                        }
+                                        return next;
+                                      });
   };
 
   if (move.as_drawStock_or_null() != nullptr) {

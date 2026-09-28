@@ -610,7 +610,6 @@ cc_library(
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:player",
         "//domains/games/libs/cards/rummy:game_state",
-        "//domains/games/libs/cards/rummy:meld",
         "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/pg:listener",
         "@com_google_absl//absl/log",

@@ -260,7 +260,28 @@ absl::StatusOr<GameState> deserializeGameState(const std::string& serialized) {
     if (!cards.ok()) return cards.status();
     auto meld = readIntInRange(move, "meld", -1, static_cast<int64_t>(melds.size()) - 1);
     if (!meld.ok()) return meld.status();
+    // The shape the engine writes for each kind: a stock draw names no
+    // card, a draw from the discard or a discard or a lay-off names one, a
+    // meld three or more; only a meld or a lay-off names a meld.
+    const bool on_meld = *kind == MoveKind::Meld || *kind == MoveKind::LayOff;
+    const std::size_t named = cards->size();
+    const bool shaped = *kind == MoveKind::DrawStock ? named == 0
+                        : *kind == MoveKind::Meld    ? named >= 3
+                                                     : named == 1;
+    if (!shaped || on_meld != (*meld >= 0)) {
+      return absl::InvalidArgumentError("lastMove does not have its kind's shape");
+    }
     last_move = LastMove{*std::move(player), *kind, *std::move(cards), *meld};
+  }
+
+  // A table in play has a move to make: a draw has somewhere to draw from,
+  // and a seat mid-turn has a card to put down. A row without one would
+  // hold every seat at "not your turn" until they all left.
+  if (*phase == Phase::Playing) {
+    const Player& on_turn = players.at(static_cast<std::size_t>(*whose_turn));
+    const bool stuck =
+        *stage == Stage::Draw ? stock->empty() && discard->empty() : on_turn.hand.empty();
+    if (stuck) return absl::InvalidArgumentError("a playing row with no move to make");
   }
 
   return GameState{std::deque<Card>(stock->begin(), stock->end()),

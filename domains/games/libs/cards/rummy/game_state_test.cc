@@ -335,6 +335,22 @@ TEST(Discard, ACardTheHandDoesNotHoldIsNotFound) {
   EXPECT_EQ(alicePlaying().discard(0, c(Rank::Ace)).status().code(), absl::StatusCode::kNotFound);
 }
 
+TEST(Discard, TheTakenCardStaysBarredAfterAMeld) {
+  // The bar is the turn's, not the draw's: melding in between lifts it
+  // only if the taken card is then all the hand holds.
+  auto game = playing({{"alice", {c(Rank::Four), c(Rank::Five), c(Rank::Six), c(Rank::Two)}},
+                       {"bob", {c(Rank::Three)}}},
+                      {c(Rank::Ace)}, {c(Rank::King)});
+  auto drew = game.drawDiscard(0);
+  ASSERT_TRUE(drew.ok());
+  auto melded = drew->meld(0, {c(Rank::Four), c(Rank::Five), c(Rank::Six)});
+  ASSERT_TRUE(melded.ok());
+  EXPECT_EQ(melded->getTakenDiscard(), c(Rank::King));
+  EXPECT_EQ(melded->discard(0, c(Rank::King)).status().code(),
+            absl::StatusCode::kFailedPrecondition);
+  EXPECT_TRUE(melded->discard(0, c(Rank::Two)).ok());
+}
+
 TEST(Discard, TheCardTakenFromTheDiscardCannotGoStraightBack) {
   auto game = playing({{"alice", {c(Rank::Two), c(Rank::Three)}}, {"bob", {c(Rank::Three)}}},
                       {c(Rank::Four)}, {c(Rank::Five)});

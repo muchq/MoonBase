@@ -152,6 +152,8 @@ TEST(RummySerde, FrozenMidTurnPayload) {
                                                      {"discard", MoveKind::Discard}}) {
     json payload = json::parse(kRow);
     payload["lastMove"]["kind"] = kind;
+    payload["lastMove"]["cards"] = want == MoveKind::DrawStock ? json::array() : json::array({31});
+    payload["lastMove"]["meld"] = want == MoveKind::LayOff ? 0 : -1;
     const auto restored = deserializeGameState(payload.dump());
     ASSERT_TRUE(restored.ok()) << kind;
     EXPECT_EQ(restored->getLastMove()->kind, want);
@@ -258,6 +260,54 @@ TEST(RummySerde, RejectsWhatTheEngineWouldIndexOutOfRange) {
   for (const char* input : {"", "[]", "not json", R"({"v":1})", R"({"v":"1"})"}) {
     EXPECT_FALSE(deserializeGameState(input).ok()) << input;
   }
+}
+
+// A last move's cards and meld follow from its kind — the shape the
+// engine writes. Anything else would be sent to every chair as it stands:
+// a stock draw naming a card would show the table a card nobody saw.
+TEST(RummySerde, ALastMoveMustHaveItsKindsShape) {
+  auto with_move = [](const char* kind, json cards, int meld) {
+    json payload = midTurnPayload();
+    payload["lastMove"] = json{{"player", "a"}, {"kind", kind}, {"cards", cards}, {"meld", meld}};
+    return payload;
+  };
+  expectRejected(with_move("drawStock", json::array({3}), -1));
+  expectRejected(with_move("drawStock", json::array(), 0));
+  expectRejected(with_move("drawDiscard", json::array(), -1));
+  expectRejected(with_move("drawDiscard", json::array({3, 4}), -1));
+  expectRejected(with_move("discard", json::array({3}), 0));
+  expectRejected(with_move("meld", json::array({43, 47, 51}), -1));
+  expectRejected(with_move("meld", json::array({43, 47}), 0));
+  expectRejected(with_move("layOff", json::array({3}), -1));
+  expectRejected(with_move("layOff", json::array({3, 4}), 0));
+  // The twins, each the shape the engine writes.
+  for (const auto& payload :
+       {with_move("drawStock", json::array(), -1), with_move("drawDiscard", json::array({3}), -1),
+        with_move("discard", json::array({3}), -1), with_move("meld", json::array({43, 47, 51}), 0),
+        with_move("layOff", json::array({3}), 0)}) {
+    EXPECT_TRUE(deserializeGameState(payload.dump()).ok()) << payload.dump();
+  }
+}
+
+// A table in play must have a move to make: a draw with nothing to draw
+// from, or a play stage with no card to put down, would hold every seat
+// at "not your turn" until they all left. Such a row is dropped instead.
+TEST(RummySerde, APlayingRowWithNoMoveToMakeIsRejected) {
+  json payload = dealtPayload();
+  payload["stock"] = json::array();
+  payload["discard"] = json::array();
+  expectRejected(payload);
+  // Its twin: the empty stock with a discard to take is a table.
+  payload["discard"] = json::array({31});
+  EXPECT_TRUE(deserializeGameState(payload.dump()).ok());
+
+  payload = midTurnPayload();
+  payload["players"][0]["hand"] = json::array();
+  expectRejected(payload);
+  // Over, an empty hand is the winner's.
+  payload["phase"] = "over";
+  payload["whoseTurn"] = -1;
+  EXPECT_TRUE(deserializeGameState(payload.dump()).ok());
 }
 
 TEST(RummySerde, UnknownFieldsAreIgnored) {

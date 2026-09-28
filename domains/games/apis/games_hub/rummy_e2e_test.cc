@@ -242,7 +242,8 @@ class RummyGameFixture : public GamesHubStreamFixture {
     int stock_draws = 0;
     int melds = 0;
     int lay_offs = 0;
-    int refills = 0;
+    // Lay-offs onto a meld another seat laid.
+    int foreign_lay_offs = 0;
   };
 
   // Plays the mirror's policy on every seat until someone goes out: the
@@ -284,7 +285,6 @@ class RummyGameFixture : public GamesHubStreamFixture {
         ASSERT_NO_FATAL_FAILURE(
             step(mover, DrawDiscard(), mirror->drawDiscard(seat), "drawDiscard"));
       } else {
-        if (mirror->getStock().empty()) ++played.refills;
         ++played.stock_draws;
         ASSERT_NO_FATAL_FAILURE(step(mover, DrawStock(), mirror->drawStock(seat), "drawStock"));
       }
@@ -298,6 +298,7 @@ class RummyGameFixture : public GamesHubStreamFixture {
         }
         if (auto lay_off = LayOffIn(held, mirror->getMelds()); lay_off.has_value()) {
           ++played.lay_offs;
+          if (mirror->getMelds().at(lay_off->second).owner != mover_id) ++played.foreign_lay_offs;
           ASSERT_NO_FATAL_FAILURE(step(mover, LayOff(Wire(lay_off->first), lay_off->second),
                                        mirror->layOff(seat, lay_off->first, lay_off->second),
                                        "layOff"));
@@ -451,6 +452,12 @@ TEST_F(RummyGameFixture, OutOfTurnOrOutOfOrderIsRefusedInBand) {
   auto refused = ReceiveCase(bob.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not your turn");
+  // Off turn, the turn is the answer, whatever card the move names: a
+  // card that is not his is no reason to tell him he is out of sync.
+  ASSERT_TRUE(bob.stream.Send(Discard(Named("A", "♠"))).ok());
+  refused = ReceiveCase(bob.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not your turn");
 
   ASSERT_TRUE(alice.stream.Send(Discard(Named("A", "♠"))).ok());
   refused = ReceiveCase(alice.stream, "commandRejected");
@@ -475,7 +482,7 @@ TEST_F(RummyGameFixture, OutOfTurnOrOutOfOrderIsRefusedInBand) {
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "no such meld");
 
-  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "rules"}}), 5);
+  EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "rules"}}), 6);
   EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "state"}}), 0);
   ExpectNoEvent(bob.stream);
 }
@@ -526,6 +533,35 @@ TEST_F(RummyGameFixture, ACardTheHandDoesNotHoldIsRefusedAsStaleAndNamed) {
   EXPECT_EQ(Face(*view.discardTop), "J♦");
   EXPECT_EQ(view.currentPlayerId.value_or(""), bob.player_id);
   EXPECT_EQ(view.stage.value_or(""), "draw");
+}
+
+// A draw, a meld and a lay-off are all the same seat's turn: the table
+// hears views and no turnChanged until the discard hands it on.
+TEST_F(RummyGameFixture, ADrawAndAMeldLeaveTheTurnUnannounced) {
+  auto table = SeatedRummyTable();
+  ASSERT_TRUE(table.has_value());
+  auto& alice = table->alice;
+  auto& bob = table->bob;
+  ASSERT_TRUE(ReceiveRummy(alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveRummy(bob.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveCase(bob.stream, "roomState").has_value());
+
+  ASSERT_TRUE(alice.stream.Send(DrawDiscard()).ok());
+  ASSERT_TRUE(ReceiveRummy(bob.stream, "gameState").has_value());
+  ExpectNoEvent(bob.stream);
+  ASSERT_TRUE(alice.stream.Send(MeldOf({Named("A", "♠"), Named("K", "♠"), Named("Q", "♠")})).ok());
+  ASSERT_TRUE(ReceiveRummy(bob.stream, "gameState").has_value());
+  ExpectNoEvent(bob.stream);
+  ASSERT_TRUE(alice.stream.Send(LayOff(Named("J", "♠"), 0)).ok());
+  ASSERT_TRUE(ReceiveRummy(bob.stream, "gameState").has_value());
+  ExpectNoEvent(bob.stream);
+  // Its twin: the discard does announce.
+  ASSERT_TRUE(alice.stream.Send(Discard(Named("A", "♦"))).ok());
+  ASSERT_TRUE(ReceiveRummy(bob.stream, "gameState").has_value());
+  auto next = bob.stream.Receive(kReceiveBudget);
+  ASSERT_TRUE(next.ok() && next->has_value());
+  ASSERT_NE((*next)->as_rummy_or_null(), nullptr);
+  EXPECT_EQ((*next)->as_rummy_or_null()->update.case_name(), std::string("turnChanged"));
 }
 
 // Taken from the discard, a card is seen taken by the whole table, and
@@ -583,6 +619,7 @@ TEST_P(SeededRummyFixture, AWholeGameAgreesWithTheEngine) {
   // The policy's game touched every move, so each was checked above.
   EXPECT_GT(played.melds, 0);
   EXPECT_GT(played.lay_offs, 0);
+  EXPECT_GT(played.foreign_lay_offs, 0);
   EXPECT_GT(played.discard_draws, 0);
   EXPECT_GT(played.stock_draws, 0);
   EXPECT_EQ(metrics_->CounterTotal("rummy_commands", {{"command", "layOff"}}), played.lay_offs);

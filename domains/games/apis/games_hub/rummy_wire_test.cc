@@ -191,6 +191,22 @@ TEST_F(RummyWireTest, TurnMovesPinTheirSpellingAndTheEndingBytes) {
             R"({"deadwood":82,"playerId":"player-2"}],"winner":"player-1"}}})");
 }
 
+// A table that broke up names no winner: the key is omitted, never null,
+// which is what the UI reads as nobody having gone out.
+TEST_F(RummyWireTest, AnAbandonedTableEndsWithNoWinnerKey) {
+  std::shared_ptr<opal::http::WebSocket> creator;
+  std::shared_ptr<opal::http::WebSocket> joiner;
+  (void)DealtTable(creator, joiner);
+  (void)EventPayload(NextFrame(*joiner), "rummy");
+  (void)EventPayload(NextFrame(*joiner), "roomState");
+
+  ASSERT_TRUE(joiner->Send(CommandFrame("rummy", R"({"move":{"leaveGame":{}}})")).ok());
+  (void)EventPayload(NextFrame(*creator), "rummy");  // the final view
+  EXPECT_EQ(
+      EventPayload(NextFrame(*creator), "rummy"),
+      R"({"update":{"gameEnded":{"points":0,"scores":[{"deadwood":82,"playerId":"player-1"}]}}})");
+}
+
 TEST_F(RummyWireTest, StockDrawAndDiscardSpellings) {
   std::shared_ptr<opal::http::WebSocket> creator;
   std::shared_ptr<opal::http::WebSocket> joiner;
