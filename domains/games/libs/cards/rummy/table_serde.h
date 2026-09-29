@@ -15,8 +15,10 @@ namespace rummy {
 /// rummy row held before the table:
 ///   {"v":2, "phase":"choosing"|"playing"|"closed", "seats":[str...],
 ///    "wins":[int...], "dealer":int, "dealNumber":int, "variant":"basic",
-///    "deal":<v1 deal>}
-/// deal is absent before the first deal. A v1 row reads as that deal at a
+///    "deal":<v1 deal>, "scoreSheet":[{"variant":str, "winner":str?,
+///    "points":int}...]}
+/// deal is absent before the first deal, scoreSheet before the first deal
+/// ends; a hub that predates the sheet ignores it. A v1 row reads as that deal at a
 /// table of its seats: in play, dealt by the seat before the one on turn,
 /// or closed if the deal had ended, so a finished row stays finished.
 ///

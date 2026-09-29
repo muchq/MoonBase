@@ -60,6 +60,18 @@ using Deal = std::variant<GameState, GinState>;
 /// both, and the standings compact with them.
 enum class TablePhase { Choosing, Playing, Closed };
 
+/// A line of the table's score sheet: one deal's end — its game, the seat
+/// that won it (none for a gin draw) and what it scored. Names, not seats:
+/// a line outlasts its seat leaving.
+struct DealScore {
+  Variant variant = Variant::SevenCard;
+  std::optional<std::string> winner;
+  int points = 0;
+  bool operator==(const DealScore& o) const {
+    return variant == o.variant && winner == o.winner && points == o.points;
+  }
+};
+
 class TableState {
  public:
   /// A table opening for these seats: choosing, seat 0 dealing.
@@ -68,7 +80,7 @@ class TableState {
 
   TableState(std::vector<std::string> _seats, std::vector<int> _wins, int _dealer, int _dealNumber,
              TablePhase _phase, Variant _variant, std::optional<Deal> _deal, std::string _gameId,
-             std::string _versionId);
+             std::string _versionId, std::vector<DealScore> _scoreSheet = {});
 
   /// The next deal, from an already-shuffled deck. `seat` must be the
   /// dealer's, or any seat's when the dealer is away.
@@ -115,6 +127,8 @@ class TableState {
   [[nodiscard]] const GinState* ginDeal() const {
     return deal.has_value() ? std::get_if<GinState>(&*deal) : nullptr;
   }
+  /// Every deal played to its end, in order.
+  [[nodiscard]] const std::vector<DealScore>& getScoreSheet() const { return scoreSheet; }
   [[nodiscard]] int playerIndex(const std::string& id) const;
   [[nodiscard]] const std::string& getGameId() const { return gameId; }
   [[nodiscard]] const std::string& getVersionId() const { return versionId; }
@@ -133,6 +147,7 @@ class TableState {
   std::optional<Deal> deal;
   std::string gameId;
   std::string versionId;
+  std::vector<DealScore> scoreSheet;
 };
 
 }  // namespace rummy

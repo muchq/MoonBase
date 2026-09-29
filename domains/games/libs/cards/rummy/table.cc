@@ -88,7 +88,8 @@ std::vector<Variant> variantsFor(int seats) {
 
 TableState::TableState(std::vector<std::string> _seats, std::vector<int> _wins, int _dealer,
                        int _dealNumber, TablePhase _phase, Variant _variant,
-                       std::optional<Deal> _deal, std::string _gameId, std::string _versionId)
+                       std::optional<Deal> _deal, std::string _gameId, std::string _versionId,
+                       std::vector<DealScore> _scoreSheet)
     : seats(std::move(_seats)),
       wins(std::move(_wins)),
       dealer(_dealer),
@@ -97,7 +98,8 @@ TableState::TableState(std::vector<std::string> _seats, std::vector<int> _wins, 
       variant(_variant),
       deal(std::move(_deal)),
       gameId(std::move(_gameId)),
-      versionId(std::move(_versionId)) {}
+      versionId(std::move(_versionId)),
+      scoreSheet(std::move(_scoreSheet)) {}
 
 StatusOr<TableState> TableState::open(const std::string& game_id,
                                       const std::vector<std::string>& seats) {
@@ -141,14 +143,14 @@ StatusOr<TableState> TableState::chooseVariant(int seat, Variant chosen,
     dealt.emplace(basic->withIdAndVersion(gameId, versionId));
   }
   return TableState{
-      seats,  wins,     dealer, dealNumber + 1, TablePhase::Playing, chosen, std::move(dealt),
-      gameId, versionId};
+      seats,  wins,      dealer,    dealNumber + 1, TablePhase::Playing, chosen, std::move(dealt),
+      gameId, versionId, scoreSheet};
 }
 
 TableState TableState::afterDeal(Deal next) const {
   if (dealPhase(next) == Phase::Playing) {
-    return TableState{seats,           wins,   dealer,   dealNumber, phase, variant,
-                      std::move(next), gameId, versionId};
+    return TableState{seats,           wins,   dealer,    dealNumber, phase, variant,
+                      std::move(next), gameId, versionId, scoreSheet};
   }
   // Over by play: the hand goes to its winner and the deal passes on.
   std::vector<int> newWins = wins;
@@ -156,9 +158,11 @@ TableState TableState::afterDeal(Deal next) const {
     const int at = playerIndex(*winner);
     if (at >= 0) newWins.at(at)++;
   }
+  std::vector<DealScore> sheet = scoreSheet;
+  sheet.push_back(DealScore{variant, dealWinner(next), dealWinnerPoints(next)});
   const int nextDealer = (dealer + 1) % static_cast<int>(seats.size());
   return TableState{seats,   std::move(newWins), nextDealer, dealNumber, TablePhase::Choosing,
-                    variant, std::move(next),    gameId,     versionId};
+                    variant, std::move(next),    gameId,     versionId,  std::move(sheet)};
 }
 
 StatusOr<TableState> TableState::removePlayer(int seat) const {
@@ -191,7 +195,8 @@ StatusOr<TableState> TableState::removePlayer(int seat) const {
                       variant,
                       std::move(newDeal),
                       gameId,
-                      versionId};
+                      versionId,
+                      scoreSheet};
   }
   // The dealer's chair follows its holder. A dealer who left passes the
   // next deal to the seat after them, wrapping: between deals that seat is
@@ -213,7 +218,8 @@ StatusOr<TableState> TableState::removePlayer(int seat) const {
                     variant,
                     std::move(newDeal),
                     gameId,
-                    versionId};
+                    versionId,
+                    scoreSheet};
 }
 
 int TableState::playerIndex(const std::string& id) const {
@@ -230,7 +236,8 @@ TableState TableState::withIdAndVersion(const std::string& game_id,
     stamped.emplace(std::visit(
         [&](const auto& d) { return Deal(d.withIdAndVersion(game_id, version_id)); }, *deal));
   }
-  return TableState{seats, wins, dealer, dealNumber, phase, variant, stamped, game_id, version_id};
+  return TableState{seats,   wins,    dealer,  dealNumber, phase,
+                    variant, stamped, game_id, version_id, scoreSheet};
 }
 
 }  // namespace rummy

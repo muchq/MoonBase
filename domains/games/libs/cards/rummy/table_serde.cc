@@ -108,6 +108,15 @@ std::string serializeTableState(const TableState& table) {
       {"dealNumber", table.getDealNumber()},
       {"variant", std::string(storedName(table.getVariant()))},
   };
+  if (!table.getScoreSheet().empty()) {
+    json sheet = json::array();
+    for (const DealScore& line : table.getScoreSheet()) {
+      json entry{{"variant", std::string(storedName(line.variant))}, {"points", line.points}};
+      if (line.winner.has_value()) entry["winner"] = sanitized(*line.winner);
+      sheet.push_back(std::move(entry));
+    }
+    serialized["scoreSheet"] = std::move(sheet);
+  }
   // The deal in its own engine's form; the variant says which.
   if (const GameState* basic = table.rummyDeal(); basic != nullptr) {
     serialized["deal"] = json::parse(serializeGameState(*basic));
@@ -175,6 +184,30 @@ absl::StatusOr<TableState> deserializeTableState(const std::string& serialized) 
   auto deal_number = readIntInRange(parsed, "dealNumber", 0, 1'000'000);
   if (!deal_number.ok()) return deal_number.status();
 
+  std::vector<DealScore> sheet;
+  if (parsed.contains("scoreSheet")) {
+    if (!parsed["scoreSheet"].is_array()) {
+      return absl::InvalidArgumentError("expected array 'scoreSheet'");
+    }
+    for (const json& entry : parsed["scoreSheet"]) {
+      if (!entry.is_object()) return absl::InvalidArgumentError("a score line is an object");
+      auto name = readString(entry, "variant");
+      if (!name.ok()) return name.status();
+      const std::optional<Variant> played =
+          *name == kSevenCardStored ? Variant::SevenCard : parseVariant(*name);
+      if (!played.has_value()) return absl::InvalidArgumentError("unknown variant");
+      auto points = readIntInRange(entry, "points", 0, 1'000'000);
+      if (!points.ok()) return points.status();
+      std::optional<std::string> winner;
+      if (entry.contains("winner")) {
+        auto who = readString(entry, "winner");
+        if (!who.ok()) return who.status();
+        winner = *std::move(who);
+      }
+      sheet.push_back(DealScore{*played, std::move(winner), *points});
+    }
+  }
+
   std::optional<Deal> deal;
   if (parsed.contains("deal")) {
     if (!parsed["deal"].is_object()) return absl::InvalidArgumentError("expected object 'deal'");
@@ -204,15 +237,8 @@ absl::StatusOr<TableState> deserializeTableState(const std::string& serialized) 
     return absl::InvalidArgumentError("between deals, the last deal is over");
   }
 
-  return TableState{std::move(seats),
-                    std::move(wins),
-                    *dealer,
-                    *deal_number,
-                    *phase,
-                    *variant,
-                    std::move(deal),
-                    "",
-                    ""};
+  return TableState{std::move(seats), std::move(wins), *dealer, *deal_number, *phase,
+                    *variant,         std::move(deal), "",      "",           std::move(sheet)};
 }
 
 }  // namespace rummy
