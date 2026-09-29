@@ -17,9 +17,11 @@
 #include "domains/games/libs/cards/card.h"
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/castle/player.h"
+#include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/golf/player.h"
 #include "domains/games/libs/cards/rummy/game_state.h"
+#include "domains/games/libs/cards/rummy/gin.h"
 #include "domains/games/libs/cards/rummy/table.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -74,12 +76,13 @@ rummy::TableState Rummy() {
       std::nullopt,
       "game",
       "v0"};
-  return rummy::TableState{{"andy", "mercy"},     {0, 0}, 1,      1,   rummy::TablePhase::Playing,
-                           rummy::Variant::Basic, deal,   "game", "v0"};
+  return rummy::TableState{
+      {"andy", "mercy"},         {0, 0}, 1,      1,   rummy::TablePhase::Playing,
+      rummy::Variant::SevenCard, deal,   "game", "v0"};
 }
 
 rummy::TableState RummyDealWon() {
-  auto won = Rummy().inDeal(
+  auto won = Rummy().inDeal<rummy::GameState>(
       [](const rummy::GameState& deal) { return deal.discard(0, Card{Suit::Clubs, Rank::Five}); });
   EXPECT_TRUE(won.ok()) << won.status();
   return *won;
@@ -132,7 +135,7 @@ TEST(GameEvents, ACastleGameLeftBelowTwoSeatsIsAbandoned) {
 }
 
 // A rummy table's games are its deals (#1609): a deal won by play is a
-// game completed, under the deal's variant word — basic rummy is "rummy".
+// game completed, under the deal's variant word — seven-card rummy is "rummy".
 TEST(GameEvents, ARummyDealPlayedOutIsCompleted) {
   const rummy::TableState table = RummyDealWon();
   ASSERT_EQ(table.getPhase(), rummy::TablePhase::Choosing);
@@ -143,6 +146,31 @@ TEST(GameEvents, ARummyDealPlayedOutIsCompleted) {
   EXPECT_EQ(finished->variant, "rummy");
   EXPECT_EQ(finished->outcome, "completed");
   EXPECT_EQ(finished->players, 2u);
+}
+
+/// A gin deal (#1610) played out: from the pristine deck mercy, opening,
+/// holds two runs; both pass, she draws the 9♥ and goes gin on it.
+rummy::TableState GinDealWon() {
+  auto dealt =
+      rummy::TableState::open("game", {"andy", "mercy"})
+          ->chooseVariant(0, rummy::Variant::Gin, cards::NoShuffleDealer().DealNewUnshuffledDeck());
+  EXPECT_TRUE(dealt.ok()) << dealt.status();
+  auto won = dealt->inDeal<rummy::GinState>([](const rummy::GinState& deal) {
+    auto drew = deal.pass(1)->pass(0)->drawStock(1);
+    return drew->knock(1, drew->getPlayer(1).hand.back());
+  });
+  EXPECT_TRUE(won.ok()) << won.status();
+  return *won;
+}
+
+// A gin deal is a game of its own: recorded as "gin", not "rummy".
+TEST(GameEvents, AGinDealPlayedOutIsCompletedAsGin) {
+  const rummy::TableState table = GinDealWon();
+  ASSERT_EQ(table.getPhase(), rummy::TablePhase::Choosing);
+  const auto finished = FinishedOf(HostedState(table), 2);
+  ASSERT_TRUE(finished.has_value());
+  EXPECT_EQ(finished->variant, "gin");
+  EXPECT_EQ(finished->outcome, "completed");
 }
 
 TEST(GameEvents, ARummyDealBrokenUpByALeaveIsAbandoned) {
@@ -242,6 +270,7 @@ TEST(GameEvents, EveryEventsLineIsTextWithNothingToEscape) {
     lines.emplace_back(GameStartedLine(when, room, "golf", 2), 16);
     lines.emplace_back(GameStartedLine(when, room, "castle", 4), 16);
     lines.emplace_back(GameStartedLine(when, room, "rummy", 3), 16);
+    lines.emplace_back(GameStartedLine(when, room, "gin", 2), 16);
 
     std::vector<HostedState> endings;
     endings.emplace_back(Golf(0));
@@ -250,13 +279,14 @@ TEST(GameEvents, EveryEventsLineIsTextWithNothingToEscape) {
     endings.emplace_back(*Castle().removePlayer(1));
     endings.emplace_back(RummyDealWon());
     endings.emplace_back(*Rummy().removePlayer(1));
+    endings.emplace_back(GinDealWon());
     for (const HostedState& state : endings) {
       for (std::size_t players = 1; players <= 4; ++players) {
         const GameFinished finished = *FinishedOf(state, players);
         EXPECT_TRUE(finished.outcome == kOutcomeCompleted || finished.outcome == kOutcomeAbandoned)
             << finished.outcome;
         EXPECT_TRUE(finished.variant == "golf" || finished.variant == "castle" ||
-                    finished.variant == "rummy")
+                    finished.variant == "rummy" || finished.variant == "gin")
             << finished.variant;
         lines.emplace_back(GameFinishedLine(when, room, finished), 20);
       }

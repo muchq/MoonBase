@@ -712,14 +712,14 @@ class GamesHubStreamFixture : public testing::Test {
     return table;
   }
 
-  // The same table with basic rummy dealt: each seat still has its dealt
+  // The same table with seven-card rummy dealt: each seat still has its dealt
   // view to read. The NoShuffleDealer deals one card a seat from the back,
   // seat 0 first; the seat after the dealer (seat 1) opens.
   std::optional<ManySeats> MultiSeatRummyTable(int count) {
     auto table = ChoosingRummyTable(count);
     if (!table.has_value()) return std::nullopt;
     moonbase::games::RummyChooseVariant basic;
-    basic.variant = "basic";
+    basic.variant = "7-card";
     if (!table->seats.front()
              .stream.Send(Rummy(moonbase::games::RummyMove::FromChoosevariant(basic)))
              .ok()) {

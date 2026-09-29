@@ -38,21 +38,27 @@ union RummyMove {
     startGame: StartGame
     leaveGame: LeaveGame
     chooseVariant: RummyChooseVariant
+    pass: RummyPass
     drawStock: RummyDrawStock
     drawDiscard: RummyDrawDiscard
     meld: RummyMeld
     layOff: RummyLayOff
     discard: RummyDiscard
+    knock: RummyKnock
 }
 
 /// Between deals, the dealer deals the next: its variant, one the table's
 /// view offers (RummyChoosing.options). A dealer who is not connected lets
 /// any seat deal.
 structure RummyChooseVariant {
-    /// basic
+    /// 7-card | 10-card | gin
     @required
     variant: String
 }
+
+/// Gin: turn down the upcard (stage upcard). Passed by both, the opener
+/// draws from the stock.
+structure RummyPass {}
 
 /// Take the top of the stock. An empty stock is refilled from the
 /// discard pile, turned over under its top card.
@@ -82,6 +88,14 @@ structure RummyLayOff {
 
 /// End the turn with one card on the discard pile.
 structure RummyDiscard {
+    @required
+    card: Card
+}
+
+/// Gin: end the deal, throwing `card`, with 10 or less deadwood left in
+/// the hand's best arrangement. The hub arranges both hands and lays the
+/// defender's cards off; the result rides lastDeal.gin.
+structure RummyKnock {
     @required
     card: Card
 }
@@ -135,9 +149,9 @@ structure RummyStanding {
     handsWon: Integer
 }
 
-/// A deal's result: the seat that went out and what it scored (every other
-/// seat's cards left in hand), in seat order. No winner for a deal broken
-/// up by a leave.
+/// A deal's result: the seat that scored and what (every other seat's
+/// cards left in hand, or gin's reckoning), and each seat's deadwood in
+/// seat order. No winner for a deal broken up by a leave or drawn.
 structure RummyDealResult {
     @required
     variant: String
@@ -149,6 +163,46 @@ structure RummyDealResult {
 
     @required
     scores: RummyScores
+
+    /// A gin deal's end, as the hub arranged it.
+    gin: RummyGinResult
+}
+
+structure RummyGinResult {
+    /// knock | gin | undercut | draw
+    @required
+    ending: String
+
+    /// Absent for a draw.
+    knocker: String
+
+    /// Each seat's hand as melds and deadwood, in seat order; the
+    /// defender's without what it laid off.
+    @required
+    hands: RummyArrangedHands
+
+    /// The defender's cards laid off onto the knocker's melds.
+    @required
+    laidOff: RummyCards
+}
+
+list RummyArrangedHands {
+    member: RummyArrangedHand
+}
+
+structure RummyArrangedHand {
+    @required
+    playerId: String
+
+    @required
+    melds: RummyCardGroups
+
+    @required
+    deadwood: RummyCards
+}
+
+list RummyCardGroups {
+    member: RummyCards
 }
 
 /// Between deals: who deals next and what they may deal. A dealer the
@@ -217,8 +271,10 @@ structure RummyView {
 
     currentPlayerId: String
 
-    /// Where the seat on turn is: draw (about to draw) | play (drawn;
-    /// melds, lay-offs, then a discard). Absent when nobody is on turn.
+    /// Where the seat on turn is: upcard (gin: take the upcard or pass) |
+    /// draw (about to draw) | play (drawn; melds, lay-offs, then a
+    /// discard — or in gin, a discard or a knock). Absent when nobody is on
+    /// turn.
     stage: String
 
     @required
@@ -228,6 +284,11 @@ structure RummyView {
     /// the discard pile has cards under its top to turn over.
     @required
     canDrawStock: Boolean
+
+    /// Whether drawDiscard would take the discard pile's top now: not
+    /// after gin's upcard was passed by both.
+    @required
+    canDrawDiscard: Boolean
 
     @required
     discardCount: Integer
@@ -287,13 +348,13 @@ structure RummyLastMove {
     @required
     playerId: String
 
-    /// drawStock | drawDiscard | meld | layOff | discard
+    /// drawStock | drawDiscard | meld | layOff | discard | pass | knock
     @required
     move: String
 
     /// What went on or came off the table: nothing for a stock draw
-    /// (nobody else sees it), the card taken, the meld as laid, the card
-    /// laid off, the card discarded.
+    /// (nobody else sees it) or a pass, the card taken, the meld as laid,
+    /// the card laid off, the card discarded or knocked on.
     @required
     cards: RummyCards
 

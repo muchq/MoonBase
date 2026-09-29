@@ -10,6 +10,7 @@
 #include "domains/games/libs/cards/card.h"
 #include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/games/libs/cards/rummy/game_state_serde.h"
+#include "domains/games/libs/cards/rummy/gin_serde.h"
 #include "domains/games/libs/cards/rummy/table.h"
 
 using namespace cards;
@@ -31,7 +32,7 @@ TableState opened() {
 }
 
 TableState playing() {
-  auto dealt = opened().chooseVariant(0, Variant::Basic, pristineDeck());
+  auto dealt = opened().chooseVariant(0, Variant::SevenCard, pristineDeck());
   EXPECT_TRUE(dealt.ok()) << dealt.status();
   return *dealt;
 }
@@ -48,7 +49,8 @@ TableState between() {
                  std::nullopt,
                  "",
                  ""};
-  return TableState{{"a", "b"}, {0, 1}, 0, 1, TablePhase::Choosing, Variant::Basic, over, "", ""};
+  return TableState{{"a", "b"},         {0, 1}, 0,  1, TablePhase::Choosing,
+                    Variant::SevenCard, over,   "", ""};
 }
 
 json payloadOf(const TableState& table) { return json::parse(serializeTableState(table)); }
@@ -70,13 +72,40 @@ void expectRoundTrips(const TableState& table) {
   EXPECT_EQ(restored->getPhase(), table.getPhase());
   EXPECT_EQ(restored->getVariant(), table.getVariant());
   ASSERT_EQ(restored->getDeal().has_value(), table.getDeal().has_value());
-  if (table.getDeal().has_value()) {
-    EXPECT_EQ(serializeGameState(*restored->getDeal()), serializeGameState(*table.getDeal()));
+  if (table.rummyDeal() != nullptr) {
+    ASSERT_NE(restored->rummyDeal(), nullptr);
+    EXPECT_EQ(serializeGameState(*restored->rummyDeal()), serializeGameState(*table.rummyDeal()));
+  }
+  if (table.ginDeal() != nullptr) {
+    ASSERT_NE(restored->ginDeal(), nullptr);
+    EXPECT_EQ(serializeGinState(*restored->ginDeal()), serializeGinState(*table.ginDeal()));
   }
   EXPECT_EQ(serializeTableState(*restored), serialized);
 }
 
 }  // namespace
+
+// Each variant's deal is stored in its own engine's form: 10-card as
+// GameState's, gin as GinState's.
+TEST(TableSerde, EveryVariantsDealRoundTrips) {
+  auto ten = opened().chooseVariant(0, Variant::TenCard, pristineDeck());
+  ASSERT_TRUE(ten.ok());
+  expectRoundTrips(*ten);
+  auto gin = opened().chooseVariant(0, Variant::Gin, pristineDeck());
+  ASSERT_TRUE(gin.ok()) << gin.status();
+  expectRoundTrips(*gin);
+  const json payload = payloadOf(*gin);
+  EXPECT_EQ(payload["variant"], "gin");
+  EXPECT_EQ(payload["deal"]["stage"], "upcard");
+
+  // A deal in another game's form than the table's variant is no table.
+  json basicAsGin = payloadOf(playing());
+  basicAsGin["variant"] = "gin";
+  expectRejected(basicAsGin);
+  json ginAsBasic = payload;
+  ginAsBasic["variant"] = "basic";
+  expectRejected(ginAsBasic);
+}
 
 TEST(TableSerde, EveryPhaseRoundTrips) {
   expectRoundTrips(opened());
@@ -88,7 +117,9 @@ TEST(TableSerde, EveryPhaseRoundTrips) {
 }
 
 // The exact bytes of a table opened and not yet dealt. A change to the
-// shape is a schema change: a version bump, not an edit here.
+// shape is a schema change: a version bump, not an edit here. Seven-card
+// is stored as "basic", its name before 10-card and gin (#1610), so a
+// hub rolled back past them still reads every seven-card table.
 TEST(TableSerde, FrozenPayload) {
   constexpr const char* kRow =
       R"({"dealNumber":0,"dealer":0,"phase":"choosing","seats":["a","b"],"v":2,)"
@@ -97,6 +128,7 @@ TEST(TableSerde, FrozenPayload) {
   const auto restored = deserializeTableState(kRow);
   ASSERT_TRUE(restored.ok()) << restored.status();
   EXPECT_EQ(restored->getPhase(), TablePhase::Choosing);
+  EXPECT_EQ(restored->getVariant(), Variant::SevenCard);
   // The deal nests as the v1 deal it is, so the deal's own schema pins it.
   const json dealt = payloadOf(playing());
   EXPECT_EQ(dealt["phase"], "playing");
@@ -120,8 +152,8 @@ TEST(TableSerde, AVersionOneRowIsOneDeal) {
   EXPECT_EQ(table->getWins(), (std::vector<int>{0, 0, 0}));
   EXPECT_EQ(table->getDealNumber(), 1);
   EXPECT_EQ(table->getDealer(), 2);
-  EXPECT_EQ(table->getVariant(), Variant::Basic);
-  EXPECT_EQ(serializeGameState(*table->getDeal()), serializeGameState(*drew));
+  EXPECT_EQ(table->getVariant(), Variant::SevenCard);
+  EXPECT_EQ(serializeGameState(*table->rummyDeal()), serializeGameState(*drew));
 
   auto gone = drew->removePlayer(1);
   ASSERT_TRUE(gone.ok());

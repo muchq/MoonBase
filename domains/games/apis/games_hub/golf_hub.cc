@@ -194,6 +194,49 @@ std::string RummyMoveName(rummy::MoveKind kind) {
   return "drawStock";
 }
 
+std::string GinMoveName(rummy::GinMoveKind kind) {
+  switch (kind) {
+    case rummy::GinMoveKind::Pass:
+      return "pass";
+    case rummy::GinMoveKind::DrawStock:
+      return "drawStock";
+    case rummy::GinMoveKind::DrawDiscard:
+      return "drawDiscard";
+    case rummy::GinMoveKind::Discard:
+      return "discard";
+    case rummy::GinMoveKind::Knock:
+      return "knock";
+  }
+  return "pass";
+}
+
+std::string GinStageName(rummy::GinStage stage) {
+  switch (stage) {
+    case rummy::GinStage::Upcard:
+      return "upcard";
+    case rummy::GinStage::StockOnly:
+    case rummy::GinStage::Draw:
+      return "draw";
+    case rummy::GinStage::Play:
+      return "play";
+  }
+  return "draw";
+}
+
+std::string GinEndingName(rummy::GinEnding ending) {
+  switch (ending) {
+    case rummy::GinEnding::Knock:
+      return "knock";
+    case rummy::GinEnding::Gin:
+      return "gin";
+    case rummy::GinEnding::Undercut:
+      return "undercut";
+    case rummy::GinEnding::Draw:
+      return "draw";
+  }
+  return "draw";
+}
+
 std::vector<moonbase::games::Card> WireCards(const std::vector<cards::Card>& cards) {
   std::vector<moonbase::games::Card> wire;
   wire.reserve(cards.size());
@@ -232,8 +275,8 @@ std::string CurrentTurnOf(const HostedState& state) {
   if (const auto* table = std::get_if<rummy::TableState>(&state)) {
     // Between deals nobody has a turn: the dealer's choice is not one.
     if (table->getPhase() != rummy::TablePhase::Playing) return "";
-    const int seat = table->getDeal()->getWhoseTurn();
-    return seat < 0 ? "" : table->getDeal()->getPlayer(seat).id;
+    const int seat = rummy::dealWhoseTurn(*table->getDeal());
+    return seat < 0 ? "" : rummy::dealPlayers(*table->getDeal()).at(seat).id;
   }
   const auto& castle_state = std::get<castle::GameState>(state);
   return CastlePlayerIdAt(castle_state, castle_state.getWhoseTurn());
@@ -291,10 +334,10 @@ std::vector<games_hub::HubStore::StatsDelta> CastleStatsDeltas(const castle::Gam
 // the winner where golf's count against every seat, so adding them to the
 // room's running total would mix two scales; the points ride the view's
 // lastDeal instead.
-std::vector<games_hub::HubStore::StatsDelta> RummyStatsDeltas(const rummy::GameState& state) {
-  const std::string winner = state.winner().value_or("");
+std::vector<games_hub::HubStore::StatsDelta> RummyStatsDeltas(const rummy::Deal& deal) {
+  const std::string winner = rummy::dealWinner(deal).value_or("");
   std::vector<games_hub::HubStore::StatsDelta> deltas;
-  for (const rummy::Player& seat : state.getPlayers()) {
+  for (const rummy::Player& seat : rummy::dealPlayers(deal)) {
     games_hub::HubStore::StatsDelta delta;
     delta.player_id = seat.id;
     delta.played = 1;
@@ -313,7 +356,7 @@ std::vector<games_hub::HubStore::StatsDelta> StatsDeltasOf(const HostedState& st
     // A table closes by a leave. A deal it broke up was played by those
     // still dealt in; one that had already ended was credited as it did.
     const auto& deal = table->getDeal();
-    if (deal.has_value() && deal->getPhase() == rummy::Phase::Abandoned) {
+    if (deal.has_value() && rummy::dealPhase(*deal) == rummy::Phase::Abandoned) {
       return RummyStatsDeltas(*deal);
     }
     return {};
@@ -438,11 +481,13 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"rummy_commands", {{"command", "startGame"}}},
       {"rummy_commands", {{"command", "leaveGame"}}},
       {"rummy_commands", {{"command", "chooseVariant"}}},
+      {"rummy_commands", {{"command", "pass"}}},
       {"rummy_commands", {{"command", "drawStock"}}},
       {"rummy_commands", {{"command", "drawDiscard"}}},
       {"rummy_commands", {{"command", "meld"}}},
       {"rummy_commands", {{"command", "layOff"}}},
       {"rummy_commands", {{"command", "discard"}}},
+      {"rummy_commands", {{"command", "knock"}}},
       {"rummy_events", {{"event", "gameJoined"}}},
       {"rummy_events", {{"event", "gameState"}}},
       {"rummy_events", {{"event", "gameCreated"}}},
@@ -1998,36 +2043,42 @@ void GolfHub::HandleCastleMove(const std::string& player_id, const CastleMove& m
 void GolfHub::HandleRummyMove(const std::string& player_id, const RummyMove& move) {
   if (LifecycleMove(player_id, move, GameKind::kRummy)) return;
   using Next = absl::StatusOr<rummy::TableState>;
-  using DealNext = absl::StatusOr<rummy::GameState>;
+  using Cards = std::vector<cards::Card>;
   // A move in the deal in play, by the mover's seat — the table's and the
-  // deal's seats are the same while a deal is on.
-  using InDeal = std::function<DealNext(const rummy::GameState&, int seat)>;
-  const auto deal_move = [&](InDeal in_deal) {
-    TableEngineMove<rummy::TableState>(
-        player_id, GameKind::kRummy,
-        [in_deal = std::move(in_deal)](const rummy::TableState& table, int seat) -> Next {
-          return table.inDeal([&](const rummy::GameState& deal) { return in_deal(deal, seat); });
-        });
-  };
-  using Laying = std::function<DealNext(const rummy::GameState&, int seat,
-                                        const std::vector<cards::Card>& cards)>;
-  const auto lay = [&](const std::vector<moonbase::games::Card>& wire, Laying laying) {
+  // deal's seats are the same while a deal is on — as each game makes it.
+  // A game without the move has no step: a basic-only move at a gin table
+  // is refused, and the other way round.
+  using BasicStep =
+      std::function<absl::StatusOr<rummy::GameState>(const rummy::GameState&, int, const Cards&)>;
+  using GinStep =
+      std::function<absl::StatusOr<rummy::GinState>(const rummy::GinState&, int, const Cards&)>;
+  const auto step = [&](const std::vector<moonbase::games::Card>& wire, BasicStep basic,
+                        GinStep gin) {
     auto named = CardsFromWire(wire);
     if (!named.ok()) {
       Reject(player_id, RejectKind::kInvalid, std::string(named.status().message()));
       return;
     }
-    deal_move([cards = *std::move(named), laying = std::move(laying)](const rummy::GameState& deal,
-                                                                      int seat) -> DealNext {
-      // The engine's turn and stage come first; only a move it would make
-      // but for a card the hand lacks is stale, and that one is named in
-      // the wire's spelling.
-      DealNext next = laying(deal, seat, cards);
-      if (next.status().code() == absl::StatusCode::kNotFound) {
-        return HeldInHand(deal.getPlayer(seat).hand, cards);
-      }
-      return next;
-    });
+    TableEngineMove<rummy::TableState>(
+        player_id, GameKind::kRummy,
+        [cards = *std::move(named), basic = std::move(basic), gin = std::move(gin)](
+            const rummy::TableState& table, int seat) -> Next {
+          // The engine's turn and stage come first; only a move it would
+          // make but for a card the hand lacks is stale, and that one is
+          // named in the wire's spelling.
+          const auto held = [&](const auto& deal, auto next) -> decltype(next) {
+            if (next.status().code() == absl::StatusCode::kNotFound) {
+              return HeldInHand(deal.getPlayer(seat).hand, cards);
+            }
+            return next;
+          };
+          if (table.ginDeal() != nullptr ? gin != nullptr : basic == nullptr) {
+            return table.inDeal<rummy::GinState>(
+                [&](const rummy::GinState& deal) { return held(deal, gin(deal, seat, cards)); });
+          }
+          return table.inDeal<rummy::GameState>(
+              [&](const rummy::GameState& deal) { return held(deal, basic(deal, seat, cards)); });
+        });
   };
 
   if (const auto* choose = move.as_chooseVariant_or_null()) {
@@ -2052,31 +2103,58 @@ void GolfHub::HandleRummyMove(const std::string& player_id, const RummyMove& mov
         });
     return;
   }
+  if (move.as_pass_or_null() != nullptr) {
+    step({}, nullptr,
+         [](const rummy::GinState& deal, int seat, const Cards&) { return deal.pass(seat); });
+    return;
+  }
   if (move.as_drawStock_or_null() != nullptr) {
-    deal_move([](const rummy::GameState& deal, int seat) { return deal.drawStock(seat); });
+    step(
+        {},
+        [](const rummy::GameState& deal, int seat, const Cards&) { return deal.drawStock(seat); },
+        [](const rummy::GinState& deal, int seat, const Cards&) { return deal.drawStock(seat); });
     return;
   }
   if (move.as_drawDiscard_or_null() != nullptr) {
-    deal_move([](const rummy::GameState& deal, int seat) { return deal.drawDiscard(seat); });
+    step(
+        {},
+        [](const rummy::GameState& deal, int seat, const Cards&) { return deal.drawDiscard(seat); },
+        [](const rummy::GinState& deal, int seat, const Cards&) { return deal.drawDiscard(seat); });
     return;
   }
   if (const auto* meld = move.as_meld_or_null()) {
-    lay(meld->cards, [](const rummy::GameState& deal, int seat,
-                        const std::vector<cards::Card>& cards) { return deal.meld(seat, cards); });
+    step(
+        meld->cards,
+        [](const rummy::GameState& deal, int seat, const Cards& cards) {
+          return deal.meld(seat, cards);
+        },
+        nullptr);
     return;
   }
   if (const auto* lay_off = move.as_layOff_or_null()) {
-    lay({lay_off->card}, [index = lay_off->meldIndex](const rummy::GameState& deal, int seat,
-                                                      const std::vector<cards::Card>& cards) {
-      return deal.layOff(seat, cards.front(), index);
-    });
+    step(
+        {lay_off->card},
+        [index = lay_off->meldIndex](const rummy::GameState& deal, int seat, const Cards& cards) {
+          return deal.layOff(seat, cards.front(), index);
+        },
+        nullptr);
     return;
   }
   if (const auto* discard = move.as_discard_or_null()) {
-    lay({discard->card},
-        [](const rummy::GameState& deal, int seat, const std::vector<cards::Card>& cards) {
+    step(
+        {discard->card},
+        [](const rummy::GameState& deal, int seat, const Cards& cards) {
+          return deal.discard(seat, cards.front());
+        },
+        [](const rummy::GinState& deal, int seat, const Cards& cards) {
           return deal.discard(seat, cards.front());
         });
+    return;
+  }
+  if (const auto* knock = move.as_knock_or_null()) {
+    step({knock->card}, nullptr, [](const rummy::GinState& deal, int seat, const Cards& cards) {
+      return deal.knock(seat, cards.front());
+    });
     return;
   }
 
@@ -3147,56 +3225,97 @@ moonbase::games::RummyView GolfHub::RummyViewLocked(const std::string& game_id,
     view.choosing = std::move(choosing);
   }
 
-  const std::optional<rummy::GameState>& deal = table.getDeal();
+  const std::optional<rummy::Deal>& deal = table.getDeal();
   // A deal that is over shows every hand: between deals the last one is
   // what the table looks at.
-  const bool shown = deal.has_value() && deal->isOver();
+  const bool shown = deal.has_value() && rummy::dealPhase(*deal) != rummy::Phase::Playing;
   if (deal.has_value()) {
-    if (!deal->isOver()) {
+    if (!shown) {
       view.currentPlayerId = CurrentTurnOf(*entry.state);
-      view.stage = deal->getStage() == rummy::Stage::Draw ? "draw" : "play";
-      view.canDrawStock = deal->canDrawStock();
-      if (deal->getTakenDiscard().has_value()) {
-        view.takenDiscard = WireCard(*deal->getTakenDiscard());
-      }
     } else {
       moonbase::games::RummyDealResult result;
       result.variant = std::string(rummy::variantName(table.getVariant()));
-      result.winner = deal->winner();
-      result.points = deal->winnerPoints();
-      for (std::size_t i = 0; i < deal->getPlayers().size(); ++i) {
+      result.winner = rummy::dealWinner(*deal);
+      result.points = rummy::dealWinnerPoints(*deal);
+      const auto& seats = rummy::dealPlayers(*deal);
+      for (std::size_t i = 0; i < seats.size(); ++i) {
         moonbase::games::RummyScore score;
-        score.playerId = deal->getPlayer(static_cast<int>(i)).id;
-        score.deadwood = deal->deadwood(static_cast<int>(i));
+        score.playerId = seats[i].id;
+        score.deadwood = rummy::dealDeadwood(*deal, static_cast<int>(i));
         result.scores.push_back(std::move(score));
+      }
+      if (const rummy::GinState* gin = table.ginDeal();
+          gin != nullptr && gin->getResult().has_value()) {
+        const rummy::GinResult& ended = *gin->getResult();
+        moonbase::games::RummyGinResult reckoning;
+        reckoning.ending = GinEndingName(ended.ending);
+        if (ended.knocker >= 0) reckoning.knocker = seats.at(ended.knocker).id;
+        for (std::size_t i = 0; i < ended.hands.size(); ++i) {
+          moonbase::games::RummyArrangedHand hand;
+          hand.playerId = seats.at(i).id;
+          for (const auto& meld : ended.hands[i].melds) hand.melds.push_back(WireCards(meld));
+          hand.deadwood = WireCards(ended.hands[i].deadwood);
+          reckoning.hands.push_back(std::move(hand));
+        }
+        reckoning.laidOff = WireCards(ended.laidOff);
+        result.gin = std::move(reckoning);
       }
       view.lastDeal = std::move(result);
     }
-    view.stockCount = static_cast<int>(deal->getStock().size());
-    view.discardCount = static_cast<int>(deal->getDiscard().size());
-    if (!deal->getDiscard().empty()) view.discardTop = WireCard(deal->getDiscard().back());
-    for (const rummy::Meld& meld : deal->getMelds()) {
-      moonbase::games::RummyTableMeld table_meld;
-      table_meld.owner = meld.owner;
-      table_meld.cards = WireCards(meld.cards);
-      view.melds.push_back(std::move(table_meld));
-    }
-    if (const auto& move = deal->getLastMove(); move.has_value()) {
-      moonbase::games::RummyLastMove last;
-      last.playerId = move->playerId;
-      last.move = RummyMoveName(move->kind);
-      last.cards = WireCards(move->cards);
-      if (move->meld >= 0) last.meldIndex = move->meld;
-      view.lastMove = std::move(last);
+    std::visit(
+        [&](const auto& d) {
+          view.stockCount = static_cast<int>(d.getStock().size());
+          view.discardCount = static_cast<int>(d.getDiscard().size());
+          if (!d.getDiscard().empty()) view.discardTop = WireCard(d.getDiscard().back());
+          if (!shown) {
+            view.canDrawStock = d.canDrawStock();
+            if (d.getTakenDiscard().has_value()) view.takenDiscard = WireCard(*d.getTakenDiscard());
+          }
+        },
+        *deal);
+    if (const rummy::GameState* basic = table.rummyDeal(); basic != nullptr) {
+      if (!shown) {
+        view.stage = basic->getStage() == rummy::Stage::Draw ? "draw" : "play";
+        view.canDrawDiscard =
+            basic->getStage() == rummy::Stage::Draw && !basic->getDiscard().empty();
+      }
+      for (const rummy::Meld& meld : basic->getMelds()) {
+        moonbase::games::RummyTableMeld table_meld;
+        table_meld.owner = meld.owner;
+        table_meld.cards = WireCards(meld.cards);
+        view.melds.push_back(std::move(table_meld));
+      }
+      if (const auto& move = basic->getLastMove(); move.has_value()) {
+        moonbase::games::RummyLastMove last;
+        last.playerId = move->playerId;
+        last.move = RummyMoveName(move->kind);
+        last.cards = WireCards(move->cards);
+        if (move->meld >= 0) last.meldIndex = move->meld;
+        view.lastMove = std::move(last);
+      }
+    } else if (const rummy::GinState* gin = table.ginDeal(); gin != nullptr) {
+      if (!shown) {
+        view.stage = GinStageName(gin->getStage());
+        view.canDrawDiscard = gin->canDrawDiscard();
+      }
+      if (const auto& move = gin->getLastMove(); move.has_value()) {
+        moonbase::games::RummyLastMove last;
+        last.playerId = move->playerId;
+        last.move = GinMoveName(move->kind);
+        last.cards = WireCards(move->cards);
+        view.lastMove = std::move(last);
+      }
     }
   }
   for (const std::string& seat_id : table.getSeats()) {
     moonbase::games::RummyPlayer player;
     player.playerId = seat_id;
     player.handCount = 0;
-    const int at = deal.has_value() ? deal->playerIndex(seat_id) : -1;
+    const int at = deal.has_value()
+                       ? std::visit([&](const auto& d) { return d.playerIndex(seat_id); }, *deal)
+                       : -1;
     if (at >= 0) {
-      const std::vector<cards::Card>& hand = deal->getPlayer(at).hand;
+      const std::vector<cards::Card>& hand = rummy::dealPlayers(*deal).at(at).hand;
       player.handCount = static_cast<int>(hand.size());
       // Own hand faces only while a deal is on, everyone's once it ends.
       if (shown || seat_id == viewer_id) player.hand = WireCards(hand);

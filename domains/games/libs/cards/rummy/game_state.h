@@ -85,10 +85,11 @@ struct Player {
 /// Deals a fresh game from an already-shuffled deck (drawn from the
 /// back): one card a seat around the table until each has its hand, then
 /// one card face up to the discard pile. Play opens at `opener`'s draw.
+/// `hand_size` is kHandSize but for ten-card rummy (#1609).
 [[nodiscard]] absl::StatusOr<GameState> dealRummyGame(const string& game_id,
                                                       const std::vector<string>& player_ids,
                                                       std::deque<Card> shuffled_deck,
-                                                      int opener = 0);
+                                                      int opener = 0, int hand_size = 7);
 
 class GameState {
  public:
@@ -97,7 +98,7 @@ class GameState {
   /// whoseTurn once the game is over.
   static constexpr int kNoTurn = -1;
 
-  /// The hand each seat is dealt.
+  /// The hand each seat is dealt, but for ten-card rummy.
   static constexpr int kHandSize = 7;
 
   GameState(std::deque<Card> _stock, std::vector<Card> _discard, std::vector<Player> _players,

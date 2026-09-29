@@ -2050,11 +2050,13 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"rummy_commands", {{"command", "startGame"}}},
       {"rummy_commands", {{"command", "leaveGame"}}},
       {"rummy_commands", {{"command", "chooseVariant"}}},
+      {"rummy_commands", {{"command", "pass"}}},
       {"rummy_commands", {{"command", "drawStock"}}},
       {"rummy_commands", {{"command", "drawDiscard"}}},
       {"rummy_commands", {{"command", "meld"}}},
       {"rummy_commands", {{"command", "layOff"}}},
       {"rummy_commands", {{"command", "discard"}}},
+      {"rummy_commands", {{"command", "knock"}}},
       {"rummy_events", {{"event", "gameJoined"}}},
       {"rummy_events", {{"event", "gameState"}}},
       {"rummy_events", {{"event", "gameCreated"}}},
@@ -2731,8 +2733,8 @@ TEST_F(GameEventFixture, ABiggerTableIsRecordedAtTheSizeItWasDealt) {
 
 // A rummy table is dealer's choice (#1609): seating it is no game, and
 // each deal is one — started when the dealer deals, finished when a seat
-// goes out — recorded as rummy whatever the deal's variant is called on
-// the wire.
+// goes out — recorded as rummy at either hand size (gin's deals are
+// "gin"; game_events_test pins that).
 TEST_F(GameEventFixture, ARummyTableRecordsEachDealAsAGame) {
   using moonbase::games::RummyMove;
   auto table = SeatedRummyTable();  // the first deal dealt by bob
@@ -2765,7 +2767,7 @@ TEST_F(GameEventFixture, ARummyTableRecordsEachDealAsAGame) {
 
   // Alice deals the second: another game.
   moonbase::games::RummyChooseVariant basic;
-  basic.variant = "basic";
+  basic.variant = "7-card";
   ASSERT_TRUE(alice.stream.Send(Rummy(RummyMove::FromChoosevariant(basic))).ok());
   ASSERT_TRUE(
       AwaitRummyView(

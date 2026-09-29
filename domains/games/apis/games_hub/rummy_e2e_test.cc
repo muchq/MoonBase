@@ -31,6 +31,14 @@
 namespace games_hub {
 namespace {
 
+// What the dealer may deal at each table size: gin only heads-up, ten
+// cards a seat only while the deck covers them.
+std::vector<std::string> OfferedAt(size_t seats) {
+  if (seats == 2) return {"7-card", "10-card", "gin"};
+  if (seats == 3) return {"7-card", "10-card"};
+  return {"7-card"};
+}
+
 using moonbase::games::CastleMove;
 using moonbase::games::GameCommands;
 using moonbase::games::RummyMove;
@@ -189,7 +197,7 @@ class RummyGameFixture : public GamesHubStreamFixture {
     EXPECT_EQ(seen.phase, !ended                                    ? "playing"
                           : mirror.getPhase() == rummy::Phase::Over ? "choosing"
                                                                     : "ended");
-    EXPECT_EQ(seen.variant.value_or(""), "basic");
+    EXPECT_EQ(seen.variant.value_or(""), "7-card");
     if (ended) {
       EXPECT_FALSE(seen.currentPlayerId.has_value());
       EXPECT_FALSE(seen.stage.has_value());
@@ -198,7 +206,7 @@ class RummyGameFixture : public GamesHubStreamFixture {
       // The deal's result rides the view, for every chair and every
       // instance, until the next deal replaces it.
       ASSERT_TRUE(seen.lastDeal.has_value());
-      EXPECT_EQ(seen.lastDeal->variant, "basic");
+      EXPECT_EQ(seen.lastDeal->variant, "7-card");
       EXPECT_EQ(seen.lastDeal->winner, mirror.winner());
       EXPECT_EQ(seen.lastDeal->points, mirror.winnerPoints());
       ASSERT_EQ(seen.lastDeal->scores.size(), mirror.getPlayers().size());
@@ -349,7 +357,7 @@ class RummyGameFixture : public GamesHubStreamFixture {
       ExpectBoard(view, seat->player_id, mirror);
       ASSERT_TRUE(view.choosing.has_value());
       EXPECT_EQ(view.choosing->dealer, next_dealer);
-      EXPECT_EQ(view.choosing->options, std::vector<std::string>{"basic"});
+      EXPECT_EQ(view.choosing->options, OfferedAt(seats.size()));
       for (const auto& standing : view.standings) {
         if (standing.playerId == winner) EXPECT_GE(standing.handsWon, 1);
       }
@@ -897,7 +905,7 @@ TEST_F(RummyGameFixture, TheNextDealIsTheNextDealersChoice) {
   ExpectNoEvent(bob.stream);
 
   // Bob dealt the first; alice deals the second.
-  ASSERT_TRUE(bob.stream.Send(Choose("basic")).ok());
+  ASSERT_TRUE(bob.stream.Send(Choose("7-card")).ok());
   auto refused = ReceiveCase(bob.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "the dealer chooses");
@@ -907,7 +915,7 @@ TEST_F(RummyGameFixture, TheNextDealIsTheNextDealersChoice) {
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "no deal in play");
 
-  ASSERT_TRUE(alice.stream.Send(Choose("basic")).ok());
+  ASSERT_TRUE(alice.stream.Send(Choose("7-card")).ok());
   for (auto* seat : {&alice, &bob}) {
     auto dealt = ReceiveRummy(seat->stream, "gameState");
     ASSERT_TRUE(dealt.has_value());
@@ -930,7 +938,7 @@ TEST_F(RummyGameFixture, TheNextDealIsTheNextDealersChoice) {
     EXPECT_EQ(turn->as_turnChanged_or_null()->playerId, bob.player_id);
   }
   // Mid-deal there is nothing to choose.
-  ASSERT_TRUE(alice.stream.Send(Choose("basic")).ok());
+  ASSERT_TRUE(alice.stream.Send(Choose("7-card")).ok());
   refused = ReceiveCase(alice.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not between deals");
@@ -953,7 +961,7 @@ TEST_F(RummyGameFixture, AnAwayDealerLetsAnySeatDeal) {
   auto table = ChoosingRummyTable(3);
   ASSERT_TRUE(table.has_value());
   Seat& dealer = table->seats[0];
-  ASSERT_TRUE(table->seats[2].stream.Send(Choose("basic")).ok());
+  ASSERT_TRUE(table->seats[2].stream.Send(Choose("7-card")).ok());
   auto refused = ReceiveCase(table->seats[2].stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "the dealer chooses");
@@ -969,7 +977,7 @@ TEST_F(RummyGameFixture, AnAwayDealerLetsAnySeatDeal) {
       },
       "the dealer shown away");
   ASSERT_TRUE(away.has_value());
-  ASSERT_TRUE(table->seats[2].stream.Send(Choose("basic")).ok());
+  ASSERT_TRUE(table->seats[2].stream.Send(Choose("7-card")).ok());
   auto dealt = AwaitRummyView(
       table->seats[2].stream, [](const RummyView& view) { return view.phase == "playing"; },
       "the deal");

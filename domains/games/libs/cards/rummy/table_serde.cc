@@ -4,12 +4,14 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/games/libs/cards/rummy/game_state_serde.h"
+#include "domains/games/libs/cards/rummy/gin_serde.h"
 
 namespace rummy {
 namespace {
@@ -17,6 +19,15 @@ namespace {
 using nlohmann::json;
 
 constexpr int kSchemaVersion = 2;
+
+// Seven-card is stored under "basic", its name before 10-card and gin
+// (#1610): a hub rolled back past them still reads every seven-card table.
+// The others are stored as the wire spells them.
+constexpr std::string_view kSevenCardStored = "basic";
+
+std::string_view storedName(Variant variant) {
+  return variant == Variant::SevenCard ? kSevenCardStored : variantName(variant);
+}
 
 // postgres jsonb rejects a NUL byte: U+FFFD, as the deal's serde does.
 std::string sanitized(const std::string& text) {
@@ -77,7 +88,7 @@ absl::StatusOr<TableState> fromVersionOne(const std::string& serialized) {
                     dealer,
                     1,
                     live ? TablePhase::Playing : TablePhase::Closed,
-                    Variant::Basic,
+                    Variant::SevenCard,
                     *std::move(deal),
                     "",
                     ""};
@@ -95,10 +106,13 @@ std::string serializeTableState(const TableState& table) {
       {"wins", table.getWins()},
       {"dealer", table.getDealer()},
       {"dealNumber", table.getDealNumber()},
-      {"variant", std::string(variantName(table.getVariant()))},
+      {"variant", std::string(storedName(table.getVariant()))},
   };
-  if (const auto& deal = table.getDeal(); deal.has_value()) {
-    serialized["deal"] = json::parse(serializeGameState(*deal));
+  // The deal in its own engine's form; the variant says which.
+  if (const GameState* basic = table.rummyDeal(); basic != nullptr) {
+    serialized["deal"] = json::parse(serializeGameState(*basic));
+  } else if (const GinState* gin = table.ginDeal(); gin != nullptr) {
+    serialized["deal"] = json::parse(serializeGinState(*gin));
   }
   return serialized.dump(/*indent=*/-1, /*indent_char=*/' ', /*ensure_ascii=*/false,
                          json::error_handler_t::replace);
@@ -126,7 +140,8 @@ absl::StatusOr<TableState> deserializeTableState(const std::string& serialized) 
 
   auto variant_name = readString(parsed, "variant");
   if (!variant_name.ok()) return variant_name.status();
-  const std::optional<Variant> variant = parseVariant(*variant_name);
+  const std::optional<Variant> variant =
+      *variant_name == kSevenCardStored ? Variant::SevenCard : parseVariant(*variant_name);
   if (!variant.has_value()) return absl::InvalidArgumentError("unknown variant");
 
   if (!parsed.contains("seats") || !parsed["seats"].is_array()) {
@@ -160,26 +175,32 @@ absl::StatusOr<TableState> deserializeTableState(const std::string& serialized) 
   auto deal_number = readIntInRange(parsed, "dealNumber", 0, 1'000'000);
   if (!deal_number.ok()) return deal_number.status();
 
-  std::optional<GameState> deal;
+  std::optional<Deal> deal;
   if (parsed.contains("deal")) {
     if (!parsed["deal"].is_object()) return absl::InvalidArgumentError("expected object 'deal'");
-    auto read = deserializeGameState(parsed["deal"].dump());
-    if (!read.ok()) return read.status();
-    deal.emplace(*std::move(read));
+    if (*variant == Variant::Gin) {
+      auto read = deserializeGinState(parsed["deal"].dump());
+      if (!read.ok()) return read.status();
+      deal.emplace(*std::move(read));
+    } else {
+      auto read = deserializeGameState(parsed["deal"].dump());
+      if (!read.ok()) return read.status();
+      deal.emplace(*std::move(read));
+    }
   }
   // A deal is there exactly when one has been dealt.
   if (deal.has_value() != (*deal_number > 0)) {
     return absl::InvalidArgumentError("the deal count disagrees with the deal");
   }
   if (*phase == TablePhase::Playing) {
-    if (!deal.has_value() || deal->isOver()) {
+    if (!deal.has_value() || dealPhase(*deal) != Phase::Playing) {
       return absl::InvalidArgumentError("a playing table has a deal in play");
     }
     std::vector<std::string> dealt;
-    for (const Player& player : deal->getPlayers()) dealt.push_back(player.id);
+    for (const Player& player : dealPlayers(*deal)) dealt.push_back(player.id);
     if (dealt != seats) return absl::InvalidArgumentError("the deal seats the table");
   }
-  if (*phase == TablePhase::Choosing && deal.has_value() && !deal->isOver()) {
+  if (*phase == TablePhase::Choosing && deal.has_value() && dealPhase(*deal) == Phase::Playing) {
     return absl::InvalidArgumentError("between deals, the last deal is over");
   }
 
