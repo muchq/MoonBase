@@ -66,6 +66,7 @@ void expectStatesEqual(const GameState& a, const GameState& b) {
   EXPECT_EQ(a.getPhase(), b.getPhase());
   EXPECT_EQ(a.getTakenDiscard(), b.getTakenDiscard());
   EXPECT_EQ(a.getLastMove(), b.getLastMove());
+  EXPECT_EQ(a.getMustPlay(), b.getMustPlay());
 }
 
 // Serialize -> deserialize -> compare, and serialize again: the second
@@ -284,7 +285,7 @@ TEST(RummySerde, ALastMoveMustHaveItsKindsShape) {
   expectRejected(with_move("drawStock", json::array({3}), -1));
   expectRejected(with_move("drawStock", json::array(), 0));
   expectRejected(with_move("drawDiscard", json::array(), -1));
-  expectRejected(with_move("drawDiscard", json::array({3, 4}), -1));
+  expectRejected(with_move("drawDiscard", json::array({3, 4}), 0));
   expectRejected(with_move("discard", json::array({3}), 0));
   expectRejected(with_move("meld", json::array({43, 47, 51}), -1));
   expectRejected(with_move("meld", json::array({43, 47}), 0));
@@ -293,6 +294,7 @@ TEST(RummySerde, ALastMoveMustHaveItsKindsShape) {
   // The twins, each the shape the engine writes.
   for (const auto& payload :
        {with_move("drawStock", json::array(), -1), with_move("drawDiscard", json::array({3}), -1),
+        with_move("drawDiscard", json::array({3, 4}), -1),  // taken down into the pile
         with_move("discard", json::array({3}), -1), with_move("meld", json::array({43, 47, 51}), 0),
         with_move("layOff", json::array({3}), 0)}) {
     EXPECT_TRUE(deserializeGameState(payload.dump()).ok()) << payload.dump();
@@ -318,6 +320,50 @@ TEST(RummySerde, APlayingRowWithNoMoveToMakeIsRejected) {
   payload["phase"] = "over";
   payload["whoseTurn"] = -1;
   EXPECT_TRUE(deserializeGameState(payload.dump()).ok());
+}
+
+// A draw taken down into the pile: the cards taken ride lastMove, and the
+// card owed is stored until it is played.
+GameState tookDown() {
+  const auto card = [](Rank rank, Suit suit) { return Card{suit, rank}; };
+  const GameState toDraw{{card(Rank::Four, Suit::Spades)},
+                         {card(Rank::Two, Suit::Clubs), card(Rank::Five, Suit::Hearts),
+                          card(Rank::Six, Suit::Hearts), card(Rank::King, Suit::Spades)},
+                         {{"a", {card(Rank::Seven, Suit::Hearts), card(Rank::Nine, Suit::Clubs)}},
+                          {"b", {card(Rank::Three, Suit::Spades)}}},
+                         {},
+                         0,
+                         Stage::Draw,
+                         Phase::Playing,
+                         std::nullopt,
+                         "",
+                         ""};
+  auto took = toDraw.drawDiscard(0, card(Rank::Five, Suit::Hearts));
+  EXPECT_TRUE(took.ok()) << took.status();
+  return *took;
+}
+
+TEST(RummySerde, ATakeDownRoundTripsWithItsCardOwed) {
+  const GameState took = tookDown();
+  ASSERT_TRUE(took.getMustPlay().has_value());
+  expectRoundTrips(took);
+  EXPECT_EQ(json::parse(serializeGameState(took))["lastMove"]["cards"].size(), 3u);
+}
+
+TEST(RummySerde, ACardOwedIsTheSeatOnTurnsAndStillInHand) {
+  const json base = json::parse(serializeGameState(tookDown()));
+  json payload = base;
+  payload["mustPlay"] = Card{Suit::Clubs, Rank::Two}.intValue();  // in the pile
+  expectRejected(payload);
+  payload = base;
+  payload["stage"] = "draw";  // owed before any draw
+  expectRejected(payload);
+}
+
+TEST(RummySerde, ADealAbandonedMidTakeDownRoundTrips) {
+  auto left = tookDown().removePlayer(1);
+  ASSERT_TRUE(left.ok()) << left.status();
+  expectRoundTrips(*left);
 }
 
 TEST(RummySerde, UnknownFieldsAreIgnored) {

@@ -228,6 +228,36 @@ TEST(TableSerde, RejectsATableTheEngineCouldNotPlay) {
   }
 }
 
+// The score sheet rides the row, a line a deal; a row from before the
+// sheet reads as a table with none. Old hubs ignore the key, so a
+// rollback keeps the table and loses only its sheet.
+TEST(TableSerde, TheScoreSheetRoundTrips) {
+  const TableState scored{
+      {"a", "b"},
+      {0, 1},
+      0,
+      2,
+      TablePhase::Choosing,
+      Variant::SevenCard,
+      between().getDeal(),
+      "",
+      "",
+      {{Variant::SevenCard, std::string("b"), 14}, {Variant::Gin, std::nullopt, 0}}};
+  const json row = payloadOf(scored);
+  EXPECT_EQ(row["scoreSheet"].dump(),
+            R"([{"points":14,"variant":"basic","winner":"b"},{"points":0,"variant":"gin"}])");
+  const auto restored = deserializeTableState(row.dump());
+  ASSERT_TRUE(restored.ok()) << restored.status();
+  EXPECT_EQ(restored->getScoreSheet(), scored.getScoreSheet());
+
+  json malformed = row;
+  malformed["scoreSheet"][0]["points"] = -3;
+  expectRejected(malformed);
+  malformed = row;
+  malformed["scoreSheet"][0]["variant"] = "canasta";
+  expectRejected(malformed);
+}
+
 TEST(TableSerde, NulInASeatIdIsReplaced) {
   const std::string nul_id("a\0b", 3);
   auto table = TableState::open("T", {nul_id, "b"});

@@ -285,6 +285,68 @@ TEST(Table, ADealWonByPlayScoresTheHandAndTheDealPassesOn) {
   EXPECT_EQ(next->getWins(), (vector<int>{0, 1, 0}));
 }
 
+// The table keeps score: each deal's end goes on the sheet — its game,
+// who went out and what they scored — and the sheet outlasts the deal.
+TEST(ScoreSheet, EachDealsEndIsScoredAndKept) {
+  GameState deal{{Card{Suit::Clubs, Rank::Two}},
+                 {Card{Suit::Clubs, Rank::Three}},
+                 {{"a", {Card{Suit::Clubs, Rank::Four}}},
+                  {"b", {Card{Suit::Clubs, Rank::Five}}},
+                  {"c", {Card{Suit::Clubs, Rank::King}}}},
+                 {},
+                 1,
+                 Stage::Play,
+                 Phase::Playing,
+                 std::nullopt,
+                 "T1",
+                 ""};
+  EXPECT_TRUE(opened().getScoreSheet().empty());
+  auto out = withDeal(opened(), deal).inDeal<GameState>([](const GameState& d) {
+    return d.discard(1, Card{Suit::Clubs, Rank::Five});
+  });
+  ASSERT_TRUE(out.ok()) << out.status();
+  // b goes out; a's 4 and c's king are 14.
+  EXPECT_EQ(out->getScoreSheet(), (vector<DealScore>{{Variant::SevenCard, std::string("b"), 14}}));
+  auto next = out->chooseVariant(1, Variant::TenCard, deck());
+  ASSERT_TRUE(next.ok());
+  EXPECT_EQ(next->getScoreSheet().size(), 1u);
+  // A seat leaving takes nothing off the sheet: the name stays by its score.
+  auto left = next->removePlayer(1);
+  ASSERT_TRUE(left.ok());
+  EXPECT_EQ(left->getScoreSheet(), out->getScoreSheet());
+}
+
+TEST(ScoreSheet, KeptThroughTheNextDealsMovesAndTheTablesClose) {
+  GameState deal{{Card{Suit::Clubs, Rank::Two}},
+                 {Card{Suit::Clubs, Rank::Three}},
+                 {{"a", {Card{Suit::Clubs, Rank::Four}}},
+                  {"b", {Card{Suit::Clubs, Rank::Five}}},
+                  {"c", {Card{Suit::Clubs, Rank::King}}}},
+                 {},
+                 1,
+                 Stage::Play,
+                 Phase::Playing,
+                 std::nullopt,
+                 "T1",
+                 ""};
+  auto out = withDeal(opened(), deal).inDeal<GameState>([](const GameState& d) {
+    return d.discard(1, Card{Suit::Clubs, Rank::Five});
+  });
+  ASSERT_TRUE(out.ok()) << out.status();
+  auto next = out->chooseVariant(1, Variant::SevenCard, deck());
+  ASSERT_TRUE(next.ok()) << next.status();
+  auto moved =
+      next->inDeal<GameState>([](const GameState& d) { return d.drawStock(d.getWhoseTurn()); });
+  ASSERT_TRUE(moved.ok()) << moved.status();
+  EXPECT_EQ(moved->getScoreSheet(), out->getScoreSheet());
+  auto two = moved->removePlayer(0);
+  ASSERT_TRUE(two.ok()) << two.status();
+  auto closed = two->removePlayer(0);
+  ASSERT_TRUE(closed.ok()) << closed.status();
+  ASSERT_EQ(closed->getPhase(), TablePhase::Closed);
+  EXPECT_EQ(closed->getScoreSheet(), out->getScoreSheet());
+}
+
 TEST(Table, TheDealWrapsRoundTheTable) {
   const TableState last{{"a", "b"},         {0, 0},       1,   3, TablePhase::Choosing,
                         Variant::SevenCard, std::nullopt, "T", ""};
