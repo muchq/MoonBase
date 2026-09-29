@@ -14,7 +14,7 @@ namespace rummy {
 /// Schema v2 — v1 (game_state_serde.h) is a lone deal, which is what a
 /// rummy row held before the table:
 ///   {"v":2, "phase":"choosing"|"playing"|"closed", "seats":[str...],
-///    "wins":[int...], "dealer":int, "dealNumber":int, "variant":"basic",
+///    "wins":[int...], "dealer":int, "dealNumber":int, "variant":"7-card",
 ///    "deal":<v1 deal>}
 /// deal is absent before the first deal. A v1 row reads as that deal at a
 /// table of its seats: in play, dealt by the seat before the one on turn,

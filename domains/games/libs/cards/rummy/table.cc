@@ -21,19 +21,19 @@ using absl::StatusOr;
 
 std::string_view variantName(Variant variant) {
   switch (variant) {
-    case Variant::Basic:
-      return "basic";
+    case Variant::SevenCard:
+      return "7-card";
     case Variant::TenCard:
-      return "ten-card";
+      return "10-card";
     case Variant::Gin:
       return "gin";
   }
-  return "basic";
+  return "7-card";
 }
 
 std::string_view recordedName(Variant variant) {
   switch (variant) {
-    case Variant::Basic:
+    case Variant::SevenCard:
     case Variant::TenCard:
       return "rummy";
     case Variant::Gin:
@@ -43,7 +43,7 @@ std::string_view recordedName(Variant variant) {
 }
 
 std::optional<Variant> parseVariant(std::string_view name) {
-  for (const Variant variant : {Variant::Basic, Variant::TenCard, Variant::Gin}) {
+  for (const Variant variant : {Variant::SevenCard, Variant::TenCard, Variant::Gin}) {
     if (name == variantName(variant)) return variant;
   }
   return std::nullopt;
@@ -77,11 +77,11 @@ int dealWhoseTurn(const Deal& deal) {
 std::vector<Variant> variantsFor(int seats) {
   switch (seats) {
     case 2:
-      return {Variant::Basic, Variant::TenCard, Variant::Gin};
+      return {Variant::SevenCard, Variant::TenCard, Variant::Gin};
     case 3:
-      return {Variant::Basic, Variant::TenCard};
+      return {Variant::SevenCard, Variant::TenCard};
     case 4:
-      return {Variant::Basic};
+      return {Variant::SevenCard};
   }
   return {};
 }
@@ -110,7 +110,7 @@ StatusOr<TableState> TableState::open(const std::string& game_id,
                     0,
                     0,
                     TablePhase::Choosing,
-                    Variant::Basic,
+                    Variant::SevenCard,
                     std::nullopt,
                     game_id,
                     ""};

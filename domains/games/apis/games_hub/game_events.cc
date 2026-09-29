@@ -53,13 +53,13 @@ std::optional<GameFinished> FinishedOf(const HostedState& state, std::size_t pla
   if (const auto* table = std::get_if<rummy::TableState>(&state)) {
     const auto& deal = table->getDeal();
     if (!deal.has_value()) return std::nullopt;
-    if (deal->getPhase() == rummy::Phase::Abandoned) {
+    if (rummy::dealPhase(*deal) == rummy::Phase::Abandoned) {
       finished.outcome = kOutcomeAbandoned;
       return finished;
     }
     // Won by play, and the table dealt on to choosing: the deal's end. A
     // closed table's finished deal was recorded when it finished.
-    if (deal->getPhase() == rummy::Phase::Over &&
+    if (rummy::dealPhase(*deal) == rummy::Phase::Over &&
         table->getPhase() == rummy::TablePhase::Choosing) {
       return finished;
     }

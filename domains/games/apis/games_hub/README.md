@@ -354,8 +354,14 @@ engine's `GameState`.
 A rummy table is dealer's choice (#1609, `libs/cards/rummy`'s
 `TableState`): `startGame` seats it between deals, the dealer's
 `chooseVariant` deals, and each deal's end passes the deal to the next
-seat. A dealer the room shows as not connected lets any seat deal. Each
-deal is a game to the room's stats and the event log: its end credits the
+seat. The variants are `7-card` and `10-card` rummy (one engine, dealt
+seven or ten) and heads-up `gin` (`GinState`, #1610); the view's
+`choosing.options` lists the ones that fit the seats. Gin's reckoning —
+both hands arranged, the defender's lay-offs, the ending — rides
+`lastDeal.gin`. Tables stored before the variants had names read
+`basic` as `7-card`. A dealer the room shows as not connected lets any seat deal. Each
+deal is a game to the room's stats and the event log, recorded as
+`rummy` or `gin`: its end credits the
 seat that went out with a win and every seat with a game played. Its
 points (what the others still held) ride the view's `lastDeal` and stay
 out of the room's running total, which is golf's lower-is-better scale.

@@ -786,7 +786,7 @@ TEST_F(PgGamesHubFixture, RummyTableSurvivesARestartMidTurn) {
   EXPECT_TRUE(after.players[0].hand.empty());
   EXPECT_EQ(after.players[0].handCount, 7);
   EXPECT_EQ(after.dealNumber, 1);
-  EXPECT_EQ(after.variant.value_or(""), "basic");
+  EXPECT_EQ(after.variant.value_or(""), "7-card");
 
   auto bob_back = OpenSeat(bob_token);
   ASSERT_TRUE(bob_back.has_value());

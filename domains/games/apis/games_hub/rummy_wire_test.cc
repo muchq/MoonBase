@@ -68,14 +68,14 @@ class RummyWireTest : public HubWireFixture {
     }
   }
 
-  // The same table with basic dealt by player-1: the creator's frames read
+  // The same table with seven-card dealt by player-1: the creator's frames read
   // up to its dealt view, which is returned; the room's listing and the
   // opening turn follow it. The joiner's are all still to read.
   std::string DealtTable(std::shared_ptr<opal::http::WebSocket>& creator,
                          std::shared_ptr<opal::http::WebSocket>& joiner) {
     ChoosingTable(creator, joiner);
     EXPECT_TRUE(
-        creator->Send(CommandFrame("rummy", R"({"move":{"chooseVariant":{"variant":"basic"}}})"))
+        creator->Send(CommandFrame("rummy", R"({"move":{"chooseVariant":{"variant":"7-card"}}})"))
             .ok());
     const std::string dealt = EventPayload(NextFrame(*creator), "rummy");
     (void)EventPayload(NextFrame(*creator), "roomState");
@@ -104,7 +104,8 @@ TEST_F(RummyWireTest, CreateAndJoinPinTheWaitingViewAndTheLobbysWord) {
   EXPECT_EQ(EventPayload(NextFrame(*creator), "rummy"),
             R"({"update":{"gameCreated":{"createdBy":"player-1","gameId":"GAME01"}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "rummy"),
-            R"({"update":{"gameJoined":{"view":{"canDrawStock":false,"dealNumber":0,)"
+            R"({"update":{"gameJoined":{"view":{"canDrawDiscard":false,"canDrawStock":false,)"
+            R"("dealNumber":0,)"
             R"("discardCount":0,"gameId":"GAME01","melds":[],"phase":"waiting","players":[)"
             R"({"hand":[],"handCount":0,"playerId":"player-1"}],"standings":[{"handsWon":0,)"
             R"("playerId":"player-1"}],"stockCount":0}}}})");
@@ -140,8 +141,9 @@ TEST_F(RummyWireTest, AStartedTableWaitsOnTheDealersChoice) {
   ASSERT_TRUE(creator->Send(CommandFrame("rummy", R"({"move":{"startGame":{}}})")).ok());
   EXPECT_EQ(EventPayload(NextFrame(*creator), "rummy"), R"({"update":{"gameStarted":{}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "rummy"),
-            R"({"update":{"gameState":{"view":{"canDrawStock":false,"choosing":{"dealer":)"
-            R"("player-1","options":["basic"]},"dealNumber":0,"discardCount":0,"gameId":)"
+            R"({"update":{"gameState":{"view":{"canDrawDiscard":false,"canDrawStock":false,)"
+            R"("choosing":{"dealer":"player-1","options":["7-card","10-card","gin"]},)"
+            R"("dealNumber":0,"discardCount":0,"gameId":)"
             R"("GAME01","melds":[],"phase":"choosing","players":[{"hand":[],"handCount":0,)"
             R"("playerId":"player-1"},{"hand":[],"handCount":0,"playerId":"player-2"}],)"
             R"("standings":[{"handsWon":0,"playerId":"player-1"},{"handsWon":0,"playerId":)"
@@ -155,14 +157,15 @@ TEST_F(RummyWireTest, AStartedTableWaitsOnTheDealersChoice) {
   for (int i = 0; i < 3; ++i) (void)NextFrame(*joiner);
 
   ASSERT_TRUE(
-      joiner->Send(CommandFrame("rummy", R"({"move":{"chooseVariant":{"variant":"basic"}}})"))
+      joiner->Send(CommandFrame("rummy", R"({"move":{"chooseVariant":{"variant":"7-card"}}})"))
           .ok());
   EXPECT_EQ(EventPayload(NextFrame(*joiner), "commandRejected"),
             R"({"reason":"the dealer chooses"})");
   ASSERT_TRUE(
-      creator->Send(CommandFrame("rummy", R"({"move":{"chooseVariant":{"variant":"gin"}}})")).ok());
+      creator->Send(CommandFrame("rummy", R"({"move":{"chooseVariant":{"variant":"canasta"}}})"))
+          .ok());
   EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
-            R"({"reason":"no such game: gin"})");
+            R"({"reason":"no such game: canasta"})");
 }
 
 TEST_F(RummyWireTest, TheDealtViewFromEachChair) {
@@ -171,19 +174,20 @@ TEST_F(RummyWireTest, TheDealtViewFromEachChair) {
   const std::string dealt = DealtTable(creator, joiner);
   EXPECT_EQ(
       dealt,
-      R"({"update":{"gameState":{"view":{"canDrawStock":true,"currentPlayerId":"player-2",)"
+      R"({"update":{"gameState":{"view":{"canDrawDiscard":true,"canDrawStock":true,)"
+      R"("currentPlayerId":"player-2",)"
       R"("dealNumber":1,"discardCount":1,"discardTop":{"rank":"J","suit":"♦"},"gameId":"GAME01",)"
       R"("melds":[],"phase":"playing","players":[{"hand":[{"rank":"A","suit":"♠"},)"
       R"({"rank":"A","suit":"♦"},{"rank":"K","suit":"♠"},{"rank":"K","suit":"♦"},)"
       R"({"rank":"Q","suit":"♠"},{"rank":"Q","suit":"♦"},{"rank":"J","suit":"♠"}],)"
       R"("handCount":7,"playerId":"player-1"},{"hand":[],"handCount":7,"playerId":"player-2"}],)"
       R"("stage":"draw","standings":[{"handsWon":0,"playerId":"player-1"},{"handsWon":0,)"
-      R"("playerId":"player-2"}],"stockCount":37,"variant":"basic"}}}})");
+      R"("playerId":"player-2"}],"stockCount":37,"variant":"7-card"}}}})");
   const json view = json::parse(dealt)["update"]["gameState"]["view"];
-  EXPECT_EQ(KeysOf(view),
-            (std::set<std::string>{"canDrawStock", "currentPlayerId", "dealNumber", "discardCount",
-                                   "discardTop", "gameId", "melds", "phase", "players", "stage",
-                                   "standings", "stockCount", "variant"}));
+  EXPECT_EQ(KeysOf(view), (std::set<std::string>{
+                              "canDrawDiscard", "canDrawStock", "currentPlayerId", "dealNumber",
+                              "discardCount", "discardTop", "gameId", "melds", "phase", "players",
+                              "stage", "standings", "stockCount", "variant"}));
   EXPECT_EQ(KeysOf(view["players"][0]), (std::set<std::string>{"hand", "handCount", "playerId"}));
   // Absent optionals are omitted keys, not nulls: nothing taken, no move
   // yet, no deal before this one, nobody choosing.
@@ -211,17 +215,18 @@ TEST_F(RummyWireTest, TurnMovesPinTheirSpellingAndTheDealsEndBytes) {
 
   ASSERT_TRUE(joiner->Send(CommandFrame("rummy", R"({"move":{"drawDiscard":{}}})")).ok());
   (void)EventPayload(NextFrame(*joiner), "rummy");
-  EXPECT_EQ(EventPayload(NextFrame(*creator), "rummy"),
-            R"({"update":{"gameState":{"view":{"canDrawStock":true,"currentPlayerId":"player-2",)"
-            R"("dealNumber":1,"discardCount":0,"gameId":"GAME01","lastMove":{"cards":[{"rank":)"
-            R"("J","suit":"♦"}],"move":"drawDiscard","playerId":"player-2"},"melds":[],"phase":)"
-            R"("playing","players":[{"hand":[{"rank":"A","suit":"♠"},{"rank":"A","suit":"♦"},)"
-            R"({"rank":"K","suit":"♠"},{"rank":"K","suit":"♦"},{"rank":"Q","suit":"♠"},)"
-            R"({"rank":"Q","suit":"♦"},{"rank":"J","suit":"♠"}],"handCount":7,"playerId":)"
-            R"("player-1"},{"hand":[],"handCount":8,"playerId":"player-2"}],"stage":"play",)"
-            R"("standings":[{"handsWon":0,"playerId":"player-1"},{"handsWon":0,"playerId":)"
-            R"("player-2"}],"stockCount":37,"takenDiscard":{"rank":"J","suit":"♦"},)"
-            R"("variant":"basic"}}}})");
+  EXPECT_EQ(
+      EventPayload(NextFrame(*creator), "rummy"),
+      R"({"update":{"gameState":{"view":{"canDrawDiscard":false,"canDrawStock":true,)"
+      R"("currentPlayerId":"player-2","dealNumber":1,"discardCount":0,"gameId":"GAME01","lastMove":{"cards":[{"rank":)"
+      R"("J","suit":"♦"}],"move":"drawDiscard","playerId":"player-2"},"melds":[],"phase":)"
+      R"("playing","players":[{"hand":[{"rank":"A","suit":"♠"},{"rank":"A","suit":"♦"},)"
+      R"({"rank":"K","suit":"♠"},{"rank":"K","suit":"♦"},{"rank":"Q","suit":"♠"},)"
+      R"({"rank":"Q","suit":"♦"},{"rank":"J","suit":"♠"}],"handCount":7,"playerId":)"
+      R"("player-1"},{"hand":[],"handCount":8,"playerId":"player-2"}],"stage":"play",)"
+      R"("standings":[{"handsWon":0,"playerId":"player-1"},{"handsWon":0,"playerId":)"
+      R"("player-2"}],"stockCount":37,"takenDiscard":{"rank":"J","suit":"♦"},)"
+      R"("variant":"7-card"}}}})");
 
   ASSERT_TRUE(
       joiner
@@ -271,16 +276,18 @@ TEST_F(RummyWireTest, TurnMovesPinTheirSpellingAndTheDealsEndBytes) {
   const json between =
       json::parse(EventPayload(NextFrame(*creator), "rummy"))["update"]["gameState"]["view"];
   EXPECT_EQ(between["phase"], "choosing");
-  EXPECT_EQ(between["choosing"].dump(), R"({"dealer":"player-2","options":["basic"]})");
+  EXPECT_EQ(between["choosing"].dump(),
+            R"({"dealer":"player-2","options":["7-card","10-card","gin"]})");
   EXPECT_EQ(between["lastDeal"].dump(),
             R"({"points":52,"scores":[{"deadwood":52,"playerId":"player-1"},)"
-            R"({"deadwood":0,"playerId":"player-2"}],"variant":"basic","winner":"player-2"})");
+            R"({"deadwood":0,"playerId":"player-2"}],"variant":"7-card","winner":"player-2"})");
   EXPECT_EQ(between["standings"].dump(),
             R"([{"handsWon":0,"playerId":"player-1"},{"handsWon":1,"playerId":"player-2"}])");
   for (const char* absent : {"currentPlayerId", "stage", "takenDiscard"}) {
     EXPECT_FALSE(between.contains(absent)) << absent;
   }
   EXPECT_EQ(between["canDrawStock"], false);
+  EXPECT_EQ(between["canDrawDiscard"], false);
   EXPECT_EQ(between["dealNumber"], 1);
   EXPECT_EQ(between["players"][0]["hand"].size(), 7u);
   const json room = json::parse(EventPayload(NextFrame(*creator), "roomState"));
@@ -288,11 +295,12 @@ TEST_F(RummyWireTest, TurnMovesPinTheirSpellingAndTheDealsEndBytes) {
   EXPECT_EQ(room["players"][1]["gamesWon"], 1);
   // Between deals the view keeps the last deal's variant and cards, and
   // adds who deals next and how the last deal went.
-  EXPECT_EQ(KeysOf(between),
-            (std::set<std::string>{"canDrawStock", "choosing", "dealNumber", "discardCount",
-                                   "discardTop", "gameId", "lastDeal", "lastMove", "melds", "phase",
-                                   "players", "standings", "stockCount", "variant"}));
-  EXPECT_EQ(between["variant"], "basic");
+  EXPECT_EQ(
+      KeysOf(between),
+      (std::set<std::string>{"canDrawDiscard", "canDrawStock", "choosing", "dealNumber",
+                             "discardCount", "discardTop", "gameId", "lastDeal", "lastMove",
+                             "melds", "phase", "players", "standings", "stockCount", "variant"}));
+  EXPECT_EQ(between["variant"], "7-card");
 }
 
 // Below two seats the table closes: the last deal, broken up, names no
@@ -309,10 +317,124 @@ TEST_F(RummyWireTest, ALeaveMidDealClosesTheTableWithItsStandings) {
   EXPECT_EQ(closed["phase"], "ended");
   EXPECT_FALSE(closed.contains("choosing"));
   EXPECT_EQ(closed["lastDeal"].dump(),
-            R"({"points":0,"scores":[{"deadwood":52,"playerId":"player-1"}],"variant":"basic"})");
+            R"({"points":0,"scores":[{"deadwood":52,"playerId":"player-1"}],"variant":"7-card"})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "rummy"),
             R"({"update":{"gameEnded":{"dealsPlayed":1,"standings":[{"handsWon":0,"playerId":)"
             R"("player-1"}]}}})");
+}
+
+// Gin's moves and its end. Dealt ten a seat, player-1 holds 10-A in ♠
+// and ♦, player-2 10-A♥ and 10-K♣ with A♣ over; 9♠ is turned up and 9♥
+// tops the stock. Both pass the upcard, player-2 draws 9♥ and knocks on
+// A♣ with nothing left over: gin, 25 and player-1's deadwood (none), and
+// nothing laid off after gin.
+TEST_F(RummyWireTest, GinPassesKnocksAndReckons) {
+  std::shared_ptr<opal::http::WebSocket> creator;
+  std::shared_ptr<opal::http::WebSocket> joiner;
+  ChoosingTable(creator, joiner);
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("rummy", R"({"move":{"chooseVariant":{"variant":"gin"}}})")).ok());
+  const json dealt =
+      json::parse(EventPayload(NextFrame(*creator), "rummy"))["update"]["gameState"]["view"];
+  EXPECT_EQ(dealt["variant"], "gin");
+  EXPECT_EQ(dealt["stage"], "upcard");
+  EXPECT_EQ(dealt["canDrawStock"], false);
+  EXPECT_EQ(dealt["canDrawDiscard"], true);
+  EXPECT_EQ(dealt["stockCount"], 31);
+  EXPECT_EQ(dealt["discardTop"].dump(), R"({"rank":"9","suit":"♠"})");
+  EXPECT_EQ(dealt["players"][0]["handCount"], 10);
+  (void)EventPayload(NextFrame(*creator), "roomState");
+  (void)EventPayload(NextFrame(*creator), "rummy");  // turnChanged
+  for (int i = 0; i < 3; ++i) (void)NextFrame(*joiner);
+
+  // A move gin does not have is refused by name.
+  ASSERT_TRUE(
+      joiner
+          ->Send(CommandFrame(
+              "rummy",
+              R"({"move":{"meld":{"cards":[{"rank":"K","suit":"♥"},{"rank":"Q","suit":"♥"},)"
+              R"({"rank":"J","suit":"♥"}]}}})"))
+          .ok());
+  EXPECT_EQ(EventPayload(NextFrame(*joiner), "commandRejected"),
+            R"({"reason":"not a move in gin"})");
+
+  ASSERT_TRUE(joiner->Send(CommandFrame("rummy", R"({"move":{"pass":{}}})")).ok());
+  (void)EventPayload(NextFrame(*joiner), "rummy");
+  (void)EventPayload(NextFrame(*joiner), "rummy");  // turnChanged
+  const json passed =
+      json::parse(EventPayload(NextFrame(*creator), "rummy"))["update"]["gameState"]["view"];
+  EXPECT_EQ(passed["lastMove"].dump(), R"({"cards":[],"move":"pass","playerId":"player-2"})");
+  EXPECT_EQ(passed["stage"], "upcard");
+  EXPECT_EQ(passed["currentPlayerId"], "player-1");
+  (void)EventPayload(NextFrame(*creator), "rummy");  // turnChanged
+
+  // Passed by both, the opener draws from the stock and only there.
+  ASSERT_TRUE(creator->Send(CommandFrame("rummy", R"({"move":{"pass":{}}})")).ok());
+  (void)EventPayload(NextFrame(*creator), "rummy");
+  (void)EventPayload(NextFrame(*creator), "rummy");  // turnChanged
+  const json stockOnly =
+      json::parse(EventPayload(NextFrame(*joiner), "rummy"))["update"]["gameState"]["view"];
+  EXPECT_EQ(stockOnly["stage"], "draw");
+  EXPECT_EQ(stockOnly["canDrawStock"], true);
+  EXPECT_EQ(stockOnly["canDrawDiscard"], false);
+  (void)EventPayload(NextFrame(*joiner), "rummy");  // turnChanged
+
+  ASSERT_TRUE(joiner->Send(CommandFrame("rummy", R"({"move":{"drawStock":{}}})")).ok());
+  const json drew =
+      json::parse(EventPayload(NextFrame(*joiner), "rummy"))["update"]["gameState"]["view"];
+  EXPECT_EQ(drew["players"][1]["hand"][10].dump(), R"({"rank":"9","suit":"♥"})");
+  (void)EventPayload(NextFrame(*creator), "rummy");
+
+  ASSERT_TRUE(
+      joiner->Send(CommandFrame("rummy", R"({"move":{"knock":{"card":{"rank":"A","suit":"♣"}}}})"))
+          .ok());
+  const json between =
+      json::parse(EventPayload(NextFrame(*creator), "rummy"))["update"]["gameState"]["view"];
+  EXPECT_EQ(between["phase"], "choosing");
+  EXPECT_EQ(between["lastMove"].dump(),
+            R"({"cards":[{"rank":"A","suit":"♣"}],"move":"knock","playerId":"player-2"})");
+  EXPECT_EQ(between["lastDeal"].dump(),
+            R"({"gin":{"ending":"gin","hands":[{"deadwood":[],"melds":[[{"rank":"10","suit":"♠"},)"
+            R"({"rank":"J","suit":"♠"},{"rank":"Q","suit":"♠"},{"rank":"K","suit":"♠"},)"
+            R"({"rank":"A","suit":"♠"}],[{"rank":"10","suit":"♦"},{"rank":"J","suit":"♦"},)"
+            R"({"rank":"Q","suit":"♦"},{"rank":"K","suit":"♦"},{"rank":"A","suit":"♦"}]],)"
+            R"("playerId":"player-1"},{"deadwood":[],"melds":[[{"rank":"Q","suit":"♥"},)"
+            R"({"rank":"K","suit":"♥"},{"rank":"A","suit":"♥"}],[{"rank":"10","suit":"♣"},)"
+            R"({"rank":"J","suit":"♣"},{"rank":"Q","suit":"♣"},{"rank":"K","suit":"♣"}],)"
+            R"([{"rank":"9","suit":"♥"},{"rank":"10","suit":"♥"},{"rank":"J","suit":"♥"}]],)"
+            R"("playerId":"player-2"}],"knocker":"player-2","laidOff":[]},"points":25,)"
+            R"("scores":[{"deadwood":0,"playerId":"player-1"},{"deadwood":0,"playerId":)"
+            R"("player-2"}],"variant":"gin","winner":"player-2"})");
+  EXPECT_EQ(between["standings"].dump(),
+            R"([{"handsWon":0,"playerId":"player-1"},{"handsWon":1,"playerId":"player-2"}])");
+}
+
+// The same deal, player-2 taking the upcard 9♠ and knocking on K♣ with
+// 9♠ and A♣ over (10): player-1's 10-A runs leave nothing, which
+// undercuts — player-1 scores 25 and the 10.
+TEST_F(RummyWireTest, GinUndercut) {
+  std::shared_ptr<opal::http::WebSocket> creator;
+  std::shared_ptr<opal::http::WebSocket> joiner;
+  ChoosingTable(creator, joiner);
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("rummy", R"({"move":{"chooseVariant":{"variant":"gin"}}})")).ok());
+  for (int i = 0; i < 3; ++i) (void)NextFrame(*creator);
+  for (int i = 0; i < 3; ++i) (void)NextFrame(*joiner);
+
+  ASSERT_TRUE(joiner->Send(CommandFrame("rummy", R"({"move":{"drawDiscard":{}}})")).ok());
+  (void)EventPayload(NextFrame(*creator), "rummy");
+  ASSERT_TRUE(
+      joiner->Send(CommandFrame("rummy", R"({"move":{"knock":{"card":{"rank":"K","suit":"♣"}}}})"))
+          .ok());
+  const json between =
+      json::parse(EventPayload(NextFrame(*creator), "rummy"))["update"]["gameState"]["view"];
+  const json& gin = between["lastDeal"]["gin"];
+  EXPECT_EQ(gin["ending"], "undercut");
+  EXPECT_EQ(gin["knocker"], "player-2");
+  EXPECT_EQ(gin["hands"][1]["deadwood"].dump(),
+            R"([{"rank":"A","suit":"♣"},{"rank":"9","suit":"♠"}])");
+  EXPECT_EQ(between["lastDeal"]["winner"], "player-1");
+  EXPECT_EQ(between["lastDeal"]["points"], 35);
 }
 
 TEST_F(RummyWireTest, StockDrawAndDiscardSpellings) {

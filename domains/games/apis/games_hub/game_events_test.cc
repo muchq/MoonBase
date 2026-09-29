@@ -74,12 +74,13 @@ rummy::TableState Rummy() {
       std::nullopt,
       "game",
       "v0"};
-  return rummy::TableState{{"andy", "mercy"},     {0, 0}, 1,      1,   rummy::TablePhase::Playing,
-                           rummy::Variant::Basic, deal,   "game", "v0"};
+  return rummy::TableState{
+      {"andy", "mercy"},         {0, 0}, 1,      1,   rummy::TablePhase::Playing,
+      rummy::Variant::SevenCard, deal,   "game", "v0"};
 }
 
 rummy::TableState RummyDealWon() {
-  auto won = Rummy().inDeal(
+  auto won = Rummy().inDeal<rummy::GameState>(
       [](const rummy::GameState& deal) { return deal.discard(0, Card{Suit::Clubs, Rank::Five}); });
   EXPECT_TRUE(won.ok()) << won.status();
   return *won;
@@ -132,7 +133,7 @@ TEST(GameEvents, ACastleGameLeftBelowTwoSeatsIsAbandoned) {
 }
 
 // A rummy table's games are its deals (#1609): a deal won by play is a
-// game completed, under the deal's variant word — basic rummy is "rummy".
+// game completed, under the deal's variant word — seven-card rummy is "rummy".
 TEST(GameEvents, ARummyDealPlayedOutIsCompleted) {
   const rummy::TableState table = RummyDealWon();
   ASSERT_EQ(table.getPhase(), rummy::TablePhase::Choosing);

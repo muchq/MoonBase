@@ -78,7 +78,7 @@ absl::StatusOr<TableState> fromVersionOne(const std::string& serialized) {
                     dealer,
                     1,
                     live ? TablePhase::Playing : TablePhase::Closed,
-                    Variant::Basic,
+                    Variant::SevenCard,
                     *std::move(deal),
                     "",
                     ""};
@@ -130,7 +130,9 @@ absl::StatusOr<TableState> deserializeTableState(const std::string& serialized) 
 
   auto variant_name = readString(parsed, "variant");
   if (!variant_name.ok()) return variant_name.status();
-  const std::optional<Variant> variant = parseVariant(*variant_name);
+  // "basic" is seven-card's name in rows written before it had its own.
+  const std::optional<Variant> variant =
+      *variant_name == "basic" ? Variant::SevenCard : parseVariant(*variant_name);
   if (!variant.has_value()) return absl::InvalidArgumentError("unknown variant");
 
   if (!parsed.contains("seats") || !parsed["seats"].is_array()) {

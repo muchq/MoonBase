@@ -2050,11 +2050,13 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"rummy_commands", {{"command", "startGame"}}},
       {"rummy_commands", {{"command", "leaveGame"}}},
       {"rummy_commands", {{"command", "chooseVariant"}}},
+      {"rummy_commands", {{"command", "pass"}}},
       {"rummy_commands", {{"command", "drawStock"}}},
       {"rummy_commands", {{"command", "drawDiscard"}}},
       {"rummy_commands", {{"command", "meld"}}},
       {"rummy_commands", {{"command", "layOff"}}},
       {"rummy_commands", {{"command", "discard"}}},
+      {"rummy_commands", {{"command", "knock"}}},
       {"rummy_events", {{"event", "gameJoined"}}},
       {"rummy_events", {{"event", "gameState"}}},
       {"rummy_events", {{"event", "gameCreated"}}},
@@ -2765,7 +2767,7 @@ TEST_F(GameEventFixture, ARummyTableRecordsEachDealAsAGame) {
 
   // Alice deals the second: another game.
   moonbase::games::RummyChooseVariant basic;
-  basic.variant = "basic";
+  basic.variant = "7-card";
   ASSERT_TRUE(alice.stream.Send(Rummy(RummyMove::FromChoosevariant(basic))).ok());
   ASSERT_TRUE(
       AwaitRummyView(

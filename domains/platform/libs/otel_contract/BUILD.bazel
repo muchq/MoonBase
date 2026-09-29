@@ -32,6 +32,7 @@ go_test(
         "//domains/games/apis/games_hub:surface.h",
         "//domains/games/apis/games_hub:world.h",
         "//domains/games/apis/one_d4:src/main/java/com/muchq/games/one_d4/api/QueryEvent.java",
+        "//domains/games/libs/cards/rummy:table.cc",
         "//domains/platform/apis/stats:aggregate.go",
         "//domains/platform/apis/stats:classify.go",
         "//domains/platform/apis/stats:games.go",

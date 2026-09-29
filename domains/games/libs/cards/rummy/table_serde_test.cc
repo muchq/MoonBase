@@ -32,7 +32,7 @@ TableState opened() {
 }
 
 TableState playing() {
-  auto dealt = opened().chooseVariant(0, Variant::Basic, pristineDeck());
+  auto dealt = opened().chooseVariant(0, Variant::SevenCard, pristineDeck());
   EXPECT_TRUE(dealt.ok()) << dealt.status();
   return *dealt;
 }
@@ -49,7 +49,8 @@ TableState between() {
                  std::nullopt,
                  "",
                  ""};
-  return TableState{{"a", "b"}, {0, 1}, 0, 1, TablePhase::Choosing, Variant::Basic, over, "", ""};
+  return TableState{{"a", "b"},         {0, 1}, 0,  1, TablePhase::Choosing,
+                    Variant::SevenCard, over,   "", ""};
 }
 
 json payloadOf(const TableState& table) { return json::parse(serializeTableState(table)); }
@@ -84,8 +85,8 @@ void expectRoundTrips(const TableState& table) {
 
 }  // namespace
 
-// Each variant's deal is stored in its own engine's form: ten-card as
-// basic's, gin as gin's.
+// Each variant's deal is stored in its own engine's form: 10-card as
+// GameState's, gin as GinState's.
 TEST(TableSerde, EveryVariantsDealRoundTrips) {
   auto ten = opened().chooseVariant(0, Variant::TenCard, pristineDeck());
   ASSERT_TRUE(ten.ok());
@@ -102,7 +103,7 @@ TEST(TableSerde, EveryVariantsDealRoundTrips) {
   basicAsGin["variant"] = "gin";
   expectRejected(basicAsGin);
   json ginAsBasic = payload;
-  ginAsBasic["variant"] = "basic";
+  ginAsBasic["variant"] = "7-card";
   expectRejected(ginAsBasic);
 }
 
@@ -120,7 +121,7 @@ TEST(TableSerde, EveryPhaseRoundTrips) {
 TEST(TableSerde, FrozenPayload) {
   constexpr const char* kRow =
       R"({"dealNumber":0,"dealer":0,"phase":"choosing","seats":["a","b"],"v":2,)"
-      R"("variant":"basic","wins":[0,0]})";
+      R"("variant":"7-card","wins":[0,0]})";
   EXPECT_EQ(serializeTableState(opened()), kRow);
   const auto restored = deserializeTableState(kRow);
   ASSERT_TRUE(restored.ok()) << restored.status();
@@ -130,6 +131,18 @@ TEST(TableSerde, FrozenPayload) {
   EXPECT_EQ(dealt["phase"], "playing");
   EXPECT_EQ(dealt["deal"]["v"], 1);
   EXPECT_EQ(dealt["dealNumber"], 1);
+}
+
+// Seven-card rummy was stored as "basic" before it had a name of its own;
+// such a row reads as seven-card, and is written back under the new word.
+TEST(TableSerde, AStoredBasicTableIsSevenCard) {
+  constexpr const char* kRow =
+      R"({"dealNumber":0,"dealer":0,"phase":"choosing","seats":["a","b"],"v":2,)"
+      R"("variant":"basic","wins":[0,0]})";
+  const auto restored = deserializeTableState(kRow);
+  ASSERT_TRUE(restored.ok()) << restored.status();
+  EXPECT_EQ(restored->getVariant(), Variant::SevenCard);
+  EXPECT_EQ(payloadOf(*restored)["variant"], "7-card");
 }
 
 // A row from before the table (#1608) is one deal: it reads as that deal
@@ -148,7 +161,7 @@ TEST(TableSerde, AVersionOneRowIsOneDeal) {
   EXPECT_EQ(table->getWins(), (std::vector<int>{0, 0, 0}));
   EXPECT_EQ(table->getDealNumber(), 1);
   EXPECT_EQ(table->getDealer(), 2);
-  EXPECT_EQ(table->getVariant(), Variant::Basic);
+  EXPECT_EQ(table->getVariant(), Variant::SevenCard);
   EXPECT_EQ(serializeGameState(*table->basicDeal()), serializeGameState(*drew));
 
   auto gone = drew->removePlayer(1);

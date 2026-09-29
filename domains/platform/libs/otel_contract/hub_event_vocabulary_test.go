@@ -29,6 +29,7 @@ const (
 	hubHostedGameH  = "../../../games/apis/games_hub/hosted_game.h"
 	hubGolfHubCc    = "../../../games/apis/games_hub/golf_hub.cc"
 	hubWorldH       = "../../../games/apis/games_hub/world.h"
+	rummyTableCc    = "../../../games/libs/cards/rummy/table.cc"
 	statsGames      = "../../apis/stats/games.go"
 	dejaHub         = "../../../ai/apis/deja/src/hub.rs"
 )
@@ -97,18 +98,7 @@ func TestHubEventValuesAgreeBetweenGamesHubAndStats(t *testing.T) {
 		regexp.MustCompile(`hubOutcomes = map\[string\]bool\{([^}]*)\}`), "hubOutcomes"),
 		"an ending the hub can write that stats would count as \"other\"")
 
-	// GameKindName: case GameKind::kCastle: return "castle"; ... return "golf";
-	hosted, err := os.ReadFile(hubHostedGameH)
-	require.NoError(t, err)
-	kindName := regexp.MustCompile(`(?s)GameKindName\(GameKind kind\) \{(.*?)\n\}`).
-		FindSubmatch(hosted)
-	require.NotNil(t, kindName, "no GameKindName in %s", hubHostedGameH)
-	var fromKinds []string
-	for _, match := range regexp.MustCompile(`"([a-z_]+)"`).FindAllSubmatch(kindName[1], -1) {
-		fromKinds = append(fromKinds, string(match[1]))
-	}
-	sort.Strings(fromKinds)
-	assert.Equal(t, fromKinds, goWords(t, reader,
+	assert.Equal(t, gameWords(t), goWords(t, reader,
 		regexp.MustCompile(`hubVariants = map\[string\]bool\{([^}]*)\}`), "hubVariants"),
 		"a game the hub can host that stats would count as \"other\"")
 
@@ -122,6 +112,32 @@ func TestHubEventValuesAgreeBetweenGamesHubAndStats(t *testing.T) {
 	assert.Equal(t, fromSurface, goWords(t, reader,
 		regexp.MustCompile(`hubSurfaces = map\[string\]bool\{([^}]*)\}`), "hubSurfaces"),
 		"a shape a room can be that stats would count as \"other\"")
+}
+
+// Every word a game is recorded under (#1571), sorted: GameKindName's —
+// case GameKind::kCastle: return "castle"; ... — and, since a rummy
+// table's deals are recorded by variant, rummy::recordedName's.
+func gameWords(t *testing.T) []string {
+	t.Helper()
+	words := map[string]bool{}
+	for _, site := range []struct{ path, function string }{
+		{hubHostedGameH, `GameKindName\(GameKind kind\)`},
+		{rummyTableCc, `recordedName\(Variant variant\)`},
+	} {
+		source, err := os.ReadFile(site.path)
+		require.NoError(t, err)
+		body := regexp.MustCompile(`(?s)` + site.function + ` \{(.*?)\n\}`).FindSubmatch(source)
+		require.NotNil(t, body, "no %s in %s", site.function, site.path)
+		for _, match := range regexp.MustCompile(`"([a-z_]+)"`).FindAllSubmatch(body[1], -1) {
+			words[string(match[1])] = true
+		}
+	}
+	var sorted []string
+	for word := range words {
+		sorted = append(sorted, word)
+	}
+	sort.Strings(sorted)
+	return sorted
 }
 
 // The body of SurfaceKindName, which is where the three spellings live —
@@ -209,8 +225,6 @@ func TestHubEventVocabularyAgreesWithDeja(t *testing.T) {
 	require.NoError(t, err)
 	surface, err := os.ReadFile(hubSurfaceH)
 	require.NoError(t, err)
-	hosted, err := os.ReadFile(hubHostedGameH)
-	require.NoError(t, err)
 	reader, err := os.ReadFile(dejaHub)
 	require.NoError(t, err)
 
@@ -242,15 +256,7 @@ func TestHubEventVocabularyAgreesWithDeja(t *testing.T) {
 	assert.Equal(t, surfaces, rustWords("SURFACES"),
 		"a shape a room can be that deja would read as \"other\"")
 
-	kindName := regexp.MustCompile(`(?s)GameKindName\(GameKind kind\) \{(.*?)\n\}`).
-		FindSubmatch(hosted)
-	require.NotNil(t, kindName, "no GameKindName in %s", hubHostedGameH)
-	var kinds []string
-	for _, match := range regexp.MustCompile(`"([a-z_]+)"`).FindAllSubmatch(kindName[1], -1) {
-		kinds = append(kinds, string(match[1]))
-	}
-	sort.Strings(kinds)
-	assert.Equal(t, kinds, rustWords("VARIANTS"),
+	assert.Equal(t, gameWords(t), rustWords("VARIANTS"),
 		"a game the hub can host that deja would read as \"other\"")
 }
 

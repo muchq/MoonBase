@@ -226,3 +226,7 @@ cc_test(
         "@nlohmann_json//:json",
     ],
 )
+
+# Read as text by //domains/platform/libs/otel_contract, which pins the
+# words recordedName records deals under against the stats readers.
+exports_files(["table.cc"])

@@ -16,22 +16,22 @@
 
 namespace rummy {
 
-/// The games a rummy deal can be (#1609). Basic is GameState's rules,
+/// The games a rummy deal can be (#1609). Seven-card is GameState's rules,
 /// seven cards a seat; ten-card is the same game dealt ten; gin is
 /// GinState's (#1610). Rummy 500 (#1611) joins here.
-enum class Variant { Basic, TenCard, Gin };
+enum class Variant { SevenCard, TenCard, Gin };
 
 /// The wire's word for a variant.
 [[nodiscard]] std::string_view variantName(Variant variant);
 /// The word a deal of this variant is recorded under as a game (#1571):
-/// basic, at either hand size, keeps "rummy", the word the game had
+/// GameState's rummy, at either hand size, keeps "rummy", the word the game had
 /// before it had variants.
 [[nodiscard]] std::string_view recordedName(Variant variant);
 [[nodiscard]] std::optional<Variant> parseVariant(std::string_view name);
 /// The variants a table of this many seats may deal.
 [[nodiscard]] std::vector<Variant> variantsFor(int seats);
 
-/// A deal of any variant: basic and ten-card play GameState, gin
+/// A deal of any variant: seven- and ten-card play GameState, gin
 /// GinState.
 using Deal = std::variant<GameState, GinState>;
 
@@ -108,7 +108,7 @@ class TableState {
   [[nodiscard]] Variant getVariant() const { return variant; }
   /// The deal in play, or the one that just ended; absent before the first.
   [[nodiscard]] const std::optional<Deal>& getDeal() const { return deal; }
-  /// The deal as basic's or gin's engine, if it is that game's.
+  /// The deal as GameState or GinState, if it is that engine's.
   [[nodiscard]] const GameState* basicDeal() const {
     return deal.has_value() ? std::get_if<GameState>(&*deal) : nullptr;
   }

@@ -169,8 +169,9 @@ TEST_F(PgHubStoreTest, RummyRowsKeepTheirKindAndDecodeWithRummySerde) {
                                cards::Card{cards::Suit::Spades, cards::Rank::King},
                                cards::Card{cards::Suit::Spades, cards::Rank::Queen}});
   ASSERT_TRUE(melded.ok()) << melded.status();
-  const rummy::TableState table{{"alice", "bob"},      {0, 0},  1,  1, rummy::TablePhase::Playing,
-                                rummy::Variant::Basic, *melded, "", ""};
+  const rummy::TableState table{
+      {"alice", "bob"},          {0, 0},  1,  1, rummy::TablePhase::Playing,
+      rummy::Variant::SevenCard, *melded, "", ""};
   PgHubStore::GameRow started{
       "R1", "M2", {"alice", "bob"}, games_hub::HostedState(table), 1, games_hub::GameKind::kRummy};
   ASSERT_TRUE(*store_->CommitGameSave(started, ""));
