@@ -41,19 +41,20 @@ vector<Player> withHand(const vector<Player>& roster, int seat, vector<Card> han
 }  // namespace
 
 StatusOr<GameState> dealRummyGame(const string& game_id, const vector<string>& player_ids,
-                                  deque<Card> shuffled_deck, int opener) {
+                                  deque<Card> shuffled_deck, int opener, int hand_size) {
   const int seats = static_cast<int>(player_ids.size());
   if (seats < GameState::kMinPlayers || seats > GameState::kMaxPlayers) {
     return InvalidArgumentError("2 to 4 players");
   }
   if (opener < 0 || opener >= seats) return InvalidArgumentError("no such opener");
-  if (static_cast<int>(shuffled_deck.size()) < seats * GameState::kHandSize + 1) {
+  if (hand_size < 1) return InvalidArgumentError("no cards to deal");
+  if (static_cast<int>(shuffled_deck.size()) < seats * hand_size + 1) {
     return InvalidArgumentError("deck too small");
   }
   vector<Player> players;
   players.reserve(player_ids.size());
   for (const string& id : player_ids) players.push_back(Player{id, {}});
-  for (int round = 0; round < GameState::kHandSize; round++) {
+  for (int round = 0; round < hand_size; round++) {
     for (Player& player : players) {
       player.hand.push_back(shuffled_deck.back());
       shuffled_deck.pop_back();

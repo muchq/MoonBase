@@ -71,6 +71,16 @@ TEST(Deal, TwoSeatsGetSevenOneCardIsTurnedUpAndTheRestIsStock) {
   EXPECT_FALSE(game->getTakenDiscard().has_value());
 }
 
+// Ten-card rummy (#1609) is the same game dealt ten a seat.
+TEST(Deal, AHandSizeCanBeAskedFor) {
+  NoShuffleDealer dealer;
+  auto game = dealRummyGame("g1", {"a", "b", "c"}, dealer.DealNewUnshuffledDeck(), 0, 10);
+  ASSERT_TRUE(game.ok()) << game.status();
+  for (const Player& p : game->getPlayers()) EXPECT_EQ(p.hand.size(), 10u);
+  EXPECT_EQ(game->getStock().size(), 52u - 30u - 1u);
+  EXPECT_FALSE(dealRummyGame("g1", {"a", "b"}, dealer.DealNewUnshuffledDeck(), 0, 0).ok());
+}
+
 TEST(Deal, DealsOneCardASeatAroundTheTableFromTheBack) {
   // The unshuffled deck's back is A♠ A♥ A♦ A♣ K♠ ...: seat 0 takes every
   // other card from it, and the card after the hands is turned up.

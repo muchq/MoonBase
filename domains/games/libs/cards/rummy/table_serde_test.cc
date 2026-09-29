@@ -10,6 +10,7 @@
 #include "domains/games/libs/cards/card.h"
 #include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/games/libs/cards/rummy/game_state_serde.h"
+#include "domains/games/libs/cards/rummy/gin_serde.h"
 #include "domains/games/libs/cards/rummy/table.h"
 
 using namespace cards;
@@ -70,13 +71,40 @@ void expectRoundTrips(const TableState& table) {
   EXPECT_EQ(restored->getPhase(), table.getPhase());
   EXPECT_EQ(restored->getVariant(), table.getVariant());
   ASSERT_EQ(restored->getDeal().has_value(), table.getDeal().has_value());
-  if (table.getDeal().has_value()) {
-    EXPECT_EQ(serializeGameState(*restored->getDeal()), serializeGameState(*table.getDeal()));
+  if (table.basicDeal() != nullptr) {
+    ASSERT_NE(restored->basicDeal(), nullptr);
+    EXPECT_EQ(serializeGameState(*restored->basicDeal()), serializeGameState(*table.basicDeal()));
+  }
+  if (table.ginDeal() != nullptr) {
+    ASSERT_NE(restored->ginDeal(), nullptr);
+    EXPECT_EQ(serializeGinState(*restored->ginDeal()), serializeGinState(*table.ginDeal()));
   }
   EXPECT_EQ(serializeTableState(*restored), serialized);
 }
 
 }  // namespace
+
+// Each variant's deal is stored in its own engine's form: ten-card as
+// basic's, gin as gin's.
+TEST(TableSerde, EveryVariantsDealRoundTrips) {
+  auto ten = opened().chooseVariant(0, Variant::TenCard, pristineDeck());
+  ASSERT_TRUE(ten.ok());
+  expectRoundTrips(*ten);
+  auto gin = opened().chooseVariant(0, Variant::Gin, pristineDeck());
+  ASSERT_TRUE(gin.ok()) << gin.status();
+  expectRoundTrips(*gin);
+  const json payload = payloadOf(*gin);
+  EXPECT_EQ(payload["variant"], "gin");
+  EXPECT_EQ(payload["deal"]["stage"], "upcard");
+
+  // A deal in another game's form than the table's variant is no table.
+  json basicAsGin = payloadOf(playing());
+  basicAsGin["variant"] = "gin";
+  expectRejected(basicAsGin);
+  json ginAsBasic = payload;
+  ginAsBasic["variant"] = "basic";
+  expectRejected(ginAsBasic);
+}
 
 TEST(TableSerde, EveryPhaseRoundTrips) {
   expectRoundTrips(opened());
@@ -121,7 +149,7 @@ TEST(TableSerde, AVersionOneRowIsOneDeal) {
   EXPECT_EQ(table->getDealNumber(), 1);
   EXPECT_EQ(table->getDealer(), 2);
   EXPECT_EQ(table->getVariant(), Variant::Basic);
-  EXPECT_EQ(serializeGameState(*table->getDeal()), serializeGameState(*drew));
+  EXPECT_EQ(serializeGameState(*table->basicDeal()), serializeGameState(*drew));
 
   auto gone = drew->removePlayer(1);
   ASSERT_TRUE(gone.ok());

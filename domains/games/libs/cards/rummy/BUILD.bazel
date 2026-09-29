@@ -40,6 +40,61 @@ cc_test(
 )
 
 cc_library(
+    name = "gin",
+    srcs = ["gin.cc"],
+    hdrs = ["gin.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":arrange",
+        ":game_state",
+        "//domains/games/libs/cards",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_test(
+    name = "gin_test",
+    size = "small",
+    srcs = ["gin_test.cc"],
+    deps = [
+        ":gin",
+        "//domains/games/libs/cards",
+        "//domains/games/libs/cards:dealer",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "gin_serde",
+    srcs = ["gin_serde.cc"],
+    hdrs = ["gin_serde.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":gin",
+        "//domains/games/libs/cards",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_test(
+    name = "gin_serde_test",
+    size = "small",
+    srcs = ["gin_serde_test.cc"],
+    deps = [
+        ":gin",
+        ":gin_serde",
+        "//domains/games/libs/cards",
+        "//domains/games/libs/cards:dealer",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_library(
     name = "game_state",
     srcs = ["game_state.cc"],
     hdrs = ["game_state.h"],
@@ -115,9 +170,11 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":game_state",
+        ":gin",
         "//domains/games/libs/cards",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -127,6 +184,7 @@ cc_test(
     srcs = ["table_test.cc"],
     deps = [
         ":game_state",
+        ":gin",
         ":table",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:dealer",
@@ -144,6 +202,7 @@ cc_library(
     deps = [
         ":game_state",
         ":game_state_serde",
+        ":gin_serde",
         ":table",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
@@ -159,6 +218,7 @@ cc_test(
     deps = [
         ":game_state",
         ":game_state_serde",
+        ":gin_serde",
         ":table",
         ":table_serde",
         "//domains/games/libs/cards",

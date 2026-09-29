@@ -10,6 +10,7 @@
 #include "absl/strings/str_cat.h"
 #include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/games/libs/cards/rummy/game_state_serde.h"
+#include "domains/games/libs/cards/rummy/gin_serde.h"
 
 namespace rummy {
 namespace {
@@ -97,8 +98,11 @@ std::string serializeTableState(const TableState& table) {
       {"dealNumber", table.getDealNumber()},
       {"variant", std::string(variantName(table.getVariant()))},
   };
-  if (const auto& deal = table.getDeal(); deal.has_value()) {
-    serialized["deal"] = json::parse(serializeGameState(*deal));
+  // The deal in its own engine's form; the variant says which.
+  if (const GameState* basic = table.basicDeal(); basic != nullptr) {
+    serialized["deal"] = json::parse(serializeGameState(*basic));
+  } else if (const GinState* gin = table.ginDeal(); gin != nullptr) {
+    serialized["deal"] = json::parse(serializeGinState(*gin));
   }
   return serialized.dump(/*indent=*/-1, /*indent_char=*/' ', /*ensure_ascii=*/false,
                          json::error_handler_t::replace);
@@ -160,26 +164,32 @@ absl::StatusOr<TableState> deserializeTableState(const std::string& serialized) 
   auto deal_number = readIntInRange(parsed, "dealNumber", 0, 1'000'000);
   if (!deal_number.ok()) return deal_number.status();
 
-  std::optional<GameState> deal;
+  std::optional<Deal> deal;
   if (parsed.contains("deal")) {
     if (!parsed["deal"].is_object()) return absl::InvalidArgumentError("expected object 'deal'");
-    auto read = deserializeGameState(parsed["deal"].dump());
-    if (!read.ok()) return read.status();
-    deal.emplace(*std::move(read));
+    if (*variant == Variant::Gin) {
+      auto read = deserializeGinState(parsed["deal"].dump());
+      if (!read.ok()) return read.status();
+      deal.emplace(*std::move(read));
+    } else {
+      auto read = deserializeGameState(parsed["deal"].dump());
+      if (!read.ok()) return read.status();
+      deal.emplace(*std::move(read));
+    }
   }
   // A deal is there exactly when one has been dealt.
   if (deal.has_value() != (*deal_number > 0)) {
     return absl::InvalidArgumentError("the deal count disagrees with the deal");
   }
   if (*phase == TablePhase::Playing) {
-    if (!deal.has_value() || deal->isOver()) {
+    if (!deal.has_value() || dealPhase(*deal) != Phase::Playing) {
       return absl::InvalidArgumentError("a playing table has a deal in play");
     }
     std::vector<std::string> dealt;
-    for (const Player& player : deal->getPlayers()) dealt.push_back(player.id);
+    for (const Player& player : dealPlayers(*deal)) dealt.push_back(player.id);
     if (dealt != seats) return absl::InvalidArgumentError("the deal seats the table");
   }
-  if (*phase == TablePhase::Choosing && deal.has_value() && !deal->isOver()) {
+  if (*phase == TablePhase::Choosing && deal.has_value() && dealPhase(*deal) == Phase::Playing) {
     return absl::InvalidArgumentError("between deals, the last deal is over");
   }
 

@@ -10,6 +10,7 @@
 #include "domains/games/libs/cards/card.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/rummy/game_state.h"
+#include "domains/games/libs/cards/rummy/gin.h"
 
 using namespace cards;
 using namespace rummy;
@@ -36,15 +37,112 @@ TableState withDeal(const TableState& table, GameState deal) {
 }  // namespace
 
 TEST(Variants, NamesRoundTripAndFitTheSeats) {
+  for (const Variant variant : {Variant::Basic, Variant::TenCard, Variant::Gin}) {
+    EXPECT_EQ(parseVariant(variantName(variant)), variant);
+  }
   EXPECT_EQ(variantName(Variant::Basic), "basic");
-  EXPECT_EQ(parseVariant("basic"), Variant::Basic);
-  EXPECT_FALSE(parseVariant("gin").has_value());
+  EXPECT_EQ(variantName(Variant::TenCard), "ten-card");
+  EXPECT_EQ(variantName(Variant::Gin), "gin");
+  EXPECT_FALSE(parseVariant("rummy500").has_value());
   EXPECT_FALSE(parseVariant("").has_value());
-  for (int seats : {2, 3, 4}) EXPECT_EQ(variantsFor(seats), vector<Variant>{Variant::Basic});
-  // Stats record basic rummy as the game it always was.
-  EXPECT_EQ(recordedName(Variant::Basic), "rummy");
+  // Ten cards a seat leaves too thin a stock at four; gin is for two.
+  EXPECT_EQ(variantsFor(2), (vector<Variant>{Variant::Basic, Variant::TenCard, Variant::Gin}));
+  EXPECT_EQ(variantsFor(3), (vector<Variant>{Variant::Basic, Variant::TenCard}));
+  EXPECT_EQ(variantsFor(4), vector<Variant>{Variant::Basic});
   EXPECT_TRUE(variantsFor(1).empty());
   EXPECT_TRUE(variantsFor(5).empty());
+  // Stats record basic rummy, at either hand size, as the game it always
+  // was; gin is a game of its own.
+  EXPECT_EQ(recordedName(Variant::Basic), "rummy");
+  EXPECT_EQ(recordedName(Variant::TenCard), "rummy");
+  EXPECT_EQ(recordedName(Variant::Gin), "gin");
+}
+
+TEST(Variants, EachDealsItsOwnGame) {
+  auto ten = opened().chooseVariant(0, Variant::TenCard, deck());
+  ASSERT_TRUE(ten.ok()) << ten.status();
+  EXPECT_EQ(ten->getVariant(), Variant::TenCard);
+  ASSERT_NE(ten->basicDeal(), nullptr);
+  for (const Player& seat : ten->basicDeal()->getPlayers()) EXPECT_EQ(seat.hand.size(), 10u);
+
+  auto gin = opened({"a", "b"}).chooseVariant(0, Variant::Gin, deck());
+  ASSERT_TRUE(gin.ok()) << gin.status();
+  EXPECT_EQ(gin->basicDeal(), nullptr);
+  ASSERT_NE(gin->ginDeal(), nullptr);
+  EXPECT_EQ(gin->ginDeal()->getStage(), GinStage::Upcard);
+  // The seat after the dealer has the upcard first.
+  EXPECT_EQ(gin->ginDeal()->getWhoseTurn(), 1);
+  EXPECT_EQ(dealWhoseTurn(*gin->getDeal()), 1);
+  EXPECT_EQ(dealPlayers(*gin->getDeal()).at(0).hand.size(), 10u);
+
+  const absl::Status unfit = opened().chooseVariant(0, Variant::Gin, deck()).status();
+  EXPECT_EQ(unfit.code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_EQ(unfit.message(), "that game does not fit this table");
+}
+
+TEST(Variants, AMoveOfTheWrongGameIsRefused) {
+  auto gin = opened({"a", "b"}).chooseVariant(0, Variant::Gin, deck());
+  ASSERT_TRUE(gin.ok());
+  const absl::Status refused =
+      gin->inDeal<GameState>([](const GameState& deal) { return deal.drawStock(1); }).status();
+  EXPECT_EQ(refused.code(), absl::StatusCode::kFailedPrecondition);
+  EXPECT_EQ(refused.message(), "not a move in gin");
+  auto passed = gin->inDeal<GinState>([](const GinState& deal) { return deal.pass(1); });
+  ASSERT_TRUE(passed.ok()) << passed.status();
+  EXPECT_EQ(passed->ginDeal()->getWhoseTurn(), 0);
+}
+
+// A gin deal ends like any other: its winner takes the hand, the deal
+// passes on. A drawn one credits nobody and still passes on.
+TEST(Variants, AGinDealsEndPassesTheDealOn) {
+  const Card nine{Suit::Diamonds, Rank::Nine};
+  const vector<Card> knocker = {Card{Suit::Hearts, Rank::Three},
+                                Card{Suit::Hearts, Rank::Four},
+                                Card{Suit::Hearts, Rank::Five},
+                                Card{Suit::Clubs, Rank::Seven},
+                                Card{Suit::Diamonds, Rank::Seven},
+                                Card{Suit::Spades, Rank::Seven},
+                                Card{Suit::Spades, Rank::Jack},
+                                Card{Suit::Spades, Rank::Queen},
+                                Card{Suit::Spades, Rank::King},
+                                Card{Suit::Diamonds, Rank::Two},
+                                nine};
+  std::deque<Card> stock;
+  // Two left, as after her draw: her discard draws the deal.
+  for (int i = 0; i < 2; i++) stock.emplace_back(i);
+  const GinState deal{stock,
+                      {},
+                      {{"a", knocker}, {"b", {Card{Suit::Clubs, Rank::King}}}},
+                      0,
+                      GinStage::Play,
+                      Phase::Playing,
+                      0,
+                      std::nullopt,
+                      std::nullopt,
+                      std::nullopt,
+                      "T1",
+                      ""};
+  const TableState table{{"a", "b"},   {0, 0}, 1,    4, TablePhase::Playing,
+                         Variant::Gin, deal,   "T1", ""};
+
+  auto knocked = table.inDeal<GinState>([&](const GinState& d) { return d.knock(0, nine); });
+  ASSERT_TRUE(knocked.ok()) << knocked.status();
+  EXPECT_EQ(knocked->getPhase(), TablePhase::Choosing);
+  EXPECT_EQ(knocked->getWins(), (vector<int>{1, 0}));
+  EXPECT_EQ(knocked->getDealer(), 0);
+  EXPECT_EQ(dealWinner(*knocked->getDeal()), "a");
+
+  auto drawn = table.inDeal<GinState>([&](const GinState& d) { return d.discard(0, nine); });
+  ASSERT_TRUE(drawn.ok()) << drawn.status();
+  EXPECT_EQ(drawn->getPhase(), TablePhase::Choosing);
+  EXPECT_EQ(drawn->getWins(), (vector<int>{0, 0}));
+  EXPECT_EQ(drawn->getDealer(), 0);
+  EXPECT_FALSE(dealWinner(*drawn->getDeal()).has_value());
+
+  auto left = table.removePlayer(1);
+  ASSERT_TRUE(left.ok()) << left.status();
+  EXPECT_TRUE(left->isOver());
+  EXPECT_EQ(dealPhase(*left->getDeal()), Phase::Abandoned);
 }
 
 TEST(Table, OpensChoosingWithTheFirstSeatDealingAndNoDeal) {
@@ -70,10 +168,10 @@ TEST(Table, TheDealerChoosesAndTheSeatAfterOpens) {
   EXPECT_EQ(dealt->getDealNumber(), 1);
   EXPECT_EQ(dealt->getVariant(), Variant::Basic);
   ASSERT_TRUE(dealt->getDeal().has_value());
-  EXPECT_EQ(dealt->getDeal()->getWhoseTurn(), 1);
-  EXPECT_EQ(dealt->getDeal()->getStage(), Stage::Draw);
-  EXPECT_EQ(dealt->getDeal()->getPlayer(0).hand.size(), 7u);
-  EXPECT_EQ(dealt->getDeal()->getGameId(), "T1");
+  EXPECT_EQ(dealt->basicDeal()->getWhoseTurn(), 1);
+  EXPECT_EQ(dealt->basicDeal()->getStage(), Stage::Draw);
+  EXPECT_EQ(dealt->basicDeal()->getPlayer(0).hand.size(), 7u);
+  EXPECT_EQ(dealt->basicDeal()->getGameId(), "T1");
 }
 
 TEST(Table, OnlyTheDealerChoosesUnlessTheDealerIsAway) {
@@ -84,7 +182,7 @@ TEST(Table, OnlyTheDealerChoosesUnlessTheDealerIsAway) {
   ASSERT_TRUE(away.ok()) << away.status();
   // The dealer stays the dealer: the seat after them still opens.
   EXPECT_EQ(away->getDealer(), 0);
-  EXPECT_EQ(away->getDeal()->getWhoseTurn(), 1);
+  EXPECT_EQ(away->basicDeal()->getWhoseTurn(), 1);
   EXPECT_EQ(table.chooseVariant(7, Variant::Basic, deck(), true).status().code(),
             absl::StatusCode::kInvalidArgument);
 }
@@ -99,17 +197,19 @@ TEST(Table, NoChoosingWhileADealIsInPlay) {
 
 TEST(Table, DealMovesGoToTheDealAndNowhereElse) {
   const TableState table = opened();
-  EXPECT_EQ(table.inDeal([](const GameState& d) { return d.drawStock(1); }).status().code(),
-            absl::StatusCode::kFailedPrecondition);
+  EXPECT_EQ(
+      table.inDeal<GameState>([](const GameState& d) { return d.drawStock(1); }).status().code(),
+      absl::StatusCode::kFailedPrecondition);
   auto dealt = table.chooseVariant(0, Variant::Basic, deck());
   ASSERT_TRUE(dealt.ok());
-  auto drew = dealt->inDeal([](const GameState& d) { return d.drawStock(1); });
+  auto drew = dealt->inDeal<GameState>([](const GameState& d) { return d.drawStock(1); });
   ASSERT_TRUE(drew.ok()) << drew.status();
-  EXPECT_EQ(drew->getDeal()->getStage(), Stage::Play);
+  EXPECT_EQ(drew->basicDeal()->getStage(), Stage::Play);
   EXPECT_EQ(drew->getPhase(), TablePhase::Playing);
   // The deal's refusal is the table's.
-  EXPECT_EQ(dealt->inDeal([](const GameState& d) { return d.drawStock(0); }).status().code(),
-            absl::StatusCode::kFailedPrecondition);
+  EXPECT_EQ(
+      dealt->inDeal<GameState>([](const GameState& d) { return d.drawStock(0); }).status().code(),
+      absl::StatusCode::kFailedPrecondition);
 }
 
 TEST(Table, ADealWonByPlayScoresTheHandAndTheDealPassesOn) {
@@ -127,7 +227,7 @@ TEST(Table, ADealWonByPlayScoresTheHandAndTheDealPassesOn) {
                  std::nullopt,
                  "T1",
                  ""};
-  auto out = withDeal(table, deal).inDeal([](const GameState& d) {
+  auto out = withDeal(table, deal).inDeal<GameState>([](const GameState& d) {
     return d.discard(1, Card{Suit::Clubs, Rank::Five});
   });
   ASSERT_TRUE(out.ok()) << out.status();
@@ -136,13 +236,13 @@ TEST(Table, ADealWonByPlayScoresTheHandAndTheDealPassesOn) {
   EXPECT_EQ(out->getDealer(), 1);
   // The finished deal stays, to show its hands and result.
   ASSERT_TRUE(out->getDeal().has_value());
-  EXPECT_EQ(out->getDeal()->winner(), "b");
+  EXPECT_EQ(out->basicDeal()->winner(), "b");
   EXPECT_FALSE(out->isOver());
   // The next dealer is b; the seat after b opens.
   auto next = out->chooseVariant(1, Variant::Basic, deck());
   ASSERT_TRUE(next.ok()) << next.status();
   EXPECT_EQ(next->getDealNumber(), out->getDealNumber() + 1);
-  EXPECT_EQ(next->getDeal()->getWhoseTurn(), 2);
+  EXPECT_EQ(next->basicDeal()->getWhoseTurn(), 2);
   EXPECT_EQ(next->getWins(), (vector<int>{0, 1, 0}));
 }
 
@@ -151,7 +251,7 @@ TEST(Table, TheDealWrapsRoundTheTable) {
                         Variant::Basic, std::nullopt, "T", ""};
   auto dealt = last.chooseVariant(1, Variant::Basic, deck());
   ASSERT_TRUE(dealt.ok());
-  EXPECT_EQ(dealt->getDeal()->getWhoseTurn(), 0);
+  EXPECT_EQ(dealt->basicDeal()->getWhoseTurn(), 0);
 }
 
 TEST(Table, ALeaveWhileChoosingCompactsTheSeatsAndTheDealerFollows) {
@@ -189,7 +289,7 @@ TEST(Table, ALeaveMidDealLeavesTheDealToo) {
   ASSERT_TRUE(left.ok()) << left.status();
   EXPECT_EQ(left->getPhase(), TablePhase::Playing);
   EXPECT_EQ(left->getSeats(), (vector<string>{"a", "b"}));
-  EXPECT_EQ(left->getDeal()->getPlayers().size(), 2u);
+  EXPECT_EQ(left->basicDeal()->getPlayers().size(), 2u);
   EXPECT_EQ(left->getWins().size(), 2u);
 }
 
@@ -213,8 +313,8 @@ TEST(Table, TheDealerLeavingMidDealPassesTheNextDealToTheSeatAfter) {
   auto left = withDeal(opened(), deal).removePlayer(0);
   ASSERT_TRUE(left.ok()) << left.status();
   ASSERT_EQ(left->getPhase(), TablePhase::Playing);
-  auto out =
-      left->inDeal([](const GameState& d) { return d.discard(0, Card{Suit::Clubs, Rank::Five}); });
+  auto out = left->inDeal<GameState>(
+      [](const GameState& d) { return d.discard(0, Card{Suit::Clubs, Rank::Five}); });
   ASSERT_TRUE(out.ok()) << out.status();
   ASSERT_EQ(out->getPhase(), TablePhase::Choosing);
   EXPECT_EQ(out->getSeats().at(out->getDealer()), "b");
@@ -242,8 +342,8 @@ TEST(Table, TheDealerLeavingMidDealPassesTheNextDealToTheSeatAfter) {
                               ""};
   auto gone = last_dealt.removePlayer(2);
   ASSERT_TRUE(gone.ok()) << gone.status();
-  auto ended =
-      gone->inDeal([](const GameState& d) { return d.discard(0, Card{Suit::Clubs, Rank::Four}); });
+  auto ended = gone->inDeal<GameState>(
+      [](const GameState& d) { return d.discard(0, Card{Suit::Clubs, Rank::Four}); });
   ASSERT_TRUE(ended.ok()) << ended.status();
   EXPECT_EQ(ended->getSeats().at(ended->getDealer()), "a");
 }
@@ -254,7 +354,7 @@ TEST(Table, BelowTwoSeatsTheTableClosesWithAnyDealInPlay) {
   auto left = dealt->removePlayer(0);
   ASSERT_TRUE(left.ok());
   EXPECT_TRUE(left->isOver());
-  EXPECT_EQ(left->getDeal()->getPhase(), Phase::Abandoned);
+  EXPECT_EQ(left->basicDeal()->getPhase(), Phase::Abandoned);
   auto choosing_left = opened({"a", "b"}).removePlayer(1);
   ASSERT_TRUE(choosing_left.ok());
   EXPECT_TRUE(choosing_left->isOver());
@@ -272,7 +372,7 @@ TEST(Table, SeatsAreFoundByIdAndTheIdsAreTheRowsToSet) {
   const TableState stamped = dealt->withIdAndVersion("G", "V");
   EXPECT_EQ(stamped.getGameId(), "G");
   EXPECT_EQ(stamped.getVersionId(), "V");
-  EXPECT_EQ(stamped.getDeal()->getGameId(), "G");
+  EXPECT_EQ(stamped.basicDeal()->getGameId(), "G");
 }
 
 TEST(Deal, OpensAtTheSeatNamed) {
