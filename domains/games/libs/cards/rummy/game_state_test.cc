@@ -708,6 +708,42 @@ TEST(TakeDown, LayingTheDeepestCardOffSettlesIt) {
   EXPECT_TRUE(laid->discard(0, c(Rank::Nine, Suit::Diamonds)).ok());
 }
 
+TEST(TakeDown, NoMeldThatLeavesTheDeepestCardUnplayable) {
+  // Down to the 5♥ on the strength of the 7♥; melding the 7♥ into a set
+  // instead would strand the 5♥ and wedge the turn.
+  auto took = aliceToDraw({}, {c(Rank::Seven, Suit::Hearts), c(Rank::Seven),
+                               c(Rank::Seven, Suit::Diamonds)})
+                  .drawDiscard(0, c(Rank::Five, Suit::Hearts));
+  ASSERT_TRUE(took.ok()) << took.status();
+  const absl::Status refused =
+      took->meld(0, {c(Rank::Seven), c(Rank::Seven, Suit::Diamonds), c(Rank::Seven, Suit::Hearts)})
+          .status();
+  EXPECT_EQ(refused.code(), absl::StatusCode::kFailedPrecondition);
+  EXPECT_EQ(refused.message(), "that would leave the 5♥ you took unplayable");
+}
+
+TEST(TakeDown, NoLayOffThatLeavesTheDeepestCardUnplayable) {
+  const vector<Meld> sevens = {
+      {"bob", {c(Rank::Seven), c(Rank::Seven, Suit::Diamonds), c(Rank::Seven, Suit::Spades)}}};
+  auto took = aliceToDraw(sevens).drawDiscard(0, c(Rank::Five, Suit::Hearts));
+  ASSERT_TRUE(took.ok()) << took.status();
+  const absl::Status refused = took->layOff(0, c(Rank::Seven, Suit::Hearts), 0).status();
+  EXPECT_EQ(refused.code(), absl::StatusCode::kFailedPrecondition);
+  EXPECT_EQ(refused.message(), "that would leave the 5♥ you took unplayable");
+}
+
+TEST(TakeDown, ALayOffThatKeepsTheDeepestCardPlayableIsAllowed) {
+  // The 7♥ onto bob's 8-9-10♥ leaves the 6♥ and then the 5♥ to lay off.
+  const vector<Meld> hearts = {
+      {"bob",
+       {c(Rank::Eight, Suit::Hearts), c(Rank::Nine, Suit::Hearts), c(Rank::Ten, Suit::Hearts)}}};
+  auto took = aliceToDraw(hearts).drawDiscard(0, c(Rank::Five, Suit::Hearts));
+  ASSERT_TRUE(took.ok()) << took.status();
+  auto laid = took->layOff(0, c(Rank::Seven, Suit::Hearts), 0);
+  ASSERT_TRUE(laid.ok()) << laid.status();
+  EXPECT_EQ(laid->getMustPlay(), c(Rank::Five, Suit::Hearts));
+}
+
 TEST(TakeDown, TheCardsASeatMayTakeDownTo) {
   // The top always; the 5♥, which melds with the 6♥ above it and the 7♥ in
   // hand; not the 6♥ or the 2♣.
@@ -737,4 +773,15 @@ TEST(TakeDown, ASeatLeavingOwingACardTakesTheDebtWithIt) {
   auto drew = left->drawStock(0);
   ASSERT_TRUE(drew.ok()) << drew.status();
   EXPECT_TRUE(drew->discard(0, c(Rank::Three, Suit::Spades)).ok());
+}
+
+TEST(TakeDown, ADealAbandonedOwingACardOwesNothing) {
+  auto took = aliceToDraw().drawDiscard(0, c(Rank::Five, Suit::Hearts));
+  ASSERT_TRUE(took.ok()) << took.status();
+  for (int leaver : {0, 1}) {
+    auto left = took->removePlayer(leaver);
+    ASSERT_TRUE(left.ok()) << left.status();
+    EXPECT_EQ(left->getPhase(), Phase::Abandoned);
+    EXPECT_EQ(left->getMustPlay(), std::nullopt) << leaver;
+  }
 }

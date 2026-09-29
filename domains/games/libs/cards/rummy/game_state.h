@@ -180,9 +180,10 @@ class GameState {
  private:
   [[nodiscard]] absl::Status ensureTurn(int player, Stage wanted) const;
   /// The state after the seat on turn put cards down, its hand now `hand`:
-  /// over if the hand is empty, else still its turn.
-  [[nodiscard]] GameState afterLaying(int player, std::vector<Card> hand, std::vector<Meld> table,
-                                      LastMove move) const;
+  /// over if the hand is empty, else still its turn. Refused if a card
+  /// owed stays in hand with no way left to play it.
+  [[nodiscard]] absl::StatusOr<GameState> afterLaying(int player, std::vector<Card> hand,
+                                                      std::vector<Meld> table, LastMove move) const;
 
   const std::deque<Card> stock;         // back is the top
   const std::vector<Card> discardPile;  // back is the top

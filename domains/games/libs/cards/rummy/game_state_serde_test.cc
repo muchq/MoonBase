@@ -360,6 +360,12 @@ TEST(RummySerde, ACardOwedIsTheSeatOnTurnsAndStillInHand) {
   expectRejected(payload);
 }
 
+TEST(RummySerde, ADealAbandonedMidTakeDownRoundTrips) {
+  auto left = tookDown().removePlayer(1);
+  ASSERT_TRUE(left.ok()) << left.status();
+  expectRoundTrips(*left);
+}
+
 TEST(RummySerde, UnknownFieldsAreIgnored) {
   json payload = dealtPayload();
   payload["future"] = "field";

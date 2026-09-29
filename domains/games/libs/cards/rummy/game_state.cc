@@ -233,12 +233,21 @@ StatusOr<GameState> GameState::discard(int player, const Card& card) const {
                    LastMove{players.at(player).id, MoveKind::Discard, {card}, -1}};
 }
 
-GameState GameState::afterLaying(int player, vector<Card> hand, vector<Meld> table,
-                                 LastMove move) const {
+StatusOr<GameState> GameState::afterLaying(int player, vector<Card> hand, vector<Meld> table,
+                                           LastMove move) const {
   const bool out = hand.empty();
-  // The card owed stays owed until it leaves the hand.
+  // The card owed stays owed until it leaves the hand, and must stay
+  // playable while it is there.
   std::optional<Card> owed = mustPlay;
   if (owed.has_value() && std::find(hand.begin(), hand.end(), *owed) == hand.end()) owed.reset();
+  if (owed.has_value()) {
+    vector<vector<Card>> laid;
+    for (const Meld& meld : table) laid.push_back(meld.cards);
+    if (!playable(*owed, hand, laid)) {
+      return FailedPreconditionError("that would leave the " + faceOf(*owed) +
+                                     " you took unplayable");
+    }
+  }
   return GameState{stock,
                    discardPile,
                    withHand(players, player, std::move(hand)),
@@ -263,7 +272,7 @@ StatusOr<GameState> GameState::removePlayer(int player) const {
   if (rest.size() < static_cast<size_t>(kMinPlayers)) {
     return GameState{stock,   discardPile, std::move(rest),  melds,
                      kNoTurn, stage,       Phase::Abandoned, takenDiscard,
-                     gameId,  versionId,   lastMove,         mustPlay};
+                     gameId,  versionId,   lastMove,         std::nullopt};
   }
   int turn = whoseTurn;
   Stage newStage = stage;
