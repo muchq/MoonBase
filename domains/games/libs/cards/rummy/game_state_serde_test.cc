@@ -297,7 +297,8 @@ TEST(RummySerde, ALastMoveMustHaveItsKindsShape) {
        {with_move("drawStock", json::array(), -1), with_move("drawDiscard", json::array({3}), -1),
         with_move("drawDiscard", json::array({3, 4}), -1),  // taken down into the pile
         with_move("discard", json::array({3}), -1), with_move("meld", json::array({43, 47, 51}), 0),
-        with_move("layOff", json::array({3}), 0), with_move("takeDown", json::array({3, 4}), 0)}) {
+        with_move("layOff", json::array({3}), 0), with_move("takeDown", json::array({3, 4}), 0),
+        with_move("takeDown", json::array({3}), 0)}) {  // the top card alone
     EXPECT_TRUE(deserializeGameState(payload.dump()).ok()) << payload.dump();
   }
 }
