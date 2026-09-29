@@ -196,6 +196,14 @@ TEST(GinKnock, MoreThanTenDeadwoodCannotKnock) {
   EXPECT_EQ(over.message(), "more than 10 deadwood: no knock");
 }
 
+TEST(GinKnock, ExactlyTenMayKnock) {
+  vector<Card> hand = knocker();
+  hand[9] = c(Rank::Ten, Suit::Diamonds);  // 10♦ for 2♦
+  auto state = playing(hand, {c(Rank::Ace, Suit::Clubs)}, someStock(10), {}, 0, GinStage::Play);
+  // Throwing the 9♦ leaves the 10♦: ten, the most a knock may carry.
+  EXPECT_TRUE(state.knock(0, c(Rank::Nine, Suit::Diamonds)).ok());
+}
+
 // No deadwood: gin. Bob may not lay off, and alice scores 25 and all he
 // holds.
 TEST(GinKnock, GinScoresTheBonusAndBlocksLayOffs) {

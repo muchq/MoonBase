@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "absl/status/status.h"
@@ -18,6 +19,15 @@ namespace {
 using nlohmann::json;
 
 constexpr int kSchemaVersion = 2;
+
+// Seven-card is stored under "basic", its name before 10-card and gin
+// (#1610): a hub rolled back past them still reads every seven-card table.
+// The others are stored as the wire spells them.
+constexpr std::string_view kSevenCardStored = "basic";
+
+std::string_view storedName(Variant variant) {
+  return variant == Variant::SevenCard ? kSevenCardStored : variantName(variant);
+}
 
 // postgres jsonb rejects a NUL byte: U+FFFD, as the deal's serde does.
 std::string sanitized(const std::string& text) {
@@ -96,7 +106,7 @@ std::string serializeTableState(const TableState& table) {
       {"wins", table.getWins()},
       {"dealer", table.getDealer()},
       {"dealNumber", table.getDealNumber()},
-      {"variant", std::string(variantName(table.getVariant()))},
+      {"variant", std::string(storedName(table.getVariant()))},
   };
   // The deal in its own engine's form; the variant says which.
   if (const GameState* basic = table.basicDeal(); basic != nullptr) {
@@ -130,9 +140,8 @@ absl::StatusOr<TableState> deserializeTableState(const std::string& serialized) 
 
   auto variant_name = readString(parsed, "variant");
   if (!variant_name.ok()) return variant_name.status();
-  // "basic" is seven-card's name in rows written before it had its own.
   const std::optional<Variant> variant =
-      *variant_name == "basic" ? Variant::SevenCard : parseVariant(*variant_name);
+      *variant_name == kSevenCardStored ? Variant::SevenCard : parseVariant(*variant_name);
   if (!variant.has_value()) return absl::InvalidArgumentError("unknown variant");
 
   if (!parsed.contains("seats") || !parsed["seats"].is_array()) {

@@ -437,6 +437,51 @@ TEST_F(RummyWireTest, GinUndercut) {
   EXPECT_EQ(between["lastDeal"]["points"], 35);
 }
 
+// The dealer can knock too: player-1, dealing, takes the 9♠ player-2
+// passed and knocks on A♦ with 9-A♠ and 10-K♦ — gin, 25, and player-2's
+// 10-A runs leave nothing to add.
+TEST_F(RummyWireTest, TheDealerKnocksFromSeatZero) {
+  std::shared_ptr<opal::http::WebSocket> creator;
+  std::shared_ptr<opal::http::WebSocket> joiner;
+  ChoosingTable(creator, joiner);
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("rummy", R"({"move":{"chooseVariant":{"variant":"gin"}}})")).ok());
+  for (int i = 0; i < 3; ++i) (void)NextFrame(*creator);
+  for (int i = 0; i < 3; ++i) (void)NextFrame(*joiner);
+
+  ASSERT_TRUE(joiner->Send(CommandFrame("rummy", R"({"move":{"pass":{}}})")).ok());
+  (void)EventPayload(NextFrame(*creator), "rummy");
+  (void)EventPayload(NextFrame(*creator), "rummy");  // turnChanged
+  ASSERT_TRUE(creator->Send(CommandFrame("rummy", R"({"move":{"drawDiscard":{}}})")).ok());
+  (void)EventPayload(NextFrame(*creator), "rummy");
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("rummy", R"({"move":{"knock":{"card":{"rank":"A","suit":"♦"}}}})"))
+          .ok());
+  const json between =
+      json::parse(EventPayload(NextFrame(*creator), "rummy"))["update"]["gameState"]["view"];
+  const json& gin = between["lastDeal"]["gin"];
+  EXPECT_EQ(gin["ending"], "gin");
+  EXPECT_EQ(gin["knocker"], "player-1");
+  EXPECT_EQ(between["lastDeal"]["winner"], "player-1");
+  EXPECT_EQ(between["lastDeal"]["points"], 25);
+}
+
+// Gin's moves are not rummy's: a pass or a knock at a 7-card table is
+// refused by the table's game, as a meld at a gin table is.
+TEST_F(RummyWireTest, GinMovesAtASevenCardTableAreRefused) {
+  std::shared_ptr<opal::http::WebSocket> creator;
+  std::shared_ptr<opal::http::WebSocket> joiner;
+  DealtAndRead(creator, joiner);
+  ASSERT_TRUE(joiner->Send(CommandFrame("rummy", R"({"move":{"pass":{}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*joiner), "commandRejected"),
+            R"({"reason":"not a move in 7-card"})");
+  ASSERT_TRUE(
+      joiner->Send(CommandFrame("rummy", R"({"move":{"knock":{"card":{"rank":"A","suit":"♥"}}}})"))
+          .ok());
+  EXPECT_EQ(EventPayload(NextFrame(*joiner), "commandRejected"),
+            R"({"reason":"not a move in 7-card"})");
+}
+
 TEST_F(RummyWireTest, StockDrawAndDiscardSpellings) {
   std::shared_ptr<opal::http::WebSocket> creator;
   std::shared_ptr<opal::http::WebSocket> joiner;

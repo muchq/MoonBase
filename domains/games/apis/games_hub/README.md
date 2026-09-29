@@ -358,8 +358,9 @@ seat. The variants are `7-card` and `10-card` rummy (one engine, dealt
 seven or ten) and heads-up `gin` (`GinState`, #1610); the view's
 `choosing.options` lists the ones that fit the seats. Gin's reckoning —
 both hands arranged, the defender's lay-offs, the ending — rides
-`lastDeal.gin`. Tables stored before the variants had names read
-`basic` as `7-card`. A dealer the room shows as not connected lets any seat deal. Each
+`lastDeal.gin`. A stored table spells
+`7-card` as `basic`, its name before the others, so a rolled-back hub
+still reads it. A dealer the room shows as not connected lets any seat deal. Each
 deal is a game to the room's stats and the event log, recorded as
 `rummy` or `gin`: its end credits the
 seat that went out with a win and every seat with a game played. Its

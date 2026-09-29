@@ -103,7 +103,7 @@ TEST(TableSerde, EveryVariantsDealRoundTrips) {
   basicAsGin["variant"] = "gin";
   expectRejected(basicAsGin);
   json ginAsBasic = payload;
-  ginAsBasic["variant"] = "7-card";
+  ginAsBasic["variant"] = "basic";
   expectRejected(ginAsBasic);
 }
 
@@ -117,32 +117,23 @@ TEST(TableSerde, EveryPhaseRoundTrips) {
 }
 
 // The exact bytes of a table opened and not yet dealt. A change to the
-// shape is a schema change: a version bump, not an edit here.
+// shape is a schema change: a version bump, not an edit here. Seven-card
+// is stored as "basic", its name before 10-card and gin (#1610), so a
+// hub rolled back past them still reads every seven-card table.
 TEST(TableSerde, FrozenPayload) {
   constexpr const char* kRow =
       R"({"dealNumber":0,"dealer":0,"phase":"choosing","seats":["a","b"],"v":2,)"
-      R"("variant":"7-card","wins":[0,0]})";
+      R"("variant":"basic","wins":[0,0]})";
   EXPECT_EQ(serializeTableState(opened()), kRow);
   const auto restored = deserializeTableState(kRow);
   ASSERT_TRUE(restored.ok()) << restored.status();
   EXPECT_EQ(restored->getPhase(), TablePhase::Choosing);
+  EXPECT_EQ(restored->getVariant(), Variant::SevenCard);
   // The deal nests as the v1 deal it is, so the deal's own schema pins it.
   const json dealt = payloadOf(playing());
   EXPECT_EQ(dealt["phase"], "playing");
   EXPECT_EQ(dealt["deal"]["v"], 1);
   EXPECT_EQ(dealt["dealNumber"], 1);
-}
-
-// Seven-card rummy was stored as "basic" before it had a name of its own;
-// such a row reads as seven-card, and is written back under the new word.
-TEST(TableSerde, AStoredBasicTableIsSevenCard) {
-  constexpr const char* kRow =
-      R"({"dealNumber":0,"dealer":0,"phase":"choosing","seats":["a","b"],"v":2,)"
-      R"("variant":"basic","wins":[0,0]})";
-  const auto restored = deserializeTableState(kRow);
-  ASSERT_TRUE(restored.ok()) << restored.status();
-  EXPECT_EQ(restored->getVariant(), Variant::SevenCard);
-  EXPECT_EQ(payloadOf(*restored)["variant"], "7-card");
 }
 
 // A row from before the table (#1608) is one deal: it reads as that deal
