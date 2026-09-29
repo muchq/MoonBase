@@ -353,7 +353,7 @@ TEST(RummySerde, ATakeDownRoundTrips) {
 }
 
 // A row's "mustPlay" is read past: a take-down's card is played in the
-// take-down itself, so nothing is ever owed.
+// take-down itself, and a card a stored row still owed is forgiven.
 TEST(RummySerde, AnOwedCardIsReadPast) {
   json payload = midTurnPayload();
   payload["mustPlay"] = payload["players"][0]["hand"][0];

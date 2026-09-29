@@ -625,6 +625,19 @@ TEST(TakeDown, MeldsTheBottomCardWithHandCardsAndTheRestComeToHand) {
   EXPECT_TRUE(took->discard(0, c(Rank::King, Suit::Spades)).ok());
 }
 
+// Only a card taken alone is barred from going straight back: the top of
+// a take-down may be discarded again at once.
+TEST(TakeDown, TheTopOfTheStackTakenMayGoStraightBack) {
+  auto took = aliceToDraw({}, {c(Rank::Three, Suit::Hearts), c(Rank::Four, Suit::Hearts),
+                               c(Rank::Nine, Suit::Diamonds)})
+                  .takeDownAndMeld(0, c(Rank::Five, Suit::Hearts),
+                                   {c(Rank::Three, Suit::Hearts), c(Rank::Four, Suit::Hearts)});
+  ASSERT_TRUE(took.ok()) << took.status();
+  auto back = took->discard(0, c(Rank::King, Suit::Spades));
+  ASSERT_TRUE(back.ok()) << back.status();
+  EXPECT_EQ(back->getDiscard(), (vector<Card>{c(Rank::Two), c(Rank::King, Suit::Spades)}));
+}
+
 TEST(TakeDown, TheMeldIsFromTheHandNotTheCardsTaken) {
   // 5-6-7♥ would need the 6♥ from the pile.
   const absl::Status refused =

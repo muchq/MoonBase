@@ -532,6 +532,12 @@ TEST_F(RummyWireTest, TakingThePileDownMeldsItsDeepestCardAtOnce) {
   (void)EventPayload(NextFrame(*creator), "rummy");  // turnChanged
   EXPECT_EQ(mine["discardPile"].dump(), R"([{"rank":"J","suit":"♦"},{"rank":"A","suit":"♣"}])");
 
+  // Off turn, the turn is what is wrong, whatever the card named.
+  ASSERT_TRUE(joiner
+                  ->Send(CommandFrame(
+                      "rummy", R"({"move":{"drawDiscard":{"card":{"rank":"J","suit":"♦"}}}})"))
+                  .ok());
+  EXPECT_EQ(EventPayload(NextFrame(*joiner), "commandRejected"), R"({"reason":"not your turn"})");
   // A plain draw takes the top alone.
   ASSERT_TRUE(creator
                   ->Send(CommandFrame(

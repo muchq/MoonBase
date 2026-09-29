@@ -2148,8 +2148,11 @@ void GolfHub::HandleRummyMove(const std::string& player_id, const RummyMove& mov
         named,
         [top](const rummy::GameState& deal, int seat,
               const Cards& cards) -> absl::StatusOr<rummy::GameState> {
+          // The engine's turn and stage refusals come first.
+          auto drew = deal.drawDiscard(seat);
+          if (!drew.ok()) return drew;
           if (auto ok = top(deal.getDiscard(), cards); !ok.ok()) return ok;
-          return deal.drawDiscard(seat);
+          return drew;
         },
         [](const rummy::GinState& deal, int seat,
            const Cards& cards) -> absl::StatusOr<rummy::GinState> {
