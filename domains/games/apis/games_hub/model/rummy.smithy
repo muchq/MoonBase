@@ -64,9 +64,15 @@ structure RummyPass {}
 /// discard pile, turned over under its top card.
 structure RummyDrawStock {}
 
-/// Take the top of the discard pile. That card may not be discarded again
-/// this turn, unless it is the last card in the hand.
-structure RummyDrawDiscard {}
+/// Take the top of the discard pile — or, but in gin, every card from the
+/// top down to `card`. A card taken alone may not be discarded again this
+/// turn, unless it is the last in the hand. Taking more than one binds the
+/// seat to play `card` (meld it or lay it off) before it discards, so it
+/// may only be a card the view offers in discardTakeable.
+structure RummyDrawDiscard {
+    /// The deepest card to take; absent, the top.
+    card: Card
+}
 
 /// Lay down a set (three or four of a rank) or a run (three or more of a
 /// suit in sequence, the ace low or high but not both).
@@ -147,6 +153,27 @@ structure RummyStanding {
 
     @required
     handsWon: Integer
+
+    /// The seat's running score: what its won deals scored, summed.
+    @required
+    points: Integer
+}
+
+/// The table's score sheet: a line a deal played to its end, in order.
+list RummyScoreSheet {
+    member: RummyScoreLine
+}
+
+structure RummyScoreLine {
+    @required
+    variant: String
+
+    /// Who won the deal; absent for a gin draw. May name a seat that has
+    /// since left.
+    winner: String
+
+    @required
+    points: Integer
 }
 
 /// A deal's result: the seat that scored and what (every other seat's
@@ -296,6 +323,20 @@ structure RummyView {
     /// The discard pile's top; absent while the pile is empty.
     discardTop: Card
 
+    /// The whole discard pile, bottom to top: public, as it lies face up.
+    @required
+    discardPile: RummyCards
+
+    /// The cards the viewer may take the discard pile down to now (drawDiscard's
+    /// card), bottom to top: the top, and each deeper card it could then
+    /// play. Empty but on the viewer's own draw, and in gin.
+    @required
+    discardTakeable: RummyCards
+
+    /// The deepest card the seat on turn took the discard pile down to,
+    /// while it is still in hand: it must be played before the turn ends.
+    mustPlay: Card
+
     /// The card the seat on turn took from the discard pile this turn,
     /// which it may not throw back unless it is its last. Public: everyone
     /// saw it taken.
@@ -309,6 +350,10 @@ structure RummyView {
     /// The table's most recent move, until the next replaces it. Absent
     /// before the first.
     lastMove: RummyLastMove
+
+    /// Every deal played to its end, in order.
+    @required
+    scoreSheet: RummyScoreSheet
 }
 
 list RummyPlayers {
@@ -353,7 +398,7 @@ structure RummyLastMove {
     move: String
 
     /// What went on or came off the table: nothing for a stock draw
-    /// (nobody else sees it) or a pass, the card taken, the meld as laid,
+    /// (nobody else sees it) or a pass, the cards taken, the meld as laid,
     /// the card laid off, the card discarded or knocked on.
     @required
     cards: RummyCards

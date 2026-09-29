@@ -223,6 +223,15 @@ std::string GinStageName(rummy::GinStage stage) {
   return "draw";
 }
 
+// A seat's running score: what the deals it won scored, off the sheet.
+int RummyPointsOf(const rummy::TableState& table, const std::string& id) {
+  int points = 0;
+  for (const rummy::DealScore& line : table.getScoreSheet()) {
+    if (line.winner == id) points += line.points;
+  }
+  return points;
+}
+
 std::string GinEndingName(rummy::GinEnding ending) {
   switch (ending) {
     case rummy::GinEnding::Knock:
@@ -2117,11 +2126,23 @@ void GolfHub::HandleRummyMove(const std::string& player_id, const RummyMove& mov
         [](const rummy::GinState& deal, int seat, const Cards&) { return deal.drawStock(seat); });
     return;
   }
-  if (move.as_drawDiscard_or_null() != nullptr) {
+  if (const auto* draw = move.as_drawDiscard_or_null()) {
+    // The card named is the deepest to take; none, the top.
+    std::vector<moonbase::games::Card> named;
+    if (draw->card.has_value()) named.push_back(*draw->card);
     step(
-        {},
-        [](const rummy::GameState& deal, int seat, const Cards&) { return deal.drawDiscard(seat); },
-        [](const rummy::GinState& deal, int seat, const Cards&) { return deal.drawDiscard(seat); });
+        named,
+        [](const rummy::GameState& deal, int seat, const Cards& cards) {
+          return cards.empty() ? deal.drawDiscard(seat) : deal.drawDiscard(seat, cards.front());
+        },
+        [](const rummy::GinState& deal, int seat,
+           const Cards& cards) -> absl::StatusOr<rummy::GinState> {
+          if (!cards.empty() &&
+              (deal.getDiscard().empty() || deal.getDiscard().back() != cards.front())) {
+            return absl::InvalidArgumentError("gin takes only the discard pile's top card");
+          }
+          return deal.drawDiscard(seat);
+        });
     return;
   }
   if (const auto* meld = move.as_meld_or_null()) {
@@ -3202,6 +3223,7 @@ moonbase::games::RummyView GolfHub::RummyViewLocked(const std::string& game_id,
       moonbase::games::RummyStanding standing;
       standing.playerId = roster_id;
       standing.handsWon = 0;
+      standing.points = 0;
       view.standings.push_back(std::move(standing));
     }
     return view;
@@ -3209,12 +3231,20 @@ moonbase::games::RummyView GolfHub::RummyViewLocked(const std::string& game_id,
 
   const rummy::TableState& table = entry.rummy();
   view.phase = RummyPhaseString(table);
+  for (const rummy::DealScore& line : table.getScoreSheet()) {
+    moonbase::games::RummyScoreLine scored;
+    scored.variant = std::string(rummy::variantName(line.variant));
+    scored.winner = line.winner;
+    scored.points = line.points;
+    view.scoreSheet.push_back(std::move(scored));
+  }
   view.dealNumber = table.getDealNumber();
   if (table.getDealNumber() > 0) view.variant = std::string(rummy::variantName(table.getVariant()));
   for (std::size_t i = 0; i < table.getSeats().size(); ++i) {
     moonbase::games::RummyStanding standing;
     standing.playerId = table.getSeats()[i];
     standing.handsWon = table.getWins()[i];
+    standing.points = RummyPointsOf(table, standing.playerId);
     view.standings.push_back(std::move(standing));
   }
   if (table.getPhase() == rummy::TablePhase::Choosing) {
@@ -3269,6 +3299,7 @@ moonbase::games::RummyView GolfHub::RummyViewLocked(const std::string& game_id,
           view.stockCount = static_cast<int>(d.getStock().size());
           view.discardCount = static_cast<int>(d.getDiscard().size());
           if (!d.getDiscard().empty()) view.discardTop = WireCard(d.getDiscard().back());
+          view.discardPile = WireCards(d.getDiscard());
           if (!shown) {
             view.canDrawStock = d.canDrawStock();
             if (d.getTakenDiscard().has_value()) view.takenDiscard = WireCard(*d.getTakenDiscard());
@@ -3280,6 +3311,11 @@ moonbase::games::RummyView GolfHub::RummyViewLocked(const std::string& game_id,
         view.stage = basic->getStage() == rummy::Stage::Draw ? "draw" : "play";
         view.canDrawDiscard =
             basic->getStage() == rummy::Stage::Draw && !basic->getDiscard().empty();
+        // How deep the viewer may take the pile: its own to know, on its draw.
+        if (const int seat = basic->playerIndex(viewer_id); seat >= 0) {
+          view.discardTakeable = WireCards(basic->discardTakeable(seat));
+        }
+        if (basic->getMustPlay().has_value()) view.mustPlay = WireCard(*basic->getMustPlay());
       }
       for (const rummy::Meld& meld : basic->getMelds()) {
         moonbase::games::RummyTableMeld table_meld;
@@ -3394,6 +3430,7 @@ void GolfHub::StageGameOverLocked(Room& room, const std::string& game_id, Outbox
       moonbase::games::RummyStanding standing;
       standing.playerId = table.getSeats()[i];
       standing.handsWon = table.getWins()[i];
+      standing.points = RummyPointsOf(table, standing.playerId);
       ended.standings.push_back(std::move(standing));
     }
     StageGameViewsLocked(game_id, game->second, outbox);

@@ -367,7 +367,13 @@ seat that went out with a win and every seat with a game played. Its
 points (what the others still held) ride the view's `lastDeal` and stay
 out of the room's running total, which is golf's lower-is-better scale.
 The table ends only below two seats, and its `gameEnded` carries the hands
-each seat won.
+each seat won. Every deal played out goes on the table's `scoreSheet`, and
+each standing's `points` is its seat's sum of it.
+
+Rummy's discard pile is public in full (`discardPile`). Outside gin a draw
+may take it down to a deeper card, which the seat must then play before it
+discards; the view offers the seat on its draw exactly the cards it may
+take down to (`discardTakeable`), and names the card owed (`mustPlay`).
 
 ## Redaction
 
