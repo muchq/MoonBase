@@ -12,6 +12,34 @@ cc_library(
 )
 
 cc_library(
+    name = "arrange",
+    srcs = ["arrange.cc"],
+    hdrs = ["arrange.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":meld",
+        "//domains/games/libs/cards",
+    ],
+)
+
+# The corpus is shared with the web client's search (muchq.github.io
+# src/apps/rummy), which replays a copy; testdata/make_arrange_corpus.py
+# makes it from a brute force of its own.
+cc_test(
+    name = "arrange_test",
+    size = "small",
+    srcs = ["arrange_test.cc"],
+    data = ["testdata/arrange_corpus.json"],
+    deps = [
+        ":arrange",
+        ":meld",
+        "//domains/games/libs/cards",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_library(
     name = "game_state",
     srcs = ["game_state.cc"],
     hdrs = ["game_state.h"],
