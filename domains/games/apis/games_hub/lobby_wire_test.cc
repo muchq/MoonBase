@@ -18,6 +18,7 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <vector>
 
 #include "domains/games/apis/games_hub/wire_test_fixture.h"
 #include "opal/http/message.h"
@@ -302,6 +303,34 @@ TEST_F(LobbyWireTest, InvalidTicketRefusesWithTerminalUnauthenticatedFrame) {
   auto closed = socket->Receive(kWireReceiveBudget);
   ASSERT_TRUE(closed.ok()) << closed.error().message();
   EXPECT_FALSE(closed->has_value()) << "expected a clean close after the exception frame";
+}
+
+// Leaving the room from a table: roomLeft is the last word on the room.
+// Anything after it — the table's leave, the room's state — would put a
+// client that has let the room go back into it, a room the hub no longer
+// seats it in.
+TEST_F(LobbyWireTest, LeavingTheRoomFromATableEndsOnRoomLeft) {
+  json session;
+  auto socket = DialReady(session);
+  ASSERT_TRUE(socket->Send(CommandFrame("createRoom", "{}")).ok());
+  (void)EventPayload(NextFrame(*socket), "roomState");
+  ASSERT_TRUE(socket->Send(CommandFrame("rummy", R"({"move":{"createGame":{}}})")).ok());
+  for (int i = 0; i < 3; ++i) (void)NextFrame(*socket);  // gameCreated, gameJoined, roomState
+
+  ASSERT_TRUE(socket->Send(CommandFrame("leaveRoom", "{}")).ok());
+  std::vector<std::string> after;
+  for (int i = 0; i < 8; ++i) {
+    const auto frame = NextFrame(*socket);
+    ASSERT_TRUE(frame.has_value());
+    after.push_back(HeaderText(*frame, ":event-type"));
+    if (after.back() == "roomLeft") break;
+  }
+  ASSERT_EQ(after.back(), "roomLeft");
+  // Nothing about the room follows: the next frame answers the next ask.
+  ASSERT_TRUE(socket->Send(CommandFrame("getRoomState", "{}")).ok());
+  const auto next = NextFrame(*socket);
+  ASSERT_TRUE(next.has_value());
+  EXPECT_EQ(HeaderText(*next, ":event-type"), "commandRejected");
 }
 
 }  // namespace
