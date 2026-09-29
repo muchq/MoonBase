@@ -1547,8 +1547,10 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
       if (it != player_room_.end()) {
         moonbase::games::RoomLeft ack;
         ack.roomId = it->second;
-        outbox.To(player_id, GameEvents::FromRoomleft(std::move(ack)));
         LeaveEverywhere(player_id, outbox, writes);
+        // Last: what leaving the table sends the leaver comes first, and
+        // nothing about the room may follow the ack that it is gone.
+        outbox.To(player_id, GameEvents::FromRoomleft(std::move(ack)));
         EnqueueWritesLocked(writes);
         left = true;
       }
