@@ -573,14 +573,15 @@ TEST(Queries, PlayerIndexByIdAndIdAndVersionAreTheRowsToSet) {
 
 // --- Taking down into the discard pile ---
 //
-// A draw may take the discard pile's top card, or every card from the top
-// down to one named deeper in the pile. Taking more than one card binds the
-// seat to play the deepest card taken — meld it or lay it off — before its
-// turn can end, so a seat may only take down to a card it can play.
+// A draw may take every card of the discard pile from the top down to one
+// named in it, if that card is played at once: melded with cards from the
+// hand, or laid off onto a meld on the table. The rest of the cards taken
+// go to the hand.
 
 namespace {
 
-// Alice to draw. The pile, bottom to top: 2♣ 5♥ 6♥ K♠. She holds 7♥ 9♦ J♣.
+// Alice to draw. The pile, bottom to top: 2♣ 5♥ 6♥ K♠. She holds 7♥ 9♦ J♣
+// unless told otherwise.
 GameState aliceToDraw(vector<Meld> table = {}, vector<Card> hand = {}) {
   if (hand.empty()) {
     hand = {c(Rank::Seven, Suit::Hearts), c(Rank::Nine, Suit::Diamonds), c(Rank::Jack)};
@@ -592,205 +593,99 @@ GameState aliceToDraw(vector<Meld> table = {}, vector<Card> hand = {}) {
                  0, Stage::Draw, std::move(table));
 }
 
+const vector<Meld> kSixes = {
+    {"bob", {c(Rank::Six), c(Rank::Six, Suit::Diamonds), c(Rank::Six, Suit::Spades)}}};
+
 }  // namespace
 
-TEST(TakeDown, NamingTheTopCardIsTheOrdinaryDraw) {
-  auto took = aliceToDraw().drawDiscard(0, c(Rank::King, Suit::Spades));
-  ASSERT_TRUE(took.ok()) << took.status();
-  EXPECT_EQ(took->getTakenDiscard(), c(Rank::King, Suit::Spades));
-  EXPECT_EQ(took->getMustPlay(), std::nullopt);
-  EXPECT_EQ(took->getDiscard().size(), 3u);
-}
-
-TEST(TakeDown, TakesEveryCardFromTheTopDownToTheNamedOne) {
-  auto took = aliceToDraw().drawDiscard(0, c(Rank::Five, Suit::Hearts));
+TEST(TakeDown, MeldsTheBottomCardWithHandCardsAndTheRestComeToHand) {
+  auto took = aliceToDraw({}, {c(Rank::Three, Suit::Hearts), c(Rank::Four, Suit::Hearts),
+                               c(Rank::Nine, Suit::Diamonds)})
+                  .takeDownAndMeld(0, c(Rank::Five, Suit::Hearts),
+                                   {c(Rank::Three, Suit::Hearts), c(Rank::Four, Suit::Hearts)});
   ASSERT_TRUE(took.ok()) << took.status();
   EXPECT_EQ(took->getDiscard(), vector<Card>{c(Rank::Two)});
-  // The hand gains them as they lay in the pile, the deepest first.
+  EXPECT_EQ(took->getMelds(),
+            (vector<Meld>{{"alice",
+                           {c(Rank::Three, Suit::Hearts), c(Rank::Four, Suit::Hearts),
+                            c(Rank::Five, Suit::Hearts)}}}));
+  // The hand keeps what it did not meld, then the cards above, as they lay.
   EXPECT_EQ(took->getPlayer(0).hand,
-            (vector<Card>{c(Rank::Seven, Suit::Hearts), c(Rank::Nine, Suit::Diamonds),
-                          c(Rank::Jack), c(Rank::Five, Suit::Hearts), c(Rank::Six, Suit::Hearts),
+            (vector<Card>{c(Rank::Nine, Suit::Diamonds), c(Rank::Six, Suit::Hearts),
                           c(Rank::King, Suit::Spades)}));
   EXPECT_EQ(took->getStage(), Stage::Play);
-  EXPECT_EQ(took->getMustPlay(), c(Rank::Five, Suit::Hearts));
-  // The one-card rule is for a one-card draw: the must-play binds instead.
-  EXPECT_EQ(took->getTakenDiscard(), std::nullopt);
-  EXPECT_EQ(took->getLastMove()->kind, MoveKind::DrawDiscard);
+  EXPECT_EQ(took->getWhoseTurn(), 0);
+  EXPECT_EQ(took->getLastMove()->kind, MoveKind::TakeDown);
   EXPECT_EQ(took->getLastMove()->cards,
             (vector<Card>{c(Rank::Five, Suit::Hearts), c(Rank::Six, Suit::Hearts),
                           c(Rank::King, Suit::Spades)}));
+  EXPECT_EQ(took->getLastMove()->meld, 0);
+  // Nothing is owed and nothing is barred: the turn goes on as after any draw.
+  EXPECT_EQ(took->getTakenDiscard(), std::nullopt);
+  EXPECT_TRUE(took->discard(0, c(Rank::King, Suit::Spades)).ok());
 }
 
-TEST(TakeDown, TheWholePileIfItsBottomCardPlays) {
-  // 2♣ plays with the 3♣ and 4♣ she holds.
-  auto took = aliceToDraw({}, {c(Rank::Three), c(Rank::Four)}).drawDiscard(0, c(Rank::Two));
-  ASSERT_TRUE(took.ok()) << took.status();
-  EXPECT_TRUE(took->getDiscard().empty());
-  EXPECT_EQ(took->getPlayer(0).hand.size(), 6u);
+TEST(TakeDown, TheMeldIsFromTheHandNotTheCardsTaken) {
+  // 5-6-7♥ would need the 6♥ from the pile.
+  const absl::Status refused =
+      aliceToDraw()
+          .takeDownAndMeld(0, c(Rank::Five, Suit::Hearts),
+                           {c(Rank::Six, Suit::Hearts), c(Rank::Seven, Suit::Hearts)})
+          .status();
+  EXPECT_EQ(refused.code(), absl::StatusCode::kNotFound);
+}
+
+TEST(TakeDown, CardsThatMakeNoMeldAreRefused) {
+  const absl::Status refused = aliceToDraw()
+                                   .takeDownAndMeld(0, c(Rank::Five, Suit::Hearts),
+                                                    {c(Rank::Nine, Suit::Diamonds), c(Rank::Jack)})
+                                   .status();
+  EXPECT_EQ(refused.code(), absl::StatusCode::kInvalidArgument);
 }
 
 TEST(TakeDown, ACardNotInThePileIsRefused) {
-  const absl::Status refused = aliceToDraw().drawDiscard(0, c(Rank::Ace)).status();
+  const absl::Status refused =
+      aliceToDraw(kSixes).takeDownAndLayOff(0, c(Rank::Six, Suit::Clubs), 0).status();
   EXPECT_EQ(refused.code(), absl::StatusCode::kInvalidArgument);
   EXPECT_EQ(refused.message(), "that card is not in the discard pile");
 }
 
-TEST(TakeDown, NotDownToACardThatCannotBePlayed) {
-  // Nothing melds with the 2♣, and no table meld takes it.
-  const absl::Status refused = aliceToDraw().drawDiscard(0, c(Rank::Two)).status();
-  EXPECT_EQ(refused.code(), absl::StatusCode::kFailedPrecondition);
-  EXPECT_EQ(refused.message(), "you could not play the 2♣");
-  // The 6♥ alone has only the 7♥: a pair is no meld, and the 5♥ stays below.
-  EXPECT_EQ(aliceToDraw().drawDiscard(0, c(Rank::Six, Suit::Hearts)).status().code(),
+TEST(TakeDown, LaysTheBottomCardOffOntoATableMeld) {
+  auto took = aliceToDraw(kSixes).takeDownAndLayOff(0, c(Rank::Six, Suit::Hearts), 0);
+  ASSERT_TRUE(took.ok()) << took.status();
+  EXPECT_EQ(took->getDiscard(), (vector<Card>{c(Rank::Two), c(Rank::Five, Suit::Hearts)}));
+  EXPECT_EQ(took->getMelds().at(0).cards.size(), 4u);
+  EXPECT_EQ(took->getPlayer(0).hand,
+            (vector<Card>{c(Rank::Seven, Suit::Hearts), c(Rank::Nine, Suit::Diamonds),
+                          c(Rank::Jack), c(Rank::King, Suit::Spades)}));
+  EXPECT_EQ(took->getLastMove()->kind, MoveKind::TakeDown);
+  EXPECT_EQ(took->getLastMove()->cards,
+            (vector<Card>{c(Rank::Six, Suit::Hearts), c(Rank::King, Suit::Spades)}));
+  EXPECT_EQ(took->getLastMove()->meld, 0);
+}
+
+TEST(TakeDown, NotOntoAMeldTheCardDoesNotFit) {
+  EXPECT_EQ(
+      aliceToDraw(kSixes).takeDownAndLayOff(0, c(Rank::Five, Suit::Hearts), 0).status().code(),
+      absl::StatusCode::kInvalidArgument);
+  EXPECT_EQ(aliceToDraw(kSixes).takeDownAndLayOff(0, c(Rank::Six, Suit::Hearts), 1).status().code(),
+            absl::StatusCode::kInvalidArgument);
+}
+
+TEST(TakeDown, OnlyAsTheSeatsDraw) {
+  EXPECT_EQ(aliceToDraw(kSixes).takeDownAndLayOff(1, c(Rank::Six, Suit::Hearts), 0).status().code(),
+            absl::StatusCode::kFailedPrecondition);
+  auto drew = aliceToDraw(kSixes).drawStock(0);
+  ASSERT_TRUE(drew.ok());
+  EXPECT_EQ(drew->takeDownAndLayOff(0, c(Rank::Six, Suit::Hearts), 0).status().code(),
             absl::StatusCode::kFailedPrecondition);
 }
 
-TEST(TakeDown, PlayableByLayingOffOntoATableMeld) {
-  const vector<Meld> sixes = {
-      {"bob", {c(Rank::Six), c(Rank::Six, Suit::Diamonds), c(Rank::Six, Suit::Spades)}}};
-  EXPECT_TRUE(aliceToDraw(sixes).drawDiscard(0, c(Rank::Six, Suit::Hearts)).ok());
-}
-
-TEST(TakeDown, PlayableByLayingOffAfterCardsThatBridgeTheGap) {
-  // 2♣ onto bob's 5-6-7♣ needs the 3♣ and 4♣ first; she holds the 4♣ and
-  // the 3♣ is nowhere, so no. With the 3♣ in hand, yes.
-  const vector<Meld> run = {{"bob", {c(Rank::Five), c(Rank::Six), c(Rank::Seven)}}};
-  EXPECT_EQ(aliceToDraw(run, {c(Rank::Four), c(Rank::Nine, Suit::Diamonds)})
-                .drawDiscard(0, c(Rank::Two))
-                .status()
-                .code(),
-            absl::StatusCode::kFailedPrecondition);
-  EXPECT_TRUE(aliceToDraw(run, {c(Rank::Four), c(Rank::Three, Suit::Clubs)})
-                  .drawDiscard(0, c(Rank::Two))
-                  .ok());
-}
-
-TEST(TakeDown, TheTurnCannotEndUntilTheDeepestCardIsPlayed) {
-  auto took = aliceToDraw().drawDiscard(0, c(Rank::Five, Suit::Hearts));
-  ASSERT_TRUE(took.ok());
-  const absl::Status refused = took->discard(0, c(Rank::King, Suit::Spades)).status();
-  EXPECT_EQ(refused.code(), absl::StatusCode::kFailedPrecondition);
-  EXPECT_EQ(refused.message(), "play the 5♥ you took first");
-}
-
-TEST(TakeDown, AMeldWithoutTheDeepestCardLeavesItOwed) {
-  auto took =
-      aliceToDraw({}, {c(Rank::Seven, Suit::Hearts), c(Rank::King), c(Rank::King, Suit::Diamonds)})
-          .drawDiscard(0, c(Rank::Five, Suit::Hearts));
-  ASSERT_TRUE(took.ok()) << took.status();
-  auto kings =
-      took->meld(0, {c(Rank::King), c(Rank::King, Suit::Diamonds), c(Rank::King, Suit::Spades)});
-  ASSERT_TRUE(kings.ok()) << kings.status();
-  EXPECT_EQ(kings->getMustPlay(), c(Rank::Five, Suit::Hearts));
-  EXPECT_FALSE(kings->discard(0, c(Rank::Seven, Suit::Hearts)).ok());
-}
-
-TEST(TakeDown, MeldingTheDeepestCardSettlesIt) {
-  auto took = aliceToDraw().drawDiscard(0, c(Rank::Five, Suit::Hearts));
-  ASSERT_TRUE(took.ok());
-  auto melded = took->meld(
-      0, {c(Rank::Five, Suit::Hearts), c(Rank::Six, Suit::Hearts), c(Rank::Seven, Suit::Hearts)});
-  ASSERT_TRUE(melded.ok()) << melded.status();
-  EXPECT_EQ(melded->getMustPlay(), std::nullopt);
-  // And the top card taken may go straight back: only a one-card draw
-  // holds its card.
-  EXPECT_TRUE(melded->discard(0, c(Rank::King, Suit::Spades)).ok());
-}
-
-TEST(TakeDown, LayingTheDeepestCardOffSettlesIt) {
-  const vector<Meld> sixes = {
-      {"bob", {c(Rank::Six), c(Rank::Six, Suit::Diamonds), c(Rank::Six, Suit::Spades)}}};
-  auto took = aliceToDraw(sixes).drawDiscard(0, c(Rank::Six, Suit::Hearts));
-  ASSERT_TRUE(took.ok());
-  auto laid = took->layOff(0, c(Rank::Six, Suit::Hearts), 0);
-  ASSERT_TRUE(laid.ok()) << laid.status();
-  EXPECT_EQ(laid->getMustPlay(), std::nullopt);
-  EXPECT_TRUE(laid->discard(0, c(Rank::Nine, Suit::Diamonds)).ok());
-}
-
-TEST(TakeDown, NoMeldThatLeavesTheDeepestCardUnplayable) {
-  // Down to the 5♥ on the strength of the 7♥; melding the 7♥ into a set
-  // instead would strand the 5♥ and wedge the turn.
-  auto took = aliceToDraw({}, {c(Rank::Seven, Suit::Hearts), c(Rank::Seven),
-                               c(Rank::Seven, Suit::Diamonds)})
-                  .drawDiscard(0, c(Rank::Five, Suit::Hearts));
-  ASSERT_TRUE(took.ok()) << took.status();
-  const absl::Status refused =
-      took->meld(0, {c(Rank::Seven), c(Rank::Seven, Suit::Diamonds), c(Rank::Seven, Suit::Hearts)})
-          .status();
-  EXPECT_EQ(refused.code(), absl::StatusCode::kFailedPrecondition);
-  EXPECT_EQ(refused.message(), "that would leave the 5♥ you took unplayable");
-}
-
-TEST(TakeDown, NoLayOffThatLeavesTheDeepestCardUnplayable) {
-  const vector<Meld> sevens = {
-      {"bob", {c(Rank::Seven), c(Rank::Seven, Suit::Diamonds), c(Rank::Seven, Suit::Spades)}}};
-  auto took = aliceToDraw(sevens).drawDiscard(0, c(Rank::Five, Suit::Hearts));
-  ASSERT_TRUE(took.ok()) << took.status();
-  const absl::Status refused = took->layOff(0, c(Rank::Seven, Suit::Hearts), 0).status();
-  EXPECT_EQ(refused.code(), absl::StatusCode::kFailedPrecondition);
-  EXPECT_EQ(refused.message(), "that would leave the 5♥ you took unplayable");
-}
-
-TEST(TakeDown, ALayOffThatKeepsTheDeepestCardPlayableIsAllowed) {
-  // The 7♥ onto bob's 8-9-10♥ leaves the 6♥ and then the 5♥ to lay off.
-  const vector<Meld> hearts = {
-      {"bob",
-       {c(Rank::Eight, Suit::Hearts), c(Rank::Nine, Suit::Hearts), c(Rank::Ten, Suit::Hearts)}}};
-  auto took = aliceToDraw(hearts).drawDiscard(0, c(Rank::Five, Suit::Hearts));
-  ASSERT_TRUE(took.ok()) << took.status();
-  auto laid = took->layOff(0, c(Rank::Seven, Suit::Hearts), 0);
-  ASSERT_TRUE(laid.ok()) << laid.status();
-  EXPECT_EQ(laid->getMustPlay(), c(Rank::Five, Suit::Hearts));
-}
-
-TEST(TakeDown, TheCardsASeatMayTakeDownTo) {
-  // The top always; the 5♥, which melds with the 6♥ above it and the 7♥ in
-  // hand; not the 6♥ or the 2♣.
-  EXPECT_EQ(aliceToDraw().discardTakeable(0),
-            (vector<Card>{c(Rank::Five, Suit::Hearts), c(Rank::King, Suit::Spades)}));
-  // Only on its draw.
-  EXPECT_TRUE(aliceToDraw().discardTakeable(1).empty());
-  auto took = aliceToDraw().drawDiscard(0);
-  ASSERT_TRUE(took.ok());
-  EXPECT_TRUE(took->discardTakeable(0).empty());
-}
-
-TEST(TakeDown, DownToACardThatMakesASetWithTwoHeld) {
-  // The 2♣ with the 2♦ and 2♥ in hand: the card taken down to counts
-  // toward its own meld.
-  const GameState twos =
-      aliceToDraw({}, {c(Rank::Two, Suit::Diamonds), c(Rank::Two, Suit::Hearts)});
-  EXPECT_EQ(twos.discardTakeable(0).front(), c(Rank::Two));
-  EXPECT_TRUE(twos.drawDiscard(0, c(Rank::Two)).ok());
-}
-
-TEST(TakeDown, ASeatLeavingOwingACardTakesTheDebtWithIt) {
-  GameState three =
-      playing({{"alice", {c(Rank::Seven, Suit::Hearts), c(Rank::Nine, Suit::Diamonds)}},
-               {"bob", {c(Rank::Three, Suit::Spades), c(Rank::Eight, Suit::Spades)}},
-               {"carol", {c(Rank::Ten, Suit::Spades)}}},
-              {c(Rank::Four, Suit::Spades), c(Rank::Queen, Suit::Diamonds)},
-              {c(Rank::Two), c(Rank::Five, Suit::Hearts), c(Rank::Six, Suit::Hearts),
-               c(Rank::King, Suit::Spades)},
-              0, Stage::Draw);
-  auto took = three.drawDiscard(0, c(Rank::Five, Suit::Hearts));
-  ASSERT_TRUE(took.ok()) << took.status();
-  auto left = took->removePlayer(0);
-  ASSERT_TRUE(left.ok()) << left.status();
-  EXPECT_EQ(left->getMustPlay(), std::nullopt);
-  auto drew = left->drawStock(0);
-  ASSERT_TRUE(drew.ok()) << drew.status();
-  EXPECT_TRUE(drew->discard(0, c(Rank::Three, Suit::Spades)).ok());
-}
-
-TEST(TakeDown, ADealAbandonedOwingACardOwesNothing) {
-  auto took = aliceToDraw().drawDiscard(0, c(Rank::Five, Suit::Hearts));
-  ASSERT_TRUE(took.ok()) << took.status();
-  for (int leaver : {0, 1}) {
-    auto left = took->removePlayer(leaver);
-    ASSERT_TRUE(left.ok()) << left.status();
-    EXPECT_EQ(left->getPhase(), Phase::Abandoned);
-    EXPECT_EQ(left->getMustPlay(), std::nullopt) << leaver;
-  }
+TEST(TakeDown, TheTopCardStraightIntoAMeldCanGoOut) {
+  auto out = aliceToDraw({}, {c(Rank::King), c(Rank::King, Suit::Diamonds)})
+                 .takeDownAndMeld(0, c(Rank::King, Suit::Spades),
+                                  {c(Rank::King), c(Rank::King, Suit::Diamonds)});
+  ASSERT_TRUE(out.ok()) << out.status();
+  EXPECT_EQ(out->getPhase(), Phase::Over);
+  EXPECT_EQ(out->winner(), "alice");
 }

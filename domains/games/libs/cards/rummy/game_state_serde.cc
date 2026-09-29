@@ -60,6 +60,8 @@ const char* kindName(MoveKind kind) {
       return "drawStock";
     case MoveKind::DrawDiscard:
       return "drawDiscard";
+    case MoveKind::TakeDown:
+      return "takeDown";
     case MoveKind::Meld:
       return "meld";
     case MoveKind::LayOff:
@@ -135,8 +137,8 @@ absl::StatusOr<Stage> readStage(const json& object) {
 absl::StatusOr<MoveKind> readKind(const json& object) {
   auto name = readString(object, "kind");
   if (!name.ok()) return name.status();
-  for (MoveKind kind : {MoveKind::DrawStock, MoveKind::DrawDiscard, MoveKind::Meld,
-                        MoveKind::LayOff, MoveKind::Discard}) {
+  for (MoveKind kind : {MoveKind::DrawStock, MoveKind::DrawDiscard, MoveKind::TakeDown,
+                        MoveKind::Meld, MoveKind::LayOff, MoveKind::Discard}) {
     if (*name == kindName(kind)) return kind;
   }
   return absl::InvalidArgumentError("unknown move kind");
@@ -179,9 +181,6 @@ std::string serializeGameState(const GameState& state) {
   };
   if (const auto& taken = state.getTakenDiscard(); taken.has_value()) {
     serialized["takenDiscard"] = taken->intValue();
-  }
-  if (const auto& owed = state.getMustPlay(); owed.has_value()) {
-    serialized["mustPlay"] = owed->intValue();
   }
   if (const auto& move = state.getLastMove(); move.has_value()) {
     serialized["lastMove"] = json{
@@ -265,33 +264,23 @@ absl::StatusOr<GameState> deserializeGameState(const std::string& serialized) {
     auto meld = readIntInRange(move, "meld", -1, static_cast<int64_t>(melds.size()) - 1);
     if (!meld.ok()) return meld.status();
     // The shape the engine writes for each kind: a stock draw names no
-    // card, a discard or a lay-off names one, a draw from the discard one or
-    // more (taken down into the pile), a meld three or more; only a meld or
-    // a lay-off names a meld.
-    const bool on_meld = *kind == MoveKind::Meld || *kind == MoveKind::LayOff;
+    // card, a discard or a lay-off names one, a take-down the cards it took
+    // and the meld its deepest went to, a meld three or more; only a meld,
+    // a lay-off or a take-down names a meld. A draw from the discard names
+    // one card, or more in a row written while a take-down was a draw of
+    // its own.
+    const bool on_meld =
+        *kind == MoveKind::Meld || *kind == MoveKind::LayOff || *kind == MoveKind::TakeDown;
     const std::size_t named = cards->size();
     const bool shaped = *kind == MoveKind::DrawStock     ? named == 0
                         : *kind == MoveKind::Meld        ? named >= 3
                         : *kind == MoveKind::DrawDiscard ? named >= 1
+                        : *kind == MoveKind::TakeDown    ? named >= 1
                                                          : named == 1;
     if (!shaped || on_meld != (*meld >= 0)) {
       return absl::InvalidArgumentError("lastMove does not have its kind's shape");
     }
     last_move = LastMove{*std::move(player), *kind, *std::move(cards), *meld};
-  }
-
-  // A card owed is the seat on turn's, mid-turn, and still in its hand.
-  std::optional<Card> owed;
-  if (parsed.contains("mustPlay")) {
-    auto card = readCard(parsed, "mustPlay");
-    if (!card.ok()) return card.status();
-    const std::vector<Card>* hand = *phase == Phase::Playing && *stage == Stage::Play
-                                        ? &players.at(static_cast<std::size_t>(*whose_turn)).hand
-                                        : nullptr;
-    if (hand == nullptr || std::find(hand->begin(), hand->end(), *card) == hand->end()) {
-      return absl::InvalidArgumentError("a card owed that is not the seat on turn's to play");
-    }
-    owed = *card;
   }
 
   // A table in play has a move to make: a draw has somewhere to draw from,
@@ -314,8 +303,7 @@ absl::StatusOr<GameState> deserializeGameState(const std::string& serialized) {
                    taken,
                    /*_gameId=*/"",
                    /*_versionId=*/"",
-                   std::move(last_move),
-                   owed};
+                   std::move(last_move)};
 }
 
 }  // namespace rummy
