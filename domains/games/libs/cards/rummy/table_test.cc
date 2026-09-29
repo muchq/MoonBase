@@ -27,10 +27,10 @@ TableState opened(vector<string> seats = {"a", "b", "c"}) {
   return *table;
 }
 
-// The table with this deal in play.
-TableState withDeal(const TableState& table, GameState deal) {
+// The table with this deal of `variant` in play.
+TableState withDeal(const TableState& table, GameState deal, Variant variant = Variant::SevenCard) {
   return TableState{table.getSeats(),      table.getWins(),     table.getDealer(),
-                    table.getDealNumber(), TablePhase::Playing, Variant::SevenCard,
+                    table.getDealNumber(), TablePhase::Playing, variant,
                     std::move(deal),       table.getGameId(),   table.getVersionId()};
 }
 
@@ -91,6 +91,44 @@ TEST(Variants, AMoveOfTheWrongGameIsRefused) {
   auto passed = gin->inDeal<GinState>([](const GinState& deal) { return deal.pass(1); });
   ASSERT_TRUE(passed.ok()) << passed.status();
   EXPECT_EQ(passed->ginDeal()->getWhoseTurn(), 0);
+}
+
+// 10-card plays 7-card's melds: the ace runs high or low, never around.
+TEST(Variants, TenCardsAceRunsAtEitherEndButNeverAroundTheCorner) {
+  const auto card = [](Rank rank, Suit suit) { return Card{suit, rank}; };
+  GameState deal{{card(Rank::Two, Suit::Hearts)},
+                 {card(Rank::Three, Suit::Hearts)},
+                 {{"a",
+                   {card(Rank::Queen, Suit::Clubs), card(Rank::King, Suit::Clubs),
+                    card(Rank::Ace, Suit::Clubs), card(Rank::Ace, Suit::Diamonds),
+                    card(Rank::Two, Suit::Diamonds), card(Rank::Three, Suit::Diamonds),
+                    card(Rank::King, Suit::Spades), card(Rank::Ace, Suit::Spades),
+                    card(Rank::Two, Suit::Spades), card(Rank::Nine, Suit::Hearts),
+                    card(Rank::Ten, Suit::Hearts)}},
+                  {"b", {card(Rank::Four, Suit::Hearts)}},
+                  {"c", {card(Rank::Five, Suit::Hearts)}}},
+                 {},
+                 0,
+                 Stage::Play,
+                 Phase::Playing,
+                 std::nullopt,
+                 "T1",
+                 ""};
+  const TableState ten = withDeal(opened(), deal, Variant::TenCard);
+  const auto meld = [&](const TableState& table, vector<Card> cards) {
+    return table.inDeal<GameState>([&](const GameState& d) { return d.meld(0, cards); });
+  };
+  auto high = meld(ten, {card(Rank::Queen, Suit::Clubs), card(Rank::King, Suit::Clubs),
+                         card(Rank::Ace, Suit::Clubs)});
+  ASSERT_TRUE(high.ok()) << high.status();
+  auto low = meld(*high, {card(Rank::Ace, Suit::Diamonds), card(Rank::Two, Suit::Diamonds),
+                          card(Rank::Three, Suit::Diamonds)});
+  ASSERT_TRUE(low.ok()) << low.status();
+  EXPECT_EQ(meld(*low, {card(Rank::King, Suit::Spades), card(Rank::Ace, Suit::Spades),
+                        card(Rank::Two, Suit::Spades)})
+                .status()
+                .code(),
+            absl::StatusCode::kInvalidArgument);
 }
 
 // A gin deal ends like any other: its winner takes the hand, the deal

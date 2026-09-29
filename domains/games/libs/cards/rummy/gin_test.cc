@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <deque>
 #include <string>
 #include <vector>
@@ -252,6 +253,59 @@ TEST(GinKnock, ADefenderWithNoMoreDeadwoodUndercuts) {
   ASSERT_TRUE(under.ok()) << under.status();
   EXPECT_EQ(under->getResult()->ending, GinEnding::Undercut);
   EXPECT_EQ(under->getResult()->points, 25 + 7);
+}
+
+// --- The ace: low under the two or high over the king, never both ---
+
+// Q-K-A is a run and leaves the 2♦: a knock. K-A-2 is not, and leaves 15.
+TEST(GinAce, RunsAtEitherEndButNeverAroundTheCorner) {
+  const vector<Card> sets = {c(Rank::Seven, Suit::Clubs),  c(Rank::Seven, Suit::Diamonds),
+                             c(Rank::Seven, Suit::Hearts), c(Rank::Three, Suit::Hearts),
+                             c(Rank::Four, Suit::Hearts),  c(Rank::Five, Suit::Hearts),
+                             c(Rank::Two, Suit::Diamonds), c(Rank::King, Suit::Diamonds)};
+  vector<Card> high = {c(Rank::Queen, Suit::Spades), c(Rank::King, Suit::Spades),
+                       c(Rank::Ace, Suit::Spades)};
+  high.insert(high.end(), sets.begin(), sets.end());
+  EXPECT_TRUE(playing(high, {c(Rank::Ace, Suit::Clubs)}, someStock(10), {}, 0, GinStage::Play)
+                  .knock(0, c(Rank::King, Suit::Diamonds))
+                  .ok());
+  vector<Card> around = {c(Rank::King, Suit::Spades), c(Rank::Ace, Suit::Spades),
+                         c(Rank::Two, Suit::Spades)};
+  around.insert(around.end(), sets.begin(), sets.end());
+  EXPECT_EQ(playing(around, {c(Rank::Ace, Suit::Clubs)}, someStock(10), {}, 0, GinStage::Play)
+                .knock(0, c(Rank::King, Suit::Diamonds))
+                .status()
+                .message(),
+            "more than 10 deadwood: no knock");
+}
+
+// Alice knocks with J-Q-K♣, 2-3-4♥ and Q-K-A♦, the 5♠ over. Bob lays A♣
+// off high and A♥ low; his 2♦ would go around the corner, so it stays: 8
+// against her 5.
+TEST(GinAce, LaysOffAtEitherEndButNeverAroundTheCorner) {
+  const vector<Card> alice = {
+      c(Rank::Jack, Suit::Clubs),     c(Rank::Queen, Suit::Clubs),   c(Rank::King, Suit::Clubs),
+      c(Rank::Two, Suit::Hearts),     c(Rank::Three, Suit::Hearts),  c(Rank::Four, Suit::Hearts),
+      c(Rank::Queen, Suit::Diamonds), c(Rank::King, Suit::Diamonds), c(Rank::Ace, Suit::Diamonds),
+      c(Rank::Five, Suit::Spades),    c(Rank::Nine, Suit::Spades)};
+  const vector<Card> bob = {c(Rank::Ace, Suit::Clubs),    c(Rank::Ace, Suit::Hearts),
+                            c(Rank::Two, Suit::Diamonds), c(Rank::Eight, Suit::Spades),
+                            c(Rank::Eight, Suit::Hearts), c(Rank::Eight, Suit::Clubs),
+                            c(Rank::Ten, Suit::Spades),   c(Rank::Ten, Suit::Hearts),
+                            c(Rank::Ten, Suit::Diamonds), c(Rank::Six, Suit::Spades)};
+  auto knocked = playing(alice, bob, someStock(10), {}, 0, GinStage::Play)
+                     .knock(0, c(Rank::Nine, Suit::Spades));
+  ASSERT_TRUE(knocked.ok()) << knocked.status();
+  const GinResult& result = *knocked->getResult();
+  vector<Card> laidOff = result.laidOff;
+  std::sort(laidOff.begin(), laidOff.end(),
+            [](const Card& a, const Card& b) { return a.getSuit() < b.getSuit(); });
+  vector<Card> expected = {c(Rank::Ace, Suit::Clubs), c(Rank::Ace, Suit::Hearts)};
+  std::sort(expected.begin(), expected.end(),
+            [](const Card& a, const Card& b) { return a.getSuit() < b.getSuit(); });
+  EXPECT_EQ(laidOff, expected);
+  EXPECT_EQ(result.ending, GinEnding::Knock);
+  EXPECT_EQ(result.points, 3);
 }
 
 TEST(GinStock, ADiscardLeavingTwoInTheStockDrawsTheDeal) {

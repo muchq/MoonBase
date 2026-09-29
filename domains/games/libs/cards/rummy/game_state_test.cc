@@ -314,6 +314,56 @@ TEST(LayOff, NotBeforeTheDraw) {
             absl::StatusCode::kFailedPrecondition);
 }
 
+// --- The ace: low under the two or high over the king, never both ---
+
+TEST(Ace, MeldsAtEitherEndOfARunButNeverAroundTheCorner) {
+  auto game = playing(
+      {{"alice",
+        {c(Rank::Queen), c(Rank::King), c(Rank::Ace), c(Rank::Ace, Suit::Hearts),
+         c(Rank::Two, Suit::Hearts), c(Rank::Three, Suit::Hearts), c(Rank::King, Suit::Spades),
+         c(Rank::Ace, Suit::Spades), c(Rank::Two, Suit::Spades), c(Rank::Nine, Suit::Diamonds)}},
+       {"bob", {c(Rank::Three, Suit::Diamonds)}}},
+      {}, {c(Rank::Two)}, 0, Stage::Play);
+  auto high = game.meld(0, {c(Rank::Queen), c(Rank::King), c(Rank::Ace)});
+  ASSERT_TRUE(high.ok()) << high.status();
+  auto low = high->meld(
+      0, {c(Rank::Ace, Suit::Hearts), c(Rank::Two, Suit::Hearts), c(Rank::Three, Suit::Hearts)});
+  ASSERT_TRUE(low.ok()) << low.status();
+  EXPECT_EQ(low->meld(0, {c(Rank::King, Suit::Spades), c(Rank::Ace, Suit::Spades),
+                          c(Rank::Two, Suit::Spades)})
+                .status()
+                .code(),
+            absl::StatusCode::kInvalidArgument);
+}
+
+TEST(Ace, LaysOffAtEitherEndButNeverAroundTheCorner) {
+  auto game = playing(
+      {{"alice",
+        {c(Rank::Ace), c(Rank::Ace, Suit::Hearts), c(Rank::Two, Suit::Spades),
+         c(Rank::King, Suit::Diamonds), c(Rank::Nine, Suit::Diamonds)}},
+       {"bob", {c(Rank::Three, Suit::Diamonds)}}},
+      {}, {c(Rank::Two)}, 0, Stage::Play,
+      {{"bob", {c(Rank::Jack), c(Rank::Queen), c(Rank::King)}},
+       {"bob",
+        {c(Rank::Two, Suit::Hearts), c(Rank::Three, Suit::Hearts), c(Rank::Four, Suit::Hearts)}},
+       {"bob",
+        {c(Rank::Queen, Suit::Spades), c(Rank::King, Suit::Spades), c(Rank::Ace, Suit::Spades)}},
+       {"bob",
+        {c(Rank::Ace, Suit::Diamonds), c(Rank::Two, Suit::Diamonds),
+         c(Rank::Three, Suit::Diamonds)}}});
+  auto high = game.layOff(0, c(Rank::Ace), 0);
+  ASSERT_TRUE(high.ok()) << high.status();
+  EXPECT_EQ(high->getMelds()[0].cards.back(), c(Rank::Ace));
+  auto low = high->layOff(0, c(Rank::Ace, Suit::Hearts), 1);
+  ASSERT_TRUE(low.ok()) << low.status();
+  EXPECT_EQ(low->getMelds()[1].cards.front(), c(Rank::Ace, Suit::Hearts));
+  // A two after the high ace, or a king under the low one, wraps.
+  EXPECT_EQ(low->layOff(0, c(Rank::Two, Suit::Spades), 2).status().code(),
+            absl::StatusCode::kInvalidArgument);
+  EXPECT_EQ(low->layOff(0, c(Rank::King, Suit::Diamonds), 3).status().code(),
+            absl::StatusCode::kInvalidArgument);
+}
+
 // --- The discard ---
 
 TEST(Discard, EndsTheTurnAtTheNextSeatsDraw) {

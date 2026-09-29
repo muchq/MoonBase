@@ -28,6 +28,8 @@ namespace rummy {
 ///     left with 10 or less deadwood in their best arrangement
 ///     (bestArrangement). The defender's hand is arranged too, laying cards
 ///     off onto the knocker's melds (bestWithLayOffs) — not after gin.
+///   - Melds are rummy's (arrangedMeld): the ace runs low under the two
+///     or high over the king, never around the corner.
 ///   - Scoring: a knock scores the knocker the deadwood difference; gin
 ///     (no deadwood) scores 25 plus the defender's deadwood; a defender
 ///     with deadwood no more than the knocker's undercuts, scoring 25 plus
