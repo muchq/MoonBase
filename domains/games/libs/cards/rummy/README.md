@@ -4,9 +4,8 @@ The rules engine for basic Rummy (#245): an immutable `GameState` value
 type in the style of [`../castle`](../castle), for the games hub.
 
 The rules the engine plays are the contract, stated on `GameState` in
-`game_state.h` and pinned one by one in `game_state_test.cc`: ten cards a
-seat at two, seven at three or four; one card turned up to start the
-discard pile; a turn is a draw from the stock or the discard, any melds
+`game_state.h` and pinned one by one in `game_state_test.cc`: seven cards
+a seat; one card turned up to start the discard pile; a turn is a draw from the stock or the discard, any melds
 and lay-offs, then a discard, and the card taken from the discard may not
 go straight back unless it is the last in the hand; an empty stock is the discard pile turned over under its
 top card; the first seat to empty its hand wins and scores what everyone

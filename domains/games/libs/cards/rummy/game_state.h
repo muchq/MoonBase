@@ -18,9 +18,9 @@ using std::string;
 /// by laying them down in melds.
 ///
 /// The rules this engine plays:
-///   - 2-4 players, one deck. Two seats are dealt ten cards each, three
-///     or four seats seven. One card is turned up to start the discard
-///     pile; the rest is the stock. Seat 0 moves first.
+///   - 2-4 players, one deck, seven cards a seat. One card is turned up
+///     to start the discard pile; the rest is the stock. The opener the
+///     table names moves first (TableState: the seat after the dealer).
 ///   - A turn opens with a draw: the top of the stock, or the top of the
 ///     discard pile. A stock that has run out is refilled by turning the
 ///     discard pile over, all but its top card; with nothing under the top
@@ -84,10 +84,11 @@ struct Player {
 
 /// Deals a fresh game from an already-shuffled deck (drawn from the
 /// back): one card a seat around the table until each has its hand, then
-/// one card face up to the discard pile. Play opens at seat 0's draw.
+/// one card face up to the discard pile. Play opens at `opener`'s draw.
 [[nodiscard]] absl::StatusOr<GameState> dealRummyGame(const string& game_id,
                                                       const std::vector<string>& player_ids,
-                                                      std::deque<Card> shuffled_deck);
+                                                      std::deque<Card> shuffled_deck,
+                                                      int opener = 0);
 
 class GameState {
  public:
@@ -96,8 +97,8 @@ class GameState {
   /// whoseTurn once the game is over.
   static constexpr int kNoTurn = -1;
 
-  /// The hand each seat is dealt at a table of this size.
-  [[nodiscard]] static int handSizeFor(int seats) { return seats == 2 ? 10 : 7; }
+  /// The hand each seat is dealt.
+  static constexpr int kHandSize = 7;
 
   GameState(std::deque<Card> _stock, std::vector<Card> _discard, std::vector<Player> _players,
             std::vector<Meld> _melds, int _whoseTurn, Stage _stage, Phase _phase,

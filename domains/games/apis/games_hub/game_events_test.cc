@@ -20,6 +20,7 @@
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/golf/player.h"
 #include "domains/games/libs/cards/rummy/game_state.h"
+#include "domains/games/libs/cards/rummy/table.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -59,10 +60,10 @@ castle::GameState Castle() {
       "game", "v0"};
 }
 
-/// Two rummy seats, seat 0 holding one card after its draw: a discard
-/// goes out.
-rummy::GameState Rummy() {
-  return rummy::GameState{
+/// A rummy table (#1609) with a deal in play: seat 0 holds one card after
+/// its draw, so a discard goes out.
+rummy::TableState Rummy() {
+  rummy::GameState deal{
       {Card{Suit::Clubs, Rank::Two}},
       {Card{Suit::Clubs, Rank::Three}},
       {{"andy", {Card{Suit::Clubs, Rank::Five}}}, {"mercy", {Card{Suit::Clubs, Rank::Six}}}},
@@ -73,13 +74,22 @@ rummy::GameState Rummy() {
       std::nullopt,
       "game",
       "v0"};
+  return rummy::TableState{{"andy", "mercy"},     {0, 0}, 1,      1,   rummy::TablePhase::Playing,
+                           rummy::Variant::Basic, deal,   "game", "v0"};
+}
+
+rummy::TableState RummyDealWon() {
+  auto won = Rummy().inDeal(
+      [](const rummy::GameState& deal) { return deal.discard(0, Card{Suit::Clubs, Rank::Five}); });
+  EXPECT_TRUE(won.ok()) << won.status();
+  return *won;
 }
 
 TEST(GameEvents, AGolfGamePlayedOutIsCompleted) {
   const golf::GameState knocked = Golf(0);
   ASSERT_TRUE(knocked.isOver());
 
-  const GameFinished finished = FinishedOf(HostedState(knocked), 2);
+  const GameFinished finished = *FinishedOf(HostedState(knocked), 2);
   EXPECT_EQ(finished.variant, "golf");
   EXPECT_EQ(finished.outcome, "completed");
   EXPECT_EQ(finished.players, 2u);
@@ -93,7 +103,7 @@ TEST(GameEvents, AGolfGameLeftBelowTwoSeatsIsAbandoned) {
   ASSERT_TRUE(lone.isOver());
   ASSERT_EQ(lone.getWhoKnocked(), golf::GameState::kAbandoned);
 
-  const GameFinished finished = FinishedOf(HostedState(lone), 1);
+  const GameFinished finished = *FinishedOf(HostedState(lone), 1);
   EXPECT_EQ(finished.variant, "golf");
   EXPECT_EQ(finished.outcome, "abandoned");
   EXPECT_EQ(finished.players, 1u);
@@ -104,7 +114,7 @@ TEST(GameEvents, ACastleGamePlayedOutIsCompleted) {
   ASSERT_TRUE(over.ok()) << over.status();
   ASSERT_EQ(over->getPhase(), castle::Phase::Over);
 
-  const GameFinished finished = FinishedOf(HostedState(*over), 2);
+  const GameFinished finished = *FinishedOf(HostedState(*over), 2);
   EXPECT_EQ(finished.variant, "castle");
   EXPECT_EQ(finished.outcome, "completed");
   EXPECT_EQ(finished.players, 2u);
@@ -115,32 +125,49 @@ TEST(GameEvents, ACastleGameLeftBelowTwoSeatsIsAbandoned) {
   ASSERT_TRUE(gone.ok()) << gone.status();
   ASSERT_EQ(gone->getPhase(), castle::Phase::Abandoned);
 
-  const GameFinished finished = FinishedOf(HostedState(*gone), 1);
+  const GameFinished finished = *FinishedOf(HostedState(*gone), 1);
   EXPECT_EQ(finished.variant, "castle");
   EXPECT_EQ(finished.outcome, "abandoned");
   EXPECT_EQ(finished.players, 1u);
 }
 
-TEST(GameEvents, ARummyGamePlayedOutIsCompleted) {
-  const absl::StatusOr<rummy::GameState> over = Rummy().discard(0, Card{Suit::Clubs, Rank::Five});
-  ASSERT_TRUE(over.ok()) << over.status();
-  ASSERT_EQ(over->getPhase(), rummy::Phase::Over);
+// A rummy table's games are its deals (#1609): a deal won by play is a
+// game completed, under the deal's variant word — basic rummy is "rummy".
+TEST(GameEvents, ARummyDealPlayedOutIsCompleted) {
+  const rummy::TableState table = RummyDealWon();
+  ASSERT_EQ(table.getPhase(), rummy::TablePhase::Choosing);
+  ASSERT_FALSE(table.isOver());
 
-  const GameFinished finished = FinishedOf(HostedState(*over), 2);
-  EXPECT_EQ(finished.variant, "rummy");
-  EXPECT_EQ(finished.outcome, "completed");
-  EXPECT_EQ(finished.players, 2u);
+  const auto finished = FinishedOf(HostedState(table), 2);
+  ASSERT_TRUE(finished.has_value());
+  EXPECT_EQ(finished->variant, "rummy");
+  EXPECT_EQ(finished->outcome, "completed");
+  EXPECT_EQ(finished->players, 2u);
 }
 
-TEST(GameEvents, ARummyGameLeftBelowTwoSeatsIsAbandoned) {
-  const absl::StatusOr<rummy::GameState> gone = Rummy().removePlayer(1);
+TEST(GameEvents, ARummyDealBrokenUpByALeaveIsAbandoned) {
+  const absl::StatusOr<rummy::TableState> gone = Rummy().removePlayer(1);
   ASSERT_TRUE(gone.ok()) << gone.status();
-  ASSERT_EQ(gone->getPhase(), rummy::Phase::Abandoned);
+  ASSERT_TRUE(gone->isOver());
 
-  const GameFinished finished = FinishedOf(HostedState(*gone), 1);
-  EXPECT_EQ(finished.variant, "rummy");
-  EXPECT_EQ(finished.outcome, "abandoned");
-  EXPECT_EQ(finished.players, 1u);
+  const auto finished = FinishedOf(HostedState(*gone), 1);
+  ASSERT_TRUE(finished.has_value());
+  EXPECT_EQ(finished->variant, "rummy");
+  EXPECT_EQ(finished->outcome, "abandoned");
+  EXPECT_EQ(finished->players, 1u);
+}
+
+// A table closing between deals, or a deal still going, is no game
+// ending: the deals it played were each recorded as they ended.
+TEST(GameEvents, ARummyTableClosingBetweenDealsRecordsNothing) {
+  const absl::StatusOr<rummy::TableState> closed = RummyDealWon().removePlayer(1);
+  ASSERT_TRUE(closed.ok()) << closed.status();
+  ASSERT_TRUE(closed->isOver());
+  EXPECT_FALSE(FinishedOf(HostedState(*closed), 1).has_value());
+  EXPECT_FALSE(FinishedOf(HostedState(Rummy()), 2).has_value());
+  const absl::StatusOr<rummy::TableState> opened = rummy::TableState::open("T", {"a", "b"});
+  ASSERT_TRUE(opened.ok());
+  EXPECT_FALSE(FinishedOf(HostedState(*opened), 2).has_value());
 }
 
 // 2026-09-21T13:40:00Z, so a reader can see the stamp is epoch millis
@@ -221,11 +248,11 @@ TEST(GameEvents, EveryEventsLineIsTextWithNothingToEscape) {
     endings.emplace_back(*Golf(golf::GameState::kNoKnock).removePlayer(1));
     endings.emplace_back(*Castle().playFromHand(0, {0}));
     endings.emplace_back(*Castle().removePlayer(1));
-    endings.emplace_back(*Rummy().discard(0, Card{Suit::Clubs, Rank::Five}));
+    endings.emplace_back(RummyDealWon());
     endings.emplace_back(*Rummy().removePlayer(1));
     for (const HostedState& state : endings) {
       for (std::size_t players = 1; players <= 4; ++players) {
-        const GameFinished finished = FinishedOf(state, players);
+        const GameFinished finished = *FinishedOf(state, players);
         EXPECT_TRUE(finished.outcome == kOutcomeCompleted || finished.outcome == kOutcomeAbandoned)
             << finished.outcome;
         EXPECT_TRUE(finished.variant == "golf" || finished.variant == "castle" ||

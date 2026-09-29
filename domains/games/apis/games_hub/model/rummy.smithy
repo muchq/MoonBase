@@ -12,9 +12,12 @@ use moonbase.games#LeaveGame
 use moonbase.games#StartGame
 use moonbase.games#TurnChanged
 
-// Rummy's vocabulary (#245): the basic game, the third on the room
-// layer. It rides the room's Play stream as one `rummy` member per
-// direction and reuses the shared lifecycle shapes, the way castle does.
+// Rummy's vocabulary (#245): the third game on the room layer, played at
+// a dealer's-choice table (#1609) — one deal after another, the dealer
+// picking each deal's variant. It rides the room's Play stream as one
+// `rummy` member per direction and reuses the shared lifecycle shapes, the
+// way castle does; startGame seats the table, and the dealer's
+// chooseVariant deals.
 // Shape names carry the game's name: codegen flattens every namespace
 // into one.
 
@@ -34,11 +37,21 @@ union RummyMove {
     joinGame: JoinGame
     startGame: StartGame
     leaveGame: LeaveGame
+    chooseVariant: RummyChooseVariant
     drawStock: RummyDrawStock
     drawDiscard: RummyDrawDiscard
     meld: RummyMeld
     layOff: RummyLayOff
     discard: RummyDiscard
+}
+
+/// Between deals, the dealer deals the next: its variant, one the table's
+/// view offers (RummyChoosing.options). A dealer who is not connected lets
+/// any seat deal.
+structure RummyChooseVariant {
+    /// basic
+    @required
+    variant: String
 }
 
 /// Take the top of the stock. An empty stock is refilled from the
@@ -99,10 +112,36 @@ structure RummyGameState {
     view: RummyView
 }
 
-/// How the game ended: the seat that went out and what it scored (every
-/// other seat's cards left in hand), or neither for an abandoned table.
-/// scores holds every seat at the table at the end, in seat order.
+/// The table broke up — below two seats. Each deal's result was the view's
+/// lastDeal as it ended; this is the evening's: the hands each seat won,
+/// every seat still at the table in seat order.
 structure RummyGameEnded {
+    @required
+    standings: RummyStandings
+
+    @required
+    dealsPlayed: Integer
+}
+
+list RummyStandings {
+    member: RummyStanding
+}
+
+structure RummyStanding {
+    @required
+    playerId: String
+
+    @required
+    handsWon: Integer
+}
+
+/// A deal's result: the seat that went out and what it scored (every other
+/// seat's cards left in hand), in seat order. No winner for a deal broken
+/// up by a leave.
+structure RummyDealResult {
+    @required
+    variant: String
+
     winner: String
 
     @required
@@ -110,6 +149,22 @@ structure RummyGameEnded {
 
     @required
     scores: RummyScores
+}
+
+/// Between deals: who deals next and what they may deal. A dealer the
+/// room shows as not connected (RoomState's PlayerInfo.connected) lets any
+/// seat deal; the room, not this view, is what says so as it changes.
+structure RummyChoosing {
+    @required
+    dealer: String
+
+    /// The variants that fit the seats, in offer order.
+    @required
+    options: RummyVariants
+}
+
+list RummyVariants {
+    member: String
 }
 
 list RummyScores {
@@ -126,17 +181,36 @@ structure RummyScore {
     deadwood: Integer
 }
 
-/// One player's redacted view: own hand faces, every other hand as a
-/// count, the melds on the table, the discard pile's top, and the stock
-/// as a count. Every hand is revealed once the game ends. An ended view
-/// is always followed by gameEnded.
+/// One player's redacted view of the table and its deal: own hand faces,
+/// every other hand as a count, the melds on the table, the discard pile's
+/// top, and the stock as a count. Every hand of a deal is revealed once
+/// the deal ends — between deals, the last deal is what the table shows.
+/// An ended view is always followed by gameEnded.
 structure RummyView {
     @required
     gameId: String
 
-    /// waiting | playing | ended
+    /// waiting | choosing | playing | ended
     @required
     phase: String
+
+    /// The deal in play's variant, or the last one's; absent before the
+    /// first deal.
+    variant: String
+
+    /// Deals dealt so far.
+    @required
+    dealNumber: Integer
+
+    /// Hands won, seat by seat.
+    @required
+    standings: RummyStandings
+
+    /// Present between deals.
+    choosing: RummyChoosing
+
+    /// The last deal's result, between deals and once the table ends.
+    lastDeal: RummyDealResult
 
     @required
     players: RummyPlayers

@@ -1,14 +1,14 @@
 // Rummy on the room stream (#245): the third game on the hub, end to end
 // through the generated client.
 //
-// Two kinds of deal. The NoShuffleDealer deals the pristine deck one card
-// a seat from the back, so every card is known: at two seats alice holds
-// A♠ A♦ K♠ K♦ Q♠ Q♦ J♠ J♦ 10♠ 10♦, bob the hearts and clubs of the same
-// ranks, 9♠ is turned up and 9♥ tops the stock. The SeededDealer shuffles
-// with a fixed seed for whole games, which a local engine mirror plays
-// alongside the hub: every turn the mirror picks a move by a simple
-// policy, the same command goes to the hub, and every seat's view must
-// agree with the mirror.
+// Every table is dealer's choice (#1609): the creator deals first, and the
+// seat after the dealer opens. Two kinds of deal. The NoShuffleDealer
+// deals the pristine deck one card a seat from the back, so every card is
+// known: at two seats alice (the opener) holds A♥ A♣ K♥ K♣ Q♥ Q♣ J♥, bob
+// (the dealer) A♠ A♦ K♠ K♦ Q♠ Q♦ J♠; J♦ is turned up and J♣ tops the
+// stock. The SeededDealer shuffles with a fixed seed for whole games, which a local engine mirror
+// plays alongside the hub: every turn the mirror picks a move by a simple policy, the same command
+// goes to the hub, and every seat's view must agree with the mirror.
 
 #include <gtest/gtest.h>
 
@@ -167,12 +167,14 @@ cards::Card DiscardFrom(const std::vector<cards::Card>& hand,
 
 class RummyGameFixture : public GamesHubStreamFixture {
  protected:
-  // The same deal the hub made, as an engine value.
-  rummy::GameState MirrorDeal(const std::string& game_id, const std::vector<std::string>& ids) {
+  // The same deal the hub made, as an engine value: `ids` in seat order,
+  // opened by the seat after the dealer — seat 1 on the first deal.
+  rummy::GameState MirrorDeal(const std::string& game_id, const std::vector<std::string>& ids,
+                              int opener = 1) {
     auto dealer = MakeDealer();
     std::deque<cards::Card> deck = dealer->DealNewUnshuffledDeck();
     dealer->ShuffleDeck(deck);
-    auto state = rummy::dealRummyGame(game_id, ids, std::move(deck));
+    auto state = rummy::dealRummyGame(game_id, ids, std::move(deck), opener);
     EXPECT_TRUE(state.ok()) << state.status();
     return *state;
   }
@@ -182,12 +184,31 @@ class RummyGameFixture : public GamesHubStreamFixture {
   void ExpectBoard(const RummyView& seen, const std::string& viewer,
                    const rummy::GameState& mirror) {
     const bool ended = mirror.isOver();
-    EXPECT_EQ(seen.phase, ended ? "ended" : "playing");
+    // A deal won by play leaves the table choosing the next; one broken up
+    // by a leave closes it.
+    EXPECT_EQ(seen.phase, !ended                                    ? "playing"
+                          : mirror.getPhase() == rummy::Phase::Over ? "choosing"
+                                                                    : "ended");
+    EXPECT_EQ(seen.variant.value_or(""), "basic");
     if (ended) {
       EXPECT_FALSE(seen.currentPlayerId.has_value());
       EXPECT_FALSE(seen.stage.has_value());
       EXPECT_FALSE(seen.canDrawStock);
+      EXPECT_FALSE(seen.takenDiscard.has_value());
+      // The deal's result rides the view, for every chair and every
+      // instance, until the next deal replaces it.
+      ASSERT_TRUE(seen.lastDeal.has_value());
+      EXPECT_EQ(seen.lastDeal->variant, "basic");
+      EXPECT_EQ(seen.lastDeal->winner, mirror.winner());
+      EXPECT_EQ(seen.lastDeal->points, mirror.winnerPoints());
+      ASSERT_EQ(seen.lastDeal->scores.size(), mirror.getPlayers().size());
+      for (std::size_t i = 0; i < seen.lastDeal->scores.size(); ++i) {
+        EXPECT_EQ(seen.lastDeal->scores[i].playerId, mirror.getPlayer(static_cast<int>(i)).id);
+        EXPECT_EQ(seen.lastDeal->scores[i].deadwood, mirror.deadwood(static_cast<int>(i)));
+      }
     } else {
+      EXPECT_FALSE(seen.lastDeal.has_value());
+      EXPECT_FALSE(seen.choosing.has_value());
       EXPECT_EQ(seen.currentPlayerId.value_or(""), mirror.getPlayer(mirror.getWhoseTurn()).id);
       EXPECT_EQ(seen.stage.value_or(""), mirror.getStage() == rummy::Stage::Draw ? "draw" : "play");
       EXPECT_EQ(seen.canDrawStock, mirror.canDrawStock());
@@ -198,7 +219,7 @@ class RummyGameFixture : public GamesHubStreamFixture {
     if (seen.discardTop.has_value()) {
       EXPECT_EQ(Face(*seen.discardTop), Face(Wire(mirror.getDiscard().back())));
     }
-    ASSERT_EQ(seen.takenDiscard.has_value(), !ended && mirror.getTakenDiscard().has_value());
+    if (!ended) ASSERT_EQ(seen.takenDiscard.has_value(), mirror.getTakenDiscard().has_value());
     if (seen.takenDiscard.has_value()) {
       EXPECT_EQ(Face(*seen.takenDiscard), Face(Wire(*mirror.getTakenDiscard())));
     }
@@ -312,101 +333,97 @@ class RummyGameFixture : public GamesHubStreamFixture {
     }
   }
 
-  // The end, from every chair: final views with every hand face up and
-  // nobody to play, the result, then the room's stats crediting the seat
-  // that went out and nobody else.
-  void ExpectEnding(const std::vector<Seat*>& seats, const rummy::GameState& mirror) {
+  // A deal's end, from every chair: final views with every hand face up,
+  // nobody to play and the deal's result, the next dealer choosing; then
+  // the room's stats crediting the seat that went out with a game won and
+  // everyone with a game played. The table stays: dealer's choice deals on.
+  void ExpectDealEnding(const std::vector<Seat*>& seats, const rummy::GameState& mirror,
+                        const std::string& next_dealer, int games_played = 1) {
     ASSERT_EQ(mirror.getPhase(), rummy::Phase::Over);
     const std::string winner = mirror.winner().value_or("");
     ASSERT_FALSE(winner.empty());
     for (Seat* seat : seats) {
       auto final_view = ReceiveRummy(seat->stream, "gameState");
       ASSERT_TRUE(final_view.has_value());
-      ExpectBoard(final_view->as_gameState_or_null()->view, seat->player_id, mirror);
-      auto ended = ReceiveRummy(seat->stream, "gameEnded");
-      ASSERT_TRUE(ended.has_value());
-      const auto& result = *ended->as_gameEnded_or_null();
-      EXPECT_EQ(result.winner.value_or(""), winner);
-      EXPECT_EQ(result.points, mirror.winnerPoints());
-      ASSERT_EQ(result.scores.size(), mirror.getPlayers().size());
-      int total = 0;
-      for (std::size_t i = 0; i < result.scores.size(); ++i) {
-        EXPECT_EQ(result.scores[i].playerId, mirror.getPlayer(static_cast<int>(i)).id);
-        EXPECT_EQ(result.scores[i].deadwood, mirror.deadwood(static_cast<int>(i)));
-        total += result.scores[i].deadwood;
+      const RummyView& view = final_view->as_gameState_or_null()->view;
+      ExpectBoard(view, seat->player_id, mirror);
+      ASSERT_TRUE(view.choosing.has_value());
+      EXPECT_EQ(view.choosing->dealer, next_dealer);
+      EXPECT_EQ(view.choosing->options, std::vector<std::string>{"basic"});
+      for (const auto& standing : view.standings) {
+        if (standing.playerId == winner) EXPECT_GE(standing.handsWon, 1);
       }
-      EXPECT_EQ(result.points, total);
       auto room = ReceiveCase(seat->stream, "roomState");
       ASSERT_TRUE(room.has_value());
-      EXPECT_TRUE(room->as_roomState_or_null()->games.empty());
+      ASSERT_EQ(room->as_roomState_or_null()->games.size(), 1u);
+      EXPECT_EQ(room->as_roomState_or_null()->games[0].status, "choosing");
       for (const auto& player : room->as_roomState_or_null()->players) {
-        EXPECT_EQ(player.gamesPlayed, 1);
-        EXPECT_EQ(player.gamesWon, player.playerId == winner ? 1 : 0);
+        EXPECT_EQ(player.gamesPlayed, games_played);
+        if (player.playerId == winner) EXPECT_GE(player.gamesWon, 1);
         // Rummy's points are the winner's, on a scale golf's running total
-        // does not share: they ride gameEnded and leave the total alone.
+        // does not share: they ride lastDeal and leave the total alone.
         EXPECT_EQ(player.totalScore, 0);
-        EXPECT_FALSE(player.table.has_value());
+        EXPECT_TRUE(player.table.has_value());
       }
     }
   }
 };
 
 // The deal from each chair, then the quickest win the pristine deck
-// allows: alice takes the turned-up 9♠ and lays down her whole hand as
-// two runs — no discard needed to go out.
+// allows: alice draws J♣ and lays her whole hand down as two runs, J to
+// A in hearts and in clubs — no discard needed to go out.
 TEST_F(RummyGameFixture, TheDealIsRedactedPerSeatAndLayingDownEverythingWins) {
   auto table = SeatedRummyTable();
   ASSERT_TRUE(table.has_value());
   auto& alice = table->alice;
   auto& bob = table->bob;
   std::optional<rummy::GameState> mirror(
-      MirrorDeal(table->game_id, {alice.player_id, bob.player_id}));
+      MirrorDeal(table->game_id, {bob.player_id, alice.player_id}));
 
   // The dealt view, in rummy's envelope, from each chair.
   ASSERT_NO_FATAL_FAILURE(ExpectViews({&alice, &bob}, *mirror, "the deal"));
 
-  ASSERT_TRUE(alice.stream.Send(DrawDiscard()).ok());
-  auto drew = mirror->drawDiscard(0);
+  ASSERT_TRUE(alice.stream.Send(DrawStock()).ok());
+  auto drew = mirror->drawStock(1);
   ASSERT_TRUE(drew.ok());
   mirror.emplace(*drew);
-  ASSERT_NO_FATAL_FAILURE(ExpectViews({&alice, &bob}, *mirror, "drawDiscard"));
+  ASSERT_NO_FATAL_FAILURE(ExpectViews({&alice, &bob}, *mirror, "drawStock"));
 
-  ASSERT_TRUE(alice.stream
-                  .Send(MeldOf({Named("A", "♠"), Named("9", "♠"), Named("K", "♠"), Named("J", "♠"),
-                                Named("10", "♠"), Named("Q", "♠")}))
-                  .ok());
-  auto spades = mirror->meld(0, {cards::Card{cards::Suit::Spades, cards::Rank::Ace},
-                                 cards::Card{cards::Suit::Spades, cards::Rank::Nine},
-                                 cards::Card{cards::Suit::Spades, cards::Rank::King},
-                                 cards::Card{cards::Suit::Spades, cards::Rank::Jack},
-                                 cards::Card{cards::Suit::Spades, cards::Rank::Ten},
-                                 cards::Card{cards::Suit::Spades, cards::Rank::Queen}});
-  ASSERT_TRUE(spades.ok()) << spades.status();
-  mirror.emplace(*spades);
-  auto after_spades = ReceiveRummy(bob.stream, "gameState");
-  ASSERT_TRUE(after_spades.has_value());
-  ExpectBoard(after_spades->as_gameState_or_null()->view, bob.player_id, *mirror);
+  ASSERT_TRUE(
+      alice.stream
+          .Send(MeldOf({Named("A", "♥"), Named("J", "♥"), Named("K", "♥"), Named("Q", "♥")}))
+          .ok());
+  auto hearts = mirror->meld(1, {cards::Card{cards::Suit::Hearts, cards::Rank::Ace},
+                                 cards::Card{cards::Suit::Hearts, cards::Rank::Jack},
+                                 cards::Card{cards::Suit::Hearts, cards::Rank::King},
+                                 cards::Card{cards::Suit::Hearts, cards::Rank::Queen}});
+  ASSERT_TRUE(hearts.ok()) << hearts.status();
+  mirror.emplace(*hearts);
+  auto after_hearts = ReceiveRummy(bob.stream, "gameState");
+  ASSERT_TRUE(after_hearts.has_value());
+  ExpectBoard(after_hearts->as_gameState_or_null()->view, bob.player_id, *mirror);
   // Laid low to high, whatever order it was named in.
-  EXPECT_EQ(Faces(after_spades->as_gameState_or_null()->view.melds.at(0).cards),
-            (std::vector<std::string>{"9♠", "10♠", "J♠", "Q♠", "K♠", "A♠"}));
+  EXPECT_EQ(Faces(after_hearts->as_gameState_or_null()->view.melds.at(0).cards),
+            (std::vector<std::string>{"J♥", "Q♥", "K♥", "A♥"}));
   ASSERT_TRUE(ReceiveRummy(alice.stream, "gameState").has_value());
 
-  ASSERT_TRUE(alice.stream
-                  .Send(MeldOf({Named("10", "♦"), Named("J", "♦"), Named("Q", "♦"), Named("K", "♦"),
-                                Named("A", "♦")}))
-                  .ok());
-  auto diamonds = mirror->meld(0, {cards::Card{cards::Suit::Diamonds, cards::Rank::Ten},
-                                   cards::Card{cards::Suit::Diamonds, cards::Rank::Jack},
-                                   cards::Card{cards::Suit::Diamonds, cards::Rank::Queen},
-                                   cards::Card{cards::Suit::Diamonds, cards::Rank::King},
-                                   cards::Card{cards::Suit::Diamonds, cards::Rank::Ace}});
-  ASSERT_TRUE(diamonds.ok()) << diamonds.status();
-  mirror.emplace(*diamonds);
-  ASSERT_NO_FATAL_FAILURE(ExpectEnding({&alice, &bob}, *mirror));
-  // Bob held A♥ A♣ and the hearts and clubs from ten to king: 1+1+80.
-  EXPECT_EQ(mirror->winnerPoints(), 82);
+  ASSERT_TRUE(
+      alice.stream
+          .Send(MeldOf({Named("J", "♣"), Named("Q", "♣"), Named("K", "♣"), Named("A", "♣")}))
+          .ok());
+  auto clubs = mirror->meld(1, {cards::Card{cards::Suit::Clubs, cards::Rank::Jack},
+                                cards::Card{cards::Suit::Clubs, cards::Rank::Queen},
+                                cards::Card{cards::Suit::Clubs, cards::Rank::King},
+                                cards::Card{cards::Suit::Clubs, cards::Rank::Ace}});
+  ASSERT_TRUE(clubs.ok()) << clubs.status();
+  mirror.emplace(*clubs);
+  // The deal passes to alice, the seat after bob.
+  ASSERT_NO_FATAL_FAILURE(ExpectDealEnding({&alice, &bob}, *mirror, alice.player_id));
+  // Bob held A♠ A♦ and five tens' worth of court cards: 1+1+50.
+  EXPECT_EQ(mirror->winnerPoints(), 52);
   EXPECT_EQ(metrics_->CounterTotal("rummy_commands", {{"command", "meld"}}), 2);
-  EXPECT_EQ(metrics_->CounterTotal("rummy_events", {{"event", "gameEnded"}}), 2);
+  // A deal's end is the view's lastDeal; gameEnded is the table's.
+  EXPECT_EQ(metrics_->CounterTotal("rummy_events", {{"event", "gameEnded"}}), 0);
 }
 
 // A stock draw is private: the drawer sees the card, everyone else a
@@ -425,10 +442,11 @@ TEST_F(RummyGameFixture, AStockDrawShowsTheCardOnlyToItsDrawer) {
   ASSERT_TRUE(hers.has_value() && his.has_value());
   const RummyView& her_view = hers->as_gameState_or_null()->view;
   const RummyView& his_view = his->as_gameState_or_null()->view;
-  EXPECT_EQ(Face(her_view.players[0].hand.back()), "9♥");
-  EXPECT_TRUE(his_view.players[0].hand.empty());
-  EXPECT_EQ(his_view.players[0].handCount, 11);
-  EXPECT_EQ(his_view.stockCount, 30);
+  // Alice sits in seat 1, after the dealer.
+  EXPECT_EQ(Face(her_view.players[1].hand.back()), "J♣");
+  EXPECT_TRUE(his_view.players[1].hand.empty());
+  EXPECT_EQ(his_view.players[1].handCount, 8);
+  EXPECT_EQ(his_view.stockCount, 36);
   ASSERT_TRUE(his_view.lastMove.has_value());
   EXPECT_EQ(his_view.lastMove->move, "drawStock");
   EXPECT_TRUE(his_view.lastMove->cards.empty());
@@ -454,12 +472,12 @@ TEST_F(RummyGameFixture, OutOfTurnOrOutOfOrderIsRefusedInBand) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not your turn");
   // Off turn, the turn is the answer, whatever card the move names: a
   // card that is not his is no reason to tell him he is out of sync.
-  ASSERT_TRUE(bob.stream.Send(Discard(Named("A", "♠"))).ok());
+  ASSERT_TRUE(bob.stream.Send(Discard(Named("A", "♥"))).ok());
   refused = ReceiveCase(bob.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not your turn");
 
-  ASSERT_TRUE(alice.stream.Send(Discard(Named("A", "♠"))).ok());
+  ASSERT_TRUE(alice.stream.Send(Discard(Named("A", "♥"))).ok());
   refused = ReceiveCase(alice.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "draw a card first");
@@ -473,11 +491,11 @@ TEST_F(RummyGameFixture, OutOfTurnOrOutOfOrderIsRefusedInBand) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "you have already drawn");
 
   // Two cards are no meld; a king does not fit the meld nobody laid.
-  ASSERT_TRUE(alice.stream.Send(MeldOf({Named("A", "♠"), Named("K", "♠")})).ok());
+  ASSERT_TRUE(alice.stream.Send(MeldOf({Named("A", "♥"), Named("K", "♥")})).ok());
   refused = ReceiveCase(alice.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "those cards are not a set or a run");
-  ASSERT_TRUE(alice.stream.Send(LayOff(Named("K", "♠"), 0)).ok());
+  ASSERT_TRUE(alice.stream.Send(LayOff(Named("K", "♥"), 0)).ok());
   refused = ReceiveCase(alice.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "no such meld");
@@ -501,36 +519,36 @@ TEST_F(RummyGameFixture, ACardTheHandDoesNotHoldIsRefusedAsStaleAndNamed) {
   ASSERT_TRUE(ReceiveRummy(alice.stream, "gameState").has_value());
   ASSERT_TRUE(ReceiveRummy(bob.stream, "gameState").has_value());
 
-  // A♥ is bob's.
-  ASSERT_TRUE(alice.stream.Send(Discard(Named("A", "♥"))).ok());
+  // A♠ is bob's.
+  ASSERT_TRUE(alice.stream.Send(Discard(Named("A", "♠"))).ok());
   auto refused = ReceiveCase(alice.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
-  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in your hand: A♥");
-  ASSERT_TRUE(alice.stream.Send(MeldOf({Named("A", "♠"), Named("K", "♠"), Named("Q", "♥")})).ok());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in your hand: A♠");
+  ASSERT_TRUE(alice.stream.Send(MeldOf({Named("A", "♥"), Named("K", "♥"), Named("Q", "♠")})).ok());
   refused = ReceiveCase(alice.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
-  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in your hand: Q♥");
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in your hand: Q♠");
   // CardMapper's letters are not the wire's glyphs.
   ASSERT_TRUE(alice.stream.Send(Discard(Named("A", "S"))).ok());
   refused = ReceiveCase(alice.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "no such card: AS");
-  ASSERT_TRUE(alice.stream.Send(MeldOf({Named("A", "♠"), Named("A", "♠"), Named("A", "♦")})).ok());
+  ASSERT_TRUE(alice.stream.Send(MeldOf({Named("A", "♥"), Named("A", "♥"), Named("A", "♣")})).ok());
   refused = ReceiveCase(alice.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
-  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "named twice: A♠");
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "named twice: A♥");
   EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "state"}}), 2);
   EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "invalid"}}), 2);
   EXPECT_EQ(metrics_->CounterTotal("hub_rejections", {{"kind", "rules"}}), 0);
   ExpectNoEvent(bob.stream);
 
   // The card she does hold goes, and it is the card she named.
-  ASSERT_TRUE(alice.stream.Send(Discard(Named("J", "♦"))).ok());
+  ASSERT_TRUE(alice.stream.Send(Discard(Named("J", "♣"))).ok());
   auto thrown = ReceiveRummy(bob.stream, "gameState");
   ASSERT_TRUE(thrown.has_value());
   const RummyView& view = thrown->as_gameState_or_null()->view;
   ASSERT_TRUE(view.discardTop.has_value());
-  EXPECT_EQ(Face(*view.discardTop), "J♦");
+  EXPECT_EQ(Face(*view.discardTop), "J♣");
   EXPECT_EQ(view.currentPlayerId.value_or(""), bob.player_id);
   EXPECT_EQ(view.stage.value_or(""), "draw");
 }
@@ -549,14 +567,14 @@ TEST_F(RummyGameFixture, ADrawAndAMeldLeaveTheTurnUnannounced) {
   ASSERT_TRUE(alice.stream.Send(DrawDiscard()).ok());
   ASSERT_TRUE(ReceiveRummy(bob.stream, "gameState").has_value());
   ExpectNoEvent(bob.stream);
-  ASSERT_TRUE(alice.stream.Send(MeldOf({Named("A", "♠"), Named("K", "♠"), Named("Q", "♠")})).ok());
+  ASSERT_TRUE(alice.stream.Send(MeldOf({Named("A", "♥"), Named("K", "♥"), Named("Q", "♥")})).ok());
   ASSERT_TRUE(ReceiveRummy(bob.stream, "gameState").has_value());
   ExpectNoEvent(bob.stream);
-  ASSERT_TRUE(alice.stream.Send(LayOff(Named("J", "♠"), 0)).ok());
+  ASSERT_TRUE(alice.stream.Send(LayOff(Named("J", "♥"), 0)).ok());
   ASSERT_TRUE(ReceiveRummy(bob.stream, "gameState").has_value());
   ExpectNoEvent(bob.stream);
   // Its twin: the discard does announce.
-  ASSERT_TRUE(alice.stream.Send(Discard(Named("A", "♦"))).ok());
+  ASSERT_TRUE(alice.stream.Send(Discard(Named("A", "♣"))).ok());
   ASSERT_TRUE(ReceiveRummy(bob.stream, "gameState").has_value());
   auto next = bob.stream.Receive(kReceiveBudget);
   ASSERT_TRUE(next.ok() && next->has_value());
@@ -580,13 +598,13 @@ TEST_F(RummyGameFixture, TheCardTakenFromTheDiscardIsPublicAndCannotGoStraightBa
   ASSERT_TRUE(his.has_value());
   const RummyView& view = his->as_gameState_or_null()->view;
   ASSERT_TRUE(view.takenDiscard.has_value());
-  EXPECT_EQ(Face(*view.takenDiscard), "9♠");
+  EXPECT_EQ(Face(*view.takenDiscard), "J♦");
   EXPECT_EQ(view.lastMove->move, "drawDiscard");
-  EXPECT_EQ(Faces(view.lastMove->cards), std::vector<std::string>{"9♠"});
+  EXPECT_EQ(Faces(view.lastMove->cards), std::vector<std::string>{"J♦"});
   EXPECT_FALSE(view.discardTop.has_value());
   EXPECT_EQ(view.discardCount, 0);
 
-  ASSERT_TRUE(alice.stream.Send(Discard(Named("9", "♠"))).ok());
+  ASSERT_TRUE(alice.stream.Send(Discard(Named("J", "♦"))).ok());
   auto refused = ReceiveCase(alice.stream, "commandRejected");
   ASSERT_TRUE(refused.has_value());
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
@@ -599,9 +617,7 @@ TEST_F(RummyGameFixture, TheCardTakenFromTheDiscardIsPublicAndCannotGoStraightBa
 // end — every view checked against the engine on the way.
 class SeededRummyFixture : public RummyGameFixture, public ::testing::WithParamInterface<int> {
  protected:
-  std::shared_ptr<cards::Dealer> MakeDealer() override {
-    return std::make_shared<SeededDealer>(1234);
-  }
+  std::shared_ptr<cards::Dealer> MakeDealer() override { return std::make_shared<SeededDealer>(7); }
 };
 
 TEST_P(SeededRummyFixture, AWholeGameAgreesWithTheEngine) {
@@ -615,7 +631,7 @@ TEST_P(SeededRummyFixture, AWholeGameAgreesWithTheEngine) {
 
   PlayedOut played;
   ASSERT_NO_FATAL_FAILURE(PlayToEnd(seats, mirror, played));
-  ASSERT_NO_FATAL_FAILURE(ExpectEnding(seats, *mirror));
+  ASSERT_NO_FATAL_FAILURE(ExpectDealEnding(seats, *mirror, table->ids()[1]));
   // The policy's game touched every move, so each was checked above.
   EXPECT_GT(played.melds, 0);
   EXPECT_GT(played.lay_offs, 0);
@@ -629,15 +645,16 @@ TEST_P(SeededRummyFixture, AWholeGameAgreesWithTheEngine) {
 INSTANTIATE_TEST_SUITE_P(TwoThreeAndFourSeats, SeededRummyFixture, ::testing::Values(2, 3, 4));
 
 // A stock that ran out is the discard pile turned over. The pristine
-// deck at two seats leaves 31 in the stock: alice and bob each draw and
+// deck at two seats leaves 37 in the stock: alice and bob each draw and
 // throw back what they drew until it is gone, and the next draw refills
 // it from under the top card, the table seeing the counts move.
 TEST_F(RummyGameFixture, AnEmptyStockIsRefilledFromTheDiscardPile) {
   auto table = SeatedRummyTable();
   ASSERT_TRUE(table.has_value());
-  std::vector<Seat*> seats{&table->alice, &table->bob};
+  // In seat order: bob deals, alice opens.
+  std::vector<Seat*> seats{&table->bob, &table->alice};
   std::optional<rummy::GameState> mirror(
-      MirrorDeal(table->game_id, {table->alice.player_id, table->bob.player_id}));
+      MirrorDeal(table->game_id, {table->bob.player_id, table->alice.player_id}));
   ASSERT_NO_FATAL_FAILURE(ExpectViews(seats, *mirror, "the deal"));
   while (!mirror->getStock().empty()) {
     const int seat = mirror->getWhoseTurn();
@@ -654,7 +671,7 @@ TEST_F(RummyGameFixture, AnEmptyStockIsRefilledFromTheDiscardPile) {
     mirror.emplace(*threw);
     ASSERT_NO_FATAL_FAILURE(ExpectViews(seats, *mirror, "discard"));
   }
-  ASSERT_EQ(mirror->getDiscard().size(), 32u);
+  ASSERT_EQ(mirror->getDiscard().size(), 38u);
   const cards::Card top = mirror->getDiscard().back();
   const cards::Card bottom = mirror->getDiscard().front();
   const int seat = mirror->getWhoseTurn();
@@ -670,14 +687,15 @@ TEST_F(RummyGameFixture, AnEmptyStockIsRefilledFromTheDiscardPile) {
     ASSERT_TRUE(update.has_value());
     const RummyView& view = update->as_gameState_or_null()->view;
     ExpectBoard(view, hearer->player_id, *mirror);
-    EXPECT_EQ(view.stockCount, 30);
+    EXPECT_EQ(view.stockCount, 36);
     EXPECT_EQ(view.discardCount, 1);
     EXPECT_EQ(Face(*view.discardTop), Face(Wire(top)));
   }
 }
 
-// Two seats, one leaves: the engine abandons rather than plays on. The
-// final view is over and the ending names no winner and scores nothing.
+// Two seats, one leaves mid-deal: the deal is abandoned and the table,
+// below two seats, closes. The last deal names no winner and scores
+// nothing; the table's end is its standings.
 TEST_F(RummyGameFixture, LeavingMidGameAbandonsItWithNoWinner) {
   auto table = SeatedRummyTable();
   ASSERT_TRUE(table.has_value());
@@ -698,12 +716,18 @@ TEST_F(RummyGameFixture, LeavingMidGameAbandonsItWithNoWinner) {
     EXPECT_FALSE(view.stage.has_value());
     ASSERT_EQ(view.players.size(), 1u);
     EXPECT_EQ(view.players[0].playerId, bob.player_id);
-    EXPECT_EQ(view.players[0].hand.size(), 10u);
+    EXPECT_EQ(view.players[0].hand.size(), 7u);
+    ASSERT_TRUE(view.lastDeal.has_value());
+    EXPECT_FALSE(view.lastDeal->winner.has_value());
+    EXPECT_EQ(view.lastDeal->points, 0);
+    EXPECT_FALSE(view.choosing.has_value());
   }
   auto ended = ReceiveRummy(bob.stream, "gameEnded");
   ASSERT_TRUE(ended.has_value());
-  EXPECT_FALSE(ended->as_gameEnded_or_null()->winner.has_value());
-  EXPECT_EQ(ended->as_gameEnded_or_null()->points, 0);
+  EXPECT_EQ(ended->as_gameEnded_or_null()->dealsPlayed, 1);
+  ASSERT_EQ(ended->as_gameEnded_or_null()->standings.size(), 1u);
+  EXPECT_EQ(ended->as_gameEnded_or_null()->standings[0].playerId, bob.player_id);
+  EXPECT_EQ(ended->as_gameEnded_or_null()->standings[0].handsWon, 0);
   auto room = ReceiveCase(bob.stream, "roomState");
   ASSERT_TRUE(room.has_value());
   EXPECT_TRUE(room->as_roomState_or_null()->games.empty());
@@ -722,25 +746,27 @@ TEST_F(RummyGameFixture, ALeaveOnTurnPassesTheDrawToTheNextSeat) {
   for (Seat& seat : table->seats) seats.push_back(&seat);
   for (Seat* seat : seats) ASSERT_TRUE(ReceiveRummy(seat->stream, "gameState").has_value());
 
-  Seat& first = table->seats[0];
-  ASSERT_TRUE(first.stream.Send(DrawStock()).ok());
+  // Seat 1 opens, after the dealer; leaving mid-turn hands the draw to
+  // seat 2.
+  Seat& opener = table->seats[1];
+  ASSERT_TRUE(opener.stream.Send(DrawStock()).ok());
   for (Seat* seat : seats) ASSERT_TRUE(ReceiveRummy(seat->stream, "gameState").has_value());
   ASSERT_TRUE(
-      first.stream.Send(Rummy(RummyMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
-  for (Seat* seat : {&table->seats[1], &table->seats[2]}) {
+      opener.stream.Send(Rummy(RummyMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  for (Seat* seat : {&table->seats[0], &table->seats[2]}) {
     auto view = ReceiveRummy(seat->stream, "gameState");
     ASSERT_TRUE(view.has_value());
     EXPECT_EQ(view->as_gameState_or_null()->view.players.size(), 2u);
     EXPECT_EQ(view->as_gameState_or_null()->view.phase, "playing");
     EXPECT_EQ(view->as_gameState_or_null()->view.currentPlayerId.value_or(""),
-              table->seats[1].player_id);
+              table->seats[2].player_id);
     EXPECT_EQ(view->as_gameState_or_null()->view.stage.value_or(""), "draw");
     auto turn = ReceiveRummy(seat->stream, "turnChanged");
     ASSERT_TRUE(turn.has_value());
-    EXPECT_EQ(turn->as_turnChanged_or_null()->playerId, table->seats[1].player_id);
+    EXPECT_EQ(turn->as_turnChanged_or_null()->playerId, table->seats[2].player_id);
   }
-  ASSERT_TRUE(table->seats[1].stream.Send(DrawStock()).ok());
-  ASSERT_TRUE(ReceiveRummy(table->seats[1].stream, "gameState").has_value());
+  ASSERT_TRUE(table->seats[2].stream.Send(DrawStock()).ok());
+  ASSERT_TRUE(ReceiveRummy(table->seats[2].stream, "gameState").has_value());
 }
 
 // Tables of every game share a room; the room says which is which, and a
@@ -820,16 +846,179 @@ TEST_F(RummyGameFixture, AResumedRummySeatGetsItsOwnViewBack) {
   EXPECT_EQ(view.currentPlayerId.value_or(""), table->alice.player_id);
   EXPECT_EQ(view.stage.value_or(""), "play");
   ASSERT_EQ(view.players.size(), 2u);
-  EXPECT_EQ(view.players[0].hand.size(), 11u);
-  EXPECT_EQ(Face(view.players[0].hand.back()), "9♥");
-  EXPECT_TRUE(view.players[1].hand.empty());
-  EXPECT_EQ(view.players[1].handCount, 10);
+  EXPECT_EQ(view.players[1].hand.size(), 8u);
+  EXPECT_EQ(Face(view.players[1].hand.back()), "J♣");
+  EXPECT_TRUE(view.players[0].hand.empty());
+  EXPECT_EQ(view.players[0].handCount, 7);
   // The turn is still hers to finish.
-  ASSERT_TRUE(resumed->stream.Send(Discard(Named("9", "♥"))).ok());
+  ASSERT_TRUE(resumed->stream.Send(Discard(Named("J", "♣"))).ok());
   auto thrown = ReceiveRummy(table->bob.stream, "gameState");
   ASSERT_TRUE(thrown.has_value());
   EXPECT_EQ(thrown->as_gameState_or_null()->view.currentPlayerId.value_or(""),
             table->bob.player_id);
+}
+
+GameCommands Choose(const std::string& variant) {
+  moonbase::games::RummyChooseVariant choice;
+  choice.variant = variant;
+  return Rummy(RummyMove::FromChoosevariant(choice));
+}
+
+// The deal passes to the seat after the dealer, and that seat alone picks
+// what comes next; the seat after it opens. Standings and the room's
+// stats carry across deals.
+TEST_F(RummyGameFixture, TheNextDealIsTheNextDealersChoice) {
+  auto table = SeatedRummyTable();
+  ASSERT_TRUE(table.has_value());
+  auto& alice = table->alice;
+  auto& bob = table->bob;
+  for (auto* seat : {&alice, &bob}) {
+    ASSERT_TRUE(ReceiveRummy(seat->stream, "gameState").has_value());
+  }
+  ASSERT_TRUE(alice.stream.Send(DrawStock()).ok());
+  ASSERT_TRUE(
+      alice.stream
+          .Send(MeldOf({Named("J", "♥"), Named("Q", "♥"), Named("K", "♥"), Named("A", "♥")}))
+          .ok());
+  ASSERT_TRUE(
+      alice.stream
+          .Send(MeldOf({Named("J", "♣"), Named("Q", "♣"), Named("K", "♣"), Named("A", "♣")}))
+          .ok());
+  // The quickest win (see the first test): every chair reads to the deal's
+  // end, the choosing view and the room's listing.
+  for (auto* seat : {&alice, &bob}) {
+    ASSERT_TRUE(AwaitRummyView(
+                    seat->stream, [](const RummyView& view) { return view.phase == "choosing"; },
+                    "the deal's end")
+                    .has_value());
+    ASSERT_TRUE(ReceiveCase(seat->stream, "roomState").has_value());
+  }
+  // Between deals nobody is on turn, and that is no turn to announce.
+  ExpectNoEvent(bob.stream);
+
+  // Bob dealt the first; alice deals the second.
+  ASSERT_TRUE(bob.stream.Send(Choose("basic")).ok());
+  auto refused = ReceiveCase(bob.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "the dealer chooses");
+  // Between deals there is nothing to draw.
+  ASSERT_TRUE(alice.stream.Send(DrawStock()).ok());
+  refused = ReceiveCase(alice.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "no deal in play");
+
+  ASSERT_TRUE(alice.stream.Send(Choose("basic")).ok());
+  for (auto* seat : {&alice, &bob}) {
+    auto dealt = ReceiveRummy(seat->stream, "gameState");
+    ASSERT_TRUE(dealt.has_value());
+    const RummyView& view = dealt->as_gameState_or_null()->view;
+    EXPECT_EQ(view.phase, "playing");
+    EXPECT_EQ(view.dealNumber, 2);
+    EXPECT_EQ(view.currentPlayerId.value_or(""), bob.player_id);
+    EXPECT_FALSE(view.lastDeal.has_value());
+    EXPECT_FALSE(view.choosing.has_value());
+    EXPECT_TRUE(view.melds.empty());
+    ASSERT_EQ(view.standings.size(), 2u);
+    EXPECT_EQ(view.standings[0].handsWon, 0);
+    EXPECT_EQ(view.standings[1].handsWon, 1);
+    for (const auto& player : view.players) EXPECT_EQ(player.handCount, 7);
+    auto room = ReceiveCase(seat->stream, "roomState");
+    ASSERT_TRUE(room.has_value());
+    EXPECT_EQ(room->as_roomState_or_null()->games[0].status, "playing");
+    auto turn = ReceiveRummy(seat->stream, "turnChanged");
+    ASSERT_TRUE(turn.has_value());
+    EXPECT_EQ(turn->as_turnChanged_or_null()->playerId, bob.player_id);
+  }
+  // Mid-deal there is nothing to choose.
+  ASSERT_TRUE(alice.stream.Send(Choose("basic")).ok());
+  refused = ReceiveCase(alice.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not between deals");
+  EXPECT_EQ(metrics_->CounterTotal("rummy_commands", {{"command", "chooseVariant"}}), 4);
+
+  // Bob leaving mid-deal closes the table; its standings keep the hand
+  // alice won, and both deals count.
+  ASSERT_TRUE(bob.stream.Send(Rummy(RummyMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  auto ended = ReceiveRummy(alice.stream, "gameEnded");
+  ASSERT_TRUE(ended.has_value());
+  EXPECT_EQ(ended->as_gameEnded_or_null()->dealsPlayed, 2);
+  ASSERT_EQ(ended->as_gameEnded_or_null()->standings.size(), 1u);
+  EXPECT_EQ(ended->as_gameEnded_or_null()->standings[0].playerId, alice.player_id);
+  EXPECT_EQ(ended->as_gameEnded_or_null()->standings[0].handsWon, 1);
+}
+
+// A dealer the room shows as gone does not stall the table: any seat may
+// deal in their place, and the deal still opens after the dealer's seat.
+TEST_F(RummyGameFixture, AnAwayDealerLetsAnySeatDeal) {
+  auto table = ChoosingRummyTable(3);
+  ASSERT_TRUE(table.has_value());
+  Seat& dealer = table->seats[0];
+  ASSERT_TRUE(table->seats[2].stream.Send(Choose("basic")).ok());
+  auto refused = ReceiveCase(table->seats[2].stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "the dealer chooses");
+
+  dealer.stream.Close();
+  auto away = AwaitRoomState(
+      table->seats[2].stream,
+      [&](const moonbase::games::RoomState& state) {
+        for (const auto& player : state.players) {
+          if (player.playerId == dealer.player_id) return !player.connected;
+        }
+        return false;
+      },
+      "the dealer shown away");
+  ASSERT_TRUE(away.has_value());
+  ASSERT_TRUE(table->seats[2].stream.Send(Choose("basic")).ok());
+  auto dealt = AwaitRummyView(
+      table->seats[2].stream, [](const RummyView& view) { return view.phase == "playing"; },
+      "the deal");
+  ASSERT_TRUE(dealt.has_value());
+  EXPECT_EQ(dealt->currentPlayerId.value_or(""), table->seats[1].player_id);
+  EXPECT_EQ(dealt->players.size(), 3u);
+}
+
+// The dealer's chair follows the table: a dealer who leaves between deals
+// passes it to the seat after them, and the table deals on while two
+// remain; the last but one leaving closes it with its standings.
+TEST_F(RummyGameFixture, ADealerLeavingBetweenDealsPassesTheChair) {
+  auto table = ChoosingRummyTable(3);
+  ASSERT_TRUE(table.has_value());
+  ASSERT_TRUE(table->seats[0]
+                  .stream.Send(Rummy(RummyMove::FromLeavegame(moonbase::games::LeaveGame{})))
+                  .ok());
+  for (Seat* seat : {&table->seats[1], &table->seats[2]}) {
+    auto view = AwaitRummyView(
+        seat->stream, [](const RummyView& view) { return view.players.size() == 2; },
+        "the table without its dealer");
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->phase, "choosing");
+    ASSERT_TRUE(view->choosing.has_value());
+    EXPECT_EQ(view->choosing->dealer, table->seats[1].player_id);
+    EXPECT_EQ(view->standings.size(), 2u);
+  }
+
+  ASSERT_TRUE(table->seats[1]
+                  .stream.Send(Rummy(RummyMove::FromLeavegame(moonbase::games::LeaveGame{})))
+                  .ok());
+  auto closed = AwaitRummyView(
+      table->seats[2].stream, [](const RummyView& view) { return view.phase == "ended"; },
+      "the table closed");
+  ASSERT_TRUE(closed.has_value());
+  EXPECT_FALSE(closed->choosing.has_value());
+  EXPECT_FALSE(closed->lastDeal.has_value());
+  auto ended = ReceiveRummy(table->seats[2].stream, "gameEnded");
+  ASSERT_TRUE(ended.has_value());
+  EXPECT_EQ(ended->as_gameEnded_or_null()->dealsPlayed, 0);
+  ASSERT_EQ(ended->as_gameEnded_or_null()->standings.size(), 1u);
+  EXPECT_EQ(ended->as_gameEnded_or_null()->standings[0].playerId, table->seats[2].player_id);
+  // Nothing was dealt, so nothing was played: the room's stats stand.
+  auto room = AwaitRoomState(
+      table->seats[2].stream,
+      [](const moonbase::games::RoomState& state) { return state.games.empty(); },
+      "the table gone from the room");
+  ASSERT_TRUE(room.has_value());
+  for (const auto& player : room->players) EXPECT_EQ(player.gamesPlayed, 0);
 }
 
 // Before the deal a table is a roster: no cards anywhere, no turn.

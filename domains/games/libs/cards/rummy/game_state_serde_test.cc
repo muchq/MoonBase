@@ -38,7 +38,7 @@ json dealtPayload() { return json::parse(serializeGameState(dealt())); }
 // Mid-turn, with a meld down and the discard's top in hand: every
 // optional field present.
 GameState midTurn() {
-  auto drew = dealt().drawDiscard(0);  // 9♠ onto A♠ ... 10♠
+  auto drew = dealt().drawDiscard(0);  // J♦ onto A♦ K♦ Q♦
   EXPECT_TRUE(drew.ok()) << drew.status();
   auto melded = drew->meld(0, {Card{Suit::Spades, Rank::Ace}, Card{Suit::Spades, Rank::King},
                                Card{Suit::Spades, Rank::Queen}});
@@ -102,17 +102,12 @@ TEST(RummySerde, EveryMoveAndPhaseRoundTrips) {
   ASSERT_EQ(abandoned->getPhase(), Phase::Abandoned);
   expectRoundTrips(*abandoned);
 
-  // Alice's deal is two runs short of the discard's 9♠: taking it, she
-  // lays her whole hand down and wins.
-  auto run = laid->meld(0, {Card{Suit::Spades, Rank::Ten}, Card{Suit::Spades, Rank::Nine}});
-  EXPECT_FALSE(run.ok());
-  auto ten = laid->layOff(0, Card{Suit::Spades, Rank::Ten}, 0);
-  ASSERT_TRUE(ten.ok()) << ten.status();
-  auto nine = ten->layOff(0, Card{Suit::Spades, Rank::Nine}, 0);
-  ASSERT_TRUE(nine.ok()) << nine.status();
-  auto over = nine->meld(0, {Card{Suit::Diamonds, Rank::Ace}, Card{Suit::Diamonds, Rank::King},
-                             Card{Suit::Diamonds, Rank::Queen}, Card{Suit::Diamonds, Rank::Jack},
-                             Card{Suit::Diamonds, Rank::Ten}});
+  // Alice's deal is the turned-up J♦ short of two runs: with it, a
+  // lay-off and one more meld empty her hand.
+  auto pair = laid->meld(0, {Card{Suit::Diamonds, Rank::Ace}, Card{Suit::Diamonds, Rank::King}});
+  EXPECT_FALSE(pair.ok());
+  auto over = laid->meld(0, {Card{Suit::Diamonds, Rank::Ace}, Card{Suit::Diamonds, Rank::King},
+                             Card{Suit::Diamonds, Rank::Queen}, Card{Suit::Diamonds, Rank::Jack}});
   ASSERT_TRUE(over.ok()) << over.status();
   ASSERT_EQ(over->getPhase(), Phase::Over);
   expectRoundTrips(*over);
@@ -123,15 +118,30 @@ TEST(RummySerde, EveryMoveAndPhaseRoundTrips) {
 // literal.
 TEST(RummySerde, FrozenPayload) {
   constexpr const char* kRow =
+      R"({"discard":[37],"melds":[],"phase":"playing",)"
+      R"("players":[{"hand":[51,49,47,45,43,41,39],"id":"a"},)"
+      R"({"hand":[50,48,46,44,42,40,38],"id":"b"}],"stage":"draw",)"
+      R"("stock":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,)"
+      R"(31,32,33,34,35,36],"v":1,"whoseTurn":0})";
+  EXPECT_EQ(serializeGameState(dealt()), kRow);
+  const auto restored = deserializeGameState(kRow);
+  ASSERT_TRUE(restored.ok()) << restored.status();
+  expectStatesEqual(dealt(), *restored);
+}
+
+// A deal stored when two seats were dealt ten still loads and plays: hand
+// sizes are the deal's, not the schema's.
+TEST(RummySerde, ARowDealtTenASeatStillLoads) {
+  constexpr const char* kRow =
       R"({"discard":[31],"melds":[],"phase":"playing",)"
       R"("players":[{"hand":[51,49,47,45,43,41,39,37,35,33],"id":"a"},)"
       R"({"hand":[50,48,46,44,42,40,38,36,34,32],"id":"b"}],"stage":"draw",)"
       R"("stock":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],)"
       R"("v":1,"whoseTurn":0})";
-  EXPECT_EQ(serializeGameState(dealt()), kRow);
   const auto restored = deserializeGameState(kRow);
   ASSERT_TRUE(restored.ok()) << restored.status();
-  expectStatesEqual(dealt(), *restored);
+  EXPECT_EQ(restored->getPlayer(0).hand.size(), 10u);
+  EXPECT_TRUE(restored->drawStock(0).ok());
 }
 
 // The bytes of a row mid-turn: the optional fields and the other stage's
@@ -140,10 +150,10 @@ TEST(RummySerde, FrozenMidTurnPayload) {
   constexpr const char* kRow =
       R"({"discard":[],"lastMove":{"cards":[43,47,51],"kind":"meld","meld":0,"player":"a"},)"
       R"("melds":[{"cards":[43,47,51],"owner":"a"}],"phase":"playing",)"
-      R"("players":[{"hand":[49,45,41,39,37,35,33,31],"id":"a"},)"
-      R"({"hand":[50,48,46,44,42,40,38,36,34,32],"id":"b"}],"stage":"play",)"
-      R"("stock":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30],)"
-      R"("takenDiscard":31,"v":1,"whoseTurn":0})";
+      R"("players":[{"hand":[49,45,41,39,37],"id":"a"},)"
+      R"({"hand":[50,48,46,44,42,40,38],"id":"b"}],"stage":"play",)"
+      R"("stock":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,)"
+      R"(31,32,33,34,35,36],"takenDiscard":37,"v":1,"whoseTurn":0})";
   EXPECT_EQ(serializeGameState(midTurn()), kRow);
   for (const auto& [kind, want] :
        std::vector<std::pair<const char*, MoveKind>>{{"drawStock", MoveKind::DrawStock},
@@ -152,7 +162,7 @@ TEST(RummySerde, FrozenMidTurnPayload) {
                                                      {"discard", MoveKind::Discard}}) {
     json payload = json::parse(kRow);
     payload["lastMove"]["kind"] = kind;
-    payload["lastMove"]["cards"] = want == MoveKind::DrawStock ? json::array() : json::array({31});
+    payload["lastMove"]["cards"] = want == MoveKind::DrawStock ? json::array() : json::array({37});
     payload["lastMove"]["meld"] = want == MoveKind::LayOff ? 0 : -1;
     const auto restored = deserializeGameState(payload.dump());
     ASSERT_TRUE(restored.ok()) << kind;

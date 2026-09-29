@@ -2049,6 +2049,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"rummy_commands", {{"command", "joinGame"}}},
       {"rummy_commands", {{"command", "startGame"}}},
       {"rummy_commands", {{"command", "leaveGame"}}},
+      {"rummy_commands", {{"command", "chooseVariant"}}},
       {"rummy_commands", {{"command", "drawStock"}}},
       {"rummy_commands", {{"command", "drawDiscard"}}},
       {"rummy_commands", {{"command", "meld"}}},
@@ -2726,6 +2727,52 @@ TEST_F(GameEventFixture, ABiggerTableIsRecordedAtTheSizeItWasDealt) {
   EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("players":3)"));
   EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("variant":"castle")"));
   EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("players":3)"));
+}
+
+// A rummy table is dealer's choice (#1609): seating it is no game, and
+// each deal is one — started when the dealer deals, finished when a seat
+// goes out — recorded as rummy whatever the deal's variant is called on
+// the wire.
+TEST_F(GameEventFixture, ARummyTableRecordsEachDealAsAGame) {
+  using moonbase::games::RummyMove;
+  auto table = SeatedRummyTable();  // the first deal dealt by bob
+  ASSERT_TRUE(table.has_value());
+  Seat& alice = table->alice;
+  ASSERT_TRUE(
+      AwaitRummyView(
+          alice.stream, [](const auto& view) { return view.phase == "playing"; }, "the first deal")
+          .has_value());
+  ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "game_started"));
+  EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("variant":"rummy")"));
+  EXPECT_THAT(events_[2], ::testing::HasSubstr(R"("players":2)"));
+
+  // Alice's quickest win: J♣ from the stock, then two runs.
+  ASSERT_TRUE(
+      alice.stream.Send(Rummy(RummyMove::FromDrawstock(moonbase::games::RummyDrawStock{}))).ok());
+  for (const char* suit : {"♥", "♣"}) {
+    moonbase::games::RummyMeld meld;
+    meld.cards = {Named("J", suit), Named("Q", suit), Named("K", suit), Named("A", suit)};
+    ASSERT_TRUE(alice.stream.Send(Rummy(RummyMove::FromMeld(meld))).ok());
+  }
+  ASSERT_TRUE(
+      AwaitRummyView(
+          alice.stream, [](const auto& view) { return view.phase == "choosing"; }, "the deal's end")
+          .has_value());
+  ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "game_started",
+                                              "game_finished"));
+  EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("variant":"rummy")"));
+  EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("outcome":"completed")"));
+
+  // Alice deals the second: another game.
+  moonbase::games::RummyChooseVariant basic;
+  basic.variant = "basic";
+  ASSERT_TRUE(alice.stream.Send(Rummy(RummyMove::FromChoosevariant(basic))).ok());
+  ASSERT_TRUE(
+      AwaitRummyView(
+          alice.stream, [](const auto& view) { return view.dealNumber == 2; }, "the second deal")
+          .has_value());
+  EXPECT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "game_started",
+                                              "game_finished", "game_started"));
 }
 
 TEST_F(GameEventFixture, ARefusedJoinIsNoEvent) {

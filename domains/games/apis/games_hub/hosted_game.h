@@ -8,7 +8,7 @@
 
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/golf/game_state.h"
-#include "domains/games/libs/cards/rummy/game_state.h"
+#include "domains/games/libs/cards/rummy/table.h"
 
 namespace games_hub {
 
@@ -19,7 +19,8 @@ namespace games_hub {
 enum class GameKind { kGolf, kCastle, kRummy };
 
 /// The engine truth of a started table, whichever game it plays.
-using HostedState = std::variant<golf::GameState, castle::GameState, rummy::GameState>;
+/// A rummy table is a dealer's-choice table (#1609), a deal at a time.
+using HostedState = std::variant<golf::GameState, castle::GameState, rummy::TableState>;
 
 inline std::string_view GameKindName(GameKind kind) {
   switch (kind) {
@@ -42,12 +43,21 @@ inline std::optional<GameKind> ParseGameKind(std::string_view name) {
 
 inline GameKind KindOf(const HostedState& state) {
   if (std::holds_alternative<castle::GameState>(state)) return GameKind::kCastle;
-  if (std::holds_alternative<rummy::GameState>(state)) return GameKind::kRummy;
+  if (std::holds_alternative<rummy::TableState>(state)) return GameKind::kRummy;
   return GameKind::kGolf;
 }
 
 inline bool IsOver(const HostedState& state) {
   return std::visit([](const auto& engine) { return engine.isOver(); }, state);
+}
+
+/// The word a game is recorded under (#1571): the kind's, except that a
+/// rummy table's games are its deals, each under its variant's word.
+inline std::string_view VariantWordOf(const HostedState& state) {
+  if (const auto* table = std::get_if<rummy::TableState>(&state)) {
+    return rummy::recordedName(table->getVariant());
+  }
+  return GameKindName(KindOf(state));
 }
 
 }  // namespace games_hub

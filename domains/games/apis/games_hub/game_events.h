@@ -2,6 +2,7 @@
 #define DOMAINS_GAMES_APIS_GAMES_HUB_GAME_EVENTS_H
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -58,8 +59,8 @@ inline constexpr std::string_view kOutcomeAbandoned = "abandoned";
 
 /// A game that ended, as the event describes it.
 struct GameFinished {
-  /// "golf", "castle" or "rummy" — GameKindName's spelling, which is also the
-  /// wire's and the stored row's.
+  /// VariantWordOf's spelling: GameKindName's for golf and castle, a rummy
+  /// deal's own variant's for a rummy table.
   std::string_view variant;
   /// kOutcomeCompleted — the engine played it out — or kOutcomeAbandoned: too few
   /// seats were left to go on.
@@ -77,8 +78,11 @@ struct GameFinished {
 /// unchanged; this is the guarantee, not a transformation.
 std::string RoomTag(std::string_view room);
 
-/// How `state` ended, for a roster of `players` seats.
-GameFinished FinishedOf(const HostedState& state, std::size_t players);
+/// How `state` ended, for a roster of `players` seats; nothing when no game
+/// ended. A rummy table's games are its deals: a deal won by play is
+/// completed, one broken up by a leave abandoned, and a table closing
+/// between deals ended nothing — its deals were each recorded as they ended.
+std::optional<GameFinished> FinishedOf(const HostedState& state, std::size_t players);
 
 /// A room was made, on the surface it chose — SurfaceKindName's
 /// spelling, which is the wire's and the stored row's. Its creator is

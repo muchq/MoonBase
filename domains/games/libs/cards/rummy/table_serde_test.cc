@@ -1,0 +1,206 @@
+#include "domains/games/libs/cards/rummy/table_serde.h"
+
+#include <gtest/gtest.h>
+
+#include <deque>
+#include <nlohmann/json.hpp>
+#include <string>
+#include <vector>
+
+#include "domains/games/libs/cards/card.h"
+#include "domains/games/libs/cards/rummy/game_state.h"
+#include "domains/games/libs/cards/rummy/game_state_serde.h"
+#include "domains/games/libs/cards/rummy/table.h"
+
+using namespace cards;
+using namespace rummy;
+using nlohmann::json;
+
+namespace {
+
+std::deque<Card> pristineDeck() {
+  std::deque<Card> deck;
+  for (int i = 0; i < 52; ++i) deck.emplace_back(i);
+  return deck;
+}
+
+TableState opened() {
+  auto table = TableState::open("T", {"a", "b"});
+  EXPECT_TRUE(table.ok());
+  return *table;
+}
+
+TableState playing() {
+  auto dealt = opened().chooseVariant(0, Variant::Basic, pristineDeck());
+  EXPECT_TRUE(dealt.ok()) << dealt.status();
+  return *dealt;
+}
+
+// Between deals: the last deal over by play, b having gone out.
+TableState between() {
+  GameState over{{Card{Suit::Clubs, Rank::Two}},
+                 {Card{Suit::Clubs, Rank::Three}},
+                 {{"a", {Card{Suit::Clubs, Rank::King}}}, {"b", {}}},
+                 {},
+                 GameState::kNoTurn,
+                 Stage::Draw,
+                 Phase::Over,
+                 std::nullopt,
+                 "",
+                 ""};
+  return TableState{{"a", "b"}, {0, 1}, 0, 1, TablePhase::Choosing, Variant::Basic, over, "", ""};
+}
+
+json payloadOf(const TableState& table) { return json::parse(serializeTableState(table)); }
+
+void expectRejected(const json& payload) {
+  const auto restored = deserializeTableState(payload.dump());
+  ASSERT_FALSE(restored.ok()) << "accepted: " << payload.dump();
+  EXPECT_EQ(restored.status().code(), absl::StatusCode::kInvalidArgument);
+}
+
+void expectRoundTrips(const TableState& table) {
+  const std::string serialized = serializeTableState(table);
+  const auto restored = deserializeTableState(serialized);
+  ASSERT_TRUE(restored.ok()) << restored.status() << "\n" << serialized;
+  EXPECT_EQ(restored->getSeats(), table.getSeats());
+  EXPECT_EQ(restored->getWins(), table.getWins());
+  EXPECT_EQ(restored->getDealer(), table.getDealer());
+  EXPECT_EQ(restored->getDealNumber(), table.getDealNumber());
+  EXPECT_EQ(restored->getPhase(), table.getPhase());
+  EXPECT_EQ(restored->getVariant(), table.getVariant());
+  ASSERT_EQ(restored->getDeal().has_value(), table.getDeal().has_value());
+  if (table.getDeal().has_value()) {
+    EXPECT_EQ(serializeGameState(*restored->getDeal()), serializeGameState(*table.getDeal()));
+  }
+  EXPECT_EQ(serializeTableState(*restored), serialized);
+}
+
+}  // namespace
+
+TEST(TableSerde, EveryPhaseRoundTrips) {
+  expectRoundTrips(opened());
+  expectRoundTrips(playing());
+  expectRoundTrips(between());
+  auto closed = playing().removePlayer(0);
+  ASSERT_TRUE(closed.ok());
+  expectRoundTrips(*closed);
+}
+
+// The exact bytes of a table opened and not yet dealt. A change to the
+// shape is a schema change: a version bump, not an edit here.
+TEST(TableSerde, FrozenPayload) {
+  constexpr const char* kRow =
+      R"({"dealNumber":0,"dealer":0,"phase":"choosing","seats":["a","b"],"v":2,)"
+      R"("variant":"basic","wins":[0,0]})";
+  EXPECT_EQ(serializeTableState(opened()), kRow);
+  const auto restored = deserializeTableState(kRow);
+  ASSERT_TRUE(restored.ok()) << restored.status();
+  EXPECT_EQ(restored->getPhase(), TablePhase::Choosing);
+  // The deal nests as the v1 deal it is, so the deal's own schema pins it.
+  const json dealt = payloadOf(playing());
+  EXPECT_EQ(dealt["phase"], "playing");
+  EXPECT_EQ(dealt["deal"]["v"], 1);
+  EXPECT_EQ(dealt["dealNumber"], 1);
+}
+
+// A row from before the table (#1608) is one deal: it reads as that deal
+// in play at a table of its seats, dealt by the seat before the one on
+// turn, or as a closed table if the deal had ended — a finished row stays
+// finished.
+TEST(TableSerde, AVersionOneRowIsOneDeal) {
+  auto deal = dealRummyGame("", {"a", "b", "c"}, pristineDeck());
+  ASSERT_TRUE(deal.ok());
+  auto drew = deal->drawStock(0);
+  ASSERT_TRUE(drew.ok());
+  auto table = deserializeTableState(serializeGameState(*drew));
+  ASSERT_TRUE(table.ok()) << table.status();
+  EXPECT_EQ(table->getPhase(), TablePhase::Playing);
+  EXPECT_EQ(table->getSeats(), (std::vector<std::string>{"a", "b", "c"}));
+  EXPECT_EQ(table->getWins(), (std::vector<int>{0, 0, 0}));
+  EXPECT_EQ(table->getDealNumber(), 1);
+  EXPECT_EQ(table->getDealer(), 2);
+  EXPECT_EQ(table->getVariant(), Variant::Basic);
+  EXPECT_EQ(serializeGameState(*table->getDeal()), serializeGameState(*drew));
+
+  auto gone = drew->removePlayer(1);
+  ASSERT_TRUE(gone.ok());
+  auto two = gone->removePlayer(1);
+  ASSERT_TRUE(two.ok());
+  ASSERT_TRUE(two->isOver());
+  auto closed = deserializeTableState(serializeGameState(*two));
+  ASSERT_TRUE(closed.ok()) << closed.status();
+  EXPECT_TRUE(closed->isOver());
+}
+
+TEST(TableSerde, RejectsATableTheEngineCouldNotPlay) {
+  json payload = payloadOf(opened());
+  payload["v"] = 3;
+  expectRejected(payload);
+
+  for (const char* key : {"phase", "seats", "wins", "dealer", "dealNumber", "variant"}) {
+    payload = payloadOf(opened());
+    payload.erase(key);
+    expectRejected(payload);
+  }
+  payload = payloadOf(opened());
+  payload["variant"] = "canasta";
+  expectRejected(payload);
+  payload = payloadOf(opened());
+  payload["phase"] = "dealing";
+  expectRejected(payload);
+  payload = payloadOf(opened());
+  payload["wins"] = json::array({0});  // one short of the seats
+  expectRejected(payload);
+  payload = payloadOf(opened());
+  payload["wins"] = json::array({0, -1});
+  expectRejected(payload);
+  payload = payloadOf(opened());
+  payload["dealer"] = 2;
+  expectRejected(payload);
+  payload = payloadOf(opened());
+  payload["seats"] = json::array({"a"});
+  payload["wins"] = json::array({0});
+  expectRejected(payload);  // an open table seats two
+
+  // In play: a deal, in play, of exactly the table's seats.
+  payload = payloadOf(playing());
+  payload.erase("deal");
+  expectRejected(payload);
+  payload = payloadOf(playing());
+  payload["seats"] = json::array({"a", "z"});
+  expectRejected(payload);
+  payload = payloadOf(playing());
+  payload["deal"]["phase"] = "over";
+  payload["deal"]["whoseTurn"] = -1;
+  expectRejected(payload);
+  payload = payloadOf(playing());
+  payload["deal"] = 7;
+  expectRejected(payload);
+
+  // Between deals: the last deal, ended; none before the first.
+  payload = payloadOf(between());
+  payload["deal"]["phase"] = "playing";
+  payload["deal"]["whoseTurn"] = 0;
+  payload["deal"]["players"][0]["hand"] = json::array({3});
+  expectRejected(payload);
+  payload = payloadOf(opened());
+  payload["dealNumber"] = 1;
+  expectRejected(payload);  // dealt once, and no deal to show
+  payload = payloadOf(between());
+  payload["dealNumber"] = 0;
+  expectRejected(payload);  // a deal, and none dealt
+
+  for (const char* input : {"", "[]", "not json", R"({"v":2})"}) {
+    EXPECT_FALSE(deserializeTableState(input).ok()) << input;
+  }
+}
+
+TEST(TableSerde, NulInASeatIdIsReplaced) {
+  const std::string nul_id("a\0b", 3);
+  auto table = TableState::open("T", {nul_id, "b"});
+  ASSERT_TRUE(table.ok());
+  const std::string serialized = serializeTableState(*table);
+  EXPECT_EQ(serialized.find('\0'), std::string::npos);
+  EXPECT_TRUE(deserializeTableState(serialized).ok());
+}
