@@ -756,6 +756,15 @@ TEST(TakeDown, TheCardsASeatMayTakeDownTo) {
   EXPECT_TRUE(took->discardTakeable(0).empty());
 }
 
+TEST(TakeDown, DownToACardThatMakesASetWithTwoHeld) {
+  // The 2♣ with the 2♦ and 2♥ in hand: the card taken down to counts
+  // toward its own meld.
+  const GameState twos =
+      aliceToDraw({}, {c(Rank::Two, Suit::Diamonds), c(Rank::Two, Suit::Hearts)});
+  EXPECT_EQ(twos.discardTakeable(0).front(), c(Rank::Two));
+  EXPECT_TRUE(twos.drawDiscard(0, c(Rank::Two)).ok());
+}
+
 TEST(TakeDown, ASeatLeavingOwingACardTakesTheDebtWithIt) {
   GameState three =
       playing({{"alice", {c(Rank::Seven, Suit::Hearts), c(Rank::Nine, Suit::Diamonds)}},

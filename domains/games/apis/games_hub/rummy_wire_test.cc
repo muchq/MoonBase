@@ -311,6 +311,18 @@ TEST_F(RummyWireTest, TurnMovesPinTheirSpellingAndTheDealsEndBytes) {
                                    "gameId", "lastDeal", "lastMove", "melds", "phase", "players",
                                    "scoreSheet", "standings", "stockCount", "variant"}));
   EXPECT_EQ(between["variant"], "7-card");
+
+  // The loser leaving closes the table: the standings it ends on keep the
+  // points the sheet scored.
+  (void)EventPayload(NextFrame(*joiner), "rummy");
+  (void)EventPayload(NextFrame(*joiner), "roomState");
+  ASSERT_TRUE(creator->Send(CommandFrame("rummy", R"({"move":{"leaveGame":{}}})")).ok());
+  const json closed =
+      json::parse(EventPayload(NextFrame(*joiner), "rummy"))["update"]["gameState"]["view"];
+  EXPECT_EQ(closed["scoreSheet"], between["scoreSheet"]);
+  EXPECT_EQ(EventPayload(NextFrame(*joiner), "rummy"),
+            R"({"update":{"gameEnded":{"dealsPlayed":1,"standings":[{"handsWon":1,"playerId":)"
+            R"("player-2","points":52}]}}})");
 }
 
 // Below two seats the table closes: the last deal, broken up, names no

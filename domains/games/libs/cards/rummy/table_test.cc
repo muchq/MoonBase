@@ -316,6 +316,37 @@ TEST(ScoreSheet, EachDealsEndIsScoredAndKept) {
   EXPECT_EQ(left->getScoreSheet(), out->getScoreSheet());
 }
 
+TEST(ScoreSheet, KeptThroughTheNextDealsMovesAndTheTablesClose) {
+  GameState deal{{Card{Suit::Clubs, Rank::Two}},
+                 {Card{Suit::Clubs, Rank::Three}},
+                 {{"a", {Card{Suit::Clubs, Rank::Four}}},
+                  {"b", {Card{Suit::Clubs, Rank::Five}}},
+                  {"c", {Card{Suit::Clubs, Rank::King}}}},
+                 {},
+                 1,
+                 Stage::Play,
+                 Phase::Playing,
+                 std::nullopt,
+                 "T1",
+                 ""};
+  auto out = withDeal(opened(), deal).inDeal<GameState>([](const GameState& d) {
+    return d.discard(1, Card{Suit::Clubs, Rank::Five});
+  });
+  ASSERT_TRUE(out.ok()) << out.status();
+  auto next = out->chooseVariant(1, Variant::SevenCard, deck());
+  ASSERT_TRUE(next.ok()) << next.status();
+  auto moved =
+      next->inDeal<GameState>([](const GameState& d) { return d.drawStock(d.getWhoseTurn()); });
+  ASSERT_TRUE(moved.ok()) << moved.status();
+  EXPECT_EQ(moved->getScoreSheet(), out->getScoreSheet());
+  auto two = moved->removePlayer(0);
+  ASSERT_TRUE(two.ok()) << two.status();
+  auto closed = two->removePlayer(0);
+  ASSERT_TRUE(closed.ok()) << closed.status();
+  ASSERT_EQ(closed->getPhase(), TablePhase::Closed);
+  EXPECT_EQ(closed->getScoreSheet(), out->getScoreSheet());
+}
+
 TEST(Table, TheDealWrapsRoundTheTable) {
   const TableState last{{"a", "b"},         {0, 0},       1,   3, TablePhase::Choosing,
                         Variant::SevenCard, std::nullopt, "T", ""};

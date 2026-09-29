@@ -113,6 +113,7 @@ TEST(Playable, InASetOrARunOfPoolCards) {
   const vector<Card> run = {c(Rank::Queen), c(Rank::King), c(Rank::Ace)};
   EXPECT_TRUE(playable(c(Rank::Ace), run, {}));
   EXPECT_TRUE(playable(c(Rank::Queen), run, {}));
+  EXPECT_TRUE(playable(c(Rank::Two), {c(Rank::Ace), c(Rank::Two), c(Rank::Three)}, {}));
   // A pair, a gap, a corner: none of them is a meld.
   EXPECT_FALSE(playable(c(Rank::Nine), {c(Rank::Nine), c(Rank::Nine, Suit::Hearts)}, {}));
   EXPECT_FALSE(playable(c(Rank::Five), {c(Rank::Five), c(Rank::Six), c(Rank::Eight)}, {}));
