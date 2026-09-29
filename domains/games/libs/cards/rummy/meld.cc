@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "domains/games/libs/cards/card.h"
+#include "domains/games/libs/cards/card_mapper.h"
 
 namespace rummy {
 namespace {
@@ -59,6 +61,60 @@ std::optional<std::vector<Card>> arrangedMeld(const std::vector<Card>& cards) {
   if (!oneSuit) return std::nullopt;
   if (auto high = asRun(cards, /*aceLow=*/false); high.has_value()) return high;
   return asRun(cards, /*aceLow=*/true);
+}
+
+std::string faceOf(const Card& card) {
+  static constexpr const char* kSuits[] = {"♣", "♦", "♥", "♠"};
+  return CardMapper::rankToString(card.getRank()) + kSuits[static_cast<int>(card.getSuit())];
+}
+
+bool playable(const Card& card, const std::vector<Card>& pool,
+              const std::vector<std::vector<Card>>& table) {
+  // A set of the card's rank.
+  const auto ofRank = std::count_if(pool.begin(), pool.end(), [&](const Card& other) {
+    return other.getRank() == card.getRank();
+  });
+  if (ofRank >= 3) return true;
+  // A run through it: the unbroken stretch of its suit around it, the ace
+  // at one end or the other.
+  for (const bool aceLow : {false, true}) {
+    const auto held = [&](int value) {
+      return std::any_of(pool.begin(), pool.end(), [&](const Card& other) {
+        return other.getSuit() == card.getSuit() && rankValue(other, aceLow) == value;
+      });
+    };
+    const int at = rankValue(card, aceLow);
+    int low = at;
+    int high = at;
+    while (held(low - 1)) low--;
+    while (held(high + 1)) high++;
+    if (high - low >= 2) return true;
+  }
+  // Onto a table meld, growing it with other pool cards until the card
+  // fits or nothing more does. A card that grows a meld never stops the
+  // card fitting later, except by filling a set, and a set the card fits
+  // takes it before anything else is tried.
+  for (const std::vector<Card>& meld : table) {
+    std::vector<Card> grown = meld;
+    for (;;) {
+      std::vector<Card> with = grown;
+      with.push_back(card);
+      if (arrangedMeld(with).has_value()) return true;
+      bool added = false;
+      for (const Card& other : pool) {
+        if (other == card || std::find(grown.begin(), grown.end(), other) != grown.end()) continue;
+        std::vector<Card> bigger = grown;
+        bigger.push_back(other);
+        if (auto arranged = arrangedMeld(bigger); arranged.has_value()) {
+          grown = *std::move(arranged);
+          added = true;
+          break;
+        }
+      }
+      if (!added) break;
+    }
+  }
+  return false;
 }
 
 int cardPoints(const Card& card) {

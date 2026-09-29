@@ -8,7 +8,10 @@ cc_library(
     srcs = ["meld.cc"],
     hdrs = ["meld.h"],
     visibility = ["//visibility:public"],
-    deps = ["//domains/games/libs/cards"],
+    deps = [
+        "//domains/games/libs/cards",
+        "//domains/games/libs/cards:card_mapper",
+    ],
 )
 
 cc_library(

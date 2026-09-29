@@ -116,9 +116,49 @@ StatusOr<GameState> GameState::drawStock(int player) const {
                    LastMove{players.at(player).id, MoveKind::DrawStock, {}, -1}};
 }
 
-StatusOr<GameState> GameState::drawDiscard(int player) const {
+vector<Card> GameState::discardTakeable(int player) const {
+  if (!ensureTurn(player, Stage::Draw).ok() || discardPile.empty()) return {};
+  vector<vector<Card>> table;
+  table.reserve(melds.size());
+  for (const Meld& meld : melds) table.push_back(meld.cards);
+  vector<Card> takeable;
+  for (size_t at = 0; at + 1 < discardPile.size(); at++) {
+    vector<Card> pool = players.at(player).hand;
+    pool.insert(pool.end(), discardPile.begin() + static_cast<std::ptrdiff_t>(at),
+                discardPile.end());
+    if (playable(discardPile.at(at), pool, table)) takeable.push_back(discardPile.at(at));
+  }
+  takeable.push_back(discardPile.back());
+  return takeable;
+}
+
+StatusOr<GameState> GameState::drawDiscard(int player, std::optional<Card> downTo) const {
   if (auto turn = ensureTurn(player, Stage::Draw); !turn.ok()) return turn;
   if (discardPile.empty()) return FailedPreconditionError("the discard pile is empty");
+  if (downTo.has_value() && *downTo != discardPile.back()) {
+    const auto at = std::find(discardPile.begin(), discardPile.end(), *downTo);
+    if (at == discardPile.end())
+      return InvalidArgumentError("that card is not in the discard pile");
+    const vector<Card> takeable = discardTakeable(player);
+    if (std::find(takeable.begin(), takeable.end(), *downTo) == takeable.end()) {
+      return FailedPreconditionError("you could not play the " + faceOf(*downTo));
+    }
+    vector<Card> taken(at, discardPile.end());
+    vector<Card> hand = players.at(player).hand;
+    hand.insert(hand.end(), taken.begin(), taken.end());
+    return GameState{stock,
+                     vector<Card>(discardPile.begin(), at),
+                     withHand(players, player, std::move(hand)),
+                     melds,
+                     player,
+                     Stage::Play,
+                     phase,
+                     std::nullopt,
+                     gameId,
+                     versionId,
+                     LastMove{players.at(player).id, MoveKind::DrawDiscard, std::move(taken), -1},
+                     *downTo};
+  }
   const Card top = discardPile.back();
   vector<Card> newDiscard(discardPile.begin(), discardPile.end() - 1);
   vector<Card> hand = players.at(player).hand;
@@ -173,6 +213,9 @@ StatusOr<GameState> GameState::discard(int player, const Card& card) const {
   if (takenDiscard == card && !rest->empty()) {
     return FailedPreconditionError("you took that card from the discard pile this turn");
   }
+  if (mustPlay.has_value()) {
+    return FailedPreconditionError("play the " + faceOf(*mustPlay) + " you took first");
+  }
   vector<Card> newDiscard = discardPile;
   newDiscard.push_back(card);
   const bool out = rest->empty();
@@ -193,6 +236,9 @@ StatusOr<GameState> GameState::discard(int player, const Card& card) const {
 GameState GameState::afterLaying(int player, vector<Card> hand, vector<Meld> table,
                                  LastMove move) const {
   const bool out = hand.empty();
+  // The card owed stays owed until it leaves the hand.
+  std::optional<Card> owed = mustPlay;
+  if (owed.has_value() && std::find(hand.begin(), hand.end(), *owed) == hand.end()) owed.reset();
   return GameState{stock,
                    discardPile,
                    withHand(players, player, std::move(hand)),
@@ -203,7 +249,8 @@ GameState GameState::afterLaying(int player, vector<Card> hand, vector<Meld> tab
                    takenDiscard,
                    gameId,
                    versionId,
-                   std::move(move)};
+                   std::move(move),
+                   owed};
 }
 
 StatusOr<GameState> GameState::removePlayer(int player) const {
@@ -216,22 +263,24 @@ StatusOr<GameState> GameState::removePlayer(int player) const {
   if (rest.size() < static_cast<size_t>(kMinPlayers)) {
     return GameState{stock,   discardPile, std::move(rest),  melds,
                      kNoTurn, stage,       Phase::Abandoned, takenDiscard,
-                     gameId,  versionId,   lastMove};
+                     gameId,  versionId,   lastMove,         mustPlay};
   }
   int turn = whoseTurn;
   Stage newStage = stage;
   std::optional<Card> taken = takenDiscard;
+  std::optional<Card> owed = mustPlay;
   if (whoseTurn == player) {
     // The seat after the leaver's takes its place, from the draw; past the
     // end of the table that is the first seat.
     turn = player % static_cast<int>(rest.size());
     newStage = Stage::Draw;
     taken.reset();
+    owed.reset();
   } else if (whoseTurn > player) {
     turn--;
   }
-  return GameState{stock, discardPile, std::move(rest), melds,     turn,    newStage,
-                   phase, taken,       gameId,          versionId, lastMove};
+  return GameState{stock, discardPile, std::move(rest), melds,     turn,     newStage,
+                   phase, taken,       gameId,          versionId, lastMove, owed};
 }
 
 std::optional<string> GameState::winner() const {
@@ -257,7 +306,7 @@ int GameState::winnerPoints() const {
 
 GameState GameState::withIdAndVersion(const string& game_id, const string& version_id) const {
   return GameState{stock, discardPile,  players, melds,      whoseTurn, stage,
-                   phase, takenDiscard, game_id, version_id, lastMove};
+                   phase, takenDiscard, game_id, version_id, lastMove,  mustPlay};
 }
 
 int GameState::playerIndex(const string& id) const {

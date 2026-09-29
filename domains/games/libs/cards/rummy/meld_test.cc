@@ -96,3 +96,42 @@ TEST(CardPoints, AceOnePipsAsPrintedFacesTen) {
   EXPECT_EQ(cardPoints(c(Rank::Queen)), 10);
   EXPECT_EQ(cardPoints(c(Rank::King)), 10);
 }
+
+TEST(Face, RankThenSuit) {
+  EXPECT_EQ(faceOf(c(Rank::Ten, Suit::Hearts)), "10♥");
+  EXPECT_EQ(faceOf(c(Rank::Ace, Suit::Spades)), "A♠");
+  EXPECT_EQ(faceOf(c(Rank::Two)), "2♣");
+}
+
+// A card is playable from a pool when some meld of pool cards holds it,
+// or it lays off onto a table meld, straight on or after pool cards that
+// bridge the way.
+TEST(Playable, InASetOrARunOfPoolCards) {
+  const vector<Card> set = {c(Rank::Nine), c(Rank::Nine, Suit::Hearts),
+                            c(Rank::Nine, Suit::Spades)};
+  EXPECT_TRUE(playable(c(Rank::Nine), set, {}));
+  const vector<Card> run = {c(Rank::Queen), c(Rank::King), c(Rank::Ace)};
+  EXPECT_TRUE(playable(c(Rank::Ace), run, {}));
+  EXPECT_TRUE(playable(c(Rank::Queen), run, {}));
+  // A pair, a gap, a corner: none of them is a meld.
+  EXPECT_FALSE(playable(c(Rank::Nine), {c(Rank::Nine), c(Rank::Nine, Suit::Hearts)}, {}));
+  EXPECT_FALSE(playable(c(Rank::Five), {c(Rank::Five), c(Rank::Six), c(Rank::Eight)}, {}));
+  EXPECT_FALSE(playable(c(Rank::Two), {c(Rank::King), c(Rank::Ace), c(Rank::Two)}, {}));
+}
+
+TEST(Playable, OntoATableMeldStraightOrBridged) {
+  const vector<vector<Card>> table = {
+      {c(Rank::Five), c(Rank::Six), c(Rank::Seven)},
+      {c(Rank::Jack, Suit::Hearts), c(Rank::Jack, Suit::Spades), c(Rank::Jack, Suit::Diamonds)}};
+  EXPECT_TRUE(playable(c(Rank::Eight), {c(Rank::Eight)}, table));
+  EXPECT_TRUE(playable(c(Rank::Jack), {c(Rank::Jack)}, table));
+  // 9♣ needs the 8♣ first; 3♣ needs the 4♣.
+  EXPECT_TRUE(playable(c(Rank::Nine), {c(Rank::Nine), c(Rank::Eight)}, table));
+  EXPECT_TRUE(playable(c(Rank::Three), {c(Rank::Three), c(Rank::Four)}, table));
+  EXPECT_FALSE(playable(c(Rank::Nine), {c(Rank::Nine)}, table));
+  EXPECT_FALSE(playable(c(Rank::Three), {c(Rank::Three), c(Rank::Eight)}, table));
+  // A set holds four at most.
+  const vector<vector<Card>> four = {{c(Rank::Jack, Suit::Hearts), c(Rank::Jack, Suit::Spades),
+                                      c(Rank::Jack, Suit::Diamonds), c(Rank::Jack)}};
+  EXPECT_FALSE(playable(c(Rank::Jack, Suit::Hearts), {c(Rank::Jack, Suit::Hearts)}, four));
+}
