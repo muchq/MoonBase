@@ -109,7 +109,7 @@ class TableState {
   /// The deal in play, or the one that just ended; absent before the first.
   [[nodiscard]] const std::optional<Deal>& getDeal() const { return deal; }
   /// The deal as GameState or GinState, if it is that engine's.
-  [[nodiscard]] const GameState* basicDeal() const {
+  [[nodiscard]] const GameState* rummyDeal() const {
     return deal.has_value() ? std::get_if<GameState>(&*deal) : nullptr;
   }
   [[nodiscard]] const GinState* ginDeal() const {

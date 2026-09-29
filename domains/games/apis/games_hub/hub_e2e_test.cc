@@ -2733,8 +2733,8 @@ TEST_F(GameEventFixture, ABiggerTableIsRecordedAtTheSizeItWasDealt) {
 
 // A rummy table is dealer's choice (#1609): seating it is no game, and
 // each deal is one — started when the dealer deals, finished when a seat
-// goes out — recorded as rummy whatever the deal's variant is called on
-// the wire.
+// goes out — recorded as rummy at either hand size (gin's deals are
+// "gin"; game_events_test pins that).
 TEST_F(GameEventFixture, ARummyTableRecordsEachDealAsAGame) {
   using moonbase::games::RummyMove;
   auto table = SeatedRummyTable();  // the first deal dealt by bob

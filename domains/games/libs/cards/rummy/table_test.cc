@@ -63,12 +63,12 @@ TEST(Variants, EachDealsItsOwnGame) {
   auto ten = opened().chooseVariant(0, Variant::TenCard, deck());
   ASSERT_TRUE(ten.ok()) << ten.status();
   EXPECT_EQ(ten->getVariant(), Variant::TenCard);
-  ASSERT_NE(ten->basicDeal(), nullptr);
-  for (const Player& seat : ten->basicDeal()->getPlayers()) EXPECT_EQ(seat.hand.size(), 10u);
+  ASSERT_NE(ten->rummyDeal(), nullptr);
+  for (const Player& seat : ten->rummyDeal()->getPlayers()) EXPECT_EQ(seat.hand.size(), 10u);
 
   auto gin = opened({"a", "b"}).chooseVariant(0, Variant::Gin, deck());
   ASSERT_TRUE(gin.ok()) << gin.status();
-  EXPECT_EQ(gin->basicDeal(), nullptr);
+  EXPECT_EQ(gin->rummyDeal(), nullptr);
   ASSERT_NE(gin->ginDeal(), nullptr);
   EXPECT_EQ(gin->ginDeal()->getStage(), GinStage::Upcard);
   // The seat after the dealer has the upcard first.
@@ -207,10 +207,10 @@ TEST(Table, TheDealerChoosesAndTheSeatAfterOpens) {
   EXPECT_EQ(dealt->getDealNumber(), 1);
   EXPECT_EQ(dealt->getVariant(), Variant::SevenCard);
   ASSERT_TRUE(dealt->getDeal().has_value());
-  EXPECT_EQ(dealt->basicDeal()->getWhoseTurn(), 1);
-  EXPECT_EQ(dealt->basicDeal()->getStage(), Stage::Draw);
-  EXPECT_EQ(dealt->basicDeal()->getPlayer(0).hand.size(), 7u);
-  EXPECT_EQ(dealt->basicDeal()->getGameId(), "T1");
+  EXPECT_EQ(dealt->rummyDeal()->getWhoseTurn(), 1);
+  EXPECT_EQ(dealt->rummyDeal()->getStage(), Stage::Draw);
+  EXPECT_EQ(dealt->rummyDeal()->getPlayer(0).hand.size(), 7u);
+  EXPECT_EQ(dealt->rummyDeal()->getGameId(), "T1");
 }
 
 TEST(Table, OnlyTheDealerChoosesUnlessTheDealerIsAway) {
@@ -221,7 +221,7 @@ TEST(Table, OnlyTheDealerChoosesUnlessTheDealerIsAway) {
   ASSERT_TRUE(away.ok()) << away.status();
   // The dealer stays the dealer: the seat after them still opens.
   EXPECT_EQ(away->getDealer(), 0);
-  EXPECT_EQ(away->basicDeal()->getWhoseTurn(), 1);
+  EXPECT_EQ(away->rummyDeal()->getWhoseTurn(), 1);
   EXPECT_EQ(table.chooseVariant(7, Variant::SevenCard, deck(), true).status().code(),
             absl::StatusCode::kInvalidArgument);
 }
@@ -243,7 +243,7 @@ TEST(Table, DealMovesGoToTheDealAndNowhereElse) {
   ASSERT_TRUE(dealt.ok());
   auto drew = dealt->inDeal<GameState>([](const GameState& d) { return d.drawStock(1); });
   ASSERT_TRUE(drew.ok()) << drew.status();
-  EXPECT_EQ(drew->basicDeal()->getStage(), Stage::Play);
+  EXPECT_EQ(drew->rummyDeal()->getStage(), Stage::Play);
   EXPECT_EQ(drew->getPhase(), TablePhase::Playing);
   // The deal's refusal is the table's.
   EXPECT_EQ(
@@ -275,13 +275,13 @@ TEST(Table, ADealWonByPlayScoresTheHandAndTheDealPassesOn) {
   EXPECT_EQ(out->getDealer(), 1);
   // The finished deal stays, to show its hands and result.
   ASSERT_TRUE(out->getDeal().has_value());
-  EXPECT_EQ(out->basicDeal()->winner(), "b");
+  EXPECT_EQ(out->rummyDeal()->winner(), "b");
   EXPECT_FALSE(out->isOver());
   // The next dealer is b; the seat after b opens.
   auto next = out->chooseVariant(1, Variant::SevenCard, deck());
   ASSERT_TRUE(next.ok()) << next.status();
   EXPECT_EQ(next->getDealNumber(), out->getDealNumber() + 1);
-  EXPECT_EQ(next->basicDeal()->getWhoseTurn(), 2);
+  EXPECT_EQ(next->rummyDeal()->getWhoseTurn(), 2);
   EXPECT_EQ(next->getWins(), (vector<int>{0, 1, 0}));
 }
 
@@ -290,7 +290,7 @@ TEST(Table, TheDealWrapsRoundTheTable) {
                         Variant::SevenCard, std::nullopt, "T", ""};
   auto dealt = last.chooseVariant(1, Variant::SevenCard, deck());
   ASSERT_TRUE(dealt.ok());
-  EXPECT_EQ(dealt->basicDeal()->getWhoseTurn(), 0);
+  EXPECT_EQ(dealt->rummyDeal()->getWhoseTurn(), 0);
 }
 
 TEST(Table, ALeaveWhileChoosingCompactsTheSeatsAndTheDealerFollows) {
@@ -328,7 +328,7 @@ TEST(Table, ALeaveMidDealLeavesTheDealToo) {
   ASSERT_TRUE(left.ok()) << left.status();
   EXPECT_EQ(left->getPhase(), TablePhase::Playing);
   EXPECT_EQ(left->getSeats(), (vector<string>{"a", "b"}));
-  EXPECT_EQ(left->basicDeal()->getPlayers().size(), 2u);
+  EXPECT_EQ(left->rummyDeal()->getPlayers().size(), 2u);
   EXPECT_EQ(left->getWins().size(), 2u);
 }
 
@@ -393,7 +393,7 @@ TEST(Table, BelowTwoSeatsTheTableClosesWithAnyDealInPlay) {
   auto left = dealt->removePlayer(0);
   ASSERT_TRUE(left.ok());
   EXPECT_TRUE(left->isOver());
-  EXPECT_EQ(left->basicDeal()->getPhase(), Phase::Abandoned);
+  EXPECT_EQ(left->rummyDeal()->getPhase(), Phase::Abandoned);
   auto choosing_left = opened({"a", "b"}).removePlayer(1);
   ASSERT_TRUE(choosing_left.ok());
   EXPECT_TRUE(choosing_left->isOver());
@@ -411,7 +411,7 @@ TEST(Table, SeatsAreFoundByIdAndTheIdsAreTheRowsToSet) {
   const TableState stamped = dealt->withIdAndVersion("G", "V");
   EXPECT_EQ(stamped.getGameId(), "G");
   EXPECT_EQ(stamped.getVersionId(), "V");
-  EXPECT_EQ(stamped.basicDeal()->getGameId(), "G");
+  EXPECT_EQ(stamped.rummyDeal()->getGameId(), "G");
 }
 
 TEST(Deal, OpensAtTheSeatNamed) {

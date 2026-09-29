@@ -72,9 +72,9 @@ void expectRoundTrips(const TableState& table) {
   EXPECT_EQ(restored->getPhase(), table.getPhase());
   EXPECT_EQ(restored->getVariant(), table.getVariant());
   ASSERT_EQ(restored->getDeal().has_value(), table.getDeal().has_value());
-  if (table.basicDeal() != nullptr) {
-    ASSERT_NE(restored->basicDeal(), nullptr);
-    EXPECT_EQ(serializeGameState(*restored->basicDeal()), serializeGameState(*table.basicDeal()));
+  if (table.rummyDeal() != nullptr) {
+    ASSERT_NE(restored->rummyDeal(), nullptr);
+    EXPECT_EQ(serializeGameState(*restored->rummyDeal()), serializeGameState(*table.rummyDeal()));
   }
   if (table.ginDeal() != nullptr) {
     ASSERT_NE(restored->ginDeal(), nullptr);
@@ -153,7 +153,7 @@ TEST(TableSerde, AVersionOneRowIsOneDeal) {
   EXPECT_EQ(table->getDealNumber(), 1);
   EXPECT_EQ(table->getDealer(), 2);
   EXPECT_EQ(table->getVariant(), Variant::SevenCard);
-  EXPECT_EQ(serializeGameState(*table->basicDeal()), serializeGameState(*drew));
+  EXPECT_EQ(serializeGameState(*table->rummyDeal()), serializeGameState(*drew));
 
   auto gone = drew->removePlayer(1);
   ASSERT_TRUE(gone.ok());

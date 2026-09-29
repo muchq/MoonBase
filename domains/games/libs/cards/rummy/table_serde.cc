@@ -109,7 +109,7 @@ std::string serializeTableState(const TableState& table) {
       {"variant", std::string(storedName(table.getVariant()))},
   };
   // The deal in its own engine's form; the variant says which.
-  if (const GameState* basic = table.basicDeal(); basic != nullptr) {
+  if (const GameState* basic = table.rummyDeal(); basic != nullptr) {
     serialized["deal"] = json::parse(serializeGameState(*basic));
   } else if (const GinState* gin = table.ginDeal(); gin != nullptr) {
     serialized["deal"] = json::parse(serializeGinState(*gin));

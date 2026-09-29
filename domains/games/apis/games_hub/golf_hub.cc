@@ -3273,7 +3273,7 @@ moonbase::games::RummyView GolfHub::RummyViewLocked(const std::string& game_id,
           }
         },
         *deal);
-    if (const rummy::GameState* basic = table.basicDeal(); basic != nullptr) {
+    if (const rummy::GameState* basic = table.rummyDeal(); basic != nullptr) {
       if (!shown) {
         view.stage = basic->getStage() == rummy::Stage::Draw ? "draw" : "play";
         view.canDrawDiscard =

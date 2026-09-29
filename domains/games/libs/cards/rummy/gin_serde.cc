@@ -204,6 +204,11 @@ absl::StatusOr<GinState> deserializeGinState(const std::string& serialized) {
     if (!id.ok()) return id.status();
     auto hand = readCardField(seat, "hand");
     if (!hand.ok()) return hand.status();
+    // Ten and the card drawn: what the engine deals and what arranging a
+    // hand is sized for.
+    if (hand->size() > GinState::kHandSize + 1) {
+      return absl::InvalidArgumentError("a hand holds at most eleven cards");
+    }
     players.push_back(Player{*std::move(id), *std::move(hand)});
   }
   auto stage = readName(parsed, "stage", kStages);
@@ -277,18 +282,27 @@ absl::StatusOr<GinState> deserializeGinState(const std::string& serialized) {
   if ((*phase == Phase::Over) != result.has_value()) {
     return absl::InvalidArgumentError("a deal over by play has its result");
   }
-  return GinState{std::deque<Card>(stock->begin(), stock->end()),
-                  *std::move(discard),
-                  std::move(players),
-                  *turn,
-                  *stage,
-                  *phase,
-                  *passes,
-                  taken,
-                  std::move(lastMove),
-                  std::move(result),
-                  "",
-                  ""};
+  GinState state{std::deque<Card>(stock->begin(), stock->end()),
+                 *std::move(discard),
+                 std::move(players),
+                 *turn,
+                 *stage,
+                 *phase,
+                 *passes,
+                 taken,
+                 std::move(lastMove),
+                 std::move(result),
+                 "",
+                 ""};
+  // A deal in play has a move to make: something to take or draw before
+  // the turn's throw, a card to throw after it. A row without one would
+  // hold both seats at "not your turn" until they left.
+  if (*phase == Phase::Playing) {
+    const bool stuck = *stage == GinStage::Play ? state.getPlayer(*turn).hand.empty()
+                                                : !state.canDrawStock() && !state.canDrawDiscard();
+    if (stuck) return absl::InvalidArgumentError("a playing row with no move to make");
+  }
+  return state;
 }
 
 }  // namespace rummy

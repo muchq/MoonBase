@@ -126,6 +126,24 @@ TEST(GinSerde, RejectsWhatTheEngineCouldNotPlay) {
   payload = base;
   payload["lastMove"]["kind"] = "meld";
   expectRejected(payload);
+  // No hand holds more than ten and the drawn card; the search that
+  // arranges a hand is sized for that.
+  payload = base;
+  for (int card = 0; card < 12; card++) payload["players"][1]["hand"].push_back(card);
+  expectRejected(payload);
+  // A playing row has a move to make: something to take or draw at the
+  // upcard or the draw, a card to throw mid-turn.
+  const json upcard = json::parse(serializeGinState(dealt()));
+  payload = upcard;
+  payload["discard"] = json::array();
+  expectRejected(payload);
+  const json stockOnly = json::parse(serializeGinState(*dealt().pass(1)->pass(0)));
+  payload = stockOnly;
+  payload["stock"] = json::array();
+  expectRejected(payload);
+  payload = base;
+  payload["players"][0]["hand"] = json::array();
+  expectRejected(payload);
 
   const json over = json::parse(serializeGinState(ginned()));
   payload = over;

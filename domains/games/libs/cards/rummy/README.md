@@ -19,10 +19,13 @@ or high but never both.
 bazel test //domains/games/libs/cards/rummy/...
 ```
 
-`game_state_serde.{h,cc}` is the versioned JSON the games hub stores a
-rummy table in — the engine's full truth, stock and every hand included,
-so it is server-side only; redaction stays in the hub.
-`game_state_serde_test.cc` pins the schema.
+`table_serde.{h,cc}` is the versioned JSON the games hub stores a table
+in: the seats, wins and dealer, and the deal in play or just ended, nested
+in its own engine's schema — `game_state_serde` for 7-card and 10-card,
+`gin_serde` for gin. 7-card is stored as `basic`, its name before the
+others. Each is the engine's full truth, stock and every hand included,
+so it is server-side only; redaction stays in the hub. The `*_serde_test.cc`
+files pin the schemas.
 
 Gin's rules are `GinState`'s, in `gin.h`, pinned in `gin_test.cc`. Its
 reckoning needs each hand's best arrangement: `arrange.h`'s search, which
