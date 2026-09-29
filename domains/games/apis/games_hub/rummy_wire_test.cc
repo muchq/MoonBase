@@ -103,14 +103,13 @@ TEST_F(RummyWireTest, CreateAndJoinPinTheWaitingViewAndTheLobbysWord) {
   ASSERT_TRUE(creator->Send(CommandFrame("rummy", R"({"move":{"createGame":{}}})")).ok());
   EXPECT_EQ(EventPayload(NextFrame(*creator), "rummy"),
             R"({"update":{"gameCreated":{"createdBy":"player-1","gameId":"GAME01"}}})");
-  EXPECT_EQ(
-      EventPayload(NextFrame(*creator), "rummy"),
-      R"({"update":{"gameJoined":{"view":{"canDrawDiscard":false,"canDrawStock":false,)"
-      R"("dealNumber":0,)"
-      R"("discardCount":0,"discardPile":[],"discardTakeable":[],"gameId":"GAME01","melds":[],)"
-      R"("phase":"waiting","players":[{"hand":[],"handCount":0,"playerId":"player-1"}],)"
-      R"("scoreSheet":[],"standings":[{"handsWon":0,"playerId":"player-1","points":0}],)"
-      R"("stockCount":0}}}})");
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "rummy"),
+            R"({"update":{"gameJoined":{"view":{"canDrawDiscard":false,"canDrawStock":false,)"
+            R"("dealNumber":0,)"
+            R"("discardCount":0,"discardPile":[],"gameId":"GAME01","melds":[],)"
+            R"("phase":"waiting","players":[{"hand":[],"handCount":0,"playerId":"player-1"}],)"
+            R"("scoreSheet":[],"standings":[{"handsWon":0,"playerId":"player-1","points":0}],)"
+            R"("stockCount":0}}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
             R"({"games":[{"game":"rummy","gameId":"GAME01","playerCount":1,"status":"waiting"}],)"
             R"("geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
@@ -145,7 +144,7 @@ TEST_F(RummyWireTest, AStartedTableWaitsOnTheDealersChoice) {
   EXPECT_EQ(EventPayload(NextFrame(*creator), "rummy"),
             R"({"update":{"gameState":{"view":{"canDrawDiscard":false,"canDrawStock":false,)"
             R"("choosing":{"dealer":"player-1","options":["7-card","10-card","gin"]},)"
-            R"("dealNumber":0,"discardCount":0,"discardPile":[],"discardTakeable":[],"gameId":)"
+            R"("dealNumber":0,"discardCount":0,"discardPile":[],"gameId":)"
             R"("GAME01","melds":[],"phase":"choosing","players":[{"hand":[],"handCount":0,)"
             R"("playerId":"player-1"},{"hand":[],"handCount":0,"playerId":"player-2"}],)"
             R"("scoreSheet":[],"standings":[{"handsWon":0,"playerId":"player-1","points":0},)"
@@ -179,7 +178,7 @@ TEST_F(RummyWireTest, TheDealtViewFromEachChair) {
       R"({"update":{"gameState":{"view":{"canDrawDiscard":true,"canDrawStock":true,)"
       R"("currentPlayerId":"player-2",)"
       R"("dealNumber":1,"discardCount":1,"discardPile":[{"rank":"J","suit":"♦"}],)"
-      R"("discardTakeable":[],"discardTop":{"rank":"J","suit":"♦"},"gameId":"GAME01",)"
+      R"("discardTop":{"rank":"J","suit":"♦"},"gameId":"GAME01",)"
       R"("melds":[],"phase":"playing","players":[{"hand":[{"rank":"A","suit":"♠"},)"
       R"({"rank":"A","suit":"♦"},{"rank":"K","suit":"♠"},{"rank":"K","suit":"♦"},)"
       R"({"rank":"Q","suit":"♠"},{"rank":"Q","suit":"♦"},{"rank":"J","suit":"♠"}],)"
@@ -190,9 +189,9 @@ TEST_F(RummyWireTest, TheDealtViewFromEachChair) {
   const json view = json::parse(dealt)["update"]["gameState"]["view"];
   EXPECT_EQ(KeysOf(view),
             (std::set<std::string>{"canDrawDiscard", "canDrawStock", "currentPlayerId",
-                                   "dealNumber", "discardCount", "discardPile", "discardTakeable",
-                                   "discardTop", "gameId", "melds", "phase", "players",
-                                   "scoreSheet", "stage", "standings", "stockCount", "variant"}));
+                                   "dealNumber", "discardCount", "discardPile", "discardTop",
+                                   "gameId", "melds", "phase", "players", "scoreSheet", "stage",
+                                   "standings", "stockCount", "variant"}));
   EXPECT_EQ(KeysOf(view["players"][0]), (std::set<std::string>{"hand", "handCount", "playerId"}));
   // Absent optionals are omitted keys, not nulls: nothing taken, no move
   // yet, no deal before this one, nobody choosing.
@@ -223,7 +222,7 @@ TEST_F(RummyWireTest, TurnMovesPinTheirSpellingAndTheDealsEndBytes) {
   EXPECT_EQ(EventPayload(NextFrame(*creator), "rummy"),
             R"({"update":{"gameState":{"view":{"canDrawDiscard":false,"canDrawStock":true,)"
             R"("currentPlayerId":"player-2","dealNumber":1,"discardCount":0,"discardPile":[],)"
-            R"("discardTakeable":[],"gameId":"GAME01","lastMove":{"cards":[{"rank":)"
+            R"("gameId":"GAME01","lastMove":{"cards":[{"rank":)"
             R"("J","suit":"♦"}],"move":"drawDiscard","playerId":"player-2"},"melds":[],"phase":)"
             R"("playing","players":[{"hand":[{"rank":"A","suit":"♠"},{"rank":"A","suit":"♦"},)"
             R"({"rank":"K","suit":"♠"},{"rank":"K","suit":"♦"},{"rank":"Q","suit":"♠"},)"
@@ -307,8 +306,8 @@ TEST_F(RummyWireTest, TurnMovesPinTheirSpellingAndTheDealsEndBytes) {
   // adds who deals next and how the last deal went.
   EXPECT_EQ(KeysOf(between),
             (std::set<std::string>{"canDrawDiscard", "canDrawStock", "choosing", "dealNumber",
-                                   "discardCount", "discardPile", "discardTakeable", "discardTop",
-                                   "gameId", "lastDeal", "lastMove", "melds", "phase", "players",
+                                   "discardCount", "discardPile", "discardTop", "gameId",
+                                   "lastDeal", "lastMove", "melds", "phase", "players",
                                    "scoreSheet", "standings", "stockCount", "variant"}));
   EXPECT_EQ(between["variant"], "7-card");
 
@@ -513,10 +512,9 @@ TEST_F(RummyWireTest, GinMovesAtASevenCardTableAreRefused) {
 }
 
 // Taking the discard pile down to a card: player-2 draws the J♣ and throws
-// the A♣ onto the J♦. player-1 — Q♦ K♦ A♦ in hand — is offered the J♦ as
-// well as the top, takes both, and owes the J♦: no discard until it is
-// played.
-TEST_F(RummyWireTest, TakingThePileDownOwesItsDeepestCard) {
+// the A♣ onto the J♦. player-1, holding Q♦ K♦, takes the pile down to the
+// J♦ and melds it with them in the one move; the A♣ comes to hand.
+TEST_F(RummyWireTest, TakingThePileDownMeldsItsDeepestCardAtOnce) {
   std::shared_ptr<opal::http::WebSocket> creator;
   std::shared_ptr<opal::http::WebSocket> joiner;
   DealtAndRead(creator, joiner);
@@ -527,59 +525,98 @@ TEST_F(RummyWireTest, TakingThePileDownOwesItsDeepestCard) {
       joiner
           ->Send(CommandFrame("rummy", R"({"move":{"discard":{"card":{"rank":"A","suit":"♣"}}}})"))
           .ok());
-  const json theirs =
-      json::parse(EventPayload(NextFrame(*joiner), "rummy"))["update"]["gameState"]["view"];
+  (void)EventPayload(NextFrame(*joiner), "rummy");
   (void)EventPayload(NextFrame(*joiner), "rummy");  // turnChanged
   const json mine =
       json::parse(EventPayload(NextFrame(*creator), "rummy"))["update"]["gameState"]["view"];
   (void)EventPayload(NextFrame(*creator), "rummy");  // turnChanged
   EXPECT_EQ(mine["discardPile"].dump(), R"([{"rank":"J","suit":"♦"},{"rank":"A","suit":"♣"}])");
-  // Offered only to the seat on its draw.
-  EXPECT_EQ(mine["discardTakeable"].dump(), R"([{"rank":"J","suit":"♦"},{"rank":"A","suit":"♣"}])");
-  EXPECT_EQ(theirs["discardTakeable"], json::array());
 
+  // Off turn, the turn is what is wrong, whatever the card named.
+  ASSERT_TRUE(joiner
+                  ->Send(CommandFrame(
+                      "rummy", R"({"move":{"drawDiscard":{"card":{"rank":"J","suit":"♦"}}}})"))
+                  .ok());
+  EXPECT_EQ(EventPayload(NextFrame(*joiner), "commandRejected"), R"({"reason":"not your turn"})");
+  // A plain draw takes the top alone.
   ASSERT_TRUE(creator
                   ->Send(CommandFrame(
                       "rummy", R"({"move":{"drawDiscard":{"card":{"rank":"J","suit":"♦"}}}})"))
                   .ok());
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
+            R"({"reason":"a draw takes the top card: take the pile down with takeDown"})");
+
+  ASSERT_TRUE(creator
+                  ->Send(CommandFrame(
+                      "rummy", R"({"move":{"takeDown":{"card":{"rank":"J","suit":"♦"},)"
+                               R"("cards":[{"rank":"Q","suit":"♦"},{"rank":"K","suit":"♦"}]}}})"))
+                  .ok());
   const json took =
       json::parse(EventPayload(NextFrame(*creator), "rummy"))["update"]["gameState"]["view"];
   EXPECT_EQ(took["discardPile"], json::array());
-  EXPECT_EQ(took["mustPlay"].dump(), R"({"rank":"J","suit":"♦"})");
-  EXPECT_EQ(took["lastMove"].dump(),
-            R"({"cards":[{"rank":"J","suit":"♦"},{"rank":"A","suit":"♣"}],"move":"drawDiscard",)"
-            R"("playerId":"player-1"})");
-  EXPECT_EQ(took["players"][0]["handCount"], 9);
+  EXPECT_EQ(took["melds"].back()["cards"].dump(),
+            R"([{"rank":"J","suit":"♦"},{"rank":"Q","suit":"♦"},{"rank":"K","suit":"♦"}])");
+  EXPECT_EQ(took["lastMove"]["move"], "takeDown");
+  EXPECT_EQ(took["lastMove"]["cards"].dump(),
+            R"([{"rank":"J","suit":"♦"},{"rank":"A","suit":"♣"}])");
+  EXPECT_EQ(took["lastMove"]["meldIndex"], took["melds"].size() - 1);
+  EXPECT_EQ(took["players"][0]["handCount"], 6);
+  EXPECT_EQ(took["stage"], "play");
 
+  // player-1 throws the A♦; player-2 takes the pile down to it by laying
+  // it off onto the J♦ Q♦ K♦.
   ASSERT_TRUE(
       creator
-          ->Send(CommandFrame("rummy", R"({"move":{"discard":{"card":{"rank":"A","suit":"♣"}}}})"))
+          ->Send(CommandFrame("rummy", R"({"move":{"discard":{"card":{"rank":"A","suit":"♦"}}}})"))
           .ok());
-  EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
-            R"({"reason":"play the J♦ you took first"})");
+  (void)EventPayload(NextFrame(*creator), "rummy");
+  (void)EventPayload(NextFrame(*creator), "rummy");  // turnChanged
+  (void)EventPayload(NextFrame(*joiner), "rummy");   // the take-down
+  (void)EventPayload(NextFrame(*joiner), "rummy");   // the discard
+  (void)EventPayload(NextFrame(*joiner), "rummy");   // turnChanged
+  const auto meld = took["melds"].size() - 1;
   ASSERT_TRUE(
-      creator
-          ->Send(CommandFrame(
-              "rummy",
-              R"({"move":{"meld":{"cards":[{"rank":"J","suit":"♦"},{"rank":"Q","suit":"♦"},)"
-              R"({"rank":"K","suit":"♦"}]}}})"))
+      joiner
+          ->Send(CommandFrame("rummy", R"({"move":{"takeDown":{"card":{"rank":"A","suit":"♦"},)"
+                                       R"("meldIndex":)" +
+                                           std::to_string(meld) + "}}}"))
           .ok());
-  const json melded =
-      json::parse(EventPayload(NextFrame(*creator), "rummy"))["update"]["gameState"]["view"];
-  EXPECT_FALSE(melded.contains("mustPlay"));
+  const json laid =
+      json::parse(EventPayload(NextFrame(*joiner), "rummy"))["update"]["gameState"]["view"];
+  EXPECT_EQ(laid["melds"][meld]["cards"].dump(),
+            R"([{"rank":"J","suit":"♦"},{"rank":"Q","suit":"♦"},{"rank":"K","suit":"♦"},)"
+            R"({"rank":"A","suit":"♦"}])");
+  EXPECT_EQ(laid["lastMove"].dump(), R"({"cards":[{"rank":"A","suit":"♦"}],"meldIndex":)" +
+                                         std::to_string(meld) +
+                                         R"(,"move":"takeDown","playerId":"player-2"})");
+  EXPECT_EQ(laid["discardPile"], json::array());
 }
 
-// A card the pile does not hold is refused as such.
-TEST_F(RummyWireTest, ACardThatCouldNotBePlayedIsNotTakenDownTo) {
+// A take-down melds cards from hand or lays off onto a meld, one or the
+// other; a lay-off names a meld on the table, and the card named is in
+// the pile.
+TEST_F(RummyWireTest, ATakeDownNamesItsPlay) {
   std::shared_ptr<opal::http::WebSocket> creator;
   std::shared_ptr<opal::http::WebSocket> joiner;
   DealtAndRead(creator, joiner);
-  ASSERT_TRUE(joiner
-                  ->Send(CommandFrame(
-                      "rummy", R"({"move":{"drawDiscard":{"card":{"rank":"2","suit":"♣"}}}})"))
-                  .ok());
-  EXPECT_EQ(EventPayload(NextFrame(*joiner), "commandRejected"),
+  const auto refused = [&](const std::string& take_down) {
+    EXPECT_TRUE(
+        joiner->Send(CommandFrame("rummy", R"({"move":{"takeDown":)" + take_down + "}}")).ok());
+    return EventPayload(NextFrame(*joiner), "commandRejected");
+  };
+  EXPECT_EQ(refused(R"({"card":{"rank":"J","suit":"♦"}})"),
+            R"({"reason":"a take-down melds cards from hand or lays off onto a meld"})");
+  EXPECT_EQ(refused(R"({"card":{"rank":"J","suit":"♦"},"cards":[{"rank":"A","suit":"♥"}],)"
+                    R"("meldIndex":0})"),
+            R"({"reason":"a take-down melds cards from hand or lays off onto a meld"})");
+  EXPECT_EQ(refused(R"({"card":{"rank":"J","suit":"♦"},"meldIndex":3})"),
+            R"({"reason":"no such meld"})");
+  EXPECT_EQ(refused(R"({"card":{"rank":"2","suit":"♣"},"meldIndex":0})"),
             R"({"reason":"that card is not in the discard pile"})");
+  // The meld is the hand's; player-1 holds the Q♦ and K♦.
+  EXPECT_EQ(refused(R"({"card":{"rank":"J","suit":"♦"},"cards":[{"rank":"Q","suit":"♦"},)"
+                    R"({"rank":"K","suit":"♦"}]})"),
+            R"({"reason":"not in your hand: Q♦"})");
 }
 
 TEST_F(RummyWireTest, StockDrawAndDiscardSpellings) {

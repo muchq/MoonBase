@@ -2053,6 +2053,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"rummy_commands", {{"command", "pass"}}},
       {"rummy_commands", {{"command", "drawStock"}}},
       {"rummy_commands", {{"command", "drawDiscard"}}},
+      {"rummy_commands", {{"command", "takeDown"}}},
       {"rummy_commands", {{"command", "meld"}}},
       {"rummy_commands", {{"command", "layOff"}}},
       {"rummy_commands", {{"command", "discard"}}},

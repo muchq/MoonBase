@@ -41,6 +41,7 @@ union RummyMove {
     pass: RummyPass
     drawStock: RummyDrawStock
     drawDiscard: RummyDrawDiscard
+    takeDown: RummyTakeDown
     meld: RummyMeld
     layOff: RummyLayOff
     discard: RummyDiscard
@@ -64,14 +65,26 @@ structure RummyPass {}
 /// discard pile, turned over under its top card.
 structure RummyDrawStock {}
 
-/// Take the top of the discard pile — or, but in gin, every card from the
-/// top down to `card`. A card taken alone may not be discarded again this
-/// turn, unless it is the last in the hand. Taking more than one binds the
-/// seat to play `card` (meld it or lay it off) before it discards, so it
-/// may only be a card the view offers in discardTakeable.
+/// Take the top of the discard pile. It may not be discarded again this
+/// turn, unless it is the last card in the hand.
 structure RummyDrawDiscard {
-    /// The deepest card to take; absent, the top.
+    /// The top card, if named; any other is refused (see RummyTakeDown).
     card: Card
+}
+
+/// Not in gin. Take every card of the discard pile from the top down to
+/// `card`, playing `card` in the same move — melded with `cards` from the
+/// hand, or laid off onto the table meld `meldIndex`, one or the other.
+/// The other cards taken come to the hand in the order they lay.
+structure RummyTakeDown {
+    @required
+    card: Card
+
+    /// Cards from the hand to meld `card` with.
+    cards: RummyCards
+
+    /// The table meld to lay `card` off onto.
+    meldIndex: Integer
 }
 
 /// Lay down a set (three or four of a rank) or a run (three or more of a
@@ -327,16 +340,6 @@ structure RummyView {
     @required
     discardPile: RummyCards
 
-    /// The cards the viewer may take the discard pile down to now (drawDiscard's
-    /// card), bottom to top: the top, and each deeper card it could then
-    /// play. Empty but on the viewer's own draw, and in gin.
-    @required
-    discardTakeable: RummyCards
-
-    /// The deepest card the seat on turn took the discard pile down to,
-    /// while it is still in hand: it must be played before the turn ends.
-    mustPlay: Card
-
     /// The card the seat on turn took from the discard pile this turn,
     /// which it may not throw back unless it is its last. Public: everyone
     /// saw it taken.
@@ -393,17 +396,19 @@ structure RummyLastMove {
     @required
     playerId: String
 
-    /// drawStock | drawDiscard | meld | layOff | discard | pass | knock
+    /// drawStock | drawDiscard | takeDown | meld | layOff | discard | pass | knock
     @required
     move: String
 
     /// What went on or came off the table: nothing for a stock draw
-    /// (nobody else sees it) or a pass, the cards taken, the meld as laid,
-    /// the card laid off, the card discarded or knocked on.
+    /// (nobody else sees it) or a pass, the card taken, the cards a
+    /// take-down took (the one it played first), the meld as laid, the
+    /// card laid off, the card discarded or knocked on.
     @required
     cards: RummyCards
 
-    /// The meld a meld or lay-off made or grew; absent otherwise.
+    /// The meld a meld, lay-off or take-down made or grew; absent
+    /// otherwise.
     meldIndex: Integer
 }
 

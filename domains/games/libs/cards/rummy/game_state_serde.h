@@ -25,13 +25,14 @@ namespace rummy {
 ///    "players":[{"id":str, "hand":[int...]}...],
 ///    "melds":[{"owner":str, "cards":[int...]}...],
 ///    "takenDiscard":int,
-///    "lastMove":{"player":str, "kind":"drawStock"|"drawDiscard"|"meld"|
-///                "layOff"|"discard", "cards":[int...], "meld":int}}
+///    "lastMove":{"player":str, "kind":"drawStock"|"drawDiscard"|"takeDown"|
+///                "meld"|"layOff"|"discard", "cards":[int...], "meld":int}}
 /// takenDiscard and lastMove are absent when there is none. lastMove has
-/// its kind's shape (no card for drawStock, one for drawDiscard, discard
-/// and layOff, three or more for meld; meld >= 0 exactly for meld and
-/// layOff), and a playing row has a move to make: something to draw at the
-/// draw stage, a card in the mover's hand at the play stage.
+/// its kind's shape (no card for drawStock, one for discard and layOff, one
+/// or more for drawDiscard and takeDown, three or more for meld; meld >= 0
+/// exactly for meld, layOff and takeDown), and a playing row has a move to
+/// make: something to draw at the draw stage, a card in the mover's hand at
+/// the play stage.
 ///
 /// Keys emit alphabetically (nlohmann's sorted-map default), so
 /// re-serializing a deserialized state reproduces the bytes. Unknown

@@ -10,7 +10,6 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//domains/games/libs/cards",
-        "//domains/games/libs/cards:card_mapper",
     ],
 )
 
@@ -25,9 +24,8 @@ cc_library(
     ],
 )
 
-# The corpus is shared with the web client's search (muchq.github.io
-# src/apps/rummy), which replays a copy; testdata/make_arrange_corpus.py
-# makes it from a brute force of its own.
+# testdata/make_arrange_corpus.py makes the corpus from a brute force of
+# its own.
 cc_test(
     name = "arrange_test",
     size = "small",

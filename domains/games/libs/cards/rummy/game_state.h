@@ -23,10 +23,9 @@ using std::string;
 ///     table names moves first (TableState: the seat after the dealer).
 ///   - A turn opens with a draw: the top of the stock, or the top of the
 ///     discard pile, or every card of the discard pile from the top down
-///     to one named deeper in it. A seat taking more than one card must
-///     play the deepest of them — meld it or lay it off — before it may
-///     discard, so it may only take down to a card it could then play
-///     (playable). A stock that has run out is refilled by turning the
+///     to one named in it, played at once — melded with cards from the
+///     hand, or laid off onto a meld on the table — with the rest going to
+///     the hand. A stock that has run out is refilled by turning the
 ///     discard pile over, all but its top card; with nothing under the top
 ///     there is no stock to draw from.
 ///   - Then any number of melds and lay-offs, in any order. A meld puts
@@ -60,13 +59,14 @@ struct Meld {
   bool operator==(const Meld& o) const { return owner == o.owner && cards == o.cards; }
 };
 
-enum class MoveKind { DrawStock, DrawDiscard, Meld, LayOff, Discard };
+enum class MoveKind { DrawStock, DrawDiscard, TakeDown, Meld, LayOff, Discard };
 
 /// The table's most recent move, as everyone saw it. `cards` is what went
 /// on or came off the table: nothing for a stock draw (nobody sees it),
-/// the card taken for a discard draw, the meld's cards, the card laid
-/// off, the card discarded. `meld` is the table meld a meld or lay-off
-/// made or grew, -1 otherwise. The seat named may since have left.
+/// the card taken for a discard draw, the cards a take-down took, the
+/// meld's cards, the card laid off, the card discarded. `meld` is the
+/// table meld a meld, lay-off or take-down made or grew, -1 otherwise. The seat named may since
+/// have left.
 struct LastMove {
   string playerId;
   MoveKind kind = MoveKind::DrawStock;
@@ -108,8 +108,7 @@ class GameState {
   GameState(std::deque<Card> _stock, std::vector<Card> _discard, std::vector<Player> _players,
             std::vector<Meld> _melds, int _whoseTurn, Stage _stage, Phase _phase,
             std::optional<Card> _takenDiscard, string _gameId, string _versionId,
-            std::optional<LastMove> _lastMove = std::nullopt,
-            std::optional<Card> _mustPlay = std::nullopt)
+            std::optional<LastMove> _lastMove = std::nullopt)
       : stock(std::move(_stock)),
         discardPile(std::move(_discard)),
         players(std::move(_players)),
@@ -119,18 +118,20 @@ class GameState {
         phase(_phase),
         takenDiscard(std::move(_takenDiscard)),
         lastMove(std::move(_lastMove)),
-        mustPlay(std::move(_mustPlay)),
         gameId(std::move(_gameId)),
         versionId(std::move(_versionId)) {}
 
   // The draw.
   [[nodiscard]] absl::StatusOr<GameState> drawStock(int player) const;
-  /// The discard pile's top card, or every card from the top down to
-  /// `downTo`. Taking more than one binds the seat to play `downTo` (meld it
-  /// or lay it off) before its turn ends, so it may only be a card the seat
-  /// could play with its hand and the cards taken (discardTakeable).
-  [[nodiscard]] absl::StatusOr<GameState> drawDiscard(
-      int player, std::optional<Card> downTo = std::nullopt) const;
+  [[nodiscard]] absl::StatusOr<GameState> drawDiscard(int player) const;
+  /// Every card of the discard pile from the top down to `downTo`, which is
+  /// melded with `fromHand` — cards the hand held before the draw — or laid
+  /// off onto the table's meld `meldIndex`. The rest come to the hand, in
+  /// the order they lay.
+  [[nodiscard]] absl::StatusOr<GameState> takeDownAndMeld(int player, const Card& downTo,
+                                                          const std::vector<Card>& fromHand) const;
+  [[nodiscard]] absl::StatusOr<GameState> takeDownAndLayOff(int player, const Card& downTo,
+                                                            int meldIndex) const;
   // After it.
   [[nodiscard]] absl::StatusOr<GameState> meld(int player, const std::vector<Card>& cards) const;
   [[nodiscard]] absl::StatusOr<GameState> layOff(int player, const Card& card, int meldIndex) const;
@@ -155,10 +156,6 @@ class GameState {
   /// Whether the stock can be drawn from right now: it holds cards, or the
   /// discard pile has cards under its top to turn over.
   [[nodiscard]] bool canDrawStock() const;
-  /// The cards in the discard pile a seat may take down to now, bottom to
-  /// top: the top card, and each deeper card it could then play. Empty but
-  /// on the seat's draw.
-  [[nodiscard]] std::vector<Card> discardTakeable(int player) const;
 
   [[nodiscard]] GameState withIdAndVersion(const string& game_id, const string& version_id) const;
   [[nodiscard]] const std::deque<Card>& getStock() const { return stock; }
@@ -170,9 +167,6 @@ class GameState {
   [[nodiscard]] int getWhoseTurn() const { return whoseTurn; }
   /// The card the seat on turn took from the discard pile this turn.
   [[nodiscard]] const std::optional<Card>& getTakenDiscard() const { return takenDiscard; }
-  /// The deepest card the seat on turn took down to, while it is still in
-  /// hand: the turn cannot end until it is played.
-  [[nodiscard]] const std::optional<Card>& getMustPlay() const { return mustPlay; }
   [[nodiscard]] const std::optional<LastMove>& getLastMove() const { return lastMove; }
   [[nodiscard]] const string& getGameId() const { return gameId; }
   [[nodiscard]] const string& getVersionId() const { return versionId; }
@@ -180,10 +174,14 @@ class GameState {
  private:
   [[nodiscard]] absl::Status ensureTurn(int player, Stage wanted) const;
   /// The state after the seat on turn put cards down, its hand now `hand`:
-  /// over if the hand is empty, else still its turn. Refused if a card
-  /// owed stays in hand with no way left to play it.
-  [[nodiscard]] absl::StatusOr<GameState> afterLaying(int player, std::vector<Card> hand,
-                                                      std::vector<Meld> table, LastMove move) const;
+  /// over if the hand is empty, else still its turn.
+  [[nodiscard]] GameState afterLaying(int player, std::vector<Card> hand, std::vector<Meld> table,
+                                      LastMove move) const;
+  /// The draw of every card from the top of the discard pile down to
+  /// `downTo`, all of them in hand; the take-down's play comes next.
+  [[nodiscard]] absl::StatusOr<GameState> tookDownTo(int player, const Card& downTo) const;
+  /// `played`, a take-down's play, recorded as the take-down it finishes.
+  [[nodiscard]] GameState asTakeDown(const GameState& played, const Card& downTo) const;
 
   const std::deque<Card> stock;         // back is the top
   const std::vector<Card> discardPile;  // back is the top
@@ -194,7 +192,6 @@ class GameState {
   const Phase phase;
   const std::optional<Card> takenDiscard;
   const std::optional<LastMove> lastMove;
-  const std::optional<Card> mustPlay;
   const string gameId;
   const string versionId;
 };

@@ -76,6 +76,8 @@ std::string MoveName(rummy::MoveKind kind) {
       return "drawStock";
     case rummy::MoveKind::DrawDiscard:
       return "drawDiscard";
+    case rummy::MoveKind::TakeDown:
+      return "takeDown";
     case rummy::MoveKind::Meld:
       return "meld";
     case rummy::MoveKind::LayOff:

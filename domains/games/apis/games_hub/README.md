@@ -371,9 +371,10 @@ each seat won. Every deal played out goes on the table's `scoreSheet`, and
 each standing's `points` is its seat's sum of it.
 
 Rummy's discard pile is public in full (`discardPile`). Outside gin a draw
-may take it down to a deeper card, which the seat must then play before it
-discards; the view offers the seat on its draw exactly the cards it may
-take down to (`discardTakeable`), and names the card owed (`mustPlay`).
+may take it down to a deeper card (`takeDown`) by playing that card in the
+same move: melded with cards from hand, or laid off onto a table meld. The
+view does not say which cards could be taken down to; seeing that is the
+player's game.
 
 ## Redaction
 

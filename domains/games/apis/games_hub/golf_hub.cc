@@ -184,6 +184,8 @@ std::string RummyMoveName(rummy::MoveKind kind) {
       return "drawStock";
     case rummy::MoveKind::DrawDiscard:
       return "drawDiscard";
+    case rummy::MoveKind::TakeDown:
+      return "takeDown";
     case rummy::MoveKind::Meld:
       return "meld";
     case rummy::MoveKind::LayOff:
@@ -493,6 +495,7 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"rummy_commands", {{"command", "pass"}}},
       {"rummy_commands", {{"command", "drawStock"}}},
       {"rummy_commands", {{"command", "drawDiscard"}}},
+      {"rummy_commands", {{"command", "takeDown"}}},
       {"rummy_commands", {{"command", "meld"}}},
       {"rummy_commands", {{"command", "layOff"}}},
       {"rummy_commands", {{"command", "discard"}}},
@@ -2063,8 +2066,10 @@ void GolfHub::HandleRummyMove(const std::string& player_id, const RummyMove& mov
       std::function<absl::StatusOr<rummy::GameState>(const rummy::GameState&, int, const Cards&)>;
   using GinStep =
       std::function<absl::StatusOr<rummy::GinState>(const rummy::GinState&, int, const Cards&)>;
+  // The named cards from `from_hand` on are the hand's; a take-down's
+  // first is the pile's.
   const auto step = [&](const std::vector<moonbase::games::Card>& wire, BasicStep basic,
-                        GinStep gin) {
+                        GinStep gin, std::size_t from_hand = 0) {
     auto named = CardsFromWire(wire);
     if (!named.ok()) {
       Reject(player_id, RejectKind::kInvalid, std::string(named.status().message()));
@@ -2072,14 +2077,16 @@ void GolfHub::HandleRummyMove(const std::string& player_id, const RummyMove& mov
     }
     TableEngineMove<rummy::TableState>(
         player_id, GameKind::kRummy,
-        [cards = *std::move(named), basic = std::move(basic), gin = std::move(gin)](
+        [cards = *std::move(named), basic = std::move(basic), gin = std::move(gin), from_hand](
             const rummy::TableState& table, int seat) -> Next {
           // The engine's turn and stage come first; only a move it would
           // make but for a card the hand lacks is stale, and that one is
           // named in the wire's spelling.
           const auto held = [&](const auto& deal, auto next) -> decltype(next) {
             if (next.status().code() == absl::StatusCode::kNotFound) {
-              return HeldInHand(deal.getPlayer(seat).hand, cards);
+              return HeldInHand(
+                  deal.getPlayer(seat).hand,
+                  Cards(cards.begin() + static_cast<std::ptrdiff_t>(from_hand), cards.end()));
             }
             return next;
           };
@@ -2127,13 +2134,25 @@ void GolfHub::HandleRummyMove(const std::string& player_id, const RummyMove& mov
     return;
   }
   if (const auto* draw = move.as_drawDiscard_or_null()) {
-    // The card named is the deepest to take; none, the top.
+    // A card named is the top's; a deeper one is a take-down's to take.
     std::vector<moonbase::games::Card> named;
     if (draw->card.has_value()) named.push_back(*draw->card);
+    const auto top = [](const std::vector<cards::Card>& pile, const Cards& cards) -> absl::Status {
+      if (!cards.empty() && (pile.empty() || pile.back() != cards.front())) {
+        return absl::InvalidArgumentError(
+            "a draw takes the top card: take the pile down with takeDown");
+      }
+      return absl::OkStatus();
+    };
     step(
         named,
-        [](const rummy::GameState& deal, int seat, const Cards& cards) {
-          return cards.empty() ? deal.drawDiscard(seat) : deal.drawDiscard(seat, cards.front());
+        [top](const rummy::GameState& deal, int seat,
+              const Cards& cards) -> absl::StatusOr<rummy::GameState> {
+          // The engine's turn and stage refusals come first.
+          auto drew = deal.drawDiscard(seat);
+          if (!drew.ok()) return drew;
+          if (auto ok = top(deal.getDiscard(), cards); !ok.ok()) return ok;
+          return drew;
         },
         [](const rummy::GinState& deal, int seat,
            const Cards& cards) -> absl::StatusOr<rummy::GinState> {
@@ -2143,6 +2162,25 @@ void GolfHub::HandleRummyMove(const std::string& player_id, const RummyMove& mov
           }
           return deal.drawDiscard(seat);
         });
+    return;
+  }
+  if (const auto* take_down = move.as_takeDown_or_null()) {
+    // Exactly one play: a meld with hand cards, or a lay-off.
+    const bool melds = take_down->cards.has_value();
+    if (melds == take_down->meldIndex.has_value()) {
+      Reject(player_id, RejectKind::kInvalid,
+             "a take-down melds cards from hand or lays off onto a meld");
+      return;
+    }
+    std::vector<moonbase::games::Card> named{take_down->card};
+    if (melds) named.insert(named.end(), take_down->cards->begin(), take_down->cards->end());
+    step(
+        named,
+        [index = take_down->meldIndex](const rummy::GameState& deal, int seat, const Cards& cards) {
+          if (index.has_value()) return deal.takeDownAndLayOff(seat, cards.front(), *index);
+          return deal.takeDownAndMeld(seat, cards.front(), Cards(cards.begin() + 1, cards.end()));
+        },
+        nullptr, /*from_hand=*/1);
     return;
   }
   if (const auto* meld = move.as_meld_or_null()) {
@@ -3311,11 +3349,6 @@ moonbase::games::RummyView GolfHub::RummyViewLocked(const std::string& game_id,
         view.stage = basic->getStage() == rummy::Stage::Draw ? "draw" : "play";
         view.canDrawDiscard =
             basic->getStage() == rummy::Stage::Draw && !basic->getDiscard().empty();
-        // How deep the viewer may take the pile: its own to know, on its draw.
-        if (const int seat = basic->playerIndex(viewer_id); seat >= 0) {
-          view.discardTakeable = WireCards(basic->discardTakeable(seat));
-        }
-        if (basic->getMustPlay().has_value()) view.mustPlay = WireCard(*basic->getMustPlay());
       }
       for (const rummy::Meld& meld : basic->getMelds()) {
         moonbase::games::RummyTableMeld table_meld;
