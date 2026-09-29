@@ -286,6 +286,13 @@ TEST_F(RummyWireTest, TurnMovesPinTheirSpellingAndTheDealsEndBytes) {
   const json room = json::parse(EventPayload(NextFrame(*creator), "roomState"));
   EXPECT_EQ(room["games"][0]["status"], "choosing");
   EXPECT_EQ(room["players"][1]["gamesWon"], 1);
+  // Between deals the view keeps the last deal's variant and cards, and
+  // adds who deals next and how the last deal went.
+  EXPECT_EQ(KeysOf(between),
+            (std::set<std::string>{"canDrawStock", "choosing", "dealNumber", "discardCount",
+                                   "discardTop", "gameId", "lastDeal", "lastMove", "melds", "phase",
+                                   "players", "standings", "stockCount", "variant"}));
+  EXPECT_EQ(between["variant"], "basic");
 }
 
 // Below two seats the table closes: the last deal, broken up, names no

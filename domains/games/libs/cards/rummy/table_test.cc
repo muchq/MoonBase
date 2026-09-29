@@ -92,8 +92,9 @@ TEST(Table, OnlyTheDealerChoosesUnlessTheDealerIsAway) {
 TEST(Table, NoChoosingWhileADealIsInPlay) {
   auto dealt = opened().chooseVariant(0, Variant::Basic, deck());
   ASSERT_TRUE(dealt.ok());
-  EXPECT_EQ(dealt->chooseVariant(0, Variant::Basic, deck()).status().code(),
-            absl::StatusCode::kFailedPrecondition);
+  const absl::Status refused = dealt->chooseVariant(0, Variant::Basic, deck()).status();
+  EXPECT_EQ(refused.code(), absl::StatusCode::kFailedPrecondition);
+  EXPECT_EQ(refused.message(), "not between deals");
 }
 
 TEST(Table, DealMovesGoToTheDealAndNowhereElse) {

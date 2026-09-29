@@ -929,7 +929,22 @@ TEST_F(RummyGameFixture, TheNextDealIsTheNextDealersChoice) {
     ASSERT_TRUE(turn.has_value());
     EXPECT_EQ(turn->as_turnChanged_or_null()->playerId, bob.player_id);
   }
-  EXPECT_EQ(metrics_->CounterTotal("rummy_commands", {{"command", "chooseVariant"}}), 3);
+  // Mid-deal there is nothing to choose.
+  ASSERT_TRUE(alice.stream.Send(Choose("basic")).ok());
+  refused = ReceiveCase(alice.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not between deals");
+  EXPECT_EQ(metrics_->CounterTotal("rummy_commands", {{"command", "chooseVariant"}}), 4);
+
+  // Bob leaving mid-deal closes the table; its standings keep the hand
+  // alice won, and both deals count.
+  ASSERT_TRUE(bob.stream.Send(Rummy(RummyMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  auto ended = ReceiveRummy(alice.stream, "gameEnded");
+  ASSERT_TRUE(ended.has_value());
+  EXPECT_EQ(ended->as_gameEnded_or_null()->dealsPlayed, 2);
+  ASSERT_EQ(ended->as_gameEnded_or_null()->standings.size(), 1u);
+  EXPECT_EQ(ended->as_gameEnded_or_null()->standings[0].playerId, alice.player_id);
+  EXPECT_EQ(ended->as_gameEnded_or_null()->standings[0].handsWon, 1);
 }
 
 // A dealer the room shows as gone does not stall the table: any seat may
