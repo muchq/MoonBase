@@ -72,7 +72,7 @@ structure RummyDrawDiscard {
     card: Card
 }
 
-/// But in gin: take every card of the discard pile from the top down to
+/// Not in gin. Take every card of the discard pile from the top down to
 /// `card`, playing `card` in the same move — melded with `cards` from the
 /// hand, or laid off onto the table meld `meldIndex`, one or the other.
 /// The other cards taken come to the hand in the order they lay.

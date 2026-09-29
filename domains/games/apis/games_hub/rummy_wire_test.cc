@@ -562,6 +562,34 @@ TEST_F(RummyWireTest, TakingThePileDownMeldsItsDeepestCardAtOnce) {
   EXPECT_EQ(took["lastMove"]["meldIndex"], took["melds"].size() - 1);
   EXPECT_EQ(took["players"][0]["handCount"], 6);
   EXPECT_EQ(took["stage"], "play");
+
+  // player-1 throws the A♦; player-2 takes the pile down to it by laying
+  // it off onto the J♦ Q♦ K♦.
+  ASSERT_TRUE(
+      creator
+          ->Send(CommandFrame("rummy", R"({"move":{"discard":{"card":{"rank":"A","suit":"♦"}}}})"))
+          .ok());
+  (void)EventPayload(NextFrame(*creator), "rummy");
+  (void)EventPayload(NextFrame(*creator), "rummy");  // turnChanged
+  (void)EventPayload(NextFrame(*joiner), "rummy");   // the take-down
+  (void)EventPayload(NextFrame(*joiner), "rummy");   // the discard
+  (void)EventPayload(NextFrame(*joiner), "rummy");   // turnChanged
+  const auto meld = took["melds"].size() - 1;
+  ASSERT_TRUE(
+      joiner
+          ->Send(CommandFrame("rummy", R"({"move":{"takeDown":{"card":{"rank":"A","suit":"♦"},)"
+                                       R"("meldIndex":)" +
+                                           std::to_string(meld) + "}}}"))
+          .ok());
+  const json laid =
+      json::parse(EventPayload(NextFrame(*joiner), "rummy"))["update"]["gameState"]["view"];
+  EXPECT_EQ(laid["melds"][meld]["cards"].dump(),
+            R"([{"rank":"J","suit":"♦"},{"rank":"Q","suit":"♦"},{"rank":"K","suit":"♦"},)"
+            R"({"rank":"A","suit":"♦"}])");
+  EXPECT_EQ(laid["lastMove"].dump(), R"({"cards":[{"rank":"A","suit":"♦"}],"meldIndex":)" +
+                                         std::to_string(meld) +
+                                         R"(,"move":"takeDown","playerId":"player-2"})");
+  EXPECT_EQ(laid["discardPile"], json::array());
 }
 
 // A take-down melds cards from hand or lays off onto a meld, one or the
