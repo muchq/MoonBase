@@ -114,6 +114,11 @@ have a reason to record instead of an assumption.
 the PR only on request. Reference the tracking issue and, when the issue is a
 checklist, tick the item once merged.
 
+**No scheduled check-ins on a PR.** Never schedule an hourly check-in — or
+any timed one — to poll a PR's CI, mergeability or review threads. Subscribe
+to the PR's activity and end the turn: its events wake the session, and a PR
+with nothing happening on it waits for its owner, not for a timer.
+
 **Update the tracking issue.** Fold new data — reproductions, measurements,
 scope corrections — back into the issue so it stays the source of truth. File
 follow-ups for what you deliberately left out rather than leaving it implicit.

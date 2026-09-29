@@ -9,7 +9,7 @@ Sources live under `domains/<domain>/{libs,apis,apps}`.
 picked up, reviewed, verified, and shipped here. It is the governing process
 document; the highlights below are pointers, not a substitute.
 
-The three rules that change behavior most:
+The rules that change behavior most:
 
 - **A test beats an argument, and it lands first.** If a behavior is worth
   reasoning about, the deliverable is a CI test, not a paragraph — written
@@ -22,6 +22,8 @@ The three rules that change behavior most:
   each refuting its own findings. Landing first makes the panel's work visible
   as commits on a judged baseline rather than invisible inside the first diff.
   If it didn't run, say so rather than letting the reader assume it did.
+- **Never schedule check-ins on a PR** — hourly or otherwise. Subscribe to its
+  activity and end the turn; events wake the session.
 - **Write the conclusion, not the journey.** Comments state the live rule and
   never narrate deleted code. A commit subject is ten words at most and most
   commits need no body at all; squash-merge concatenates them onto `main`, so
