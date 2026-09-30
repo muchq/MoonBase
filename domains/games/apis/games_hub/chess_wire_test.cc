@@ -13,6 +13,8 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/time/time.h"
 #include "domains/games/apis/games_hub/wire_test_fixture.h"
@@ -113,8 +115,10 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
 }
 
 // The model's bounds are the decoder's to enforce: a clock outside them,
-// or a move that is not four or five characters, is refused in band
-// before the hub sees it — and the table is left as it was.
+// or a move that is not four or five characters, is refused in band before
+// the hub sees it. The table is seated at two, so the hub itself would
+// start with any clock and take any move on turn: only the decoder refuses
+// these, and the game does not start.
 TEST_F(ChessWireTest, TheModelsBoundsAreRefusedInBand) {
   json creator_session;
   auto creator = DialReady(creator_session);
@@ -124,21 +128,51 @@ TEST_F(ChessWireTest, TheModelsBoundsAreRefusedInBand) {
   (void)EventPayload(NextFrame(*creator), "chess");
   (void)EventPayload(NextFrame(*creator), "chess");
   (void)EventPayload(NextFrame(*creator), "roomState");
+  json joiner_session;
+  auto joiner = DialReady(joiner_session);
+  ASSERT_TRUE(joiner->Send(CommandFrame("joinRoom", R"({"roomId":"room-1"})")).ok());
+  (void)EventPayload(NextFrame(*joiner), "roomState");
+  (void)EventPayload(NextFrame(*joiner), "roomChatHistory");
+  (void)EventPayload(NextFrame(*creator), "roomState");
+  ASSERT_TRUE(
+      joiner->Send(CommandFrame("chess", R"({"move":{"joinGame":{"gameId":"GAME01"}}})")).ok());
+  (void)EventPayload(NextFrame(*creator), "chess");
+  (void)EventPayload(NextFrame(*creator), "roomState");
 
-  for (const char* move :
-       {R"({"move":{"startGame":{"initialSeconds":29}}})",
-        R"({"move":{"startGame":{"initialSeconds":1801}}})",
-        R"({"move":{"startGame":{"incrementSeconds":31}}})", R"({"move":{"play":{"uci":"e7e"}}})",
-        R"({"move":{"play":{"uci":"e7e8qq"}}})"}) {
+  const std::string initial_bounds =
+      R"({"reason":"Value at '/chess/move/startGame/initialSeconds' failed to satisfy )"
+      R"(constraint: Member must be between 30 and 1800, inclusive"})";
+  for (const auto& [move, reason] : std::vector<std::pair<std::string, std::string>>{
+           {R"({"move":{"startGame":{"initialSeconds":29}}})", initial_bounds},
+           {R"({"move":{"startGame":{"initialSeconds":1801}}})", initial_bounds},
+           {R"({"move":{"startGame":{"incrementSeconds":31}}})",
+            R"({"reason":"Value at '/chess/move/startGame/incrementSeconds' failed to satisfy )"
+            R"(constraint: Member must be between 0 and 30, inclusive"})"}}) {
     ASSERT_TRUE(creator->Send(CommandFrame("chess", move)).ok());
-    (void)EventPayload(NextFrame(*creator), "commandRejected");
+    EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"), reason) << move;
   }
-  // The control: the same start inside the bounds reaches the hub, which
-  // refuses it for its own reason.
+  // The control: the same start inside the bounds starts the game.
   ASSERT_TRUE(
       creator->Send(CommandFrame("chess", R"({"move":{"startGame":{"initialSeconds":30}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"), R"({"update":{"gameStarted":{}}})");
+  (void)EventPayload(NextFrame(*creator), "chess");
+  (void)EventPayload(NextFrame(*creator), "roomState");
+
+  // On turn, a move of the wrong length never reaches the engine.
+  for (const auto& [move, length] :
+       std::vector<std::pair<std::string, int>>{{R"({"move":{"play":{"uci":"e7e"}}})", 3},
+                                                {R"({"move":{"play":{"uci":"e7e8qq"}}})", 6}}) {
+    ASSERT_TRUE(creator->Send(CommandFrame("chess", move)).ok());
+    EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
+              R"({"reason":"Value with length )" + std::to_string(length) +
+                  R"( at '/chess/move/play/uci' failed to satisfy constraint: Member must have )"
+                  R"(length between 4 and 5, inclusive"})")
+        << move;
+  }
+  // The control: one of the right length that is no move is the engine's.
+  ASSERT_TRUE(creator->Send(CommandFrame("chess", R"({"move":{"play":{"uci":"e7e6"}}})")).ok());
   EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
-            R"({"reason":"need at least 2 players to start"})");
+            R"({"reason":"not a legal move: e7e6"})");
 }
 
 }  // namespace

@@ -57,7 +57,7 @@ TEST(ChessSerde, EveryStageRoundTrips) {
   ExpectRoundTrips(Started());
   ExpectRoundTrips(Played());
   ExpectRoundTrips(*Played().resign(0, kT0 + 10'000));
-  ExpectRoundTrips(*Played().removePlayer(1));
+  ExpectRoundTrips(*Played().removePlayer(1, kT0 + 10'000));
   // A draw on time: no winner.
   ExpectRoundTrips(*Started().flag(kT0 + 180'000));
   auto mated = GameState::start({"a", "b"}, "kpk", Opening{"7k/8/6K1/8/8/8/8/1Q6 w - - 0 1", 0},
@@ -127,6 +127,9 @@ TEST(ChessSerde, RefusesWhatIsNotAStoredGame) {
   ExpectRejected(with("/timeControl/incrementMs"_json_pointer, 1.5));
   ExpectRejected(with("/clock/whiteMs"_json_pointer, -1));
   ExpectRejected(with("/clock/turnStartedMs"_json_pointer, "later"));
+  // Past int64: nlohmann reads it unsigned, and it must not wrap.
+  ExpectRejected(
+      with("/clock/turnStartedMs"_json_pointer, json(uint64_t{18'000'000'000'000'000'000u})));
   ExpectRejected(with("/result"_json_pointer, json::parse(R"({"ending":"sulking"})")));
   ExpectRejected(
       with("/result"_json_pointer, json::parse(R"({"winner":"red","ending":"timeout"})")));

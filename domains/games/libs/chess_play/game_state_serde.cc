@@ -36,6 +36,11 @@ absl::Status Missing(const char* key, const char* kind) {
 
 absl::StatusOr<int64_t> ReadInt(const json& object, const char* key) {
   if (!object.contains(key) || !object[key].is_number_integer()) return Missing(key, "integer");
+  // nlohmann holds a value past int64 as unsigned; read as int64 it wraps.
+  if (object[key].is_number_unsigned() &&
+      object[key].get<uint64_t>() > static_cast<uint64_t>(INT64_MAX)) {
+    return absl::InvalidArgumentError(absl::StrCat("field '", key, "' out of range"));
+  }
   return object[key].get<int64_t>();
 }
 

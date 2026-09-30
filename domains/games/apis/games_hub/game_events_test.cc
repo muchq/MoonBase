@@ -142,8 +142,8 @@ chess_play::GameState Chess() {
   return *state;
 }
 
-// Every chess ending but a leave is the game played out: a resignation or
-// a flag finishes the game as surely as a mate.
+// Every chess ending but a leave is the game played out: a resignation, a
+// flag or a draw finishes the game as surely as a mate.
 TEST(GameEvents, AChessGameResignedIsCompleted) {
   const auto resigned = Chess().resign(1, 1'000);
   ASSERT_TRUE(resigned.ok());
@@ -153,8 +153,24 @@ TEST(GameEvents, AChessGameResignedIsCompleted) {
   EXPECT_EQ(finished.players, 2u);
 }
 
+TEST(GameEvents, AChessGameDrawnOnTimeOrMatedIsCompleted) {
+  const auto drawn = Chess().flag(60'000);
+  ASSERT_TRUE(drawn.ok());
+  ASSERT_FALSE(drawn->result()->winner.has_value());
+  EXPECT_EQ(FinishedOf(HostedState(*drawn), 2)->outcome, "completed");
+  auto mate_in_one = chess_play::GameState::start(
+      {"andy", "mercy"}, "kpk", {"7k/4P3/6K1/8/8/8/8/8 w - - 0 1", 0}, {60'000, 0}, 0);
+  ASSERT_TRUE(mate_in_one.ok());
+  const auto mated = mate_in_one->move(0, "e7e8q", 1'000);
+  ASSERT_TRUE(mated.ok());
+  ASSERT_EQ(mated->result()->ending, chess_play::Ending::kCheckmate);
+  const GameFinished finished = *FinishedOf(HostedState(*mated), 2);
+  EXPECT_EQ(finished.variant, "chess");
+  EXPECT_EQ(finished.outcome, "completed");
+}
+
 TEST(GameEvents, AChessGameLeftIsAbandoned) {
-  const auto left = Chess().removePlayer(0);
+  const auto left = Chess().removePlayer(0, 1'000);
   ASSERT_TRUE(left.ok());
   const GameFinished finished = *FinishedOf(HostedState(*left), 1);
   EXPECT_EQ(finished.variant, "chess");
@@ -298,6 +314,7 @@ TEST(GameEvents, EveryEventsLineIsTextWithNothingToEscape) {
     lines.emplace_back(GameStartedLine(when, room, "castle", 4), 16);
     lines.emplace_back(GameStartedLine(when, room, "rummy", 3), 16);
     lines.emplace_back(GameStartedLine(when, room, "gin", 2), 16);
+    lines.emplace_back(GameStartedLine(when, room, "chess", 2), 16);
 
     std::vector<HostedState> endings;
     endings.emplace_back(Golf(0));
@@ -307,13 +324,17 @@ TEST(GameEvents, EveryEventsLineIsTextWithNothingToEscape) {
     endings.emplace_back(RummyDealWon());
     endings.emplace_back(*Rummy().removePlayer(1));
     endings.emplace_back(GinDealWon());
+    endings.emplace_back(*Chess().resign(1, 1'000));
+    endings.emplace_back(*Chess().flag(60'000));
+    endings.emplace_back(*Chess().removePlayer(0, 1'000));
     for (const HostedState& state : endings) {
       for (std::size_t players = 1; players <= 4; ++players) {
         const GameFinished finished = *FinishedOf(state, players);
         EXPECT_TRUE(finished.outcome == kOutcomeCompleted || finished.outcome == kOutcomeAbandoned)
             << finished.outcome;
         EXPECT_TRUE(finished.variant == "golf" || finished.variant == "castle" ||
-                    finished.variant == "rummy" || finished.variant == "gin")
+                    finished.variant == "rummy" || finished.variant == "gin" ||
+                    finished.variant == "chess")
             << finished.variant;
         lines.emplace_back(GameFinishedLine(when, room, finished), 20);
       }

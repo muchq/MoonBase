@@ -74,12 +74,13 @@ struct GolfTestHooks {
 
 /// GolfHub is the room hub (#1187): seat admission, rooms,
 /// chat, and the game layer, behind GamesHubHandler::Play. The name is
-/// golf's; the room layer, castle (#77), rummy (#245) and the lobby (#1490)
-/// live here too. A room hosts tables of any game (#79): golf on
-/// libs/cards/golf, castle on libs/cards/castle and rummy on
-/// libs/cards/rummy, each a member of the stream's unions with its own
-/// per-viewer view. Each tenant's envelope counts on its own series (golf_,
-/// castle_, rummy_, lobby_, voice_); the room layer's own are hub_*.
+/// golf's; the room layer, castle (#77), rummy (#245), chess and the lobby
+/// (#1490) live here too. A room hosts tables of any game (#79): golf on
+/// libs/cards/golf, castle on libs/cards/castle, rummy on libs/cards/rummy
+/// and chess on libs/chess_play, each a member of the stream's unions with
+/// its own per-viewer view. Each tenant's envelope counts on its own series
+/// (golf_, castle_, rummy_, chess_, lobby_, voice_); the room layer's own are
+/// hub_*.
 ///
 /// The lobby member is the World (world.h) keyed by the session's room:
 /// a roomed session stands in its room's world, an unroomed one in the
@@ -349,6 +350,9 @@ class GolfHub final {
 
   /// How late a flag may land after the time ran out.
   static constexpr std::chrono::milliseconds kChessClockTick{250};
+  /// How long a flag the store could not take waits before the sweep
+  /// tries that game again.
+  static constexpr std::chrono::milliseconds kChessFlagRetry{5000};
   /// A chess clock the starter did not name.
   static constexpr chess_play::TimeControl kDefaultChessClock{180'000, 2'000};
 
@@ -452,8 +456,9 @@ class GolfHub final {
   void HandleCastleMove(const std::string& player_id, const moonbase::games::CastleMove& move);
   void HandleRummyMove(const std::string& player_id, const moonbase::games::RummyMove& move);
   void HandleChessMove(const std::string& player_id, const moonbase::games::ChessMove& move);
-  /// The lifecycle half of castle's and rummy's move unions, which share
-  /// its shapes: true when `move` was one and has been handled.
+  /// The lifecycle half of castle's, rummy's and chess's move unions, which
+  /// share its shapes (chess's startGame aside, which HandleChessMove takes
+  /// first): true when `move` was one and has been handled.
   template <typename Move>
   bool LifecycleMove(const std::string& player_id, const Move& move, GameKind kind);
   /// The lobby member: the session's world is its room's, or the plaza's.
@@ -780,6 +785,9 @@ class GolfHub final {
 
   /// Chess's opening and clock, set before serving.
   ChessOpener chess_opener_;
+  /// Per (room, game): the epoch ms before which the sweep does not retry
+  /// a flag the store refused as unavailable. Guarded by mu_.
+  std::map<std::pair<std::string, std::string>, int64_t> chess_flag_retry_at_;
   std::function<absl::Time()> clock_;
   std::mutex chess_clock_mu_;
   std::condition_variable chess_clock_cv_;

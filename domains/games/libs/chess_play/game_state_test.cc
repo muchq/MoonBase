@@ -196,21 +196,37 @@ TEST(GameStateTest, TheRunningClockNeverShowsBelowZeroNorAClockFromTheFuture) {
   const auto early = state.move(0, "e2e4", kT0 - 500);
   ASSERT_TRUE(early.ok());
   EXPECT_EQ(early->clock().remaining_ms[0], 302'000);
+  // Nor does the next turn start before this one did: a move stamped
+  // early costs the opponent nothing.
+  EXPECT_EQ(early->clock().turn_started_ms, kT0);
 }
 
 TEST(GameStateTest, ALeaverLosesByAbandonment) {
   const GameState state = Start(kKpk, /*white_seat=*/0);
-  const auto left = state.removePlayer(0);
+  const auto left = state.removePlayer(0, kT0 + 100'000);
   ASSERT_TRUE(left.ok());
   EXPECT_EQ(*left->result(), (Result{Color::kBlack, Ending::kAbandoned}));
-  const auto other = state.removePlayer(1);
+  // The clock stops where the leave found it.
+  EXPECT_EQ(left->remainingMs(Color::kWhite, kT0 + 900'000), 200'000);
+  const auto other = state.removePlayer(1, kT0);
   ASSERT_TRUE(other.ok());
   EXPECT_EQ(*other->result(), (Result{Color::kWhite, Ending::kAbandoned}));
   // Leaving a finished game changes nothing.
-  const auto after = left->removePlayer(1);
+  const auto after = left->removePlayer(1, kT0 + 200'000);
   ASSERT_TRUE(after.ok());
   EXPECT_EQ(*after->result(), *left->result());
-  EXPECT_FALSE(state.removePlayer(2).ok());
+  EXPECT_FALSE(state.removePlayer(2, kT0).ok());
+}
+
+// A flag that fell before the leave is what ended the game: the leave
+// cannot turn the pawn side's draw on time into a win.
+TEST(GameStateTest, ALeaveAfterTheFlagIsTheFlag) {
+  const auto left = Start().removePlayer(1, kT0 + 300'000);
+  ASSERT_TRUE(left.ok());
+  EXPECT_EQ(*left->result(), (Result{std::nullopt, Ending::kTimeout}));
+  // The control: a moment earlier, the same leave is an abandonment.
+  EXPECT_EQ(*Start().removePlayer(1, kT0 + 299'999)->result(),
+            (Result{Color::kWhite, Ending::kAbandoned}));
 }
 
 TEST(GameStateTest, StartRefusesWhatIsNotAGame) {
@@ -288,6 +304,26 @@ TEST(GameStateTest, RestoreRefusesAMovePastTheEnd) {
   EXPECT_TRUE(GameState::restore(drawn.players(), "kpk", kKpk, 0, repeated, drawn.timeControl(),
                                  drawn.clock(), drawn.result())
                   .ok());
+}
+
+// A stored clock the arithmetic cannot hold is not a stored game.
+TEST(GameStateTest, RestoreRefusesAClockOutOfRange) {
+  const GameState open = Start();
+  const auto restore = [&](TimeControl tc, Clock clock) {
+    return GameState::restore(open.players(), "kpk", kKpk, 0, {}, tc, clock, std::nullopt);
+  };
+  ASSERT_TRUE(restore(open.timeControl(), open.clock()).ok());  // the control
+  Clock negative_start = open.clock();
+  negative_start.turn_started_ms = -1;
+  EXPECT_FALSE(restore(open.timeControl(), negative_start).ok());
+  Clock far_future = open.clock();
+  far_future.turn_started_ms = GameState::kMaxEpochMs + 1;
+  EXPECT_FALSE(restore(open.timeControl(), far_future).ok());
+  Clock too_long = open.clock();
+  too_long.remaining_ms[1] = GameState::kMaxClockMs + 1;
+  EXPECT_FALSE(restore(open.timeControl(), too_long).ok());
+  EXPECT_FALSE(restore({GameState::kMaxClockMs + 1, 0}, open.clock()).ok());
+  EXPECT_FALSE(restore({300'000, GameState::kMaxClockMs + 1}, open.clock()).ok());
 }
 
 TEST(RandomKpkOpeningTest, EveryOpeningIsAPlayableKpkWithWhiteToMove) {

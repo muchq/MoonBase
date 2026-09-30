@@ -909,6 +909,7 @@ cc_test(
         "//domains/games/libs/chess_play:game_state",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
         "@opal_cpp//runtime:client",

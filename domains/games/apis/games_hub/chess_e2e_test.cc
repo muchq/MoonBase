@@ -3,14 +3,24 @@
 // moves it, and the position is the one the test names, so every legal
 // move and every ending is known in advance.
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
+#include <chrono>
+#include <functional>
+#include <iterator>
+#include <map>
+#include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "absl/time/time.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 #include "domains/games/libs/chess_play/game_state.h"
@@ -75,6 +85,19 @@ class ChessFixture : public GamesHubStreamFixture {
       view = state->as_gameState_or_null()->view;
     }
     return Started{std::move(table), *view};
+  }
+
+  // The room's record for each seat once `ready` holds for it: played
+  // and won, keyed by player.
+  std::map<std::string, std::pair<int, int>> RecordsOnce(
+      Seat& seat, const std::function<bool(const moonbase::games::RoomState&)>& ready) {
+    std::map<std::string, std::pair<int, int>> records;
+    auto room = AwaitRoomState(seat.stream, ready, "the room's stats");
+    if (!room.has_value()) return records;
+    for (const auto& player : room->players) {
+      records[player.playerId] = {player.gamesPlayed, player.gamesWon};
+    }
+    return records;
   }
 
   std::optional<moonbase::games::ChessResult> Ended(Seat& seat) {
@@ -260,6 +283,13 @@ TEST_F(ChessFixture, ThePawnSideOutOfTimeOnlyDraws) {
   EXPECT_FALSE(result->winner.has_value());
   EXPECT_FALSE(result->winnerColor.has_value());
   EXPECT_EQ(result->ending, "timeout");
+  // A draw is a game played for both, and a win for neither.
+  const auto records = RecordsOnce(started->table.bob, [](const auto& room) {
+    return std::all_of(room.players.begin(), room.players.end(),
+                       [](const auto& p) { return p.gamesPlayed == 1; });
+  });
+  EXPECT_EQ(records.at(started->table.alice.player_id), std::make_pair(1, 0));
+  EXPECT_EQ(records.at(started->table.bob.player_id), std::make_pair(1, 0));
 }
 
 TEST_F(ChessFixture, AMoveAfterTheFlagLosesOnTimeInsteadOfMoving) {
@@ -293,6 +323,27 @@ TEST_F(ChessFixture, ALeaverLosesByAbandonment) {
   EXPECT_EQ(result->winner, table.bob.player_id);
   EXPECT_EQ(result->winnerColor, "black");
   EXPECT_EQ(result->ending, "abandoned");
+  // The winner is credited; the leaver, no longer at the table, is not.
+  const auto records = RecordsOnce(table.bob, [&](const auto& room) {
+    return std::any_of(room.players.begin(), room.players.end(),
+                       [&](const auto& p) { return p.gamesWon == 1; });
+  });
+  EXPECT_EQ(records.at(table.bob.player_id), std::make_pair(1, 1));
+  EXPECT_EQ(records.at(table.alice.player_id), std::make_pair(0, 0));
+}
+
+// The clock thread main starts: it flags without anyone sweeping by hand,
+// a second start changes nothing, and the hub goes down with it running.
+TEST_F(ChessFixture, TheClockThreadFlagsOnItsOwn) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  golf_->StartChessClocks(std::chrono::milliseconds(10));
+  golf_->StartChessClocks(std::chrono::milliseconds(10));
+  now_ms_ += 180'000;
+  auto result = Ended(started->table.alice);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->ending, "timeout");
 }
 
 TEST_F(ChessFixture, AThirdSeatIsRefused) {
@@ -341,6 +392,109 @@ TEST_F(ChessFixture, AMoveBeforeTheStartIsRefused) {
   // Nor is a pending table anything to sweep, however late it is.
   now_ms_ += 10'000'000;
   EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+}
+
+// A chess game in the stats archive (#1571): started as chess at its two
+// seats, finished once, by the commit that ended it.
+class ChessEventFixture : public ChessFixture {
+ protected:
+  void SetUp() override {
+    ChessFixture::SetUp();
+    golf_->SetEventWriter(
+        [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
+  }
+  // The writer goes first: the hub's teardown can end a game, and
+  // `events_` dies before the base's hub does.
+  void TearDown() override {
+    if (golf_ != nullptr) golf_->SetEventWriter(nullptr);
+    ChessFixture::TearDown();
+  }
+  std::vector<std::string> events_;
+};
+
+TEST_F(ChessEventFixture, AChessGameIsRecordedStartedAndFinishedAsChess) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  ASSERT_TRUE(started->table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(started->table.alice).has_value());
+  std::vector<std::string> games;
+  for (const std::string& line : events_) {
+    if (line.find(R"("event":"game_)") != std::string::npos) games.push_back(line);
+  }
+  ASSERT_EQ(games.size(), 2u);
+  EXPECT_THAT(games[0], ::testing::HasSubstr(R"("event":"game_started")"));
+  EXPECT_THAT(games[0], ::testing::HasSubstr(R"("variant":"chess")"));
+  EXPECT_THAT(games[0], ::testing::HasSubstr(R"("players":2)"));
+  EXPECT_THAT(games[1], ::testing::HasSubstr(R"("event":"game_finished")"));
+  EXPECT_THAT(games[1], ::testing::HasSubstr(R"("variant":"chess")"));
+  EXPECT_THAT(games[1], ::testing::HasSubstr(R"("outcome":"completed")"));
+}
+
+// A store that cannot take a game's finish while `down` holds, counting
+// every finish it was asked for.
+class FinishOutageStore final : public HubStore {
+ public:
+  void Enqueue(std::vector<Op> ops) override { delegate_.Enqueue(std::move(ops)); }
+  void Flush() override { delegate_.Flush(); }
+  absl::StatusOr<Snapshot> LoadSnapshot() override { return delegate_.LoadSnapshot(); }
+  absl::StatusOr<bool> CommitGameSave(const GameRow& row,
+                                      const std::string& notify_payload) override {
+    return delegate_.CommitGameSave(row, notify_payload);
+  }
+  absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& deltas,
+                                        const std::string& notify_payload) override {
+    ++finishes;
+    if (down) return absl::UnavailableError("hub store unreachable");
+    return delegate_.CommitGameFinish(row, deltas, notify_payload);
+  }
+  absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
+                                                  const std::string& game_id) override {
+    return delegate_.LoadGame(room_id, game_id);
+  }
+  absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override {
+    return delegate_.LoadRoom(room_id);
+  }
+
+  std::atomic<bool> down{false};
+  std::atomic<int> finishes{0};
+
+ private:
+  MemoryHubStore delegate_;
+};
+
+class ChessOutageFixture : public ChessFixture {
+ protected:
+  std::shared_ptr<HubStore> MakeStore() override {
+    outage_ = std::make_shared<FinishOutageStore>();
+    return outage_;
+  }
+  std::shared_ptr<FinishOutageStore> outage_;
+};
+
+// A flag the store cannot take is tried again after kChessFlagRetry, not
+// on every tick: during an outage the sweep does not hammer the store
+// with the hub's lock held.
+TEST_F(ChessOutageFixture, AFlagTheStoreCannotTakeWaitsBeforeItsRetry) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  now_ms_ += 180'000;
+  outage_->down = true;
+  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(outage_->finishes, 1);
+  now_ms_ += GolfHub::kChessFlagRetry.count() - 1;
+  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(outage_->finishes, 1);
+  now_ms_ += 1;
+  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(outage_->finishes, 2);
+  // Back up: the next retry lands the flag.
+  outage_->down = false;
+  now_ms_ += GolfHub::kChessFlagRetry.count();
+  EXPECT_EQ(golf_->SweepChessClocksOnce(), 1);
+  auto result = Ended(started->table.bob);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->ending, "timeout");
 }
 
 // Without an opener set, the hub deals the variant's own: a random KPK.

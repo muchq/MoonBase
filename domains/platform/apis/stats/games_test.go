@@ -82,6 +82,17 @@ func TestALineWithNoTimestampTakesTheObjectsDay(t *testing.T) {
 	assert.Equal(t, int64(1), rollup.HubEvents[HubEventKey{Date: "2026-09-21", Event: "room_closed"}])
 }
 
+// Every game the hub hosts is a word this build knows, never "other".
+func TestEveryHostedGameIsItsOwnWord(t *testing.T) {
+	for _, variant := range []string{"golf", "castle", "rummy", "gin", "chess"} {
+		line := `{"ts":1789998000000,"event":"game_started","room":"A","variant":"` + variant + `","players":2}`
+		rollup, skipped := hubRollup(t, line, "2026-09-21")
+		assert.Zero(t, skipped)
+		assert.Equal(t, int64(1), rollup.HubEvents[HubEventKey{
+			Date: "2026-09-21", Event: "game_started", Variant: variant, Players: 2}], variant)
+	}
+}
+
 // A word this build does not know is still counted, under "other", so
 // the hub growing its vocabulary shows up as a row rather than as
 // events that quietly stop arriving.

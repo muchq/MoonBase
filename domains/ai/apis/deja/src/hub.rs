@@ -158,6 +158,11 @@ mod tests {
                 .token,
             "hub game_finished castle abandoned"
         );
+        assert_eq!(
+            obs(r#"{"ts":1,"event":"game_finished","room":"abc","variant":"chess","outcome":"completed","players":2}"#)
+                .token,
+            "hub game_finished chess completed"
+        );
     }
 
     // A room's size is a count, and counts do not belong in a vocabulary:

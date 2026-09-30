@@ -84,6 +84,11 @@ class GameState {
  public:
   static constexpr int kSeats = 2;
   static constexpr std::string_view kKpk = "kpk";
+  /// Bounds a stored clock must keep for its arithmetic to hold: a day on
+  /// any clock or increment, and a turn that started within the next
+  /// thirty thousand years.
+  static constexpr int64_t kMaxClockMs = 24LL * 60 * 60 * 1000;
+  static constexpr int64_t kMaxEpochMs = 1'000'000'000'000'000;
 
   /// A game at `opening`, White's clock running from `now_ms`. Refuses
   /// anything but two distinct seats, a variant it does not know, a
@@ -113,9 +118,11 @@ class GameState {
   /// The game ended on time if the side to move's clock has run out at
   /// `now_ms`; FailedPrecondition if it has not.
   [[nodiscard]] absl::StatusOr<GameState> flag(int64_t now_ms) const;
-  /// A seat left: the other wins by abandonment. A finished game is
+  /// A seat left at `now_ms`: the other wins by abandonment, unless the
+  /// side to move's time had already run out, which ended the game on time
+  /// first. The clock stops where the leave found it. A finished game is
   /// returned unchanged.
-  [[nodiscard]] absl::StatusOr<GameState> removePlayer(int seat) const;
+  [[nodiscard]] absl::StatusOr<GameState> removePlayer(int seat, int64_t now_ms) const;
 
   [[nodiscard]] bool isOver() const { return result_.has_value(); }
   [[nodiscard]] const std::optional<Result>& result() const { return result_; }
@@ -154,7 +161,9 @@ class GameState {
   [[nodiscard]] absl::Status settle();
   [[nodiscard]] GameState ended(Result result, Clock clock) const;
   /// The clock with the side to move charged up to `now_ms` and its turn
-  /// restarted there.
+  /// restarted there — never before it started, so a move stamped early
+  /// (another instance's clock behind, or a wait for the hub's lock) costs
+  /// the next side nothing.
   [[nodiscard]] Clock chargedTo(int64_t now_ms) const;
   [[nodiscard]] Result timeoutResult() const;
 

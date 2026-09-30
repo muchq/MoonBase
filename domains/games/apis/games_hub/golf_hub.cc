@@ -127,7 +127,7 @@ GameEvents ChessUpdateEvent(ChessUpdate update) {
 
 // The shared lifecycle announcements, in the table's own envelope. Each
 // game's update union carries the same case for them, so one generic
-// build serves all three: `make` picks the case off whichever union.
+// build serves every game: `make` picks the case off whichever union.
 template <typename Make>
 GameEvents InTableEnvelope(GameKind kind, const Make& make) {
   switch (kind) {
@@ -458,13 +458,21 @@ bool DealStarted(const HostedState& before, const HostedState& after) {
 
 // The seat a leaver vacates, in whichever engine: compacted while seats
 // remain, or the game resolved (golf keeps every seat for the scorecard;
-// castle and rummy abandon below two seats).
-std::optional<HostedState> WithoutSeat(const HostedState& state, const std::string& player_id) {
+// castle, rummy and chess abandon below two seats — chess on its clock at
+// `now_ms`, which may already have ended the game on time).
+std::optional<HostedState> WithoutSeat(const HostedState& state, const std::string& player_id,
+                                       int64_t now_ms) {
   return std::visit(
       [&](const auto& engine) -> std::optional<HostedState> {
         const int seat = engine.playerIndex(player_id);
         if (seat < 0) return HostedState(engine);
-        auto next = engine.removePlayer(seat);
+        auto next = [&] {
+          if constexpr (std::is_same_v<std::decay_t<decltype(engine)>, chess_play::GameState>) {
+            return engine.removePlayer(seat, now_ms);
+          } else {
+            return engine.removePlayer(seat);
+          }
+        }();
         return HostedState(next.ok() ? *std::move(next) : engine);
       },
       state);
@@ -2137,10 +2145,8 @@ void GolfHub::HandleCastleMove(const std::string& player_id, const CastleMove& m
   Reject(player_id, RejectKind::kUnknown, "unknown move");
 }
 
-// Rummy's moves. The ones that put cards down name them: a spelling no
-// card has never reaches the table, and a card the hand does not hold is
-// the engine's NotFound — the same stale-view refusal castle's rows give —
-// named here in the wire's spelling.
+// Chess's moves: the clock is read inside each, under mu_, so a move that
+// waited on the lock is charged from when it landed.
 void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& move) {
   // startGame is chess's own shape: it names the clock.
   if (const auto* start = move.as_startGame_or_null()) {
@@ -2155,24 +2161,28 @@ void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& mov
     return;
   }
   if (LifecycleMove(player_id, move, GameKind::kChess)) return;
-  const int64_t now = NowMs();
   if (const auto* play = move.as_play_or_null()) {
     TableEngineMove<chess_play::GameState>(
         player_id, GameKind::kChess,
-        [uci = play->uci, now](const chess_play::GameState& state, int seat) {
-          return state.move(seat, uci, now);
+        [this, uci = play->uci](const chess_play::GameState& state, int seat) {
+          return state.move(seat, uci, NowMs());
         });
     return;
   }
   if (move.as_resign_or_null() != nullptr) {
-    TableEngineMove<chess_play::GameState>(
-        player_id, GameKind::kChess,
-        [now](const chess_play::GameState& state, int seat) { return state.resign(seat, now); });
+    TableEngineMove<chess_play::GameState>(player_id, GameKind::kChess,
+                                           [this](const chess_play::GameState& state, int seat) {
+                                             return state.resign(seat, NowMs());
+                                           });
     return;
   }
   Reject(player_id, RejectKind::kUnknown, "unknown move");
 }
 
+// Rummy's moves. The ones that put cards down name them: a spelling no
+// card has never reaches the table, and a card the hand does not hold is
+// the engine's NotFound — the same stale-view refusal castle's rows give —
+// named here in the wire's spelling.
 void GolfHub::HandleRummyMove(const std::string& player_id, const RummyMove& move) {
   if (LifecycleMove(player_id, move, GameKind::kRummy)) return;
   using Next = absl::StatusOr<rummy::TableState>;
@@ -2793,41 +2803,62 @@ void GolfHub::SetChessOpener(ChessOpener opener) { chess_opener_ = std::move(ope
 void GolfHub::SetClock(std::function<absl::Time()> clock) { clock_ = std::move(clock); }
 
 int GolfHub::SweepChessClocksOnce() {
-  Outbox outbox;
-  int ended = 0;
+  struct Flagged {
+    std::string room_id;
+    std::string game_id;
+  };
+  std::vector<Flagged> flagged;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     const int64_t now = NowMs();
-    // Collected first: an ending erases the game from its room.
-    struct Flagged {
-      std::string room_id;
-      std::string game_id;
-      std::string on_turn;
-    };
-    std::vector<Flagged> flagged;
     for (const auto& [room_id, room] : rooms_) {
       for (const auto& [game_id, entry] : room.games) {
         if (entry.kind != GameKind::kChess || !entry.started()) continue;
         const chess_play::GameState& state = entry.chess();
         if (state.isOver() || state.remainingMs(state.sideToMove(), now) > 0) continue;
-        flagged.push_back({room_id, game_id, state.players().at(state.whoseTurn())});
+        const auto retry = chess_flag_retry_at_.find({room_id, game_id});
+        if (retry != chess_flag_retry_at_.end() && now < retry->second) continue;
+        flagged.push_back({room_id, game_id});
       }
     }
-    for (const Flagged& flag : flagged) {
+  }
+  // Each flag takes mu_ on its own: a commit is a store round trip, and a
+  // slow store holds the hub for one game's, never for the sweep's.
+  int ended = 0;
+  for (const Flagged& flag : flagged) {
+    Outbox outbox;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      const std::pair<std::string, std::string> key{flag.room_id, flag.game_id};
       const auto room = rooms_.find(flag.room_id);
-      if (room == rooms_.end()) continue;
+      if (room == rooms_.end()) {
+        chess_flag_retry_at_.erase(key);
+        continue;
+      }
       const auto game = room->second.games.find(flag.game_id);
-      if (game == room->second.games.end()) continue;
+      if (game == room->second.games.end() || !game->second.started()) {
+        chess_flag_retry_at_.erase(key);
+        continue;
+      }
+      const chess_play::GameState& state = game->second.chess();
+      if (state.isOver()) continue;
       const GameRef ref{flag.room_id, &room->second, flag.game_id, &game->second};
+      const int64_t now = NowMs();
       // A rebase may find the game already ended elsewhere, or moved on:
       // the refusal says so, and the seat on turn sent nothing to refuse.
       const auto refusal = ApplyTableEngineMoveLocked<chess_play::GameState>(
-          ref, flag.on_turn, GameKind::kChess,
+          ref, state.players().at(state.whoseTurn()), GameKind::kChess,
           [now](const chess_play::GameState& state, int) { return state.flag(now); }, outbox);
+      if (refusal.has_value() && refusal->kind == RejectKind::kUnavailable) {
+        // The store is down: try this game again later, not every tick.
+        chess_flag_retry_at_[key] = now + kChessFlagRetry.count();
+      } else {
+        chess_flag_retry_at_.erase(key);
+      }
       if (!refusal.has_value()) ++ended;
     }
+    Deliver(outbox);
   }
-  Deliver(outbox);
   return ended;
 }
 
@@ -2967,7 +2998,7 @@ void GolfHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writ
     // losing or winning. The
     // shrunken roster is what records who left — and who can still win.
     const std::optional<HostedState> state =
-        entry.started() ? WithoutSeat(*entry.state, player_id) : std::nullopt;
+        entry.started() ? WithoutSeat(*entry.state, player_id, NowMs()) : std::nullopt;
     const std::string previous_turn = entry.started() ? CurrentTurnOf(*entry.state) : "";
     const bool over = state.has_value() && IsOver(*state);
     std::vector<HubStore::StatsDelta> deltas;

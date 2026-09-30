@@ -390,10 +390,17 @@ abandonment. `startGame` names the clock (30–1800 s, 0–30 s increment,
 3+2 absent). A side out of time loses — or draws, when the other side
 has only its king. Time is `SetClock`'s, absl::Now unless a test fixes
 it. A move that arrives after its mover's time ran out is not played:
-the game ends on time. Nobody moving is `SweepChessClocksOnce`'s, every
-250 ms on each instance (`StartChessClocks`, from main): a flag is a
-conditional commit like a move, so of several instances holding the room
-one lands it and the rest rebase onto it. A finish credits the winner a
+the game ends on time; so does a leave that finds the mover's time gone.
+The time a move is charged at is read under the hub's lock, so waiting on
+it costs nobody, and no turn starts before the one it follows. Nobody
+moving is `SweepChessClocksOnce`'s, every 250 ms on each instance
+(`StartChessClocks`, from main): a flag is a conditional commit like a
+move, so of several instances holding the room one lands it and the rest
+rebase onto it. Each flag takes the lock on its own, and one the store
+could not take waits `kChessFlagRetry` before the next try, so an outage
+stalls the hub for one commit at a time rather than every tick. The row
+stores wall-clock epoch milliseconds, which every instance reads against
+its own clock: instances must agree on the time, as NTP has them. A finish credits the winner a
 win and both seats a game; a draw credits no win, and a leaver nothing.
 The view carries each side's time as of when it was built, and the
 client runs the side to move's down from there.

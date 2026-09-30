@@ -107,6 +107,9 @@ absl::Status CheckSeats(const std::vector<std::string>& players, const std::stri
   if (tc.initial_ms <= 0 || tc.increment_ms < 0) {
     return absl::InvalidArgumentError("a clock needs time on it");
   }
+  if (tc.initial_ms > GameState::kMaxClockMs || tc.increment_ms > GameState::kMaxClockMs) {
+    return absl::InvalidArgumentError("a clock of more than a day");
+  }
   return absl::OkStatus();
 }
 
@@ -256,8 +259,13 @@ absl::StatusOr<GameState> GameState::restore(std::vector<std::string> players, s
   if (auto seats = CheckSeats(players, variant, white_seat, time_control); !seats.ok()) {
     return seats;
   }
-  if (clock.remaining_ms[0] < 0 || clock.remaining_ms[1] < 0) {
-    return absl::InvalidArgumentError("a clock cannot show less than nothing");
+  for (const int64_t remaining : clock.remaining_ms) {
+    if (remaining < 0 || remaining > kMaxClockMs) {
+      return absl::InvalidArgumentError("a clock out of range");
+    }
+  }
+  if (clock.turn_started_ms < 0 || clock.turn_started_ms > kMaxEpochMs) {
+    return absl::InvalidArgumentError("a turn that started out of range");
   }
   GameState state(std::move(players), std::move(variant), std::move(start_fen), white_seat,
                   std::move(moves), time_control, clock, std::move(result));
@@ -308,10 +316,11 @@ absl::StatusOr<GameState> GameState::flag(int64_t now_ms) const {
   return ended(timeoutResult(), chargedTo(now_ms));
 }
 
-absl::StatusOr<GameState> GameState::removePlayer(int seat) const {
+absl::StatusOr<GameState> GameState::removePlayer(int seat, int64_t now_ms) const {
   if (seat < 0 || seat >= kSeats) return absl::InvalidArgumentError("no such seat");
   if (isOver()) return *this;
-  return ended(Result{Other(colorOf(seat)), Ending::kAbandoned}, clock_);
+  if (remainingMs(side_to_move_, now_ms) == 0) return ended(timeoutResult(), chargedTo(now_ms));
+  return ended(Result{Other(colorOf(seat)), Ending::kAbandoned}, chargedTo(now_ms));
 }
 
 GameState GameState::ended(Result result, Clock clock) const {
@@ -325,7 +334,7 @@ GameState GameState::ended(Result result, Clock clock) const {
 Clock GameState::chargedTo(int64_t now_ms) const {
   Clock clock = clock_;
   clock.remaining_ms[Index(side_to_move_)] = remainingMs(side_to_move_, now_ms);
-  clock.turn_started_ms = now_ms;
+  clock.turn_started_ms = std::max(now_ms, clock_.turn_started_ms);
   return clock;
 }
 
