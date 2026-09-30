@@ -497,6 +497,27 @@ TEST_F(ChessOutageFixture, AFlagTheStoreCannotTakeWaitsBeforeItsRetry) {
   EXPECT_EQ(result->ending, "timeout");
 }
 
+// A game that ends while its flag is backing off takes its retry with it:
+// the map holds only games still waiting on the store.
+TEST_F(ChessOutageFixture, AGameThatEndsWhileItsFlagWaitsLeavesNoRetryBehind) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  now_ms_ += 180'000;
+  outage_->down = true;
+  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(golf_->ChessFlagRetriesPending(), 1u);
+  // The control: another sweep inside the retry window keeps it.
+  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(golf_->ChessFlagRetriesPending(), 1u);
+  // The store comes back and the game ends another way.
+  outage_->down = false;
+  ASSERT_TRUE(started->table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(started->table.alice).has_value());
+  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(golf_->ChessFlagRetriesPending(), 0u);
+}
+
 // Without an opener set, the hub deals the variant's own: a random KPK.
 class DefaultOpeningFixture : public GamesHubStreamFixture {};
 

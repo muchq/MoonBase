@@ -6,6 +6,7 @@
 #include <random>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/random/random.h"
@@ -304,6 +305,57 @@ TEST(GameStateTest, RestoreRefusesAMovePastTheEnd) {
   EXPECT_TRUE(GameState::restore(drawn.players(), "kpk", kKpk, 0, repeated, drawn.timeControl(),
                                  drawn.clock(), drawn.result())
                   .ok());
+}
+
+// A resignation that comes after the flag fell is too late: the game had
+// already ended on time, whichever seat resigns.
+TEST(GameStateTest, AResignationAfterTheFlagIsTheFlag) {
+  for (const int seat : {0, 1}) {
+    const auto late = Start().resign(seat, kT0 + 300'000);
+    ASSERT_TRUE(late.ok());
+    EXPECT_EQ(*late->result(), (Result{std::nullopt, Ending::kTimeout})) << seat;
+  }
+  // The control: a moment earlier, it is a resignation.
+  EXPECT_EQ(*Start().resign(1, kT0 + 299'999)->result(),
+            (Result{Color::kWhite, Ending::kResignation}));
+}
+
+// The wire and the stored row spell every ending this way.
+TEST(GameStateTest, EveryEndingIsSpelledAsTheWireSaysIt) {
+  const std::vector<std::pair<Ending, std::string>> spellings = {
+      {Ending::kCheckmate, "checkmate"},
+      {Ending::kStalemate, "stalemate"},
+      {Ending::kInsufficientMaterial, "insufficientMaterial"},
+      {Ending::kFiftyMoves, "fiftyMoves"},
+      {Ending::kRepetition, "repetition"},
+      {Ending::kResignation, "resignation"},
+      {Ending::kTimeout, "timeout"},
+      {Ending::kAbandoned, "abandoned"},
+  };
+  for (const auto& [ending, name] : spellings) {
+    EXPECT_EQ(EndingName(ending), name);
+    EXPECT_EQ(ParseEnding(name), ending) << name;
+  }
+  EXPECT_EQ(ParseEnding("resigned"), std::nullopt);
+}
+
+// A timeout in a stored row is the one its clock shows: the side to move
+// out of time, and the result that flag would have given.
+TEST(GameStateTest, RestoreRefusesATimeoutTheClockContradicts) {
+  const auto flagged = Start().flag(kT0 + 300'000);
+  ASSERT_TRUE(flagged.ok());
+  const auto restore = [&](Clock clock, Result result) {
+    return GameState::restore(flagged->players(), "kpk", kKpk, 0, {}, flagged->timeControl(), clock,
+                              result);
+  };
+  ASSERT_TRUE(restore(flagged->clock(), *flagged->result()).ok());  // the control
+  // A win on time for the side against a bare king, or for the side that flagged.
+  EXPECT_FALSE(restore(flagged->clock(), Result{Color::kWhite, Ending::kTimeout}).ok());
+  EXPECT_FALSE(restore(flagged->clock(), Result{Color::kBlack, Ending::kTimeout}).ok());
+  // A timeout with time still on the clock.
+  Clock time_left = flagged->clock();
+  time_left.remaining_ms[0] = 5'000;
+  EXPECT_FALSE(restore(time_left, *flagged->result()).ok());
 }
 
 // A stored clock the arithmetic cannot hold is not a stored game.

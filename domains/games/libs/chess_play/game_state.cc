@@ -277,6 +277,13 @@ absl::StatusOr<GameState> GameState::restore(std::vector<std::string> players, s
           : state.result_.has_value() && IsBoardEnding(state.result_->ending)) {
     return absl::InvalidArgumentError("the stored result is not what the moves reached");
   }
+  // A timeout is the one the clock shows: the side to move out of time,
+  // and the result a flag then gives.
+  if (state.result_.has_value() && state.result_->ending == Ending::kTimeout &&
+      (state.clock_.remaining_ms[Index(state.side_to_move_)] != 0 ||
+       state.result_ != state.timeoutResult())) {
+    return absl::InvalidArgumentError("the stored timeout is not what the clock shows");
+  }
   return state;
 }
 
@@ -305,6 +312,7 @@ absl::StatusOr<GameState> GameState::move(int seat, std::string_view uci, int64_
 absl::StatusOr<GameState> GameState::resign(int seat, int64_t now_ms) const {
   if (isOver()) return absl::FailedPreconditionError("the game is over");
   if (seat < 0 || seat >= kSeats) return absl::InvalidArgumentError("no such seat");
+  if (remainingMs(side_to_move_, now_ms) == 0) return ended(timeoutResult(), chargedTo(now_ms));
   return ended(Result{Other(colorOf(seat)), Ending::kResignation}, chargedTo(now_ms));
 }
 

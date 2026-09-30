@@ -99,8 +99,8 @@ class GameState {
                                                        TimeControl time_control, int64_t now_ms);
 
   /// The full truth, validated as `start` validates plus every move legal
-  /// in turn and the result, if any, one the moves could have produced.
-  /// For a stored row.
+  /// in turn and the result, if any, one the moves could have produced —
+  /// a timeout the one the stored clock shows. For a stored row.
   [[nodiscard]] static absl::StatusOr<GameState> restore(std::vector<std::string> players,
                                                          std::string variant, std::string start_fen,
                                                          int white_seat,
@@ -113,7 +113,8 @@ class GameState {
   /// finished game, or a move not legal here is refused.
   [[nodiscard]] absl::StatusOr<GameState> move(int seat, std::string_view uci,
                                                int64_t now_ms) const;
-  /// Either seat, on turn or not.
+  /// Either seat, on turn or not; after the flag fell, too late: the game
+  /// ends on time instead.
   [[nodiscard]] absl::StatusOr<GameState> resign(int seat, int64_t now_ms) const;
   /// The game ended on time if the side to move's clock has run out at
   /// `now_ms`; FailedPrecondition if it has not.

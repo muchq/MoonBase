@@ -2811,6 +2811,15 @@ int GolfHub::SweepChessClocksOnce() {
   {
     const std::lock_guard<std::mutex> lock(mu_);
     const int64_t now = NowMs();
+    // A retry outlives nothing: a game gone from here, or over, whether it
+    // ended on this instance or another, is no longer waiting on the store.
+    std::erase_if(chess_flag_retry_at_, [this](const auto& retry) {
+      const auto room = rooms_.find(retry.first.first);
+      if (room == rooms_.end()) return true;
+      const auto game = room->second.games.find(retry.first.second);
+      return game == room->second.games.end() || !game->second.started() ||
+             game->second.chess().isOver();
+    });
     for (const auto& [room_id, room] : rooms_) {
       for (const auto& [game_id, entry] : room.games) {
         if (entry.kind != GameKind::kChess || !entry.started()) continue;
@@ -2841,7 +2850,10 @@ int GolfHub::SweepChessClocksOnce() {
         continue;
       }
       const chess_play::GameState& state = game->second.chess();
-      if (state.isOver()) continue;
+      if (state.isOver()) {
+        chess_flag_retry_at_.erase(key);
+        continue;
+      }
       const GameRef ref{flag.room_id, &room->second, flag.game_id, &game->second};
       const int64_t now = NowMs();
       // A rebase may find the game already ended elsewhere, or moved on:

@@ -344,6 +344,13 @@ class GolfHub final {
   /// call ended.
   int SweepChessClocksOnce();
 
+  /// Chess games whose flag the store refused and that wait to be tried
+  /// again; for tests.
+  std::size_t ChessFlagRetriesPending() {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return chess_flag_retry_at_.size();
+  }
+
   /// Starts SweepChessClocksOnce on a thread every `interval` until the
   /// hub is destroyed. A second call changes nothing.
   void StartChessClocks(std::chrono::milliseconds interval = kChessClockTick);

@@ -439,7 +439,7 @@ lobby-safe summaries only.
   stream side counts admissions, live sessions, disconnects, grace
   expiries, and the command/event flow (`hub_*` for the room layer —
   sessions, seats, refusals, its own commands and events — `golf_*`,
-  `castle_*`, `rummy_*`, `lobby_*` and `voice_*` for each tenant's envelope, `chat_*` for
+  `castle_*`, `rummy_*`, `chess_*`, `lobby_*` and `voice_*` for each tenant's envelope, `chat_*` for
   chat). The tape rides the lobby's prefix: `lobby_tape_polls{result}`,
   `lobby_tape_splats`, and the `lobby_tape_poller_active` gauge, which is
   1 exactly while a glasshouse is occupied.
