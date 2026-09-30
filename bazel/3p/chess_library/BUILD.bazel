@@ -5,8 +5,9 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 #
 # Visible to the two packages that hand chess:: types around: the wrapper
 # that owns the dependency, //domains/games/libs/chess_cpp, and
-# //domains/games/libs/one_d4_motifs, whose detectors read a Board. Nothing
-# else can declare a dep on it. That is all the visibility buys: the wrapper's own headers expose chess:: types, and
+# //domains/games/libs/one_d4_motifs, whose detectors read a Board; and to
+# //domains/games/libs/chess_play, the hub's chess rules, whose headers
+# name no chess:: type. Nothing else can declare a dep on it. That is all the visibility buys: the wrapper's own headers expose chess:: types, and
 # with layering_check off (.bazelrc) a transitive consumer still compiles
 # against this header. Keeping chess:: out of those headers is what would
 # make the boundary real; the wrapper trades that for handing detectors a
@@ -17,6 +18,7 @@ cc_library(
     includes = ["."],
     visibility = [
         "//domains/games/libs/chess_cpp:__pkg__",
+        "//domains/games/libs/chess_play:__pkg__",
         "//domains/games/libs/one_d4_motifs:__pkg__",
     ],
 )
