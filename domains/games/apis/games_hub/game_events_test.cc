@@ -23,6 +23,7 @@
 #include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/games/libs/cards/rummy/gin.h"
 #include "domains/games/libs/cards/rummy/table.h"
+#include "domains/games/libs/chess_play/game_state.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -132,6 +133,32 @@ TEST(GameEvents, ACastleGameLeftBelowTwoSeatsIsAbandoned) {
   EXPECT_EQ(finished.variant, "castle");
   EXPECT_EQ(finished.outcome, "abandoned");
   EXPECT_EQ(finished.players, 1u);
+}
+
+chess_play::GameState Chess() {
+  auto state = chess_play::GameState::start({"andy", "mercy"}, "kpk",
+                                            {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0}, {60'000, 0}, 0);
+  EXPECT_TRUE(state.ok()) << state.status();
+  return *state;
+}
+
+// Every chess ending but a leave is the game played out: a resignation or
+// a flag finishes the game as surely as a mate.
+TEST(GameEvents, AChessGameResignedIsCompleted) {
+  const auto resigned = Chess().resign(1, 1'000);
+  ASSERT_TRUE(resigned.ok());
+  const GameFinished finished = *FinishedOf(HostedState(*resigned), 2);
+  EXPECT_EQ(finished.variant, "chess");
+  EXPECT_EQ(finished.outcome, "completed");
+  EXPECT_EQ(finished.players, 2u);
+}
+
+TEST(GameEvents, AChessGameLeftIsAbandoned) {
+  const auto left = Chess().removePlayer(0);
+  ASSERT_TRUE(left.ok());
+  const GameFinished finished = *FinishedOf(HostedState(*left), 1);
+  EXPECT_EQ(finished.variant, "chess");
+  EXPECT_EQ(finished.outcome, "abandoned");
 }
 
 // A rummy table's games are its deals (#1609): a deal won by play is a

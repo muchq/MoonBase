@@ -205,6 +205,14 @@ inline std::optional<moonbase::games::RummyUpdate> ReceiveRummy(
       [](const moonbase::games::GameEvents& event) { return event.as_rummy_or_null(); }, budget);
 }
 
+inline std::optional<moonbase::games::ChessUpdate> ReceiveChess(
+    moonbase::games::PlayClientStream& stream, const std::string& wanted,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  return ReceiveEnvelope(
+      stream, wanted, "chess",
+      [](const moonbase::games::GameEvents& event) { return event.as_chess_or_null(); }, budget);
+}
+
 inline std::optional<moonbase::games::LobbyUpdate> ReceiveLobby(
     moonbase::games::PlayClientStream& stream, const std::string& wanted,
     std::chrono::milliseconds budget = kReceiveBudget) {
@@ -315,6 +323,19 @@ std::optional<moonbase::games::RummyView> AwaitRummyView(
       predicate, waiting_for, budget);
 }
 
+template <typename Predicate>
+std::optional<moonbase::games::ChessView> AwaitChessView(
+    moonbase::games::PlayClientStream& stream, Predicate&& predicate,
+    const std::string& waiting_for, std::chrono::milliseconds budget = kReceiveBudget) {
+  return AwaitMatching(
+      [&](std::chrono::milliseconds remaining) -> std::optional<moonbase::games::ChessView> {
+        auto update = ReceiveChess(stream, "gameState", remaining);
+        if (!update.has_value()) return std::nullopt;
+        return update->as_gameState_or_null()->view;
+      },
+      predicate, waiting_for, budget);
+}
+
 // Effectively-unlimited stream budgets (#1240) for suites whose flows
 // send at test speed, not human speed. Every direct GolfHub
 // construction in a test should pass this unless the test is about the
@@ -414,6 +435,13 @@ inline moonbase::games::GameCommands Rummy(moonbase::games::RummyMove move) {
   moonbase::games::RummyCommand command;
   command.move = std::move(move);
   return moonbase::games::GameCommands::FromRummy(std::move(command));
+}
+
+// And chess's.
+inline moonbase::games::GameCommands Chess(moonbase::games::ChessMove move) {
+  moonbase::games::ChessCommand command;
+  command.move = std::move(move);
+  return moonbase::games::GameCommands::FromChess(std::move(command));
 }
 
 // Captures every metric the hub records so tests can assert what is

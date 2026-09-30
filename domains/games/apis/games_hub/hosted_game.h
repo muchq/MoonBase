@@ -9,18 +9,20 @@
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/rummy/table.h"
+#include "domains/games/libs/chess_play/game_state.h"
 
 namespace games_hub {
 
-/// The games a room can host (#79): golf, castle (#77) and rummy (#245). A table is
+/// The games a room can host (#79): golf, castle (#77), rummy (#245) and chess. A table is
 /// created as one kind and keeps it; the kind names the engine whose
 /// state the entry (and its stored row) carries, and the wire word on
 /// GameSummary.game.
-enum class GameKind { kGolf, kCastle, kRummy };
+enum class GameKind { kGolf, kCastle, kRummy, kChess };
 
 /// The engine truth of a started table, whichever game it plays.
 /// A rummy table is a dealer's-choice table (#1609), a deal at a time.
-using HostedState = std::variant<golf::GameState, castle::GameState, rummy::TableState>;
+using HostedState =
+    std::variant<golf::GameState, castle::GameState, rummy::TableState, chess_play::GameState>;
 
 inline std::string_view GameKindName(GameKind kind) {
   switch (kind) {
@@ -28,6 +30,8 @@ inline std::string_view GameKindName(GameKind kind) {
       return "castle";
     case GameKind::kRummy:
       return "rummy";
+    case GameKind::kChess:
+      return "chess";
     case GameKind::kGolf:
       break;
   }
@@ -38,12 +42,14 @@ inline std::optional<GameKind> ParseGameKind(std::string_view name) {
   if (name == "golf") return GameKind::kGolf;
   if (name == "castle") return GameKind::kCastle;
   if (name == "rummy") return GameKind::kRummy;
+  if (name == "chess") return GameKind::kChess;
   return std::nullopt;
 }
 
 inline GameKind KindOf(const HostedState& state) {
   if (std::holds_alternative<castle::GameState>(state)) return GameKind::kCastle;
   if (std::holds_alternative<rummy::TableState>(state)) return GameKind::kRummy;
+  if (std::holds_alternative<chess_play::GameState>(state)) return GameKind::kChess;
   return GameKind::kGolf;
 }
 

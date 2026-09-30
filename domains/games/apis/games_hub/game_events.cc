@@ -13,6 +13,7 @@
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/games/libs/cards/rummy/table.h"
+#include "domains/games/libs/chess_play/game_state.h"
 
 namespace games_hub {
 namespace {
@@ -64,6 +65,13 @@ std::optional<GameFinished> FinishedOf(const HostedState& state, std::size_t pla
       return finished;
     }
     return std::nullopt;
+  }
+  if (const auto* chess_state = std::get_if<chess_play::GameState>(&state)) {
+    if (chess_state->result().has_value() &&
+        chess_state->result()->ending == chess_play::Ending::kAbandoned) {
+      finished.outcome = kOutcomeAbandoned;
+    }
+    return finished;
   }
   if (std::get<castle::GameState>(state).getPhase() == castle::Phase::Abandoned) {
     finished.outcome = kOutcomeAbandoned;

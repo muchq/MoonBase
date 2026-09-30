@@ -7,6 +7,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <memory>
@@ -17,11 +18,13 @@
 #include <utility>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "domains/games/apis/games_hub/migrations.h"
 #include "domains/games/apis/games_hub/pg_chat_store.h"
 #include "domains/games/apis/games_hub/pg_hub_store.h"
 #include "domains/games/apis/games_hub/pg_ticket_vault.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
+#include "domains/games/libs/chess_play/game_state.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 
@@ -885,6 +888,68 @@ TEST_F(PgGamesHubFixture, TwoInstancesShareOneCastleTable) {
   ASSERT_EQ(rows.games.size(), 1u);
   EXPECT_EQ(rows.games[0].kind, GameKind::kCastle);
   EXPECT_EQ(rows.games[0].version, version_at_start + 4);
+}
+
+// A flag is a commit like a move: two instances sweeping the same expired
+// clock end the game once, and both seats hear that one ending.
+TEST_F(PgGamesHubFixture, TwoInstancesSweepingOneClockEndTheGameOnce) {
+  using moonbase::games::ChessMove;
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  DetachOnScopeExit detach{this, remote.get()};
+  std::atomic<int64_t> now_ms{1'800'000'000'000};
+  for (GolfHub* hub : {golf_.get(), remote->golf.get()}) {
+    hub->SetClock([&now_ms] { return absl::FromUnixMillis(now_ms.load()); });
+    hub->SetChessOpener([] { return chess_play::Opening{"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0}; });
+  }
+  CrossSeats seats;
+  const std::string room_id = SeatedCrossRoom(*remote, seats);
+  ASSERT_FALSE(room_id.empty());
+  Seat& alice = *seats.alice;
+  Seat& bob = *seats.bob;
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  const std::string game_id = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(AwaitLobbyGame(bob, game_id));
+  moonbase::games::JoinGame join;
+  join.gameId = game_id;
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  ASSERT_TRUE(ReceiveChess(bob.stream, "gameJoined").has_value());
+  ASSERT_TRUE(AwaitChessView(
+                  alice.stream, [](const auto& view) { return view.players.size() == 2; },
+                  "alice (primary) sees bob seated")
+                  .has_value());
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromStartgame(moonbase::games::ChessStartGame{}))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  bob.stream, [](const auto& view) { return view.phase == "playing"; },
+                  "bob (remote) sees the game start")
+                  .has_value());
+
+  now_ms += 180'000;
+  const int ended = remote->golf->SweepChessClocksOnce() + golf_->SweepChessClocksOnce();
+  EXPECT_EQ(ended, 1);
+  for (Seat* seat : {&alice, &bob}) {
+    auto result = ReceiveChess(seat->stream, "gameEnded");
+    ASSERT_TRUE(result.has_value()) << seat->player_id;
+    EXPECT_EQ(result->as_gameEnded_or_null()->result.ending, "timeout");
+    // Whatever else follows (the room's stats), no second ending does.
+    while (true) {
+      auto received = seat->stream.Receive(std::chrono::milliseconds(300));
+      if (!received.ok() || !received->has_value()) break;
+      const auto* chess = (*received)->as_chess_or_null();
+      EXPECT_FALSE(chess != nullptr && chess->update.as_gameEnded_or_null() != nullptr)
+          << seat->player_id << " heard a second ending";
+    }
+  }
+  remote->store->Flush();
+  auto rows = Rows();
+  ASSERT_EQ(rows.games.size(), 1u);
+  EXPECT_EQ(rows.games[0].kind, GameKind::kChess);
+  ASSERT_TRUE(rows.games[0].state.has_value());
+  EXPECT_TRUE(IsOver(*rows.games[0].state));
 }
 
 TEST_F(PgGamesHubFixture, PendingGameLifecycleWritesThrough) {

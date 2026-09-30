@@ -3,11 +3,12 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 # The games hub's model (#79): the room layer (games.smithy) and one
-# envelope per tenant — lobby, voice, golf, castle, rummy.
+# envelope per tenant — lobby, voice, golf, castle, rummy, chess.
 smithy_cpp_server_library(
     name = "games_hub_smithy_server",
     srcs = [
         "model/castle.smithy",
+        "model/chess.smithy",
         "model/games.smithy",
         "model/golf.smithy",
         "model/lobby.smithy",
@@ -22,6 +23,7 @@ smithy_cpp_client_library(
     name = "games_hub_smithy_client",
     srcs = [
         "model/castle.smithy",
+        "model/chess.smithy",
         "model/games.smithy",
         "model/golf.smithy",
         "model/lobby.smithy",
@@ -43,6 +45,7 @@ cc_library(
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/rummy:game_state",
         "//domains/games/libs/cards/rummy:table",
+        "//domains/games/libs/chess_play:game_state",
     ],
 )
 
@@ -109,6 +112,7 @@ cc_library(
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/rummy:game_state",
         "//domains/games/libs/cards/rummy:table",
+        "//domains/games/libs/chess_play:game_state",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
     ],
@@ -132,6 +136,7 @@ cc_test(
         "//domains/games/libs/cards/rummy:game_state",
         "//domains/games/libs/cards/rummy:gin",
         "//domains/games/libs/cards/rummy:table",
+        "//domains/games/libs/chess_play:game_state",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
@@ -354,6 +359,7 @@ cc_library(
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:game_state_serde",
         "//domains/games/libs/cards/rummy:table_serde",
+        "//domains/games/libs/chess_play:game_state_serde",
         "//domains/platform/libs/pg",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
@@ -433,6 +439,8 @@ cc_test(
         "//domains/games/libs/cards/rummy:game_state",
         "//domains/games/libs/cards/rummy:table",
         "//domains/games/libs/cards/rummy:table_serde",
+        "//domains/games/libs/chess_play:game_state",
+        "//domains/games/libs/chess_play:game_state_serde",
         "//domains/platform/libs/pg",
         "//domains/platform/libs/pg:listener",
         "@googletest//:gtest_main",
@@ -459,6 +467,8 @@ cc_test(
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:game_state_serde",
         "//domains/games/libs/cards/golf:player",
+        "//domains/games/libs/chess_play:game_state",
+        "//domains/games/libs/chess_play:game_state_serde",
         "//domains/platform/libs/pg",
         "@googletest//:gtest_main",
     ],
@@ -649,6 +659,7 @@ cc_library(
         "//domains/games/libs/cards/golf:player",
         "//domains/games/libs/cards/rummy:game_state",
         "//domains/games/libs/cards/rummy:table",
+        "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/mithril_cpp:client",
         "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/pg:listener",
@@ -713,10 +724,12 @@ cc_test(
         ":pg_ticket_vault",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/chess_play:game_state",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "//domains/platform/libs/pg",
         "//domains/platform/libs/pg:listener",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
         "@opal_cpp//runtime:client",
         "@opal_cpp//runtime:core",
@@ -744,6 +757,35 @@ cc_test(
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:eventstream",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
+# Chess's wire goldens: the chess envelope's command and update bytes, the
+# view through a game to its mate, and the model's bounds refused in band.
+cc_test(
+    name = "chess_wire_test",
+    size = "small",
+    srcs = [
+        "chess_wire_test.cc",
+        "wire_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_server",
+        ":golf_hub",
+        ":id_generator",
+        ":rate_limiter",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/chess_play:game_state",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
         "@opal_cpp//runtime:core",
@@ -846,6 +888,36 @@ cc_test(
     ],
 )
 
+# Chess on the room stream: a fixed clock and opening, every ending the hub
+# can reach, the clock sweep, and the seat cap.
+cc_test(
+    name = "chess_e2e_test",
+    size = "small",
+    srcs = [
+        "chess_e2e_test.cc",
+        "stream_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_client",
+        ":games_hub_smithy_server",
+        ":golf_hub",
+        ":hub_store",
+        ":id_generator",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/chess_play:game_state",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
 # Rummy on the room stream (#245): whole games against an engine mirror
 # at every table size, redaction, refusals, the refill, abandonment and
 # resume.
@@ -891,6 +963,7 @@ cc_test(
     # their union cases.
     data = [
         "model/castle.smithy",
+        "model/chess.smithy",
         "model/games.smithy",
         "model/golf.smithy",
         "model/lobby.smithy",

@@ -360,7 +360,7 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("Chat", "history_replays", "", `chat_history_replays_total`),
 			counter("Chat", "failures", "", `chat_failures_total`),
 			// Each tenant's envelope on the one stream (#1490): golf, castle
-			// (#77), rummy (#245), and the lobby's world. Series and labels carry the game
+			// (#77), rummy (#245), chess, and the lobby's world. Series and labels carry the game
 			// prefix because a label is a tile's identity across the whole
 			// service, not just its group; chat_* and hub_* are the room
 			// layer's.
@@ -370,6 +370,8 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("Castle", "castle_events", "", `castle_events_total`),
 			counter("Rummy", "rummy_commands", "", `rummy_commands_total`),
 			counter("Rummy", "rummy_events", "", `rummy_events_total`),
+			counter("Chess", "chess_commands", "", `chess_commands_total`),
+			counter("Chess", "chess_events", "", `chess_events_total`),
 			counter("Lobby", "lobby_commands", "", `lobby_commands_total`),
 			counter("Lobby", "lobby_events", "", `lobby_events_total`),
 		},
@@ -404,6 +406,8 @@ var serviceRegistry = map[string]serviceEntry{
 			"castle_event":       tsCounter(`castle_events_total`),
 			"rummy_command":      tsCounter(`rummy_commands_total`),
 			"rummy_event":        tsCounter(`rummy_events_total`),
+			"chess_command":      tsCounter(`chess_commands_total`),
+			"chess_event":        tsCounter(`chess_events_total`),
 			"lobby_command":      tsCounter(`lobby_commands_total`),
 			"lobby_event":        tsCounter(`lobby_events_total`),
 		},
