@@ -1,5 +1,5 @@
 // The games hub server (#79): sessions, rooms, chat, and every tenant
-// (lobby, voice, golf, castle) on opal-cpp's streaming stack — generated async
+// (lobby, voice, golf, castle, rummy, chess) on opal-cpp's streaming stack — generated async
 // handlers (ADR-0021), SessionRegistry fan-out with reconnect grace
 // (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018).
 //
@@ -145,6 +145,10 @@ int main() {
     // crashed instance held go stale for the sweep.
     golf->StartRoomHeartbeat();
   }
+
+  // Chess's clocks run out whether or not anyone moves; with a store, any
+  // instance holding the room may land the flag, and one does.
+  golf->StartChessClocks();
 
   // deja's tape on the glasshouse walls (#1554, #1150). DEJA_URL names
   // deja on the app network; unset, glasshouses simply have blank walls.

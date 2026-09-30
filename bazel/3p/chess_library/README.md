@@ -9,7 +9,7 @@ PGN reader, and magic-bitboard attack tables. MIT.
 | Version | 0.9.4 |
 | Commit | `53e6a841dcda7059a2af363d85f785ef1817304a` |
 | Files | `chess.hpp` (upstream `include/chess.hpp`), `LICENSE` |
-| Consumer | `//domains/games/libs/chess_cpp` (the only one — see the BUILD file) |
+| Consumers | `//domains/games/libs/chess_cpp` and `//domains/games/libs/chess_play` (see the BUILD file) |
 
 ## Why this is vendored rather than fetched
 
@@ -39,7 +39,7 @@ cd bazel/3p/chess_library
 curl -sSLO "https://raw.githubusercontent.com/Disservin/chess-library/$SHA/include/chess.hpp"
 curl -sSLO "https://raw.githubusercontent.com/Disservin/chess-library/$SHA/LICENSE"
 # then update the table above, and run:
-bazel test //domains/games/libs/chess_cpp/...
+bazel test //domains/games/libs/chess_cpp/... //domains/games/libs/chess_play/...
 ```
 
 `chess_library_contract_test` is the reason that last step is enough to

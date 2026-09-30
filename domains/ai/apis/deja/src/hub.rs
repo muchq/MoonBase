@@ -54,7 +54,7 @@ const EVENTS: [&str; 7] = [
     "game_started",
     "game_finished",
 ];
-const VARIANTS: [&str; 4] = ["golf", "castle", "rummy", "gin"];
+const VARIANTS: [&str; 5] = ["golf", "castle", "rummy", "gin", "chess"];
 const SURFACES: [&str; 3] = ["plane", "sphere", "glasshouse"];
 const OUTCOMES: [&str; 2] = ["completed", "abandoned"];
 /// The seats the engine deals a table, from golf_hub's kMaxSeats.
@@ -157,6 +157,11 @@ mod tests {
             obs(r#"{"ts":1,"event":"game_finished","room":"abc","variant":"castle","outcome":"abandoned","players":1}"#)
                 .token,
             "hub game_finished castle abandoned"
+        );
+        assert_eq!(
+            obs(r#"{"ts":1,"event":"game_finished","room":"abc","variant":"chess","outcome":"completed","players":2}"#)
+                .token,
+            "hub game_finished chess completed"
         );
     }
 

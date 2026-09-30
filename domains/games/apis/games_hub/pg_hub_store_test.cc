@@ -23,6 +23,8 @@
 #include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/games/libs/cards/rummy/table.h"
 #include "domains/games/libs/cards/rummy/table_serde.h"
+#include "domains/games/libs/chess_play/game_state.h"
+#include "domains/games/libs/chess_play/game_state_serde.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "gtest/gtest.h"
@@ -149,6 +151,29 @@ TEST_F(PgHubStoreTest, CastleRowsKeepTheirKindAndDecodeWithCastleSerde) {
   ASSERT_TRUE(reread.ok() && reread->has_value());
   EXPECT_EQ((*reread)->kind, games_hub::GameKind::kCastle);
   EXPECT_EQ((*reread)->version, 2);
+}
+
+// A chess game is the fourth: its kind is stored, and a game in play — its
+// moves and a running clock — decodes with chess's serde byte for byte.
+TEST_F(PgHubStoreTest, ChessRowsKeepTheirKindAndDecodeWithChessSerde) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  auto started = chess_play::GameState::start(
+      {"alice", "bob"}, "kpk", {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 1}, {180'000, 2'000}, 1'000);
+  ASSERT_TRUE(started.ok()) << started.status();
+  auto moved = started->move(1, "e2e4", 5'000);
+  ASSERT_TRUE(moved.ok()) << moved.status();
+  PgHubStore::GameRow row{
+      "R1", "C1", {"alice", "bob"}, games_hub::HostedState(*moved), 1, games_hub::GameKind::kChess};
+  ASSERT_TRUE(*store_->CommitGameSave(row, ""));
+
+  auto reread = store_->LoadGame("R1", "C1");
+  ASSERT_TRUE(reread.ok() && reread->has_value());
+  EXPECT_EQ((*reread)->kind, games_hub::GameKind::kChess);
+  ASSERT_TRUE((*reread)->state.has_value());
+  ASSERT_TRUE(std::holds_alternative<chess_play::GameState>(*(*reread)->state));
+  EXPECT_EQ(chess_play::serializeGameState(std::get<chess_play::GameState>(*(*reread)->state)),
+            chess_play::serializeGameState(*moved));
 }
 
 // A rummy table (#245) is the third engine behind the same rows: its kind

@@ -36,6 +36,7 @@
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/rummy/table.h"
+#include "domains/games/libs/chess_play/game_state.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "moonbase/games/server.h"
@@ -73,12 +74,13 @@ struct GolfTestHooks {
 
 /// GolfHub is the room hub (#1187): seat admission, rooms,
 /// chat, and the game layer, behind GamesHubHandler::Play. The name is
-/// golf's; the room layer, castle (#77), rummy (#245) and the lobby (#1490)
-/// live here too. A room hosts tables of any game (#79): golf on
-/// libs/cards/golf, castle on libs/cards/castle and rummy on
-/// libs/cards/rummy, each a member of the stream's unions with its own
-/// per-viewer view. Each tenant's envelope counts on its own series (golf_,
-/// castle_, rummy_, lobby_, voice_); the room layer's own are hub_*.
+/// golf's; the room layer, castle (#77), rummy (#245), chess and the lobby
+/// (#1490) live here too. A room hosts tables of any game (#79): golf on
+/// libs/cards/golf, castle on libs/cards/castle, rummy on libs/cards/rummy
+/// and chess on libs/chess_play, each a member of the stream's unions with
+/// its own per-viewer view. Each tenant's envelope counts on its own series
+/// (golf_, castle_, rummy_, chess_, lobby_, voice_); the room layer's own are
+/// hub_*.
 ///
 /// The lobby member is the World (world.h) keyed by the session's room:
 /// a roomed session stands in its room's world, an unroomed one in the
@@ -325,6 +327,42 @@ class GolfHub final {
   /// deja talking nonsense must not reach the hub's lock or a socket.
   bool PollTapeOnce();
 
+  /// Where a chess table starts, asked once per game at startGame. The
+  /// default deals the kpk variant's random position; tests fix one. Call
+  /// before serving: read without a lock thereafter.
+  using ChessOpener = std::function<chess_play::Opening()>;
+  void SetChessOpener(ChessOpener opener);
+
+  /// The wall clock chess's clocks read, absl::Now unless a test fixes
+  /// it. Call before serving: read without a lock thereafter.
+  void SetClock(std::function<absl::Time()> clock);
+
+  /// Ends on time every chess game this instance holds whose side to
+  /// move has run out at the clock's now, through the same conditional
+  /// commit a move takes: with several instances holding the room, one
+  /// lands the ending and the rest rebase onto it. Returns how many this
+  /// call ended.
+  int SweepChessClocksOnce();
+
+  /// Chess games whose flag the store refused and that wait to be tried
+  /// again; for tests.
+  std::size_t ChessFlagRetriesPending() {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return chess_flag_retry_at_.size();
+  }
+
+  /// Starts SweepChessClocksOnce on a thread every `interval` until the
+  /// hub is destroyed. A second call changes nothing.
+  void StartChessClocks(std::chrono::milliseconds interval = kChessClockTick);
+
+  /// How late a flag may land after the time ran out.
+  static constexpr std::chrono::milliseconds kChessClockTick{250};
+  /// How long a flag the store could not take waits before the sweep
+  /// tries that game again.
+  static constexpr std::chrono::milliseconds kChessFlagRetry{5000};
+  /// A chess clock the starter did not name.
+  static constexpr chess_play::TimeControl kDefaultChessClock{180'000, 2'000};
+
   /// The tick between polls. deja scores roughly a request a second, so
   /// this is "about as often as there is something to show"; the jitter
   /// keeps a fleet of instances off a single second.
@@ -362,6 +400,9 @@ class GolfHub final {
     }
     [[nodiscard]] const rummy::TableState& rummy() const {
       return std::get<rummy::TableState>(*state);
+    }
+    [[nodiscard]] const chess_play::GameState& chess() const {
+      return std::get<chess_play::GameState>(*state);
     }
   };
 
@@ -421,8 +462,10 @@ class GolfHub final {
   void HandleMove(const std::string& player_id, const moonbase::games::GolfMove& move);
   void HandleCastleMove(const std::string& player_id, const moonbase::games::CastleMove& move);
   void HandleRummyMove(const std::string& player_id, const moonbase::games::RummyMove& move);
-  /// The lifecycle half of castle's and rummy's move unions, which share
-  /// its shapes: true when `move` was one and has been handled.
+  void HandleChessMove(const std::string& player_id, const moonbase::games::ChessMove& move);
+  /// The lifecycle half of castle's, rummy's and chess's move unions, which
+  /// share its shapes (chess's startGame aside, which HandleChessMove takes
+  /// first): true when `move` was one and has been handled.
   template <typename Move>
   bool LifecycleMove(const std::string& player_id, const Move& move, GameKind kind);
   /// The lobby member: the session's world is its room's, or the plaza's.
@@ -450,7 +493,9 @@ class GolfHub final {
   /// in that table's own envelope.
   void CreateGameMove(const std::string& player_id, GameKind kind);
   void JoinGameMove(const std::string& player_id, const std::string& game_id, GameKind kind);
-  void StartGameMove(const std::string& player_id);
+  /// `time_control` is chess's clock, and nothing to any other game.
+  void StartGameMove(const std::string& player_id,
+                     chess_play::TimeControl time_control = kDefaultChessClock);
   /// The shared shape of every in-game engine move: transition, then
   /// stage the fan-out (views, turn change, game end) the result implies.
   void EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects);
@@ -460,6 +505,18 @@ class GolfHub final {
   template <typename Engine>
   void TableEngineMove(const std::string& player_id, GameKind kind,
                        const TableMoveFn<Engine>& move);
+  /// TableEngineMove's commit loop on a resolved game, as `player_id`'s
+  /// seat: the refusal if there is one, and otherwise the fan-out staged.
+  /// The chess clock sweep calls it for the seat on turn, which sent
+  /// nothing and so is told nothing of a refusal.
+  template <typename Engine>
+  std::optional<games_hub::Refusal> ApplyTableEngineMoveLocked(GameRef ref,
+                                                               const std::string& player_id,
+                                                               GameKind kind,
+                                                               const TableMoveFn<Engine>& move,
+                                                               Outbox& outbox);
+  /// Epoch milliseconds on the chess clock.
+  int64_t NowMs() const;
 
   /// Stream-side observability (#1187): the aura chain instruments
   /// only unary requests, so admissions, live-session count, disconnects,
@@ -620,6 +677,8 @@ class GolfHub final {
   void StageRoomStateLocked(const std::string& room_id, Outbox& outbox) const;
   moonbase::games::GameView ViewLocked(const std::string& game_id, const GameEntry& entry,
                                        const std::string& viewer_id) const;
+  moonbase::games::ChessView ChessViewLocked(const std::string& game_id,
+                                             const GameEntry& entry) const;
   moonbase::games::CastleView CastleViewLocked(const std::string& game_id, const GameEntry& entry,
                                                const std::string& viewer_id) const;
   moonbase::games::RummyView RummyViewLocked(const std::string& game_id, const GameEntry& entry,
@@ -730,6 +789,17 @@ class GolfHub final {
   std::condition_variable heartbeat_cv_;
   bool heartbeat_stop_ = false;
   std::thread heartbeat_;
+
+  /// Chess's opening and clock, set before serving.
+  ChessOpener chess_opener_;
+  /// Per (room, game): the epoch ms before which the sweep does not retry
+  /// a flag the store refused as unavailable. Guarded by mu_.
+  std::map<std::pair<std::string, std::string>, int64_t> chess_flag_retry_at_;
+  std::function<absl::Time()> clock_;
+  std::mutex chess_clock_mu_;
+  std::condition_variable chess_clock_cv_;
+  bool chess_clock_stop_ = false;
+  std::thread chess_clocks_;
 
   /// Set before serving and read without a lock thereafter, like the
   /// tape's client; one per responder. Cleared first in ~GolfHub: their

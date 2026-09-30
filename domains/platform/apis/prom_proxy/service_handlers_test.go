@@ -127,7 +127,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, "1d", response.Window)
 
 	// Custom groups keep registry order and every descriptor is present.
-	require.Len(t, response.Custom, 8)
+	require.Len(t, response.Custom, 9)
 	assert.Equal(t, "Probes", response.Custom[0].Title)
 	assert.Equal(t, "Sessions", response.Custom[1].Title)
 	assert.Equal(t, "Room layer", response.Custom[2].Title)
@@ -135,7 +135,8 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, "Golf", response.Custom[4].Title)
 	assert.Equal(t, "Castle", response.Custom[5].Title)
 	assert.Equal(t, "Rummy", response.Custom[6].Title)
-	assert.Equal(t, "Lobby", response.Custom[7].Title)
+	assert.Equal(t, "Chess", response.Custom[7].Title)
+	assert.Equal(t, "Lobby", response.Custom[8].Title)
 	assert.Len(t, response.Custom[0].Metrics, 1)
 	assert.Len(t, response.Custom[1].Metrics, 7)
 	assert.Len(t, response.Custom[2].Metrics, 4)
@@ -143,6 +144,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	require.Len(t, response.Custom[4].Metrics, 2)
 	require.Len(t, response.Custom[5].Metrics, 2)
 	require.Len(t, response.Custom[6].Metrics, 2)
+	require.Len(t, response.Custom[7].Metrics, 2)
 
 	assert.Equal(t, CustomMetricValue{Label: "health_checks", Value: 200.0, Toggleable: true},
 		response.Custom[0].Metrics[0])
@@ -156,8 +158,8 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	// Chat starts at CustomScalars index 12, so its first value is 200+12.
 	assert.Equal(t, CustomMetricValue{Label: "messages", Value: 212.0, Toggleable: true},
 		response.Custom[3].Metrics[0])
-	// The tenants' envelopes from index 17 (#1490): golf, castle, rummy, the
-	// lobby.
+	// The tenants' envelopes from index 17 (#1490): golf, castle, rummy,
+	// chess, the lobby.
 	// Labels carry the game prefix so a tile's label names it across the
 	// whole service, not just its group.
 	assert.Equal(t, CustomMetricValue{Label: "golf_commands", Value: 217.0, Toggleable: true},
@@ -166,10 +168,12 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 		response.Custom[5].Metrics[0])
 	assert.Equal(t, CustomMetricValue{Label: "rummy_commands", Value: 221.0, Toggleable: true},
 		response.Custom[6].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "lobby_commands", Value: 223.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "chess_commands", Value: 223.0, Toggleable: true},
 		response.Custom[7].Metrics[0])
+	assert.Equal(t, CustomMetricValue{Label: "lobby_commands", Value: 225.0, Toggleable: true},
+		response.Custom[8].Metrics[0])
 	// The omitted query's descriptor survives with a zero value.
-	last := response.Custom[7].Metrics[1]
+	last := response.Custom[8].Metrics[1]
 	assert.Equal(t, omitted.Label, last.Label)
 	assert.Equal(t, 0.0, last.Value)
 }
@@ -369,6 +373,8 @@ func TestMetricsHandler_GetServiceMetricsTimeSeries_StandardPlusCustom(t *testin
 		"castle_event_rate", "castle_event_count",
 		"rummy_command_rate", "rummy_command_count",
 		"rummy_event_rate", "rummy_event_count",
+		"chess_command_rate", "chess_command_count",
+		"chess_event_rate", "chess_event_count",
 		"lobby_command_rate", "lobby_command_count",
 		"lobby_event_rate", "lobby_event_count",
 	}

@@ -28,11 +28,14 @@
 #include "domains/games/libs/cards/golf/player.h"
 #include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/games/libs/cards/rummy/table.h"
+#include "domains/games/libs/chess_play/game_state.h"
 
 namespace games_hub {
 
 using moonbase::games::CastleMove;
 using moonbase::games::CastleUpdate;
+using moonbase::games::ChessMove;
+using moonbase::games::ChessUpdate;
 using moonbase::games::GameCommands;
 using moonbase::games::GameEvents;
 using moonbase::games::GolfMove;
@@ -67,6 +70,10 @@ std::unordered_set<int> WinnersAmong(const golf::GameState& state,
 namespace {
 
 constexpr std::size_t kMaxSeats = 4;
+
+std::size_t MaxSeatsOf(GameKind kind) {
+  return kind == GameKind::kChess ? chess_play::GameState::kSeats : kMaxSeats;
+}
 
 // The one place a stored row becomes a wire message. Live delivery and
 // history replay share it, so the two can never describe the same
@@ -112,9 +119,15 @@ GameEvents RummyUpdateEvent(RummyUpdate update) {
   return GameEvents::FromRummy(std::move(event));
 }
 
+GameEvents ChessUpdateEvent(ChessUpdate update) {
+  moonbase::games::ChessEvent event;
+  event.update = std::move(update);
+  return GameEvents::FromChess(std::move(event));
+}
+
 // The shared lifecycle announcements, in the table's own envelope. Each
 // game's update union carries the same case for them, so one generic
-// build serves all three: `make` picks the case off whichever union.
+// build serves every game: `make` picks the case off whichever union.
 template <typename Make>
 GameEvents InTableEnvelope(GameKind kind, const Make& make) {
   switch (kind) {
@@ -122,6 +135,8 @@ GameEvents InTableEnvelope(GameKind kind, const Make& make) {
       return CastleUpdateEvent(make(CastleUpdate{}));
     case GameKind::kRummy:
       return RummyUpdateEvent(make(RummyUpdate{}));
+    case GameKind::kChess:
+      return ChessUpdateEvent(make(ChessUpdate{}));
     case GameKind::kGolf:
       break;
   }
@@ -267,6 +282,19 @@ std::string RummyPhaseString(const rummy::TableState& table) {
   return "ended";
 }
 
+// The wire's word for a chess result: the winning seat and its color, or
+// neither for a draw.
+moonbase::games::ChessResult ChessResultOf(const chess_play::GameState& state) {
+  const chess_play::Result& result = *state.result();
+  moonbase::games::ChessResult wire;
+  wire.ending = std::string(chess_play::EndingName(result.ending));
+  if (result.winner.has_value()) {
+    wire.winner = state.players().at(state.seatOf(*result.winner));
+    wire.winnerColor = std::string(chess_play::ColorName(*result.winner));
+  }
+  return wire;
+}
+
 // The table's phase for the room's lobby summary, whichever game it plays.
 std::string PhaseStringOf(const HostedState& state) {
   if (const auto* golf_state = std::get_if<golf::GameState>(&state)) {
@@ -274,6 +302,9 @@ std::string PhaseStringOf(const HostedState& state) {
   }
   if (const auto* table = std::get_if<rummy::TableState>(&state)) {
     return RummyPhaseString(*table);
+  }
+  if (const auto* chess_state = std::get_if<chess_play::GameState>(&state)) {
+    return chess_state->isOver() ? "ended" : "playing";
   }
   return CastlePhaseString(std::get<castle::GameState>(state));
 }
@@ -288,6 +319,10 @@ std::string CurrentTurnOf(const HostedState& state) {
     if (table->getPhase() != rummy::TablePhase::Playing) return "";
     const int seat = rummy::dealWhoseTurn(*table->getDeal());
     return seat < 0 ? "" : rummy::dealPlayers(*table->getDeal()).at(seat).id;
+  }
+  if (const auto* chess_state = std::get_if<chess_play::GameState>(&state)) {
+    const int seat = chess_state->whoseTurn();
+    return seat < 0 ? "" : chess_state->players().at(seat);
   }
   const auto& castle_state = std::get<castle::GameState>(state);
   return CastlePlayerIdAt(castle_state, castle_state.getWhoseTurn());
@@ -358,6 +393,25 @@ std::vector<games_hub::HubStore::StatsDelta> RummyStatsDeltas(const rummy::Deal&
   return deltas;
 }
 
+// A chess finish: both seats played, the winner won, a draw credits
+// nobody. A leaver played and lost.
+std::vector<games_hub::HubStore::StatsDelta> ChessStatsDeltas(const chess_play::GameState& state) {
+  const std::optional<chess_play::Result>& result = state.result();
+  std::string winner;
+  if (result.has_value() && result->winner.has_value()) {
+    winner = state.players().at(state.seatOf(*result->winner));
+  }
+  std::vector<games_hub::HubStore::StatsDelta> deltas;
+  for (const std::string& id : state.players()) {
+    games_hub::HubStore::StatsDelta delta;
+    delta.player_id = id;
+    delta.played = 1;
+    delta.won = id == winner ? 1 : 0;
+    deltas.push_back(std::move(delta));
+  }
+  return deltas;
+}
+
 std::vector<games_hub::HubStore::StatsDelta> StatsDeltasOf(const HostedState& state,
                                                            const std::vector<std::string>& roster) {
   if (const auto* golf_state = std::get_if<golf::GameState>(&state)) {
@@ -371,6 +425,9 @@ std::vector<games_hub::HubStore::StatsDelta> StatsDeltasOf(const HostedState& st
       return RummyStatsDeltas(*deal);
     }
     return {};
+  }
+  if (const auto* chess_state = std::get_if<chess_play::GameState>(&state)) {
+    return ChessStatsDeltas(*chess_state);
   }
   return CastleStatsDeltas(std::get<castle::GameState>(state));
 }
@@ -399,13 +456,21 @@ bool DealStarted(const HostedState& before, const HostedState& after) {
 
 // The seat a leaver vacates, in whichever engine: compacted while seats
 // remain, or the game resolved (golf keeps every seat for the scorecard;
-// castle and rummy abandon below two seats).
-std::optional<HostedState> WithoutSeat(const HostedState& state, const std::string& player_id) {
+// castle, rummy and chess abandon below two seats — chess on its clock at
+// `now_ms`, which may already have ended the game on time).
+std::optional<HostedState> WithoutSeat(const HostedState& state, const std::string& player_id,
+                                       int64_t now_ms) {
   return std::visit(
       [&](const auto& engine) -> std::optional<HostedState> {
         const int seat = engine.playerIndex(player_id);
         if (seat < 0) return HostedState(engine);
-        auto next = engine.removePlayer(seat);
+        auto next = [&] {
+          if constexpr (std::is_same_v<std::decay_t<decltype(engine)>, chess_play::GameState>) {
+            return engine.removePlayer(seat, now_ms);
+          } else {
+            return engine.removePlayer(seat);
+          }
+        }();
         return HostedState(next.ok() ? *std::move(next) : engine);
       },
       state);
@@ -436,6 +501,10 @@ GolfHub::GolfHub(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Deal
       hooks_(std::move(hooks)),
       grace_period_(grace_period),
       instance_id_(InstanceId()),
+      chess_opener_([] {
+        absl::BitGen gen;
+        return chess_play::RandomKpkOpening(gen);
+      }),
       registry_([this, grace_period] {
         Registry::Options options;
         options.async_delivery = true;  // chains, not writer threads (ADR-0019)
@@ -507,6 +576,19 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"rummy_events", {{"event", "turnChanged"}}},
       {"rummy_events", {{"event", "gameEnded"}}},
       {"rummy_events", {{"event", "gameLeft"}}},
+      {"chess_commands", {{"command", "createGame"}}},
+      {"chess_commands", {{"command", "joinGame"}}},
+      {"chess_commands", {{"command", "startGame"}}},
+      {"chess_commands", {{"command", "leaveGame"}}},
+      {"chess_commands", {{"command", "play"}}},
+      {"chess_commands", {{"command", "resign"}}},
+      {"chess_events", {{"event", "gameJoined"}}},
+      {"chess_events", {{"event", "gameState"}}},
+      {"chess_events", {{"event", "gameCreated"}}},
+      {"chess_events", {{"event", "gameStarted"}}},
+      {"chess_events", {{"event", "turnChanged"}}},
+      {"chess_events", {{"event", "gameEnded"}}},
+      {"chess_events", {{"event", "gameLeft"}}},
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -643,6 +725,12 @@ GolfHub::~GolfHub() {
   }
   heartbeat_cv_.notify_all();
   if (heartbeat_.joinable()) heartbeat_.join();
+  {
+    const std::lock_guard<std::mutex> lock(chess_clock_mu_);
+    chess_clock_stop_ = true;
+  }
+  chess_clock_cv_.notify_all();
+  if (chess_clocks_.joinable()) chess_clocks_.join();
 }
 
 absl::Status GolfHub::RestoreFromStore() {
@@ -1677,6 +1765,11 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
     return;
   }
 
+  if (const auto* chess_command = command.as_chess_or_null()) {
+    HandleChessMove(player_id, chess_command->move);
+    return;
+  }
+
   if (const auto* lobby = command.as_lobby_or_null()) {
     HandleLobby(player_id, lobby->action);
     return;
@@ -2050,6 +2143,40 @@ void GolfHub::HandleCastleMove(const std::string& player_id, const CastleMove& m
   Reject(player_id, RejectKind::kUnknown, "unknown move");
 }
 
+// Chess's moves: the clock is read inside each, under mu_, so a move that
+// waited on the lock is charged from when it landed.
+void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& move) {
+  // startGame is chess's own shape: it names the clock.
+  if (const auto* start = move.as_startGame_or_null()) {
+    chess_play::TimeControl time_control = kDefaultChessClock;
+    if (start->initialSeconds.has_value()) {
+      time_control.initial_ms = int64_t{*start->initialSeconds} * 1000;
+    }
+    if (start->incrementSeconds.has_value()) {
+      time_control.increment_ms = int64_t{*start->incrementSeconds} * 1000;
+    }
+    StartGameMove(player_id, time_control);
+    return;
+  }
+  if (LifecycleMove(player_id, move, GameKind::kChess)) return;
+  if (const auto* play = move.as_play_or_null()) {
+    TableEngineMove<chess_play::GameState>(
+        player_id, GameKind::kChess,
+        [this, uci = play->uci](const chess_play::GameState& state, int seat) {
+          return state.move(seat, uci, NowMs());
+        });
+    return;
+  }
+  if (move.as_resign_or_null() != nullptr) {
+    TableEngineMove<chess_play::GameState>(player_id, GameKind::kChess,
+                                           [this](const chess_play::GameState& state, int seat) {
+                                             return state.resign(seat, NowMs());
+                                           });
+    return;
+  }
+  Reject(player_id, RejectKind::kUnknown, "unknown move");
+}
+
 // Rummy's moves. The ones that put cards down name them: a spelling no
 // card has never reaches the table, and a card the hand does not hold is
 // the engine's NotFound — the same stale-view refusal castle's rows give —
@@ -2319,7 +2446,7 @@ void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game
             refusal = Refusal{RejectKind::kState, "game already started"};
             break;
           }
-          if (entry.roster.size() >= kMaxSeats) {
+          if (entry.roster.size() >= MaxSeatsOf(entry.kind)) {
             refusal = Refusal{RejectKind::kState, "game is full"};
             break;
           }
@@ -2360,7 +2487,7 @@ void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game
   if (refusal.has_value()) Reject(player_id, std::move(*refusal));
 }
 
-void GolfHub::StartGameMove(const std::string& player_id) {
+void GolfHub::StartGameMove(const std::string& player_id, chess_play::TimeControl time_control) {
   Outbox outbox;
   std::optional<Refusal> refusal;
   {
@@ -2391,6 +2518,15 @@ void GolfHub::StartGameMove(const std::string& player_id) {
             break;
           }
           dealt.emplace(*std::move(table));
+        } else if (ref->entry->kind == GameKind::kChess) {
+          auto chess_game = chess_play::GameState::start(ref->entry->roster,
+                                                         std::string(chess_play::GameState::kKpk),
+                                                         chess_opener_(), time_control, NowMs());
+          if (!chess_game.ok()) {
+            refusal = Refusal{RejectKind::kRules, std::string(chess_game.status().message())};
+            break;
+          }
+          dealt.emplace(*std::move(chess_game));
         } else if (ref->entry->kind == GameKind::kCastle) {
           auto castle_deal =
               castle::dealCastleGame(ref->game_id, ref->entry->roster, std::move(deck));
@@ -2565,92 +2701,8 @@ void GolfHub::TableEngineMove(const std::string& player_id, GameKind kind,
     auto ref = FindGameLocked(player_id);
     if (!ref.has_value()) {
       refusal = Refusal{RejectKind::kState, "not in a game"};
-    } else if (!ref->entry->started()) {
-      refusal = Refusal{RejectKind::kState, "game not started"};
     } else {
-      bool landed = false;
-      for (int attempt = 0; attempt < kMaxCommitAttempts && !refusal.has_value(); ++attempt) {
-        if (ref->entry->kind != kind) {
-          refusal = Refusal{RejectKind::kState,
-                            absl::StrCat("that table plays ", GameKindName(ref->entry->kind))};
-          break;
-        }
-        const Engine& state = std::get<Engine>(*ref->entry->state);
-        const int seat = state.playerIndex(player_id);
-        if (seat < 0) {
-          refusal = Refusal{RejectKind::kState, "not seated in this game"};
-          break;
-        }
-        auto next = move(state, seat);
-        if (!next.ok()) {
-          // A card the seat's row does not hold (absl::NotFound: castle's
-          // RowIndexesOf, rummy's engine) is a client acting on a view
-          // the table has moved past, not a rules refusal.
-          const RejectKind kind = next.status().code() == absl::StatusCode::kNotFound
-                                      ? RejectKind::kState
-                                      : RejectKind::kRules;
-          refusal = Refusal{kind, std::string(next.status().message())};
-          break;
-        }
-        // Occupant ids, not seats: the engine renumbers on a leave. The
-        // opening turn (setup done) reads as a change from nobody.
-        const std::string previous_turn = CurrentTurnOf(*ref->entry->state);
-        const bool over = next->isOver();
-        HostedState next_state(*std::move(next));
-        // A finish credits the room's stats in the same conditional commit
-        // that lands it: the table's end, or a rummy deal's (#1609), which
-        // leaves the table dealing on.
-        std::optional<std::vector<HubStore::StatsDelta>> deltas =
-            DealEndDeltas(*ref->entry->state, next_state);
-        const bool deal_ended = deltas.has_value();
-        const bool deal_started = DealStarted(*ref->entry->state, next_state);
-        if (over) deltas = StatsDeltasOf(next_state, ref->entry->roster);
-        const Commit commit =
-            CommitEntryLocked(ref->room_id, ref->game_id, *ref->entry, ref->entry->roster,
-                              std::move(next_state), deltas.has_value() ? &*deltas : nullptr);
-        if (commit == Commit::kRebased) continue;
-        if (commit == Commit::kGone) {
-          DropGameLocked(*ref);
-          StageRoomStateLocked(ref->room_id, outbox);
-          refusal = Refusal{RejectKind::kState, "game no longer exists"};
-          break;
-        }
-        if (commit == Commit::kUnavailable) {
-          refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
-          break;
-        }
-        landed = true;
-        if (deal_started) {
-          RecordLocked([&id = ref->room_id, variant = VariantWordOf(*ref->entry->state),
-                        seats = ref->entry->roster.size()](absl::Time now) {
-            return GameStartedLine(now, id, variant, seats);
-          });
-        }
-        if (over) {
-          FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox);
-        } else {
-          StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
-          if (deal_ended) {
-            // The hand is the room's too: its stats moved.
-            MirrorStatsLocked(*ref->room, *deltas);
-          }
-          // Either way the table's status in the room's listing moved.
-          if (deal_ended || deal_started) StageRoomStateLocked(ref->room_id, outbox);
-          // Between deals nobody is on turn, and that is no turn to announce.
-          const std::string current_turn = CurrentTurnOf(*ref->entry->state);
-          if (current_turn != previous_turn && !current_turn.empty()) {
-            moonbase::games::TurnChanged turn;
-            turn.playerId = current_turn;
-            for (const std::string& recipient : ref->entry->roster) {
-              outbox.To(recipient, TurnEvent(kind, turn));
-            }
-          }
-        }
-        break;
-      }
-      if (!refusal.has_value() && !landed) {
-        refusal = Refusal{RejectKind::kState, "game changed; try again"};
-      }
+      refusal = ApplyTableEngineMoveLocked<Engine>(*ref, player_id, kind, move, outbox);
     }
     EnqueueWritesLocked(writes);
   }
@@ -2659,6 +2711,177 @@ void GolfHub::TableEngineMove(const std::string& player_id, GameKind kind,
   } else {
     Deliver(outbox);
   }
+}
+
+template <typename Engine>
+std::optional<Refusal> GolfHub::ApplyTableEngineMoveLocked(GameRef ref,
+                                                           const std::string& player_id,
+                                                           GameKind kind,
+                                                           const TableMoveFn<Engine>& move,
+                                                           Outbox& outbox) {
+  if (!ref.entry->started()) return Refusal{RejectKind::kState, "game not started"};
+  for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
+    if (ref.entry->kind != kind) {
+      return Refusal{RejectKind::kState,
+                     absl::StrCat("that table plays ", GameKindName(ref.entry->kind))};
+    }
+    const Engine& state = std::get<Engine>(*ref.entry->state);
+    const int seat = state.playerIndex(player_id);
+    if (seat < 0) return Refusal{RejectKind::kState, "not seated in this game"};
+    auto next = move(state, seat);
+    if (!next.ok()) {
+      // A card the seat's row does not hold (absl::NotFound: castle's
+      // RowIndexesOf, rummy's engine) is a client acting on a view
+      // the table has moved past, not a rules refusal.
+      const RejectKind reject_kind = next.status().code() == absl::StatusCode::kNotFound
+                                         ? RejectKind::kState
+                                         : RejectKind::kRules;
+      return Refusal{reject_kind, std::string(next.status().message())};
+    }
+    // Occupant ids, not seats: the engine renumbers on a leave. The
+    // opening turn (setup done) reads as a change from nobody.
+    const std::string previous_turn = CurrentTurnOf(*ref.entry->state);
+    const bool over = next->isOver();
+    HostedState next_state(*std::move(next));
+    // A finish credits the room's stats in the same conditional commit
+    // that lands it: the table's end, or a rummy deal's (#1609), which
+    // leaves the table dealing on.
+    std::optional<std::vector<HubStore::StatsDelta>> deltas =
+        DealEndDeltas(*ref.entry->state, next_state);
+    const bool deal_ended = deltas.has_value();
+    const bool deal_started = DealStarted(*ref.entry->state, next_state);
+    if (over) deltas = StatsDeltasOf(next_state, ref.entry->roster);
+    const Commit commit =
+        CommitEntryLocked(ref.room_id, ref.game_id, *ref.entry, ref.entry->roster,
+                          std::move(next_state), deltas.has_value() ? &*deltas : nullptr);
+    if (commit == Commit::kRebased) continue;
+    if (commit == Commit::kGone) {
+      DropGameLocked(ref);
+      StageRoomStateLocked(ref.room_id, outbox);
+      return Refusal{RejectKind::kState, "game no longer exists"};
+    }
+    if (commit == Commit::kUnavailable) {
+      return Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
+    }
+    if (deal_started) {
+      RecordLocked([&id = ref.room_id, variant = VariantWordOf(*ref.entry->state),
+                    seats = ref.entry->roster.size()](absl::Time now) {
+        return GameStartedLine(now, id, variant, seats);
+      });
+    }
+    if (over) {
+      FinalizeGameLocked(ref.room_id, *ref.room, ref.game_id, outbox);
+      return std::nullopt;
+    }
+    StageGameViewsLocked(ref.game_id, *ref.entry, outbox);
+    if (deal_ended) {
+      // The hand is the room's too: its stats moved.
+      MirrorStatsLocked(*ref.room, *deltas);
+    }
+    // Either way the table's status in the room's listing moved.
+    if (deal_ended || deal_started) StageRoomStateLocked(ref.room_id, outbox);
+    // Between deals nobody is on turn, and that is no turn to announce.
+    const std::string current_turn = CurrentTurnOf(*ref.entry->state);
+    if (current_turn != previous_turn && !current_turn.empty()) {
+      moonbase::games::TurnChanged turn;
+      turn.playerId = current_turn;
+      for (const std::string& recipient : ref.entry->roster) {
+        outbox.To(recipient, TurnEvent(kind, turn));
+      }
+    }
+    return std::nullopt;
+  }
+  return Refusal{RejectKind::kState, "game changed; try again"};
+}
+
+int64_t GolfHub::NowMs() const { return absl::ToUnixMillis(clock_ ? clock_() : absl::Now()); }
+
+void GolfHub::SetChessOpener(ChessOpener opener) { chess_opener_ = std::move(opener); }
+
+void GolfHub::SetClock(std::function<absl::Time()> clock) { clock_ = std::move(clock); }
+
+int GolfHub::SweepChessClocksOnce() {
+  struct Flagged {
+    std::string room_id;
+    std::string game_id;
+  };
+  std::vector<Flagged> flagged;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    const int64_t now = NowMs();
+    // A retry outlives nothing: a game gone from here, or over, whether it
+    // ended on this instance or another, is no longer waiting on the store.
+    std::erase_if(chess_flag_retry_at_, [this](const auto& retry) {
+      const auto room = rooms_.find(retry.first.first);
+      if (room == rooms_.end()) return true;
+      const auto game = room->second.games.find(retry.first.second);
+      return game == room->second.games.end() || !game->second.started() ||
+             game->second.chess().isOver();
+    });
+    for (const auto& [room_id, room] : rooms_) {
+      for (const auto& [game_id, entry] : room.games) {
+        if (entry.kind != GameKind::kChess || !entry.started()) continue;
+        const chess_play::GameState& state = entry.chess();
+        if (state.isOver() || state.remainingMs(state.sideToMove(), now) > 0) continue;
+        const auto retry = chess_flag_retry_at_.find({room_id, game_id});
+        if (retry != chess_flag_retry_at_.end() && now < retry->second) continue;
+        flagged.push_back({room_id, game_id});
+      }
+    }
+  }
+  // Each flag takes mu_ on its own: a commit is a store round trip, and a
+  // slow store holds the hub for one game's, never for the sweep's.
+  int ended = 0;
+  for (const Flagged& flag : flagged) {
+    Outbox outbox;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      const std::pair<std::string, std::string> key{flag.room_id, flag.game_id};
+      const auto room = rooms_.find(flag.room_id);
+      if (room == rooms_.end()) {
+        chess_flag_retry_at_.erase(key);
+        continue;
+      }
+      const auto game = room->second.games.find(flag.game_id);
+      if (game == room->second.games.end() || !game->second.started()) {
+        chess_flag_retry_at_.erase(key);
+        continue;
+      }
+      const chess_play::GameState& state = game->second.chess();
+      if (state.isOver()) {
+        chess_flag_retry_at_.erase(key);
+        continue;
+      }
+      const GameRef ref{flag.room_id, &room->second, flag.game_id, &game->second};
+      const int64_t now = NowMs();
+      // A rebase may find the game already ended elsewhere, or moved on:
+      // the refusal says so, and the seat on turn sent nothing to refuse.
+      const auto refusal = ApplyTableEngineMoveLocked<chess_play::GameState>(
+          ref, state.players().at(state.whoseTurn()), GameKind::kChess,
+          [now](const chess_play::GameState& state, int) { return state.flag(now); }, outbox);
+      if (refusal.has_value() && refusal->kind == RejectKind::kUnavailable) {
+        // The store is down: try this game again later, not every tick.
+        chess_flag_retry_at_[key] = now + kChessFlagRetry.count();
+      } else {
+        chess_flag_retry_at_.erase(key);
+      }
+      if (!refusal.has_value()) ++ended;
+    }
+    Deliver(outbox);
+  }
+  return ended;
+}
+
+void GolfHub::StartChessClocks(std::chrono::milliseconds interval) {
+  if (chess_clocks_.joinable()) return;
+  chess_clocks_ = std::thread([this, interval] {
+    while (true) {
+      SweepChessClocksOnce();
+      std::unique_lock<std::mutex> lock(chess_clock_mu_);
+      chess_clock_cv_.wait_for(lock, interval, [this] { return chess_clock_stop_; });
+      if (chess_clock_stop_) return;
+    }
+  });
 }
 
 void GolfHub::SetConnected(const std::string& player_id, bool connected) {
@@ -2785,7 +3008,7 @@ void GolfHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writ
     // losing or winning. The
     // shrunken roster is what records who left — and who can still win.
     const std::optional<HostedState> state =
-        entry.started() ? WithoutSeat(*entry.state, player_id) : std::nullopt;
+        entry.started() ? WithoutSeat(*entry.state, player_id, NowMs()) : std::nullopt;
     const std::string previous_turn = entry.started() ? CurrentTurnOf(*entry.state) : "";
     const bool over = state.has_value() && IsOver(*state);
     std::vector<HubStore::StatsDelta> deltas;
@@ -3030,6 +3253,9 @@ void GolfHub::CountCommand(const GameCommands& command) {
   } else if (const auto* rummy = command.as_rummy_or_null()) {
     metrics_->RecordCounter("rummy_commands", 1,
                             {{"command", std::string(rummy->move.case_name())}});
+  } else if (const auto* chess = command.as_chess_or_null()) {
+    metrics_->RecordCounter("chess_commands", 1,
+                            {{"command", std::string(chess->move.case_name())}});
   } else if (const auto* lobby = command.as_lobby_or_null()) {
     metrics_->RecordCounter("lobby_commands", 1,
                             {{"command", std::string(lobby->action.case_name())}});
@@ -3052,6 +3278,9 @@ void GolfHub::Send(const std::string& player_id, GameEvents event,
     } else if (const auto* rummy = event.as_rummy_or_null()) {
       metrics_->RecordCounter("rummy_events", 1,
                               {{"event", std::string(rummy->update.case_name())}});
+    } else if (const auto* chess = event.as_chess_or_null()) {
+      metrics_->RecordCounter("chess_events", 1,
+                              {{"event", std::string(chess->update.case_name())}});
     } else if (const auto* lobby = event.as_lobby_or_null()) {
       metrics_->RecordCounter("lobby_events", 1,
                               {{"event", std::string(lobby->update.case_name())}});
@@ -3171,6 +3400,48 @@ moonbase::games::GameView GolfHub::ViewLocked(const std::string& game_id, const 
     }
     view.players.push_back(std::move(player));
   }
+  return view;
+}
+
+moonbase::games::ChessView GolfHub::ChessViewLocked(const std::string& game_id,
+                                                    const GameEntry& entry) const {
+  moonbase::games::ChessView view;
+  view.gameId = game_id;
+  view.inCheck = false;
+  if (!entry.started()) {
+    view.phase = "waiting";
+    for (const std::string& roster_id : entry.roster) {
+      moonbase::games::ChessPlayer player;
+      player.playerId = roster_id;
+      view.players.push_back(std::move(player));
+    }
+    return view;
+  }
+  const chess_play::GameState& state = entry.chess();
+  const int64_t now = NowMs();
+  view.phase = state.isOver() ? "ended" : "playing";
+  view.variant = state.variant();
+  for (int seat = 0; seat < chess_play::GameState::kSeats; ++seat) {
+    moonbase::games::ChessPlayer player;
+    player.playerId = state.players().at(seat);
+    player.color = std::string(chess_play::ColorName(state.colorOf(seat)));
+    view.players.push_back(std::move(player));
+  }
+  view.fen = state.fen();
+  view.moves = state.moves();
+  if (!state.isOver()) {
+    view.sideToMove = std::string(chess_play::ColorName(state.sideToMove()));
+    view.currentPlayerId = state.players().at(state.whoseTurn());
+  }
+  view.inCheck = state.inCheck();
+  view.legalMoves = state.legalMoves();
+  moonbase::games::ChessClock clock;
+  clock.whiteMs = state.remainingMs(chess_play::Color::kWhite, now);
+  clock.blackMs = state.remainingMs(chess_play::Color::kBlack, now);
+  clock.initialMs = state.timeControl().initial_ms;
+  clock.incrementMs = state.timeControl().increment_ms;
+  view.clock = clock;
+  if (state.isOver()) view.result = ChessResultOf(state);
   return view;
 }
 
@@ -3403,6 +3674,11 @@ GameEvents GolfHub::JoinedEventLocked(const std::string& game_id, const GameEntr
     joined.view = CastleViewLocked(game_id, entry, viewer_id);
     return CastleUpdateEvent(CastleUpdate::FromGamejoined(std::move(joined)));
   }
+  if (entry.kind == GameKind::kChess) {
+    moonbase::games::ChessGameJoined joined;
+    joined.view = ChessViewLocked(game_id, entry);
+    return ChessUpdateEvent(ChessUpdate::FromGamejoined(std::move(joined)));
+  }
   if (entry.kind == GameKind::kRummy) {
     moonbase::games::RummyGameJoined joined;
     joined.view = RummyViewLocked(game_id, entry, viewer_id);
@@ -3420,6 +3696,12 @@ void GolfHub::StageGameViewsLocked(const std::string& game_id, const GameEntry& 
       moonbase::games::CastleGameState update;
       update.view = CastleViewLocked(game_id, entry, recipient);
       outbox.To(recipient, CastleUpdateEvent(CastleUpdate::FromGamestate(std::move(update))));
+      continue;
+    }
+    if (entry.kind == GameKind::kChess) {
+      moonbase::games::ChessGameState update;
+      update.view = ChessViewLocked(game_id, entry);
+      outbox.To(recipient, ChessUpdateEvent(ChessUpdate::FromGamestate(std::move(update))));
       continue;
     }
     if (entry.kind == GameKind::kRummy) {
@@ -3448,6 +3730,19 @@ void GolfHub::StageGameOverLocked(Room& room, const std::string& game_id, Outbox
     StageGameViewsLocked(game_id, game->second, outbox);
     for (const std::string& recipient : game->second.roster) {
       outbox.To(recipient, CastleUpdateEvent(CastleUpdate::FromGameended(ended)));
+      player_game_.erase(recipient);
+    }
+    room.games.erase(game);
+    return;
+  }
+  if (game->second.kind == GameKind::kChess) {
+    // Final views, then the result. A leaver hears neither: the roster no
+    // longer names it, and its gameLeft said it was out.
+    moonbase::games::ChessGameEnded ended;
+    ended.result = ChessResultOf(game->second.chess());
+    StageGameViewsLocked(game_id, game->second, outbox);
+    for (const std::string& recipient : game->second.roster) {
+      outbox.To(recipient, ChessUpdateEvent(ChessUpdate::FromGameended(ended)));
       player_game_.erase(recipient);
     }
     room.games.erase(game);

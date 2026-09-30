@@ -8,7 +8,7 @@ Game engines, services, and libraries.
 
 ## APIs
 
-- [**Games Hub**](apis/games_hub): opal-cpp event-stream backend for golf and thoughts (#79).
+- [**Games Hub**](apis/games_hub): opal-cpp event-stream backend for the lobby, golf, castle, rummy, chess and thoughts (#79).
 - [**Mithril**](apis/mithril): Rust-based game service.
 - [**1d4.net**](apis/one_d4): Chess analysis service.
 - [**MCPServer**](apis/mcpserver): Multi-protocol game server.
@@ -30,6 +30,7 @@ Game engines, services, and libraries.
 - [**Chess.com C++ Client**](libs/chess_com_cpp): Smithy-generated client for the Chess.com endpoints used by the C++ index worker.
 - [**ChessQL**](libs/chessql): Query language/engine for chess data.
 - [**Chess C++**](libs/chess_cpp): PGN parsing, replay, and board queries for the C++ index worker, on a vendored Disservin/chess-library.
+- [**Chess Play**](libs/chess_play): chess at a games-hub table — full rules, a Fischer clock, a variant's opening, and the stored row.
 - [**1d4 Motifs**](libs/one_d4_motifs): The motif detectors — positions in, `motif_occurrences` rows out. Shared by the batch indexer and the analyze RPC.
 - [**Wordchains**](libs/wordchains): Core graph algorithms and data structures for word chain puzzles.
 

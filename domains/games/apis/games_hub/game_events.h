@@ -59,7 +59,7 @@ inline constexpr std::string_view kOutcomeAbandoned = "abandoned";
 
 /// A game that ended, as the event describes it.
 struct GameFinished {
-  /// VariantWordOf's spelling: GameKindName's for golf and castle, a rummy
+  /// VariantWordOf's spelling: GameKindName's for golf, castle and chess, a rummy
   /// deal's own variant's for a rummy table.
   std::string_view variant;
   /// kOutcomeCompleted — the engine played it out — or kOutcomeAbandoned: too few

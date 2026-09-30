@@ -1,19 +1,19 @@
 # games_hub — the games hub on opal-cpp event streams
 
 The backend behind muchq.com/games — the lobby (#1490), golf, castle
-(#77) and rummy (#245) — and its /golf and /thoughts pages (#79), on opal-cpp's
+(#77), rummy (#245) and chess — and its /golf and /thoughts pages (#79), on opal-cpp's
 streaming stack: a modeled protocol with generated async handlers
 (ADR-0021), `SessionRegistry` fan-out with reconnect grace
 (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018), and ticket
 auth ahead of the 101. One session identity opens the one stream.
 
-## The model (six namespaces)
+## The model (seven namespaces)
 
 - `model/games.smithy` — `moonbase.games`: the service, session identity
   (`POST /games/v2/session`), the two terminal stream errors, the one
   stream — `Play` at `/games/v2/play`, its `GameCommands`/`GameEvents`
   unions carrying the room layer's own cases plus one envelope member
-  per tenant (`lobby`, `voice`, `golf`, `castle`, `rummy`) — and the game-agnostic room
+  per tenant (`lobby`, `voice`, `golf`, `castle`, `rummy`, `chess`) — and the game-agnostic room
   layer — rooms, chat, player info with room-scoped stats and the
   member's table (`PlayerInfo.table`: which game, which
   table, pending or in play, absent while idle — how the lobby tells who
@@ -35,6 +35,9 @@ auth ahead of the 101. One session identity opens the one stream.
   join refused at another game's table, and moves that name their cards.
   Its shapes are all prefixed `Rummy`, since codegen flattens the
   namespaces into one.
+- `model/chess.smithy` — `moonbase.chess`: chess's vocabulary, the
+  `chess` member, on castle's terms except `startGame`, which is chess's
+  own shape and names the clock. Shapes are prefixed `Chess`.
 - `model/lobby.smithy` — `moonbase.lobby`: the world's shapes — the
   `lobby` member of the room stream (`LobbyAction`, `LobbyUpdate`) and
   what they carry.
@@ -45,7 +48,7 @@ auth ahead of the 101. One session identity opens the one stream.
 A new game is one new model file and one more envelope member on the
 room stream's unions, the way castle, rummy and the lobby joined. Codegen
 flattens every namespace into `moonbase::games`, so shape names must be
-unique across the six files (a collision gets the foreign namespace's
+unique across the seven files (a collision gets the foreign namespace's
 name appended, which nothing here wants).
 
 ## The lobby's world
@@ -376,6 +379,32 @@ same move: melded with cards from hand, or laid off onto a table meld. The
 view does not say which cards could be taken down to; seeing that is the
 player's game.
 
+Chess is two seats, the full rules and a Fischer clock
+(`libs/chess_play`). The first variant, `kpk`, starts from a random king
+and pawn against king, White (the pawn) to move and White a random seat;
+the opening comes from `SetChessOpener`, which tests fix. Moves are UCI,
+checked against the view's `legalMoves`. Checkmate, stalemate,
+insufficient material, fifty moves and threefold repetition end a game
+unclaimed; either seat may resign at any time; a leaver loses by
+abandonment. `startGame` names the clock (30–1800 s, 0–30 s increment,
+3+2 absent). A side out of time loses — or draws, when the other side
+has only its king. Time is `SetClock`'s, absl::Now unless a test fixes
+it. A move that arrives after its mover's time ran out is not played:
+the game ends on time; so does a leave that finds the mover's time gone.
+The time a move is charged at is read under the hub's lock, so waiting on
+it costs nobody, and no turn starts before the one it follows. Nobody
+moving is `SweepChessClocksOnce`'s, every 250 ms on each instance
+(`StartChessClocks`, from main): a flag is a conditional commit like a
+move, so of several instances holding the room one lands it and the rest
+rebase onto it. Each flag takes the lock on its own, and one the store
+could not take waits `kChessFlagRetry` before the next try, so an outage
+stalls the hub for one commit at a time rather than every tick. The row
+stores wall-clock epoch milliseconds, which every instance reads against
+its own clock: instances must agree on the time, as NTP has them. A finish credits the winner a
+win and both seats a game, a leaver included; a draw credits no win.
+The view carries each side's time as of when it was built, and the
+client runs the side to move's down from there.
+
 ## Redaction
 
 A castle table redacts by `CastleViewLocked`: own hand faces (everyone's
@@ -383,8 +412,9 @@ once the game ends), every face-up row, face-down rows as counts. A rummy
 table by `RummyViewLocked`: own hand faces (everyone's once the deal
 ends, and between deals), other hands as counts, the stock as a count; the melds, the
 discard's top and the card taken from it this turn are public, and a
-stock draw's `lastMove` names no card. Golf's rules, below, are
-`ViewLocked`'s.
+stock draw's `lastMove` names no card. A chess table hides nothing:
+`ChessViewLocked` builds one view for both seats. Golf's rules, below,
+are `ViewLocked`'s.
 
 Every game broadcast is per-recipient (`ViewLocked`): own card faces only
 at the viewer's peeked indexes, the drawn card only to its holder, other
@@ -409,13 +439,13 @@ lobby-safe summaries only.
   stream side counts admissions, live sessions, disconnects, grace
   expiries, and the command/event flow (`hub_*` for the room layer —
   sessions, seats, refusals, its own commands and events — `golf_*`,
-  `castle_*`, `rummy_*`, `lobby_*` and `voice_*` for each tenant's envelope, `chat_*` for
+  `castle_*`, `rummy_*`, `chess_*`, `lobby_*` and `voice_*` for each tenant's envelope, `chat_*` for
   chat). The tape rides the lobby's prefix: `lobby_tape_polls{result}`,
   `lobby_tape_splats`, and the `lobby_tape_poller_active` gauge, which is
   1 exactly while a glasshouse is occupied.
 - `ALLOWED_ORIGINS` unset admits all origins (local dev); production
   sets the allowlist.
 - Deployed behind Caddy at `/games/v2/*` (`deploy/consolidated`); the
-  muchq.com games, golf, castle, rummy and thoughts UIs' only backend. No game
+  muchq.com games, golf, castle, rummy, chess and thoughts UIs' only backend. No game
   has a route of its own: all ride the one play stream, and the origin
   gate is per connection, not per game.
