@@ -323,13 +323,13 @@ TEST_F(ChessFixture, ALeaverLosesByAbandonment) {
   EXPECT_EQ(result->winner, table.bob.player_id);
   EXPECT_EQ(result->winnerColor, "black");
   EXPECT_EQ(result->ending, "abandoned");
-  // The winner is credited; the leaver, no longer at the table, is not.
+  // The leaver played and lost.
   const auto records = RecordsOnce(table.bob, [&](const auto& room) {
     return std::any_of(room.players.begin(), room.players.end(),
                        [&](const auto& p) { return p.gamesWon == 1; });
   });
   EXPECT_EQ(records.at(table.bob.player_id), std::make_pair(1, 1));
-  EXPECT_EQ(records.at(table.alice.player_id), std::make_pair(0, 0));
+  EXPECT_EQ(records.at(table.alice.player_id), std::make_pair(1, 0));
 }
 
 // The clock thread main starts: it flags without anyone sweeping by hand,

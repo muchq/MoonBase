@@ -394,9 +394,8 @@ std::vector<games_hub::HubStore::StatsDelta> RummyStatsDeltas(const rummy::Deal&
 }
 
 // A chess finish: both seats played, the winner won, a draw credits
-// nobody. Roster seats only — a leaver forfeits, and tallies nothing.
-std::vector<games_hub::HubStore::StatsDelta> ChessStatsDeltas(
-    const chess_play::GameState& state, const std::vector<std::string>& roster) {
+// nobody. A leaver played and lost.
+std::vector<games_hub::HubStore::StatsDelta> ChessStatsDeltas(const chess_play::GameState& state) {
   const std::optional<chess_play::Result>& result = state.result();
   std::string winner;
   if (result.has_value() && result->winner.has_value()) {
@@ -404,7 +403,6 @@ std::vector<games_hub::HubStore::StatsDelta> ChessStatsDeltas(
   }
   std::vector<games_hub::HubStore::StatsDelta> deltas;
   for (const std::string& id : state.players()) {
-    if (std::find(roster.begin(), roster.end(), id) == roster.end()) continue;
     games_hub::HubStore::StatsDelta delta;
     delta.player_id = id;
     delta.played = 1;
@@ -429,7 +427,7 @@ std::vector<games_hub::HubStore::StatsDelta> StatsDeltasOf(const HostedState& st
     return {};
   }
   if (const auto* chess_state = std::get_if<chess_play::GameState>(&state)) {
-    return ChessStatsDeltas(*chess_state, roster);
+    return ChessStatsDeltas(*chess_state);
   }
   return CastleStatsDeltas(std::get<castle::GameState>(state));
 }

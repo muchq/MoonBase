@@ -401,7 +401,7 @@ could not take waits `kChessFlagRetry` before the next try, so an outage
 stalls the hub for one commit at a time rather than every tick. The row
 stores wall-clock epoch milliseconds, which every instance reads against
 its own clock: instances must agree on the time, as NTP has them. A finish credits the winner a
-win and both seats a game; a draw credits no win, and a leaver nothing.
+win and both seats a game, a leaver included; a draw credits no win.
 The view carries each side's time as of when it was built, and the
 client runs the side to move's down from there.
 
