@@ -31,6 +31,32 @@ cc_test(
     ],
 )
 
+# Games one after another at one table, and its score sheet.
+cc_library(
+    name = "table",
+    srcs = ["table.cc"],
+    hdrs = ["table.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_state",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "table_test",
+    size = "small",
+    srcs = ["table_test.cc"],
+    deps = [
+        ":game_state",
+        ":table",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The games table's column for a chess row. Server-side only.
 cc_library(
     name = "game_state_serde",
@@ -54,6 +80,36 @@ cc_test(
         ":game_state",
         ":game_state_serde",
         "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_library(
+    name = "table_serde",
+    srcs = ["table_serde.cc"],
+    hdrs = ["table_serde.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_state",
+        ":game_state_serde",
+        ":table",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_test(
+    name = "table_serde_test",
+    size = "small",
+    srcs = ["table_serde_test.cc"],
+    deps = [
+        ":game_state",
+        ":game_state_serde",
+        ":table",
+        ":table_serde",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
     ],

@@ -25,6 +25,7 @@
 #include "domains/games/apis/games_hub/pg_ticket_vault.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 #include "domains/games/libs/chess_play/game_state.h"
+#include "domains/games/libs/chess_play/table.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 
@@ -949,7 +950,11 @@ TEST_F(PgGamesHubFixture, TwoInstancesSweepingOneClockEndTheGameOnce) {
   ASSERT_EQ(rows.games.size(), 1u);
   EXPECT_EQ(rows.games[0].kind, GameKind::kChess);
   ASSERT_TRUE(rows.games[0].state.has_value());
-  EXPECT_TRUE(IsOver(*rows.games[0].state));
+  // The table stays for the next game, the flag on its sheet once.
+  const auto& table = std::get<chess_play::Table>(*rows.games[0].state);
+  EXPECT_FALSE(table.isOver());
+  EXPECT_TRUE(table.game().isOver());
+  EXPECT_EQ(table.scoreSheet().size(), 1u);
 }
 
 TEST_F(PgGamesHubFixture, PendingGameLifecycleWritesThrough) {

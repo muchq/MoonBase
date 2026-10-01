@@ -10,6 +10,7 @@
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/rummy/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
+#include "domains/games/libs/chess_play/table.h"
 
 namespace games_hub {
 
@@ -20,9 +21,10 @@ namespace games_hub {
 enum class GameKind { kGolf, kCastle, kRummy, kChess };
 
 /// The engine truth of a started table, whichever game it plays.
-/// A rummy table is a dealer's-choice table (#1609), a deal at a time.
+/// A rummy table is a dealer's-choice table (#1609), a deal at a time; a
+/// chess table plays one game after another the same way.
 using HostedState =
-    std::variant<golf::GameState, castle::GameState, rummy::TableState, chess_play::GameState>;
+    std::variant<golf::GameState, castle::GameState, rummy::TableState, chess_play::Table>;
 
 inline std::string_view GameKindName(GameKind kind) {
   switch (kind) {
@@ -49,7 +51,7 @@ inline std::optional<GameKind> ParseGameKind(std::string_view name) {
 inline GameKind KindOf(const HostedState& state) {
   if (std::holds_alternative<castle::GameState>(state)) return GameKind::kCastle;
   if (std::holds_alternative<rummy::TableState>(state)) return GameKind::kRummy;
-  if (std::holds_alternative<chess_play::GameState>(state)) return GameKind::kChess;
+  if (std::holds_alternative<chess_play::Table>(state)) return GameKind::kChess;
   return GameKind::kGolf;
 }
 

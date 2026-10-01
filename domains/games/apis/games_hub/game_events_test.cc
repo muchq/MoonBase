@@ -135,17 +135,18 @@ TEST(GameEvents, ACastleGameLeftBelowTwoSeatsIsAbandoned) {
   EXPECT_EQ(finished.players, 1u);
 }
 
-chess_play::GameState Chess() {
-  auto state = chess_play::GameState::start({"andy", "mercy"}, "kpk",
-                                            {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0}, {60'000, 0}, 0);
-  EXPECT_TRUE(state.ok()) << state.status();
-  return *state;
+chess_play::Table Chess(const char* fen = "8/8/8/4k3/8/8/4P3/4K3 w - - 0 1") {
+  auto table = chess_play::Table::open({"andy", "mercy"}, "kpk", {fen, 0}, {60'000, 0}, 0);
+  EXPECT_TRUE(table.ok()) << table.status();
+  return *table;
 }
 
 // Every chess ending but a leave is the game played out: a resignation, a
-// flag or a draw finishes the game as surely as a mate.
+// flag or a draw finishes the game as surely as a mate, and the table
+// plays on.
 TEST(GameEvents, AChessGameResignedIsCompleted) {
-  const auto resigned = Chess().resign(1, 1'000);
+  const auto resigned =
+      Chess().inGame([](const chess_play::GameState& game) { return game.resign(1, 1'000); });
   ASSERT_TRUE(resigned.ok());
   const GameFinished finished = *FinishedOf(HostedState(*resigned), 2);
   EXPECT_EQ(finished.variant, "chess");
@@ -154,16 +155,17 @@ TEST(GameEvents, AChessGameResignedIsCompleted) {
 }
 
 TEST(GameEvents, AChessGameDrawnOnTimeOrMatedIsCompleted) {
-  const auto drawn = Chess().flag(60'000);
+  const auto drawn =
+      Chess().inGame([](const chess_play::GameState& game) { return game.flag(60'000); });
   ASSERT_TRUE(drawn.ok());
-  ASSERT_FALSE(drawn->result()->winner.has_value());
+  ASSERT_FALSE(drawn->game().result()->winner.has_value());
   EXPECT_EQ(FinishedOf(HostedState(*drawn), 2)->outcome, "completed");
-  auto mate_in_one = chess_play::GameState::start(
-      {"andy", "mercy"}, "kpk", {"7k/4P3/6K1/8/8/8/8/8 w - - 0 1", 0}, {60'000, 0}, 0);
-  ASSERT_TRUE(mate_in_one.ok());
-  const auto mated = mate_in_one->move(0, "e7e8q", 1'000);
+  const auto mated = Chess("7k/4P3/6K1/8/8/8/8/8 w - - 0 1")
+                         .inGame([](const chess_play::GameState& game) {
+                           return game.move(0, "e7e8q", 1'000);
+                         });
   ASSERT_TRUE(mated.ok());
-  ASSERT_EQ(mated->result()->ending, chess_play::Ending::kCheckmate);
+  ASSERT_EQ(mated->game().result()->ending, chess_play::Ending::kCheckmate);
   const GameFinished finished = *FinishedOf(HostedState(*mated), 2);
   EXPECT_EQ(finished.variant, "chess");
   EXPECT_EQ(finished.outcome, "completed");
@@ -175,6 +177,18 @@ TEST(GameEvents, AChessGameLeftIsAbandoned) {
   const GameFinished finished = *FinishedOf(HostedState(*left), 1);
   EXPECT_EQ(finished.variant, "chess");
   EXPECT_EQ(finished.outcome, "abandoned");
+}
+
+// A game in play is no finish; nor is a table closed between games, whose
+// last game was recorded as it ended.
+TEST(GameEvents, AChessTableRecordsOnlyAGamesEnd) {
+  EXPECT_FALSE(FinishedOf(HostedState(Chess()), 2).has_value());
+  const auto resigned =
+      Chess().inGame([](const chess_play::GameState& game) { return game.resign(1, 1'000); });
+  ASSERT_TRUE(resigned.ok());
+  const auto closed = resigned->removePlayer(0, 2'000);
+  ASSERT_TRUE(closed.ok());
+  EXPECT_FALSE(FinishedOf(HostedState(*closed), 1).has_value());
 }
 
 // A rummy table's games are its deals (#1609): a deal won by play is a
@@ -324,8 +338,10 @@ TEST(GameEvents, EveryEventsLineIsTextWithNothingToEscape) {
     endings.emplace_back(RummyDealWon());
     endings.emplace_back(*Rummy().removePlayer(1));
     endings.emplace_back(GinDealWon());
-    endings.emplace_back(*Chess().resign(1, 1'000));
-    endings.emplace_back(*Chess().flag(60'000));
+    endings.emplace_back(
+        *Chess().inGame([](const chess_play::GameState& g) { return g.resign(1, 1'000); }));
+    endings.emplace_back(
+        *Chess().inGame([](const chess_play::GameState& g) { return g.flag(60'000); }));
     endings.emplace_back(*Chess().removePlayer(0, 1'000));
     for (const HostedState& state : endings) {
       for (std::size_t players = 1; players <= 4; ++players) {

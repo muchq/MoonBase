@@ -8,8 +8,8 @@
 
 namespace chess_play {
 
-/// The games table's column for a chess row: versioned JSON of the
-/// engine's whole truth. Deserialize goes through GameState::restore, so
+/// One game as versioned JSON of the engine's whole truth: the `game` of
+/// a stored table (table_serde.h), and alone, a row from before tables. Deserialize goes through GameState::restore, so
 /// a row whose moves are illegal, or whose result the moves contradict,
 /// is refused rather than played on; the bytes come from a database row,
 /// not from code we trust. Unknown versions are refused too.

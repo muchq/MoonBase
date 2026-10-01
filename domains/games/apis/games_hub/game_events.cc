@@ -14,6 +14,7 @@
 #include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/games/libs/cards/rummy/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
+#include "domains/games/libs/chess_play/table.h"
 
 namespace games_hub {
 namespace {
@@ -66,9 +67,13 @@ std::optional<GameFinished> FinishedOf(const HostedState& state, std::size_t pla
     }
     return std::nullopt;
   }
-  if (const auto* chess_state = std::get_if<chess_play::GameState>(&state)) {
-    if (chess_state->result().has_value() &&
-        chess_state->result()->ending == chess_play::Ending::kAbandoned) {
+  if (const auto* table = std::get_if<chess_play::Table>(&state)) {
+    // A game's end, the table playing on or closed by the leave that ended
+    // it. A table closed between games recorded its last when it ended.
+    if (!table->game().isOver() || (table->isOver() && !table->endedByClose())) {
+      return std::nullopt;
+    }
+    if (table->game().result()->ending == chess_play::Ending::kAbandoned) {
       finished.outcome = kOutcomeAbandoned;
     }
     return finished;

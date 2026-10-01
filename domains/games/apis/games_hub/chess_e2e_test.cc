@@ -346,6 +346,90 @@ TEST_F(ChessFixture, TheClockThreadFlagsOnItsOwn) {
   EXPECT_EQ(result->ending, "timeout");
 }
 
+// A table plays one game after another: a finished game stays on the
+// table with its line on the sheet, and either seat starts the next, sides
+// swapped, so the pawn goes back and forth.
+TEST_F(ChessFixture, TheNextGameSwapsSidesAndKeepsTheScore) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Play("e7e8q")).ok());
+  for (Seat* seat : {&table.alice, &table.bob}) {
+    auto view =
+        AwaitChessView(seat->stream, [](const auto& v) { return v.phase == "ended"; }, "the mate");
+    ASSERT_TRUE(view.has_value());
+    ASSERT_EQ(view->scoreSheet.size(), 1u);
+    EXPECT_EQ(view->scoreSheet[0].winner, table.alice.player_id);
+    EXPECT_EQ(view->scoreSheet[0].ending, "checkmate");
+  }
+
+  // Bob, the seat that lost, starts it.
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  auto second = AwaitChessView(
+      table.alice.stream, [](const auto& v) { return v.phase == "playing"; }, "the next game");
+  ASSERT_TRUE(second.has_value());
+  EXPECT_EQ(second->players[1].playerId, table.bob.player_id);
+  EXPECT_EQ(second->players[1].color, "white");
+  EXPECT_EQ(second->currentPlayerId, table.bob.player_id);
+  EXPECT_TRUE(second->moves.empty());
+  EXPECT_FALSE(second->result.has_value());
+  EXPECT_EQ(second->scoreSheet.size(), 1u);
+
+  ASSERT_TRUE(table.bob.stream.Send(Play("e7e8q")).ok());
+  auto result = Ended(table.alice);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->winner, table.bob.player_id);
+  // Each game is the room's too: two played, one won apiece.
+  const auto records = RecordsOnce(table.alice, [](const auto& room) {
+    return std::all_of(room.players.begin(), room.players.end(),
+                       [](const auto& p) { return p.gamesPlayed == 2; });
+  });
+  EXPECT_EQ(records.at(table.alice.player_id), std::make_pair(2, 1));
+  EXPECT_EQ(records.at(table.bob.player_id), std::make_pair(2, 1));
+}
+
+TEST_F(ChessFixture, TheNextGameWaitsForThisOneToEnd) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  ASSERT_TRUE(started->table.bob.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  auto refused = ReceiveCase(started->table.bob.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "a game is in play");
+}
+
+// Between games a leave closes the table and scores nothing: the game
+// before was scored as it ended, and nobody is told it again.
+TEST_F(ChessFixture, LeavingBetweenGamesClosesTheTable) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Play("e7e8q")).ok());
+  ASSERT_TRUE(Ended(table.bob).has_value());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  ASSERT_TRUE(
+      table.alice.stream.Send(Chess(ChessMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  bool closed = false;
+  std::optional<moonbase::games::RoomState> room;
+  while (true) {
+    auto received = table.bob.stream.Receive(std::chrono::milliseconds(300));
+    if (!received.ok() || !received->has_value()) break;
+    if (const auto* chess = (*received)->as_chess_or_null()) {
+      EXPECT_EQ(chess->update.as_gameEnded_or_null(), nullptr) << "the mate, told again";
+      if (const auto* state = chess->update.as_gameState_or_null()) {
+        closed = closed || state->view.phase == "closed";
+        EXPECT_EQ(state->view.scoreSheet.size(), 1u);
+      }
+    }
+    if (const auto* state = (*received)->as_roomState_or_null()) room = *state;
+  }
+  EXPECT_TRUE(closed);
+  ASSERT_TRUE(room.has_value());
+  EXPECT_TRUE(room->games.empty());
+  for (const auto& player : room->players) {
+    EXPECT_EQ(player.gamesPlayed, 1) << player.playerId;
+  }
+}
+
 TEST_F(ChessFixture, AThirdSeatIsRefused) {
   auto room = SeatedRoom(3);
   ASSERT_TRUE(room.has_value());

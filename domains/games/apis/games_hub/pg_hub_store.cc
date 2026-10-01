@@ -10,7 +10,7 @@
 #include "domains/games/libs/cards/castle/game_state_serde.h"
 #include "domains/games/libs/cards/golf/game_state_serde.h"
 #include "domains/games/libs/cards/rummy/table_serde.h"
-#include "domains/games/libs/chess_play/game_state_serde.h"
+#include "domains/games/libs/chess_play/table_serde.h"
 
 namespace games_hub {
 namespace {
@@ -124,6 +124,8 @@ std::string StateJson(const PgHubStore::GameRow& row) {
       [](const auto& state) -> std::string {
         if constexpr (std::is_same_v<std::decay_t<decltype(state)>, rummy::TableState>) {
           return rummy::serializeTableState(state);
+        } else if constexpr (std::is_same_v<std::decay_t<decltype(state)>, chess_play::Table>) {
+          return chess_play::serializeTable(state);
         } else {
           return serializeGameState(state);
         }
@@ -391,7 +393,7 @@ absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(
       if (!state.ok()) return state.status();
       row.state.emplace(*std::move(state));
     } else if (row.kind == GameKind::kChess) {
-      auto state = chess_play::deserializeGameState(state_json);
+      auto state = chess_play::deserializeTable(state_json);
       if (!state.ok()) return state.status();
       row.state.emplace(*std::move(state));
     } else {

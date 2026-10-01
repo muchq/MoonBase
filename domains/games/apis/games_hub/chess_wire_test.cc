@@ -53,7 +53,7 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
             R"({"update":{"gameJoined":{"view":{"gameId":"GAME01","inCheck":false,)"
             R"("legalMoves":[],"moves":[],"phase":"waiting",)"
-            R"("players":[{"playerId":"player-1"}]}}}})");
+            R"("players":[{"playerId":"player-1"}],"scoreSheet":[]}}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
             R"({"games":[{"game":"chess","gameId":"GAME01","playerCount":1,"status":"waiting"}],)"
             R"("geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
@@ -71,7 +71,8 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
       joiner->Send(CommandFrame("chess", R"({"move":{"joinGame":{"gameId":"GAME01"}}})")).ok());
   const std::string waiting_pair =
       R"("view":{"gameId":"GAME01","inCheck":false,"legalMoves":[],"moves":[],)"
-      R"("phase":"waiting","players":[{"playerId":"player-1"},{"playerId":"player-2"}]})";
+      R"("phase":"waiting","players":[{"playerId":"player-1"},{"playerId":"player-2"}],)"
+      R"("scoreSheet":[]})";
   EXPECT_EQ(EventPayload(NextFrame(*joiner), "chess"),
             R"({"update":{"gameJoined":{)" + waiting_pair + R"(}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
@@ -93,7 +94,8 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
       R"("legalMoves":["e7e8b","e7e8n","e7e8q","e7e8r","g6f5","g6f6","g6f7","g6g5",)"
       R"("g6h5","g6h6"],"moves":[],"phase":"playing",)"
       R"("players":[{"color":"white","playerId":"player-1"},)"
-      R"({"color":"black","playerId":"player-2"}],"sideToMove":"white","variant":"kpk"})";
+      R"({"color":"black","playerId":"player-2"}],"scoreSheet":[],"sideToMove":"white",)"
+      R"("variant":"kpk"})";
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
             R"({"update":{"gameState":{)" + playing + R"(}}})");
   (void)EventPayload(NextFrame(*creator), "roomState");
@@ -108,7 +110,7 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
             R"("players":[{"color":"white","playerId":"player-1"},)"
             R"({"color":"black","playerId":"player-2"}],)"
             R"("result":{"ending":"checkmate","winner":"player-1","winnerColor":"white"},)"
-            R"("variant":"kpk"}}}})");
+            R"("scoreSheet":[{"ending":"checkmate","winner":"player-1"}],"variant":"kpk"}}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
             R"({"update":{"gameEnded":{"result":{"ending":"checkmate","winner":"player-1",)"
             R"("winnerColor":"white"}}}})");

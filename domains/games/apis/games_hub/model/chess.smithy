@@ -36,7 +36,8 @@ union ChessMove {
 }
 
 /// Seats two and deals the variant's position, White's clock running.
-/// Absent fields take the default, three minutes and two seconds.
+/// On a table whose game has ended, either seat starts the next one, sides
+/// swapped. Absent fields take the default, three minutes and two seconds.
 structure ChessStartGame {
     /// Each side's time, 30 to 1800.
     @range(min: 30, max: 1800)
@@ -84,7 +85,8 @@ structure ChessGameState {
     view: ChessView
 }
 
-/// The game is over; the ended view before it carries the same result.
+/// A game is over; the view before it carries the same result. The table
+/// stays for the next game unless a leave ended it.
 structure ChessGameEnded {
     @required
     result: ChessResult
@@ -95,7 +97,8 @@ structure ChessView {
     @required
     gameId: String
 
-    /// waiting | playing | ended
+    /// waiting | playing | ended | closed: ended between games, closed
+    /// once a seat left the table.
     @required
     phase: String
 
@@ -133,6 +136,10 @@ structure ChessView {
 
     /// Present once the game is over.
     result: ChessResult
+
+    /// Every game this table finished, in order.
+    @required
+    scoreSheet: ChessScoreSheet
 }
 
 list ChessPlayers {
@@ -178,6 +185,20 @@ structure ChessResult {
 
     /// checkmate | stalemate | insufficientMaterial | fiftyMoves |
     /// repetition | resignation | timeout | abandoned
+    @required
+    ending: String
+}
+
+list ChessScoreSheet {
+    member: ChessScoreLine
+}
+
+/// One finished game.
+structure ChessScoreLine {
+    /// The winning player; absent for a draw.
+    winner: String
+
+    /// As ChessResult.ending.
     @required
     ending: String
 }
