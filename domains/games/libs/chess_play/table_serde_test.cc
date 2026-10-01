@@ -48,7 +48,7 @@ TEST(ChessTableSerde, TheStoredBytesArePinned) {
   const Table table = Mated(Opened());
   EXPECT_EQ(serializeTable(table),
             R"({"closed":false,"endedByClose":false,"game":)" + serializeGameState(table.game()) +
-                R"(,"scoreSheet":[{"ending":"checkmate","winner":"alice"}],"v":2})");
+                R"(,"scoreSheet":[{"ending":"checkmate","winner":"alice","winnerColor":"white"}],"v":2})");
 }
 
 // A row stored before tables: one game, which is the table.
@@ -83,6 +83,7 @@ TEST(ChessTableSerde, RefusesWhatIsNotAStoredTable) {
   EXPECT_FALSE(with("/v"_json_pointer, 3).ok());
   EXPECT_FALSE(with("/scoreSheet/0/ending"_json_pointer, "sulking").ok());
   EXPECT_FALSE(with("/scoreSheet/0/winner"_json_pointer, 7).ok());
+  EXPECT_FALSE(with("/scoreSheet/0/winnerColor"_json_pointer, "red").ok());
   // What restore refuses, the row does too.
   EXPECT_FALSE(with("/scoreSheet"_json_pointer, json::array()).ok());
   EXPECT_FALSE(with("/game/moves"_json_pointer, json::array({"e7e5"})).ok());

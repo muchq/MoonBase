@@ -12,10 +12,12 @@
 namespace chess_play {
 
 /// A line of the table's score sheet: one game's end. The winner by
-/// name, not seat or color, since sides swap every game; absent for a draw.
+/// name, since sides swap every game, and the color they won with; both
+/// absent for a draw.
 struct GameScore {
   std::optional<std::string> winner;
   Ending ending = Ending::kCheckmate;
+  std::optional<Color> winner_color;
   bool operator==(const GameScore&) const = default;
 };
 

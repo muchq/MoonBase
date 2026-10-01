@@ -72,6 +72,29 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "chess_results",
+    srcs = ["chess_results.cc"],
+    hdrs = ["chess_results.h"],
+    deps = [
+        ":games_hub_smithy_server",
+        "//domains/games/libs/chess_play:game_state",
+        "//domains/games/libs/chess_play:table",
+    ],
+)
+
+cc_test(
+    name = "chess_results_test",
+    size = "small",
+    srcs = ["chess_results_test.cc"],
+    deps = [
+        ":chess_results",
+        "//domains/games/libs/chess_play:game_state",
+        "//domains/games/libs/chess_play:table",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_test(
     name = "wire_cards_test",
     size = "small",
@@ -640,6 +663,7 @@ cc_library(
     hdrs = ["golf_hub.h"],
     deps = [
         ":chat_store",
+        ":chess_results",
         ":game_events",
         ":games_hub_smithy_server",
         ":hosted_game",

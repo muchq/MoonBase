@@ -19,6 +19,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/time/clock.h"
+#include "domains/games/apis/games_hub/chess_results.h"
 #include "domains/games/apis/games_hub/game_events.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
@@ -280,19 +281,6 @@ std::string RummyPhaseString(const rummy::TableState& table) {
       break;
   }
   return "ended";
-}
-
-// The wire's word for a chess result: the winning seat and its color, or
-// neither for a draw.
-moonbase::games::ChessResult ChessResultOf(const chess_play::GameState& state) {
-  const chess_play::Result& result = *state.result();
-  moonbase::games::ChessResult wire;
-  wire.ending = std::string(chess_play::EndingName(result.ending));
-  if (result.winner.has_value()) {
-    wire.winner = state.players().at(state.seatOf(*result.winner));
-    wire.winnerColor = std::string(chess_play::ColorName(*result.winner));
-  }
-  return wire;
 }
 
 // The games a chess table has finished; zero for anything else.
@@ -3496,7 +3484,7 @@ moonbase::games::ChessView GolfHub::ChessViewLocked(const std::string& game_id,
   clock.initialMs = state.timeControl().initial_ms;
   clock.incrementMs = state.timeControl().increment_ms;
   view.clock = clock;
-  if (state.isOver()) view.result = ChessResultOf(state);
+  if (state.isOver()) view.result = WireChessResult(chess_play::ScoreOf(state));
   for (const chess_play::GameScore& score : table.scoreSheet()) {
     moonbase::games::ChessScoreLine line;
     line.winner = score.winner;
@@ -3775,20 +3763,19 @@ void GolfHub::StageGameViewsLocked(const std::string& game_id, const GameEntry& 
     update.view = ViewLocked(game_id, entry, recipient);
     outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
   }
+  // Each finished game's result after the views, once, from the sheet: an
+  // instance that learns of a game's end only after the next began still
+  // owes it.
   if (entry.kind == GameKind::kChess && entry.started()) {
-    const chess_play::Table& table = entry.chess();
-    if (table.game().isOver() && table.scoreSheet().size() > entry.chess_games_announced) {
-      StageChessGameEndedLocked(entry, outbox);
+    for (moonbase::games::ChessResult& result :
+         ChessResultsSince(entry.chess(), entry.chess_games_announced)) {
+      moonbase::games::ChessGameEnded ended;
+      ended.result = std::move(result);
+      for (const std::string& recipient : entry.roster) {
+        outbox.To(recipient, ChessUpdateEvent(ChessUpdate::FromGameended(ended)));
+      }
     }
-    entry.chess_games_announced = table.scoreSheet().size();
-  }
-}
-
-void GolfHub::StageChessGameEndedLocked(const GameEntry& entry, Outbox& outbox) const {
-  moonbase::games::ChessGameEnded ended;
-  ended.result = ChessResultOf(entry.chess().game());
-  for (const std::string& recipient : entry.roster) {
-    outbox.To(recipient, ChessUpdateEvent(ChessUpdate::FromGameended(ended)));
+    entry.chess_games_announced = entry.chess().scoreSheet().size();
   }
 }
 

@@ -13,8 +13,9 @@ namespace chess_play {
 ///
 /// Schema v2:
 ///   {"v":2, "closed":bool, "endedByClose":bool, "game":<GameState v1>,
-///    "scoreSheet":[{"winner":playerId, "ending":EndingName}...]}
-/// a line's winner absent for a draw. A v1 row, one game before tables
+///    "scoreSheet":[{"winner":playerId, "winnerColor":"white"|"black",
+///                   "ending":EndingName}...]}
+/// a line's winner and color absent for a draw. A v1 row, one game before tables
 /// kept playing, reads as a table on that game: open while it is in play,
 /// closed by its end once over, as it was.
 [[nodiscard]] std::string serializeTable(const Table& table);

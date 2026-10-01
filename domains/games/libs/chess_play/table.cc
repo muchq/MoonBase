@@ -11,7 +11,10 @@ GameScore ScoreOf(const GameState& finished) {
   const Result& result = *finished.result();
   GameScore score;
   score.ending = result.ending;
-  if (result.winner.has_value()) score.winner = finished.players().at(finished.seatOf(*result.winner));
+  if (result.winner.has_value()) {
+    score.winner = finished.players().at(finished.seatOf(*result.winner));
+    score.winner_color = result.winner;
+  }
   return score;
 }
 
@@ -27,6 +30,9 @@ absl::StatusOr<Table> Table::open(std::vector<std::string> players, std::string 
 absl::StatusOr<Table> Table::restore(GameState game, std::vector<GameScore> score_sheet,
                                      bool closed, bool ended_by_close) {
   for (const GameScore& line : score_sheet) {
+    if (line.winner.has_value() != line.winner_color.has_value()) {
+      return absl::InvalidArgumentError("a winner and their color go together");
+    }
     if (line.winner.has_value() && game.playerIndex(*line.winner) < 0) {
       return absl::InvalidArgumentError(absl::StrCat("not at this table: ", *line.winner));
     }

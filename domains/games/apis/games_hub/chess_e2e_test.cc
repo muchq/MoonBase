@@ -318,6 +318,13 @@ TEST_F(ChessFixture, ALeaverLosesByAbandonment) {
   Table& table = started->table;
   ASSERT_TRUE(
       table.alice.stream.Send(Chess(ChessMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  // The final view first: the table closed, the abandoned game on its sheet.
+  auto closed = AwaitChessView(
+      table.bob.stream, [](const auto& v) { return v.phase == "closed"; }, "the close");
+  ASSERT_TRUE(closed.has_value());
+  ASSERT_EQ(closed->scoreSheet.size(), 1u);
+  EXPECT_EQ(closed->scoreSheet[0].winner, table.bob.player_id);
+  EXPECT_EQ(closed->scoreSheet[0].ending, "abandoned");
   auto result = Ended(table.bob);
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->winner, table.bob.player_id);
@@ -376,9 +383,15 @@ TEST_F(ChessFixture, TheNextGameSwapsSidesAndKeepsTheScore) {
   EXPECT_EQ(second->scoreSheet.size(), 1u);
 
   ASSERT_TRUE(table.bob.stream.Send(Play("e7e8q")).ok());
+  auto scored = AwaitChessView(
+      table.alice.stream, [](const auto& v) { return v.phase == "ended"; }, "the second mate");
+  ASSERT_TRUE(scored.has_value());
+  ASSERT_EQ(scored->scoreSheet.size(), 2u);
+  EXPECT_EQ(scored->scoreSheet[1].winner, table.bob.player_id);
   auto result = Ended(table.alice);
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->winner, table.bob.player_id);
+  EXPECT_EQ(result->winnerColor, "white");
   // Each game is the room's too: two played, one won apiece.
   const auto records = RecordsOnce(table.alice, [](const auto& room) {
     return std::all_of(room.players.begin(), room.players.end(),

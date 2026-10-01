@@ -46,13 +46,13 @@ TEST(ChessTable, AGameThatEndsIsScoredAndTheTableStaysOpen) {
   EXPECT_FALSE(table.isOver());
   EXPECT_TRUE(table.game().isOver());
   EXPECT_EQ(table.scoreSheet(),
-            (std::vector<GameScore>{{std::string("alice"), Ending::kCheckmate}}));
+            (std::vector<GameScore>{{std::string("alice"), Ending::kCheckmate, Color::kWhite}}));
 }
 
 TEST(ChessTable, ADrawIsScoredForNobody) {
   auto drawn = Opened().inGame([](const GameState& game) { return game.flag(kT0 + 180'000); });
   ASSERT_TRUE(drawn.ok()) << drawn.status();  // the pawn side's flag against a bare king
-  EXPECT_EQ(drawn->scoreSheet(), (std::vector<GameScore>{{std::nullopt, Ending::kTimeout}}));
+  EXPECT_EQ(drawn->scoreSheet(), (std::vector<GameScore>{{std::nullopt, Ending::kTimeout, std::nullopt}}));
 }
 
 TEST(ChessTable, AMoveThatDoesNotEndTheGameScoresNothing) {
@@ -80,8 +80,9 @@ TEST(ChessTable, TheNextGameSwapsSidesAndKeepsTheSheet) {
   EXPECT_EQ(second->scoreSheet(), first.scoreSheet());
 
   const Table scored = Mated(*second);
-  EXPECT_EQ(scored.scoreSheet(), (std::vector<GameScore>{{std::string("alice"), Ending::kCheckmate},
-                                                         {std::string("bob"), Ending::kCheckmate}}));
+  EXPECT_EQ(scored.scoreSheet(),
+            (std::vector<GameScore>{{std::string("alice"), Ending::kCheckmate, Color::kWhite},
+                                    {std::string("bob"), Ending::kCheckmate, Color::kWhite}}));
 }
 
 TEST(ChessTable, TheNextGameWaitsForThisOneToEnd) {
@@ -95,7 +96,7 @@ TEST(ChessTable, LeavingMidGameLosesItAndClosesTheTable) {
   ASSERT_TRUE(left.ok()) << left.status();
   EXPECT_TRUE(left->isOver());
   EXPECT_TRUE(left->endedByClose());
-  EXPECT_EQ(left->scoreSheet(), (std::vector<GameScore>{{std::string("bob"), Ending::kAbandoned}}));
+  EXPECT_EQ(left->scoreSheet(), (std::vector<GameScore>{{std::string("bob"), Ending::kAbandoned, Color::kBlack}}));
 }
 
 TEST(ChessTable, LeavingBetweenGamesClosesTheTableAndScoresNothing) {
@@ -118,11 +119,15 @@ TEST(ChessTable, RestoreRefusesASheetTheGameContradicts) {
   EXPECT_TRUE(Table::restore(mated.game(), mated.scoreSheet(), false, false).ok());
   // An ended game its sheet does not end with.
   EXPECT_FALSE(Table::restore(mated.game(), {}, false, false).ok());
-  EXPECT_FALSE(Table::restore(mated.game(), {{std::string("bob"), Ending::kCheckmate}}, false, false)
+  EXPECT_FALSE(Table::restore(mated.game(), {{std::string("bob"), Ending::kCheckmate, Color::kWhite}}, false, false)
                    .ok());
   // A winner nobody at the table is.
-  EXPECT_FALSE(Table::restore(Opened().game(), {{std::string("carol"), Ending::kCheckmate}}, false,
+  EXPECT_FALSE(Table::restore(Opened().game(), {{std::string("carol"), Ending::kCheckmate, Color::kWhite}}, false,
                               false)
+                   .ok());
+  // A winner without the color they won with.
+  EXPECT_FALSE(Table::restore(mated.game(), {{std::string("alice"), Ending::kCheckmate, std::nullopt}},
+                              false, false)
                    .ok());
   // Closed over a game still in play; ended by a close that did not close it.
   EXPECT_FALSE(Table::restore(Opened().game(), {}, true, false).ok());

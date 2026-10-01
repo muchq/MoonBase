@@ -52,6 +52,16 @@ absl::StatusOr<std::vector<GameScore>> ReadSheet(const json& payload) {
       if (!line["winner"].is_string()) return absl::InvalidArgumentError("a winner is a name");
       score.winner = line["winner"].get<std::string>();
     }
+    if (line.contains("winnerColor")) {
+      const json& color = line["winnerColor"];
+      if (color == ColorName(Color::kWhite)) {
+        score.winner_color = Color::kWhite;
+      } else if (color == ColorName(Color::kBlack)) {
+        score.winner_color = Color::kBlack;
+      } else {
+        return absl::InvalidArgumentError("a winner's color is white or black");
+      }
+    }
     sheet.push_back(std::move(score));
   }
   return sheet;
@@ -71,6 +81,7 @@ std::string serializeTable(const Table& table) {
   for (const GameScore& score : table.scoreSheet()) {
     json line{{"ending", EndingName(score.ending)}};
     if (score.winner.has_value()) line["winner"] = Sanitized(*score.winner);
+    if (score.winner_color.has_value()) line["winnerColor"] = ColorName(*score.winner_color);
     sheet.push_back(std::move(line));
   }
   const json payload{

@@ -696,8 +696,6 @@ class GolfHub final {
   /// The game-over ceremony: final face-up views, then gameEnded, then
   /// the game is erased locally. Shared by the local finisher and the
   /// refresh path (a game another instance finished).
-  // A chess table's gameEnded, for the game it holds, to its roster.
-  void StageChessGameEndedLocked(const GameEntry& entry, Outbox& outbox) const;
   void StageGameOverLocked(Room& room, const std::string& game_id, Outbox& outbox);
   /// Writes one domain event (game_events.h), if this deployment records
   /// them. `build` renders the line under the same instant the log files
