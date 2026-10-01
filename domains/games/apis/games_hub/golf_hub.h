@@ -828,11 +828,16 @@ class GolfHub final {
   bool chess_clock_stop_ = false;
   std::thread chess_clocks_;
 
-  /// Chess bots: the engine, set before serving; per (room, game) the
-  /// epoch ms before which a game whose engine failed is not asked again
-  /// (guarded by mu_); and the bot thread.
+  /// Chess bots: the engine, set before serving; per (room, table) the
+  /// game, counted by the table's finished games, whose engine failed and
+  /// the epoch ms before which it is not asked again (guarded by mu_); and
+  /// the bot thread.
+  struct ChessBotRetry {
+    std::size_t game;
+    int64_t until;
+  };
   ChessBotEngine chess_bot_engine_;
-  std::map<std::pair<std::string, std::string>, int64_t> chess_bot_retry_at_;
+  std::map<std::pair<std::string, std::string>, ChessBotRetry> chess_bot_retry_at_;
   std::mutex chess_bot_mu_;
   std::condition_variable chess_bot_cv_;
   bool chess_bot_stop_ = false;

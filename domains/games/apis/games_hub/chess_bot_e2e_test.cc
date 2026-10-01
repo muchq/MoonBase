@@ -241,6 +241,63 @@ TEST_F(ChessBotFixture, AnAnswerForAGameThatMovedOnInPlayIsDropped) {
   }
 }
 
+// A table keeps its id and, from a fixed opening, its start across games,
+// and every other game the bot has White again with no moves made. An
+// answer asked for in one game is not played in a later one that happens
+// to look the same.
+TEST_F(ChessBotFixture, AnAnswerFromAnEarlierGameIsNotPlayedInALaterOne) {
+  opening_.white_seat = 1;
+  auto alice = AliceAtATable();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(StartedAgainstBot(*alice, 1500).has_value());
+  during_ask_ = [&] {
+    for (int game = 2; game <= 3; ++game) {
+      ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromResign({}))).ok());
+      ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "ended"; }, "resigned"));
+      ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+      ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "playing"; }, "next game"));
+    }
+  };
+  EXPECT_EQ(golf_->PlayChessBotsOnce(), 0) << "game one's move was played in game three";
+}
+
+// An engine failure holds back the game it failed in, not the next one
+// at the same table.
+TEST_F(ChessBotFixture, AnEngineFailureDoesNotHoldTheNextGame) {
+  opening_.white_seat = 1;
+  auto alice = AliceAtATable();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(StartedAgainstBot(*alice, 1500).has_value());
+  answer_ = absl::UnavailableError("engine down");
+  ASSERT_EQ(golf_->PlayChessBotsOnce(), 0);
+  ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromResign({}))).ok());
+  ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "ended"; }, "resigned"));
+  ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "playing"; }, "next game"));
+  moonbase::games::ChessPlay play;  // alice has White now
+  play.uci = "g6f6";
+  ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromPlay(play))).ok());
+  ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return !v.moves.empty(); }, "her move"));
+  answer_ = std::string("h8g8");
+  EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
+}
+
+// An answer the position refuses is a fault like a failed ask: no move,
+// and no second ask until the retry.
+TEST_F(ChessBotFixture, AnIllegalAnswerIsAskedAgainOnlyAfterTheRetry) {
+  opening_.white_seat = 1;
+  auto alice = AliceAtATable();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(StartedAgainstBot(*alice, 1500).has_value());
+  answer_ = std::string("a1a2");
+  EXPECT_EQ(golf_->PlayChessBotsOnce(), 0);
+  EXPECT_EQ(golf_->PlayChessBotsOnce(), 0);
+  EXPECT_EQ(asks_.size(), 1u);
+  now_ms_ += kChessBotRetry.count();
+  answer_ = std::string("e7e8q");
+  EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
+}
+
 // A bot holds no table on its own: its player leaving a table not yet
 // started takes the table, and the bot, away.
 TEST_F(ChessBotFixture, ABotAloneHoldsNoTable) {

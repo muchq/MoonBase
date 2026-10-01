@@ -2990,13 +2990,24 @@ int GolfHub::PlayChessBotsOnce() {
     std::string room_id;
     std::string game_id;
     std::string bot_id;
+    // Which of the table's games: its count of finished ones. A table
+    // keeps its id, and can repeat a start, from one game to the next.
+    std::size_t game_no;
     ChessBotAsk ask;
   };
   std::vector<Turn> turns;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     const int64_t now = NowMs();
-    std::erase_if(chess_bot_retry_at_, [now](const auto& retry) { return retry.second <= now; });
+    // A retry holds back the game it was for, and only until it is due.
+    std::erase_if(chess_bot_retry_at_, [this, now](const auto& retry) {
+      if (retry.second.until <= now) return true;
+      const auto room = rooms_.find(retry.first.first);
+      if (room == rooms_.end()) return true;
+      const auto game = room->second.games.find(retry.first.second);
+      return game == room->second.games.end() || !game->second.started() ||
+             game->second.chess().scoreSheet().size() != retry.second.game;
+    });
     for (const auto& [room_id, room] : rooms_) {
       for (const auto& [game_id, entry] : room.games) {
         if (entry.kind != GameKind::kChess || !entry.started()) continue;
@@ -3006,8 +3017,8 @@ int GolfHub::PlayChessBotsOnce() {
         const std::string& on_turn = game.players().at(seat);
         const std::optional<int> elo = ChessBotElo(on_turn);
         if (!elo.has_value() || chess_bot_retry_at_.contains({room_id, game_id})) continue;
-        turns.push_back(
-            {room_id, game_id, on_turn, {game.startFen(), game.moves(), kChessBotMovetimeMs, *elo}});
+        turns.push_back({room_id, game_id, on_turn, entry.chess().scoreSheet().size(),
+                         {game.startFen(), game.moves(), kChessBotMovetimeMs, *elo}});
       }
     }
   }
@@ -3023,7 +3034,7 @@ int GolfHub::PlayChessBotsOnce() {
       if (!answer.ok()) {
         LOG(WARNING) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/"
                      << turn.game_id << ": " << answer.status();
-        chess_bot_retry_at_[key] = NowMs() + kChessBotRetry.count();
+        chess_bot_retry_at_[key] = {turn.game_no, NowMs() + kChessBotRetry.count()};
         continue;
       }
       const auto room = rooms_.find(turn.room_id);
@@ -3032,14 +3043,22 @@ int GolfHub::PlayChessBotsOnce() {
       if (game == room->second.games.end() || !game->second.started()) continue;
       const GameRef ref{turn.room_id, &room->second, turn.game_id, &game->second};
       const std::size_t asked_at = turn.ask.moves.size();
-      // Only on the game it was asked about: the same start and as many
-      // moves, the bot still on turn. Anything else moved on meanwhile.
+      // Only on the game it was asked about: the same game of the table,
+      // the same start and as many moves, the bot still on turn. Anything
+      // else moved on meanwhile. An answer that game refuses is the
+      // engine's fault, and waits out the retry like a failed ask.
+      bool moved_on = false;
       const auto refusal = ApplyTableEngineMoveLocked<chess_play::Table>(
           ref, turn.bot_id, GameKind::kChess,
-          [this, &turn, asked_at, uci = *answer](const chess_play::Table& table, int seat) {
+          [this, &turn, &moved_on, asked_at, uci = *answer](const chess_play::Table& table, int seat) {
+            if (table.scoreSheet().size() != turn.game_no) {
+              moved_on = true;
+              return absl::StatusOr<chess_play::Table>(absl::FailedPreconditionError("the position moved on"));
+            }
             return table.inGame([&](const chess_play::GameState& state)
                                     -> absl::StatusOr<chess_play::GameState> {
               if (state.startFen() != turn.ask.fen || state.moves().size() != asked_at) {
+                moved_on = true;
                 return absl::FailedPreconditionError("the position moved on");
               }
               return state.move(seat, uci, NowMs());
@@ -3049,6 +3068,7 @@ int GolfHub::PlayChessBotsOnce() {
       if (refusal.has_value()) {
         LOG(INFO) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/" << turn.game_id
                   << ": " << turn.ask.moves.size() << " moves in, not played: " << refusal->reason;
+        if (!moved_on) chess_bot_retry_at_[key] = {turn.game_no, NowMs() + kChessBotRetry.count()};
       } else {
         ++played;
       }
