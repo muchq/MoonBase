@@ -61,3 +61,28 @@ http_file(
         "https://github.com/muchq/MoonBase/releases/download/dbip-country-lite-2026-09/dbip-country-lite-2026-09.csv.gz",
     ],
 )
+
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# Stockfish's own release build for the chess_engine image (#1618). It is
+# GPL-3: chess_engine runs it as a child process and nothing links it.
+# sse41-popcnt rather than avx2: any x86-64 host from the last decade runs
+# it, and king and pawn against king needs no speed. A version bump is the
+# tag, the sha256, and the binary's name in the URL and below.
+http_archive(
+    name = "stockfish",
+    build_file_content = """
+exports_files(["Copying.txt"], visibility = ["//visibility:public"])
+
+genrule(
+    name = "engine",
+    srcs = ["stockfish-ubuntu-x86-64-sse41-popcnt"],
+    outs = ["stockfish"],
+    cmd = "cp $< $@",
+    visibility = ["//visibility:public"],
+)
+""",
+    sha256 = "dea5016a6d9ab705e5697b093d882fca4677d84d8828f470ee33e76de33cf962",
+    strip_prefix = "stockfish",
+    urls = ["https://github.com/official-stockfish/Stockfish/releases/download/sf_18/stockfish-ubuntu-x86-64-sse41-popcnt.tar"],
+)
