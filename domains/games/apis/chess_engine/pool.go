@@ -38,6 +38,11 @@ func (p *Pool) BestMove(ctx context.Context, q Query) (string, error) {
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
+	// Out of time already: the engine is sound, so it goes back unasked.
+	if err := ctx.Err(); err != nil {
+		p.slots <- engine
+		return "", err
+	}
 	if engine == nil {
 		fresh, err := p.spawn()
 		if err != nil {

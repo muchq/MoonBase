@@ -16,7 +16,7 @@ POST /chess_engine/v1/bestmove
 
 `ENGINES` Stockfish processes (default 2) are started up front and serve one move at a time each. An engine that fails or misses its deadline is killed, and its slot starts a fresh one on next use.
 
-Stockfish is GPL-3. It runs here as a child process, spoken to over UCI, and is never linked into anything. The image ships the official release binary (`@stockfish`, pinned in `bazel/tools.MODULE.bazel`) at `/stockfish/stockfish`, with its license `Copying.txt` beside it.
+Stockfish is GPL-3. It runs here as a child process, spoken to over UCI, and is never linked into anything; the HTTP boundary is for isolation, so a hung or crashed engine costs a request, not games_hub. Its corresponding source is the `sf_18` release tag. The image ships the official release binary (`@stockfish`, pinned in `bazel/tools.MODULE.bazel`) at `/stockfish/stockfish`, with its license `Copying.txt` beside it.
 
 Internal only: there is no published port and no caddy route. games_hub calls it across the app network on port 8094.
 

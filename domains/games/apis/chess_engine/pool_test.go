@@ -18,7 +18,7 @@ import (
 )
 
 // The test binary run as an engine process: FAKE_UCI says how it answers
-// `go` — a move, never, or by exiting.
+// `go` — a move, no move, never, never while chattering, or by exiting.
 func TestHelperProcess(t *testing.T) {
 	mode := os.Getenv("FAKE_UCI")
 	if mode == "" {
@@ -36,8 +36,14 @@ func TestHelperProcess(t *testing.T) {
 			switch mode {
 			case "move":
 				fmt.Println("bestmove e7e8q")
+			case "none":
+				fmt.Println("bestmove (none)")
 			case "hang":
 				select {}
+			case "chatty":
+				for i := 0; ; i++ {
+					fmt.Printf("info depth %d\n", i)
+				}
 			case "die":
 				os.Exit(3)
 			}
@@ -125,4 +131,55 @@ func TestABusyPoolHoldsAWaiterOnlyUntilItsDeadline(t *testing.T) {
 	_, err = pool.BestMove(ctx, kpk)
 	assert.True(t, errors.Is(err, context.DeadlineExceeded), "got %v", err)
 	release()
+}
+
+// Mate or stalemate is an answer, not a fault: the engine stays.
+func TestNoMoveKeepsTheEngine(t *testing.T) {
+	spawn, spawned := fakeSpawner("none")
+	pool, err := NewPool(1, spawn)
+	require.NoError(t, err)
+	defer pool.Close()
+	for range 2 {
+		_, err = pool.BestMove(context.Background(), kpk)
+		assert.ErrorIs(t, err, ErrNoMove)
+	}
+	_, _ = pool.BestMove(context.Background(), kpk)
+	assert.Equal(t, int32(1), spawned.Load())
+}
+
+// A request already out of time when it gets an engine leaves it be.
+func TestAnExpiredRequestKeepsTheEngine(t *testing.T) {
+	spawn, spawned := fakeSpawner("move")
+	pool, err := NewPool(1, spawn)
+	require.NoError(t, err)
+	defer pool.Close()
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	for range 20 {
+		_, err = pool.BestMove(expired, kpk)
+		assert.ErrorIs(t, err, context.Canceled)
+	}
+	move, err := pool.BestMove(context.Background(), kpk)
+	require.NoError(t, err)
+	assert.Equal(t, "e7e8q", move)
+	assert.Equal(t, int32(1), spawned.Load())
+}
+
+// An engine still searching when its deadline passes fills the line
+// buffer; closing it must still end the reader, not strand it on a send.
+func TestClosingAChattyEngineEndsItsReader(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
+	cmd.Env = append(os.Environ(), "FAKE_UCI=chatty")
+	engine, err := Spawn(cmd)
+	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err = engine.BestMove(ctx, kpk)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	engine.Close()
+	select {
+	case <-engine.exited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the reader is stuck after Close")
+	}
 }
