@@ -22,6 +22,7 @@
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/time/time.h"
 #include "domains/ai/libs/deja_cpp/production_client.h"
 #include "domains/ai/libs/microgpt_cpp/production_client.h"
@@ -37,6 +38,7 @@
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/apis/games_hub/voice.h"
 #include "domains/games/libs/cards/dealer.h"
+#include "domains/games/libs/chess_engine_cpp/production_client.h"
 #include "domains/games/libs/mithril_cpp/production_client.h"
 #include "domains/platform/libs/aura/middleware.h"
 #include "domains/platform/libs/event_log/event_log.h"
@@ -198,6 +200,28 @@ int main() {
     LOG(INFO) << "Wordchain bot: asking mithril at " << mithril_url;
   } else {
     LOG(INFO) << "Wordchain bot: off (MITHRIL_URL unset)";
+  }
+
+  // Chess bots (#1618): Stockfish on chess_engine across the app network,
+  // a seat at a chess table its player can fill. Unset, no table offers one.
+  const char* chess_engine_url = std::getenv("CHESS_ENGINE_URL");
+  if (chess_engine_url != nullptr && *chess_engine_url != '\0') {
+    auto engine = chess_engine::CreateProductionClient(chess_engine_url);
+    if (!engine.ok()) {
+      LOG(ERROR) << "Failed to build the chess_engine client: " << engine.error().message();
+      return 1;
+    }
+    auto client = std::make_shared<chess_engine::Client>(std::move(*engine));
+    golf->SetChessBotEngine(
+        [client](const games_hub::ChessBotAsk& ask) -> absl::StatusOr<std::string> {
+          auto move = client->BestMove({ask.fen, ask.moves, ask.movetime_ms, ask.elo});
+          if (!move.ok()) return absl::UnavailableError(move.error().message());
+          return *std::move(move);
+        });
+    golf->StartChessBots();
+    LOG(INFO) << "Chess bots: asking chess_engine at " << chess_engine_url;
+  } else {
+    LOG(INFO) << "Chess bots: off (CHESS_ENGINE_URL unset)";
   }
 
   // A room's voice (#1590): the STUN servers a voice roster hands each

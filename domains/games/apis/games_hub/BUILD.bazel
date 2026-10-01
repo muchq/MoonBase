@@ -660,7 +660,10 @@ cc_test(
 cc_library(
     name = "golf_hub",
     srcs = ["golf_hub.cc"],
-    hdrs = ["golf_hub.h"],
+    hdrs = [
+        "chess_bots.h",
+        "golf_hub.h",
+    ],
     deps = [
         ":chat_store",
         ":chess_results",
@@ -955,6 +958,37 @@ cc_test(
     ],
 )
 
+# Chess bots (#1618): a fake engine behind the seat Stockfish takes.
+cc_test(
+    name = "chess_bot_e2e_test",
+    size = "small",
+    srcs = [
+        "chess_bot_e2e_test.cc",
+        "stream_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_client",
+        ":games_hub_smithy_server",
+        ":golf_hub",
+        ":hub_store",
+        ":id_generator",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/chess_play:game_state",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
 # Rummy on the room stream (#245): whole games against an engine mirror
 # at every table size, redaction, refusals, the refill, abandonment and
 # resume.
@@ -1225,6 +1259,8 @@ cc_binary(
         "//domains/ai/libs/deja_cpp:production_client",
         "//domains/ai/libs/microgpt_cpp:production_client",
         "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/chess_engine_cpp:client",
+        "//domains/games/libs/chess_engine_cpp:production_client",
         "//domains/games/libs/mithril_cpp:production_client",
         "//domains/platform/libs/aura",
         "//domains/platform/libs/event_log",

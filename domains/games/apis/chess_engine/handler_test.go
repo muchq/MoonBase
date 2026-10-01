@@ -75,3 +75,20 @@ func TestHealth(t *testing.T) {
 	NewRouter(&stubMover{}).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
+
+// The bytes games_hub sends and reads back, character for character as
+// chess_engine_cpp's best_move_wire_test pins them: a rename on either side
+// fails both.
+func TestTheWireIsPinned(t *testing.T) {
+	stub := &stubMover{move: "e7e8q"}
+	rec := post(NewRouter(stub), `{"elo":1500,"fen":"7k/4P3/6K1/8/8/8/8/8 w - - 0 1","moves":["g6f6","h8g8"],"movetimeMs":300}`)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "{\"uci\":\"e7e8q\"}\n", rec.Body.String())
+	require.NotNil(t, stub.got.Elo)
+	assert.Equal(t, Query{FEN: "7k/4P3/6K1/8/8/8/8/8 w - - 0 1", Moves: []string{"g6f6", "h8g8"}, MovetimeMs: 300, Elo: stub.got.Elo}, stub.got)
+	assert.Equal(t, 1500, *stub.got.Elo)
+
+	full := post(NewRouter(stub), `{"fen":"7k/4P3/6K1/8/8/8/8/8 w - - 0 1","movetimeMs":300}`)
+	require.Equal(t, http.StatusOK, full.Code)
+	assert.Nil(t, stub.got.Elo)
+}

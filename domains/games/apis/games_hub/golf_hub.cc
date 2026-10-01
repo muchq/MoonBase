@@ -601,6 +601,7 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"chess_commands", {{"command", "leaveGame"}}},
       {"chess_commands", {{"command", "play"}}},
       {"chess_commands", {{"command", "resign"}}},
+      {"chess_commands", {{"command", "addBot"}}},
       {"chess_events", {{"event", "gameJoined"}}},
       {"chess_events", {{"event", "gameState"}}},
       {"chess_events", {{"event", "gameCreated"}}},
@@ -750,6 +751,12 @@ GolfHub::~GolfHub() {
   }
   chess_clock_cv_.notify_all();
   if (chess_clocks_.joinable()) chess_clocks_.join();
+  {
+    const std::lock_guard<std::mutex> lock(chess_bot_mu_);
+    chess_bot_stop_ = true;
+  }
+  chess_bot_cv_.notify_all();
+  if (chess_bots_.joinable()) chess_bots_.join();
 }
 
 absl::Status GolfHub::RestoreFromStore() {
@@ -2194,6 +2201,10 @@ void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& mov
         });
     return;
   }
+  if (const auto* add = move.as_addBot_or_null()) {
+    AddChessBotMove(player_id, add->elo);
+    return;
+  }
   if (LifecycleMove(player_id, move, GameKind::kChess)) return;
   if (const auto* play = move.as_play_or_null()) {
     TableEngineMove<chess_play::Table>(
@@ -2914,6 +2925,151 @@ int GolfHub::SweepChessClocksOnce() {
   return ended;
 }
 
+void GolfHub::SetChessBotEngine(ChessBotEngine engine) { chess_bot_engine_ = std::move(engine); }
+
+void GolfHub::AddChessBotMove(const std::string& player_id, int elo) {
+  Outbox outbox;
+  std::optional<Refusal> refusal;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    auto ref = FindGameLocked(player_id);
+    bool seated = false;
+    if (chess_bot_engine_ == nullptr) {
+      refusal = Refusal{RejectKind::kState, "no chess engine"};
+    } else if (!ref.has_value()) {
+      refusal = Refusal{RejectKind::kState, "not in a game"};
+    } else {
+      for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
+        GameEntry& entry = *ref->entry;
+        if (entry.kind != GameKind::kChess) {
+          refusal = Refusal{RejectKind::kState,
+                            absl::StrCat("that table plays ", GameKindName(entry.kind))};
+          break;
+        }
+        if (entry.started()) {
+          refusal = Refusal{RejectKind::kState, "game already started"};
+          break;
+        }
+        if (entry.roster.size() >= MaxSeatsOf(entry.kind)) {
+          refusal = Refusal{RejectKind::kState, "the table is full"};
+          break;
+        }
+        std::vector<std::string> roster = entry.roster;
+        roster.push_back(ChessBotId(elo));
+        const Commit commit =
+            CommitEntryLocked(ref->room_id, ref->game_id, entry, roster, std::nullopt, nullptr);
+        if (commit == Commit::kRebased) continue;
+        if (commit == Commit::kGone) {
+          DropGameLocked(*ref);
+          StageRoomStateLocked(ref->room_id, outbox);
+          refusal = Refusal{RejectKind::kState, "game no longer exists"};
+          break;
+        }
+        if (commit == Commit::kUnavailable) {
+          refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
+          break;
+        }
+        seated = true;
+        StageGameViewsLocked(ref->game_id, entry, outbox);
+        StageRoomStateLocked(ref->room_id, outbox);
+        break;
+      }
+      if (!refusal.has_value() && !seated) refusal = Refusal{RejectKind::kState, "game changed; try again"};
+    }
+  }
+  if (refusal.has_value()) {
+    Reject(player_id, std::move(*refusal));
+  } else {
+    Deliver(outbox);
+  }
+}
+
+int GolfHub::PlayChessBotsOnce() {
+  if (chess_bot_engine_ == nullptr) return 0;
+  struct Turn {
+    std::string room_id;
+    std::string game_id;
+    std::string bot_id;
+    ChessBotAsk ask;
+  };
+  std::vector<Turn> turns;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    const int64_t now = NowMs();
+    std::erase_if(chess_bot_retry_at_, [now](const auto& retry) { return retry.second <= now; });
+    for (const auto& [room_id, room] : rooms_) {
+      for (const auto& [game_id, entry] : room.games) {
+        if (entry.kind != GameKind::kChess || !entry.started()) continue;
+        const chess_play::GameState& game = entry.chess().game();
+        const int seat = game.whoseTurn();
+        if (seat < 0) continue;
+        const std::string& on_turn = game.players().at(seat);
+        const std::optional<int> elo = ChessBotElo(on_turn);
+        if (!elo.has_value() || chess_bot_retry_at_.contains({room_id, game_id})) continue;
+        turns.push_back(
+            {room_id, game_id, on_turn, {game.startFen(), game.moves(), kChessBotMovetimeMs, *elo}});
+      }
+    }
+  }
+  // The engine is asked without mu_: it thinks for a movetime, and the
+  // hub serves everyone else meanwhile.
+  int played = 0;
+  for (const Turn& turn : turns) {
+    const absl::StatusOr<std::string> answer = chess_bot_engine_(turn.ask);
+    Outbox outbox;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      const std::pair<std::string, std::string> key{turn.room_id, turn.game_id};
+      if (!answer.ok()) {
+        LOG(WARNING) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/"
+                     << turn.game_id << ": " << answer.status();
+        chess_bot_retry_at_[key] = NowMs() + kChessBotRetry.count();
+        continue;
+      }
+      const auto room = rooms_.find(turn.room_id);
+      if (room == rooms_.end()) continue;
+      const auto game = room->second.games.find(turn.game_id);
+      if (game == room->second.games.end() || !game->second.started()) continue;
+      const GameRef ref{turn.room_id, &room->second, turn.game_id, &game->second};
+      const std::size_t asked_at = turn.ask.moves.size();
+      // Only on the game it was asked about: the same start and as many
+      // moves, the bot still on turn. Anything else moved on meanwhile.
+      const auto refusal = ApplyTableEngineMoveLocked<chess_play::Table>(
+          ref, turn.bot_id, GameKind::kChess,
+          [this, &turn, asked_at, uci = *answer](const chess_play::Table& table, int seat) {
+            return table.inGame([&](const chess_play::GameState& state)
+                                    -> absl::StatusOr<chess_play::GameState> {
+              if (state.startFen() != turn.ask.fen || state.moves().size() != asked_at) {
+                return absl::FailedPreconditionError("the position moved on");
+              }
+              return state.move(seat, uci, NowMs());
+            });
+          },
+          outbox);
+      if (refusal.has_value()) {
+        LOG(INFO) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/" << turn.game_id
+                  << ": " << turn.ask.moves.size() << " moves in, not played: " << refusal->reason;
+      } else {
+        ++played;
+      }
+    }
+    Deliver(outbox);
+  }
+  return played;
+}
+
+void GolfHub::StartChessBots(std::chrono::milliseconds interval) {
+  if (chess_bots_.joinable() || chess_bot_engine_ == nullptr) return;
+  chess_bots_ = std::thread([this, interval] {
+    while (true) {
+      PlayChessBotsOnce();
+      std::unique_lock<std::mutex> lock(chess_bot_mu_);
+      chess_bot_cv_.wait_for(lock, interval, [this] { return chess_bot_stop_; });
+      if (chess_bot_stop_) return;
+    }
+  });
+}
+
 void GolfHub::StartChessClocks(std::chrono::milliseconds interval) {
   if (chess_clocks_.joinable()) return;
   chess_clocks_ = std::thread([this, interval] {
@@ -3036,7 +3192,12 @@ void GolfHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writ
     std::vector<std::string> roster = entry.roster;
     roster.erase(std::remove(roster.begin(), roster.end(), player_id), roster.end());
 
-    if (!entry.started() && roster.empty()) {
+    // A bot holds no table alone: with no player left, it goes too.
+    const bool players_left =
+        std::any_of(roster.begin(), roster.end(),
+                    [](const std::string& id) { return !ChessBotElo(id).has_value(); });
+    if (!entry.started() && !players_left) {
+      for (const std::string& bot : roster) player_game_.erase(bot);
       ref->room->games.erase(ref->game_id);
       StageLocked(writes, HubStore::DeleteGame{ref->room_id, ref->game_id});
       StageWakeLocked(ref->room_id, writes);
@@ -3455,6 +3616,7 @@ moonbase::games::ChessView GolfHub::ChessViewLocked(const std::string& game_id,
     for (const std::string& roster_id : entry.roster) {
       moonbase::games::ChessPlayer player;
       player.playerId = roster_id;
+      if (ChessBotElo(roster_id).has_value()) player.bot = true;
       view.players.push_back(std::move(player));
     }
     return view;
@@ -3468,6 +3630,7 @@ moonbase::games::ChessView GolfHub::ChessViewLocked(const std::string& game_id,
     moonbase::games::ChessPlayer player;
     player.playerId = state.players().at(seat);
     player.color = std::string(chess_play::ColorName(state.colorOf(seat)));
+    if (ChessBotElo(player.playerId).has_value()) player.bot = true;
     view.players.push_back(std::move(player));
   }
   view.fen = state.fen();

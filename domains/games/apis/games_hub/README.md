@@ -404,7 +404,17 @@ rebase onto it. Each flag takes the lock on its own, and one the store
 could not take waits `kChessFlagRetry` before the next try, so an outage
 stalls the hub for one commit at a time rather than every tick. The row
 stores wall-clock epoch milliseconds, which every instance reads against
-its own clock: instances must agree on the time, as NTP has them. Each game's end credits the winner a
+its own clock: instances must agree on the time, as NTP has them. A table's one player may seat a bot in the other chair
+(`addBot`, an Elo of 1320 to 3190, #1618): Stockfish on `chess_engine`,
+reached at `CHESS_ENGINE_URL`. Its seat's id is `stockfish@<elo>`, which no
+minted id can be, and the view marks it `bot`. `PlayChessBotsOnce`, every
+100 ms on each instance, asks the engine for the move of every bot on turn
+without the hub's lock, and plays the answer through the move's own commit
+only if the game is still where it was asked. An engine that fails is
+asked again after `kChessBotRetry`, the bot's clock running meanwhile. A
+bot holds no table alone: its player leaving a table not yet started takes
+it, and a game against it counts for the player, the bot being no member.
+Each game's end credits the winner a
 win and both seats a game, a leaver included; a draw credits no win.
 Every instance holding the table sends a game's `gameEnded` once, after
 the views that show it, however it learned of the end.
