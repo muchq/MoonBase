@@ -37,6 +37,7 @@
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/rummy/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
+#include "domains/games/libs/chess_play/table.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "moonbase/games/server.h"
@@ -393,6 +394,10 @@ class GolfHub final {
     std::vector<std::string> roster;
     std::optional<HostedState> state;
     int64_t version = 0;
+    /// A chess table's finished games this instance has sent gameEnded
+    /// for: whichever path moved the table on, the views staged after it
+    /// announce the rest. Held from a row, the games so far count as told.
+    mutable std::size_t chess_games_announced = 0;
     [[nodiscard]] bool started() const { return state.has_value(); }
     [[nodiscard]] const golf::GameState& golf() const { return std::get<golf::GameState>(*state); }
     [[nodiscard]] const castle::GameState& castle() const {
@@ -401,8 +406,8 @@ class GolfHub final {
     [[nodiscard]] const rummy::TableState& rummy() const {
       return std::get<rummy::TableState>(*state);
     }
-    [[nodiscard]] const chess_play::GameState& chess() const {
-      return std::get<chess_play::GameState>(*state);
+    [[nodiscard]] const chess_play::Table& chess() const {
+      return std::get<chess_play::Table>(*state);
     }
   };
 

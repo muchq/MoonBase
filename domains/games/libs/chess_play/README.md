@@ -10,9 +10,12 @@ it stores.
   replaying the moves through `//bazel/3p/chess_library`, which stays behind
   the `.cc` files. Resignation, timeout and abandonment are the players'.
   Time is epoch milliseconds handed in by the caller.
+- `table.h` — `Table`: two seats playing one game after another, sides
+  swapped each game, with a score sheet; a leave closes it.
 - `RandomKpkOpening` — the `kpk` variant's start: king and pawn against
   king, White to move, White a random seat.
-- `game_state_serde.h` — the versioned JSON the games table holds;
-  deserializing replays and validates it through `GameState::restore`.
+- `table_serde.h` — the versioned JSON the games table holds, the game's
+  own (`game_state_serde.h`) inside it; deserializing replays and validates
+  it through `Table::restore`, and still reads a row from before tables.
 
 A new variant is a new opening, and a new name `GameState::start` accepts.

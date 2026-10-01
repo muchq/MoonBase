@@ -24,7 +24,7 @@
 #include "domains/games/libs/cards/rummy/table.h"
 #include "domains/games/libs/cards/rummy/table_serde.h"
 #include "domains/games/libs/chess_play/game_state.h"
-#include "domains/games/libs/chess_play/game_state_serde.h"
+#include "domains/games/libs/chess_play/table_serde.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "gtest/gtest.h"
@@ -153,15 +153,22 @@ TEST_F(PgHubStoreTest, CastleRowsKeepTheirKindAndDecodeWithCastleSerde) {
   EXPECT_EQ((*reread)->version, 2);
 }
 
-// A chess game is the fourth: its kind is stored, and a game in play — its
-// moves and a running clock — decodes with chess's serde byte for byte.
+// A chess table is the fourth: its kind is stored, and a table on its
+// second game — a score line, moves and a running clock — decodes with
+// the table's serde byte for byte.
 TEST_F(PgHubStoreTest, ChessRowsKeepTheirKindAndDecodeWithChessSerde) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
   store_->Flush();
-  auto started = chess_play::GameState::start(
+  auto opened = chess_play::Table::open(
       {"alice", "bob"}, "kpk", {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 1}, {180'000, 2'000}, 1'000);
-  ASSERT_TRUE(started.ok()) << started.status();
-  auto moved = started->move(1, "e2e4", 5'000);
+  ASSERT_TRUE(opened.ok()) << opened.status();
+  auto resigned = opened->inGame(
+      [](const chess_play::GameState& game) { return game.resign(0, 2'000); });
+  ASSERT_TRUE(resigned.ok()) << resigned.status();
+  auto second = resigned->next({"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 1}, {180'000, 2'000}, 3'000);
+  ASSERT_TRUE(second.ok()) << second.status();
+  auto moved = second->inGame(
+      [](const chess_play::GameState& game) { return game.move(0, "e2e4", 5'000); });
   ASSERT_TRUE(moved.ok()) << moved.status();
   PgHubStore::GameRow row{
       "R1", "C1", {"alice", "bob"}, games_hub::HostedState(*moved), 1, games_hub::GameKind::kChess};
@@ -171,9 +178,9 @@ TEST_F(PgHubStoreTest, ChessRowsKeepTheirKindAndDecodeWithChessSerde) {
   ASSERT_TRUE(reread.ok() && reread->has_value());
   EXPECT_EQ((*reread)->kind, games_hub::GameKind::kChess);
   ASSERT_TRUE((*reread)->state.has_value());
-  ASSERT_TRUE(std::holds_alternative<chess_play::GameState>(*(*reread)->state));
-  EXPECT_EQ(chess_play::serializeGameState(std::get<chess_play::GameState>(*(*reread)->state)),
-            chess_play::serializeGameState(*moved));
+  ASSERT_TRUE(std::holds_alternative<chess_play::Table>(*(*reread)->state));
+  EXPECT_EQ(chess_play::serializeTable(std::get<chess_play::Table>(*(*reread)->state)),
+            chess_play::serializeTable(*moved));
 }
 
 // A rummy table (#245) is the third engine behind the same rows: its kind

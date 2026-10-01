@@ -11,7 +11,7 @@
 #include "domains/games/libs/cards/golf/game_state_serde.h"
 #include "domains/games/libs/cards/golf/player.h"
 #include "domains/games/libs/chess_play/game_state.h"
-#include "domains/games/libs/chess_play/game_state_serde.h"
+#include "domains/games/libs/chess_play/table_serde.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace {
@@ -125,21 +125,25 @@ TEST_F(GameStateJsonbTest, NameWithNulByteStillInserts) {
 // jsonb would refuse raw.
 TEST_F(GameStateJsonbTest, AChessStateSurvivesJsonbNormalization) {
   auto started =
-      chess_play::GameState::start({std::string("a\0b", 3), "bob"}, "kpk",
-                                   {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0}, {180'000, 2'000}, 1'000);
+      chess_play::Table::open({std::string("a\0b", 3), "bob"}, "kpk",
+                              {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0}, {180'000, 2'000}, 1'000);
   ASSERT_TRUE(started.ok()) << started.status();
-  auto moved = started->move(0, "e2e4", 5'000);
+  auto moved = started->inGame(
+      [](const chess_play::GameState& game) { return game.move(0, "e2e4", 5'000); });
   ASSERT_TRUE(moved.ok());
-  auto flagged = moved->flag(1'000'000);
+  // Black's flag: the NUL-named seat wins, and the score sheet names it.
+  auto flagged = moved->inGame(
+      [](const chess_play::GameState& game) { return game.flag(1'000'000); });
   ASSERT_TRUE(flagged.ok());
-  for (const chess_play::GameState& state : {*moved, *flagged}) {
+  ASSERT_TRUE(flagged->scoreSheet().back().winner.has_value());
+  for (const chess_play::Table& table : {*moved, *flagged}) {
     ASSERT_TRUE(db_->Exec("TRUNCATE game_state_probe").ok());
-    const std::string serialized = chess_play::serializeGameState(state);
+    const std::string serialized = chess_play::serializeTable(table);
     const auto stored = StoreAndFetch(serialized);
     ASSERT_TRUE(stored.has_value());
-    const auto restored = chess_play::deserializeGameState(*stored);
+    const auto restored = chess_play::deserializeTable(*stored);
     ASSERT_TRUE(restored.ok()) << restored.status();
-    EXPECT_EQ(chess_play::serializeGameState(*restored), serialized);
+    EXPECT_EQ(chess_play::serializeTable(*restored), serialized);
   }
 }
 

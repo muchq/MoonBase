@@ -380,13 +380,17 @@ view does not say which cards could be taken down to; seeing that is the
 player's game.
 
 Chess is two seats, the full rules and a Fischer clock
-(`libs/chess_play`). The first variant, `kpk`, starts from a random king
+(`libs/chess_play`), one game after another at a table that stays until
+a seat leaves, as a rummy table deals on. A game's end is a line on the
+view's `scoreSheet`; `startGame` on an ended table starts the next, sides
+swapped. The first variant, `kpk`, starts from a random king
 and pawn against king, White (the pawn) to move and White a random seat;
 the opening comes from `SetChessOpener`, which tests fix. Moves are UCI,
 checked against the view's `legalMoves`. Checkmate, stalemate,
 insufficient material, fifty moves and threefold repetition end a game
 unclaimed; either seat may resign at any time; a leaver loses by
-abandonment. `startGame` names the clock (30–1800 s, 0–30 s increment,
+abandonment and the table closes (phase `closed`); a leave between
+games closes it and scores nothing. `startGame` names the clock (30–1800 s, 0–30 s increment,
 3+2 absent). A side out of time loses — or draws, when the other side
 has only its king. Time is `SetClock`'s, absl::Now unless a test fixes
 it. A move that arrives after its mover's time ran out is not played:
@@ -400,8 +404,10 @@ rebase onto it. Each flag takes the lock on its own, and one the store
 could not take waits `kChessFlagRetry` before the next try, so an outage
 stalls the hub for one commit at a time rather than every tick. The row
 stores wall-clock epoch milliseconds, which every instance reads against
-its own clock: instances must agree on the time, as NTP has them. A finish credits the winner a
+its own clock: instances must agree on the time, as NTP has them. Each game's end credits the winner a
 win and both seats a game, a leaver included; a draw credits no win.
+Every instance holding the table sends a game's `gameEnded` once, after
+the views that show it, however it learned of the end.
 The view carries each side's time as of when it was built, and the
 client runs the side to move's down from there.
 
