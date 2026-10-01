@@ -1,0 +1,60 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("//bazel/rules:oci.bzl", "linux_oci_go")
+
+# A chess engine behind HTTP (#1618): Stockfish run as a child process and
+# spoken to over UCI. Stockfish is GPL-3, so it is never linked into
+# anything; games_hub reaches it over the app network.
+
+go_library(
+    name = "chess_engine_lib",
+    srcs = [
+        "handler.go",
+        "pool.go",
+        "query.go",
+        "uci.go",
+    ],
+    importpath = "github.com/muchq/moonbase/domains/games/apis/chess_engine",
+    visibility = ["//visibility:public"],
+    deps = ["//domains/platform/libs/mucks"],
+)
+
+go_test(
+    name = "chess_engine_test",
+    size = "small",
+    srcs = [
+        "handler_test.go",
+        "pool_test.go",
+        "query_test.go",
+        "uci_test.go",
+    ],
+    embed = [":chess_engine_lib"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)
+
+go_binary(
+    name = "chess_engine",
+    srcs = ["main.go"],
+    visibility = ["//visibility:public"],
+    deps = [":chess_engine_lib"],
+)
+
+# The engine binary, and its license beside it: shipping Stockfish's
+# binary carries GPL-3's terms, and the source is the release it names.
+pkg_tar(
+    name = "stockfish_layer",
+    srcs = [
+        "@stockfish//:Copying.txt",
+        "@stockfish//:engine",
+    ],
+    mode = "0755",
+    package_dir = "/stockfish",
+)
+
+linux_oci_go(
+    bin_name = "chess_engine",
+    extra_tars = [":stockfish_layer"],
+)

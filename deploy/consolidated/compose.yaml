@@ -171,6 +171,36 @@ services:
           cpus: '0.25'
           memory: 256M
 
+  # Stockfish behind HTTP for chess bots (#1618). Internal only: no port
+  # published and no caddy route; games_hub calls it across the app network.
+  # Stockfish is GPL-3 and runs here as a child process, never linked.
+  chess_engine:
+    image: ghcr.io/muchq/chess_engine:${CHESS_ENGINE_SHA:-${DEPLOY_SHA:-latest}}
+    labels:
+      com.muchq.description: "Stockfish over HTTP for chess bots"
+    restart: always
+    logging: *default-logging
+    environment:
+      - PORT=8094
+      - STOCKFISH_PATH=/stockfish/stockfish
+      # Engine processes, each serving one move at a time. A bot thinks for
+      # a fixed movetime, so two share the half core without queuing.
+      - ENGINES=2
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      # Steady /health probe (#1307); see games_hub's for the full rationale.
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8094 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   mithril:
     image: ghcr.io/muchq/mithril:${MITHRIL_SHA:-${DEPLOY_SHA:-latest}}
     labels:

@@ -113,6 +113,7 @@ flowchart LR
     mcpserver["mcpserver"]
     portrait["portrait"]
     mithril["mithril"]
+    chess_engine["chess_engine"]
     posterize["posterize"]
     microgpt-serve["microgpt-serve"]
     iili["iili"]
