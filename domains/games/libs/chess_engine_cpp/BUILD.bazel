@@ -1,0 +1,62 @@
+load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# chess_engine's best move, for C++ consumers: games_hub's chess bots (#1618).
+smithy_cpp_client_library(
+    name = "chess_engine_smithy_client",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/chess_engine.smithy",
+    ],
+    namespace = "moonbase::chessengine",
+    service = "moonbase.chessengine#ChessEngine",
+)
+
+cc_library(
+    name = "client",
+    srcs = ["client.cc"],
+    hdrs = ["client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":chess_engine_smithy_client",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+    ],
+)
+
+cc_library(
+    name = "production_client",
+    srcs = ["production_client.cc"],
+    hdrs = ["production_client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
+# The consumer-tier pin: the request the hub sends and the answer
+# chess_engine gives, as the same bytes the Go tests pin.
+cc_test(
+    name = "best_move_wire_test",
+    size = "small",
+    srcs = ["best_move_wire_test.cc"],
+    deps = [
+        ":client",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
+cc_test(
+    name = "production_client_test",
+    size = "small",
+    srcs = ["production_client_test.cc"],
+    deps = [
+        ":production_client",
+        "@googletest//:gtest_main",
+    ],
+)

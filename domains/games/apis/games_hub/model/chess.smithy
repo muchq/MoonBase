@@ -33,6 +33,16 @@ union ChessMove {
     leaveGame: LeaveGame
     play: ChessPlay
     resign: ChessResign
+    addBot: ChessAddBot
+}
+
+/// Seats Stockfish in the empty second seat of a table not yet started
+/// (#1618), playing at `elo`. Only the table's one player may; the bot
+/// leaves with them. Refused when the hub has no engine to ask.
+structure ChessAddBot {
+    @required
+    @range(min: 1320, max: 3190)
+    elo: Integer
 }
 
 /// Seats two and deals the variant's position, White's clock running.
@@ -152,6 +162,10 @@ structure ChessPlayer {
 
     /// white | black; absent while waiting.
     color: String
+
+    /// The seat is a bot's, its playerId naming the engine and strength
+    /// ("stockfish@1500"). Absent for a person.
+    bot: Boolean
 }
 
 list ChessMoves {

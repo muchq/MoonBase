@@ -75,6 +75,9 @@ services:
       # by mithril, called across the app network. Unset, the command is
       # ordinary chat.
       MITHRIL_URL: http://mithril:8083
+      # Chess bots (#1618): Stockfish's moves for a bot's seat, asked of
+      # chess_engine across the app network. Unset, no table offers a bot.
+      CHESS_ENGINE_URL: http://chess_engine:8094
       # A room's voice (#1590): the STUN server each voice roster names,
       # so browsers behind NAT can find each other. Audio never touches
       # this host; browsers connect peer to peer.

@@ -160,6 +160,17 @@ TEST_F(ChessWireTest, TheModelsBoundsAreRefusedInBand) {
   (void)EventPayload(NextFrame(*creator), "chess");
   (void)EventPayload(NextFrame(*creator), "roomState");
 
+  // A bot's strength is Stockfish's range, and the decoder holds it.
+  for (const int elo : {1319, 3191}) {
+    ASSERT_TRUE(
+        creator->Send(CommandFrame("chess", R"({"move":{"addBot":{"elo":)" + std::to_string(elo) + "}}}"))
+            .ok());
+    EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
+              R"({"reason":"Value at '/chess/move/addBot/elo' failed to satisfy )"
+              R"(constraint: Member must be between 1320 and 3190, inclusive"})")
+        << elo;
+  }
+
   // On turn, a move of the wrong length never reaches the engine.
   for (const auto& [move, length] :
        std::vector<std::pair<std::string, int>>{{R"({"move":{"play":{"uci":"e7e"}}})", 3},

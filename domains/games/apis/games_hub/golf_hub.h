@@ -21,6 +21,7 @@
 #include "absl/time/time.h"
 #include "domains/ai/libs/deja_cpp/client.h"
 #include "domains/games/apis/games_hub/chat_store.h"
+#include "domains/games/apis/games_hub/chess_bots.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/hub_metrics.h"
 #include "domains/games/apis/games_hub/hub_store.h"
@@ -356,6 +357,25 @@ class GolfHub final {
   /// hub is destroyed. A second call changes nothing.
   void StartChessClocks(std::chrono::milliseconds interval = kChessClockTick);
 
+  /// The engine chess bots ask (#1618); null, the default, seats no bot.
+  /// Call before serving: read without a lock thereafter.
+  void SetChessBotEngine(ChessBotEngine engine);
+
+  /// Plays the move of every chess bot this instance holds that is on
+  /// turn: the position read under the lock, the engine asked without it,
+  /// and the answer played through the same conditional commit as a
+  /// player's move — only if the game is still where it was asked. An
+  /// engine that fails is asked again for that game after kChessBotRetry,
+  /// the bot's clock running meanwhile. Returns how many moves it played.
+  int PlayChessBotsOnce();
+
+  /// Starts PlayChessBotsOnce on a thread every `interval` until the hub
+  /// is destroyed. A second call changes nothing.
+  void StartChessBots(std::chrono::milliseconds interval = kChessBotTick);
+
+  /// How soon after its turn begins a bot starts to think.
+  static constexpr std::chrono::milliseconds kChessBotTick{100};
+
   /// How late a flag may land after the time ran out.
   static constexpr std::chrono::milliseconds kChessClockTick{250};
   /// How long a flag the store could not take waits before the sweep
@@ -468,6 +488,8 @@ class GolfHub final {
   void HandleCastleMove(const std::string& player_id, const moonbase::games::CastleMove& move);
   void HandleRummyMove(const std::string& player_id, const moonbase::games::RummyMove& move);
   void HandleChessMove(const std::string& player_id, const moonbase::games::ChessMove& move);
+  /// A bot to the second seat of `player_id`'s chess table (#1618).
+  void AddChessBotMove(const std::string& player_id, int elo);
   /// The lifecycle half of castle's, rummy's and chess's move unions, which
   /// share its shapes (chess's startGame aside, which HandleChessMove takes
   /// first): true when `move` was one and has been handled.
@@ -805,6 +827,21 @@ class GolfHub final {
   std::condition_variable chess_clock_cv_;
   bool chess_clock_stop_ = false;
   std::thread chess_clocks_;
+
+  /// Chess bots: the engine, set before serving; per (room, table) the
+  /// game, counted by the table's finished games, whose engine failed and
+  /// the epoch ms before which it is not asked again (guarded by mu_); and
+  /// the bot thread.
+  struct ChessBotRetry {
+    std::size_t game;
+    int64_t until;
+  };
+  ChessBotEngine chess_bot_engine_;
+  std::map<std::pair<std::string, std::string>, ChessBotRetry> chess_bot_retry_at_;
+  std::mutex chess_bot_mu_;
+  std::condition_variable chess_bot_cv_;
+  bool chess_bot_stop_ = false;
+  std::thread chess_bots_;
 
   /// Set before serving and read without a lock thereafter, like the
   /// tape's client; one per responder. Cleared first in ~GolfHub: their
