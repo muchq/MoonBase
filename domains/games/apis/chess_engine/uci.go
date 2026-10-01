@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -25,20 +26,28 @@ const handshakeTimeout = 5 * time.Second
 // to its stdin, answers read line by line off its stdout. It serves one
 // query at a time; Pool shares several.
 type UCI struct {
-	in    io.WriteCloser
-	lines chan string
-	cmd   *exec.Cmd
+	in     io.WriteCloser
+	lines  chan string
+	cmd    *exec.Cmd
+	done   chan struct{} // closed by Close
+	exited chan struct{} // closed when the reader returns
+	once   sync.Once
 }
 
 // NewUCI starts a conversation and waits out the handshake. `cmd`, if
 // any, is the process behind the pipes, killed on Close.
 func NewUCI(in io.WriteCloser, out io.Reader, cmd *exec.Cmd) (*UCI, error) {
-	u := &UCI{in: in, lines: make(chan string, 64), cmd: cmd}
+	u := &UCI{in: in, lines: make(chan string, 64), cmd: cmd, done: make(chan struct{}), exited: make(chan struct{})}
 	go func() {
+		defer close(u.exited)
 		defer close(u.lines)
 		scanner := bufio.NewScanner(out)
 		for scanner.Scan() {
-			u.lines <- scanner.Text()
+			select {
+			case u.lines <- scanner.Text():
+			case <-u.done:
+				return
+			}
 		}
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), handshakeTimeout)
@@ -114,6 +123,7 @@ func (u *UCI) BestMove(ctx context.Context, q Query) (string, error) {
 
 // Close ends the conversation and, with it, the process.
 func (u *UCI) Close() error {
+	u.once.Do(func() { close(u.done) })
 	_ = u.send("quit")
 	err := u.in.Close()
 	if u.cmd != nil && u.cmd.Process != nil {

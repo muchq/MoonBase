@@ -30,7 +30,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("starting %d engines from %s: %v", size, path, err)
 	}
-	defer pool.Close()
 	log.Printf("chess_engine on :%s, %d engines from %s", port, size, path)
 	log.Fatal(http.ListenAndServe(":"+port, chess_engine.NewRouter(pool)))
 }
