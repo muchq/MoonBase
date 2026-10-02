@@ -172,6 +172,27 @@ TEST_F(ChessBotFixture, ThinkTimeFollowsTheTablesTimeControl) {
   EXPECT_EQ(asks_[0].movetime_ms, 500);
 }
 
+// Remaining time caps the budget: after most of a short clock has run,
+// the ask is sized to what's left, not the table's full TC slice.
+TEST_F(ChessBotFixture, ThinkTimeIsCappedByTheSideToMovesRemaining) {
+  opening_.white_seat = 1;
+  auto alice = AliceAtATable();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(alice->stream.Send(AddBot(1500)).ok());
+  ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.players.size() == 2; }, "the bot"));
+  moonbase::games::ChessStartGame start;
+  start.initialSeconds = 30;
+  start.incrementSeconds = 0;
+  ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromStartgame(start))).ok());
+  ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "playing"; }, "start"));
+  // 30s clock, 29.6s already spent → 400 ms left → 350 ms ask after reserve.
+  now_ms_ += 29'600;
+  EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
+  ASSERT_EQ(asks_.size(), 1u);
+  EXPECT_EQ(asks_[0].movetime_ms, ChessBotMovetimeMs(30'000, 0, 400));
+  EXPECT_EQ(asks_[0].movetime_ms, 400 - kChessBotClockReserveMs);
+}
+
 TEST_F(ChessBotFixture, OffItsTurnTheBotWaits) {
   opening_.white_seat = 0;  // alice has White
   auto alice = AliceAtATable();

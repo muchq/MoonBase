@@ -3017,18 +3017,36 @@ int GolfHub::PlayChessBotsOnce() {
         const std::string& on_turn = game.players().at(seat);
         const std::optional<int> elo = ChessBotElo(on_turn);
         if (!elo.has_value() || chess_bot_retry_at_.contains({room_id, game_id})) continue;
-        const chess_play::TimeControl& tc = game.timeControl();
-        const int64_t remaining = game.remainingMs(game.sideToMove(), now);
-        const int movetime_ms = ChessBotMovetimeMs(tc.initial_ms, tc.increment_ms, remaining);
+        // Movetime is filled just before the ask, from the live remaining
+        // clock — not here — so a later bot in this pass is not capped by
+        // a snapshot taken before earlier bots thought.
         turns.push_back({room_id, game_id, on_turn, entry.chess().scoreSheet().size(),
-                         {game.startFen(), game.moves(), movetime_ms, *elo}});
+                         {game.startFen(), game.moves(), 0, *elo}});
       }
     }
   }
   // The engine is asked without mu_: it thinks for a movetime, and the
   // hub serves everyone else meanwhile.
   int played = 0;
-  for (const Turn& turn : turns) {
+  for (Turn& turn : turns) {
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      const auto room = rooms_.find(turn.room_id);
+      if (room == rooms_.end()) continue;
+      const auto game = room->second.games.find(turn.game_id);
+      if (game == room->second.games.end() || !game->second.started()) continue;
+      if (game->second.chess().scoreSheet().size() != turn.game_no) continue;
+      const chess_play::GameState& state = game->second.chess().game();
+      if (state.startFen() != turn.ask.fen || state.moves().size() != turn.ask.moves.size()) {
+        continue;
+      }
+      const int seat = state.whoseTurn();
+      if (seat < 0 || state.players().at(seat) != turn.bot_id) continue;
+      const chess_play::TimeControl& tc = state.timeControl();
+      turn.ask.movetime_ms =
+          ChessBotMovetimeMs(tc.initial_ms, tc.increment_ms,
+                             state.remainingMs(state.sideToMove(), NowMs()));
+    }
     const auto ask_started = std::chrono::steady_clock::now();
     LOG(INFO) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/" << turn.game_id
               << ": asking elo=" << turn.ask.elo << " movetimeMs=" << turn.ask.movetime_ms
