@@ -30,6 +30,7 @@
 #include "domains/games/apis/games_hub/rate_limiter.h"
 #include "domains/games/apis/games_hub/room_bot.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
+#include "domains/games/apis/games_hub/turn_credentials.h"
 #include "domains/games/apis/games_hub/voice.h"
 #include "domains/games/apis/games_hub/wordchain.h"
 #include "domains/games/apis/games_hub/world.h"
@@ -278,6 +279,9 @@ class GolfHub final {
   /// The ICE servers every voice roster hands a joiner (#1590). Call
   /// before serving; none leaves browsers to their host candidates.
   void SetIceServers(std::vector<moonbase::games::IceServer> servers);
+  /// The TURN server every voice roster adds, with credentials minted per
+  /// joiner. Call before serving; nullopt is none.
+  void SetTurn(std::optional<TurnConfig> turn);
 
   /// Starts the room bot (#1591): "@bot" mentions in room chat are
   /// answered by microgpt through `client`. main starts it when
