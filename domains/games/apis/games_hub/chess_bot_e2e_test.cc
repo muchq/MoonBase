@@ -132,7 +132,8 @@ TEST_F(ChessBotFixture, WithNoEngineTheHubSeatsNoBot) {
 }
 
 // On turn, the bot asks the engine with the game so far and plays its
-// answer the way a player's move is played: here, the mate.
+// answer the way a player's move is played: here, the mate. Think time
+// follows the table's clock (default 3+2 → ceiling).
 TEST_F(ChessBotFixture, OnItsTurnTheBotPlaysTheEnginesMove) {
   opening_.white_seat = 1;  // the bot has White
   auto alice = AliceAtATable();
@@ -143,7 +144,7 @@ TEST_F(ChessBotFixture, OnItsTurnTheBotPlaysTheEnginesMove) {
   EXPECT_EQ(asks_[0].fen, kMate);
   EXPECT_TRUE(asks_[0].moves.empty());
   EXPECT_EQ(asks_[0].elo, 1500);
-  EXPECT_EQ(asks_[0].movetime_ms, kChessBotMovetimeMs);
+  EXPECT_EQ(asks_[0].movetime_ms, ChessBotMovetimeMs(180'000, 2'000));
   auto view = AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "ended"; }, "the mate");
   ASSERT_TRUE(view.has_value());
   EXPECT_EQ(view->moves, std::vector<std::string>{"e7e8q"});
@@ -151,6 +152,24 @@ TEST_F(ChessBotFixture, OnItsTurnTheBotPlaysTheEnginesMove) {
   // A finished game is nothing to play.
   EXPECT_EQ(golf_->PlayChessBotsOnce(), 0);
   EXPECT_EQ(asks_.size(), 1u);
+}
+
+// A shorter clock asks for less think time: 30s + 0 → 500 ms.
+TEST_F(ChessBotFixture, ThinkTimeFollowsTheTablesTimeControl) {
+  opening_.white_seat = 1;
+  auto alice = AliceAtATable();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(alice->stream.Send(AddBot(1500)).ok());
+  ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.players.size() == 2; }, "the bot"));
+  moonbase::games::ChessStartGame start;
+  start.initialSeconds = 30;
+  start.incrementSeconds = 0;
+  ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromStartgame(start))).ok());
+  ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "playing"; }, "start"));
+  EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
+  ASSERT_EQ(asks_.size(), 1u);
+  EXPECT_EQ(asks_[0].movetime_ms, ChessBotMovetimeMs(30'000, 0));
+  EXPECT_EQ(asks_[0].movetime_ms, 500);
 }
 
 TEST_F(ChessBotFixture, OffItsTurnTheBotWaits) {

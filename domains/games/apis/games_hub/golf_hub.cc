@@ -3017,8 +3017,11 @@ int GolfHub::PlayChessBotsOnce() {
         const std::string& on_turn = game.players().at(seat);
         const std::optional<int> elo = ChessBotElo(on_turn);
         if (!elo.has_value() || chess_bot_retry_at_.contains({room_id, game_id})) continue;
+        const chess_play::TimeControl& tc = game.timeControl();
+        const int64_t remaining = game.remainingMs(game.sideToMove(), now);
+        const int movetime_ms = ChessBotMovetimeMs(tc.initial_ms, tc.increment_ms, remaining);
         turns.push_back({room_id, game_id, on_turn, entry.chess().scoreSheet().size(),
-                         {game.startFen(), game.moves(), kChessBotMovetimeMs, *elo}});
+                         {game.startFen(), game.moves(), movetime_ms, *elo}});
       }
     }
   }
@@ -3026,14 +3029,21 @@ int GolfHub::PlayChessBotsOnce() {
   // hub serves everyone else meanwhile.
   int played = 0;
   for (const Turn& turn : turns) {
+    const auto ask_started = std::chrono::steady_clock::now();
+    LOG(INFO) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/" << turn.game_id
+              << ": asking elo=" << turn.ask.elo << " movetimeMs=" << turn.ask.movetime_ms
+              << " moves=" << turn.ask.moves.size() << " fen=" << turn.ask.fen;
     const absl::StatusOr<std::string> answer = chess_bot_engine_(turn.ask);
+    const auto ask_took = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - ask_started);
     Outbox outbox;
     {
       const std::lock_guard<std::mutex> lock(mu_);
       const std::pair<std::string, std::string> key{turn.room_id, turn.game_id};
       if (!answer.ok()) {
         LOG(WARNING) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/"
-                     << turn.game_id << ": " << answer.status();
+                     << turn.game_id << ": movetimeMs=" << turn.ask.movetime_ms << " after "
+                     << ask_took.count() << "ms: " << answer.status();
         chess_bot_retry_at_[key] = {turn.game_no, NowMs() + kChessBotRetry.count()};
         continue;
       }
@@ -3067,9 +3077,13 @@ int GolfHub::PlayChessBotsOnce() {
           outbox);
       if (refusal.has_value()) {
         LOG(INFO) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/" << turn.game_id
-                  << ": " << turn.ask.moves.size() << " moves in, not played: " << refusal->reason;
+                  << ": " << turn.ask.moves.size() << " moves in, uci=" << *answer << " after "
+                  << ask_took.count() << "ms, not played: " << refusal->reason;
         if (!moved_on) chess_bot_retry_at_[key] = {turn.game_no, NowMs() + kChessBotRetry.count()};
       } else {
+        LOG(INFO) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/" << turn.game_id
+                  << ": played " << *answer << " after " << ask_took.count()
+                  << "ms (movetimeMs=" << turn.ask.movetime_ms << ")";
         ++played;
       }
     }

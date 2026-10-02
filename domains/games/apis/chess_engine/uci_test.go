@@ -15,7 +15,8 @@ import (
 
 // fakeEngine plays the engine's side of a UCI conversation over pipes:
 // it answers the handshake and isready, records every command it is
-// sent, and answers `go` with whatever reply says.
+// sent, and answers `go` with whatever reply says. Handshake options
+// (Threads, Hash) are recorded too so a spawn that skipped them fails.
 type fakeEngine struct {
 	commands chan string
 	reply    func(goLine string) []string
@@ -59,7 +60,16 @@ func (f *fakeEngine) sentThroughGo(t *testing.T) []string {
 	for {
 		select {
 		case line := <-f.commands:
-			if line == "uci" || (len(sent) == 0 && line == "isready") {
+			if line == "uci" {
+				continue
+			}
+			// Handshake only: Threads/Hash and the isready that follows
+			// them. BestMove's own isready (after ucinewgame) stays.
+			if strings.HasPrefix(line, "setoption name Threads ") ||
+				strings.HasPrefix(line, "setoption name Hash ") {
+				continue
+			}
+			if line == "isready" && len(sent) == 0 {
 				continue
 			}
 			sent = append(sent, line)
@@ -76,6 +86,29 @@ func bestmove(uci string) func(string) []string {
 	return func(string) []string {
 		return []string{"info depth 1 score cp 900", "bestmove " + uci + " ponder h8g8"}
 	}
+}
+
+// One thread and a small hash: the deploy caps chess_engine at half a
+// core and 512M, and Stockfish's default Threads=N cores is what made
+// bots peg the CPU and miss their deadline.
+func TestSpawnPinsOneThreadAndASmallHash(t *testing.T) {
+	_, fake := startFake(t, bestmove("e7e8q"))
+	var opts []string
+	deadline := time.After(2 * time.Second)
+	for len(opts) < 2 {
+		select {
+		case line := <-fake.commands:
+			if strings.HasPrefix(line, "setoption ") {
+				opts = append(opts, line)
+			}
+		case <-deadline:
+			t.Fatalf("handshake options incomplete: %v", opts)
+		}
+	}
+	assert.Equal(t, []string{
+		"setoption name Threads value 1",
+		"setoption name Hash value 16",
+	}, opts)
 }
 
 func TestAPositionWithMovesAndAStrengthIsAskedAsUCI(t *testing.T) {
