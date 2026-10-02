@@ -90,9 +90,10 @@ TEST(BestMoveWire, AnEngineThatCouldNotAnswerIsAnError) {
   }
 }
 
-// The deadline covers the service's own: movetime plus its 2 s of slack.
+// The deadline covers the service's own: MaxMovetimeMs (5 s) plus its
+// 2 s of slack, with a little left for the connection.
 TEST(BestMoveWire, TheDeadlineOutlastsTheService) {
-  EXPECT_GE(chess_engine::DefaultClientConfig("http://x").request_timeout_ms, 5'000);
+  EXPECT_EQ(chess_engine::DefaultClientConfig("http://x").request_timeout_ms, 8'000);
   EXPECT_EQ(chess_engine::DefaultClientConfig("http://x").retry.max_attempts, 1);
 }
 

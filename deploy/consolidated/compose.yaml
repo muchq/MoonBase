@@ -186,8 +186,9 @@ services:
     environment:
       - PORT=8094
       - STOCKFISH_PATH=/stockfish/stockfish
-      # Engine processes, each serving one move at a time. A bot thinks for
-      # a fixed movetime, so two share the half core without queuing.
+      # Engine processes, each serving one move at a time on one thread.
+      # games_hub sizes each ask from the table's clock (up to 2 s); two
+      # share the half core without queuing under that budget.
       - ENGINES=2
     networks:
       - app_network

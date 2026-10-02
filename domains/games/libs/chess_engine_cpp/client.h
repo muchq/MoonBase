@@ -14,8 +14,8 @@ namespace chess_engine {
 
 /// How games_hub reaches chess_engine: `endpoint` is the service on the app
 /// network (http://chess_engine:8094). One attempt, and a deadline past
-/// the service's own (movetime plus 2 s): a bot that misses it just thinks
-/// again on its next turn, its clock running.
+/// the service's own (movetime plus 2 s, up to MaxMovetimeMs): a bot that
+/// misses it just thinks again on its next turn, its clock running.
 opal::ClientConfig DefaultClientConfig(std::string endpoint);
 
 /// A move to ask for: the position, the moves since, how long to think,

@@ -35,7 +35,10 @@ type UCI struct {
 }
 
 // NewUCI starts a conversation and waits out the handshake. `cmd`, if
-// any, is the process behind the pipes, killed on Close.
+// any, is the process behind the pipes, killed on Close. Threads is pinned
+// to 1 so Stockfish cannot fan out across every core — the deploy gives
+// chess_engine half a CPU, and an unbound Threads is what made bots hang
+// at full CPU without ever answering.
 func NewUCI(in io.WriteCloser, out io.Reader, cmd *exec.Cmd) (*UCI, error) {
 	u := &UCI{in: in, lines: make(chan string, 64), cmd: cmd, done: make(chan struct{}), exited: make(chan struct{})}
 	go func() {
@@ -59,6 +62,15 @@ func NewUCI(in io.WriteCloser, out io.Reader, cmd *exec.Cmd) (*UCI, error) {
 	if _, err := u.await(ctx, func(line string) bool { return line == "uciok" }); err != nil {
 		u.Close()
 		return nil, err
+	}
+	for _, option := range []string{
+		"setoption name Threads value 1",
+		"setoption name Hash value 16",
+	} {
+		if err := u.send(option); err != nil {
+			u.Close()
+			return nil, err
+		}
 	}
 	if err := u.ready(ctx); err != nil {
 		u.Close()

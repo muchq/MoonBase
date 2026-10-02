@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/muchq/moonbase/domains/platform/libs/mucks"
@@ -46,15 +48,28 @@ func NewRouter(engine Mover) *mucks.Mucks {
 			mucks.JsonError(w, mucks.NewBadRequest(err.Error()))
 			return
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), time.Duration(q.MovetimeMs)*time.Millisecond+slack)
+		elo := "full"
+		if q.Elo != nil {
+			elo = strconv.Itoa(*q.Elo)
+		}
+		deadline := time.Duration(q.MovetimeMs)*time.Millisecond + slack
+		ctx, cancel := context.WithTimeout(r.Context(), deadline)
 		defer cancel()
+		started := time.Now()
 		move, err := engine.BestMove(ctx, q)
+		took := time.Since(started).Round(time.Millisecond)
 		switch {
 		case errors.Is(err, ErrNoMove):
+			log.Printf("bestmove fen=%q moves=%d movetimeMs=%d elo=%s: no move after %s",
+				q.FEN, len(q.Moves), q.MovetimeMs, elo, took)
 			mucks.JsonError(w, mucks.Problem{StatusCode: 422, ErrorCode: 422, Message: "No Move", Detail: "the position has no legal move"})
 		case err != nil:
+			log.Printf("bestmove fen=%q moves=%d movetimeMs=%d elo=%s: %v after %s (deadline %s)",
+				q.FEN, len(q.Moves), q.MovetimeMs, elo, err, took, deadline)
 			mucks.JsonError(w, mucks.Problem{StatusCode: 503, ErrorCode: 503, Message: "Engine Unavailable", Detail: "no engine answered in time"})
 		default:
+			log.Printf("bestmove fen=%q moves=%d movetimeMs=%d elo=%s: %s after %s",
+				q.FEN, len(q.Moves), q.MovetimeMs, elo, move, took)
 			json.NewEncoder(w).Encode(bestMoveResponse{UCI: move})
 		}
 	})

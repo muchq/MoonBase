@@ -14,7 +14,7 @@ POST /chess_engine/v1/bestmove
 - A position with no legal move gets 422.
 - 503 means no engine answered within the movetime plus two seconds.
 
-`ENGINES` Stockfish processes (default 2) are started up front and serve one move at a time each. An engine that fails or misses its deadline is killed, and its slot starts a fresh one on next use.
+`ENGINES` Stockfish processes (default 2) are started up front and serve one move at a time each. Each is pinned to `Threads=1` and `Hash=16` so they fit the half-core / 512M deploy: Stockfish's default Threads (every core) is what made bots peg the CPU and miss their deadline. An engine that fails or misses its deadline is killed, and its slot starts a fresh one on next use. Every ask is logged with fen, movetime, elo, the answer or error, and how long it took.
 
 Stockfish is GPL-3. It runs here as a child process, spoken to over UCI, and is never linked into anything; the HTTP boundary is for isolation, so a hung or crashed engine costs a request, not games_hub. Its corresponding source is the `sf_18` release tag. The image ships the official release binary (`@stockfish`, pinned in `bazel/tools.MODULE.bazel`) at `/stockfish/stockfish`, with its license `Copying.txt` beside it.
 

@@ -655,17 +655,37 @@ cc_test(
     ],
 )
 
+# Chess bots at a table (#1618): Stockfish seat ids and how long they think.
+cc_library(
+    name = "chess_bots",
+    hdrs = ["chess_bots.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+cc_test(
+    name = "chess_bots_test",
+    size = "small",
+    srcs = ["chess_bots_test.cc"],
+    deps = [
+        ":chess_bots",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The room host: rooms, seats, chat, and every tenant (lobby, voice, golf,
 # castle, the tape) behind GamesHubHandler's Play.
 cc_library(
     name = "golf_hub",
     srcs = ["golf_hub.cc"],
     hdrs = [
-        "chess_bots.h",
         "golf_hub.h",
     ],
     deps = [
         ":chat_store",
+        ":chess_bots",
         ":chess_results",
         ":game_events",
         ":games_hub_smithy_server",
