@@ -208,6 +208,15 @@ func (h *MetricsHandler) fetchSystemMetrics(ctx context.Context) (*SystemMetrics
 		metrics.Memory.Utilization = (metrics.Memory.Used / metrics.Memory.Total) * 100
 	}
 
+	// Host-global OOM kills from /proc/vmstat via node_exporter. Absent series
+	// leaves zero — the same no-verdict contract as container OOM.
+	oomResp, err := h.promClient.Query(ctx, `increase(node_vmstat_oom_kill[1h])`)
+	if err == nil && len(oomResp.Data.Result) > 0 {
+		if val, err := extractFloatValue(&oomResp.Data.Result[0]); err == nil {
+			metrics.Memory.OOMKillsLastHour = val
+		}
+	}
+
 	// Fetch disk metrics
 	diskUsageQuery := `system_filesystem_usage_bytes`
 	diskResp, err := h.promClient.Query(ctx, diskUsageQuery)
@@ -316,6 +325,7 @@ func (h *MetricsHandler) fetchSystemMetricsTimeSeries(ctx context.Context, timeR
 	queries := map[string]string{
 		"cpu_utilization":    `100-avg(rate(system_cpu_time_seconds_total{state="idle"}[5m]))*100`,
 		"memory_utilization": dedupeScope(`system_memory_usage_bytes{state="used"}`) + `/on()group_left()sum(` + dedupeScope(`system_memory_usage_bytes`) + `)*100`,
+		"oom_kills":          `increase(node_vmstat_oom_kill[5m])`,
 		"disk_io_rate":       dedupeScope(`rate(system_disk_io_bytes_total[5m])`),
 		"network_rx_rate":    dedupeScope(`rate(system_network_io_bytes_total{direction="receive"}[5m])`),
 		"network_tx_rate":    dedupeScope(`rate(system_network_io_bytes_total{direction="transmit"}[5m])`),

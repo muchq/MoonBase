@@ -186,10 +186,11 @@ services:
     environment:
       - PORT=8094
       - STOCKFISH_PATH=/stockfish/stockfish
-      # Engine processes, each serving one move at a time on one thread.
-      # games_hub sizes each ask from the table's clock (up to 2 s); two
-      # share the half core without queuing under that budget.
-      - ENGINES=2
+      # One Stockfish process: SF18 loads both NNUE nets at spawn (~270M
+      # RSS), and this host is a 1.9G box with no swap — two engines were
+      # what the OOM killer took out mid-search (bots stuck on 503).
+      # games_hub sizes each ask from the table's clock (up to 2 s).
+      - ENGINES=1
     networks:
       - app_network
     deploy:

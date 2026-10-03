@@ -585,10 +585,37 @@ func TestMetricsHandler_GetHostMetrics_Success(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	require.NotNil(t, response.System)
 	assert.Equal(t, 42.5, response.System.CPU.Utilization)
+	assert.Equal(t, 42.5, response.System.Memory.OOMKillsLastHour)
 	require.Len(t, response.Containers, 1)
 	assert.Equal(t, "caddy", response.Containers[0].Name)
 	assert.Equal(t, 42.5, response.Containers[0].CPUUsagePercent)
 	assert.WithinDuration(t, time.Now(), response.Timestamp, 5*time.Second)
+}
+
+// Host-global OOM kills come from node_vmstat_oom_kill, not cAdvisor. A
+// wrong PromQL here would leave the Host page flat for the failure mode
+// that killed Stockfish inside chess_engine.
+func TestHostMetrics_OOMKillsLastHourFromVmstat(t *testing.T) {
+	const oomQuery = `increase(node_vmstat_oom_kill[1h])`
+	mock := &mockPrometheusClient{queryResponses: map[string]*QueryResponse{
+		oomQuery: scalarResponse("11"),
+		// Minimal fixtures so the host page still builds a system block.
+		`system_memory_usage_bytes{state="used"}`:   scalarResponse("1"),
+		`system_memory_usage_bytes{state="free"}`:   scalarResponse("1"),
+		`system_memory_usage_bytes{state="cached"}`: scalarResponse("1"),
+	}}
+	handler := &MetricsHandler{promClient: mock}
+
+	req := httptest.NewRequest("GET", "/metrics/v1/host", nil)
+	w := httptest.NewRecorder()
+	handler.GetHostMetrics(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response HostMetricsResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.NotNil(t, response.System)
+	assert.Equal(t, 11.0, response.System.Memory.OOMKillsLastHour)
+	assert.Contains(t, mock.instantQueries, oomQuery)
 }
 
 func TestMetricsHandler_GetHostMetrics_PrometheusError(t *testing.T) {

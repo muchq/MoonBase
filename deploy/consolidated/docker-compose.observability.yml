@@ -62,6 +62,27 @@ services:
           cpus: '0.25'
           memory: 256M
 
+  # Host /proc/vmstat only: otel hostmetrics has no oom_kill, and cAdvisor's
+  # container_oom_events_total misses global OOM kills of children inside a
+  # container still under its cgroup limit (Stockfish on chess_engine).
+  # disable-defaults keeps this from becoming a second full host agent.
+  node_exporter:
+    image: prom/node-exporter:v1.12.1
+    restart: always
+    command:
+      - '--path.procfs=/host/proc'
+      - '--collector.disable-defaults'
+      - '--collector.vmstat'
+    volumes:
+      - /proc:/host/proc:ro
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
+
 volumes:
   prometheus_data:
   grafana_data:

@@ -264,6 +264,37 @@ func TestHostMetricsReadsTheHostAndNotTheCollectorContainer(t *testing.T) {
 	}
 }
 
+// Host OOM kills of children inside a container still under its cgroup limit
+// never bump container_oom_events_total. /proc/vmstat's oom_kill does, and
+// otel hostmetrics does not scrape it — so node_exporter runs vmstat only,
+// and prometheus must scrape it, or the Host page's oom_kills_last_hour is
+// permanently zero for the failure mode that took out chess bots.
+func TestNodeExporterExposesHostOomKills(t *testing.T) {
+	compose := activeServiceLines(t, "docker-compose.observability.yml", "node_exporter")
+	if len(compose) == 0 {
+		t.Fatal("no node_exporter service in docker-compose.observability.yml")
+	}
+	joined := strings.Join(compose, "\n")
+	if !strings.Contains(joined, "--collector.disable-defaults") {
+		t.Errorf("node_exporter does not disable default collectors; it becomes a second "+
+			"full host agent. Lines were:\n%s", joined)
+	}
+	if !strings.Contains(joined, "--collector.vmstat") {
+		t.Errorf("node_exporter does not enable vmstat; node_vmstat_oom_kill never appears. "+
+			"Lines were:\n%s", joined)
+	}
+	if !hasLine(compose, "- /proc:/host/proc:ro") {
+		t.Errorf("node_exporter does not bind host /proc; vmstat would read the container. "+
+			"Lines were:\n%s", joined)
+	}
+
+	prom := activeLines(t, "o11y/prometheus.yml")
+	if !hasLine(prom, "- targets: ['node_exporter:9100']") {
+		t.Errorf("prometheus does not scrape node_exporter:9100; the series never lands. "+
+			"Lines were:\n%s", strings.Join(prom, "\n"))
+	}
+}
+
 // The `cpu` attribute on system.cpu.time is opt-in, and left off the metrics
 // builder writes only `state` — so every core's datapoint carries identical
 // attributes and the default aggregation_strategy of `sum` folds them into one
@@ -2363,6 +2394,18 @@ func TestEveryShippedLogDirIsMountedWritableOnTheShipper(t *testing.T) {
 				"count — or fails its delete every pass and re-uploads forever. Lines "+
 				"were:\n%s", label, dir, dir, strings.Join(lines, "\n"))
 		}
+	}
+}
+
+// chess_engine runs one Stockfish process. SF18 loads both NNUE nets at
+// spawn (~270M RSS); two engines on the 1.9G consolidated host with no
+// swap are what the OOM killer took mid-search, leaving bots on 503.
+func TestChessEngineRunsOneStockfish(t *testing.T) {
+	lines := activeServiceLines(t, "compose.yaml", "chess_engine")
+	if !hasLine(lines, "- ENGINES=1") {
+		t.Errorf("chess_engine does not set ENGINES=1; two Stockfish processes "+
+			"OOM the host mid-search and bots never move. Lines were:\n%s",
+			strings.Join(lines, "\n"))
 	}
 }
 
