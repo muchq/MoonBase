@@ -87,6 +87,10 @@ type MemoryMetrics struct {
 	Free        float64 `json:"free_bytes"`
 	Cached      float64 `json:"cached_bytes"`
 	Utilization float64 `json:"utilization_percent"`
+	// Host kernel OOM kills in the last hour (node_vmstat_oom_kill). Catches
+	// global_oom of children inside a container still under its cgroup limit,
+	// which container_oom_events_total misses. Zero when the series is absent.
+	OOMKillsLastHour float64 `json:"oom_kills_last_hour"`
 }
 
 type DiskMetrics struct {

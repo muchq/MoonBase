@@ -363,10 +363,11 @@ class GolfHub final {
 
   /// Plays the move of every chess bot this instance holds that is on
   /// turn: the position read under the lock, the engine asked without it
-  /// for ChessBotMovetimeMs of the table's clock, and the answer played
-  /// through the same conditional commit as a player's move — only if
-  /// the game is still where it was asked. An engine that fails is asked
-  /// again for that game after kChessBotRetry, the bot's clock running
+  /// for ChessBotMovetimeMs of the seat's named strength (capped by the
+  /// side's remaining clock; no UCI Elo), and the answer played through
+  /// the same conditional commit as a player's move — only if the game
+  /// is still where it was asked. An engine that fails is asked again
+  /// for that game after kChessBotRetry, the bot's clock running
   /// meanwhile. Returns how many moves it played.
   int PlayChessBotsOnce();
 

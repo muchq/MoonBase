@@ -133,6 +133,7 @@ flowchart LR
     otelcol["otelcol"]
     prometheus["prometheus"]
     cadvisor["cadvisor"]
+    node_exporter["node_exporter"]
   end
 
   muchq_com -->|ui| ui_games
@@ -213,6 +214,7 @@ flowchart LR
   deja -.->|metrics| otelcol
   otelcol -.->|metrics| prometheus
   cadvisor -.->|metrics| prometheus
+  node_exporter -.->|metrics| prometheus
   prometheus -.->|metrics| prom_proxy
 
   classDef gated stroke-dasharray: 5 5

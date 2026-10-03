@@ -407,17 +407,20 @@ stores wall-clock epoch milliseconds, which every instance reads against
 its own clock: instances must agree on the time, as NTP has them. A table's one player may seat a bot in the other chair
 (`addBot`, an Elo of 1320 to 3190, #1618): Stockfish on `chess_engine`,
 reached at `CHESS_ENGINE_URL`. Its seat's id is `stockfish@<elo>`, which no
-minted id can be, and the view marks it `bot`. `PlayChessBotsOnce`, every
-100 ms on each instance, asks the engine for the move of every bot on turn
-without the hub's lock — thinking for `ChessBotMovetimeMs` of the table's
-clock (initial/60 plus most of the increment, 100–2000 ms, capped by the
-side to move's remaining time less a small reserve; a near-flag seat still
-asks the engine's 10 ms minimum) — and plays the answer through the move's
-own commit only if the game is still where it was asked. Ask, answer, and
-elapsed time are logged. An engine that fails is asked again after
-`kChessBotRetry`, the bot's clock running meanwhile. A
-bot holds no table alone: its player leaving a table not yet started takes
-it, and a game against it counts for the player, the bot being no member.
+minted id can be, and the view marks it `bot`. Stockfish's
+`UCI_LimitStrength` sandbags too hard for playable mates, so the named Elo
+only sizes think time — the engine is asked at full strength.
+`PlayChessBotsOnce`, every 100 ms on each instance, asks for the move of
+every bot on turn without the hub's lock — thinking for
+`ChessBotStrengthThinkMs` of the seat (UI tiers 50–4000 ms, values between
+them interpolate), capped by the side to move's remaining time less a
+small reserve; a near-flag seat still asks the engine's 10 ms minimum —
+and plays the answer through the move's own commit only if the game is
+still where it was asked. Ask, answer, and elapsed time are logged. An
+engine that fails is asked again after `kChessBotRetry`, the bot's clock
+running meanwhile. A bot holds no table alone: its player leaving a table
+not yet started takes it, and a game against it counts for the player, the
+bot being no member.
 Each game's end credits the winner a
 win and both seats a game, a leaver included; a draw credits no win.
 Every instance holding the table sends a game's `gameEnded` once, after
