@@ -27,7 +27,7 @@ struct GameScore {
 ///   - It opens on its first game. A game's end is a line on the score
 ///     sheet, and the table stays open for the next.
 ///   - The next game swaps sides: whoever played Black plays White, so in
-///     king and pawn against king the pawn goes back and forth.
+///     every setup each player practices both sides.
 ///   - A leave closes the table. In the middle of a game it ends that
 ///     game first — lost by abandonment, or on time if the flag had
 ///     already fallen — and that game is scored; between games it scores

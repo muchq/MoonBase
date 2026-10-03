@@ -12,10 +12,13 @@ it stores.
   Time is epoch milliseconds handed in by the caller.
 - `table.h` — `Table`: two seats playing one game after another, sides
   swapped each game, with a score sheet; a leave closes it.
-- `RandomKpkOpening` — the `kpk` variant's start: king and pawn against
-  king, White to move, White a random seat.
+- `SelectChessSetup` — the server-owned setup catalog: random K+P vs K
+  (the default), K+P vs K opposition, the R+P vs R Lucena position, and
+  Q vs R conversion. Each stable setup ID resolves to its variant,
+  display name, validated position, and a randomized first White seat.
 - `table_serde.h` — the versioned JSON the games table holds, the game's
   own (`game_state_serde.h`) inside it; deserializing replays and validates
   it through `Table::restore`, and still reads a row from before tables.
 
-A new variant is a new opening, and a new name `GameState::start` accepts.
+A new practice position is a catalog entry whose variant
+`GameState::start` accepts.

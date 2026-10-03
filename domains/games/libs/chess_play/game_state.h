@@ -16,8 +16,7 @@ namespace chess_play {
 /// Chess at a games-hub table: two seats, a clock, and the full
 /// rules — checkmate, stalemate, insufficient material, the fifty-move
 /// rule and threefold repetition end the game on their own, unclaimed.
-/// A variant is only where the game starts; the first is king and pawn
-/// against king ("kpk").
+/// A variant is the material family a server-owned setup starts from.
 ///
 /// The truth is the start position and the moves played from it, in UCI
 /// ("e2e4", "e7e8q"): the position, repetition history and every ending

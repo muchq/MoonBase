@@ -106,8 +106,9 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
       R"("legalMoves":["e7e8b","e7e8n","e7e8q","e7e8r","g6f5","g6f6","g6f7","g6g5",)"
       R"("g6h5","g6h6"],"moves":[],"phase":"playing",)"
       R"("players":[{"color":"white","playerId":"player-1"},)"
-      R"({"color":"black","playerId":"player-2"}],"scoreSheet":[],"sideToMove":"white",)"
-      R"("setupId":"kpk-opposition","setupName":"K+P vs K — Opposition","variant":"kpk"})";
+      R"({"color":"black","playerId":"player-2"}],"scoreSheet":[],)"
+      R"("setupId":"kpk-opposition","setupName":"K+P vs K — Opposition",)"
+      R"("sideToMove":"white","variant":"kpk"})";
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
             R"({"update":{"gameState":{)" + playing + R"(}}})");
   (void)EventPayload(NextFrame(*creator), "roomState");
