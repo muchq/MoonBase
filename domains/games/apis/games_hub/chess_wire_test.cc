@@ -12,7 +12,9 @@
 
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <random>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -34,11 +36,19 @@ class ChessWireTest : public HubWireFixture {
     HubWireFixture::SetUp();
     golf_->SetClock([] { return absl::FromUnixMillis(1'800'000'000'000); });
     // White Kg6 Pe7 against Kh8: e7e8q mates.
-    golf_->SetChessOpener([] { return chess_play::Opening{"7k/4P3/6K1/8/8/8/8/8 w - - 0 1", 0}; });
+    golf_->SetChessOpener([this](std::string_view setup_id) {
+      auto setup = chess_play::SelectChessSetup(setup_id, setup_gen_);
+      if (setup.ok()) {
+        setup->opening = chess_play::Opening{"7k/4P3/6K1/8/8/8/8/8 w - - 0 1", 0};
+      }
+      return setup;
+    });
   }
   std::shared_ptr<opal::http::WebSocket> DialReady(json& session) {
     return HubWireFixture::DialReady(kPlayPath, session);
   }
+
+  std::mt19937_64 setup_gen_{1234};
 };
 
 TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
@@ -80,11 +90,13 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
   (void)EventPayload(NextFrame(*joiner), "roomState");
   (void)EventPayload(NextFrame(*creator), "roomState");
 
-  // startGame names the clock in seconds; the view carries milliseconds.
+  // startGame names the setup and clock; the view carries both.
   ASSERT_TRUE(
       creator
           ->Send(CommandFrame(
-              "chess", R"({"move":{"startGame":{"initialSeconds":60,"incrementSeconds":1}}})"))
+              "chess",
+              R"({"move":{"startGame":{"initialSeconds":60,"incrementSeconds":1,)"
+              R"("setupId":"kpk-opposition"}}})"))
           .ok());
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"), R"({"update":{"gameStarted":{}}})");
   const std::string playing =
@@ -95,7 +107,7 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
       R"("g6h5","g6h6"],"moves":[],"phase":"playing",)"
       R"("players":[{"color":"white","playerId":"player-1"},)"
       R"({"color":"black","playerId":"player-2"}],"scoreSheet":[],"sideToMove":"white",)"
-      R"("variant":"kpk"})";
+      R"("setupId":"kpk-opposition","setupName":"K+P vs K — Opposition","variant":"kpk"})";
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
             R"({"update":{"gameState":{)" + playing + R"(}}})");
   (void)EventPayload(NextFrame(*creator), "roomState");
@@ -110,7 +122,9 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
             R"("players":[{"color":"white","playerId":"player-1"},)"
             R"({"color":"black","playerId":"player-2"}],)"
             R"("result":{"ending":"checkmate","winner":"player-1","winnerColor":"white"},)"
-            R"("scoreSheet":[{"ending":"checkmate","winner":"player-1"}],"variant":"kpk"}}}})");
+            R"("scoreSheet":[{"ending":"checkmate","winner":"player-1"}],)"
+            R"("setupId":"kpk-opposition","setupName":"K+P vs K — Opposition",)"
+            R"("variant":"kpk"}}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
             R"({"update":{"gameEnded":{"result":{"ending":"checkmate","winner":"player-1",)"
             R"("winnerColor":"white"}}}})");
@@ -153,6 +167,10 @@ TEST_F(ChessWireTest, TheModelsBoundsAreRefusedInBand) {
     ASSERT_TRUE(creator->Send(CommandFrame("chess", move)).ok());
     EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"), reason) << move;
   }
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("chess", R"({"move":{"startGame":{"setupId":"unknown"}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
+            R"({"reason":"unknown chess setup: unknown"})");
   // The control: the same start inside the bounds starts the game.
   ASSERT_TRUE(
       creator->Send(CommandFrame("chess", R"({"move":{"startGame":{"initialSeconds":30}}})")).ok());

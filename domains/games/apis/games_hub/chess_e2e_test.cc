@@ -51,7 +51,11 @@ class ChessFixture : public GamesHubStreamFixture {
   void SetUp() override {
     GamesHubStreamFixture::SetUp();
     golf_->SetClock([this] { return absl::FromUnixMillis(now_ms_.load()); });
-    golf_->SetChessOpener([this] { return opening_; });
+    golf_->SetChessOpener([this](std::string_view setup_id) {
+      auto setup = chess_play::SelectChessSetup(setup_id, setup_gen_);
+      if (setup.ok()) setup->opening = opening_;
+      return setup;
+    });
   }
 
   // A two-seat chess table, started with `start`: alice (seat 0) created it,
@@ -107,6 +111,7 @@ class ChessFixture : public GamesHubStreamFixture {
   }
 
   std::atomic<int64_t> now_ms_{kT0};
+  std::mt19937_64 setup_gen_{1234};
   chess_play::Opening opening_{kPromotionMates, 0};
 };
 
@@ -116,6 +121,8 @@ TEST_F(ChessFixture, AStartedTableShowsBothSeatsThePositionTheColorsAndTheClock)
   const auto& view = started->view;
   EXPECT_EQ(view.phase, "playing");
   EXPECT_EQ(view.variant, "kpk");
+  EXPECT_EQ(view.setupId, "random-kpk");
+  EXPECT_EQ(view.setupName, "Random K+P vs K");
   EXPECT_EQ(view.fen, kPromotionMates);
   ASSERT_EQ(view.players.size(), 2u);
   EXPECT_EQ(view.players[0].playerId, started->table.alice.player_id);
@@ -138,6 +145,7 @@ TEST_F(ChessFixture, AStartedTableShowsBothSeatsThePositionTheColorsAndTheClock)
 
 TEST_F(ChessFixture, StartGameNamesTheClock) {
   moonbase::games::ChessStartGame start;
+  start.setupId = "kpk-opposition";
   start.initialSeconds = 60;
   start.incrementSeconds = 0;
   auto started = StartedTable(start);
@@ -145,6 +153,8 @@ TEST_F(ChessFixture, StartGameNamesTheClock) {
   ASSERT_TRUE(started->view.clock.has_value());
   EXPECT_EQ(started->view.clock->initialMs, 60'000);
   EXPECT_EQ(started->view.clock->incrementMs, 0);
+  EXPECT_EQ(started->view.setupId, "kpk-opposition");
+  EXPECT_EQ(started->view.setupName, "K+P vs K — Opposition");
 }
 
 TEST_F(ChessFixture, TheWhitePieceIsWhicheverSeatTheOpeningSays) {
@@ -371,13 +381,18 @@ TEST_F(ChessFixture, TheNextGameSwapsSidesAndKeepsTheScore) {
   }
 
   // Bob, the seat that lost, starts it.
-  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  moonbase::games::ChessStartGame next;
+  next.setupId = "qvr-basic";
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame(next))).ok());
   auto second = AwaitChessView(
       table.alice.stream, [](const auto& v) { return v.phase == "playing"; }, "the next game");
   ASSERT_TRUE(second.has_value());
   EXPECT_EQ(second->players[1].playerId, table.bob.player_id);
   EXPECT_EQ(second->players[1].color, "white");
   EXPECT_EQ(second->currentPlayerId, table.bob.player_id);
+  EXPECT_EQ(second->variant, "qvr");
+  EXPECT_EQ(second->setupId, "qvr-basic");
+  EXPECT_EQ(second->setupName, "Q vs R — Basic conversion");
   EXPECT_TRUE(second->moves.empty());
   EXPECT_FALSE(second->result.has_value());
   EXPECT_EQ(second->scoreSheet.size(), 1u);
@@ -643,6 +658,33 @@ TEST_F(DefaultOpeningFixture, TheHubDealsARandomKpk) {
   std::sort(pieces.begin(), pieces.end());
   EXPECT_EQ(pieces, "KPk");
   EXPECT_EQ(view->sideToMove, "white");
+  EXPECT_EQ(view->setupId, "random-kpk");
+  EXPECT_EQ(view->setupName, "Random K+P vs K");
+}
+
+TEST_F(DefaultOpeningFixture, TheHubDealsASelectedPracticeSetup) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  moonbase::games::JoinGame join;
+  join.gameId = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  ASSERT_TRUE(ReceiveChess(bob.stream, "gameJoined").has_value());
+  moonbase::games::ChessStartGame start;
+  start.setupId = "rpr-lucena";
+  ASSERT_TRUE(alice.stream.Send(Chess(ChessMove::FromStartgame(start))).ok());
+  auto view =
+      AwaitChessView(alice.stream, [](const auto& v) { return v.phase == "playing"; }, "the deal");
+  ASSERT_TRUE(view.has_value());
+  EXPECT_EQ(view->variant, "rpr");
+  EXPECT_EQ(view->setupId, "rpr-lucena");
+  EXPECT_EQ(view->setupName, "R+P vs R — Lucena position");
+  EXPECT_EQ(view->fen, "1K1R4/1P6/1k6/8/8/8/r7/8 w - - 0 1");
 }
 
 }  // namespace

@@ -71,9 +71,12 @@ TEST(ChessTable, AMoveBetweenGamesIsRefused) {
 TEST(ChessTable, TheNextGameSwapsSidesAndKeepsTheSheet) {
   const Table first = Mated(Opened(/*white_seat=*/0));
   // The opening's own seat is overruled: sides alternate.
-  auto second = first.next(Opening{kMate, 0}, TimeControl{60'000, 0}, kT0 + 5'000);
+  auto second =
+      first.next("qvr", Opening{kMate, 0}, TimeControl{60'000, 0}, kT0 + 5'000, "qvr-basic");
   ASSERT_TRUE(second.ok()) << second.status();
   EXPECT_EQ(second->game().whiteSeat(), 1);
+  EXPECT_EQ(second->game().variant(), "qvr");
+  EXPECT_EQ(second->game().setupId(), "qvr-basic");
   EXPECT_FALSE(second->game().isOver());
   EXPECT_EQ(second->game().timeControl(), (TimeControl{60'000, 0}));
   EXPECT_EQ(second->game().players(), first.players());
@@ -86,7 +89,7 @@ TEST(ChessTable, TheNextGameSwapsSidesAndKeepsTheSheet) {
 }
 
 TEST(ChessTable, TheNextGameWaitsForThisOneToEnd) {
-  const auto refused = Opened().next(Opening{kMate, 0}, kClock, kT0);
+  const auto refused = Opened().next("kpk", Opening{kMate, 0}, kClock, kT0);
   ASSERT_FALSE(refused.ok());
   EXPECT_EQ(refused.status().code(), absl::StatusCode::kFailedPrecondition);
 }
@@ -109,7 +112,7 @@ TEST(ChessTable, LeavingBetweenGamesClosesTheTableAndScoresNothing) {
 
 TEST(ChessTable, AClosedTablePlaysNoMore) {
   const Table closed = *Mated(Opened()).removePlayer(1, kT0);
-  EXPECT_FALSE(closed.next(Opening{kMate, 0}, kClock, kT0).ok());
+  EXPECT_FALSE(closed.next("kpk", Opening{kMate, 0}, kClock, kT0).ok());
   EXPECT_FALSE(closed.removePlayer(0, kT0).ok());
 }
 

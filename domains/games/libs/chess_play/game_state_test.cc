@@ -378,6 +378,44 @@ TEST(GameStateTest, RestoreRefusesAClockOutOfRange) {
   EXPECT_FALSE(restore({300'000, GameState::kMaxClockMs + 1}, open.clock()).ok());
 }
 
+TEST(ChessSetupTest, EveryNamedSetupIsPlayableAndCarriesItsStableIdentity) {
+  struct Expected {
+    const char* id;
+    const char* name;
+    const char* variant;
+    const char* fen;
+  };
+  const std::vector<Expected> fixed = {
+      {"kpk-opposition", "K+P vs K — Opposition", "kpk",
+       "8/8/4k3/4P3/4K3/8/8/8 w - - 0 1"},
+      {"rpr-lucena", "R+P vs R — Lucena position", "rpr",
+       "1K1R4/1P6/1k6/8/8/8/r7/8 w - - 0 1"},
+      {"qvr-basic", "Q vs R — Basic conversion", "qvr",
+       "4k3/8/8/8/8/8/1r6/3QK3 w - - 0 1"},
+  };
+  std::mt19937_64 gen(1234);
+  for (const Expected& expected : fixed) {
+    const auto setup = SelectChessSetup(expected.id, gen);
+    ASSERT_TRUE(setup.ok()) << expected.id << ": " << setup.status();
+    EXPECT_EQ(setup->id, expected.id);
+    EXPECT_EQ(setup->name, expected.name);
+    EXPECT_EQ(setup->variant, expected.variant);
+    EXPECT_EQ(setup->opening.fen, expected.fen);
+    const auto state =
+        GameState::start({"a", "b"}, setup->variant, setup->opening, kFiveAndTwo, kT0, setup->id);
+    ASSERT_TRUE(state.ok()) << expected.id << ": " << state.status();
+    EXPECT_EQ(state->setupId(), expected.id);
+    EXPECT_FALSE(state->isOver());
+  }
+
+  const auto random = SelectChessSetup(kRandomKpkSetup, gen);
+  ASSERT_TRUE(random.ok()) << random.status();
+  EXPECT_EQ(random->id, kRandomKpkSetup);
+  EXPECT_EQ(random->name, "Random K+P vs K");
+  EXPECT_EQ(random->variant, "kpk");
+  EXPECT_FALSE(SelectChessSetup("not-a-setup", gen).ok());
+}
+
 TEST(RandomKpkOpeningTest, EveryOpeningIsAPlayableKpkWithWhiteToMove) {
   std::mt19937_64 gen(1234);
   std::set<int> white_seats;

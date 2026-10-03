@@ -18,7 +18,10 @@ using nlohmann::json;
 constexpr char kMate[] = "7k/4P3/6K1/8/8/8/8/8 w - - 0 1";
 constexpr int64_t kT0 = 1'000'000;
 
-Table Opened() { return *Table::open({"alice", "bob"}, "kpk", Opening{kMate, 0}, {60'000, 0}, kT0); }
+Table Opened() {
+  return *Table::open({"alice", "bob"}, "kpk", Opening{kMate, 0}, {60'000, 0}, kT0,
+                      "kpk-opposition");
+}
 Table Mated(const Table& table) {
   const int white = table.game().whiteSeat();
   return *table.inGame([&](const GameState& game) { return game.move(white, "e7e8q", kT0); });
@@ -31,6 +34,7 @@ void ExpectRoundTrips(const Table& table) {
   EXPECT_EQ(restored->scoreSheet(), table.scoreSheet());
   EXPECT_EQ(restored->isOver(), table.isOver());
   EXPECT_EQ(restored->endedByClose(), table.endedByClose());
+  EXPECT_EQ(restored->game().setupId(), table.game().setupId());
   EXPECT_EQ(serializeGameState(restored->game()), serializeGameState(table.game()));
   EXPECT_EQ(serializeTable(*restored), bytes);
 }
@@ -38,7 +42,7 @@ void ExpectRoundTrips(const Table& table) {
 TEST(ChessTableSerde, EveryStageRoundTrips) {
   ExpectRoundTrips(Opened());
   ExpectRoundTrips(Mated(Opened()));
-  ExpectRoundTrips(*Mated(Opened()).next(Opening{kMate, 0}, {60'000, 0}, kT0));
+  ExpectRoundTrips(*Mated(Opened()).next("kpk", Opening{kMate, 0}, {60'000, 0}, kT0));
   ExpectRoundTrips(*Opened().removePlayer(0, kT0));
   ExpectRoundTrips(*Mated(Opened()).removePlayer(0, kT0));
 }

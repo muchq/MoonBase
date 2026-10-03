@@ -49,6 +49,10 @@ structure ChessAddBot {
 /// On a table whose game has ended, either seat starts the next one, sides
 /// swapped. Absent fields take the default, three minutes and two seconds.
 structure ChessStartGame {
+    /// A server-owned practice setup identifier. Absent selects random-kpk.
+    @length(min: 1, max: 32)
+    setupId: String
+
     /// Each side's time, 30 to 1800.
     @range(min: 30, max: 1800)
     initialSeconds: Integer
@@ -114,6 +118,10 @@ structure ChessView {
 
     /// The variant being played; absent while waiting.
     variant: String
+
+    /// The selected server-owned setup and its display name; absent while waiting.
+    setupId: String
+    setupName: String
 
     /// Seat order; colors are absent while waiting.
     @required
