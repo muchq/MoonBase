@@ -29,6 +29,11 @@ namespace {
 using json = nlohmann::json;
 
 constexpr char kPlayPath[] = "/games/v2/play";
+const std::string kAvailableSetups =
+    R"("availableSetups":[{"name":"Random K+P vs K","setupId":"random-kpk"},)"
+    R"({"name":"K+P vs K — Opposition","setupId":"kpk-opposition"},)"
+    R"({"name":"R+P vs R — Lucena position","setupId":"rpr-lucena"},)"
+    R"({"name":"Q vs R — Basic conversion","setupId":"qvr-basic"}],)";
 
 class ChessWireTest : public HubWireFixture {
  protected:
@@ -61,7 +66,8 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
             R"({"update":{"gameCreated":{"createdBy":"player-1","gameId":"GAME01"}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
-            R"({"update":{"gameJoined":{"view":{"gameId":"GAME01","inCheck":false,)"
+            R"({"update":{"gameJoined":{"view":{)" + kAvailableSetups +
+                R"("gameId":"GAME01","inCheck":false,)"
             R"("legalMoves":[],"moves":[],"phase":"waiting",)"
             R"("players":[{"playerId":"player-1"}],"scoreSheet":[]}}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
@@ -80,7 +86,8 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
   ASSERT_TRUE(
       joiner->Send(CommandFrame("chess", R"({"move":{"joinGame":{"gameId":"GAME01"}}})")).ok());
   const std::string waiting_pair =
-      R"("view":{"gameId":"GAME01","inCheck":false,"legalMoves":[],"moves":[],)"
+      R"("view":{)" + kAvailableSetups +
+      R"("gameId":"GAME01","inCheck":false,"legalMoves":[],"moves":[],)"
       R"("phase":"waiting","players":[{"playerId":"player-1"},{"playerId":"player-2"}],)"
       R"("scoreSheet":[]})";
   EXPECT_EQ(EventPayload(NextFrame(*joiner), "chess"),
@@ -100,7 +107,8 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
           .ok());
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"), R"({"update":{"gameStarted":{}}})");
   const std::string playing =
-      R"("view":{"clock":{"blackMs":60000,"incrementMs":1000,"initialMs":60000,)"
+      R"("view":{)" + kAvailableSetups +
+      R"("clock":{"blackMs":60000,"incrementMs":1000,"initialMs":60000,)"
       R"("whiteMs":60000},"currentPlayerId":"player-1",)"
       R"("fen":"7k/4P3/6K1/8/8/8/8/8 w - - 0 1","gameId":"GAME01","inCheck":false,)"
       R"("legalMoves":["e7e8b","e7e8n","e7e8q","e7e8r","g6f5","g6f6","g6f7","g6g5",)"
@@ -117,7 +125,8 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
   // clock stood still with White's increment — then the result.
   ASSERT_TRUE(creator->Send(CommandFrame("chess", R"({"move":{"play":{"uci":"e7e8q"}}})")).ok());
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
-            R"({"update":{"gameState":{"view":{"clock":{"blackMs":60000,"incrementMs":1000,)"
+            R"({"update":{"gameState":{"view":{)" + kAvailableSetups +
+                R"("clock":{"blackMs":60000,"incrementMs":1000,)"
             R"("initialMs":60000,"whiteMs":61000},"fen":"4Q2k/8/6K1/8/8/8/8/8 b - - 0 1",)"
             R"("gameId":"GAME01","inCheck":true,"legalMoves":[],"moves":["e7e8q"],"phase":"ended",)"
             R"("players":[{"color":"white","playerId":"player-1"},)"
