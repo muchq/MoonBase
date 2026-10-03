@@ -133,7 +133,7 @@ TEST_F(ChessBotFixture, WithNoEngineTheHubSeatsNoBot) {
 
 // On turn, the bot asks the engine with the game so far and plays its
 // answer the way a player's move is played: here, the mate. Think time
-// follows the table's clock (default 3+2 → ceiling).
+// follows the seat's named strength; Elo is not sent (full strength).
 TEST_F(ChessBotFixture, OnItsTurnTheBotPlaysTheEnginesMove) {
   opening_.white_seat = 1;  // the bot has White
   auto alice = AliceAtATable();
@@ -143,8 +143,8 @@ TEST_F(ChessBotFixture, OnItsTurnTheBotPlaysTheEnginesMove) {
   ASSERT_EQ(asks_.size(), 1u);
   EXPECT_EQ(asks_[0].fen, kMate);
   EXPECT_TRUE(asks_[0].moves.empty());
-  EXPECT_EQ(asks_[0].elo, 1500);
-  EXPECT_EQ(asks_[0].movetime_ms, ChessBotMovetimeMs(180'000, 2'000));
+  EXPECT_EQ(asks_[0].elo, std::nullopt);
+  EXPECT_EQ(asks_[0].movetime_ms, ChessBotMovetimeMs(/*remaining=*/180'000, /*elo=*/1500));
   auto view = AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "ended"; }, "the mate");
   ASSERT_TRUE(view.has_value());
   EXPECT_EQ(view->moves, std::vector<std::string>{"e7e8q"});
@@ -154,31 +154,26 @@ TEST_F(ChessBotFixture, OnItsTurnTheBotPlaysTheEnginesMove) {
   EXPECT_EQ(asks_.size(), 1u);
 }
 
-// A shorter clock asks for less think time: 30s + 0 → 500 ms.
-TEST_F(ChessBotFixture, ThinkTimeFollowsTheTablesTimeControl) {
+// A stronger seat asks for more think time; the table's clock only caps it.
+TEST_F(ChessBotFixture, ThinkTimeFollowsTheBotsNamedStrength) {
   opening_.white_seat = 1;
   auto alice = AliceAtATable();
   ASSERT_TRUE(alice.has_value());
-  ASSERT_TRUE(alice->stream.Send(AddBot(1500)).ok());
-  ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.players.size() == 2; }, "the bot"));
-  moonbase::games::ChessStartGame start;
-  start.initialSeconds = 30;
-  start.incrementSeconds = 0;
-  ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromStartgame(start))).ok());
-  ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "playing"; }, "start"));
+  ASSERT_TRUE(StartedAgainstBot(*alice, 2300).has_value());
   EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
   ASSERT_EQ(asks_.size(), 1u);
-  EXPECT_EQ(asks_[0].movetime_ms, ChessBotMovetimeMs(30'000, 0));
-  EXPECT_EQ(asks_[0].movetime_ms, 500);
+  EXPECT_EQ(asks_[0].elo, std::nullopt);
+  EXPECT_EQ(asks_[0].movetime_ms, ChessBotStrengthThinkMs(2300));
+  EXPECT_EQ(asks_[0].movetime_ms, 1'200);
 }
 
 // Remaining time caps the budget: after most of a short clock has run,
-// the ask is sized to what's left, not the table's full TC slice.
+// the ask is sized to what's left, not the strength slice.
 TEST_F(ChessBotFixture, ThinkTimeIsCappedByTheSideToMovesRemaining) {
   opening_.white_seat = 1;
   auto alice = AliceAtATable();
   ASSERT_TRUE(alice.has_value());
-  ASSERT_TRUE(alice->stream.Send(AddBot(1500)).ok());
+  ASSERT_TRUE(alice->stream.Send(AddBot(2300)).ok());
   ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.players.size() == 2; }, "the bot"));
   moonbase::games::ChessStartGame start;
   start.initialSeconds = 30;
@@ -189,7 +184,8 @@ TEST_F(ChessBotFixture, ThinkTimeIsCappedByTheSideToMovesRemaining) {
   now_ms_ += 29'600;
   EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
   ASSERT_EQ(asks_.size(), 1u);
-  EXPECT_EQ(asks_[0].movetime_ms, ChessBotMovetimeMs(30'000, 0, 400));
+  EXPECT_EQ(asks_[0].elo, std::nullopt);
+  EXPECT_EQ(asks_[0].movetime_ms, ChessBotMovetimeMs(/*remaining=*/400, /*elo=*/2300));
   EXPECT_EQ(asks_[0].movetime_ms, 400 - kChessBotClockReserveMs);
 }
 

@@ -5,39 +5,38 @@
 namespace games_hub {
 namespace {
 
-TEST(ChessBotMovetimeMsTest, DefaultThreePlusTwoHitsTheCeiling) {
-  // 180s / 60 + 0.8 * 2s = 3s + 1.6s, clamped to the ceiling.
-  EXPECT_EQ(ChessBotMovetimeMs(180'000, 2'000), kChessBotMovetimeCeilMs);
+// The UI's strength labels (1320…3190) name the seat; think time is the
+// proxy that reaches Stockfish — more ms, stronger play at full strength.
+TEST(ChessBotStrengthThinkMsTest, UiTiersMapToThinkTime) {
+  EXPECT_EQ(ChessBotStrengthThinkMs(1320), 50);
+  EXPECT_EQ(ChessBotStrengthThinkMs(1600), 150);
+  EXPECT_EQ(ChessBotStrengthThinkMs(1900), 400);
+  EXPECT_EQ(ChessBotStrengthThinkMs(2300), 1'200);
+  EXPECT_EQ(ChessBotStrengthThinkMs(3190), 4'000);
 }
 
-TEST(ChessBotMovetimeMsTest, AShortClockStaysSnappy) {
-  // 30s / 60 + 0 = 500 ms — between floor and ceiling.
-  EXPECT_EQ(ChessBotMovetimeMs(30'000, 0), 500);
+TEST(ChessBotStrengthThinkMsTest, ValuesBetweenTiersInterpolate) {
+  // Halfway from 1900/400ms to 2300/1200ms → 800 ms.
+  EXPECT_EQ(ChessBotStrengthThinkMs(2100), 800);
 }
 
-TEST(ChessBotMovetimeMsTest, IncrementCountsTowardTheBudget) {
-  // 60s / 60 + 0.8 * 5s = 1s + 4s → ceiling.
-  EXPECT_EQ(ChessBotMovetimeMs(60'000, 5'000), kChessBotMovetimeCeilMs);
-  // 60s / 60 + 0 = 1s.
-  EXPECT_EQ(ChessBotMovetimeMs(60'000, 0), 1'000);
+TEST(ChessBotStrengthThinkMsTest, OutsideTheUiRangeClampsToTheEnds) {
+  EXPECT_EQ(ChessBotStrengthThinkMs(1), 50);
+  EXPECT_EQ(ChessBotStrengthThinkMs(10'000), 4'000);
 }
 
-TEST(ChessBotMovetimeMsTest, NeverBelowTheFloorOrAboveTheCeiling) {
-  EXPECT_EQ(ChessBotMovetimeMs(1'000, 0), kChessBotMovetimeFloorMs);
-  EXPECT_EQ(ChessBotMovetimeMs(3'600'000, 30'000), kChessBotMovetimeCeilMs);
+TEST(ChessBotMovetimeMsTest, StrengthBudgetWhenTheClockHasRoom) {
+  EXPECT_EQ(ChessBotMovetimeMs(/*remaining_ms=*/60'000, /*elo=*/2300), 1'200);
+  EXPECT_EQ(ChessBotMovetimeMs(/*remaining_ms=*/60'000, /*elo=*/1320), 50);
 }
 
-TEST(ChessBotMovetimeMsTest, RemainingTimeCapsTheBudget) {
-  // A 3+2 budget of 2s does not outrun a side down to 400 ms.
-  EXPECT_EQ(ChessBotMovetimeMs(180'000, 2'000, 400), 400 - kChessBotClockReserveMs);
+TEST(ChessBotMovetimeMsTest, RemainingTimeCapsTheStrengthBudget) {
+  EXPECT_EQ(ChessBotMovetimeMs(/*remaining_ms=*/400, /*elo=*/2300), 400 - kChessBotClockReserveMs);
 }
 
 TEST(ChessBotMovetimeMsTest, ANearFlagSeatStillAsksTheEngineMinimum) {
-  // Usable time at or below zero: the shortest the engine accepts, so the
-  // ask itself cannot hang waiting on a zero movetime.
-  EXPECT_EQ(ChessBotMovetimeMs(180'000, 2'000, kChessBotClockReserveMs),
-            kChessBotMovetimeEngineMinMs);
-  EXPECT_EQ(ChessBotMovetimeMs(180'000, 2'000, 0), kChessBotMovetimeEngineMinMs);
+  EXPECT_EQ(ChessBotMovetimeMs(kChessBotClockReserveMs, 2300), kChessBotMovetimeEngineMinMs);
+  EXPECT_EQ(ChessBotMovetimeMs(0, 2300), kChessBotMovetimeEngineMinMs);
 }
 
 TEST(ChessBotIdTest, StrengthIsNamedInTheSeatId) {

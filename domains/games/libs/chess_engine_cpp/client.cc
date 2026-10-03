@@ -8,8 +8,8 @@ opal::ClientConfig DefaultClientConfig(std::string endpoint) {
   opal::ClientConfig config;
   config.endpoint = std::move(endpoint);
   config.user_agent = "games_hub/1.0";
-  // The service gives up at movetime plus 2 s; bots ask for at most
-  // kChessBotMovetimeCeilMs (2 s), so 8 s covers MaxMovetimeMs (5 s) plus
+  // The service gives up at movetime plus 2 s; bots ask up to the
+  // strength ceiling (4 s), so 8 s covers MaxMovetimeMs (5 s) plus
   // slack and the connection with room to spare.
   config.request_timeout_ms = 8'000;
   config.retry.max_attempts = 1;

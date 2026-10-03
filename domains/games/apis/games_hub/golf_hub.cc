@@ -3017,11 +3017,12 @@ int GolfHub::PlayChessBotsOnce() {
         const std::string& on_turn = game.players().at(seat);
         const std::optional<int> elo = ChessBotElo(on_turn);
         if (!elo.has_value() || chess_bot_retry_at_.contains({room_id, game_id})) continue;
-        // Movetime is filled just before the ask, from the live remaining
-        // clock — not here — so a later bot in this pass is not capped by
-        // a snapshot taken before earlier bots thought.
+        // Movetime is filled just before the ask, from the seat's named
+        // strength and the live remaining clock — not here — so a later
+        // bot in this pass is not capped by a snapshot taken before
+        // earlier bots thought. Elo stays off the ask (full strength).
         turns.push_back({room_id, game_id, on_turn, entry.chess().scoreSheet().size(),
-                         {game.startFen(), game.moves(), 0, *elo}});
+                         ChessBotAsk{game.startFen(), game.moves(), 0, std::nullopt}});
       }
     }
   }
@@ -3042,14 +3043,16 @@ int GolfHub::PlayChessBotsOnce() {
       }
       const int seat = state.whoseTurn();
       if (seat < 0 || state.players().at(seat) != turn.bot_id) continue;
-      const chess_play::TimeControl& tc = state.timeControl();
-      turn.ask.movetime_ms =
-          ChessBotMovetimeMs(tc.initial_ms, tc.increment_ms,
-                             state.remainingMs(state.sideToMove(), NowMs()));
+      // Strength → think time; Elo is not put on the ask (full-strength
+      // Stockfish). The side's remaining clock only caps the budget.
+      const std::optional<int> strength = ChessBotElo(turn.bot_id);
+      turn.ask.movetime_ms = ChessBotMovetimeMs(
+          state.remainingMs(state.sideToMove(), NowMs()), strength.value_or(1320));
+      turn.ask.elo = std::nullopt;
     }
     const auto ask_started = std::chrono::steady_clock::now();
     LOG(INFO) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/" << turn.game_id
-              << ": asking elo=" << turn.ask.elo << " movetimeMs=" << turn.ask.movetime_ms
+              << ": asking movetimeMs=" << turn.ask.movetime_ms
               << " moves=" << turn.ask.moves.size() << " fen=" << turn.ask.fen;
     const absl::StatusOr<std::string> answer = chess_bot_engine_(turn.ask);
     const auto ask_took = std::chrono::duration_cast<std::chrono::milliseconds>(
