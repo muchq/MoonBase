@@ -520,9 +520,9 @@ GolfHub::GolfHub(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::Deal
       hooks_(std::move(hooks)),
       grace_period_(grace_period),
       instance_id_(InstanceId()),
-      chess_opener_([] {
+      chess_opener_([](std::string_view setup_id) {
         absl::BitGen gen;
-        return chess_play::RandomKpkOpening(gen);
+        return chess_play::SelectChessSetup(setup_id, gen);
       }),
       registry_([this, grace_period] {
         Registry::Options options;
@@ -2183,6 +2183,12 @@ void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& mov
     if (start->incrementSeconds.has_value()) {
       time_control.increment_ms = int64_t{*start->incrementSeconds} * 1000;
     }
+    const auto setup =
+        chess_opener_(start->setupId.value_or(std::string(chess_play::kRandomKpkSetup)));
+    if (!setup.ok()) {
+      Reject(player_id, RejectKind::kRules, std::string(setup.status().message()));
+      return;
+    }
     // On a table whose game ended, the next game; otherwise the first.
     bool seated = false;
     {
@@ -2191,13 +2197,13 @@ void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& mov
       seated = ref.has_value() && ref->entry->started();
     }
     if (!seated) {
-      StartGameMove(player_id, time_control);
+      StartGameMove(player_id, time_control, *setup);
       return;
     }
     TableEngineMove<chess_play::Table>(
         player_id, GameKind::kChess,
-        [this, time_control](const chess_play::Table& table, int) {
-          return table.next(chess_opener_(), time_control, NowMs());
+        [this, setup = *setup, time_control](const chess_play::Table& table, int) {
+          return table.next(setup.variant, setup.opening, time_control, NowMs(), setup.id);
         });
     return;
   }
@@ -2537,7 +2543,8 @@ void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game
   if (refusal.has_value()) Reject(player_id, std::move(*refusal));
 }
 
-void GolfHub::StartGameMove(const std::string& player_id, chess_play::TimeControl time_control) {
+void GolfHub::StartGameMove(const std::string& player_id, chess_play::TimeControl time_control,
+                            std::optional<chess_play::ChessSetup> chess_setup) {
   Outbox outbox;
   std::optional<Refusal> refusal;
   {
@@ -2569,9 +2576,13 @@ void GolfHub::StartGameMove(const std::string& player_id, chess_play::TimeContro
           }
           dealt.emplace(*std::move(table));
         } else if (ref->entry->kind == GameKind::kChess) {
-          auto chess_game = chess_play::Table::open(ref->entry->roster,
-                                                    std::string(chess_play::GameState::kKpk),
-                                                    chess_opener_(), time_control, NowMs());
+          if (!chess_setup.has_value()) {
+            refusal = Refusal{RejectKind::kRules, "a chess setup is required"};
+            break;
+          }
+          auto chess_game =
+              chess_play::Table::open(ref->entry->roster, chess_setup->variant,
+                                      chess_setup->opening, time_control, NowMs(), chess_setup->id);
           if (!chess_game.ok()) {
             refusal = Refusal{RejectKind::kRules, std::string(chess_game.status().message())};
             break;
@@ -3681,6 +3692,8 @@ moonbase::games::ChessView GolfHub::ChessViewLocked(const std::string& game_id,
   const int64_t now = NowMs();
   view.phase = ChessPhaseString(table);
   view.variant = state.variant();
+  view.setupId = state.setupId();
+  view.setupName = std::string(*chess_play::ChessSetupName(state.setupId()));
   for (int seat = 0; seat < chess_play::GameState::kSeats; ++seat) {
     moonbase::games::ChessPlayer player;
     player.playerId = state.players().at(seat);

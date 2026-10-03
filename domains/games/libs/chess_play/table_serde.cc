@@ -102,7 +102,9 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
     return absl::InvalidArgumentError("not a stored chess table");
   }
   const int64_t version = payload["v"].get<int64_t>();
-  if (version == kGameRowVersion) {
+  // A v1 payload is a game row. At v2, a table has a nested `game`;
+  // a game row has its game fields at the top level.
+  if (version == kGameRowVersion || (version == kSchemaVersion && !payload.contains("game"))) {
     auto game = deserializeGameState(serialized);
     if (!game.ok()) return game.status();
     const bool over = game->isOver();

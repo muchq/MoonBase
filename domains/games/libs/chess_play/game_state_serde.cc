@@ -15,7 +15,8 @@ namespace {
 
 using nlohmann::json;
 
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
+constexpr int kLegacySchemaVersion = 1;
 
 // postgres jsonb refuses a NUL byte; it gets invalid UTF-8's treatment.
 std::string Sanitized(const std::string& text) {
@@ -100,6 +101,7 @@ std::string serializeGameState(const GameState& state) {
       {"v", kSchemaVersion},
       {"players", std::move(players)},
       {"variant", state.variant()},
+      {"setupId", state.setupId()},
       {"whiteSeat", state.whiteSeat()},
       {"startFen", state.startFen()},
       {"moves", state.moves()},
@@ -127,13 +129,19 @@ absl::StatusOr<GameState> deserializeGameState(const std::string& serialized) {
   }
   auto version = ReadInt(payload, "v");
   if (!version.ok()) return version.status();
-  if (*version != kSchemaVersion) {
+  if (*version != kLegacySchemaVersion && *version != kSchemaVersion) {
     return absl::InvalidArgumentError(absl::StrCat("unknown schema version: ", *version));
   }
   auto players = ReadStrings(payload, "players");
   if (!players.ok()) return players.status();
   auto variant = ReadString(payload, "variant");
   if (!variant.ok()) return variant.status();
+  std::string setup_id(kRandomKpkSetup);
+  if (*version == kSchemaVersion) {
+    auto stored_setup_id = ReadString(payload, "setupId");
+    if (!stored_setup_id.ok()) return stored_setup_id.status();
+    setup_id = *std::move(stored_setup_id);
+  }
   auto white_seat = ReadInt(payload, "whiteSeat");
   if (!white_seat.ok()) return white_seat.status();
   auto start_fen = ReadString(payload, "startFen");
@@ -168,7 +176,8 @@ absl::StatusOr<GameState> deserializeGameState(const std::string& serialized) {
   clock.turn_started_ms = *turn_started;
   return GameState::restore(*std::move(players), *std::move(variant), *std::move(start_fen),
                             static_cast<int>(*white_seat), *std::move(moves),
-                            TimeControl{*initial, *increment}, clock, *std::move(result));
+                            TimeControl{*initial, *increment}, clock, *std::move(result),
+                            std::move(setup_id));
 }
 
 }  // namespace chess_play

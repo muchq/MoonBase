@@ -14,6 +14,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -901,7 +902,11 @@ TEST_F(PgGamesHubFixture, TwoInstancesSweepingOneClockEndTheGameOnce) {
   std::atomic<int64_t> now_ms{1'800'000'000'000};
   for (GolfHub* hub : {golf_.get(), remote->golf.get()}) {
     hub->SetClock([&now_ms] { return absl::FromUnixMillis(now_ms.load()); });
-    hub->SetChessOpener([] { return chess_play::Opening{"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0}; });
+    hub->SetChessOpener([](std::string_view setup_id) {
+      return absl::StatusOr<chess_play::ChessSetup>(chess_play::ChessSetup{
+          std::string(setup_id), "Random K+P vs K", "kpk",
+          {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0}});
+    });
   }
   CrossSeats seats;
   const std::string room_id = SeatedCrossRoom(*remote, seats);
