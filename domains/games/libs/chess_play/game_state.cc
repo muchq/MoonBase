@@ -100,7 +100,7 @@ absl::Status CheckSeats(const std::vector<std::string>& players, const std::stri
     return absl::InvalidArgumentError("chess needs exactly 2 players");
   }
   if (players[0] == players[1]) return absl::InvalidArgumentError("a player cannot play itself");
-  if (variant != GameState::kKpk) {
+  if (variant != GameState::kKpk && variant != "rpr" && variant != "qvr") {
     return absl::InvalidArgumentError(absl::StrCat("unknown variant: ", variant));
   }
   if (white_seat != 0 && white_seat != 1) return absl::InvalidArgumentError("white seat is 0 or 1");
@@ -111,6 +111,31 @@ absl::Status CheckSeats(const std::vector<std::string>& players, const std::stri
     return absl::InvalidArgumentError("a clock of more than a day");
   }
   return absl::OkStatus();
+}
+
+struct SetupDefinition {
+  std::string_view id;
+  std::string_view name;
+  std::string_view variant;
+  /// Empty only for the generated random KPK position.
+  std::string_view fen;
+};
+
+constexpr std::array<SetupDefinition, 4> kChessSetups{{
+    {kRandomKpkSetup, "Random K+P vs K", "kpk", ""},
+    {"kpk-opposition", "K+P vs K — Opposition", "kpk",
+     "8/8/4k3/4P3/4K3/8/8/8 w - - 0 1"},
+    {"rpr-lucena", "R+P vs R — Lucena position", "rpr",
+     "1K1R4/1P6/1k6/8/8/8/r7/8 w - - 0 1"},
+    {"qvr-basic", "Q vs R — Basic conversion", "qvr",
+     "4k3/8/8/8/8/8/1r6/3QK3 w - - 0 1"},
+}};
+
+const SetupDefinition* FindChessSetup(std::string_view id) {
+  const auto found =
+      std::find_if(kChessSetups.begin(), kChessSetups.end(),
+                   [id](const SetupDefinition& setup) { return setup.id == id; });
+  return found == kChessSetups.end() ? nullptr : &*found;
 }
 
 }  // namespace
@@ -146,6 +171,27 @@ std::optional<Ending> ParseEnding(std::string_view name) {
     if (EndingName(ending) == name) return ending;
   }
   return std::nullopt;
+}
+
+std::vector<ChessSetupOption> AvailableChessSetups() {
+  std::vector<ChessSetupOption> options;
+  options.reserve(kChessSetups.size());
+  for (const SetupDefinition& setup : kChessSetups) {
+    options.push_back(ChessSetupOption{setup.id, setup.name});
+  }
+  return options;
+}
+
+std::optional<std::string_view> ChessSetupName(std::string_view id) {
+  const SetupDefinition* setup = FindChessSetup(id);
+  return setup == nullptr ? std::nullopt
+                          : std::optional<std::string_view>(setup->name);
+}
+
+std::optional<std::string_view> ChessSetupVariant(std::string_view id) {
+  const SetupDefinition* setup = FindChessSetup(id);
+  return setup == nullptr ? std::nullopt
+                          : std::optional<std::string_view>(setup->variant);
 }
 
 Opening RandomKpkOpening(absl::BitGenRef gen) {
@@ -191,11 +237,28 @@ Opening RandomKpkOpening(absl::BitGenRef gen) {
   }
 }
 
-GameState::GameState(std::vector<std::string> players, std::string variant, std::string start_fen,
-                     int white_seat, std::vector<std::string> moves, TimeControl time_control,
-                     Clock clock, std::optional<Result> result)
+absl::StatusOr<ChessSetup> SelectChessSetup(std::string_view id, absl::BitGenRef gen) {
+  const SetupDefinition* setup = FindChessSetup(id);
+  if (setup == nullptr) {
+    return absl::InvalidArgumentError(absl::StrCat("unknown chess setup: ", id));
+  }
+  Opening opening;
+  if (setup->fen.empty()) {
+    opening = RandomKpkOpening(gen);
+  } else {
+    opening.white_seat = absl::Uniform(gen, 0, GameState::kSeats);
+    opening.fen = setup->fen;
+  }
+  return ChessSetup{std::string(setup->id), std::string(setup->name),
+                    std::string(setup->variant), std::move(opening)};
+}
+
+GameState::GameState(std::vector<std::string> players, std::string variant, std::string setup_id,
+                     std::string start_fen, int white_seat, std::vector<std::string> moves,
+                     TimeControl time_control, Clock clock, std::optional<Result> result)
     : players_(std::move(players)),
       variant_(std::move(variant)),
+      setup_id_(std::move(setup_id)),
       start_fen_(std::move(start_fen)),
       white_seat_(white_seat),
       moves_(std::move(moves)),
@@ -235,15 +298,23 @@ absl::Status GameState::settle() {
 
 absl::StatusOr<GameState> GameState::start(std::vector<std::string> players, std::string variant,
                                            const Opening& opening, TimeControl time_control,
-                                           int64_t now_ms) {
+                                           int64_t now_ms, std::string setup_id) {
   if (auto seats = CheckSeats(players, variant, opening.white_seat, time_control); !seats.ok()) {
     return seats;
+  }
+  const auto setup_variant = ChessSetupVariant(setup_id);
+  if (!setup_variant.has_value()) {
+    return absl::InvalidArgumentError(absl::StrCat("unknown chess setup: ", setup_id));
+  }
+  if (*setup_variant != variant) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("setup ", setup_id, " is not variant ", variant));
   }
   Clock clock;
   clock.remaining_ms = {time_control.initial_ms, time_control.initial_ms};
   clock.turn_started_ms = now_ms;
-  GameState state(std::move(players), std::move(variant), opening.fen, opening.white_seat, {},
-                  time_control, clock, std::nullopt);
+  GameState state(std::move(players), std::move(variant), std::move(setup_id), opening.fen,
+                  opening.white_seat, {}, time_control, clock, std::nullopt);
   if (auto settled = state.settle(); !settled.ok()) return settled;
   if (state.board_ending_.has_value()) {
     return absl::InvalidArgumentError(absl::StrCat("the game is over already: ", opening.fen));
@@ -255,9 +326,17 @@ absl::StatusOr<GameState> GameState::restore(std::vector<std::string> players, s
                                              std::string start_fen, int white_seat,
                                              std::vector<std::string> moves,
                                              TimeControl time_control, Clock clock,
-                                             std::optional<Result> result) {
+                                             std::optional<Result> result, std::string setup_id) {
   if (auto seats = CheckSeats(players, variant, white_seat, time_control); !seats.ok()) {
     return seats;
+  }
+  const auto setup_variant = ChessSetupVariant(setup_id);
+  if (!setup_variant.has_value()) {
+    return absl::InvalidArgumentError(absl::StrCat("unknown chess setup: ", setup_id));
+  }
+  if (*setup_variant != variant) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("setup ", setup_id, " is not variant ", variant));
   }
   for (const int64_t remaining : clock.remaining_ms) {
     if (remaining < 0 || remaining > kMaxClockMs) {
@@ -267,8 +346,9 @@ absl::StatusOr<GameState> GameState::restore(std::vector<std::string> players, s
   if (clock.turn_started_ms < 0 || clock.turn_started_ms > kMaxEpochMs) {
     return absl::InvalidArgumentError("a turn that started out of range");
   }
-  GameState state(std::move(players), std::move(variant), std::move(start_fen), white_seat,
-                  std::move(moves), time_control, clock, std::move(result));
+  GameState state(std::move(players), std::move(variant), std::move(setup_id),
+                  std::move(start_fen), white_seat, std::move(moves), time_control, clock,
+                  std::move(result));
   if (auto settled = state.settle(); !settled.ok()) return settled;
   // The board's ending is the only one it can have; without one, only
   // the players can have ended it.
@@ -299,8 +379,8 @@ absl::StatusOr<GameState> GameState::move(int seat, std::string_view uci, int64_
   clock.remaining_ms[Index(side_to_move_)] += time_control_.increment_ms;
   std::vector<std::string> moves = moves_;
   moves.emplace_back(uci);
-  GameState next(players_, variant_, start_fen_, white_seat_, std::move(moves), time_control_,
-                 clock, std::nullopt);
+  GameState next(players_, variant_, setup_id_, start_fen_, white_seat_, std::move(moves),
+                 time_control_, clock, std::nullopt);
   if (auto settled = next.settle(); !settled.ok()) return settled;
   if (next.board_ending_.has_value()) {
     next.result_ = next.board_ending_;

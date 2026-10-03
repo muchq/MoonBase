@@ -165,7 +165,8 @@ TEST_F(PgHubStoreTest, ChessRowsKeepTheirKindAndDecodeWithChessSerde) {
   auto resigned = opened->inGame(
       [](const chess_play::GameState& game) { return game.resign(0, 2'000); });
   ASSERT_TRUE(resigned.ok()) << resigned.status();
-  auto second = resigned->next({"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 1}, {180'000, 2'000}, 3'000);
+  auto second = resigned->next("kpk", {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 1},
+                               {180'000, 2'000}, 3'000);
   ASSERT_TRUE(second.ok()) << second.status();
   auto moved = second->inGame(
       [](const chess_play::GameState& game) { return game.move(0, "e2e4", 5'000); });

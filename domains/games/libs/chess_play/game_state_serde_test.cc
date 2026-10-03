@@ -18,7 +18,8 @@ constexpr char kKpk[] = "8/8/8/4k3/8/8/4P3/4K3 w - - 0 1";
 constexpr int64_t kT0 = 1'000'000;
 
 GameState Started() {
-  auto state = GameState::start({"alice", "bob"}, "kpk", Opening{kKpk, 1}, {180'000, 2'000}, kT0);
+  auto state = GameState::start({"alice", "bob"}, "kpk", Opening{kKpk, 1}, {180'000, 2'000}, kT0,
+                                "kpk-opposition");
   EXPECT_TRUE(state.ok()) << state.status();
   return *state;
 }
@@ -37,6 +38,7 @@ void ExpectRoundTrips(const GameState& state) {
   ASSERT_TRUE(restored.ok()) << restored.status() << "\n" << bytes;
   EXPECT_EQ(restored->players(), state.players());
   EXPECT_EQ(restored->variant(), state.variant());
+  EXPECT_EQ(restored->setupId(), state.setupId());
   EXPECT_EQ(restored->whiteSeat(), state.whiteSeat());
   EXPECT_EQ(restored->startFen(), state.startFen());
   EXPECT_EQ(restored->moves(), state.moves());
@@ -72,13 +74,26 @@ TEST(ChessSerde, TheStoredBytesArePinned) {
   EXPECT_EQ(serializeGameState(Played()),
             R"({"clock":{"blackMs":177000,"turnStartedMs":1009000,"whiteMs":178000},)"
             R"("moves":["e2e4","e5e6"],"players":["alice","bob"],)"
+            R"("setupId":"kpk-opposition",)"
             R"("startFen":"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1",)"
-            R"("timeControl":{"incrementMs":2000,"initialMs":180000},"v":1,)"
+            R"("timeControl":{"incrementMs":2000,"initialMs":180000},"v":2,)"
             R"("variant":"kpk","whiteSeat":1})");
   EXPECT_EQ(json::parse(serializeGameState(*Played().resign(1, kT0 + 10'000)))["result"],
             json::parse(R"({"winner":"black","ending":"resignation"})"));
   EXPECT_FALSE(
       json::parse(serializeGameState(*Started().flag(kT0 + 180'000)))["result"].contains("winner"));
+}
+
+TEST(ChessSerde, VersionOneRowsRestoreAsTheOriginalRandomKpkSetup) {
+  const std::string legacy =
+      R"({"clock":{"blackMs":177000,"turnStartedMs":1009000,"whiteMs":178000},)"
+      R"("moves":["e2e4","e5e6"],"players":["alice","bob"],)"
+      R"("startFen":"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1",)"
+      R"("timeControl":{"incrementMs":2000,"initialMs":180000},"v":1,)"
+      R"("variant":"kpk","whiteSeat":1})";
+  const auto restored = deserializeGameState(legacy);
+  ASSERT_TRUE(restored.ok()) << restored.status();
+  EXPECT_EQ(restored->setupId(), kRandomKpkSetup);
 }
 
 TEST(ChessSerde, APlayerIdJsonbWouldRefuseIsReplaced) {
@@ -105,7 +120,8 @@ TEST(ChessSerde, RefusesWhatIsNotAStoredGame) {
     return payload;
   };
   for (const char* key :
-       {"v", "players", "variant", "whiteSeat", "startFen", "moves", "timeControl", "clock"}) {
+       {"v", "players", "variant", "setupId", "whiteSeat", "startFen", "moves", "timeControl",
+        "clock"}) {
     ExpectRejected(without(key));
   }
 
@@ -114,10 +130,11 @@ TEST(ChessSerde, RefusesWhatIsNotAStoredGame) {
     payload[at] = std::move(value);
     return payload;
   };
-  ExpectRejected(with("/v"_json_pointer, 2));
+  ExpectRejected(with("/v"_json_pointer, 3));
   ExpectRejected(with("/players"_json_pointer, json::array({"alice"})));
   ExpectRejected(with("/players/0"_json_pointer, 7));
   ExpectRejected(with("/variant"_json_pointer, "atomic"));
+  ExpectRejected(with("/setupId"_json_pointer, "not-a-setup"));
   ExpectRejected(with("/whiteSeat"_json_pointer, 2));
   ExpectRejected(with("/whiteSeat"_json_pointer, "1"));
   ExpectRejected(with("/startFen"_json_pointer, "nonsense"));

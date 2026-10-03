@@ -20,9 +20,9 @@ GameScore ScoreOf(const GameState& finished) {
 
 absl::StatusOr<Table> Table::open(std::vector<std::string> players, std::string variant,
                                   const Opening& opening, TimeControl time_control,
-                                  int64_t now_ms) {
-  auto game =
-      GameState::start(std::move(players), std::move(variant), opening, time_control, now_ms);
+                                  int64_t now_ms, std::string setup_id) {
+  auto game = GameState::start(std::move(players), std::move(variant), opening, time_control, now_ms,
+                               std::move(setup_id));
   if (!game.ok()) return game.status();
   return Table(*std::move(game), {}, false, false);
 }
@@ -61,12 +61,13 @@ absl::StatusOr<Table> Table::inGame(
   return withGame(*std::move(after), false);
 }
 
-absl::StatusOr<Table> Table::next(Opening opening, TimeControl time_control,
-                                  int64_t now_ms) const {
+absl::StatusOr<Table> Table::next(std::string variant, Opening opening, TimeControl time_control,
+                                  int64_t now_ms, std::string setup_id) const {
   if (closed_) return absl::FailedPreconditionError("the table is closed");
   if (!game_.isOver()) return absl::FailedPreconditionError("a game is in play");
   opening.white_seat = 1 - game_.whiteSeat();
-  auto game = GameState::start(game_.players(), game_.variant(), opening, time_control, now_ms);
+  auto game = GameState::start(game_.players(), std::move(variant), opening, time_control, now_ms,
+                               std::move(setup_id));
   if (!game.ok()) return game.status();
   return Table(*std::move(game), score_sheet_, false, false);
 }

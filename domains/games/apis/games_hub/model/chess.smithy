@@ -13,8 +13,8 @@ use moonbase.games#TurnChanged
 // Chess's vocabulary: two seats, the full rules, a Fischer clock. It rides
 // the room's Play stream as one `chess` member per direction and reuses
 // the shared lifecycle shapes, except startGame, which names the clock.
-// The first variant is king and pawn against king ("kpk"), from a random
-// position. Shape names carry the game's name: codegen flattens every
+// Starting positions are selected from the hub's server-owned practice
+// catalog. Shape names carry the game's name: codegen flattens every
 // namespace into one.
 
 /// The chess envelope on the command stream.
@@ -49,6 +49,10 @@ structure ChessAddBot {
 /// On a table whose game has ended, either seat starts the next one, sides
 /// swapped. Absent fields take the default, three minutes and two seconds.
 structure ChessStartGame {
+    /// A server-owned practice setup identifier. Absent selects random-kpk.
+    @length(min: 1, max: 32)
+    setupId: String
+
     /// Each side's time, 30 to 1800.
     @range(min: 30, max: 1800)
     initialSeconds: Integer
@@ -68,6 +72,18 @@ structure ChessPlay {
 
 /// Either seat, on turn or not: the other side wins.
 structure ChessResign {}
+
+structure ChessSetupOption {
+    @required
+    setupId: String
+
+    @required
+    name: String
+}
+
+list ChessSetupOptions {
+    member: ChessSetupOption
+}
 
 /// The chess envelope on the event stream.
 structure ChessEvent {
@@ -107,6 +123,10 @@ structure ChessView {
     @required
     gameId: String
 
+    /// The server-owned setup catalog, available before and during play.
+    @required
+    availableSetups: ChessSetupOptions
+
     /// waiting | playing | ended | closed: ended between games, closed
     /// once a seat left the table.
     @required
@@ -114,6 +134,10 @@ structure ChessView {
 
     /// The variant being played; absent while waiting.
     variant: String
+
+    /// The selected server-owned setup and its display name; absent while waiting.
+    setupId: String
+    setupName: String
 
     /// Seat order; colors are absent while waiting.
     @required
