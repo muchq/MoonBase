@@ -189,7 +189,7 @@ services:
       # One Stockfish process: SF18 loads both NNUE nets at spawn (~270M
       # RSS), and this host is a 1.9G box with no swap — two engines were
       # what the OOM killer took out mid-search (bots stuck on 503).
-      # games_hub sizes each ask from the table's clock (up to 2 s).
+      # games_hub sizes each ask from the seat's strength (up to 4 s).
       - ENGINES=1
     networks:
       - app_network
