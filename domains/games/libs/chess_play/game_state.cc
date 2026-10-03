@@ -113,6 +113,31 @@ absl::Status CheckSeats(const std::vector<std::string>& players, const std::stri
   return absl::OkStatus();
 }
 
+struct SetupDefinition {
+  std::string_view id;
+  std::string_view name;
+  std::string_view variant;
+  /// Empty only for the generated random KPK position.
+  std::string_view fen;
+};
+
+constexpr std::array<SetupDefinition, 4> kChessSetups{{
+    {kRandomKpkSetup, "Random K+P vs K", "kpk", ""},
+    {"kpk-opposition", "K+P vs K — Opposition", "kpk",
+     "8/8/4k3/4P3/4K3/8/8/8 w - - 0 1"},
+    {"rpr-lucena", "R+P vs R — Lucena position", "rpr",
+     "1K1R4/1P6/1k6/8/8/8/r7/8 w - - 0 1"},
+    {"qvr-basic", "Q vs R — Basic conversion", "qvr",
+     "4k3/8/8/8/8/8/1r6/3QK3 w - - 0 1"},
+}};
+
+const SetupDefinition* FindChessSetup(std::string_view id) {
+  const auto found =
+      std::find_if(kChessSetups.begin(), kChessSetups.end(),
+                   [id](const SetupDefinition& setup) { return setup.id == id; });
+  return found == kChessSetups.end() ? nullptr : &*found;
+}
+
 }  // namespace
 
 std::string_view ColorName(Color color) { return color == Color::kWhite ? "white" : "black"; }
@@ -149,18 +174,15 @@ std::optional<Ending> ParseEnding(std::string_view name) {
 }
 
 std::optional<std::string_view> ChessSetupName(std::string_view id) {
-  if (id == kRandomKpkSetup) return "Random K+P vs K";
-  if (id == "kpk-opposition") return "K+P vs K — Opposition";
-  if (id == "rpr-lucena") return "R+P vs R — Lucena position";
-  if (id == "qvr-basic") return "Q vs R — Basic conversion";
-  return std::nullopt;
+  const SetupDefinition* setup = FindChessSetup(id);
+  return setup == nullptr ? std::nullopt
+                          : std::optional<std::string_view>(setup->name);
 }
 
 std::optional<std::string_view> ChessSetupVariant(std::string_view id) {
-  if (id == kRandomKpkSetup || id == "kpk-opposition") return "kpk";
-  if (id == "rpr-lucena") return "rpr";
-  if (id == "qvr-basic") return "qvr";
-  return std::nullopt;
+  const SetupDefinition* setup = FindChessSetup(id);
+  return setup == nullptr ? std::nullopt
+                          : std::optional<std::string_view>(setup->variant);
 }
 
 Opening RandomKpkOpening(absl::BitGenRef gen) {
@@ -207,25 +229,19 @@ Opening RandomKpkOpening(absl::BitGenRef gen) {
 }
 
 absl::StatusOr<ChessSetup> SelectChessSetup(std::string_view id, absl::BitGenRef gen) {
-  const auto name = ChessSetupName(id);
-  const auto variant = ChessSetupVariant(id);
-  if (!name.has_value() || !variant.has_value()) {
+  const SetupDefinition* setup = FindChessSetup(id);
+  if (setup == nullptr) {
     return absl::InvalidArgumentError(absl::StrCat("unknown chess setup: ", id));
   }
   Opening opening;
-  if (id == kRandomKpkSetup) {
+  if (setup->fen.empty()) {
     opening = RandomKpkOpening(gen);
   } else {
     opening.white_seat = absl::Uniform(gen, 0, GameState::kSeats);
-    if (id == "kpk-opposition") {
-      opening.fen = "8/8/4k3/4P3/4K3/8/8/8 w - - 0 1";
-    } else if (id == "rpr-lucena") {
-      opening.fen = "1K1R4/1P6/1k6/8/8/8/r7/8 w - - 0 1";
-    } else {
-      opening.fen = "4k3/8/8/8/8/8/1r6/3QK3 w - - 0 1";
-    }
+    opening.fen = setup->fen;
   }
-  return ChessSetup{std::string(id), std::string(*name), std::string(*variant), std::move(opening)};
+  return ChessSetup{std::string(setup->id), std::string(setup->name),
+                    std::string(setup->variant), std::move(opening)};
 }
 
 GameState::GameState(std::vector<std::string> players, std::string variant, std::string setup_id,
