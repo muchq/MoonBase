@@ -385,8 +385,9 @@ a seat leaves, as a rummy table deals on. A game's end is a line on the
 view's `scoreSheet`; `startGame` on an ended table starts the next, sides
 swapped. `startGame.setupId` selects a server-owned practice position:
 `random-kpk` (the default), `kpk-opposition`, `rpr-lucena`, or
-`qvr-basic`. The view carries the selected ID and display name. The
-first White seat is random; later games swap sides. The setup comes from
+`qvr-basic`. Every view carries `availableSetups` for the selector; once
+started it also carries the selected ID and display name. The first
+White seat is random; later games swap sides. The setup comes from
 `SetChessOpener`, which tests fix. Moves are UCI, checked against the
 view's `legalMoves`. Checkmate, stalemate,
 insufficient material, fifty moves and threefold repetition end a game

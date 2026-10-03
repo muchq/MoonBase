@@ -173,6 +173,15 @@ std::optional<Ending> ParseEnding(std::string_view name) {
   return std::nullopt;
 }
 
+std::vector<ChessSetupOption> AvailableChessSetups() {
+  std::vector<ChessSetupOption> options;
+  options.reserve(kChessSetups.size());
+  for (const SetupDefinition& setup : kChessSetups) {
+    options.push_back(ChessSetupOption{setup.id, setup.name});
+  }
+  return options;
+}
+
 std::optional<std::string_view> ChessSetupName(std::string_view id) {
   const SetupDefinition* setup = FindChessSetup(id);
   return setup == nullptr ? std::nullopt

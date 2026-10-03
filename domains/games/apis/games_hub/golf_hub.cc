@@ -3677,6 +3677,12 @@ moonbase::games::ChessView GolfHub::ChessViewLocked(const std::string& game_id,
   moonbase::games::ChessView view;
   view.gameId = game_id;
   view.inCheck = false;
+  for (const chess_play::ChessSetupOption& available : chess_play::AvailableChessSetups()) {
+    moonbase::games::ChessSetupOption option;
+    option.setupId = available.id;
+    option.name = available.name;
+    view.availableSetups.push_back(std::move(option));
+  }
   if (!entry.started()) {
     view.phase = "waiting";
     for (const std::string& roster_id : entry.roster) {

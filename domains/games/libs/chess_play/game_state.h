@@ -76,10 +76,16 @@ struct ChessSetup {
   Opening opening;
 };
 
+struct ChessSetupOption {
+  std::string_view id;
+  std::string_view name;
+};
+
 /// Selects a named setup, randomizing its position or White seat where
 /// that setup calls for it.
 [[nodiscard]] absl::StatusOr<ChessSetup> SelectChessSetup(std::string_view id,
                                                           absl::BitGenRef gen);
+[[nodiscard]] std::vector<ChessSetupOption> AvailableChessSetups();
 [[nodiscard]] std::optional<std::string_view> ChessSetupName(std::string_view id);
 [[nodiscard]] std::optional<std::string_view> ChessSetupVariant(std::string_view id);
 

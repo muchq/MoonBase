@@ -393,6 +393,15 @@ TEST(ChessSetupTest, EveryNamedSetupIsPlayableAndCarriesItsStableIdentity) {
       {"qvr-basic", "Q vs R — Basic conversion", "qvr",
        "4k3/8/8/8/8/8/1r6/3QK3 w - - 0 1"},
   };
+  const std::vector<ChessSetupOption> options = AvailableChessSetups();
+  ASSERT_EQ(options.size(), fixed.size() + 1);
+  EXPECT_EQ(options[0].id, kRandomKpkSetup);
+  EXPECT_EQ(options[0].name, "Random K+P vs K");
+  for (std::size_t i = 0; i < fixed.size(); ++i) {
+    EXPECT_EQ(options[i + 1].id, fixed[i].id);
+    EXPECT_EQ(options[i + 1].name, fixed[i].name);
+  }
+
   std::mt19937_64 gen(1234);
   for (const Expected& expected : fixed) {
     const auto setup = SelectChessSetup(expected.id, gen);

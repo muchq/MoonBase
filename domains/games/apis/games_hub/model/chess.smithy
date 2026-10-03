@@ -73,6 +73,18 @@ structure ChessPlay {
 /// Either seat, on turn or not: the other side wins.
 structure ChessResign {}
 
+structure ChessSetupOption {
+    @required
+    setupId: String
+
+    @required
+    name: String
+}
+
+list ChessSetupOptions {
+    member: ChessSetupOption
+}
+
 /// The chess envelope on the event stream.
 structure ChessEvent {
     @required
@@ -110,6 +122,10 @@ structure ChessGameEnded {
 structure ChessView {
     @required
     gameId: String
+
+    /// The server-owned setup catalog, available before and during play.
+    @required
+    availableSetups: ChessSetupOptions
 
     /// waiting | playing | ended | closed: ended between games, closed
     /// once a seat left the table.
