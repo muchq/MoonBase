@@ -168,6 +168,18 @@ TEST_F(ChessWireTest, TheModelsBoundsAreRefusedInBand) {
     ASSERT_TRUE(creator->Send(CommandFrame("chess", move)).ok());
     EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"), reason) << move;
   }
+  for (const auto& [setup_id, length] :
+       std::vector<std::pair<std::string, int>>{{"", 0}, {std::string(33, 'a'), 33}}) {
+    ASSERT_TRUE(creator
+                    ->Send(CommandFrame(
+                        "chess", R"({"move":{"startGame":{"setupId":")" + setup_id + R"("}}})"))
+                    .ok());
+    EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
+              R"({"reason":"Value with length )" + std::to_string(length) +
+                  R"( at '/chess/move/startGame/setupId' failed to satisfy constraint: Member )"
+                  R"(must have length between 1 and 32, inclusive"})")
+        << setup_id;
+  }
   ASSERT_TRUE(
       creator->Send(CommandFrame("chess", R"({"move":{"startGame":{"setupId":"unknown"}}})")).ok());
   EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),

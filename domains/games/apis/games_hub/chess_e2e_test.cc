@@ -687,5 +687,49 @@ TEST_F(DefaultOpeningFixture, TheHubDealsASelectedPracticeSetup) {
   EXPECT_EQ(view->fen, "1K1R4/1P6/1k6/8/8/8/r7/8 w - - 0 1");
 }
 
+TEST_F(DefaultOpeningFixture, TheNextGameCanSelectAnotherCatalogPosition) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  moonbase::games::JoinGame join;
+  join.gameId = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  ASSERT_TRUE(ReceiveChess(bob.stream, "gameJoined").has_value());
+
+  moonbase::games::ChessStartGame first;
+  first.setupId = "kpk-opposition";
+  ASSERT_TRUE(alice.stream.Send(Chess(ChessMove::FromStartgame(first))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  alice.stream,
+                  [](const auto& view) {
+                    return view.phase == "playing" && view.setupId == "kpk-opposition";
+                  },
+                  "the first setup")
+                  .has_value());
+  ASSERT_TRUE(alice.stream.Send(Resign()).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  alice.stream, [](const auto& view) { return view.phase == "ended"; }, "the end")
+                  .has_value());
+
+  moonbase::games::ChessStartGame next;
+  next.setupId = "qvr-basic";
+  ASSERT_TRUE(alice.stream.Send(Chess(ChessMove::FromStartgame(next))).ok());
+  auto view = AwaitChessView(
+      alice.stream,
+      [](const auto& candidate) {
+        return candidate.phase == "playing" && candidate.setupId == "qvr-basic";
+      },
+      "the next setup");
+  ASSERT_TRUE(view.has_value());
+  EXPECT_EQ(view->variant, "qvr");
+  EXPECT_EQ(view->setupName, "Q vs R — Basic conversion");
+  EXPECT_EQ(view->fen, "4k3/8/8/8/8/8/1r6/3QK3 w - - 0 1");
+}
+
 }  // namespace
 }  // namespace games_hub

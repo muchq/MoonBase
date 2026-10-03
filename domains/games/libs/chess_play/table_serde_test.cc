@@ -55,19 +55,32 @@ TEST(ChessTableSerde, TheStoredBytesArePinned) {
                 R"(,"scoreSheet":[{"ending":"checkmate","winner":"alice","winnerColor":"white"}],"v":2})");
 }
 
-// A row stored before tables: one game, which is the table.
-TEST(ChessTableSerde, AGameRowReadsAsItsTable) {
-  const auto live = deserializeTable(serializeGameState(Opened().game()));
-  ASSERT_TRUE(live.ok()) << live.status();
-  EXPECT_FALSE(live->isOver());
-  EXPECT_TRUE(live->scoreSheet().empty());
+TEST(ChessTableSerde, VersionOneGameRowsAndVersionTwoTablesStillRestore) {
+  const json legacy_game = json::parse(
+      R"({"clock":{"blackMs":60000,"turnStartedMs":1000000,"whiteMs":60000},)"
+      R"("moves":[],"players":["alice","bob"],)"
+      R"("startFen":"7k/4P3/6K1/8/8/8/8/8 w - - 0 1",)"
+      R"("timeControl":{"incrementMs":0,"initialMs":60000},"v":1,)"
+      R"("variant":"kpk","whiteSeat":0})");
 
-  // A finished one was a table the finish closed.
-  const auto finished = deserializeTable(serializeGameState(Mated(Opened()).game()));
-  ASSERT_TRUE(finished.ok()) << finished.status();
-  EXPECT_TRUE(finished->isOver());
-  EXPECT_TRUE(finished->endedByClose());
-  EXPECT_EQ(finished->scoreSheet(), Mated(Opened()).scoreSheet());
+  const auto bare = deserializeTable(legacy_game.dump());
+  ASSERT_TRUE(bare.ok()) << bare.status();
+  EXPECT_EQ(bare->game().setupId(), kRandomKpkSetup);
+  EXPECT_FALSE(bare->isOver());
+  EXPECT_TRUE(bare->scoreSheet().empty());
+
+  const json legacy_table{
+      {"v", 2},
+      {"closed", false},
+      {"endedByClose", false},
+      {"game", legacy_game},
+      {"scoreSheet", json::array()},
+  };
+  const auto nested = deserializeTable(legacy_table.dump());
+  ASSERT_TRUE(nested.ok()) << nested.status();
+  EXPECT_EQ(nested->game().setupId(), kRandomKpkSetup);
+  EXPECT_FALSE(nested->isOver());
+  EXPECT_TRUE(nested->scoreSheet().empty());
 }
 
 TEST(ChessTableSerde, RefusesWhatIsNotAStoredTable) {
