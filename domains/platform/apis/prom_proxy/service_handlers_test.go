@@ -671,10 +671,11 @@ func TestMetricsHandler_GetHostMetricsTimeSeries(t *testing.T) {
 	// Host series keep their names; container series are namespaced so
 	// the merged payload can't collide.
 	assert.True(t, names["cpu_utilization"])
+	assert.True(t, names["oom_kills"])
 	assert.True(t, names["container_cpu_usage"])
 	// Restart history is what makes a crash loop visible after the fact.
 	assert.True(t, names["container_restarts"])
-	assert.Equal(t, 5, hostSeries)
+	assert.Equal(t, 6, hostSeries)
 	assert.Equal(t, 7, containerSeries)
 }
 
