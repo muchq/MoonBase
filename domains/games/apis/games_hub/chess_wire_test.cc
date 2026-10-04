@@ -4,7 +4,8 @@
 // and cannot see a rename. The pinned surface: the chess command envelope
 // ({"move":{...}} inside the `chess` command) and the update envelope
 // ({"update":{...}} inside the `chess` event) through createGame, joinGame,
-// startGame naming the clock, a play that mates, and gameEnded; the model's
+// startGame naming the clock, a play that mates, and gameEnded; watch and
+// the gameState and gameLeft that answer it; the model's
 // bounds on startGame and play refused in band; and the lobby's roomState
 // naming the table's game.
 
@@ -229,6 +230,36 @@ TEST_F(ChessWireTest, TheModelsBoundsAreRefusedInBand) {
   ASSERT_TRUE(creator->Send(CommandFrame("chess", R"({"move":{"play":{"uci":"e7e6"}}})")).ok());
   EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"),
             R"({"reason":"not a legal move: e7e6"})");
+}
+
+// A watcher (#1633) sends the table's id and hears the seats' own view,
+// with no seat of its own in it; leaveGame stops the watch.
+TEST_F(ChessWireTest, WatchPinsItsCommandAndTheViewThatAnswersIt) {
+  json creator_session;
+  auto creator = DialReady(creator_session);
+  ASSERT_TRUE(creator->Send(CommandFrame("createRoom", "{}")).ok());
+  (void)EventPayload(NextFrame(*creator), "roomState");
+  ASSERT_TRUE(creator->Send(CommandFrame("chess", R"({"move":{"createGame":{}}})")).ok());
+  (void)EventPayload(NextFrame(*creator), "chess");
+  (void)EventPayload(NextFrame(*creator), "chess");
+  (void)EventPayload(NextFrame(*creator), "roomState");
+  json watcher_session;
+  auto watcher = DialReady(watcher_session);
+  ASSERT_TRUE(watcher->Send(CommandFrame("joinRoom", R"({"roomId":"room-1"})")).ok());
+  (void)EventPayload(NextFrame(*watcher), "roomState");
+  (void)EventPayload(NextFrame(*watcher), "roomChatHistory");
+
+  ASSERT_TRUE(
+      watcher->Send(CommandFrame("chess", R"({"move":{"watch":{"gameId":"GAME01"}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*watcher), "chess"),
+            R"({"update":{"gameState":{"view":{)" + kAvailableSetups +
+                R"("defaultSetupId":"standard","gameId":"GAME01","inCheck":false,)"
+                R"("legalMoves":[],"moves":[],"phase":"waiting",)"
+                R"("players":[{"playerId":"player-1"}],"scoreSheet":[]}}}})");
+
+  ASSERT_TRUE(watcher->Send(CommandFrame("chess", R"({"move":{"leaveGame":{}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(*watcher), "chess"),
+            R"({"update":{"gameLeft":{"gameId":"GAME01"}}})");
 }
 
 }  // namespace

@@ -1116,6 +1116,80 @@ TEST_F(PgGamesHubFixture, CrashedConnectedSeatsRoomIsSweptOnceStale) {
   EXPECT_FALSE(held) << "the sweep's wake never dropped the successor's copy";
 }
 
+// A watcher (#1633) is held where its socket is: a table moved on another
+// instance reaches it through that commit's wake, re-projected here.
+TEST_F(PgGamesHubFixture, AWatcherOnAnotherInstanceSeesTheTableMove) {
+  using moonbase::games::ChessMove;
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  DetachOnScopeExit detach{this, remote.get()};
+  CrossSeats seats;
+  const std::string room_id = SeatedCrossRoom(*remote, seats);
+  ASSERT_FALSE(room_id.empty());
+  Seat& alice = *seats.alice;
+  Seat& bob = *seats.bob;
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  const std::string game_id = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(AwaitLobbyGame(bob, game_id));
+
+  moonbase::games::ChessWatch watch;
+  watch.gameId = game_id;
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromWatch(watch))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  bob.stream, [](const auto& view) { return view.players.size() == 1; },
+                  "bob (remote) watching alice's table")
+                  .has_value());
+
+  // carol sits down on the primary; bob hears it from there.
+  auto carol = OpenSeat();
+  ASSERT_TRUE(carol.has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  moonbase::games::JoinRoom join_room;
+  join_room.roomId = room_id;
+  ASSERT_TRUE(carol->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "roomState").has_value());
+  moonbase::games::JoinGame join;
+  join.gameId = game_id;
+  ASSERT_TRUE(carol->stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  ASSERT_TRUE(ReceiveChess(carol->stream, "gameJoined").has_value());
+  EXPECT_TRUE(AwaitChessView(
+                  bob.stream, [](const auto& view) { return view.players.size() == 2; },
+                  "bob (remote) sees carol seated on the primary")
+                  .has_value());
+}
+
+// A table deleted on another instance before it starts has no closed
+// view for a watcher here: the wake that drops it hands over gameLeft.
+TEST_F(PgGamesHubFixture, AWatcherHearsATableDeletedOnAnotherInstance) {
+  using moonbase::games::ChessMove;
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  DetachOnScopeExit detach{this, remote.get()};
+  CrossSeats seats;
+  const std::string room_id = SeatedCrossRoom(*remote, seats);
+  ASSERT_FALSE(room_id.empty());
+  Seat& alice = *seats.alice;
+  Seat& bob = *seats.bob;
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  const std::string game_id = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(AwaitLobbyGame(bob, game_id));
+  moonbase::games::ChessWatch watch;
+  watch.gameId = game_id;
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromWatch(watch))).ok());
+  ASSERT_TRUE(ReceiveChess(bob.stream, "gameState").has_value());
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  auto left = ReceiveChess(bob.stream, "gameLeft");
+  ASSERT_TRUE(left.has_value());
+  EXPECT_EQ(left->as_gameLeft_or_null()->gameId, game_id);
+}
+
 // Two live hubs (#1194), one game. alice plays on
 // the primary instance, bob on the second; every move is a conditional
 // commit whose NOTIFY wakes the other side into re-reading and

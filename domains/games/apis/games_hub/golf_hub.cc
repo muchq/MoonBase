@@ -602,6 +602,7 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"chess_commands", {{"command", "play"}}},
       {"chess_commands", {{"command", "resign"}}},
       {"chess_commands", {{"command", "addBot"}}},
+      {"chess_commands", {{"command", "watch"}}},
       {"chess_events", {{"event", "gameJoined"}}},
       {"chess_events", {{"event", "gameState"}}},
       {"chess_events", {{"event", "gameCreated"}}},
@@ -1332,6 +1333,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
     if (members.contains(member_id)) continue;
     changed = true;
     if (auto it = player_room_.find(member_id); it != player_room_.end() && it->second == room_id) {
+      StopWatchingLocked(member_id);  // while its room is still known
       player_room_.erase(it);
       player_game_.erase(member_id);
       LeaveWorldLocked(member_id);  // a sibling's drop takes the world too
@@ -1371,7 +1373,9 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
     if (row.version <= entry.version && !owed) continue;  // ours is current
     changed = true;
     // A code re-minted for a table of the other game: the kind travels
-    // with the state, or the next view would read the wrong engine.
+    // with the state, or the next view would read the wrong engine, and
+    // the chess table its watchers watched is gone.
+    if (entry.kind != row.kind) DropWatchersLocked(row.game_id, entry, outbox);
     entry.kind = row.kind;
     for (const std::string& member_id : entry.roster) {
       // A member the new roster dropped left the game remotely.
@@ -1395,6 +1399,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
     }
     changed = true;
     // Deleted remotely: a pre-start table whose last player left.
+    DropWatchersLocked(game->first, game->second, outbox);
     for (const std::string& member_id : game->second.roster) {
       if (auto it = player_game_.find(member_id);
           it != player_game_.end() && it->second == game->first) {
@@ -1415,7 +1420,18 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
   return changed;
 }
 
-void GolfHub::DropGameLocked(const GameRef& ref) {
+void GolfHub::DropWatchersLocked(const std::string& game_id, GameEntry& entry,
+                                 Outbox& outbox) {
+  for (const std::string& watcher : entry.watchers) {
+    moonbase::games::GameLeft left;
+    left.gameId = game_id;
+    outbox.To(watcher, LeftEvent(GameKind::kChess, std::move(left)));
+  }
+  entry.watchers.clear();
+}
+
+void GolfHub::DropGameLocked(const GameRef& ref, Outbox& outbox) {
+  DropWatchersLocked(ref.game_id, *ref.entry, outbox);
   for (const std::string& member_id : ref.entry->roster) {
     if (auto it = player_game_.find(member_id);
         it != player_game_.end() && it->second == ref.game_id) {
@@ -1538,6 +1554,8 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
         // Voice too: the peer connections died with the socket, and a
         // resume joins again.
         LeaveVoiceLocked(player_id);
+        // And a watch, which a resume asks for again.
+        StopWatchingLocked(player_id);
       }
       if (hooks_.before_seat_release) hooks_.before_seat_release(player_id);
       if (registry_.Detach(player_id)) {
@@ -2069,7 +2087,17 @@ bool GolfHub::LifecycleMove(const std::string& player_id, const Move& move, Game
     {
       const std::lock_guard<std::mutex> lock(mu_);
       in_game = player_game_.contains(player_id);
-      if (in_game) LeaveGameLocked(player_id, outbox, writes);
+      if (in_game) {
+        LeaveGameLocked(player_id, outbox, writes);
+      } else if (kind == GameKind::kChess) {
+        if (const auto watched = StopWatchingLocked(player_id)) {
+          // A watcher gets up the way a seat does.
+          in_game = true;
+          moonbase::games::GameLeft ack;
+          ack.gameId = *watched;
+          outbox.To(player_id, LeftEvent(GameKind::kChess, std::move(ack)));
+        }
+      }
       EnqueueWritesLocked(writes);
     }
     if (in_game) {
@@ -2209,6 +2237,10 @@ void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& mov
   }
   if (const auto* add = move.as_addBot_or_null()) {
     AddChessBotMove(player_id, add->elo);
+    return;
+  }
+  if (const auto* watch = move.as_watch_or_null()) {
+    WatchChessMove(player_id, watch->gameId);
     return;
   }
   if (LifecycleMove(player_id, move, GameKind::kChess)) return;
@@ -2437,6 +2469,7 @@ void GolfHub::CreateGameMove(const std::string& player_id, GameKind kind) {
           refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
           break;
         }
+        StopWatchingLocked(player_id);
         player_game_[player_id] = game_id;
 
         moonbase::games::GameCreated announcement;
@@ -2512,6 +2545,7 @@ void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game
               CommitEntryLocked(room_id, game_id, entry, roster, std::nullopt, nullptr);
           if (commit == Commit::kRebased) continue;
           if (commit == Commit::kGone) {
+            DropWatchersLocked(game_id, entry, outbox);
             room->games.erase(game_id);
             refusal = Refusal{RejectKind::kState, "game not found"};
             break;
@@ -2520,6 +2554,7 @@ void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game
             refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
             break;
           }
+          StopWatchingLocked(player_id);
           player_game_[player_id] = game_id;
 
           outbox.To(player_id, JoinedEventLocked(game_id, entry, player_id));
@@ -2608,7 +2643,7 @@ void GolfHub::StartGameMove(const std::string& player_id, chess_play::TimeContro
                                                 ref->entry->roster, dealt, nullptr);
         if (commit == Commit::kRebased) continue;  // the roster (or starter) raced us; redeal
         if (commit == Commit::kGone) {
-          DropGameLocked(*ref);
+          DropGameLocked(*ref, outbox);
           StageRoomStateLocked(ref->room_id, outbox);
           refusal = Refusal{RejectKind::kState, "game no longer exists"};
           break;
@@ -2692,7 +2727,7 @@ void GolfHub::EngineMove(const std::string& player_id, const MoveFn& move, MoveE
                               HostedState(*std::move(next)), over ? &deltas : nullptr);
         if (commit == Commit::kRebased) continue;  // another instance moved first
         if (commit == Commit::kGone) {
-          DropGameLocked(*ref);
+          DropGameLocked(*ref, outbox);
           StageRoomStateLocked(ref->room_id, outbox);
           refusal = Refusal{RejectKind::kState, "game no longer exists"};
           break;
@@ -2817,7 +2852,7 @@ std::optional<Refusal> GolfHub::ApplyTableEngineMoveLocked(GameRef ref,
                           std::move(next_state), deltas.has_value() ? &*deltas : nullptr);
     if (commit == Commit::kRebased) continue;
     if (commit == Commit::kGone) {
-      DropGameLocked(ref);
+      DropGameLocked(ref, outbox);
       StageRoomStateLocked(ref.room_id, outbox);
       return Refusal{RejectKind::kState, "game no longer exists"};
     }
@@ -2971,7 +3006,7 @@ void GolfHub::AddChessBotMove(const std::string& player_id, int elo) {
             CommitEntryLocked(ref->room_id, ref->game_id, entry, roster, std::nullopt, nullptr);
         if (commit == Commit::kRebased) continue;
         if (commit == Commit::kGone) {
-          DropGameLocked(*ref);
+          DropGameLocked(*ref, outbox);
           StageRoomStateLocked(ref->room_id, outbox);
           refusal = Refusal{RejectKind::kState, "game no longer exists"};
           break;
@@ -2993,6 +3028,63 @@ void GolfHub::AddChessBotMove(const std::string& player_id, int elo) {
   } else {
     Deliver(outbox);
   }
+}
+
+void GolfHub::WatchChessMove(const std::string& player_id, const std::string& game_id) {
+  if (HasEmbeddedNul(game_id)) {
+    Reject(player_id, RejectKind::kInvalid, "invalid game id");
+    return;
+  }
+  Outbox outbox;
+  std::optional<Refusal> refusal;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    Room* room = FindRoomLocked(player_id);
+    if (room == nullptr) {
+      refusal = Refusal{RejectKind::kState, "not in a room"};
+    } else if (player_game_.contains(player_id)) {
+      refusal = Refusal{RejectKind::kState, "leave your current game first"};
+    } else {
+      bool store_answered = true;
+      if (!room->games.contains(game_id)) {
+        // Another instance may have opened it since our last wake.
+        store_answered = RefreshRoomLocked(player_room_.at(player_id), outbox,
+                                           /*project_always=*/true);
+        room = FindRoomLocked(player_id);  // the refresh can drop us or the room
+      }
+      GameEntry* entry = nullptr;
+      if (room != nullptr) {
+        const auto game = room->games.find(game_id);
+        if (game != room->games.end()) entry = &game->second;
+      }
+      if (entry == nullptr) {
+        refusal = store_answered
+                      ? Refusal{RejectKind::kState, "game not found"}
+                      : Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
+      } else if (entry->kind != GameKind::kChess) {
+        refusal = Refusal{RejectKind::kState,
+                          absl::StrCat("that table plays ", GameKindName(entry->kind))};
+      } else {
+        StopWatchingLocked(player_id);
+        entry->watchers.insert(player_id);
+        moonbase::games::ChessGameState update;
+        update.view = ChessViewLocked(game_id, *entry);
+        outbox.To(player_id, ChessUpdateEvent(ChessUpdate::FromGamestate(std::move(update))));
+      }
+    }
+  }
+  // Whatever the refresh staged is true either way.
+  Deliver(outbox);
+  if (refusal.has_value()) Reject(player_id, std::move(*refusal));
+}
+
+std::optional<std::string> GolfHub::StopWatchingLocked(const std::string& player_id) {
+  Room* room = FindRoomLocked(player_id);
+  if (room == nullptr) return std::nullopt;
+  for (auto& [game_id, entry] : room->games) {
+    if (entry.watchers.erase(player_id) > 0) return game_id;
+  }
+  return std::nullopt;
 }
 
 int GolfHub::PlayChessBotsOnce() {
@@ -3203,6 +3295,7 @@ std::optional<GolfHub::GameRef> GolfHub::FindGameLocked(const std::string& playe
 void GolfHub::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Writes& writes) {
   LeaveWorldLocked(player_id);
   LeaveVoiceLocked(player_id);
+  StopWatchingLocked(player_id);
   LeaveGameLocked(player_id, outbox, writes);
 
   const auto it = player_room_.find(player_id);
@@ -3263,6 +3356,7 @@ void GolfHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writ
         std::any_of(roster.begin(), roster.end(),
                     [](const std::string& id) { return !ChessBotElo(id).has_value(); });
     if (!entry.started() && !players_left) {
+      DropWatchersLocked(ref->game_id, entry, outbox);
       for (const std::string& bot : roster) player_game_.erase(bot);
       ref->room->games.erase(ref->game_id);
       StageLocked(writes, HubStore::DeleteGame{ref->room_id, ref->game_id});
@@ -3286,7 +3380,7 @@ void GolfHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writ
                                             over ? &deltas : nullptr);
     if (commit == Commit::kRebased) continue;
     if (commit == Commit::kGone) {
-      DropGameLocked(*ref);
+      DropGameLocked(*ref, outbox);
       StageRoomStateLocked(ref->room_id, outbox);
       return;
     }
@@ -3978,6 +4072,9 @@ GameEvents GolfHub::JoinedEventLocked(const std::string& game_id, const GameEntr
 
 void GolfHub::StageGameViewsLocked(const std::string& game_id, const GameEntry& entry,
                                    Outbox& outbox) const {
+  // Chess hides nothing: one view for every seat and every watcher.
+  std::optional<moonbase::games::ChessView> chess_view;
+  if (entry.kind == GameKind::kChess) chess_view = ChessViewLocked(game_id, entry);
   for (const std::string& recipient : entry.roster) {
     if (entry.kind == GameKind::kCastle) {
       moonbase::games::CastleGameState update;
@@ -3985,9 +4082,9 @@ void GolfHub::StageGameViewsLocked(const std::string& game_id, const GameEntry& 
       outbox.To(recipient, CastleUpdateEvent(CastleUpdate::FromGamestate(std::move(update))));
       continue;
     }
-    if (entry.kind == GameKind::kChess) {
+    if (chess_view.has_value()) {
       moonbase::games::ChessGameState update;
-      update.view = ChessViewLocked(game_id, entry);
+      update.view = *chess_view;
       outbox.To(recipient, ChessUpdateEvent(ChessUpdate::FromGamestate(std::move(update))));
       continue;
     }
@@ -4001,6 +4098,13 @@ void GolfHub::StageGameViewsLocked(const std::string& game_id, const GameEntry& 
     update.view = ViewLocked(game_id, entry, recipient);
     outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
   }
+  if (chess_view.has_value()) {
+    for (const std::string& watcher : entry.watchers) {
+      moonbase::games::ChessGameState update;
+      update.view = *chess_view;
+      outbox.To(watcher, ChessUpdateEvent(ChessUpdate::FromGamestate(std::move(update))));
+    }
+  }
   // Each finished game's result after the views, once, from the sheet: an
   // instance that learns of a game's end only after the next began still
   // owes it.
@@ -4011,6 +4115,9 @@ void GolfHub::StageGameViewsLocked(const std::string& game_id, const GameEntry& 
       ended.result = std::move(result);
       for (const std::string& recipient : entry.roster) {
         outbox.To(recipient, ChessUpdateEvent(ChessUpdate::FromGameended(ended)));
+      }
+      for (const std::string& watcher : entry.watchers) {
+        outbox.To(watcher, ChessUpdateEvent(ChessUpdate::FromGameended(ended)));
       }
     }
     entry.chess_games_announced = entry.chess().scoreSheet().size();
@@ -4038,8 +4145,9 @@ void GolfHub::StageGameOverLocked(Room& room, const std::string& game_id, Outbox
   }
   if (game->second.kind == GameKind::kChess) {
     // Final views, and with them the result of a game the close ended
-    // (StageGameViewsLocked); one between games was said when it ended. A leaver hears neither: the roster no
-    // longer names it, and its gameLeft said it was out.
+    // (StageGameViewsLocked), to the seats and any watcher; one between games
+    // was said when it ended. A leaver hears neither: the roster no longer
+    // names it, and its gameLeft said it was out.
     StageGameViewsLocked(game_id, game->second, outbox);
     for (const std::string& recipient : game->second.roster) player_game_.erase(recipient);
     room.games.erase(game);

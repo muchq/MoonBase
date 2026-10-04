@@ -432,6 +432,19 @@ the views that show it, however it learned of the end.
 The view carries each side's time as of when it was built, and the
 client runs the side to move's down from there.
 
+Any member at no table may `watch` a chess table in its room, in any
+phase (#1633). The answer is a `gameState`; from then on the watcher hears
+every `gameState` and `gameEnded` the seats do, a sibling's commits
+re-projected here included, and no `turnChanged`. A watcher's moves are
+refused: it holds no seat. Watching another table switches to it;
+`createGame`, `joinGame`, `leaveGame` (acked with `gameLeft`), leaving the
+room, a sibling dropping the member, and a closed socket each end it, and a
+resume does not restore it. A table that ends hands its watchers the
+closed view, as it does its seats; one erased without that (deleted
+before it started, here or on a sibling) hands them `gameLeft`. Watchers
+live on the table's local entry (`GameEntry::watchers`), never in a row,
+so no watcher count can reach `GameSummary` truthfully across instances.
+
 ## Redaction
 
 A castle table redacts by `CastleViewLocked`: own hand faces (everyone's
@@ -440,7 +453,7 @@ table by `RummyViewLocked`: own hand faces (everyone's once the deal
 ends, and between deals), other hands as counts, the stock as a count; the melds, the
 discard's top and the card taken from it this turn are public, and a
 stock draw's `lastMove` names no card. A chess table hides nothing:
-`ChessViewLocked` builds one view for both seats. Golf's rules, below,
+`ChessViewLocked` builds one view for both seats and every watcher. Golf's rules, below,
 are `ViewLocked`'s.
 
 Every game broadcast is per-recipient (`ViewLocked`): own card faces only

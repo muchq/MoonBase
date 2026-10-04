@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -421,6 +422,11 @@ class GolfHub final {
     /// for: whichever path moved the table on, the views staged after it
     /// announce the rest. Held from a row, the games so far count as told.
     mutable std::size_t chess_games_announced = 0;
+    /// Members watching this chess table from no seat (#1633): they hear
+    /// its views and results. Presence, like the world: held here, never
+    /// stored. A table that ends hands them its closed view; one erased
+    /// without it hands them gameLeft (DropWatchersLocked).
+    std::set<std::string> watchers;
     [[nodiscard]] bool started() const { return state.has_value(); }
     [[nodiscard]] const golf::GameState& golf() const { return std::get<golf::GameState>(*state); }
     [[nodiscard]] const castle::GameState& castle() const {
@@ -493,6 +499,12 @@ class GolfHub final {
   void HandleChessMove(const std::string& player_id, const moonbase::games::ChessMove& move);
   /// A bot to the second seat of `player_id`'s chess table (#1618).
   void AddChessBotMove(const std::string& player_id, int elo);
+  /// `player_id` watches a chess table in its room from no seat (#1633).
+  void WatchChessMove(const std::string& player_id, const std::string& game_id);
+  /// Out of whatever table the player watches, in its room; callers hold
+  /// mu_. The table watched, if any. Every way of sitting down or leaving
+  /// the room comes through here first.
+  std::optional<std::string> StopWatchingLocked(const std::string& player_id);
   /// The lifecycle half of castle's, rummy's and chess's move unions, which
   /// share its shapes (chess's startGame aside, which HandleChessMove takes
   /// first): true when `move` was one and has been handled.
@@ -697,9 +709,12 @@ class GolfHub final {
   /// `project_always` is false, skips re-project on a no-op catch-up.
   bool ReconcileRoomLocked(const std::string& room_id, const HubStore::RoomRows& rows,
                            Outbox& outbox, bool project_always = true);
-  /// Erases the game and its player mappings without any events — for
-  /// games the database says no longer exist.
-  void DropGameLocked(const GameRef& ref);
+  /// Erases the game and its player mappings — for games the database
+  /// says no longer exist. Only its watchers are told.
+  void DropGameLocked(const GameRef& ref, Outbox& outbox);
+  /// A table going without a final view: each watcher hears gameLeft and
+  /// watches nothing. Callers hold mu_.
+  void DropWatchersLocked(const std::string& game_id, GameEntry& entry, Outbox& outbox);
   void ListenRoomLocked(const std::string& room_id);
   void UnlistenRoomLocked(const std::string& room_id);
 
