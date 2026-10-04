@@ -16,8 +16,7 @@ namespace chess_play {
 /// Chess at a games-hub table: two seats, a clock, and the full
 /// rules — checkmate, stalemate, insufficient material, the fifty-move
 /// rule and threefold repetition end the game on their own, unclaimed.
-/// A variant is only where the game starts; the first is king and pawn
-/// against king ("kpk").
+/// A variant is the material family a server-owned setup starts from.
 ///
 /// The truth is the start position and the moves played from it, in UCI
 /// ("e2e4", "e7e8q"): the position, repetition history and every ending
@@ -67,6 +66,29 @@ struct Opening {
   int white_seat = 0;
 };
 
+inline constexpr std::string_view kRandomKpkSetup = "random-kpk";
+
+/// One server-owned starting-position choice presented to a client.
+struct ChessSetup {
+  std::string id;
+  std::string name;
+  std::string variant;
+  Opening opening;
+};
+
+struct ChessSetupOption {
+  std::string_view id;
+  std::string_view name;
+};
+
+/// Selects a named setup, randomizing its position or White seat where
+/// that setup calls for it.
+[[nodiscard]] absl::StatusOr<ChessSetup> SelectChessSetup(std::string_view id,
+                                                          absl::BitGenRef gen);
+[[nodiscard]] std::vector<ChessSetupOption> AvailableChessSetups();
+[[nodiscard]] std::optional<std::string_view> ChessSetupName(std::string_view id);
+[[nodiscard]] std::optional<std::string_view> ChessSetupVariant(std::string_view id);
+
 /// A random king-and-pawn-against-king position, White (the pawn's side)
 /// to move: legal, not already over, the pawn on its second to sixth
 /// rank. White is either seat.
@@ -96,7 +118,9 @@ class GameState {
   /// with no time.
   [[nodiscard]] static absl::StatusOr<GameState> start(std::vector<std::string> players,
                                                        std::string variant, const Opening& opening,
-                                                       TimeControl time_control, int64_t now_ms);
+                                                       TimeControl time_control, int64_t now_ms,
+                                                       std::string setup_id =
+                                                           std::string(kRandomKpkSetup));
 
   /// The full truth, validated as `start` validates plus every move legal
   /// in turn and the result, if any, one the moves could have produced —
@@ -106,7 +130,9 @@ class GameState {
                                                          int white_seat,
                                                          std::vector<std::string> moves,
                                                          TimeControl time_control, Clock clock,
-                                                         std::optional<Result> result);
+                                                         std::optional<Result> result,
+                                                         std::string setup_id =
+                                                             std::string(kRandomKpkSetup));
 
   /// The seat on turn plays `uci`. A mover whose time ran out before it
   /// arrived does not move: the game ends on time instead. Off turn, a
@@ -130,6 +156,7 @@ class GameState {
   [[nodiscard]] int playerIndex(const std::string& id) const;
   [[nodiscard]] const std::vector<std::string>& players() const { return players_; }
   [[nodiscard]] const std::string& variant() const { return variant_; }
+  [[nodiscard]] const std::string& setupId() const { return setup_id_; }
   [[nodiscard]] int whiteSeat() const { return white_seat_; }
   [[nodiscard]] int seatOf(Color color) const;
   [[nodiscard]] Color colorOf(int seat) const;
@@ -152,9 +179,9 @@ class GameState {
   [[nodiscard]] int64_t remainingMs(Color color, int64_t now_ms) const;
 
  private:
-  GameState(std::vector<std::string> players, std::string variant, std::string start_fen,
-            int white_seat, std::vector<std::string> moves, TimeControl time_control, Clock clock,
-            std::optional<Result> result);
+  GameState(std::vector<std::string> players, std::string variant, std::string setup_id,
+            std::string start_fen, int white_seat, std::vector<std::string> moves,
+            TimeControl time_control, Clock clock, std::optional<Result> result);
 
   /// Replays the moves from the start, filling the derived position
   /// fields and the result the board itself reaches. Fails on an illegal
@@ -170,6 +197,7 @@ class GameState {
 
   std::vector<std::string> players_;
   std::string variant_;
+  std::string setup_id_;
   std::string start_fen_;
   int white_seat_ = 0;
   std::vector<std::string> moves_;

@@ -330,9 +330,10 @@ class GolfHub final {
   bool PollTapeOnce();
 
   /// Where a chess table starts, asked once per game at startGame. The
-  /// default deals the kpk variant's random position; tests fix one. Call
-  /// before serving: read without a lock thereafter.
-  using ChessOpener = std::function<chess_play::Opening()>;
+  /// default resolves the requested server-owned setup; tests fix its
+  /// position. Call before serving: read without a lock thereafter.
+  using ChessOpener =
+      std::function<absl::StatusOr<chess_play::ChessSetup>(std::string_view setup_id)>;
   void SetChessOpener(ChessOpener opener);
 
   /// The wall clock chess's clocks read, absl::Now unless a test fixes
@@ -523,8 +524,9 @@ class GolfHub final {
   void CreateGameMove(const std::string& player_id, GameKind kind);
   void JoinGameMove(const std::string& player_id, const std::string& game_id, GameKind kind);
   /// `time_control` is chess's clock, and nothing to any other game.
-  void StartGameMove(const std::string& player_id,
-                     chess_play::TimeControl time_control = kDefaultChessClock);
+  void StartGameMove(
+      const std::string& player_id, chess_play::TimeControl time_control = kDefaultChessClock,
+      std::optional<chess_play::ChessSetup> chess_setup = std::nullopt);
   /// The shared shape of every in-game engine move: transition, then
   /// stage the fan-out (views, turn change, game end) the result implies.
   void EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects);

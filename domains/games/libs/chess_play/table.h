@@ -27,7 +27,7 @@ struct GameScore {
 ///   - It opens on its first game. A game's end is a line on the score
 ///     sheet, and the table stays open for the next.
 ///   - The next game swaps sides: whoever played Black plays White, so in
-///     king and pawn against king the pawn goes back and forth.
+///     every setup each player practices both sides.
 ///   - A leave closes the table. In the middle of a game it ends that
 ///     game first — lost by abandonment, or on time if the flag had
 ///     already fallen — and that game is scored; between games it scores
@@ -37,7 +37,9 @@ class Table {
   /// A table for `players` on its first game.
   [[nodiscard]] static absl::StatusOr<Table> open(std::vector<std::string> players,
                                                   std::string variant, const Opening& opening,
-                                                  TimeControl time_control, int64_t now_ms);
+                                                  TimeControl time_control, int64_t now_ms,
+                                                  std::string setup_id =
+                                                      std::string(kRandomKpkSetup));
   /// The full truth, for a stored row: refused unless the sheet ends with
   /// the game's result exactly when the game is over, names only the
   /// table's players, and a closed table's game is over.
@@ -51,8 +53,9 @@ class Table {
       const std::function<absl::StatusOr<GameState>(const GameState&)>& move) const;
   /// The next game, sides swapped whatever `opening` says. Only between
   /// games.
-  [[nodiscard]] absl::StatusOr<Table> next(Opening opening, TimeControl time_control,
-                                           int64_t now_ms) const;
+  [[nodiscard]] absl::StatusOr<Table> next(
+      std::string variant, Opening opening, TimeControl time_control, int64_t now_ms,
+      std::string setup_id = std::string(kRandomKpkSetup)) const;
   /// A seat leaving at `now_ms`: the table closes.
   [[nodiscard]] absl::StatusOr<Table> removePlayer(int seat, int64_t now_ms) const;
 

@@ -9,19 +9,20 @@
 namespace chess_play {
 
 /// One game as versioned JSON of the engine's whole truth: the `game` of
-/// a stored table (table_serde.h), and alone, a row from before tables. Deserialize goes through GameState::restore, so
-/// a row whose moves are illegal, or whose result the moves contradict,
-/// is refused rather than played on; the bytes come from a database row,
-/// not from code we trust. Unknown versions are refused too.
+/// a stored table (table_serde.h), and alone, a v1 row. Deserialize goes
+/// through GameState::restore, so a row whose moves are illegal, or whose
+/// result the moves contradict, is refused rather than played on; the
+/// bytes come from a database row, not from code we trust. Unknown
+/// versions are refused too.
 ///
-/// Schema v1:
-///   {"v":1, "players":[str,str], "variant":"kpk", "whiteSeat":0|1,
-///    "startFen":str, "moves":[uci...],
+/// Schema v2:
+///   {"v":2, "players":[str,str], "variant":str, "setupId":str,
+///    "whiteSeat":0|1, "startFen":str, "moves":[uci...],
 ///    "timeControl":{"initialMs":int, "incrementMs":int},
 ///    "clock":{"whiteMs":int, "blackMs":int, "turnStartedMs":int},
 ///    "result":{"winner":"white"|"black", "ending":EndingName}}
 /// result is absent while the game is on, and its winner absent for a
-/// draw.
+/// draw. A v1 row has no setupId and restores as random-kpk.
 ///
 /// Keys emit alphabetically, so re-serializing a deserialized state
 /// reproduces the bytes. A player id carrying a NUL byte or invalid

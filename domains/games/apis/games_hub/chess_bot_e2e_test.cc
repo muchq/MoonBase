@@ -12,6 +12,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -41,7 +42,10 @@ class ChessBotFixture : public GamesHubStreamFixture {
   void SetUp() override {
     GamesHubStreamFixture::SetUp();
     golf_->SetClock([this] { return absl::FromUnixMillis(now_ms_.load()); });
-    golf_->SetChessOpener([this] { return opening_; });
+    golf_->SetChessOpener([this](std::string_view setup_id) {
+      return absl::StatusOr<chess_play::ChessSetup>(chess_play::ChessSetup{
+          std::string(setup_id), "Random K+P vs K", "kpk", opening_});
+    });
     golf_->SetChessBotEngine([this](const ChessBotAsk& ask) -> absl::StatusOr<std::string> {
       asks_.push_back(ask);
       if (during_ask_) during_ask_();
