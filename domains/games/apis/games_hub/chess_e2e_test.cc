@@ -46,6 +46,14 @@ GameCommands Play(const std::string& uci) {
 
 GameCommands Resign() { return Chess(ChessMove::FromResign(moonbase::games::ChessResign{})); }
 
+GameCommands Watch(const std::string& game_id) {
+  moonbase::games::ChessWatch watch;
+  watch.gameId = game_id;
+  return Chess(ChessMove::FromWatch(watch));
+}
+
+GameCommands LeaveTable() { return Chess(ChessMove::FromLeavegame(moonbase::games::LeaveGame{})); }
+
 class ChessFixture : public GamesHubStreamFixture {
  protected:
   void SetUp() override {
@@ -60,15 +68,19 @@ class ChessFixture : public GamesHubStreamFixture {
 
   // A two-seat chess table, started with `start`: alice (seat 0) created it,
   // bob joined. Each seat has heard gameStarted and read its first view.
+  // `idle` more members are in the room, at no table.
   struct Started {
     Table table;
     moonbase::games::ChessView view;
+    std::vector<Seat> idle;
   };
   std::optional<Started> StartedTable(
-      moonbase::games::ChessStartGame start = moonbase::games::ChessStartGame{}) {
-    auto room = SeatedRoom(2);
+      moonbase::games::ChessStartGame start = moonbase::games::ChessStartGame{}, int idle = 0) {
+    auto room = SeatedRoom(2 + idle);
     if (!room.has_value()) return std::nullopt;
     Table table{std::move(room->seats[0]), std::move(room->seats[1]), room->room_id, ""};
+    std::vector<Seat> idle_seats;
+    for (int i = 0; i < idle; ++i) idle_seats.push_back(std::move(room->seats[2 + i]));
     if (!table.alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{})))
              .ok()) {
       return std::nullopt;
@@ -89,7 +101,7 @@ class ChessFixture : public GamesHubStreamFixture {
       if (!state.has_value()) return std::nullopt;
       view = state->as_gameState_or_null()->view;
     }
-    return Started{std::move(table), *view};
+    return Started{std::move(table), *view, std::move(idle_seats)};
   }
 
   // The room's record for each seat once `ready` holds for it: played
@@ -104,6 +116,25 @@ class ChessFixture : public GamesHubStreamFixture {
     }
     return records;
   }
+
+  // The chess updates that reach `seat` before it goes quiet. A closed
+  // stream is a failure, not silence.
+  static std::vector<std::string> ChessHeard(Seat& seat) {
+    std::vector<std::string> heard;
+    while (true) {
+      auto received = seat.stream.Receive(std::chrono::milliseconds(300));
+      if (!received.ok()) break;
+      if (!received->has_value()) {
+        ADD_FAILURE() << seat.player_id << "'s stream closed";
+        break;
+      }
+      if (const auto* chess = (*received)->as_chess_or_null()) {
+        heard.emplace_back(chess->update.case_name());
+      }
+    }
+    return heard;
+  }
+  static bool HearsChess(Seat& seat) { return !ChessHeard(seat).empty(); }
 
   std::optional<moonbase::games::ChessResult> Ended(Seat& seat) {
     auto ended = ReceiveChess(seat.stream, "gameEnded");
@@ -505,6 +536,366 @@ TEST_F(ChessFixture, AMoveBeforeTheStartIsRefused) {
   // Nor is a pending table anything to sweep, however late it is.
   now_ms_ += 10'000'000;
   EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+}
+
+// The rest of the room watches a table (#1633): the seats' own view,
+// every move and the result, from a member who holds no seat.
+TEST_F(ChessFixture, AWatcherSeesTheTableEveryMoveAndTheResult) {
+  auto started = StartedTable({}, 1);
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  Seat& carol = started->idle[0];
+  ASSERT_TRUE(carol.stream.Send(Watch(table.game_id)).ok());
+  auto watching = ReceiveChess(carol.stream, "gameState");
+  ASSERT_TRUE(watching.has_value());
+  const auto& view = watching->as_gameState_or_null()->view;
+  EXPECT_EQ(view.gameId, table.game_id);
+  EXPECT_EQ(view.phase, "playing");
+  EXPECT_EQ(view.fen, kPromotionMates);
+  ASSERT_EQ(view.players.size(), 2u);
+  for (const auto& player : view.players) EXPECT_NE(player.playerId, carol.player_id);
+
+  ASSERT_TRUE(table.alice.stream.Send(Play("e7e8q")).ok());
+  auto mated = AwaitChessView(
+      carol.stream, [](const auto& v) { return v.phase == "ended"; }, "the mate, watched");
+  ASSERT_TRUE(mated.has_value());
+  EXPECT_EQ(mated->moves, std::vector<std::string>{"e7e8q"});
+  auto result = Ended(carol);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->winner, table.alice.player_id);
+  EXPECT_EQ(result->ending, "checkmate");
+}
+
+// The view says whose turn it is: a watcher hears no turnChanged.
+TEST_F(ChessFixture, AWatcherHearsViewsAndNoTurnChanged) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable({}, 1);
+  ASSERT_TRUE(started.has_value());
+  Seat& carol = started->idle[0];
+  ASSERT_TRUE(carol.stream.Send(Watch(started->table.game_id)).ok());
+  ASSERT_TRUE(ReceiveChess(carol.stream, "gameState").has_value());
+  ASSERT_TRUE(started->table.alice.stream.Send(Play("e2e4")).ok());
+  // The control: the seats hear the turn change hands.
+  ASSERT_TRUE(ReceiveChess(started->table.bob.stream, "turnChanged").has_value());
+  EXPECT_EQ(ChessHeard(carol), std::vector<std::string>{"gameState"});
+}
+
+// A table that goes before it starts has no closed view to hand over:
+// its watchers hear gameLeft.
+TEST_F(ChessFixture, ATableGoneBeforeItStartsTellsItsWatchers) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& carol = room->seats[1];
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  const std::string game_id = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(carol.stream.Send(Watch(game_id)).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  carol.stream, [](const auto& v) { return v.phase == "waiting"; }, "watching")
+                  .has_value());
+  ASSERT_TRUE(alice.stream.Send(LeaveTable()).ok());
+  auto left = ReceiveChess(carol.stream, "gameLeft");
+  ASSERT_TRUE(left.has_value());
+  EXPECT_EQ(left->as_gameLeft_or_null()->gameId, game_id);
+  // Watching nothing now, so there is nothing to leave.
+  ASSERT_TRUE(carol.stream.Send(LeaveTable()).ok());
+  auto refused = ReceiveCase(carol.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in a game");
+}
+
+// leaveGame stops a watch only in chess's own envelope.
+TEST_F(ChessFixture, AnotherGamesLeaveDoesNotStopAChessWatch) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable({}, 1);
+  ASSERT_TRUE(started.has_value());
+  Seat& carol = started->idle[0];
+  ASSERT_TRUE(carol.stream.Send(Watch(started->table.game_id)).ok());
+  ASSERT_TRUE(ReceiveChess(carol.stream, "gameState").has_value());
+  ASSERT_TRUE(carol.stream
+                  .Send(Castle(moonbase::games::CastleMove::FromLeavegame(
+                      moonbase::games::LeaveGame{})))
+                  .ok());
+  auto refused = ReceiveCase(carol.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in a game");
+  ASSERT_TRUE(started->table.alice.stream.Send(Play("e2e4")).ok());
+  EXPECT_TRUE(AwaitChessView(
+                  carol.stream, [](const auto& v) { return !v.moves.empty(); }, "still watching")
+                  .has_value());
+}
+
+TEST_F(ChessFixture, WatchingAnIdWithANulIsRefused) {
+  auto room = SeatedRoom(1);
+  ASSERT_TRUE(room.has_value());
+  ASSERT_TRUE(room->seats[0].stream.Send(Watch(std::string("GAME01\0alias", 12))).ok());
+  auto refused = ReceiveCase(room->seats[0].stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "invalid game id");
+}
+
+TEST_F(ChessFixture, AWatcherSeesATableFromBeforeItStarts) {
+  auto room = SeatedRoom(3);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  Seat& carol = room->seats[2];
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  const std::string game_id = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(carol.stream.Send(Watch(game_id)).ok());
+  auto waiting = AwaitChessView(
+      carol.stream, [](const auto& v) { return v.phase == "waiting"; }, "the empty table");
+  ASSERT_TRUE(waiting.has_value());
+  EXPECT_EQ(waiting->players.size(), 1u);
+
+  moonbase::games::JoinGame join;
+  join.gameId = game_id;
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  auto joined = AwaitChessView(
+      carol.stream, [](const auto& v) { return v.players.size() == 2; }, "bob sits down");
+  ASSERT_TRUE(joined.has_value());
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromStartgame(moonbase::games::ChessStartGame{}))).ok());
+  EXPECT_TRUE(AwaitChessView(
+                  carol.stream, [](const auto& v) { return v.phase == "playing"; }, "the start")
+                  .has_value());
+}
+
+// A watcher holds no seat, so nothing it sends moves the table.
+TEST_F(ChessFixture, AWatcherCannotMoveOrResign) {
+  auto started = StartedTable({}, 1);
+  ASSERT_TRUE(started.has_value());
+  Seat& carol = started->idle[0];
+  ASSERT_TRUE(carol.stream.Send(Watch(started->table.game_id)).ok());
+  ASSERT_TRUE(ReceiveChess(carol.stream, "gameState").has_value());
+  for (const GameCommands& command : {Play("e7e8q"), Resign()}) {
+    ASSERT_TRUE(carol.stream.Send(command).ok());
+    auto refused = ReceiveCase(carol.stream, "commandRejected");
+    ASSERT_TRUE(refused.has_value());
+    EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in a game");
+  }
+  EXPECT_FALSE(HearsChess(started->table.bob)) << "a watcher moved the table";
+}
+
+TEST_F(ChessFixture, ASeatCannotWatch) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  ASSERT_TRUE(started->table.bob.stream.Send(Watch(started->table.game_id)).ok());
+  auto refused = ReceiveCase(started->table.bob.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "leave your current game first");
+}
+
+TEST_F(ChessFixture, WatchingATableThatIsNotThereIsRefused) {
+  auto room = SeatedRoom(1);
+  ASSERT_TRUE(room.has_value());
+  ASSERT_TRUE(room->seats[0].stream.Send(Watch("NOPE")).ok());
+  auto refused = ReceiveCase(room->seats[0].stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "game not found");
+}
+
+TEST_F(ChessFixture, WatchingOutsideARoomIsRefused) {
+  auto seat = OpenSeat();
+  ASSERT_TRUE(seat.has_value());
+  ASSERT_TRUE(ReceiveCase(seat->stream, "sessionReady").has_value());
+  ASSERT_TRUE(seat->stream.Send(Watch("NOPE")).ok());
+  auto refused = ReceiveCase(seat->stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in a room");
+}
+
+TEST_F(ChessFixture, OnlyAChessTableCanBeWatched) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  ASSERT_TRUE(
+      room->seats[0]
+          .stream
+          .Send(Move(moonbase::games::GolfMove::FromCreategame(moonbase::games::CreateGame{})))
+          .ok());
+  auto created = ReceiveGolf(room->seats[0].stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  ASSERT_TRUE(
+      room->seats[1].stream.Send(Watch(created->as_gameJoined_or_null()->view.gameId)).ok());
+  auto refused = ReceiveCase(room->seats[1].stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "that table plays golf");
+}
+
+// leaveGame stops a watch the way it gets a seat up: gameLeft, then
+// nothing more from that table.
+TEST_F(ChessFixture, LeavingStopsTheWatch) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable({}, 1);
+  ASSERT_TRUE(started.has_value());
+  Seat& carol = started->idle[0];
+  ASSERT_TRUE(carol.stream.Send(Watch(started->table.game_id)).ok());
+  ASSERT_TRUE(ReceiveChess(carol.stream, "gameState").has_value());
+  ASSERT_TRUE(carol.stream.Send(LeaveTable()).ok());
+  auto left = ReceiveChess(carol.stream, "gameLeft");
+  ASSERT_TRUE(left.has_value());
+  EXPECT_EQ(left->as_gameLeft_or_null()->gameId, started->table.game_id);
+
+  ASSERT_TRUE(started->table.alice.stream.Send(Play("e2e4")).ok());
+  // The control: the move went out.
+  ASSERT_TRUE(
+      AwaitChessView(
+          started->table.bob.stream, [](const auto& v) { return !v.moves.empty(); }, "the move")
+          .has_value());
+  EXPECT_FALSE(HearsChess(carol));
+}
+
+TEST_F(ChessFixture, WatchingAnotherTableSwitchesToIt) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable({}, 2);
+  ASSERT_TRUE(started.has_value());
+  Seat& carol = started->idle[0];
+  Seat& dave = started->idle[1];
+  ASSERT_TRUE(
+      dave.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(dave.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  const std::string other = created->as_gameJoined_or_null()->view.gameId;
+
+  ASSERT_TRUE(carol.stream.Send(Watch(started->table.game_id)).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  carol.stream, [&](const auto& v) { return v.gameId == started->table.game_id; },
+                  "the first")
+                  .has_value());
+  ASSERT_TRUE(carol.stream.Send(Watch(other)).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  carol.stream, [&](const auto& v) { return v.gameId == other; }, "the second")
+                  .has_value());
+  ASSERT_TRUE(started->table.alice.stream.Send(Play("e2e4")).ok());
+  ASSERT_TRUE(
+      AwaitChessView(
+          started->table.bob.stream, [](const auto& v) { return !v.moves.empty(); }, "the move")
+          .has_value());
+  EXPECT_FALSE(HearsChess(carol)) << "the first table, still watched";
+}
+
+// Sitting down anywhere ends a watch: a seat hears its own table only.
+TEST_F(ChessFixture, OpeningATableStopsTheWatch) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable({}, 1);
+  ASSERT_TRUE(started.has_value());
+  Seat& carol = started->idle[0];
+  ASSERT_TRUE(carol.stream.Send(Watch(started->table.game_id)).ok());
+  ASSERT_TRUE(ReceiveChess(carol.stream, "gameState").has_value());
+  ASSERT_TRUE(
+      carol.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  ASSERT_TRUE(ReceiveChess(carol.stream, "gameJoined").has_value());
+  HearsChess(carol);  // the room's word of carol's table
+  ASSERT_TRUE(started->table.alice.stream.Send(Play("e2e4")).ok());
+  ASSERT_TRUE(
+      AwaitChessView(
+          started->table.bob.stream, [](const auto& v) { return !v.moves.empty(); }, "the move")
+          .has_value());
+  EXPECT_FALSE(HearsChess(carol));
+}
+
+TEST_F(ChessFixture, JoiningATableStopsTheWatch) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable({}, 2);
+  ASSERT_TRUE(started.has_value());
+  Seat& carol = started->idle[0];
+  Seat& dave = started->idle[1];
+  ASSERT_TRUE(
+      dave.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(dave.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  ASSERT_TRUE(carol.stream.Send(Watch(started->table.game_id)).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  carol.stream, [&](const auto& v) { return v.gameId == started->table.game_id; },
+                  "watching")
+                  .has_value());
+  moonbase::games::JoinGame join;
+  join.gameId = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(carol.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  ASSERT_TRUE(ReceiveChess(carol.stream, "gameJoined").has_value());
+  HearsChess(carol);
+  ASSERT_TRUE(started->table.alice.stream.Send(Play("e2e4")).ok());
+  ASSERT_TRUE(
+      AwaitChessView(
+          started->table.bob.stream, [](const auto& v) { return !v.moves.empty(); }, "the move")
+          .has_value());
+  EXPECT_FALSE(HearsChess(carol));
+}
+
+TEST_F(ChessFixture, LeavingTheRoomStopsTheWatch) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable({}, 1);
+  ASSERT_TRUE(started.has_value());
+  Seat& carol = started->idle[0];
+  ASSERT_TRUE(carol.stream.Send(Watch(started->table.game_id)).ok());
+  ASSERT_TRUE(ReceiveChess(carol.stream, "gameState").has_value());
+  ASSERT_TRUE(carol.stream.Send(GameCommands::FromLeaveroom(moonbase::games::LeaveRoom{})).ok());
+  ASSERT_TRUE(ReceiveCase(carol.stream, "roomLeft").has_value());
+  ASSERT_TRUE(started->table.alice.stream.Send(Play("e2e4")).ok());
+  ASSERT_TRUE(
+      AwaitChessView(
+          started->table.bob.stream, [](const auto& v) { return !v.moves.empty(); }, "the move")
+          .has_value());
+  EXPECT_FALSE(HearsChess(carol));
+}
+
+// Watching is presence, like the world: a resumed session watches nothing
+// until it asks again.
+TEST_F(ChessFixture, AResumeDoesNotRestoreTheWatch) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable({}, 1);
+  ASSERT_TRUE(started.has_value());
+  Seat& carol = started->idle[0];
+  ASSERT_TRUE(carol.stream.Send(Watch(started->table.game_id)).ok());
+  ASSERT_TRUE(ReceiveChess(carol.stream, "gameState").has_value());
+  const std::string token = carol.resume_token;
+  carol.stream.Close();
+  // The room hears carol go before she comes back.
+  ASSERT_TRUE(AwaitRoomState(
+                  started->table.alice.stream,
+                  [&](const auto& room) {
+                    return std::any_of(room.players.begin(), room.players.end(),
+                                       [&](const auto& p) {
+                                         return p.playerId == carol.player_id && !p.connected;
+                                       });
+                  },
+                  "carol parked")
+                  .has_value());
+  auto resumed = OpenSeat(token);
+  ASSERT_TRUE(resumed.has_value());
+  auto ready = ReceiveCase(resumed->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  ASSERT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  HearsChess(*resumed);  // the resync
+  ASSERT_TRUE(started->table.alice.stream.Send(Play("e2e4")).ok());
+  ASSERT_TRUE(
+      AwaitChessView(
+          started->table.bob.stream, [](const auto& v) { return !v.moves.empty(); }, "the move")
+          .has_value());
+  EXPECT_FALSE(HearsChess(*resumed));
+}
+
+// The close a leaving seat causes is the watcher's last word from the
+// table: the final view and the result.
+TEST_F(ChessFixture, AWatcherSeesTheTableClose) {
+  auto started = StartedTable({}, 1);
+  ASSERT_TRUE(started.has_value());
+  Seat& carol = started->idle[0];
+  ASSERT_TRUE(carol.stream.Send(Watch(started->table.game_id)).ok());
+  ASSERT_TRUE(ReceiveChess(carol.stream, "gameState").has_value());
+  ASSERT_TRUE(started->table.alice.stream.Send(LeaveTable()).ok());
+  auto closed =
+      AwaitChessView(carol.stream, [](const auto& v) { return v.phase == "closed"; }, "the close");
+  ASSERT_TRUE(closed.has_value());
+  auto result = Ended(carol);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->ending, "abandoned");
 }
 
 // A chess game in the stats archive (#1571): started as chess at its two

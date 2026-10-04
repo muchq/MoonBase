@@ -34,6 +34,18 @@ union ChessMove {
     play: ChessPlay
     resign: ChessResign
     addBot: ChessAddBot
+    watch: ChessWatch
+}
+
+/// Watches a chess table in the room, in any phase, from no seat (#1633):
+/// the answer is a gameState, and from then on every gameState and
+/// gameEnded the seats get. Refused while seated. Watching another table
+/// switches to it; sitting down anywhere, leaveGame (acked with
+/// gameLeft), leaving the room and a closed socket each end it. A table
+/// erased before it started tells its watchers gameLeft.
+structure ChessWatch {
+    @required
+    gameId: String
 }
 
 /// Seats Stockfish in the empty second seat of a table not yet started
@@ -119,7 +131,7 @@ structure ChessGameEnded {
     result: ChessResult
 }
 
-/// The table as both seats see it: chess hides nothing.
+/// The table as both seats and every watcher see it: chess hides nothing.
 structure ChessView {
     @required
     gameId: String
