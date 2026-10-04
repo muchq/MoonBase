@@ -122,7 +122,7 @@ class GameState {
                                                        std::string variant, const Opening& opening,
                                                        TimeControl time_control, int64_t now_ms,
                                                        std::string setup_id =
-                                                           std::string(kRandomKpkSetup));
+                                                           std::string(kDefaultChessSetup));
 
   /// The full truth, validated as `start` validates plus every move legal
   /// in turn and the result, if any, one the moves could have produced —
@@ -134,7 +134,7 @@ class GameState {
                                                          TimeControl time_control, Clock clock,
                                                          std::optional<Result> result,
                                                          std::string setup_id =
-                                                             std::string(kRandomKpkSetup));
+                                                             std::string(kDefaultChessSetup));
 
   /// The seat on turn plays `uci`. A mover whose time ran out before it
   /// arrived does not move: the game ends on time instead. Off turn, a

@@ -39,7 +39,7 @@ class Table {
                                                   std::string variant, const Opening& opening,
                                                   TimeControl time_control, int64_t now_ms,
                                                   std::string setup_id =
-                                                      std::string(kRandomKpkSetup));
+                                                      std::string(kDefaultChessSetup));
   /// The full truth, for a stored row: refused unless the sheet ends with
   /// the game's result exactly when the game is over, names only the
   /// table's players, and a closed table's game is over.
@@ -55,7 +55,7 @@ class Table {
   /// games.
   [[nodiscard]] absl::StatusOr<Table> next(
       std::string variant, Opening opening, TimeControl time_control, int64_t now_ms,
-      std::string setup_id = std::string(kRandomKpkSetup)) const;
+      std::string setup_id = std::string(kDefaultChessSetup)) const;
   /// A seat leaving at `now_ms`: the table closes.
   [[nodiscard]] absl::StatusOr<Table> removePlayer(int seat, int64_t now_ms) const;
 

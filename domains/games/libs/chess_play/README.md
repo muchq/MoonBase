@@ -13,10 +13,10 @@ it stores.
 - `table.h` — `Table`: two seats playing one game after another, sides
   swapped each game, with a score sheet; a leave closes it.
 - `SelectChessSetup` — the server-owned setup catalog: the standard
-  starting position (the default), random K+P vs K, K+P vs K opposition,
-  the R+P vs R Lucena position, and Q vs R conversion. Each stable setup
-  ID resolves to its variant, display name, validated position, and a
-  randomized first White seat.
+  starting position (the default), random K+P vs K, K+P vs K with the
+  pawn on e2, K+P vs K opposition, the R+P vs R Lucena position, and
+  Q vs R conversion. Each stable setup ID resolves to its variant,
+  display name, validated position, and a randomized first White seat.
 - `table_serde.h` — the versioned JSON the games table holds, the game's
   own (`game_state_serde.h`) inside it; deserializing replays and validates
   it through `Table::restore`, and still reads a row from before tables.

@@ -122,10 +122,11 @@ struct SetupDefinition {
   std::string_view fen;
 };
 
-constexpr std::array<SetupDefinition, 5> kChessSetups{{
+constexpr std::array<SetupDefinition, 6> kChessSetups{{
     {kStandardSetup, "Standard starting position", "standard",
      "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"},
     {kRandomKpkSetup, "Random K+P vs K", "kpk", ""},
+    {"kpk-e2", "K+P vs K — Pawn on e2", "kpk", "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"},
     {"kpk-opposition", "K+P vs K — Opposition", "kpk",
      "8/8/4k3/4P3/4K3/8/8/8 w - - 0 1"},
     {"rpr-lucena", "R+P vs R — Lucena position", "rpr",

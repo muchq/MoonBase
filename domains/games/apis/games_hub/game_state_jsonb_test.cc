@@ -124,9 +124,9 @@ TEST_F(GameStateJsonbTest, NameWithNulByteStillInserts) {
 // Chess's row: moves, a clock, a result with no winner, and a seat id
 // jsonb would refuse raw.
 TEST_F(GameStateJsonbTest, AChessStateSurvivesJsonbNormalization) {
-  auto started =
-      chess_play::Table::open({std::string("a\0b", 3), "bob"}, "kpk",
-                              {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0}, {180'000, 2'000}, 1'000);
+  auto started = chess_play::Table::open({std::string("a\0b", 3), "bob"}, "kpk",
+                                         {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0}, {180'000, 2'000},
+                                         1'000, std::string(chess_play::kRandomKpkSetup));
   ASSERT_TRUE(started.ok()) << started.status();
   auto moved = started->inGame(
       [](const chess_play::GameState& game) { return game.move(0, "e2e4", 5'000); });

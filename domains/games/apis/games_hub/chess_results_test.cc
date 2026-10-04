@@ -37,10 +37,11 @@ TEST(ChessResults, AWinIsItsPlayerAndColorADrawNeither) {
 // still owes the game before it: the owed results come off the sheet, not
 // the game in play.
 TEST(ChessResults, AGameEndedBeforeTheNextBeganIsStillOwed) {
-  const auto opened =
-      chess_play::Table::open({"alice", "bob"}, "kpk", {kMate, 0}, {60'000, 0}, 0);
+  const auto opened = chess_play::Table::open({"alice", "bob"}, "kpk", {kMate, 0}, {60'000, 0}, 0,
+                                              std::string(chess_play::kRandomKpkSetup));
   ASSERT_TRUE(opened.ok()) << opened.status();
-  const auto next = Mated(*opened).next("kpk", {kMate, 0}, {60'000, 0}, 1'000);
+  const auto next = Mated(*opened).next("kpk", {kMate, 0}, {60'000, 0}, 1'000,
+                                        std::string(chess_play::kRandomKpkSetup));
   ASSERT_TRUE(next.ok()) << next.status();
   ASSERT_FALSE(next->game().isOver());
 

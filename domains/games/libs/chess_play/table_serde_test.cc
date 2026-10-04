@@ -42,7 +42,8 @@ void ExpectRoundTrips(const Table& table) {
 TEST(ChessTableSerde, EveryStageRoundTrips) {
   ExpectRoundTrips(Opened());
   ExpectRoundTrips(Mated(Opened()));
-  ExpectRoundTrips(*Mated(Opened()).next("kpk", Opening{kMate, 0}, {60'000, 0}, kT0));
+  ExpectRoundTrips(
+      *Mated(Opened()).next("kpk", Opening{kMate, 0}, {60'000, 0}, kT0, std::string(kRandomKpkSetup)));
   ExpectRoundTrips(*Opened().removePlayer(0, kT0));
   ExpectRoundTrips(*Mated(Opened()).removePlayer(0, kT0));
 }

@@ -18,7 +18,7 @@ const TimeControl kClock{180'000, 2'000};
 
 Table Opened(int white_seat = 0) {
   auto table = Table::open({"alice", "bob"}, std::string(GameState::kKpk),
-                           Opening{kMate, white_seat}, kClock, kT0);
+                           Opening{kMate, white_seat}, kClock, kT0, std::string(kRandomKpkSetup));
   EXPECT_TRUE(table.ok()) << table.status();
   return *table;
 }
@@ -39,6 +39,13 @@ TEST(ChessTable, OpensOnItsFirstGame) {
   EXPECT_EQ(table.players(), (std::vector<std::string>{"alice", "bob"}));
   EXPECT_EQ(table.playerIndex("bob"), 1);
   EXPECT_EQ(table.playerIndex("carol"), -1);
+}
+
+TEST(ChessTable, OmittingSetupIdUsesTheCatalogDefault) {
+  constexpr char kStandard[] = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+  const auto table = Table::open({"alice", "bob"}, "standard", Opening{kStandard, 0}, kClock, kT0);
+  ASSERT_TRUE(table.ok()) << table.status();
+  EXPECT_EQ(table->game().setupId(), kDefaultChessSetup);
 }
 
 TEST(ChessTable, AGameThatEndsIsScoredAndTheTableStaysOpen) {
