@@ -136,7 +136,8 @@ TEST(GameEvents, ACastleGameLeftBelowTwoSeatsIsAbandoned) {
 }
 
 chess_play::Table Chess(const char* fen = "8/8/8/4k3/8/8/4P3/4K3 w - - 0 1") {
-  auto table = chess_play::Table::open({"andy", "mercy"}, "kpk", {fen, 0}, {60'000, 0}, 0);
+  auto table = chess_play::Table::open({"andy", "mercy"}, "kpk", {fen, 0}, {60'000, 0}, 0,
+                                       std::string(chess_play::kRandomKpkSetup));
   EXPECT_TRUE(table.ok()) << table.status();
   return *table;
 }

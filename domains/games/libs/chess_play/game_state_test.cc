@@ -21,7 +21,8 @@ constexpr TimeControl kFiveAndTwo{300'000, 2'000};
 constexpr int64_t kT0 = 1'000'000;
 
 GameState Start(const std::string& fen = kKpk, int white_seat = 0, TimeControl tc = kFiveAndTwo) {
-  auto state = GameState::start({"alice", "bob"}, "kpk", Opening{fen, white_seat}, tc, kT0);
+  auto state = GameState::start({"alice", "bob"}, "kpk", Opening{fen, white_seat}, tc, kT0,
+                                std::string(kRandomKpkSetup));
   EXPECT_TRUE(state.ok()) << state.status();
   return *state;
 }
@@ -232,13 +233,14 @@ TEST(GameStateTest, ALeaveAfterTheFlagIsTheFlag) {
 
 TEST(GameStateTest, StartRefusesWhatIsNotAGame) {
   const Opening kpk{kKpk, 0};
-  EXPECT_FALSE(GameState::start({"alice"}, "kpk", kpk, kFiveAndTwo, kT0).ok());
-  EXPECT_FALSE(GameState::start({"alice", "bob", "carol"}, "kpk", kpk, kFiveAndTwo, kT0).ok());
-  EXPECT_FALSE(GameState::start({"alice", "alice"}, "kpk", kpk, kFiveAndTwo, kT0).ok());
-  EXPECT_FALSE(GameState::start({"alice", "bob"}, "atomic", kpk, kFiveAndTwo, kT0).ok());
-  EXPECT_FALSE(GameState::start({"alice", "bob"}, "kpk", {kKpk, 2}, kFiveAndTwo, kT0).ok());
-  EXPECT_FALSE(GameState::start({"alice", "bob"}, "kpk", kpk, {0, 0}, kT0).ok());
-  EXPECT_FALSE(GameState::start({"alice", "bob"}, "kpk", kpk, {1000, -1}, kT0).ok());
+  const std::string setup(kRandomKpkSetup);
+  EXPECT_FALSE(GameState::start({"alice"}, "kpk", kpk, kFiveAndTwo, kT0, setup).ok());
+  EXPECT_FALSE(GameState::start({"alice", "bob", "carol"}, "kpk", kpk, kFiveAndTwo, kT0, setup).ok());
+  EXPECT_FALSE(GameState::start({"alice", "alice"}, "kpk", kpk, kFiveAndTwo, kT0, setup).ok());
+  EXPECT_FALSE(GameState::start({"alice", "bob"}, "atomic", kpk, kFiveAndTwo, kT0, setup).ok());
+  EXPECT_FALSE(GameState::start({"alice", "bob"}, "kpk", {kKpk, 2}, kFiveAndTwo, kT0, setup).ok());
+  EXPECT_FALSE(GameState::start({"alice", "bob"}, "kpk", kpk, {0, 0}, kT0, setup).ok());
+  EXPECT_FALSE(GameState::start({"alice", "bob"}, "kpk", kpk, {1000, -1}, kT0, setup).ok());
   for (const char* fen : {"", "not a fen", "8/8/8/8/8/8/8/8 w - - 0 1",
                           // Two white kings.
                           "8/8/8/4k3/8/8/4P3/3KK3 w - - 0 1",
@@ -246,23 +248,26 @@ TEST(GameStateTest, StartRefusesWhatIsNotAGame) {
                           "4k3/8/8/8/8/8/8/4RK2 w - - 0 1",
                           // Stalemate: already over.
                           "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1"}) {
-    EXPECT_FALSE(GameState::start({"alice", "bob"}, "kpk", {fen, 0}, kFiveAndTwo, kT0).ok()) << fen;
+    EXPECT_FALSE(GameState::start({"alice", "bob"}, "kpk", {fen, 0}, kFiveAndTwo, kT0, setup).ok())
+        << fen;
   }
   // The control: the same call with a real position starts.
-  EXPECT_TRUE(GameState::start({"alice", "bob"}, "kpk", kpk, kFiveAndTwo, kT0).ok());
+  EXPECT_TRUE(GameState::start({"alice", "bob"}, "kpk", kpk, kFiveAndTwo, kT0, setup).ok());
 }
 
 TEST(GameStateTest, RestoreReplaysTheMovesAndRefusesAnIllegalOne) {
   const GameState played = Play(Start(), {"e2e4", "e5e4"});
   const auto restored =
       GameState::restore(played.players(), "kpk", played.startFen(), played.whiteSeat(),
-                         played.moves(), played.timeControl(), played.clock(), played.result());
+                         played.moves(), played.timeControl(), played.clock(), played.result(),
+                         played.setupId());
   ASSERT_TRUE(restored.ok()) << restored.status();
   EXPECT_EQ(restored->fen(), played.fen());
   EXPECT_EQ(restored->legalMoves(), played.legalMoves());
 
   EXPECT_FALSE(GameState::restore(played.players(), "kpk", played.startFen(), 0, {"e2e4", "e5e5"},
-                                  played.timeControl(), played.clock(), std::nullopt)
+                                  played.timeControl(), played.clock(), std::nullopt,
+                                  played.setupId())
                    .ok());
 }
 
@@ -270,7 +275,7 @@ TEST(GameStateTest, RestoreRefusesAResultTheMovesContradict) {
   const GameState mated = Play(Start("7k/8/6K1/8/8/8/8/1Q6 w - - 0 1"), {"b1b8"});
   const auto restore = [&](std::optional<Result> result) {
     return GameState::restore(mated.players(), "kpk", mated.startFen(), 0, mated.moves(),
-                              mated.timeControl(), mated.clock(), result);
+                              mated.timeControl(), mated.clock(), result, mated.setupId());
   };
   ASSERT_TRUE(restore(mated.result()).ok());
   // Mated on the board, but stored as unfinished, or as another ending.
@@ -280,10 +285,10 @@ TEST(GameStateTest, RestoreRefusesAResultTheMovesContradict) {
   // A board ending on a board that has not ended.
   const GameState open = Start();
   EXPECT_FALSE(GameState::restore(open.players(), "kpk", kKpk, 0, {}, kFiveAndTwo, open.clock(),
-                                  Result{Color::kWhite, Ending::kCheckmate})
+                                  Result{Color::kWhite, Ending::kCheckmate}, open.setupId())
                    .ok());
   EXPECT_TRUE(GameState::restore(open.players(), "kpk", kKpk, 0, {}, kFiveAndTwo, open.clock(),
-                                 Result{Color::kWhite, Ending::kResignation})
+                                 Result{Color::kWhite, Ending::kResignation}, open.setupId())
                   .ok());
 }
 
@@ -296,14 +301,14 @@ TEST(GameStateTest, RestoreRefusesAMovePastTheEnd) {
   ASSERT_TRUE(drawn.isOver());
   const auto restore = [&](std::vector<std::string> moves) {
     return GameState::restore(drawn.players(), "kpk", kKpk, 0, std::move(moves),
-                              drawn.timeControl(), drawn.clock(), std::nullopt);
+                              drawn.timeControl(), drawn.clock(), std::nullopt, drawn.setupId());
   };
   std::vector<std::string> past = repeated;
   past.emplace_back("e2e3");  // a position never seen, so only the draw refuses it
   EXPECT_FALSE(restore(past).ok());
   // The control: the moves up to the draw, stored with the draw, restore.
   EXPECT_TRUE(GameState::restore(drawn.players(), "kpk", kKpk, 0, repeated, drawn.timeControl(),
-                                 drawn.clock(), drawn.result())
+                                 drawn.clock(), drawn.result(), drawn.setupId())
                   .ok());
 }
 
@@ -346,7 +351,7 @@ TEST(GameStateTest, RestoreRefusesATimeoutTheClockContradicts) {
   ASSERT_TRUE(flagged.ok());
   const auto restore = [&](Clock clock, Result result) {
     return GameState::restore(flagged->players(), "kpk", kKpk, 0, {}, flagged->timeControl(), clock,
-                              result);
+                              result, flagged->setupId());
   };
   ASSERT_TRUE(restore(flagged->clock(), *flagged->result()).ok());  // the control
   // A win on time for the side against a bare king, or for the side that flagged.
@@ -362,7 +367,8 @@ TEST(GameStateTest, RestoreRefusesATimeoutTheClockContradicts) {
 TEST(GameStateTest, RestoreRefusesAClockOutOfRange) {
   const GameState open = Start();
   const auto restore = [&](TimeControl tc, Clock clock) {
-    return GameState::restore(open.players(), "kpk", kKpk, 0, {}, tc, clock, std::nullopt);
+    return GameState::restore(open.players(), "kpk", kKpk, 0, {}, tc, clock, std::nullopt,
+                              open.setupId());
   };
   ASSERT_TRUE(restore(open.timeControl(), open.clock()).ok());  // the control
   Clock negative_start = open.clock();
@@ -388,6 +394,7 @@ TEST(ChessSetupTest, EveryNamedSetupIsPlayableAndCarriesItsStableIdentity) {
   const std::vector<Expected> fixed = {
       {"standard", "Standard starting position", "standard",
        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"},
+      {"kpk-e2", "K+P vs K — Pawn on e2", "kpk", "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"},
       {"kpk-opposition", "K+P vs K — Opposition", "kpk",
        "8/8/4k3/4P3/4K3/8/8/8 w - - 0 1"},
       {"rpr-lucena", "R+P vs R — Lucena position", "rpr",
@@ -397,6 +404,10 @@ TEST(ChessSetupTest, EveryNamedSetupIsPlayableAndCarriesItsStableIdentity) {
   };
   const std::vector<ChessSetupOption> options = AvailableChessSetups();
   EXPECT_EQ(kDefaultChessSetup, "standard");
+  const Opening standard{fixed[0].fen, 0};
+  const auto omitted = GameState::start({"a", "b"}, "standard", standard, kFiveAndTwo, kT0);
+  ASSERT_TRUE(omitted.ok()) << omitted.status();
+  EXPECT_EQ(omitted->setupId(), kDefaultChessSetup);
   ASSERT_EQ(options.size(), fixed.size() + 1);
   EXPECT_EQ(options[0].id, fixed[0].id);
   EXPECT_EQ(options[0].name, fixed[0].name);
@@ -452,7 +463,8 @@ TEST(RandomKpkOpeningTest, EveryOpeningIsAPlayableKpkWithWhiteToMove) {
       if (c == '/') ++row;
       if (c == 'P') pawn_ranks.insert(static_cast<char>('8' - row));
     }
-    const auto state = GameState::start({"a", "b"}, "kpk", opening, kFiveAndTwo, kT0);
+    const auto state = GameState::start({"a", "b"}, "kpk", opening, kFiveAndTwo, kT0,
+                                        std::string(kRandomKpkSetup));
     ASSERT_TRUE(state.ok()) << opening.fen << ": " << state.status();
     EXPECT_FALSE(state->isOver());
   }

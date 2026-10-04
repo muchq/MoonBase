@@ -63,7 +63,7 @@ TEST(ChessSerde, EveryStageRoundTrips) {
   // A draw on time: no winner.
   ExpectRoundTrips(*Started().flag(kT0 + 180'000));
   auto mated = GameState::start({"a", "b"}, "kpk", Opening{"7k/8/6K1/8/8/8/8/1Q6 w - - 0 1", 0},
-                                {60'000, 0}, kT0);
+                                {60'000, 0}, kT0, std::string(kRandomKpkSetup));
   ASSERT_TRUE(mated.ok());
   ExpectRoundTrips(*mated->move(0, "b1b8", kT0));
 }
@@ -98,7 +98,8 @@ TEST(ChessSerde, VersionOneRowsRestoreAsTheOriginalRandomKpkSetup) {
 
 TEST(ChessSerde, APlayerIdJsonbWouldRefuseIsReplaced) {
   auto state =
-      GameState::start({std::string("a\0b", 3), "\xff"}, "kpk", Opening{kKpk, 0}, {60'000, 0}, kT0);
+      GameState::start({std::string("a\0b", 3), "\xff"}, "kpk", Opening{kKpk, 0}, {60'000, 0}, kT0,
+                       std::string(kRandomKpkSetup));
   ASSERT_TRUE(state.ok());
   const auto restored = deserializeGameState(serializeGameState(*state));
   ASSERT_TRUE(restored.ok()) << restored.status();

@@ -384,7 +384,7 @@ Chess is two seats, the full rules and a Fischer clock
 a seat leaves, as a rummy table deals on. A game's end is a line on the
 view's `scoreSheet`; `startGame` on an ended table starts the next, sides
 swapped. `startGame.setupId` selects a server-owned position: `standard`
-(the default), `random-kpk`, `kpk-opposition`, `rpr-lucena`, or
+(the default), `random-kpk`, `kpk-e2`, `kpk-opposition`, `rpr-lucena`, or
 `qvr-basic`. Every view carries `availableSetups` and `defaultSetupId`
 for the selector; once started it also carries the selected ID and
 display name. The first

@@ -32,6 +32,7 @@ constexpr char kPlayPath[] = "/games/v2/play";
 const std::string kAvailableSetups =
     R"("availableSetups":[{"name":"Standard starting position","setupId":"standard"},)"
     R"({"name":"Random K+P vs K","setupId":"random-kpk"},)"
+    R"({"name":"K+P vs K — Pawn on e2","setupId":"kpk-e2"},)"
     R"({"name":"K+P vs K — Opposition","setupId":"kpk-opposition"},)"
     R"({"name":"R+P vs R — Lucena position","setupId":"rpr-lucena"},)"
     R"({"name":"Q vs R — Basic conversion","setupId":"qvr-basic"}],)";
