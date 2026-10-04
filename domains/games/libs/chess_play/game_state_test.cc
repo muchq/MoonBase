@@ -396,6 +396,7 @@ TEST(ChessSetupTest, EveryNamedSetupIsPlayableAndCarriesItsStableIdentity) {
        "4k3/8/8/8/8/8/1r6/3QK3 w - - 0 1"},
   };
   const std::vector<ChessSetupOption> options = AvailableChessSetups();
+  EXPECT_EQ(kDefaultChessSetup, "standard");
   ASSERT_EQ(options.size(), fixed.size() + 1);
   EXPECT_EQ(options[0].id, fixed[0].id);
   EXPECT_EQ(options[0].name, fixed[0].name);

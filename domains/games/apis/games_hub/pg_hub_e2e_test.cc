@@ -902,10 +902,16 @@ TEST_F(PgGamesHubFixture, TwoInstancesSweepingOneClockEndTheGameOnce) {
   std::atomic<int64_t> now_ms{1'800'000'000'000};
   for (GolfHub* hub : {golf_.get(), remote->golf.get()}) {
     hub->SetClock([&now_ms] { return absl::FromUnixMillis(now_ms.load()); });
-    hub->SetChessOpener([](std::string_view setup_id) {
-      return absl::StatusOr<chess_play::ChessSetup>(chess_play::ChessSetup{
-          std::string(setup_id), "Random K+P vs K", "kpk",
-          {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0}});
+    hub->SetChessOpener([](std::string_view setup_id)
+                            -> absl::StatusOr<chess_play::ChessSetup> {
+      const auto name = chess_play::ChessSetupName(setup_id);
+      const auto variant = chess_play::ChessSetupVariant(setup_id);
+      if (!name.has_value() || !variant.has_value()) {
+        return absl::InvalidArgumentError("unknown setup");
+      }
+      return chess_play::ChessSetup{
+          std::string(setup_id), std::string(*name), std::string(*variant),
+          {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0}};
     });
   }
   CrossSeats seats;

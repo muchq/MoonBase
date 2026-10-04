@@ -80,6 +80,7 @@ class ChessFixture : public GamesHubStreamFixture {
     join.gameId = table.game_id;
     if (!table.bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok()) return std::nullopt;
     if (!ReceiveChess(table.bob.stream, "gameJoined").has_value()) return std::nullopt;
+    if (!start.setupId.has_value()) start.setupId = std::string(chess_play::kRandomKpkSetup);
     if (!table.alice.stream.Send(Chess(ChessMove::FromStartgame(start))).ok()) return std::nullopt;
     std::optional<moonbase::games::ChessView> view;
     for (Seat* seat : {&table.alice, &table.bob}) {

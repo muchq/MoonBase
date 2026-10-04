@@ -66,6 +66,8 @@ struct Opening {
   int white_seat = 0;
 };
 
+inline constexpr std::string_view kStandardSetup = "standard";
+inline constexpr std::string_view kDefaultChessSetup = kStandardSetup;
 inline constexpr std::string_view kRandomKpkSetup = "random-kpk";
 
 /// One server-owned starting-position choice presented to a client.

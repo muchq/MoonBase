@@ -2184,7 +2184,7 @@ void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& mov
       time_control.increment_ms = int64_t{*start->incrementSeconds} * 1000;
     }
     const auto setup =
-        chess_opener_(start->setupId.value_or(std::string(chess_play::kRandomKpkSetup)));
+        chess_opener_(start->setupId.value_or(std::string(chess_play::kDefaultChessSetup)));
     if (!setup.ok()) {
       Reject(player_id, RejectKind::kRules, std::string(setup.status().message()));
       return;
@@ -3677,6 +3677,7 @@ moonbase::games::ChessView GolfHub::ChessViewLocked(const std::string& game_id,
   moonbase::games::ChessView view;
   view.gameId = game_id;
   view.inCheck = false;
+  view.defaultSetupId = chess_play::kDefaultChessSetup;
   for (const chess_play::ChessSetupOption& available : chess_play::AvailableChessSetups()) {
     moonbase::games::ChessSetupOption option;
     option.setupId = available.id;
