@@ -80,6 +80,7 @@ class ChessFixture : public GamesHubStreamFixture {
     join.gameId = table.game_id;
     if (!table.bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok()) return std::nullopt;
     if (!ReceiveChess(table.bob.stream, "gameJoined").has_value()) return std::nullopt;
+    if (!start.setupId.has_value()) start.setupId = std::string(chess_play::kRandomKpkSetup);
     if (!table.alice.stream.Send(Chess(ChessMove::FromStartgame(start))).ok()) return std::nullopt;
     std::optional<moonbase::games::ChessView> view;
     for (Seat* seat : {&table.alice, &table.bob}) {
@@ -630,10 +631,10 @@ TEST_F(ChessOutageFixture, AGameThatEndsWhileItsFlagWaitsLeavesNoRetryBehind) {
   EXPECT_EQ(golf_->ChessFlagRetriesPending(), 0u);
 }
 
-// Without an opener set, the hub deals the variant's own: a random KPK.
+// Without a setup named, the hub starts ordinary chess.
 class DefaultOpeningFixture : public GamesHubStreamFixture {};
 
-TEST_F(DefaultOpeningFixture, TheHubDealsARandomKpk) {
+TEST_F(DefaultOpeningFixture, TheHubDefaultsToTheStandardStartingPosition) {
   auto room = SeatedRoom(2);
   ASSERT_TRUE(room.has_value());
   Seat& alice = room->seats[0];
@@ -651,15 +652,13 @@ TEST_F(DefaultOpeningFixture, TheHubDealsARandomKpk) {
   auto view =
       AwaitChessView(alice.stream, [](const auto& v) { return v.phase == "playing"; }, "the deal");
   ASSERT_TRUE(view.has_value());
-  const std::string placement = view->fen->substr(0, view->fen->find(' '));
-  std::string pieces;
-  std::copy_if(placement.begin(), placement.end(), std::back_inserter(pieces),
-               [](char c) { return std::isalpha(static_cast<unsigned char>(c)); });
-  std::sort(pieces.begin(), pieces.end());
-  EXPECT_EQ(pieces, "KPk");
+  EXPECT_EQ(view->fen,
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
   EXPECT_EQ(view->sideToMove, "white");
-  EXPECT_EQ(view->setupId, "random-kpk");
-  EXPECT_EQ(view->setupName, "Random K+P vs K");
+  EXPECT_EQ(view->variant, "standard");
+  EXPECT_EQ(view->setupId, "standard");
+  EXPECT_EQ(view->setupName, "Standard starting position");
+  EXPECT_EQ(view->defaultSetupId, "standard");
 }
 
 TEST_F(DefaultOpeningFixture, TheHubDealsASelectedPracticeSetup) {

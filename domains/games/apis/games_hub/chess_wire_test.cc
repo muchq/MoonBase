@@ -30,7 +30,8 @@ using json = nlohmann::json;
 
 constexpr char kPlayPath[] = "/games/v2/play";
 const std::string kAvailableSetups =
-    R"("availableSetups":[{"name":"Random K+P vs K","setupId":"random-kpk"},)"
+    R"("availableSetups":[{"name":"Standard starting position","setupId":"standard"},)"
+    R"({"name":"Random K+P vs K","setupId":"random-kpk"},)"
     R"({"name":"K+P vs K — Opposition","setupId":"kpk-opposition"},)"
     R"({"name":"R+P vs R — Lucena position","setupId":"rpr-lucena"},)"
     R"({"name":"Q vs R — Basic conversion","setupId":"qvr-basic"}],)";
@@ -67,7 +68,7 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
             R"({"update":{"gameCreated":{"createdBy":"player-1","gameId":"GAME01"}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
             R"({"update":{"gameJoined":{"view":{)" + kAvailableSetups +
-                R"("gameId":"GAME01","inCheck":false,)"
+                R"("defaultSetupId":"standard","gameId":"GAME01","inCheck":false,)"
             R"("legalMoves":[],"moves":[],"phase":"waiting",)"
             R"("players":[{"playerId":"player-1"}],"scoreSheet":[]}}}})");
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
@@ -87,7 +88,7 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
       joiner->Send(CommandFrame("chess", R"({"move":{"joinGame":{"gameId":"GAME01"}}})")).ok());
   const std::string waiting_pair =
       R"("view":{)" + kAvailableSetups +
-      R"("gameId":"GAME01","inCheck":false,"legalMoves":[],"moves":[],)"
+      R"("defaultSetupId":"standard","gameId":"GAME01","inCheck":false,"legalMoves":[],"moves":[],)"
       R"("phase":"waiting","players":[{"playerId":"player-1"},{"playerId":"player-2"}],)"
       R"("scoreSheet":[]})";
   EXPECT_EQ(EventPayload(NextFrame(*joiner), "chess"),
@@ -109,7 +110,7 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
   const std::string playing =
       R"("view":{)" + kAvailableSetups +
       R"("clock":{"blackMs":60000,"incrementMs":1000,"initialMs":60000,)"
-      R"("whiteMs":60000},"currentPlayerId":"player-1",)"
+      R"("whiteMs":60000},"currentPlayerId":"player-1","defaultSetupId":"standard",)"
       R"("fen":"7k/4P3/6K1/8/8/8/8/8 w - - 0 1","gameId":"GAME01","inCheck":false,)"
       R"("legalMoves":["e7e8b","e7e8n","e7e8q","e7e8r","g6f5","g6f6","g6f7","g6g5",)"
       R"("g6h5","g6h6"],"moves":[],"phase":"playing",)"
@@ -127,7 +128,8 @@ TEST_F(ChessWireTest, TableFlowPinsChessCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
             R"({"update":{"gameState":{"view":{)" + kAvailableSetups +
                 R"("clock":{"blackMs":60000,"incrementMs":1000,)"
-            R"("initialMs":60000,"whiteMs":61000},"fen":"4Q2k/8/6K1/8/8/8/8/8 b - - 0 1",)"
+            R"("initialMs":60000,"whiteMs":61000},"defaultSetupId":"standard",)"
+            R"("fen":"4Q2k/8/6K1/8/8/8/8/8 b - - 0 1",)"
             R"("gameId":"GAME01","inCheck":true,"legalMoves":[],"moves":["e7e8q"],"phase":"ended",)"
             R"("players":[{"color":"white","playerId":"player-1"},)"
             R"({"color":"black","playerId":"player-2"}],)"

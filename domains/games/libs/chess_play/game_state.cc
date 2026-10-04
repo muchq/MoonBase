@@ -100,7 +100,8 @@ absl::Status CheckSeats(const std::vector<std::string>& players, const std::stri
     return absl::InvalidArgumentError("chess needs exactly 2 players");
   }
   if (players[0] == players[1]) return absl::InvalidArgumentError("a player cannot play itself");
-  if (variant != GameState::kKpk && variant != "rpr" && variant != "qvr") {
+  if (variant != "standard" && variant != GameState::kKpk && variant != "rpr" &&
+      variant != "qvr") {
     return absl::InvalidArgumentError(absl::StrCat("unknown variant: ", variant));
   }
   if (white_seat != 0 && white_seat != 1) return absl::InvalidArgumentError("white seat is 0 or 1");
@@ -121,7 +122,9 @@ struct SetupDefinition {
   std::string_view fen;
 };
 
-constexpr std::array<SetupDefinition, 4> kChessSetups{{
+constexpr std::array<SetupDefinition, 5> kChessSetups{{
+    {kStandardSetup, "Standard starting position", "standard",
+     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"},
     {kRandomKpkSetup, "Random K+P vs K", "kpk", ""},
     {"kpk-opposition", "K+P vs K — Opposition", "kpk",
      "8/8/4k3/4P3/4K3/8/8/8 w - - 0 1"},

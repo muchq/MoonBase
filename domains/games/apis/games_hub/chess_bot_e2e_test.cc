@@ -42,9 +42,15 @@ class ChessBotFixture : public GamesHubStreamFixture {
   void SetUp() override {
     GamesHubStreamFixture::SetUp();
     golf_->SetClock([this] { return absl::FromUnixMillis(now_ms_.load()); });
-    golf_->SetChessOpener([this](std::string_view setup_id) {
-      return absl::StatusOr<chess_play::ChessSetup>(chess_play::ChessSetup{
-          std::string(setup_id), "Random K+P vs K", "kpk", opening_});
+    golf_->SetChessOpener([this](std::string_view setup_id)
+                              -> absl::StatusOr<chess_play::ChessSetup> {
+      const auto name = chess_play::ChessSetupName(setup_id);
+      const auto variant = chess_play::ChessSetupVariant(setup_id);
+      if (!name.has_value() || !variant.has_value()) {
+        return absl::InvalidArgumentError("unknown setup");
+      }
+      return chess_play::ChessSetup{
+          std::string(setup_id), std::string(*name), std::string(*variant), opening_};
     });
     golf_->SetChessBotEngine([this](const ChessBotAsk& ask) -> absl::StatusOr<std::string> {
       asks_.push_back(ask);

@@ -13,7 +13,7 @@ use moonbase.games#TurnChanged
 // Chess's vocabulary: two seats, the full rules, a Fischer clock. It rides
 // the room's Play stream as one `chess` member per direction and reuses
 // the shared lifecycle shapes, except startGame, which names the clock.
-// Starting positions are selected from the hub's server-owned practice
+// Starting positions are selected from the hub's server-owned setup
 // catalog. Shape names carry the game's name: codegen flattens every
 // namespace into one.
 
@@ -47,9 +47,10 @@ structure ChessAddBot {
 
 /// Seats two and deals the variant's position, White's clock running.
 /// On a table whose game has ended, either seat starts the next one, sides
-/// swapped. Absent fields take the default, three minutes and two seconds.
+/// swapped. Absent fields take the defaults: the standard starting
+/// position, three minutes and two seconds.
 structure ChessStartGame {
-    /// A server-owned practice setup identifier. Absent selects random-kpk.
+    /// A server-owned setup identifier. Absent selects standard.
     @length(min: 1, max: 32)
     setupId: String
 
@@ -126,6 +127,10 @@ structure ChessView {
     /// The server-owned setup catalog, available before and during play.
     @required
     availableSetups: ChessSetupOptions
+
+    /// The setup selected when ChessStartGame.setupId is absent.
+    @required
+    defaultSetupId: String
 
     /// waiting | playing | ended | closed: ended between games, closed
     /// once a seat left the table.
