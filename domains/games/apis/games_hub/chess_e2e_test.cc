@@ -54,7 +54,7 @@ GameCommands Watch(const std::string& game_id) {
 
 GameCommands Challenge(std::optional<std::string> setup_id, std::optional<int> initial,
                        std::optional<int> increment) {
-  moonbase::games::ChessChallenge challenge;
+  moonbase::games::ChessStartGame challenge;
   challenge.setupId = std::move(setup_id);
   challenge.initialSeconds = initial;
   challenge.incrementSeconds = increment;
@@ -68,11 +68,13 @@ class ChessFixture : public GamesHubStreamFixture {
   void SetUp() override {
     GamesHubStreamFixture::SetUp();
     golf_->SetClock([this] { return absl::FromUnixMillis(now_ms_.load()); });
-    golf_->SetChessOpener([this](std::string_view setup_id) {
-      auto setup = chess_play::SelectChessSetup(setup_id, setup_gen_);
-      if (setup.ok()) setup->opening = opening_;
-      return setup;
-    });
+    golf_->SetChessOpener(
+        [this](std::string_view setup_id) -> absl::StatusOr<chess_play::ChessSetup> {
+          if (setup_id == refused_setup_) return absl::UnavailableError("the opener is down");
+          auto setup = chess_play::SelectChessSetup(setup_id, setup_gen_);
+          if (setup.ok()) setup->opening = opening_;
+          return setup;
+        });
   }
 
   // A two-seat chess table, started with `start`: alice (seat 0) created it,
@@ -152,6 +154,8 @@ class ChessFixture : public GamesHubStreamFixture {
   }
 
   std::atomic<int64_t> now_ms_{kT0};
+  // A setup the opener refuses, so a challenge's start can be made to fail.
+  std::string refused_setup_;
   std::mt19937_64 setup_gen_{1234};
   chess_play::Opening opening_{kPromotionMates, 0};
 };
@@ -1013,6 +1017,64 @@ TEST_F(ChessFixture, AChallengeTakesStartGamesDefaultsForWhatItLeavesOut) {
   ASSERT_TRUE(replaced.has_value());
   EXPECT_EQ(replaced->terms->setupId, "qvr-basic");
   EXPECT_EQ(replaced->terms->initialSeconds, 300);
+}
+
+// The room's line gives a clock of whole minutes in minutes, and any other
+// in seconds.
+TEST_F(ChessFixture, AChallengesLineGivesOddSecondsAsSeconds) {
+  auto room = SeatedRoom(1);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  ASSERT_TRUE(ReceiveChess(alice.stream, "gameJoined").has_value());
+  ASSERT_TRUE(alice.stream.Send(Challenge("standard", 90, 0)).ok());
+  auto listed = AwaitRoomState(
+      alice.stream, [](const auto& r) { return !r.games.empty() && r.games[0].terms.has_value(); },
+      "the challenge in the room's list");
+  ASSERT_TRUE(listed.has_value());
+  EXPECT_EQ(listed->games[0].terms, "Standard starting position · 90s+0");
+}
+
+// A start that fails leaves the table full and waiting. Terms are the
+// poster's: once anyone leaves, the table has none, and the next seat to
+// fill it chooses at the start like any other.
+TEST_F(ChessFixture, AFailedStartTellsTheJoinerAndALeaveClearsTheTerms) {
+  refused_setup_ = "qvr-basic";
+  auto room = SeatedRoom(3);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  Seat& carol = room->seats[2];
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  ASSERT_TRUE(alice.stream.Send(Challenge("qvr-basic", 60, 0)).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  alice.stream, [](const auto& v) { return v.terms.has_value(); }, "the terms")
+                  .has_value());
+  moonbase::games::JoinGame join;
+  join.gameId = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  auto refused = ReceiveCase(bob.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "the opener is down");
+
+  ASSERT_TRUE(alice.stream.Send(LeaveTable()).ok());
+  auto alone =
+      AwaitChessView(bob.stream, [](const auto& v) { return v.players.size() == 1; }, "alice gone");
+  ASSERT_TRUE(alone.has_value());
+  EXPECT_FALSE(alone->terms.has_value());
+  auto listed = AwaitRoomState(
+      carol.stream, [](const auto& r) { return !r.games.empty() && r.games[0].playerCount == 1; },
+      "bob alone");
+  ASSERT_TRUE(listed.has_value());
+  EXPECT_FALSE(listed->games[0].terms.has_value());
+  // And carol's join waits for the start rather than taking alice's terms.
+  ASSERT_TRUE(carol.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  ASSERT_TRUE(ReceiveChess(carol.stream, "gameJoined").has_value());
+  for (const std::string& heard : ChessHeard(carol)) EXPECT_NE(heard, "gameStarted");
 }
 
 TEST_F(ChessFixture, AChallengeNamesASetupTheHubHas) {

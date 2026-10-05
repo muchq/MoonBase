@@ -227,9 +227,9 @@ structure GameSummary {
     @required
     playerCount: Integer
 
-    /// What a waiting table plays on, as the lobby shows it ("Standard
-    /// starting position · 3+2"); absent when its seats choose at the
-    /// start.
+    /// Text the table's game supplies for the lobby to show as is: what a
+    /// waiting table plays on (chess's challenge: "Standard starting
+    /// position · 3+2"). Absent when there is nothing to say.
     terms: String
 }
 

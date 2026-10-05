@@ -283,6 +283,20 @@ std::string RummyPhaseString(const rummy::TableState& table) {
   return "ended";
 }
 
+// A startGame's or a challenge's fields, absent ones taking the defaults:
+// the standard position, three minutes and two seconds.
+ChessTerms TermsFrom(const moonbase::games::ChessStartGame& fields) {
+  ChessTerms terms{fields.setupId.value_or(std::string(chess_play::kDefaultChessSetup)),
+                   GolfHub::kDefaultChessClock};
+  if (fields.initialSeconds.has_value()) {
+    terms.time_control.initial_ms = int64_t{*fields.initialSeconds} * 1000;
+  }
+  if (fields.incrementSeconds.has_value()) {
+    terms.time_control.increment_ms = int64_t{*fields.incrementSeconds} * 1000;
+  }
+  return terms;
+}
+
 // A challenge's terms as the lobby lists them: "Standard starting
 // position · 3+2", a clock of whole minutes in minutes and any other in
 // seconds.
@@ -2225,15 +2239,9 @@ void GolfHub::HandleCastleMove(const std::string& player_id, const CastleMove& m
 void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& move) {
   // startGame is chess's own shape: it names the clock.
   if (const auto* start = move.as_startGame_or_null()) {
-    chess_play::TimeControl time_control = kDefaultChessClock;
-    if (start->initialSeconds.has_value()) {
-      time_control.initial_ms = int64_t{*start->initialSeconds} * 1000;
-    }
-    if (start->incrementSeconds.has_value()) {
-      time_control.increment_ms = int64_t{*start->incrementSeconds} * 1000;
-    }
-    const auto setup =
-        chess_opener_(start->setupId.value_or(std::string(chess_play::kDefaultChessSetup)));
+    const ChessTerms terms = TermsFrom(*start);
+    const chess_play::TimeControl time_control = terms.time_control;
+    const auto setup = chess_opener_(terms.setup_id);
     if (!setup.ok()) {
       Reject(player_id, RejectKind::kRules, std::string(setup.status().message()));
       return;
@@ -2265,15 +2273,7 @@ void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& mov
     return;
   }
   if (const auto* challenge = move.as_challenge_or_null()) {
-    ChessTerms terms{std::string(chess_play::kDefaultChessSetup), kDefaultChessClock};
-    if (challenge->setupId.has_value()) terms.setup_id = *challenge->setupId;
-    if (challenge->initialSeconds.has_value()) {
-      terms.time_control.initial_ms = int64_t{*challenge->initialSeconds} * 1000;
-    }
-    if (challenge->incrementSeconds.has_value()) {
-      terms.time_control.increment_ms = int64_t{*challenge->incrementSeconds} * 1000;
-    }
-    ChallengeChessMove(player_id, std::move(terms));
+    ChallengeChessMove(player_id, TermsFrom(*challenge));
     return;
   }
   if (LifecycleMove(player_id, move, GameKind::kChess)) return;
@@ -3125,11 +3125,9 @@ void GolfHub::ChallengeChessMove(const std::string& player_id, ChessTerms terms)
       }
     }
   }
-  if (refusal.has_value()) {
-    Reject(player_id, std::move(*refusal));
-  } else {
-    Deliver(outbox);
-  }
+  // A vanished table's news is true either way.
+  Deliver(outbox);
+  if (refusal.has_value()) Reject(player_id, std::move(*refusal));
 }
 
 void GolfHub::StartChallengeMove(const std::string& player_id,
@@ -3490,8 +3488,10 @@ void GolfHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writ
     const bool over = state.has_value() && IsOver(*state);
     std::vector<HubStore::StatsDelta> deltas;
     if (over) deltas = StatsDeltasOf(*state, roster);
+    // Terms are the poster's: a waiting table someone leaves has none.
+    const std::optional<ChessTerms> no_terms;
     const Commit commit = CommitEntryLocked(ref->room_id, ref->game_id, entry, roster, state,
-                                            over ? &deltas : nullptr);
+                                            over ? &deltas : nullptr, &no_terms);
     if (commit == Commit::kRebased) continue;
     if (commit == Commit::kGone) {
       DropGameLocked(*ref, outbox);

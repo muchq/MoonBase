@@ -1190,6 +1190,37 @@ TEST_F(PgGamesHubFixture, AWatcherHearsATableDeletedOnAnotherInstance) {
   EXPECT_EQ(left->as_gameLeft_or_null()->gameId, game_id);
 }
 
+// A challenge outlives the process that held it: the restarted hub reads
+// the terms back from the row, and the resumed seat's table shows them.
+TEST_F(PgGamesHubFixture, AChallengeSurvivesARestart) {
+  using moonbase::games::ChessMove;
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  ASSERT_FALSE(CreateRoomFor(*alice).empty());
+  ASSERT_TRUE(
+      alice->stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  ASSERT_TRUE(ReceiveChess(alice->stream, "gameJoined").has_value());
+  moonbase::games::ChessStartGame challenge;
+  challenge.setupId = "kpk-opposition";
+  challenge.initialSeconds = 60;
+  ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromChallenge(challenge))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  alice->stream, [](const auto& v) { return v.terms.has_value(); }, "the terms")
+                  .has_value());
+  const std::string token = alice->resume_token;
+  RestartHub();
+  auto back = OpenSeat(token);
+  ASSERT_TRUE(back.has_value());
+  ASSERT_TRUE(ReceiveCase(back->stream, "sessionReady").has_value());
+  auto resynced = ReceiveChess(back->stream, "gameJoined");
+  ASSERT_TRUE(resynced.has_value());
+  const auto& view = resynced->as_gameJoined_or_null()->view;
+  ASSERT_TRUE(view.terms.has_value());
+  EXPECT_EQ(view.terms->setupId, "kpk-opposition");
+  EXPECT_EQ(view.terms->initialSeconds, 60);
+}
+
 // A challenge posted on one instance is read back from the row on another
 // (#1633): the remote lists its terms, and joining there starts the game
 // on them.
@@ -1221,7 +1252,7 @@ TEST_F(PgGamesHubFixture, AChallengePostedOnOneInstanceStartsOnAnother) {
   auto created = ReceiveChess(alice.stream, "gameJoined");
   ASSERT_TRUE(created.has_value());
   const std::string game_id = created->as_gameJoined_or_null()->view.gameId;
-  moonbase::games::ChessChallenge challenge;
+  moonbase::games::ChessStartGame challenge;
   challenge.setupId = "kpk-opposition";
   challenge.initialSeconds = 60;
   challenge.incrementSeconds = 1;

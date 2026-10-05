@@ -293,7 +293,7 @@ still waiting for players):
 SELECT player_id, connected, games_played, games_won, total_score
 FROM room_members WHERE room_id = 'ABC123' ORDER BY player_id;
 
-SELECT game_id, game, version, state IS NOT NULL AS dealt,
+SELECT game_id, game, version, state IS NOT NULL AND NOT state ? 'terms' AS dealt,
        jsonb_array_length(roster) AS seats, roster
 FROM games WHERE room_id = 'ABC123' ORDER BY game_id;
 
@@ -440,7 +440,10 @@ them. The seat that fills the table — a join, or `addBot` — starts the
 game on them, as its own `startGame` right after the seat commits. The
 terms ride the row's `state` column, NULL until the start otherwise, as
 `{"terms":{...}}`, so a sibling reads them back and starts the game the
-same way; the started row is the engine's alone.
+same way; the started row is the engine's alone. Terms are the poster's:
+a leave from a waiting table clears them. A start that fails (the
+opener refusing, an outage) is the filler's refusal and leaves the table
+full and waiting on its terms, for a `startGame`.
 
 Any member at no table may `watch` a chess table in its room, in any
 phase (#1633). The answer is a `gameState`; from then on the watcher hears

@@ -110,7 +110,7 @@ TEST_F(ChessBotFixture, TheTablesOnePlayerSeatsABotAtTheirChosenStrength) {
 TEST_F(ChessBotFixture, ABotTakesAChallengeOnItsTerms) {
   auto alice = AliceAtATable();
   ASSERT_TRUE(alice.has_value());
-  moonbase::games::ChessChallenge challenge;
+  moonbase::games::ChessStartGame challenge;
   challenge.setupId = "kpk-opposition";
   challenge.initialSeconds = 60;
   challenge.incrementSeconds = 0;

@@ -263,6 +263,35 @@ TEST_F(ChessWireTest, WatchPinsItsCommandAndTheViewThatAnswersIt) {
             R"({"update":{"gameLeft":{"gameId":"GAME01"}}})");
 }
 
+// A challenge takes startGame's shape, and the decoder holds its bounds.
+TEST_F(ChessWireTest, AChallengesBoundsAreRefusedInBand) {
+  json creator_session;
+  auto creator = DialReady(creator_session);
+  ASSERT_TRUE(creator->Send(CommandFrame("createRoom", "{}")).ok());
+  (void)EventPayload(NextFrame(*creator), "roomState");
+  ASSERT_TRUE(creator->Send(CommandFrame("chess", R"({"move":{"createGame":{}}})")).ok());
+  (void)EventPayload(NextFrame(*creator), "chess");
+  (void)EventPayload(NextFrame(*creator), "chess");
+  (void)EventPayload(NextFrame(*creator), "roomState");
+  for (const auto& [move, reason] : std::vector<std::pair<std::string, std::string>>{
+           {R"({"move":{"challenge":{"initialSeconds":29}}})",
+            R"({"reason":"Value at '/chess/move/challenge/initialSeconds' failed to satisfy )"
+            R"(constraint: Member must be between 30 and 1800, inclusive"})"},
+           {R"({"move":{"challenge":{"incrementSeconds":31}}})",
+            R"({"reason":"Value at '/chess/move/challenge/incrementSeconds' failed to satisfy )"
+            R"(constraint: Member must be between 0 and 30, inclusive"})"},
+           {R"({"move":{"challenge":{"setupId":""}}})",
+            R"({"reason":"Value with length 0 at '/chess/move/challenge/setupId' failed to )"
+            R"(satisfy constraint: Member must have length between 1 and 32, inclusive"})"}}) {
+    ASSERT_TRUE(creator->Send(CommandFrame("chess", move)).ok());
+    EXPECT_EQ(EventPayload(NextFrame(*creator), "commandRejected"), reason) << move;
+  }
+  // The control: inside the bounds, the terms post.
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("chess", R"({"move":{"challenge":{"initialSeconds":30}}})")).ok());
+  EXPECT_NE(EventPayload(NextFrame(*creator), "chess").find(R"("terms":)"), std::string::npos);
+}
+
 // A challenge (#1633) is the table's terms posted before anyone joins:
 // the view carries them structured, the room's list as one line.
 TEST_F(ChessWireTest, ChallengePinsItsCommandTheViewsTermsAndTheRoomsLine) {
