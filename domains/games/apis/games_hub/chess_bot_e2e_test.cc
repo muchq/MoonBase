@@ -105,6 +105,28 @@ TEST_F(ChessBotFixture, TheTablesOnePlayerSeatsABotAtTheirChosenStrength) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "the table is full");
 }
 
+// A bot fills a challenge's second seat like anyone (#1633): the game
+// starts on the posted terms.
+TEST_F(ChessBotFixture, ABotTakesAChallengeOnItsTerms) {
+  auto alice = AliceAtATable();
+  ASSERT_TRUE(alice.has_value());
+  moonbase::games::ChessChallenge challenge;
+  challenge.setupId = "kpk-opposition";
+  challenge.initialSeconds = 60;
+  challenge.incrementSeconds = 0;
+  ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromChallenge(challenge))).ok());
+  ASSERT_TRUE(
+      AwaitChessView(alice->stream, [](const auto& v) { return v.terms.has_value(); }, "terms"));
+  ASSERT_TRUE(alice->stream.Send(AddBot(1500)).ok());
+  auto playing = AwaitChessView(
+      alice->stream, [](const auto& v) { return v.phase == "playing"; }, "the start");
+  ASSERT_TRUE(playing.has_value());
+  EXPECT_EQ(playing->setupId, "kpk-opposition");
+  ASSERT_TRUE(playing->clock.has_value());
+  EXPECT_EQ(playing->clock->initialMs, 60'000);
+  EXPECT_EQ(playing->clock->incrementMs, 0);
+}
+
 TEST_F(ChessBotFixture, ABotIsOnlyForAChessTableNotYetStarted) {
   auto room = SeatedRoom(2);
   ASSERT_TRUE(room.has_value());

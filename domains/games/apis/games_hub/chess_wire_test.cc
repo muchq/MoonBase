@@ -5,7 +5,8 @@
 // ({"move":{...}} inside the `chess` command) and the update envelope
 // ({"update":{...}} inside the `chess` event) through createGame, joinGame,
 // startGame naming the clock, a play that mates, and gameEnded; watch and
-// the gameState and gameLeft that answer it; the model's
+// the gameState and gameLeft that answer it; a challenge's terms in the
+// view and the room's list; the model's
 // bounds on startGame and play refused in band; and the lobby's roomState
 // naming the table's game.
 
@@ -260,6 +261,38 @@ TEST_F(ChessWireTest, WatchPinsItsCommandAndTheViewThatAnswersIt) {
   ASSERT_TRUE(watcher->Send(CommandFrame("chess", R"({"move":{"leaveGame":{}}})")).ok());
   EXPECT_EQ(EventPayload(NextFrame(*watcher), "chess"),
             R"({"update":{"gameLeft":{"gameId":"GAME01"}}})");
+}
+
+// A challenge (#1633) is the table's terms posted before anyone joins:
+// the view carries them structured, the room's list as one line.
+TEST_F(ChessWireTest, ChallengePinsItsCommandTheViewsTermsAndTheRoomsLine) {
+  json creator_session;
+  auto creator = DialReady(creator_session);
+  ASSERT_TRUE(creator->Send(CommandFrame("createRoom", "{}")).ok());
+  (void)EventPayload(NextFrame(*creator), "roomState");
+  ASSERT_TRUE(creator->Send(CommandFrame("chess", R"({"move":{"createGame":{}}})")).ok());
+  (void)EventPayload(NextFrame(*creator), "chess");
+  (void)EventPayload(NextFrame(*creator), "chess");
+  (void)EventPayload(NextFrame(*creator), "roomState");
+
+  ASSERT_TRUE(
+      creator
+          ->Send(CommandFrame("chess", R"({"move":{"challenge":{"incrementSeconds":2,)"
+                                       R"("initialSeconds":300,"setupId":"kpk-opposition"}}})"))
+          .ok());
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "chess"),
+            R"({"update":{"gameState":{"view":{)" + kAvailableSetups +
+                R"("defaultSetupId":"standard","gameId":"GAME01","inCheck":false,)"
+                R"("legalMoves":[],"moves":[],"phase":"waiting",)"
+                R"("players":[{"playerId":"player-1"}],"scoreSheet":[],)"
+                R"("terms":{"incrementSeconds":2,"initialSeconds":300,)"
+                R"("setupId":"kpk-opposition","setupName":"K+P vs K — Opposition"}}}}})");
+  EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
+            R"({"games":[{"game":"chess","gameId":"GAME01","playerCount":1,"status":"waiting",)"
+            R"("terms":"K+P vs K — Opposition · 5+2"}],)"
+            R"("geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
+            R"("playerId":"player-1","table":{"game":"chess","gameId":"GAME01"},)"
+            R"("totalScore":0}],"roomId":"room-1"})");
 }
 
 }  // namespace

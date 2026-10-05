@@ -1190,6 +1190,65 @@ TEST_F(PgGamesHubFixture, AWatcherHearsATableDeletedOnAnotherInstance) {
   EXPECT_EQ(left->as_gameLeft_or_null()->gameId, game_id);
 }
 
+// A challenge posted on one instance is read back from the row on another
+// (#1633): the remote lists its terms, and joining there starts the game
+// on them.
+TEST_F(PgGamesHubFixture, AChallengePostedOnOneInstanceStartsOnAnother) {
+  using moonbase::games::ChessMove;
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  DetachOnScopeExit detach{this, remote.get()};
+  for (GolfHub* hub : {golf_.get(), remote->golf.get()}) {
+    hub->SetChessOpener([](std::string_view setup_id) -> absl::StatusOr<chess_play::ChessSetup> {
+      const auto name = chess_play::ChessSetupName(setup_id);
+      const auto variant = chess_play::ChessSetupVariant(setup_id);
+      if (!name.has_value() || !variant.has_value()) {
+        return absl::InvalidArgumentError("unknown setup");
+      }
+      return chess_play::ChessSetup{std::string(setup_id),
+                                    std::string(*name),
+                                    std::string(*variant),
+                                    {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0}};
+    });
+  }
+  CrossSeats seats;
+  const std::string room_id = SeatedCrossRoom(*remote, seats);
+  ASSERT_FALSE(room_id.empty());
+  Seat& alice = *seats.alice;
+  Seat& bob = *seats.bob;
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  const std::string game_id = created->as_gameJoined_or_null()->view.gameId;
+  moonbase::games::ChessChallenge challenge;
+  challenge.setupId = "kpk-opposition";
+  challenge.initialSeconds = 60;
+  challenge.incrementSeconds = 1;
+  ASSERT_TRUE(alice.stream.Send(Chess(ChessMove::FromChallenge(challenge))).ok());
+  ASSERT_TRUE(AwaitRoomState(
+                  bob.stream,
+                  [&](const moonbase::games::RoomState& room) {
+                    for (const auto& game : room.games) {
+                      if (game.gameId == game_id && game.terms.has_value()) return true;
+                    }
+                    return false;
+                  },
+                  "bob (remote) lists alice's challenge")
+                  .has_value());
+  moonbase::games::JoinGame join;
+  join.gameId = game_id;
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  auto playing = AwaitChessView(
+      bob.stream, [](const auto& view) { return view.phase == "playing"; },
+      "bob (remote) starts on alice's terms");
+  ASSERT_TRUE(playing.has_value());
+  EXPECT_EQ(playing->setupId, "kpk-opposition");
+  ASSERT_TRUE(playing->clock.has_value());
+  EXPECT_EQ(playing->clock->initialMs, 60'000);
+  EXPECT_EQ(playing->clock->incrementMs, 1'000);
+}
+
 // Two live hubs (#1194), one game. alice plays on
 // the primary instance, bob on the second; every move is a conditional
 // commit whose NOTIFY wakes the other side into re-reading and

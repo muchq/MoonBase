@@ -226,6 +226,11 @@ structure GameSummary {
 
     @required
     playerCount: Integer
+
+    /// What a waiting table plays on, as the lobby shows it ("Standard
+    /// starting position · 3+2"); absent when its seats choose at the
+    /// start.
+    terms: String
 }
 
 /// Ack for a deliberate leaveRoom; the remaining members see roomState.

@@ -2073,6 +2073,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"chess_commands", {{"command", "resign"}}},
       {"chess_commands", {{"command", "addBot"}}},
       {"chess_commands", {{"command", "watch"}}},
+      {"chess_commands", {{"command", "challenge"}}},
       {"chess_events", {{"event", "gameJoined"}}},
       {"chess_events", {{"event", "gameState"}}},
       {"chess_events", {{"event", "gameCreated"}}},

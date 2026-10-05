@@ -52,6 +52,15 @@ GameCommands Watch(const std::string& game_id) {
   return Chess(ChessMove::FromWatch(watch));
 }
 
+GameCommands Challenge(std::optional<std::string> setup_id, std::optional<int> initial,
+                       std::optional<int> increment) {
+  moonbase::games::ChessChallenge challenge;
+  challenge.setupId = std::move(setup_id);
+  challenge.initialSeconds = initial;
+  challenge.incrementSeconds = increment;
+  return Chess(ChessMove::FromChallenge(challenge));
+}
+
 GameCommands LeaveTable() { return Chess(ChessMove::FromLeavegame(moonbase::games::LeaveGame{})); }
 
 class ChessFixture : public GamesHubStreamFixture {
@@ -896,6 +905,180 @@ TEST_F(ChessFixture, AWatcherSeesTheTableClose) {
   auto result = Ended(carol);
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->ending, "abandoned");
+}
+
+// A table's one seat posts its terms (#1633): the room's list says them,
+// and the view carries them, before anyone joins.
+TEST_F(ChessFixture, APostedChallengeShowsInTheRoomAndTheView) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  EXPECT_FALSE(created->as_gameJoined_or_null()->view.terms.has_value());
+  ASSERT_TRUE(alice.stream.Send(Challenge("kpk-opposition", 60, 1)).ok());
+  auto posted =
+      AwaitChessView(alice.stream, [](const auto& v) { return v.terms.has_value(); }, "the terms");
+  ASSERT_TRUE(posted.has_value());
+  EXPECT_EQ(posted->phase, "waiting");
+  EXPECT_EQ(posted->terms->setupId, "kpk-opposition");
+  EXPECT_EQ(posted->terms->setupName, "K+P vs K — Opposition");
+  EXPECT_EQ(posted->terms->initialSeconds, 60);
+  EXPECT_EQ(posted->terms->incrementSeconds, 1);
+  auto listed = AwaitRoomState(
+      bob.stream, [](const auto& r) { return !r.games.empty() && r.games[0].terms.has_value(); },
+      "the challenge in the room's list");
+  ASSERT_TRUE(listed.has_value());
+  EXPECT_EQ(listed->games[0].terms, "K+P vs K — Opposition · 1+1");
+}
+
+TEST_F(ChessFixture, JoiningAChallengeStartsItOnItsTerms) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  ASSERT_TRUE(alice.stream.Send(Challenge("kpk-opposition", 60, 1)).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  alice.stream, [](const auto& v) { return v.terms.has_value(); }, "the terms")
+                  .has_value());
+  moonbase::games::JoinGame join;
+  join.gameId = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  for (Seat* seat : {&alice, &bob}) {
+    ASSERT_TRUE(ReceiveChess(seat->stream, "gameStarted").has_value()) << seat->player_id;
+    auto playing = AwaitChessView(
+        seat->stream, [](const auto& v) { return v.phase == "playing"; }, "the start");
+    ASSERT_TRUE(playing.has_value());
+    EXPECT_EQ(playing->setupId, "kpk-opposition");
+    ASSERT_TRUE(playing->clock.has_value());
+    EXPECT_EQ(playing->clock->initialMs, 60'000);
+    EXPECT_EQ(playing->clock->incrementMs, 1'000);
+    EXPECT_FALSE(playing->terms.has_value());
+  }
+  // In play, the room's list names no terms.
+  auto listed = AwaitRoomState(
+      bob.stream, [](const auto& r) { return !r.games.empty() && r.games[0].status != "waiting"; },
+      "in play");
+  ASSERT_TRUE(listed.has_value());
+  EXPECT_FALSE(listed->games[0].terms.has_value());
+}
+
+// The control for the challenge's start: a table with no terms waits for
+// its seats to choose, as it always has.
+TEST_F(ChessFixture, JoiningATableWithNoTermsWaitsForTheStart) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  moonbase::games::JoinGame join;
+  join.gameId = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  auto joined = ReceiveChess(bob.stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  EXPECT_EQ(joined->as_gameJoined_or_null()->view.phase, "waiting");
+  for (const std::string& heard : ChessHeard(bob)) EXPECT_NE(heard, "gameStarted");
+}
+
+TEST_F(ChessFixture, AChallengeTakesStartGamesDefaultsForWhatItLeavesOut) {
+  auto room = SeatedRoom(1);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  ASSERT_TRUE(ReceiveChess(alice.stream, "gameJoined").has_value());
+  ASSERT_TRUE(alice.stream.Send(Challenge(std::nullopt, std::nullopt, std::nullopt)).ok());
+  auto posted =
+      AwaitChessView(alice.stream, [](const auto& v) { return v.terms.has_value(); }, "the terms");
+  ASSERT_TRUE(posted.has_value());
+  EXPECT_EQ(posted->terms->setupId, "standard");
+  EXPECT_EQ(posted->terms->initialSeconds, 180);
+  EXPECT_EQ(posted->terms->incrementSeconds, 2);
+  // Posting again replaces them.
+  ASSERT_TRUE(alice.stream.Send(Challenge("qvr-basic", 300, 3)).ok());
+  auto replaced = AwaitChessView(
+      alice.stream,
+      [](const auto& v) { return v.terms.has_value() && v.terms->setupId != "standard"; },
+      "the new terms");
+  ASSERT_TRUE(replaced.has_value());
+  EXPECT_EQ(replaced->terms->setupId, "qvr-basic");
+  EXPECT_EQ(replaced->terms->initialSeconds, 300);
+}
+
+TEST_F(ChessFixture, AChallengeNamesASetupTheHubHas) {
+  auto room = SeatedRoom(1);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  ASSERT_TRUE(ReceiveChess(alice.stream, "gameJoined").has_value());
+  ASSERT_TRUE(alice.stream.Send(Challenge("nope", 60, 0)).ok());
+  auto refused = ReceiveCase(alice.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "unknown chess setup: nope");
+}
+
+// Terms are posted to a table waiting on its second seat, by its one seat.
+TEST_F(ChessFixture, OnlyATablesLoneSeatPostsAChallenge) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  // At no table.
+  ASSERT_TRUE(alice.stream.Send(Challenge(std::nullopt, std::nullopt, std::nullopt)).ok());
+  auto nowhere = ReceiveCase(alice.stream, "commandRejected");
+  ASSERT_TRUE(nowhere.has_value());
+  EXPECT_EQ(nowhere->as_commandRejected_or_null()->reason, "not in a game");
+  // Two seats, no terms: they choose at the start.
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  moonbase::games::JoinGame join;
+  join.gameId = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  ASSERT_TRUE(ReceiveChess(bob.stream, "gameJoined").has_value());
+  for (Seat* seat : {&alice, &bob}) {
+    ASSERT_TRUE(seat->stream.Send(Challenge(std::nullopt, std::nullopt, std::nullopt)).ok());
+    auto full = ReceiveCase(seat->stream, "commandRejected");
+    ASSERT_TRUE(full.has_value());
+    EXPECT_EQ(full->as_commandRejected_or_null()->reason, "the table is full");
+  }
+  // Started.
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromStartgame(moonbase::games::ChessStartGame{}))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  alice.stream, [](const auto& v) { return v.phase == "playing"; }, "the start")
+                  .has_value());
+  ASSERT_TRUE(alice.stream.Send(Challenge(std::nullopt, std::nullopt, std::nullopt)).ok());
+  auto started = ReceiveCase(alice.stream, "commandRejected");
+  ASSERT_TRUE(started.has_value());
+  EXPECT_EQ(started->as_commandRejected_or_null()->reason, "game already started");
+}
+
+TEST_F(ChessFixture, OnlyAChessTableTakesAChallenge) {
+  auto room = SeatedRoom(1);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  ASSERT_TRUE(
+      alice.stream
+          .Send(Move(moonbase::games::GolfMove::FromCreategame(moonbase::games::CreateGame{})))
+          .ok());
+  ASSERT_TRUE(ReceiveGolf(alice.stream, "gameJoined").has_value());
+  ASSERT_TRUE(alice.stream.Send(Challenge(std::nullopt, std::nullopt, std::nullopt)).ok());
+  auto refused = ReceiveCase(alice.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "that table plays golf");
 }
 
 // A chess game in the stats archive (#1571): started as chess at its two

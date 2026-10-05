@@ -116,10 +116,34 @@ std::string StatsJson(const std::vector<PgHubStore::StatsDelta>& stats) {
   return rows.dump();
 }
 
+// A waiting chess table's challenge (#1633) rides the state column, which
+// is otherwise NULL until the start: {"terms":{...}}. No engine's encoding
+// has a top-level "terms".
+std::string TermsJson(const ChessTerms& terms) {
+  return json{{"terms",
+               {{"setupId", terms.setup_id},
+                {"initialMs", terms.time_control.initial_ms},
+                {"incrementMs", terms.time_control.increment_ms}}}}
+      .dump();
+}
+
+absl::StatusOr<std::optional<ChessTerms>> TermsFromJson(const std::string& state_json) {
+  const json parsed = json::parse(state_json, /*cb=*/nullptr, /*allow_exceptions=*/false);
+  if (!parsed.is_object() || !parsed.contains("terms")) return std::nullopt;
+  const json& terms = parsed["terms"];
+  if (!terms.is_object() || !terms.contains("setupId") || !terms["setupId"].is_string() ||
+      !terms.contains("initialMs") || !terms["initialMs"].is_number_integer() ||
+      !terms.contains("incrementMs") || !terms["incrementMs"].is_number_integer()) {
+    return absl::DataLossError("chess terms are malformed");
+  }
+  return ChessTerms{terms["setupId"].get<std::string>(),
+                    {terms["initialMs"].get<int64_t>(), terms["incrementMs"].get<int64_t>()}};
+}
+
 // The state column is encoded by whichever engine the variant holds; the
 // kind column is what the loads read to pick the decoder back.
 std::string StateJson(const PgHubStore::GameRow& row) {
-  if (!row.state.has_value()) return "";
+  if (!row.state.has_value()) return row.terms.has_value() ? TermsJson(*row.terms) : "";
   return std::visit(
       [](const auto& state) -> std::string {
         if constexpr (std::is_same_v<std::decay_t<decltype(state)>, rummy::TableState>) {
@@ -393,6 +417,12 @@ absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(
       if (!state.ok()) return state.status();
       row.state.emplace(*std::move(state));
     } else if (row.kind == GameKind::kChess) {
+      auto terms = TermsFromJson(state_json);
+      if (!terms.ok()) return terms.status();
+      if (terms->has_value()) {
+        row.terms = **terms;
+        return row;
+      }
       auto state = chess_play::deserializeTable(state_json);
       if (!state.ok()) return state.status();
       row.state.emplace(*std::move(state));

@@ -283,6 +283,17 @@ std::string RummyPhaseString(const rummy::TableState& table) {
   return "ended";
 }
 
+// A challenge's terms as the lobby lists them: "Standard starting
+// position · 3+2", a clock of whole minutes in minutes and any other in
+// seconds.
+std::string TermsLine(const ChessTerms& terms) {
+  const int64_t initial_s = terms.time_control.initial_ms / 1000;
+  const std::string initial =
+      initial_s % 60 == 0 ? absl::StrCat(initial_s / 60) : absl::StrCat(initial_s, "s");
+  return absl::StrCat(chess_play::ChessSetupName(terms.setup_id).value_or(terms.setup_id), " · ",
+                      initial, "+", terms.time_control.increment_ms / 1000);
+}
+
 // The games a chess table has finished; zero for anything else.
 std::size_t ChessGamesOf(const std::optional<HostedState>& state) {
   if (!state.has_value()) return 0;
@@ -603,6 +614,7 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"chess_commands", {{"command", "resign"}}},
       {"chess_commands", {{"command", "addBot"}}},
       {"chess_commands", {{"command", "watch"}}},
+      {"chess_commands", {{"command", "challenge"}}},
       {"chess_events", {{"event", "gameJoined"}}},
       {"chess_events", {{"event", "gameState"}}},
       {"chess_events", {{"event", "gameCreated"}}},
@@ -810,6 +822,7 @@ absl::Status GolfHub::RestoreFromStore() {
     entry.roster = row.roster;
     entry.version = row.version;
     if (row.state.has_value()) entry.state.emplace(*std::move(row.state));
+    entry.terms = row.terms;
     entry.chess_games_announced = ChessGamesOf(entry.state);
     for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
     rooms_[row.room_id].games.emplace(row.game_id, std::move(entry));
@@ -1081,8 +1094,11 @@ void GolfHub::StageWakeLocked(const std::string& room_id, Writes& writes) const 
 GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std::string& game_id,
                                            GameEntry& entry, const std::vector<std::string>& roster,
                                            const std::optional<HostedState>& state,
-                                           const std::vector<HubStore::StatsDelta>* finish) {
+                                           const std::vector<HubStore::StatsDelta>* finish,
+                                           const std::optional<ChessTerms>* terms) {
   const int64_t version = entry.version + 1;
+  const std::optional<ChessTerms> next_terms =
+      state.has_value() ? std::nullopt : (terms != nullptr ? *terms : entry.terms);
   // Whether the table was already over before this transition — a commit
   // loop that rebased onto another instance's finish holds its ended
   // state, and the retry then commits over the terminal row. That game
@@ -1102,6 +1118,7 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
   row.kind = entry.kind;
   row.roster = roster;
   if (state.has_value()) row.state.emplace(*state);
+  row.terms = next_terms;
   row.version = version;
   const auto landed = finish != nullptr ? store_->CommitGameFinish(row, *finish, instance_id_)
                                         : store_->CommitGameSave(row, instance_id_);
@@ -1122,9 +1139,11 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
     entry.roster = (*stored)->roster;
     entry.version = (*stored)->version;
     if ((*stored)->state.has_value()) entry.state.emplace(*std::move((*stored)->state));
+    entry.terms = (*stored)->terms;
     return Commit::kRebased;
   }
   entry.roster = roster;
+  entry.terms = next_terms;
   if (state.has_value()) entry.state.emplace(*state);
   entry.version = version;
   // The game-finished event (#1571), here and nowhere downstream: this
@@ -1358,6 +1377,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
       entry.roster = row.roster;
       entry.version = row.version;
       if (row.state.has_value()) entry.state.emplace(*row.state);
+      entry.terms = row.terms;
       entry.chess_games_announced = ChessGamesOf(entry.state);
       for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
       room.games.emplace(row.game_id, std::move(entry));
@@ -1389,6 +1409,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
     entry.roster = row.roster;
     entry.version = row.version;
     if (row.state.has_value()) entry.state.emplace(*row.state);
+    entry.terms = row.terms;
     for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
     if (over) StageGameOverLocked(room, row.game_id, outbox);
   }
@@ -2243,6 +2264,18 @@ void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& mov
     WatchChessMove(player_id, watch->gameId);
     return;
   }
+  if (const auto* challenge = move.as_challenge_or_null()) {
+    ChessTerms terms{std::string(chess_play::kDefaultChessSetup), kDefaultChessClock};
+    if (challenge->setupId.has_value()) terms.setup_id = *challenge->setupId;
+    if (challenge->initialSeconds.has_value()) {
+      terms.time_control.initial_ms = int64_t{*challenge->initialSeconds} * 1000;
+    }
+    if (challenge->incrementSeconds.has_value()) {
+      terms.time_control.increment_ms = int64_t{*challenge->incrementSeconds} * 1000;
+    }
+    ChallengeChessMove(player_id, std::move(terms));
+    return;
+  }
   if (LifecycleMove(player_id, move, GameKind::kChess)) return;
   if (const auto* play = move.as_play_or_null()) {
     TableEngineMove<chess_play::Table>(
@@ -2502,6 +2535,7 @@ void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game
   }
   Outbox outbox;
   std::optional<Refusal> refusal;
+  std::optional<ChessTerms> challenge;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     Room* room = FindRoomLocked(player_id);
@@ -2556,6 +2590,7 @@ void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game
           }
           StopWatchingLocked(player_id);
           player_game_[player_id] = game_id;
+          if (entry.roster.size() >= MaxSeatsOf(entry.kind)) challenge = entry.terms;
 
           outbox.To(player_id, JoinedEventLocked(game_id, entry, player_id));
           Outbox others;
@@ -2575,7 +2610,11 @@ void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game
   // Whatever the refresh staged is true either way; a refused join is
   // not a reason to drop it.
   Deliver(outbox);
-  if (refusal.has_value()) Reject(player_id, std::move(*refusal));
+  if (refusal.has_value()) {
+    Reject(player_id, std::move(*refusal));
+    return;
+  }
+  StartChallengeMove(player_id, challenge);
 }
 
 void GolfHub::StartGameMove(const std::string& player_id, chess_play::TimeControl time_control,
@@ -2976,6 +3015,7 @@ void GolfHub::SetChessBotEngine(ChessBotEngine engine) { chess_bot_engine_ = std
 void GolfHub::AddChessBotMove(const std::string& player_id, int elo) {
   Outbox outbox;
   std::optional<Refusal> refusal;
+  std::optional<ChessTerms> challenge;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     auto ref = FindGameLocked(player_id);
@@ -3016,6 +3056,7 @@ void GolfHub::AddChessBotMove(const std::string& player_id, int elo) {
           break;
         }
         seated = true;
+        challenge = entry.terms;
         StageGameViewsLocked(ref->game_id, entry, outbox);
         StageRoomStateLocked(ref->room_id, outbox);
         break;
@@ -3025,9 +3066,82 @@ void GolfHub::AddChessBotMove(const std::string& player_id, int elo) {
   }
   if (refusal.has_value()) {
     Reject(player_id, std::move(*refusal));
+    return;
+  }
+  Deliver(outbox);
+  StartChallengeMove(player_id, challenge);
+}
+
+void GolfHub::ChallengeChessMove(const std::string& player_id, ChessTerms terms) {
+  if (!chess_play::ChessSetupName(terms.setup_id).has_value()) {
+    Reject(player_id, RejectKind::kRules, absl::StrCat("unknown chess setup: ", terms.setup_id));
+    return;
+  }
+  Outbox outbox;
+  std::optional<Refusal> refusal;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    auto ref = FindGameLocked(player_id);
+    bool posted = false;
+    if (!ref.has_value()) {
+      refusal = Refusal{RejectKind::kState, "not in a game"};
+    } else {
+      const std::optional<ChessTerms> next = std::move(terms);
+      for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
+        GameEntry& entry = *ref->entry;
+        if (entry.kind != GameKind::kChess) {
+          refusal = Refusal{RejectKind::kState,
+                            absl::StrCat("that table plays ", GameKindName(entry.kind))};
+          break;
+        }
+        if (entry.started()) {
+          refusal = Refusal{RejectKind::kState, "game already started"};
+          break;
+        }
+        if (entry.roster.size() >= MaxSeatsOf(entry.kind)) {
+          refusal = Refusal{RejectKind::kState, "the table is full"};
+          break;
+        }
+        const Commit commit = CommitEntryLocked(ref->room_id, ref->game_id, entry, entry.roster,
+                                                std::nullopt, nullptr, &next);
+        if (commit == Commit::kRebased) continue;
+        if (commit == Commit::kGone) {
+          DropGameLocked(*ref, outbox);
+          StageRoomStateLocked(ref->room_id, outbox);
+          refusal = Refusal{RejectKind::kState, "game no longer exists"};
+          break;
+        }
+        if (commit == Commit::kUnavailable) {
+          refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
+          break;
+        }
+        posted = true;
+        StageGameViewsLocked(ref->game_id, entry, outbox);
+        StageRoomStateLocked(ref->room_id, outbox);
+        break;
+      }
+      if (!refusal.has_value() && !posted) {
+        refusal = Refusal{RejectKind::kState, "game changed; try again"};
+      }
+    }
+  }
+  if (refusal.has_value()) {
+    Reject(player_id, std::move(*refusal));
   } else {
     Deliver(outbox);
   }
+}
+
+void GolfHub::StartChallengeMove(const std::string& player_id,
+                                 const std::optional<ChessTerms>& terms) {
+  if (!terms.has_value()) return;
+  // The opening is drawn off the lock, as a startGame's is.
+  const auto setup = chess_opener_(terms->setup_id);
+  if (!setup.ok()) {
+    Reject(player_id, RejectKind::kRules, std::string(setup.status().message()));
+    return;
+  }
+  StartGameMove(player_id, terms->time_control, *setup);
 }
 
 void GolfHub::WatchChessMove(const std::string& player_id, const std::string& game_id) {
@@ -3690,6 +3804,7 @@ moonbase::games::RoomState GolfHub::RoomStateLocked(const std::string& room_id,
     summary.game = std::string(GameKindName(entry.kind));
     summary.status = entry.started() ? PhaseStringOf(*entry.state) : "waiting";
     summary.playerCount = static_cast<int>(entry.roster.size());
+    if (entry.terms.has_value()) summary.terms = TermsLine(*entry.terms);
     state.games.push_back(std::move(summary));
   }
   return state;
@@ -3780,6 +3895,14 @@ moonbase::games::ChessView GolfHub::ChessViewLocked(const std::string& game_id,
   }
   if (!entry.started()) {
     view.phase = "waiting";
+    if (entry.terms.has_value()) {
+      moonbase::games::ChessTerms terms;
+      terms.setupId = entry.terms->setup_id;
+      terms.setupName = std::string(chess_play::ChessSetupName(entry.terms->setup_id).value_or(""));
+      terms.initialSeconds = static_cast<int>(entry.terms->time_control.initial_ms / 1000);
+      terms.incrementSeconds = static_cast<int>(entry.terms->time_control.increment_ms / 1000);
+      view.terms = std::move(terms);
+    }
     for (const std::string& roster_id : entry.roster) {
       moonbase::games::ChessPlayer player;
       player.playerId = roster_id;

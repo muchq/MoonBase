@@ -35,6 +35,39 @@ union ChessMove {
     resign: ChessResign
     addBot: ChessAddBot
     watch: ChessWatch
+    challenge: ChessChallenge
+}
+
+/// Posts the terms a waiting table plays on (#1633). Only the table's one
+/// seat may, before anyone joins; posting again replaces them. The room's
+/// GameSummary.terms and every view show them, and the seat that fills the
+/// table, a player's or a bot's, starts the game on them. Absent fields
+/// take startGame's defaults.
+structure ChessChallenge {
+    @length(min: 1, max: 32)
+    setupId: String
+
+    @range(min: 30, max: 1800)
+    initialSeconds: Integer
+
+    @range(min: 0, max: 30)
+    incrementSeconds: Integer
+}
+
+/// A challenge's terms, as ChessChallenge posted them with the defaults
+/// filled in.
+structure ChessTerms {
+    @required
+    setupId: String
+
+    @required
+    setupName: String
+
+    @required
+    initialSeconds: Integer
+
+    @required
+    incrementSeconds: Integer
 }
 
 /// Watches a chess table in the room, in any phase, from no seat (#1633):
@@ -143,6 +176,9 @@ structure ChessView {
     /// The setup selected when ChessStartGame.setupId is absent.
     @required
     defaultSetupId: String
+
+    /// The posted challenge's terms; present only while waiting on one.
+    terms: ChessTerms
 
     /// waiting | playing | ended | closed: ended between games, closed
     /// once a seat left the table.

@@ -185,6 +185,52 @@ TEST_F(PgHubStoreTest, ChessRowsKeepTheirKindAndDecodeWithChessSerde) {
             chess_play::serializeTable(*moved));
 }
 
+// A challenge's terms (#1633) ride the state column while the table
+// waits, and go when the game starts: the started row is the engine's
+// alone.
+TEST_F(PgHubStoreTest, ChallengeTermsRideTheStateColumnUntilTheStart) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  PgHubStore::GameRow waiting{"R1", "K1", {"alice"}, std::nullopt, 1, games_hub::GameKind::kChess};
+  waiting.terms = games_hub::ChessTerms{"kpk-opposition", {60'000, 1'000}};
+  ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
+  auto reread = store_->LoadGame("R1", "K1");
+  ASSERT_TRUE(reread.ok() && reread->has_value());
+  EXPECT_FALSE((*reread)->state.has_value());
+  ASSERT_TRUE((*reread)->terms.has_value());
+  EXPECT_EQ((*reread)->terms->setup_id, "kpk-opposition");
+  EXPECT_EQ((*reread)->terms->time_control, (chess_play::TimeControl{60'000, 1'000}));
+
+  auto opened =
+      chess_play::Table::open({"alice", "bob"}, "kpk", {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0},
+                              {60'000, 1'000}, 1'000, "kpk-opposition");
+  ASSERT_TRUE(opened.ok()) << opened.status();
+  PgHubStore::GameRow started{"R1",
+                              "K1",
+                              {"alice", "bob"},
+                              games_hub::HostedState(*opened),
+                              2,
+                              games_hub::GameKind::kChess};
+  started.terms = waiting.terms;
+  ASSERT_TRUE(*store_->CommitGameSave(started, ""));
+  auto played = store_->LoadGame("R1", "K1");
+  ASSERT_TRUE(played.ok() && played->has_value());
+  EXPECT_TRUE((*played)->state.has_value());
+  EXPECT_FALSE((*played)->terms.has_value());
+}
+
+// The control: a waiting chess table with no terms stores no state.
+TEST_F(PgHubStoreTest, AWaitingTableWithNoTermsStoresNoState) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  PgHubStore::GameRow waiting{"R1", "K1", {"alice"}, std::nullopt, 1, games_hub::GameKind::kChess};
+  ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
+  auto reread = store_->LoadGame("R1", "K1");
+  ASSERT_TRUE(reread.ok() && reread->has_value());
+  EXPECT_FALSE((*reread)->state.has_value());
+  EXPECT_FALSE((*reread)->terms.has_value());
+}
+
 // A rummy table (#245) is the third engine behind the same rows: its kind
 // is stored, and a table mid-deal (#1609) — melds, the card taken from
 // the discard, the last move — decodes with the table's serde byte for

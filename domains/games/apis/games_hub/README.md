@@ -432,6 +432,16 @@ the views that show it, however it learned of the end.
 The view carries each side's time as of when it was built, and the
 client runs the side to move's down from there.
 
+A table's one seat may post a `challenge` before anyone joins (#1633): a
+setup and clock, absent fields taking `startGame`'s defaults. The view
+carries them as `terms`, and the room's `GameSummary.terms` lists them
+as one line ("Standard starting position · 3+2"); posting again replaces
+them. The seat that fills the table — a join, or `addBot` — starts the
+game on them, as its own `startGame` right after the seat commits. The
+terms ride the row's `state` column, NULL until the start otherwise, as
+`{"terms":{...}}`, so a sibling reads them back and starts the game the
+same way; the started row is the engine's alone.
+
 Any member at no table may `watch` a chess table in its room, in any
 phase (#1633). The answer is a `gameState`; from then on the watcher hears
 every `gameState` and `gameEnded` the seats do, a sibling's commits
