@@ -33,6 +33,10 @@ Poller::Run MakeRun(PlatformArchives archives, PlatformRosters rosters, SinkFact
   };
 }
 
+absl::flat_hash_map<std::string, int> PlatformLimits() {
+  return {{"LICHESS", 1}, {"MUCHQ_COM", 1}};
+}
+
 std::string OwnerId(std::string_view host, int pid) {
   constexpr int kMaxHost = 40;
   return absl::StrCat("cpp/", host.substr(0, std::min<size_t>(host.size(), kMaxHost)), "/", pid);

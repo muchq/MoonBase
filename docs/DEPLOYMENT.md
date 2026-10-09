@@ -190,6 +190,7 @@ flowchart LR
   games_hub -->|http| chess_engine
   one_d4 -->|sql| shared_postgres
   one_d4_worker -->|sql| shared_postgres
+  one_d4_worker -->|http| games_hub
   iili -->|sql| shared_postgres
   stats -->|sql| shared_postgres
 
@@ -289,6 +290,7 @@ matcher (#1468).
 | --- | --- | --- |
 | POST | `/games/v2/session` | games_hub |
 | any | `/games/v2/play` | games_hub — websocket upgrade |
+| GET | `/games/v2/chess.pgn`, `/games/v2/chess/*` | games_hub — the public chess feed and one game of it |
 | POST | `/portrait/v1/trace` | portrait |
 | GET | `/metrics/v1/*` | prom_proxy |
 | POST | `/mithril/v1/wordchain` | mithril |

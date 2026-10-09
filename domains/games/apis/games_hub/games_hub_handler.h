@@ -35,6 +35,11 @@ class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
       const moonbase::games::ExportChessGamesInput& input,
       const opal::server::RequestContext& context) override;
 
+  /// One published game, for its page (#1637).
+  opal::Outcome<moonbase::games::GetChessGameOutput> GetChessGame(
+      const moonbase::games::GetChessGameInput& input,
+      const opal::server::RequestContext& context) override;
+
   opal::eventstream::StreamTask Play(moonbase::games::PlayInput input,
                                      moonbase::games::PlayAsyncServerStream& stream) override;
 

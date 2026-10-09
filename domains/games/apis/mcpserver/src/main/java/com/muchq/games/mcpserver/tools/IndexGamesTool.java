@@ -21,15 +21,15 @@ public class IndexGamesTool {
       name = "index_chess_games",
       description =
           "Index a chess player's games for tactical motif detection and ChessQL queries. Fetches"
-              + " games from chess.com or lichess, replays positions, and detects pins, forks,"
-              + " skewers, discovered attacks, checks, checkmates, promotions, and more."
-              + " A single-month request is waited on for up to a minute; a multi-month one is"
-              + " not waited on at all. Either can come back still running, so follow any"
-              + " non-terminal status with index_status. Once indexed, use"
-              + " query_chess_games and aggregate_chess_games.")
+              + " games from chess.com, lichess or muchq.com, replays positions, and detects pins,"
+              + " forks, skewers, discovered attacks, checks, checkmates, promotions, and more. A"
+              + " single-month request is waited on for up to a minute; a multi-month one is not"
+              + " waited on at all. Either can come back still running, so follow any non-terminal"
+              + " status with index_status. Once indexed, use query_chess_games and"
+              + " aggregate_chess_games.")
   public CallToolResult indexChessGames(
-      @ToolArg(description = "Chess platform username") String username,
-      @ToolArg(description = "Chess platform: chess.com or lichess") String platform,
+      @ToolArg(description = "Chess platform username, or muchq.com player id") String username,
+      @ToolArg(description = "Chess platform: chess.com, lichess or muchq.com") String platform,
       @ToolArg(name = "start_month", description = "Start month in YYYY-MM format (e.g. 2026-03)")
           String startMonth,
       @ToolArg(name = "end_month", description = "End month in YYYY-MM format (e.g. 2026-03)")

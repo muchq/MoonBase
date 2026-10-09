@@ -579,6 +579,9 @@ services:
       # fails, saying the server is not configured for the platform. See
       # deploy/consolidated/README.md.
       - ONE_D4_LICHESS_TOKEN=${ONE_D4_LICHESS_TOKEN:-}
+      # MUCHQ_COM requests read games_hub's public chess feed (#1637), over
+      # the compose network.
+      - ONE_D4_GAMES_HUB_URL=http://games_hub:8089
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=one_d4_worker
       - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4_worker,service.version=${ONE_D4_WORKER_SHA:-${DEPLOY_SHA:-latest}}

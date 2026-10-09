@@ -44,6 +44,8 @@ var services = []siteServices{
 		"/1d4/v1/index/*":       "one_d4",
 		"/1d4/v1/query":         "one_d4",
 		"/deja/v1/*":            "deja",
+		"/games/v2/chess.pgn":   "games_hub",
+		"/games/v2/chess/*":     "games_hub",
 		"/games/v2/play":        "games_hub",
 		"/games/v2/session":     "games_hub",
 		"/iili/v1/r/*":          "iili",

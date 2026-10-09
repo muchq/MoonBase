@@ -69,7 +69,7 @@ class HttpMetricsSink {
 /// without the gateway names whatever caller it claims. server_pal's
 /// INTERNAL_CALLERS is the same list, pinned by
 /// //domains/platform/libs/otel_contract.
-inline constexpr std::string_view kInternalCallers[] = {"games_hub", "mcpserver"};
+inline constexpr std::string_view kInternalCallers[] = {"games_hub", "mcpserver", "one_d4_worker"};
 inline constexpr char kEdgeCaller[] = "edge";
 inline constexpr char kOtherCaller[] = "other";
 std::string CallerOf(const opal::http::Headers& headers);

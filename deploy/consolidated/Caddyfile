@@ -137,6 +137,17 @@ api.muchq.com {
 		path /games/v2/play
 	}
 
+	# The public chess feed and one game of it (#1637): plain GETs.
+	@get_chess_feed {
+		method GET
+		path /games/v2/chess.pgn
+	}
+
+	@get_chess_game {
+		method GET
+		path /games/v2/chess/*
+	}
+
 	@options {
 		method OPTIONS
 	}
@@ -178,6 +189,12 @@ api.muchq.com {
 		reverse_proxy games_hub:8089
 	}
 	handle @ws_play_v2 {
+		reverse_proxy games_hub:8089
+	}
+	handle @get_chess_feed {
+		reverse_proxy games_hub:8089
+	}
+	handle @get_chess_game {
 		reverse_proxy games_hub:8089
 	}
 	handle @post_portrait {

@@ -7,6 +7,8 @@ api.muchq.com	/deja/v1/state	/deja/v1/*
 api.muchq.com	/deja/v1/next	/deja/v1/*
 api.muchq.com	/games/v2/session	/games/v2/session
 api.muchq.com	/games/v2/play	/games/v2/play
+api.muchq.com	/games/v2/chess.pgn	/games/v2/chess.pgn
+api.muchq.com	/games/v2/chess/42	/games/v2/chess/*
 api.muchq.com	/iili/v1/r/abc	/iili/v1/r/*
 api.muchq.com	/iili/v1/shorten	/iili/v1/shorten
 api.muchq.com	/stats/v1/summary	/stats/v1/*

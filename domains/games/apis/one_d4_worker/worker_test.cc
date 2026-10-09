@@ -118,6 +118,14 @@ Claim AClaim(std::string id) {
 
 // ---- Platform dispatch ----
 
+// One run at a time per process for an archive that serialises its reads:
+// a second claim would park on the archive's lock holding a lease and two
+// Postgres connections. chess.com tolerates concurrency and is not capped.
+TEST(PlatformLimits, CapsTheArchivesThatReadOneAtATime) {
+  EXPECT_THAT(PlatformLimits(), ::testing::UnorderedElementsAre(::testing::Pair("LICHESS", 1),
+                                                                ::testing::Pair("MUCHQ_COM", 1)));
+}
+
 TEST(MakeRun, SendsAJobToTheArchiveForItsPlatform) {
   FakeArchive chess_com;
   chess_com.months["2026-01"] = {AGame("c1")};

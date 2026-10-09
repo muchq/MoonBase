@@ -3314,6 +3314,16 @@ absl::StatusOr<std::string> GolfHub::ExportChessPgn(int64_t after_archive_id) {
   return pgn;
 }
 
+absl::StatusOr<std::optional<moonbase::games::ChessReview>> GolfHub::PublishedChessReview(
+    int64_t archive_id) {
+  if (archive_id <= 0) return std::nullopt;  // ids count from 1
+  // The feed's first game past the one before: this one, if the feed has it.
+  auto games = store_->LoadPublishedChess(archive_id - 1, 1);
+  if (!games.ok()) return games.status();
+  if (games->empty() || games->front().archive_id != archive_id) return std::nullopt;
+  return ChessReviewOf(games->front());
+}
+
 std::optional<std::string> GolfHub::StopWatchingLocked(const std::string& player_id) {
   Room* room = FindRoomLocked(player_id);
   if (room == nullptr) return std::nullopt;

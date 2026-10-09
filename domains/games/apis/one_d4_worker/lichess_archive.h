@@ -9,6 +9,7 @@
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
 #include "domains/games/apis/one_d4_worker/archive.h"
+#include "domains/games/apis/one_d4_worker/pgn_games.h"
 #include "domains/games/libs/lichess_cpp/client.h"
 
 namespace one_d4_worker {
@@ -41,15 +42,6 @@ class LichessArchive : public ArchiveSource {
   const lichess::Client& client_;
   absl::Mutex one_at_a_time_;
 };
-
-/// Splits concatenated PGN into one string per game, each holding the text
-/// it arrived as.
-///
-/// Exposed for testing, and separate because the parser hands back tags and
-/// moves rather than source: the row stores the PGN itself, so something has
-/// to keep the bytes. Games are cut at a line beginning "[Event ", the one
-/// tag every Lichess game opens with.
-std::vector<std::string_view> SplitPgnGames(std::string_view pgn);
 
 }  // namespace one_d4_worker
 

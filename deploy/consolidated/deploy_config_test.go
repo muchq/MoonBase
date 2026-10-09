@@ -936,6 +936,20 @@ func TestTheWorkerCarriesTheLichessTokenAndToleratesItsAbsence(t *testing.T) {
 	}
 }
 
+// MUCHQ_COM requests read games_hub's public chess feed (#1637). The API
+// accepts them whatever the worker was given, and a worker without the URL
+// only warns at startup, so a missing line fails every such request at run
+// time instead of here.
+func TestTheWorkerIsPointedAtGamesHub(t *testing.T) {
+	block := serviceBlock(t, "compose.yaml", "one_d4_worker")
+
+	if !strings.Contains(block, "ONE_D4_GAMES_HUB_URL=http://games_hub:8089") {
+		t.Errorf("one_d4_worker does not name games_hub as the source of MUCHQ_COM games. "+
+			"Without it the worker registers no archive for the platform and every such "+
+			"request fails (#1637). Block was:\n%s", block)
+	}
+}
+
 func TestMcpserverIsPointedAtOneD4(t *testing.T) {
 	block := serviceBlock(t, "compose.yaml", "mcpserver")
 
@@ -1153,6 +1167,9 @@ var publicRoutes = []struct {
 	// browser makes on its own terms.
 	{"@post_golf_v2_session", []string{"method POST", "path /games/v2/session"}, "games_hub:8089"},
 	{"@ws_play_v2", []string{"path /games/v2/play"}, "games_hub:8089"},
+	// The public chess feed and one game of it (#1637), read-only.
+	{"@get_chess_feed", []string{"method GET", "path /games/v2/chess.pgn"}, "games_hub:8089"},
+	{"@get_chess_game", []string{"method GET", "path /games/v2/chess/*"}, "games_hub:8089"},
 	// The 1d4.net stats tab (#1465) reads its own service's aggregates on
 	// api.1d4.net, the host whose CORS grant covers the app — only the
 	// one_d4 prefix, since the rest of the stats API is muchq.com's.

@@ -268,7 +268,7 @@ TEST(MakeHttpMetricsSinkTest, DeclaresEveryCallerAtZero) {
   const auto sink = aura::MakeHttpMetricsSink(
       std::make_shared<futility::otel::HttpMetricsManager>("svc", std::move(recorder)));
 
-  for (const std::string caller : {"edge", "games_hub", "mcpserver", "other"}) {
+  for (const std::string caller : {"edge", "games_hub", "mcpserver", "one_d4_worker", "other"}) {
     EXPECT_TRUE(captured->Declared("http_server_requests_by_caller",
                                    {{"service_name", "svc"}, {"caller", caller}}))
         << caller;

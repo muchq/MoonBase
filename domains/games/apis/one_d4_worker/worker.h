@@ -62,6 +62,13 @@ using PlatformRosters = absl::flat_hash_map<std::string, TitleRoster*>;
 Poller::Run MakeRun(PlatformArchives archives, PlatformRosters rosters, SinkFactory make_sink,
                     RunObserver& observer, std::function<bool()> stopping);
 
+/// How many runs at once this process admits per platform, for
+/// PlatformAdmission. Only platforms whose archive reads one at a time are
+/// capped: LICHESS, which refuses concurrent exports, and MUCHQ_COM, whose
+/// archive holds its lock across a feed read. A claim past the cap would
+/// park on that lock holding a lease and two Postgres connections.
+absl::flat_hash_map<std::string, int> PlatformLimits();
+
 /// Names this process in the owner column, for whoever reads it while
 /// debugging a stuck range.
 ///

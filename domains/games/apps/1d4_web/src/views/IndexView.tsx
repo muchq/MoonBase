@@ -73,11 +73,14 @@ export default function IndexView() {
     },
   });
 
+  const chosen = PLATFORMS.find((option) => option.value === platform) ?? PLATFORMS[0];
+  const playerNoun = chosen.player;
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const p = player.trim();
     if (!p) {
-      setMessage({ text: 'Please enter a username.', type: 'error' });
+      setMessage({ text: `Please enter a ${playerNoun.toLowerCase()}.`, type: 'error' });
       return;
     }
     setMessage(null);
@@ -106,11 +109,11 @@ export default function IndexView() {
         <form onSubmit={handleSubmit} className="enqueue-form">
           <div className="enqueue-form-row">
             <div className="form-group enqueue-username">
-              <label htmlFor="player">Username</label>
+              <label htmlFor="player">{playerNoun}</label>
               <input
                 id="player"
                 type="text"
-                placeholder="e.g. hikaru"
+                placeholder={`e.g. ${chosen.example}`}
                 value={player}
                 onChange={(e) => setPlayer(e.target.value)}
                 required

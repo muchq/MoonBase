@@ -9,12 +9,13 @@
 
 namespace games_hub {
 
-moonbase::games::ChessGameSummary ChessSummaryOf(const HubStore::ChessGameRow& row) {
-  const chess_play::GameState& game = row.game;
+namespace {
+
+// What a game says of itself, wherever it was archived.
+moonbase::games::ChessGameSummary SummaryOf(int64_t archive_id, const chess_play::GameState& game,
+                                            int64_t ended_at_ms, bool published) {
   moonbase::games::ChessGameSummary summary;
-  summary.archiveId = row.archive_id;
-  summary.gameId = row.game_id;
-  summary.ordinal = row.ordinal;
+  summary.archiveId = archive_id;
   summary.white = game.players().at(game.seatOf(chess_play::Color::kWhite));
   summary.black = game.players().at(game.seatOf(chess_play::Color::kBlack));
   summary.result = WireChessResult(chess_play::ScoreOf(game));
@@ -22,8 +23,30 @@ moonbase::games::ChessGameSummary ChessSummaryOf(const HubStore::ChessGameRow& r
   summary.setupName =
       std::string(chess_play::ChessSetupName(game.setupId()).value_or(game.setupId()));
   summary.plies = static_cast<int>(game.moves().size());
-  summary.endedAtMs = row.ended_at_ms;
-  summary.published = row.published;
+  summary.endedAtMs = ended_at_ms;
+  summary.published = published;
+  return summary;
+}
+
+moonbase::games::ChessReview ReviewOf(moonbase::games::ChessGameSummary summary,
+                                      const chess_play::GameState& game) {
+  chess_play::Replayed replayed = chess_play::ReplayGame(game);
+  moonbase::games::ChessReview review;
+  review.pgn = ChessPgnOf(summary.archiveId, game, summary.endedAtMs);
+  review.summary = std::move(summary);
+  review.moves = game.moves();
+  review.san = std::move(replayed.san);
+  review.fens = std::move(replayed.fens);
+  return review;
+}
+
+}  // namespace
+
+moonbase::games::ChessGameSummary ChessSummaryOf(const HubStore::ChessGameRow& row) {
+  moonbase::games::ChessGameSummary summary =
+      SummaryOf(row.archive_id, row.game, row.ended_at_ms, row.published);
+  summary.gameId = row.game_id;
+  summary.ordinal = row.ordinal;
   return summary;
 }
 
@@ -34,14 +57,11 @@ std::string ChessPgnOf(int64_t archive_id, const chess_play::GameState& game, in
 }
 
 moonbase::games::ChessReview ChessReviewOf(const HubStore::ChessGameRow& row) {
-  chess_play::Replayed replayed = chess_play::ReplayGame(row.game);
-  moonbase::games::ChessReview review;
-  review.summary = ChessSummaryOf(row);
-  review.moves = row.game.moves();
-  review.san = std::move(replayed.san);
-  review.fens = std::move(replayed.fens);
-  review.pgn = ChessPgnOf(row.archive_id, row.game, row.ended_at_ms);
-  return review;
+  return ReviewOf(ChessSummaryOf(row), row.game);
+}
+
+moonbase::games::ChessReview ChessReviewOf(const HubStore::PublishedChessGame& game) {
+  return ReviewOf(SummaryOf(game.archive_id, game.game, game.ended_at_ms, true), game.game);
 }
 
 }  // namespace games_hub

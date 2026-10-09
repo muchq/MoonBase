@@ -159,7 +159,8 @@ public class IndexRequestService {
    * run rather than completing it empty (#1360), which spends an attempt on work nobody could do.
    * Accepting one here that {@code worker_main.cc} does not register is how that happens.
    */
-  private static final Set<String> SUPPORTED_PLATFORMS = Set.of("CHESS_COM", "LICHESS");
+  private static final Set<String> SUPPORTED_PLATFORMS =
+      Set.of("CHESS_COM", "LICHESS", "MUCHQ_COM");
 
   /**
    * The canonical spelling of a platform this service will index, or a 400. What it returns is what
