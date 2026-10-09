@@ -82,6 +82,38 @@ absl::Status RunMigrations(pg::Client& db) {
       // The sweep's range scan.
       R"sql(CREATE INDEX IF NOT EXISTS idx_rooms_last_active_at
           ON rooms (last_active_at))sql",
+      // A room's finished chess games (#1637), written by the commit that
+      // ends each one. game is the finished game's chess_play serde.
+      // published is the room's flag when it ended. A table code
+      // can be minted again within a room, so (game_id, ordinal) alone
+      // does not name a game: the unique index adds the game itself, and
+      // every later commit carrying the same ended game conflicts on it.
+      R"sql(ALTER TABLE rooms
+          ADD COLUMN IF NOT EXISTS chess_published boolean NOT NULL DEFAULT false)sql",
+      R"sql(CREATE TABLE IF NOT EXISTS chess_games (
+          archive_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+          room_id    text NOT NULL REFERENCES rooms (room_id) ON DELETE CASCADE,
+          game_id    text NOT NULL,
+          ordinal    integer NOT NULL,
+          game       jsonb NOT NULL,
+          published  boolean NOT NULL,
+          ended_at   timestamptz NOT NULL DEFAULT clock_timestamp()
+      ))sql",
+      R"sql(CREATE UNIQUE INDEX IF NOT EXISTS idx_chess_games_once
+          ON chess_games (room_id, game_id, ordinal, md5(game::text)))sql",
+      R"sql(CREATE INDEX IF NOT EXISTS idx_chess_games_room
+          ON chess_games (room_id, archive_id))sql",
+      // The public feed: each game archived while its room was published,
+      // copied by the same statement under the same id. No room and no
+      // table code, so it neither names a room to join nor dies with one;
+      // the heartbeat sweeps it by age.
+      R"sql(CREATE TABLE IF NOT EXISTS published_chess_games (
+          archive_id bigint PRIMARY KEY,
+          game       jsonb NOT NULL,
+          ended_at   timestamptz NOT NULL
+      ))sql",
+      R"sql(CREATE INDEX IF NOT EXISTS idx_published_chess_games_ended
+          ON published_chess_games (ended_at))sql",
   };
   for (const char* statement : kStatements) {
     if (auto result = db.Exec(statement); !result.ok()) return result.status();

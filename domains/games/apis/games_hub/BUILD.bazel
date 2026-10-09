@@ -83,6 +83,23 @@ cc_library(
     ],
 )
 
+# A room's finished chess games on the wire (#1637): summaries, reviews
+# and PGN.
+cc_library(
+    name = "chess_archive",
+    srcs = ["chess_archive.cc"],
+    hdrs = ["chess_archive.h"],
+    deps = [
+        ":chess_results",
+        ":games_hub_smithy_server",
+        ":hub_store",
+        "//domains/games/libs/chess_play:game_state",
+        "//domains/games/libs/chess_play:pgn",
+        "//domains/games/libs/chess_play:table",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
 cc_test(
     name = "chess_results_test",
     size = "small",
@@ -247,7 +264,12 @@ cc_library(
         ":hosted_game",
         ":surface",
         "//domains/games/libs/cards/golf:game_state",
+        "//domains/games/libs/chess_play:game_state",
+        "//domains/games/libs/chess_play:game_state_serde",
+        "//domains/games/libs/chess_play:table",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
     ],
 )
 
@@ -256,10 +278,14 @@ cc_test(
     size = "small",
     srcs = ["hub_store_test.cc"],
     deps = [
+        ":hosted_game",
         ":hub_store",
         ":surface",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards/golf:game_state",
+        "//domains/games/libs/chess_play:game_state",
+        "//domains/games/libs/chess_play:table",
+        "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
     ],
 )
@@ -472,6 +498,7 @@ cc_test(
         "//domains/games/libs/chess_play:table_serde",
         "//domains/platform/libs/pg",
         "//domains/platform/libs/pg:listener",
+        "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
         "@nlohmann_json//:json",
     ],
@@ -686,6 +713,7 @@ cc_library(
     ],
     deps = [
         ":chat_store",
+        ":chess_archive",
         ":chess_bots",
         ":chess_results",
         ":game_events",
@@ -965,6 +993,8 @@ cc_test(
         ":id_generator",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/chess_cpp:parsed_game",
+        "//domains/games/libs/chess_cpp:pgn",
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:table",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",

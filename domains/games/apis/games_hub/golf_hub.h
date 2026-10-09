@@ -305,10 +305,14 @@ class GolfHub final {
   void StampHeldRooms();
 
   /// Deletes the rooms no instance has stamped for kRoomStaleAfter — the
-  /// ones only a crashed instance held. Every instance sweeps; the delete
-  /// is idempotent, and its wake drops each swept room wherever it is
-  /// still held.
+  /// ones only a crashed instance held — and the published chess games
+  /// older than kPublishedChessKept. Every instance sweeps; the deletes
+  /// are idempotent, and the room sweep's wake drops each swept room
+  /// wherever it is still held.
   void SweepStaleRooms();
+
+  /// How long a published chess game stays in the public feed (#1637).
+  static constexpr std::chrono::hours kPublishedChessKept{30 * 24};
 
   /// How often the heartbeat stamps and sweeps.
   static constexpr std::chrono::milliseconds kRoomHeartbeat{60000};
@@ -372,6 +376,11 @@ class GolfHub final {
   /// for that game after kChessBotRetry, the bot's clock running
   /// meanwhile. Returns how many moves it played.
   int PlayChessBotsOnce();
+
+  /// The public chess feed past `after_archive_id` as one PGN archive, at
+  /// most kChessHistoryLimit games (#1637). Reads the store only, so any
+  /// instance answers.
+  absl::StatusOr<std::string> ExportChessPgn(int64_t after_archive_id);
 
   /// Starts PlayChessBotsOnce on a thread every `interval` until the hub
   /// is destroyed. A second call changes nothing.
@@ -455,6 +464,9 @@ class GolfHub final {
     /// predate local truth, and reconciling them would roll the room
     /// back to the moment of the read.
     uint64_t revision = 0;
+    /// Whether the room publishes its chess games (#1637), as its row
+    /// last said; a reconcile that finds it changed tells the members.
+    bool chess_published = false;
   };
 
   /// Events staged under the lock, delivered outside it. Delivery
@@ -509,6 +521,16 @@ class GolfHub final {
   void StartChallengeMove(const std::string& player_id, const std::optional<ChessTerms>& terms);
   /// `player_id` watches a chess table in its room from no seat (#1633).
   void WatchChessMove(const std::string& player_id, const std::string& game_id);
+  /// The room's finished chess games, its review of one, and publishing
+  /// them (#1637). The archive is read off the hub's lock.
+  void ChessHistoryMove(const std::string& player_id);
+  void ChessReviewMove(const std::string& player_id,
+                       const moonbase::games::ChessReviewRequest& review);
+  void PublishChessMove(const std::string& player_id, bool published);
+  /// Tells every member of `room` held here that its games are published
+  /// or withdrawn, by `by` when this instance knows who.
+  void StagePublishedLocked(const Room& room, bool published, const std::optional<std::string>& by,
+                            Outbox& outbox) const;
   /// Out of whatever table the player watches, in its room; callers hold
   /// mu_. The table watched, if any. Every way of sitting down or leaving
   /// the room comes through here first.

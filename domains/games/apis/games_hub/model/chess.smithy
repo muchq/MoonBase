@@ -36,6 +36,36 @@ union ChessMove {
     addBot: ChessAddBot
     watch: ChessWatch
     challenge: ChessStartGame
+    history: ChessHistoryRequest
+    review: ChessReviewRequest
+    publish: ChessPublish
+}
+
+/// The room's finished games, newest first: answered with a history.
+/// Any member, seated, watching or neither.
+structure ChessHistoryRequest {}
+
+/// One finished game from the room's history, answered with a review:
+/// by its archiveId, or by its table and line on that table's score sheet
+/// (ChessScoreLine's position, from 1), which names that table's newest
+/// such game. Exactly one of the two.
+structure ChessReviewRequest {
+    archiveId: Long
+
+    gameId: String
+
+    @range(min: 1)
+    ordinal: Integer
+}
+
+/// Publishes the room's chess games, or stops: any member may, and every
+/// member hears published. A game that ends while its room is published
+/// joins the public feed, GET /games/v2/chess.pgn, which names no room and
+/// keeps it for 30 days, room or no room. Stopping keeps the next games
+/// private; those already out stay out.
+structure ChessPublish {
+    @required
+    published: Boolean
 }
 
 /// A challenge's terms, as `challenge` posted them with the defaults filled
@@ -133,6 +163,101 @@ union ChessUpdate {
     turnChanged: TurnChanged
     gameEnded: ChessGameEnded
     gameLeft: GameLeft
+    history: ChessHistory
+    review: ChessReview
+    published: ChessPublished
+}
+
+/// The room's finished games, newest first, at most 100. The room's
+/// history lives as long as the room does.
+structure ChessHistory {
+    /// Whether the room publishes its games now.
+    @required
+    published: Boolean
+
+    @required
+    games: ChessGameSummaries
+}
+
+list ChessGameSummaries {
+    member: ChessGameSummary
+}
+
+/// One finished game, without its moves.
+structure ChessGameSummary {
+    /// The game's identity: what a review names it by, and its place in
+    /// the public feed if it is there.
+    @required
+    archiveId: Long
+
+    @required
+    gameId: String
+
+    /// The game's position on its table's scoreSheet, from 1.
+    @required
+    ordinal: Integer
+
+    @required
+    white: String
+
+    @required
+    black: String
+
+    @required
+    result: ChessResult
+
+    @required
+    setupId: String
+
+    @required
+    setupName: String
+
+    /// Half-moves played.
+    @required
+    plies: Integer
+
+    /// When it ended, epoch milliseconds.
+    @required
+    endedAtMs: Long
+
+    /// Whether it ended while the room was published.
+    @required
+    published: Boolean
+}
+
+/// One finished game, move by move.
+structure ChessReview {
+    @required
+    summary: ChessGameSummary
+
+    /// Every move in UCI, as ChessView.moves.
+    @required
+    moves: ChessMoves
+
+    /// The same moves in SAN.
+    @required
+    san: ChessMoves
+
+    /// Every position as FEN, the start first: one more than the moves.
+    @required
+    fens: ChessFens
+
+    /// The game as export-format PGN.
+    @required
+    pgn: String
+}
+
+list ChessFens {
+    member: String
+}
+
+/// The room's games were published or withdrawn. `by` names the member
+/// who did it; absent when another instance relays it.
+structure ChessPublished {
+    @required
+    published: Boolean
+
+    by: String
 }
 
 structure ChessGameJoined {

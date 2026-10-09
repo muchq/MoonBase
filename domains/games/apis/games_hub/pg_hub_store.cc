@@ -6,10 +6,12 @@
 
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/libs/cards/castle/game_state_serde.h"
 #include "domains/games/libs/cards/golf/game_state_serde.h"
 #include "domains/games/libs/cards/rummy/table_serde.h"
+#include "domains/games/libs/chess_play/game_state_serde.h"
 #include "domains/games/libs/chess_play/table_serde.h"
 
 namespace games_hub {
@@ -21,6 +23,8 @@ constexpr char kUpsertRoom[] = R"sql(
     INSERT INTO rooms (room_id, geometry) VALUES ($1, $2::jsonb)
     ON CONFLICT (room_id) DO NOTHING)sql";
 constexpr char kSetRoomSurface[] = "UPDATE rooms SET geometry = $2::jsonb WHERE room_id = $1";
+constexpr char kSetChessPublished[] =
+    "UPDATE rooms SET chess_published = $2::boolean WHERE room_id = $1";
 constexpr char kDeleteRoom[] = "DELETE FROM rooms WHERE room_id = $1";
 // A member's stats are written once, when the row is made; after that
 // only a finish's increments move them (CommitGameFinish). A later upsert
@@ -46,6 +50,10 @@ constexpr char kSweepRooms[] = R"sql(
       WHERE last_active_at < now() - make_interval(secs => $1::double precision)
       RETURNING room_id)
     SELECT pg_notify($2 || room_id, $3) FROM swept)sql";
+// The public feed's retention; $1 is the age in seconds.
+constexpr char kSweepPublishedChess[] = R"sql(
+    DELETE FROM published_chess_games
+    WHERE ended_at < now() - make_interval(secs => $1::double precision))sql";
 // The heartbeat's batch of the same stamp; $1 is a JSON array of ids.
 constexpr char kTouchRooms[] = R"sql(
     UPDATE rooms SET last_active_at = now()
@@ -68,8 +76,26 @@ constexpr char kCommitUpdate[] = R"sql(
       UPDATE games
       SET roster = $3::jsonb, state = NULLIF($4, '')::jsonb, version = $5::bigint
       WHERE room_id = $1 AND game_id = $2 AND version = $5::bigint - 1
-      RETURNING version)
+      RETURNING version),
+    archive AS (
+      INSERT INTO chess_games (room_id, game_id, ordinal, game, published)
+      SELECT $1, $2, NULLIF($8, '')::integer, NULLIF($9, '')::jsonb, r.chess_published
+      FROM rooms r
+      WHERE r.room_id = $1 AND $9 <> '' AND EXISTS (SELECT 1 FROM save)
+      ON CONFLICT DO NOTHING
+      RETURNING archive_id, game, ended_at, published),
+    feed AS (
+      INSERT INTO published_chess_games (archive_id, game, ended_at)
+      SELECT archive_id, game, ended_at FROM archive WHERE published)
     SELECT pg_notify($6, $7) FROM save)sql";
+// An update or finish that lands a chess table whose game is over also
+// archives that game (#1637), guarded on the save the way the finish's
+// stats are, with the room's published flag of the moment, and copies it
+// to the public feed when that flag is set; a blank game says there is
+// none to archive, and a later commit still carrying the same ended game
+// conflicts on the archive's unique index, so the feed is not written
+// twice either.
+//
 // The finishing commit adds the stat deltas, guarded on the save landing
 // so a conflicted (or retried) finish applies them zero times, not
 // twice. Postgres runs every data-modifying CTE exactly once whether or
@@ -87,7 +113,17 @@ constexpr char kCommitFinish[] = R"sql(
           total_score = m.total_score + s.score
       FROM jsonb_to_recordset($6::jsonb) AS s(player_id text, played int, won int, score int)
       WHERE m.room_id = $1 AND m.player_id = s.player_id
-        AND EXISTS (SELECT 1 FROM save))
+        AND EXISTS (SELECT 1 FROM save)),
+    archive AS (
+      INSERT INTO chess_games (room_id, game_id, ordinal, game, published)
+      SELECT $1, $2, NULLIF($9, '')::integer, NULLIF($10, '')::jsonb, r.chess_published
+      FROM rooms r
+      WHERE r.room_id = $1 AND $10 <> '' AND EXISTS (SELECT 1 FROM save)
+      ON CONFLICT DO NOTHING
+      RETURNING archive_id, game, ended_at, published),
+    feed AS (
+      INSERT INTO published_chess_games (archive_id, game, ended_at)
+      SELECT archive_id, game, ended_at FROM archive WHERE published)
     SELECT pg_notify($7, $8) FROM save)sql";
 
 // An unreadable geometry costs the room its shape, not the boot: it
@@ -157,6 +193,40 @@ std::string StateJson(const PgHubStore::GameRow& row) {
       *row.state);
 }
 
+// The archive's two parameters for a committed row: the ordinal and the
+// finished game, or two blanks when the row archives nothing.
+std::vector<std::string> ArchiveParams(const PgHubStore::GameRow& row) {
+  const auto archived = ArchivedChessGame(row);
+  if (!archived.has_value()) return {"", ""};
+  return {std::to_string(archived->ordinal), chess_play::serializeGameState(archived->game)};
+}
+
+// Milliseconds truncated, not rounded: ended_at holds microseconds.
+constexpr char kChessGameColumns[] =
+    "archive_id, game_id, ordinal, game::text,"
+    " floor(extract(epoch FROM ended_at) * 1000)::bigint, published";
+
+// Rows of kChessGameColumns, each restored through the game's serde: one
+// that no longer restores costs that game, logged, as a games row does.
+std::vector<PgHubStore::ChessGameRow> ChessGamesFrom(const std::string& room_id,
+                                                     const pg::Result& result) {
+  std::vector<PgHubStore::ChessGameRow> games;
+  for (int i = 0; i < result.rows(); ++i) {
+    const std::string game_id = result.Get(i, 1).value_or("");
+    auto game = chess_play::deserializeGameState(result.Get(i, 3).value_or(""));
+    if (!game.ok()) {
+      LOG(ERROR) << "dropping archived chess game " << room_id << "/" << game_id << ": "
+                 << game.status();
+      continue;
+    }
+    games.push_back({std::atoll(result.Get(i, 0).value_or("0").c_str()), game_id,
+                     std::atoi(result.Get(i, 2).value_or("0").c_str()), *std::move(game),
+                     std::atoll(result.Get(i, 4).value_or("0").c_str()),
+                     result.Get(i, 5).value_or("f") == "t"});
+  }
+  return games;
+}
+
 }  // namespace
 
 PgHubStore::PgHubStore(std::shared_ptr<pg::Client> db)
@@ -223,6 +293,10 @@ void PgHubStore::Apply(const Op& op) {
   } else if (const auto* set = std::get_if<SetRoomSurface>(&op)) {
     ExecOrWarn("SetRoomSurface", kSetRoomSurface, {set->room_id, SurfaceJson(set->surface)});
     Touch(set->room_id);
+  } else if (const auto* set = std::get_if<SetChessPublished>(&op)) {
+    ExecOrWarn("SetChessPublished", kSetChessPublished,
+               {set->room_id, set->published ? "true" : "false"});
+    Touch(set->room_id);
   } else if (const auto* erase = std::get_if<DeleteRoom>(&op)) {
     ExecOrWarn("DeleteRoom", kDeleteRoom, {erase->room_id});
   } else if (const auto* upsert = std::get_if<UpsertMember>(&op)) {
@@ -242,6 +316,9 @@ void PgHubStore::Apply(const Op& op) {
     ExecOrWarn("Notify", "SELECT pg_notify($1, $2)", {notify->channel, notify->payload});
   } else if (const auto* touch = std::get_if<TouchRooms>(&op)) {
     ExecOrWarn("TouchRooms", kTouchRooms, {RosterJson(touch->room_ids)});
+  } else if (const auto* sweep = std::get_if<SweepPublishedChess>(&op)) {
+    ExecOrWarn("SweepPublishedChess", kSweepPublishedChess,
+               {std::to_string(sweep->older_than.count())});
   } else if (const auto* sweep = std::get_if<SweepRooms>(&op)) {
     const auto swept =
         ExecOrWarn("SweepRooms", kSweepRooms,
@@ -265,6 +342,8 @@ absl::StatusOr<bool> PgHubStore::CommitGameSave(const GameRow& row,
   // cannot disagree.
   if (row.version == 1) {
     params.emplace_back(GameKindName(row.state.has_value() ? KindOf(*row.state) : row.kind));
+  } else {
+    for (std::string& param : ArchiveParams(row)) params.push_back(std::move(param));
   }
   auto result = db_->Exec(row.version == 1 ? kCommitInsert : kCommitUpdate, params);
   if (!result.ok()) return result.status();
@@ -275,10 +354,16 @@ absl::StatusOr<bool> PgHubStore::CommitGameSave(const GameRow& row,
 absl::StatusOr<bool> PgHubStore::CommitGameFinish(const GameRow& row,
                                                   const std::vector<StatsDelta>& stats,
                                                   const std::string& notify_payload) {
-  auto result =
-      db_->Exec(kCommitFinish, {row.room_id, row.game_id, RosterJson(row.roster), StateJson(row),
-                                std::to_string(row.version), StatsJson(stats),
-                                RoomChannel(row.room_id), notify_payload});
+  std::vector<std::string> params = {row.room_id,
+                                     row.game_id,
+                                     RosterJson(row.roster),
+                                     StateJson(row),
+                                     std::to_string(row.version),
+                                     StatsJson(stats),
+                                     RoomChannel(row.room_id),
+                                     notify_payload};
+  for (std::string& param : ArchiveParams(row)) params.push_back(std::move(param));
+  auto result = db_->Exec(kCommitFinish, params);
   if (!result.ok()) return result.status();
   Touch(row.room_id);
   return result->rows() == 1;
@@ -305,11 +390,13 @@ absl::StatusOr<std::optional<PgHubStore::GameRow>> PgHubStore::LoadGame(
 
 absl::StatusOr<PgHubStore::RoomRows> PgHubStore::LoadRoom(const std::string& room_id) {
   RoomRows out;
-  auto room = db_->Exec("SELECT geometry::text FROM rooms WHERE room_id = $1", {room_id});
+  auto room =
+      db_->Exec("SELECT geometry::text, chess_published FROM rooms WHERE room_id = $1", {room_id});
   if (!room.ok()) return room.status();
   out.exists = room->rows() > 0;
   if (!out.exists) return out;
   out.surface = SurfaceFromColumn(room_id, room->Get(0, 0).value_or(""));
+  out.chess_published = room->Get(0, 1).value_or("f") == "t";
 
   auto members = db_->Exec(
       "SELECT player_id, connected, games_played, games_won, total_score"
@@ -348,11 +435,12 @@ absl::StatusOr<PgHubStore::RoomRows> PgHubStore::LoadRoom(const std::string& roo
 
 absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
   Snapshot snapshot;
-  auto rooms = db_->Exec("SELECT room_id, geometry::text FROM rooms");
+  auto rooms = db_->Exec("SELECT room_id, geometry::text, chess_published FROM rooms");
   if (!rooms.ok()) return rooms.status();
   for (int i = 0; i < rooms->rows(); ++i) {
     const std::string room_id = rooms->Get(i, 0).value_or("");
-    snapshot.rooms.push_back({room_id, SurfaceFromColumn(room_id, rooms->Get(i, 1).value_or(""))});
+    snapshot.rooms.push_back({room_id, SurfaceFromColumn(room_id, rooms->Get(i, 1).value_or("")),
+                              rooms->Get(i, 2).value_or("f") == "t"});
   }
 
   auto members = db_->Exec(
@@ -389,6 +477,66 @@ absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
     snapshot.games.push_back(*std::move(row));
   }
   return snapshot;
+}
+
+absl::StatusOr<PgHubStore::ChessHistory> PgHubStore::LoadChessHistory(const std::string& room_id,
+                                                                      int limit) {
+  auto room = db_->Exec("SELECT chess_published FROM rooms WHERE room_id = $1", {room_id});
+  if (!room.ok()) return room.status();
+  if (room->rows() == 0) return absl::NotFoundError("no such room");
+  auto games = db_->Exec(absl::StrCat("SELECT ", kChessGameColumns,
+                                      " FROM chess_games WHERE room_id = $1"
+                                      " ORDER BY archive_id DESC LIMIT $2::integer"),
+                         {room_id, std::to_string(limit)});
+  if (!games.ok()) return games.status();
+  return ChessHistory{room->Get(0, 0).value_or("f") == "t", ChessGamesFrom(room_id, *games)};
+}
+
+absl::StatusOr<std::optional<PgHubStore::ChessGameRow>> PgHubStore::LoadChessGame(
+    const std::string& room_id, const ChessGameKey& key) {
+  auto games =
+      key.archive_id.has_value()
+          ? db_->Exec(
+                absl::StrCat("SELECT ", kChessGameColumns,
+                             " FROM chess_games WHERE room_id = $1 AND archive_id = $2::bigint"),
+                {room_id, std::to_string(*key.archive_id)})
+          : db_->Exec(absl::StrCat("SELECT ", kChessGameColumns,
+                                   " FROM chess_games WHERE room_id = $1 AND game_id = $2"
+                                   " AND ordinal = $3::integer ORDER BY archive_id DESC LIMIT 1"),
+                      {room_id, key.game_id, std::to_string(key.ordinal)});
+  if (!games.ok()) return games.status();
+  auto rows = ChessGamesFrom(room_id, *games);
+  if (rows.empty()) return std::nullopt;
+  return std::optional<ChessGameRow>(std::move(rows.front()));
+}
+
+absl::StatusOr<std::vector<PgHubStore::PublishedChessGame>> PgHubStore::LoadPublishedChess(
+    int64_t after_archive_id, int limit) {
+  // A row that no longer restores is dropped, as an undecodable games row
+  // is; reading on past it fills the page, so a reader advancing by the
+  // last id it got is never handed a page the bad rows emptied.
+  std::vector<PublishedChessGame> page;
+  int64_t cursor = after_archive_id;
+  while (std::ssize(page) < limit) {
+    auto games = db_->Exec(
+        "SELECT archive_id, game::text, floor(extract(epoch FROM ended_at) * 1000)::bigint"
+        " FROM published_chess_games WHERE archive_id > $1::bigint"
+        " ORDER BY archive_id LIMIT $2::integer",
+        {std::to_string(cursor), std::to_string(limit - std::ssize(page))});
+    if (!games.ok()) return games.status();
+    if (games->rows() == 0) break;
+    for (int i = 0; i < games->rows(); ++i) {
+      const std::string archive_id = games->Get(i, 0).value_or("0");
+      cursor = std::atoll(archive_id.c_str());
+      auto game = chess_play::deserializeGameState(games->Get(i, 1).value_or(""));
+      if (!game.ok()) {
+        LOG(ERROR) << "dropping published chess game " << archive_id << ": " << game.status();
+        continue;
+      }
+      page.push_back({cursor, *std::move(game), std::atoll(games->Get(i, 2).value_or("0").c_str())});
+    }
+  }
+  return page;
 }
 
 absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(

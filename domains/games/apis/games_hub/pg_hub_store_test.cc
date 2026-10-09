@@ -25,6 +25,7 @@
 #include "domains/games/libs/cards/rummy/table.h"
 #include "domains/games/libs/cards/rummy/table_serde.h"
 #include "domains/games/libs/chess_play/game_state.h"
+#include "domains/games/libs/chess_play/game_state_serde.h"
 #include "domains/games/libs/chess_play/table_serde.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
@@ -80,7 +81,7 @@ class PgHubStoreTest : public ::testing::Test {
     }
     db_ = std::make_shared<pg::Client>(url_);
     ASSERT_TRUE(games_hub::RunMigrations(*db_).ok());
-    ASSERT_TRUE(db_->Exec("TRUNCATE rooms CASCADE").ok());
+    ASSERT_TRUE(db_->Exec("TRUNCATE rooms, published_chess_games CASCADE").ok());
     store_ = std::make_unique<PgHubStore>(db_);
   }
 
@@ -518,6 +519,256 @@ TEST_F(PgHubStoreTest, PresenceWritesLeaveStatsToTheirIncrements) {
   EXPECT_EQ(room->members[0].games_played, 4);
   EXPECT_EQ(room->members[0].games_won, 2);
   EXPECT_EQ(room->members[0].total_score, 14);
+}
+
+// White Kg6 Pe7 against Kh8: e7e8q mates.
+constexpr char kMate[] = "7k/4P3/6K1/8/8/8/8/8 w - - 0 1";
+
+chess_play::Table ChessOpened(std::vector<std::string> players = {"alice", "bob"}) {
+  auto table =
+      chess_play::Table::open(std::move(players), "kpk", chess_play::Opening{kMate, 0},
+                              {180'000, 2'000}, 1'000, std::string(chess_play::kRandomKpkSetup));
+  EXPECT_TRUE(table.ok()) << table.status();
+  return *table;
+}
+
+chess_play::Table Mated(const chess_play::Table& table) {
+  auto mated = table.inGame([&](const chess_play::GameState& game) {
+    return game.move(game.whiteSeat(), "e7e8q", 2'000);
+  });
+  EXPECT_TRUE(mated.ok()) << mated.status();
+  return *mated;
+}
+
+chess_play::Table Next(const chess_play::Table& table) {
+  auto next = table.next("kpk", chess_play::Opening{kMate, 0}, {180'000, 2'000}, 3'000,
+                         std::string(chess_play::kRandomKpkSetup));
+  EXPECT_TRUE(next.ok()) << next.status();
+  return *next;
+}
+
+PgHubStore::GameRow ChessRow(const chess_play::Table& table, int64_t version) {
+  return {"R1",
+          "C1",
+          table.players(),
+          games_hub::HostedState(table),
+          version,
+          games_hub::GameKind::kChess};
+}
+
+// The commit that ends a chess game archives it in the same statement
+// (#1637): once, whichever later commits still carry it, never from a
+// commit that missed, and marked with the room's published flag of the
+// moment.
+TEST_F(PgHubStoreTest, ACommitThatEndsAChessGameArchivesItOnce) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  const chess_play::Table opened = ChessOpened();
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(opened, 1), ""));
+  auto history = store_->LoadChessHistory("R1", 100);
+  ASSERT_TRUE(history.ok()) << history.status();
+  EXPECT_FALSE(history->published);
+  EXPECT_TRUE(history->games.empty());
+
+  const chess_play::Table mated = Mated(opened);
+  EXPECT_FALSE(*store_->CommitGameSave(ChessRow(mated, 3), "")) << "a miss";
+  EXPECT_FALSE(*store_->CommitGameFinish(ChessRow(mated, 3), {}, "")) << "a miss";
+  EXPECT_TRUE(store_->LoadChessHistory("R1", 100)->games.empty()) << "misses archive nothing";
+
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(mated, 2), ""));
+  ASSERT_TRUE(*store_->CommitGameFinish(ChessRow(*mated.removePlayer(1, 2'500), 3), {}, ""));
+  history = store_->LoadChessHistory("R1", 100);
+  ASSERT_TRUE(history.ok()) << history.status();
+  ASSERT_EQ(history->games.size(), 1u);
+  EXPECT_EQ(history->games[0].game_id, "C1");
+  EXPECT_EQ(history->games[0].ordinal, 1);
+  EXPECT_EQ(chess_play::serializeGameState(history->games[0].game),
+            chess_play::serializeGameState(mated.game()));
+  EXPECT_FALSE(history->games[0].published);
+  EXPECT_GT(history->games[0].ended_at_ms, 1'700'000'000'000) << "a wall-clock stamp";
+}
+
+TEST_F(PgHubStoreTest, ChessHistoryIsNewestFirstAndTheFeedIsWhatEndedPublished) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertRoom{"R2"}});
+  store_->Flush();
+  chess_play::Table table = ChessOpened();
+  int64_t version = 1;
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(table, version++), ""));
+  table = Mated(table);
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(table, version++), ""));  // private
+  EXPECT_TRUE(store_->LoadPublishedChess(0, 100)->empty());
+  store_->Enqueue(
+      {PgHubStore::SetChessPublished{"R1", true}, PgHubStore::SetChessPublished{"ghost", true}});
+  store_->Flush();
+  for (int game = 2; game <= 4; ++game) {
+    table = Next(table);
+    ASSERT_TRUE(*store_->CommitGameSave(ChessRow(table, version++), ""));
+    table = Mated(table);
+    ASSERT_TRUE(*store_->CommitGameSave(ChessRow(table, version++), ""));
+  }
+  // The close carries game 4 again: the feed takes it once.
+  ASSERT_TRUE(
+      *store_->CommitGameFinish(ChessRow(*table.removePlayer(1, 9'000), version++), {}, ""));
+  store_->Enqueue({PgHubStore::SetChessPublished{"R1", false}});
+  store_->Flush();
+
+  auto history = store_->LoadChessHistory("R1", 100);
+  ASSERT_TRUE(history.ok()) << history.status();
+  EXPECT_FALSE(history->published);
+  ASSERT_EQ(history->games.size(), 4u);
+  EXPECT_EQ(history->games[0].ordinal, 4);
+  EXPECT_GT(history->games[0].archive_id, history->games[1].archive_id);
+  EXPECT_EQ(history->games[3].ordinal, 1);
+  EXPECT_FALSE(history->games[3].published);
+  EXPECT_TRUE(history->games[0].published);
+  EXPECT_EQ(store_->LoadChessHistory("R1", 2)->games.size(), 2u);
+  EXPECT_TRUE(store_->LoadChessHistory("R2", 100)->games.empty()) << "scoped to the room";
+  EXPECT_EQ(store_->LoadChessHistory("ghost", 100).status().code(), absl::StatusCode::kNotFound);
+
+  auto feed = store_->LoadPublishedChess(0, 100);
+  ASSERT_TRUE(feed.ok()) << feed.status();
+  ASSERT_EQ(feed->size(), 3u) << "withdrawing keeps what was already out";
+  EXPECT_EQ((*feed)[0].archive_id, history->games[2].archive_id);
+  EXPECT_EQ((*feed)[2].archive_id, history->games[0].archive_id);
+  EXPECT_EQ((*feed)[2].ended_at_ms, history->games[0].ended_at_ms);
+  EXPECT_EQ(chess_play::serializeGameState((*feed)[2].game),
+            chess_play::serializeGameState(history->games[0].game));
+  feed = store_->LoadPublishedChess((*feed)[0].archive_id, 100);
+  ASSERT_TRUE(feed.ok());
+  EXPECT_EQ(feed->size(), 2u) << "after is exclusive";
+  EXPECT_EQ(store_->LoadPublishedChess(0, 1)->size(), 1u);
+
+  EXPECT_TRUE(store_->LoadRoom("R1").ok());
+  auto snapshot = store_->LoadSnapshot();
+  ASSERT_TRUE(snapshot.ok());
+  for (const auto& room : snapshot->rooms) EXPECT_FALSE(room.chess_published) << room.room_id;
+
+  store_->Enqueue({PgHubStore::DeleteRoom{"R1"}});
+  store_->Flush();
+  auto left = db_->Exec("SELECT count(*) FROM chess_games");
+  ASSERT_TRUE(left.ok());
+  EXPECT_EQ(left->Get(0, 0).value_or(""), "0") << "the room's archive dies with it";
+  EXPECT_EQ(store_->LoadPublishedChess(0, 100)->size(), 3u) << "the feed does not";
+}
+
+TEST_F(PgHubStoreTest, AnArchivedGameIsFoundByIdOrByTableAndLine) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertRoom{"R2"}});
+  store_->Flush();
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(ChessOpened(), 1), ""));
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(Mated(ChessOpened()), 2), ""));
+  store_->Enqueue({PgHubStore::DeleteGame{"R1", "C1"}});
+  store_->Flush();
+  const chess_play::Table other = ChessOpened({"carol", "dave"});
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(other, 1), ""));
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(Mated(other), 2), ""));
+  auto history = store_->LoadChessHistory("R1", 100);
+  ASSERT_EQ(history->games.size(), 2u);
+  const int64_t older = history->games[1].archive_id;
+  const int64_t newer = history->games[0].archive_id;
+
+  auto found = store_->LoadChessGame("R1", {older, "", 0});
+  ASSERT_TRUE(found.ok() && found->has_value()) << found.status();
+  EXPECT_EQ((*found)->archive_id, older);
+  EXPECT_EQ((*found)->game.players(), (std::vector<std::string>{"alice", "bob"}));
+  found = store_->LoadChessGame("R1", {std::nullopt, "C1", 1});
+  ASSERT_TRUE(found.ok() && found->has_value());
+  EXPECT_EQ((*found)->archive_id, newer);
+  EXPECT_FALSE(store_->LoadChessGame("R1", {std::nullopt, "C1", 2})->has_value());
+  EXPECT_FALSE(store_->LoadChessGame("R2", {older, "", 0})->has_value()) << "another room's";
+}
+
+// Retention: the feed is swept by age, the room's own archive is not.
+TEST_F(PgHubStoreTest, ThePublishedFeedIsSweptByAge) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::SetChessPublished{"R1", true}});
+  store_->Flush();
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(ChessOpened(), 1), ""));
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(Mated(ChessOpened()), 2), ""));
+  store_->Enqueue({PgHubStore::SweepPublishedChess{std::chrono::hours(1)}});
+  store_->Flush();
+  EXPECT_EQ(store_->LoadPublishedChess(0, 100)->size(), 1u) << "fresh stays";
+  ASSERT_TRUE(
+      db_->Exec("UPDATE published_chess_games SET ended_at = now() - interval '2 hours'").ok());
+  store_->Enqueue({PgHubStore::SweepPublishedChess{std::chrono::hours(1)}});
+  store_->Flush();
+  EXPECT_TRUE(store_->LoadPublishedChess(0, 100)->empty());
+  EXPECT_EQ(store_->LoadChessHistory("R1", 100)->games.size(), 1u);
+}
+
+// An unreadable row in the feed costs that row, never the rows after it:
+// a page reads on past it, so a reader advancing by the last id it got
+// cannot stall on a page the bad rows emptied.
+TEST_F(PgHubStoreTest, TheFeedReadsOnPastUnreadableRows) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::SetChessPublished{"R1", true}});
+  store_->Flush();
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(ChessOpened(), 1), ""));
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(Mated(ChessOpened()), 2), ""));
+  auto feed = store_->LoadPublishedChess(0, 100);
+  ASSERT_TRUE(feed.ok() && feed->size() == 1u);
+  const int64_t good = (*feed)[0].archive_id;
+  // Three unreadable rows past it, then a readable one.
+  for (int64_t bad = good + 1; bad <= good + 3; ++bad) {
+    ASSERT_TRUE(db_->Exec("INSERT INTO published_chess_games (archive_id, game, ended_at)"
+                          " VALUES ($1::bigint, '{\"v\":99}', now())",
+                          {std::to_string(bad)})
+                    .ok());
+  }
+  ASSERT_TRUE(db_->Exec("INSERT INTO published_chess_games (archive_id, game, ended_at)"
+                        " SELECT $1::bigint, game, ended_at FROM published_chess_games"
+                        " WHERE archive_id = $2::bigint",
+                        {std::to_string(good + 4), std::to_string(good)})
+                  .ok());
+
+  feed = store_->LoadPublishedChess(good, 2);
+  ASSERT_TRUE(feed.ok()) << feed.status();
+  ASSERT_EQ(feed->size(), 1u) << "the bad rows filled the first SQL page";
+  EXPECT_EQ((*feed)[0].archive_id, good + 4);
+  feed = store_->LoadPublishedChess(good + 4, 2);
+  ASSERT_TRUE(feed.ok());
+  EXPECT_TRUE(feed->empty()) << "and the end of the feed is still the end";
+}
+
+// Milliseconds are truncated: a game that ended at .6ms reads as the ms
+// it ended in, never the next.
+TEST_F(PgHubStoreTest, EndTimesTruncateToTheMillisecond) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::SetChessPublished{"R1", true}});
+  store_->Flush();
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(ChessOpened(), 1), ""));
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(Mated(ChessOpened()), 2), ""));
+  ASSERT_TRUE(db_->Exec("UPDATE chess_games SET ended_at = to_timestamp(1.0006)").ok());
+  ASSERT_TRUE(db_->Exec("UPDATE published_chess_games SET ended_at = to_timestamp(1.0006)").ok());
+  EXPECT_EQ(store_->LoadChessHistory("R1", 100)->games[0].ended_at_ms, 1'000);
+  EXPECT_EQ((*store_->LoadPublishedChess(0, 100))[0].ended_at_ms, 1'000);
+}
+
+// A table code freed and minted again replays ordinals under the same
+// game id; those are other games, and kept.
+TEST_F(PgHubStoreTest, AReMintedTableCodeArchivesItsOwnGames) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(ChessOpened(), 1), ""));
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(Mated(ChessOpened()), 2), ""));
+  store_->Enqueue({PgHubStore::DeleteGame{"R1", "C1"}});
+  store_->Flush();
+  const chess_play::Table other = ChessOpened({"carol", "dave"});
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(other, 1), ""));
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(Mated(other), 2), ""));
+  EXPECT_EQ(store_->LoadChessHistory("R1", 100)->games.size(), 2u);
+}
+
+// An archived game that no longer restores costs that game, not the
+// room's history.
+TEST_F(PgHubStoreTest, AnUnreadableArchivedGameIsDropped) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(ChessOpened(), 1), ""));
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(Mated(ChessOpened()), 2), ""));
+  ASSERT_TRUE(db_->Exec("INSERT INTO chess_games (room_id, game_id, ordinal, game, published)"
+                        " VALUES ('R1', 'C9', 1, '{\"v\":99}', false)")
+                  .ok());
+  auto history = store_->LoadChessHistory("R1", 100);
+  ASSERT_TRUE(history.ok()) << history.status();
+  ASSERT_EQ(history->games.size(), 1u);
+  EXPECT_EQ(history->games[0].game_id, "C1");
 }
 
 // The surface a room stands on rides its row (#1554): stored in the

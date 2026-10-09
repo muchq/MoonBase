@@ -44,6 +44,17 @@ opal::Outcome<moonbase::games::GetSessionOutput> GamesHubHandler::GetSession(
   return output;
 }
 
+opal::Outcome<moonbase::games::ExportChessGamesOutput> GamesHubHandler::ExportChessGames(
+    const moonbase::games::ExportChessGamesInput& input,
+    const opal::server::RequestContext& /*context*/) {
+  absl::StatusOr<std::string> pgn = golf_->ExportChessPgn(input.after.value_or(0));
+  if (!pgn.ok()) return opal::Error::Unknown("game store unavailable");
+  moonbase::games::ExportChessGamesOutput output;
+  output.contentType = "application/x-chess-pgn";
+  output.pgn = opal::Blob::FromString(*pgn);
+  return output;
+}
+
 opal::eventstream::StreamTask GamesHubHandler::Play(
     moonbase::games::PlayInput input, moonbase::games::PlayAsyncServerStream& stream) {
   return golf_->Play(std::move(input), stream);

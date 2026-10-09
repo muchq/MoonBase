@@ -25,7 +25,7 @@ use moonbase.voice#VoiceEvent
 @title("Games Hub")
 service GamesHub {
     version: "2026-07-21"
-    operations: [GetSession, Play]
+    operations: [GetSession, Play, ExportChessGames]
 }
 
 /// The one WebSocket session per player: commands up, events down. The
@@ -82,6 +82,32 @@ union GameEvents {
     castle: CastleEvent
     rummy: RummyEvent
     chess: ChessEvent
+}
+
+/// The public chess feed (moonbase.chess#ChessPublish): every game that
+/// ended while its room was published, ended within the last 30 days, as
+/// PGN in archive order, at most 100 past `after`, one blank line between
+/// games. No ticket, and no room named anywhere: [Site] is the game's own
+/// URL, unique per game. Read on from the last game's archive id; ids
+/// grow in archive order, but a game can land behind one already read,
+/// so a reader that rereads a little and dedupes on [Site] misses none.
+@readonly
+@http(method: "GET", uri: "/games/v2/chess.pgn", code: 200)
+operation ExportChessGames {
+    input := {
+        /// An archive id, exclusive: only games archived after it.
+        @httpQuery("after")
+        after: Long
+    }
+    output := {
+        @required
+        @httpHeader("Content-Type")
+        contentType: String
+
+        @required
+        @httpPayload
+        pgn: Blob
+    }
 }
 
 /// Session identity is game-agnostic: the route carries no game segment,
