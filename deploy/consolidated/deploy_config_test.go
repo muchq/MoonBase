@@ -936,6 +936,20 @@ func TestTheWorkerCarriesTheLichessTokenAndToleratesItsAbsence(t *testing.T) {
 	}
 }
 
+// MUCHQ_COM requests read games_hub's public chess feed (#1637). The API
+// accepts them whatever the worker was given, and a worker without the URL
+// only warns at startup, so a missing line fails every such request at run
+// time instead of here.
+func TestTheWorkerIsPointedAtGamesHub(t *testing.T) {
+	block := serviceBlock(t, "compose.yaml", "one_d4_worker")
+
+	if !strings.Contains(block, "ONE_D4_GAMES_HUB_URL=http://games_hub:8089") {
+		t.Errorf("one_d4_worker does not name games_hub as the source of MUCHQ_COM games. "+
+			"Without it the worker registers no archive for the platform and every such "+
+			"request fails (#1637). Block was:\n%s", block)
+	}
+}
+
 func TestMcpserverIsPointedAtOneD4(t *testing.T) {
 	block := serviceBlock(t, "compose.yaml", "mcpserver")
 
