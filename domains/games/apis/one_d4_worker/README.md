@@ -47,6 +47,19 @@ request after three before it ever reached the end. A ceiling that moved
 Scaling out does not speed a pass up — one owner at a time is the point —
 but it does mean any instance can pick up a pass whose owner died.
 
+## muchq.com's own games
+
+`MUCHQ_COM` reads games_hub's public chess feed (#1637): every game that
+ended in a published room in the last 30 days. A player is their hub
+player id.
+
+The feed is global, not one player's month, so `GamesHubArchive` reads all
+of it from the start and keeps that player's games from that month. No
+cursor survives the run, so there is nothing to dedupe and no game lost to
+one landing behind another. A month older than 30 days returns what the
+feed still has; the rest is gone at the source, so the month is still
+complete.
+
 ## Where titles come from
 
 Per platform, because a username means a different player on each one.
@@ -236,6 +249,8 @@ call a run is already inside, which is why the stop grace is 240s.
 | `ONE_D4_DB_URL` | required; no default, the worker exits 1 without it |
 | `ONE_D4_INDEX_SLOTS` | requests at once, default 4, capped at 16 |
 | `ONE_D4_POLL_SECONDS` | how long to wait before asking an empty queue again, default 5 |
+| `ONE_D4_LICHESS_TOKEN` | Lichess token; unset fails every LICHESS request |
+| `ONE_D4_GAMES_HUB_URL` | games_hub's base URL; unset fails every MUCHQ_COM request |
 
 The lease, its renewal interval, the run ceiling and the retention windows
 are not configurable, by design. They are protocol constants of the queue —

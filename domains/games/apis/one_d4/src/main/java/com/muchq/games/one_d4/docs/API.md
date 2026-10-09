@@ -27,8 +27,8 @@ Start indexing games for a player over a month range.
 
 | Field         | Type   | Required | Description                            |
 |---------------|--------|----------|----------------------------------------|
-| player        | string | yes      | Username on the chess platform (normalized to lowercase) |
-| platform      | string | yes      | `"chess.com"` or `"lichess"`, case-insensitive; echoed back canonicalized as `"CHESS_COM"` / `"LICHESS"` |
+| player        | string | yes      | Username on the chess platform, or the player id on muchq.com (normalized to lowercase) |
+| platform      | string | yes      | `"chess.com"`, `"lichess"` or `"muchq.com"`, case-insensitive; echoed back canonicalized as `"CHESS_COM"` / `"LICHESS"` / `"MUCHQ_COM"` |
 | startMonth    | string | yes      | Start month inclusive, format `YYYY-MM` |
 | endMonth      | string | yes      | End month inclusive, format `YYYY-MM`   |
 | excludeBullet | bool   | no       | Skip bullet games (default false)       |

@@ -32,6 +32,8 @@ smithy_cpp_client_library(
     ],
     namespace = "moonbase::games",
     service = "moonbase.games#GamesHub",
+    # one_d4_worker reads the public chess feed with it (#1637).
+    visibility = ["//domains/games/apis/one_d4_worker:__pkg__"],
 )
 
 # The games a room hosts (#79): the kind a table is created as, and the
@@ -89,6 +91,8 @@ cc_library(
     name = "chess_archive",
     srcs = ["chess_archive.cc"],
     hdrs = ["chess_archive.h"],
+    # one_d4_worker's feed test reads the PGN this writes.
+    visibility = ["//domains/games/apis/one_d4_worker:__pkg__"],
     deps = [
         ":chess_results",
         ":games_hub_smithy_server",

@@ -31,6 +31,7 @@
 #include "absl/time/time.h"
 #include "domains/games/apis/one_d4_worker/chess_com_archive.h"
 #include "domains/games/apis/one_d4_worker/db_options.h"
+#include "domains/games/apis/one_d4_worker/games_hub_archive.h"
 #include "domains/games/apis/one_d4_worker/index_pool.h"
 #include "domains/games/apis/one_d4_worker/index_run.h"
 #include "domains/games/apis/one_d4_worker/lichess_archive.h"
@@ -54,6 +55,7 @@
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/futility/otel/otel_provider.h"
 #include "domains/platform/libs/pg/pg.h"
+#include "opal/http/beast_transport.h"
 
 namespace {
 
@@ -175,6 +177,31 @@ int main(int /*argc*/, char** argv) {
   }
   one_d4_worker::LichessArchive lichess_archive(*lichess_client);
 
+  // muchq.com's own games, from games_hub's public feed (#1637). Inside the
+  // compose network, so the hub is plain HTTP and its rate limit sees this
+  // container as a client of its own.
+  one_d4_worker::PlatformArchives archives = {{"CHESS_COM", &archive},
+                                              {"LICHESS", &lichess_archive}};
+  std::unique_ptr<one_d4_worker::GamesHubArchive> games_hub_archive;
+  if (const std::string hub_url = Env("ONE_D4_GAMES_HUB_URL"); hub_url.empty()) {
+    LOG(WARNING) << "ONE_D4_GAMES_HUB_URL is unset; MUCHQ_COM requests will fail";
+  } else {
+    opal::ClientConfig hub_config = one_d4_worker::GamesHubArchive::DefaultClientConfig(hub_url);
+    auto transport = opal::http::BeastHttpClient::FromConfig(hub_config);
+    if (!transport.ok()) {
+      LOG(ERROR) << "Could not build the games_hub transport: " << transport.error().message();
+      return 1;
+    }
+    hub_config.http_client = *std::move(transport);
+    auto hub = one_d4_worker::GamesHubArchive::Create(std::move(hub_config));
+    if (!hub.ok()) {
+      LOG(ERROR) << "Could not build the games_hub client: " << hub.status();
+      return 1;
+    }
+    games_hub_archive = *std::move(hub);
+    archives.emplace("MUCHQ_COM", games_hub_archive.get());
+  }
+
   // Bounded, because nothing else bounds them and the run ceiling cannot:
   // a thread inside libpq never reaches a checkpoint to be told its time
   // is up. Cancelling a run that is already blocked is a separate job
@@ -205,7 +232,7 @@ int main(int /*argc*/, char** argv) {
   // Keyed by the spelling indexing_requests.platform carries. A request
   // naming anything else fails rather than completing empty (#1527).
   const one_d4_worker::Poller::Run run = one_d4_worker::MakeRun(
-      {{"CHESS_COM", &archive}, {"LICHESS", &lichess_archive}},
+      std::move(archives),
       // Only chess.com. Lichess states a title on the game itself and has
       // no roster endpoint to read, so it is absent rather than empty —
       // and absent means "needs none", not "failed to load".

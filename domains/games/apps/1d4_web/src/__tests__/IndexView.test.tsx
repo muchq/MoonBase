@@ -69,7 +69,7 @@ function submitForm() {
   // fireEvent.click on a submit button doesn't propagate to onSubmit in jsdom;
   // fire the submit event on the form itself instead.
   fireEvent.submit(
-    screen.getByLabelText('Username').closest('form') as HTMLFormElement
+    screen.getByLabelText('Platform').closest('form') as HTMLFormElement
   );
 }
 
@@ -365,13 +365,28 @@ describe('platform options', () => {
     vi.mocked(api.listIndexRequests).mockResolvedValue([]);
   });
 
-  it('offers both platforms, labelled the way their sites spell themselves', () => {
+  it('offers every platform, labelled the way their sites spell themselves', () => {
     render(<IndexView />, { wrapper: makeWrapper() });
 
     const select = screen.getByLabelText('Platform') as HTMLSelectElement;
     const options = Array.from(select.options);
-    expect(options.map((o) => o.value)).toEqual(['CHESS_COM', 'LICHESS']);
-    expect(options.map((o) => o.textContent)).toEqual(['chess.com', 'lichess']);
+    expect(options.map((o) => o.value)).toEqual(['CHESS_COM', 'LICHESS', 'MUCHQ_COM']);
+    expect(options.map((o) => o.textContent)).toEqual(['chess.com', 'lichess', 'muchq.com']);
+  });
+
+  // A muchq.com player has no username, only the player id the hub shows.
+  it('asks a muchq.com player for their player id', async () => {
+    const user = userEvent.setup({ delay: null });
+    render(<IndexView />, { wrapper: makeWrapper() });
+
+    await user.selectOptions(screen.getByLabelText('Platform'), 'MUCHQ_COM');
+
+    expect(screen.getByLabelText('Player id')).toHaveAttribute(
+      'placeholder',
+      'e.g. bouncy-coral-quokka-x9k2'
+    );
+    submitForm();
+    expect(await screen.findByText('Please enter a player id.')).toBeInTheDocument();
   });
 
   it('still defaults to chess.com', () => {

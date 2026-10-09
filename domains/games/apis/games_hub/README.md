@@ -486,7 +486,8 @@ which is what an indexer keys a game on, and `[UTCDate]`/`[UTCTime]` say
 when it ended. Archive ids are taken before commit, so a game can land
 behind one already read: a reader that rereads a little and dedupes on
 `[Site]` misses none. It shares the unary rate limit with session mints
-(aura's limiter keys on the client, not the route).
+(aura's limiter keys on the client, not the route). one_d4_worker
+indexes it as the `MUCHQ_COM` platform, by player id.
 
 ## Redaction
 

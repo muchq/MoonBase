@@ -5,6 +5,7 @@ describe('platformLabel', () => {
   it('spells a stored platform the way its site does', () => {
     expect(platformLabel('CHESS_COM')).toBe('chess.com');
     expect(platformLabel('LICHESS')).toBe('lichess');
+    expect(platformLabel('MUCHQ_COM')).toBe('muchq.com');
   });
 
   // A row this build does not recognize still came from somewhere. Blanking it
@@ -19,6 +20,6 @@ describe('platformLabel', () => {
   it('keys on the stored spelling, not a friendly one', () => {
     expect(platformLabel('chess.com')).toBe('chess.com');
     expect(platformLabel('lichess')).toBe('lichess');
-    expect(PLATFORMS.map((p) => p.value)).toEqual(['CHESS_COM', 'LICHESS']);
+    expect(PLATFORMS.map((p) => p.value)).toEqual(['CHESS_COM', 'LICHESS', 'MUCHQ_COM']);
   });
 });

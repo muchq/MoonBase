@@ -697,6 +697,7 @@ cc_binary(
     deps = [
         ":chess_com_archive",
         ":db_options",
+        ":games_hub_archive",
         ":index_pool",
         ":index_run",
         ":lichess_archive",
@@ -725,6 +726,8 @@ cc_binary(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:http_beast",
     ],
 )
 
@@ -820,6 +823,18 @@ cc_test(
 # The Lichess half of the archive port (#1527 slice 4). Concatenated PGN
 # rather than game objects, so the row is read out of tag pairs.
 cc_library(
+    name = "pgn_games",
+    srcs = ["pgn_games.cc"],
+    hdrs = ["pgn_games.h"],
+    deps = [
+        ":archive",
+        "//domains/games/libs/chess_cpp:pgn",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+cc_library(
     name = "lichess_archive",
     srcs = ["lichess_archive.cc"],
     hdrs = ["lichess_archive.h"],
@@ -827,6 +842,7 @@ cc_library(
     deps = [
         ":archive",
         ":job",
+        ":pgn_games",
         "//domains/games/libs/chess_cpp:pgn",
         "//domains/games/libs/lichess_cpp:client",
         "@com_google_absl//absl/base:core_headers",
@@ -834,7 +850,46 @@ cc_library(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
+    ],
+)
+
+cc_library(
+    name = "games_hub_archive",
+    srcs = ["games_hub_archive.cc"],
+    hdrs = ["games_hub_archive.h"],
+    deps = [
+        ":archive",
+        ":job",
+        ":pgn_games",
+        "//domains/games/apis/games_hub:games_hub_smithy_client",
+        "//domains/games/libs/chess_cpp:pgn",
+        "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
+        "@opal_cpp//runtime:client",
+    ],
+)
+
+# Over the hub's own PGN, so the tags it writes are the contract.
+cc_test(
+    name = "games_hub_archive_test",
+    size = "small",
+    srcs = ["games_hub_archive_test.cc"],
+    deps = [
+        ":games_hub_archive",
+        ":result",
+        "//domains/games/apis/games_hub:chess_archive",
+        "//domains/games/libs/chess_play:game_state",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
     ],
 )
 

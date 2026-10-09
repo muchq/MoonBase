@@ -83,6 +83,19 @@ public class IndexRequestServiceTest {
         .containsOnly("LICHESS");
   }
 
+  /**
+   * muchq.com's own games, read from games_hub's public feed (#1637). Spelled as the site, like the
+   * other two, so the label a user reads is a value they can type.
+   */
+  @Test
+  public void submit_acceptsMuchqComHoweverItIsSpelled() {
+    for (String spelling : List.of("muchq.com", "MUCHQ_COM", " Muchq.Com ")) {
+      IndexResponse response = service.submit(submission("Bouncy-Coral-Quokka-X9K2", spelling));
+      assertThat(response.platform()).as(spelling).isEqualTo("MUCHQ_COM");
+      assertThat(response.player()).isEqualTo("bouncy-coral-quokka-x9k2");
+    }
+  }
+
   @Test
   public void submit_stillRefusesAPlatformNobodyIndexes() {
     assertThatThrownBy(() -> service.submit(submission("x", "chess24.com")))
@@ -90,6 +103,7 @@ public class IndexRequestServiceTest {
         .hasMessageContaining("Unsupported platform")
         // The message names what it will take, so a 400 is actionable without the source.
         .hasMessageContaining("CHESS_COM")
+        .hasMessageContaining("MUCHQ_COM")
         .hasMessageContaining("LICHESS");
   }
 

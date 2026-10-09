@@ -466,6 +466,13 @@ TEST(LichessArchive, RunsOneExportAtATime) {
 
 TEST(SplitPgnGames, FindsNothingInAnEmptyBody) { EXPECT_TRUE(SplitPgnGames("").empty()); }
 
+// Each game's PGN is stored as it arrived, less the blank lines between
+// games.
+TEST(SplitPgnGames, DropsTheWhitespaceBetweenGames) {
+  EXPECT_THAT(SplitPgnGames("[Event \"a\"]\n1. e4 *\n\n\n[Event \"b\"]\n1. d4 *\n\n"),
+              ElementsAre("[Event \"a\"]\n1. e4 *", "[Event \"b\"]\n1. d4 *"));
+}
+
 // "[Event " inside movetext or a tag value is text, not a boundary. Cutting
 // there would split one game into two, and the second half would parse as a
 // game with no tags.

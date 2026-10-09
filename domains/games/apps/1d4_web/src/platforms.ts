@@ -11,11 +11,17 @@ export interface Platform {
   /** As stored, and as one_d4_worker's archive registry is keyed. */
   value: string;
   label: string;
+  /** What the site calls a player, and one to show as an example. */
+  player: string;
+  example: string;
 }
 
 export const PLATFORMS: Platform[] = [
-  { value: 'CHESS_COM', label: 'chess.com' },
-  { value: 'LICHESS', label: 'lichess' },
+  { value: 'CHESS_COM', label: 'chess.com', player: 'Username', example: 'hikaru' },
+  { value: 'LICHESS', label: 'lichess', player: 'Username', example: 'hikaru' },
+  // muchq.com's own chess, from games_hub's public feed: a player is the
+  // player id the hub shows.
+  { value: 'MUCHQ_COM', label: 'muchq.com', player: 'Player id', example: 'bouncy-coral-quokka-x9k2' },
 ];
 
 const LABELS: Record<string, string> = Object.fromEntries(
