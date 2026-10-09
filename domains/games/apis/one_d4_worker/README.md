@@ -196,7 +196,8 @@ every slot on a LICHESS request, the worker is one stream wide and the rest
 is parked, including against chess.com work that has no such rule.
 
 So it does not claim one. `PlatformAdmission` caps LICHESS at one run per
-process, and the cap is applied when the row is *claimed*: a request for a
+process — MUCHQ_COM too, whose archive holds its lock across a feed read
+(`PlatformLimits()` in `worker.h`) — and the cap is applied when the row is *claimed*: a request for a
 platform this process is full on is not a candidate, stays PENDING, and is
 passed over for one the process can run. Parking on the mutex was the
 symptom; claiming the row was the cause.

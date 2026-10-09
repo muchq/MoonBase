@@ -140,14 +140,15 @@ int main(int /*argc*/, char** argv) {
   one_d4_worker::Poller::Options poller_options =
       one_d4_worker::PollerOptionsFrom(*policy, one_d4_worker::OwnerId(Hostname(), getpid()));
   // Lichess asks for one request at a time, and LichessArchive holds a mutex
-  // to honour it. Without this a second LICHESS claim parks on that mutex
-  // holding a lease and two Postgres connections, and chess.com work queues
-  // behind it. Per process — see the README on what replicas would need.
+  // to honour it; GamesHubArchive holds one across a feed read. Without the
+  // caps a second claim parks on that mutex holding a lease and two Postgres
+  // connections, and chess.com work queues behind it. Per process — see the
+  // README on what replicas would need.
   //
   // Outside the pool, because the pool builds a Poller per slot thread from
   // these Options: one of these shared by all of them caps the worker, one
   // per Poller caps a slot and therefore nothing.
-  one_d4_worker::PlatformAdmission admission({{"LICHESS", 1}});
+  one_d4_worker::PlatformAdmission admission(one_d4_worker::PlatformLimits());
   poller_options.admission = &admission;
 
   // How often to ask an empty queue is local: it costs one round trip and
