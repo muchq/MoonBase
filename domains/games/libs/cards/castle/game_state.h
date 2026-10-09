@@ -34,17 +34,17 @@ using std::string;
 ///     more cards of rank k or higher (two is the lowest rank, so a two
 ///     on top asks only for its count). The run on top — every card of
 ///     the top's rank in a row, across plays — sets the four: exactly the
-///     cards of rank k that complete its four of a kind also play. Twos and tens play on anything
-///     in any count; anything plays on an empty pile. A hand play draws
+///     cards of rank k that complete its four of a kind also play. Twos
+///     and tens play on anything in any count, and so does a four of a
+///     kind; anything plays on an empty pile. A hand play draws
 ///     back up to three while the draw pile lasts; face-up and face-down
 ///     plays never draw. The turn passes to the next seat, wrapping.
 ///   - Twos reset the pile and tens clear it; four of a kind counts as
 ///     a ten. A cleared pile leaves the game; a reset stays as the new
 ///     floor. Either way the same seat plays again from whichever row is
 ///     then in play — unless the play shed the seat's last card, which
-///     ends the game. A clear is a play like any other: the cards must
-///     be playable on the pile as it stands, and a run of four is broken
-///     by a card of another rank.
+///     ends the game. A run of four on the pile is broken by a card of
+///     another rank.
 ///   - The pile may be picked up on any turn instead of playing, from
 ///     any row. A face-down card that turns out unplayable goes into the
 ///     hand with the pile.
@@ -129,7 +129,7 @@ class GameState {
   /// what a four of a kind completes. Zero on an empty pile.
   [[nodiscard]] int runOnTop() const;
   /// Whether `count` cards of this rank may go on the pile as it stands:
-  /// a special always; on an empty pile anything; otherwise the last
+  /// a special or a four of a kind always; on an empty pile anything; otherwise the last
   /// play's count or more of that rank or higher, or exactly what
   /// completes the four of a kind of the top's own rank on the pile. No
   /// cards is never a play.
