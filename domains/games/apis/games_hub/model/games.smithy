@@ -226,6 +226,11 @@ structure GameSummary {
 
     @required
     playerCount: Integer
+
+    /// Text the table's game supplies for the lobby to show as is: what a
+    /// waiting table plays on (chess's challenge: "Standard starting
+    /// position · 3+2"). Absent when there is nothing to say.
+    terms: String
 }
 
 /// Ack for a deliberate leaveRoom; the remaining members see roomState.

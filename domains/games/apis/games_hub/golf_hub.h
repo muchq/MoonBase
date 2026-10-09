@@ -427,6 +427,9 @@ class GolfHub final {
     /// stored. A table that ends hands them its closed view; one erased
     /// without it hands them gameLeft (DropWatchersLocked).
     std::set<std::string> watchers;
+    /// A waiting chess table's posted challenge (#1633), stored with the
+    /// row until the game starts on it.
+    std::optional<ChessTerms> terms;
     [[nodiscard]] bool started() const { return state.has_value(); }
     [[nodiscard]] const golf::GameState& golf() const { return std::get<golf::GameState>(*state); }
     [[nodiscard]] const castle::GameState& castle() const {
@@ -499,6 +502,11 @@ class GolfHub final {
   void HandleChessMove(const std::string& player_id, const moonbase::games::ChessMove& move);
   /// A bot to the second seat of `player_id`'s chess table (#1618).
   void AddChessBotMove(const std::string& player_id, int elo);
+  /// The table's one seat posts the terms it starts on (#1633).
+  void ChallengeChessMove(const std::string& player_id, ChessTerms terms);
+  /// After a seat fills `player_id`'s table: a challenge starts on its
+  /// terms. `terms` was read under the lock that seated it.
+  void StartChallengeMove(const std::string& player_id, const std::optional<ChessTerms>& terms);
   /// `player_id` watches a chess table in its room from no seat (#1633).
   void WatchChessMove(const std::string& player_id, const std::string& game_id);
   /// Out of whatever table the player watches, in its room; callers hold
@@ -675,10 +683,13 @@ class GolfHub final {
   /// (the entry is untouched; the caller drops it). kUnavailable: the
   /// commit's fate is unknown; nothing was adopted.
   enum class Commit { kCommitted, kRebased, kGone, kUnavailable };
+  /// `terms` is a waiting chess table's challenge to commit; null keeps
+  /// the entry's. A started row carries none.
   Commit CommitEntryLocked(const std::string& room_id, const std::string& game_id, GameEntry& entry,
                            const std::vector<std::string>& roster,
                            const std::optional<HostedState>& state,
-                           const std::vector<HubStore::StatsDelta>* finish);
+                           const std::vector<HubStore::StatsDelta>* finish,
+                           const std::optional<ChessTerms>* terms = nullptr);
 
   /// Shared chat/room dispatch for OnNotify and OnChannelActive.
   /// `from_active` skips the own-instance filter (active has no payload)

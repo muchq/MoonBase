@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <utility>
@@ -183,6 +184,81 @@ TEST_F(PgHubStoreTest, ChessRowsKeepTheirKindAndDecodeWithChessSerde) {
   ASSERT_TRUE(std::holds_alternative<chess_play::Table>(*(*reread)->state));
   EXPECT_EQ(chess_play::serializeTable(std::get<chess_play::Table>(*(*reread)->state)),
             chess_play::serializeTable(*moved));
+}
+
+// A challenge's terms (#1633) ride the state column while the table
+// waits, and go when the game starts: the started row is the engine's
+// alone.
+TEST_F(PgHubStoreTest, ChallengeTermsRideTheStateColumnUntilTheStart) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  PgHubStore::GameRow waiting{"R1", "K1", {"alice"}, std::nullopt, 1, games_hub::GameKind::kChess};
+  waiting.terms = games_hub::ChessTerms{"kpk-opposition", {60'000, 1'000}};
+  ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
+  auto reread = store_->LoadGame("R1", "K1");
+  ASSERT_TRUE(reread.ok() && reread->has_value());
+  EXPECT_FALSE((*reread)->state.has_value());
+  ASSERT_TRUE((*reread)->terms.has_value());
+  EXPECT_EQ((*reread)->terms->setup_id, "kpk-opposition");
+  EXPECT_EQ((*reread)->terms->time_control, (chess_play::TimeControl{60'000, 1'000}));
+
+  auto opened =
+      chess_play::Table::open({"alice", "bob"}, "kpk", {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0},
+                              {60'000, 1'000}, 1'000, "kpk-opposition");
+  ASSERT_TRUE(opened.ok()) << opened.status();
+  PgHubStore::GameRow started{"R1",
+                              "K1",
+                              {"alice", "bob"},
+                              games_hub::HostedState(*opened),
+                              2,
+                              games_hub::GameKind::kChess};
+  started.terms = waiting.terms;
+  ASSERT_TRUE(*store_->CommitGameSave(started, ""));
+  auto played = store_->LoadGame("R1", "K1");
+  ASSERT_TRUE(played.ok() && played->has_value());
+  EXPECT_TRUE((*played)->state.has_value());
+  EXPECT_FALSE((*played)->terms.has_value());
+}
+
+// Stored terms that are not the terms shape lose the row, as any
+// undecodable row does, rather than decoding as something else.
+TEST_F(PgHubStoreTest, MalformedTermsLoseTheRow) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  PgHubStore::GameRow waiting{"R1", "K1", {"alice"}, std::nullopt, 1, games_hub::GameKind::kChess};
+  ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
+  for (const std::string& state :
+       {R"({"terms":{"setupId":"standard","initialMs":"60000","incrementMs":0}})",
+        R"({"terms":{"setupId":"standard","initialMs":60000}})", R"({"terms":"standard"})"}) {
+    ASSERT_TRUE(db_->Exec("UPDATE games SET state = $1::jsonb WHERE game_id = 'K1'", {state}).ok());
+    auto reread = store_->LoadGame("R1", "K1");
+    ASSERT_TRUE(reread.ok()) << state;
+    EXPECT_FALSE(reread->has_value()) << state;
+  }
+}
+
+// The terms key is the codec's alone: no stored chess table has one at its
+// top level, or a started row would read as a waiting challenge.
+TEST_F(PgHubStoreTest, AStoredChessTableHasNoTopLevelTerms) {
+  auto opened =
+      chess_play::Table::open({"alice", "bob"}, "kpk", {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0},
+                              {60'000, 1'000}, 1'000, "kpk-opposition");
+  ASSERT_TRUE(opened.ok()) << opened.status();
+  const auto encoded = nlohmann::json::parse(chess_play::serializeTable(*opened));
+  ASSERT_TRUE(encoded.is_object());
+  EXPECT_FALSE(encoded.contains("terms"));
+}
+
+// The control: a waiting chess table with no terms stores no state.
+TEST_F(PgHubStoreTest, AWaitingTableWithNoTermsStoresNoState) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  PgHubStore::GameRow waiting{"R1", "K1", {"alice"}, std::nullopt, 1, games_hub::GameKind::kChess};
+  ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
+  auto reread = store_->LoadGame("R1", "K1");
+  ASSERT_TRUE(reread.ok() && reread->has_value());
+  EXPECT_FALSE((*reread)->state.has_value());
+  EXPECT_FALSE((*reread)->terms.has_value());
 }
 
 // A rummy table (#245) is the third engine behind the same rows: its kind

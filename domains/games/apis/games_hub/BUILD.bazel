@@ -473,6 +473,7 @@ cc_test(
         "//domains/platform/libs/pg",
         "//domains/platform/libs/pg:listener",
         "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
     ],
 )
 

@@ -24,6 +24,14 @@ inline std::string RoomChannel(const std::string& room_id) { return "room_" + ro
 /// no instance's id, so every instance holding the room acts on it.
 inline constexpr char kSweepWake[] = "sweep";
 
+/// A chess challenge's terms (#1633): the setup and clock a waiting
+/// table starts on once its second seat fills.
+struct ChessTerms {
+  std::string setup_id;
+  chess_play::TimeControl time_control;
+  bool operator==(const ChessTerms&) const = default;
+};
+
 /// The hub's authoritative room, member, and game persistence contract.
 /// Implementations serialize conditional game commits and retain terminal
 /// rows until their room is deleted so another instance can finish its
@@ -48,6 +56,8 @@ class HubStore {
     /// Which game the table plays, fixed at creation; `state` is that
     /// engine's once started.
     GameKind kind = GameKind::kGolf;
+    /// A waiting chess table's posted challenge; dropped once started.
+    std::optional<ChessTerms> terms = std::nullopt;
   };
 
   /// A room and the surface it chose at creation (#1554).
