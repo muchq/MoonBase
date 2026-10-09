@@ -55,6 +55,19 @@ opal::Outcome<moonbase::games::ExportChessGamesOutput> GamesHubHandler::ExportCh
   return output;
 }
 
+opal::Outcome<moonbase::games::GetChessGameOutput> GamesHubHandler::GetChessGame(
+    const moonbase::games::GetChessGameInput& input,
+    const opal::server::RequestContext& /*context*/) {
+  auto review = golf_->PublishedChessReview(input.archiveId);
+  if (!review.ok()) return opal::Error::Unknown("game store unavailable");
+  if (!review->has_value()) {
+    return opal::Error::Modeled("ChessGameNotFound", "no published game has that archive id");
+  }
+  moonbase::games::GetChessGameOutput output;
+  output.review = **std::move(review);
+  return output;
+}
+
 opal::eventstream::StreamTask GamesHubHandler::Play(
     moonbase::games::PlayInput input, moonbase::games::PlayAsyncServerStream& stream) {
   return golf_->Play(std::move(input), stream);

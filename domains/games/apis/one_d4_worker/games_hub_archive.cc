@@ -51,7 +51,8 @@ std::string TimeClassOf(const chess_cpp::Headers& headers) {
 opal::ClientConfig GamesHubArchive::DefaultClientConfig(std::string endpoint) {
   opal::ClientConfig config;
   config.endpoint = std::move(endpoint);
-  config.user_agent = "MoonBase indexer/1.0";
+  // The first product token is the caller the hub's metrics count it as.
+  config.user_agent = "one_d4_worker/1.0";
   config.request_timeout_ms = 30'000;
   // Waits of up to 1, 2, 4 and 8s: past the hub's 15s start period.
   config.retry.max_attempts = 5;

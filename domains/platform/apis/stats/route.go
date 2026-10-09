@@ -47,6 +47,8 @@ var routes = []siteRoutes{
 		"/1d4/v1/index/*",
 		"/1d4/v1/query",
 		"/deja/v1/*",
+		"/games/v2/chess.pgn",
+		"/games/v2/chess/*",
 		"/games/v2/play",
 		"/games/v2/session",
 		"/iili/v1/r/*",

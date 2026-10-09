@@ -190,11 +190,12 @@ structure ChessGameSummary {
     @required
     archiveId: Long
 
-    @required
+    /// The table it was played at. Absent on its public page, which names
+    /// no table.
     gameId: String
 
-    /// The game's position on its table's scoreSheet, from 1.
-    @required
+    /// The game's position on its table's scoreSheet, from 1. Absent with
+    /// gameId.
     ordinal: Integer
 
     @required

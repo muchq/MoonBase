@@ -1696,5 +1696,55 @@ TEST_F(ChessFixture, ThePublicFeedServesGamesThatEndedPublished) {
                                                   std::to_string(games[1].archiveId) + "\"")));
 }
 
+// A published game's own page reads it by the archive id its [Site]
+// names. A game that ended private has an archive id too, and is not
+// there: the id is all the route takes, and it reaches no room.
+TEST_F(ChessFixture, APublishedGameIsServedByItsArchiveIdAndAPrivateOneIsNot) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Resign()).ok());  // private
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  ASSERT_TRUE(table.alice.stream.Send(Publish(true)).ok());
+  ASSERT_TRUE(ReceiveChess(table.alice.stream, "published").has_value());
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  table.alice.stream, [](const auto& view) { return view.phase == "playing"; },
+                  "the next game")
+                  .has_value());
+  ASSERT_TRUE(table.alice.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+
+  ASSERT_TRUE(table.alice.stream.Send(History()).ok());
+  auto history = ReceiveChess(table.alice.stream, "history");
+  ASSERT_TRUE(history.has_value());
+  const auto& games = history->as_history_or_null()->games;
+  ASSERT_EQ(games.size(), 2u);
+  const int64_t published = games[0].archiveId;
+  const int64_t private_game = games[1].archiveId;
+
+  moonbase::games::GetChessGameInput input;
+  input.archiveId = published;
+  auto game = client_->GetChessGame(input);
+  ASSERT_TRUE(game.ok()) << game.error().message();
+  const moonbase::games::ChessReview& review = game->review;
+  EXPECT_EQ(review.summary.archiveId, published);
+  EXPECT_EQ(review.summary.white, games[0].white);
+  EXPECT_EQ(review.summary.black, games[0].black);
+  EXPECT_TRUE(review.summary.published);
+  EXPECT_FALSE(review.summary.gameId.has_value()) << "the page names no table";
+  EXPECT_FALSE(review.summary.ordinal.has_value());
+  EXPECT_EQ(review.fens.size(), review.moves.size() + 1);
+  EXPECT_THAT(review.pgn, ::testing::HasSubstr("/games/chess/" + std::to_string(published) + "\""));
+  EXPECT_THAT(review.pgn, ::testing::Not(::testing::HasSubstr(table.room_id)));
+
+  for (const int64_t missing : {private_game, published + 1000}) {
+    input.archiveId = missing;
+    auto refused = client_->GetChessGame(input);
+    ASSERT_FALSE(refused.ok()) << missing;
+    EXPECT_EQ(refused.error().code(), "ChessGameNotFound") << missing;
+  }
+}
+
 }  // namespace
 }  // namespace games_hub

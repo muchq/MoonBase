@@ -190,6 +190,7 @@ flowchart LR
   games_hub -->|http| chess_engine
   one_d4 -->|sql| shared_postgres
   one_d4_worker -->|sql| shared_postgres
+  one_d4_worker -->|http| games_hub
   iili -->|sql| shared_postgres
   stats -->|sql| shared_postgres
 

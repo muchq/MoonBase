@@ -25,6 +25,10 @@ std::string ChessPgnOf(int64_t archive_id, const chess_play::GameState& game, in
 /// An archived game move by move, for a review.
 moonbase::games::ChessReview ChessReviewOf(const HubStore::ChessGameRow& row);
 
+/// A game from the public feed move by move, for its own page. It names no
+/// table: gameId and ordinal are absent.
+moonbase::games::ChessReview ChessReviewOf(const HubStore::PublishedChessGame& game);
+
 }  // namespace games_hub
 
 #endif

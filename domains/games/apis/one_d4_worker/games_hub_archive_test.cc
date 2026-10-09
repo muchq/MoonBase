@@ -329,7 +329,7 @@ TEST(GamesHubArchive, TheDefaultClientWaitsOutARestart) {
   EXPECT_EQ(config.endpoint, "http://hub");
   EXPECT_GE(config.retry.max_attempts, 5);
   EXPECT_GE(config.retry.initial_backoff, std::chrono::seconds(1));
-  EXPECT_FALSE(config.user_agent.empty());
+  EXPECT_EQ(config.user_agent, "one_d4_worker/1.0") << "aura counts the caller by it";
 }
 
 // ---- the speed ----

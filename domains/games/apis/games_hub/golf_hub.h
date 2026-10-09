@@ -382,6 +382,11 @@ class GolfHub final {
   /// instance answers.
   absl::StatusOr<std::string> ExportChessPgn(int64_t after_archive_id);
 
+  /// One game of the public feed by its archive id, for its page; nullopt
+  /// when the feed has none by that id. Reads the store only.
+  absl::StatusOr<std::optional<moonbase::games::ChessReview>> PublishedChessReview(
+      int64_t archive_id);
+
   /// Starts PlayChessBotsOnce on a thread every `interval` until the hub
   /// is destroyed. A second call changes nothing.
   void StartChessBots(std::chrono::milliseconds interval = kChessBotTick);

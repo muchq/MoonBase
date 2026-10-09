@@ -63,7 +63,7 @@ pub const UNMATCHED_ROUTE: &str = "unmatched";
 /// callers never do; a request that reaches a published port without the
 /// gateway names whatever caller it claims. aura's kInternalCallers is the
 /// same list, pinned by //domains/platform/libs/otel_contract.
-pub const INTERNAL_CALLERS: [&str; 2] = ["games_hub", "mcpserver"];
+pub const INTERNAL_CALLERS: [&str; 3] = ["games_hub", "mcpserver", "one_d4_worker"];
 pub const EDGE_CALLER: &str = "edge";
 pub const OTHER_CALLER: &str = "other";
 

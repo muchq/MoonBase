@@ -7,6 +7,7 @@ use moonbase.castle#CastleCommand
 use moonbase.castle#CastleEvent
 use moonbase.chess#ChessCommand
 use moonbase.chess#ChessEvent
+use moonbase.chess#ChessReview
 use moonbase.golf#GolfCommand
 use moonbase.golf#GolfEvent
 use moonbase.lobby#Geometry
@@ -25,7 +26,7 @@ use moonbase.voice#VoiceEvent
 @title("Games Hub")
 service GamesHub {
     version: "2026-07-21"
-    operations: [GetSession, Play, ExportChessGames]
+    operations: [GetSession, Play, ExportChessGames, GetChessGame]
 }
 
 /// The one WebSocket session per player: commands up, events down. The
@@ -108,6 +109,33 @@ operation ExportChessGames {
         @httpPayload
         pgn: Blob
     }
+}
+
+/// One game from the public feed, by the archive id its [Site] names:
+/// what muchq.com/games/chess/<id> shows. Only a game that ended
+/// published, and only while the feed keeps it.
+@readonly
+@http(method: "GET", uri: "/games/v2/chess/{archiveId}", code: 200)
+operation GetChessGame {
+    input := {
+        @required
+        @httpLabel
+        archiveId: Long
+    }
+    output := {
+        @required
+        @httpPayload
+        review: ChessReview
+    }
+    errors: [ChessGameNotFound]
+}
+
+/// No published game has that archive id: it never was one, or it has
+/// aged out of the feed.
+@error("client")
+@httpError(404)
+structure ChessGameNotFound {
+    message: String
 }
 
 /// Session identity is game-agnostic: the route carries no game segment,
