@@ -175,8 +175,8 @@ structure CastleLastPlay {
     @required
     cards: Cards
 
-    /// The play cleared the pile: a ten, or the four of a kind it
-    /// completed, which counts as one. A two resets the pile instead
+    /// The play cleared the pile: a ten, or a four of a kind on top,
+    /// played at once or completed across plays, which counts as one. A two resets the pile instead
     /// and stays on it. Either way the mover plays again.
     @required
     burned: Boolean
