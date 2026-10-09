@@ -191,7 +191,8 @@ bool GameState::isPlayable(Rank rank, int count) const {
   if (count < 1) {
     return false;
   }
-  if (isSpecial(rank) || pile.empty()) {
+  // Four of a kind counts as a ten, so it plays on anything too.
+  if (isSpecial(rank) || pile.empty() || count >= 4) {
     return true;
   }
   const Rank top = pile.back().getRank();

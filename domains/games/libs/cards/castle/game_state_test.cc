@@ -316,13 +316,24 @@ TEST(Play, AFourOfAKindRunBrokenByATwoDoesNotBurn) {
   EXPECT_EQ(pair->getWhoseTurn(), 1);
 }
 
-TEST(Play, ABurnMustStillBeAPlayableRank) {
-  const GameState g =
-      playing({seat("a", {c(Rank::Five), c(Rank::Five, Suit::Hearts), c(Rank::Five, Suit::Spades),
-                          c(Rank::Five, Suit::Diamonds)}),
-               seat("b", {c(Rank::Nine)})},
-              {c(Rank::King)});
-  EXPECT_FALSE(g.playFromHand(0, {0, 1, 2, 3}).ok());
+// Four of a kind is a ten: it plays on anything, whatever the top's
+// rank or the last play's count, and clears the pile.
+TEST(Play, FourOfAKindPlaysOnAnything) {
+  const GameState g = playing({seat("a",
+                                    {c(Rank::Five), c(Rank::Five, Suit::Hearts),
+                                     c(Rank::Five, Suit::Spades), c(Rank::Five, Suit::Diamonds)},
+                                    {c(Rank::Nine)}),
+                               seat("b", {c(Rank::Nine)})},
+                              {c(Rank::King), c(Rank::King, Suit::Hearts)}, {}, 0,
+                              LastPlay{"b", {c(Rank::King), c(Rank::King, Suit::Hearts)}});
+  EXPECT_TRUE(g.isPlayable(Rank::Five, 4));
+  EXPECT_FALSE(g.isPlayable(Rank::Five, 3));
+  EXPECT_TRUE(g.hasLegalPlay(0));
+  auto burn = g.playFromHand(0, {0, 1, 2, 3});
+  ASSERT_TRUE(burn.ok()) << burn.status();
+  EXPECT_TRUE(burn->getPile().empty());
+  EXPECT_TRUE(burn->getLastPlay()->burned);
+  EXPECT_EQ(burn->getWhoseTurn(), 0);
 }
 
 TEST(Play, AHandNeverEmptiesWhileTheDrawPileLasts) {
