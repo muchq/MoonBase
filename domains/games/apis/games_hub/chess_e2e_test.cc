@@ -1452,6 +1452,24 @@ TEST_F(ChessFixture, AFinishedGameIsInTheRoomsHistory) {
   EXPECT_EQ(history->as_history_or_null()->games[0].result.ending, "resignation");
 }
 
+// A game ended by a seat leaving is archived as any ending is: the
+// archive keys on the game being over, not on how.
+TEST_F(ChessFixture, AGameEndedByALeaveIsInTheHistory) {
+  auto started = StartedTable({}, 1);
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(LeaveTable()).ok());
+  ASSERT_TRUE(ReceiveChess(table.bob.stream, "gameEnded").has_value());
+  Seat& carol = started->idle[0];
+  ASSERT_TRUE(carol.stream.Send(History()).ok());
+  auto history = ReceiveChess(carol.stream, "history");
+  ASSERT_TRUE(history.has_value());
+  const auto& games = history->as_history_or_null()->games;
+  ASSERT_EQ(games.size(), 1u);
+  EXPECT_EQ(games[0].result.ending, "abandoned");
+  EXPECT_EQ(games[0].result.winner, table.bob.player_id);
+}
+
 TEST_F(ChessFixture, AReviewIsTheGameMoveByMoveAndItsPgn) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());

@@ -3286,6 +3286,10 @@ void GolfHub::PublishChessMove(const std::string& player_id, bool published) {
     Reject(player_id, RejectKind::kState, "not in a room");
     return;
   }
+  // The row before the word: every instance's archive reads the flag off
+  // the row, so a game that ends after anyone hears this is archived on
+  // it. One that ends between the click and the write was not announced.
+  store_->Flush();
   Deliver(outbox);
 }
 

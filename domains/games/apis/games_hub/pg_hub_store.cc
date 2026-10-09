@@ -512,22 +512,29 @@ absl::StatusOr<std::optional<PgHubStore::ChessGameRow>> PgHubStore::LoadChessGam
 
 absl::StatusOr<std::vector<PgHubStore::PublishedChessGame>> PgHubStore::LoadPublishedChess(
     int64_t after_archive_id, int limit) {
-  auto games = db_->Exec(
-      "SELECT archive_id, game::text, floor(extract(epoch FROM ended_at) * 1000)::bigint"
-      " FROM published_chess_games WHERE archive_id > $1::bigint"
-      " ORDER BY archive_id LIMIT $2::integer",
-      {std::to_string(after_archive_id), std::to_string(limit)});
-  if (!games.ok()) return games.status();
+  // A row that no longer restores is dropped, as an undecodable games row
+  // is; reading on past it fills the page, so a reader advancing by the
+  // last id it got is never handed a page the bad rows emptied.
   std::vector<PublishedChessGame> page;
-  for (int i = 0; i < games->rows(); ++i) {
-    const std::string archive_id = games->Get(i, 0).value_or("0");
-    auto game = chess_play::deserializeGameState(games->Get(i, 1).value_or(""));
-    if (!game.ok()) {
-      LOG(ERROR) << "dropping published chess game " << archive_id << ": " << game.status();
-      continue;
+  int64_t cursor = after_archive_id;
+  while (std::ssize(page) < limit) {
+    auto games = db_->Exec(
+        "SELECT archive_id, game::text, floor(extract(epoch FROM ended_at) * 1000)::bigint"
+        " FROM published_chess_games WHERE archive_id > $1::bigint"
+        " ORDER BY archive_id LIMIT $2::integer",
+        {std::to_string(cursor), std::to_string(limit - std::ssize(page))});
+    if (!games.ok()) return games.status();
+    if (games->rows() == 0) break;
+    for (int i = 0; i < games->rows(); ++i) {
+      const std::string archive_id = games->Get(i, 0).value_or("0");
+      cursor = std::atoll(archive_id.c_str());
+      auto game = chess_play::deserializeGameState(games->Get(i, 1).value_or(""));
+      if (!game.ok()) {
+        LOG(ERROR) << "dropping published chess game " << archive_id << ": " << game.status();
+        continue;
+      }
+      page.push_back({cursor, *std::move(game), std::atoll(games->Get(i, 2).value_or("0").c_str())});
     }
-    page.push_back({std::atoll(archive_id.c_str()), *std::move(game),
-                    std::atoll(games->Get(i, 2).value_or("0").c_str())});
   }
   return page;
 }

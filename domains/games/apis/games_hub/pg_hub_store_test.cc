@@ -694,6 +694,39 @@ TEST_F(PgHubStoreTest, ThePublishedFeedIsSweptByAge) {
   EXPECT_EQ(store_->LoadChessHistory("R1", 100)->games.size(), 1u);
 }
 
+// An unreadable row in the feed costs that row, never the rows after it:
+// a page reads on past it, so a reader advancing by the last id it got
+// cannot stall on a page the bad rows emptied.
+TEST_F(PgHubStoreTest, TheFeedReadsOnPastUnreadableRows) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::SetChessPublished{"R1", true}});
+  store_->Flush();
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(ChessOpened(), 1), ""));
+  ASSERT_TRUE(*store_->CommitGameSave(ChessRow(Mated(ChessOpened()), 2), ""));
+  auto feed = store_->LoadPublishedChess(0, 100);
+  ASSERT_TRUE(feed.ok() && feed->size() == 1u);
+  const int64_t good = (*feed)[0].archive_id;
+  // Three unreadable rows past it, then a readable one.
+  for (int64_t bad = good + 1; bad <= good + 3; ++bad) {
+    ASSERT_TRUE(db_->Exec("INSERT INTO published_chess_games (archive_id, game, ended_at)"
+                          " VALUES ($1::bigint, '{\"v\":99}', now())",
+                          {std::to_string(bad)})
+                    .ok());
+  }
+  ASSERT_TRUE(db_->Exec("INSERT INTO published_chess_games (archive_id, game, ended_at)"
+                        " SELECT $1::bigint, game, ended_at FROM published_chess_games"
+                        " WHERE archive_id = $2::bigint",
+                        {std::to_string(good + 4), std::to_string(good)})
+                  .ok());
+
+  feed = store_->LoadPublishedChess(good, 2);
+  ASSERT_TRUE(feed.ok()) << feed.status();
+  ASSERT_EQ(feed->size(), 1u) << "the bad rows filled the first SQL page";
+  EXPECT_EQ((*feed)[0].archive_id, good + 4);
+  feed = store_->LoadPublishedChess(good + 4, 2);
+  ASSERT_TRUE(feed.ok());
+  EXPECT_TRUE(feed->empty()) << "and the end of the feed is still the end";
+}
+
 // Milliseconds are truncated: a game that ended at .6ms reads as the ms
 // it ended in, never the next.
 TEST_F(PgHubStoreTest, EndTimesTruncateToTheMillisecond) {

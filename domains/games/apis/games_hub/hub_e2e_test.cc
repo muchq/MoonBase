@@ -283,6 +283,8 @@ class TouchSpyStore final : public HubStore {
           touches_.emplace_back(touch->room_ids.begin(), touch->room_ids.end());
         } else if (const auto* sweep = std::get_if<SweepRooms>(&op)) {
           sweeps_.push_back(sweep->older_than);
+        } else if (const auto* feed = std::get_if<SweepPublishedChess>(&op)) {
+          feed_sweeps_.push_back(feed->older_than);
         }
       }
     }
@@ -328,6 +330,13 @@ class TouchSpyStore final : public HubStore {
     if (!cv_.wait_for(lock, budget, [&] { return !sweeps_.empty(); })) return std::nullopt;
     return sweeps_.front();
   }
+  /// Whether a feed sweep was enqueued within `budget`, and the first
+  /// one's threshold.
+  std::optional<std::chrono::seconds> AwaitFeedSweep(std::chrono::milliseconds budget) {
+    std::unique_lock<std::mutex> lock(mu_);
+    if (!cv_.wait_for(lock, budget, [&] { return !feed_sweeps_.empty(); })) return std::nullopt;
+    return feed_sweeps_.front();
+  }
   /// Whether some batch named `room_id` within `budget`.
   bool AwaitTouchOf(const std::string& room_id, std::chrono::milliseconds budget) {
     std::unique_lock<std::mutex> lock(mu_);
@@ -345,6 +354,68 @@ class TouchSpyStore final : public HubStore {
   std::condition_variable cv_;
   std::vector<std::set<std::string>> touches_;
   std::vector<std::chrono::seconds> sweeps_;
+  std::vector<std::chrono::seconds> feed_sweeps_;
+};
+
+// Holds every SetChessPublished back until someone flushes, as a slow
+// async writer would; everything else applies at once.
+class HeldPublishStore final : public HubStore {
+ public:
+  explicit HeldPublishStore(std::shared_ptr<HubStore> delegate) : delegate_(std::move(delegate)) {}
+  void Enqueue(std::vector<Op> ops) override {
+    std::vector<Op> now;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      for (Op& op : ops) {
+        if (std::holds_alternative<SetChessPublished>(op)) {
+          held_.push_back(std::move(op));
+        } else {
+          now.push_back(std::move(op));
+        }
+      }
+    }
+    delegate_->Enqueue(std::move(now));
+  }
+  void Flush() override {
+    std::vector<Op> held;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      held.swap(held_);
+    }
+    delegate_->Enqueue(std::move(held));
+    delegate_->Flush();
+  }
+  absl::StatusOr<Snapshot> LoadSnapshot() override { return delegate_->LoadSnapshot(); }
+  absl::StatusOr<bool> CommitGameSave(const GameRow& row, const std::string& payload) override {
+    return delegate_->CommitGameSave(row, payload);
+  }
+  absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& stats,
+                                        const std::string& payload) override {
+    return delegate_->CommitGameFinish(row, stats, payload);
+  }
+  absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
+                                                  const std::string& game_id) override {
+    return delegate_->LoadGame(room_id, game_id);
+  }
+  absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
+    return delegate_->LoadChessHistory(room_id, limit);
+  }
+  absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
+                                                            const ChessGameKey& key) override {
+    return delegate_->LoadChessGame(room_id, key);
+  }
+  absl::StatusOr<std::vector<PublishedChessGame>> LoadPublishedChess(int64_t after_archive_id,
+                                                                     int limit) override {
+    return delegate_->LoadPublishedChess(after_archive_id, limit);
+  }
+  absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override {
+    return delegate_->LoadRoom(room_id);
+  }
+
+ private:
+  std::shared_ptr<HubStore> delegate_;
+  std::mutex mu_;
+  std::vector<Op> held_;
 };
 
 std::unique_ptr<SecondInstance> BuildSecondInstance(
@@ -1726,6 +1797,28 @@ TEST_F(GamesHubStreamFixture, HeartbeatStampsOnlyRoomsThisInstanceHoldsSeatsIn) 
 
 // The heartbeat thread is StampHeldRooms then SweepStaleRooms on its
 // interval, the sweep at kRoomStaleAfter.
+// What members are told is what the store holds (#1637): by the time
+// anyone hears published, the flag is in the row every instance's
+// archive reads, so no game a sibling ends after the announcement is
+// archived on the old flag.
+TEST_F(GamesHubStreamFixture, PublishedIsAnnouncedOnlyOnceTheStoreHoldsIt) {
+  auto held = std::make_shared<HeldPublishStore>(store_);
+  auto instance = BuildSecondInstance(vault_, held, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto carol = OpenSeatVia(*instance->client);
+  ASSERT_TRUE(carol.has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*carol);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::games::ChessPublish publish;
+  publish.published = true;
+  ASSERT_TRUE(carol->stream.Send(Chess(moonbase::games::ChessMove::FromPublish(publish))).ok());
+  ASSERT_TRUE(ReceiveChess(carol->stream, "published").has_value());
+  auto rows = store_->LoadRoom(room_id);
+  ASSERT_TRUE(rows.ok());
+  EXPECT_TRUE(rows->chess_published) << "announced before the store held it";
+}
+
 TEST_F(GamesHubStreamFixture, RoomHeartbeatStampsAndSweepsOnItsInterval) {
   auto spy = std::make_shared<TouchSpyStore>(store_);
   auto instance = BuildSecondInstance(vault_, spy, chat_store_);
@@ -1742,6 +1835,9 @@ TEST_F(GamesHubStreamFixture, RoomHeartbeatStampsAndSweepsOnItsInterval) {
   EXPECT_EQ(spy->AwaitSweep(std::chrono::seconds(5)),
             std::chrono::duration_cast<std::chrono::seconds>(GolfHub::kRoomStaleAfter))
       << "the heartbeat never swept, or swept at the wrong threshold";
+  EXPECT_EQ(spy->AwaitFeedSweep(std::chrono::seconds(5)),
+            std::chrono::duration_cast<std::chrono::seconds>(GolfHub::kPublishedChessKept))
+      << "the heartbeat never swept the public chess feed (#1637), or at the wrong age";
 }
 
 // The same contract's second window: a seat that entered the cohort
