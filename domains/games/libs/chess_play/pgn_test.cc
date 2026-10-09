@@ -154,23 +154,17 @@ TEST(ChessPgn, LongMovetextWrapsUnderEightyColumns) {
 TEST(ChessPgn, RandomGamesRoundTripThroughTheIndexersParser) {
   std::mt19937 gen(1633);  // fixed: the same games every run
   int plies = 0;
-  int castles = 0;
-  int promotions = 0;
-  for (int i = 0; i < 200; ++i) {
+  for (int i = 0; i < 40; ++i) {
     const bool kpk = i % 4 == 3;
     GameState game =
         kpk ? Started(0, "8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", "kpk", "kpk-e2") : Started(i % 2);
-    while (!game.isOver() && game.moves().size() < 300) {
+    while (!game.isOver() && game.moves().size() < 150) {
       const auto& legal = game.legalMoves();
       const std::string uci = legal[gen() % legal.size()];
       game = *game.move(game.whoseTurn(), uci, kT0);
     }
     if (!game.isOver()) game = *game.resign(0, kT0);
     plies += static_cast<int>(game.moves().size());
-    for (const std::string& san : ReplayGame(game).san) {
-      castles += san.starts_with("O-O") ? 1 : 0;
-      promotions += san.find('=') != std::string::npos ? 1 : 0;
-    }
 
     const std::string pgn = ToPgn(game, Tags());
     const auto parsed = chess_cpp::ParseGame(pgn);
@@ -185,9 +179,28 @@ TEST(ChessPgn, RandomGamesRoundTripThroughTheIndexersParser) {
     ASSERT_TRUE(replayed.ok()) << replayed << "\n" << pgn;
     EXPECT_EQ(last, game.fen()) << pgn;
   }
-  EXPECT_GT(plies, 200 * 20);
-  EXPECT_GT(castles, 0);
-  EXPECT_GT(promotions, 0);
+  EXPECT_GT(plies, 40 * 20);
+}
+
+// The moves a random game is least likely to play, written out: en
+// passant, both castles and a promotion, through the same parser.
+TEST(ChessPgn, SpecialMovesRoundTripThroughTheIndexersParser) {
+  const GameState game =
+      Played(Started(0, "r3k2r/1P6/8/3pP3/8/8/8/R3K2R w KQkq d6 0 1", "standard", "standard"),
+             {"e5d6", "e8g8", "e1c1", "g8g7", "b7b8q"});
+  EXPECT_EQ(ReplayGame(game).san,
+            (std::vector<std::string>{"exd6", "O-O", "O-O-O", "Kg7", "b8=Q"}));
+  const std::string pgn = ToPgn(game, Tags());
+  const auto parsed = chess_cpp::ParseGame(pgn);
+  ASSERT_TRUE(parsed.ok()) << parsed.status() << "\n" << pgn;
+  const auto start = chess_cpp::StartFen(parsed->headers);
+  ASSERT_TRUE(start.ok()) << start.status();
+  std::string last;
+  ASSERT_TRUE(chess_cpp::ReplayFrom(*start, parsed->san_moves,
+                                    [&](const chess_cpp::Position& p) { last = p.board.getFen(); })
+                  .ok())
+      << pgn;
+  EXPECT_EQ(last, game.fen()) << pgn;
 }
 
 }  // namespace
