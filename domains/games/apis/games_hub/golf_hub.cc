@@ -19,6 +19,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/time/clock.h"
+#include "domains/games/apis/games_hub/chess_archive.h"
 #include "domains/games/apis/games_hub/chess_results.h"
 #include "domains/games/apis/games_hub/game_events.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
@@ -628,6 +629,9 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"chess_commands", {{"command", "resign"}}},
       {"chess_commands", {{"command", "addBot"}}},
       {"chess_commands", {{"command", "watch"}}},
+      {"chess_commands", {{"command", "history"}}},
+      {"chess_commands", {{"command", "review"}}},
+      {"chess_commands", {{"command", "publish"}}},
       {"chess_commands", {{"command", "challenge"}}},
       {"chess_events", {{"event", "gameJoined"}}},
       {"chess_events", {{"event", "gameState"}}},
@@ -636,6 +640,9 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"chess_events", {{"event", "turnChanged"}}},
       {"chess_events", {{"event", "gameEnded"}}},
       {"chess_events", {{"event", "gameLeft"}}},
+      {"chess_events", {{"event", "history"}}},
+      {"chess_events", {{"event", "review"}}},
+      {"chess_events", {{"event", "published"}}},
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -797,7 +804,7 @@ absl::Status GolfHub::RestoreFromStore() {
   if (!snapshot.ok()) return snapshot.status();
   const std::lock_guard<std::mutex> lock(mu_);
   for (const HubStore::RoomRow& row : snapshot->rooms) {
-    rooms_[row.room_id];
+    rooms_[row.room_id].chess_published = row.chess_published;
     world_.SetSurface(row.room_id, row.surface);
   }
   for (const HubStore::MemberRow& row : snapshot->members) {
@@ -946,7 +953,8 @@ void GolfHub::StartRoomHeartbeat(std::chrono::milliseconds interval) {
 
 void GolfHub::SweepStaleRooms() {
   store_->Enqueue(
-      {HubStore::SweepRooms{std::chrono::duration_cast<std::chrono::seconds>(kRoomStaleAfter)}});
+      {HubStore::SweepRooms{std::chrono::duration_cast<std::chrono::seconds>(kRoomStaleAfter)},
+       HubStore::SweepPublishedChess{kPublishedChessKept}});
 }
 
 void GolfHub::StampHeldRooms() {
@@ -1065,9 +1073,11 @@ void GolfHub::EnqueueWritesLocked(Writes& writes) {
           using Write = std::decay_t<decltype(write)>;
           if constexpr (std::is_same_v<Write, HubStore::Notify> ||
                         std::is_same_v<Write, HubStore::TouchRooms> ||
-                        std::is_same_v<Write, HubStore::SweepRooms>) {
+                        std::is_same_v<Write, HubStore::SweepRooms> ||
+                        std::is_same_v<Write, HubStore::SweepPublishedChess>) {
             // A wake changes no row; a stamp changes none a client sees;
-            // a sweep's deletes reach clients through its own wakes.
+            // a room sweep's deletes reach clients through its own wakes,
+            // and the feed's are no room's.
           } else if constexpr (std::is_same_v<Write, HubStore::UpsertMember>) {
             TouchRoomLocked(write.row.room_id);
           } else {
@@ -1323,7 +1333,12 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
   // then be stepped over — the adoption race a wake-time seed would have.
   if (materialized) SeedChatCursorLocked(room_id);
 
-  bool changed = materialized || reshaped;
+  // A sibling's publish reaches this instance as the row; the members
+  // held here hear it without a `by`, which the row does not carry. It is
+  // a change like any other, so a catch-up that read before it rereads.
+  const bool republished = rows.chess_published != room.chess_published;
+  room.chess_published = rows.chess_published;
+  bool changed = materialized || reshaped || republished;
 
   // Members mirror the rows: every instance writes its own players'
   // rows, and the refresh flush made ours current.
@@ -1374,6 +1389,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
     }
   }
   room.members = std::move(members);
+  if (republished && !materialized) StagePublishedLocked(room, rows.chess_published, {}, outbox);
 
   // Games: adopt rows that moved past us. A row that ended while we
   // hold the game is a remote finish — ceremony here, then it is gone
@@ -2270,6 +2286,18 @@ void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& mov
   }
   if (const auto* watch = move.as_watch_or_null()) {
     WatchChessMove(player_id, watch->gameId);
+    return;
+  }
+  if (move.as_history_or_null() != nullptr) {
+    ChessHistoryMove(player_id);
+    return;
+  }
+  if (const auto* review = move.as_review_or_null()) {
+    ChessReviewMove(player_id, *review);
+    return;
+  }
+  if (const auto* publish = move.as_publish_or_null()) {
+    PublishChessMove(player_id, publish->published);
     return;
   }
   if (const auto* challenge = move.as_challenge_or_null()) {
@@ -3188,6 +3216,98 @@ void GolfHub::WatchChessMove(const std::string& player_id, const std::string& ga
   // Whatever the refresh staged is true either way.
   Deliver(outbox);
   if (refusal.has_value()) Reject(player_id, std::move(*refusal));
+}
+
+void GolfHub::ChessHistoryMove(const std::string& player_id) {
+  const auto room_id = CurrentRoom(player_id);
+  if (!room_id.has_value()) {
+    Reject(player_id, RejectKind::kState, "not in a room");
+    return;
+  }
+  // Staged publishes land first, so the flag read is the one last set.
+  store_->Flush();
+  auto history = store_->LoadChessHistory(*room_id, kChessHistoryLimit);
+  if (!history.ok()) {
+    Reject(player_id, RejectKind::kUnavailable, "storage unavailable; try again");
+    return;
+  }
+  moonbase::games::ChessHistory answer;
+  answer.published = history->published;
+  for (const HubStore::ChessGameRow& row : history->games) {
+    answer.games.push_back(ChessSummaryOf(row));
+  }
+  Send(player_id, ChessUpdateEvent(ChessUpdate::FromHistory(std::move(answer))));
+}
+
+void GolfHub::ChessReviewMove(const std::string& player_id,
+                              const moonbase::games::ChessReviewRequest& review) {
+  const bool by_table = review.gameId.has_value() && review.ordinal.has_value();
+  if (review.archiveId.has_value() == by_table ||
+      review.gameId.has_value() != review.ordinal.has_value()) {
+    Reject(player_id, RejectKind::kInvalid, "name a game by archiveId, or by gameId and ordinal");
+    return;
+  }
+  const auto room_id = CurrentRoom(player_id);
+  if (!room_id.has_value()) {
+    Reject(player_id, RejectKind::kState, "not in a room");
+    return;
+  }
+  auto row = store_->LoadChessGame(
+      *room_id, {review.archiveId, review.gameId.value_or(""), review.ordinal.value_or(0)});
+  if (!row.ok()) {
+    Reject(player_id, RejectKind::kUnavailable, "storage unavailable; try again");
+    return;
+  }
+  if (!row->has_value()) {
+    Reject(player_id, RejectKind::kState, "no such game in this room");
+    return;
+  }
+  Send(player_id, ChessUpdateEvent(ChessUpdate::FromReview(ChessReviewOf(**row))));
+}
+
+void GolfHub::PublishChessMove(const std::string& player_id, bool published) {
+  Outbox outbox;
+  bool in_room = false;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    const auto room_id = player_room_.find(player_id);
+    Room* room = FindRoomLocked(player_id);
+    in_room = room_id != player_room_.end() && room != nullptr;
+    if (in_room) {
+      room->chess_published = published;
+      Writes writes;
+      StageLocked(writes, HubStore::SetChessPublished{room_id->second, published});
+      StageWakeLocked(room_id->second, writes);
+      EnqueueWritesLocked(writes);
+      StagePublishedLocked(*room, published, player_id, outbox);
+    }
+  }
+  if (!in_room) {
+    Reject(player_id, RejectKind::kState, "not in a room");
+    return;
+  }
+  Deliver(outbox);
+}
+
+void GolfHub::StagePublishedLocked(const Room& room, bool published,
+                                   const std::optional<std::string>& by, Outbox& outbox) const {
+  moonbase::games::ChessPublished update;
+  update.published = published;
+  update.by = by;
+  for (const auto& [member_id, member] : room.members) {
+    outbox.To(member_id, ChessUpdateEvent(ChessUpdate::FromPublished(update)));
+  }
+}
+
+absl::StatusOr<std::string> GolfHub::ExportChessPgn(int64_t after_archive_id) {
+  auto games = store_->LoadPublishedChess(after_archive_id, kChessHistoryLimit);
+  if (!games.ok()) return games.status();
+  std::string pgn;
+  for (const HubStore::PublishedChessGame& game : *games) {
+    if (!pgn.empty()) pgn += "\n";
+    pgn += ChessPgnOf(game.archive_id, game.game, game.ended_at_ms);
+  }
+  return pgn;
 }
 
 std::optional<std::string> GolfHub::StopWatchingLocked(const std::string& player_id) {

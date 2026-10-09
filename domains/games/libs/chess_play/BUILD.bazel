@@ -114,3 +114,34 @@ cc_test(
         "@nlohmann_json//:json",
     ],
 )
+
+# A game read back for review, and as PGN: what a room's archive serves.
+cc_library(
+    name = "pgn",
+    srcs = ["pgn.cc"],
+    hdrs = ["pgn.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_state",
+        "//bazel/3p/chess_library",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# Round-trips the export through chess_cpp's reader: the parser one_d4's
+# worker indexes with.
+cc_test(
+    name = "pgn_test",
+    size = "small",
+    srcs = ["pgn_test.cc"],
+    deps = [
+        ":game_state",
+        ":game_state_serde",
+        ":pgn",
+        "//domains/games/libs/chess_cpp:pgn",
+        "//domains/games/libs/chess_cpp:replay",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)

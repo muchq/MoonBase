@@ -44,7 +44,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     }
     pg::Client db(url_);
     ASSERT_TRUE(RunMigrations(db).ok());
-    ASSERT_TRUE(db.Exec("TRUNCATE rooms CASCADE").ok());
+    ASSERT_TRUE(db.Exec("TRUNCATE rooms, published_chess_games CASCADE").ok());
     ASSERT_TRUE(db.Exec("TRUNCATE tickets, resume_tokens").ok());
     GamesHubStreamFixture::SetUp();
     listener_ = MakeListener(golf_);
@@ -1683,6 +1683,125 @@ TEST_F(PgGamesHubFixture, SetGeometryReshapesTheRoomOnEveryInstance) {
   EXPECT_NE(world->as_worldState_or_null()->geometry.as_sphere_or_null(), nullptr);
 }
 
+// Publishing a room's chess games reaches every instance holding it
+// (#1637): bob, on the remote, hears alice's publish from the primary —
+// without a `by`, which the row does not carry — and a game that ends
+// on the primary is in bob's history, and in the export the remote
+// serves.
+TEST_F(PgGamesHubFixture, PublishingAndHistoryCrossInstances) {
+  using moonbase::games::ChessMove;
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  DetachOnScopeExit detach{this, remote.get()};
+  CrossSeats seats;
+  const std::string room_id = SeatedCrossRoom(*remote, seats);
+  ASSERT_FALSE(room_id.empty());
+  Seat& alice = *seats.alice;
+  Seat& bob = *seats.bob;
+
+  moonbase::games::ChessPublish publish;
+  publish.published = true;
+  ASSERT_TRUE(alice.stream.Send(Chess(ChessMove::FromPublish(publish))).ok());
+  auto mine = ReceiveChess(alice.stream, "published");
+  ASSERT_TRUE(mine.has_value());
+  EXPECT_EQ(mine->as_published_or_null()->by, alice.player_id);
+  auto relayed = ReceiveChess(bob.stream, "published");
+  ASSERT_TRUE(relayed.has_value());
+  EXPECT_TRUE(relayed->as_published_or_null()->published);
+  EXPECT_FALSE(relayed->as_published_or_null()->by.has_value());
+
+  ASSERT_TRUE(
+      alice.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  const std::string game_id = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(AwaitLobbyGame(bob, game_id));
+  moonbase::games::JoinGame join;
+  join.gameId = game_id;
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  ASSERT_TRUE(ReceiveChess(bob.stream, "gameJoined").has_value());
+  ASSERT_TRUE(AwaitChessView(
+                  alice.stream, [](const auto& view) { return view.players.size() == 2; },
+                  "alice (primary) sees bob seated on the remote")
+                  .has_value());
+  ASSERT_TRUE(alice.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  bob.stream, [](const auto& view) { return view.phase == "playing"; },
+                  "bob (remote) sees the game alice started")
+                  .has_value());
+  ASSERT_TRUE(alice.stream.Send(Chess(ChessMove::FromResign({}))).ok());
+  ASSERT_TRUE(ReceiveChess(bob.stream, "gameEnded").has_value());
+
+  ASSERT_TRUE(
+      bob.stream.Send(Chess(ChessMove::FromHistory(moonbase::games::ChessHistoryRequest{}))).ok());
+  auto history = ReceiveChess(bob.stream, "history");
+  ASSERT_TRUE(history.has_value());
+  EXPECT_TRUE(history->as_history_or_null()->published);
+  ASSERT_EQ(history->as_history_or_null()->games.size(), 1u);
+  EXPECT_TRUE(history->as_history_or_null()->games[0].published);
+  EXPECT_EQ(history->as_history_or_null()->games[0].result.winner, bob.player_id);
+
+  auto pgn = remote->golf->ExportChessPgn(0);
+  ASSERT_TRUE(pgn.ok()) << pgn.status();
+  EXPECT_NE(pgn->find("[Termination \"normal\"]"), std::string::npos) << *pgn;
+}
+
+// A restart keeps knowing the room publishes: the wake after it, a
+// sibling's member joining, announces nothing, and a sibling's withdrawal
+// still does.
+TEST_F(PgGamesHubFixture, APublishedRoomStaysPublishedAcrossARestart) {
+  using moonbase::games::ChessMove;
+  auto alice = OpenSeat();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(ReceiveCase(alice->stream, "sessionReady").has_value());
+  const std::string room_id = CreateRoomFor(*alice);
+  ASSERT_FALSE(room_id.empty());
+  moonbase::games::ChessPublish publish;
+  publish.published = true;
+  ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromPublish(publish))).ok());
+  ASSERT_TRUE(ReceiveChess(alice->stream, "published").has_value());
+
+  const std::string alice_token = alice->resume_token;
+  RestartHub();
+  auto alice_back = OpenSeat(alice_token);
+  ASSERT_TRUE(alice_back.has_value());
+  // Pokes on the room's channel wake the restarted hub into reconciling
+  // the room's row; everything alice hears from her resume until one of
+  // them reaches her is checked, so no announcement can hide in it.
+  pg::Client db(url_);
+  for (int i = 0; i < 10; ++i) {
+    ASSERT_TRUE(db.Exec("SELECT pg_notify($1, 'poke')", {RoomChannel(room_id)}).ok());
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  int room_states = 0;
+  for (int i = 0; i < 16 && room_states < 2; ++i) {
+    auto event = NextEvent(alice_back->stream);
+    ASSERT_TRUE(event.has_value());
+    if (const auto* chess = event->as_chess_or_null()) {
+      ADD_FAILURE() << "alice heard chess " << chess->update.case_name();
+    }
+    if (event->as_roomState_or_null() != nullptr) ++room_states;
+  }
+  ASSERT_EQ(room_states, 2) << "the resume's roomState, then a poke's";
+
+  // The twin: a sibling's withdrawal does reach her.
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  DetachOnScopeExit detach{this, remote.get()};
+  auto carol = OpenSeatVia(*remote->client);
+  ASSERT_TRUE(carol.has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  moonbase::games::JoinRoom join_room;
+  join_room.roomId = room_id;
+  ASSERT_TRUE(carol->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "roomState").has_value());
+  publish.published = false;
+  ASSERT_TRUE(carol->stream.Send(Chess(ChessMove::FromPublish(publish))).ok());
+  auto withdrawn = ReceiveChess(alice_back->stream, "published");
+  ASSERT_TRUE(withdrawn.has_value());
+  EXPECT_FALSE(withdrawn->as_published_or_null()->published);
+}
+
 TEST_F(PgGamesHubFixture, EmptiedRoomVanishesFromTheDatabase) {
   auto alice = OpenSeat();
   ASSERT_TRUE(alice.has_value());
@@ -1742,6 +1861,17 @@ class LaggingHubStore final : public HubStore {
   absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
                                                   const std::string& game_id) override {
     return inner_->LoadGame(room_id, game_id);
+  }
+  absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
+    return inner_->LoadChessHistory(room_id, limit);
+  }
+  absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
+                                                            const ChessGameKey& key) override {
+    return inner_->LoadChessGame(room_id, key);
+  }
+  absl::StatusOr<std::vector<PublishedChessGame>> LoadPublishedChess(int64_t after_archive_id,
+                                                                     int limit) override {
+    return inner_->LoadPublishedChess(after_archive_id, limit);
   }
   absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override {
     return inner_->LoadRoom(room_id);

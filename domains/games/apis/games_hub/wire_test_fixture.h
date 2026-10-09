@@ -142,7 +142,7 @@ class HubWireFixture : public ::testing::Test {
     auto ids = std::make_shared<SequentialIdGenerator>();
     golf_ = std::make_shared<GolfHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
                                       /*grace_period=*/std::chrono::seconds(60), metrics_,
-                                      /*store=*/nullptr, /*chat_store=*/nullptr, MakeRateLimits());
+                                      MakeStore(), /*chat_store=*/nullptr, MakeRateLimits());
     ASSERT_TRUE(golf_->RestoreFromStore().ok());
     handler_ = std::make_shared<GamesHubHandler>(vault, ids, golf_);
     server_ = std::make_unique<moonbase::games::GamesHubServer>(handler_);
@@ -150,6 +150,8 @@ class HubWireFixture : public ::testing::Test {
   }
 
   virtual RateLimits MakeRateLimits() { return WireRateLimits(); }
+  /// Null selects the production memory store.
+  virtual std::shared_ptr<HubStore> MakeStore() { return nullptr; }
 
   void TearDown() override {
     // Idempotent; unblocks any session a failed test body left parked.

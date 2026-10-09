@@ -10,7 +10,8 @@ auth ahead of the 101. One session identity opens the one stream.
 ## The model (seven namespaces)
 
 - `model/games.smithy` — `moonbase.games`: the service, session identity
-  (`POST /games/v2/session`), the two terminal stream errors, the one
+  (`POST /games/v2/session`), the public chess feed
+  (`GET /games/v2/chess.pgn`), the two terminal stream errors, the one
   stream — `Play` at `/games/v2/play`, its `GameCommands`/`GameEvents`
   unions carrying the room layer's own cases plus one envelope member
   per tenant (`lobby`, `voice`, `golf`, `castle`, `rummy`, `chess`) — and the game-agnostic room
@@ -457,6 +458,35 @@ closed view, as it does its seats; one erased without that (deleted
 before it started, here or on a sibling) hands them `gameLeft`. Watchers
 live on the table's local entry (`GameEntry::watchers`), never in a row,
 so no watcher count can reach `GameSummary` truthfully across instances.
+
+A room keeps its finished chess games (#1637). The commit that ends a
+game archives it in the same statement (`chess_games`, under an archive
+id of its own, keyed so the later commits that still carry the ended game
+add nothing), marked with whether the room was published then; the
+archive dies with the room. Any member asks for `history` — the newest
+100, without moves — and `review`s one by its archive id, or by its table
+code and line on that table's score sheet (the newest such game, since a
+code is minted again once its table is gone): the moves in UCI and SAN,
+every position as FEN, and the game as PGN (`chess_play/pgn.h`,
+round-tripped through `chess_cpp`'s reader, the parser one_d4's worker
+indexes with).
+
+Any member may `publish` the room's games, or withdraw them; every member
+hears `published`, with who did it when the instance knows (a sibling's
+relay, read off the row, does not). A game that ends while its room is
+published is copied by the same statement to the public feed
+(`published_chess_games`), which names no room — a room code is all it
+takes to join a room and read its private games — and outlives the room;
+the heartbeat sweeps it after 30 days (`kPublishedChessKept`).
+Withdrawing keeps the next games private; those already out stay out,
+since anything could have read them. The feed is
+`GET /games/v2/chess.pgn?after=<archive id>`, no ticket: 100 games at a
+time in archive order. Each game's `[Site]` is its own URL by archive id,
+which is what an indexer keys a game on, and `[UTCDate]`/`[UTCTime]` say
+when it ended. Archive ids are taken before commit, so a game can land
+behind one already read: a reader that rereads a little and dedupes on
+`[Site]` misses none. It shares the unary rate limit with session mints
+(aura's limiter keys on the client, not the route).
 
 ## Redaction
 

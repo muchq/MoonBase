@@ -56,6 +56,54 @@ class ChessWireTest : public HubWireFixture {
   std::shared_ptr<opal::http::WebSocket> DialReady(json& session) {
     return HubWireFixture::DialReady(kPlayPath, session);
   }
+  // An archive whose games end at a fixed moment, so endedAtMs and the
+  // PGN's [Date] are goldens too.
+  std::shared_ptr<HubStore> MakeStore() override {
+    return std::make_shared<MemoryHubStore>([] { return int64_t{1'800'000'000'000}; });
+  }
+
+  // A room of two whose table has played one game, which player-1 won by
+  // mate; each stream has read everything up to its gameEnded.
+  struct Played {
+    std::shared_ptr<opal::http::WebSocket> creator;
+    std::shared_ptr<opal::http::WebSocket> joiner;
+  };
+  Played PlayedOneGame() {
+    json creator_session;
+    json joiner_session;
+    Played played{DialReady(creator_session), DialReady(joiner_session)};
+    auto& creator = *played.creator;
+    auto& joiner = *played.joiner;
+    EXPECT_TRUE(creator.Send(CommandFrame("createRoom", "{}")).ok());
+    (void)EventPayload(NextFrame(creator), "roomState");
+    EXPECT_TRUE(creator.Send(CommandFrame("chess", R"({"move":{"createGame":{}}})")).ok());
+    for (const char* event : {"chess", "chess", "roomState"}) {
+      (void)EventPayload(NextFrame(creator), event);
+    }
+    EXPECT_TRUE(joiner.Send(CommandFrame("joinRoom", R"({"roomId":"room-1"})")).ok());
+    (void)EventPayload(NextFrame(joiner), "roomState");
+    (void)EventPayload(NextFrame(joiner), "roomChatHistory");
+    (void)EventPayload(NextFrame(creator), "roomState");
+    EXPECT_TRUE(
+        joiner.Send(CommandFrame("chess", R"({"move":{"joinGame":{"gameId":"GAME01"}}})")).ok());
+    for (const char* event : {"chess", "roomState"}) (void)EventPayload(NextFrame(joiner), event);
+    for (const char* event : {"chess", "roomState"}) (void)EventPayload(NextFrame(creator), event);
+    EXPECT_TRUE(
+        creator.Send(CommandFrame("chess", R"({"move":{"startGame":{"setupId":"kpk-e2"}}})")).ok());
+    for (const char* event : {"chess", "chess", "roomState"}) {
+      (void)EventPayload(NextFrame(creator), event);
+    }
+    for (const char* event : {"chess", "chess", "roomState"}) {
+      (void)EventPayload(NextFrame(joiner), event);
+    }
+    EXPECT_TRUE(creator.Send(CommandFrame("chess", R"({"move":{"play":{"uci":"e7e8q"}}})")).ok());
+    for (auto* stream : {&creator, &joiner}) {
+      for (const char* event : {"chess", "chess", "roomState"}) {
+        (void)EventPayload(NextFrame(*stream), event);
+      }
+    }
+    return played;
+  }
 
   std::mt19937_64 setup_gen_{1234};
 };
@@ -261,6 +309,98 @@ TEST_F(ChessWireTest, WatchPinsItsCommandAndTheViewThatAnswersIt) {
   ASSERT_TRUE(watcher->Send(CommandFrame("chess", R"({"move":{"leaveGame":{}}})")).ok());
   EXPECT_EQ(EventPayload(NextFrame(*watcher), "chess"),
             R"({"update":{"gameLeft":{"gameId":"GAME01"}}})");
+}
+
+// The room's history, a review and publishing (#1637): the commands'
+// spelling and every byte of what answers them.
+TEST_F(ChessWireTest, HistoryReviewAndPublishPinTheirBytes) {
+  Played played = PlayedOneGame();
+  auto& creator = *played.creator;
+  auto& joiner = *played.joiner;
+  const std::string summary =
+      R"({"archiveId":1,"black":"player-2","endedAtMs":1800000000000,"gameId":"GAME01",)"
+      R"("ordinal":1,"plies":1,)"
+      R"("published":false,"result":{"ending":"checkmate","winner":"player-1",)"
+      R"("winnerColor":"white"},"setupId":"kpk-e2","setupName":"K+P vs K — Pawn on e2",)"
+      R"("white":"player-1"})";
+
+  ASSERT_TRUE(joiner.Send(CommandFrame("chess", R"({"move":{"history":{}}})")).ok());
+  EXPECT_EQ(EventPayload(NextFrame(joiner), "chess"),
+            R"({"update":{"history":{"games":[)" + summary + R"(],"published":false}}})");
+
+  ASSERT_TRUE(
+      joiner.Send(CommandFrame("chess", R"({"move":{"review":{"gameId":"GAME01","ordinal":1}}})"))
+          .ok());
+  EXPECT_EQ(EventPayload(NextFrame(joiner), "chess"),
+            R"({"update":{"review":{"fens":["7k/4P3/6K1/8/8/8/8/8 w - - 0 1",)"
+            R"("4Q2k/8/6K1/8/8/8/8/8 b - - 0 1"],"moves":["e7e8q"],)"
+            R"("pgn":"[Event \"muchq.com chess\"]\n[Site \"https://muchq.com/games/chess/1\"]\n)"
+            R"([Date \"2027.01.15\"]\n[Round \"-\"]\n[White \"player-1\"]\n)"
+            R"([Black \"player-2\"]\n[Result \"1-0\"]\n[UTCDate \"2027.01.15\"]\n)"
+            R"([UTCTime \"08:00:00\"]\n[SetUp \"1\"]\n)"
+            R"([FEN \"7k/4P3/6K1/8/8/8/8/8 w - - 0 1\"]\n[TimeControl \"180+2\"]\n)"
+            R"([Termination \"normal\"]\n\n1. e8=Q# 1-0\n",)"
+            R"("san":["e8=Q#"],"summary":)" +
+                summary + R"(}}})");
+
+  ASSERT_TRUE(
+      creator.Send(CommandFrame("chess", R"({"move":{"publish":{"published":true}}})")).ok());
+  for (auto* stream : {&creator, &joiner}) {
+    EXPECT_EQ(EventPayload(NextFrame(*stream), "chess"),
+              R"({"update":{"published":{"by":"player-1","published":true}}})");
+  }
+}
+
+// The feed as a raw GET, the way an indexer fetches it: the status, the
+// content type and the bytes.
+TEST_F(ChessWireTest, TheFeedIsPgnOverPlainHttp) {
+  Played played = PlayedOneGame();  // ended private
+  opal::http::HttpRequest request;
+  request.method = "GET";
+  request.target = "/games/v2/chess.pgn";
+  auto empty = loopback_->Send(request);
+  ASSERT_TRUE(empty.ok()) << empty.error().message();
+  EXPECT_EQ(empty->status, 200);
+  EXPECT_EQ(empty->headers.Get("content-type"), "application/x-chess-pgn");
+  EXPECT_EQ(empty->body, "") << "the game ended before the room published";
+
+  ASSERT_TRUE(
+      played.creator->Send(CommandFrame("chess", R"({"move":{"publish":{"published":true}}})"))
+          .ok());
+  (void)EventPayload(NextFrame(*played.creator), "chess");
+  // The next game ends published. Its traffic is pinned elsewhere; read
+  // up to its gameEnded.
+  const auto read_until = [](opal::http::WebSocket& stream, std::string_view marker) {
+    for (int i = 0; i < 8; ++i) {
+      auto frame = NextFrame(stream);
+      if (!frame.has_value()) break;
+      if (frame->payload.ToString().find(marker) != std::string::npos) return;
+    }
+    ADD_FAILURE() << "never saw " << marker;
+  };
+  ASSERT_TRUE(
+      played.creator->Send(CommandFrame("chess", R"({"move":{"startGame":{"setupId":"kpk-e2"}}})"))
+          .ok());
+  read_until(*played.creator, R"("phase":"playing")");
+  ASSERT_TRUE(played.joiner->Send(CommandFrame("chess", R"({"move":{"resign":{}}})")).ok());
+  read_until(*played.creator, "gameEnded");
+  auto exported = loopback_->Send(request);
+  ASSERT_TRUE(exported.ok());
+  EXPECT_EQ(exported->status, 200);
+  EXPECT_EQ(exported->headers.Get("content-type"), "application/x-chess-pgn");
+  EXPECT_EQ(exported->body,
+            "[Event \"muchq.com chess\"]\n[Site \"https://muchq.com/games/chess/2\"]\n"
+            "[Date \"2027.01.15\"]\n[Round \"-\"]\n[White \"player-2\"]\n"
+            "[Black \"player-1\"]\n[Result \"0-1\"]\n[UTCDate \"2027.01.15\"]\n"
+            "[UTCTime \"08:00:00\"]\n[SetUp \"1\"]\n"
+            "[FEN \"7k/4P3/6K1/8/8/8/8/8 w - - 0 1\"]\n[TimeControl \"180+2\"]\n"
+            "[Termination \"normal\"]\n\n0-1\n");
+
+  request.target = "/games/v2/chess.pgn?after=2";
+  auto after = loopback_->Send(request);
+  ASSERT_TRUE(after.ok());
+  EXPECT_EQ(after->status, 200);
+  EXPECT_EQ(after->body, "") << "after is exclusive";
 }
 
 // A challenge takes startGame's shape, and the decoder holds its bounds.

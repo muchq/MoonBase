@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -23,6 +24,7 @@
 #include "absl/status/status.h"
 #include "absl/time/time.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
+#include "domains/games/libs/chess_cpp/pgn.h"
 #include "domains/games/libs/chess_play/game_state.h"
 
 namespace games_hub {
@@ -62,6 +64,29 @@ GameCommands Challenge(std::optional<std::string> setup_id, std::optional<int> i
 }
 
 GameCommands LeaveTable() { return Chess(ChessMove::FromLeavegame(moonbase::games::LeaveGame{})); }
+
+GameCommands History() {
+  return Chess(ChessMove::FromHistory(moonbase::games::ChessHistoryRequest{}));
+}
+
+GameCommands Review(const std::string& game_id, int ordinal) {
+  moonbase::games::ChessReviewRequest review;
+  review.gameId = game_id;
+  review.ordinal = ordinal;
+  return Chess(ChessMove::FromReview(review));
+}
+
+GameCommands ReviewArchived(int64_t archive_id) {
+  moonbase::games::ChessReviewRequest review;
+  review.archiveId = archive_id;
+  return Chess(ChessMove::FromReview(review));
+}
+
+GameCommands Publish(bool published) {
+  moonbase::games::ChessPublish publish;
+  publish.published = published;
+  return Chess(ChessMove::FromPublish(publish));
+}
 
 class ChessFixture : public GamesHubStreamFixture {
  protected:
@@ -1200,6 +1225,17 @@ class FinishOutageStore final : public HubStore {
                                                   const std::string& game_id) override {
     return delegate_.LoadGame(room_id, game_id);
   }
+  absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
+    return delegate_.LoadChessHistory(room_id, limit);
+  }
+  absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
+                                                            const ChessGameKey& key) override {
+    return delegate_.LoadChessGame(room_id, key);
+  }
+  absl::StatusOr<std::vector<PublishedChessGame>> LoadPublishedChess(int64_t after_archive_id,
+                                                                     int limit) override {
+    return delegate_.LoadPublishedChess(after_archive_id, limit);
+  }
   absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override {
     return delegate_.LoadRoom(room_id);
   }
@@ -1364,6 +1400,282 @@ TEST_F(DefaultOpeningFixture, TheNextGameCanSelectAnotherCatalogPosition) {
   EXPECT_EQ(view->variant, "qvr");
   EXPECT_EQ(view->setupName, "Q vs R — Basic conversion");
   EXPECT_EQ(view->fen, "4k3/8/8/8/8/8/1r6/3QK3 w - - 0 1");
+}
+
+// A room keeps its finished games (#1637): any member asks, seated or
+// not, and hears them newest first, each with its sides and result.
+TEST_F(ChessFixture, AFinishedGameIsInTheRoomsHistory) {
+  auto started = StartedTable({}, 1);
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  Seat& carol = started->idle[0];
+  ASSERT_TRUE(carol.stream.Send(History()).ok());
+  auto empty = ReceiveChess(carol.stream, "history");
+  ASSERT_TRUE(empty.has_value());
+  EXPECT_TRUE(empty->as_history_or_null()->games.empty()) << "a game in play is not history";
+  EXPECT_FALSE(empty->as_history_or_null()->published);
+
+  ASSERT_TRUE(table.alice.stream.Send(Play("e7e8q")).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  ASSERT_TRUE(carol.stream.Send(History()).ok());
+  auto history = ReceiveChess(carol.stream, "history");
+  ASSERT_TRUE(history.has_value());
+  const auto& games = history->as_history_or_null()->games;
+  ASSERT_EQ(games.size(), 1u);
+  EXPECT_EQ(games[0].gameId, table.game_id);
+  EXPECT_EQ(games[0].ordinal, 1);
+  EXPECT_EQ(games[0].white, table.alice.player_id);
+  EXPECT_EQ(games[0].black, table.bob.player_id);
+  EXPECT_EQ(games[0].result.winner, table.alice.player_id);
+  EXPECT_EQ(games[0].result.winnerColor, "white");
+  EXPECT_EQ(games[0].result.ending, "checkmate");
+  EXPECT_EQ(games[0].setupId, "random-kpk");
+  EXPECT_EQ(games[0].setupName, "Random K+P vs K");
+  EXPECT_EQ(games[0].plies, 1);
+  EXPECT_GT(games[0].endedAtMs, 0);
+  EXPECT_GT(games[0].archiveId, 0);
+  EXPECT_FALSE(games[0].published);
+
+  // The table's next game is the second line, and heads the history.
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  table.bob.stream, [](const auto& view) { return view.phase == "playing"; },
+                  "the second game")
+                  .has_value());
+  ASSERT_TRUE(table.alice.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  ASSERT_TRUE(table.alice.stream.Send(History()).ok());
+  history = ReceiveChess(table.alice.stream, "history");
+  ASSERT_TRUE(history.has_value());
+  ASSERT_EQ(history->as_history_or_null()->games.size(), 2u);
+  EXPECT_EQ(history->as_history_or_null()->games[0].ordinal, 2);
+  EXPECT_EQ(history->as_history_or_null()->games[0].result.ending, "resignation");
+}
+
+TEST_F(ChessFixture, AReviewIsTheGameMoveByMoveAndItsPgn) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Play("e7e8q")).ok());
+  ASSERT_TRUE(Ended(table.bob).has_value());
+  ASSERT_TRUE(table.bob.stream.Send(Review(table.game_id, 1)).ok());
+  auto review = ReceiveChess(table.bob.stream, "review");
+  ASSERT_TRUE(review.has_value());
+  const auto& game = *review->as_review_or_null();
+  EXPECT_EQ(game.summary.gameId, table.game_id);
+  EXPECT_EQ(game.summary.ordinal, 1);
+  EXPECT_EQ(game.moves, std::vector<std::string>{"e7e8q"});
+  EXPECT_EQ(game.san, std::vector<std::string>{"e8=Q#"});
+  ASSERT_EQ(game.fens.size(), 2u);
+  EXPECT_EQ(game.fens[0], kPromotionMates);
+  EXPECT_EQ(game.fens[1], "4Q2k/8/6K1/8/8/8/8/8 b - - 0 1");
+  EXPECT_THAT(game.pgn, ::testing::HasSubstr("[White \"" + table.alice.player_id + "\"]"));
+  EXPECT_THAT(game.pgn, ::testing::HasSubstr("[Site \"https://muchq.com/games/chess/" +
+                                             std::to_string(game.summary.archiveId) + "\"]"));
+  EXPECT_THAT(game.pgn, ::testing::Not(::testing::HasSubstr(table.room_id)))
+      << "the PGN names no room: a room code is all it takes to join one";
+  EXPECT_THAT(game.pgn, ::testing::HasSubstr("[SetUp \"1\"]"));
+  EXPECT_THAT(game.pgn, ::testing::HasSubstr("1. e8=Q# 1-0\n"));
+}
+
+// A table code minted again shares its lines with the old table's games;
+// the id names either, the table and line the newest.
+TEST_F(ChessFixture, AReviewNamesAGameByItsArchiveId) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Play("e7e8q")).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  ASSERT_TRUE(table.alice.stream.Send(History()).ok());
+  auto history = ReceiveChess(table.alice.stream, "history");
+  ASSERT_TRUE(history.has_value());
+  const int64_t archive_id = history->as_history_or_null()->games.at(0).archiveId;
+  ASSERT_TRUE(table.alice.stream.Send(ReviewArchived(archive_id)).ok());
+  auto review = ReceiveChess(table.alice.stream, "review");
+  ASSERT_TRUE(review.has_value());
+  EXPECT_EQ(review->as_review_or_null()->summary.archiveId, archive_id);
+  EXPECT_EQ(review->as_review_or_null()->moves, std::vector<std::string>{"e7e8q"});
+}
+
+TEST_F(ChessFixture, AReviewNamingTheGameBothWaysOrHalfAWayIsRefused) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Seat& alice = started->table.alice;
+  moonbase::games::ChessReviewRequest both;
+  both.archiveId = 1;
+  both.gameId = started->table.game_id;
+  both.ordinal = 1;
+  moonbase::games::ChessReviewRequest half;
+  half.gameId = started->table.game_id;
+  for (const auto& request : {both, half, moonbase::games::ChessReviewRequest{}}) {
+    ASSERT_TRUE(alice.stream.Send(Chess(ChessMove::FromReview(request))).ok());
+    auto refused = ReceiveCase(alice.stream, "commandRejected");
+    ASSERT_TRUE(refused.has_value());
+    EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
+              "name a game by archiveId, or by gameId and ordinal");
+  }
+}
+
+TEST_F(ChessFixture, AReviewOfNoSuchGameIsRefused) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Review(table.game_id, 1)).ok());
+  auto refused = ReceiveCase(table.alice.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "no such game in this room");
+}
+
+// Another room's games are not this room's history, nor reviewable here.
+TEST_F(ChessFixture, ARoomsHistoryIsItsOwn) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Play("e7e8q")).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  auto elsewhere = SeatedRoom(1);
+  ASSERT_TRUE(elsewhere.has_value());
+  Seat& dave = elsewhere->seats[0];
+  ASSERT_TRUE(dave.stream.Send(History()).ok());
+  auto history = ReceiveChess(dave.stream, "history");
+  ASSERT_TRUE(history.has_value());
+  EXPECT_TRUE(history->as_history_or_null()->games.empty());
+  ASSERT_TRUE(table.alice.stream.Send(History()).ok());
+  auto theirs = ReceiveChess(table.alice.stream, "history");
+  ASSERT_TRUE(theirs.has_value());
+  ASSERT_TRUE(
+      dave.stream.Send(ReviewArchived(theirs->as_history_or_null()->games.at(0).archiveId)).ok());
+  auto by_id = ReceiveCase(dave.stream, "commandRejected");
+  ASSERT_TRUE(by_id.has_value());
+  EXPECT_EQ(by_id->as_commandRejected_or_null()->reason, "no such game in this room");
+  ASSERT_TRUE(dave.stream.Send(Review(table.game_id, 1)).ok());
+  auto refused = ReceiveCase(dave.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "no such game in this room");
+}
+
+TEST_F(ChessFixture, HistoryOutsideARoomIsRefused) {
+  auto seat = OpenSeat();
+  ASSERT_TRUE(seat.has_value());
+  ASSERT_TRUE(ReceiveCase(seat->stream, "sessionReady").has_value());
+  ASSERT_TRUE(seat->stream.Send(History()).ok());
+  auto refused = ReceiveCase(seat->stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in a room");
+}
+
+// Publishing is the room's to know: every member hears who did it, and
+// each game remembers whether the room was published when it ended.
+TEST_F(ChessFixture, PublishingTellsTheRoomAndMarksTheGamesThatEndAfter) {
+  auto started = StartedTable({}, 1);
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  ASSERT_TRUE(started->idle[0].stream.Send(Publish(true)).ok());
+  for (Seat* seat : {&table.alice, &table.bob, &started->idle[0]}) {
+    auto published = ReceiveChess(seat->stream, "published");
+    ASSERT_TRUE(published.has_value()) << seat->player_id;
+    EXPECT_TRUE(published->as_published_or_null()->published);
+    EXPECT_EQ(published->as_published_or_null()->by, started->idle[0].player_id);
+  }
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  table.alice.stream, [](const auto& view) { return view.phase == "playing"; },
+                  "the second game")
+                  .has_value());
+  ASSERT_TRUE(table.alice.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+
+  ASSERT_TRUE(table.alice.stream.Send(History()).ok());
+  auto history = ReceiveChess(table.alice.stream, "history");
+  ASSERT_TRUE(history.has_value());
+  EXPECT_TRUE(history->as_history_or_null()->published);
+  const auto& games = history->as_history_or_null()->games;
+  ASSERT_EQ(games.size(), 2u);
+  EXPECT_TRUE(games[0].published);
+  EXPECT_FALSE(games[1].published) << "ended before the room published";
+
+  ASSERT_TRUE(table.bob.stream.Send(Publish(false)).ok());
+  auto withdrawn = ReceiveChess(started->idle[0].stream, "published");
+  ASSERT_TRUE(withdrawn.has_value());
+  EXPECT_FALSE(withdrawn->as_published_or_null()->published);
+  EXPECT_EQ(withdrawn->as_published_or_null()->by, table.bob.player_id);
+}
+
+TEST_F(ChessFixture, PublishingOutsideARoomIsRefused) {
+  auto seat = OpenSeat();
+  ASSERT_TRUE(seat.has_value());
+  ASSERT_TRUE(ReceiveCase(seat->stream, "sessionReady").has_value());
+  ASSERT_TRUE(seat->stream.Send(Publish(true)).ok());
+  auto refused = ReceiveCase(seat->stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "not in a room");
+}
+
+// The public feed: games that ended in a published room, over plain HTTP
+// through the generated client, in archive order, read on with `after`;
+// one stays there after the room stops publishing, and the indexer's
+// stream reader takes the page as that many games, each its own Site.
+TEST_F(ChessFixture, ThePublicFeedServesGamesThatEndedPublished) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  const auto next_game = [&] {
+    ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+    ASSERT_TRUE(AwaitChessView(
+                    table.alice.stream, [](const auto& view) { return view.phase == "playing"; },
+                    "the next game")
+                    .has_value());
+  };
+  ASSERT_TRUE(table.alice.stream.Send(Resign()).ok());  // private
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  auto empty = client_->ExportChessGames({});
+  ASSERT_TRUE(empty.ok()) << empty.error().message();
+  EXPECT_EQ(empty->contentType, "application/x-chess-pgn");
+  EXPECT_TRUE(empty->pgn.empty()) << "a game that ended private is not public";
+
+  ASSERT_TRUE(table.alice.stream.Send(Publish(true)).ok());
+  ASSERT_TRUE(ReceiveChess(table.alice.stream, "published").has_value());
+  for (int game = 0; game < 2; ++game) {
+    next_game();
+    ASSERT_TRUE(table.alice.stream.Send(Resign()).ok());
+    ASSERT_TRUE(Ended(table.alice).has_value());
+  }
+  ASSERT_TRUE(table.alice.stream.Send(Publish(false)).ok());
+  ASSERT_TRUE(ReceiveChess(table.alice.stream, "published").has_value());
+
+  auto exported = client_->ExportChessGames({});
+  ASSERT_TRUE(exported.ok()) << exported.error().message();
+  const std::string pgn = exported->pgn.ToString();
+  EXPECT_THAT(pgn, ::testing::Not(::testing::HasSubstr(table.room_id)));
+  std::istringstream stream(pgn);
+  std::vector<std::string> sites;
+  ASSERT_TRUE(chess_cpp::ParseGames(stream, [&](chess_cpp::ParsedGame game) {
+                sites.emplace_back(game.headers.Get("Site").value_or(""));
+                EXPECT_TRUE(game.headers.Get("UTCDate").has_value());
+                EXPECT_TRUE(game.headers.Get("UTCTime").has_value());
+                return absl::OkStatus();
+              }).ok());
+  ASSERT_EQ(sites.size(), 2u) << "the two that ended published, still out after withdrawing";
+  EXPECT_NE(sites[0], sites[1]);
+
+  ASSERT_TRUE(table.alice.stream.Send(History()).ok());
+  auto history = ReceiveChess(table.alice.stream, "history");
+  ASSERT_TRUE(history.has_value());
+  const auto& games = history->as_history_or_null()->games;
+  ASSERT_EQ(games.size(), 3u);
+  EXPECT_EQ(sites[0], "https://muchq.com/games/chess/" + std::to_string(games[1].archiveId))
+      << "archive order";
+  moonbase::games::ExportChessGamesInput after;
+  after.after = games[1].archiveId;
+  auto rest = client_->ExportChessGames(after);
+  ASSERT_TRUE(rest.ok());
+  EXPECT_THAT(rest->pgn.ToString(),
+              ::testing::HasSubstr("/games/chess/" + std::to_string(games[0].archiveId) + "\""));
+  EXPECT_THAT(rest->pgn.ToString(),
+              ::testing::Not(::testing::HasSubstr("/games/chess/" +
+                                                  std::to_string(games[1].archiveId) + "\"")));
 }
 
 }  // namespace

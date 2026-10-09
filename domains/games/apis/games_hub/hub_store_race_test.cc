@@ -82,6 +82,17 @@ class GatedHubStore final : public HubStore {
                                                   const std::string& game_id) override {
     return delegate_.LoadGame(room_id, game_id);
   }
+  absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
+    return delegate_.LoadChessHistory(room_id, limit);
+  }
+  absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
+                                                            const ChessGameKey& key) override {
+    return delegate_.LoadChessGame(room_id, key);
+  }
+  absl::StatusOr<std::vector<PublishedChessGame>> LoadPublishedChess(int64_t after_archive_id,
+                                                                     int limit) override {
+    return delegate_.LoadPublishedChess(after_archive_id, limit);
+  }
   absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override {
     auto rows = delegate_.LoadRoom(room_id);
     // The rows are already in hand: parking here is what a catch-up

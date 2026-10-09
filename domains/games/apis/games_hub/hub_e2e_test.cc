@@ -251,6 +251,17 @@ class TornSnapshotStore final : public HubStore {
                                                   const std::string& game_id) override {
     return delegate_->LoadGame(room_id, game_id);
   }
+  absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
+    return delegate_->LoadChessHistory(room_id, limit);
+  }
+  absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
+                                                            const ChessGameKey& key) override {
+    return delegate_->LoadChessGame(room_id, key);
+  }
+  absl::StatusOr<std::vector<PublishedChessGame>> LoadPublishedChess(int64_t after_archive_id,
+                                                                     int limit) override {
+    return delegate_->LoadPublishedChess(after_archive_id, limit);
+  }
   absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override {
     return delegate_->LoadRoom(room_id);
   }
@@ -290,6 +301,17 @@ class TouchSpyStore final : public HubStore {
   absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
                                                   const std::string& game_id) override {
     return delegate_->LoadGame(room_id, game_id);
+  }
+  absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
+    return delegate_->LoadChessHistory(room_id, limit);
+  }
+  absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
+                                                            const ChessGameKey& key) override {
+    return delegate_->LoadChessGame(room_id, key);
+  }
+  absl::StatusOr<std::vector<PublishedChessGame>> LoadPublishedChess(int64_t after_archive_id,
+                                                                     int limit) override {
+    return delegate_->LoadPublishedChess(after_archive_id, limit);
   }
   absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override {
     return delegate_->LoadRoom(room_id);
@@ -2073,6 +2095,9 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"chess_commands", {{"command", "resign"}}},
       {"chess_commands", {{"command", "addBot"}}},
       {"chess_commands", {{"command", "watch"}}},
+      {"chess_commands", {{"command", "history"}}},
+      {"chess_commands", {{"command", "review"}}},
+      {"chess_commands", {{"command", "publish"}}},
       {"chess_commands", {{"command", "challenge"}}},
       {"chess_events", {{"event", "gameJoined"}}},
       {"chess_events", {{"event", "gameState"}}},
@@ -2081,6 +2106,9 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"chess_events", {{"event", "turnChanged"}}},
       {"chess_events", {{"event", "gameEnded"}}},
       {"chess_events", {{"event", "gameLeft"}}},
+      {"chess_events", {{"event", "history"}}},
+      {"chess_events", {{"event", "review"}}},
+      {"chess_events", {{"event", "published"}}},
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -2420,6 +2448,17 @@ class FailingLoadRoomHubStore final : public HubStore {
   absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
                                                   const std::string& game_id) override {
     return delegate_->LoadGame(room_id, game_id);
+  }
+  absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
+    return delegate_->LoadChessHistory(room_id, limit);
+  }
+  absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
+                                                            const ChessGameKey& key) override {
+    return delegate_->LoadChessGame(room_id, key);
+  }
+  absl::StatusOr<std::vector<PublishedChessGame>> LoadPublishedChess(int64_t after_archive_id,
+                                                                     int limit) override {
+    return delegate_->LoadPublishedChess(after_archive_id, limit);
   }
   absl::StatusOr<RoomRows> LoadRoom([[maybe_unused]] const std::string& room_id) override {
     return absl::UnavailableError("hub store unreachable");
