@@ -288,6 +288,7 @@ cc_library(
     hdrs = ["hub_store.h"],
     deps = [
         ":hosted_game",
+        ":round_robin",
         ":surface",
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/chess_play:game_state",
@@ -432,6 +433,7 @@ cc_library(
     deps = [
         ":hosted_game",
         ":hub_store",
+        ":round_robin",
         ":surface",
         "//domains/games/libs/cards/castle:game_state_serde",
         "//domains/games/libs/cards/golf:game_state",
@@ -508,6 +510,7 @@ cc_test(
         ":hosted_game",
         ":pg_hub_store",
         ":pg_ticket_vault",
+        ":round_robin",
         ":surface",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:dealer",

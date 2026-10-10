@@ -18,6 +18,11 @@ std::optional<HubStore::ChessGameRow> ArchivedChessGame(const HubStore::GameRow&
       0, row.game_id, static_cast<int>(table->scoreSheet().size()), table->game(), 0, false};
 }
 
+std::optional<std::string> ChessWinner(const chess_play::GameState& game) {
+  if (!game.result().has_value() || !game.result()->winner.has_value()) return std::nullopt;
+  return game.players()[game.seatOf(*game.result()->winner)];
+}
+
 MemoryHubStore::MemoryHubStore(std::function<int64_t()> now_ms)
     : now_ms_(now_ms ? std::move(now_ms) : [] { return absl::ToUnixMillis(absl::Now()); }) {}
 
@@ -34,6 +39,9 @@ absl::StatusOr<HubStore::Snapshot> MemoryHubStore::LoadSnapshot() {
   }
   for (const auto& [key, member] : members_) snapshot.members.push_back(member);
   for (const auto& [key, game] : games_) snapshot.games.push_back(game);
+  for (const auto& [room_id, room] : rooms_) {
+    for (ChessEventRow& event : EventsLocked(room)) snapshot.events.push_back(std::move(event));
+  }
   return snapshot;
 }
 
@@ -80,6 +88,7 @@ absl::StatusOr<HubStore::RoomRows> MemoryHubStore::LoadRoom(const std::string& r
   for (const auto& [key, game] : games_) {
     if (key.first == room_id) rows.games.push_back(game);
   }
+  rows.events = EventsLocked(room->second);
   return rows;
 }
 
@@ -92,9 +101,11 @@ bool MemoryHubStore::CommitGameLocked(const GameRow& row) {
   } else if (game == games_.end() || game->second.version != row.version - 1) {
     return false;
   }
+  GameRow stored = row;
+  if (game != games_.end()) stored.event = game->second.event;
   games_.erase(key);
-  games_.emplace(key, row);
-  if (auto archived = ArchivedChessGame(row); archived.has_value()) {
+  games_.emplace(key, stored);
+  if (auto archived = ArchivedChessGame(stored); archived.has_value()) {
     // Keyed as postgres keys it: the same table code, line and game.
     RoomData& room = rooms_.at(row.room_id);
     const std::string serialized = chess_play::serializeGameState(archived->game);
@@ -110,10 +121,45 @@ bool MemoryHubStore::CommitGameLocked(const GameRow& row) {
       if (archived->published) {
         published_.push_back({archived->archive_id, archived->game, archived->ended_at_ms});
       }
+      if (stored.event.has_value() && archived->ordinal == 1) {
+        room.event_games.push_back({stored.event->event_id,
+                                    {archived->archive_id, row.game_id, stored.event->pairing,
+                                     ChessWinner(archived->game)}});
+      }
       room.chess_games.push_back(*std::move(archived));
     }
   }
   return true;
+}
+
+absl::StatusOr<bool> MemoryHubStore::CommitChessEvent(const ChessEventRow& row,
+                                                      const std::string& /*notify_payload*/) {
+  const std::lock_guard<std::mutex> lock(mu_);
+  const auto room = rooms_.find(row.room_id);
+  if (room == rooms_.end()) return false;
+  auto& events = room->second.events;
+  const auto event = events.find(row.event_id);
+  if (row.version == 1) {
+    if (event != events.end()) return false;
+  } else if (event == events.end() || event->second.version != row.version - 1) {
+    return false;
+  }
+  ChessEventRow stored = row;
+  stored.games.clear();
+  events.insert_or_assign(row.event_id, std::move(stored));
+  return true;
+}
+
+std::vector<HubStore::ChessEventRow> MemoryHubStore::EventsLocked(const RoomData& room) const {
+  std::vector<ChessEventRow> events;
+  for (const auto& [event_id, event] : room.events) {
+    ChessEventRow loaded = event;
+    for (const auto& [tagged, game] : room.event_games) {
+      if (tagged == event_id) loaded.games.push_back(game);
+    }
+    events.push_back(std::move(loaded));
+  }
+  return events;
 }
 
 void MemoryHubStore::ApplyLocked(const Op& op) {

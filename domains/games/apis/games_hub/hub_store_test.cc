@@ -1,5 +1,6 @@
 #include "domains/games/apis/games_hub/hub_store.h"
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <deque>
@@ -7,6 +8,7 @@
 #include <vector>
 
 #include "absl/status/status.h"
+#include "domains/games/apis/games_hub/round_robin.h"
 #include "domains/games/libs/cards/card.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/chess_play/game_state.h"
@@ -14,6 +16,8 @@
 
 namespace games_hub {
 namespace {
+
+using ::testing::ElementsAre;
 
 golf::GameState DealtState() {
   std::deque<cards::Card> deck;
@@ -138,9 +142,10 @@ TEST(MemoryHubStoreTest, FinishCommitIsConditionalAtomicAndRetained) {
 // White Kg6 Pe7 against Kh8: e7e8q mates.
 constexpr char kMate[] = "7k/4P3/6K1/8/8/8/8/8 w - - 0 1";
 
-chess_play::Table ChessOpened() {
-  auto table = chess_play::Table::open({"alice", "bob"}, "kpk", chess_play::Opening{kMate, 0},
-                                       {180'000, 2'000}, 1'000, "random-kpk");
+chess_play::Table ChessOpened(int white_seat = 0) {
+  auto table =
+      chess_play::Table::open({"alice", "bob"}, "kpk", chess_play::Opening{kMate, white_seat},
+                              {180'000, 2'000}, 1'000, "random-kpk");
   EXPECT_TRUE(table.ok()) << table.status();
   return *table;
 }
@@ -353,6 +358,177 @@ TEST(MemoryHubStoreTest, ThePublishedFlagRidesTheRoomRows) {
   ASSERT_TRUE(snapshot.ok());
   ASSERT_EQ(snapshot->rooms.size(), 1u) << "publishing no room makes none";
   EXPECT_TRUE(snapshot->rooms[0].chess_published);
+}
+
+HubStore::ChessEventRow Event(int64_t version, const std::string& creator = "alice") {
+  HubStore::ChessEventRow row;
+  row.room_id = "R1";
+  row.event_id = "E1";
+  row.version = version;
+  row.creator = creator;
+  row.entrants = {"alice", "bob", "carol"};
+  row.terms = {"standard", {180'000, 2'000}};
+  row.pairings = *RoundRobinPairings(row.entrants);
+  return row;
+}
+
+// A round robin (#1647) commits as a games row does: version 1 creates
+// it, refused when the id is taken or the room is not; each later
+// version replaces the one before, and nothing else lands.
+TEST(MemoryHubStoreTest, AnEventCommitsOnItsVersionAndDiesWithItsRoom) {
+  MemoryHubStore store;
+  store.Enqueue({HubStore::UpsertRoom{"R1"}});
+  ASSERT_TRUE(*store.CommitChessEvent(Event(1), ""));
+  EXPECT_FALSE(*store.CommitChessEvent(Event(1, "mallory"), "")) << "the id is taken";
+  HubStore::ChessEventRow ghost = Event(1);
+  ghost.room_id = "ghost";
+  EXPECT_FALSE(*store.CommitChessEvent(ghost, "")) << "no such room";
+
+  HubStore::ChessEventRow moderated = Event(2);
+  moderated.withdrawn = {"carol"};
+  moderated.pairings[0].result = PairingResult::kWhite;
+  moderated.pairings[0].forfeit = true;
+  EXPECT_FALSE(*store.CommitChessEvent(Event(3), "")) << "skips a version";
+  ASSERT_TRUE(*store.CommitChessEvent(moderated, ""));
+  EXPECT_FALSE(*store.CommitChessEvent(Event(2), "")) << "replaces 1, not 2";
+
+  auto room = store.LoadRoom("R1");
+  ASSERT_TRUE(room.ok());
+  ASSERT_EQ(room->events.size(), 1u);
+  EXPECT_EQ(room->events[0].version, 2);
+  EXPECT_EQ(room->events[0].creator, "alice");
+  EXPECT_EQ(room->events[0].entrants, moderated.entrants);
+  EXPECT_EQ(room->events[0].terms, moderated.terms);
+  EXPECT_EQ(room->events[0].pairings, moderated.pairings);
+  EXPECT_EQ(room->events[0].withdrawn, moderated.withdrawn);
+  ASSERT_EQ(store.LoadSnapshot()->events.size(), 1u);
+
+  store.Enqueue({HubStore::DeleteRoom{"R1"}});
+  EXPECT_TRUE(store.LoadSnapshot()->events.empty());
+}
+
+// White to move; b5b6 stalemates the king on a8.
+constexpr char kStalemate[] = "k7/8/2K5/1Q6/8/8/8/8 w - - 0 1";
+
+chess_play::Table Drawn() {
+  auto table = chess_play::Table::open({"alice", "bob"}, "kpk", chess_play::Opening{kStalemate, 0},
+                                       {180'000, 2'000}, 1'000, "random-kpk");
+  EXPECT_TRUE(table.ok()) << table.status();
+  auto drawn = table->inGame([&](const chess_play::GameState& game) {
+    return game.move(game.whiteSeat(), "b5b6", 2'000);
+  });
+  EXPECT_TRUE(drawn.ok()) << drawn.status();
+  EXPECT_TRUE(drawn->game().isOver());
+  return *drawn;
+}
+
+HubStore::GameRow Tagged(const chess_play::Table& table, int64_t version,
+                         const std::string& game_id, std::optional<EventTag> tag) {
+  HubStore::GameRow row = ChessRow(table, version, game_id);
+  row.event = std::move(tag);
+  return row;
+}
+
+// A table playing a pairing ends its first game in the commit that
+// archives it, and that game is the pairing's: the event lists it with
+// its winner (none for a draw) under the tag the table was made with. A
+// rematch on the table is not the pairing's, and an untagged table's game
+// is history, not the event's.
+TEST(MemoryHubStoreTest, ATaggedTablesFirstGameIsArchivedAsItsPairings) {
+  MemoryHubStore store;
+  store.Enqueue({HubStore::UpsertRoom{"R1"}});
+  ASSERT_TRUE(*store.CommitChessEvent(Event(1), ""));
+  const EventTag tag{"E1", 2};
+  // White in the second seat: the winner is named by seat, not by order.
+  const chess_play::Table opened = ChessOpened(1);
+  ASSERT_TRUE(*store.CommitGameSave(Tagged(opened, 1, "G1", tag), ""));
+  EXPECT_EQ((*store.LoadGame("R1", "G1"))->event, std::optional<EventTag>(tag));
+
+  const chess_play::Table mated = Mated(opened);
+  ASSERT_TRUE(*store.CommitGameSave(Tagged(mated, 2, "G1", EventTag{"E9", 0}), ""));
+  EXPECT_EQ((*store.LoadGame("R1", "G1"))->event, std::optional<EventTag>(tag))
+      << "only the insert writes the tag";
+  ASSERT_TRUE(*store.CommitGameSave(Tagged(Next(mated), 3, "G1", std::nullopt), ""));
+  const chess_play::Table rematched = Mated(Next(mated));
+  ASSERT_TRUE(*store.CommitGameSave(Tagged(rematched, 4, "G1", std::nullopt), ""));
+  ASSERT_TRUE(*store.CommitGameSave(Tagged(Next(rematched), 5, "G1", std::nullopt), ""));
+  ASSERT_TRUE(
+      *store.CommitGameFinish(Tagged(Mated(Next(rematched)), 6, "G1", std::nullopt), {}, ""));
+  ASSERT_TRUE(*store.CommitGameSave(Tagged(opened, 1, "G2", std::nullopt), ""));
+  ASSERT_TRUE(*store.CommitGameSave(Tagged(mated, 2, "G2", std::nullopt), ""));
+  const chess_play::Table drawn = Drawn();
+  ASSERT_TRUE(*store.CommitGameSave(Tagged(drawn, 1, "G3", EventTag{"E1", 0}), ""));
+  ASSERT_TRUE(*store.CommitGameFinish(Tagged(*drawn.removePlayer(0, 3'000), 2, "G3", std::nullopt),
+                                      {}, ""));
+
+  ASSERT_EQ(store.LoadChessHistory("R1", 100)->games.size(), 5u);
+  const auto archived = [&](const std::string& game_id, int ordinal) {
+    return (*store.LoadChessGame("R1", {std::nullopt, game_id, ordinal}))->archive_id;
+  };
+  auto room = store.LoadRoom("R1");
+  ASSERT_TRUE(room.ok());
+  ASSERT_EQ(room->events.size(), 1u);
+  ASSERT_EQ(opened.players()[opened.game().whiteSeat()], "bob");
+  EXPECT_THAT(room->events[0].games,
+              ElementsAre(HubStore::EventGame{archived("G1", 1), "G1", 2, "bob"},
+                          HubStore::EventGame{archived("G3", 1), "G3", 0, std::nullopt}))
+      << "archive order";
+
+  // Each event holds its own games: another event in the room, and one
+  // of the same id in another room, each with a game of its own.
+  store.Enqueue({HubStore::UpsertRoom{"R2"}});
+  HubStore::ChessEventRow second = Event(1);
+  second.event_id = "E2";
+  HubStore::ChessEventRow elsewhere = Event(1);
+  elsewhere.room_id = "R2";
+  ASSERT_TRUE(*store.CommitChessEvent(second, ""));
+  ASSERT_TRUE(*store.CommitChessEvent(elsewhere, ""));
+  ASSERT_TRUE(*store.CommitGameSave(Tagged(opened, 1, "G4", EventTag{"E2", 1}), ""));
+  ASSERT_TRUE(*store.CommitGameSave(Tagged(mated, 2, "G4", std::nullopt), ""));
+  HubStore::GameRow r2 = Tagged(opened, 1, "G1", EventTag{"E1", 1});
+  r2.room_id = "R2";
+  ASSERT_TRUE(*store.CommitGameSave(r2, ""));
+  HubStore::GameRow r2_ended = ChessRow(mated, 2);
+  r2_ended.room_id = "R2";
+  ASSERT_TRUE(*store.CommitGameSave(r2_ended, ""));
+
+  // An event loaded with its games and committed back keeps them as the
+  // archive has them: the commit writes none.
+  HubStore::ChessEventRow reloaded = store.LoadRoom("R1")->events[0];
+  reloaded.version = 2;
+  ASSERT_TRUE(*store.CommitChessEvent(reloaded, ""));
+
+  room = store.LoadRoom("R1");
+  ASSERT_EQ(room->events.size(), 2u);
+  EXPECT_EQ(room->events[0].games.size(), 2u);
+  ASSERT_EQ(room->events[1].games.size(), 1u);
+  EXPECT_EQ(room->events[1].games[0].game_id, "G4");
+  auto snapshot = store.LoadSnapshot();
+  ASSERT_EQ(snapshot->events.size(), 3u);
+  for (const HubStore::ChessEventRow& event : snapshot->events) {
+    const size_t want = event.room_id == "R1" && event.event_id == "E1" ? 2u : 1u;
+    EXPECT_EQ(event.games.size(), want) << event.room_id << "/" << event.event_id;
+  }
+}
+
+// Two tables racing to play one pairing each end a first game, and the
+// event lists both, in archive order: the store does not pick.
+TEST(MemoryHubStoreTest, TwoTablesPlayingOnePairingAreBothListed) {
+  MemoryHubStore store;
+  store.Enqueue({HubStore::UpsertRoom{"R1"}});
+  ASSERT_TRUE(*store.CommitChessEvent(Event(1), ""));
+  const chess_play::Table opened = ChessOpened();
+  for (const std::string game_id : {"G1", "G2"}) {
+    ASSERT_TRUE(*store.CommitGameSave(Tagged(opened, 1, game_id, EventTag{"E1", 1}), ""));
+    ASSERT_TRUE(*store.CommitGameSave(Tagged(Mated(opened), 2, game_id, std::nullopt), ""));
+  }
+  const auto games = store.LoadRoom("R1")->events[0].games;
+  ASSERT_EQ(games.size(), 2u);
+  EXPECT_EQ(games[0].game_id, "G1");
+  EXPECT_EQ(games[1].game_id, "G2");
+  EXPECT_EQ(games[0].pairing, 1);
+  EXPECT_EQ(games[1].pairing, 1);
+  EXPECT_LT(games[0].archive_id, games[1].archive_id);
 }
 
 }  // namespace

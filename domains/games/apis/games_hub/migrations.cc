@@ -114,6 +114,28 @@ absl::Status RunMigrations(pg::Client& db) {
       ))sql",
       R"sql(CREATE INDEX IF NOT EXISTS idx_published_chess_games_ended
           ON published_chess_games (ended_at))sql",
+      // A room's round robins (#1647): what each event's creator fixed
+      // and moderates, as one body under the hub's optimistic version. A
+      // table playing a pairing carries it from its insert, and the commit
+      // that archives the table's first game copies it onto the archive
+      // with the winner (NULL for a draw), so an event's played results
+      // are its tagged rows in chess_games, read without the game.
+      R"sql(CREATE TABLE IF NOT EXISTS chess_events (
+          room_id  text NOT NULL REFERENCES rooms (room_id) ON DELETE CASCADE,
+          event_id text NOT NULL,
+          version  bigint NOT NULL,
+          body     jsonb NOT NULL,
+          PRIMARY KEY (room_id, event_id)
+      ))sql",
+      R"sql(ALTER TABLE games
+          ADD COLUMN IF NOT EXISTS event_id text,
+          ADD COLUMN IF NOT EXISTS pairing integer)sql",
+      R"sql(ALTER TABLE chess_games
+          ADD COLUMN IF NOT EXISTS event_id text,
+          ADD COLUMN IF NOT EXISTS pairing integer,
+          ADD COLUMN IF NOT EXISTS winner text)sql",
+      R"sql(CREATE INDEX IF NOT EXISTS idx_chess_games_event
+          ON chess_games (room_id, event_id, archive_id) WHERE event_id IS NOT NULL)sql",
   };
   for (const char* statement : kStatements) {
     if (auto result = db.Exec(statement); !result.ok()) return result.status();

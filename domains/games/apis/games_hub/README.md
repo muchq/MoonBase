@@ -471,6 +471,19 @@ every position as FEN, and the game as PGN (`chess_play/pgn.h`,
 round-tripped through `chess_cpp`'s reader, the parser one_d4's worker
 indexes with).
 
+A room's round robins (#1647) are rows of `chess_events`: what each
+event's creator fixed and moderates (entrants, terms, pairings, forfeits,
+withdrawals), committed on the hub's optimistic version with the room's
+NOTIFY in the same statement, and dying with the room. A table playing a
+pairing carries it from its insert (`games.event_id`, `games.pairing`),
+and the statement that archives the table's first game copies it onto the
+archive row with the winner, so an event's played results are its tagged
+rows in `chess_games`: the score sheets themselves, written by the commits
+that ended them, and read without restoring a game. A rematch on the
+table is history, not the pairing's. Instances racing to open a pairing's
+table can each play it; the store lists every such game and the hub
+decides which counts.
+
 Any member may `publish` the room's games, or withdraw them; every member
 hears `published`, with who did it when the instance knows (a sibling's
 relay, read off the row, does not). A game that ends while its room is
