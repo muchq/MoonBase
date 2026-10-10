@@ -4462,6 +4462,7 @@ moonbase::games::ChessView GolfHub::ChessViewLocked(const std::string& game_id,
                                                     const GameEntry& entry) const {
   moonbase::games::ChessView view;
   view.gameId = game_id;
+  if (entry.event.has_value()) view.roundRobinId = entry.event->event_id;
   view.inCheck = false;
   view.defaultSetupId = chess_play::kDefaultChessSetup;
   for (const chess_play::ChessSetupOption& available : chess_play::AvailableChessSetups()) {

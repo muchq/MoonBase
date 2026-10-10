@@ -458,6 +458,11 @@ structure ChessView {
     /// waiting, until a startGame or a leave.
     terms: ChessTerms
 
+    /// The round robin whose pairing this table plays (#1647), from its
+    /// opening to its close: it plays that one game on the round robin's
+    /// terms, with no next game, bot or challenge. Absent at any other table.
+    roundRobinId: String
+
     /// waiting | playing | ended | closed: ended between games, closed
     /// once a seat left the table.
     @required

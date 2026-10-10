@@ -371,6 +371,7 @@ TEST_F(RoundRobinFixture, APairingPlayedAtItsTableScoresForTheRoom) {
   auto playing = AwaitChessView(
       opponent.stream, [](const auto& view) { return view.phase == "playing"; }, "the start");
   ASSERT_TRUE(playing.has_value());
+  EXPECT_EQ(playing->roundRobinId, created->roundRobinId);
   EXPECT_FALSE(playing->terms.has_value());
   ASSERT_TRUE(playing->clock.has_value());
   EXPECT_EQ(playing->clock->initialMs, 180'000);
@@ -381,6 +382,11 @@ TEST_F(RoundRobinFixture, APairingPlayedAtItsTableScoresForTheRoom) {
 
   Seat& resigner = members->room.seats[black_seat];
   ASSERT_TRUE(resigner.stream.Send(Chess(ChessMove::FromResign({}))).ok());
+  // Still the round robin's once over: its table plays no next game.
+  auto ended = AwaitChessView(
+      opponent.stream, [](const auto& view) { return view.phase == "ended"; }, "the end");
+  ASSERT_TRUE(ended.has_value());
+  EXPECT_EQ(ended->roundRobinId, created->roundRobinId);
   for (Seat& seat : members->room.seats) {
     auto decided = HeardWhere(seat, [&](const ChessRoundRobin& heard) {
       const auto* played = PairingOf(heard, ids[0], ids[1]);
@@ -540,6 +546,7 @@ TEST_F(RoundRobinFixture, APairingsWaitingTableShowsTheRoundRobinsTerms) {
   ASSERT_TRUE(view.terms.has_value());
   EXPECT_EQ(view.terms->initialSeconds, 300);
   EXPECT_EQ(view.terms->incrementSeconds, 3);
+  EXPECT_EQ(view.roundRobinId, created->roundRobinId);
 }
 
 // A pairing is opened from no table, and only while it counts: not by a
@@ -782,6 +789,7 @@ TEST_F(RoundRobinFixture, APlainTableBetweenPairedEntrantsIsAnOrdinaryGame) {
   auto joined = ReceiveChess(host.stream, "gameJoined");
   ASSERT_TRUE(joined.has_value());
   const std::string game_id = joined->as_gameJoined_or_null()->view.gameId;
+  EXPECT_FALSE(joined->as_gameJoined_or_null()->view.roundRobinId.has_value());
   moonbase::games::ChessStartGame terms;
   terms.initialSeconds = 60;
   terms.incrementSeconds = 0;
