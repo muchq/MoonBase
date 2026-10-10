@@ -444,6 +444,38 @@ inline moonbase::games::GameCommands Chess(moonbase::games::ChessMove move) {
   return moonbase::games::GameCommands::FromChess(std::move(command));
 }
 
+// Round robins (#1647).
+inline moonbase::games::GameCommands CreateRoundRobin(
+    std::vector<std::string> entrants,
+    std::optional<moonbase::games::ChessStartGame> terms = std::nullopt) {
+  moonbase::games::ChessCreateRoundRobin create;
+  create.entrants = std::move(entrants);
+  create.terms = std::move(terms);
+  return Chess(moonbase::games::ChessMove::FromCreateroundrobin(create));
+}
+
+inline moonbase::games::GameCommands Withdraw(const std::string& round_robin_id,
+                                              const std::string& player_id) {
+  moonbase::games::ChessWithdraw withdraw;
+  withdraw.roundRobinId = round_robin_id;
+  withdraw.playerId = player_id;
+  return Chess(moonbase::games::ChessMove::FromWithdraw(withdraw));
+}
+
+inline moonbase::games::GameCommands Forfeit(const std::string& round_robin_id,
+                                             const std::string& winner, const std::string& loser) {
+  moonbase::games::ChessForfeit forfeit;
+  forfeit.roundRobinId = round_robin_id;
+  forfeit.winner = winner;
+  forfeit.loser = loser;
+  return Chess(moonbase::games::ChessMove::FromForfeit(forfeit));
+}
+
+inline moonbase::games::GameCommands RoundRobins() {
+  return Chess(
+      moonbase::games::ChessMove::FromRoundrobins(moonbase::games::ChessRoundRobinsRequest{}));
+}
+
 // Captures every metric the hub records so tests can assert what is
 // counted — and, just as important, what never appears in a name or
 // label (room ids, player ids, message text; the model forbids them).

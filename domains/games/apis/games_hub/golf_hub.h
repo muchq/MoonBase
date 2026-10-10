@@ -401,6 +401,9 @@ class GolfHub final {
   static constexpr std::chrono::milliseconds kChessFlagRetry{5000};
   /// A chess clock the starter did not name.
   static constexpr chess_play::TimeControl kDefaultChessClock{180'000, 2'000};
+  /// A room's round robins (#1647) live as long as it does; this many is
+  /// an evening's worth, and a bound on what every wake reads.
+  static constexpr std::size_t kMaxRoundRobinsPerRoom = 16;
 
   /// The tick between polls. deja scores roughly a request a second, so
   /// this is "about as often as there is something to show"; the jitter
@@ -472,6 +475,9 @@ class GolfHub final {
     /// Whether the room publishes its chess games (#1637), as its row
     /// last said; a reconcile that finds it changed tells the members.
     bool chess_published = false;
+    /// The room's round robins (#1647) by id, as their rows last said; a
+    /// reconcile that finds one changed tells the members.
+    std::map<std::string, HubStore::ChessEventRow> round_robins;
   };
 
   /// Events staged under the lock, delivered outside it. Delivery
@@ -532,6 +538,23 @@ class GolfHub final {
   void ChessReviewMove(const std::string& player_id,
                        const moonbase::games::ChessReviewRequest& review);
   void PublishChessMove(const std::string& player_id, bool published);
+  /// Round robins (#1647): any member creates one, its creator withdraws
+  /// entrants and records forfeits, and any member asks for the room's.
+  void CreateRoundRobinMove(const std::string& player_id,
+                            const moonbase::games::ChessCreateRoundRobin& create);
+  void WithdrawMove(const std::string& player_id, const moonbase::games::ChessWithdraw& withdraw);
+  void ForfeitMove(const std::string& player_id, const moonbase::games::ChessForfeit& forfeit);
+  void RoundRobinsMove(const std::string& player_id);
+  /// The creator's `change` to one of the player's room's round robins,
+  /// committed on its version and retried over a sibling's; every member
+  /// held here hears the result. Callers hold mu_.
+  std::optional<games_hub::Refusal> ModerateRoundRobinLocked(
+      const std::string& player_id, const std::string& round_robin_id,
+      const std::function<std::optional<games_hub::Refusal>(HubStore::ChessEventRow&)>& change,
+      Outbox& outbox);
+  /// Tells every member of `room` held here how a round robin stands.
+  void StageRoundRobinLocked(const Room& room, const HubStore::ChessEventRow& row,
+                             Outbox& outbox) const;
   /// Tells every member of `room` held here that its games are published
   /// or withdrawn, by `by` when this instance knows who.
   void StagePublishedLocked(const Room& room, bool published, const std::optional<std::string>& by,

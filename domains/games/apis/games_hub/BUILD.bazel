@@ -74,6 +74,31 @@ cc_library(
     ],
 )
 
+# A round robin on the wire (#1647).
+cc_library(
+    name = "round_robin_wire",
+    srcs = ["round_robin_wire.cc"],
+    hdrs = ["round_robin_wire.h"],
+    deps = [
+        ":games_hub_smithy_server",
+        ":hub_store",
+        ":round_robin",
+        "//domains/games/libs/chess_play:game_state",
+    ],
+)
+
+cc_test(
+    name = "round_robin_wire_test",
+    size = "small",
+    srcs = ["round_robin_wire_test.cc"],
+    deps = [
+        ":hub_store",
+        ":round_robin",
+        ":round_robin_wire",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "chess_results",
     srcs = ["chess_results.cc"],
@@ -755,6 +780,8 @@ cc_library(
         ":protocol_input",
         ":rate_limiter",
         ":room_bot",
+        ":round_robin",
+        ":round_robin_wire",
         ":splat",
         ":surface",
         ":ticket_vault",
@@ -996,6 +1023,36 @@ cc_test(
         "//domains/games/libs/cards/castle:player",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
+# Round robins on the room stream (#1647).
+cc_test(
+    name = "chess_round_robin_e2e_test",
+    size = "small",
+    srcs = [
+        "chess_round_robin_e2e_test.cc",
+        "stream_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_client",
+        ":games_hub_smithy_server",
+        ":golf_hub",
+        ":hub_store",
+        ":id_generator",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
         "@opal_cpp//runtime:client",
         "@opal_cpp//runtime:core",
