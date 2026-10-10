@@ -870,6 +870,8 @@ cc_library(
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",
         "@opal_cpp//runtime:client",
+        # The generated hub client dials streams over Beast.
+        "@opal_cpp//runtime:http_beast",
     ],
 )
 
