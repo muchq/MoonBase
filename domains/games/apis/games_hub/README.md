@@ -485,7 +485,8 @@ party to. An entrant plays a
 pairing with `playRoundRobin`: a table tagged with it, waiting on the round
 robin's terms, that only the opponent can fill, starting on the pairing's
 colours when they sit, and playing that one game (no next game, bot or
-other terms). Its first game's archive row is the pairing's result, over a
+other terms); its view names the round robin (`ChessView.roundRobinId`), so a
+client offers none of those there. Its first game's archive row is the pairing's result, over a
 forfeit and over a racing table's later game; the instance that ended it
 re-reads the room's round robin games, and siblings get them by wake. Every member
 hears `roundRobin` (the crosstable: pairings, withdrawals and standings by
