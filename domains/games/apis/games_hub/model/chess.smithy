@@ -39,7 +39,54 @@ union ChessMove {
     history: ChessHistoryRequest
     review: ChessReviewRequest
     publish: ChessPublish
+    createRoundRobin: ChessCreateRoundRobin
+    withdraw: ChessWithdraw
+    forfeit: ChessForfeit
+    roundRobins: ChessRoundRobinsRequest
 }
+
+/// Starts a round robin among the room's members (#1647): everyone plays
+/// everyone once, on these terms. Any member may, entering 3 to 8 members
+/// by playerId; the pairings follow their order. The creator moderates it.
+/// Every member hears roundRobin. A room keeps at most 16, as long as it
+/// lives, counted by the instance that takes the command.
+structure ChessCreateRoundRobin {
+    @required
+    entrants: ChessEntrants
+
+    /// Absent fields take a challenge's defaults.
+    terms: ChessStartGame
+}
+
+list ChessEntrants {
+    member: String
+}
+
+/// The creator withdraws an entrant: their pairings still to play are
+/// void, and their games played stand. Every member hears roundRobin.
+structure ChessWithdraw {
+    @required
+    roundRobinId: String
+
+    @required
+    playerId: String
+}
+
+/// The creator scores a pairing still to play as a win for `winner` over
+/// `loser`, unplayed. Every member hears roundRobin.
+structure ChessForfeit {
+    @required
+    roundRobinId: String
+
+    @required
+    winner: String
+
+    @required
+    loser: String
+}
+
+/// The room's round robins, answered with roundRobins. Any member.
+structure ChessRoundRobinsRequest {}
 
 /// The room's finished games, newest first: answered with a history.
 /// Any member, seated, watching or neither.
@@ -166,6 +213,100 @@ union ChessUpdate {
     history: ChessHistory
     review: ChessReview
     published: ChessPublished
+    roundRobin: ChessRoundRobin
+    roundRobins: ChessRoundRobins
+}
+
+/// The room's round robins.
+structure ChessRoundRobins {
+    @required
+    roundRobins: ChessRoundRobinList
+}
+
+list ChessRoundRobinList {
+    member: ChessRoundRobin
+}
+
+/// A round robin as every member sees it, sent to them all whenever it
+/// changes.
+structure ChessRoundRobin {
+    @required
+    roundRobinId: String
+
+    @required
+    creator: String
+
+    /// In the order the pairings were drawn from.
+    @required
+    entrants: ChessEntrants
+
+    @required
+    terms: ChessTerms
+
+    /// In round order.
+    @required
+    pairings: ChessPairings
+
+    @required
+    withdrawn: ChessEntrants
+
+    /// Best first.
+    @required
+    standings: ChessStandings
+}
+
+list ChessPairings {
+    member: ChessPairing
+}
+
+structure ChessPairing {
+    /// From 1. Rounds order a player's list; pairings are played whenever
+    /// both players are free.
+    @required
+    round: Integer
+
+    @required
+    white: String
+
+    @required
+    black: String
+
+    /// white | black | draw; absent until decided.
+    result: String
+
+    /// The result was recorded by the creator, not played.
+    @required
+    forfeit: Boolean
+
+    /// Never to be played: an entrant in it withdrew before it was.
+    @required
+    voided: Boolean
+}
+
+list ChessStandings {
+    member: ChessStanding
+}
+
+structure ChessStanding {
+    @required
+    playerId: String
+
+    /// 1 a win, ½ a draw.
+    @required
+    points: Double
+
+    /// The points of every opponent beaten plus half those of every
+    /// opponent drawn.
+    @required
+    sonnebornBerger: Double
+
+    /// From 1. Players level on points, Sonneborn-Berger and their games
+    /// against each other share a place, and the place after them skips.
+    @required
+    place: Integer
+
+    @required
+    withdrawn: Boolean
 }
 
 /// The room's finished games, newest first, at most 100. The room's

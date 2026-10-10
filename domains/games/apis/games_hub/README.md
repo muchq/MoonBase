@@ -471,6 +471,18 @@ every position as FEN, and the game as PGN (`chess_play/pgn.h`,
 round-tripped through `chess_cpp`'s reader, the parser one_d4's worker
 indexes with).
 
+Any member starts a round robin (`createRoundRobin`): 3 to 8 of the
+room's members, on a challenge's terms, paired in Berger order from the
+order entered (`round_robin.h`). A room runs them side by side, at most
+16 over its life (`kMaxRoundRobinsPerRoom`, counted by the instance that
+takes the command). Its creator moderates: `forfeit` scores a
+pairing still to play as an unplayed win, and `withdraw` voids an
+entrant's pairings still to play and keeps what they scored. Every member
+hears `roundRobin` (the crosstable: pairings, withdrawals and standings by
+points, Sonneborn-Berger, then head-to-head) whenever one changes, a
+sibling's change by wake; any member asks for the room's with
+`roundRobins`.
+
 A room's round robins (#1647) are rows of `chess_events`: what each
 event's creator fixed and moderates (entrants, terms, pairings, forfeits,
 withdrawals), committed on the hub's optimistic version with the room's

@@ -1932,5 +1932,69 @@ TEST_F(PgLaggingWriterFixture, ChatBeforeTheSeatIsWrittenIsEchoed) {
   EXPECT_TRUE(ReceiveCase(bob->stream, "roomChat").has_value());
 }
 
+// A round robin is the room's across instances: one made on the remote
+// is heard on the primary, the creator's forfeit there reaches it too, and
+// a restart restores it from its row.
+TEST_F(PgGamesHubFixture, ARoundRobinIsTheRoomsAcrossInstancesAndRestarts) {
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  DetachOnScopeExit detach{this, remote.get()};
+  CrossSeats seats;
+  const std::string room_id = SeatedCrossRoom(*remote, seats);
+  ASSERT_FALSE(room_id.empty());
+  Seat& alice = *seats.alice;
+  Seat& bob = *seats.bob;
+  auto carol = OpenSeat();
+  ASSERT_TRUE(carol.has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  moonbase::games::JoinRoom join_room;
+  join_room.roomId = room_id;
+  ASSERT_TRUE(carol->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
+  for (Seat* seat : {&alice, &bob, &*carol}) {
+    ASSERT_TRUE(AwaitRoomState(
+                    seat->stream,
+                    [](const moonbase::games::RoomState& room) { return room.players.size() == 3; },
+                    seat->player_id + " roomState with 3 players")
+                    .has_value());
+  }
+
+  // bob creates it on the remote; the primary's members hear it by wake.
+  const std::vector<std::string> entrants = {alice.player_id, bob.player_id, carol->player_id};
+  ASSERT_TRUE(bob.stream.Send(CreateRoundRobin(entrants)).ok());
+  std::string round_robin_id;
+  for (Seat* seat : {&bob, &alice, &*carol}) {
+    auto heard = ReceiveChess(seat->stream, "roundRobin");
+    ASSERT_TRUE(heard.has_value()) << seat->player_id;
+    EXPECT_EQ(heard->as_roundRobin_or_null()->creator, bob.player_id);
+    EXPECT_EQ(heard->as_roundRobin_or_null()->entrants, entrants);
+    round_robin_id = heard->as_roundRobin_or_null()->roundRobinId;
+  }
+
+  // His forfeit from the remote reaches the primary.
+  ASSERT_TRUE(bob.stream.Send(Forfeit(round_robin_id, alice.player_id, carol->player_id)).ok());
+  for (Seat* seat : {&alice, &*carol}) {
+    auto heard = ReceiveChess(seat->stream, "roundRobin");
+    ASSERT_TRUE(heard.has_value()) << seat->player_id;
+    EXPECT_EQ(heard->as_roundRobin_or_null()->standings[0].playerId, alice.player_id);
+    EXPECT_EQ(heard->as_roundRobin_or_null()->standings[0].points, 1);
+  }
+
+  // The primary restarts and restores it from the row.
+  const std::string alice_token = alice.resume_token;
+  remote->store->Flush();
+  RestartHub();
+  auto alice_back = OpenSeat(alice_token);
+  ASSERT_TRUE(alice_back.has_value());
+  ASSERT_TRUE(ReceiveCase(alice_back->stream, "sessionReady").has_value());
+  ASSERT_TRUE(alice_back->stream.Send(RoundRobins()).ok());
+  auto listed = ReceiveChess(alice_back->stream, "roundRobins");
+  ASSERT_TRUE(listed.has_value());
+  const auto& round_robins = listed->as_roundRobins_or_null()->roundRobins;
+  ASSERT_EQ(round_robins.size(), 1u);
+  EXPECT_EQ(round_robins[0].roundRobinId, round_robin_id);
+  EXPECT_EQ(round_robins[0].standings[0].playerId, alice.player_id);
+  EXPECT_EQ(round_robins[0].standings[0].points, 1);
+}
+
 }  // namespace
 }  // namespace games_hub

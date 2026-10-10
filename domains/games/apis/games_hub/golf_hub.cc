@@ -24,6 +24,8 @@
 #include "domains/games/apis/games_hub/game_events.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
+#include "domains/games/apis/games_hub/round_robin.h"
+#include "domains/games/apis/games_hub/round_robin_wire.h"
 #include "domains/games/apis/games_hub/splat.h"
 #include "domains/games/apis/games_hub/wire_cards.h"
 #include "domains/games/libs/cards/castle/game_state.h"
@@ -633,6 +635,10 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"chess_commands", {{"command", "review"}}},
       {"chess_commands", {{"command", "publish"}}},
       {"chess_commands", {{"command", "challenge"}}},
+      {"chess_commands", {{"command", "createRoundRobin"}}},
+      {"chess_commands", {{"command", "withdraw"}}},
+      {"chess_commands", {{"command", "forfeit"}}},
+      {"chess_commands", {{"command", "roundRobins"}}},
       {"chess_events", {{"event", "gameJoined"}}},
       {"chess_events", {{"event", "gameState"}}},
       {"chess_events", {{"event", "gameCreated"}}},
@@ -643,6 +649,8 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"chess_events", {{"event", "history"}}},
       {"chess_events", {{"event", "review"}}},
       {"chess_events", {{"event", "published"}}},
+      {"chess_events", {{"event", "roundRobin"}}},
+      {"chess_events", {{"event", "roundRobins"}}},
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -806,6 +814,9 @@ absl::Status GolfHub::RestoreFromStore() {
   for (const HubStore::RoomRow& row : snapshot->rooms) {
     rooms_[row.room_id].chess_published = row.chess_published;
     world_.SetSurface(row.room_id, row.surface);
+  }
+  for (const HubStore::ChessEventRow& row : snapshot->events) {
+    rooms_[row.room_id].round_robins.insert_or_assign(row.event_id, row);
   }
   for (const HubStore::MemberRow& row : snapshot->members) {
     // Presence seeds from the row, the fleet truth ReconcileRoomLocked
@@ -1390,6 +1401,16 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
   }
   room.members = std::move(members);
   if (republished && !materialized) StagePublishedLocked(room, rows.chess_published, {}, outbox);
+
+  // A sibling's round robin, or its change to one, reaches this instance
+  // as the row; the members held here hear each one that moved.
+  for (const HubStore::ChessEventRow& row : rows.events) {
+    const auto held = room.round_robins.find(row.event_id);
+    if (held != room.round_robins.end() && held->second.version >= row.version) continue;
+    changed = true;
+    room.round_robins.insert_or_assign(row.event_id, row);
+    if (!materialized) StageRoundRobinLocked(room, row, outbox);
+  }
 
   // Games: adopt rows that moved past us. A row that ended while we
   // hold the game is a remote finish — ceremony here, then it is gone
@@ -2302,6 +2323,22 @@ void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& mov
   }
   if (const auto* challenge = move.as_challenge_or_null()) {
     ChallengeChessMove(player_id, TermsFrom(*challenge));
+    return;
+  }
+  if (const auto* create = move.as_createRoundRobin_or_null()) {
+    CreateRoundRobinMove(player_id, *create);
+    return;
+  }
+  if (const auto* withdraw = move.as_withdraw_or_null()) {
+    WithdrawMove(player_id, *withdraw);
+    return;
+  }
+  if (const auto* forfeit = move.as_forfeit_or_null()) {
+    ForfeitMove(player_id, *forfeit);
+    return;
+  }
+  if (move.as_roundRobins_or_null() != nullptr) {
+    RoundRobinsMove(player_id);
     return;
   }
   if (LifecycleMove(player_id, move, GameKind::kChess)) return;
@@ -3303,6 +3340,197 @@ void GolfHub::StagePublishedLocked(const Room& room, bool published,
   }
 }
 
+void GolfHub::CreateRoundRobinMove(const std::string& player_id,
+                                   const moonbase::games::ChessCreateRoundRobin& create) {
+  const ChessTerms terms = TermsFrom(create.terms.value_or(moonbase::games::ChessStartGame{}));
+  if (!chess_play::ChessSetupName(terms.setup_id).has_value()) {
+    Reject(player_id, RejectKind::kRules, absl::StrCat("unknown chess setup: ", terms.setup_id));
+    return;
+  }
+  auto pairings = RoundRobinPairings(create.entrants);
+  if (!pairings.ok()) {
+    Reject(player_id, RejectKind::kRules, std::string(pairings.status().message()));
+    return;
+  }
+  Outbox outbox;
+  std::optional<Refusal> refusal;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    refusal = Refusal{RejectKind::kState, "round robin changed; try again"};
+    for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
+      // Looked up each attempt: a refresh can take the player or the room.
+      const auto placed = player_room_.find(player_id);
+      Room* room = placed == player_room_.end() ? nullptr : FindRoomLocked(player_id);
+      if (room == nullptr) {
+        refusal = Refusal{RejectKind::kState, "not in a room"};
+        break;
+      }
+      const std::string room_id = placed->second;
+      const auto stranger = std::find_if(
+          create.entrants.begin(), create.entrants.end(),
+          [&](const std::string& entrant) { return !room->members.contains(entrant); });
+      if (stranger != create.entrants.end()) {
+        refusal = Refusal{RejectKind::kRules, absl::StrCat(*stranger, " is not in the room")};
+        break;
+      }
+      if (room->round_robins.size() >= kMaxRoundRobinsPerRoom) {
+        refusal =
+            Refusal{RejectKind::kState,
+                    absl::StrCat("a room keeps at most ", kMaxRoundRobinsPerRoom, " round robins")};
+        break;
+      }
+      HubStore::ChessEventRow row;
+      row.room_id = room_id;
+      row.event_id = ids_->GameCode();
+      while (room->round_robins.contains(row.event_id)) row.event_id = ids_->GameCode();
+      row.version = 1;
+      row.creator = player_id;
+      row.entrants = create.entrants;
+      row.terms = terms;
+      row.pairings = *pairings;
+      TouchRoomLocked(row.room_id);
+      store_->Flush();  // the room row its insert needs
+      const auto landed = store_->CommitChessEvent(row, instance_id_);
+      if (!landed.ok()) {
+        LOG(WARNING) << "round robin " << row.room_id << "/" << row.event_id
+                     << " commit unavailable: " << landed.status();
+        refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
+        break;
+      }
+      if (*landed) {
+        refusal.reset();
+        StageRoundRobinLocked(*room, row, outbox);
+        room->round_robins.insert_or_assign(row.event_id, std::move(row));
+        break;
+      }
+      // A sibling took the id or the room: read what it did, and look again.
+      if (!RefreshRoomLocked(room_id, outbox, /*project_always=*/false)) {
+        refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
+        break;
+      }
+    }
+  }
+  Deliver(outbox);
+  if (refusal.has_value()) Reject(player_id, std::move(*refusal));
+}
+
+void GolfHub::WithdrawMove(const std::string& player_id,
+                           const moonbase::games::ChessWithdraw& withdraw) {
+  Outbox outbox;
+  std::optional<Refusal> refusal;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    refusal = ModerateRoundRobinLocked(
+        player_id, withdraw.roundRobinId,
+        [&](HubStore::ChessEventRow& row) -> std::optional<Refusal> {
+          const std::string& entrant = withdraw.playerId;
+          if (std::find(row.entrants.begin(), row.entrants.end(), entrant) == row.entrants.end()) {
+            return Refusal{RejectKind::kRules, absl::StrCat(entrant, " is not entered")};
+          }
+          if (!row.withdrawn.insert(entrant).second) {
+            return Refusal{RejectKind::kState, absl::StrCat(entrant, " has already withdrawn")};
+          }
+          return std::nullopt;
+        },
+        outbox);
+  }
+  Deliver(outbox);
+  if (refusal.has_value()) Reject(player_id, std::move(*refusal));
+}
+
+void GolfHub::ForfeitMove(const std::string& player_id,
+                          const moonbase::games::ChessForfeit& forfeit) {
+  Outbox outbox;
+  std::optional<Refusal> refusal;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    refusal = ModerateRoundRobinLocked(
+        player_id, forfeit.roundRobinId,
+        [&](HubStore::ChessEventRow& row) -> std::optional<Refusal> {
+          const auto open = OpenPairing(row.pairings, row.withdrawn, forfeit.winner, forfeit.loser);
+          if (!open.has_value()) {
+            return Refusal{RejectKind::kState, absl::StrCat(forfeit.winner, " and ", forfeit.loser,
+                                                            " have no pairing still to play")};
+          }
+          Pairing& pairing = row.pairings[*open];
+          pairing.result =
+              pairing.white == forfeit.winner ? PairingResult::kWhite : PairingResult::kBlack;
+          pairing.forfeit = true;
+          return std::nullopt;
+        },
+        outbox);
+  }
+  Deliver(outbox);
+  if (refusal.has_value()) Reject(player_id, std::move(*refusal));
+}
+
+std::optional<games_hub::Refusal> GolfHub::ModerateRoundRobinLocked(
+    const std::string& player_id, const std::string& round_robin_id,
+    const std::function<std::optional<Refusal>(HubStore::ChessEventRow&)>& change, Outbox& outbox) {
+  for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
+    // Looked up each attempt: a refresh can take the player or the room.
+    const auto placed = player_room_.find(player_id);
+    Room* room = placed == player_room_.end() ? nullptr : FindRoomLocked(player_id);
+    if (room == nullptr) return Refusal{RejectKind::kState, "not in a room"};
+    const std::string room_id = placed->second;
+    const auto held = room->round_robins.find(round_robin_id);
+    if (held == room->round_robins.end()) {
+      return Refusal{RejectKind::kState, "no such round robin in this room"};
+    }
+    if (held->second.creator != player_id) {
+      return Refusal{RejectKind::kState, "only the round robin's creator can do that"};
+    }
+    HubStore::ChessEventRow next = held->second;
+    if (auto refused = change(next); refused.has_value()) return refused;
+    next.version = held->second.version + 1;
+    TouchRoomLocked(room_id);
+    store_->Flush();
+    const auto landed = store_->CommitChessEvent(next, instance_id_);
+    if (!landed.ok()) {
+      LOG(WARNING) << "round robin " << room_id << "/" << round_robin_id
+                   << " commit unavailable: " << landed.status();
+      return Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
+    }
+    if (*landed) {
+      StageRoundRobinLocked(*room, next, outbox);
+      held->second = std::move(next);
+      return std::nullopt;
+    }
+    // A sibling moved it first: adopt its version, and change that.
+    if (!RefreshRoomLocked(room_id, outbox, /*project_always=*/false)) {
+      return Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
+    }
+  }
+  return Refusal{RejectKind::kState, "round robin changed; try again"};
+}
+
+void GolfHub::RoundRobinsMove(const std::string& player_id) {
+  moonbase::games::ChessRoundRobins answer;
+  bool in_room = false;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    if (const Room* room = FindRoomLocked(player_id); room != nullptr) {
+      in_room = true;
+      for (const auto& [id, row] : room->round_robins) {
+        answer.roundRobins.push_back(RoundRobinOf(row));
+      }
+    }
+  }
+  if (!in_room) {
+    Reject(player_id, RejectKind::kState, "not in a room");
+    return;
+  }
+  Send(player_id, ChessUpdateEvent(ChessUpdate::FromRoundrobins(std::move(answer))));
+}
+
+void GolfHub::StageRoundRobinLocked(const Room& room, const HubStore::ChessEventRow& row,
+                                    Outbox& outbox) const {
+  const moonbase::games::ChessRoundRobin view = RoundRobinOf(row);
+  for (const auto& [member_id, member] : room.members) {
+    outbox.To(member_id, ChessUpdateEvent(ChessUpdate::FromRoundrobin(view)));
+  }
+}
+
 absl::StatusOr<std::string> GolfHub::ExportChessPgn(int64_t after_archive_id) {
   auto games = store_->LoadPublishedChess(after_archive_id, kChessHistoryLimit);
   if (!games.ok()) return games.status();
@@ -4029,14 +4257,7 @@ moonbase::games::ChessView GolfHub::ChessViewLocked(const std::string& game_id,
   }
   if (!entry.started()) {
     view.phase = "waiting";
-    if (entry.terms.has_value()) {
-      moonbase::games::ChessTerms terms;
-      terms.setupId = entry.terms->setup_id;
-      terms.setupName = std::string(chess_play::ChessSetupName(entry.terms->setup_id).value_or(""));
-      terms.initialSeconds = static_cast<int>(entry.terms->time_control.initial_ms / 1000);
-      terms.incrementSeconds = static_cast<int>(entry.terms->time_control.increment_ms / 1000);
-      view.terms = std::move(terms);
-    }
+    if (entry.terms.has_value()) view.terms = WireTerms(*entry.terms);
     for (const std::string& roster_id : entry.roster) {
       moonbase::games::ChessPlayer player;
       player.playerId = roster_id;
