@@ -639,6 +639,7 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"chess_commands", {{"command", "withdraw"}}},
       {"chess_commands", {{"command", "forfeit"}}},
       {"chess_commands", {{"command", "roundRobins"}}},
+      {"chess_commands", {{"command", "playRoundRobin"}}},
       {"chess_events", {{"event", "gameJoined"}}},
       {"chess_events", {{"event", "gameState"}}},
       {"chess_events", {{"event", "gameCreated"}}},
@@ -855,6 +856,7 @@ absl::Status GolfHub::RestoreFromStore() {
     entry.version = row.version;
     if (row.state.has_value()) entry.state.emplace(*std::move(row.state));
     entry.terms = row.terms;
+    entry.event = row.event;
     entry.chess_games_announced = ChessGamesOf(entry.state);
     for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
     rooms_[row.room_id].games.emplace(row.game_id, std::move(entry));
@@ -1139,6 +1141,7 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
   // state, and the retry then commits over the terminal row. That game
   // was played once, and was recorded by whoever ended it.
   const bool was_over = entry.started() && IsOver(*entry.state);
+  const bool game_was_over = ChessGameOver(entry);
   // Stamped before the outcome is known: a commit whose fate is unknown
   // may still have landed.
   TouchRoomLocked(room_id);
@@ -1154,6 +1157,7 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
   row.roster = roster;
   if (state.has_value()) row.state.emplace(*state);
   row.terms = next_terms;
+  row.event = entry.event;
   row.version = version;
   const auto landed = finish != nullptr ? store_->CommitGameFinish(row, *finish, instance_id_)
                                         : store_->CommitGameSave(row, instance_id_);
@@ -1175,6 +1179,7 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
     entry.version = (*stored)->version;
     if ((*stored)->state.has_value()) entry.state.emplace(*std::move((*stored)->state));
     entry.terms = (*stored)->terms;
+    entry.event = (*stored)->event;
     return Commit::kRebased;
   }
   entry.roster = roster;
@@ -1191,6 +1196,11 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
     if (const auto finished = FinishedOf(*state, roster.size()); finished.has_value()) {
       RecordLocked([&](absl::Time now) { return GameFinishedLine(now, room_id, *finished); });
     }
+  }
+  // A tagged table's game just ended: its result is a row the archive
+  // now holds, which this instance reads back for its round robins.
+  if (entry.event.has_value() && !game_was_over && ChessGameOver(entry)) {
+    RefreshRoundRobinGamesLocked(room_id);
   }
   return Commit::kCommitted;
 }
@@ -1403,13 +1413,21 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
   if (republished && !materialized) StagePublishedLocked(room, rows.chess_published, {}, outbox);
 
   // A sibling's round robin, or its change to one, reaches this instance
-  // as the row; the members held here hear each one that moved.
+  // as the row; so does a table it opened or closed for one, as the
+  // games. The members held here hear each round robin that moved, after
+  // its games' own news.
+  std::map<std::string, std::map<int, std::string>> live_before;
+  for (const auto& [id, held] : room.round_robins) live_before[id] = LiveTablesLocked(room, id);
+  std::set<std::string> moved_round_robins;
   for (const HubStore::ChessEventRow& row : rows.events) {
     const auto held = room.round_robins.find(row.event_id);
-    if (held != room.round_robins.end() && held->second.version >= row.version) continue;
+    if (held != room.round_robins.end() && held->second.version >= row.version &&
+        held->second.games == row.games) {
+      continue;
+    }
     changed = true;
     room.round_robins.insert_or_assign(row.event_id, row);
-    if (!materialized) StageRoundRobinLocked(room, row, outbox);
+    moved_round_robins.insert(row.event_id);
   }
 
   // Games: adopt rows that moved past us. A row that ended while we
@@ -1429,6 +1447,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
       entry.version = row.version;
       if (row.state.has_value()) entry.state.emplace(*row.state);
       entry.terms = row.terms;
+      entry.event = row.event;
       entry.chess_games_announced = ChessGamesOf(entry.state);
       for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
       room.games.emplace(row.game_id, std::move(entry));
@@ -1461,6 +1480,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
     entry.version = row.version;
     if (row.state.has_value()) entry.state.emplace(*row.state);
     entry.terms = row.terms;
+    entry.event = row.event;
     for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
     if (over) StageGameOverLocked(room, row.game_id, outbox);
   }
@@ -1488,6 +1508,15 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
   if (changed || project_always) {
     for (const auto& [game_id, entry] : room.games) StageGameViewsLocked(game_id, entry, outbox);
     StageRoomStateLocked(room_id, outbox);
+  }
+  if (!materialized) {
+    for (const auto& [id, row] : room.round_robins) {
+      const auto before = live_before.find(id);
+      if (moved_round_robins.contains(id) || before == live_before.end() ||
+          before->second != LiveTablesLocked(room, id)) {
+        StageRoundRobinLocked(room, row, outbox);
+      }
+    }
   }
   return changed;
 }
@@ -2276,19 +2305,27 @@ void GolfHub::HandleCastleMove(const std::string& player_id, const CastleMove& m
 void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& move) {
   // startGame is chess's own shape: it names the clock.
   if (const auto* start = move.as_startGame_or_null()) {
-    const ChessTerms terms = TermsFrom(*start);
+    ChessTerms terms = TermsFrom(*start);
+    // On a table whose game ended, the next game; otherwise the first. A
+    // round robin's table plays its one game on the round robin's terms.
+    bool seated = false;
+    bool tagged = false;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      const auto ref = FindGameLocked(player_id);
+      seated = ref.has_value() && ref->entry->started();
+      tagged = ref.has_value() && ref->entry->event.has_value();
+      if (tagged && ref->entry->terms.has_value()) terms = *ref->entry->terms;
+    }
+    if (seated && tagged) {
+      Reject(player_id, RejectKind::kState, "a round robin's table plays one game");
+      return;
+    }
     const chess_play::TimeControl time_control = terms.time_control;
     const auto setup = chess_opener_(terms.setup_id);
     if (!setup.ok()) {
       Reject(player_id, RejectKind::kRules, std::string(setup.status().message()));
       return;
-    }
-    // On a table whose game ended, the next game; otherwise the first.
-    bool seated = false;
-    {
-      const std::lock_guard<std::mutex> lock(mu_);
-      const auto ref = FindGameLocked(player_id);
-      seated = ref.has_value() && ref->entry->started();
     }
     if (!seated) {
       StartGameMove(player_id, time_control, *setup);
@@ -2339,6 +2376,10 @@ void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& mov
   }
   if (move.as_roundRobins_or_null() != nullptr) {
     RoundRobinsMove(player_id);
+    return;
+  }
+  if (const auto* play = move.as_playRoundRobin_or_null()) {
+    PlayRoundRobinMove(player_id, *play);
     return;
   }
   if (LifecycleMove(player_id, move, GameKind::kChess)) return;
@@ -2638,6 +2679,19 @@ void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game
             refusal = Refusal{RejectKind::kState, "game is full"};
             break;
           }
+          if (const Pairing* pairing = PairingOfLocked(*room, entry); pairing != nullptr) {
+            const bool opened_by_white = std::find(entry.roster.begin(), entry.roster.end(),
+                                                   pairing->white) != entry.roster.end();
+            const std::string& opponent = opened_by_white ? pairing->black : pairing->white;
+            if (player_id != opponent) {
+              refusal = Refusal{RejectKind::kState, absl::StrCat("that table is for ", opponent)};
+              break;
+            }
+            if (Voided(*pairing, room->round_robins.at(entry.event->event_id).withdrawn)) {
+              refusal = Refusal{RejectKind::kState, "that table's pairing is void"};
+              break;
+            }
+          }
           std::vector<std::string> roster = entry.roster;
           roster.push_back(player_id);
           const Commit commit =
@@ -2719,9 +2773,16 @@ void GolfHub::StartGameMove(const std::string& player_id, chess_play::TimeContro
             refusal = Refusal{RejectKind::kRules, "a chess setup is required"};
             break;
           }
+          chess_play::Opening opening = chess_setup->opening;
+          if (const Pairing* pairing = PairingOfLocked(*ref->room, *ref->entry);
+              pairing != nullptr) {
+            const auto& roster = ref->entry->roster;
+            opening.white_seat = static_cast<int>(
+                std::find(roster.begin(), roster.end(), pairing->white) - roster.begin());
+          }
           auto chess_game =
-              chess_play::Table::open(ref->entry->roster, chess_setup->variant,
-                                      chess_setup->opening, time_control, NowMs(), chess_setup->id);
+              chess_play::Table::open(ref->entry->roster, chess_setup->variant, opening,
+                                      time_control, NowMs(), chess_setup->id);
           if (!chess_game.ok()) {
             refusal = Refusal{RejectKind::kRules, std::string(chess_game.status().message())};
             break;
@@ -3085,7 +3146,9 @@ void GolfHub::AddChessBotMove(const std::string& player_id, int elo) {
     const std::lock_guard<std::mutex> lock(mu_);
     auto ref = FindGameLocked(player_id);
     bool seated = false;
-    if (chess_bot_engine_ == nullptr) {
+    if (ref.has_value() && ref->entry->event.has_value()) {
+      refusal = Refusal{RejectKind::kState, "a round robin's pairing is played by its pair"};
+    } else if (chess_bot_engine_ == nullptr) {
       refusal = Refusal{RejectKind::kState, "no chess engine"};
     } else if (!ref.has_value()) {
       refusal = Refusal{RejectKind::kState, "not in a game"};
@@ -3157,6 +3220,10 @@ void GolfHub::ChallengeChessMove(const std::string& player_id, ChessTerms terms)
         if (entry.kind != GameKind::kChess) {
           refusal = Refusal{RejectKind::kState,
                             absl::StrCat("that table plays ", GameKindName(entry.kind))};
+          break;
+        }
+        if (entry.event.has_value()) {
+          refusal = Refusal{RejectKind::kState, "a round robin's table plays on its terms"};
           break;
         }
         if (entry.started()) {
@@ -3421,15 +3488,26 @@ void GolfHub::WithdrawMove(const std::string& player_id,
   {
     const std::lock_guard<std::mutex> lock(mu_);
     refusal = ModerateRoundRobinLocked(
-        player_id, withdraw.roundRobinId,
+        player_id, withdraw.roundRobinId, {withdraw.playerId},
         [&](HubStore::ChessEventRow& row) -> std::optional<Refusal> {
           const std::string& entrant = withdraw.playerId;
           if (std::find(row.entrants.begin(), row.entrants.end(), entrant) == row.entrants.end()) {
             return Refusal{RejectKind::kRules, absl::StrCat(entrant, " is not entered")};
           }
-          if (!row.withdrawn.insert(entrant).second) {
+          if (row.withdrawn.contains(entrant)) {
             return Refusal{RejectKind::kState, absl::StrCat(entrant, " has already withdrawn")};
           }
+          // A pairing in play is decided by its table, not voided.
+          if (const auto seat = player_game_.find(entrant); seat != player_game_.end()) {
+            const Room& room = *FindRoomLocked(player_id);
+            if (const auto game = room.games.find(seat->second);
+                game != room.games.end() && game->second.event.has_value() &&
+                game->second.event->event_id == row.event_id && !ChessGameOver(game->second)) {
+              return Refusal{RejectKind::kState,
+                             absl::StrCat(entrant, " is playing a pairing at ", seat->second)};
+            }
+          }
+          row.withdrawn.insert(entrant);
           return std::nullopt;
         },
         outbox);
@@ -3445,12 +3523,18 @@ void GolfHub::ForfeitMove(const std::string& player_id,
   {
     const std::lock_guard<std::mutex> lock(mu_);
     refusal = ModerateRoundRobinLocked(
-        player_id, forfeit.roundRobinId,
+        player_id, forfeit.roundRobinId, {forfeit.winner, forfeit.loser},
         [&](HubStore::ChessEventRow& row) -> std::optional<Refusal> {
-          const auto open = OpenPairing(row.pairings, row.withdrawn, forfeit.winner, forfeit.loser);
+          const auto open =
+              OpenPairing(EffectivePairings(row), row.withdrawn, forfeit.winner, forfeit.loser);
           if (!open.has_value()) {
             return Refusal{RejectKind::kState, absl::StrCat(forfeit.winner, " and ", forfeit.loser,
                                                             " have no pairing still to play")};
+          }
+          const auto live = LiveTablesLocked(*FindRoomLocked(player_id), row.event_id);
+          if (const auto table = live.find(static_cast<int>(*open)); table != live.end()) {
+            return Refusal{RejectKind::kState,
+                           absl::StrCat("that pairing is being played at ", table->second)};
           }
           Pairing& pairing = row.pairings[*open];
           pairing.result =
@@ -3466,6 +3550,7 @@ void GolfHub::ForfeitMove(const std::string& player_id,
 
 std::optional<games_hub::Refusal> GolfHub::ModerateRoundRobinLocked(
     const std::string& player_id, const std::string& round_robin_id,
+    const std::vector<std::string>& parties,
     const std::function<std::optional<Refusal>(HubStore::ChessEventRow&)>& change, Outbox& outbox) {
   for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
     // Looked up each attempt: a refresh can take the player or the room.
@@ -3477,8 +3562,20 @@ std::optional<games_hub::Refusal> GolfHub::ModerateRoundRobinLocked(
     if (held == room->round_robins.end()) {
       return Refusal{RejectKind::kState, "no such round robin in this room"};
     }
-    if (held->second.creator != player_id) {
-      return Refusal{RejectKind::kState, "only the round robin's creator can do that"};
+    // The creator moderates; while they are out of the room, any entrant
+    // in it does, but not on what they are party to.
+    const HubStore::ChessEventRow& row = held->second;
+    if (room->members.contains(row.creator)) {
+      if (row.creator != player_id) {
+        return Refusal{RejectKind::kState, "only the round robin's creator can do that"};
+      }
+    } else if (std::find(row.entrants.begin(), row.entrants.end(), player_id) ==
+               row.entrants.end()) {
+      return Refusal{RejectKind::kState,
+                     "only the round robin's entrants can do that while its creator is away"};
+    } else if (std::find(parties.begin(), parties.end(), player_id) != parties.end()) {
+      return Refusal{RejectKind::kState,
+                     "while its creator is away, entrants can't moderate themselves"};
     }
     HubStore::ChessEventRow next = held->second;
     if (auto refused = change(next); refused.has_value()) return refused;
@@ -3512,7 +3609,7 @@ void GolfHub::RoundRobinsMove(const std::string& player_id) {
     if (const Room* room = FindRoomLocked(player_id); room != nullptr) {
       in_room = true;
       for (const auto& [id, row] : room->round_robins) {
-        answer.roundRobins.push_back(RoundRobinOf(row));
+        answer.roundRobins.push_back(RoundRobinOf(row, LiveTablesLocked(*room, id)));
       }
     }
   }
@@ -3523,9 +3620,117 @@ void GolfHub::RoundRobinsMove(const std::string& player_id) {
   Send(player_id, ChessUpdateEvent(ChessUpdate::FromRoundrobins(std::move(answer))));
 }
 
+void GolfHub::PlayRoundRobinMove(const std::string& player_id,
+                                 const moonbase::games::ChessPlayRoundRobin& play) {
+  Outbox outbox;
+  std::optional<Refusal> refusal;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    Room* room = FindRoomLocked(player_id);
+    if (room == nullptr) {
+      refusal = Refusal{RejectKind::kState, "not in a room"};
+    } else if (player_game_.contains(player_id)) {
+      refusal = Refusal{RejectKind::kState, "leave your current game first"};
+    } else if (const auto held = room->round_robins.find(play.roundRobinId);
+               held == room->round_robins.end()) {
+      refusal = Refusal{RejectKind::kState, "no such round robin in this room"};
+    } else {
+      const HubStore::ChessEventRow& row = held->second;
+      const auto open =
+          OpenPairing(EffectivePairings(row), row.withdrawn, player_id, play.opponent);
+      const auto live = LiveTablesLocked(*room, row.event_id);
+      if (!open.has_value()) {
+        refusal = Refusal{RejectKind::kState, absl::StrCat(player_id, " and ", play.opponent,
+                                                           " have no pairing still to play")};
+      } else if (const auto table = live.find(static_cast<int>(*open)); table != live.end()) {
+        refusal = Refusal{RejectKind::kState,
+                          absl::StrCat("that pairing is being played at ", table->second)};
+      } else {
+        const std::string room_id = player_room_.at(player_id);
+        const std::optional<ChessTerms> terms = row.terms;
+        for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
+          std::string game_id = ids_->GameCode();
+          while (room->games.contains(game_id)) game_id = ids_->GameCode();
+          GameEntry& entry = room->games[game_id];
+          entry.kind = GameKind::kChess;
+          entry.event = EventTag{row.event_id, static_cast<int>(*open)};
+          const Commit commit = CommitEntryLocked(room_id, game_id, entry, {player_id},
+                                                  std::nullopt, nullptr, &terms);
+          if (commit == Commit::kRebased) continue;  // the code was taken; roll another
+          if (commit != Commit::kCommitted) {
+            room->games.erase(game_id);
+            if (commit == Commit::kGone) continue;
+            refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
+            break;
+          }
+          StopWatchingLocked(player_id);
+          player_game_[player_id] = game_id;
+          moonbase::games::GameCreated announcement;
+          announcement.gameId = game_id;
+          announcement.createdBy = player_id;
+          for (const auto& member : room->members) {
+            outbox.To(member.first, CreatedEvent(GameKind::kChess, announcement));
+          }
+          outbox.To(player_id, JoinedEventLocked(game_id, entry, player_id));
+          StageRoomStateLocked(room_id, outbox);
+          StageRoundRobinLocked(*room, row, outbox);
+          break;
+        }
+        if (!refusal.has_value() && !player_game_.contains(player_id)) {
+          refusal = Refusal{RejectKind::kUnavailable, "could not allocate a game code; try again"};
+        }
+      }
+    }
+  }
+  Deliver(outbox);
+  if (refusal.has_value()) Reject(player_id, std::move(*refusal));
+}
+
+bool GolfHub::ChessGameOver(const GameEntry& entry) {
+  return entry.kind == GameKind::kChess && entry.started() && entry.chess().game().isOver();
+}
+
+std::map<int, std::string> GolfHub::LiveTablesLocked(const Room& room,
+                                                     const std::string& round_robin_id) const {
+  std::map<int, std::string> live;
+  for (const auto& [game_id, entry] : room.games) {
+    if (!entry.event.has_value() || entry.event->event_id != round_robin_id) continue;
+    if (ChessGameOver(entry)) continue;  // its game is the pairing's now
+    live.emplace(entry.event->pairing, game_id);
+  }
+  return live;
+}
+
+const Pairing* GolfHub::PairingOfLocked(const Room& room, const GameEntry& entry) const {
+  if (!entry.event.has_value()) return nullptr;
+  const auto held = room.round_robins.find(entry.event->event_id);
+  if (held == room.round_robins.end()) return nullptr;
+  const auto& pairings = held->second.pairings;
+  if (entry.event->pairing < 0 || entry.event->pairing >= std::ssize(pairings)) return nullptr;
+  return &pairings[entry.event->pairing];
+}
+
+void GolfHub::RefreshRoundRobinGamesLocked(const std::string& room_id) {
+  const auto room = rooms_.find(room_id);
+  if (room == rooms_.end()) return;
+  auto rows = store_->LoadRoom(room_id);
+  if (!rows.ok()) {
+    // The next wake's reconcile reads them instead.
+    LOG(WARNING) << "room " << room_id << " round robin read failed: " << rows.status();
+    return;
+  }
+  for (const HubStore::ChessEventRow& row : rows->events) {
+    const auto held = room->second.round_robins.find(row.event_id);
+    if (held == room->second.round_robins.end() || held->second.games == row.games) continue;
+    held->second.games = row.games;
+    round_robins_moved_.emplace_back(room_id, row.event_id);
+  }
+}
+
 void GolfHub::StageRoundRobinLocked(const Room& room, const HubStore::ChessEventRow& row,
                                     Outbox& outbox) const {
-  const moonbase::games::ChessRoundRobin view = RoundRobinOf(row);
+  const moonbase::games::ChessRoundRobin view =
+      RoundRobinOf(row, LiveTablesLocked(room, row.event_id));
   for (const auto& [member_id, member] : room.members) {
     outbox.To(member_id, ChessUpdateEvent(ChessUpdate::FromRoundrobin(view)));
   }
@@ -3832,10 +4037,18 @@ void GolfHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writ
     if (!entry.started() && !players_left) {
       DropWatchersLocked(ref->game_id, entry, outbox);
       for (const std::string& bot : roster) player_game_.erase(bot);
+      const std::optional<EventTag> event = entry.event;
       ref->room->games.erase(ref->game_id);
       StageLocked(writes, HubStore::DeleteGame{ref->room_id, ref->game_id});
       StageWakeLocked(ref->room_id, writes);
       StageRoomStateLocked(ref->room_id, outbox);
+      // Its pairing is at no table now.
+      if (event.has_value()) {
+        if (const auto held = ref->room->round_robins.find(event->event_id);
+            held != ref->room->round_robins.end()) {
+          StageRoundRobinLocked(*ref->room, held->second, outbox);
+        }
+      }
       return;
     }
 
@@ -3850,10 +4063,12 @@ void GolfHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Writ
     const bool over = state.has_value() && IsOver(*state);
     std::vector<HubStore::StatsDelta> deltas;
     if (over) deltas = StatsDeltasOf(*state, roster);
-    // Terms are the poster's: a waiting table someone leaves has none.
-    const std::optional<ChessTerms> no_terms;
+    // Terms are the poster's: a waiting table someone leaves has none,
+    // unless they are its round robin's.
+    const std::optional<ChessTerms> terms =
+        entry.event.has_value() ? entry.terms : std::optional<ChessTerms>();
     const Commit commit = CommitEntryLocked(ref->room_id, ref->game_id, entry, roster, state,
-                                            over ? &deltas : nullptr, &no_terms);
+                                            over ? &deltas : nullptr, &terms);
     if (commit == Commit::kRebased) continue;
     if (commit == Commit::kGone) {
       DropGameLocked(*ref, outbox);
@@ -4600,6 +4815,16 @@ void GolfHub::StageGameViewsLocked(const std::string& game_id, const GameEntry& 
     }
     entry.chess_games_announced = entry.chess().scoreSheet().size();
   }
+  // A pairing's result follows the game's own ending.
+  for (const auto& [room_id, round_robin_id] : round_robins_moved_) {
+    const auto room = rooms_.find(room_id);
+    if (room == rooms_.end()) continue;
+    const auto row = room->second.round_robins.find(round_robin_id);
+    if (row != room->second.round_robins.end()) {
+      StageRoundRobinLocked(room->second, row->second, outbox);
+    }
+  }
+  round_robins_moved_.clear();
 }
 
 void GolfHub::StageGameOverLocked(Room& room, const std::string& game_id, Outbox& outbox) {

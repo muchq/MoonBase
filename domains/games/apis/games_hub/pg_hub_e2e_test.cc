@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
 #include "domains/games/apis/games_hub/migrations.h"
 #include "domains/games/apis/games_hub/pg_chat_store.h"
@@ -1994,6 +1995,90 @@ TEST_F(PgGamesHubFixture, ARoundRobinIsTheRoomsAcrossInstancesAndRestarts) {
   EXPECT_EQ(round_robins[0].roundRobinId, round_robin_id);
   EXPECT_EQ(round_robins[0].standings[0].playerId, alice.player_id);
   EXPECT_EQ(round_robins[0].standings[0].points, 1);
+}
+
+// A pairing played on one instance scores on the other: the result is
+// only an archive row, the round robin's version unmoved, and a sibling's
+// wake still brings it.
+TEST_F(PgGamesHubFixture, APairingPlayedOnOneInstanceScoresOnTheOther) {
+  using moonbase::games::ChessMove;
+  auto remote = BuildInstance();
+  ASSERT_NE(remote, nullptr);
+  DetachOnScopeExit detach{this, remote.get()};
+  CrossSeats seats;
+  const std::string room_id = SeatedCrossRoom(*remote, seats);
+  ASSERT_FALSE(room_id.empty());
+  Seat& alice = *seats.alice;
+  Seat& bob = *seats.bob;
+  auto carol = OpenSeat();
+  ASSERT_TRUE(carol.has_value());
+  ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
+  moonbase::games::JoinRoom join_room;
+  join_room.roomId = room_id;
+  ASSERT_TRUE(carol->stream.Send(GameCommands::FromJoinroom(join_room)).ok());
+  for (Seat* seat : {&alice, &bob, &*carol}) {
+    ASSERT_TRUE(AwaitRoomState(
+                    seat->stream,
+                    [](const moonbase::games::RoomState& room) { return room.players.size() == 3; },
+                    seat->player_id + " roomState with 3 players")
+                    .has_value());
+  }
+  ASSERT_TRUE(
+      alice.stream.Send(CreateRoundRobin({alice.player_id, bob.player_id, carol->player_id})).ok());
+  std::string round_robin_id;
+  for (Seat* seat : {&alice, &bob, &*carol}) {
+    auto heard = ReceiveChess(seat->stream, "roundRobin");
+    ASSERT_TRUE(heard.has_value()) << seat->player_id;
+    round_robin_id = heard->as_roundRobin_or_null()->roundRobinId;
+  }
+
+  // The alice-carol pairing as bob, on the remote, last heard it.
+  auto heard_by_bob = [&](auto done) -> std::optional<moonbase::games::ChessPairing> {
+    for (int i = 0; i < 8; ++i) {
+      auto heard = ReceiveChess(bob.stream, "roundRobin");
+      if (!heard.has_value()) return std::nullopt;
+      for (const auto& pairing : heard->as_roundRobin_or_null()->pairings) {
+        const bool ours = (pairing.white == alice.player_id && pairing.black == carol->player_id) ||
+                          (pairing.white == carol->player_id && pairing.black == alice.player_id);
+        if (ours && done(pairing)) return pairing;
+      }
+    }
+    return std::nullopt;
+  };
+
+  // alice opens theirs on the primary: bob hears it at that table, and
+  // the remote holds it as theirs, not bob's to fill.
+  ASSERT_TRUE(alice.stream.Send(PlayRoundRobin(round_robin_id, carol->player_id)).ok());
+  auto joined = ReceiveChess(alice.stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  moonbase::games::JoinGame join;
+  join.gameId = joined->as_gameJoined_or_null()->view.gameId;
+  EXPECT_TRUE(heard_by_bob([&](const auto& pairing) { return pairing.gameId == join.gameId; }))
+      << "bob hears the table";
+  ASSERT_TRUE(bob.stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  auto refused = ReceiveCase(bob.stream, "commandRejected");
+  ASSERT_TRUE(refused.has_value());
+  EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
+            absl::StrCat("that table is for ", carol->player_id));
+
+  // carol fills it and resigns: bob hears alice's point, at no table.
+  ASSERT_TRUE(carol->stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  carol->stream, [](const auto& view) { return view.phase == "playing"; },
+                  "carol's game starting")
+                  .has_value());
+  ASSERT_TRUE(carol->stream.Send(Chess(ChessMove::FromResign({}))).ok());
+  auto scored = heard_by_bob([](const auto& pairing) { return pairing.result.has_value(); });
+  ASSERT_TRUE(scored.has_value());
+  EXPECT_EQ(scored->result, scored->white == alice.player_id ? "white" : "black");
+  EXPECT_FALSE(scored->gameId.has_value()) << "its table is done";
+
+  // The result is the archive's: the round robin itself never moved.
+  store_->Flush();
+  auto room = store_->LoadRoom(room_id);
+  ASSERT_TRUE(room.ok()) << room.status();
+  ASSERT_EQ(room->events.size(), 1u);
+  EXPECT_EQ(room->events[0].version, 1);
 }
 
 }  // namespace

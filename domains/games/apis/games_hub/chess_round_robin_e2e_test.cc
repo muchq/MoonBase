@@ -5,18 +5,25 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/random/random.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
+#include "domains/games/libs/chess_play/game_state.h"
 
 namespace games_hub {
 namespace {
 
+using moonbase::games::ChessMove;
 using moonbase::games::ChessRoundRobin;
+using moonbase::games::GameCommands;
 using ::testing::ElementsAre;
 
 class RoundRobinFixture : public GamesHubStreamFixture {
@@ -38,6 +45,41 @@ class RoundRobinFixture : public GamesHubStreamFixture {
     auto update = ReceiveChess(seat.stream, "roundRobin");
     if (!update.has_value()) return std::nullopt;
     return *update->as_roundRobin_or_null();
+  }
+
+  // Receives roundRobin updates until one satisfies `pred`.
+  template <typename Pred>
+  std::optional<ChessRoundRobin> HeardWhere(Seat& seat, Pred pred) {
+    for (int i = 0; i < 8; ++i) {
+      auto heard = Heard(seat);
+      if (!heard.has_value()) return std::nullopt;
+      if (pred(*heard)) return heard;
+    }
+    return std::nullopt;
+  }
+
+  // The table seat `opener` opens for its pairing with `opponent`, once
+  // every member has heard the pairing at it.
+  std::optional<std::string> Opened(Members& members, int opener, int opponent,
+                                    const std::string& round_robin_id) {
+    Seat& seat = members.room.seats[opener];
+    if (!seat.stream.Send(PlayRoundRobin(round_robin_id, members.ids[opponent])).ok()) {
+      return std::nullopt;
+    }
+    auto joined = ReceiveChess(seat.stream, "gameJoined");
+    if (!joined.has_value()) return std::nullopt;
+    const std::string game_id = joined->as_gameJoined_or_null()->view.gameId;
+    for (Seat& member : members.room.seats) {
+      if (!HeardWhere(member, [&](const ChessRoundRobin& heard) {
+             for (const auto& pairing : heard.pairings) {
+               if (pairing.gameId == game_id) return true;
+             }
+             return false;
+           }).has_value()) {
+        return std::nullopt;
+      }
+    }
+    return game_id;
   }
 
   std::optional<std::string> Refused(Seat& seat) {
@@ -286,6 +328,538 @@ TEST_F(RoundRobinFixture, AChangeOverANewerStoredVersionAdoptsItFirst) {
   EXPECT_EQ(changed->standings[0].playerId, ids[0]);
   EXPECT_EQ(changed->standings[0].points, 1);
   EXPECT_EQ(store_->LoadRoom(members->room.room_id)->events[0].version, 3);
+}
+
+const moonbase::games::ChessPairing* PairingOf(const ChessRoundRobin& round_robin,
+                                               const std::string& a, const std::string& b) {
+  for (const auto& pairing : round_robin.pairings) {
+    if ((pairing.white == a && pairing.black == b) || (pairing.white == b && pairing.black == a)) {
+      return &pairing;
+    }
+  }
+  return nullptr;
+}
+
+GameCommands JoinTable(const std::string& game_id) {
+  moonbase::games::JoinGame join;
+  join.gameId = game_id;
+  return Chess(moonbase::games::ChessMove::FromJoingame(join));
+}
+
+// A pairing is played at a table tagged with it: the round robin's
+// terms, the pairing's colours, a start when the opponent sits, and the
+// game's result is the pairing's for the whole room.
+TEST_F(RoundRobinFixture, APairingPlayedAtItsTableScoresForTheRoom) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  const auto* pairing = PairingOf(*created, ids[0], ids[1]);
+  ASSERT_NE(pairing, nullptr);
+  const std::string white = pairing->white;
+  const std::string black = pairing->black;
+  // Black opens it, White fills it: the colours are the pairing's, not
+  // the seats'.
+  const int black_seat = black == ids[0] ? 0 : 1;
+  const int white_seat = 1 - black_seat;
+
+  auto game_id = Opened(*members, black_seat, white_seat, created->roundRobinId);
+  ASSERT_TRUE(game_id.has_value());
+  Seat& opponent = members->room.seats[white_seat];
+  ASSERT_TRUE(opponent.stream.Send(JoinTable(*game_id)).ok());
+  auto playing = AwaitChessView(
+      opponent.stream, [](const auto& view) { return view.phase == "playing"; }, "the start");
+  ASSERT_TRUE(playing.has_value());
+  EXPECT_FALSE(playing->terms.has_value());
+  ASSERT_TRUE(playing->clock.has_value());
+  EXPECT_EQ(playing->clock->initialMs, 180'000);
+  EXPECT_EQ(playing->clock->incrementMs, 2'000);
+  for (const auto& player : playing->players) {
+    EXPECT_EQ(player.color, player.playerId == white ? "white" : "black") << player.playerId;
+  }
+
+  Seat& resigner = members->room.seats[black_seat];
+  ASSERT_TRUE(resigner.stream.Send(Chess(ChessMove::FromResign({}))).ok());
+  for (Seat& seat : members->room.seats) {
+    auto decided = HeardWhere(seat, [&](const ChessRoundRobin& heard) {
+      const auto* played = PairingOf(heard, ids[0], ids[1]);
+      return played != nullptr && played->result.has_value();
+    });
+    ASSERT_TRUE(decided.has_value()) << seat.player_id;
+    const auto* played = PairingOf(*decided, ids[0], ids[1]);
+    EXPECT_EQ(played->result, "white");
+    EXPECT_FALSE(played->forfeit);
+    EXPECT_FALSE(played->gameId.has_value()) << "its table is done";
+    EXPECT_EQ(decided->standings[0].playerId, white);
+    EXPECT_EQ(decided->standings[0].points, 1);
+  }
+}
+
+// Only the paired opponent fills a pairing's table, nothing changes its
+// terms or seats a bot, and it plays the one game.
+TEST_F(RoundRobinFixture, APairingsTableIsForItsPairAndOneGame) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  auto game_id = Opened(*members, 0, 1, created->roundRobinId);
+  ASSERT_TRUE(game_id.has_value());
+  Seat& opener = members->room.seats[0];
+  Seat& stranger = members->room.seats[2];
+
+  ASSERT_TRUE(stranger.stream.Send(JoinTable(*game_id)).ok());
+  EXPECT_EQ(Refused(stranger), absl::StrCat("that table is for ", ids[1]));
+  moonbase::games::ChessAddBot bot;
+  bot.elo = 1500;
+  ASSERT_TRUE(opener.stream.Send(Chess(ChessMove::FromAddbot(bot))).ok());
+  EXPECT_EQ(Refused(opener), "a round robin's pairing is played by its pair");
+  ASSERT_TRUE(opener.stream.Send(Chess(ChessMove::FromChallenge({}))).ok());
+  EXPECT_EQ(Refused(opener), "a round robin's table plays on its terms");
+
+  Seat& opponent = members->room.seats[1];
+  ASSERT_TRUE(opponent.stream.Send(JoinTable(*game_id)).ok());
+  ASSERT_TRUE(
+      AwaitChessView(
+          opponent.stream, [](const auto& view) { return view.phase == "playing"; }, "the start")
+          .has_value());
+  ASSERT_TRUE(opponent.stream.Send(Chess(ChessMove::FromResign({}))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  opener.stream, [](const auto& view) { return view.phase == "ended"; }, "the end")
+                  .has_value());
+  ASSERT_TRUE(opener.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  EXPECT_EQ(Refused(opener), "a round robin's table plays one game");
+}
+
+// A table whose start failed is started by hand on the round robin's
+// terms, whatever the start names.
+TEST_F(RoundRobinFixture, AHandStartedPairingPlaysOnTheRoundRobinsTerms) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  auto game_id = Opened(*members, 0, 1, created->roundRobinId);
+  ASSERT_TRUE(game_id.has_value());
+  std::atomic<int> opened{0};
+  golf_->SetChessOpener(
+      [&opened](std::string_view setup_id) -> absl::StatusOr<chess_play::ChessSetup> {
+        if (opened++ == 0) return absl::UnavailableError("the opener is down");
+        absl::BitGen gen;
+        return chess_play::SelectChessSetup(setup_id, gen);
+      });
+  Seat& opener = members->room.seats[0];
+  Seat& opponent = members->room.seats[1];
+  ASSERT_TRUE(opponent.stream.Send(JoinTable(*game_id)).ok());
+  EXPECT_EQ(Refused(opponent), "the opener is down");
+
+  moonbase::games::ChessStartGame other;
+  other.setupId = std::string(chess_play::kRandomKpkSetup);
+  other.initialSeconds = 60;
+  other.incrementSeconds = 0;
+  ASSERT_TRUE(opener.stream.Send(Chess(ChessMove::FromStartgame(other))).ok());
+  auto playing = AwaitChessView(
+      opponent.stream, [](const auto& view) { return view.phase == "playing"; }, "the start");
+  ASSERT_TRUE(playing.has_value());
+  EXPECT_EQ(playing->setupId, "standard");
+  ASSERT_TRUE(playing->clock.has_value());
+  EXPECT_EQ(playing->clock->initialMs, 180'000);
+  EXPECT_EQ(playing->clock->incrementMs, 2'000);
+}
+
+// A pairing's waiting table keeps the round robin's terms through a
+// leave: its pair, back at it, start on them.
+TEST_F(RoundRobinFixture, APairingsTableKeepsItsTermsThroughALeave) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  auto game_id = Opened(*members, 0, 1, created->roundRobinId);
+  ASSERT_TRUE(game_id.has_value());
+  std::atomic<int> opened{0};
+  golf_->SetChessOpener(
+      [&opened](std::string_view setup_id) -> absl::StatusOr<chess_play::ChessSetup> {
+        if (opened++ == 0) return absl::UnavailableError("the opener is down");
+        absl::BitGen gen;
+        return chess_play::SelectChessSetup(setup_id, gen);
+      });
+  Seat& opener = members->room.seats[0];
+  Seat& opponent = members->room.seats[1];
+  ASSERT_TRUE(opponent.stream.Send(JoinTable(*game_id)).ok());
+  EXPECT_EQ(Refused(opponent), "the opener is down");
+  ASSERT_TRUE(opener.stream.Send(Chess(ChessMove::FromLeavegame({}))).ok());
+  ASSERT_TRUE(ReceiveChess(opener.stream, "gameLeft").has_value());
+
+  ASSERT_TRUE(opener.stream.Send(JoinTable(*game_id)).ok());
+  auto playing = AwaitChessView(
+      opener.stream, [](const auto& view) { return view.phase == "playing"; }, "the start");
+  ASSERT_TRUE(playing.has_value());
+  ASSERT_TRUE(playing->clock.has_value());
+  EXPECT_EQ(playing->clock->initialMs, 180'000);
+  EXPECT_EQ(playing->clock->incrementMs, 2'000);
+}
+
+// A pairing's table its opener leaves before anyone sits is gone, and
+// the room hears the pairing at no table.
+TEST_F(RoundRobinFixture, APairingsTableLeftEmptyLeavesThePairingOpen) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  ASSERT_TRUE(Opened(*members, 0, 1, created->roundRobinId).has_value());
+  Seat& opener = members->room.seats[0];
+  ASSERT_TRUE(opener.stream.Send(Chess(ChessMove::FromLeavegame({}))).ok());
+  for (Seat& seat : members->room.seats) {
+    auto heard = Heard(seat);
+    ASSERT_TRUE(heard.has_value()) << seat.player_id;
+    const auto* pairing = PairingOf(*heard, ids[0], ids[1]);
+    ASSERT_NE(pairing, nullptr);
+    EXPECT_FALSE(pairing->gameId.has_value());
+    EXPECT_FALSE(pairing->result.has_value());
+  }
+}
+
+// A pairing's waiting table shows the round robin's terms, not the
+// default ones.
+TEST_F(RoundRobinFixture, APairingsWaitingTableShowsTheRoundRobinsTerms) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  moonbase::games::ChessStartGame terms;
+  terms.initialSeconds = 300;
+  terms.incrementSeconds = 3;
+  ASSERT_TRUE(members->room.seats[0].stream.Send(CreateRoundRobin(ids, terms)).ok());
+  std::optional<ChessRoundRobin> created;
+  for (Seat& seat : members->room.seats) ASSERT_TRUE((created = Heard(seat)).has_value());
+  Seat& opener = members->room.seats[0];
+  ASSERT_TRUE(opener.stream.Send(PlayRoundRobin(created->roundRobinId, ids[1])).ok());
+  auto joined = ReceiveChess(opener.stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  const auto& view = joined->as_gameJoined_or_null()->view;
+  ASSERT_TRUE(view.terms.has_value());
+  EXPECT_EQ(view.terms->initialSeconds, 300);
+  EXPECT_EQ(view.terms->incrementSeconds, 3);
+}
+
+// A pairing is opened from no table, and only while it counts: not by a
+// seat at another table, nor once withdrawal voided it.
+TEST_F(RoundRobinFixture, APairingIsOpenedFromNoTableWhileItCounts) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  Seat& creator = members->room.seats[0];
+  Seat& entrant = members->room.seats[1];
+  ASSERT_TRUE(creator.stream.Send(Withdraw(created->roundRobinId, ids[2])).ok());
+  ASSERT_TRUE(Heard(entrant).has_value());
+  ASSERT_TRUE(entrant.stream.Send(PlayRoundRobin(created->roundRobinId, ids[2])).ok());
+  EXPECT_EQ(Refused(entrant),
+            absl::StrCat(ids[1], " and ", ids[2], " have no pairing still to play"));
+
+  ASSERT_TRUE(
+      entrant.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  ASSERT_TRUE(ReceiveChess(entrant.stream, "gameJoined").has_value());
+  ASSERT_TRUE(entrant.stream.Send(PlayRoundRobin(created->roundRobinId, ids[0])).ok());
+  EXPECT_EQ(Refused(entrant), "leave your current game first");
+}
+
+// A pairing being played isn't forfeited: its table decides it.
+TEST_F(RoundRobinFixture, APairingAtATableIsNotForfeited) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  auto game_id = Opened(*members, 1, 2, created->roundRobinId);
+  ASSERT_TRUE(game_id.has_value());
+  Seat& creator = members->room.seats[0];
+  ASSERT_TRUE(creator.stream.Send(Forfeit(created->roundRobinId, ids[1], ids[2])).ok());
+  EXPECT_EQ(Refused(creator), absl::StrCat("that pairing is being played at ", *game_id));
+}
+
+// A player who leaves their pairing's game mid-play loses it, as at any
+// table, and it scores as played.
+TEST_F(RoundRobinFixture, LeavingAPairingsGameLosesIt) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  auto game_id = Opened(*members, 0, 1, created->roundRobinId);
+  ASSERT_TRUE(game_id.has_value());
+  Seat& leaver = members->room.seats[1];
+  ASSERT_TRUE(leaver.stream.Send(JoinTable(*game_id)).ok());
+  ASSERT_TRUE(
+      AwaitChessView(
+          leaver.stream, [](const auto& view) { return view.phase == "playing"; }, "the start")
+          .has_value());
+  ASSERT_TRUE(leaver.stream.Send(Chess(ChessMove::FromLeavegame({}))).ok());
+  Seat& bystander = members->room.seats[2];
+  auto decided = HeardWhere(bystander, [&](const ChessRoundRobin& heard) {
+    const auto* played = PairingOf(heard, ids[0], ids[1]);
+    return played != nullptr && played->result.has_value();
+  });
+  ASSERT_TRUE(decided.has_value());
+  const auto* played = PairingOf(*decided, ids[0], ids[1]);
+  EXPECT_EQ(played->result, played->white == ids[0] ? "white" : "black");
+  EXPECT_FALSE(played->forfeit);
+  EXPECT_FALSE(played->gameId.has_value());
+}
+
+// Opening a pairing's table ends a watch, as opening any table does.
+TEST_F(RoundRobinFixture, OpeningAPairingsTableStopsTheWatch) {
+  auto members = Seated(4);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  Seat& creator = members->room.seats[0];
+  ASSERT_TRUE(creator.stream.Send(CreateRoundRobin({ids[0], ids[1], ids[2]})).ok());
+  std::optional<ChessRoundRobin> created;
+  for (Seat& seat : members->room.seats) ASSERT_TRUE((created = Heard(seat)).has_value());
+  Seat& host = members->room.seats[0];
+  Seat& guest = members->room.seats[3];
+  ASSERT_TRUE(
+      host.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto joined = ReceiveChess(host.stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  const std::string plain = joined->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(guest.stream.Send(JoinTable(plain)).ok());
+  ASSERT_TRUE(ReceiveChess(guest.stream, "gameJoined").has_value());
+  ASSERT_TRUE(host.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  ASSERT_TRUE(
+      AwaitChessView(
+          guest.stream, [](const auto& view) { return view.phase == "playing"; }, "the start")
+          .has_value());
+
+  Seat& watcher = members->room.seats[1];
+  moonbase::games::ChessWatch watch;
+  watch.gameId = plain;
+  ASSERT_TRUE(watcher.stream.Send(Chess(ChessMove::FromWatch(watch))).ok());
+  ASSERT_TRUE(ReceiveChess(watcher.stream, "gameState").has_value());
+  ASSERT_TRUE(watcher.stream.Send(PlayRoundRobin(created->roundRobinId, ids[2])).ok());
+  auto mine = ReceiveChess(watcher.stream, "gameJoined");
+  ASSERT_TRUE(mine.has_value());
+  const std::string table = mine->as_gameJoined_or_null()->view.gameId;
+
+  ASSERT_TRUE(guest.stream.Send(Chess(ChessMove::FromResign({}))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  host.stream, [](const auto& view) { return view.phase == "ended"; }, "the end")
+                  .has_value());
+  while (true) {
+    auto received = watcher.stream.Receive(std::chrono::milliseconds(300));
+    if (!received.ok() || !received->has_value()) break;
+    const auto* chess = (*received)->as_chess_or_null();
+    if (chess == nullptr) continue;
+    if (const auto* state = chess->update.as_gameState_or_null()) {
+      EXPECT_EQ(state->view.gameId, table) << "the watched table, still heard";
+    }
+    EXPECT_EQ(chess->update.as_gameEnded_or_null(), nullptr) << "the watched table's end";
+  }
+}
+
+// A withdrawal never voids a pairing being played: not one whose table
+// the entrant sits at, and a table left waiting on a withdrawn entrant
+// is filled by no one.
+TEST_F(RoundRobinFixture, AWithdrawalVoidsNoPairingInPlay) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  auto game_id = Opened(*members, 1, 2, created->roundRobinId);
+  ASSERT_TRUE(game_id.has_value());
+  Seat& creator = members->room.seats[0];
+  ASSERT_TRUE(creator.stream.Send(Withdraw(created->roundRobinId, ids[1])).ok());
+  EXPECT_EQ(Refused(creator), absl::StrCat(ids[1], " is playing a pairing at ", *game_id));
+
+  ASSERT_TRUE(creator.stream.Send(Withdraw(created->roundRobinId, ids[2])).ok());
+  Seat& withdrawn = members->room.seats[2];
+  auto heard = Heard(withdrawn);
+  ASSERT_TRUE(heard.has_value());
+  EXPECT_THAT(heard->withdrawn, ElementsAre(ids[2]));
+  ASSERT_TRUE(withdrawn.stream.Send(JoinTable(*game_id)).ok());
+  EXPECT_EQ(Refused(withdrawn), "that table's pairing is void");
+}
+
+// A pairing at a table can't be opened again, nor one already decided;
+// and a played pairing can't be forfeited.
+TEST_F(RoundRobinFixture, APairingAtATableOrDecidedIsNotOpenedAgain) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  auto game_id = Opened(*members, 0, 1, created->roundRobinId);
+  ASSERT_TRUE(game_id.has_value());
+  Seat& opponent = members->room.seats[1];
+  ASSERT_TRUE(opponent.stream.Send(PlayRoundRobin(created->roundRobinId, ids[0])).ok());
+  EXPECT_EQ(Refused(opponent), absl::StrCat("that pairing is being played at ", *game_id));
+  Seat& outsider = members->room.seats[2];
+  ASSERT_TRUE(outsider.stream.Send(PlayRoundRobin(created->roundRobinId, "stranger")).ok());
+  EXPECT_EQ(Refused(outsider), absl::StrCat(ids[2], " and stranger have no pairing still to play"));
+
+  ASSERT_TRUE(opponent.stream.Send(JoinTable(*game_id)).ok());
+  ASSERT_TRUE(
+      AwaitChessView(
+          opponent.stream, [](const auto& view) { return view.phase == "playing"; }, "the start")
+          .has_value());
+  ASSERT_TRUE(opponent.stream.Send(Chess(ChessMove::FromResign({}))).ok());
+  Seat& creator = members->room.seats[0];
+  ASSERT_TRUE(HeardWhere(creator, [&](const ChessRoundRobin& heard) {
+                const auto* played = PairingOf(heard, ids[0], ids[1]);
+                return played != nullptr && played->result.has_value();
+              }).has_value());
+  ASSERT_TRUE(creator.stream.Send(Chess(ChessMove::FromLeavegame({}))).ok());
+  ASSERT_TRUE(ReceiveChess(creator.stream, "gameLeft").has_value());
+  ASSERT_TRUE(creator.stream.Send(PlayRoundRobin(created->roundRobinId, ids[1])).ok());
+  EXPECT_EQ(Refused(creator),
+            absl::StrCat(ids[0], " and ", ids[1], " have no pairing still to play"));
+  ASSERT_TRUE(creator.stream.Send(Forfeit(created->roundRobinId, ids[1], ids[0])).ok());
+  EXPECT_EQ(Refused(creator),
+            absl::StrCat(ids[1], " and ", ids[0], " have no pairing still to play"));
+}
+
+// While the creator is out of the room, any entrant in it moderates
+// what isn't their own; a member who isn't entered never does.
+TEST_F(RoundRobinFixture, WhileTheCreatorIsAwayAnEntrantModerates) {
+  auto members = Seated(4);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  Seat& creator = members->room.seats[0];
+  ASSERT_TRUE(creator.stream.Send(CreateRoundRobin({ids[0], ids[1], ids[2]})).ok());
+  auto created = Heard(creator);
+  ASSERT_TRUE(created.has_value());
+  for (int i = 1; i < 4; ++i) ASSERT_TRUE(Heard(members->room.seats[i]).has_value());
+
+  Seat& entrant = members->room.seats[1];
+  ASSERT_TRUE(entrant.stream.Send(Forfeit(created->roundRobinId, ids[1], ids[2])).ok());
+  EXPECT_EQ(Refused(entrant), "only the round robin's creator can do that");
+
+  ASSERT_TRUE(creator.stream.Send(GameCommands::FromLeaveroom(moonbase::games::LeaveRoom{})).ok());
+  ASSERT_TRUE(AwaitRoomState(
+                  entrant.stream,
+                  [](const moonbase::games::RoomState& room) { return room.players.size() == 3; },
+                  "the creator gone")
+                  .has_value());
+  Seat& bystander = members->room.seats[3];
+  ASSERT_TRUE(bystander.stream.Send(Forfeit(created->roundRobinId, ids[1], ids[2])).ok());
+  EXPECT_EQ(Refused(bystander),
+            "only the round robin's entrants can do that while its creator is away");
+  constexpr char kNotThemselves[] = "while its creator is away, entrants can't moderate themselves";
+  ASSERT_TRUE(entrant.stream.Send(Forfeit(created->roundRobinId, ids[1], ids[2])).ok());
+  EXPECT_EQ(Refused(entrant), kNotThemselves);
+  ASSERT_TRUE(entrant.stream.Send(Forfeit(created->roundRobinId, ids[2], ids[1])).ok());
+  EXPECT_EQ(Refused(entrant), kNotThemselves);
+  ASSERT_TRUE(entrant.stream.Send(Withdraw(created->roundRobinId, ids[1])).ok());
+  EXPECT_EQ(Refused(entrant), kNotThemselves);
+
+  ASSERT_TRUE(entrant.stream.Send(Forfeit(created->roundRobinId, ids[2], ids[0])).ok());
+  auto forfeited = Heard(bystander);
+  ASSERT_TRUE(forfeited.has_value());
+  EXPECT_EQ(forfeited->standings[0].playerId, ids[2]);
+  EXPECT_EQ(forfeited->standings[0].points, 1);
+  ASSERT_TRUE(entrant.stream.Send(Withdraw(created->roundRobinId, ids[0])).ok());
+  auto withdrawn = Heard(bystander);
+  ASSERT_TRUE(withdrawn.has_value());
+  EXPECT_THAT(withdrawn->withdrawn, ElementsAre(ids[0]));
+}
+
+// The ordinary 1v1 table is untouched by a round robin in the room: two
+// entrants who are paired can still open a plain table, post a challenge,
+// play, and play the next game, and none of it is their pairing's result.
+TEST_F(RoundRobinFixture, APlainTableBetweenPairedEntrantsIsAnOrdinaryGame) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  Seat& host = members->room.seats[0];
+  Seat& guest = members->room.seats[1];
+
+  ASSERT_TRUE(
+      host.stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto joined = ReceiveChess(host.stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  const std::string game_id = joined->as_gameJoined_or_null()->view.gameId;
+  moonbase::games::ChessStartGame terms;
+  terms.initialSeconds = 60;
+  terms.incrementSeconds = 0;
+  ASSERT_TRUE(host.stream.Send(Chess(ChessMove::FromChallenge(terms))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  host.stream, [](const auto& view) { return view.terms.has_value(); },
+                  "the posted challenge")
+                  .has_value());
+
+  ASSERT_TRUE(guest.stream.Send(JoinTable(game_id)).ok());
+  auto playing = AwaitChessView(
+      guest.stream, [](const auto& view) { return view.phase == "playing"; }, "the start");
+  ASSERT_TRUE(playing.has_value());
+  ASSERT_TRUE(playing->clock.has_value());
+  EXPECT_EQ(playing->clock->initialMs, 60'000) << "the challenge's terms, not the round robin's";
+  ASSERT_TRUE(guest.stream.Send(Chess(ChessMove::FromResign({}))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  host.stream, [](const auto& view) { return view.phase == "ended"; }, "the end")
+                  .has_value());
+  ASSERT_TRUE(host.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  ASSERT_TRUE(
+      AwaitChessView(
+          guest.stream,
+          [](const auto& view) { return view.phase == "playing" && view.scoreSheet.size() == 1; },
+          "the next game")
+          .has_value());
+
+  Seat& asker = members->room.seats[2];
+  ASSERT_TRUE(asker.stream.Send(RoundRobins()).ok());
+  auto listed = ReceiveChess(asker.stream, "roundRobins");
+  ASSERT_TRUE(listed.has_value());
+  const auto& round_robin = listed->as_roundRobins_or_null()->roundRobins.at(0);
+  const auto* pairing = PairingOf(round_robin, ids[0], ids[1]);
+  ASSERT_NE(pairing, nullptr);
+  EXPECT_FALSE(pairing->result.has_value()) << "a plain game is not the pairing's";
+  EXPECT_FALSE(pairing->gameId.has_value());
+  for (const auto& standing : round_robin.standings) EXPECT_EQ(standing.points, 0);
+}
+
+// A pairing's table is watched like any chess table: the watcher sees it
+// from waiting to its result, and the pairing still scores.
+TEST_F(RoundRobinFixture, AWatcherFollowsAPairingsTableToItsResult) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto& ids = members->ids;
+  auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  auto game_id = Opened(*members, 0, 1, created->roundRobinId);
+  ASSERT_TRUE(game_id.has_value());
+
+  Seat& watcher = members->room.seats[2];
+  moonbase::games::ChessWatch watch;
+  watch.gameId = *game_id;
+  ASSERT_TRUE(watcher.stream.Send(Chess(ChessMove::FromWatch(watch))).ok());
+  auto waiting = ReceiveChess(watcher.stream, "gameState");
+  ASSERT_TRUE(waiting.has_value());
+  EXPECT_EQ(waiting->as_gameState_or_null()->view.phase, "waiting");
+  ASSERT_TRUE(waiting->as_gameState_or_null()->view.terms.has_value());
+  EXPECT_EQ(waiting->as_gameState_or_null()->view.terms->initialSeconds, 180);
+
+  Seat& opponent = members->room.seats[1];
+  ASSERT_TRUE(opponent.stream.Send(JoinTable(*game_id)).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  watcher.stream, [](const auto& view) { return view.phase == "playing"; },
+                  "the watcher seeing the start")
+                  .has_value());
+  ASSERT_TRUE(opponent.stream.Send(Chess(ChessMove::FromResign({}))).ok());
+  auto ended = AwaitChessView(
+      watcher.stream, [](const auto& view) { return view.result.has_value(); },
+      "the watcher seeing the result");
+  ASSERT_TRUE(ended.has_value());
+  EXPECT_EQ(ended->result->winner, ids[0]);
+  auto decided = HeardWhere(watcher, [&](const ChessRoundRobin& heard) {
+    const auto* played = PairingOf(heard, ids[0], ids[1]);
+    return played != nullptr && played->result.has_value();
+  });
+  ASSERT_TRUE(decided.has_value());
+  EXPECT_EQ(decided->standings[0].playerId, ids[0]);
 }
 
 }  // namespace

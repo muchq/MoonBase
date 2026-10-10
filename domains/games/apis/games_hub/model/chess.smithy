@@ -43,6 +43,7 @@ union ChessMove {
     withdraw: ChessWithdraw
     forfeit: ChessForfeit
     roundRobins: ChessRoundRobinsRequest
+    playRoundRobin: ChessPlayRoundRobin
 }
 
 /// Starts a round robin among the room's members (#1647): everyone plays
@@ -63,7 +64,9 @@ list ChessEntrants {
 }
 
 /// The creator withdraws an entrant: their pairings still to play are
-/// void, and their games played stand. Every member hears roundRobin.
+/// void, and their games played stand. Refused while the entrant sits at
+/// a pairing's table; a table waiting on them is filled by no one. Every member hears roundRobin.
+/// While the creator is out of the room, any other entrant in it does.
 structure ChessWithdraw {
     @required
     roundRobinId: String
@@ -72,8 +75,9 @@ structure ChessWithdraw {
     playerId: String
 }
 
-/// The creator scores a pairing still to play as a win for `winner` over
-/// `loser`, unplayed. Every member hears roundRobin.
+/// The creator scores a pairing still to play, and at no table, as a win
+/// for `winner` over `loser`, unplayed. Every member hears roundRobin. While the creator is
+/// out of the room, any entrant in it but those two does.
 structure ChessForfeit {
     @required
     roundRobinId: String
@@ -87,6 +91,20 @@ structure ChessForfeit {
 
 /// The room's round robins, answered with roundRobins. Any member.
 structure ChessRoundRobinsRequest {}
+
+/// Opens a table for the player's pairing with `opponent` (#1647), from no
+/// seat: it waits on the round robin's terms, only the opponent can fill
+/// it, each plays the colour the pairing gives, and the game starts when
+/// they sit. It plays that one game, which is the pairing's result; no
+/// next game, bot or other terms. Refused for a pairing decided, void or
+/// already at a table. Every member hears roundRobin.
+structure ChessPlayRoundRobin {
+    @required
+    roundRobinId: String
+
+    @required
+    opponent: String
+}
 
 /// The room's finished games, newest first: answered with a history.
 /// Any member, seated, watching or neither.
@@ -281,6 +299,9 @@ structure ChessPairing {
     /// Never to be played: an entrant in it withdrew before it was.
     @required
     voided: Boolean
+
+    /// The table playing it now; absent otherwise.
+    gameId: String
 }
 
 list ChessStandings {

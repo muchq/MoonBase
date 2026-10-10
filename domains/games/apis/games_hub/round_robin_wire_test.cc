@@ -104,5 +104,44 @@ TEST(RoundRobinWire, StandingsCarryPointsSonnebornBergerPlacesAndWithdrawals) {
   EXPECT_TRUE(view.standings[2].withdrawn);
 }
 
+// The games played for pairings are their results: a played game over a
+// forfeit, the first archived over a racing table's, a draw for a game
+// with no winner, and nothing from a game that names no pairing or a
+// winner who isn't in it.
+TEST(RoundRobinWire, PlayedGamesDecideTheirPairings) {
+  HubStore::ChessEventRow row = Row({"A", "B", "C", "D"});
+  // Pairings: 0 A-D, 1 B-C, 2 D-B, 3 C-A, 4 C-D, 5 A-B.
+  Score(row, "A", "D", 0);  // a forfeit to D, then played and won by A
+  // Out of archive order: the merge goes by archive id, not list order.
+  row.games = {
+      {14, "G4", 3, "C"},           // a racing table's later game: ignored
+      {12, "G2", 0, "A"},           // A beats D, over the forfeit
+      {11, "G1", 1, std::nullopt},  // B-C drawn
+      {13, "G3", 3, "A"},           // A beats C (black), the earlier
+      {15, "G5", 9, "A"},           // no such pairing
+      {16, "G6", 5, "stranger"},    // a winner not in A-B
+  };
+  const auto pairings = EffectivePairings(row);
+  ASSERT_EQ(pairings.size(), 6u);
+  EXPECT_EQ(pairings[0].result, PairingResult::kWhite);
+  EXPECT_FALSE(pairings[0].forfeit) << "played, not forfeited";
+  EXPECT_EQ(pairings[1].result, PairingResult::kDraw);
+  EXPECT_FALSE(pairings[2].result.has_value());
+  EXPECT_EQ(pairings[3].result, PairingResult::kBlack);
+  EXPECT_FALSE(pairings[4].result.has_value());
+  EXPECT_FALSE(pairings[5].result.has_value());
+
+  const auto view = RoundRobinOf(row);
+  EXPECT_EQ(view.pairings[3].result, "black");
+  EXPECT_EQ(view.standings[0].playerId, "A");
+  EXPECT_EQ(view.standings[0].points, 2);
+}
+
+TEST(RoundRobinWire, APairingAtATableNamesIt) {
+  const auto view = RoundRobinOf(Row({"A", "B", "C"}), {{1, "G7"}});
+  EXPECT_FALSE(view.pairings[0].gameId.has_value());
+  EXPECT_EQ(view.pairings[1].gameId, "G7");
+}
+
 }  // namespace
 }  // namespace games_hub

@@ -447,6 +447,9 @@ class GolfHub final {
     /// A waiting chess table's posted challenge (#1633), stored with the
     /// row until the game starts on it.
     std::optional<ChessTerms> terms;
+    /// The round robin pairing the table plays (#1647), fixed when it is
+    /// opened.
+    std::optional<EventTag> event;
     [[nodiscard]] bool started() const { return state.has_value(); }
     [[nodiscard]] const golf::GameState& golf() const { return std::get<golf::GameState>(*state); }
     [[nodiscard]] const castle::GameState& castle() const {
@@ -479,6 +482,9 @@ class GolfHub final {
     /// reconcile that finds one changed tells the members.
     std::map<std::string, HubStore::ChessEventRow> round_robins;
   };
+  /// Round robins whose games a commit just re-read, as (room, id): the
+  /// next StageGameViewsLocked tells their rooms. Under mu_.
+  mutable std::vector<std::pair<std::string, std::string>> round_robins_moved_;
 
   /// Events staged under the lock, delivered outside it. Delivery
   /// preserves staged order per recipient — callers stage in the order
@@ -545,11 +551,27 @@ class GolfHub final {
   void WithdrawMove(const std::string& player_id, const moonbase::games::ChessWithdraw& withdraw);
   void ForfeitMove(const std::string& player_id, const moonbase::games::ChessForfeit& forfeit);
   void RoundRobinsMove(const std::string& player_id);
+  /// Opens a table for the player's pairing with `opponent` (#1647).
+  void PlayRoundRobinMove(const std::string& player_id,
+                          const moonbase::games::ChessPlayRoundRobin& play);
+  /// The tables playing a round robin's pairings now, by pairing index.
+  std::map<int, std::string> LiveTablesLocked(const Room& room,
+                                              const std::string& round_robin_id) const;
+  /// Whether a chess table's game is over: ended between games or closed.
+  static bool ChessGameOver(const GameEntry& entry);
+  /// The pairing a tagged table plays, if its round robin is held.
+  const Pairing* PairingOfLocked(const Room& room, const GameEntry& entry) const;
+  /// After a commit ends a tagged table's game: the round robins' games
+  /// re-read from the archive, their views staged with the next game
+  /// views. Callers hold mu_.
+  void RefreshRoundRobinGamesLocked(const std::string& room_id);
   /// The creator's `change` to one of the player's room's round robins,
   /// committed on its version and retried over a sibling's; every member
-  /// held here hears the result. Callers hold mu_.
+  /// held here hears the result. While the creator is away an entrant
+  /// moderates, unless among the change's `parties`. Callers hold mu_.
   std::optional<games_hub::Refusal> ModerateRoundRobinLocked(
       const std::string& player_id, const std::string& round_robin_id,
+      const std::vector<std::string>& parties,
       const std::function<std::optional<games_hub::Refusal>(HubStore::ChessEventRow&)>& change,
       Outbox& outbox);
   /// Tells every member of `room` held here how a round robin stands.

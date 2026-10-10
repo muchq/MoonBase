@@ -471,6 +471,14 @@ inline moonbase::games::GameCommands Forfeit(const std::string& round_robin_id,
   return Chess(moonbase::games::ChessMove::FromForfeit(forfeit));
 }
 
+inline moonbase::games::GameCommands PlayRoundRobin(const std::string& round_robin_id,
+                                                    const std::string& opponent) {
+  moonbase::games::ChessPlayRoundRobin play;
+  play.roundRobinId = round_robin_id;
+  play.opponent = opponent;
+  return Chess(moonbase::games::ChessMove::FromPlayroundrobin(play));
+}
+
 inline moonbase::games::GameCommands RoundRobins() {
   return Chess(
       moonbase::games::ChessMove::FromRoundrobins(moonbase::games::ChessRoundRobinsRequest{}));

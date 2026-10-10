@@ -1,5 +1,6 @@
 #include "domains/games/apis/games_hub/round_robin_wire.h"
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <utility>
@@ -34,13 +35,42 @@ moonbase::games::ChessTerms WireTerms(const ChessTerms& terms) {
   return wire;
 }
 
-moonbase::games::ChessRoundRobin RoundRobinOf(const HubStore::ChessEventRow& row) {
+std::vector<Pairing> EffectivePairings(const HubStore::ChessEventRow& row) {
+  std::vector<Pairing> pairings = row.pairings;
+  std::vector<HubStore::EventGame> games = row.games;
+  std::sort(games.begin(), games.end(),
+            [](const auto& a, const auto& b) { return a.archive_id < b.archive_id; });
+  std::vector<bool> played(pairings.size(), false);
+  for (const HubStore::EventGame& game : games) {
+    if (game.pairing < 0 || game.pairing >= std::ssize(pairings) || played[game.pairing]) continue;
+    Pairing& pairing = pairings[game.pairing];
+    std::optional<PairingResult> result;
+    if (!game.winner.has_value()) {
+      result = PairingResult::kDraw;
+    } else if (*game.winner == pairing.white) {
+      result = PairingResult::kWhite;
+    } else if (*game.winner == pairing.black) {
+      result = PairingResult::kBlack;
+    } else {
+      continue;
+    }
+    pairing.result = result;
+    pairing.forfeit = false;
+    played[game.pairing] = true;
+  }
+  return pairings;
+}
+
+moonbase::games::ChessRoundRobin RoundRobinOf(const HubStore::ChessEventRow& row,
+                                              const std::map<int, std::string>& live) {
+  const std::vector<Pairing> pairings = EffectivePairings(row);
   moonbase::games::ChessRoundRobin view;
   view.roundRobinId = row.event_id;
   view.creator = row.creator;
   view.entrants = row.entrants;
   view.terms = WireTerms(row.terms);
-  for (const Pairing& pairing : row.pairings) {
+  for (std::size_t i = 0; i < pairings.size(); ++i) {
+    const Pairing& pairing = pairings[i];
     moonbase::games::ChessPairing wire;
     wire.round = pairing.round;
     wire.white = pairing.white;
@@ -48,10 +78,13 @@ moonbase::games::ChessRoundRobin RoundRobinOf(const HubStore::ChessEventRow& row
     wire.result = ResultName(pairing.result);
     wire.forfeit = pairing.forfeit;
     wire.voided = Voided(pairing, row.withdrawn);
+    if (const auto table = live.find(static_cast<int>(i)); table != live.end()) {
+      wire.gameId = table->second;
+    }
     view.pairings.push_back(std::move(wire));
   }
   view.withdrawn.assign(row.withdrawn.begin(), row.withdrawn.end());
-  for (const Standing& standing : Standings(row.entrants, row.pairings, row.withdrawn)) {
+  for (const Standing& standing : Standings(row.entrants, pairings, row.withdrawn)) {
     moonbase::games::ChessStanding wire;
     wire.playerId = standing.player;
     wire.points = standing.points;

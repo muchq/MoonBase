@@ -476,8 +476,18 @@ room's members, on a challenge's terms, paired in Berger order from the
 order entered (`round_robin.h`). A room runs them side by side, at most
 16 over its life (`kMaxRoundRobinsPerRoom`, counted by the instance that
 takes the command). Its creator moderates: `forfeit` scores a
-pairing still to play as an unplayed win, and `withdraw` voids an
-entrant's pairings still to play and keeps what they scored. Every member
+pairing still to play, and at no table, as an unplayed win, and `withdraw` voids an
+entrant's pairings still to play and keeps what they scored (not while
+they sit at a pairing's table, and a table waiting on them is filled by
+no one); while the
+creator is out of the room, any entrant in it moderates what they aren't
+party to. An entrant plays a
+pairing with `playRoundRobin`: a table tagged with it, waiting on the round
+robin's terms, that only the opponent can fill, starting on the pairing's
+colours when they sit, and playing that one game (no next game, bot or
+other terms). Its first game's archive row is the pairing's result, over a
+forfeit and over a racing table's later game; the instance that ended it
+re-reads the room's round robin games, and siblings get them by wake. Every member
 hears `roundRobin` (the crosstable: pairings, withdrawals and standings by
 points, Sonneborn-Berger, then head-to-head) whenever one changes, a
 sibling's change by wake; any member asks for the room's with

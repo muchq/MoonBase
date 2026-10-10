@@ -2211,6 +2211,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"chess_commands", {{"command", "withdraw"}}},
       {"chess_commands", {{"command", "forfeit"}}},
       {"chess_commands", {{"command", "roundRobins"}}},
+      {"chess_commands", {{"command", "playRoundRobin"}}},
       {"chess_events", {{"event", "gameJoined"}}},
       {"chess_events", {{"event", "gameState"}}},
       {"chess_events", {{"event", "gameCreated"}}},
