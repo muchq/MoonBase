@@ -116,6 +116,28 @@ cc_test(
     ],
 )
 
+# A chess round robin's pairings and standings (#1647).
+cc_library(
+    name = "round_robin",
+    srcs = ["round_robin.cc"],
+    hdrs = ["round_robin.h"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "round_robin_test",
+    size = "small",
+    srcs = ["round_robin_test.cc"],
+    deps = [
+        ":round_robin",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_test(
     name = "wire_cards_test",
     size = "small",
