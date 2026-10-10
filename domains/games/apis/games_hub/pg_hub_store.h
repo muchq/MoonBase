@@ -69,6 +69,12 @@ class PgHubStore final : public HubStore {
   absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& stats,
                                         const std::string& notify_payload) override;
 
+  /// A round robin's conditional commit (#1647), its NOTIFY in the same
+  /// statement as games rows'. An event whose body no longer decodes is
+  /// dropped from the loads with a loud log, as an undecodable game is.
+  absl::StatusOr<bool> CommitChessEvent(const ChessEventRow& row,
+                                        const std::string& notify_payload) override;
+
   /// Rebase read after a conditional miss; nullopt = the game is gone.
   /// An undecodable row also reads as gone (logged loudly) — the same
   /// one-bad-row-costs-one-game policy as LoadSnapshot.
@@ -99,7 +105,7 @@ class PgHubStore final : public HubStore {
   absl::StatusOr<GameRow> RowFromColumns(const std::string& room_id, const std::string& game_id,
                                          const std::string& roster_json,
                                          const std::string& state_json, int64_t version,
-                                         const std::string& game);
+                                         const std::string& game, std::optional<EventTag> event);
 
   const std::shared_ptr<pg::Client> db_;
   std::mutex mu_;

@@ -1,6 +1,8 @@
 #include "domains/games/apis/games_hub/pg_hub_store.h"
 
+#include <algorithm>
 #include <nlohmann/json.hpp>
+#include <set>
 #include <type_traits>
 #include <utility>
 
@@ -66,8 +68,9 @@ constexpr char kTouchRooms[] = R"sql(
 // double-fires. rows() of the outer SELECT is the landed/missed probe.
 constexpr char kCommitInsert[] = R"sql(
     WITH save AS (
-      INSERT INTO games (room_id, game_id, roster, state, version, game)
-      VALUES ($1, $2, $3::jsonb, NULLIF($4, '')::jsonb, $5::bigint, $8)
+      INSERT INTO games (room_id, game_id, roster, state, version, game, event_id, pairing)
+      VALUES ($1, $2, $3::jsonb, NULLIF($4, '')::jsonb, $5::bigint, $8, NULLIF($9, ''),
+              NULLIF($10, '')::integer)
       ON CONFLICT (room_id, game_id) DO NOTHING
       RETURNING version)
     SELECT pg_notify($6, $7) FROM save)sql";
@@ -78,9 +81,12 @@ constexpr char kCommitUpdate[] = R"sql(
       WHERE room_id = $1 AND game_id = $2 AND version = $5::bigint - 1
       RETURNING version),
     archive AS (
-      INSERT INTO chess_games (room_id, game_id, ordinal, game, published)
-      SELECT $1, $2, NULLIF($8, '')::integer, NULLIF($9, '')::jsonb, r.chess_published
-      FROM rooms r
+      INSERT INTO chess_games (room_id, game_id, ordinal, game, published, event_id, pairing,
+                               winner)
+      SELECT $1, $2, NULLIF($8, '')::integer, NULLIF($9, '')::jsonb, r.chess_published,
+             CASE WHEN $8 = '1' THEN g.event_id END, CASE WHEN $8 = '1' THEN g.pairing END,
+             NULLIF($10, '')
+      FROM rooms r JOIN games g ON g.room_id = r.room_id AND g.game_id = $2
       WHERE r.room_id = $1 AND $9 <> '' AND EXISTS (SELECT 1 FROM save)
       ON CONFLICT DO NOTHING
       RETURNING archive_id, game, ended_at, published),
@@ -94,7 +100,11 @@ constexpr char kCommitUpdate[] = R"sql(
 // to the public feed when that flag is set; a blank game says there is
 // none to archive, and a later commit still carrying the same ended game
 // conflicts on the archive's unique index, so the feed is not written
-// twice either.
+// twice either. A table's first game takes the pairing from the row it
+// saves, whose tag only the insert wrote (the CTEs read the statement's
+// snapshot, which the save does not change); a rematch is not the
+// pairing's. The winner rides along so an event's results read without
+// restoring a game.
 //
 // The finishing commit adds the stat deltas, guarded on the save landing
 // so a conflicted (or retried) finish applies them zero times, not
@@ -115,9 +125,12 @@ constexpr char kCommitFinish[] = R"sql(
       WHERE m.room_id = $1 AND m.player_id = s.player_id
         AND EXISTS (SELECT 1 FROM save)),
     archive AS (
-      INSERT INTO chess_games (room_id, game_id, ordinal, game, published)
-      SELECT $1, $2, NULLIF($9, '')::integer, NULLIF($10, '')::jsonb, r.chess_published
-      FROM rooms r
+      INSERT INTO chess_games (room_id, game_id, ordinal, game, published, event_id, pairing,
+                               winner)
+      SELECT $1, $2, NULLIF($9, '')::integer, NULLIF($10, '')::jsonb, r.chess_published,
+             CASE WHEN $9 = '1' THEN g.event_id END, CASE WHEN $9 = '1' THEN g.pairing END,
+             NULLIF($11, '')
+      FROM rooms r JOIN games g ON g.room_id = r.room_id AND g.game_id = $2
       WHERE r.room_id = $1 AND $10 <> '' AND EXISTS (SELECT 1 FROM save)
       ON CONFLICT DO NOTHING
       RETURNING archive_id, game, ended_at, published),
@@ -125,6 +138,23 @@ constexpr char kCommitFinish[] = R"sql(
       INSERT INTO published_chess_games (archive_id, game, ended_at)
       SELECT archive_id, game, ended_at FROM archive WHERE published)
     SELECT pg_notify($7, $8) FROM save)sql";
+
+// A round robin's commit (#1647), conditional and notifying as a games
+// row's: the insert lands only into a room that is, the update only on
+// version - 1.
+constexpr char kCommitEventInsert[] = R"sql(
+    WITH save AS (
+      INSERT INTO chess_events (room_id, event_id, version, body)
+      SELECT $1, $2, $3::bigint, $4::jsonb FROM rooms WHERE room_id = $1
+      ON CONFLICT (room_id, event_id) DO NOTHING
+      RETURNING version)
+    SELECT pg_notify($5, $6) FROM save)sql";
+constexpr char kCommitEventUpdate[] = R"sql(
+    WITH save AS (
+      UPDATE chess_events SET body = $4::jsonb, version = $3::bigint
+      WHERE room_id = $1 AND event_id = $2 AND version = $3::bigint - 1
+      RETURNING version)
+    SELECT pg_notify($5, $6) FROM save)sql";
 
 // An unreadable geometry costs the room its shape, not the boot: it
 // reads as the plane, which is what every row before the column was.
@@ -193,18 +223,30 @@ std::string StateJson(const PgHubStore::GameRow& row) {
       *row.state);
 }
 
-// The archive's two parameters for a committed row: the ordinal and the
-// finished game, or two blanks when the row archives nothing.
+// The archive's three parameters for a committed row: the ordinal, the
+// finished game and its winner (blank for a draw), or three blanks when
+// the row archives nothing.
 std::vector<std::string> ArchiveParams(const PgHubStore::GameRow& row) {
   const auto archived = ArchivedChessGame(row);
-  if (!archived.has_value()) return {"", ""};
-  return {std::to_string(archived->ordinal), chess_play::serializeGameState(archived->game)};
+  if (!archived.has_value()) return {"", "", ""};
+  return {std::to_string(archived->ordinal), chess_play::serializeGameState(archived->game),
+          ChessWinner(archived->game).value_or("")};
 }
 
 // Milliseconds truncated, not rounded: ended_at holds microseconds.
 constexpr char kChessGameColumns[] =
     "archive_id, game_id, ordinal, game::text,"
     " floor(extract(epoch FROM ended_at) * 1000)::bigint, published";
+
+// An event's games, in archive order, without restoring them: room_id
+// leads so one query serves a room or the snapshot.
+constexpr char kEventGameColumns[] =
+    "room_id, event_id, archive_id, game_id, pairing, winner IS NULL, COALESCE(winner, '')";
+
+std::optional<EventTag> TagFromColumns(const std::string& event_id, const std::string& pairing) {
+  if (event_id.empty()) return std::nullopt;
+  return EventTag{event_id, std::atoi(pairing.c_str())};
+}
 
 // Rows of kChessGameColumns, each restored through the game's serde: one
 // that no longer restores costs that game, logged, as a games row does.
@@ -225,6 +267,117 @@ std::vector<PgHubStore::ChessGameRow> ChessGamesFrom(const std::string& room_id,
                      result.Get(i, 5).value_or("f") == "t"});
   }
   return games;
+}
+
+// A round robin's body (#1647): what its creator fixed and moderates.
+// The room, id and version are columns of their own.
+constexpr std::pair<PairingResult, const char*> kResultNames[] = {
+    {PairingResult::kWhite, "white"},
+    {PairingResult::kBlack, "black"},
+    {PairingResult::kDraw, "draw"},
+};
+
+std::string EventBodyJson(const PgHubStore::ChessEventRow& row) {
+  json pairings = json::array();
+  for (const Pairing& p : row.pairings) {
+    json pairing = {{"round", p.round}, {"white", p.white}, {"black", p.black}};
+    for (const auto& [result, name] : kResultNames) {
+      if (p.result == result) pairing["result"] = name;
+    }
+    if (p.forfeit) pairing["forfeit"] = true;
+    pairings.push_back(std::move(pairing));
+  }
+  return json{{"creator", row.creator},
+              {"entrants", row.entrants},
+              {"terms",
+               {{"setupId", row.terms.setup_id},
+                {"initialMs", row.terms.time_control.initial_ms},
+                {"incrementMs", row.terms.time_control.increment_ms}}},
+              {"pairings", std::move(pairings)},
+              {"withdrawn", row.withdrawn}}
+      .dump();
+}
+
+bool IsStrings(const json& value) {
+  return value.is_array() &&
+         std::all_of(value.begin(), value.end(), [](const json& v) { return v.is_string(); });
+}
+
+absl::Status EventBodyFromJson(const std::string& text, PgHubStore::ChessEventRow& row) {
+  const absl::Status malformed = absl::DataLossError("chess event body is malformed");
+  const json body = json::parse(text, /*cb=*/nullptr, /*allow_exceptions=*/false);
+  if (!body.is_object() || !body.contains("creator") || !body["creator"].is_string() ||
+      !body.contains("entrants") || !IsStrings(body["entrants"]) || !body.contains("terms") ||
+      !body["terms"].is_object() || !body.contains("pairings") || !body["pairings"].is_array() ||
+      !body.contains("withdrawn") || !IsStrings(body["withdrawn"])) {
+    return malformed;
+  }
+  const json& terms = body["terms"];
+  if (!terms.contains("setupId") || !terms["setupId"].is_string() || !terms.contains("initialMs") ||
+      !terms["initialMs"].is_number_integer() || !terms.contains("incrementMs") ||
+      !terms["incrementMs"].is_number_integer()) {
+    return malformed;
+  }
+  row.creator = body["creator"].get<std::string>();
+  row.entrants = body["entrants"].get<std::vector<std::string>>();
+  row.terms = {terms["setupId"].get<std::string>(),
+               {terms["initialMs"].get<int64_t>(), terms["incrementMs"].get<int64_t>()}};
+  row.withdrawn = body["withdrawn"].get<std::set<std::string>>();
+  row.pairings.clear();
+  for (const json& p : body["pairings"]) {
+    if (!p.is_object() || !p.contains("round") || !p["round"].is_number_integer() ||
+        !p.contains("white") || !p["white"].is_string() || !p.contains("black") ||
+        !p["black"].is_string()) {
+      return malformed;
+    }
+    Pairing pairing{p["round"].get<int>(), p["white"].get<std::string>(),
+                    p["black"].get<std::string>()};
+    if (p.contains("result")) {
+      if (!p["result"].is_string()) return malformed;
+      for (const auto& [result, name] : kResultNames) {
+        if (p["result"].get<std::string>() == name) pairing.result = result;
+      }
+      if (!pairing.result.has_value()) return malformed;
+    }
+    if (p.contains("forfeit")) {
+      if (!p["forfeit"].is_boolean()) return malformed;
+      pairing.forfeit = p["forfeit"].get<bool>();
+    }
+    row.pairings.push_back(std::move(pairing));
+  }
+  return absl::OkStatus();
+}
+
+// Rows of (room_id, event_id, version, body), each with its games from
+// rows of kEventGameColumns. A body that no longer decodes costs its
+// event, logged, as an undecodable game row does.
+std::vector<PgHubStore::ChessEventRow> EventsFrom(const pg::Result& events,
+                                                  const pg::Result& games) {
+  std::vector<PgHubStore::ChessEventRow> rows;
+  for (int i = 0; i < events.rows(); ++i) {
+    PgHubStore::ChessEventRow row;
+    row.room_id = events.Get(i, 0).value_or("");
+    row.event_id = events.Get(i, 1).value_or("");
+    row.version = std::atoll(events.Get(i, 2).value_or("0").c_str());
+    if (auto decoded = EventBodyFromJson(events.Get(i, 3).value_or(""), row); !decoded.ok()) {
+      LOG(ERROR) << "dropping chess event " << row.room_id << "/" << row.event_id << ": "
+                 << decoded;
+      continue;
+    }
+    for (int j = 0; j < games.rows(); ++j) {
+      if (games.Get(j, 0).value_or("") != row.room_id ||
+          games.Get(j, 1).value_or("") != row.event_id) {
+        continue;
+      }
+      std::optional<std::string> winner;
+      if (games.Get(j, 5).value_or("t") == "f") winner = games.Get(j, 6).value_or("");
+      row.games.push_back({std::atoll(games.Get(j, 2).value_or("0").c_str()),
+                           games.Get(j, 3).value_or(""),
+                           std::atoi(games.Get(j, 4).value_or("0").c_str()), std::move(winner)});
+    }
+    rows.push_back(std::move(row));
+  }
+  return rows;
 }
 
 }  // namespace
@@ -342,6 +495,8 @@ absl::StatusOr<bool> PgHubStore::CommitGameSave(const GameRow& row,
   // cannot disagree.
   if (row.version == 1) {
     params.emplace_back(GameKindName(row.state.has_value() ? KindOf(*row.state) : row.kind));
+    params.push_back(row.event.has_value() ? row.event->event_id : "");
+    params.push_back(row.event.has_value() ? std::to_string(row.event->pairing) : "");
   } else {
     for (std::string& param : ArchiveParams(row)) params.push_back(std::move(param));
   }
@@ -369,17 +524,29 @@ absl::StatusOr<bool> PgHubStore::CommitGameFinish(const GameRow& row,
   return result->rows() == 1;
 }
 
+absl::StatusOr<bool> PgHubStore::CommitChessEvent(const ChessEventRow& row,
+                                                  const std::string& notify_payload) {
+  auto result = db_->Exec(row.version == 1 ? kCommitEventInsert : kCommitEventUpdate,
+                          {row.room_id, row.event_id, std::to_string(row.version),
+                           EventBodyJson(row), RoomChannel(row.room_id), notify_payload});
+  if (!result.ok()) return result.status();
+  Touch(row.room_id);
+  return result->rows() == 1;
+}
+
 absl::StatusOr<std::optional<PgHubStore::GameRow>> PgHubStore::LoadGame(
     const std::string& room_id, const std::string& game_id) {
   auto result = db_->Exec(
-      "SELECT roster::text, COALESCE(state::text, ''), version, game FROM games"
+      "SELECT roster::text, COALESCE(state::text, ''), version, game,"
+      " COALESCE(event_id, ''), COALESCE(pairing, 0) FROM games"
       " WHERE room_id = $1 AND game_id = $2",
       {room_id, game_id});
   if (!result.ok()) return result.status();
   if (result->rows() == 0) return std::nullopt;
   auto row = RowFromColumns(
       room_id, game_id, result->Get(0, 0).value_or("[]"), result->Get(0, 1).value_or(""),
-      std::atoll(result->Get(0, 2).value_or("0").c_str()), result->Get(0, 3).value_or("golf"));
+      std::atoll(result->Get(0, 2).value_or("0").c_str()), result->Get(0, 3).value_or("golf"),
+      TagFromColumns(result->Get(0, 4).value_or(""), result->Get(0, 5).value_or("")));
   if (!row.ok()) {
     LOG(ERROR) << "game " << room_id << "/" << game_id
                << " unreadable, treating as gone: " << row.status();
@@ -415,21 +582,35 @@ absl::StatusOr<PgHubStore::RoomRows> PgHubStore::LoadRoom(const std::string& roo
   }
 
   auto games = db_->Exec(
-      "SELECT game_id, roster::text, COALESCE(state::text, ''), version, game FROM games"
-      " WHERE room_id = $1",
+      "SELECT game_id, roster::text, COALESCE(state::text, ''), version, game,"
+      " COALESCE(event_id, ''), COALESCE(pairing, 0) FROM games WHERE room_id = $1",
       {room_id});
   if (!games.ok()) return games.status();
   for (int i = 0; i < games->rows(); ++i) {
     const std::string game_id = games->Get(i, 0).value_or("");
     auto row = RowFromColumns(
         room_id, game_id, games->Get(i, 1).value_or("[]"), games->Get(i, 2).value_or(""),
-        std::atoll(games->Get(i, 3).value_or("0").c_str()), games->Get(i, 4).value_or("golf"));
+        std::atoll(games->Get(i, 3).value_or("0").c_str()), games->Get(i, 4).value_or("golf"),
+        TagFromColumns(games->Get(i, 5).value_or(""), games->Get(i, 6).value_or("")));
     if (!row.ok()) {
       LOG(ERROR) << "dropping game " << room_id << "/" << game_id << ": " << row.status();
       continue;
     }
     out.games.push_back(*std::move(row));
   }
+
+  auto events = db_->Exec(
+      "SELECT room_id, event_id, version, body::text FROM chess_events"
+      " WHERE room_id = $1 ORDER BY event_id",
+      {room_id});
+  if (!events.ok()) return events.status();
+  auto event_games = db_->Exec(absl::StrCat("SELECT ", kEventGameColumns,
+                                            " FROM chess_games"
+                                            " WHERE room_id = $1 AND event_id IS NOT NULL"
+                                            " ORDER BY archive_id"),
+                               {room_id});
+  if (!event_games.ok()) return event_games.status();
+  out.events = EventsFrom(*events, *event_games);
   return out;
 }
 
@@ -459,8 +640,8 @@ absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
   }
 
   auto games = db_->Exec(
-      "SELECT room_id, game_id, roster::text, COALESCE(state::text, ''), version, game"
-      " FROM games");
+      "SELECT room_id, game_id, roster::text, COALESCE(state::text, ''), version, game,"
+      " COALESCE(event_id, ''), COALESCE(pairing, 0) FROM games");
   if (!games.ok()) return games.status();
   for (int i = 0; i < games->rows(); ++i) {
     const std::string room_id = games->Get(i, 0).value_or("");
@@ -469,13 +650,24 @@ absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
     // radius whichever column is bad.
     auto row = RowFromColumns(
         room_id, game_id, games->Get(i, 2).value_or("[]"), games->Get(i, 3).value_or(""),
-        std::atoll(games->Get(i, 4).value_or("0").c_str()), games->Get(i, 5).value_or("golf"));
+        std::atoll(games->Get(i, 4).value_or("0").c_str()), games->Get(i, 5).value_or("golf"),
+        TagFromColumns(games->Get(i, 6).value_or(""), games->Get(i, 7).value_or("")));
     if (!row.ok()) {
       LOG(ERROR) << "dropping game " << room_id << "/" << game_id << ": " << row.status();
       continue;
     }
     snapshot.games.push_back(*std::move(row));
   }
+
+  auto events = db_->Exec(
+      "SELECT room_id, event_id, version, body::text FROM chess_events"
+      " ORDER BY room_id, event_id");
+  if (!events.ok()) return events.status();
+  auto event_games = db_->Exec(absl::StrCat("SELECT ", kEventGameColumns,
+                                            " FROM chess_games"
+                                            " WHERE event_id IS NOT NULL ORDER BY archive_id"));
+  if (!event_games.ok()) return event_games.status();
+  snapshot.events = EventsFrom(*events, *event_games);
   return snapshot;
 }
 
@@ -541,11 +733,13 @@ absl::StatusOr<std::vector<PgHubStore::PublishedChessGame>> PgHubStore::LoadPubl
 
 absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(
     const std::string& room_id, const std::string& game_id, const std::string& roster_json,
-    const std::string& state_json, int64_t version, const std::string& game) {
+    const std::string& state_json, int64_t version, const std::string& game,
+    std::optional<EventTag> event) {
   GameRow row;
   row.room_id = room_id;
   row.game_id = game_id;
   row.version = version;
+  row.event = std::move(event);
   const std::optional<GameKind> kind = ParseGameKind(game);
   if (!kind.has_value()) return absl::DataLossError("unknown game kind: " + game);
   row.kind = *kind;

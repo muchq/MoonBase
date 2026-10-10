@@ -78,6 +78,10 @@ class GatedHubStore final : public HubStore {
     }
     return landed;
   }
+  absl::StatusOr<bool> CommitChessEvent(const ChessEventRow& row,
+                                        const std::string& notify_payload) override {
+    return delegate_.CommitChessEvent(row, notify_payload);
+  }
   absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
                                                   const std::string& game_id) override {
     return delegate_.LoadGame(room_id, game_id);

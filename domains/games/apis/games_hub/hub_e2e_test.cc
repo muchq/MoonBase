@@ -247,6 +247,10 @@ class TornSnapshotStore final : public HubStore {
                                         const std::string& payload) override {
     return delegate_->CommitGameFinish(row, stats, payload);
   }
+  absl::StatusOr<bool> CommitChessEvent(const ChessEventRow& row,
+                                        const std::string& notify_payload) override {
+    return delegate_->CommitChessEvent(row, notify_payload);
+  }
   absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
                                                   const std::string& game_id) override {
     return delegate_->LoadGame(room_id, game_id);
@@ -299,6 +303,10 @@ class TouchSpyStore final : public HubStore {
   absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& stats,
                                         const std::string& payload) override {
     return delegate_->CommitGameFinish(row, stats, payload);
+  }
+  absl::StatusOr<bool> CommitChessEvent(const ChessEventRow& row,
+                                        const std::string& notify_payload) override {
+    return delegate_->CommitChessEvent(row, notify_payload);
   }
   absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
                                                   const std::string& game_id) override {
@@ -392,6 +400,10 @@ class HeldPublishStore final : public HubStore {
   absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& stats,
                                         const std::string& payload) override {
     return delegate_->CommitGameFinish(row, stats, payload);
+  }
+  absl::StatusOr<bool> CommitChessEvent(const ChessEventRow& row,
+                                        const std::string& notify_payload) override {
+    return delegate_->CommitChessEvent(row, notify_payload);
   }
   absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
                                                   const std::string& game_id) override {
@@ -2540,6 +2552,10 @@ class FailingLoadRoomHubStore final : public HubStore {
   absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& deltas,
                                         const std::string& notify_payload) override {
     return delegate_->CommitGameFinish(row, deltas, notify_payload);
+  }
+  absl::StatusOr<bool> CommitChessEvent(const ChessEventRow& row,
+                                        const std::string& notify_payload) override {
+    return delegate_->CommitChessEvent(row, notify_payload);
   }
   absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
                                                   const std::string& game_id) override {

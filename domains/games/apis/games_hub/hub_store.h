@@ -15,6 +15,7 @@
 
 #include "absl/status/statusor.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
+#include "domains/games/apis/games_hub/round_robin.h"
 #include "domains/games/apis/games_hub/surface.h"
 #include "domains/games/libs/chess_play/game_state.h"
 
@@ -32,6 +33,14 @@ struct ChessTerms {
   std::string setup_id;
   chess_play::TimeControl time_control;
   bool operator==(const ChessTerms&) const = default;
+};
+
+/// The round robin pairing a chess table plays (#1647): the event, and
+/// the pairing's index in it.
+struct EventTag {
+  std::string event_id;
+  int pairing = 0;
+  bool operator==(const EventTag&) const = default;
 };
 
 /// The hub's authoritative room, member, and game persistence contract.
@@ -68,6 +77,9 @@ class HubStore {
     GameKind kind = GameKind::kGolf;
     /// A waiting chess table's posted challenge; dropped once started.
     std::optional<ChessTerms> terms = std::nullopt;
+    /// The pairing the table plays, fixed at creation: only the insert
+    /// writes it, and the table's first game is archived as the pairing's.
+    std::optional<EventTag> event = std::nullopt;
   };
 
   /// A room and the surface it chose at creation (#1554).
@@ -78,10 +90,58 @@ class HubStore {
     bool chess_published = false;
   };
 
+  /// One finished chess game in its room's archive.
+  struct ChessGameRow {
+    /// The game's identity, increasing in the order games were archived;
+    /// the feed's cursor. A table code alone is not one: codes are minted
+    /// again once their table is gone.
+    int64_t archive_id = 0;
+    std::string game_id;
+    /// The game's line on its table's score sheet, from 1.
+    int ordinal = 0;
+    chess_play::GameState game;
+    int64_t ended_at_ms = 0;
+    /// The room was published when it ended.
+    bool published = false;
+  };
+
+  /// A game played for a round robin's pairing: the first game of a table
+  /// tagged with it, as the commit that ended it archived it. A tagged
+  /// table's later games are history, not the pairing's.
+  struct EventGame {
+    int64_t archive_id = 0;
+    std::string game_id;
+    int pairing = 0;
+    /// Absent for a draw.
+    std::optional<std::string> winner;
+    bool operator==(const EventGame&) const = default;
+  };
+
+  /// A round robin in a room (#1647): what its creator fixed and
+  /// moderates. A pairing's result here is one the creator recorded; the
+  /// games its tables played are the room's archived games tagged with it,
+  /// written by the commits that ended them.
+  struct ChessEventRow {
+    std::string room_id;
+    std::string event_id;
+    int64_t version = 0;
+    std::string creator;
+    std::vector<std::string> entrants;
+    ChessTerms terms;
+    std::vector<Pairing> pairings;
+    std::set<std::string> withdrawn;
+    /// Loaded, never written: the games played for the event's pairings,
+    /// in archive order. Instances racing to open a pairing's table can
+    /// each play it, so a pairing can have more than one; which counts is
+    /// the hub's to decide.
+    std::vector<EventGame> games = {};
+  };
+
   struct Snapshot {
     std::vector<RoomRow> rooms;
     std::vector<MemberRow> members;
     std::vector<GameRow> games;
+    std::vector<ChessEventRow> events = {};
   };
 
   /// Creates the room on its surface; an upsert of a room that exists
@@ -152,21 +212,7 @@ class HubStore {
     bool chess_published = false;
     std::vector<MemberRow> members;
     std::vector<GameRow> games;
-  };
-
-  /// One finished chess game in its room's archive.
-  struct ChessGameRow {
-    /// The game's identity, increasing in the order games were archived;
-    /// the feed's cursor. A table code alone is not one: codes are minted
-    /// again once their table is gone.
-    int64_t archive_id = 0;
-    std::string game_id;
-    /// The game's line on its table's score sheet, from 1.
-    int ordinal = 0;
-    chess_play::GameState game;
-    int64_t ended_at_ms = 0;
-    /// The room was published when it ended.
-    bool published = false;
+    std::vector<ChessEventRow> events = {};
   };
 
   struct ChessHistory {
@@ -201,6 +247,11 @@ class HubStore {
   virtual absl::StatusOr<bool> CommitGameFinish(const GameRow& row,
                                                 const std::vector<StatsDelta>& stats,
                                                 const std::string& notify_payload) = 0;
+  /// Version 1 creates the event, refused when its id is taken in the
+  /// room or the room is not; version n replaces n-1, refused otherwise.
+  /// Notifies the room's channel exactly when it lands.
+  virtual absl::StatusOr<bool> CommitChessEvent(const ChessEventRow& row,
+                                                const std::string& notify_payload) = 0;
   virtual absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
                                                           const std::string& game_id) = 0;
   virtual absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) = 0;
@@ -221,6 +272,10 @@ class HubStore {
 /// stamps are the store's to give.
 std::optional<HubStore::ChessGameRow> ArchivedChessGame(const HubStore::GameRow& row);
 
+/// The player who won a finished game; absent for a draw or a game in
+/// play.
+std::optional<std::string> ChessWinner(const chess_play::GameState& game);
+
 /// Process-local production storage. Operations are synchronous, but use
 /// the same conditional commit and terminal-row semantics as PostgreSQL.
 class MemoryHubStore final : public HubStore {
@@ -235,6 +290,8 @@ class MemoryHubStore final : public HubStore {
   absl::StatusOr<bool> CommitGameSave(const GameRow& row,
                                       const std::string& notify_payload) override;
   absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& stats,
+                                        const std::string& notify_payload) override;
+  absl::StatusOr<bool> CommitChessEvent(const ChessEventRow& row,
                                         const std::string& notify_payload) override;
   absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
                                                   const std::string& game_id) override;
@@ -253,9 +310,15 @@ class MemoryHubStore final : public HubStore {
     bool chess_published = false;
     /// Oldest first.
     std::vector<ChessGameRow> chess_games;
+    /// By event id.
+    std::map<std::string, ChessEventRow> events = {};
+    /// Each with its event's id, in archive order.
+    std::vector<std::pair<std::string, EventGame>> event_games = {};
   };
 
   bool CommitGameLocked(const GameRow& row);
+  /// The room's events, each with its archived games.
+  std::vector<ChessEventRow> EventsLocked(const RoomData& room) const;
   void ApplyLocked(const Op& op);
 
   const std::function<int64_t()> now_ms_;
