@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -392,6 +393,31 @@ TEST_F(ChessBotFixture, AGameAgainstABotCountsForThePlayer) {
   ASSERT_TRUE(room.has_value());
   ASSERT_EQ(room->players.size(), 1u);
   EXPECT_EQ(room->players[0].gamesWon, 0);
+}
+
+// A bot has no games on 1d4 to index: a game against one, ended in a
+// published room, asks only for the human who played it.
+TEST_F(ChessBotFixture, APublishedGameAgainstABotAsksToIndexOnlyItsPlayer) {
+  std::mutex mu;
+  std::vector<one_d4::IndexAsk> asked;
+  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+    const std::lock_guard<std::mutex> lock(mu);
+    asked.push_back(ask);
+  });
+  auto alice = AliceAtATable();
+  ASSERT_TRUE(alice.has_value());
+  moonbase::games::ChessPublish publish;
+  publish.published = true;
+  ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromPublish(publish))).ok());
+  ASSERT_TRUE(ReceiveChess(alice->stream, "published").has_value());
+  ASSERT_TRUE(StartedAgainstBot(*alice, 1500).has_value());
+  ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromResign({}))).ok());
+  ASSERT_TRUE(
+      AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "ended"; }, "resigned"));
+  const std::lock_guard<std::mutex> lock(mu);
+  ASSERT_EQ(asked.size(), 1u);
+  EXPECT_EQ(asked[0].player_id, alice->player_id);
+  EXPECT_EQ(asked[0].month, "2027-01");
 }
 
 }  // namespace

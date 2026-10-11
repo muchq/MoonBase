@@ -14,6 +14,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -1698,6 +1699,126 @@ TEST_F(ChessFixture, ThePublicFeedServesGamesThatEndedPublished) {
   EXPECT_THAT(rest->pgn.ToString(),
               ::testing::Not(::testing::HasSubstr("/games/chess/" +
                                                   std::to_string(games[1].archiveId) + "\"")));
+}
+
+// A game that ends while the room is published asks 1d4 to index each of
+// its players for the month it ended in, so it reaches 1d4 without anyone
+// asking; one that ends private asks nothing.
+TEST_F(ChessFixture, AGameEndingPublishedAsksToIndexItsPlayers) {
+  std::mutex mu;
+  std::vector<std::pair<std::string, std::string>> asked;
+  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+    const std::lock_guard<std::mutex> lock(mu);
+    asked.emplace_back(ask.player_id, ask.month);
+  });
+  const auto seen = [&] {
+    const std::lock_guard<std::mutex> lock(mu);
+    return asked;
+  };
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  EXPECT_TRUE(seen().empty()) << "a game that ended private";
+
+  ASSERT_TRUE(table.alice.stream.Send(Publish(true)).ok());
+  ASSERT_TRUE(ReceiveChess(table.alice.stream, "published").has_value());
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  table.alice.stream, [](const auto& view) { return view.phase == "playing"; },
+                  "the next game")
+                  .has_value());
+  ASSERT_TRUE(table.alice.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  // kT0 is 2027-01-15, UTC.
+  EXPECT_THAT(seen(), ::testing::UnorderedElementsAre(std::pair{table.alice.player_id, "2027-01"},
+                                                      std::pair{table.bob.player_id, "2027-01"}));
+}
+
+// A game a player ends by leaving is in the feed with both of them, so
+// both are asked for, the one who left included.
+TEST_F(ChessFixture, AGameEndedByALeaveAsksToIndexWhoeverLeftToo) {
+  std::mutex mu;
+  std::vector<std::string> asked;
+  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+    const std::lock_guard<std::mutex> lock(mu);
+    asked.push_back(ask.player_id);
+  });
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Publish(true)).ok());
+  ASSERT_TRUE(ReceiveChess(table.alice.stream, "published").has_value());
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromLeavegame({}))).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  const std::lock_guard<std::mutex> lock(mu);
+  EXPECT_THAT(asked, ::testing::UnorderedElementsAre(table.alice.player_id, table.bob.player_id));
+}
+
+// A game ends in the database's clock and is asked for in the hub's, so
+// one that ends in the first minute of a month is asked for in the month
+// before too, in case it ended there.
+TEST_F(ChessFixture, AGameEndingInAMonthsFirstMinuteAsksForTheMonthBeforeToo) {
+  constexpr int64_t kFebruary = 1'801'440'000'000;  // 2027-02-01T00:00:00Z
+  std::mutex mu;
+  std::vector<std::pair<std::string, std::string>> asked;
+  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+    const std::lock_guard<std::mutex> lock(mu);
+    asked.emplace_back(ask.player_id, ask.month);
+  });
+  const auto seen = [&] {
+    const std::lock_guard<std::mutex> lock(mu);
+    return asked;
+  };
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  const std::string& alice = table.alice.player_id;
+  const std::string& bob = table.bob.player_id;
+  ASSERT_TRUE(table.alice.stream.Send(Publish(true)).ok());
+  ASSERT_TRUE(ReceiveChess(table.alice.stream, "published").has_value());
+  now_ms_ = kFebruary + 59'999;
+  ASSERT_TRUE(table.alice.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  EXPECT_THAT(seen(), ::testing::UnorderedElementsAre(
+                          std::pair{alice, "2027-02"}, std::pair{bob, "2027-02"},
+                          std::pair{alice, "2027-01"}, std::pair{bob, "2027-01"}));
+
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  table.alice.stream, [](const auto& view) { return view.phase == "playing"; },
+                  "the next game")
+                  .has_value());
+  now_ms_ = kFebruary + 60'000;
+  ASSERT_TRUE(table.alice.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  EXPECT_EQ(seen().size(), 6u) << "past the first minute, the month alone";
+}
+
+// The ask is the finish's: a later commit at the ended table, a seat
+// leaving it here, asks nobody again.
+TEST_F(ChessFixture, ATableThatHasAlreadyEndedAsksNoOneAgain) {
+  std::mutex mu;
+  std::vector<std::string> asked;
+  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+    const std::lock_guard<std::mutex> lock(mu);
+    asked.push_back(ask.player_id);
+  });
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Publish(true)).ok());
+  ASSERT_TRUE(ReceiveChess(table.alice.stream, "published").has_value());
+  ASSERT_TRUE(table.alice.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromLeavegame({}))).ok());
+  ASSERT_TRUE(
+      AwaitChessView(
+          table.alice.stream, [](const auto& view) { return view.phase == "closed"; }, "the close")
+          .has_value());
+  const std::lock_guard<std::mutex> lock(mu);
+  EXPECT_EQ(asked.size(), 2u);
 }
 
 // A published game's own page reads it by the archive id its [Site]

@@ -78,6 +78,10 @@ services:
       # Chess bots (#1618): Stockfish's moves for a bot's seat, asked of
       # chess_engine across the app network. Unset, no table offers a bot.
       CHESS_ENGINE_URL: http://chess_engine:8094
+      # 1d4: a chess game that ends in a published room asks one_d4 to
+      # index its players' month from the public feed. Unset, nothing
+      # reaches 1d4 until someone asks there.
+      ONE_D4_URL: http://one_d4:8080
       # A room's voice (#1590): the STUN server each voice roster names,
       # so browsers behind NAT can find each other. Audio never touches
       # this host; browsers connect peer to peer.
