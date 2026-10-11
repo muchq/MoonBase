@@ -950,6 +950,18 @@ func TestTheWorkerIsPointedAtGamesHub(t *testing.T) {
 	}
 }
 
+// A chess game that ends in a published room asks one_d4 to index its
+// players. A hub without the URL logs that it is off and asks nothing, so a
+// missing line leaves published games off 1d4 until someone asks there.
+func TestGamesHubIsPointedAtOneD4(t *testing.T) {
+	block := serviceBlock(t, "compose.yaml", "games_hub")
+
+	if !strings.Contains(block, "ONE_D4_URL: http://one_d4:8080") {
+		t.Errorf("games_hub does not name one_d4 as where published chess games are sent "+
+			"to be indexed. Without it no game reaches 1d4 on its own. Block was:\n%s", block)
+	}
+}
+
 func TestMcpserverIsPointedAtOneD4(t *testing.T) {
 	block := serviceBlock(t, "compose.yaml", "mcpserver")
 
@@ -2823,7 +2835,7 @@ func TestEveryInternalHttpUrlNamesSomethingOnTheNetwork(t *testing.T) {
 		t.Fatalf("parsed only %d internal URLs; has compose's shape changed?", reached)
 	}
 
-	// The four the topology doc names as application calls. The floor above
+	// The ones the topology doc names as application calls. The floor above
 	// is mostly OTLP exports, so it would still be met with every one of
 	// these deleted — and deleting one is exactly the edit that makes the
 	// doc's paragraph wrong.
@@ -2831,6 +2843,7 @@ func TestEveryInternalHttpUrlNamesSomethingOnTheNetwork(t *testing.T) {
 		{"mcpserver", "one_d4"},
 		{"mcpserver", "one_d4_v2"},
 		{"games_hub", "deja"},
+		{"games_hub", "one_d4"},
 		{"prom_proxy", "prometheus"},
 	} {
 		found := false

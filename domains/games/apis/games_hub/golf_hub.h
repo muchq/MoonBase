@@ -40,6 +40,7 @@
 #include "domains/games/libs/cards/rummy/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
+#include "domains/games/libs/one_d4_cpp/index_queue.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "moonbase/games/server.h"
@@ -366,6 +367,13 @@ class GolfHub final {
   /// The engine chess bots ask (#1618); null, the default, seats no bot.
   /// Call before serving: read without a lock thereafter.
   void SetChessBotEngine(ChessBotEngine engine);
+
+  /// Asked, for each human player, when this instance ends a chess game in
+  /// a published room: 1d4 indexes them from the public feed. Called under
+  /// the hub's lock, so it must not block (one_d4::IndexQueue::Submit). Null,
+  /// the default, asks nothing.
+  using ChessIndexer = std::function<void(const one_d4::IndexAsk&)>;
+  void SetChessIndexer(ChessIndexer indexer);
 
   /// Plays the move of every chess bot this instance holds that is on
   /// turn: the position read under the lock, the engine asked without it
@@ -939,6 +947,7 @@ class GolfHub final {
     int64_t until;
   };
   ChessBotEngine chess_bot_engine_;
+  ChessIndexer chess_indexer_;
   std::map<std::pair<std::string, std::string>, ChessBotRetry> chess_bot_retry_at_;
   std::mutex chess_bot_mu_;
   std::condition_variable chess_bot_cv_;

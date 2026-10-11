@@ -515,7 +515,13 @@ published is copied by the same statement to the public feed
 takes to join a room and read its private games — and outlives the room;
 the heartbeat sweeps it after 30 days (`kPublishedChessKept`).
 Withdrawing keeps the next games private; those already out stay out,
-since anything could have read them. The feed is
+since anything could have read them. The instance that ends a published
+game also asks one_d4 (`ONE_D4_URL`, `POST /v1/index`) to index each human
+player's month from the feed (and the month before, in a month's first
+minute), through `one_d4::IndexQueue` on a thread of its own, so nothing
+on the hub's lock waits on it. Best effort: one attempt, duplicates
+folded, and an ask that fails waits for the player's next game or an
+index asked for on 1d4. The feed is
 `GET /games/v2/chess.pgn?after=<archive id>`, no ticket: 100 games at a
 time in archive order. Each game's `[Site]` is its own URL by archive id,
 which is what an indexer keys a game on, and `[UTCDate]`/`[UTCTime]` say
