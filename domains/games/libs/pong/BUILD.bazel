@@ -1,0 +1,73 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# Pong at a games-hub table: the score a table keeps, the rally played
+# between points on smallcat's flat court or in the 3D tunnel, and the bot
+# that plays it.
+
+cc_library(
+    name = "table",
+    srcs = ["table.cc"],
+    hdrs = ["table.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "table_test",
+    size = "small",
+    srcs = ["table_test.cc"],
+    deps = [
+        ":table",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "rally",
+    srcs = ["rally.cc"],
+    hdrs = ["rally.h"],
+    visibility = ["//visibility:public"],
+    deps = [":table"],
+)
+
+cc_test(
+    name = "rally_test",
+    size = "small",
+    srcs = ["rally_test.cc"],
+    deps = [
+        ":rally",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The games table's column for a pong row. Server-side only.
+cc_library(
+    name = "table_serde",
+    srcs = ["table_serde.cc"],
+    hdrs = ["table_serde.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":table",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_test(
+    name = "table_serde_test",
+    size = "small",
+    srcs = ["table_serde_test.cc"],
+    deps = [
+        ":table",
+        ":table_serde",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+    ],
+)

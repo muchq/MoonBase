@@ -9,6 +9,7 @@
 
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/round_robin.h"
+#include "domains/games/libs/pong/table.h"
 
 namespace games_hub {
 namespace {
@@ -141,6 +142,29 @@ TEST(RoundRobinWire, APairingAtATableNamesIt) {
   const auto view = RoundRobinOf(Row({"A", "B", "C"}), {{1, "G7"}});
   EXPECT_FALSE(view.pairings[0].gameId.has_value());
   EXPECT_EQ(view.pairings[1].gameId, "G7");
+}
+
+// A pong round robin carries its variant, and each pairing names its
+// winner, whichever side of the pairing won.
+TEST(RoundRobinWire, APongRoundRobinNamesItsVariantAndEachPairingsWinner) {
+  HubStore::ChessEventRow row = Row({"A", "B", "C", "D"});
+  row.kind = GameKind::kPong;
+  row.pong_variant = pong::Variant::kThreeD;
+  Score(row, "A", "D", 1);  // A is first
+  Score(row, "C", "A", 0);  // C is first: the second wins
+  const auto view = PongRoundRobinOf(row);
+  EXPECT_EQ(view.variant, "3d");
+  int named = 0;
+  for (const auto& pairing : view.pairings) {
+    if (!pairing.winner.has_value()) continue;
+    ++named;
+    EXPECT_EQ(*pairing.winner, "A");
+    EXPECT_TRUE(pairing.forfeit);
+  }
+  EXPECT_EQ(named, 2);
+  ASSERT_FALSE(view.standings.empty());
+  EXPECT_EQ(view.standings[0].playerId, "A");
+  EXPECT_EQ(view.standings[0].points, 2);
 }
 
 }  // namespace

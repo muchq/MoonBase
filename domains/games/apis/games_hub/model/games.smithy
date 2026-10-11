@@ -8,6 +8,8 @@ use moonbase.castle#CastleEvent
 use moonbase.chess#ChessCommand
 use moonbase.chess#ChessEvent
 use moonbase.chess#ChessReview
+use moonbase.pong#PongCommand
+use moonbase.pong#PongEvent
 use moonbase.golf#GolfCommand
 use moonbase.golf#GolfEvent
 use moonbase.lobby#Geometry
@@ -20,7 +22,7 @@ use moonbase.voice#VoiceEvent
 
 /// The games hub (#79): one service, one session identity, one room layer,
 /// and one stream, Play, on which the lobby (#1490), voice (#1590), golf,
-/// castle (#77), rummy (#245) and chess each ride as one envelope member
+/// castle (#77), rummy (#245), chess and pong each ride as one envelope member
 /// per direction.
 @simpleRestJson
 @title("Games Hub")
@@ -52,8 +54,8 @@ operation Play {
 }
 
 /// The room layer's own commands, then one envelope per tenant: the
-/// lobby's world, the room's voice, golf's, castle's, rummy's and chess's
-/// tables.
+/// lobby's world, the room's voice, golf's, castle's, rummy's, chess's and
+/// pong's tables.
 @streaming
 union GameCommands {
     createRoom: CreateRoom
@@ -67,6 +69,7 @@ union GameCommands {
     castle: CastleCommand
     rummy: RummyCommand
     chess: ChessCommand
+    pong: PongCommand
 }
 
 @streaming
@@ -83,6 +86,7 @@ union GameEvents {
     castle: CastleEvent
     rummy: RummyEvent
     chess: ChessEvent
+    pong: PongEvent
 }
 
 /// The public chess feed (moonbase.chess#ChessPublish): every game that
@@ -150,8 +154,8 @@ operation GetSession {
 /// and chat. Apart from GameSummary.game and Table.game — the word that
 /// names a table's game for the lobby — nothing in this
 /// namespace knows which game a table plays; a game contributes only its
-/// own vocabulary, the way moonbase.golf, moonbase.castle, moonbase.rummy
-/// and moonbase.chess do.
+/// own vocabulary, the way moonbase.golf, moonbase.castle, moonbase.rummy,
+/// moonbase.chess and moonbase.pong do.
 
 /// GetSession's input: a resume token exchanges for a fresh ticket and
 /// the same playerId; absent or expired mints a fresh player.
@@ -254,7 +258,7 @@ structure PlayerInfo {
 
 /// A room member's table: which game, which table.
 structure Table {
-    /// golf | castle | rummy | chess, as GameSummary.game spells it.
+    /// golf | castle | rummy | chess | pong, as GameSummary.game spells it.
     @required
     game: String
 
@@ -271,7 +275,7 @@ structure GameSummary {
     @required
     gameId: String
 
-    /// Which game the table plays: golf | castle | rummy | chess.
+    /// Which game the table plays: golf | castle | rummy | chess | pong.
     @required
     game: String
 

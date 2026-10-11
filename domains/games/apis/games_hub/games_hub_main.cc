@@ -153,6 +153,7 @@ int main() {
   // Chess's clocks run out whether or not anyone moves; with a store, any
   // instance holding the room may land the flag, and one does.
   golf->StartChessClocks();
+  golf->StartPongTicks();
 
   // deja's tape on the glasshouse walls (#1554, #1150). DEJA_URL names
   // deja on the app network; unset, glasshouses simply have blank walls.

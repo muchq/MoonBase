@@ -213,6 +213,14 @@ inline std::optional<moonbase::games::ChessUpdate> ReceiveChess(
       [](const moonbase::games::GameEvents& event) { return event.as_chess_or_null(); }, budget);
 }
 
+inline std::optional<moonbase::games::PongUpdate> ReceivePong(
+    moonbase::games::PlayClientStream& stream, const std::string& wanted,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  return ReceiveEnvelope(
+      stream, wanted, "pong",
+      [](const moonbase::games::GameEvents& event) { return event.as_pong_or_null(); }, budget);
+}
+
 inline std::optional<moonbase::games::LobbyUpdate> ReceiveLobby(
     moonbase::games::PlayClientStream& stream, const std::string& wanted,
     std::chrono::milliseconds budget = kReceiveBudget) {
@@ -336,6 +344,19 @@ std::optional<moonbase::games::ChessView> AwaitChessView(
       predicate, waiting_for, budget);
 }
 
+template <typename Predicate>
+std::optional<moonbase::games::PongView> AwaitPongView(
+    moonbase::games::PlayClientStream& stream, Predicate&& predicate,
+    const std::string& waiting_for, std::chrono::milliseconds budget = kReceiveBudget) {
+  return AwaitMatching(
+      [&](std::chrono::milliseconds remaining) -> std::optional<moonbase::games::PongView> {
+        auto update = ReceivePong(stream, "gameState", remaining);
+        if (!update.has_value()) return std::nullopt;
+        return update->as_gameState_or_null()->view;
+      },
+      predicate, waiting_for, budget);
+}
+
 // Effectively-unlimited stream budgets (#1240) for suites whose flows
 // send at test speed, not human speed. Every direct GolfHub
 // construction in a test should pass this unless the test is about the
@@ -350,6 +371,8 @@ inline RateLimits UnlimitedRateLimits() {
   limits.chat_refill_per_sec = 1e9;
   limits.voice_burst = 1e9;
   limits.voice_refill_per_sec = 1e9;
+  limits.paddle_burst = 1e9;
+  limits.paddle_refill_per_sec = 1e9;
   return limits;
 }
 
@@ -442,6 +465,13 @@ inline moonbase::games::GameCommands Chess(moonbase::games::ChessMove move) {
   moonbase::games::ChessCommand command;
   command.move = std::move(move);
   return moonbase::games::GameCommands::FromChess(std::move(command));
+}
+
+// And pong's.
+inline moonbase::games::GameCommands Pong(moonbase::games::PongMove move) {
+  moonbase::games::PongCommand command;
+  command.move = std::move(move);
+  return moonbase::games::GameCommands::FromPong(std::move(command));
 }
 
 // Round robins (#1647).

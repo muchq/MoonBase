@@ -31,6 +31,29 @@ void MemoryHubStore::Enqueue(std::vector<Op> ops) {
   for (const Op& op : ops) ApplyLocked(op);
 }
 
+void AddPongEventGames(const std::vector<HubStore::GameRow>& games,
+                       std::vector<HubStore::ChessEventRow>& events) {
+  std::vector<const HubStore::GameRow*> tagged;
+  for (const HubStore::GameRow& game : games) {
+    if (game.kind != GameKind::kPong || !game.event.has_value() || !game.state.has_value()) {
+      continue;
+    }
+    const auto* table = std::get_if<pong::Table>(&*game.state);
+    if (table != nullptr && !table->scoreSheet().empty()) tagged.push_back(&game);
+  }
+  // By code, so every instance reads a pairing's tables in one order.
+  std::sort(tagged.begin(), tagged.end(),
+            [](const auto* a, const auto* b) { return a->game_id < b->game_id; });
+  for (HubStore::ChessEventRow& event : events) {
+    if (event.kind != GameKind::kPong) continue;
+    for (const HubStore::GameRow* game : tagged) {
+      if (game->room_id != event.room_id || game->event->event_id != event.event_id) continue;
+      event.games.push_back({0, game->game_id, game->event->pairing,
+                             std::get<pong::Table>(*game->state).scoreSheet().front().winner});
+    }
+  }
+}
+
 absl::StatusOr<HubStore::Snapshot> MemoryHubStore::LoadSnapshot() {
   const std::lock_guard<std::mutex> lock(mu_);
   Snapshot snapshot;
@@ -42,6 +65,7 @@ absl::StatusOr<HubStore::Snapshot> MemoryHubStore::LoadSnapshot() {
   for (const auto& [room_id, room] : rooms_) {
     for (ChessEventRow& event : EventsLocked(room)) snapshot.events.push_back(std::move(event));
   }
+  AddPongEventGames(snapshot.games, snapshot.events);
   return snapshot;
 }
 
@@ -89,6 +113,7 @@ absl::StatusOr<HubStore::RoomRows> MemoryHubStore::LoadRoom(const std::string& r
     if (key.first == room_id) rows.games.push_back(game);
   }
   rows.events = EventsLocked(room->second);
+  AddPongEventGames(rows.games, rows.events);
   return rows;
 }
 

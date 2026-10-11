@@ -1,20 +1,20 @@
 # games_hub — the games hub on opal-cpp event streams
 
 The backend behind muchq.com/games — the lobby (#1490), golf, castle
-(#77), rummy (#245) and chess — and its /golf and /thoughts pages (#79), on opal-cpp's
+(#77), rummy (#245), chess and pong — and its /golf and /thoughts pages (#79), on opal-cpp's
 streaming stack: a modeled protocol with generated async handlers
 (ADR-0021), `SessionRegistry` fan-out with reconnect grace
 (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018), and ticket
 auth ahead of the 101. One session identity opens the one stream.
 
-## The model (seven namespaces)
+## The model (eight namespaces)
 
 - `model/games.smithy` — `moonbase.games`: the service, session identity
   (`POST /games/v2/session`), the public chess feed
   (`GET /games/v2/chess.pgn`), the two terminal stream errors, the one
   stream — `Play` at `/games/v2/play`, its `GameCommands`/`GameEvents`
   unions carrying the room layer's own cases plus one envelope member
-  per tenant (`lobby`, `voice`, `golf`, `castle`, `rummy`, `chess`) — and the game-agnostic room
+  per tenant (`lobby`, `voice`, `golf`, `castle`, `rummy`, `chess`, `pong`) — and the game-agnostic room
   layer — rooms, chat, player info with room-scoped stats and the
   member's table (`PlayerInfo.table`: which game, which
   table, pending or in play, absent while idle — how the lobby tells who
@@ -39,6 +39,9 @@ auth ahead of the 101. One session identity opens the one stream.
 - `model/chess.smithy` — `moonbase.chess`: chess's vocabulary, the
   `chess` member, on castle's terms except `startGame`, which is chess's
   own shape and names the clock. Shapes are prefixed `Chess`.
+- `model/pong.smithy` — `moonbase.pong`: pong's vocabulary, the `pong`
+  member, on chess's terms: `startGame` names the variant, and `frame`
+  carries the rally. Shapes are prefixed `Pong`.
 - `model/lobby.smithy` — `moonbase.lobby`: the world's shapes — the
   `lobby` member of the room stream (`LobbyAction`, `LobbyUpdate`) and
   what they carry.
@@ -49,7 +52,7 @@ auth ahead of the 101. One session identity opens the one stream.
 A new game is one new model file and one more envelope member on the
 room stream's unions, the way castle, rummy and the lobby joined. Codegen
 flattens every namespace into `moonbase::games`, so shape names must be
-unique across the seven files (a collision gets the foreign namespace's
+unique across the eight files (a collision gets the foreign namespace's
 name appended, which nothing here wants).
 
 ## The lobby's world
@@ -533,6 +536,57 @@ behind one already read: a reader that rereads a little and dedupes on
 review, for the page `[Site]` names; any other id is `ChessGameNotFound`,
 including a game that ended private. one_d4_worker
 indexes it as the `MUCHQ_COM` platform, by player id.
+
+### Pong
+
+Two seats play one game after another on `libs/pong`, as a chess table
+does: a seat's misses cost it a life, three and the game is the other's,
+and the table waits for either seat's `startGame` to play the next. The
+variant is `startGame`'s: `smallcat`, the flat court of smallcat.dog
+side on, or `3d`, the tunnel seen from behind your own paddle. A leave
+abandons a game in play to the other seat and closes the table; between
+games it scores nothing. Each game's end credits the room's stats as
+chess's does, and `gameEnded` follows the views once per game. A table's
+one player may seat smallcat's own opponent (`addBot`, level 1 to 3,
+seat id `smallcat@<level>`), which leaves with them. Watching is
+chess's.
+
+Pong is the hub's one real-time game, so its state is split. The row
+holds the score — lives, points and the sheet (`pong::Table`) — and
+commits like any game's moves, a point at a time. The rally, ball and
+paddles between serve and miss, is motion no row holds: it runs in
+memory on one instance, `TickPongOnce` at 60 Hz (`StartPongTicks`, from
+main), and reaches the seats and watchers as `frame`s every other tick,
+delivered coalescing per table so a slow reader keeps only the newest.
+Which instance runs it is settled by the commits: the one that commits
+the table — its start, a point, the next game — runs the rally, and one
+that adopts a row another instance committed (a point's own commit
+rebasing included) lets it go. A seat's `paddle` takes up a table in play
+that nothing here runs and no other instance has committed since this one
+loaded it, from a serve: that is how a rally resumes after a restart.
+Frame ticks count on from the clock's whenever a rally is taken up, so
+they never run backwards across instances. A point the store could not
+take is played again.
+
+Pong has round robins on chess's terms (#1647), on its own envelope: a
+pong round robin names a variant instead of a clock, each pairing names
+its winner (pong has no draws), and each game's moves serve and list only
+their own game's round robins, refusing the other's. The row is chess's
+`chess_events` row with `"game":"pong"` and the variant in its body. A
+pairing's table starts on the round robin's variant when its second seat
+fills and plays that one game, with no next game or bot; the game is the
+pairing's result off the table's own row (`AddPongEventGames`), read
+back as chess reads its archive, so the commit that ends the game is the
+one that scores the pairing.
+
+A `paddle` names where the seat wants its paddle's centre; the paddle
+chases it at the court's `playerSpeed` a tick and stays on its end. It is
+the one command that follows the pointer, so it draws from its own budget
+(`paddle_refill_per_sec` 60, `paddle_burst` 120), and with no game in play
+it is dropped rather than refused. A seat on an instance that has seen
+another commit the table since loading it steers nothing: taking the
+rally up there would run a second one, scoring the paddle that cannot move
+here.
 
 ## Redaction
 

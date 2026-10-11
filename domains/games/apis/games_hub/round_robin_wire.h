@@ -22,6 +22,12 @@ moonbase::games::ChessTerms WireTerms(const ChessTerms& terms);
 moonbase::games::ChessRoundRobin RoundRobinOf(const HubStore::ChessEventRow& row,
                                               const std::map<int, std::string>& live = {});
 
+/// A pong round robin as every member sees it: chess's, its terms the
+/// variant and each pairing's result the winner's id, since pong has no
+/// draws.
+moonbase::games::PongRoundRobin PongRoundRobinOf(const HubStore::ChessEventRow& row,
+                                                 const std::map<int, std::string>& live = {});
+
 /// The row's pairings with the games played for them (#1647): a pairing's
 /// first archived game is its result, over a forfeit the creator recorded
 /// and over a later game from a table that raced it. A game naming no

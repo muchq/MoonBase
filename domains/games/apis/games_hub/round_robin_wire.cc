@@ -7,6 +7,7 @@
 
 #include "domains/games/apis/games_hub/round_robin.h"
 #include "domains/games/libs/chess_play/game_state.h"
+#include "domains/games/libs/pong/table.h"
 
 namespace games_hub {
 namespace {
@@ -38,8 +39,9 @@ moonbase::games::ChessTerms WireTerms(const ChessTerms& terms) {
 std::vector<Pairing> EffectivePairings(const HubStore::ChessEventRow& row) {
   std::vector<Pairing> pairings = row.pairings;
   std::vector<HubStore::EventGame> games = row.games;
-  std::sort(games.begin(), games.end(),
-            [](const auto& a, const auto& b) { return a.archive_id < b.archive_id; });
+  // Stable: a pong pairing's tables all carry archive id 0, in code order.
+  std::stable_sort(games.begin(), games.end(),
+                   [](const auto& a, const auto& b) { return a.archive_id < b.archive_id; });
   std::vector<bool> played(pairings.size(), false);
   for (const HubStore::EventGame& game : games) {
     if (game.pairing < 0 || game.pairing >= std::ssize(pairings) || played[game.pairing]) continue;
@@ -76,6 +78,42 @@ moonbase::games::ChessRoundRobin RoundRobinOf(const HubStore::ChessEventRow& row
     wire.white = pairing.white;
     wire.black = pairing.black;
     wire.result = ResultName(pairing.result);
+    wire.forfeit = pairing.forfeit;
+    wire.voided = Voided(pairing, row.withdrawn);
+    if (const auto table = live.find(static_cast<int>(i)); table != live.end()) {
+      wire.gameId = table->second;
+    }
+    view.pairings.push_back(std::move(wire));
+  }
+  view.withdrawn.assign(row.withdrawn.begin(), row.withdrawn.end());
+  for (const Standing& standing : Standings(row.entrants, pairings, row.withdrawn)) {
+    moonbase::games::ChessStanding wire;
+    wire.playerId = standing.player;
+    wire.points = standing.points;
+    wire.sonnebornBerger = standing.sonneborn_berger;
+    wire.place = standing.place;
+    wire.withdrawn = standing.withdrawn;
+    view.standings.push_back(std::move(wire));
+  }
+  return view;
+}
+
+moonbase::games::PongRoundRobin PongRoundRobinOf(const HubStore::ChessEventRow& row,
+                                                 const std::map<int, std::string>& live) {
+  const std::vector<Pairing> pairings = EffectivePairings(row);
+  moonbase::games::PongRoundRobin view;
+  view.roundRobinId = row.event_id;
+  view.creator = row.creator;
+  view.entrants = row.entrants;
+  view.variant = std::string(pong::VariantName(row.pong_variant));
+  for (std::size_t i = 0; i < pairings.size(); ++i) {
+    const Pairing& pairing = pairings[i];
+    moonbase::games::PongPairing wire;
+    wire.round = pairing.round;
+    wire.first = pairing.white;
+    wire.second = pairing.black;
+    if (pairing.result == PairingResult::kWhite) wire.winner = pairing.white;
+    if (pairing.result == PairingResult::kBlack) wire.winner = pairing.black;
     wire.forfeit = pairing.forfeit;
     wire.voided = Voided(pairing, row.withdrawn);
     if (const auto table = live.find(static_cast<int>(i)); table != live.end()) {

@@ -41,6 +41,8 @@
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
 #include "domains/games/libs/one_d4_cpp/index_queue.h"
+#include "domains/games/libs/pong/rally.h"
+#include "domains/games/libs/pong/table.h"
 #include "domains/platform/libs/futility/otel/metrics.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "moonbase/games/server.h"
@@ -399,6 +401,35 @@ class GolfHub final {
   /// is destroyed. A second call changes nothing.
   void StartChessBots(std::chrono::milliseconds interval = kChessBotTick);
 
+  /// One tick of every pong rally this instance runs: each paddle steps
+  /// toward where its seat points (a bot's, where the bot does), the ball
+  /// moves, and a miss is the table's point, committed as a move is. The
+  /// seats and watchers get a frame every kPongFrameEvery ticks and on
+  /// every point. A rally runs on the instance that last committed its
+  /// table: a point another instance commits takes it away from this one,
+  /// and a seat's paddle takes up a table in play that nothing here runs,
+  /// from a serve. Returns how many rallies it ticked.
+  int TickPongOnce();
+
+  /// The pong rallies this instance runs; for tests.
+  std::size_t PongRalliesHosted() {
+    const std::lock_guard<std::mutex> lock(mu_);
+    return pong_rallies_.size();
+  }
+
+  /// Forgets every rally, as a restart does; for tests.
+  void DropPongRalliesForTest() {
+    const std::lock_guard<std::mutex> lock(mu_);
+    pong_rallies_.clear();
+  }
+
+  /// Starts TickPongOnce on a thread at pong's tick rate until the hub is
+  /// destroyed. A second call changes nothing.
+  void StartPongTicks();
+
+  /// A frame every this many ticks: thirty a second.
+  static constexpr int kPongFrameEvery = 2;
+
   /// How soon after its turn begins a bot starts to think.
   static constexpr std::chrono::milliseconds kChessBotTick{100};
 
@@ -443,10 +474,11 @@ class GolfHub final {
     std::vector<std::string> roster;
     std::optional<HostedState> state;
     int64_t version = 0;
-    /// A chess table's finished games this instance has sent gameEnded
-    /// for: whichever path moved the table on, the views staged after it
-    /// announce the rest. Held from a row, the games so far count as told.
-    mutable std::size_t chess_games_announced = 0;
+    /// A chess or pong table's finished games this instance has sent
+    /// gameEnded for: whichever path moved the table on, the views staged
+    /// after it announce the rest. Held from a row, the games so far count
+    /// as told.
+    mutable std::size_t games_announced = 0;
     /// Members watching this chess table from no seat (#1633): they hear
     /// its views and results. Presence, like the world: held here, never
     /// stored. A table that ends hands them its closed view; one erased
@@ -469,6 +501,7 @@ class GolfHub final {
     [[nodiscard]] const chess_play::Table& chess() const {
       return std::get<chess_play::Table>(*state);
     }
+    [[nodiscard]] const pong::Table& pong() const { return std::get<pong::Table>(*state); }
   };
 
   struct Room {
@@ -544,8 +577,21 @@ class GolfHub final {
   /// After a seat fills `player_id`'s table: a challenge starts on its
   /// terms. `terms` was read under the lock that seated it.
   void StartChallengeMove(const std::string& player_id, const std::optional<ChessTerms>& terms);
-  /// `player_id` watches a chess table in its room from no seat (#1633).
-  void WatchChessMove(const std::string& player_id, const std::string& game_id);
+  /// `player_id` watches a chess or pong table in its room from no seat
+  /// (#1633); `kind` is the game whose envelope asked.
+  void WatchMove(const std::string& player_id, const std::string& game_id, GameKind kind);
+  /// Pong's moves: its own startGame, a seat's paddle, a bot to the
+  /// second seat, and watching.
+  void HandlePongMove(const std::string& player_id, const moonbase::games::PongMove& move);
+  /// A pong table's first game, or its next, on `variant` (a round
+  /// robin's table on the round robin's, once).
+  void StartPongMove(const std::string& player_id, pong::Variant variant);
+  void PaddleMove(const std::string& player_id, const moonbase::games::PongPaddle& paddle);
+  void AddPongBotMove(const std::string& player_id, int level);
+  /// Runs a pong table's rally here from a serve, if the table is in play
+  /// and nothing here runs it yet. Callers hold mu_.
+  void HostPongLocked(const std::string& room_id, const std::string& game_id,
+                      const GameEntry& entry);
   /// The room's finished chess games, its review of one, and publishing
   /// them (#1637). The archive is read off the hub's lock.
   void ChessHistoryMove(const std::string& player_id);
@@ -554,19 +600,27 @@ class GolfHub final {
   void PublishChessMove(const std::string& player_id, bool published);
   /// Round robins (#1647): any member creates one, its creator withdraws
   /// entrants and records forfeits, and any member asks for the room's.
-  void CreateRoundRobinMove(const std::string& player_id,
-                            const moonbase::games::ChessCreateRoundRobin& create);
-  void WithdrawMove(const std::string& player_id, const moonbase::games::ChessWithdraw& withdraw);
-  void ForfeitMove(const std::string& player_id, const moonbase::games::ChessForfeit& forfeit);
-  void RoundRobinsMove(const std::string& player_id);
+  /// Each takes the game whose envelope asked: a round robin is chess's
+  /// or pong's, and each game's moves serve its own. `terms` is chess's,
+  /// `variant` pong's.
+  void CreateRoundRobinMove(const std::string& player_id, const std::vector<std::string>& entrants,
+                            GameKind kind, const ChessTerms& terms, pong::Variant variant);
+  void WithdrawMove(const std::string& player_id, const moonbase::games::ChessWithdraw& withdraw,
+                    GameKind kind);
+  void ForfeitMove(const std::string& player_id, const moonbase::games::ChessForfeit& forfeit,
+                   GameKind kind);
+  void RoundRobinsMove(const std::string& player_id, GameKind kind);
   /// Opens a table for the player's pairing with `opponent` (#1647).
   void PlayRoundRobinMove(const std::string& player_id,
-                          const moonbase::games::ChessPlayRoundRobin& play);
+                          const moonbase::games::ChessPlayRoundRobin& play, GameKind kind);
   /// The tables playing a round robin's pairings now, by pairing index.
   std::map<int, std::string> LiveTablesLocked(const Room& room,
                                               const std::string& round_robin_id) const;
   /// Whether a chess table's game is over: ended between games or closed.
   static bool ChessGameOver(const GameEntry& entry);
+  /// Whether a chess or pong table's game is over, a pairing's result if
+  /// the table plays one.
+  static bool TableGameOver(const GameEntry& entry);
   /// The pairing a tagged table plays, if its round robin is held.
   const Pairing* PairingOfLocked(const Room& room, const GameEntry& entry) const;
   /// After a commit ends a tagged table's game: the round robins' games
@@ -578,7 +632,7 @@ class GolfHub final {
   /// held here hears the result. While the creator is away an entrant
   /// moderates, unless among the change's `parties`. Callers hold mu_.
   std::optional<games_hub::Refusal> ModerateRoundRobinLocked(
-      const std::string& player_id, const std::string& round_robin_id,
+      const std::string& player_id, const std::string& round_robin_id, GameKind kind,
       const std::vector<std::string>& parties,
       const std::function<std::optional<games_hub::Refusal>(HubStore::ChessEventRow&)>& change,
       Outbox& outbox);
@@ -623,10 +677,12 @@ class GolfHub final {
   /// in that table's own envelope.
   void CreateGameMove(const std::string& player_id, GameKind kind);
   void JoinGameMove(const std::string& player_id, const std::string& game_id, GameKind kind);
-  /// `time_control` is chess's clock, and nothing to any other game.
-  void StartGameMove(
-      const std::string& player_id, chess_play::TimeControl time_control = kDefaultChessClock,
-      std::optional<chess_play::ChessSetup> chess_setup = std::nullopt);
+  /// `time_control` and `chess_setup` are chess's, `pong_variant` pong's,
+  /// and nothing to any other game.
+  void StartGameMove(const std::string& player_id,
+                     chess_play::TimeControl time_control = kDefaultChessClock,
+                     std::optional<chess_play::ChessSetup> chess_setup = std::nullopt,
+                     std::optional<pong::Variant> pong_variant = std::nullopt);
   /// The shared shape of every in-game engine move: transition, then
   /// stage the fan-out (views, turn change, game end) the result implies.
   void EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects);
@@ -816,6 +872,8 @@ class GolfHub final {
                                        const std::string& viewer_id) const;
   moonbase::games::ChessView ChessViewLocked(const std::string& game_id,
                                              const GameEntry& entry) const;
+  moonbase::games::PongView PongViewLocked(const std::string& game_id,
+                                           const GameEntry& entry) const;
   moonbase::games::CastleView CastleViewLocked(const std::string& game_id, const GameEntry& entry,
                                                const std::string& viewer_id) const;
   moonbase::games::RummyView RummyViewLocked(const std::string& game_id, const GameEntry& entry,
@@ -953,6 +1011,29 @@ class GolfHub final {
   std::condition_variable chess_bot_cv_;
   bool chess_bot_stop_ = false;
   std::thread chess_bots_;
+
+  /// Pong's rallies by (room, table): the motion between points, which no
+  /// store holds. A rally is this instance's to run while it is here; the
+  /// targets are where each seat last pointed. Guarded by mu_.
+  struct PongRally {
+    pong::Rally rally;
+    std::array<pong::Vec2, pong::kSeats> targets;
+    /// Ticks run here, and the frame tick they count on from: the clock's
+    /// when the rally was taken up, so frames never run backwards across
+    /// instances.
+    int64_t ticks = 0;
+    int64_t first_tick = 0;
+  };
+  std::map<std::pair<std::string, std::string>, PongRally> pong_rallies_;
+  /// Pong tables another instance has committed since this one loaded
+  /// them: a seat's paddle takes up none of these, which would run a
+  /// second rally beside that instance's. One this instance commits
+  /// leaves the set. Guarded by mu_.
+  std::set<std::pair<std::string, std::string>> pong_elsewhere_;
+  std::mutex pong_tick_mu_;
+  std::condition_variable pong_tick_cv_;
+  bool pong_tick_stop_ = false;
+  std::thread pong_ticks_;
 
   /// Set before serving and read without a lock thereafter, like the
   /// tape's client; one per responder. Cleared first in ~GolfHub: their

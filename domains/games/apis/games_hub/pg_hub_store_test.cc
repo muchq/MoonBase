@@ -28,6 +28,8 @@
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/game_state_serde.h"
 #include "domains/games/libs/chess_play/table_serde.h"
+#include "domains/games/libs/pong/table.h"
+#include "domains/games/libs/pong/table_serde.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "gmock/gmock.h"
@@ -188,6 +190,23 @@ TEST_F(PgHubStoreTest, ChessRowsKeepTheirKindAndDecodeWithChessSerde) {
   ASSERT_TRUE(std::holds_alternative<chess_play::Table>(*(*reread)->state));
   EXPECT_EQ(chess_play::serializeTable(std::get<chess_play::Table>(*(*reread)->state)),
             chess_play::serializeTable(*moved));
+}
+
+TEST_F(PgHubStoreTest, PongRowsKeepTheirKindAndDecodeWithPongSerde) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  const pong::Table scored = *pong::Table::open({"alice", "bob"}, pong::Variant::kThreeD)->point(0);
+  PgHubStore::GameRow row{
+      "R1", "P1", {"alice", "bob"}, games_hub::HostedState(scored), 1, games_hub::GameKind::kPong};
+  ASSERT_TRUE(*store_->CommitGameSave(row, ""));
+
+  auto reread = store_->LoadGame("R1", "P1");
+  ASSERT_TRUE(reread.ok() && reread->has_value());
+  EXPECT_EQ((*reread)->kind, games_hub::GameKind::kPong);
+  ASSERT_TRUE((*reread)->state.has_value());
+  ASSERT_TRUE(std::holds_alternative<pong::Table>(*(*reread)->state));
+  EXPECT_EQ(pong::serializeTable(std::get<pong::Table>(*(*reread)->state)),
+            pong::serializeTable(scored));
 }
 
 // A challenge's terms (#1633) ride the state column while the table
@@ -1167,6 +1186,40 @@ TEST_F(PgHubStoreTest, ATaggedTablesFirstGameIsArchivedAsItsPairings) {
 
 // An event body nothing here can read costs that event, logged, as an
 // unreadable games row costs its game: never the room or the boot.
+// A pong round robin keeps its game and variant through the body, and its
+// pairings are scored off the tables that played them.
+TEST_F(PgHubStoreTest, APongRoundRobinKeepsItsGameAndIsScoredByItsTables) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  PgHubStore::ChessEventRow event = Event(1);
+  event.kind = games_hub::GameKind::kPong;
+  event.pong_variant = pong::Variant::kThreeD;
+  ASSERT_TRUE(*store_->CommitChessEvent(event, ""));
+
+  pong::Table table = *pong::Table::open({"bob", "alice"}, pong::Variant::kThreeD);
+  PgHubStore::GameRow row{
+      "R1", "P1", table.players(), games_hub::HostedState(table), 1, games_hub::GameKind::kPong};
+  row.event = games_hub::EventTag{"E1", 0};
+  ASSERT_TRUE(*store_->CommitGameSave(row, ""));
+  for (int i = 0; i < pong::kLives; ++i) table = *table.point(0);
+  row.state.emplace(table);
+  row.version = 2;
+  ASSERT_TRUE(*store_->CommitGameFinish(row, {}, ""));
+
+  auto room = store_->LoadRoom("R1");
+  ASSERT_TRUE(room.ok()) << room.status();
+  ASSERT_EQ(room->events.size(), 1u);
+  EXPECT_EQ(room->events[0].kind, games_hub::GameKind::kPong);
+  EXPECT_EQ(room->events[0].pong_variant, pong::Variant::kThreeD);
+  ASSERT_EQ(room->events[0].games.size(), 1u);
+  EXPECT_EQ(room->events[0].games[0], (PgHubStore::EventGame{0, "P1", 0, "alice"}));
+  auto snapshot = store_->LoadSnapshot();
+  ASSERT_TRUE(snapshot.ok()) << snapshot.status();
+  ASSERT_EQ(snapshot->events.size(), 1u);
+  EXPECT_EQ(snapshot->events[0].kind, games_hub::GameKind::kPong);
+  EXPECT_EQ(snapshot->events[0].games.size(), 1u);
+}
+
 TEST_F(PgHubStoreTest, AnUnreadableEventIsDropped) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
   store_->Flush();

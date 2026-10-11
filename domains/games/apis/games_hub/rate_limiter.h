@@ -24,7 +24,9 @@ using TokenBucket = futility::rate_limiter::TokenBucket;
 /// lobby's budget is an order of magnitude wider. Chat is tighter because
 /// each message is a durable PostgreSQL transaction plus fleet-wide
 /// NOTIFY fan-out, and a rate that is fine for gameplay is still a flood
-/// in a conversation.
+/// in a conversation. Pong's paddle has a bucket of its own: it moves
+/// with the pointer, a few dozen times a second, and must not starve the
+/// table's other commands.
 struct RateLimits {
   double command_burst = 10;
   double command_refill_per_sec = 5;
@@ -34,6 +36,8 @@ struct RateLimits {
   double chat_refill_per_sec = 1;
   double voice_burst = 100;
   double voice_refill_per_sec = 10;
+  double paddle_burst = 120;
+  double paddle_refill_per_sec = 60;
 };
 
 }  // namespace games_hub
