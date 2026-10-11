@@ -1142,6 +1142,8 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
   // was played once, and was recorded by whoever ended it.
   const bool was_over = entry.started() && IsOver(*entry.state);
   const bool game_was_over = ChessGameOver(entry);
+  // Who played: a leave that ends the game commits without its leaver.
+  const std::vector<std::string> seated = entry.roster;
   // Stamped before the outcome is known: a commit whose fate is unknown
   // may still have landed.
   TouchRoomLocked(room_id);
@@ -1202,7 +1204,33 @@ GolfHub::Commit GolfHub::CommitEntryLocked(const std::string& room_id, const std
   if (entry.event.has_value() && !game_was_over && ChessGameOver(entry)) {
     RefreshRoundRobinGamesLocked(room_id);
   }
+  // A chess game this instance just ended, in a published room, is in
+  // the public feed now: 1d4 is asked to index its players for the month.
+  // The feed dates it by the database's clock, not this one, so in a
+  // month's first minute the month before is asked for too. Bots have no
+  // games there of their own.
+  if (chess_indexer_ && !game_was_over && ChessGameOver(entry)) {
+    if (const auto room = rooms_.find(room_id);
+        room != rooms_.end() && room->second.chess_published) {
+      const absl::Time now = absl::FromUnixMillis(NowMs());
+      std::vector<std::string> months = {absl::FormatTime("%Y-%m", now, absl::UTCTimeZone())};
+      if (std::string before =
+              absl::FormatTime("%Y-%m", now - absl::Minutes(1), absl::UTCTimeZone());
+          before != months[0]) {
+        months.push_back(std::move(before));
+      }
+      for (const std::string& player_id : seated) {
+        if (ChessBotElo(player_id).has_value()) continue;
+        for (const std::string& month : months) chess_indexer_({player_id, month});
+      }
+    }
+  }
   return Commit::kCommitted;
+}
+
+void GolfHub::SetChessIndexer(ChessIndexer indexer) {
+  const std::lock_guard<std::mutex> lock(mu_);
+  chess_indexer_ = std::move(indexer);
 }
 
 void GolfHub::SetEventWriter(EventWriter writer) {

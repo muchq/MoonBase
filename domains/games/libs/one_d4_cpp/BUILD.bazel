@@ -1,0 +1,87 @@
+load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# one_d4's index requests, for C++ consumers: games_hub asks for a player's
+# month when a chess game ends in a published room.
+smithy_cpp_client_library(
+    name = "one_d4_smithy_client",
+    srcs = [
+        "model/bindings/simplerestjson.smithy",
+        "model/one_d4.smithy",
+    ],
+    namespace = "moonbase::oned4",
+    service = "moonbase.oned4#OneD4",
+)
+
+cc_library(
+    name = "client",
+    srcs = ["client.cc"],
+    hdrs = ["client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":one_d4_smithy_client",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+    ],
+)
+
+cc_library(
+    name = "production_client",
+    srcs = ["production_client.cc"],
+    hdrs = ["production_client.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
+# The consumer-tier pin: the request the hub sends and the answer
+# one_d4 gives, pinned against its IndexRequest record.
+cc_test(
+    name = "index_wire_test",
+    size = "small",
+    srcs = ["index_wire_test.cc"],
+    deps = [
+        ":client",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
+cc_test(
+    name = "production_client_test",
+    size = "small",
+    srcs = ["production_client_test.cc"],
+    deps = [
+        ":production_client",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Sends index asks on a thread of its own, so a caller holding a lock never
+# waits on one_d4.
+cc_library(
+    name = "index_queue",
+    srcs = ["index_queue.cc"],
+    hdrs = ["index_queue.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/status",
+    ],
+)
+
+cc_test(
+    name = "index_queue_test",
+    size = "small",
+    srcs = ["index_queue_test.cc"],
+    deps = [
+        ":index_queue",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)

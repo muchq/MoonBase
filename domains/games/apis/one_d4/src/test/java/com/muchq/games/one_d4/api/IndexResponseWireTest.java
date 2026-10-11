@@ -71,6 +71,24 @@ public class IndexResponseWireTest {
   }
 
   /**
+   * The bytes games_hub sends when a chess game ends in a published room, as its index_wire_test
+   * pins them: the provider half of that pin, so a change to either side's field names fails a test
+   * rather than every ask in production.
+   */
+  @Test
+  public void createIndex_acceptsTheRequestGamesHubSends() throws Exception {
+    String created =
+        post(
+            "{\"endMonth\":\"2026-10\",\"platform\":\"MUCHQ_COM\","
+                + "\"player\":\"cheeky-jade-wallaby-yt3z\",\"startMonth\":\"2026-10\"}");
+
+    assertThat(created)
+        .contains("\"status\":\"PENDING\"")
+        .contains("\"player\":\"cheeky-jade-wallaby-yt3z\"")
+        .contains("\"id\":");
+  }
+
+  /**
    * The positive twin for the assertion above, sharing its fixture. Without it every assertion in
    * this class would still pass if {@code IndexResponse.data} were deleted from the record outright
    * — an absence test alone cannot tell "correctly omitted" from "never existed".

@@ -40,6 +40,8 @@
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/chess_engine_cpp/production_client.h"
 #include "domains/games/libs/mithril_cpp/production_client.h"
+#include "domains/games/libs/one_d4_cpp/index_queue.h"
+#include "domains/games/libs/one_d4_cpp/production_client.h"
 #include "domains/platform/libs/aura/middleware.h"
 #include "domains/platform/libs/event_log/event_log.h"
 #include "domains/platform/libs/futility/env/env.h"
@@ -222,6 +224,29 @@ int main() {
     LOG(INFO) << "Chess bots: asking chess_engine at " << chess_engine_url;
   } else {
     LOG(INFO) << "Chess bots: off (CHESS_ENGINE_URL unset)";
+  }
+
+  // 1d4: a chess game that ends in a published room asks one_d4 to index
+  // its players' month from the public feed, on a thread of its own.
+  // Unset, nothing reaches 1d4 until someone asks there.
+  const char* one_d4_url = std::getenv("ONE_D4_URL");
+  if (one_d4_url != nullptr && *one_d4_url != '\0') {
+    auto indexer = one_d4::CreateProductionClient(one_d4_url);
+    if (!indexer.ok()) {
+      LOG(ERROR) << "Failed to build the one_d4 client: " << indexer.error().message();
+      return 1;
+    }
+    auto client = std::make_shared<one_d4::Client>(std::move(*indexer));
+    auto queue =
+        std::make_shared<one_d4::IndexQueue>([client](const one_d4::IndexAsk& ask) -> absl::Status {
+          auto id = client->IndexMuchqMonth(ask.player_id, ask.month);
+          if (!id.ok()) return absl::UnavailableError(id.error().message());
+          return absl::OkStatus();
+        });
+    golf->SetChessIndexer([queue](const one_d4::IndexAsk& ask) { queue->Submit(ask); });
+    LOG(INFO) << "1d4: asking one_d4 at " << one_d4_url << " to index published games";
+  } else {
+    LOG(INFO) << "1d4: off (ONE_D4_URL unset; published games wait for an index asked on 1d4)";
   }
 
   // A room's voice (#1590): the STUN servers a voice roster hands each

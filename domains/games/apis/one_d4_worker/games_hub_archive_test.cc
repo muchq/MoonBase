@@ -185,13 +185,14 @@ TEST(GamesHubArchive, ReadsOnFromTheLastArchiveIdUntilAPageIsEmpty) {
 // ---- one read, shared ----
 
 // The hub allows 20 requests a minute per client, and a request is up to
-// twelve months: reading the whole feed for each would run out of them.
-TEST(GamesHubArchive, EveryMonthAndRequestShareOneReadForAMinute) {
+// twelve months: a month that can gain no more games is answered from the
+// copy, across months and requests alike.
+TEST(GamesHubArchive, MonthsThatHaveEndedShareOneRead) {
   Fixture fixture = ArchiveOver(
       {Page({HubGame(1, "alice", "bob"), HubGame(2, "alice", "carol", kFebruaryMs)}), Page({})});
 
   const auto january = fixture.archive->FetchMonth("alice", January());
-  *fixture.now += absl::Seconds(59);
+  *fixture.now += absl::Hours(23);
   const auto february = fixture.archive->FetchMonth("ALICE", February());
   const auto carols = fixture.archive->FetchMonth("carol", February());
 
@@ -204,20 +205,75 @@ TEST(GamesHubArchive, EveryMonthAndRequestShareOneReadForAMinute) {
   EXPECT_EQ(fixture.transport->requests().size(), 2u);
 }
 
-// The current month is read again on every request, so a game that ends
-// after the read reaches the next one.
-TEST(GamesHubArchive, ReadsTheFeedAgainOnceTheReadIsAMinuteOld) {
-  Fixture fixture =
-      ArchiveOver({Page({HubGame(1, "alice", "bob")}), Page({}),
-                   Page({HubGame(1, "alice", "bob"), HubGame(2, "alice", "bob")}), Page({})});
+// games_hub asks for a player's month the moment their game ends, so the
+// month still running is topped up on every request, however recent the
+// last read: a game that ended after it reaches the very next one.
+TEST(GamesHubArchive, TheMonthStillRunningIsToppedUpOnEveryRequest) {
+  Fixture fixture = ArchiveOver({
+      Page({HubGame(150, "alice", "bob")}),
+      Page({}),
+      Page({HubGame(150, "alice", "bob"), HubGame(151, "alice", "bob")}),
+      Page({}),
+  });
+  *fixture.now = absl::FromUnixMillis(kMidJanuaryMs);
 
   ASSERT_TRUE(fixture.archive->FetchMonth("alice", January()).ok());
-  *fixture.now += absl::Seconds(60);
   const auto games = fixture.archive->FetchMonth("alice", January());
 
   ASSERT_TRUE(games.ok()) << games.status();
-  EXPECT_EQ(games->size(), 2u);
-  EXPECT_EQ(fixture.transport->requests().size(), 4u);
+  EXPECT_THAT(Urls(*games), ElementsAre("https://muchq.com/games/chess/150",
+                                        "https://muchq.com/games/chess/151"));
+  const auto& requests = fixture.transport->requests();
+  ASSERT_EQ(requests.size(), 4u);
+  // Back a hundred ids from the newest held, for a game whose archive id
+  // was taken before one already read but committed after it.
+  EXPECT_THAT(requests[2].target, HasSubstr("after=50"));
+}
+
+// A game that ends at a month's last instant can land a moment later, so
+// the month is topped up until a read starts a minute past its end.
+TEST(GamesHubArchive, AMonthIsToppedUpUntilAReadStartsAMinutePastItsEnd) {
+  Fixture fixture = ArchiveOver({Page({}), Page({}), Page({}), Page({})});
+  *fixture.now = absl::FromUnixMillis(kFebruaryMs) + absl::Seconds(59);
+
+  ASSERT_TRUE(fixture.archive->FetchMonth("alice", January()).ok());
+  ASSERT_TRUE(fixture.archive->FetchMonth("alice", January()).ok());
+  EXPECT_EQ(fixture.transport->requests().size(), 2u) << "an empty feed is one page";
+  *fixture.now += absl::Seconds(1);
+  ASSERT_TRUE(fixture.archive->FetchMonth("alice", January()).ok());
+  ASSERT_TRUE(fixture.archive->FetchMonth("alice", January()).ok());
+
+  EXPECT_EQ(fixture.transport->requests().size(), 3u);
+}
+
+// Topped up, the copy would hold games the feed has since let go and grow
+// for as long as the worker runs. A day on it is read whole and replaced.
+TEST(GamesHubArchive, TheCopyIsReadWholeAndReplacedADayOn) {
+  Fixture fixture = ArchiveOver({
+      Page({HubGame(1, "alice", "bob"), HubGame(2, "alice", "bob")}),
+      Page({}),
+      Page({HubGame(2, "alice", "bob")}),
+      Page({}),
+  });
+
+  ASSERT_TRUE(fixture.archive->FetchMonth("alice", January()).ok());
+  *fixture.now += absl::Hours(24);
+  const auto games = fixture.archive->FetchMonth("alice", January());
+
+  ASSERT_TRUE(games.ok()) << games.status();
+  EXPECT_THAT(Urls(*games), ElementsAre("https://muchq.com/games/chess/2"));
+  ASSERT_EQ(fixture.transport->requests().size(), 4u);
+  EXPECT_THAT(fixture.transport->requests()[2].target, HasSubstr("after=0"));
+}
+
+TEST(GamesHubArchive, AFailedTopUpFailsTheMonth) {
+  Fixture fixture = ArchiveOver({Page({HubGame(1, "alice", "bob")}), Page({}), Status(503)});
+  *fixture.now = absl::FromUnixMillis(kMidJanuaryMs);
+
+  ASSERT_TRUE(fixture.archive->FetchMonth("alice", January()).ok());
+  const auto games = fixture.archive->FetchMonth("alice", January());
+
+  EXPECT_EQ(games.status().code(), absl::StatusCode::kUnavailable) << games.status();
 }
 
 TEST(GamesHubArchive, AFailedReadIsNotKept) {
@@ -242,7 +298,7 @@ TEST(GamesHubArchive, ABodyThatIsNotPgnIsDataLossNotAnEmptyFeed) {
   EXPECT_EQ(games.status().code(), absl::StatusCode::kDataLoss) << games.status();
 }
 
-// The feed is read whole, so failing on one bad game would fail every
+// The feed is every player's, so failing on one bad game would fail every
 // month for every player until it aged out. It is skipped — nobody can
 // say whose it is — and the cursor still moves past it.
 TEST(GamesHubArchive, AGameThatWillNotParseIsSkippedAndReadPast) {
