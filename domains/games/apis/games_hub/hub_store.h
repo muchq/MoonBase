@@ -117,17 +117,22 @@ class HubStore {
     bool operator==(const EventGame&) const = default;
   };
 
-  /// A round robin in a room (#1647): what its creator fixed and
-  /// moderates. A pairing's result here is one the creator recorded; the
-  /// games its tables played are the room's archived games tagged with it,
-  /// written by the commits that ended them.
+  /// A round robin in a room (#1647), of chess or pong: what its creator
+  /// fixed and moderates. A pairing's result here is one the creator
+  /// recorded; the games its tables played are the room's archived chess
+  /// games tagged with it, written by the commits that ended them, or for
+  /// pong each tagged table's one game, off the table's own row
+  /// (AddPongEventGames).
   struct ChessEventRow {
     std::string room_id;
     std::string event_id;
     int64_t version = 0;
     std::string creator;
     std::vector<std::string> entrants;
+    GameKind kind = GameKind::kChess;
+    /// Chess's terms, or pong's variant: the other is unused.
     ChessTerms terms;
+    pong::Variant pong_variant = pong::Variant::kSmallcat;
     std::vector<Pairing> pairings;
     std::set<std::string> withdrawn;
     /// Loaded, never written: the games played for the event's pairings,
@@ -278,6 +283,13 @@ std::optional<std::string> ChessWinner(const chess_play::GameState& game);
 
 /// Process-local production storage. Operations are synchronous, but use
 /// the same conditional commit and terminal-row semantics as PostgreSQL.
+/// A pong round robin's games, for both stores' loads: each table tagged
+/// with one of its pairings plays that one game, so a tagged table whose
+/// sheet has a line is the pairing's game, its winner off the sheet. Adds
+/// them to the pong events among `events` they name, by table code.
+void AddPongEventGames(const std::vector<HubStore::GameRow>& games,
+                       std::vector<HubStore::ChessEventRow>& events);
+
 class MemoryHubStore final : public HubStore {
  public:
   /// `now_ms` stamps when an archived game ended; the wall clock unless a

@@ -12,6 +12,8 @@
 #include "domains/games/libs/cards/golf/player.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table_serde.h"
+#include "domains/games/libs/pong/table.h"
+#include "domains/games/libs/pong/table_serde.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace {
@@ -144,6 +146,24 @@ TEST_F(GameStateJsonbTest, AChessStateSurvivesJsonbNormalization) {
     const auto restored = chess_play::deserializeTable(*stored);
     ASSERT_TRUE(restored.ok()) << restored.status();
     EXPECT_EQ(chess_play::serializeTable(*restored), serialized);
+  }
+}
+
+// Pong's row: lives, a sheet, a closed table, and a seat id jsonb would
+// refuse raw.
+TEST_F(GameStateJsonbTest, APongStateSurvivesJsonbNormalization) {
+  auto opened = pong::Table::open({std::string("a\0b", 3), "bob"}, pong::Variant::kThreeD);
+  ASSERT_TRUE(opened.ok()) << opened.status();
+  const pong::Table scored = *opened->point(1);
+  const pong::Table closed = *scored.removePlayer(1);
+  for (const pong::Table& table : {scored, closed}) {
+    ASSERT_TRUE(db_->Exec("TRUNCATE game_state_probe").ok());
+    const std::string serialized = pong::serializeTable(table);
+    const auto stored = StoreAndFetch(serialized);
+    ASSERT_TRUE(stored.has_value());
+    const auto restored = pong::deserializeTable(*stored);
+    ASSERT_TRUE(restored.ok()) << restored.status();
+    EXPECT_EQ(pong::serializeTable(*restored), serialized);
   }
 }
 

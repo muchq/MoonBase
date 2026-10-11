@@ -15,6 +15,7 @@
 #include "domains/games/libs/cards/rummy/table_serde.h"
 #include "domains/games/libs/chess_play/game_state_serde.h"
 #include "domains/games/libs/chess_play/table_serde.h"
+#include "domains/games/libs/pong/table_serde.h"
 
 namespace games_hub {
 namespace {
@@ -216,6 +217,8 @@ std::string StateJson(const PgHubStore::GameRow& row) {
           return rummy::serializeTableState(state);
         } else if constexpr (std::is_same_v<std::decay_t<decltype(state)>, chess_play::Table>) {
           return chess_play::serializeTable(state);
+        } else if constexpr (std::is_same_v<std::decay_t<decltype(state)>, pong::Table>) {
+          return pong::serializeTable(state);
         } else {
           return serializeGameState(state);
         }
@@ -287,15 +290,20 @@ std::string EventBodyJson(const PgHubStore::ChessEventRow& row) {
     if (p.forfeit) pairing["forfeit"] = true;
     pairings.push_back(std::move(pairing));
   }
-  return json{{"creator", row.creator},
-              {"entrants", row.entrants},
-              {"terms",
-               {{"setupId", row.terms.setup_id},
-                {"initialMs", row.terms.time_control.initial_ms},
-                {"incrementMs", row.terms.time_control.increment_ms}}},
-              {"pairings", std::move(pairings)},
-              {"withdrawn", row.withdrawn}}
-      .dump();
+  json body{{"creator", row.creator},
+            {"entrants", row.entrants},
+            {"terms",
+             {{"setupId", row.terms.setup_id},
+              {"initialMs", row.terms.time_control.initial_ms},
+              {"incrementMs", row.terms.time_control.increment_ms}}},
+            {"pairings", std::move(pairings)},
+            {"withdrawn", row.withdrawn}};
+  // A pong round robin says so; a body without "game" is chess's.
+  if (row.kind == GameKind::kPong) {
+    body["game"] = "pong";
+    body["variant"] = pong::VariantName(row.pong_variant);
+  }
+  return body.dump();
 }
 
 bool IsStrings(const json& value) {
@@ -317,6 +325,17 @@ absl::Status EventBodyFromJson(const std::string& text, PgHubStore::ChessEventRo
       !terms["initialMs"].is_number_integer() || !terms.contains("incrementMs") ||
       !terms["incrementMs"].is_number_integer()) {
     return malformed;
+  }
+  row.kind = GameKind::kChess;
+  if (body.contains("game")) {
+    if (body["game"] != "pong" || !body.contains("variant") || !body["variant"].is_string()) {
+      return malformed;
+    }
+    const std::optional<pong::Variant> variant =
+        pong::ParseVariant(body["variant"].get<std::string>());
+    if (!variant.has_value()) return malformed;
+    row.kind = GameKind::kPong;
+    row.pong_variant = *variant;
   }
   row.creator = body["creator"].get<std::string>();
   row.entrants = body["entrants"].get<std::vector<std::string>>();
@@ -611,6 +630,7 @@ absl::StatusOr<PgHubStore::RoomRows> PgHubStore::LoadRoom(const std::string& roo
                                {room_id});
   if (!event_games.ok()) return event_games.status();
   out.events = EventsFrom(*events, *event_games);
+  AddPongEventGames(out.games, out.events);
   return out;
 }
 
@@ -668,6 +688,7 @@ absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
                                             " WHERE event_id IS NOT NULL ORDER BY archive_id"));
   if (!event_games.ok()) return event_games.status();
   snapshot.events = EventsFrom(*events, *event_games);
+  AddPongEventGames(snapshot.games, snapshot.events);
   return snapshot;
 }
 
@@ -766,6 +787,10 @@ absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(
         return row;
       }
       auto state = chess_play::deserializeTable(state_json);
+      if (!state.ok()) return state.status();
+      row.state.emplace(*std::move(state));
+    } else if (row.kind == GameKind::kPong) {
+      auto state = pong::deserializeTable(state_json);
       if (!state.ok()) return state.status();
       row.state.emplace(*std::move(state));
     } else {

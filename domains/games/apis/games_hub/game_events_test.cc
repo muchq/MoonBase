@@ -192,6 +192,35 @@ TEST(GameEvents, AChessTableRecordsOnlyAGamesEnd) {
   EXPECT_FALSE(FinishedOf(HostedState(*closed), 1).has_value());
 }
 
+pong::Table Pong() { return *pong::Table::open({"andy", "mercy"}, pong::Variant::kSmallcat); }
+
+pong::Table PongWon() {
+  pong::Table table = Pong();
+  for (int i = 0; i < pong::kLives; ++i) table = *table.point(1);
+  return table;
+}
+
+TEST(GameEvents, APongGamePlayedOutIsCompleted) {
+  const auto finished = FinishedOf(PongWon(), 2);
+  ASSERT_TRUE(finished.has_value());
+  EXPECT_EQ(finished->variant, "pong");
+  EXPECT_EQ(finished->outcome, kOutcomeCompleted);
+}
+
+TEST(GameEvents, APongGameLeftIsAbandoned) {
+  const auto finished = FinishedOf(*Pong().removePlayer(0), 1);
+  ASSERT_TRUE(finished.has_value());
+  EXPECT_EQ(finished->outcome, kOutcomeAbandoned);
+}
+
+// A point is no game's end, and a table closed between games recorded its
+// last game when it ended.
+TEST(GameEvents, APongTableRecordsOnlyAGamesEnd) {
+  EXPECT_FALSE(FinishedOf(Pong(), 2).has_value());
+  EXPECT_FALSE(FinishedOf(*Pong().point(0), 2).has_value());
+  EXPECT_FALSE(FinishedOf(*PongWon().removePlayer(0), 1).has_value());
+}
+
 // A rummy table's games are its deals (#1609): a deal won by play is a
 // game completed, under the deal's variant word — seven-card rummy is "rummy".
 TEST(GameEvents, ARummyDealPlayedOutIsCompleted) {

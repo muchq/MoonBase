@@ -13,6 +13,7 @@
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
+#include "domains/games/libs/pong/table.h"
 
 namespace games_hub {
 namespace {
@@ -513,6 +514,41 @@ TEST(MemoryHubStoreTest, ATaggedTablesFirstGameIsArchivedAsItsPairings) {
 
 // Two tables racing to play one pairing each end a first game, and the
 // event lists both, in archive order: the store does not pick.
+// A pong round robin keeps its game and variant, and a pairing's game is
+// its tagged table's one game: the table's own row says who won it, from
+// the commit that ended it on.
+TEST(MemoryHubStoreTest, APongRoundRobinsPairingsAreScoredByTheirTables) {
+  MemoryHubStore store;
+  store.Enqueue({HubStore::UpsertRoom{"R1"}});
+  HubStore::ChessEventRow event = Event(1);
+  event.kind = GameKind::kPong;
+  event.pong_variant = pong::Variant::kThreeD;
+  ASSERT_TRUE(*store.CommitChessEvent(event, ""));
+  const auto loaded = store.LoadRoom("R1");
+  ASSERT_TRUE(loaded.ok());
+  ASSERT_EQ(loaded->events.size(), 1u);
+  EXPECT_EQ(loaded->events[0].kind, GameKind::kPong);
+  EXPECT_EQ(loaded->events[0].pong_variant, pong::Variant::kThreeD);
+
+  const auto pong_row = [](const pong::Table& table, int64_t version, std::optional<EventTag> tag) {
+    HubStore::GameRow row{"R1",    "G1",           table.players(), HostedState(table),
+                          version, GameKind::kPong};
+    row.event = std::move(tag);
+    return row;
+  };
+  pong::Table table = *pong::Table::open({"bob", "alice"}, pong::Variant::kThreeD);
+  ASSERT_TRUE(*store.CommitGameSave(pong_row(table, 1, EventTag{"E1", 0}), ""));
+  EXPECT_TRUE(store.LoadRoom("R1")->events[0].games.empty()) << "a game in play decides nothing";
+  for (int i = 0; i < pong::kLives; ++i) table = *table.point(0);
+  ASSERT_TRUE(*store.CommitGameFinish(pong_row(table, 2, std::nullopt), {}, ""));
+  EXPECT_THAT(store.LoadRoom("R1")->events[0].games,
+              ElementsAre(HubStore::EventGame{0, "G1", 0, "alice"}));
+  const auto snapshot = store.LoadSnapshot();
+  ASSERT_TRUE(snapshot.ok());
+  ASSERT_EQ(snapshot->events.size(), 1u);
+  EXPECT_THAT(snapshot->events[0].games, ElementsAre(HubStore::EventGame{0, "G1", 0, "alice"}));
+}
+
 TEST(MemoryHubStoreTest, TwoTablesPlayingOnePairingAreBothListed) {
   MemoryHubStore store;
   store.Enqueue({HubStore::UpsertRoom{"R1"}});

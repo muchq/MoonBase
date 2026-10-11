@@ -15,6 +15,7 @@
 #include "domains/games/libs/cards/rummy/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
+#include "domains/games/libs/pong/table.h"
 
 namespace games_hub {
 namespace {
@@ -74,6 +75,18 @@ std::optional<GameFinished> FinishedOf(const HostedState& state, std::size_t pla
       return std::nullopt;
     }
     if (table->game().result()->ending == chess_play::Ending::kAbandoned) {
+      finished.outcome = kOutcomeAbandoned;
+    }
+    return finished;
+  }
+  if (const auto* table = std::get_if<pong::Table>(&state)) {
+    // As chess's: a game's end, the table playing on or closed by the
+    // leave that ended it.
+    if (table->inPlay() || table->scoreSheet().empty() ||
+        (table->isOver() && !table->endedByClose())) {
+      return std::nullopt;
+    }
+    if (table->scoreSheet().back().ending == pong::Ending::kAbandoned) {
       finished.outcome = kOutcomeAbandoned;
     }
     return finished;

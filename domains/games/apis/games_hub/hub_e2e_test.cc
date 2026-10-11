@@ -2224,6 +2224,27 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"chess_events", {{"event", "published"}}},
       {"chess_events", {{"event", "roundRobin"}}},
       {"chess_events", {{"event", "roundRobins"}}},
+      {"pong_commands", {{"command", "createGame"}}},
+      {"pong_commands", {{"command", "joinGame"}}},
+      {"pong_commands", {{"command", "startGame"}}},
+      {"pong_commands", {{"command", "leaveGame"}}},
+      {"pong_commands", {{"command", "paddle"}}},
+      {"pong_commands", {{"command", "addBot"}}},
+      {"pong_commands", {{"command", "watch"}}},
+      {"pong_commands", {{"command", "createRoundRobin"}}},
+      {"pong_commands", {{"command", "withdraw"}}},
+      {"pong_commands", {{"command", "forfeit"}}},
+      {"pong_commands", {{"command", "roundRobins"}}},
+      {"pong_commands", {{"command", "playRoundRobin"}}},
+      {"pong_events", {{"event", "gameJoined"}}},
+      {"pong_events", {{"event", "gameState"}}},
+      {"pong_events", {{"event", "gameCreated"}}},
+      {"pong_events", {{"event", "gameStarted"}}},
+      {"pong_events", {{"event", "gameEnded"}}},
+      {"pong_events", {{"event", "gameLeft"}}},
+      {"pong_events", {{"event", "frame"}}},
+      {"pong_events", {{"event", "roundRobin"}}},
+      {"pong_events", {{"event", "roundRobins"}}},
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -2292,6 +2313,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"hub_rate_limited", {{"kind", "chat"}}},
       {"hub_rate_limited", {{"kind", "command"}}},
       {"hub_rate_limited", {{"kind", "lobby"}}},
+      {"hub_rate_limited", {{"kind", "paddle"}}},
       {"hub_rate_limited", {{"kind", "voice"}}},
       {"hub_rejections", {{"kind", "rate_limited"}}},
       {"hub_rejections", {{"kind", "invalid"}}},
@@ -2367,6 +2389,7 @@ TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
             outer_commands.end());
   ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "rummy"), outer_commands.end());
   ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "chess"), outer_commands.end());
+  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "pong"), outer_commands.end());
   ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "lobby"), outer_commands.end());
 
   // Controls before the comparison: a parser that quietly matched nothing
@@ -2383,13 +2406,13 @@ TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
   std::set<std::string> room_commands;
   for (const auto& name : outer_commands) {
     if (name != "golf" && name != "castle" && name != "rummy" && name != "chess" &&
-        name != "lobby" && name != "voice")
+        name != "pong" && name != "lobby" && name != "voice")
       room_commands.insert(name);
   }
   std::set<std::string> room_events;
   for (const auto& name : outer_events) {
     if (name != "golf" && name != "castle" && name != "rummy" && name != "chess" &&
-        name != "lobby" && name != "voice")
+        name != "pong" && name != "lobby" && name != "voice")
       room_events.insert(name);
   }
   EXPECT_EQ(DeclaredLabelValues("hub_commands", "command"), room_commands);
@@ -2472,6 +2495,21 @@ TEST(StreamSeriesModelPin, ChessSeriesMatchTheModelUnions) {
   EXPECT_EQ(DeclaredLabelValues("chess_commands", "command"),
             std::set<std::string>(moves.begin(), moves.end()));
   EXPECT_EQ(DeclaredLabelValues("chess_events", "event"),
+            std::set<std::string>(updates.begin(), updates.end()));
+}
+
+// Pong's envelope counts its inner case names on pong_commands and
+// pong_events, pinned against pong.smithy the same way.
+TEST(StreamSeriesModelPin, PongSeriesMatchTheModelUnions) {
+  const std::string model = ReadModel("domains/games/apis/games_hub/model/pong.smithy");
+  ASSERT_FALSE(model.empty());
+  const auto moves = ModelUnionCases(model, "PongMove");
+  const auto updates = ModelUnionCases(model, "PongUpdate");
+  ASSERT_NE(std::find(moves.begin(), moves.end(), "paddle"), moves.end());
+  ASSERT_NE(std::find(updates.begin(), updates.end(), "frame"), updates.end());
+  EXPECT_EQ(DeclaredLabelValues("pong_commands", "command"),
+            std::set<std::string>(moves.begin(), moves.end()));
+  EXPECT_EQ(DeclaredLabelValues("pong_events", "event"),
             std::set<std::string>(updates.begin(), updates.end()));
 }
 
