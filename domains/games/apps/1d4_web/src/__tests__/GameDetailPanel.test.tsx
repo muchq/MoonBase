@@ -144,6 +144,33 @@ describe('GameDetailPanel', () => {
     expect(screen.getByText('Start')).toBeInTheDocument();
   });
 
+  // A game that starts from a set-up position — an endgame drill, a
+  // chess960 start — names it in [SetUp]/[FEN]. Its moves replay from
+  // there; from the standard start its first move is not even legal.
+  it('replays a game from the position its [FEN] tag sets up', () => {
+    const pgn = [
+      '[SetUp "1"]',
+      '[FEN "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"]',
+      '',
+      '1. Kf2 Kf7 2. Kf3 Kf6 1-0',
+    ].join('\n');
+    render(<GameDetailPanel game={{ ...mockGame, pgn, numMoves: 4 }} onClose={() => {}} />);
+    const board = () => screen.getByTestId('chessboard').getAttribute('data-fen');
+    expect(board()).toBe('4k3/8/8/8/8/8/4P3/4K3 w - - 0 1');
+    fireEvent.click(screen.getByRole('button', { name: 'Next move' }));
+    expect(board()).toBe('4k3/8/8/8/8/8/4PK2/8 b - - 1 1');
+    fireEvent.click(screen.getByRole('button', { name: 'Go to end' }));
+    expect(board()).toBe('8/8/5k2/8/8/5K2/4P3/8 w - - 4 3');
+    expect(screen.getByText('End')).toBeInTheDocument();
+  });
+
+  // No moves yet: the board is the set-up position, not the standard one.
+  it('shows a set-up position with no moves as itself', () => {
+    const pgn = '[SetUp "1"]\n[FEN "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1"]\n\n*';
+    render(<GameDetailPanel game={{ ...mockGame, pgn, numMoves: 0 }} onClose={() => {}} />);
+    expect(screen.getByTestId('chessboard').getAttribute('data-fen')).toBe('4k3/8/8/8/8/8/4P3/4K3 w - - 0 1');
+  });
+
   it('go-to-end seeks to last position', () => {
     render(<GameDetailPanel game={mockGame} onClose={() => {}} />);
     fireEvent.click(screen.getByRole('button', { name: 'Go to end' }));

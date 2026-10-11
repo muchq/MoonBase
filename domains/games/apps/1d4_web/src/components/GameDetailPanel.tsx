@@ -28,18 +28,14 @@ const DEFAULT_MOTIF_COLOR = '#aaaaaa';
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
+// Each move carries the positions either side of it, so the game replays
+// from wherever its [FEN] tag set it up, not from the standard start.
 function parsePgn(pgn: string): { fens: string[]; moves: Move[] } {
   const chess = new Chess();
   chess.loadPgn(pgn);
-  const sans = chess.history();
-  chess.reset();
-  const fens: string[] = [chess.fen()];
-  const moves: Move[] = [];
-  for (const san of sans) {
-    const move = chess.move(san);
-    moves.push(move);
-    fens.push(chess.fen());
-  }
+  const moves = chess.history({ verbose: true });
+  // With no moves, the loaded position is the one the game starts from.
+  const fens = [moves[0]?.before ?? chess.fen(), ...moves.map((move) => move.after)];
   return { fens, moves };
 }
 
