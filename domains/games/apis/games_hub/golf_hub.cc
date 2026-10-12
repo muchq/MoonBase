@@ -37,6 +37,7 @@
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/pong/rally.h"
 #include "domains/games/libs/pong/table.h"
+#include "domains/games/libs/cards/spades/table.h"
 
 namespace games_hub {
 
@@ -52,6 +53,8 @@ using moonbase::games::PongMove;
 using moonbase::games::PongUpdate;
 using moonbase::games::RummyMove;
 using moonbase::games::RummyUpdate;
+using moonbase::games::SpadesMove;
+using moonbase::games::SpadesUpdate;
 
 std::unordered_set<int> WinnersAmong(const golf::GameState& state,
                                      const std::vector<std::string>& roster) {
@@ -84,6 +87,7 @@ constexpr std::size_t kMaxSeats = 4;
 std::size_t MaxSeatsOf(GameKind kind) {
   if (kind == GameKind::kChess) return chess_play::GameState::kSeats;
   if (kind == GameKind::kPong) return pong::kSeats;
+  if (kind == GameKind::kSpades) return spades::kSeats;
   return kMaxSeats;
 }
 
@@ -143,6 +147,12 @@ GameEvents PongUpdateEvent(PongUpdate update) {
   return GameEvents::FromPong(std::move(event));
 }
 
+GameEvents SpadesUpdateEvent(SpadesUpdate update) {
+  moonbase::games::SpadesEvent event;
+  event.update = std::move(update);
+  return GameEvents::FromSpades(std::move(event));
+}
+
 // The shared lifecycle announcements, in the table's own envelope. Each
 // game's update union carries the same case for them, so one generic
 // build serves every game: `make` picks the case off whichever union.
@@ -157,6 +167,8 @@ GameEvents InTableEnvelope(GameKind kind, const Make& make) {
       return ChessUpdateEvent(make(ChessUpdate{}));
     case GameKind::kPong:
       return PongUpdateEvent(make(PongUpdate{}));
+    case GameKind::kSpades:
+      return SpadesUpdateEvent(make(SpadesUpdate{}));
     case GameKind::kGolf:
       break;
   }
@@ -335,13 +347,29 @@ std::string TermsLine(const ChessTerms& terms) {
                       initial, "+", terms.time_control.increment_ms / 1000);
 }
 
-// The games a chess or pong table has finished; zero for anything else.
+// Whether a spades table closed by a leave was in a game: one still bid or
+// played, or played out without anyone having won. The leave abandoned it.
+bool SpadesClosedInGame(const spades::Table& table) {
+  if (!table.isOver()) return false;
+  return table.hand().stage() != spades::Stage::kDone ||
+         !spades::gameWinner(table.scores()).has_value();
+}
+
+// The games a spades table has ended: those won, and one a leave abandoned.
+std::size_t SpadesGamesEnded(const spades::Table& table) {
+  return static_cast<std::size_t>(table.gamesWon()[0] + table.gamesWon()[1]) +
+         (SpadesClosedInGame(table) ? 1 : 0);
+}
+
+// The games a chess, pong or spades table has finished; zero for anything
+// else.
 std::size_t GamesOf(const std::optional<HostedState>& state) {
   if (!state.has_value()) return 0;
   if (const auto* table = std::get_if<chess_play::Table>(&*state)) {
     return table->scoreSheet().size();
   }
   if (const auto* table = std::get_if<pong::Table>(&*state)) return table->scoreSheet().size();
+  if (const auto* table = std::get_if<spades::Table>(&*state)) return SpadesGamesEnded(*table);
   return 0;
 }
 
@@ -371,6 +399,9 @@ std::string PhaseStringOf(const HostedState& state) {
     return ChessPhaseString(*table);
   }
   if (const auto* table = std::get_if<pong::Table>(&state)) return PongPhaseString(*table);
+  if (const auto* table = std::get_if<spades::Table>(&state)) {
+    return std::string(spades::phaseName(table->phase()));
+  }
   return CastlePhaseString(std::get<castle::GameState>(state));
 }
 
@@ -391,6 +422,11 @@ std::string CurrentTurnOf(const HostedState& state) {
   }
   // Pong has no turns: both seats play at once.
   if (std::holds_alternative<pong::Table>(state)) return "";
+  if (const auto* table = std::get_if<spades::Table>(&state)) {
+    // Between hands nobody has a turn: any seat deals.
+    const int seat = table->isOver() ? spades::kNoTurn : table->hand().turn();
+    return seat < 0 ? "" : table->seats().at(seat);
+  }
   const auto& castle_state = std::get<castle::GameState>(state);
   return CastlePlayerIdAt(castle_state, castle_state.getWhoseTurn());
 }
@@ -477,6 +513,21 @@ std::vector<games_hub::HubStore::StatsDelta> PongStatsDeltas(const pong::Table& 
   return PlayedWon(table.players(), table.scoreSheet().back().winner.value_or(""));
 }
 
+// A spades game's end: all four seats played it, and the winning team's
+// two won it. A game a leave abandoned was played, and won by nobody.
+std::vector<games_hub::HubStore::StatsDelta> SpadesStatsDeltas(const spades::Table& table,
+                                                               std::optional<int> winning_team) {
+  std::vector<games_hub::HubStore::StatsDelta> deltas;
+  for (int seat = 0; seat < spades::kSeats; ++seat) {
+    games_hub::HubStore::StatsDelta delta;
+    delta.player_id = table.seats()[seat];
+    delta.played = 1;
+    delta.won = winning_team == spades::teamOf(seat) ? 1 : 0;
+    deltas.push_back(std::move(delta));
+  }
+  return deltas;
+}
+
 std::vector<games_hub::HubStore::StatsDelta> StatsDeltasOf(const HostedState& state,
                                                            const std::vector<std::string>& roster) {
   if (const auto* golf_state = std::get_if<golf::GameState>(&state)) {
@@ -501,6 +552,12 @@ std::vector<games_hub::HubStore::StatsDelta> StatsDeltasOf(const HostedState& st
     return table->endedByClose() ? PongStatsDeltas(*table)
                                  : std::vector<games_hub::HubStore::StatsDelta>{};
   }
+  if (const auto* table = std::get_if<spades::Table>(&state)) {
+    // A table closes by a leave: a game it abandoned was played; one
+    // already won was credited as it was won.
+    return SpadesClosedInGame(*table) ? SpadesStatsDeltas(*table, std::nullopt)
+                                      : std::vector<games_hub::HubStore::StatsDelta>{};
+  }
   return CastleStatsDeltas(std::get<castle::GameState>(state));
 }
 
@@ -514,6 +571,14 @@ std::optional<std::vector<games_hub::HubStore::StatsDelta>> DealEndDeltas(
   if (pong_was != nullptr && pong_now != nullptr) {
     if (!pong_was->inPlay() || pong_now->inPlay() || pong_now->isOver()) return std::nullopt;
     return PongStatsDeltas(*pong_now);
+  }
+  const auto* spades_was = std::get_if<spades::Table>(&before);
+  const auto* spades_now = std::get_if<spades::Table>(&after);
+  if (spades_was != nullptr && spades_now != nullptr) {
+    if (spades_was->phase() == spades::Phase::kWon || spades_now->phase() != spades::Phase::kWon) {
+      return std::nullopt;
+    }
+    return SpadesStatsDeltas(*spades_now, spades_now->winner());
   }
   const auto* chess_was = std::get_if<chess_play::Table>(&before);
   const auto* chess_now = std::get_if<chess_play::Table>(&after);
@@ -539,6 +604,12 @@ bool DealStarted(const HostedState& before, const HostedState& after) {
   const auto* pong_was = std::get_if<pong::Table>(&before);
   const auto* pong_now = std::get_if<pong::Table>(&after);
   if (pong_was != nullptr && pong_now != nullptr) return !pong_was->inPlay() && pong_now->inPlay();
+  const auto* spades_was = std::get_if<spades::Table>(&before);
+  const auto* spades_now = std::get_if<spades::Table>(&after);
+  if (spades_was != nullptr && spades_now != nullptr) {
+    return spades_was->phase() == spades::Phase::kWon &&
+           spades_now->phase() == spades::Phase::kBidding;
+  }
   const auto* chess_was = std::get_if<chess_play::Table>(&before);
   const auto* chess_now = std::get_if<chess_play::Table>(&after);
   if (chess_was != nullptr && chess_now != nullptr) {
@@ -721,6 +792,20 @@ const std::vector<GolfHub::CounterSeries>& GolfHub::DeclaredCounterSeries() {
       {"pong_events", {{"event", "frame"}}},
       {"pong_events", {{"event", "roundRobin"}}},
       {"pong_events", {{"event", "roundRobins"}}},
+      {"spades_commands", {{"command", "createGame"}}},
+      {"spades_commands", {{"command", "joinGame"}}},
+      {"spades_commands", {{"command", "startGame"}}},
+      {"spades_commands", {{"command", "leaveGame"}}},
+      {"spades_commands", {{"command", "bid"}}},
+      {"spades_commands", {{"command", "play"}}},
+      {"spades_commands", {{"command", "deal"}}},
+      {"spades_events", {{"event", "gameJoined"}}},
+      {"spades_events", {{"event", "gameState"}}},
+      {"spades_events", {{"event", "gameCreated"}}},
+      {"spades_events", {{"event", "gameStarted"}}},
+      {"spades_events", {{"event", "turnChanged"}}},
+      {"spades_events", {{"event", "gameEnded"}}},
+      {"spades_events", {{"event", "gameLeft"}}},
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -2048,6 +2133,11 @@ void GolfHub::HandleCommand(const std::string& player_id, const GameCommands& co
     return;
   }
 
+  if (const auto* spades_command = command.as_spades_or_null()) {
+    HandleSpadesMove(player_id, spades_command->move);
+    return;
+  }
+
   if (const auto* lobby = command.as_lobby_or_null()) {
     HandleLobby(player_id, lobby->action);
     return;
@@ -2433,6 +2523,49 @@ void GolfHub::HandleCastleMove(const std::string& player_id, const CastleMove& m
 
 // Chess's moves: the clock is read inside each, under mu_, so a move that
 // waited on the lock is charged from when it landed.
+// Spades' moves (#1658). A play names its card: a card the hand does not
+// hold is the stale-view refusal, named in the wire's spelling.
+void GolfHub::HandleSpadesMove(const std::string& player_id, const SpadesMove& move) {
+  if (LifecycleMove(player_id, move, GameKind::kSpades)) return;
+  if (const auto* bid = move.as_bid_or_null()) {
+    TableEngineMove<spades::Table>(
+        player_id, GameKind::kSpades,
+        [tricks = bid->tricks](const spades::Table& table, int seat) {
+          return table.bid(seat, tricks);
+        });
+    return;
+  }
+  if (const auto* play = move.as_play_or_null()) {
+    const std::optional<cards::Card> card = CardFromWire(play->card);
+    if (!card.has_value()) {
+      Reject(player_id, RejectKind::kInvalid,
+             absl::StrCat("no such card: ", play->card.rank, play->card.suit));
+      return;
+    }
+    TableEngineMove<spades::Table>(
+        player_id, GameKind::kSpades,
+        [card = *card](const spades::Table& table, int seat) -> absl::StatusOr<spades::Table> {
+          absl::StatusOr<spades::Table> next = table.play(seat, card);
+          if (next.status().code() == absl::StatusCode::kNotFound) {
+            return HeldInHand(table.hand().hands()[seat], {card});
+          }
+          return next;
+        });
+    return;
+  }
+  if (move.as_deal_or_null() != nullptr) {
+    TableEngineMove<spades::Table>(player_id, GameKind::kSpades,
+                                   [this](const spades::Table& table, int) {
+                                     std::deque<cards::Card> deck =
+                                         dealer_->DealNewUnshuffledDeck();
+                                     dealer_->ShuffleDeck(deck);
+                                     return table.deal(std::move(deck));
+                                   });
+    return;
+  }
+  Reject(player_id, RejectKind::kUnknown, "unknown move");
+}
+
 void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& move) {
   // startGame is chess's own shape: it names the clock.
   if (const auto* start = move.as_startGame_or_null()) {
@@ -2943,6 +3076,13 @@ void GolfHub::StartGameMove(const std::string& player_id, chess_play::TimeContro
             break;
           }
           dealt.emplace(*std::move(pong_table));
+        } else if (ref->entry->kind == GameKind::kSpades) {
+          auto spades_table = spades::Table::open(ref->entry->roster, std::move(deck));
+          if (!spades_table.ok()) {
+            refusal = Refusal{RejectKind::kRules, std::string(spades_table.status().message())};
+            break;
+          }
+          dealt.emplace(*std::move(spades_table));
         } else if (ref->entry->kind == GameKind::kCastle) {
           auto castle_deal =
               castle::dealCastleGame(ref->game_id, ref->entry->roster, std::move(deck));
@@ -4824,6 +4964,9 @@ void GolfHub::CountCommand(const GameCommands& command) {
                             {{"command", std::string(chess->move.case_name())}});
   } else if (const auto* pong = command.as_pong_or_null()) {
     metrics_->RecordCounter("pong_commands", 1, {{"command", std::string(pong->move.case_name())}});
+  } else if (const auto* spades = command.as_spades_or_null()) {
+    metrics_->RecordCounter("spades_commands", 1,
+                            {{"command", std::string(spades->move.case_name())}});
   } else if (const auto* lobby = command.as_lobby_or_null()) {
     metrics_->RecordCounter("lobby_commands", 1,
                             {{"command", std::string(lobby->action.case_name())}});
@@ -4851,6 +4994,9 @@ void GolfHub::Send(const std::string& player_id, GameEvents event,
                               {{"event", std::string(chess->update.case_name())}});
     } else if (const auto* pong = event.as_pong_or_null()) {
       metrics_->RecordCounter("pong_events", 1, {{"event", std::string(pong->update.case_name())}});
+    } else if (const auto* spades = event.as_spades_or_null()) {
+      metrics_->RecordCounter("spades_events", 1,
+                              {{"event", std::string(spades->update.case_name())}});
     } else if (const auto* lobby = event.as_lobby_or_null()) {
       metrics_->RecordCounter("lobby_events", 1,
                               {{"event", std::string(lobby->update.case_name())}});
@@ -5156,6 +5302,98 @@ moonbase::games::CastleView GolfHub::CastleViewLocked(const std::string& game_id
   return view;
 }
 
+// One seat's spades table: its own hand by suit (♠ ♥ ♣ ♦, colours
+// alternating) and rank, everyone else's as a count.
+moonbase::games::SpadesView GolfHub::SpadesViewLocked(const std::string& game_id,
+                                                      const GameEntry& entry,
+                                                      const std::string& viewer_id) const {
+  moonbase::games::SpadesView view;
+  view.gameId = game_id;
+  view.handNumber = 0;
+  view.spadesBroken = false;
+  if (!entry.started()) {
+    view.phase = "waiting";
+    for (std::size_t i = 0; i < entry.roster.size(); ++i) {
+      moonbase::games::SpadesPlayer player;
+      player.playerId = entry.roster[i];
+      player.team = static_cast<int>(i % 2);
+      player.handCount = 0;
+      player.tricks = 0;
+      view.players.push_back(std::move(player));
+    }
+    return view;
+  }
+  const spades::Table& table = entry.spades();
+  const spades::Hand& hand = table.hand();
+  const auto id_of = [&table](int seat) { return table.seats().at(seat); };
+  view.phase = std::string(spades::phaseName(table.phase()));
+  view.dealer = id_of(hand.dealer());
+  const std::string turn = CurrentTurnOf(*entry.state);
+  if (!turn.empty()) view.currentPlayerId = turn;
+  view.handNumber = table.handNumber();
+  view.spadesBroken = hand.spadesBroken();
+  static constexpr std::array<int, 4> kSuitOrder = {2, 3, 1, 0};  // ♣ ♦ ♥ ♠ → ♠ ♥ ♣ ♦
+  const auto sorted = [](std::vector<cards::Card> cards) {
+    std::sort(cards.begin(), cards.end(), [](const cards::Card& a, const cards::Card& b) {
+      const int suit_a = kSuitOrder[static_cast<int>(a.getSuit())];
+      const int suit_b = kSuitOrder[static_cast<int>(b.getSuit())];
+      if (suit_a != suit_b) return suit_a < suit_b;
+      return a.getRank() < b.getRank();
+    });
+    std::vector<moonbase::games::Card> wire;
+    for (const cards::Card& card : cards) wire.push_back(WireCard(card));
+    return wire;
+  };
+  const int viewer = table.playerIndex(viewer_id);
+  for (int seat = 0; seat < spades::kSeats; ++seat) {
+    moonbase::games::SpadesPlayer player;
+    player.playerId = id_of(seat);
+    player.team = spades::teamOf(seat);
+    player.handCount = static_cast<int>(hand.hands()[seat].size());
+    if (seat == viewer) player.hand = sorted(hand.hands()[seat]);
+    player.bid = hand.bids()[seat];
+    player.tricks = hand.tricks()[seat];
+    view.players.push_back(std::move(player));
+  }
+  const auto plays_of = [&](const std::vector<spades::TrickPlay>& plays) {
+    std::vector<moonbase::games::SpadesTrickPlay> wire;
+    for (const spades::TrickPlay& play : plays) {
+      moonbase::games::SpadesTrickPlay played;
+      played.playerId = id_of(play.seat);
+      played.card = WireCard(play.card);
+      wire.push_back(std::move(played));
+    }
+    return wire;
+  };
+  view.trick = plays_of(hand.current());
+  if (hand.last().has_value()) {
+    moonbase::games::SpadesTrick last;
+    last.plays = plays_of(hand.last()->plays);
+    last.winner = id_of(hand.last()->winner);
+    view.lastTrick = std::move(last);
+  }
+  if (viewer >= 0 && !table.isOver()) view.legal = sorted(hand.legalPlays(viewer));
+  for (int team = 0; team < spades::kTeams; ++team) {
+    moonbase::games::SpadesTeam side;
+    side.players = {id_of(team), id_of(team + 2)};
+    side.score = table.scores()[team];
+    side.bags = table.bags()[team];
+    side.gamesWon = table.gamesWon()[team];
+    view.teams.push_back(std::move(side));
+  }
+  for (const spades::HandLine& line : table.scoreSheet()) {
+    moonbase::games::SpadesHandLine wire;
+    wire.bids.assign(line.bids.begin(), line.bids.end());
+    wire.tricks.assign(line.tricks.begin(), line.tricks.end());
+    wire.points.assign(line.points.begin(), line.points.end());
+    wire.scores.assign(line.scores.begin(), line.scores.end());
+    view.scoreSheet.push_back(std::move(wire));
+  }
+  view.winningTeam = table.winner();
+  if (table.left().has_value()) view.left = id_of(*table.left());
+  return view;
+}
+
 moonbase::games::RummyView GolfHub::RummyViewLocked(const std::string& game_id,
                                                     const GameEntry& entry,
                                                     const std::string& viewer_id) const {
@@ -5327,6 +5565,11 @@ GameEvents GolfHub::JoinedEventLocked(const std::string& game_id, const GameEntr
     joined.view = PongViewLocked(game_id, entry);
     return PongUpdateEvent(PongUpdate::FromGamejoined(std::move(joined)));
   }
+  if (entry.kind == GameKind::kSpades) {
+    moonbase::games::SpadesGameJoined joined;
+    joined.view = SpadesViewLocked(game_id, entry, viewer_id);
+    return SpadesUpdateEvent(SpadesUpdate::FromGamejoined(std::move(joined)));
+  }
   if (entry.kind == GameKind::kRummy) {
     moonbase::games::RummyGameJoined joined;
     joined.view = RummyViewLocked(game_id, entry, viewer_id);
@@ -5376,6 +5619,12 @@ void GolfHub::StageGameViewsLocked(const std::string& game_id, const GameEntry& 
       outbox.To(recipient, ChessUpdateEvent(ChessUpdate::FromGamestate(std::move(update))));
       continue;
     }
+    if (entry.kind == GameKind::kSpades) {
+      moonbase::games::SpadesGameState update;
+      update.view = SpadesViewLocked(game_id, entry, recipient);
+      outbox.To(recipient, SpadesUpdateEvent(SpadesUpdate::FromGamestate(std::move(update))));
+      continue;
+    }
     if (entry.kind == GameKind::kRummy) {
       moonbase::games::RummyGameState update;
       update.view = RummyViewLocked(game_id, entry, recipient);
@@ -5410,6 +5659,28 @@ void GolfHub::StageGameViewsLocked(const std::string& game_id, const GameEntry& 
     }
     entry.games_announced = entry.chess().scoreSheet().size();
   }
+  // A spades game's end after the views, once: won on points by the table
+  // as it stands, or abandoned by the leave that closed it. An instance
+  // that learns of a game's end only after the next began says nothing of
+  // it: the scores it ended on are gone.
+  if (entry.kind == GameKind::kSpades && entry.started()) {
+    const spades::Table& table = entry.spades();
+    const std::size_t ended = SpadesGamesEnded(table);
+    const bool won = table.phase() == spades::Phase::kWon;
+    if (ended > entry.games_announced && (won || SpadesClosedInGame(table))) {
+      moonbase::games::SpadesGameEnded told;
+      told.ending = won ? "points" : "abandoned";
+      if (won) {
+        for (int seat = 0; seat < spades::kSeats; ++seat) {
+          if (spades::teamOf(seat) == *table.winner()) told.winners.push_back(table.seats()[seat]);
+        }
+      }
+      told.scores = {table.scores()[0], table.scores()[1]};
+      const GameEvents event = SpadesUpdateEvent(SpadesUpdate::FromGameended(told));
+      for (const std::string& recipient : entry.roster) outbox.To(recipient, event);
+    }
+    entry.games_announced = ended;
+  }
   // A pairing's result follows the game's own ending.
   for (const auto& [room_id, round_robin_id] : round_robins_moved_) {
     const auto room = rooms_.find(room_id);
@@ -5441,7 +5712,8 @@ void GolfHub::StageGameOverLocked(Room& room, const std::string& game_id, Outbox
     room.games.erase(game);
     return;
   }
-  if (game->second.kind == GameKind::kChess || game->second.kind == GameKind::kPong) {
+  if (game->second.kind == GameKind::kChess || game->second.kind == GameKind::kPong ||
+      game->second.kind == GameKind::kSpades) {
     // Final views, and with them the result of a game the close ended
     // (StageGameViewsLocked), to the seats and any watcher; one between games
     // was said when it ended. A leaver hears neither: the roster no longer

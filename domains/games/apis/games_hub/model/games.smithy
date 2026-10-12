@@ -10,6 +10,8 @@ use moonbase.chess#ChessEvent
 use moonbase.chess#ChessReview
 use moonbase.pong#PongCommand
 use moonbase.pong#PongEvent
+use moonbase.spades#SpadesCommand
+use moonbase.spades#SpadesEvent
 use moonbase.golf#GolfCommand
 use moonbase.golf#GolfEvent
 use moonbase.lobby#Geometry
@@ -22,8 +24,8 @@ use moonbase.voice#VoiceEvent
 
 /// The games hub (#79): one service, one session identity, one room layer,
 /// and one stream, Play, on which the lobby (#1490), voice (#1590), golf,
-/// castle (#77), rummy (#245), chess and pong each ride as one envelope member
-/// per direction.
+/// castle (#77), rummy (#245), chess, pong and spades (#1658) each ride as one
+/// envelope member per direction.
 @simpleRestJson
 @title("Games Hub")
 service GamesHub {
@@ -54,8 +56,8 @@ operation Play {
 }
 
 /// The room layer's own commands, then one envelope per tenant: the
-/// lobby's world, the room's voice, golf's, castle's, rummy's, chess's and
-/// pong's tables.
+/// lobby's world, the room's voice, golf's, castle's, rummy's, chess's,
+/// pong's and spades' tables.
 @streaming
 union GameCommands {
     createRoom: CreateRoom
@@ -70,6 +72,7 @@ union GameCommands {
     rummy: RummyCommand
     chess: ChessCommand
     pong: PongCommand
+    spades: SpadesCommand
 }
 
 @streaming
@@ -87,6 +90,7 @@ union GameEvents {
     rummy: RummyEvent
     chess: ChessEvent
     pong: PongEvent
+    spades: SpadesEvent
 }
 
 /// The public chess feed (moonbase.chess#ChessPublish): every game that
@@ -258,7 +262,7 @@ structure PlayerInfo {
 
 /// A room member's table: which game, which table.
 structure Table {
-    /// golf | castle | rummy | chess | pong, as GameSummary.game spells it.
+    /// golf | castle | rummy | chess | pong | spades, as GameSummary.game spells it.
     @required
     game: String
 
@@ -275,7 +279,7 @@ structure GameSummary {
     @required
     gameId: String
 
-    /// Which game the table plays: golf | castle | rummy | chess | pong.
+    /// Which game the table plays: golf | castle | rummy | chess | pong | spades.
     @required
     game: String
 

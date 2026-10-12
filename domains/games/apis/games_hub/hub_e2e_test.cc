@@ -2245,6 +2245,20 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"pong_events", {{"event", "frame"}}},
       {"pong_events", {{"event", "roundRobin"}}},
       {"pong_events", {{"event", "roundRobins"}}},
+      {"spades_commands", {{"command", "createGame"}}},
+      {"spades_commands", {{"command", "joinGame"}}},
+      {"spades_commands", {{"command", "startGame"}}},
+      {"spades_commands", {{"command", "leaveGame"}}},
+      {"spades_commands", {{"command", "bid"}}},
+      {"spades_commands", {{"command", "play"}}},
+      {"spades_commands", {{"command", "deal"}}},
+      {"spades_events", {{"event", "gameJoined"}}},
+      {"spades_events", {{"event", "gameState"}}},
+      {"spades_events", {{"event", "gameCreated"}}},
+      {"spades_events", {{"event", "gameStarted"}}},
+      {"spades_events", {{"event", "turnChanged"}}},
+      {"spades_events", {{"event", "gameEnded"}}},
+      {"spades_events", {{"event", "gameLeft"}}},
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -2390,6 +2404,8 @@ TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
   ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "rummy"), outer_commands.end());
   ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "chess"), outer_commands.end());
   ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "pong"), outer_commands.end());
+  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "spades"),
+            outer_commands.end());
   ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "lobby"), outer_commands.end());
 
   // Controls before the comparison: a parser that quietly matched nothing
@@ -2406,13 +2422,13 @@ TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
   std::set<std::string> room_commands;
   for (const auto& name : outer_commands) {
     if (name != "golf" && name != "castle" && name != "rummy" && name != "chess" &&
-        name != "pong" && name != "lobby" && name != "voice")
+        name != "pong" && name != "spades" && name != "lobby" && name != "voice")
       room_commands.insert(name);
   }
   std::set<std::string> room_events;
   for (const auto& name : outer_events) {
     if (name != "golf" && name != "castle" && name != "rummy" && name != "chess" &&
-        name != "pong" && name != "lobby" && name != "voice")
+        name != "pong" && name != "spades" && name != "lobby" && name != "voice")
       room_events.insert(name);
   }
   EXPECT_EQ(DeclaredLabelValues("hub_commands", "command"), room_commands);
@@ -2510,6 +2526,20 @@ TEST(StreamSeriesModelPin, PongSeriesMatchTheModelUnions) {
   EXPECT_EQ(DeclaredLabelValues("pong_commands", "command"),
             std::set<std::string>(moves.begin(), moves.end()));
   EXPECT_EQ(DeclaredLabelValues("pong_events", "event"),
+            std::set<std::string>(updates.begin(), updates.end()));
+}
+
+// Spades' envelope, the same way (#1658).
+TEST(StreamSeriesModelPin, SpadesSeriesMatchTheModelUnions) {
+  const std::string model = ReadModel("domains/games/apis/games_hub/model/spades.smithy");
+  ASSERT_FALSE(model.empty());
+  const auto moves = ModelUnionCases(model, "SpadesMove");
+  const auto updates = ModelUnionCases(model, "SpadesUpdate");
+  ASSERT_NE(std::find(moves.begin(), moves.end(), "bid"), moves.end());
+  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
+  EXPECT_EQ(DeclaredLabelValues("spades_commands", "command"),
+            std::set<std::string>(moves.begin(), moves.end()));
+  EXPECT_EQ(DeclaredLabelValues("spades_events", "event"),
             std::set<std::string>(updates.begin(), updates.end()));
 }
 

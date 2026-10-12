@@ -7,14 +7,14 @@ streaming stack: a modeled protocol with generated async handlers
 (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018), and ticket
 auth ahead of the 101. One session identity opens the one stream.
 
-## The model (eight namespaces)
+## The model (nine namespaces)
 
 - `model/games.smithy` — `moonbase.games`: the service, session identity
   (`POST /games/v2/session`), the public chess feed
   (`GET /games/v2/chess.pgn`), the two terminal stream errors, the one
   stream — `Play` at `/games/v2/play`, its `GameCommands`/`GameEvents`
   unions carrying the room layer's own cases plus one envelope member
-  per tenant (`lobby`, `voice`, `golf`, `castle`, `rummy`, `chess`, `pong`) — and the game-agnostic room
+  per tenant (`lobby`, `voice`, `golf`, `castle`, `rummy`, `chess`, `pong`, `spades`) — and the game-agnostic room
   layer — rooms, chat, player info with room-scoped stats and the
   member's table (`PlayerInfo.table`: which game, which
   table, pending or in play, absent while idle — how the lobby tells who
@@ -587,6 +587,21 @@ it is dropped rather than refused. A seat on an instance that has seen
 another commit the table since loading it steers nothing: taking the
 rally up there would run a second one, scoring the paddle that cannot move
 here.
+
+### Spades
+
+Classic partnership spades (#1658), on `libs/cards/spades`: four seats,
+partners across in join order (seats 0 and 2 are team 0), and a table
+starts only with all four. Each hand is bid round the table from the
+dealer's left (0 is nil) and played out trick by trick; a play names its
+card, and one the hand lacks is the stale-view refusal. A hand played out
+is scored and kept — `phase` `scored` — until any seat sends `deal`; the
+deal passes left. A team at 500 or more, or at −200 or less, at a hand's
+end ends the game on the higher score (`won`, a `gameEnded` with the two
+winners), and the next `deal` starts a new game, scores and bags at
+nothing. A game is recorded as `spades` and credits all four seats played,
+the winning team won. A leave closes the table: a game in play is
+abandoned, played by all four and won by nobody.
 
 ## Redaction
 

@@ -14,6 +14,7 @@ smithy_cpp_server_library(
         "model/lobby.smithy",
         "model/pong.smithy",
         "model/rummy.smithy",
+        "model/spades.smithy",
         "model/voice.smithy",
     ],
     namespace = "moonbase::games",
@@ -30,6 +31,7 @@ smithy_cpp_client_library(
         "model/lobby.smithy",
         "model/pong.smithy",
         "model/rummy.smithy",
+        "model/spades.smithy",
         "model/voice.smithy",
     ],
     namespace = "moonbase::games",
@@ -49,6 +51,7 @@ cc_library(
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/rummy:game_state",
         "//domains/games/libs/cards/rummy:table",
+        "//domains/games/libs/cards/spades:table",
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:table",
         "//domains/games/libs/pong:table",
@@ -86,6 +89,7 @@ cc_library(
         ":games_hub_smithy_server",
         ":hub_store",
         ":round_robin",
+        "//domains/games/libs/cards/spades:table",
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/pong:table",
     ],
@@ -99,6 +103,7 @@ cc_test(
         ":hub_store",
         ":round_robin",
         ":round_robin_wire",
+        "//domains/games/libs/cards/spades:table",
         "//domains/games/libs/pong:table",
         "@googletest//:gtest_main",
     ],
@@ -209,6 +214,7 @@ cc_library(
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/rummy:game_state",
         "//domains/games/libs/cards/rummy:table",
+        "//domains/games/libs/cards/spades:table",
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:table",
         "//domains/games/libs/pong:table",
@@ -235,6 +241,7 @@ cc_test(
         "//domains/games/libs/cards/rummy:game_state",
         "//domains/games/libs/cards/rummy:gin",
         "//domains/games/libs/cards/rummy:table",
+        "//domains/games/libs/cards/spades:table",
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:table",
         "//domains/games/libs/pong:table",
@@ -471,6 +478,7 @@ cc_library(
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:game_state_serde",
         "//domains/games/libs/cards/rummy:table_serde",
+        "//domains/games/libs/cards/spades:table_serde",
         "//domains/games/libs/chess_play:game_state_serde",
         "//domains/games/libs/chess_play:table_serde",
         "//domains/games/libs/pong:table_serde",
@@ -554,6 +562,8 @@ cc_test(
         "//domains/games/libs/cards/rummy:game_state",
         "//domains/games/libs/cards/rummy:table",
         "//domains/games/libs/cards/rummy:table_serde",
+        "//domains/games/libs/cards/spades:table",
+        "//domains/games/libs/cards/spades:table_serde",
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:game_state_serde",
         "//domains/games/libs/chess_play:table",
@@ -588,6 +598,8 @@ cc_test(
         "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/cards/golf:game_state_serde",
         "//domains/games/libs/cards/golf:player",
+        "//domains/games/libs/cards/spades:table",
+        "//domains/games/libs/cards/spades:table_serde",
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:game_state_serde",
         "//domains/games/libs/chess_play:table",
@@ -830,6 +842,7 @@ cc_library(
         "//domains/games/libs/cards/golf:player",
         "//domains/games/libs/cards/rummy:game_state",
         "//domains/games/libs/cards/rummy:table",
+        "//domains/games/libs/cards/spades:table",
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:table",
         "//domains/games/libs/mithril_cpp:client",
@@ -999,6 +1012,33 @@ cc_test(
     ],
 )
 
+# Spades' wire goldens (#1658): the spades envelope's command and update
+# bytes, the browser's contract.
+cc_test(
+    name = "spades_wire_test",
+    size = "small",
+    srcs = [
+        "spades_wire_test.cc",
+        "wire_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_server",
+        ":golf_hub",
+        ":id_generator",
+        ":rate_limiter",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:eventstream",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
 # Rummy's wire goldens (#245): the rummy envelope's command and update
 # bytes, every in-game move's spelling, and the view from each chair.
 cc_test(
@@ -1144,6 +1184,8 @@ cc_test(
         ":id_generator",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/cards/spades:table",
+        "//domains/games/libs/cards/spades:table_serde",
         "//domains/games/libs/pong:rally",
         "//domains/games/libs/pong:table",
         "//domains/games/libs/pong:table_serde",
@@ -1174,6 +1216,8 @@ cc_test(
         ":id_generator",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/cards/spades:table",
+        "//domains/games/libs/cards/spades:table_serde",
         "//domains/games/libs/pong:rally",
         "//domains/games/libs/pong:table",
         "//domains/games/libs/pong:table_serde",
@@ -1286,6 +1330,33 @@ cc_test(
 )
 
 cc_test(
+    name = "spades_e2e_test",
+    size = "small",
+    srcs = [
+        "spades_e2e_test.cc",
+        "stream_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_client",
+        ":games_hub_smithy_server",
+        ":golf_hub",
+        ":hub_store",
+        ":id_generator",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
+cc_test(
     name = "hub_e2e_test",
     size = "small",
     srcs = [
@@ -1303,6 +1374,7 @@ cc_test(
         "model/lobby.smithy",
         "model/pong.smithy",
         "model/rummy.smithy",
+        "model/spades.smithy",
         "model/voice.smithy",
     ],
     deps = [
