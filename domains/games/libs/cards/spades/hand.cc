@@ -90,6 +90,9 @@ absl::StatusOr<Hand> Hand::restore(int dealer, std::array<std::vector<Card>, kSe
         trickWinner(last->plays) != last->winner || tricks[last->winner] == 0) {
       return absl::InvalidArgumentError("the last trick is not one play could leave");
     }
+    if (!ValidSeat(last->plays.front().seat)) {
+      return absl::InvalidArgumentError("the last trick is played by no seat");
+    }
     for (int i = 0; i < kSeats; ++i) {
       if (last->plays[i].seat != (last->plays.front().seat + i) % kSeats) {
         return absl::InvalidArgumentError("the last trick is played out of turn");
@@ -128,6 +131,21 @@ absl::StatusOr<Hand> Hand::restore(int dealer, std::array<std::vector<Card>, kSe
   }
   if (spade_seen && !spades_broken) {
     return absl::InvalidArgumentError("a spade played with spades unbroken");
+  }
+  if (spades_broken && played == 0 && !spade_seen) {
+    return absl::InvalidArgumentError("spades broken before any was played");
+  }
+  // A seat off the suit led held none of it, and holds none now: a hand
+  // only loses cards.
+  const auto followed = [&hands](const std::vector<TrickPlay>& plays) {
+    if (plays.empty()) return true;
+    const Suit led = plays.front().card.getSuit();
+    return std::all_of(plays.begin() + 1, plays.end(), [&](const TrickPlay& play) {
+      return play.card.getSuit() == led || !HoldsSuit(hands[play.seat], led);
+    });
+  };
+  if (!followed(current) || (last.has_value() && !followed(last->plays))) {
+    return absl::InvalidArgumentError("a card off the suit led by a seat that holds it");
   }
   return Hand(dealer, std::move(hands), bids, tricks, std::move(current), std::move(last),
               spades_broken);

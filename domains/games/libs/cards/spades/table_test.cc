@@ -34,6 +34,17 @@ Table PlayOut(Table table, const std::array<int, kSeats>& bids) {
   return table;
 }
 
+// A table one hand into a game standing at `scores`, about to bid the
+// hand of `opened`.
+Table Near(const Table& opened, std::array<int, kTeams> scores, std::array<int, kTeams> bags = {},
+           std::vector<GameScore> games = {}) {
+  const auto table = Table::restore(opened.seats(), opened.hand(), 2, scores, bags,
+                                    {HandLine{{1, 1, 1, 1}, {4, 3, 3, 3}, scores, scores}},
+                                    std::move(games), std::nullopt);
+  EXPECT_TRUE(table.ok()) << table.status();
+  return *table;
+}
+
 TEST(Table, OpensForFourSeatsWithSeatZeroDealing) {
   EXPECT_EQ(Table::open({"ann", "bob", "cat"}, FullDeck()).status().code(),
             StatusCode::kInvalidArgument);
@@ -57,9 +68,8 @@ TEST(Table, AHandPlayedOutIsScoredAndKept) {
   EXPECT_EQ(table.hand().tricks(), (std::array<int, kSeats>{13, 0, 0, 0}));
   EXPECT_EQ(table.scores(), (std::array<int, kTeams>{158, -50}));
   EXPECT_EQ(table.bags(), (std::array<int, kTeams>{8, 0}));
-  ASSERT_EQ(table.scoreSheet().size(), 1u);
-  EXPECT_EQ(table.scoreSheet()[0],
-            (HandLine{{5, 3, kNil, 2}, {13, 0, 0, 0}, {158, -50}, {158, -50}}));
+  ASSERT_EQ(table.hands().size(), 1u);
+  EXPECT_EQ(table.hands()[0], (HandLine{{5, 3, kNil, 2}, {13, 0, 0, 0}, {158, -50}, {158, -50}}));
   EXPECT_EQ(table.winner(), std::nullopt);
   EXPECT_EQ(table.bid(1, 3).status().code(), StatusCode::kFailedPrecondition);
 }
@@ -90,8 +100,7 @@ TEST(Table, BagsCarryIntoTheNextHand) {
 
 TEST(Table, AHandThatWinsTheGameEndsItAndTheNextDealStartsAnother) {
   const Table opened = *Table::open(kSeatIds, FullDeck());
-  const Table near =
-      *Table::restore(kSeatIds, opened.hand(), 6, {420, 100}, {0, 0}, {}, {0, 2}, std::nullopt);
+  const Table near = Near(opened, {420, 100}, {}, {{1, {80, 510}}, {1, {200, 505}}});
   const Table won = PlayOut(near, {5, 3, kNil, 2});
   EXPECT_EQ(won.phase(), Phase::kWon);
   EXPECT_EQ(won.winner(), 0);
@@ -101,7 +110,7 @@ TEST(Table, AHandThatWinsTheGameEndsItAndTheNextDealStartsAnother) {
   EXPECT_EQ(fresh->phase(), Phase::kBidding);
   EXPECT_EQ(fresh->scores(), (std::array<int, kTeams>{0, 0}));
   EXPECT_EQ(fresh->bags(), (std::array<int, kTeams>{0, 0}));
-  EXPECT_TRUE(fresh->scoreSheet().empty());
+  EXPECT_TRUE(fresh->hands().empty());
   EXPECT_EQ(fresh->handNumber(), 1);
   EXPECT_EQ(fresh->hand().dealer(), 1);
   EXPECT_EQ(fresh->gamesWon(), (std::array<int, kTeams>{1, 2}));
@@ -123,16 +132,64 @@ TEST(Table, ALeaveClosesTheTable) {
 }
 
 TEST(Table, RestoreRefusesWhatPlayCouldNotReach) {
-  const Hand hand = Table::open(kSeatIds, FullDeck())->hand();
-  EXPECT_FALSE(
-      Table::restore({"ann", "bob"}, hand, 1, {0, 0}, {0, 0}, {}, {0, 0}, std::nullopt).ok());
-  EXPECT_FALSE(Table::restore(kSeatIds, hand, 0, {0, 0}, {0, 0}, {}, {0, 0}, std::nullopt).ok());
-  EXPECT_FALSE(Table::restore(kSeatIds, hand, 1, {0, 0}, {10, 0}, {}, {0, 0}, std::nullopt).ok());
-  EXPECT_FALSE(Table::restore(kSeatIds, hand, 1, {0, 0}, {0, 0}, {}, {-1, 0}, std::nullopt).ok());
-  EXPECT_FALSE(Table::restore(kSeatIds, hand, 1, {0, 0}, {0, 0}, {}, {0, 0}, 5).ok());
+  const Table opened = *Table::open(kSeatIds, FullDeck());
+  const Hand hand = opened.hand();
+  const std::vector<HandLine> one = {HandLine{{1, 1, 1, 1}, {4, 3, 3, 3}, {10, 10}, {10, 10}}};
+  const auto restore = [&](int hand_number, std::array<int, kTeams> scores,
+                           std::array<int, kTeams> bags, std::vector<HandLine> hands,
+                           std::vector<GameScore> games, std::optional<int> left) {
+    return Table::restore(kSeatIds, hand, hand_number, scores, bags, std::move(hands),
+                          std::move(games), left);
+  };
+  EXPECT_TRUE(restore(1, {0, 0}, {0, 0}, {}, {}, std::nullopt).ok());
+  EXPECT_TRUE(restore(2, {10, 10}, {0, 0}, one, {}, std::nullopt).ok());
+  EXPECT_FALSE(Table::restore({"ann", "bob"}, hand, 1, {0, 0}, {0, 0}, {}, {}, std::nullopt).ok());
+  EXPECT_FALSE(restore(1, {0, 0}, {10, 0}, {}, {}, std::nullopt).ok());
+  EXPECT_FALSE(restore(1, {0, 0}, {0, 0}, {}, {}, 5).ok());
+  // A line for each hand played out, and the scores the last line's.
+  EXPECT_FALSE(restore(0, {0, 0}, {0, 0}, {}, {}, std::nullopt).ok());
+  EXPECT_FALSE(restore(1, {10, 10}, {0, 0}, one, {}, std::nullopt).ok());
+  EXPECT_FALSE(restore(2, {0, 0}, {0, 0}, one, {}, std::nullopt).ok());
+  EXPECT_FALSE(restore(1, {300, -50}, {0, 0}, {}, {}, std::nullopt).ok());
   // A game won is a hand played out; in a hand still bid, it is not.
-  EXPECT_FALSE(Table::restore(kSeatIds, hand, 1, {510, 0}, {0, 0}, {}, {0, 0}, std::nullopt).ok());
-  EXPECT_TRUE(Table::restore(kSeatIds, hand, 1, {0, 0}, {0, 0}, {}, {0, 0}, std::nullopt).ok());
+  const std::vector<HandLine> out = {HandLine{{1, 1, 1, 1}, {4, 3, 3, 3}, {510, 0}, {510, 0}}};
+  EXPECT_FALSE(restore(2, {510, 0}, {0, 0}, out, {}, std::nullopt).ok());
+  // A leave in a game abandoned it: the games' last.
+  EXPECT_FALSE(restore(1, {0, 0}, {0, 0}, {}, {}, 2).ok());
+  EXPECT_TRUE(restore(1, {0, 0}, {0, 0}, {}, {{std::nullopt, {0, 0}}}, 2).ok());
+  EXPECT_FALSE(restore(1, {0, 0}, {0, 0}, {}, {{3, {0, 0}}}, std::nullopt).ok());
+  // A hand played out is the last line.
+  const Table scored = PlayOut(opened, {5, 3, kNil, 2});
+  EXPECT_TRUE(Table::restore(kSeatIds, scored.hand(), 1, scored.scores(), scored.bags(),
+                             scored.hands(), {}, std::nullopt)
+                  .ok());
+  std::vector<HandLine> other = scored.hands();
+  other.back().bids[0] = 6;
+  EXPECT_FALSE(Table::restore(kSeatIds, scored.hand(), 1, scored.scores(), scored.bags(), other, {},
+                              std::nullopt)
+                   .ok());
+}
+
+// The games a table ended: each won one, and one a leave abandoned.
+TEST(Table, KeepsEachGameItEnded) {
+  const Table opened = *Table::open(kSeatIds, FullDeck());
+  const Table won = PlayOut(Near(opened, {420, 100}), {5, 3, kNil, 2});
+  EXPECT_EQ(won.result(), (GameScore{0, {578, 50}}));
+  EXPECT_EQ(won.games(), (std::vector<GameScore>{{0, {578, 50}}}));
+  // A leave after the game was won abandons nothing.
+  const Table left_after = *won.removePlayer(1);
+  EXPECT_FALSE(left_after.abandonedGame());
+  EXPECT_EQ(left_after.result(), std::nullopt);
+  EXPECT_EQ(left_after.games().size(), 1u);
+  // One in the next game abandons it, on the scores it stood at.
+  const Table abandoned = *won.deal(FullDeck())->removePlayer(1);
+  EXPECT_TRUE(abandoned.abandonedGame());
+  EXPECT_EQ(abandoned.result(), (GameScore{std::nullopt, {0, 0}}));
+  EXPECT_EQ(abandoned.gamesWon(), (std::array<int, kTeams>{1, 0}));
+  // Between hands of a game not yet won, a leave abandons it too.
+  const Table between = *PlayOut(opened, {5, 3, kNil, 2}).removePlayer(0);
+  EXPECT_EQ(between.result(), (GameScore{std::nullopt, {158, -50}}));
+  EXPECT_EQ(opened.result(), std::nullopt);
 }
 
 TEST(Phase, HasAWireWordEach) {

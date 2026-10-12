@@ -9,9 +9,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <deque>
+#include <memory>
 #include <optional>
+#include <random>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -135,6 +140,37 @@ class SpadesFixture : public GamesHubStreamFixture {
     }
   }
 
+  // The dealer takes every trick: dealer bids 13 and partner nil, the
+  // other team one each. Team 0 deals hands 1, 3 and 5, and is out at the
+  // fifth: 230, 210, 440, 420, 650 to team 1's -20, 210, 190, 420, 400.
+  static void WinTheFirstGame(Started& started) {
+    for (int hand = 0; hand < 5; ++hand) {
+      const int dealer = hand % 4;
+      std::array<int, 4> bids{};
+      for (int seat = 0; seat < 4; ++seat) {
+        bids[seat] = seat == dealer ? 13 : seat == (dealer + 2) % 4 ? 0 : 1;
+      }
+      ASSERT_NO_FATAL_FAILURE(PlayOut(started, bids));
+      if (hand < 4) {
+        ASSERT_EQ(started.views[0].phase, "scored") << "hand " << hand + 1;
+        ASSERT_TRUE(started.table.seats[0].stream.Send(DealNext()).ok());
+        ASSERT_TRUE(ReadViews(started));
+      }
+    }
+  }
+
+  // No gameEnded arrives within a moment.
+  static void ExpectNoGameEnded(moonbase::games::PlayClientStream& stream) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+    while (true) {
+      auto received = ReceiveWithin(stream, deadline);
+      if (!received.ok() || !received->has_value()) return;
+      if (const auto* spades = (*received)->as_spades_or_null()) {
+        EXPECT_FALSE(spades->update.as_gameEnded_or_null() != nullptr) << "a game said twice";
+      }
+    }
+  }
+
   // The refusal the hub sends `seat` next.
   static std::string RefusalTo(Seat& seat) {
     auto refused = ReceiveCase(seat.stream, "commandRejected");
@@ -236,9 +272,9 @@ TEST_F(SpadesFixture, AHandPlayedOutIsScoredAndAnySeatDealsTheNext) {
   EXPECT_EQ(scored.teams[0].score, 158);
   EXPECT_EQ(scored.teams[0].bags, 8);
   EXPECT_EQ(scored.teams[1].score, -50);
-  ASSERT_EQ(scored.scoreSheet.size(), 1u);
-  EXPECT_EQ(scored.scoreSheet[0].bids, (std::vector<int>{5, 3, 0, 2}));
-  EXPECT_EQ(scored.scoreSheet[0].points, (std::vector<int>{158, -50}));
+  ASSERT_EQ(scored.hands.size(), 1u);
+  EXPECT_EQ(scored.hands[0].bids, (std::vector<int>{5, 3, 0, 2}));
+  EXPECT_EQ(scored.hands[0].points, (std::vector<int>{158, -50}));
   ASSERT_TRUE(scored.lastTrick.has_value());
   EXPECT_EQ(scored.lastTrick->winner, started->table.ids()[0]);
 
@@ -258,28 +294,15 @@ TEST_F(SpadesFixture, NoDealUntilTheHandIsScored) {
   EXPECT_EQ(RefusalTo(started->table.seats[0]), "the hand is not over");
 }
 
-// The dealer takes every trick: dealer bids 13 and partner nil, the
-// other team one each. Team 0 deals hands 1, 3 and 5, and is out at the
-// fifth: 230, 210, 440, 420, 650 to team 1's -20, 210, 190, 420, 400.
 TEST_F(SpadesFixture, ATeamThatPassesFiveHundredWinsAndTheRoomCountsIt) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
-  for (int hand = 0; hand < 5; ++hand) {
-    const int dealer = hand % 4;
-    std::array<int, 4> bids{};
-    for (int seat = 0; seat < 4; ++seat) {
-      bids[seat] = seat == dealer ? 13 : seat == (dealer + 2) % 4 ? 0 : 1;
-    }
-    ASSERT_NO_FATAL_FAILURE(PlayOut(*started, bids));
-    if (hand < 4) {
-      ASSERT_EQ(started->views[0].phase, "scored") << "hand " << hand + 1;
-      ASSERT_TRUE(started->table.seats[0].stream.Send(DealNext()).ok());
-      ASSERT_TRUE(ReadViews(*started));
-    }
-  }
+  ASSERT_NO_FATAL_FAILURE(WinTheFirstGame(*started));
   const SpadesView& won = started->views[1];
   EXPECT_EQ(won.phase, "won");
-  EXPECT_EQ(won.winningTeam, 0);
+  ASSERT_TRUE(won.result.has_value());
+  EXPECT_EQ(won.result->winners,
+            (std::vector<std::string>{started->table.ids()[0], started->table.ids()[2]}));
   EXPECT_EQ(won.teams[0].score, 650);
   EXPECT_EQ(won.teams[1].score, 400);
   EXPECT_EQ(won.teams[0].gamesWon, 1);
@@ -287,9 +310,10 @@ TEST_F(SpadesFixture, ATeamThatPassesFiveHundredWinsAndTheRoomCountsIt) {
   for (Seat& seat : started->table.seats) {
     auto ended = ReceiveSpades(seat.stream, "gameEnded");
     ASSERT_TRUE(ended.has_value());
-    EXPECT_EQ(ended->as_gameEnded_or_null()->ending, "points");
-    EXPECT_EQ(ended->as_gameEnded_or_null()->winners, (std::vector<std::string>{ids[0], ids[2]}));
-    EXPECT_EQ(ended->as_gameEnded_or_null()->scores, (std::vector<int>{650, 400}));
+    EXPECT_EQ(ended->as_gameEnded_or_null()->result.ending, "points");
+    EXPECT_EQ(ended->as_gameEnded_or_null()->result.winners,
+              (std::vector<std::string>{ids[0], ids[2]}));
+    EXPECT_EQ(ended->as_gameEnded_or_null()->result.scores, (std::vector<int>{650, 400}));
   }
   auto room = AwaitRoomState(
       started->table.seats[0].stream,
@@ -314,16 +338,18 @@ TEST_F(SpadesFixture, ATeamThatPassesFiveHundredWinsAndTheRoomCountsIt) {
   EXPECT_THAT(games_[1], ::testing::HasSubstr(R"("event":"game_finished")"));
   EXPECT_THAT(games_[1], ::testing::HasSubstr(R"("outcome":"completed")"));
 
-  // The next deal starts a new game, scores at nothing.
+  // The next deal starts a new game, scores at nothing, and says nothing
+  // more of the last.
   ASSERT_TRUE(started->table.seats[2].stream.Send(DealNext()).ok());
   ASSERT_TRUE(ReadViews(*started));
+  ExpectNoGameEnded(started->table.seats[1].stream);
   ASSERT_EQ(games_.size(), 3u);
   EXPECT_THAT(games_[2], ::testing::HasSubstr(R"("event":"game_started")"));
   EXPECT_EQ(started->views[0].phase, "bidding");
   EXPECT_EQ(started->views[0].handNumber, 1);
   EXPECT_EQ(started->views[0].teams[0].score, 0);
   EXPECT_EQ(started->views[0].teams[0].gamesWon, 1);
-  EXPECT_TRUE(started->views[0].scoreSheet.empty());
+  EXPECT_TRUE(started->views[0].hands.empty());
 }
 
 // A leave closes the table: the game in play is abandoned, with no
@@ -340,10 +366,12 @@ TEST_F(SpadesFixture, ALeaveClosesTheTableAndAbandonsTheGame) {
     ASSERT_TRUE(state.has_value());
     EXPECT_EQ(state->as_gameState_or_null()->view.phase, "closed");
     EXPECT_EQ(state->as_gameState_or_null()->view.left, leaver);
+    ASSERT_TRUE(state->as_gameState_or_null()->view.result.has_value());
+    EXPECT_EQ(state->as_gameState_or_null()->view.result->ending, "abandoned");
     auto ended = ReceiveSpades(stayer.stream, "gameEnded");
     ASSERT_TRUE(ended.has_value());
-    EXPECT_EQ(ended->as_gameEnded_or_null()->ending, "abandoned");
-    EXPECT_TRUE(ended->as_gameEnded_or_null()->winners.empty());
+    EXPECT_EQ(ended->as_gameEnded_or_null()->result.ending, "abandoned");
+    EXPECT_TRUE(ended->as_gameEnded_or_null()->result.winners.empty());
   }
   auto room = AwaitRoomState(
       started->table.seats[0].stream,
@@ -371,6 +399,65 @@ TEST_F(SpadesFixture, TheRoomListsTheTableAsSpades) {
   ASSERT_TRUE(room.has_value());
   EXPECT_EQ(room->games[0].game, "spades");
   EXPECT_EQ(TableOf(*room, started->table.ids()[0]), AtTable("spades", started->table.game_id));
+}
+
+// A leave after a won game abandons nothing: the game was said and
+// counted when it was won.
+TEST_F(SpadesFixture, ALeaveAfterAWonGameEndsNothingFurther) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  ASSERT_NO_FATAL_FAILURE(WinTheFirstGame(*started));
+  for (int seat = 0; seat < 3; ++seat) {
+    ASSERT_TRUE(ReceiveSpades(started->table.seats[seat].stream, "gameEnded").has_value());
+  }
+  ASSERT_TRUE(started->table.seats[3].stream.Send(LeaveTable()).ok());
+  auto closed = ReceiveSpades(started->table.seats[0].stream, "gameState");
+  ASSERT_TRUE(closed.has_value());
+  EXPECT_EQ(closed->as_gameState_or_null()->view.phase, "closed");
+  EXPECT_FALSE(closed->as_gameState_or_null()->view.result.has_value());
+  auto room = AwaitRoomState(
+      started->table.seats[0].stream,
+      [](const moonbase::games::RoomState& state) { return state.games.empty(); },
+      "the table gone from the room");
+  ASSERT_TRUE(room.has_value());
+  for (const auto& player : room->players) EXPECT_EQ(player.gamesPlayed, 1) << player.playerId;
+  ASSERT_EQ(games_.size(), 2u);
+  ExpectNoEvent(started->table.seats[0].stream, std::chrono::milliseconds(200));
+}
+
+// A fixed shuffle: a hand of every suit.
+class SeededDealer : public cards::Dealer {
+ public:
+  void ShuffleDeck(std::deque<cards::Card>& deck) override {
+    std::mt19937 generator(1658);
+    std::shuffle(deck.begin(), deck.end(), generator);
+  }
+};
+
+class ShuffledSpadesFixture : public SpadesFixture {
+ protected:
+  std::shared_ptr<cards::Dealer> MakeDealer() override { return std::make_shared<SeededDealer>(); }
+};
+
+// Your own hand by suit — spades, hearts, clubs, diamonds, the colours
+// alternating — and by rank within it.
+TEST_F(ShuffledSpadesFixture, YourHandIsSortedBySuitThenRank) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  const auto& hand = started->views[0].players[0].hand;
+  ASSERT_EQ(hand.size(), 13u);
+  const std::string suits = "♠♥♣♦";
+  const std::string ranks[] = {"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"};
+  const auto order = [&](const moonbase::games::Card& card) {
+    const auto rank = std::find(std::begin(ranks), std::end(ranks), card.rank) - std::begin(ranks);
+    return std::make_pair(suits.find(card.suit), rank);
+  };
+  std::set<std::string> seen;
+  for (std::size_t i = 0; i < hand.size(); ++i) {
+    seen.insert(hand[i].suit);
+    if (i > 0) EXPECT_LT(order(hand[i - 1]), order(hand[i])) << Face(hand[i - 1]) << Face(hand[i]);
+  }
+  EXPECT_GE(seen.size(), 3u) << "the seed should deal a mixed hand";
 }
 
 }  // namespace

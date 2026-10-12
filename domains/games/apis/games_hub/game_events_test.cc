@@ -250,8 +250,9 @@ spades::Table Spades() { return *spades::Table::open(kSpadesSeats, SpadesDeck())
 // Seat 0 holds every spade and takes every trick: 158 a hand to its team.
 spades::Table SpadesWon() {
   const spades::Table opened = Spades();
-  const spades::Table near = *spades::Table::restore(kSpadesSeats, opened.hand(), 4, {460, 0},
-                                                     {0, 0}, {}, {0, 0}, std::nullopt);
+  const spades::Table near = *spades::Table::restore(
+      kSpadesSeats, opened.hand(), 2, {460, 0}, {0, 0},
+      {spades::HandLine{{1, 1, 1, 1}, {4, 3, 3, 3}, {460, 0}, {460, 0}}}, {}, std::nullopt);
   return SpadesPlayedOut(near, {5, 3, spades::kNil, 2});
 }
 

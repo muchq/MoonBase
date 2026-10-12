@@ -195,5 +195,42 @@ TEST(Restore, RefusesWhatPlayCouldNotReach) {
   EXPECT_TRUE(Hand::restore(0, two_each, {3, 3, 3, 3}, {3, 3, 3, 2}, {}, last, false).ok());
 }
 
+// What a stored row could hold that play never leaves: a seat outside the
+// table, spades broken before any spade was played, a card off the suit
+// led by a seat that holds it.
+TEST(Restore, RefusesRowsTamperedWith) {
+  const std::array<std::vector<Card>, kSeats> two_each = LateHand().hands();
+  const Trick last = *LateHand().last();
+  // Led by "seat -1", seat 0 taking it: in turn, by the arithmetic.
+  const Trick off_table{{{-1, C(Rank::Two, Suit::Diamonds)},
+                         {0, C(Rank::Ace, Suit::Diamonds)},
+                         {1, C(Rank::Jack, Suit::Diamonds)},
+                         {2, C(Rank::Three, Suit::Diamonds)}},
+                        0};
+  EXPECT_FALSE(Hand::restore(0, two_each, {3, 3, 3, 3}, {3, 3, 3, 2}, {}, off_table, false).ok());
+
+  const auto dealt = Hand::deal(0, FullDeck())->hands();
+  EXPECT_FALSE(Hand::restore(0, dealt, {3, 3, 3, 3}, {0, 0, 0, 0}, {}, std::nullopt, true).ok());
+  EXPECT_TRUE(Hand::restore(0, dealt, {3, 3, 3, 3}, {0, 0, 0, 0}, {}, std::nullopt, false).ok());
+
+  // Seat 0 holds the five of hearts, so its spade on a heart lead is no play.
+  auto led = two_each;
+  led[3] = {C(Rank::Nine, Suit::Spades)};
+  led[0] = {C(Rank::Five, Suit::Hearts)};
+  const std::vector<TrickPlay> off_suit = {{3, C(Rank::King, Suit::Hearts)},
+                                           {0, C(Rank::Two, Suit::Spades)}};
+  EXPECT_FALSE(Hand::restore(0, led, {3, 3, 3, 3}, {3, 3, 3, 2}, off_suit, last, true).ok());
+  led[0] = {C(Rank::Two, Suit::Spades)};
+  const std::vector<TrickPlay> followed = {{3, C(Rank::King, Suit::Hearts)},
+                                           {0, C(Rank::Five, Suit::Hearts)}};
+  EXPECT_TRUE(Hand::restore(0, led, {3, 3, 3, 3}, {3, 3, 3, 2}, followed, last, false).ok());
+
+  // The same in the trick last taken: seat 1 threw a heart on diamonds
+  // while it still holds a diamond.
+  Trick discarded = last;
+  discarded.plays[2].card = C(Rank::Two, Suit::Hearts);
+  EXPECT_FALSE(Hand::restore(0, two_each, {3, 3, 3, 3}, {3, 3, 3, 2}, {}, discarded, false).ok());
+}
+
 }  // namespace
 }  // namespace spades

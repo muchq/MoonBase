@@ -19,9 +19,9 @@ namespace spades {
 ///    "current":[{"seat":n, "card":c}...],
 ///    "last":{"plays":[{"seat":n, "card":c} x4], "winner":n} | null,
 ///    "spadesBroken":bool, "handNumber":n, "scores":[n, n], "bags":[n, n],
-///    "scoreSheet":[{"bids":[n x4], "tricks":[n x4], "points":[n, n],
-///                   "scores":[n, n]}...],
-///    "gamesWon":[n, n], "left":n | null}
+///    "lines":[{"bids":[n x4], "tricks":[n x4], "points":[n, n],
+///              "scores":[n, n]}...],
+///    "games":[{"winner":0|1|null, "scores":[n, n]}...], "left":n | null}
 [[nodiscard]] std::string serializeTable(const Table& table);
 [[nodiscard]] absl::StatusOr<Table> deserializeTable(const std::string& serialized);
 

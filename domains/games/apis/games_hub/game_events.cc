@@ -95,8 +95,7 @@ std::optional<GameFinished> FinishedOf(const HostedState& state, std::size_t pla
     // A game won, the table dealing on; or one a leave abandoned. A table
     // closed between games recorded its last when it was won.
     if (table->phase() == spades::Phase::kWon) return finished;
-    if (table->isOver() && (table->hand().stage() != spades::Stage::kDone ||
-                            !spades::gameWinner(table->scores()).has_value())) {
+    if (table->abandonedGame()) {
       finished.outcome = kOutcomeAbandoned;
       return finished;
     }

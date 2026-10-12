@@ -69,11 +69,12 @@ TEST_F(SpadesWireTest, TableFlowPinsSpadesCommandAndUpdatePayloadBytes) {
   ASSERT_TRUE(seats[0]->Send(CommandFrame("spades", R"({"move":{"createGame":{}}})")).ok());
   EXPECT_EQ(Spades(*seats[0]),
             R"({"update":{"gameCreated":{"createdBy":"player-1","gameId":"GAME01"}}})");
-  EXPECT_EQ(Spades(*seats[0]),
-            R"({"update":{"gameJoined":{"view":{"gameId":"GAME01","handNumber":0,"legal":[],)"
-            R"("phase":"waiting","players":[{"hand":[],"handCount":0,"playerId":"player-1",)"
-            R"("team":0,"tricks":0}],"scoreSheet":[],"spadesBroken":false,"teams":[],)"
-            R"("trick":[]}}}})");
+  EXPECT_EQ(
+      Spades(*seats[0]),
+      R"({"update":{"gameJoined":{"view":{"gameId":"GAME01","handNumber":0,"hands":[],"legal":[],)"
+      R"("phase":"waiting","players":[{"hand":[],"handCount":0,"playerId":"player-1",)"
+      R"("team":0,"tricks":0}],"spadesBroken":false,"teams":[],)"
+      R"("trick":[]}}}})");
 
   for (int i = 1; i < 4; ++i) {
     json joined;
@@ -92,13 +93,13 @@ TEST_F(SpadesWireTest, TableFlowPinsSpadesCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(
       SpadesCase(*seats[1], "gameState"),
       R"({"update":{"gameState":{"view":{"currentPlayerId":"player-2","dealer":"player-1",)"
-      R"("gameId":"GAME01","handNumber":1,"legal":[],"phase":"bidding","players":[)"
+      R"("gameId":"GAME01","handNumber":1,"hands":[],"legal":[],"phase":"bidding","players":[)"
       R"({"hand":[],"handCount":13,"playerId":"player-1","team":0,"tricks":0},)"
       R"({"hand":[{"rank":"2","suit":"♣"},{"rank":"3","suit":"♣"},{"rank":"4","suit":"♣"},{"rank":"5","suit":"♣"},{"rank":"6","suit":"♣"},{"rank":"7","suit":"♣"},{"rank":"8","suit":"♣"},{"rank":"9","suit":"♣"},{"rank":"10","suit":"♣"},{"rank":"J","suit":"♣"},{"rank":"Q","suit":"♣"},{"rank":"K","suit":"♣"},{"rank":"A","suit":"♣"}],)"
       R"("handCount":13,"playerId":"player-2","team":1,"tricks":0},)"
       R"({"hand":[],"handCount":13,"playerId":"player-3","team":0,"tricks":0},)"
       R"({"hand":[],"handCount":13,"playerId":"player-4","team":1,"tricks":0}],)"
-      R"("scoreSheet":[],"spadesBroken":false,"teams":[)"
+      R"("spadesBroken":false,"teams":[)"
       R"({"bags":0,"gamesWon":0,"players":["player-1","player-3"],"score":0},)"
       R"({"bags":0,"gamesWon":0,"players":["player-2","player-4"],"score":0}],"trick":[]}}}})");
 
@@ -125,17 +126,18 @@ TEST_F(SpadesWireTest, TableFlowPinsSpadesCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(view["players"][1]["handCount"], 12);
   EXPECT_EQ(view["players"][1]["hand"].dump(), "[]");
   EXPECT_EQ(view["legal"].size(), 13u);
-  EXPECT_EQ(KeysOf(view), (std::set<std::string>{"currentPlayerId", "dealer", "gameId",
-                                                 "handNumber", "legal", "phase", "players",
-                                                 "scoreSheet", "spadesBroken", "teams", "trick"}));
+  EXPECT_EQ(KeysOf(view),
+            (std::set<std::string>{"currentPlayerId", "dealer", "gameId", "handNumber", "legal",
+                                   "phase", "players", "hands", "spadesBroken", "teams", "trick"}));
 
   ASSERT_TRUE(seats[2]->Send(CommandFrame("spades", R"({"move":{"deal":{}}})")).ok());
   EXPECT_EQ(Next(*seats[2], "commandRejected"), R"({"reason":"the hand is not over"})");
 
   ASSERT_TRUE(seats[3]->Send(CommandFrame("spades", R"({"move":{"leaveGame":{}}})")).ok());
   EXPECT_EQ(SpadesCase(*seats[3], "gameLeft"), R"({"update":{"gameLeft":{"gameId":"GAME01"}}})");
-  EXPECT_EQ(SpadesCase(*seats[0], "gameEnded"),
-            R"({"update":{"gameEnded":{"ending":"abandoned","scores":[0,0],"winners":[]}}})");
+  EXPECT_EQ(
+      SpadesCase(*seats[0], "gameEnded"),
+      R"({"update":{"gameEnded":{"result":{"ending":"abandoned","scores":[0,0],"winners":[]}}}})");
 }
 
 }  // namespace

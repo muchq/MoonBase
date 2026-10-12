@@ -1,6 +1,8 @@
 #include "domains/games/libs/cards/spades/table_serde.h"
 
 #include <array>
+#include <cstdint>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -53,8 +55,13 @@ absl::StatusOr<const json*> Field(const json& payload, const char* name) {
 }
 
 absl::StatusOr<int> Int(const json& value, const char* name) {
-  if (!value.is_number_integer())
-    return absl::InvalidArgumentError(absl::StrCat(name, " is a count"));
+  // A count past an int's range is refused, not narrowed.
+  // Parsed, a count at zero or above is unsigned and one below signed.
+  const bool fits =
+      value.is_number_unsigned()
+          ? value.get<uint64_t>() <= std::numeric_limits<int>::max()
+          : value.is_number_integer() && value.get<int64_t>() >= std::numeric_limits<int>::min();
+  if (!fits) return absl::InvalidArgumentError(absl::StrCat(name, " is a count"));
   return value.get<int>();
 }
 
@@ -169,10 +176,27 @@ absl::StatusOr<Hand> HandOf(const json& payload) {
                        std::move(last), (*broken_field)->get<bool>());
 }
 
-absl::StatusOr<std::vector<HandLine>> SheetOf(const json& payload) {
-  const auto field = Field(payload, "scoreSheet");
+absl::StatusOr<std::vector<GameScore>> GamesOf(const json& payload) {
+  const auto field = Field(payload, "games");
   if (!field.ok()) return field.status();
-  if (!(*field)->is_array()) return absl::InvalidArgumentError("scoreSheet is an array");
+  if (!(*field)->is_array()) return absl::InvalidArgumentError("games is an array");
+  std::vector<GameScore> games;
+  for (const json& game : **field) {
+    const auto winner_field = Field(game, "winner");
+    if (!winner_field.ok()) return winner_field.status();
+    const auto winner = OptionalInt(**winner_field, "a winner");
+    if (!winner.ok()) return winner.status();
+    const auto scores = CountsField<kTeams>(game, "scores");
+    if (!scores.ok()) return scores.status();
+    games.push_back({*winner, *scores});
+  }
+  return games;
+}
+
+absl::StatusOr<std::vector<HandLine>> SheetOf(const json& payload) {
+  const auto field = Field(payload, "lines");
+  if (!field.ok()) return field.status();
+  if (!(*field)->is_array()) return absl::InvalidArgumentError("lines is an array");
   std::vector<HandLine> sheet;
   for (const json& line : **field) {
     const auto bids = CountsField<kSeats>(line, "bids");
@@ -206,8 +230,13 @@ std::string serializeTable(const Table& table) {
   if (hand.last().has_value()) {
     last = {{"plays", PlaysJson(hand.last()->plays)}, {"winner", hand.last()->winner}};
   }
+  json games = json::array();
+  for (const GameScore& game : table.games()) {
+    games.push_back({{"winner", game.winner.has_value() ? json(*game.winner) : json(nullptr)},
+                     {"scores", Counts(game.scores)}});
+  }
   json sheet = json::array();
-  for (const HandLine& line : table.scoreSheet()) {
+  for (const HandLine& line : table.hands()) {
     sheet.push_back({{"bids", Counts(line.bids)},
                      {"tricks", Counts(line.tricks)},
                      {"points", Counts(line.points)},
@@ -225,8 +254,8 @@ std::string serializeTable(const Table& table) {
                  {"handNumber", table.handNumber()},
                  {"scores", Counts(table.scores())},
                  {"bags", Counts(table.bags())},
-                 {"scoreSheet", std::move(sheet)},
-                 {"gamesWon", Counts(table.gamesWon())},
+                 {"lines", std::move(sheet)},
+                 {"games", std::move(games)},
                  {"left", table.left().has_value() ? json(*table.left()) : json(nullptr)}};
   return row.dump();
 }
@@ -259,14 +288,14 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
   if (!bags.ok()) return bags.status();
   auto sheet = SheetOf(payload);
   if (!sheet.ok()) return sheet.status();
-  const auto games_won = CountsField<kTeams>(payload, "gamesWon");
-  if (!games_won.ok()) return games_won.status();
+  auto games = GamesOf(payload);
+  if (!games.ok()) return games.status();
   const auto left_field = Field(payload, "left");
   if (!left_field.ok()) return left_field.status();
   const auto left = OptionalInt(**left_field, "left");
   if (!left.ok()) return left.status();
   return Table::restore(std::move(seats), *std::move(hand), *hand_number, *scores, *bags,
-                        *std::move(sheet), *games_won, *left);
+                        *std::move(sheet), *std::move(games), *left);
 }
 
 }  // namespace spades

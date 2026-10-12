@@ -31,8 +31,9 @@ TEST(TableSerde, RoundTripsEveryShapeATableTakes) {
   const Table opened = *Table::open(kSeatIds, FullDeck());
   const Table mid_trick = Steps(opened, 4 + 6);
   const Table scored = Steps(opened, 4 + 52);
-  const Table near =
-      *Table::restore(kSeatIds, opened.hand(), 3, {460, 10}, {2, 3}, {}, {1, 0}, std::nullopt);
+  const Table near = *Table::restore(kSeatIds, opened.hand(), 2, {460, 10}, {2, 3},
+                                     {HandLine{{1, 1, 1, 1}, {4, 3, 3, 3}, {460, 10}, {460, 10}}},
+                                     {{1, {80, 510}}}, std::nullopt);
   const Table won = Steps(near, 4 + 52);
   ASSERT_EQ(won.phase(), Phase::kWon);
   const Table closed = *mid_trick.removePlayer(3);
@@ -91,8 +92,19 @@ TEST(TableSerde, RefusesWhatItCannotRead) {
   nlohmann::json bad_card = nlohmann::json::parse(good);
   bad_card["hands"][0][0] = 52;
   EXPECT_FALSE(deserializeTable(bad_card.dump()).ok());
+  // A count past an int's range is refused, not narrowed to a bid of nil.
+  nlohmann::json big_bid = nlohmann::json::parse(good);
+  big_bid["bids"][1] = 4294967296LL;
+  EXPECT_FALSE(deserializeTable(big_bid.dump()).ok());
+  EXPECT_FALSE(with("dealer", 4294967296ULL).ok());
+  // Narrowed, this would read as hand 1.
+  EXPECT_FALSE(with("handNumber", -4294967295LL).ok());
+  EXPECT_FALSE(with("games", nlohmann::json::array({{{"winner", "x"}, {"scores", {0, 0}}}})).ok());
+  EXPECT_FALSE(with("last", 3).ok());
+  EXPECT_FALSE(with("current", 3).ok());
+  EXPECT_FALSE(with("seats", nlohmann::json({"ann", "bob", "cat", 4})).ok());
   nlohmann::json missing = nlohmann::json::parse(good);
-  missing.erase("scoreSheet");
+  missing.erase("lines");
   EXPECT_FALSE(deserializeTable(missing.dump()).ok());
 }
 

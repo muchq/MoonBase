@@ -84,9 +84,15 @@ structure SpadesGameState {
     view: SpadesView
 }
 
-/// A game is over; the view before it says the same. Won on points, by
-/// the team the winners name; or abandoned by a leave, with no winner.
+/// A game is over; the view before it carries the same result.
 structure SpadesGameEnded {
+    @required
+    result: SpadesResult
+}
+
+/// A game's end: won on points by the team the winners name, or
+/// abandoned by a leave, with no winner.
+structure SpadesResult {
     /// points | abandoned
     @required
     ending: String
@@ -147,10 +153,11 @@ structure SpadesView {
 
     /// This game's hands, in order.
     @required
-    scoreSheet: SpadesScoreSheet
+    hands: SpadesHandLines
 
-    /// The team that won the game, once won: 0 or 1.
-    winningTeam: Integer
+    /// The game's end, once won (phase won) or abandoned by the leave
+    /// that closed the table (phase closed).
+    result: SpadesResult
 
     /// The seat that left, once closed.
     left: String
@@ -228,7 +235,7 @@ structure SpadesTeam {
     gamesWon: Integer
 }
 
-list SpadesScoreSheet {
+list SpadesHandLines {
     member: SpadesHandLine
 }
 

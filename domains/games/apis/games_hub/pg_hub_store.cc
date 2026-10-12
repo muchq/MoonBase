@@ -13,10 +13,10 @@
 #include "domains/games/libs/cards/castle/game_state_serde.h"
 #include "domains/games/libs/cards/golf/game_state_serde.h"
 #include "domains/games/libs/cards/rummy/table_serde.h"
+#include "domains/games/libs/cards/spades/table_serde.h"
 #include "domains/games/libs/chess_play/game_state_serde.h"
 #include "domains/games/libs/chess_play/table_serde.h"
 #include "domains/games/libs/pong/table_serde.h"
-#include "domains/games/libs/cards/spades/table_serde.h"
 
 namespace games_hub {
 namespace {
