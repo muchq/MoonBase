@@ -4,7 +4,7 @@
 // rename, and the browser reading these lives in another repository. The
 // pinned surface: the spades command envelope ({"move":{...}} inside the
 // `spades` command) and the update envelope ({"update":{...}} inside the
-// `spades` event) through createGame, startGame at four seats, a bid, a
+// `spades` event) through createGame, startGame in partners, a bid, a
 // play, the deal refused mid-hand, and the leave that abandons the game.
 
 #include <gtest/gtest.h>
@@ -87,13 +87,15 @@ TEST_F(SpadesWireTest, TableFlowPinsSpadesCommandAndUpdatePayloadBytes) {
     (void)SpadesCase(*seats[i], "gameJoined");
   }
 
-  ASSERT_TRUE(seats[0]->Send(CommandFrame("spades", R"({"move":{"startGame":{}}})")).ok());
+  ASSERT_TRUE(
+      seats[0]->Send(CommandFrame("spades", R"({"move":{"startGame":{"mode":"partners"}}})")).ok());
   EXPECT_EQ(SpadesCase(*seats[1], "gameStarted"), R"({"update":{"gameStarted":{}}})");
   // Seat 1, at the dealer's left, bids first; it holds every club.
   EXPECT_EQ(
       SpadesCase(*seats[1], "gameState"),
       R"({"update":{"gameState":{"view":{"currentPlayerId":"player-2","dealer":"player-1",)"
-      R"("gameId":"GAME01","handNumber":1,"hands":[],"legal":[],"phase":"bidding","players":[)"
+      R"("gameId":"GAME01","handNumber":1,"handSize":13,"hands":[],"legal":[],"mode":"partners",)"
+      R"("phase":"bidding","players":[)"
       R"({"hand":[],"handCount":13,"playerId":"player-1","team":0,"tricks":0},)"
       R"({"hand":[{"rank":"2","suit":"♣"},{"rank":"3","suit":"♣"},{"rank":"4","suit":"♣"},{"rank":"5","suit":"♣"},{"rank":"6","suit":"♣"},{"rank":"7","suit":"♣"},{"rank":"8","suit":"♣"},{"rank":"9","suit":"♣"},{"rank":"10","suit":"♣"},{"rank":"J","suit":"♣"},{"rank":"Q","suit":"♣"},{"rank":"K","suit":"♣"},{"rank":"A","suit":"♣"}],)"
       R"("handCount":13,"playerId":"player-2","team":1,"tricks":0},)"
@@ -127,8 +129,9 @@ TEST_F(SpadesWireTest, TableFlowPinsSpadesCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(view["players"][1]["hand"].dump(), "[]");
   EXPECT_EQ(view["legal"].size(), 13u);
   EXPECT_EQ(KeysOf(view),
-            (std::set<std::string>{"currentPlayerId", "dealer", "gameId", "handNumber", "legal",
-                                   "phase", "players", "hands", "spadesBroken", "teams", "trick"}));
+            (std::set<std::string>{"currentPlayerId", "dealer", "gameId", "handNumber", "handSize",
+                                   "legal", "mode", "phase", "players", "hands", "spadesBroken",
+                                   "teams", "trick"}));
 
   ASSERT_TRUE(seats[2]->Send(CommandFrame("spades", R"({"move":{"deal":{}}})")).ok());
   EXPECT_EQ(Next(*seats[2], "commandRejected"), R"({"reason":"the hand is not over"})");

@@ -682,11 +682,12 @@ class GolfHub final {
   void CreateGameMove(const std::string& player_id, GameKind kind);
   void JoinGameMove(const std::string& player_id, const std::string& game_id, GameKind kind);
   /// `time_control` and `chess_setup` are chess's, `pong_variant` pong's,
-  /// and nothing to any other game.
+  /// `spades_mode` spades', and nothing to any other game.
   void StartGameMove(const std::string& player_id,
                      chess_play::TimeControl time_control = kDefaultChessClock,
                      std::optional<chess_play::ChessSetup> chess_setup = std::nullopt,
-                     std::optional<pong::Variant> pong_variant = std::nullopt);
+                     std::optional<pong::Variant> pong_variant = std::nullopt,
+                     std::optional<spades::Mode> spades_mode = std::nullopt);
   /// The shared shape of every in-game engine move: transition, then
   /// stage the fan-out (views, turn change, game end) the result implies.
   void EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects);

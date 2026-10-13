@@ -1,17 +1,19 @@
 #include "domains/games/libs/cards/spades/scoring.h"
 
+#include <algorithm>
+
 namespace spades {
 
-std::array<TeamScore, kTeams> scoreHand(const std::array<int, kSeats>& bids,
-                                        const std::array<int, kSeats>& tricks,
-                                        const std::array<int, kTeams>& bags_before) {
-  std::array<TeamScore, kTeams> scores;
-  for (int team = 0; team < kTeams; ++team) {
+std::vector<TeamScore> scoreHand(const std::vector<int>& bids, const std::vector<int>& tricks,
+                                 const std::vector<int>& bags_before) {
+  const int teams = static_cast<int>(bags_before.size());
+  std::vector<TeamScore> scores(teams);
+  for (int team = 0; team < teams; ++team) {
     int contract = 0;
     int counted = 0;
     int points = 0;
     int bags = bags_before[team];
-    for (int seat = team; seat < kSeats; seat += kTeams) {
+    for (std::size_t seat = team; seat < bids.size(); seat += teams) {
       if (bids[seat] == kNil) {
         points += tricks[seat] == 0 ? kNilBonus : -kNilBonus;
         bags += tricks[seat];
@@ -35,11 +37,14 @@ std::array<TeamScore, kTeams> scoreHand(const std::array<int, kSeats>& bids,
   return scores;
 }
 
-std::optional<int> gameWinner(const std::array<int, kTeams>& scores) {
-  const bool decided = scores[0] >= kWinningScore || scores[1] >= kWinningScore ||
-                       scores[0] <= kLosingScore || scores[1] <= kLosingScore;
-  if (!decided || scores[0] == scores[1]) return std::nullopt;
-  return scores[0] > scores[1] ? 0 : 1;
+std::optional<int> gameWinner(const std::vector<int>& scores) {
+  const bool decided = std::any_of(scores.begin(), scores.end(), [](int score) {
+    return score >= kWinningScore || score <= kLosingScore;
+  });
+  if (!decided) return std::nullopt;
+  const auto best = std::max_element(scores.begin(), scores.end());
+  if (std::count(scores.begin(), scores.end(), *best) > 1) return std::nullopt;
+  return static_cast<int>(best - scores.begin());
 }
 
 }  // namespace spades

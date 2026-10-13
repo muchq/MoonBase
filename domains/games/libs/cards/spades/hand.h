@@ -1,7 +1,6 @@
 #ifndef DOMAINS_GAMES_LIBS_CARDS_SPADES_HAND_H
 #define DOMAINS_GAMES_LIBS_CARDS_SPADES_HAND_H
 
-#include <array>
 #include <deque>
 #include <optional>
 #include <vector>
@@ -15,16 +14,16 @@ using cards::Card;
 using cards::Rank;
 using cards::Suit;
 
-inline constexpr int kSeats = 4;
-inline constexpr int kHandSize = 13;
+inline constexpr int kMinSeats = 2;
+inline constexpr int kMaxSeats = 4;
 /// A bid of no tricks at all, scored on its own (scoring.h).
 inline constexpr int kNil = 0;
-inline constexpr int kMaxBid = kHandSize;
 /// turn() once the hand is played out.
 inline constexpr int kNoTurn = -1;
 
-/// Seats are partners across the table: 0 and 2 are team 0, 1 and 3 team 1.
-[[nodiscard]] constexpr int teamOf(int seat) { return seat % 2; }
+/// Cards a seat is dealt, and so the most it may bid: seventeen at three
+/// seats, thirteen at two or four.
+[[nodiscard]] constexpr int handSize(int seats) { return seats == 3 ? 17 : 13; }
 
 enum class Stage { kBidding, kPlaying, kDone };
 
@@ -45,11 +44,13 @@ struct Trick {
 /// the highest spade, or with none the highest of the suit led.
 [[nodiscard]] int trickWinner(const std::vector<TrickPlay>& plays);
 
-/// One hand of spades (#1658): thirteen cards a seat, a bid from each,
-/// then thirteen tricks.
+/// One hand of spades (#1658) at two to four seats: handSize cards a
+/// seat, a bid from each, then as many tricks as cards in a hand.
 ///
+///   - Two seats are dealt thirteen each and the rest stay out; three,
+///     seventeen each without the two of clubs; four, thirteen each.
 ///   - Bidding goes round from the dealer's left; each seat bids 0
-///     (nil) to 13 tricks.
+///     (nil) to handSize tricks.
 ///   - The dealer's left leads the first trick; a trick's winner leads
 ///     the next. A seat follows the suit led if it can.
 ///   - Spades may not be led until one has been played to a trick
@@ -61,14 +62,14 @@ struct Trick {
 /// view the table has moved past.
 class Hand {
  public:
-  /// Deals a full deck, `shuffled` front first, one card a seat round the
-  /// table from the dealer's left.
-  [[nodiscard]] static absl::StatusOr<Hand> deal(int dealer, std::deque<Card> shuffled);
+  /// Deals from a full deck, `shuffled` front first, one card a seat
+  /// round the table from the dealer's left.
+  [[nodiscard]] static absl::StatusOr<Hand> deal(int seats, int dealer, std::deque<Card> shuffled);
   /// The full truth, for a stored row: refused unless play could reach it.
   [[nodiscard]] static absl::StatusOr<Hand> restore(int dealer,
-                                                    std::array<std::vector<Card>, kSeats> hands,
-                                                    std::array<std::optional<int>, kSeats> bids,
-                                                    std::array<int, kSeats> tricks,
+                                                    std::vector<std::vector<Card>> hands,
+                                                    std::vector<std::optional<int>> bids,
+                                                    std::vector<int> tricks,
                                                     std::vector<TrickPlay> current,
                                                     std::optional<Trick> last, bool spades_broken);
 
@@ -82,10 +83,11 @@ class Hand {
   /// The seat to bid or play; kNoTurn once the hand is played out.
   [[nodiscard]] int turn() const;
   [[nodiscard]] int dealer() const { return dealer_; }
-  [[nodiscard]] const std::array<std::vector<Card>, kSeats>& hands() const { return hands_; }
-  [[nodiscard]] const std::array<std::optional<int>, kSeats>& bids() const { return bids_; }
+  [[nodiscard]] int seats() const { return static_cast<int>(hands_.size()); }
+  [[nodiscard]] const std::vector<std::vector<Card>>& hands() const { return hands_; }
+  [[nodiscard]] const std::vector<std::optional<int>>& bids() const { return bids_; }
   /// Tricks taken, seat by seat.
-  [[nodiscard]] const std::array<int, kSeats>& tricks() const { return tricks_; }
+  [[nodiscard]] const std::vector<int>& tricks() const { return tricks_; }
   /// The trick in play, from its lead.
   [[nodiscard]] const std::vector<TrickPlay>& current() const { return current_; }
   /// The trick last taken; absent before the first.
@@ -95,9 +97,9 @@ class Hand {
   bool operator==(const Hand&) const = default;
 
  private:
-  Hand(int dealer, std::array<std::vector<Card>, kSeats> hands,
-       std::array<std::optional<int>, kSeats> bids, std::array<int, kSeats> tricks,
-       std::vector<TrickPlay> current, std::optional<Trick> last, bool spades_broken)
+  Hand(int dealer, std::vector<std::vector<Card>> hands, std::vector<std::optional<int>> bids,
+       std::vector<int> tricks, std::vector<TrickPlay> current, std::optional<Trick> last,
+       bool spades_broken)
       : dealer_(dealer),
         hands_(std::move(hands)),
         bids_(bids),
@@ -112,9 +114,9 @@ class Hand {
   [[nodiscard]] int tricksPlayed() const;
 
   int dealer_ = 0;
-  std::array<std::vector<Card>, kSeats> hands_;
-  std::array<std::optional<int>, kSeats> bids_;
-  std::array<int, kSeats> tricks_{};
+  std::vector<std::vector<Card>> hands_;
+  std::vector<std::optional<int>> bids_;
+  std::vector<int> tricks_;
   std::vector<TrickPlay> current_;
   std::optional<Trick> last_;
   bool spades_broken_ = false;

@@ -10,9 +10,9 @@
 namespace spades {
 namespace {
 
-constexpr int kDeckSize = kSeats * kHandSize;
+constexpr std::size_t kDeckSize = 52;
 
-bool ValidSeat(int seat) { return seat >= 0 && seat < kSeats; }
+bool ValidSeat(int seat, int seats) { return seat >= 0 && seat < seats; }
 
 bool HoldsSuit(const std::vector<Card>& hand, Suit suit) {
   return std::any_of(hand.begin(), hand.end(),
@@ -37,8 +37,11 @@ int trickWinner(const std::vector<TrickPlay>& plays) {
   return plays[best].seat;
 }
 
-absl::StatusOr<Hand> Hand::deal(int dealer, std::deque<Card> shuffled) {
-  if (!ValidSeat(dealer)) return absl::InvalidArgumentError("no such dealer");
+absl::StatusOr<Hand> Hand::deal(int seats, int dealer, std::deque<Card> shuffled) {
+  if (seats < kMinSeats || seats > kMaxSeats) {
+    return absl::InvalidArgumentError(absl::StrCat("spades seats ", kMinSeats, " to ", kMaxSeats));
+  }
+  if (!ValidSeat(dealer, seats)) return absl::InvalidArgumentError("no such dealer");
   if (shuffled.size() != kDeckSize) {
     return absl::InvalidArgumentError(absl::StrCat("a deal takes ", kDeckSize, " cards"));
   }
@@ -48,28 +51,40 @@ absl::StatusOr<Hand> Hand::deal(int dealer, std::deque<Card> shuffled) {
       return absl::InvalidArgumentError("a deal takes every card once");
     }
   }
-  std::array<std::vector<Card>, kSeats> hands;
-  for (int i = 0; i < kDeckSize; ++i) {
-    hands[(dealer + 1 + i) % kSeats].push_back(shuffled[i]);
+  if (seats == 3) {
+    std::erase(shuffled, Card(Suit::Clubs, Rank::Two));
   }
-  return Hand(dealer, std::move(hands), {}, {}, {}, std::nullopt, false);
+  std::vector<std::vector<Card>> hands(seats);
+  for (int i = 0; i < seats * handSize(seats); ++i) {
+    hands[(dealer + 1 + i) % seats].push_back(shuffled[i]);
+  }
+  return Hand(dealer, std::move(hands), std::vector<std::optional<int>>(seats),
+              std::vector<int>(seats), {}, std::nullopt, false);
 }
 
-absl::StatusOr<Hand> Hand::restore(int dealer, std::array<std::vector<Card>, kSeats> hands,
-                                   std::array<std::optional<int>, kSeats> bids,
-                                   std::array<int, kSeats> tricks, std::vector<TrickPlay> current,
-                                   std::optional<Trick> last, bool spades_broken) {
-  if (!ValidSeat(dealer)) return absl::InvalidArgumentError("no such dealer");
+absl::StatusOr<Hand> Hand::restore(int dealer, std::vector<std::vector<Card>> hands,
+                                   std::vector<std::optional<int>> bids, std::vector<int> tricks,
+                                   std::vector<TrickPlay> current, std::optional<Trick> last,
+                                   bool spades_broken) {
+  const int seat_count = static_cast<int>(hands.size());
+  if (seat_count < kMinSeats || seat_count > kMaxSeats) {
+    return absl::InvalidArgumentError(absl::StrCat("spades seats ", kMinSeats, " to ", kMaxSeats));
+  }
+  if (bids.size() != hands.size() || tricks.size() != hands.size()) {
+    return absl::InvalidArgumentError("a bid and a trick count a seat");
+  }
+  const int hand_size = handSize(seat_count);
+  if (!ValidSeat(dealer, seat_count)) return absl::InvalidArgumentError("no such dealer");
   // Bids go round from the dealer's left: those made are a run from there.
   int bids_made = 0;
-  for (int i = 0; i < kSeats; ++i) {
-    const auto& made = bids[(dealer + 1 + i) % kSeats];
+  for (int i = 0; i < seat_count; ++i) {
+    const auto& made = bids[(dealer + 1 + i) % seat_count];
     if (!made.has_value()) break;
-    if (*made < kNil || *made > kMaxBid) return absl::InvalidArgumentError("a bid out of range");
+    if (*made < kNil || *made > hand_size) return absl::InvalidArgumentError("a bid out of range");
     ++bids_made;
   }
-  for (int i = bids_made; i < kSeats; ++i) {
-    if (bids[(dealer + 1 + i) % kSeats].has_value()) {
+  for (int i = bids_made; i < seat_count; ++i) {
+    if (bids[(dealer + 1 + i) % seat_count].has_value()) {
       return absl::InvalidArgumentError("a bid out of turn");
     }
   }
@@ -78,39 +93,45 @@ absl::StatusOr<Hand> Hand::restore(int dealer, std::array<std::vector<Card>, kSe
     if (taken < 0) return absl::InvalidArgumentError("tricks taken below zero");
     played += taken;
   }
-  if (played > kHandSize || current.size() >= kSeats) {
+  if (played > hand_size || current.size() >= hands.size()) {
     return absl::InvalidArgumentError("more tricks than a hand holds");
   }
-  if (bids_made < kSeats && (played > 0 || !current.empty())) {
+  if (bids_made < seat_count && (played > 0 || !current.empty())) {
     return absl::InvalidArgumentError("a card played before the bidding ended");
   }
   if (played == 0 && last.has_value()) return absl::InvalidArgumentError("a last trick unplayed");
   if (played > 0) {
-    if (!last.has_value() || last->plays.size() != kSeats || !ValidSeat(last->winner) ||
-        trickWinner(last->plays) != last->winner || tricks[last->winner] == 0) {
+    if (!last.has_value() || last->plays.size() != hands.size() ||
+        !ValidSeat(last->winner, seat_count) || trickWinner(last->plays) != last->winner ||
+        tricks[last->winner] == 0) {
       return absl::InvalidArgumentError("the last trick is not one play could leave");
     }
-    if (!ValidSeat(last->plays.front().seat)) {
+    if (!ValidSeat(last->plays.front().seat, seat_count)) {
       return absl::InvalidArgumentError("the last trick is played by no seat");
     }
-    for (int i = 0; i < kSeats; ++i) {
-      if (last->plays[i].seat != (last->plays.front().seat + i) % kSeats) {
+    for (int i = 0; i < seat_count; ++i) {
+      if (last->plays[i].seat != (last->plays.front().seat + i) % seat_count) {
         return absl::InvalidArgumentError("the last trick is played out of turn");
       }
     }
   }
-  const int leader = last.has_value() ? last->winner : (dealer + 1) % kSeats;
-  std::array<bool, kSeats> played_now{};
+  const int leader = last.has_value() ? last->winner : (dealer + 1) % seat_count;
+  std::vector<bool> played_now(seat_count);
   for (std::size_t i = 0; i < current.size(); ++i) {
-    if (current[i].seat != (leader + static_cast<int>(i)) % kSeats) {
+    if (current[i].seat != (leader + static_cast<int>(i)) % seat_count) {
       return absl::InvalidArgumentError("the trick in play is played out of turn");
     }
     played_now[current[i].seat] = true;
   }
   std::set<int> seen;
-  const auto once = [&seen](const Card& card) { return seen.insert(card.intValue()).second; };
-  for (int seat = 0; seat < kSeats; ++seat) {
-    const std::size_t holds = kHandSize - played - (played_now[seat] ? 1 : 0);
+  // Three seats deal without the two of clubs.
+  const Card dropped(Suit::Clubs, Rank::Two);
+  const auto once = [&seen, &dropped, seat_count](const Card& card) {
+    return !(seat_count == 3 && card == dropped) && seen.insert(card.intValue()).second;
+  };
+  for (int seat = 0; seat < seat_count; ++seat) {
+    const std::size_t holds =
+        static_cast<std::size_t>(hand_size - played) - (played_now[seat] ? 1 : 0);
     if (hands[seat].size() != holds) {
       return absl::InvalidArgumentError(absl::StrCat("seat ", seat, " holds the wrong count"));
     }
@@ -157,25 +178,25 @@ int Hand::tricksPlayed() const {
   return played;
 }
 
-int Hand::leader() const { return last_.has_value() ? last_->winner : (dealer_ + 1) % kSeats; }
+int Hand::leader() const { return last_.has_value() ? last_->winner : (dealer_ + 1) % seats(); }
 
 Stage Hand::stage() const {
   if (std::any_of(bids_.begin(), bids_.end(), [](const auto& bid) { return !bid.has_value(); })) {
     return Stage::kBidding;
   }
-  return tricksPlayed() == kHandSize ? Stage::kDone : Stage::kPlaying;
+  return tricksPlayed() == handSize(seats()) ? Stage::kDone : Stage::kPlaying;
 }
 
 int Hand::turn() const {
   switch (stage()) {
     case Stage::kBidding:
-      for (int i = 0; i < kSeats; ++i) {
-        const int seat = (dealer_ + 1 + i) % kSeats;
+      for (int i = 0; i < seats(); ++i) {
+        const int seat = (dealer_ + 1 + i) % seats();
         if (!bids_[seat].has_value()) return seat;
       }
       return kNoTurn;
     case Stage::kPlaying:
-      return (leader() + static_cast<int>(current_.size())) % kSeats;
+      return (leader() + static_cast<int>(current_.size())) % seats();
     case Stage::kDone:
       break;
   }
@@ -185,8 +206,8 @@ int Hand::turn() const {
 absl::StatusOr<Hand> Hand::bid(int seat, int tricks) const {
   if (stage() != Stage::kBidding) return absl::FailedPreconditionError("the bidding is over");
   if (seat != turn()) return absl::FailedPreconditionError("not your bid");
-  if (tricks < kNil || tricks > kMaxBid) {
-    return absl::InvalidArgumentError(absl::StrCat("a bid is 0 (nil) to ", kMaxBid));
+  if (tricks < kNil || tricks > handSize(seats())) {
+    return absl::InvalidArgumentError(absl::StrCat("a bid is 0 (nil) to ", handSize(seats())));
   }
   auto bids = bids_;
   bids[seat] = tricks;
@@ -231,7 +252,7 @@ absl::StatusOr<Hand> Hand::play(int seat, const Card& card) const {
   auto current = current_;
   current.push_back({seat, card});
   const bool broken = spades_broken_ || card.getSuit() == Suit::Spades;
-  if (current.size() < kSeats) {
+  if (current.size() < hands_.size()) {
     return Hand(dealer_, std::move(hands), bids_, tricks_, std::move(current), last_, broken);
   }
   const int winner = trickWinner(current);

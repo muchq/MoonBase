@@ -25,13 +25,13 @@
 #include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/games/libs/cards/rummy/table.h"
 #include "domains/games/libs/cards/rummy/table_serde.h"
+#include "domains/games/libs/cards/spades/table.h"
+#include "domains/games/libs/cards/spades/table_serde.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/game_state_serde.h"
 #include "domains/games/libs/chess_play/table_serde.h"
 #include "domains/games/libs/pong/table.h"
 #include "domains/games/libs/pong/table_serde.h"
-#include "domains/games/libs/cards/spades/table.h"
-#include "domains/games/libs/cards/spades/table_serde.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "gmock/gmock.h"
@@ -168,18 +168,18 @@ TEST_F(PgHubStoreTest, CastleRowsKeepTheirKindAndDecodeWithCastleSerde) {
 TEST_F(PgHubStoreTest, ChessRowsKeepTheirKindAndDecodeWithChessSerde) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
   store_->Flush();
-  auto opened = chess_play::Table::open(
-      {"alice", "bob"}, "kpk", {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 1}, {180'000, 2'000}, 1'000,
-      std::string(chess_play::kRandomKpkSetup));
+  auto opened =
+      chess_play::Table::open({"alice", "bob"}, "kpk", {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 1},
+                              {180'000, 2'000}, 1'000, std::string(chess_play::kRandomKpkSetup));
   ASSERT_TRUE(opened.ok()) << opened.status();
-  auto resigned = opened->inGame(
-      [](const chess_play::GameState& game) { return game.resign(0, 2'000); });
+  auto resigned =
+      opened->inGame([](const chess_play::GameState& game) { return game.resign(0, 2'000); });
   ASSERT_TRUE(resigned.ok()) << resigned.status();
-  auto second = resigned->next("kpk", {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 1},
-                               {180'000, 2'000}, 3'000, std::string(chess_play::kRandomKpkSetup));
+  auto second = resigned->next("kpk", {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 1}, {180'000, 2'000},
+                               3'000, std::string(chess_play::kRandomKpkSetup));
   ASSERT_TRUE(second.ok()) << second.status();
-  auto moved = second->inGame(
-      [](const chess_play::GameState& game) { return game.move(0, "e2e4", 5'000); });
+  auto moved =
+      second->inGame([](const chess_play::GameState& game) { return game.move(0, "e2e4", 5'000); });
   ASSERT_TRUE(moved.ok()) << moved.status();
   PgHubStore::GameRow row{
       "R1", "C1", {"alice", "bob"}, games_hub::HostedState(*moved), 1, games_hub::GameKind::kChess};
@@ -217,9 +217,10 @@ TEST_F(PgHubStoreTest, SpadesRowsKeepTheirKindAndDecodeWithSpadesSerde) {
   std::deque<cards::Card> deck;
   for (int i = 0; i < 52; ++i) deck.emplace_back(i);
   const std::vector<std::string> seats = {"alice", "bob", "cat", "dan"};
-  const spades::Table bid = *spades::Table::open(seats, std::move(deck))->bid(1, 4);
-  PgHubStore::GameRow row{"R1", "S1", seats, games_hub::HostedState(bid), 1,
-                          games_hub::GameKind::kSpades};
+  const spades::Table bid =
+      *spades::Table::open(spades::Mode::kPartners, seats, std::move(deck))->bid(1, 4);
+  PgHubStore::GameRow row{
+      "R1", "S1", seats, games_hub::HostedState(bid), 1, games_hub::GameKind::kSpades};
   ASSERT_TRUE(*store_->CommitGameSave(row, ""));
 
   auto reread = store_->LoadGame("R1", "S1");

@@ -28,10 +28,10 @@ Table Steps(Table table, int count) {
 }
 
 TEST(TableSerde, RoundTripsEveryShapeATableTakes) {
-  const Table opened = *Table::open(kSeatIds, FullDeck());
+  const Table opened = *Table::open(Mode::kPartners, kSeatIds, FullDeck());
   const Table mid_trick = Steps(opened, 4 + 6);
   const Table scored = Steps(opened, 4 + 52);
-  const Table near = *Table::restore(kSeatIds, opened.hand(), 2, {460, 10}, {2, 3},
+  const Table near = *Table::restore(Mode::kPartners, kSeatIds, opened.hand(), 2, {460, 10}, {2, 3},
                                      {HandLine{{1, 1, 1, 1}, {4, 3, 3, 3}, {460, 10}, {460, 10}}},
                                      {{1, {80, 510}}}, std::nullopt);
   const Table won = Steps(near, 4 + 52);
@@ -45,7 +45,7 @@ TEST(TableSerde, RoundTripsEveryShapeATableTakes) {
 }
 
 TEST(TableSerde, WritesTheDocumentedSchema) {
-  const Table mid_trick = Steps(*Table::open(kSeatIds, FullDeck()), 4 + 6);
+  const Table mid_trick = Steps(*Table::open(Mode::kPartners, kSeatIds, FullDeck()), 4 + 6);
   const nlohmann::json row = nlohmann::json::parse(serializeTable(mid_trick));
   EXPECT_EQ(row["v"], 1);
   EXPECT_EQ(row["seats"], nlohmann::json(kSeatIds));
@@ -60,19 +60,20 @@ TEST(TableSerde, WritesTheDocumentedSchema) {
   EXPECT_EQ(row["handNumber"], 1);
   EXPECT_EQ(row["scores"], nlohmann::json({0, 0}));
   EXPECT_EQ(row["left"], nullptr);
-  EXPECT_EQ(nlohmann::json::parse(serializeTable(*Table::open(kSeatIds, FullDeck())))["bids"],
+  EXPECT_EQ(nlohmann::json::parse(
+                serializeTable(*Table::open(Mode::kPartners, kSeatIds, FullDeck())))["bids"],
             nlohmann::json({nullptr, nullptr, nullptr, nullptr}));
 }
 
 // Postgres jsonb refuses a NUL byte.
 TEST(TableSerde, StoresNoNulByte) {
   const std::string nul_name("a\0b", 3);
-  const Table table = *Table::open({nul_name, "bob", "cat", "dan"}, FullDeck());
+  const Table table = *Table::open(Mode::kPartners, {nul_name, "bob", "cat", "dan"}, FullDeck());
   EXPECT_EQ(serializeTable(table).find('\0'), std::string::npos);
 }
 
 TEST(TableSerde, RefusesWhatItCannotRead) {
-  const std::string good = serializeTable(*Table::open(kSeatIds, FullDeck()));
+  const std::string good = serializeTable(*Table::open(Mode::kPartners, kSeatIds, FullDeck()));
   EXPECT_TRUE(deserializeTable(good).ok());
   EXPECT_FALSE(deserializeTable("not json").ok());
   EXPECT_FALSE(deserializeTable("[]").ok());
@@ -106,6 +107,30 @@ TEST(TableSerde, RefusesWhatItCannotRead) {
   nlohmann::json missing = nlohmann::json::parse(good);
   missing.erase("lines");
   EXPECT_FALSE(deserializeTable(missing.dump()).ok());
+}
+
+TEST(TableSerde, RoundTripsCutthroat) {
+  const Table three =
+      Steps(*Table::open(Mode::kCutthroat, {"ann", "bob", "cat"}, FullDeck()), 3 + 4);
+  const auto read = deserializeTable(serializeTable(three));
+  ASSERT_TRUE(read.ok()) << read.status();
+  EXPECT_EQ(*read, three);
+  EXPECT_EQ(nlohmann::json::parse(serializeTable(three))["mode"], "cutthroat");
+}
+
+// Rows written before cutthroat name no mode, and are partners.
+TEST(TableSerde, ARowWithNoModeIsPartners) {
+  const Table partners = *Table::open(Mode::kPartners, kSeatIds, FullDeck());
+  nlohmann::json row = nlohmann::json::parse(serializeTable(partners));
+  EXPECT_EQ(row["mode"], "partners");
+  row.erase("mode");
+  const auto read = deserializeTable(row.dump());
+  ASSERT_TRUE(read.ok()) << read.status();
+  EXPECT_EQ(*read, partners);
+  row["mode"] = "solo";
+  EXPECT_FALSE(deserializeTable(row.dump()).ok());
+  row["mode"] = 1;
+  EXPECT_FALSE(deserializeTable(row.dump()).ok());
 }
 
 }  // namespace

@@ -86,7 +86,7 @@ constexpr std::size_t kMaxSeats = 4;
 std::size_t MaxSeatsOf(GameKind kind) {
   if (kind == GameKind::kChess) return chess_play::GameState::kSeats;
   if (kind == GameKind::kPong) return pong::kSeats;
-  if (kind == GameKind::kSpades) return spades::kSeats;
+  if (kind == GameKind::kSpades) return spades::kMaxSeats;
   return kMaxSeats;
 }
 
@@ -503,23 +503,25 @@ moonbase::games::SpadesResult SpadesResultOf(const spades::Table& table,
                                              const spades::GameScore& game) {
   moonbase::games::SpadesResult result;
   result.ending = game.winner.has_value() ? "points" : "abandoned";
-  for (int seat = 0; seat < spades::kSeats; ++seat) {
-    if (game.winner == spades::teamOf(seat)) result.winners.push_back(table.seats()[seat]);
+  for (std::size_t seat = 0; seat < table.seats().size(); ++seat) {
+    if (game.winner == table.teamOf(static_cast<int>(seat))) {
+      result.winners.push_back(table.seats()[seat]);
+    }
   }
-  result.scores = {game.scores[0], game.scores[1]};
+  result.scores = game.scores;
   return result;
 }
 
-// A spades game's end: all four seats played it, and the winning team's
-// two won it. A game a leave abandoned was played, and won by nobody.
+// A spades game's end: every seat played it, and the winning team's
+// seats won it. A game a leave abandoned was played, and won by nobody.
 std::vector<games_hub::HubStore::StatsDelta> SpadesStatsDeltas(const spades::Table& table,
                                                                std::optional<int> winning_team) {
   std::vector<games_hub::HubStore::StatsDelta> deltas;
-  for (int seat = 0; seat < spades::kSeats; ++seat) {
+  for (std::size_t seat = 0; seat < table.seats().size(); ++seat) {
     games_hub::HubStore::StatsDelta delta;
     delta.player_id = table.seats()[seat];
     delta.played = 1;
-    delta.won = winning_team == spades::teamOf(seat) ? 1 : 0;
+    delta.won = winning_team == table.teamOf(static_cast<int>(seat)) ? 1 : 0;
     deltas.push_back(std::move(delta));
   }
   return deltas;
@@ -1720,8 +1722,7 @@ bool GolfHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::Ro
   return changed;
 }
 
-void GolfHub::DropWatchersLocked(const std::string& game_id, GameEntry& entry,
-                                 Outbox& outbox) {
+void GolfHub::DropWatchersLocked(const std::string& game_id, GameEntry& entry, Outbox& outbox) {
   for (const std::string& watcher : entry.watchers) {
     moonbase::games::GameLeft left;
     left.gameId = game_id;
@@ -2521,13 +2522,25 @@ void GolfHub::HandleCastleMove(const std::string& player_id, const CastleMove& m
 // Spades' moves (#1658). A play names its card: a card the hand does not
 // hold is the stale-view refusal, named in the wire's spelling.
 void GolfHub::HandleSpadesMove(const std::string& player_id, const SpadesMove& move) {
+  // startGame is spades' own shape: it names the mode.
+  if (const auto* start = move.as_startGame_or_null()) {
+    std::optional<spades::Mode> mode;
+    if (start->mode.has_value()) {
+      mode = spades::parseMode(*start->mode);
+      if (!mode.has_value()) {
+        Reject(player_id, RejectKind::kRules, absl::StrCat("unknown spades mode: ", *start->mode));
+        return;
+      }
+    }
+    StartGameMove(player_id, kDefaultChessClock, std::nullopt, std::nullopt, mode);
+    return;
+  }
   if (LifecycleMove(player_id, move, GameKind::kSpades)) return;
   if (const auto* bid = move.as_bid_or_null()) {
-    TableEngineMove<spades::Table>(
-        player_id, GameKind::kSpades,
-        [tricks = bid->tricks](const spades::Table& table, int seat) {
-          return table.bid(seat, tricks);
-        });
+    TableEngineMove<spades::Table>(player_id, GameKind::kSpades,
+                                   [tricks = bid->tricks](const spades::Table& table, int seat) {
+                                     return table.bid(seat, tricks);
+                                   });
     return;
   }
   if (const auto* play = move.as_play_or_null()) {
@@ -2549,13 +2562,12 @@ void GolfHub::HandleSpadesMove(const std::string& player_id, const SpadesMove& m
     return;
   }
   if (move.as_deal_or_null() != nullptr) {
-    TableEngineMove<spades::Table>(player_id, GameKind::kSpades,
-                                   [this](const spades::Table& table, int) {
-                                     std::deque<cards::Card> deck =
-                                         dealer_->DealNewUnshuffledDeck();
-                                     dealer_->ShuffleDeck(deck);
-                                     return table.deal(std::move(deck));
-                                   });
+    TableEngineMove<spades::Table>(
+        player_id, GameKind::kSpades, [this](const spades::Table& table, int) {
+          std::deque<cards::Card> deck = dealer_->DealNewUnshuffledDeck();
+          dealer_->ShuffleDeck(deck);
+          return table.deal(std::move(deck));
+        });
     return;
   }
   Reject(player_id, RejectKind::kUnknown, "unknown move");
@@ -2654,9 +2666,8 @@ void GolfHub::HandleChessMove(const std::string& player_id, const ChessMove& mov
     TableEngineMove<chess_play::Table>(
         player_id, GameKind::kChess,
         [this, uci = play->uci](const chess_play::Table& table, int seat) {
-          return table.inGame([&](const chess_play::GameState& game) {
-            return game.move(seat, uci, NowMs());
-          });
+          return table.inGame(
+              [&](const chess_play::GameState& game) { return game.move(seat, uci, NowMs()); });
         });
     return;
   }
@@ -3014,7 +3025,8 @@ void GolfHub::JoinGameMove(const std::string& player_id, const std::string& game
 
 void GolfHub::StartGameMove(const std::string& player_id, chess_play::TimeControl time_control,
                             std::optional<chess_play::ChessSetup> chess_setup,
-                            std::optional<pong::Variant> pong_variant) {
+                            std::optional<pong::Variant> pong_variant,
+                            std::optional<spades::Mode> spades_mode) {
   Outbox outbox;
   std::optional<Refusal> refusal;
   {
@@ -3074,7 +3086,10 @@ void GolfHub::StartGameMove(const std::string& player_id, chess_play::TimeContro
           }
           dealt.emplace(*std::move(pong_table));
         } else if (ref->entry->kind == GameKind::kSpades) {
-          auto spades_table = spades::Table::open(ref->entry->roster, std::move(deck));
+          // Unnamed, four seats play partners and fewer cutthroat.
+          const spades::Mode mode = spades_mode.value_or(
+              ref->entry->roster.size() == 4 ? spades::Mode::kPartners : spades::Mode::kCutthroat);
+          auto spades_table = spades::Table::open(mode, ref->entry->roster, std::move(deck));
           if (!spades_table.ok()) {
             refusal = Refusal{RejectKind::kRules, std::string(spades_table.status().message())};
             break;
@@ -3412,7 +3427,8 @@ int GolfHub::SweepChessClocksOnce() {
       const auto refusal = ApplyTableEngineMoveLocked<chess_play::Table>(
           ref, state.players().at(state.whoseTurn()), GameKind::kChess,
           [now](const chess_play::Table& table, int) {
-            return table.inGame([now](const chess_play::GameState& game) { return game.flag(now); });
+            return table.inGame(
+                [now](const chess_play::GameState& game) { return game.flag(now); });
           },
           outbox);
       if (refusal.has_value() && refusal->kind == RejectKind::kUnavailable) {
@@ -3481,7 +3497,8 @@ void GolfHub::AddChessBotMove(const std::string& player_id, int elo) {
         StageRoomStateLocked(ref->room_id, outbox);
         break;
       }
-      if (!refusal.has_value() && !seated) refusal = Refusal{RejectKind::kState, "game changed; try again"};
+      if (!refusal.has_value() && !seated)
+        refusal = Refusal{RejectKind::kState, "game changed; try again"};
     }
   }
   if (refusal.has_value()) {
@@ -4151,8 +4168,8 @@ int GolfHub::PlayChessBotsOnce() {
       // Strength → think time; Elo is not put on the ask (full-strength
       // Stockfish). The side's remaining clock only caps the budget.
       const std::optional<int> strength = ChessBotElo(turn.bot_id);
-      turn.ask.movetime_ms = ChessBotMovetimeMs(
-          state.remainingMs(state.sideToMove(), NowMs()), strength.value_or(1320));
+      turn.ask.movetime_ms = ChessBotMovetimeMs(state.remainingMs(state.sideToMove(), NowMs()),
+                                                strength.value_or(1320));
       turn.ask.elo = std::nullopt;
     }
     const auto ask_started = std::chrono::steady_clock::now();
@@ -4167,9 +4184,9 @@ int GolfHub::PlayChessBotsOnce() {
       const std::lock_guard<std::mutex> lock(mu_);
       const std::pair<std::string, std::string> key{turn.room_id, turn.game_id};
       if (!answer.ok()) {
-        LOG(WARNING) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/"
-                     << turn.game_id << ": movetimeMs=" << turn.ask.movetime_ms << " after "
-                     << ask_took.count() << "ms: " << answer.status();
+        LOG(WARNING) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/" << turn.game_id
+                     << ": movetimeMs=" << turn.ask.movetime_ms << " after " << ask_took.count()
+                     << "ms: " << answer.status();
         chess_bot_retry_at_[key] = {turn.game_no, NowMs() + kChessBotRetry.count()};
         continue;
       }
@@ -4186,19 +4203,21 @@ int GolfHub::PlayChessBotsOnce() {
       bool moved_on = false;
       const auto refusal = ApplyTableEngineMoveLocked<chess_play::Table>(
           ref, turn.bot_id, GameKind::kChess,
-          [this, &turn, &moved_on, asked_at, uci = *answer](const chess_play::Table& table, int seat) {
+          [this, &turn, &moved_on, asked_at, uci = *answer](const chess_play::Table& table,
+                                                            int seat) {
             if (table.scoreSheet().size() != turn.game_no) {
               moved_on = true;
-              return absl::StatusOr<chess_play::Table>(absl::FailedPreconditionError("the position moved on"));
+              return absl::StatusOr<chess_play::Table>(
+                  absl::FailedPreconditionError("the position moved on"));
             }
-            return table.inGame([&](const chess_play::GameState& state)
-                                    -> absl::StatusOr<chess_play::GameState> {
-              if (state.startFen() != turn.ask.fen || state.moves().size() != asked_at) {
-                moved_on = true;
-                return absl::FailedPreconditionError("the position moved on");
-              }
-              return state.move(seat, uci, NowMs());
-            });
+            return table.inGame(
+                [&](const chess_play::GameState& state) -> absl::StatusOr<chess_play::GameState> {
+                  if (state.startFen() != turn.ask.fen || state.moves().size() != asked_at) {
+                    moved_on = true;
+                    return absl::FailedPreconditionError("the position moved on");
+                  }
+                  return state.move(seat, uci, NowMs());
+                });
           },
           outbox);
       if (refusal.has_value()) {
@@ -5324,6 +5343,8 @@ moonbase::games::SpadesView GolfHub::SpadesViewLocked(const std::string& game_id
   const spades::Hand& hand = table.hand();
   const auto id_of = [&table](int seat) { return table.seats().at(seat); };
   view.phase = std::string(spades::phaseName(table.phase()));
+  view.mode = std::string(spades::modeName(table.mode()));
+  view.handSize = spades::handSize(hand.seats());
   view.dealer = id_of(hand.dealer());
   const std::string turn = CurrentTurnOf(*entry.state);
   if (!turn.empty()) view.currentPlayerId = turn;
@@ -5342,10 +5363,10 @@ moonbase::games::SpadesView GolfHub::SpadesViewLocked(const std::string& game_id
     return wire;
   };
   const int viewer = table.playerIndex(viewer_id);
-  for (int seat = 0; seat < spades::kSeats; ++seat) {
+  for (int seat = 0; seat < hand.seats(); ++seat) {
     moonbase::games::SpadesPlayer player;
     player.playerId = id_of(seat);
-    player.team = spades::teamOf(seat);
+    player.team = table.teamOf(seat);
     player.handCount = static_cast<int>(hand.hands()[seat].size());
     if (seat == viewer) player.hand = sorted(hand.hands()[seat]);
     player.bid = hand.bids()[seat];
@@ -5370,9 +5391,11 @@ moonbase::games::SpadesView GolfHub::SpadesViewLocked(const std::string& game_id
     view.lastTrick = std::move(last);
   }
   if (viewer >= 0 && !table.isOver()) view.legal = sorted(hand.legalPlays(viewer));
-  for (int team = 0; team < spades::kTeams; ++team) {
+  for (int team = 0; team < table.teams(); ++team) {
     moonbase::games::SpadesTeam side;
-    side.players = {id_of(team), id_of(team + 2)};
+    for (int seat = team; seat < hand.seats(); seat += table.teams()) {
+      side.players.push_back(id_of(seat));
+    }
     side.score = table.scores()[team];
     side.bags = table.bags()[team];
     side.gamesWon = table.gamesWon()[team];

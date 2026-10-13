@@ -23,8 +23,8 @@
 #include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/games/libs/cards/rummy/gin.h"
 #include "domains/games/libs/cards/rummy/table.h"
-#include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/cards/spades/table.h"
+#include "domains/games/libs/chess_play/game_state.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -162,10 +162,10 @@ TEST(GameEvents, AChessGameDrawnOnTimeOrMatedIsCompleted) {
   ASSERT_TRUE(drawn.ok());
   ASSERT_FALSE(drawn->game().result()->winner.has_value());
   EXPECT_EQ(FinishedOf(HostedState(*drawn), 2)->outcome, "completed");
-  const auto mated = Chess("7k/4P3/6K1/8/8/8/8/8 w - - 0 1")
-                         .inGame([](const chess_play::GameState& game) {
-                           return game.move(0, "e7e8q", 1'000);
-                         });
+  const auto mated =
+      Chess("7k/4P3/6K1/8/8/8/8/8 w - - 0 1").inGame([](const chess_play::GameState& game) {
+        return game.move(0, "e7e8q", 1'000);
+      });
   ASSERT_TRUE(mated.ok());
   ASSERT_EQ(mated->game().result()->ending, chess_play::Ending::kCheckmate);
   const GameFinished finished = *FinishedOf(HostedState(*mated), 2);
@@ -222,7 +222,6 @@ TEST(GameEvents, APongTableRecordsOnlyAGamesEnd) {
   EXPECT_FALSE(FinishedOf(*PongWon().removePlayer(0), 1).has_value());
 }
 
-
 std::deque<cards::Card> SpadesDeck() {
   std::deque<cards::Card> deck;
   for (int i = 0; i < 52; ++i) deck.emplace_back(i);
@@ -231,7 +230,7 @@ std::deque<cards::Card> SpadesDeck() {
 
 // Bids round from the dealer's left, then the first legal card of
 // whoever is on turn until the hand is out.
-spades::Table SpadesPlayedOut(spades::Table table, const std::array<int, spades::kSeats>& bids) {
+spades::Table SpadesPlayedOut(spades::Table table, const std::vector<int>& bids) {
   while (table.phase() == spades::Phase::kBidding) {
     const int seat = table.hand().turn();
     table = *table.bid(seat, bids[seat]);
@@ -245,13 +244,15 @@ spades::Table SpadesPlayedOut(spades::Table table, const std::array<int, spades:
 
 const std::vector<std::string> kSpadesSeats = {"andy", "mercy", "lou", "kit"};
 
-spades::Table Spades() { return *spades::Table::open(kSpadesSeats, SpadesDeck()); }
+spades::Table Spades() {
+  return *spades::Table::open(spades::Mode::kPartners, kSpadesSeats, SpadesDeck());
+}
 
 // Seat 0 holds every spade and takes every trick: 158 a hand to its team.
 spades::Table SpadesWon() {
   const spades::Table opened = Spades();
   const spades::Table near = *spades::Table::restore(
-      kSpadesSeats, opened.hand(), 2, {460, 0}, {0, 0},
+      spades::Mode::kPartners, kSpadesSeats, opened.hand(), 2, {460, 0}, {0, 0},
       {spades::HandLine{{1, 1, 1, 1}, {4, 3, 3, 3}, {460, 0}, {460, 0}}}, {}, std::nullopt);
   return SpadesPlayedOut(near, {5, 3, spades::kNil, 2});
 }

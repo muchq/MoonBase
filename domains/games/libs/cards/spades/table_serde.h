@@ -13,15 +13,16 @@ namespace spades {
 /// play could not reach is refused. Server-side only: redaction is the
 /// hub's. A card is its Card::intValue (rank * 4 + suit).
 ///
-/// Schema v1:
-///   {"v":1, "seats":[id x4], "dealer":n, "hands":[[card...] x4],
-///    "bids":[n|null x4], "tricks":[n x4],
+/// Schema v1, for S seats and T teams (2 in partners, S in cutthroat):
+///   {"v":1, "mode":"partners"|"cutthroat", "seats":[id xS], "dealer":n,
+///    "hands":[[card...] xS], "bids":[n|null xS], "tricks":[n xS],
 ///    "current":[{"seat":n, "card":c}...],
-///    "last":{"plays":[{"seat":n, "card":c} x4], "winner":n} | null,
-///    "spadesBroken":bool, "handNumber":n, "scores":[n, n], "bags":[n, n],
-///    "lines":[{"bids":[n x4], "tricks":[n x4], "points":[n, n],
-///              "scores":[n, n]}...],
-///    "games":[{"winner":0|1|null, "scores":[n, n]}...], "left":n | null}
+///    "last":{"plays":[{"seat":n, "card":c} xS], "winner":n} | null,
+///    "spadesBroken":bool, "handNumber":n, "scores":[n xT], "bags":[n xT],
+///    "lines":[{"bids":[n xS], "tricks":[n xS], "points":[n xT],
+///              "scores":[n xT]}...],
+///    "games":[{"winner":team|null, "scores":[n xT]}...], "left":n | null}
+/// A row with no mode is partners: rows written before cutthroat.
 [[nodiscard]] std::string serializeTable(const Table& table);
 [[nodiscard]] absl::StatusOr<Table> deserializeTable(const std::string& serialized);
 

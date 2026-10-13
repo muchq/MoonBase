@@ -9,18 +9,28 @@
 namespace spades {
 namespace {
 
-std::array<int, kSeats> BidsOf(const Hand& hand) {
-  std::array<int, kSeats> bids{};
-  for (int seat = 0; seat < kSeats; ++seat) bids[seat] = hand.bids()[seat].value_or(kNil);
+std::vector<int> BidsOf(const Hand& hand) {
+  std::vector<int> bids;
+  for (const std::optional<int>& bid : hand.bids()) bids.push_back(bid.value_or(kNil));
   return bids;
 }
 
-absl::Status ValidSeats(const std::vector<std::string>& seats) {
-  if (seats.size() != kSeats) return absl::InvalidArgumentError("spades seats four");
-  if (std::set<std::string>(seats.begin(), seats.end()).size() != kSeats) {
+absl::Status ValidSeats(Mode mode, const std::vector<std::string>& seats) {
+  if (mode == Mode::kPartners && seats.size() != 4) {
+    return absl::InvalidArgumentError("partners seats four");
+  }
+  if (seats.size() < static_cast<std::size_t>(kMinSeats) ||
+      seats.size() > static_cast<std::size_t>(kMaxSeats)) {
+    return absl::InvalidArgumentError("spades seats two to four");
+  }
+  if (std::set<std::string>(seats.begin(), seats.end()).size() != seats.size()) {
     return absl::InvalidArgumentError("a seat twice");
   }
   return absl::OkStatus();
+}
+
+int TeamsOf(Mode mode, std::size_t seats) {
+  return mode == Mode::kPartners ? 2 : static_cast<int>(seats);
 }
 
 }  // namespace
@@ -41,29 +51,57 @@ std::string_view phaseName(Phase phase) {
   return "closed";
 }
 
-absl::StatusOr<Table> Table::open(std::vector<std::string> seats, std::deque<Card> shuffled) {
-  if (absl::Status valid = ValidSeats(seats); !valid.ok()) return valid;
-  absl::StatusOr<Hand> hand = Hand::deal(0, std::move(shuffled));
-  if (!hand.ok()) return hand.status();
-  return Table(std::move(seats), *std::move(hand), 1, {}, {}, {}, {}, std::nullopt);
+std::string_view modeName(Mode mode) { return mode == Mode::kPartners ? "partners" : "cutthroat"; }
+
+std::optional<Mode> parseMode(std::string_view name) {
+  if (name == "partners") return Mode::kPartners;
+  if (name == "cutthroat") return Mode::kCutthroat;
+  return std::nullopt;
 }
 
-absl::StatusOr<Table> Table::restore(std::vector<std::string> seats, Hand hand, int hand_number,
-                                     std::array<int, kTeams> scores, std::array<int, kTeams> bags,
-                                     std::vector<HandLine> hands, std::vector<GameScore> games,
-                                     std::optional<int> left) {
-  if (absl::Status valid = ValidSeats(seats); !valid.ok()) return valid;
-  for (int team = 0; team < kTeams; ++team) {
-    if (bags[team] < 0 || bags[team] >= kBagLimit) {
+absl::StatusOr<Table> Table::open(Mode mode, std::vector<std::string> seats,
+                                  std::deque<Card> shuffled) {
+  if (absl::Status valid = ValidSeats(mode, seats); !valid.ok()) return valid;
+  absl::StatusOr<Hand> hand = Hand::deal(static_cast<int>(seats.size()), 0, std::move(shuffled));
+  if (!hand.ok()) return hand.status();
+  const int teams = TeamsOf(mode, seats.size());
+  return Table(mode, std::move(seats), *std::move(hand), 1, std::vector<int>(teams),
+               std::vector<int>(teams), {}, {}, std::nullopt);
+}
+
+absl::StatusOr<Table> Table::restore(Mode mode, std::vector<std::string> seats, Hand hand,
+                                     int hand_number, std::vector<int> scores,
+                                     std::vector<int> bags, std::vector<HandLine> hands,
+                                     std::vector<GameScore> games, std::optional<int> left) {
+  if (absl::Status valid = ValidSeats(mode, seats); !valid.ok()) return valid;
+  const std::size_t seat_count = seats.size();
+  const int teams = TeamsOf(mode, seat_count);
+  if (static_cast<std::size_t>(hand.seats()) != seat_count) {
+    return absl::InvalidArgumentError("a hand a seat");
+  }
+  if (scores.size() != static_cast<std::size_t>(teams) ||
+      bags.size() != static_cast<std::size_t>(teams)) {
+    return absl::InvalidArgumentError("a score and bags a team");
+  }
+  for (int team_bags : bags) {
+    if (team_bags < 0 || team_bags >= kBagLimit) {
       return absl::InvalidArgumentError("bags past the limit are paid for");
     }
   }
-  if (left.has_value() && (*left < 0 || *left >= kSeats)) {
+  if (left.has_value() && (*left < 0 || static_cast<std::size_t>(*left) >= seat_count)) {
     return absl::InvalidArgumentError("no such seat left");
   }
   for (const GameScore& game : games) {
-    if (game.winner.has_value() && *game.winner != 0 && *game.winner != 1) {
+    if (game.scores.size() != static_cast<std::size_t>(teams) ||
+        (game.winner.has_value() && (*game.winner < 0 || *game.winner >= teams))) {
       return absl::InvalidArgumentError("no such team");
+    }
+  }
+  for (const HandLine& line : hands) {
+    if (line.bids.size() != seat_count || line.tricks.size() != seat_count ||
+        line.points.size() != static_cast<std::size_t>(teams) ||
+        line.scores.size() != static_cast<std::size_t>(teams)) {
+      return absl::InvalidArgumentError("a line counts every seat and team");
     }
   }
   // The hands of this game: one a hand dealt, the one in play included
@@ -72,7 +110,7 @@ absl::StatusOr<Table> Table::restore(std::vector<std::string> seats, Hand hand, 
   if (hand_number < 1 || static_cast<std::size_t>(hand_number) != hands.size() + (done ? 0 : 1)) {
     return absl::InvalidArgumentError("a line for each hand played out");
   }
-  if (scores != (hands.empty() ? std::array<int, kTeams>{} : hands.back().scores)) {
+  if (scores != (hands.empty() ? std::vector<int>(teams) : hands.back().scores)) {
     return absl::InvalidArgumentError("the scores are the last line's");
   }
   if (done && (hands.back().bids != BidsOf(hand) || hands.back().tricks != hand.tricks())) {
@@ -87,9 +125,11 @@ absl::StatusOr<Table> Table::restore(std::vector<std::string> seats, Hand hand, 
   if ((won.has_value() || abandoned) && (games.empty() || games.back() != GameScore{won, scores})) {
     return absl::InvalidArgumentError("a game ended is the games' last");
   }
-  return Table(std::move(seats), std::move(hand), hand_number, scores, bags, std::move(hands),
-               std::move(games), left);
+  return Table(mode, std::move(seats), std::move(hand), hand_number, std::move(scores),
+               std::move(bags), std::move(hands), std::move(games), left);
 }
+
+int Table::teams() const { return TeamsOf(mode_, seats_.size()); }
 
 Phase Table::phase() const {
   if (left_.has_value()) return Phase::kClosed;
@@ -118,8 +158,8 @@ std::optional<GameScore> Table::result() const {
   return std::nullopt;
 }
 
-std::array<int, kTeams> Table::gamesWon() const {
-  std::array<int, kTeams> won{};
+std::vector<int> Table::gamesWon() const {
+  std::vector<int> won(teams());
   for (const GameScore& game : games_) {
     if (game.winner.has_value()) ++won[*game.winner];
   }
@@ -133,13 +173,14 @@ int Table::playerIndex(const std::string& id) const {
 
 Table Table::withHand(Hand next) const {
   if (next.stage() != Stage::kDone) {
-    return Table(seats_, std::move(next), hand_number_, scores_, bags_, hands_, games_, left_);
+    return Table(mode_, seats_, std::move(next), hand_number_, scores_, bags_, hands_, games_,
+                 left_);
   }
-  const std::array<TeamScore, kTeams> scored = scoreHand(BidsOf(next), next.tricks(), bags_);
-  std::array<int, kTeams> scores = scores_;
-  std::array<int, kTeams> bags{};
-  std::array<int, kTeams> points{};
-  for (int team = 0; team < kTeams; ++team) {
+  const std::vector<TeamScore> scored = scoreHand(BidsOf(next), next.tricks(), bags_);
+  std::vector<int> scores = scores_;
+  std::vector<int> bags(teams());
+  std::vector<int> points(teams());
+  for (int team = 0; team < teams(); ++team) {
     points[team] = scored[team].points;
     scores[team] += scored[team].points;
     bags[team] = scored[team].bags;
@@ -150,8 +191,8 @@ Table Table::withHand(Hand next) const {
   if (const std::optional<int> won = gameWinner(scores); won.has_value()) {
     games.push_back({won, scores});
   }
-  return Table(seats_, std::move(next), hand_number_, scores, bags, std::move(hands),
-               std::move(games), left_);
+  return Table(mode_, seats_, std::move(next), hand_number_, std::move(scores), std::move(bags),
+               std::move(hands), std::move(games), left_);
 }
 
 absl::StatusOr<Table> Table::bid(int seat, int tricks) const {
@@ -173,22 +214,25 @@ absl::StatusOr<Table> Table::deal(std::deque<Card> shuffled) const {
   if (now != Phase::kScored && now != Phase::kWon) {
     return absl::FailedPreconditionError("the hand is not over");
   }
-  absl::StatusOr<Hand> next = Hand::deal((hand_.dealer() + 1) % kSeats, std::move(shuffled));
+  const int seat_count = hand_.seats();
+  absl::StatusOr<Hand> next =
+      Hand::deal(seat_count, (hand_.dealer() + 1) % seat_count, std::move(shuffled));
   if (!next.ok()) return next.status();
   if (now == Phase::kWon) {
-    return Table(seats_, *std::move(next), 1, {}, {}, {}, games_, std::nullopt);
+    return Table(mode_, seats_, *std::move(next), 1, std::vector<int>(teams()),
+                 std::vector<int>(teams()), {}, games_, std::nullopt);
   }
-  return Table(seats_, *std::move(next), hand_number_ + 1, scores_, bags_, hands_, games_,
+  return Table(mode_, seats_, *std::move(next), hand_number_ + 1, scores_, bags_, hands_, games_,
                std::nullopt);
 }
 
 absl::StatusOr<Table> Table::removePlayer(int seat) const {
   if (left_.has_value()) return absl::FailedPreconditionError("the table has closed");
-  if (seat < 0 || seat >= kSeats) return absl::InvalidArgumentError("no such seat");
+  if (seat < 0 || seat >= hand_.seats()) return absl::InvalidArgumentError("no such seat");
   std::vector<GameScore> games = games_;
   // A leave in a game abandons it: a game's end, with no winner.
   if (!winner().has_value()) games.push_back({std::nullopt, scores_});
-  return Table(seats_, hand_, hand_number_, scores_, bags_, hands_, std::move(games), seat);
+  return Table(mode_, seats_, hand_, hand_number_, scores_, bags_, hands_, std::move(games), seat);
 }
 
 }  // namespace spades
