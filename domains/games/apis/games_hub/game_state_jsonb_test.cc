@@ -14,6 +14,8 @@
 #include "domains/games/libs/chess_play/table_serde.h"
 #include "domains/games/libs/pong/table.h"
 #include "domains/games/libs/pong/table_serde.h"
+#include "domains/games/libs/cards/spades/table.h"
+#include "domains/games/libs/cards/spades/table_serde.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace {
@@ -164,6 +166,26 @@ TEST_F(GameStateJsonbTest, APongStateSurvivesJsonbNormalization) {
     const auto restored = pong::deserializeTable(*stored);
     ASSERT_TRUE(restored.ok()) << restored.status();
     EXPECT_EQ(pong::serializeTable(*restored), serialized);
+  }
+}
+
+// Spades' row: every hand, nulls for bids not made, a closed table, and
+// a seat id jsonb would refuse raw.
+TEST_F(GameStateJsonbTest, ASpadesStateSurvivesJsonbNormalization) {
+  std::deque<cards::Card> deck;
+  for (int i = 0; i < 52; ++i) deck.emplace_back(i);
+  auto opened = spades::Table::open({std::string("a\0b", 3), "bob", "cat", "dan"}, std::move(deck));
+  ASSERT_TRUE(opened.ok()) << opened.status();
+  const spades::Table bid = *opened->bid(1, 3);
+  const spades::Table closed = *bid.removePlayer(2);
+  for (const spades::Table& table : {bid, closed}) {
+    ASSERT_TRUE(db_->Exec("TRUNCATE game_state_probe").ok());
+    const std::string serialized = spades::serializeTable(table);
+    const auto stored = StoreAndFetch(serialized);
+    ASSERT_TRUE(stored.has_value());
+    const auto restored = spades::deserializeTable(*stored);
+    ASSERT_TRUE(restored.ok()) << restored.status();
+    EXPECT_EQ(spades::serializeTable(*restored), serialized);
   }
 }
 

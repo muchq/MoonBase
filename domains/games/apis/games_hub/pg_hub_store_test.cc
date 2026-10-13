@@ -30,6 +30,8 @@
 #include "domains/games/libs/chess_play/table_serde.h"
 #include "domains/games/libs/pong/table.h"
 #include "domains/games/libs/pong/table_serde.h"
+#include "domains/games/libs/cards/spades/table.h"
+#include "domains/games/libs/cards/spades/table_serde.h"
 #include "domains/platform/libs/pg/listener.h"
 #include "domains/platform/libs/pg/pg.h"
 #include "gmock/gmock.h"
@@ -207,6 +209,25 @@ TEST_F(PgHubStoreTest, PongRowsKeepTheirKindAndDecodeWithPongSerde) {
   ASSERT_TRUE(std::holds_alternative<pong::Table>(*(*reread)->state));
   EXPECT_EQ(pong::serializeTable(std::get<pong::Table>(*(*reread)->state)),
             pong::serializeTable(scored));
+}
+
+TEST_F(PgHubStoreTest, SpadesRowsKeepTheirKindAndDecodeWithSpadesSerde) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  std::deque<cards::Card> deck;
+  for (int i = 0; i < 52; ++i) deck.emplace_back(i);
+  const std::vector<std::string> seats = {"alice", "bob", "cat", "dan"};
+  const spades::Table bid = *spades::Table::open(seats, std::move(deck))->bid(1, 4);
+  PgHubStore::GameRow row{"R1", "S1", seats, games_hub::HostedState(bid), 1,
+                          games_hub::GameKind::kSpades};
+  ASSERT_TRUE(*store_->CommitGameSave(row, ""));
+
+  auto reread = store_->LoadGame("R1", "S1");
+  ASSERT_TRUE(reread.ok() && reread->has_value());
+  EXPECT_EQ((*reread)->kind, games_hub::GameKind::kSpades);
+  ASSERT_TRUE((*reread)->state.has_value());
+  ASSERT_TRUE(std::holds_alternative<spades::Table>(*(*reread)->state));
+  EXPECT_EQ(std::get<spades::Table>(*(*reread)->state), bid);
 }
 
 // A challenge's terms (#1633) ride the state column while the table

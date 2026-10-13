@@ -13,6 +13,7 @@
 #include "domains/games/libs/cards/castle/game_state_serde.h"
 #include "domains/games/libs/cards/golf/game_state_serde.h"
 #include "domains/games/libs/cards/rummy/table_serde.h"
+#include "domains/games/libs/cards/spades/table_serde.h"
 #include "domains/games/libs/chess_play/game_state_serde.h"
 #include "domains/games/libs/chess_play/table_serde.h"
 #include "domains/games/libs/pong/table_serde.h"
@@ -219,6 +220,8 @@ std::string StateJson(const PgHubStore::GameRow& row) {
           return chess_play::serializeTable(state);
         } else if constexpr (std::is_same_v<std::decay_t<decltype(state)>, pong::Table>) {
           return pong::serializeTable(state);
+        } else if constexpr (std::is_same_v<std::decay_t<decltype(state)>, spades::Table>) {
+          return spades::serializeTable(state);
         } else {
           return serializeGameState(state);
         }
@@ -791,6 +794,10 @@ absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(
       row.state.emplace(*std::move(state));
     } else if (row.kind == GameKind::kPong) {
       auto state = pong::deserializeTable(state_json);
+      if (!state.ok()) return state.status();
+      row.state.emplace(*std::move(state));
+    } else if (row.kind == GameKind::kSpades) {
+      auto state = spades::deserializeTable(state_json);
       if (!state.ok()) return state.status();
       row.state.emplace(*std::move(state));
     } else {

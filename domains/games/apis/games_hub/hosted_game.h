@@ -9,24 +9,27 @@
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/rummy/table.h"
+#include "domains/games/libs/cards/spades/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
 #include "domains/games/libs/pong/table.h"
 
 namespace games_hub {
 
-/// The games a room can host (#79): golf, castle (#77), rummy (#245), chess and pong. A table is
+/// The games a room can host (#79): golf, castle (#77), rummy (#245), chess, pong and
+/// spades (#1658). A table is
 /// created as one kind and keeps it; the kind names the engine whose
 /// state the entry (and its stored row) carries, and the wire word on
 /// GameSummary.game.
-enum class GameKind { kGolf, kCastle, kRummy, kChess, kPong };
+enum class GameKind { kGolf, kCastle, kRummy, kChess, kPong, kSpades };
 
 /// The engine truth of a started table, whichever game it plays.
 /// A rummy table is a dealer's-choice table (#1609), a deal at a time; a
 /// chess table plays one game after another the same way, and so does a
-/// pong table, whose state is its score and never its rally.
+/// pong table, whose state is its score and never its rally, and a spades
+/// table, hand after hand and game after game.
 using HostedState = std::variant<golf::GameState, castle::GameState, rummy::TableState,
-                                 chess_play::Table, pong::Table>;
+                                 chess_play::Table, pong::Table, spades::Table>;
 
 inline std::string_view GameKindName(GameKind kind) {
   switch (kind) {
@@ -38,6 +41,8 @@ inline std::string_view GameKindName(GameKind kind) {
       return "chess";
     case GameKind::kPong:
       return "pong";
+    case GameKind::kSpades:
+      return "spades";
     case GameKind::kGolf:
       break;
   }
@@ -50,6 +55,7 @@ inline std::optional<GameKind> ParseGameKind(std::string_view name) {
   if (name == "rummy") return GameKind::kRummy;
   if (name == "chess") return GameKind::kChess;
   if (name == "pong") return GameKind::kPong;
+  if (name == "spades") return GameKind::kSpades;
   return std::nullopt;
 }
 
@@ -58,6 +64,7 @@ inline GameKind KindOf(const HostedState& state) {
   if (std::holds_alternative<rummy::TableState>(state)) return GameKind::kRummy;
   if (std::holds_alternative<chess_play::Table>(state)) return GameKind::kChess;
   if (std::holds_alternative<pong::Table>(state)) return GameKind::kPong;
+  if (std::holds_alternative<spades::Table>(state)) return GameKind::kSpades;
   return GameKind::kGolf;
 }
 

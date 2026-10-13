@@ -91,6 +91,16 @@ std::optional<GameFinished> FinishedOf(const HostedState& state, std::size_t pla
     }
     return finished;
   }
+  if (const auto* table = std::get_if<spades::Table>(&state)) {
+    // A game won, the table dealing on; or one a leave abandoned. A table
+    // closed between games recorded its last when it was won.
+    if (table->phase() == spades::Phase::kWon) return finished;
+    if (table->abandonedGame()) {
+      finished.outcome = kOutcomeAbandoned;
+      return finished;
+    }
+    return std::nullopt;
+  }
   if (std::get<castle::GameState>(state).getPhase() == castle::Phase::Abandoned) {
     finished.outcome = kOutcomeAbandoned;
   }

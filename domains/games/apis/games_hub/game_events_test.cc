@@ -24,6 +24,7 @@
 #include "domains/games/libs/cards/rummy/gin.h"
 #include "domains/games/libs/cards/rummy/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
+#include "domains/games/libs/cards/spades/table.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -219,6 +220,67 @@ TEST(GameEvents, APongTableRecordsOnlyAGamesEnd) {
   EXPECT_FALSE(FinishedOf(Pong(), 2).has_value());
   EXPECT_FALSE(FinishedOf(*Pong().point(0), 2).has_value());
   EXPECT_FALSE(FinishedOf(*PongWon().removePlayer(0), 1).has_value());
+}
+
+
+std::deque<cards::Card> SpadesDeck() {
+  std::deque<cards::Card> deck;
+  for (int i = 0; i < 52; ++i) deck.emplace_back(i);
+  return deck;
+}
+
+// Bids round from the dealer's left, then the first legal card of
+// whoever is on turn until the hand is out.
+spades::Table SpadesPlayedOut(spades::Table table, const std::array<int, spades::kSeats>& bids) {
+  while (table.phase() == spades::Phase::kBidding) {
+    const int seat = table.hand().turn();
+    table = *table.bid(seat, bids[seat]);
+  }
+  while (table.phase() == spades::Phase::kPlaying) {
+    const int seat = table.hand().turn();
+    table = *table.play(seat, table.hand().legalPlays(seat).front());
+  }
+  return table;
+}
+
+const std::vector<std::string> kSpadesSeats = {"andy", "mercy", "lou", "kit"};
+
+spades::Table Spades() { return *spades::Table::open(kSpadesSeats, SpadesDeck()); }
+
+// Seat 0 holds every spade and takes every trick: 158 a hand to its team.
+spades::Table SpadesWon() {
+  const spades::Table opened = Spades();
+  const spades::Table near = *spades::Table::restore(
+      kSpadesSeats, opened.hand(), 2, {460, 0}, {0, 0},
+      {spades::HandLine{{1, 1, 1, 1}, {4, 3, 3, 3}, {460, 0}, {460, 0}}}, {}, std::nullopt);
+  return SpadesPlayedOut(near, {5, 3, spades::kNil, 2});
+}
+
+TEST(GameEvents, ASpadesGameWonIsCompleted) {
+  const spades::Table won = SpadesWon();
+  ASSERT_EQ(won.phase(), spades::Phase::kWon);
+  const auto finished = FinishedOf(won, 4);
+  ASSERT_TRUE(finished.has_value());
+  EXPECT_EQ(finished->variant, "spades");
+  EXPECT_EQ(finished->outcome, kOutcomeCompleted);
+}
+
+TEST(GameEvents, ASpadesGameLeftIsAbandoned) {
+  const auto finished = FinishedOf(*Spades().removePlayer(2), 3);
+  ASSERT_TRUE(finished.has_value());
+  EXPECT_EQ(finished->outcome, kOutcomeAbandoned);
+  // Between hands of a game not yet won, a leave abandons it too.
+  const spades::Table scored = SpadesPlayedOut(Spades(), {5, 3, spades::kNil, 2});
+  ASSERT_EQ(scored.phase(), spades::Phase::kScored);
+  EXPECT_EQ(FinishedOf(*scored.removePlayer(1), 3)->outcome, kOutcomeAbandoned);
+}
+
+// A hand is no game's end, and a table closed after a won game recorded
+// that game when it was won.
+TEST(GameEvents, ASpadesTableRecordsOnlyAGamesEnd) {
+  EXPECT_FALSE(FinishedOf(Spades(), 4).has_value());
+  EXPECT_FALSE(FinishedOf(SpadesPlayedOut(Spades(), {5, 3, spades::kNil, 2}), 4).has_value());
+  EXPECT_FALSE(FinishedOf(*SpadesWon().removePlayer(0), 3).has_value());
 }
 
 // A rummy table's games are its deals (#1609): a deal won by play is a

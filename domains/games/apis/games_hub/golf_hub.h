@@ -38,6 +38,7 @@
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/rummy/table.h"
+#include "domains/games/libs/cards/spades/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
 #include "domains/games/libs/one_d4_cpp/index_queue.h"
@@ -502,6 +503,7 @@ class GolfHub final {
       return std::get<chess_play::Table>(*state);
     }
     [[nodiscard]] const pong::Table& pong() const { return std::get<pong::Table>(*state); }
+    [[nodiscard]] const spades::Table& spades() const { return std::get<spades::Table>(*state); }
   };
 
   struct Room {
@@ -569,6 +571,8 @@ class GolfHub final {
   void HandleMove(const std::string& player_id, const moonbase::games::GolfMove& move);
   void HandleCastleMove(const std::string& player_id, const moonbase::games::CastleMove& move);
   void HandleRummyMove(const std::string& player_id, const moonbase::games::RummyMove& move);
+  /// Spades' moves (#1658): a bid, a play, and the next hand's deal.
+  void HandleSpadesMove(const std::string& player_id, const moonbase::games::SpadesMove& move);
   void HandleChessMove(const std::string& player_id, const moonbase::games::ChessMove& move);
   /// A bot to the second seat of `player_id`'s chess table (#1618).
   void AddChessBotMove(const std::string& player_id, int elo);
@@ -878,6 +882,8 @@ class GolfHub final {
                                                const std::string& viewer_id) const;
   moonbase::games::RummyView RummyViewLocked(const std::string& game_id, const GameEntry& entry,
                                              const std::string& viewer_id) const;
+  moonbase::games::SpadesView SpadesViewLocked(const std::string& game_id, const GameEntry& entry,
+                                               const std::string& viewer_id) const;
   /// One viewer's gameJoined in the table's own vocabulary.
   moonbase::games::GameEvents JoinedEventLocked(const std::string& game_id, const GameEntry& entry,
                                                 const std::string& viewer_id) const;
