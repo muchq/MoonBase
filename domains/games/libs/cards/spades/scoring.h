@@ -1,14 +1,13 @@
 #ifndef DOMAINS_GAMES_LIBS_CARDS_SPADES_SCORING_H
 #define DOMAINS_GAMES_LIBS_CARDS_SPADES_SCORING_H
 
-#include <array>
 #include <optional>
+#include <vector>
 
 #include "domains/games/libs/cards/spades/hand.h"
 
 namespace spades {
 
-inline constexpr int kTeams = 2;
 /// A team that has taken this many bags pays for them.
 inline constexpr int kBagLimit = 10;
 inline constexpr int kBagPenalty = 100;
@@ -27,22 +26,25 @@ struct TeamScore {
 };
 
 /// Each team's score for a hand played out, with the bags each carried in.
+/// There are as many teams as `bags_before` counts, and seat `s` plays for
+/// team `s % teams`: two teams of partners across four seats, or a team
+/// of one a seat.
 ///
-///   - A team's contract is its partners' bids that are not nil. Made, it
+///   - A team's contract is its seats' bids that are not nil. Made, it
 ///     scores 10 a trick bid and 1 a trick over, a bag; set, it loses 10 a
 ///     trick bid.
 ///   - A nil scores 100 if its bidder took no trick, and loses 100 if it
 ///     took any. A nil bidder's tricks never count toward the contract;
 ///     they are bags.
 ///   - Every 10 bags carried cost 100 and are cleared.
-[[nodiscard]] std::array<TeamScore, kTeams> scoreHand(const std::array<int, kSeats>& bids,
-                                                      const std::array<int, kSeats>& tricks,
-                                                      const std::array<int, kTeams>& bags_before);
+[[nodiscard]] std::vector<TeamScore> scoreHand(const std::vector<int>& bids,
+                                               const std::vector<int>& tricks,
+                                               const std::vector<int>& bags_before);
 
-/// The team that has won on these scores, at a hand's end: once either
-/// team reaches kWinningScore or falls to kLosingScore, the higher score
-/// wins. Level scores play on.
-[[nodiscard]] std::optional<int> gameWinner(const std::array<int, kTeams>& scores);
+/// The team that has won on these scores, at a hand's end: once any team
+/// reaches kWinningScore or falls to kLosingScore, the highest score wins.
+/// A tie for the highest plays on.
+[[nodiscard]] std::optional<int> gameWinner(const std::vector<int>& scores);
 
 }  // namespace spades
 

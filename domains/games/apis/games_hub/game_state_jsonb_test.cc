@@ -174,7 +174,8 @@ TEST_F(GameStateJsonbTest, APongStateSurvivesJsonbNormalization) {
 TEST_F(GameStateJsonbTest, ASpadesStateSurvivesJsonbNormalization) {
   std::deque<cards::Card> deck;
   for (int i = 0; i < 52; ++i) deck.emplace_back(i);
-  auto opened = spades::Table::open({std::string("a\0b", 3), "bob", "cat", "dan"}, std::move(deck));
+  auto opened = spades::Table::open(spades::Mode::kPartners,
+                                    {std::string("a\0b", 3), "bob", "cat", "dan"}, std::move(deck));
   ASSERT_TRUE(opened.ok()) << opened.status();
   const spades::Table bid = *opened->bid(1, 3);
   const spades::Table closed = *bid.removePlayer(2);

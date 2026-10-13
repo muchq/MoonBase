@@ -53,6 +53,12 @@ GameCommands PlayCard(moonbase::games::Card card) {
 
 GameCommands DealNext() { return Spades(SpadesMove::FromDeal(moonbase::games::SpadesDeal{})); }
 
+GameCommands StartTable(std::optional<std::string> mode = std::nullopt) {
+  moonbase::games::SpadesStartGame start;
+  start.mode = std::move(mode);
+  return Spades(SpadesMove::FromStartgame(std::move(start)));
+}
+
 GameCommands LeaveTable() {
   return Spades(SpadesMove::FromLeavegame(moonbase::games::LeaveGame{}));
 }
@@ -84,26 +90,53 @@ class SpadesFixture : public GamesHubStreamFixture {
   // The stats archive's game lines (#1571), in order.
   std::vector<std::string> games_;
 
-  // A started four-seat table, the first seat its creator and first
-  // dealer; each seat has read its first view, `views` in seat order.
+  // A started table, four seats in partners unless asked otherwise, the
+  // first seat its creator and first dealer; each seat has read its first
+  // view, `views` in seat order.
   struct Started {
     ManySeats table;
-    std::array<SpadesView, 4> views;
+    std::vector<SpadesView> views;
   };
-  std::optional<Started> StartedTable() {
-    auto table = MultiSeatTableOf<SpadesMove>(
-        4, Spades, [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
-          return ReceiveSpades(stream, wanted);
-        });
+  std::optional<Started> StartedTable(int seats = 4,
+                                      std::optional<std::string> mode = std::nullopt) {
+    auto table = WaitingTable(seats);
     if (!table.has_value()) return std::nullopt;
-    Started started{std::move(*table), {}};
+    if (!table->seats.front().stream.Send(StartTable(std::move(mode))).ok()) return std::nullopt;
+    for (Seat& seat : table->seats) {
+      if (!ReceiveSpades(seat.stream, "gameStarted").has_value()) return std::nullopt;
+    }
+    Started started{std::move(*table), std::vector<SpadesView>(seats)};
     if (!ReadViews(started)) return std::nullopt;
     return started;
   }
 
+  // Every seat joined, nobody started.
+  std::optional<ManySeats> WaitingTable(int seats) {
+    auto room = SeatedRoom(seats);
+    if (!room.has_value()) return std::nullopt;
+    ManySeats table{std::move(room->seats), room->room_id, ""};
+    if (!table.seats[0]
+             .stream.Send(Spades(SpadesMove::FromCreategame(moonbase::games::CreateGame{})))
+             .ok()) {
+      return std::nullopt;
+    }
+    auto created = ReceiveSpades(table.seats[0].stream, "gameJoined");
+    if (!created.has_value()) return std::nullopt;
+    table.game_id = created->as_gameJoined_or_null()->view.gameId;
+    moonbase::games::JoinGame join;
+    join.gameId = table.game_id;
+    for (std::size_t i = 1; i < table.seats.size(); ++i) {
+      if (!table.seats[i].stream.Send(Spades(SpadesMove::FromJoingame(join))).ok()) {
+        return std::nullopt;
+      }
+      if (!ReceiveSpades(table.seats[i].stream, "gameJoined").has_value()) return std::nullopt;
+    }
+    return table;
+  }
+
   // Each seat's next view, into `views`.
   static bool ReadViews(Started& started) {
-    for (std::size_t i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < started.views.size(); ++i) {
       auto state = ReceiveSpades(started.table.seats[i].stream, "gameState");
       if (!state.has_value()) return false;
       started.views[i] = state->as_gameState_or_null()->view;
@@ -112,7 +145,7 @@ class SpadesFixture : public GamesHubStreamFixture {
   }
 
   static int SeatOf(const Started& started, const std::string& id) {
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < static_cast<int>(started.views.size()); ++i) {
       if (started.table.seats[i].player_id == id) return i;
     }
     return -1;
@@ -128,7 +161,7 @@ class SpadesFixture : public GamesHubStreamFixture {
 
   // Bids `bids` round from the dealer's left, then plays the first legal
   // card of whoever is on turn until the hand is out.
-  static void PlayOut(Started& started, const std::array<int, 4>& bids) {
+  static void PlayOut(Started& started, const std::vector<int>& bids) {
     while (started.views[0].phase == "bidding") {
       const int seat = SeatOf(started, *started.views[0].currentPlayerId);
       ASSERT_NO_FATAL_FAILURE(Act(started, Bid(bids[seat])));
@@ -146,7 +179,7 @@ class SpadesFixture : public GamesHubStreamFixture {
   static void WinTheFirstGame(Started& started) {
     for (int hand = 0; hand < 5; ++hand) {
       const int dealer = hand % 4;
-      std::array<int, 4> bids{};
+      std::vector<int> bids(4);
       for (int seat = 0; seat < 4; ++seat) {
         bids[seat] = seat == dealer ? 13 : seat == (dealer + 2) % 4 ? 0 : 1;
       }
@@ -178,29 +211,94 @@ class SpadesFixture : public GamesHubStreamFixture {
   }
 };
 
-TEST_F(SpadesFixture, ATableStartsOnlyWithAllFourSeats) {
-  auto room = SeatedRoom(3);
-  ASSERT_TRUE(room.has_value());
-  ASSERT_TRUE(room->seats[0]
-                  .stream.Send(Spades(SpadesMove::FromCreategame(moonbase::games::CreateGame{})))
-                  .ok());
-  auto created = ReceiveSpades(room->seats[0].stream, "gameJoined");
-  ASSERT_TRUE(created.has_value());
-  EXPECT_EQ(created->as_gameJoined_or_null()->view.phase, "waiting");
-  moonbase::games::JoinGame join;
-  join.gameId = created->as_gameJoined_or_null()->view.gameId;
-  for (int i = 1; i < 3; ++i) {
-    ASSERT_TRUE(room->seats[i].stream.Send(Spades(SpadesMove::FromJoingame(join))).ok());
-    ASSERT_TRUE(ReceiveSpades(room->seats[i].stream, "gameJoined").has_value());
+// Partners seats four; unnamed, fewer seats play cutthroat, a team of one
+// a seat, and three are dealt seventeen each.
+TEST_F(SpadesFixture, PartnersSeatsFourAndFewerSeatsPlayCutthroat) {
+  auto waiting = WaitingTable(3);
+  ASSERT_TRUE(waiting.has_value());
+  Seat& host = waiting->seats[0];
+  ASSERT_TRUE(host.stream.Send(StartTable("partners")).ok());
+  EXPECT_EQ(RefusalTo(host), "partners seats four");
+  ASSERT_TRUE(host.stream.Send(StartTable("solo")).ok());
+  EXPECT_EQ(RefusalTo(host), "unknown spades mode: solo");
+  ASSERT_TRUE(host.stream.Send(StartTable()).ok());
+  ASSERT_TRUE(ReceiveSpades(host.stream, "gameStarted").has_value());
+  auto state = ReceiveSpades(host.stream, "gameState");
+  ASSERT_TRUE(state.has_value());
+  const SpadesView& view = state->as_gameState_or_null()->view;
+  EXPECT_EQ(view.mode, "cutthroat");
+  EXPECT_EQ(view.handSize, 17);
+  ASSERT_EQ(view.players.size(), 3u);
+  ASSERT_EQ(view.teams.size(), 3u);
+  for (int seat = 0; seat < 3; ++seat) {
+    EXPECT_EQ(view.players[seat].team, seat);
+    EXPECT_EQ(view.players[seat].handCount, 17);
+    EXPECT_EQ(view.teams[seat].players, (std::vector<std::string>{waiting->ids()[seat]}));
   }
-  ASSERT_TRUE(room->seats[0]
-                  .stream.Send(Spades(SpadesMove::FromStartgame(moonbase::games::StartGame{})))
-                  .ok());
-  EXPECT_EQ(RefusalTo(room->seats[0]), "spades seats four");
+  EXPECT_EQ(view.players[0].hand.size(), 17u);
 }
 
-// Your own hand by suit and rank, everyone else's as a count; bidding
-// opens at the dealer's left.
+TEST_F(SpadesFixture, FourSeatsPlayPartnersUnlessCutthroatIsNamed) {
+  auto partners = StartedTable();
+  ASSERT_TRUE(partners.has_value());
+  EXPECT_EQ(partners->views[0].mode, "partners");
+  EXPECT_EQ(partners->views[0].handSize, 13);
+  ASSERT_EQ(partners->views[0].teams.size(), 2u);
+  EXPECT_EQ(partners->views[0].players[2].team, 0);
+
+  auto cutthroat = StartedTable(4, "cutthroat");
+  ASSERT_TRUE(cutthroat.has_value());
+  EXPECT_EQ(cutthroat->views[0].mode, "cutthroat");
+  ASSERT_EQ(cutthroat->views[0].teams.size(), 4u);
+  EXPECT_EQ(cutthroat->views[0].players[2].team, 2);
+}
+
+// Three seats, seventeen each, the dealer bidding all seventeen and the
+// others nil: unshuffled, that ruins everyone, and after two hands every
+// seat is bust at -270, -270 and -200. The least bust wins: seat 2 alone,
+// not the seats a partnership would pair it with — said once, and the
+// room counts it so.
+TEST_F(SpadesFixture, ACutthroatGameIsWonByOneSeat) {
+  auto started = StartedTable(3);
+  ASSERT_TRUE(started.has_value());
+  for (int hand = 0; hand < 2; ++hand) {
+    std::vector<int> bids = {0, 0, 0};
+    bids[hand] = 17;
+    ASSERT_NO_FATAL_FAILURE(PlayOut(*started, bids));
+    if (hand < 1) {
+      ASSERT_EQ(started->views[0].phase, "scored");
+      ASSERT_TRUE(started->table.seats[0].stream.Send(DealNext()).ok());
+      ASSERT_TRUE(ReadViews(*started));
+    }
+  }
+  const std::vector<std::string> ids = started->table.ids();
+  const SpadesView& won = started->views[1];
+  ASSERT_EQ(won.phase, "won");
+  ASSERT_TRUE(won.result.has_value());
+  EXPECT_EQ(won.result->winners, (std::vector<std::string>{ids[2]}));
+  EXPECT_EQ(won.result->scores, (std::vector<int>{-270, -270, -200}));
+  EXPECT_EQ(won.teams[2].gamesWon, 1);
+  EXPECT_EQ(won.teams[0].gamesWon, 0);
+  for (Seat& seat : started->table.seats) {
+    auto ended = ReceiveSpades(seat.stream, "gameEnded");
+    ASSERT_TRUE(ended.has_value());
+    EXPECT_EQ(ended->as_gameEnded_or_null()->result.winners, (std::vector<std::string>{ids[2]}));
+  }
+  auto room = AwaitRoomState(
+      started->table.seats[0].stream,
+      [](const moonbase::games::RoomState& state) {
+        for (const auto& player : state.players) {
+          if (player.gamesPlayed == 0) return false;
+        }
+        return true;
+      },
+      "every seat's game counted");
+  ASSERT_TRUE(room.has_value());
+  for (const auto& player : room->players) {
+    EXPECT_EQ(player.gamesWon, player.playerId == ids[2] ? 1 : 0) << player.playerId;
+  }
+}
+
 TEST_F(SpadesFixture, TheFirstHandIsDealtAndEachSeatSeesOnlyItsOwnCards) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());

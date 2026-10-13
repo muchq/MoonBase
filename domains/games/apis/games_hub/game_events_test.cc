@@ -231,7 +231,7 @@ std::deque<cards::Card> SpadesDeck() {
 
 // Bids round from the dealer's left, then the first legal card of
 // whoever is on turn until the hand is out.
-spades::Table SpadesPlayedOut(spades::Table table, const std::array<int, spades::kSeats>& bids) {
+spades::Table SpadesPlayedOut(spades::Table table, const std::vector<int>& bids) {
   while (table.phase() == spades::Phase::kBidding) {
     const int seat = table.hand().turn();
     table = *table.bid(seat, bids[seat]);
@@ -245,13 +245,15 @@ spades::Table SpadesPlayedOut(spades::Table table, const std::array<int, spades:
 
 const std::vector<std::string> kSpadesSeats = {"andy", "mercy", "lou", "kit"};
 
-spades::Table Spades() { return *spades::Table::open(kSpadesSeats, SpadesDeck()); }
+spades::Table Spades() {
+  return *spades::Table::open(spades::Mode::kPartners, kSpadesSeats, SpadesDeck());
+}
 
 // Seat 0 holds every spade and takes every trick: 158 a hand to its team.
 spades::Table SpadesWon() {
   const spades::Table opened = Spades();
   const spades::Table near = *spades::Table::restore(
-      kSpadesSeats, opened.hand(), 2, {460, 0}, {0, 0},
+      spades::Mode::kPartners, kSpadesSeats, opened.hand(), 2, {460, 0}, {0, 0},
       {spades::HandLine{{1, 1, 1, 1}, {4, 3, 3, 3}, {460, 0}, {460, 0}}}, {}, std::nullopt);
   return SpadesPlayedOut(near, {5, 3, spades::kNil, 2});
 }

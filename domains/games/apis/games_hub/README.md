@@ -590,18 +590,23 @@ here.
 
 ### Spades
 
-Classic partnership spades (#1658), on `libs/cards/spades`: four seats,
-partners across in join order (seats 0 and 2 are team 0), and a table
-starts only with all four. Each hand is bid round the table from the
+Spades (#1658), on `libs/cards/spades`, at two to four seats in join
+order. `startGame` names the mode: `partners` seats four, partners across
+(seats 0 and 2 are team 0); `cutthroat` seats two to four, every seat a
+team of one. Unnamed, four seats play partners and fewer cutthroat. Two
+seats are dealt thirteen each and the rest stay out; three, seventeen each
+without the two of clubs; four, thirteen each. The view's `handSize` is
+the deal and the highest bid. Each hand is bid round the table from the
 dealer's left (0 is nil) and played out trick by trick; a play names its
 card, and one the hand lacks is the stale-view refusal. A hand played out
 is scored and kept — `phase` `scored` — until any seat sends `deal`; the
 deal passes left. A team at 500 or more, or at −200 or less, at a hand's
-end ends the game on the higher score (`won`, a `gameEnded` with the two
-winners), and the next `deal` starts a new game, scores and bags at
-nothing. A game is recorded as `spades` and credits all four seats played,
-the winning team won. A leave closes the table: a game in play is
-abandoned, played by all four and won by nobody.
+end ends the game on the highest score, a tie for it playing on (`won`, a
+`gameEnded` with the winning team's seats), and the next `deal` starts a
+new game, scores and bags at nothing. A game is recorded as `spades` and
+credits every seat played, the winning team's won. A leave closes the
+table: a game in play is abandoned, played by every seat and won by
+nobody.
 
 ## Redaction
 

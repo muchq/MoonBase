@@ -776,7 +776,7 @@ class GamesHubStreamFixture : public testing::Test {
       }
       if (!receive(table.seats[i].stream, "gameJoined").has_value()) return std::nullopt;
     }
-    if (!host.stream.Send(wrap(MoveUnion::FromStartgame(moonbase::games::StartGame{}))).ok()) {
+    if (!host.stream.Send(wrap(MoveUnion::FromStartgame({}))).ok()) {
       return std::nullopt;
     }
     for (Seat& seat : table.seats) {

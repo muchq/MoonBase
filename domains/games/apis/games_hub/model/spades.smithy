@@ -10,16 +10,17 @@ use moonbase.games#GameStarted
 use moonbase.games#JoinGame
 use moonbase.games#LeaveGame
 use moonbase.games#PlayerIds
-use moonbase.games#StartGame
 use moonbase.games#TurnChanged
 
-// Spades' vocabulary (#1658): four seats, partners across — seats 0 and 2
-// are team 0, seats 1 and 3 team 1, in the order they joined — playing
-// hands until a team wins the game, then game after game until a seat
-// leaves. It rides the room's Play stream as one `spades` member per
-// direction and reuses the shared lifecycle shapes; startGame needs all
-// four seats and deals the first hand. Shapes are prefixed `Spades`:
-// codegen flattens every namespace into one.
+// Spades' vocabulary (#1658): two to four seats, in the order they joined,
+// playing hands until a team wins the game, then game after game until a
+// seat leaves. Partners seats four, partners across — seats 0 and 2 are
+// team 0, seats 1 and 3 team 1; cutthroat seats two to four, every seat a
+// team of its own. Two seats are dealt thirteen each, the rest unseen;
+// three, seventeen each without the two of clubs; four, thirteen each. It
+// rides the room's Play stream as one `spades` member per direction and
+// reuses the shared lifecycle shapes but startGame, which names the mode.
+// Shapes are prefixed `Spades`: codegen flattens every namespace into one.
 
 /// The spades envelope on the command stream.
 structure SpadesCommand {
@@ -33,17 +34,26 @@ structure SpadesCommand {
 union SpadesMove {
     createGame: CreateGame
     joinGame: JoinGame
-    startGame: StartGame
+    startGame: SpadesStartGame
     leaveGame: LeaveGame
     bid: SpadesBid
     play: SpadesPlay
     deal: SpadesDeal
 }
 
-/// The seat's bid: tricks it means to take, 0 (nil) to 13.
+/// Deals the first hand once two or more seats are filled.
+structure SpadesStartGame {
+    /// partners | cutthroat; absent, partners at four seats and cutthroat
+    /// at fewer. Partners needs four.
+    @length(min: 1, max: 16)
+    mode: String
+}
+
+/// The seat's bid: tricks it means to take, 0 (nil) to the view's
+/// handSize.
 structure SpadesBid {
     @required
-    @range(min: 0, max: 13)
+    @range(min: 0, max: 17)
     tricks: Integer
 }
 
@@ -97,11 +107,11 @@ structure SpadesResult {
     @required
     ending: String
 
-    /// The winning team's two seats; empty when abandoned.
+    /// The winning team's seats; empty when abandoned.
     @required
     winners: PlayerIds
 
-    /// Each team's score at the end, team 0 first.
+    /// Each team's score at the end, in the order of the view's teams.
     @required
     scores: SpadesCounts
 }
@@ -119,7 +129,14 @@ structure SpadesView {
     @required
     phase: String
 
-    /// Seat order: seats 0 and 2 are team 0, 1 and 3 team 1.
+    /// partners | cutthroat; absent while waiting.
+    mode: String
+
+    /// Cards a seat is dealt, and the most it may bid; absent while
+    /// waiting.
+    handSize: Integer
+
+    /// Seat order, which is turn order.
     @required
     players: SpadesPlayers
 
@@ -147,7 +164,8 @@ structure SpadesView {
     @required
     legal: SpadesCards
 
-    /// Team 0 then team 1; empty while waiting.
+    /// In team order: partners' two, or cutthroat's one a seat in seat
+    /// order; empty while waiting.
     @required
     teams: SpadesTeams
 
@@ -171,7 +189,7 @@ structure SpadesPlayer {
     @required
     playerId: String
 
-    /// 0 or 1.
+    /// Its index in the view's teams; 0 while waiting.
     @required
     team: Integer
 
@@ -219,7 +237,7 @@ list SpadesTeams {
 }
 
 structure SpadesTeam {
-    /// Its two seats, in seat order.
+    /// Its seats, in seat order: two partners, or one.
     @required
     players: PlayerIds
 

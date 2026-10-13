@@ -217,9 +217,10 @@ TEST_F(PgHubStoreTest, SpadesRowsKeepTheirKindAndDecodeWithSpadesSerde) {
   std::deque<cards::Card> deck;
   for (int i = 0; i < 52; ++i) deck.emplace_back(i);
   const std::vector<std::string> seats = {"alice", "bob", "cat", "dan"};
-  const spades::Table bid = *spades::Table::open(seats, std::move(deck))->bid(1, 4);
-  PgHubStore::GameRow row{"R1", "S1", seats, games_hub::HostedState(bid), 1,
-                          games_hub::GameKind::kSpades};
+  const spades::Table bid =
+      *spades::Table::open(spades::Mode::kPartners, seats, std::move(deck))->bid(1, 4);
+  PgHubStore::GameRow row{
+      "R1", "S1", seats, games_hub::HostedState(bid), 1, games_hub::GameKind::kSpades};
   ASSERT_TRUE(*store_->CommitGameSave(row, ""));
 
   auto reread = store_->LoadGame("R1", "S1");
