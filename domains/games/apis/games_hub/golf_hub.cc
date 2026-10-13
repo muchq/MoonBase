@@ -1753,6 +1753,12 @@ void GolfHub::UnlistenRoomLocked(const std::string& room_id) {
   listener_->Unlisten(ChatChannel(room_id));
 }
 
+// What a wire a resume takes over is closed with: 4001 tells a browser it
+// was superseded (CloseEvent.code), not dropped. The grace stays under the
+// admission deadline that follows the kick.
+static const opal::http::CloseReason kSuperseded{.code = 4001, .reason = "superseded"};
+static constexpr std::chrono::milliseconds kKickGrace{250};
+
 opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
                                             moonbase::games::PlayAsyncServerStream& stream) {
   if (HasEmbeddedNul(input.ticket)) {
@@ -1773,9 +1779,11 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
   if (admission == Registry::Admission::kRefused) {
     // The ticket was minted from this player's resume token, so this dial
     // is the player: the live wire it collides with is one they left, such
-    // as a phone's socket whose close never arrived. Closing it parks the
-    // seat, and this dial resumes it; a wire already closing ignores it.
-    registry_.Close(player_id);
+    // as a phone's socket whose close never arrived. Kicking it parks the
+    // seat, and this dial resumes it. The kick waits for no answer from a
+    // peer that may be gone, and tells one that is still there (a
+    // duplicated tab) it was superseded, so it does not redial.
+    registry_.Kick(player_id, kSuperseded, kKickGrace);
     admission = registry_.ResumeOrAdd(player_id, mint, std::chrono::seconds(1));
   }
   if (admission == Registry::Admission::kRefused) {

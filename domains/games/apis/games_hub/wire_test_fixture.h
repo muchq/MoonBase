@@ -26,7 +26,6 @@
 #include <utility>
 #include <vector>
 
-#include "domains/games/apis/games_hub/deferred_close_websocket.h"
 #include "domains/games/apis/games_hub/games_hub_handler.h"
 #include "domains/games/apis/games_hub/golf_hub.h"
 #include "domains/games/apis/games_hub/id_generator.h"
@@ -159,8 +158,6 @@ class HubWireFixture : public ::testing::Test {
   void TearDown() override {
     // Idempotent; unblocks any session a failed test body left parked.
     for (auto& session : sessions_) session->Close();
-    // Then the closes the hub asked for, before the hub they call into goes.
-    closer_->Stop();
     // After the closes, so the disconnect counters are in the capture.
     ExpectOnlyDeclaredCounterSeriesOnTheWire(*metrics_);
   }
@@ -187,8 +184,7 @@ class HubWireFixture : public ::testing::Test {
     upgrade.method = "GET";
     upgrade.target = path + query;
     sessions_.push_back(far);
-    server_->StreamRouter()->ServeSession()(
-        upgrade, std::make_shared<DeferredCloseWebSocket>(far, closer_));
+    server_->StreamRouter()->ServeSession()(upgrade, far);
     return near;
   }
 
@@ -234,7 +230,6 @@ class HubWireFixture : public ::testing::Test {
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::shared_ptr<opal::http::Loopback> loopback_ = std::make_shared<opal::http::Loopback>();
   std::vector<std::shared_ptr<opal::http::WebSocket>> sessions_;
-  std::shared_ptr<DeferredCloser> closer_ = std::make_shared<DeferredCloser>();
 };
 
 }  // namespace games_hub

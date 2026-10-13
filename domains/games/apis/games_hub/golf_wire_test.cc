@@ -429,9 +429,10 @@ TEST_F(GolfWireTest, LeaveRoomAcksWithRoomLeftFrame) {
 
 // Consumer: the web client coming back to a seat whose old socket the
 // hub still holds open (a phone that navigated away). The resume wins:
-// the old wire closes cleanly with no exception frame, so the client it
-// belonged to reconnects like after any drop, and the new wire is
-// admitted as a resume.
+// the old wire closes cleanly with no exception frame and close code 4001
+// "superseded" (a browser's CloseEvent.code), which tells the client it
+// belonged to that another connection holds the seat, so it does not
+// redial and take it back; the new wire is admitted as a resume.
 TEST_F(GolfWireTest, SecondDialWhileSeatIsLiveTakesItOver) {
   json session;
   auto socket = DialReady(session);
@@ -449,6 +450,8 @@ TEST_F(GolfWireTest, SecondDialWhileSeatIsLiveTakesItOver) {
   auto closed = socket->Receive(kWireReceiveBudget);
   ASSERT_TRUE(closed.ok()) << closed.error().message();
   EXPECT_FALSE(closed->has_value()) << "expected a clean close, not a frame";
+  EXPECT_EQ(socket->PeerCloseReason(),
+            (opal::http::CloseReason{.code = 4001, .reason = "superseded"}));
   ASSERT_TRUE(taken->Send(CommandFrame("createRoom", "{}")).ok());
   (void)EventPayload(NextFrame(*taken), "roomState");
 }

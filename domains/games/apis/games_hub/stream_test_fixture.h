@@ -27,7 +27,6 @@
 #include <utility>
 #include <vector>
 
-#include "domains/games/apis/games_hub/deferred_close_websocket.h"
 #include "domains/games/apis/games_hub/games_hub_handler.h"
 #include "domains/games/apis/games_hub/golf_hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
@@ -607,8 +606,7 @@ class GamesHubStreamFixture : public testing::Test {
       upgrade.target = request.target;
       upgrade.headers = request.headers;
       sessions_.push_back(far);
-      server_->StreamRouter()->ServeSession()(
-          upgrade, std::make_shared<DeferredCloseWebSocket>(far, closer_));
+      server_->StreamRouter()->ServeSession()(upgrade, far);
       return near;
     };
     auto client = moonbase::games::GamesHubClient::Create(std::move(config));
@@ -620,8 +618,6 @@ class GamesHubStreamFixture : public testing::Test {
     // Idempotent; unblocks any session a failed test body left parked so
     // the registry's teardown joins cannot hang.
     for (auto& session : sessions_) session->Close();
-    // Then the closes the hub asked for, before the hub they call into goes.
-    closer_->Stop();
     // After the closes, so the disconnect counters this suite would otherwise
     // never observe are in the recorder when the sweep runs. Covers the
     // fixture's own handler only: a test that builds a second instance with
@@ -862,7 +858,6 @@ class GamesHubStreamFixture : public testing::Test {
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::unique_ptr<moonbase::games::GamesHubClient> client_;
   std::vector<std::shared_ptr<opal::http::WebSocket>> sessions_;
-  std::shared_ptr<DeferredCloser> closer_ = std::make_shared<DeferredCloser>();
 };
 
 }  // namespace games_hub

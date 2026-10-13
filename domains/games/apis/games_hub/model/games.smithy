@@ -426,7 +426,7 @@ structure Unauthenticated {
 }
 
 /// The player's old session was still unwinding when this one dialed: a
-/// dial takes the seat from a live wire (ADR-0022 Close), and this fires
+/// dial takes the seat from a live wire (ADR-0022 Kick), and this fires
 /// only when the closed one has not let go within the admission deadline.
 /// The identity is good; dial again with the same resume token.
 @error("client")

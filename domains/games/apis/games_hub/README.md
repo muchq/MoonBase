@@ -637,8 +637,10 @@ lobby-safe summaries only.
   all-in-memory — dev mode and the test harness.
 - A resume token is the player: a dial with it takes the seat from a wire
   the hub still holds open (a phone's socket whose close never arrived),
-  closing that wire (opal ADR-0022's `Close`) so the dial resumes the seat.
-  `SeatConflict` is left for a closed wire still unwinding past the
+  kicking that wire (opal ADR-0022's `Kick`, 250 ms grace) so the dial
+  resumes the seat. The kicked wire closes with code 4001 "superseded",
+  which tells a client still holding it (a duplicated tab) not to redial.
+  `SeatConflict` is left for a kicked wire still unwinding past the
   admission deadline; the client keeps its token and dials again.
 - Player ids are whimsical (`bouncy-coral-quokka-x9k2`) and double as
   display names. Room and game ids
