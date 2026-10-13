@@ -19,6 +19,8 @@ void Voice::SetIceServers(std::vector<moonbase::games::IceServer> servers) {
   ice_servers_ = std::move(servers);
 }
 
+void Voice::SetTurn(std::optional<TurnConfig> turn) { turn_ = std::move(turn); }
+
 std::optional<Refusal> Voice::Join(const std::string& player_id, const std::string& room_id,
                                    Deliveries& out) {
   if (in_voice_.contains(player_id)) return Refusal{RejectKind::kState, "already in voice"};
@@ -32,6 +34,7 @@ std::optional<Refusal> Voice::Join(const std::string& player_id, const std::stri
   }
   if (roster.members.size() >= kCapacity) return Refusal{RejectKind::kState, "voice is full"};
   roster.iceServers = ice_servers_;
+  if (turn_.has_value()) roster.iceServers.push_back(TurnServerFor(*turn_, player_id, clock_()));
   roster.epoch = next_epoch_++;
 
   in_voice_.emplace(player_id, Member{room_id, roster.epoch});
