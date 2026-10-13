@@ -282,6 +282,31 @@ TEST_F(PongFixture, FramesReachTheSeatsAndAWatcher) {
   }
 }
 
+// A phone that navigates away can leave its socket open on the hub's
+// side; the player coming back with their resume token is seated again
+// and hears the rally, not shown the court as a stranger.
+TEST_F(PongFixture, AResumeWhileTheOldWireIsStillOpenReclaimsTheSeat) {
+  auto started = StartedTable("smallcat");
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+
+  auto back = OpenSeat(table.alice.resume_token);
+  ASSERT_TRUE(back.has_value());
+  EXPECT_EQ(back->player_id, table.alice.player_id);
+  auto ready = ReceiveCase(back->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  auto joined = ReceivePong(back->stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  EXPECT_EQ(joined->as_gameJoined_or_null()->view.gameId, table.game_id);
+
+  golf_->TickPongOnce();
+  golf_->TickPongOnce();
+  const auto frame = LatestFrame(*back);
+  ASSERT_TRUE(frame.has_value()) << "the rally does not reach the resumed seat";
+  EXPECT_EQ(frame->gameId, table.game_id);
+}
+
 // Ticks count on from the clock, so a rally taken up mid-game, here or
 // on another instance, never draws a frame a client would call stale.
 TEST_F(PongFixture, FrameTicksCountOnFromTheClockAcrossATakeUp) {
