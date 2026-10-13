@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "domains/games/apis/games_hub/deferred_close_websocket.h"
 #include "domains/games/apis/games_hub/games_hub_handler.h"
 #include "domains/games/apis/games_hub/golf_hub.h"
 #include "domains/games/apis/games_hub/id_generator.h"
@@ -140,9 +141,10 @@ class HubWireFixture : public ::testing::Test {
     auto vault = std::make_shared<InMemoryTicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
                                                        /*resume_ttl=*/std::chrono::seconds(60));
     auto ids = std::make_shared<SequentialIdGenerator>();
-    golf_ = std::make_shared<GolfHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
-                                      /*grace_period=*/std::chrono::seconds(60), metrics_,
-                                      MakeStore(), /*chat_store=*/nullptr, MakeRateLimits());
+    golf_ =
+        std::make_shared<GolfHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
+                                  /*grace_period=*/std::chrono::seconds(60), metrics_, MakeStore(),
+                                  /*chat_store=*/nullptr, MakeRateLimits(), MakeGolfHooks());
     ASSERT_TRUE(golf_->RestoreFromStore().ok());
     handler_ = std::make_shared<GamesHubHandler>(vault, ids, golf_);
     server_ = std::make_unique<moonbase::games::GamesHubServer>(handler_);
@@ -150,12 +152,15 @@ class HubWireFixture : public ::testing::Test {
   }
 
   virtual RateLimits MakeRateLimits() { return WireRateLimits(); }
+  virtual GolfTestHooks MakeGolfHooks() { return {}; }
   /// Null selects the production memory store.
   virtual std::shared_ptr<HubStore> MakeStore() { return nullptr; }
 
   void TearDown() override {
     // Idempotent; unblocks any session a failed test body left parked.
     for (auto& session : sessions_) session->Close();
+    // Then the closes the hub asked for, before the hub they call into goes.
+    closer_->Stop();
     // After the closes, so the disconnect counters are in the capture.
     ExpectOnlyDeclaredCounterSeriesOnTheWire(*metrics_);
   }
@@ -182,7 +187,8 @@ class HubWireFixture : public ::testing::Test {
     upgrade.method = "GET";
     upgrade.target = path + query;
     sessions_.push_back(far);
-    server_->StreamRouter()->ServeSession()(upgrade, far);
+    server_->StreamRouter()->ServeSession()(
+        upgrade, std::make_shared<DeferredCloseWebSocket>(far, closer_));
     return near;
   }
 
@@ -228,6 +234,7 @@ class HubWireFixture : public ::testing::Test {
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::shared_ptr<opal::http::Loopback> loopback_ = std::make_shared<opal::http::Loopback>();
   std::vector<std::shared_ptr<opal::http::WebSocket>> sessions_;
+  std::shared_ptr<DeferredCloser> closer_ = std::make_shared<DeferredCloser>();
 };
 
 }  // namespace games_hub

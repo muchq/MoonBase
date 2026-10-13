@@ -425,9 +425,10 @@ structure Unauthenticated {
     message: String
 }
 
-/// The player already holds a live seat (ADR-0022 admission refused).
-/// Reconnect after an abrupt loss resumes instead — this fires only while
-/// the old wire is still healthy.
+/// The player's old session was still unwinding when this one dialed: a
+/// dial takes the seat from a live wire (ADR-0022 Close), and this fires
+/// only when the closed one has not let go within the admission deadline.
+/// The identity is good; dial again with the same resume token.
 @error("client")
 @httpError(409)
 structure SeatConflict {

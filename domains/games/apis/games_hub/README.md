@@ -635,6 +635,11 @@ lobby-safe summaries only.
   their seat. The database is every game's authority; each commit's
   NOTIFY wakes the other instances holding the room. Unset is
   all-in-memory — dev mode and the test harness.
+- A resume token is the player: a dial with it takes the seat from a wire
+  the hub still holds open (a phone's socket whose close never arrived),
+  closing that wire (opal ADR-0022's `Close`) so the dial resumes the seat.
+  `SeatConflict` is left for a closed wire still unwinding past the
+  admission deadline; the client keeps its token and dials again.
 - Player ids are whimsical (`bouncy-coral-quokka-x9k2`) and double as
   display names. Room and game ids
   are 6-char uppercase codes that ride in permalinks.

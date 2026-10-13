@@ -31,11 +31,14 @@
 
 #include <gtest/gtest.h>
 
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <set>
 #include <string>
+#include <thread>
 
 #include "domains/games/apis/games_hub/wire_test_fixture.h"
 #include "domains/games/libs/mithril_cpp/client.h"
@@ -421,13 +424,12 @@ TEST_F(GolfWireTest, LeaveRoomAcksWithRoomLeftFrame) {
   EXPECT_EQ(EventPayload(NextFrame(*socket), "roomLeft"), R"({"roomId":"room-1"})");
 }
 
-// Consumer: the golf web client's second-tab handling. A fresh ticket for
-// a player whose first wire is still healthy is refused after the upgrade
-// as one terminal SeatConflict exception frame, then a clean close — the
-// same three-header envelope as Unauthenticated, so one decoder handles
-// every dial failure. (The payload carries only "message"; the "__type"
-// member belongs to the unary error envelope, not stream exceptions.)
-TEST_F(GolfWireTest, SecondDialWhileSeatIsLiveRefusesWithSeatConflictFrame) {
+// Consumer: the web client coming back to a seat whose old socket the
+// hub still holds open (a phone that navigated away). The resume wins:
+// the old wire closes cleanly with no exception frame, so the client it
+// belonged to reconnects like after any drop, and the new wire is
+// admitted as a resume.
+TEST_F(GolfWireTest, SecondDialWhileSeatIsLiveTakesItOver) {
   json session;
   auto socket = DialReady(session);
 
@@ -437,22 +439,88 @@ TEST_F(GolfWireTest, SecondDialWhileSeatIsLiveRefusesWithSeatConflictFrame) {
   ASSERT_EQ(response.status, 200) << response.body;
   const json second = json::parse(response.body);
 
+  auto taken = DialPlay("?ticket=" + second["ticket"].get<std::string>());
+  EXPECT_EQ(EventPayload(NextFrame(*taken), "sessionReady"),
+            R"({"playerId":"player-1","resumed":true})");
+
+  auto closed = socket->Receive(kWireReceiveBudget);
+  ASSERT_TRUE(closed.ok()) << closed.error().message();
+  EXPECT_FALSE(closed->has_value()) << "expected a clean close, not a frame";
+  ASSERT_TRUE(taken->Send(CommandFrame("createRoom", "{}")).ok());
+  (void)EventPayload(NextFrame(*taken), "roomState");
+}
+
+// Holds the close path at the seat's release until the test lets go, so a
+// resume can arrive while the old session is still unwinding.
+class SeatReleaseWireTest : public GolfWireTest {
+ protected:
+  void TearDown() override {
+    Release();
+    GolfWireTest::TearDown();
+  }
+  GolfTestHooks MakeGolfHooks() override {
+    GolfTestHooks hooks;
+    hooks.before_seat_release = [this](const std::string&) {
+      std::unique_lock<std::mutex> lock(mu_);
+      parked_ = true;
+      cv_.notify_all();
+      cv_.wait(lock, [this] { return released_; });
+    };
+    return hooks;
+  }
+  bool WaitParked() {
+    std::unique_lock<std::mutex> lock(mu_);
+    return cv_.wait_for(lock, kWireReceiveBudget, [this] { return parked_; });
+  }
+  void Release() {
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      released_ = true;
+    }
+    cv_.notify_all();
+  }
+
+ private:
+  std::mutex mu_;
+  std::condition_variable cv_;
+  bool parked_ = false;
+  bool released_ = false;
+};
+
+// Consumer: the web client's retry. A resume that lands while the old
+// session is still unwinding is refused as one terminal SeatConflict
+// exception frame, then a clean close — the same three-header envelope as
+// Unauthenticated, so one decoder handles every dial failure. The client
+// keeps its resume token on this one and dials again. (The payload
+// carries only "message"; the "__type" member belongs to the unary error
+// envelope, not stream exceptions.)
+TEST_F(SeatReleaseWireTest, ADialWhileTheOldSessionUnwindsRefusesWithSeatConflictFrame) {
+  json session;
+  auto socket = DialReady(session);
+  // The in-memory wire runs the old session's close path on the closing
+  // thread, which the hook then holds.
+  std::thread closer([&] { socket->Close(); });
+  ASSERT_TRUE(WaitParked());
+
+  const std::string resume_body =
+      std::string(R"({"resumeToken":")") + session["resumeToken"].get<std::string>() + R"("})";
+  const auto response = PostSession(resume_body);
+  ASSERT_EQ(response.status, 200) << response.body;
+  const json second = json::parse(response.body);
+
   auto conflicted = DialPlay("?ticket=" + second["ticket"].get<std::string>());
   const auto frame = NextFrame(*conflicted);
+  Release();
+  closer.join();
   ASSERT_TRUE(frame.has_value());
   EXPECT_EQ(HeaderText(*frame, ":message-type"), "exception");
   EXPECT_EQ(HeaderText(*frame, ":exception-type"), "SeatConflict");
   EXPECT_EQ(HeaderText(*frame, ":content-type"), "application/json");
   EXPECT_EQ(frame->headers.size(), 3u);
   EXPECT_EQ(frame->payload.ToString(), R"({"message":"player already has a live connection"})");
-
-  // Terminal for the second dial only: it closes cleanly, and the first
-  // wire is still live — the next command lands.
   auto closed = conflicted->Receive(kWireReceiveBudget);
   ASSERT_TRUE(closed.ok()) << closed.error().message();
   EXPECT_FALSE(closed->has_value()) << "expected a clean close after the exception frame";
-  ASSERT_TRUE(socket->Send(CommandFrame("createRoom", "{}")).ok());
-  (void)EventPayload(NextFrame(*socket), "roomState");
 }
 
 }  // namespace

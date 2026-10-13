@@ -888,6 +888,7 @@ cc_test(
     # raise the ceiling.
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "pg_hub_e2e_test.cc",
         "stream_test_fixture.h",
     ],
@@ -933,6 +934,7 @@ cc_test(
     size = "small",
     srcs = [
         "castle_wire_test.cc",
+        "deferred_close_websocket.h",
         "wire_test_fixture.h",
     ],
     deps = [
@@ -960,6 +962,7 @@ cc_test(
     size = "small",
     srcs = [
         "chess_wire_test.cc",
+        "deferred_close_websocket.h",
         "wire_test_fixture.h",
     ],
     deps = [
@@ -988,6 +991,7 @@ cc_test(
     name = "pong_wire_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "pong_wire_test.cc",
         "wire_test_fixture.h",
     ],
@@ -1016,6 +1020,7 @@ cc_test(
     name = "spades_wire_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "spades_wire_test.cc",
         "wire_test_fixture.h",
     ],
@@ -1043,6 +1048,7 @@ cc_test(
     name = "rummy_wire_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "rummy_wire_test.cc",
         "wire_test_fixture.h",
     ],
@@ -1077,6 +1083,7 @@ cc_test(
     name = "golf_wire_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "golf_wire_test.cc",
         "wire_test_fixture.h",
     ],
@@ -1107,6 +1114,7 @@ cc_test(
     size = "small",
     srcs = [
         "castle_e2e_test.cc",
+        "deferred_close_websocket.h",
         "stream_test_fixture.h",
     ],
     deps = [
@@ -1137,6 +1145,7 @@ cc_test(
     size = "small",
     srcs = [
         "chess_round_robin_e2e_test.cc",
+        "deferred_close_websocket.h",
         "stream_test_fixture.h",
     ],
     deps = [
@@ -1170,6 +1179,7 @@ cc_test(
     name = "pong_e2e_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "pong_e2e_test.cc",
         "stream_test_fixture.h",
     ],
@@ -1200,6 +1210,7 @@ cc_test(
     name = "pong_round_robin_e2e_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "pong_round_robin_e2e_test.cc",
         "stream_test_fixture.h",
     ],
@@ -1232,6 +1243,7 @@ cc_test(
     size = "small",
     srcs = [
         "chess_e2e_test.cc",
+        "deferred_close_websocket.h",
         "stream_test_fixture.h",
     ],
     deps = [
@@ -1265,6 +1277,7 @@ cc_test(
     size = "small",
     srcs = [
         "chess_bot_e2e_test.cc",
+        "deferred_close_websocket.h",
         "stream_test_fixture.h",
     ],
     deps = [
@@ -1297,6 +1310,7 @@ cc_test(
     name = "rummy_e2e_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "rummy_e2e_test.cc",
         "stream_test_fixture.h",
     ],
@@ -1327,6 +1341,7 @@ cc_test(
     name = "spades_e2e_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "spades_e2e_test.cc",
         "stream_test_fixture.h",
     ],
@@ -1354,6 +1369,7 @@ cc_test(
     name = "hub_e2e_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "hub_e2e_test.cc",
         "stream_test_fixture.h",
     ],
@@ -1403,6 +1419,7 @@ cc_test(
     name = "hub_chat_race_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "hub_chat_race_test.cc",
         "stream_test_fixture.h",
     ],
@@ -1432,6 +1449,7 @@ cc_test(
     name = "hub_store_race_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "hub_store_race_test.cc",
         "stream_test_fixture.h",
     ],
@@ -1460,6 +1478,7 @@ cc_test(
     name = "lobby_e2e_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "lobby_e2e_test.cc",
         "stream_test_fixture.h",
     ],
@@ -1489,6 +1508,7 @@ cc_test(
     name = "lobby_wire_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "lobby_wire_test.cc",
         "wire_test_fixture.h",
     ],
@@ -1516,6 +1536,7 @@ cc_test(
     name = "voice_wire_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "voice_wire_test.cc",
         "wire_test_fixture.h",
     ],
@@ -1545,6 +1566,7 @@ cc_test(
     name = "tape_test",
     size = "small",
     srcs = [
+        "deferred_close_websocket.h",
         "tape_test.cc",
         "wire_test_fixture.h",
     ],

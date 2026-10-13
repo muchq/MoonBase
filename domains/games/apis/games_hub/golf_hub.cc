@@ -1768,8 +1768,16 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
 
   // The blessed admission call (ADR-0022): pre-first-suspend, on the
   // launching handler thread, where its brief blocking is legal.
-  const auto admission = registry_.ResumeOrAdd(
-      player_id, [&stream] { return stream.Share(); }, std::chrono::seconds(1));
+  const auto mint = [&stream] { return stream.Share(); };
+  auto admission = registry_.ResumeOrAdd(player_id, mint, std::chrono::milliseconds(0));
+  if (admission == Registry::Admission::kRefused) {
+    // The ticket was minted from this player's resume token, so this dial
+    // is the player: the live wire it collides with is one they left, such
+    // as a phone's socket whose close never arrived. Closing it parks the
+    // seat, and this dial resumes it; a wire already closing ignores it.
+    registry_.Close(player_id);
+    admission = registry_.ResumeOrAdd(player_id, mint, std::chrono::seconds(1));
+  }
   if (admission == Registry::Admission::kRefused) {
     Count("hub_admissions_refused", {{"reason", "seat_conflict"}});
     co_return opal::Error::Modeled("SeatConflict", "player already has a live connection");

@@ -569,7 +569,7 @@ TEST_F(GamesHubStreamFixture, TicketSpendsOnce) {
   ASSERT_TRUE(ReceiveCase(seat->stream, "sessionReady").has_value());
 
   // The same ticket is gone; a second dial with it dies typed. (A fresh
-  // ticket for the same player is the SeatConflict test below.)
+  // ticket for the same player is the takeover test below.)
   moonbase::games::PlayInput replay;
   replay.ticket = "t-bogus";  // any unspendable ticket behaves alike
   auto second = client_->Play(replay);
@@ -579,19 +579,29 @@ TEST_F(GamesHubStreamFixture, TicketSpendsOnce) {
   EXPECT_EQ(first_event.error().code(), "Unauthenticated");
 }
 
-TEST_F(GamesHubStreamFixture, SecondLiveConnectionForSamePlayerIsRefused) {
+TEST_F(GamesHubStreamFixture, SecondLiveConnectionForSamePlayerTakesTheSeatOver) {
   auto seat = OpenSeat();
   ASSERT_TRUE(seat.has_value());
   ASSERT_TRUE(ReceiveCase(seat->stream, "sessionReady").has_value());
 
   // Fresh ticket for the same player while the first wire is healthy:
-  // admission refuses (ADR-0022) as the modeled SeatConflict.
-  auto conflicted = OpenSeat(seat->resume_token);
-  ASSERT_TRUE(conflicted.has_value());
-  EXPECT_EQ(conflicted->player_id, seat->player_id);
-  auto first = conflicted->stream.Receive();
-  ASSERT_FALSE(first.ok());
-  EXPECT_EQ(first.error().code(), "SeatConflict");
+  // the resume wins at once, not after an admission deadline (a running
+  // chess clock is waiting), and the first wire ends with a clean close.
+  const auto dialed = std::chrono::steady_clock::now();
+  auto taken = OpenSeat(seat->resume_token);
+  ASSERT_TRUE(taken.has_value());
+  EXPECT_EQ(taken->player_id, seat->player_id);
+  auto ready = ReceiveCase(taken->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  EXPECT_LT(std::chrono::steady_clock::now() - dialed, std::chrono::milliseconds(500));
+  auto closed = seat->stream.Receive(std::chrono::seconds(5));
+  ASSERT_TRUE(closed.ok()) << closed.error().message();
+  EXPECT_FALSE(closed->has_value()) << "the first wire is still open";
+
+  // The new wire is the live one.
+  ASSERT_TRUE(taken->stream.Send(GameCommands::FromCreateroom(moonbase::games::CreateRoom{})).ok());
+  EXPECT_TRUE(ReceiveCase(taken->stream, "roomState").has_value());
 }
 
 TEST_F(GamesHubStreamFixture, CreateJoinAndLeaveBroadcastRoomState) {
