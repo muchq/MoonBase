@@ -26,9 +26,9 @@ The rules that change behavior most:
   activity and end the turn; events wake the session.
 - **Write the conclusion, not the journey.** Comments state the live rule and
   never narrate deleted code. A commit subject is ten words at most and most
-  commits need no body at all; squash-merge concatenates them onto `main`, so
-  a review's fixup commits are squashed and reworded before merge rather than
-  shipped as a changelog of the review. PR bodies are terse.
+  commits need no body at all, since squash-merge concatenates them onto
+  `main`. A review's fixups land as commits of their own; there is no need to
+  squash them before merge. PR bodies are terse.
 
 Other docs: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) (what's deployed and how
 data moves), [`docs/TESTING.md`](docs/TESTING.md) (mutation checking and the
