@@ -90,6 +90,9 @@ TEST(TableSerde, RefusesWhatItCannotRead) {
   EXPECT_FALSE(with("spadesBroken", 1).ok());
   EXPECT_FALSE(with("scores", nlohmann::json::array({0})).ok());
   EXPECT_FALSE(with("left", 9).ok());
+  nlohmann::json short_hands = nlohmann::json::parse(good)["hands"];
+  short_hands.erase(short_hands.size() - 1);
+  EXPECT_FALSE(with("hands", short_hands).ok());
   // A card past an int's range is refused, not narrowed to the card it
   // wraps to.
   nlohmann::json wrapped = nlohmann::json::parse(good);

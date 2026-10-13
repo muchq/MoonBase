@@ -79,9 +79,8 @@ absl::StatusOr<Table> Table::restore(Mode mode, std::vector<std::string> seats, 
   if (static_cast<std::size_t>(hand.seats()) != seat_count) {
     return absl::InvalidArgumentError("a hand a seat");
   }
-  if (scores.size() != static_cast<std::size_t>(teams) ||
-      bags.size() != static_cast<std::size_t>(teams)) {
-    return absl::InvalidArgumentError("a score and bags a team");
+  if (bags.size() != static_cast<std::size_t>(teams)) {
+    return absl::InvalidArgumentError("bags a team");
   }
   for (int team_bags : bags) {
     if (team_bags < 0 || team_bags >= kBagLimit) {

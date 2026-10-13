@@ -320,5 +320,33 @@ TEST(Restore, RefusesWhatNoDealMakes) {
       Hand::restore(0, two, {std::nullopt, std::nullopt}, {0, 0, 0}, {}, std::nullopt, false).ok());
 }
 
+// Two to four seats; a bid up to the cards held; a trick of a card a seat.
+TEST(Restore, SizesAreTheSeats) {
+  // One seat holding a full thirteen is still no table.
+  const auto dealt = Hand::deal(2, 0, FullDeck())->hands();
+  EXPECT_FALSE(Hand::restore(0, {dealt[0]}, {std::nullopt}, {0}, {}, std::nullopt, false).ok());
+  EXPECT_FALSE(Hand::restore(0, std::vector<std::vector<Card>>(5),
+                             std::vector<std::optional<int>>(5), std::vector<int>(5), {},
+                             std::nullopt, false)
+                   .ok());
+  const auto three = Hand::deal(3, 0, FullDeck())->hands();
+  EXPECT_TRUE(
+      Hand::restore(0, three, {std::nullopt, 17, std::nullopt}, {0, 0, 0}, {}, std::nullopt, false)
+          .ok());
+  EXPECT_FALSE(
+      Hand::restore(0, three, {std::nullopt, 18, std::nullopt}, {0, 0, 0}, {}, std::nullopt, false)
+          .ok());
+  Hand two = *Hand::deal(2, 0, FullDeck());
+  two = *two.bid(1, 3);
+  two = *two.bid(0, 3);
+  two = *two.play(1, two.legalPlays(1).front());
+  two = *two.play(0, two.legalPlays(0).front());
+  ASSERT_TRUE(two.last().has_value());
+  const auto read = Hand::restore(two.dealer(), two.hands(), two.bids(), two.tricks(), {},
+                                  two.last(), two.spadesBroken());
+  ASSERT_TRUE(read.ok()) << read.status();
+  EXPECT_EQ(*read, two);
+}
+
 }  // namespace
 }  // namespace spades

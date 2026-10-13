@@ -255,5 +255,64 @@ TEST(Table, CutthroatIsWonByOneSeat) {
                    .ok());
 }
 
+// A cutthroat row is sized by its seats: a team, a score and bags a seat.
+TEST(Table, RestoreRefusesACutthroatRowOfTheWrongShape) {
+  const std::vector<std::string> three = {"ann", "bob", "cat"};
+  const Table opened = *Table::open(Mode::kCutthroat, three, FullDeck());
+  const Hand hand = opened.hand();
+  const auto restore = [&](std::vector<std::string> seats, const Hand& held, int number,
+                           std::vector<int> scores, std::vector<int> bags,
+                           std::vector<HandLine> lines, std::vector<GameScore> games,
+                           std::optional<int> left) {
+    return Table::restore(Mode::kCutthroat, std::move(seats), held, number, std::move(scores),
+                          std::move(bags), std::move(lines), std::move(games), left);
+  };
+  const std::vector<int> zero = {0, 0, 0};
+  EXPECT_TRUE(restore(three, hand, 1, zero, zero, {}, {}, std::nullopt).ok());
+  // A hand dealt to another number of seats.
+  EXPECT_FALSE(restore({"ann", "bob"}, hand, 1, {0, 0}, {0, 0}, {}, {}, std::nullopt).ok());
+  // Bags a team, none below nothing.
+  EXPECT_FALSE(restore(three, hand, 1, zero, {0, 0}, {}, {}, std::nullopt).ok());
+  EXPECT_FALSE(restore(three, hand, 1, zero, {0, -1, 0}, {}, {}, std::nullopt).ok());
+  // The seat that left is one of the three.
+  const std::vector<GameScore> abandoned = {{std::nullopt, zero}};
+  EXPECT_TRUE(restore(three, hand, 1, zero, zero, {}, abandoned, 2).ok());
+  EXPECT_FALSE(restore(three, hand, 1, zero, zero, {}, abandoned, 3).ok());
+  // An earlier game: a score a team, won by one of them.
+  EXPECT_TRUE(restore(three, hand, 1, zero, zero, {}, {{2, {10, 20, 500}}}, std::nullopt).ok());
+  EXPECT_FALSE(restore(three, hand, 1, zero, zero, {}, {{0, {500, 10}}}, std::nullopt).ok());
+  EXPECT_FALSE(restore(three, hand, 1, zero, zero, {}, {{3, {10, 20, 500}}}, std::nullopt).ok());
+  EXPECT_FALSE(restore(three, hand, 1, zero, zero, {}, {{-1, {10, 20, 500}}}, std::nullopt).ok());
+  // A line counts every seat and team.
+  const std::vector<int> ten = {10, 10, 10};
+  EXPECT_TRUE(restore(three, hand, 2, ten, zero, {HandLine{{1, 1, 1}, {6, 6, 5}, ten, ten}}, {},
+                      std::nullopt)
+                  .ok());
+  EXPECT_FALSE(
+      restore(three, hand, 2, ten, zero, {HandLine{{1, 1}, {6, 6, 5}, ten, ten}}, {}, std::nullopt)
+          .ok());
+  EXPECT_FALSE(restore(three, hand, 2, ten, zero, {HandLine{{1, 1, 1}, {6, 6, 5}, {10, 10}, ten}},
+                       {}, std::nullopt)
+                   .ok());
+  // A hand played out is the last of at least one.
+  const Table scored = PlayOut(opened, {5, kNil, 6});
+  EXPECT_FALSE(restore(three, scored.hand(), 0, zero, zero, {}, {}, std::nullopt).ok());
+}
+
+// The deal passes left round however many seats there are.
+TEST(Table, TheDealGoesRoundTheTable) {
+  for (std::size_t n = 2; n <= 3; ++n) {
+    const std::vector<std::string> seats(kSeatIds.begin(), kSeatIds.begin() + n);
+    Table table = *Table::open(Mode::kCutthroat, seats, FullDeck());
+    for (std::size_t hand = 1; hand <= n; ++hand) {
+      table = *PlayOut(table, std::vector<int>(n, 1)).deal(FullDeck());
+      EXPECT_EQ(table.hand().dealer(), static_cast<int>(hand % n)) << n << " seats, hand " << hand;
+    }
+  }
+  const Table three = *Table::open(Mode::kCutthroat, {"ann", "bob", "cat"}, FullDeck());
+  EXPECT_EQ(three.removePlayer(3).status().code(), StatusCode::kInvalidArgument);
+  EXPECT_TRUE(three.removePlayer(2).ok());
+}
+
 }  // namespace
 }  // namespace spades
