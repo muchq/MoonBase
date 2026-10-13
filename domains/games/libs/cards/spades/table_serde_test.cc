@@ -90,6 +90,11 @@ TEST(TableSerde, RefusesWhatItCannotRead) {
   EXPECT_FALSE(with("spadesBroken", 1).ok());
   EXPECT_FALSE(with("scores", nlohmann::json::array({0})).ok());
   EXPECT_FALSE(with("left", 9).ok());
+  // A card past an int's range is refused, not narrowed to the card it
+  // wraps to.
+  nlohmann::json wrapped = nlohmann::json::parse(good);
+  wrapped["hands"][1][0] = 4294967296ull + wrapped["hands"][1][0].get<uint64_t>();
+  EXPECT_FALSE(deserializeTable(wrapped.dump()).ok());
   nlohmann::json bad_card = nlohmann::json::parse(good);
   bad_card["hands"][0][0] = 52;
   EXPECT_FALSE(deserializeTable(bad_card.dump()).ok());
@@ -118,7 +123,7 @@ TEST(TableSerde, RoundTripsCutthroat) {
   EXPECT_EQ(nlohmann::json::parse(serializeTable(three))["mode"], "cutthroat");
 }
 
-// Rows written before cutthroat name no mode, and are partners.
+// A row with no mode is partners.
 TEST(TableSerde, ARowWithNoModeIsPartners) {
   const Table partners = *Table::open(Mode::kPartners, kSeatIds, FullDeck());
   nlohmann::json row = nlohmann::json::parse(serializeTable(partners));

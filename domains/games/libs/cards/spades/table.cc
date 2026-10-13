@@ -16,7 +16,7 @@ std::vector<int> BidsOf(const Hand& hand) {
 }
 
 absl::Status ValidSeats(Mode mode, const std::vector<std::string>& seats) {
-  if (mode == Mode::kPartners && seats.size() != 4) {
+  if (mode == Mode::kPartners && seats.size() != kPartnersSeats) {
     return absl::InvalidArgumentError("partners seats four");
   }
   if (seats.size() < static_cast<std::size_t>(kMinSeats) ||
@@ -27,10 +27,6 @@ absl::Status ValidSeats(Mode mode, const std::vector<std::string>& seats) {
     return absl::InvalidArgumentError("a seat twice");
   }
   return absl::OkStatus();
-}
-
-int TeamsOf(Mode mode, std::size_t seats) {
-  return mode == Mode::kPartners ? 2 : static_cast<int>(seats);
 }
 
 }  // namespace
@@ -53,6 +49,10 @@ std::string_view phaseName(Phase phase) {
 
 std::string_view modeName(Mode mode) { return mode == Mode::kPartners ? "partners" : "cutthroat"; }
 
+int teamsOf(Mode mode, std::size_t seats) {
+  return mode == Mode::kPartners ? 2 : static_cast<int>(seats);
+}
+
 std::optional<Mode> parseMode(std::string_view name) {
   if (name == "partners") return Mode::kPartners;
   if (name == "cutthroat") return Mode::kCutthroat;
@@ -64,7 +64,7 @@ absl::StatusOr<Table> Table::open(Mode mode, std::vector<std::string> seats,
   if (absl::Status valid = ValidSeats(mode, seats); !valid.ok()) return valid;
   absl::StatusOr<Hand> hand = Hand::deal(static_cast<int>(seats.size()), 0, std::move(shuffled));
   if (!hand.ok()) return hand.status();
-  const int teams = TeamsOf(mode, seats.size());
+  const int teams = teamsOf(mode, seats.size());
   return Table(mode, std::move(seats), *std::move(hand), 1, std::vector<int>(teams),
                std::vector<int>(teams), {}, {}, std::nullopt);
 }
@@ -75,7 +75,7 @@ absl::StatusOr<Table> Table::restore(Mode mode, std::vector<std::string> seats, 
                                      std::vector<GameScore> games, std::optional<int> left) {
   if (absl::Status valid = ValidSeats(mode, seats); !valid.ok()) return valid;
   const std::size_t seat_count = seats.size();
-  const int teams = TeamsOf(mode, seat_count);
+  const int teams = teamsOf(mode, seat_count);
   if (static_cast<std::size_t>(hand.seats()) != seat_count) {
     return absl::InvalidArgumentError("a hand a seat");
   }
@@ -129,7 +129,7 @@ absl::StatusOr<Table> Table::restore(Mode mode, std::vector<std::string> seats, 
                std::move(bags), std::move(hands), std::move(games), left);
 }
 
-int Table::teams() const { return TeamsOf(mode_, seats_.size()); }
+int Table::teams() const { return teamsOf(mode_, seats_.size()); }
 
 Phase Table::phase() const {
   if (left_.has_value()) return Phase::kClosed;

@@ -85,10 +85,11 @@ absl::StatusOr<std::vector<int>> CountsField(const json& payload, const char* na
 }
 
 absl::StatusOr<Card> CardOf(const json& value) {
-  if (!value.is_number_integer() || value.get<int>() < 0 || value.get<int>() >= kDeckSize) {
+  const auto card = Int(value, "a card");
+  if (!card.ok() || *card < 0 || *card >= kDeckSize) {
     return absl::InvalidArgumentError("a card is 0 to 51");
   }
-  return Card(value.get<int>());
+  return Card(*card);
 }
 
 absl::StatusOr<std::vector<TrickPlay>> PlaysOf(const json& value) {
@@ -277,7 +278,7 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
     if (!id.is_string()) return absl::InvalidArgumentError("a seat is a name");
     seats.push_back(id.get<std::string>());
   }
-  // A row from before cutthroat names no mode: it is partners.
+  // A row with no mode is partners.
   Mode mode = Mode::kPartners;
   if (payload.contains("mode")) {
     const json& named = payload["mode"];
@@ -286,7 +287,7 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
     if (!parsed.has_value()) return absl::InvalidArgumentError("mode is partners or cutthroat");
     mode = *parsed;
   }
-  const std::size_t teams = mode == Mode::kPartners ? 2 : seats.size();
+  const std::size_t teams = teamsOf(mode, seats.size());
   auto hand = HandOf(payload, seats.size());
   if (!hand.ok()) return hand.status();
   const auto hand_number = IntField(payload, "handNumber");

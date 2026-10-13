@@ -189,7 +189,7 @@ structure SpadesPlayer {
     @required
     playerId: String
 
-    /// Its index in the view's teams.
+    /// Its index in the view's teams; 0 while waiting.
     @required
     team: Integer
 

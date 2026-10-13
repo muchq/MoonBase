@@ -10,12 +10,12 @@
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/golf/game_state_serde.h"
 #include "domains/games/libs/cards/golf/player.h"
-#include "domains/games/libs/cards/spades/table.h"
-#include "domains/games/libs/cards/spades/table_serde.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table_serde.h"
 #include "domains/games/libs/pong/table.h"
 #include "domains/games/libs/pong/table_serde.h"
+#include "domains/games/libs/cards/spades/table.h"
+#include "domains/games/libs/cards/spades/table_serde.h"
 #include "domains/platform/libs/pg/pg.h"
 
 namespace {
@@ -136,8 +136,8 @@ TEST_F(GameStateJsonbTest, AChessStateSurvivesJsonbNormalization) {
       [](const chess_play::GameState& game) { return game.move(0, "e2e4", 5'000); });
   ASSERT_TRUE(moved.ok());
   // Black's flag: the NUL-named seat wins, and the score sheet names it.
-  auto flagged =
-      moved->inGame([](const chess_play::GameState& game) { return game.flag(1'000'000); });
+  auto flagged = moved->inGame(
+      [](const chess_play::GameState& game) { return game.flag(1'000'000); });
   ASSERT_TRUE(flagged.ok());
   ASSERT_TRUE(flagged->scoreSheet().back().winner.has_value());
   for (const chess_play::Table& table : {*moved, *flagged}) {

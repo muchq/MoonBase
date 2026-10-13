@@ -23,6 +23,9 @@ enum class Phase { kBidding, kPlaying, kScored, kWon, kClosed };
 enum class Mode { kPartners, kCutthroat };
 [[nodiscard]] std::string_view modeName(Mode mode);
 [[nodiscard]] std::optional<Mode> parseMode(std::string_view name);
+inline constexpr std::size_t kPartnersSeats = 4;
+/// Two teams of partners, or one a seat.
+[[nodiscard]] int teamsOf(Mode mode, std::size_t seats);
 
 /// A line of the game's score sheet: one hand's bids and tricks, seat by
 /// seat, what each team scored on it and its total after.

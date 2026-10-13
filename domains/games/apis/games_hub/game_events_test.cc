@@ -23,8 +23,8 @@
 #include "domains/games/libs/cards/rummy/game_state.h"
 #include "domains/games/libs/cards/rummy/gin.h"
 #include "domains/games/libs/cards/rummy/table.h"
-#include "domains/games/libs/cards/spades/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
+#include "domains/games/libs/cards/spades/table.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -162,10 +162,10 @@ TEST(GameEvents, AChessGameDrawnOnTimeOrMatedIsCompleted) {
   ASSERT_TRUE(drawn.ok());
   ASSERT_FALSE(drawn->game().result()->winner.has_value());
   EXPECT_EQ(FinishedOf(HostedState(*drawn), 2)->outcome, "completed");
-  const auto mated =
-      Chess("7k/4P3/6K1/8/8/8/8/8 w - - 0 1").inGame([](const chess_play::GameState& game) {
-        return game.move(0, "e7e8q", 1'000);
-      });
+  const auto mated = Chess("7k/4P3/6K1/8/8/8/8/8 w - - 0 1")
+                         .inGame([](const chess_play::GameState& game) {
+                           return game.move(0, "e7e8q", 1'000);
+                         });
   ASSERT_TRUE(mated.ok());
   ASSERT_EQ(mated->game().result()->ending, chess_play::Ending::kCheckmate);
   const GameFinished finished = *FinishedOf(HostedState(*mated), 2);
@@ -221,6 +221,7 @@ TEST(GameEvents, APongTableRecordsOnlyAGamesEnd) {
   EXPECT_FALSE(FinishedOf(*Pong().point(0), 2).has_value());
   EXPECT_FALSE(FinishedOf(*PongWon().removePlayer(0), 1).has_value());
 }
+
 
 std::deque<cards::Card> SpadesDeck() {
   std::deque<cards::Card> deck;

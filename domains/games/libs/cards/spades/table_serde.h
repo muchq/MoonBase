@@ -22,7 +22,7 @@ namespace spades {
 ///    "lines":[{"bids":[n xS], "tricks":[n xS], "points":[n xT],
 ///              "scores":[n xT]}...],
 ///    "games":[{"winner":team|null, "scores":[n xT]}...], "left":n | null}
-/// A row with no mode is partners: rows written before cutthroat.
+/// A row with no mode is partners.
 [[nodiscard]] std::string serializeTable(const Table& table);
 [[nodiscard]] absl::StatusOr<Table> deserializeTable(const std::string& serialized);
 

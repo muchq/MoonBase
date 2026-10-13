@@ -33,7 +33,7 @@ struct TrickPlay {
   bool operator==(const TrickPlay&) const = default;
 };
 
-/// A finished trick: its four plays from the leader on, and who took it.
+/// A finished trick: a play a seat from the leader on, and who took it.
 struct Trick {
   std::vector<TrickPlay> plays;
   int winner = 0;
