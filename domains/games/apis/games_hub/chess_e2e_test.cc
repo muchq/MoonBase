@@ -939,11 +939,18 @@ TEST_F(ChessFixture, AResumeWhileTheOldWireIsStillOpenReclaimsTheSeat) {
   ASSERT_TRUE(joined.has_value());
   EXPECT_EQ(joined->as_gameJoined_or_null()->view.currentPlayerId, table.alice.player_id);
 
+  // The wire she left ends cleanly, and the game goes on.
+  while (true) {
+    auto left = table.alice.stream.Receive(std::chrono::seconds(5));
+    ASSERT_TRUE(left.ok()) << left.error().message();
+    if (!left->has_value()) break;
+  }
   ASSERT_TRUE(back->stream.Send(Play("e2e4")).ok());
   auto moved = AwaitChessView(
       table.bob.stream, [](const auto& v) { return !v.moves.empty(); }, "alice's move");
   ASSERT_TRUE(moved.has_value());
   EXPECT_EQ(moved->moves, std::vector<std::string>{"e2e4"});
+  EXPECT_EQ(moved->phase, "playing");
 }
 
 // The close a leaving seat causes is the watcher's last word from the

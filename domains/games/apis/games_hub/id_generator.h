@@ -51,7 +51,7 @@ class SequentialIdGenerator final : public IdGenerator {
 /// distinct id space (remote-player-1, remote-room-1, RGAME1), because
 /// two SequentialIdGenerators would both mint "player-1" and a fresh
 /// seat on the second instance would then hold the first instance's
-/// player id — a seat conflict for that player's own resume.
+/// player id, and that seat's dial would take the first player's.
 class RemoteIdGenerator final : public IdGenerator {
  public:
   std::string PlayerId() override { return "remote-player-" + std::to_string(++players_); }

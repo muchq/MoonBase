@@ -740,8 +740,9 @@ TEST_F(LobbyRaceFixture, AClosedSocketLeavesTheWorldBeforeTheSeatParks) {
   Trigger closer(*this, [&] { alice->stream.Close(); });
   ASSERT_TRUE(WaitParked("seat"));
 
-  // Inside the seam: the world has already told bob, and the seat is
-  // still alice's and live — a resume now is the modeled SeatConflict.
+  // Inside the seam: the world has already told bob, and the closed
+  // session still holds the seat — a resume now is the modeled
+  // SeatConflict.
   auto left = ReceiveLobby(bob->stream, "playerLeft");
   ASSERT_TRUE(left.has_value());
   EXPECT_EQ(left->as_playerLeft_or_null()->playerId, alice->player_id);

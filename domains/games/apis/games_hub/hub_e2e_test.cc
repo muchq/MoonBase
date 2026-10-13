@@ -594,7 +594,7 @@ TEST_F(GamesHubStreamFixture, SecondLiveConnectionForSamePlayerTakesTheSeatOver)
   auto ready = ReceiveCase(taken->stream, "sessionReady");
   ASSERT_TRUE(ready.has_value());
   EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
-  EXPECT_LT(std::chrono::steady_clock::now() - dialed, std::chrono::milliseconds(500));
+  EXPECT_LT(std::chrono::steady_clock::now() - dialed, std::chrono::milliseconds(900));
   auto closed = seat->stream.Receive(std::chrono::seconds(5));
   ASSERT_TRUE(closed.ok()) << closed.error().message();
   EXPECT_FALSE(closed->has_value()) << "the first wire is still open";

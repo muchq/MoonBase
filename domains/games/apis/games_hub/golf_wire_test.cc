@@ -17,7 +17,9 @@
 // through createGame → gameCreated/gameJoined, joinGame →
 // gameJoined/gameState, startGame → gameStarted plus the dealt opening
 // GameView (the full key set, card rank/suit spelling included); and the
-// two terminal exception frames (Unauthenticated, SeatConflict); and a
+// two terminal exception frames (Unauthenticated, SeatConflict); a
+// resume against a live wire, which closes that wire with no frame and
+// admits the resume; and a
 // bot's reply with mithril's wordchain ladder, live and replayed. Updates
 // this suite does not drive (peek/draw/swap/knock, turnChanged,
 // gameEnded) share GameView's pinned shape but keep their byte-level
@@ -33,6 +35,7 @@
 
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -500,6 +503,14 @@ TEST_F(SeatReleaseWireTest, ADialWhileTheOldSessionUnwindsRefusesWithSeatConflic
   // The in-memory wire runs the old session's close path on the closing
   // thread, which the hook then holds.
   std::thread closer([&] { socket->Close(); });
+  // Releases and joins on every exit, an early ASSERT's included.
+  struct Joiner {
+    std::function<void()> join;
+    ~Joiner() { join(); }
+  } joiner{[&] {
+    Release();
+    closer.join();
+  }};
   ASSERT_TRUE(WaitParked());
 
   const std::string resume_body =
@@ -510,8 +521,6 @@ TEST_F(SeatReleaseWireTest, ADialWhileTheOldSessionUnwindsRefusesWithSeatConflic
 
   auto conflicted = DialPlay("?ticket=" + second["ticket"].get<std::string>());
   const auto frame = NextFrame(*conflicted);
-  Release();
-  closer.join();
   ASSERT_TRUE(frame.has_value());
   EXPECT_EQ(HeaderText(*frame, ":message-type"), "exception");
   EXPECT_EQ(HeaderText(*frame, ":exception-type"), "SeatConflict");
