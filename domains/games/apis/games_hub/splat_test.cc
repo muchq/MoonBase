@@ -25,19 +25,11 @@ std::string Spot(std::int64_t seq) {
   return buffer;
 }
 
-// Two hub instances share no state at all — only the number deja stamped
-// on the event — so a spot that drew on anything else would differ
-// between them. ThePlacementIsPinned is what fixes which spot it is.
-TEST(Splat, TheSameSeqAlwaysLandsOnTheSameSpot) {
-  for (const std::int64_t seq : {std::int64_t{0}, std::int64_t{1}, std::int64_t{7},
-                                 std::int64_t{1'000'003}, std::int64_t{9'007'199'254'740'993}}) {
-    EXPECT_EQ(Spot(seq), Spot(seq));
-  }
-}
-
-// The golden block: a change to the mixer moves every splat on every
-// wall, which is a wire change and has to be a deliberate one.
-TEST(Splat, ThePlacementIsPinned) {
+// Two hub instances share nothing but the number deja stamped on the
+// event, so a spot is a function of it alone, and a change to the mixer
+// moves every splat on every wall: a wire change, which has to be a
+// deliberate one.
+TEST(Splat, EachSeqLandsOnItsGoldenSpot) {
   const std::vector<std::string> expected = {
       "1/0.535192/0.532492", "2/0.111684/0.729517", "1/0.855492/0.907602", "2/0.883599/0.451646",
       "2/0.638821/0.094144", "0/0.679441/0.918536", "3/0.348420/0.118638", "2/0.935870/0.948037",
