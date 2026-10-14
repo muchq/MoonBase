@@ -91,7 +91,6 @@ struct Adapter<pong::Table> {
     if (!event.has_value()) return std::nullopt;
     return StartGame<Start>{Start{}, /*next_game=*/true};
   }
-  /// The engine as its games row's state column holds it, and back.
   static std::string Serialize(const pong::Table& engine);
   static absl::StatusOr<pong::Table> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view player_id) { return PongBotLevel(player_id).has_value(); }

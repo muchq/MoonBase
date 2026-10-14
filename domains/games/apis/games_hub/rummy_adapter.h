@@ -96,7 +96,6 @@ struct Adapter<rummy::TableState> {
                                                      const std::optional<EventTag>&) {
     return std::nullopt;
   }
-  /// The engine as its games row's state column holds it, and back.
   static std::string Serialize(const rummy::TableState& engine);
   static absl::StatusOr<rummy::TableState> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view) { return false; }

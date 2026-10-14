@@ -110,7 +110,6 @@ struct Adapter<chess_play::Table> {
     if (!terms.has_value()) return std::nullopt;
     return StartGame<Start>{Start{*terms, std::nullopt}};
   }
-  /// The engine as its games row's state column holds it, and back.
   static std::string Serialize(const chess_play::Table& engine);
   static absl::StatusOr<chess_play::Table> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view player_id) { return ChessBotElo(player_id).has_value(); }

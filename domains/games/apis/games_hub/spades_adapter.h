@@ -90,7 +90,6 @@ struct Adapter<spades::Table> {
                                                      const std::optional<EventTag>&) {
     return std::nullopt;
   }
-  /// The engine as its games row's state column holds it, and back.
   static std::string Serialize(const spades::Table& engine);
   static absl::StatusOr<spades::Table> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view) { return false; }
