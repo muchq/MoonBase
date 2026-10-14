@@ -20,6 +20,7 @@
 #include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/apis/games_hub/chess_archive.h"
 #include "domains/games/apis/games_hub/game_events.h"
+#include "domains/games/apis/games_hub/memory_hub_store.h"
 #include "domains/games/apis/games_hub/pong_bots.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
 #include "domains/games/apis/games_hub/round_robin.h"

@@ -30,6 +30,7 @@
 #include "domains/games/apis/games_hub/hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/id_generator.h"
+#include "domains/games/apis/games_hub/memory_hub_store.h"
 #include "domains/games/apis/games_hub/migrations.h"
 #include "domains/games/apis/games_hub/pg_chat_store.h"
 #include "domains/games/apis/games_hub/pg_hub_store.h"

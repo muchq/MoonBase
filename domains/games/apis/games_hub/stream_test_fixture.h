@@ -33,6 +33,7 @@
 #include "domains/games/apis/games_hub/hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/id_generator.h"
+#include "domains/games/apis/games_hub/memory_hub_store.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/platform/libs/futility/otel/capturing_metrics_recorder.h"

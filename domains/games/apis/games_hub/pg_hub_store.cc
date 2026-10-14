@@ -609,7 +609,7 @@ absl::StatusOr<PgHubStore::RoomRows> PgHubStore::LoadRoom(const std::string& roo
                                {room_id});
   if (!event_games.ok()) return event_games.status();
   out.events = EventsFrom(*events, *event_games);
-  AddPongEventGames(out.games, out.events);
+  AddRoundRobinTableGames(out.games, out.events);
   return out;
 }
 
@@ -667,7 +667,7 @@ absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
                                             " WHERE event_id IS NOT NULL ORDER BY archive_id"));
   if (!event_games.ok()) return event_games.status();
   snapshot.events = EventsFrom(*events, *event_games);
-  AddPongEventGames(snapshot.games, snapshot.events);
+  AddRoundRobinTableGames(snapshot.games, snapshot.events);
   return snapshot;
 }
 

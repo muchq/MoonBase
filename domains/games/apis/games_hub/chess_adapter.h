@@ -145,6 +145,16 @@ struct Adapter<chess_play::Table> {
                                  HubStore::ChessEventRow&) {
     return true;
   }
+  // A pairing's games are the archived ones its table played (Archived).
+  static std::optional<HubStore::EventGame> TableGame(const chess_play::Table&) {
+    return std::nullopt;
+  }
+  // A table's game once it is over, on its line of the score sheet.
+  static std::optional<HubStore::ChessGameRow> Archived(const chess_play::Table& table) {
+    if (!table.game().isOver()) return std::nullopt;
+    return HubStore::ChessGameRow{
+        0, "", static_cast<int>(table.scoreSheet().size()), table.game(), 0, false};
+  }
 
   static bool FlagDue(const chess_play::Table& table, int64_t now_ms) {
     const chess_play::GameState& game = table.game();

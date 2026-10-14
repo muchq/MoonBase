@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "absl/status/status.h"
+#include "domains/games/apis/games_hub/memory_hub_store.h"
 #include "domains/games/apis/games_hub/round_robin.h"
 #include "domains/games/libs/cards/card.h"
 #include "domains/games/libs/cards/golf/game_state.h"

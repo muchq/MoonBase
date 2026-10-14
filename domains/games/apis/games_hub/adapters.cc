@@ -1,5 +1,7 @@
 #include "domains/games/apis/games_hub/adapters.h"
 
+#include <algorithm>
+
 #include "absl/log/log.h"
 
 namespace games_hub {
@@ -185,6 +187,54 @@ std::optional<ChessTerms> RoundRobinTermsOf(GameKind kind, const HubStore::Chess
       return std::nullopt;
     }
   });
+}
+
+std::optional<HubStore::ChessGameRow> ArchivedChessGame(const HubStore::GameRow& row) {
+  if (!row.state.has_value()) return std::nullopt;
+  return VisitAdapter(
+      *row.state, [&](auto adapter, const auto& engine) -> std::optional<HubStore::ChessGameRow> {
+        using A = decltype(adapter);
+        if constexpr (kHas<A, kPublished>) {
+          auto archived = A::Archived(engine);
+          if (archived.has_value()) archived->game_id = row.game_id;
+          return archived;
+        } else {
+          return std::nullopt;
+        }
+      });
+}
+
+void AddRoundRobinTableGames(const std::vector<HubStore::GameRow>& games,
+                             std::vector<HubStore::ChessEventRow>& events) {
+  std::vector<std::pair<const HubStore::GameRow*, HubStore::EventGame>> tagged;
+  for (const HubStore::GameRow& game : games) {
+    if (!game.event.has_value()) continue;
+    std::optional<HubStore::EventGame> played =
+        VisitTable(game.kind, game.state,
+                   [](auto adapter, const auto* engine) -> std::optional<HubStore::EventGame> {
+                     using A = decltype(adapter);
+                     if constexpr (kHas<A, kRoundRobins>) {
+                       if (engine != nullptr) return A::TableGame(*engine);
+                     }
+                     return std::nullopt;
+                   });
+    if (!played.has_value()) continue;
+    played->game_id = game.game_id;
+    played->pairing = game.event->pairing;
+    tagged.emplace_back(&game, *std::move(played));
+  }
+  // By code, so every instance reads a pairing's tables in one order.
+  std::sort(tagged.begin(), tagged.end(),
+            [](const auto& a, const auto& b) { return a.first->game_id < b.first->game_id; });
+  for (HubStore::ChessEventRow& event : events) {
+    for (const auto& [game, played] : tagged) {
+      if (game->kind != event.kind || game->room_id != event.room_id ||
+          game->event->event_id != event.event_id) {
+        continue;
+      }
+      event.games.push_back(played);
+    }
+  }
 }
 
 }  // namespace games_hub

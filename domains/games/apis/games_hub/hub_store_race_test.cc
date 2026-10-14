@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "domains/games/apis/games_hub/hub_store.h"
+#include "domains/games/apis/games_hub/memory_hub_store.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "opal/client/config.h"

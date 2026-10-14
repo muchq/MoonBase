@@ -106,6 +106,9 @@ concept RoundRobinHooks =
         A::FromRoundRobinBody(std::declval<const std::map<std::string, std::string>&>(),
                               std::declval<HubStore::ChessEventRow&>())
       } -> std::same_as<bool>;
+      {
+        A::TableGame(std::declval<const typename A::Engine&>())
+      } -> std::same_as<std::optional<HubStore::EventGame>>;
     };
 
 template <typename A>
@@ -120,6 +123,11 @@ concept ClockHooks = NextGameHooks<A> && requires(const typename A::Engine& engi
 };
 
 template <typename A>
+concept PublishedHooks = NextGameHooks<A> && requires(const typename A::Engine& engine) {
+  { A::Archived(engine) } -> std::same_as<std::optional<HubStore::ChessGameRow>>;
+};
+
+template <typename A>
 concept RealtimeHooks = requires(const typename A::Move& move) {
   { A::Steers(move) } -> std::same_as<bool>;
 };
@@ -131,7 +139,7 @@ template <typename A>
 concept CapableAdapter =
     (!kHas<A, kNextGame> || NextGameHooks<A>) && (!kHas<A, kRoundRobins> || RoundRobinHooks<A>) &&
     (!kHas<A, kOpenings> || OpeningHooks<A>) && (!kHas<A, kClocked> || ClockHooks<A>) &&
-    (!kHas<A, kRealtime> || RealtimeHooks<A>) && (!kHas<A, kPublished> || NextGameHooks<A>);
+    (!kHas<A, kRealtime> || RealtimeHooks<A>) && (!kHas<A, kPublished> || PublishedHooks<A>);
 
 /// Each HostedState alternative has a full adapter that names the GameKind
 /// at its index, so a kind and its engine never disagree.
@@ -322,6 +330,17 @@ std::vector<std::pair<std::string, std::string>> RoundRobinBodyOf(
 /// robin game's.
 bool RoundRobinFromBody(const std::map<std::string, std::string>& fields,
                         HubStore::ChessEventRow& row);
+
+/// The finished game a committed row archives (kPublished's Archived),
+/// and its ordinal; absent for anything else. Its id and stamps are the
+/// store's to give.
+std::optional<HubStore::ChessGameRow> ArchivedChessGame(const HubStore::GameRow& row);
+
+/// The round robins' games their tagged tables' own rows record
+/// (kRoundRobins' TableGame), for both stores' loads: each added to the
+/// event among `events` it names, by table code.
+void AddRoundRobinTableGames(const std::vector<HubStore::GameRow>& games,
+                             std::vector<HubStore::ChessEventRow>& events);
 
 /// Whether a `kind` table's adapter opts into `capability`.
 inline bool HasCapability(GameKind kind, Capability capability) {

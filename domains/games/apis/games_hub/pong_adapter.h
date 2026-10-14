@@ -131,6 +131,12 @@ struct Adapter<pong::Table> {
     row.pong_variant = *parsed;
     return true;
   }
+  // A tagged table plays its pairing's one game: once its sheet has a
+  // line, that is the game, its winner off the sheet.
+  static std::optional<HubStore::EventGame> TableGame(const pong::Table& table) {
+    if (table.scoreSheet().empty()) return std::nullopt;
+    return HubStore::EventGame{0, "", 0, table.scoreSheet().front().winner};
+  }
 };
 
 }  // namespace games_hub

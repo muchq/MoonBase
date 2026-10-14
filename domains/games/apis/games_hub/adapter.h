@@ -80,7 +80,9 @@ enum Capability : unsigned {
   /// whether a stored round robin's body names its game (exactly one
   /// game's bodies name none, and a body naming none is that game's);
   /// RoundRobinBody(row) and FromRoundRobinBody(fields, row), the game's
-  /// own string fields in that body, and whether they read back.
+  /// own string fields in that body, and whether they read back;
+  /// TableGame(engine), the pairing's game a tagged table's own row
+  /// records, for a game whose pairings' games are not archived.
   kRoundRobins = 1U << 2,
   /// A start draws its opening from the hub's ChessOpener. Hooks:
   /// Prepare(start, opener).
@@ -97,6 +99,8 @@ enum Capability : unsigned {
   kRealtime = 1U << 6,
   /// A published room's finished games reach the public feed, and the
   /// hub's indexer is asked after each one's players (implies kNextGame).
+  /// Hooks: Archived(engine), the finished game a committed row archives
+  /// and its ordinal, which the stores keep as the room's history.
   kPublished = 1U << 7,
   /// A waiting table posts the terms its next seat starts on (#1633), and
   /// its stored row carries them in place of a state until the start.

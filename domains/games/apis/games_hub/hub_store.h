@@ -3,13 +3,9 @@
 
 #include <chrono>
 #include <cstdint>
-#include <functional>
-#include <map>
-#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
-#include <utility>
 #include <variant>
 #include <vector>
 
@@ -122,7 +118,7 @@ class HubStore {
   /// recorded; the games its tables played are the room's archived chess
   /// games tagged with it, written by the commits that ended them, or for
   /// pong each tagged table's one game, off the table's own row
-  /// (AddPongEventGames).
+  /// (AddRoundRobinTableGames).
   struct ChessEventRow {
     std::string room_id;
     std::string event_id;
@@ -272,76 +268,9 @@ class HubStore {
       int64_t after_archive_id, int limit) = 0;
 };
 
-/// The chess game a committed row archives, and its ordinal: a chess
-/// table's game once it is over. Absent for anything else. Its id and
-/// stamps are the store's to give.
-std::optional<HubStore::ChessGameRow> ArchivedChessGame(const HubStore::GameRow& row);
-
 /// The player who won a finished game; absent for a draw or a game in
 /// play.
 std::optional<std::string> ChessWinner(const chess_play::GameState& game);
-
-/// Process-local production storage. Operations are synchronous, but use
-/// the same conditional commit and terminal-row semantics as PostgreSQL.
-/// A pong round robin's games, for both stores' loads: each table tagged
-/// with one of its pairings plays that one game, so a tagged table whose
-/// sheet has a line is the pairing's game, its winner off the sheet. Adds
-/// them to the pong events among `events` they name, by table code.
-void AddPongEventGames(const std::vector<HubStore::GameRow>& games,
-                       std::vector<HubStore::ChessEventRow>& events);
-
-class MemoryHubStore final : public HubStore {
- public:
-  /// `now_ms` stamps when an archived game ended; the wall clock unless a
-  /// test fixes it.
-  explicit MemoryHubStore(std::function<int64_t()> now_ms = nullptr);
-
-  void Enqueue(std::vector<Op> ops) override;
-  void Flush() override {}
-  absl::StatusOr<Snapshot> LoadSnapshot() override;
-  absl::StatusOr<bool> CommitGameSave(const GameRow& row,
-                                      const std::string& notify_payload) override;
-  absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& stats,
-                                        const std::string& notify_payload) override;
-  absl::StatusOr<bool> CommitChessEvent(const ChessEventRow& row,
-                                        const std::string& notify_payload) override;
-  absl::StatusOr<std::optional<GameRow>> LoadGame(const std::string& room_id,
-                                                  const std::string& game_id) override;
-  absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override;
-  absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override;
-  absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
-                                                            const ChessGameKey& key) override;
-  absl::StatusOr<std::vector<PublishedChessGame>> LoadPublishedChess(int64_t after_archive_id,
-                                                                     int limit) override;
-
- private:
-  using Key = std::pair<std::string, std::string>;
-
-  struct RoomData {
-    Surface surface;
-    bool chess_published = false;
-    /// Oldest first.
-    std::vector<ChessGameRow> chess_games;
-    /// By event id.
-    std::map<std::string, ChessEventRow> events = {};
-    /// Each with its event's id, in archive order.
-    std::vector<std::pair<std::string, EventGame>> event_games = {};
-  };
-
-  bool CommitGameLocked(const GameRow& row);
-  /// The room's events, each with its archived games.
-  std::vector<ChessEventRow> EventsLocked(const RoomData& room) const;
-  void ApplyLocked(const Op& op);
-
-  const std::function<int64_t()> now_ms_;
-  std::mutex mu_;
-  int64_t last_archive_id_ = 0;
-  std::map<std::string, RoomData> rooms_;
-  /// In archive order.
-  std::vector<PublishedChessGame> published_;
-  std::map<Key, MemberRow> members_;
-  std::map<Key, GameRow> games_;
-};
 
 }  // namespace games_hub
 

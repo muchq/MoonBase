@@ -575,7 +575,7 @@ their own game's round robins, refusing the other's. The row is chess's
 `chess_events` row with `"game":"pong"` and the variant in its body. A
 pairing's table starts on the round robin's variant when its second seat
 fills and plays that one game, with no next game or bot; the game is the
-pairing's result off the table's own row (`AddPongEventGames`), read
+pairing's result off the table's own row (`AddRoundRobinTableGames`), read
 back as chess reads its archive, so the commit that ends the game is the
 one that scores the pairing.
 
