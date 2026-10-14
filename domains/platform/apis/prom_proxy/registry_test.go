@@ -513,7 +513,7 @@ var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|c
 // What games_hub exports, as the collector's Prometheus exporter names it:
 // _total for a counter, _gauge for futility's up-down gauge.
 //
-// A hand-kept copy, verified against GolfHub::DeclaredCounterSeries() by a
+// A hand-kept copy, verified against GamesHub::DeclaredCounterSeries() by a
 // person, not a test — the roster lives in C++ and this file in Go with no
 // shared artifact to pin them together (that is #1308's scope). What these
 // audits do close, on their own side: every tile reads only names in this
@@ -521,7 +521,7 @@ var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|c
 var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:hub_|golf_|chat_|castle_|rummy_|chess_|lobby_)[a-z_]*)(\{[^}]*\})?`)
 
 var gamesHubExportedNames = map[string]bool{
-	// The castle envelope (#77), from GolfHub::DeclaredCounterSeries().
+	// The castle envelope (#77), from GamesHub::DeclaredCounterSeries().
 	"castle_commands_total":           true,
 	"castle_events_total":             true,
 	"chat_appends_total":              true,

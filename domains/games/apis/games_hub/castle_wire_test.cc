@@ -1,5 +1,5 @@
 // Wire-contract goldens for castle (#77) on the room stream, the way
-// golf_wire_test pins golf's: raw eventstream frames and exact payload
+// hub_wire_test pins golf's: raw eventstream frames and exact payload
 // bytes, because the typed-client suites regenerate both sides together
 // and cannot see a rename. The pinned surface: the castle command
 // envelope ({"move":{...}} inside the `castle` command), the update

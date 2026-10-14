@@ -81,7 +81,7 @@ public class IndexerModuleTest {
    * accepted everything, which is the failure mode that would let a libpq-shaped URL through.
    */
   @Test
-  public void pgjdbcRejectsTheLibpqUrlShapeGolfHubUses() throws Exception {
+  public void pgjdbcRejectsTheLibpqUrlShapeGamesHubUses() throws Exception {
     assertThat(new org.postgresql.Driver().acceptsURL("postgresql://one_d4_postgres:5432/one_d4"))
         .as("games_hub's C++ form is not a JDBC URL and must not be mistaken for one")
         .isFalse();

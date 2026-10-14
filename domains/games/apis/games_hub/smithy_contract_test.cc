@@ -7,7 +7,7 @@
 // What the hub relies on and where:
 //   RequireOrigin           games_hub_main.cc websocket_gate (ADR-0018)
 //   InMemoryWebSocketPair   every hub session test harness
-//   SessionRegistry         golf_hub.cc: ResumeOrAdd admission
+//   SessionRegistry         hub.cc: ResumeOrAdd admission
 //                           (ADR-0022), Detach + grace + on_expired
 //                           (ADR-0020/0021), SendTo fan-out
 //   Encode/DecodeJsonFrame  games_hub_main.cc websocket_accept_json_frames
@@ -137,7 +137,7 @@ TEST(JsonFrameContract, EventFramesRenderTheEnvelopeTextAndRoundTrip) {
 
 TEST(JsonFrameContract, ExceptionFramesRenderTheExceptionMember) {
   // The terminal error arm — what a browser sees when a dial is refused
-  // (golf_wire_test pins the same refusal's binary framing).
+  // (hub_wire_test pins the same refusal's binary framing).
   const opal::eventstream::Message refusal = opal::eventstream::MakeExceptionMessage(
       "Unauthenticated", "application/json",
       opal::Blob::FromString(R"({"message":"ticket expired or already spent"})"));

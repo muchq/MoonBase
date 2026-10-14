@@ -22,7 +22,7 @@ namespace games_hub {
 /// standing on the surface its room chose (#1554).
 ///
 /// This is the rules and the map, and nothing about wires: it stages
-/// what each session is owed, in delivery order, and GolfHub, which
+/// what each session is owed, in delivery order, and GamesHub, which
 /// hosts it as the room stream's `lobby` member, hands them to its
 /// registry under its lock. Not thread-safe; the owner's lock covers
 /// every call.

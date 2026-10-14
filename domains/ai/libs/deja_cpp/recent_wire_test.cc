@@ -1,4 +1,4 @@
-// Beyoncé Rule wire-contract test (consumer tier), the way golf_wire_test
+// Beyoncé Rule wire-contract test (consumer tier), the way hub_wire_test
 // pins the hub's stream: the exact bytes deja's `recent` hands back,
 // parsed by the real generated client, so a rename on the Rust side fails
 // here — in CI, with the field named — instead of in a glasshouse that

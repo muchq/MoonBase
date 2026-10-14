@@ -150,7 +150,7 @@ class GatedHubStore final : public HubStore {
 class HubStoreRaceFixture : public GamesHubStreamFixture {
  protected:
   struct Instance {
-    std::shared_ptr<GolfHub> golf;
+    std::shared_ptr<GamesHub> golf;
     std::shared_ptr<CapturingMetricsRecorder> metrics;
     std::unique_ptr<moonbase::games::GamesHubServer> server;
     std::unique_ptr<moonbase::games::GamesHubClient> client;
@@ -172,7 +172,7 @@ class HubStoreRaceFixture : public GamesHubStreamFixture {
     auto vault =
         std::make_shared<InMemoryTicketVault>(std::chrono::seconds(60), std::chrono::seconds(60));
     auto ids = std::make_shared<RemoteIdGenerator>();
-    instance->golf = std::make_shared<GolfHub>(
+    instance->golf = std::make_shared<GamesHub>(
         vault, std::make_shared<cards::NoShuffleDealer>(), ids, std::chrono::seconds(60),
         instance->metrics, gated_store_, /*chat_store=*/nullptr, UnlimitedRateLimits());
     EXPECT_TRUE(instance->golf->RestoreFromStore().ok());
@@ -234,7 +234,7 @@ class HubStoreRaceFixture : public GamesHubStreamFixture {
     HeldCatchUp(HubStoreRaceFixture& fixture, const std::string& room_id, int holds = 1)
         : store_(fixture.gated_store_), holds_(holds) {
       store_->HoldLoadRooms(holds);
-      GolfHub* golf = fixture.golf_.get();
+      GamesHub* golf = fixture.golf_.get();
       thread_ = std::thread([golf, room_id] { golf->OnChannelActive(RoomChannel(room_id)); });
     }
     ~HeldCatchUp() { Join(); }
@@ -482,7 +482,7 @@ TEST_F(HubStoreRaceFixture, StaleCatchUpReadsRetryThenLockAndStaySilent) {
   Seat& bob = room->seats[1];
   ASSERT_TRUE(ReceiveCase(alice.stream, "roomState").has_value());  // bob's join
 
-  HeldCatchUp catch_up(*this, room->room_id, GolfHub::kCatchUpReadAttempts);
+  HeldCatchUp catch_up(*this, room->room_id, GamesHub::kCatchUpReadAttempts);
   ASSERT_TRUE(catch_up.WaitForRead());
   ASSERT_TRUE(bob.stream.Send(GameCommands::FromLeaveroom(moonbase::games::LeaveRoom{})).ok());
   ASSERT_TRUE(ReceiveCase(bob.stream, "roomLeft").has_value());

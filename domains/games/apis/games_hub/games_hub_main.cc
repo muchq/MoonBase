@@ -27,7 +27,7 @@
 #include "domains/ai/libs/deja_cpp/production_client.h"
 #include "domains/ai/libs/microgpt_cpp/production_client.h"
 #include "domains/games/apis/games_hub/games_hub_handler.h"
-#include "domains/games/apis/games_hub/golf_hub.h"
+#include "domains/games/apis/games_hub/hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/id_generator.h"
 #include "domains/games/apis/games_hub/migrations.h"
@@ -114,7 +114,7 @@ int main() {
   } else {
     vault = std::make_shared<games_hub::InMemoryTicketVault>(kTicketTtl, kResumeTtl);
     store = std::make_shared<games_hub::MemoryHubStore>();
-    // chat_store stays null: GolfHub builds its own MemoryChatStore
+    // chat_store stays null: GamesHub builds its own MemoryChatStore
     // wired to its membership guard.
     LOG(INFO) << "Persistence: in-memory (GAMES_HUB_DB_URL unset; restarts forget everything)";
   }
@@ -122,7 +122,7 @@ int main() {
   // meter the aura chain's unary instruments use.
   auto stream_metrics = std::make_shared<futility::otel::MetricsRecorder>("games_hub");
   auto ids = std::make_shared<games_hub::WhimsicalIdGenerator>();
-  auto golf = std::make_shared<games_hub::GolfHub>(vault, std::make_shared<cards::Dealer>(), ids,
+  auto golf = std::make_shared<games_hub::GamesHub>(vault, std::make_shared<cards::Dealer>(), ids,
                                                    /*grace_period=*/std::chrono::minutes(5),
                                                    stream_metrics, store, chat_store);
   auto handler = std::make_shared<games_hub::GamesHubHandler>(vault, ids, golf);

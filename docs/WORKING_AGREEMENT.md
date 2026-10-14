@@ -267,7 +267,7 @@ observable behavior worth keeping gets a test, at every level that fits:
 - **the consumer's boundary** — where the behavior is part of a contract
   someone else depends on, prove it the way they will actually hit it. That
   means raw JSON and raw frames, not a round trip through generated types that
-  regenerate on both sides and hide a rename: `golf_wire_test.cc`,
+  regenerate on both sides and hide a rename: `hub_wire_test.cc`,
   `portrait_smithy_wire_test.cc`, `smithy_contract_test.cc`,
   `DtoJsonCompatTest`, `IndexResponseWireTest`.
 

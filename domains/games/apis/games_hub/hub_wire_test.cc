@@ -25,7 +25,7 @@
 // gameEnded) share GameView's pinned shape but keep their byte-level
 // coverage in hub_e2e_test's typed assertions only.
 //
-// The harness is wire_test_fixture.h's: GolfHub behind the generated
+// The harness is wire_test_fixture.h's: GamesHub behind the generated
 // GamesHubServer, unary requests through Loopback, streams through
 // StreamRouter()->ServeSession() over an InMemoryWebSocketPair whose near
 // end this test holds and drives with hand-built frames. Non-Beast, so it
@@ -57,7 +57,7 @@ using json = nlohmann::json;
 // strands them all.
 constexpr char kPlayPath[] = "/games/v2/play";
 
-class GolfWireTest : public HubWireFixture {
+class HubWireTest : public HubWireFixture {
  protected:
   std::shared_ptr<opal::http::WebSocket> DialPlay(const std::string& query) {
     return DialStream(kPlayPath, query);
@@ -71,7 +71,7 @@ class GolfWireTest : public HubWireFixture {
 // three camelCase keys from the response body; the byte-level prefix pins
 // key order and spelling so a codegen change that renames or re-nests any
 // of them fails here, not in a browser.
-TEST_F(GolfWireTest, SessionMintPinsRawResponseBody) {
+TEST_F(HubWireTest, SessionMintPinsRawResponseBody) {
   const auto response = PostSession("{}");
   ASSERT_EQ(response.status, 200) << response.body;
   EXPECT_EQ(response.headers.Get("content-type").value_or(""), "application/json");
@@ -95,7 +95,7 @@ TEST_F(GolfWireTest, SessionMintPinsRawResponseBody) {
 // and replays it as {"resumeToken": ...}; the hub must return the same
 // playerId and echo the same token (the long-lived credential must not
 // churn), while minting a fresh single-use ticket.
-TEST_F(GolfWireTest, ResumeTokenRoundTripsThroughTheRawWire) {
+TEST_F(HubWireTest, ResumeTokenRoundTripsThroughTheRawWire) {
   const json first = MintSession();
 
   const std::string resume_body =
@@ -116,7 +116,7 @@ TEST_F(GolfWireTest, ResumeTokenRoundTripsThroughTheRawWire) {
 // main.cc additionally refuses obviously-bad tickets pre-101 with a 401
 // gate; a ticket that expires between that peek and the handler's spend
 // still lands here, so this frame is the stream's own refusal contract.)
-TEST_F(GolfWireTest, InvalidTicketRefusesWithTerminalUnauthenticatedFrame) {
+TEST_F(HubWireTest, InvalidTicketRefusesWithTerminalUnauthenticatedFrame) {
   auto socket = DialPlay("?ticket=bogus");
 
   const auto frame = NextFrame(*socket);
@@ -139,7 +139,7 @@ TEST_F(GolfWireTest, InvalidTicketRefusesWithTerminalUnauthenticatedFrame) {
 // payload bytes (key names AND values are deterministic under the
 // sequential id generator) for both server events, plus the command
 // encoding the client sends.
-TEST_F(GolfWireTest, ValidSessionStreamsSessionReadyAndRoomStateFrames) {
+TEST_F(HubWireTest, ValidSessionStreamsSessionReadyAndRoomStateFrames) {
   const json session = MintSession();
   auto socket = DialPlay("?ticket=" + session["ticket"].get<std::string>());
 
@@ -173,7 +173,7 @@ TEST_F(GolfWireTest, ValidSessionStreamsSessionReadyAndRoomStateFrames) {
 // valid command the hub refuses (joining a room that does not exist)
 // comes back as a commandRejected EVENT — not an exception, the stream
 // survives — whose payload carries the one "reason" key the UI renders.
-TEST_F(GolfWireTest, SemanticallyInvalidCommandYieldsCommandRejectedEvent) {
+TEST_F(HubWireTest, SemanticallyInvalidCommandYieldsCommandRejectedEvent) {
   const json session = MintSession();
   auto socket = DialPlay("?ticket=" + session["ticket"].get<std::string>());
   const auto ready = NextFrame(*socket);
@@ -204,7 +204,7 @@ TEST_F(GolfWireTest, SemanticallyInvalidCommandYieldsCommandRejectedEvent) {
 // gameStarted) and the full GameView key set: the waiting view on
 // create/join, and the dealt opening view — currentPlayerId, discardTop,
 // and the card rank/suit spelling — on start.
-TEST_F(GolfWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
+TEST_F(HubWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
   json creator_session;
   auto creator = DialReady(creator_session);
   ASSERT_TRUE(creator->Send(CommandFrame("createRoom", "{}")).ok());
@@ -295,10 +295,10 @@ TEST_F(GolfWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
 // joiner's admission order is part of the contract: roomState first, then
 // exactly one roomChatHistory — sent even when the room has no chat, so
 // the client hears "history loaded, and it is empty" instead of inferring
-// emptiness from silence (golf_hub.cc's documented signal). Live chat
+// emptiness from silence (hub.cc's documented signal). Live chat
 // then carries the server's messageId and clock: the id is the golden
 // byte, the timestamp a seam.
-TEST_F(GolfWireTest, JoinerHearsRoomStateThenEmptyChatHistoryAndChatCarriesServerIds) {
+TEST_F(HubWireTest, JoinerHearsRoomStateThenEmptyChatHistoryAndChatCarriesServerIds) {
   json creator_session;
   auto creator = DialReady(creator_session);
   ASSERT_TRUE(creator->Send(CommandFrame("createRoom", "{}")).ok());
@@ -347,7 +347,7 @@ class OneLadderMithril final : public opal::http::HttpClient {
 // Consumer: the web client's bot rows and wordchain ladder. A bot's reply
 // carries `bot` and its author as playerId; mithril's carries `wordchain`
 // too, the rungs as a list. Live and replayed, the same bytes.
-TEST_F(GolfWireTest, AWordchainReplyCarriesItsLadderOnTheWire) {
+TEST_F(HubWireTest, AWordchainReplyCarriesItsLadderOnTheWire) {
   opal::ClientConfig config = mithril::DefaultClientConfig("http://mithril:8083");
   config.http_client = std::make_shared<OneLadderMithril>();
   auto client = mithril::Client::Create(std::move(config));
@@ -383,7 +383,7 @@ TEST_F(GolfWireTest, AWordchainReplyCarriesItsLadderOnTheWire) {
 // redials with the fresh ticket, and steers on the resumed sessionReady:
 // resumed true AND the roomId member PRESENT — that key's arrival is what
 // tells the UI to restore the room screen instead of the lobby.
-TEST_F(GolfWireTest, ResumedSessionReadyCarriesRoomIdOnTheWire) {
+TEST_F(HubWireTest, ResumedSessionReadyCarriesRoomIdOnTheWire) {
   json session;
   auto socket = DialReady(session);
   ASSERT_TRUE(socket->Send(CommandFrame("createRoom", "{}")).ok());
@@ -417,7 +417,7 @@ TEST_F(GolfWireTest, ResumedSessionReadyCarriesRoomIdOnTheWire) {
 // leaveRoom command carries leave intent (a close parks the seat), and
 // the ack the UI keys its navigation on is the roomLeft event naming the
 // departed room.
-TEST_F(GolfWireTest, LeaveRoomAcksWithRoomLeftFrame) {
+TEST_F(HubWireTest, LeaveRoomAcksWithRoomLeftFrame) {
   json session;
   auto socket = DialReady(session);
   ASSERT_TRUE(socket->Send(CommandFrame("createRoom", "{}")).ok());
@@ -433,7 +433,7 @@ TEST_F(GolfWireTest, LeaveRoomAcksWithRoomLeftFrame) {
 // "superseded" (a browser's CloseEvent.code), which tells the client it
 // belonged to that another connection holds the seat, so it does not
 // redial and take it back; the new wire is admitted as a resume.
-TEST_F(GolfWireTest, SecondDialWhileSeatIsLiveTakesItOver) {
+TEST_F(HubWireTest, SecondDialWhileSeatIsLiveTakesItOver) {
   json session;
   auto socket = DialReady(session);
 
@@ -458,14 +458,14 @@ TEST_F(GolfWireTest, SecondDialWhileSeatIsLiveTakesItOver) {
 
 // Holds the close path at the seat's release until the test lets go, so a
 // resume can arrive while the old session is still unwinding.
-class SeatReleaseWireTest : public GolfWireTest {
+class SeatReleaseWireTest : public HubWireTest {
  protected:
   void TearDown() override {
     Release();
-    GolfWireTest::TearDown();
+    HubWireTest::TearDown();
   }
-  GolfTestHooks MakeGolfHooks() override {
-    GolfTestHooks hooks;
+  HubTestHooks MakeGolfHooks() override {
+    HubTestHooks hooks;
     hooks.before_seat_release = [this](const std::string&) {
       std::unique_lock<std::mutex> lock(mu_);
       parked_ = true;

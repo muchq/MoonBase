@@ -1305,7 +1305,7 @@ TEST_F(ChessOutageFixture, AFlagTheStoreCannotTakeWaitsBeforeItsRetry) {
   outage_->down = true;
   EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
   EXPECT_EQ(outage_->finishes, 1);
-  now_ms_ += GolfHub::kChessFlagRetry.count() - 1;
+  now_ms_ += GamesHub::kChessFlagRetry.count() - 1;
   EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
   EXPECT_EQ(outage_->finishes, 1);
   now_ms_ += 1;
@@ -1313,7 +1313,7 @@ TEST_F(ChessOutageFixture, AFlagTheStoreCannotTakeWaitsBeforeItsRetry) {
   EXPECT_EQ(outage_->finishes, 2);
   // Back up: the next retry lands the flag.
   outage_->down = false;
-  now_ms_ += GolfHub::kChessFlagRetry.count();
+  now_ms_ += GamesHub::kChessFlagRetry.count();
   EXPECT_EQ(golf_->SweepChessClocksOnce(), 1);
   auto result = Ended(started->table.bob);
   ASSERT_TRUE(result.has_value());

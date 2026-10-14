@@ -186,14 +186,14 @@ cc_test(
 # Read as text by //domains/platform/libs/otel_contract, which pins this
 # vocabulary against the stats pipeline's reader: the event names and
 # outcomes in the header, the JSON keys the line builders format, the
-# game and surface spellings, and golf_hub's seat cap against the bound
+# game and surface spellings, and hub.cc's seat cap against the bound
 # the reader counts a table by. games_hub_main.cc is read by
 # //deploy/consolidated:consolidated_test for the event log's file name.
 exports_files([
     "game_events.cc",
     "game_events.h",
     "games_hub_main.cc",
-    "golf_hub.cc",
+    "hub.cc",
     "hosted_game.h",
     "surface.h",
     "world.h",
@@ -682,7 +682,7 @@ cc_test(
 )
 
 # The lobby's world, its rules and map (#79, #1490): staged deliveries,
-# no wire, hosted by GolfHub as the room stream's lobby member.
+# no wire, hosted by GamesHub as the room stream's lobby member.
 cc_library(
     name = "world",
     srcs = ["world.cc"],
@@ -735,7 +735,7 @@ cc_test(
 )
 
 # A room's voice (#1590): who is in it and the WebRTC signals between
-# them, staged, no wire, hosted by GolfHub as the room stream's voice member.
+# them, staged, no wire, hosted by GamesHub as the room stream's voice member.
 cc_library(
     name = "voice",
     srcs = ["voice.cc"],
@@ -800,10 +800,10 @@ cc_test(
 # The room host: rooms, seats, chat, and every tenant (lobby, voice, golf,
 # castle, the tape) behind GamesHubHandler's Play.
 cc_library(
-    name = "golf_hub",
-    srcs = ["golf_hub.cc"],
+    name = "hub",
+    srcs = ["hub.cc"],
     hdrs = [
-        "golf_hub.h",
+        "hub.h",
     ],
     deps = [
         ":chat_store",
@@ -859,14 +859,14 @@ cc_library(
 )
 
 # The generated service's one handler (#79): session identity, and the
-# one Play stream forwarded whole to GolfHub.
+# one Play stream forwarded whole to GamesHub.
 cc_library(
     name = "games_hub_handler",
     srcs = ["games_hub_handler.cc"],
     hdrs = ["games_hub_handler.h"],
     deps = [
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_metrics",
         ":id_generator",
         ":protocol_input",
@@ -902,7 +902,7 @@ cc_test(
         ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":pg_chat_store",
@@ -938,7 +938,7 @@ cc_test(
     deps = [
         ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":id_generator",
         ":rate_limiter",
         ":ticket_vault",
@@ -965,7 +965,7 @@ cc_test(
     deps = [
         ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":id_generator",
         ":rate_limiter",
         ":ticket_vault",
@@ -994,7 +994,7 @@ cc_test(
     deps = [
         ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":id_generator",
         ":rate_limiter",
         ":ticket_vault",
@@ -1022,7 +1022,7 @@ cc_test(
     deps = [
         ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":id_generator",
         ":rate_limiter",
         ":ticket_vault",
@@ -1049,7 +1049,7 @@ cc_test(
     deps = [
         ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":id_generator",
         ":rate_limiter",
         ":ticket_vault",
@@ -1074,16 +1074,16 @@ cc_test(
 # still pass. Non-Beast deps only, so it runs with no sandbox setup at all
 # (behind a blocking proxy, Beast needs scripts/make-git-overrides.sh first).
 cc_test(
-    name = "golf_wire_test",
+    name = "hub_wire_test",
     size = "small",
     srcs = [
-        "golf_wire_test.cc",
+        "hub_wire_test.cc",
         "wire_test_fixture.h",
     ],
     deps = [
         ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":id_generator",
         ":rate_limiter",
         ":ticket_vault",
@@ -1113,7 +1113,7 @@ cc_test(
         ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":ticket_vault",
@@ -1143,7 +1143,7 @@ cc_test(
         ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":ticket_vault",
@@ -1177,7 +1177,7 @@ cc_test(
         ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":ticket_vault",
@@ -1207,7 +1207,7 @@ cc_test(
         ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":ticket_vault",
@@ -1238,7 +1238,7 @@ cc_test(
         ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":ticket_vault",
@@ -1271,7 +1271,7 @@ cc_test(
         ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":ticket_vault",
@@ -1304,7 +1304,7 @@ cc_test(
         ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":ticket_vault",
@@ -1334,7 +1334,7 @@ cc_test(
         ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":ticket_vault",
@@ -1377,7 +1377,7 @@ cc_test(
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
         ":games_hub_handler",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":ticket_vault",
@@ -1411,7 +1411,7 @@ cc_test(
         ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":ticket_vault",
@@ -1439,7 +1439,7 @@ cc_test(
         ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":ticket_vault",
@@ -1467,7 +1467,7 @@ cc_test(
         ":games_hub_handler",
         ":games_hub_smithy_client",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":ticket_vault",
@@ -1483,7 +1483,7 @@ cc_test(
     ],
 )
 
-# The lobby's wire, pinned raw the way golf_wire_test pins golf's: the
+# The lobby's wire, pinned raw the way hub_wire_test pins golf's: the
 # one route and the lobby envelope's bytes.
 cc_test(
     name = "lobby_wire_test",
@@ -1495,7 +1495,7 @@ cc_test(
     deps = [
         ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":id_generator",
         ":rate_limiter",
         ":ticket_vault",
@@ -1522,7 +1522,7 @@ cc_test(
     deps = [
         ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":id_generator",
         ":rate_limiter",
         ":ticket_vault",
@@ -1551,7 +1551,7 @@ cc_test(
     deps = [
         ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":id_generator",
         ":rate_limiter",
         ":splat",
@@ -1577,7 +1577,7 @@ cc_binary(
     deps = [
         ":games_hub_handler",
         ":games_hub_smithy_server",
-        ":golf_hub",
+        ":hub",
         ":hub_store",
         ":id_generator",
         ":pg_chat_store",

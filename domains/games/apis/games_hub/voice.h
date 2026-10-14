@@ -20,7 +20,7 @@ namespace games_hub {
 /// more.
 ///
 /// Like World, this is the rules and the map and nothing about wires:
-/// it stages what each session is owed, in delivery order, and GolfHub,
+/// it stages what each session is owed, in delivery order, and GamesHub,
 /// which hosts it as the room stream's `voice` member, hands them to its
 /// registry under its lock. Not thread-safe; the owner's lock covers
 /// every call. Which room a player is in is the hub's to say.

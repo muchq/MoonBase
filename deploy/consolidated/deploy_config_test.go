@@ -1331,7 +1331,7 @@ func TestNoDeployConfigNamesR3dr(t *testing.T) {
 // The games hub's database, role, init step and host key are games_hub now
 // (#79); any golf_hub left in the deploy surface is a missed rename. Golf the
 // game keeps its routes, so only the joined spelling is refused.
-func TestNoDeployConfigNamesGolfHub(t *testing.T) {
+func TestNoDeployConfigNamesGamesHub(t *testing.T) {
 	files := []string{"compose.yaml", "Caddyfile", "Caddyfile.local", "deploy.sh",
 		"local_deploy.sh", "initialize_host.sh"}
 	for _, name := range files {

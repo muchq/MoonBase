@@ -169,17 +169,17 @@ TEST_F(RoundRobinFixture, CreatingOutsideARoomIsRefused) {
 }
 
 // A room runs round robins side by side, a new one while another has
-// pairings to play, up to GolfHub::kMaxRoundRobinsPerRoom.
+// pairings to play, up to GamesHub::kMaxRoundRobinsPerRoom.
 TEST_F(RoundRobinFixture, ARoomRunsSeveralUpToItsLimit) {
   auto members = Seated(3);
   ASSERT_TRUE(members.has_value());
   Seat& creator = members->room.seats[1];
-  for (std::size_t i = 0; i < GolfHub::kMaxRoundRobinsPerRoom; ++i) {
+  for (std::size_t i = 0; i < GamesHub::kMaxRoundRobinsPerRoom; ++i) {
     ASSERT_TRUE(creator.stream.Send(CreateRoundRobin(members->ids)).ok());
     ASSERT_TRUE(Heard(creator).has_value()) << i;
   }
   ASSERT_TRUE(creator.stream.Send(CreateRoundRobin(members->ids)).ok());
-  EXPECT_EQ(Refused(creator), absl::StrCat("a room keeps at most ", GolfHub::kMaxRoundRobinsPerRoom,
+  EXPECT_EQ(Refused(creator), absl::StrCat("a room keeps at most ", GamesHub::kMaxRoundRobinsPerRoom,
                                            " round robins"));
   Seat& asker = members->room.seats[0];
   ASSERT_TRUE(asker.stream.Send(RoundRobins()).ok());
@@ -188,7 +188,7 @@ TEST_F(RoundRobinFixture, ARoomRunsSeveralUpToItsLimit) {
   for (int i = 0; i < 3 && !answer.has_value(); ++i)
     answer = ReceiveChess(asker.stream, "roundRobins");
   ASSERT_TRUE(answer.has_value());
-  EXPECT_EQ(answer->as_roundRobins_or_null()->roundRobins.size(), GolfHub::kMaxRoundRobinsPerRoom);
+  EXPECT_EQ(answer->as_roundRobins_or_null()->roundRobins.size(), GamesHub::kMaxRoundRobinsPerRoom);
 }
 
 // The creator records a forfeit on a pairing still to play: it scores as

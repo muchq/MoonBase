@@ -27,7 +27,7 @@ const (
 	hubEventsCc     = "../../../games/apis/games_hub/game_events.cc"
 	hubSurfaceH     = "../../../games/apis/games_hub/surface.h"
 	hubHostedGameH  = "../../../games/apis/games_hub/hosted_game.h"
-	hubGolfHubCc    = "../../../games/apis/games_hub/golf_hub.cc"
+	hubCc    = "../../../games/apis/games_hub/hub.cc"
 	hubWorldH       = "../../../games/apis/games_hub/world.h"
 	rummyTableCc    = "../../../games/libs/cards/rummy/table.cc"
 	statsGames      = "../../apis/stats/games.go"
@@ -192,13 +192,13 @@ func TestHubEventFieldNamesAgreeBetweenGamesHubAndStats(t *testing.T) {
 // table becomes a players of -1: a row that says "past the bound" about a
 // perfectly ordinary game.
 func TestTheTableCapAgreesBetweenGamesHubAndStats(t *testing.T) {
-	hub, err := os.ReadFile(hubGolfHubCc)
+	hub, err := os.ReadFile(hubCc)
 	require.NoError(t, err)
 	reader, err := os.ReadFile(statsGames)
 	require.NoError(t, err)
 
 	seats := regexp.MustCompile(`constexpr std::size_t kMaxSeats = (\d+);`).FindSubmatch(hub)
-	require.NotNil(t, seats, "no kMaxSeats in %s", hubGolfHubCc)
+	require.NotNil(t, seats, "no kMaxSeats in %s", hubCc)
 	bound := regexp.MustCompile(`hubMaxSeats\s+= (\d+)`).FindSubmatch(reader)
 	require.NotNil(t, bound, "no hubMaxSeats in %s", statsGames)
 	assert.Equal(t, string(seats[1]), string(bound[1]),
@@ -209,7 +209,7 @@ func TestTheTableCapAgreesBetweenGamesHubAndStats(t *testing.T) {
 // leaving the next reader to look for one: nothing caps a room, so 16 is
 // the reader's own ceiling on how many rows one room shape may mint.
 func TestTheRoomCeilingIsTheReadersAlone(t *testing.T) {
-	hub, err := os.ReadFile(hubGolfHubCc)
+	hub, err := os.ReadFile(hubCc)
 	require.NoError(t, err)
 	assert.NotRegexp(t, `kMaxMembers|kMaxRoomSize`, string(hub),
 		"the hub grew a room cap; hubMaxMembers should be pinned to it rather than "+
@@ -294,13 +294,13 @@ func TestHubEventFieldNamesAgreeBetweenGamesHubAndDeja(t *testing.T) {
 // the same drift that would make stats say -1 would make deja mint a
 // token per size instead.
 func TestTheTableCapAgreesBetweenGamesHubAndDeja(t *testing.T) {
-	hub, err := os.ReadFile(hubGolfHubCc)
+	hub, err := os.ReadFile(hubCc)
 	require.NoError(t, err)
 	reader, err := os.ReadFile(dejaHub)
 	require.NoError(t, err)
 
 	seats := regexp.MustCompile(`constexpr std::size_t kMaxSeats = (\d+);`).FindSubmatch(hub)
-	require.NotNil(t, seats, "no kMaxSeats in %s", hubGolfHubCc)
+	require.NotNil(t, seats, "no kMaxSeats in %s", hubCc)
 	bound := regexp.MustCompile(`const MAX_SEATS: i64 = (\d+);`).FindSubmatch(reader)
 	require.NotNil(t, bound, "no MAX_SEATS in %s", dejaHub)
 	assert.Equal(t, string(seats[1]), string(bound[1]),
