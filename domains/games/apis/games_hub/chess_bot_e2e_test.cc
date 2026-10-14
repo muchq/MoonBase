@@ -42,8 +42,8 @@ class ChessBotFixture : public GamesHubStreamFixture {
  protected:
   void SetUp() override {
     GamesHubStreamFixture::SetUp();
-    golf_->SetClock([this] { return absl::FromUnixMillis(now_ms_.load()); });
-    golf_->SetChessOpener([this](std::string_view setup_id)
+    hub_->SetClock([this] { return absl::FromUnixMillis(now_ms_.load()); });
+    hub_->SetChessOpener([this](std::string_view setup_id)
                               -> absl::StatusOr<chess_play::ChessSetup> {
       const auto name = chess_play::ChessSetupName(setup_id);
       const auto variant = chess_play::ChessSetupVariant(setup_id);
@@ -53,7 +53,7 @@ class ChessBotFixture : public GamesHubStreamFixture {
       return chess_play::ChessSetup{
           std::string(setup_id), std::string(*name), std::string(*variant), opening_};
     });
-    golf_->SetChessBotEngine([this](const ChessBotAsk& ask) -> absl::StatusOr<std::string> {
+    hub_->SetChessBotEngine([this](const ChessBotAsk& ask) -> absl::StatusOr<std::string> {
       asks_.push_back(ask);
       if (during_ask_) during_ask_();
       return answer_;
@@ -155,7 +155,7 @@ TEST_F(ChessBotFixture, ABotIsOnlyForAChessTableNotYetStarted) {
 }
 
 TEST_F(ChessBotFixture, WithNoEngineTheHubSeatsNoBot) {
-  golf_->SetChessBotEngine(nullptr);
+  hub_->SetChessBotEngine(nullptr);
   auto alice = AliceAtATable();
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(alice->stream.Send(AddBot(1500)).ok());
@@ -172,7 +172,7 @@ TEST_F(ChessBotFixture, OnItsTurnTheBotPlaysTheEnginesMove) {
   auto alice = AliceAtATable();
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(StartedAgainstBot(*alice, 1500).has_value());
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 1);
   ASSERT_EQ(asks_.size(), 1u);
   EXPECT_EQ(asks_[0].fen, kMate);
   EXPECT_TRUE(asks_[0].moves.empty());
@@ -183,7 +183,7 @@ TEST_F(ChessBotFixture, OnItsTurnTheBotPlaysTheEnginesMove) {
   EXPECT_EQ(view->moves, std::vector<std::string>{"e7e8q"});
   EXPECT_EQ(view->result->winner, "stockfish@1500");
   // A finished game is nothing to play.
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 0);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 0);
   EXPECT_EQ(asks_.size(), 1u);
 }
 
@@ -193,7 +193,7 @@ TEST_F(ChessBotFixture, ThinkTimeFollowsTheBotsNamedStrength) {
   auto alice = AliceAtATable();
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(StartedAgainstBot(*alice, 2300).has_value());
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 1);
   ASSERT_EQ(asks_.size(), 1u);
   EXPECT_EQ(asks_[0].elo, std::nullopt);
   EXPECT_EQ(asks_[0].movetime_ms, ChessBotStrengthThinkMs(2300));
@@ -215,7 +215,7 @@ TEST_F(ChessBotFixture, ThinkTimeIsCappedByTheSideToMovesRemaining) {
   ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "playing"; }, "start"));
   // 30s clock, 29.6s already spent → 400 ms left → 350 ms ask after reserve.
   now_ms_ += 29'600;
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 1);
   ASSERT_EQ(asks_.size(), 1u);
   EXPECT_EQ(asks_[0].elo, std::nullopt);
   EXPECT_EQ(asks_[0].movetime_ms, ChessBotMovetimeMs(/*remaining=*/400, /*elo=*/2300));
@@ -227,7 +227,7 @@ TEST_F(ChessBotFixture, OffItsTurnTheBotWaits) {
   auto alice = AliceAtATable();
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(StartedAgainstBot(*alice, 1500).has_value());
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 0);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 0);
   EXPECT_TRUE(asks_.empty());
   // alice moves; now it is the bot's, with her move in the ask.
   moonbase::games::ChessPlay play;
@@ -235,7 +235,7 @@ TEST_F(ChessBotFixture, OffItsTurnTheBotWaits) {
   ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromPlay(play))).ok());
   ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return !v.moves.empty(); }, "her move"));
   answer_ = std::string("h8g8");
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 1);
   ASSERT_EQ(asks_.size(), 1u);
   EXPECT_EQ(asks_[0].moves, std::vector<std::string>{"g6f6"});
 }
@@ -248,12 +248,12 @@ TEST_F(ChessBotFixture, AnEngineThatFailsIsAskedAgainOnlyAfterTheRetry) {
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(StartedAgainstBot(*alice, 1500).has_value());
   answer_ = absl::UnavailableError("engine down");
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 0);
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 0);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 0);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 0);
   EXPECT_EQ(asks_.size(), 1u);
   now_ms_ += kChessBotRetry.count();
   answer_ = std::string("e7e8q");
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 1);
   EXPECT_EQ(asks_.size(), 2u);
 }
 
@@ -268,7 +268,7 @@ TEST_F(ChessBotFixture, AnAnswerForAPositionThatMovedOnIsDropped) {
     ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromResign({}))).ok());
     ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "ended"; }, "resigned"));
   };
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 0);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 0);
   while (true) {
     auto received = alice->stream.Receive(std::chrono::milliseconds(300));
     if (!received.ok() || !received->has_value()) break;
@@ -293,14 +293,14 @@ TEST_F(ChessBotFixture, AnAnswerForAGameThatMovedOnInPlayIsDropped) {
     if (elsewhere) return;
     elsewhere = true;
     answer_ = std::string("g6f6");
-    EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
+    EXPECT_EQ(hub_->PlayChessBotsOnce(), 1);
     moonbase::games::ChessPlay reply;
     reply.uci = "h8g8";
     ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromPlay(reply))).ok());
     ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.moves.size() == 2; }, "her reply"));
     answer_ = std::string("e7e8q");  // legal after her reply too
   };
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 0);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 0);
   while (true) {
     auto received = alice->stream.Receive(std::chrono::milliseconds(300));
     if (!received.ok() || !received->has_value()) break;
@@ -327,7 +327,7 @@ TEST_F(ChessBotFixture, AnAnswerFromAnEarlierGameIsNotPlayedInALaterOne) {
       ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "playing"; }, "next game"));
     }
   };
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 0) << "game one's move was played in game three";
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 0) << "game one's move was played in game three";
 }
 
 // An engine failure holds back the game it failed in, not the next one
@@ -338,7 +338,7 @@ TEST_F(ChessBotFixture, AnEngineFailureDoesNotHoldTheNextGame) {
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(StartedAgainstBot(*alice, 1500).has_value());
   answer_ = absl::UnavailableError("engine down");
-  ASSERT_EQ(golf_->PlayChessBotsOnce(), 0);
+  ASSERT_EQ(hub_->PlayChessBotsOnce(), 0);
   ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromResign({}))).ok());
   ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return v.phase == "ended"; }, "resigned"));
   ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromStartgame({}))).ok());
@@ -348,7 +348,7 @@ TEST_F(ChessBotFixture, AnEngineFailureDoesNotHoldTheNextGame) {
   ASSERT_TRUE(alice->stream.Send(Chess(ChessMove::FromPlay(play))).ok());
   ASSERT_TRUE(AwaitChessView(alice->stream, [](const auto& v) { return !v.moves.empty(); }, "her move"));
   answer_ = std::string("h8g8");
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 1);
 }
 
 // An answer the position refuses is a fault like a failed ask: no move,
@@ -359,12 +359,12 @@ TEST_F(ChessBotFixture, AnIllegalAnswerIsAskedAgainOnlyAfterTheRetry) {
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(StartedAgainstBot(*alice, 1500).has_value());
   answer_ = std::string("a1a2");
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 0);
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 0);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 0);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 0);
   EXPECT_EQ(asks_.size(), 1u);
   now_ms_ += kChessBotRetry.count();
   answer_ = std::string("e7e8q");
-  EXPECT_EQ(golf_->PlayChessBotsOnce(), 1);
+  EXPECT_EQ(hub_->PlayChessBotsOnce(), 1);
 }
 
 // A bot holds no table on its own: its player leaving a table not yet
@@ -386,7 +386,7 @@ TEST_F(ChessBotFixture, AGameAgainstABotCountsForThePlayer) {
   auto alice = AliceAtATable();
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(StartedAgainstBot(*alice, 1500).has_value());
-  ASSERT_EQ(golf_->PlayChessBotsOnce(), 1);
+  ASSERT_EQ(hub_->PlayChessBotsOnce(), 1);
   auto room = AwaitRoomState(alice->stream, [](const auto& state) {
     return std::any_of(state.players.begin(), state.players.end(), [](const auto& p) { return p.gamesPlayed == 1; });
   }, "alice's game");
@@ -400,7 +400,7 @@ TEST_F(ChessBotFixture, AGameAgainstABotCountsForThePlayer) {
 TEST_F(ChessBotFixture, APublishedGameAgainstABotAsksToIndexOnlyItsPlayer) {
   std::mutex mu;
   std::vector<one_d4::IndexAsk> asked;
-  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+  hub_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
     const std::lock_guard<std::mutex> lock(mu);
     asked.push_back(ask);
   });

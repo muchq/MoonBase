@@ -140,18 +140,18 @@ class HubWireFixture : public ::testing::Test {
     auto vault = std::make_shared<InMemoryTicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
                                                        /*resume_ttl=*/std::chrono::seconds(60));
     auto ids = std::make_shared<SequentialIdGenerator>();
-    golf_ =
+    hub_ =
         std::make_shared<GamesHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
                                   /*grace_period=*/std::chrono::seconds(60), metrics_, MakeStore(),
-                                  /*chat_store=*/nullptr, MakeRateLimits(), MakeGolfHooks());
-    ASSERT_TRUE(golf_->RestoreFromStore().ok());
-    handler_ = std::make_shared<GamesHubHandler>(vault, ids, golf_);
+                                  /*chat_store=*/nullptr, MakeRateLimits(), MakeHubHooks());
+    ASSERT_TRUE(hub_->RestoreFromStore().ok());
+    handler_ = std::make_shared<GamesHubHandler>(vault, ids, hub_);
     server_ = std::make_unique<moonbase::games::GamesHubServer>(handler_);
     ASSERT_TRUE(loopback_->Start(server_->Handler()).ok());
   }
 
   virtual RateLimits MakeRateLimits() { return WireRateLimits(); }
-  virtual HubTestHooks MakeGolfHooks() { return {}; }
+  virtual HubTestHooks MakeHubHooks() { return {}; }
   /// Null selects the production memory store.
   virtual std::shared_ptr<HubStore> MakeStore() { return nullptr; }
 
@@ -225,7 +225,7 @@ class HubWireFixture : public ::testing::Test {
 
   std::shared_ptr<futility::otel::CapturingMetricsRecorder> metrics_ =
       std::make_shared<futility::otel::CapturingMetricsRecorder>("games_hub_test");
-  std::shared_ptr<GamesHub> golf_;
+  std::shared_ptr<GamesHub> hub_;
   std::shared_ptr<GamesHubHandler> handler_;
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::shared_ptr<opal::http::Loopback> loopback_ = std::make_shared<opal::http::Loopback>();

@@ -93,8 +93,8 @@ class ChessFixture : public GamesHubStreamFixture {
  protected:
   void SetUp() override {
     GamesHubStreamFixture::SetUp();
-    golf_->SetClock([this] { return absl::FromUnixMillis(now_ms_.load()); });
-    golf_->SetChessOpener(
+    hub_->SetClock([this] { return absl::FromUnixMillis(now_ms_.load()); });
+    hub_->SetChessOpener(
         [this](std::string_view setup_id) -> absl::StatusOr<chess_play::ChessSetup> {
           if (setup_id == refused_setup_) return absl::UnavailableError("the opener is down");
           auto setup = chess_play::SelectChessSetup(setup_id, setup_gen_);
@@ -338,11 +338,11 @@ TEST_F(ChessFixture, TheSweepEndsAGameWhoseSideToMoveRanOutOfTime) {
 
   // Black's three minutes, less a millisecond: nothing to sweep.
   now_ms_ += 179'999;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
   ExpectNoEvent(table.bob.stream);
 
   now_ms_ += 1;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 1);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 1);
   for (Seat* seat : {&table.alice, &table.bob}) {
     auto result = Ended(*seat);
     ASSERT_TRUE(result.has_value());
@@ -350,7 +350,25 @@ TEST_F(ChessFixture, TheSweepEndsAGameWhoseSideToMoveRanOutOfTime) {
     EXPECT_EQ(result->ending, "timeout");
   }
   // A finished game is nothing to sweep.
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+}
+
+// A leave reads the clock first: a side whose flag has fallen, unswept,
+// lost on time, not by leaving.
+TEST_F(ChessFixture, ALeaveAfterTheFlagFellIsATimeout) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Play("e2e4")).ok());
+  ASSERT_TRUE(ReceiveChess(table.bob.stream, "turnChanged").has_value());
+  now_ms_ += 180'000;
+  ASSERT_TRUE(
+      table.bob.stream.Send(Chess(ChessMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  auto result = Ended(table.alice);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->winner, table.alice.player_id);
+  EXPECT_EQ(result->ending, "timeout");
 }
 
 TEST_F(ChessFixture, ThePawnSideOutOfTimeOnlyDraws) {
@@ -358,7 +376,7 @@ TEST_F(ChessFixture, ThePawnSideOutOfTimeOnlyDraws) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
   now_ms_ += 180'000;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 1);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 1);
   auto result = Ended(started->table.bob);
   ASSERT_TRUE(result.has_value());
   EXPECT_FALSE(result->winner.has_value());
@@ -426,8 +444,8 @@ TEST_F(ChessFixture, TheClockThreadFlagsOnItsOwn) {
   opening_.fen = kQuiet;
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
-  golf_->StartChessClocks(std::chrono::milliseconds(10));
-  golf_->StartChessClocks(std::chrono::milliseconds(10));
+  hub_->StartChessClocks(std::chrono::milliseconds(10));
+  hub_->StartChessClocks(std::chrono::milliseconds(10));
   now_ms_ += 180'000;
   auto result = Ended(started->table.alice);
   ASSERT_TRUE(result.has_value());
@@ -530,21 +548,10 @@ TEST_F(ChessFixture, LeavingBetweenGamesClosesTheTable) {
 }
 
 TEST_F(ChessFixture, AThirdSeatIsRefused) {
-  auto room = SeatedRoom(3);
-  ASSERT_TRUE(room.has_value());
-  ASSERT_TRUE(room->seats[0]
-                  .stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{})))
-                  .ok());
-  auto created = ReceiveChess(room->seats[0].stream, "gameJoined");
-  ASSERT_TRUE(created.has_value());
-  moonbase::games::JoinGame join;
-  join.gameId = created->as_gameJoined_or_null()->view.gameId;
-  ASSERT_TRUE(room->seats[1].stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
-  ASSERT_TRUE(ReceiveChess(room->seats[1].stream, "gameJoined").has_value());
-  ASSERT_TRUE(room->seats[2].stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
-  auto refused = ReceiveCase(room->seats[2].stream, "commandRejected");
-  ASSERT_TRUE(refused.has_value());
-  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "game is full");
+  ExpectSeatCap<ChessMove>(2, Chess,
+                           [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+                             return ReceiveChess(stream, wanted);
+                           });
 }
 
 TEST_F(ChessFixture, AStartOnOneSeatIsRefused) {
@@ -574,7 +581,7 @@ TEST_F(ChessFixture, AMoveBeforeTheStartIsRefused) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "game not started");
   // Nor is a pending table anything to sweep, however late it is.
   now_ms_ += 10'000'000;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
 }
 
 // The rest of the room watches a table (#1633): the seats' own view,
@@ -1208,16 +1215,8 @@ class ChessEventFixture : public ChessFixture {
  protected:
   void SetUp() override {
     ChessFixture::SetUp();
-    golf_->SetEventWriter(
-        [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
+    CaptureEvents();
   }
-  // The writer goes first: the hub's teardown can end a game, and
-  // `events_` dies before the base's hub does.
-  void TearDown() override {
-    if (golf_ != nullptr) golf_->SetEventWriter(nullptr);
-    ChessFixture::TearDown();
-  }
-  std::vector<std::string> events_;
 };
 
 TEST_F(ChessEventFixture, AChessGameIsRecordedStartedAndFinishedAsChess) {
@@ -1225,10 +1224,7 @@ TEST_F(ChessEventFixture, AChessGameIsRecordedStartedAndFinishedAsChess) {
   ASSERT_TRUE(started.has_value());
   ASSERT_TRUE(started->table.bob.stream.Send(Resign()).ok());
   ASSERT_TRUE(Ended(started->table.alice).has_value());
-  std::vector<std::string> games;
-  for (const std::string& line : events_) {
-    if (line.find(R"("event":"game_)") != std::string::npos) games.push_back(line);
-  }
+  const auto games = GameLines();
   ASSERT_EQ(games.size(), 2u);
   EXPECT_THAT(games[0], ::testing::HasSubstr(R"("event":"game_started")"));
   EXPECT_THAT(games[0], ::testing::HasSubstr(R"("variant":"chess")"));
@@ -1303,18 +1299,18 @@ TEST_F(ChessOutageFixture, AFlagTheStoreCannotTakeWaitsBeforeItsRetry) {
   ASSERT_TRUE(started.has_value());
   now_ms_ += 180'000;
   outage_->down = true;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
   EXPECT_EQ(outage_->finishes, 1);
   now_ms_ += GamesHub::kChessFlagRetry.count() - 1;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
   EXPECT_EQ(outage_->finishes, 1);
   now_ms_ += 1;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
   EXPECT_EQ(outage_->finishes, 2);
   // Back up: the next retry lands the flag.
   outage_->down = false;
   now_ms_ += GamesHub::kChessFlagRetry.count();
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 1);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 1);
   auto result = Ended(started->table.bob);
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->ending, "timeout");
@@ -1328,17 +1324,17 @@ TEST_F(ChessOutageFixture, AGameThatEndsWhileItsFlagWaitsLeavesNoRetryBehind) {
   ASSERT_TRUE(started.has_value());
   now_ms_ += 180'000;
   outage_->down = true;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
-  EXPECT_EQ(golf_->ChessFlagRetriesPending(), 1u);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->ChessFlagRetriesPending(), 1u);
   // The control: another sweep inside the retry window keeps it.
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
-  EXPECT_EQ(golf_->ChessFlagRetriesPending(), 1u);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->ChessFlagRetriesPending(), 1u);
   // The store comes back and the game ends another way.
   outage_->down = false;
   ASSERT_TRUE(started->table.bob.stream.Send(Resign()).ok());
   ASSERT_TRUE(Ended(started->table.alice).has_value());
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
-  EXPECT_EQ(golf_->ChessFlagRetriesPending(), 0u);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->ChessFlagRetriesPending(), 0u);
 }
 
 // Without a setup named, the hub starts ordinary chess.
@@ -1740,7 +1736,7 @@ TEST_F(ChessFixture, ThePublicFeedServesGamesThatEndedPublished) {
 TEST_F(ChessFixture, AGameEndingPublishedAsksToIndexItsPlayers) {
   std::mutex mu;
   std::vector<std::pair<std::string, std::string>> asked;
-  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+  hub_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
     const std::lock_guard<std::mutex> lock(mu);
     asked.emplace_back(ask.player_id, ask.month);
   });
@@ -1774,7 +1770,7 @@ TEST_F(ChessFixture, AGameEndingPublishedAsksToIndexItsPlayers) {
 TEST_F(ChessFixture, AGameEndedByALeaveAsksToIndexWhoeverLeftToo) {
   std::mutex mu;
   std::vector<std::string> asked;
-  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+  hub_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
     const std::lock_guard<std::mutex> lock(mu);
     asked.push_back(ask.player_id);
   });
@@ -1796,7 +1792,7 @@ TEST_F(ChessFixture, AGameEndingInAMonthsFirstMinuteAsksForTheMonthBeforeToo) {
   constexpr int64_t kFebruary = 1'801'440'000'000;  // 2027-02-01T00:00:00Z
   std::mutex mu;
   std::vector<std::pair<std::string, std::string>> asked;
-  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+  hub_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
     const std::lock_guard<std::mutex> lock(mu);
     asked.emplace_back(ask.player_id, ask.month);
   });
@@ -1834,7 +1830,7 @@ TEST_F(ChessFixture, AGameEndingInAMonthsFirstMinuteAsksForTheMonthBeforeToo) {
 TEST_F(ChessFixture, ATableThatHasAlreadyEndedAsksNoOneAgain) {
   std::mutex mu;
   std::vector<std::string> asked;
-  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+  hub_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
     const std::lock_guard<std::mutex> lock(mu);
     asked.push_back(ask.player_id);
   });
@@ -1902,6 +1898,82 @@ TEST_F(ChessFixture, APublishedGameIsServedByItsArchiveIdAndAPrivateOneIsNot) {
     ASSERT_FALSE(refused.ok()) << missing;
     EXPECT_EQ(refused.error().code(), "ChessGameNotFound") << missing;
   }
+}
+
+
+// Chess's branches of the hub (#1621): the status the room lists a table under, the commands chess
+// counts, and the record of a table's next game.
+TEST_F(ChessFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ExpectListedStatus(table.alice, table.game_id, "playing");
+  ASSERT_TRUE(table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  ExpectListedStatus(table.alice, table.game_id, "ended");
+  moonbase::games::ChessStartGame next;
+  next.setupId = "qvr-basic";
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame(next))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  table.alice.stream, [](const auto& v) { return v.phase == "playing"; },
+                  "the next game")
+                  .has_value());
+  ExpectListedStatus(table.alice, table.game_id, "playing");
+}
+
+TEST_F(ChessFixture, CommandsAreCountedOnTheChessSeries) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  ASSERT_TRUE(started->table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(started->table.alice).has_value());
+  EXPECT_EQ(metrics_->CounterTotal("chess_commands", {{"command", "createGame"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("chess_commands", {{"command", "joinGame"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("chess_commands", {{"command", "startGame"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("chess_commands", {{"command", "resign"}}), 1);
+}
+
+// A table's next game is a game of its own in the stats archive: started
+// as chess, like the first.
+TEST_F(ChessEventFixture, TheNextGameIsRecordedStartedAsChess) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  moonbase::games::ChessStartGame next;
+  next.setupId = "qvr-basic";
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame(next))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  table.alice.stream, [](const auto& v) { return v.phase == "playing"; },
+                  "the next game")
+                  .has_value());
+  const auto games = GameLines();
+  ASSERT_EQ(games.size(), 3u);
+  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("event":"game_started")"));
+  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("variant":"chess")"));
+  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("players":2)"));
+}
+
+// An instance that takes the table on after its first game ended counts
+// that game as told: the next game's start does not tell it again.
+TEST_F(ChessFixture, ATakenOverTableDoesNotRetellAFinishedGame) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto bob = OpenSeatVia(*instance->client, table.bob.resume_token);
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveChess(bob->stream, "gameJoined").has_value());
+  moonbase::games::ChessStartGame next;
+  next.setupId = "qvr-basic";
+  ASSERT_TRUE(bob->stream.Send(Chess(ChessMove::FromStartgame(next))).ok());
+  const auto cases = CasesUntilQuiet(bob->stream);
+  EXPECT_THAT(cases, ::testing::Contains("chess.gameState"));
+  EXPECT_THAT(cases, ::testing::Not(::testing::Contains("chess.gameEnded")));
 }
 
 }  // namespace

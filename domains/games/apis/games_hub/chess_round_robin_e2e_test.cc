@@ -448,7 +448,7 @@ TEST_F(RoundRobinFixture, AHandStartedPairingPlaysOnTheRoundRobinsTerms) {
   auto game_id = Opened(*members, 0, 1, created->roundRobinId);
   ASSERT_TRUE(game_id.has_value());
   std::atomic<int> opened{0};
-  golf_->SetChessOpener(
+  hub_->SetChessOpener(
       [&opened](std::string_view setup_id) -> absl::StatusOr<chess_play::ChessSetup> {
         if (opened++ == 0) return absl::UnavailableError("the opener is down");
         absl::BitGen gen;
@@ -483,7 +483,7 @@ TEST_F(RoundRobinFixture, APairingsTableKeepsItsTermsThroughALeave) {
   auto game_id = Opened(*members, 0, 1, created->roundRobinId);
   ASSERT_TRUE(game_id.has_value());
   std::atomic<int> opened{0};
-  golf_->SetChessOpener(
+  hub_->SetChessOpener(
       [&opened](std::string_view setup_id) -> absl::StatusOr<chess_play::ChessSetup> {
         if (opened++ == 0) return absl::UnavailableError("the opener is down");
         absl::BitGen gen;

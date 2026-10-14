@@ -10,8 +10,8 @@
 namespace games_hub {
 
 GamesHubHandler::GamesHubHandler(std::shared_ptr<TicketVault> vault,
-                                 std::shared_ptr<IdGenerator> ids, std::shared_ptr<GamesHub> golf)
-    : vault_(std::move(vault)), ids_(std::move(ids)), golf_(std::move(golf)) {}
+                                 std::shared_ptr<IdGenerator> ids, std::shared_ptr<GamesHub> hub)
+    : vault_(std::move(vault)), ids_(std::move(ids)), hub_(std::move(hub)) {}
 
 opal::Outcome<moonbase::games::GetSessionOutput> GamesHubHandler::GetSession(
     const moonbase::games::GetSessionInput& input,
@@ -47,7 +47,7 @@ opal::Outcome<moonbase::games::GetSessionOutput> GamesHubHandler::GetSession(
 opal::Outcome<moonbase::games::ExportChessGamesOutput> GamesHubHandler::ExportChessGames(
     const moonbase::games::ExportChessGamesInput& input,
     const opal::server::RequestContext& /*context*/) {
-  absl::StatusOr<std::string> pgn = golf_->ExportChessPgn(input.after.value_or(0));
+  absl::StatusOr<std::string> pgn = hub_->ExportChessPgn(input.after.value_or(0));
   if (!pgn.ok()) return opal::Error::Unknown("game store unavailable");
   moonbase::games::ExportChessGamesOutput output;
   output.contentType = "application/x-chess-pgn";
@@ -58,7 +58,7 @@ opal::Outcome<moonbase::games::ExportChessGamesOutput> GamesHubHandler::ExportCh
 opal::Outcome<moonbase::games::GetChessGameOutput> GamesHubHandler::GetChessGame(
     const moonbase::games::GetChessGameInput& input,
     const opal::server::RequestContext& /*context*/) {
-  auto review = golf_->PublishedChessReview(input.archiveId);
+  auto review = hub_->PublishedChessReview(input.archiveId);
   if (!review.ok()) return opal::Error::Unknown("game store unavailable");
   if (!review->has_value()) {
     return opal::Error::Modeled("ChessGameNotFound", "no published game has that archive id");
@@ -70,7 +70,7 @@ opal::Outcome<moonbase::games::GetChessGameOutput> GamesHubHandler::GetChessGame
 
 opal::eventstream::StreamTask GamesHubHandler::Play(
     moonbase::games::PlayInput input, moonbase::games::PlayAsyncServerStream& stream) {
-  return golf_->Play(std::move(input), stream);
+  return hub_->Play(std::move(input), stream);
 }
 
 }  // namespace games_hub

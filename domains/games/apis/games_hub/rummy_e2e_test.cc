@@ -1062,5 +1062,14 @@ TEST_F(RummyGameFixture, AWaitingTableIsARosterWithNoCards) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "game not started");
 }
 
+
+// The seat cap (#1621).
+TEST_F(RummyGameFixture, AFifthSeatIsRefused) {
+  ExpectSeatCap<RummyMove>(4, Rummy,
+                      [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+                        return ReceiveRummy(stream, wanted);
+                      });
+}
+
 }  // namespace
 }  // namespace games_hub

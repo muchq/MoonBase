@@ -27,7 +27,7 @@ class PongWireTest : public HubWireFixture {
  protected:
   void SetUp() override {
     HubWireFixture::SetUp();
-    golf_->SetClock([] { return absl::FromUnixMillis(1'800'000'000'000); });
+    hub_->SetClock([] { return absl::FromUnixMillis(1'800'000'000'000); });
   }
 };
 
@@ -71,8 +71,8 @@ TEST_F(PongWireTest, TableFlowPinsPongCommandAndUpdatePayloadBytes) {
   ASSERT_TRUE(alice->Send(CommandFrame("pong", R"({"move":{"paddle":{"x":0,"y":0}}})")).ok());
   ASSERT_TRUE(alice->Send(CommandFrame("getRoomState", "{}")).ok());
   (void)EventPayload(NextFrame(*alice), "roomState");
-  golf_->TickPongOnce();
-  golf_->TickPongOnce();
+  hub_->TickPongOnce();
+  hub_->TickPongOnce();
   EXPECT_EQ(
       EventPayload(NextFrame(*alice), "pong"),
       R"({"update":{"frame":{"ball":{"x":200.0,"y":150.0,"z":400.0},"gameId":"GAME01",)"

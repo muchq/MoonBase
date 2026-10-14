@@ -165,10 +165,10 @@ TEST_F(PongRoundRobinFixture, APairingsTablePlaysOneGameAndScoresIt) {
   ASSERT_TRUE(bob.stream.Send(PongPaddle(0)).ok());
   ASSERT_TRUE(bob.stream.Send(GameCommands::FromGetroomstate({})).ok());
   ASSERT_TRUE(ReceiveCase(bob.stream, "roomState").has_value());
-  for (int tick = 0; tick < 4000 && golf_->PongRalliesHosted() > 0; ++tick) {
-    golf_->TickPongOnce();
+  for (int tick = 0; tick < 4000 && hub_->PongRalliesHosted() > 0; ++tick) {
+    hub_->TickPongOnce();
   }
-  EXPECT_EQ(golf_->PongRalliesHosted(), 0u);
+  EXPECT_EQ(hub_->PongRalliesHosted(), 0u);
   const auto scored = HeardWhere(members->room.seats[2], [](const PongRoundRobin& heard) {
     for (const auto& pairing : heard.pairings) {
       if (pairing.winner.has_value()) return true;

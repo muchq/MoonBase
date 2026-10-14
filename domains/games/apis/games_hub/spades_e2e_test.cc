@@ -77,14 +77,14 @@ class SpadesFixture : public GamesHubStreamFixture {
  protected:
   void SetUp() override {
     GamesHubStreamFixture::SetUp();
-    golf_->SetEventWriter([this](absl::Time, std::string_view line) {
+    hub_->SetEventWriter([this](absl::Time, std::string_view line) {
       if (line.find(R"("event":"game_)") != std::string::npos) games_.emplace_back(line);
     });
   }
   // The writer goes first: the hub's teardown can end a game, and
   // `games_` dies before the base's hub does.
   void TearDown() override {
-    if (golf_ != nullptr) golf_->SetEventWriter(nullptr);
+    if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
     GamesHubStreamFixture::TearDown();
   }
   // The stats archive's game lines (#1571), in order.
@@ -443,6 +443,8 @@ TEST_F(SpadesFixture, ATeamThatPassesFiveHundredWinsAndTheRoomCountsIt) {
   ExpectNoGameEnded(started->table.seats[1].stream);
   ASSERT_EQ(games_.size(), 3u);
   EXPECT_THAT(games_[2], ::testing::HasSubstr(R"("event":"game_started")"));
+  EXPECT_THAT(games_[2], ::testing::HasSubstr(R"("variant":"spades")"));
+  EXPECT_THAT(games_[2], ::testing::HasSubstr(R"("players":4)"));
   EXPECT_EQ(started->views[0].phase, "bidding");
   EXPECT_EQ(started->views[0].handNumber, 1);
   EXPECT_EQ(started->views[0].teams[0].score, 0);
@@ -556,6 +558,73 @@ TEST_F(ShuffledSpadesFixture, YourHandIsSortedBySuitThenRank) {
     if (i > 0) EXPECT_LT(order(hand[i - 1]), order(hand[i])) << Face(hand[i - 1]) << Face(hand[i]);
   }
   EXPECT_GE(seen.size(), 3u) << "the seed should deal a mixed hand";
+}
+
+
+// The seat cap (#1621).
+TEST_F(SpadesFixture, AFifthSeatIsRefused) {
+  ExpectSeatCap<SpadesMove>(4, Spades,
+                      [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+                        return ReceiveSpades(stream, wanted);
+                      });
+}
+
+
+// Spades's branches of the hub (#1621): the commands spades counts, and the view a resumed
+// seat gets back.
+TEST_F(SpadesFixture, CommandsAreCountedOnTheSpadesSeries) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  EXPECT_EQ(metrics_->CounterTotal("spades_commands", {{"command", "createGame"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("spades_commands", {{"command", "joinGame"}}), 3);
+  EXPECT_EQ(metrics_->CounterTotal("spades_commands", {{"command", "startGame"}}), 1);
+}
+
+TEST_F(SpadesFixture, AResumedSpadesSeatGetsItsOwnViewBack) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Seat& dealer = started->table.seats[0];
+  const SpadesView& before = started->views[0];
+  dealer.stream.Close();
+  auto resumed = OpenSeat(dealer.resume_token);
+  ASSERT_TRUE(resumed.has_value());
+  EXPECT_EQ(resumed->player_id, dealer.player_id);
+  auto ready = ReceiveCase(resumed->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  // The seat's own view, in spades's envelope, redacted for its viewer.
+  auto joined = ReceiveSpades(resumed->stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  const auto& view = joined->as_gameJoined_or_null()->view;
+  EXPECT_EQ(view.gameId, started->table.game_id);
+  EXPECT_EQ(view.phase, before.phase);
+  ASSERT_EQ(view.players.size(), 4u);
+  EXPECT_EQ(view.players[0].hand.size(), before.players[0].hand.size());
+  EXPECT_FALSE(view.players[0].hand.empty());
+  for (std::size_t i = 1; i < view.players.size(); ++i) {
+    EXPECT_TRUE(view.players[i].hand.empty()) << "seat " << i;
+  }
+}
+
+// An instance that takes the table on after its first game ended counts
+// that game as told: the next deal does not tell it again.
+TEST_F(SpadesFixture, ATakenOverTableDoesNotRetellAFinishedGame) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  ASSERT_NO_FATAL_FAILURE(WinTheFirstGame(*started));
+  for (Seat& seat : started->table.seats) {
+    ASSERT_TRUE(ReceiveSpades(seat.stream, "gameEnded").has_value());
+  }
+
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto dealer = OpenSeatVia(*instance->client, started->table.seats[2].resume_token);
+  ASSERT_TRUE(dealer.has_value());
+  ASSERT_TRUE(ReceiveSpades(dealer->stream, "gameJoined").has_value());
+  ASSERT_TRUE(dealer->stream.Send(DealNext()).ok());
+  const auto cases = CasesUntilQuiet(dealer->stream);
+  EXPECT_THAT(cases, ::testing::Contains("spades.gameState"));
+  EXPECT_THAT(cases, ::testing::Not(::testing::Contains("spades.gameEnded")));
 }
 
 }  // namespace

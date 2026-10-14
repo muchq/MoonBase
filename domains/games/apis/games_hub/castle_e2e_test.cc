@@ -17,8 +17,10 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 #include "domains/games/libs/cards/card.h"
 #include "domains/games/libs/cards/castle/game_state.h"
@@ -1032,6 +1034,36 @@ TEST_F(ShortGraceCastleFixture, GraceExpiryAbandonsTheTableWithNoLoser) {
   EXPECT_EQ(room->as_roomState_or_null()->players[0].playerId, alice.player_id);
   EXPECT_EQ(room->as_roomState_or_null()->players[0].gamesPlayed, 1);
   EXPECT_EQ(room->as_roomState_or_null()->players[0].gamesWon, 0);
+}
+
+
+// The seat cap (#1621).
+TEST_F(CastleGameFixture, AFifthSeatIsRefused) {
+  ExpectSeatCap<CastleMove>(4, Castle,
+                            [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+                              return ReceiveCastle(stream, wanted);
+                            });
+}
+
+// A castle game in the stats archive (#1571), recorded started as castle.
+class CastleEventFixture : public CastleGameFixture {
+ protected:
+  void SetUp() override {
+    CastleGameFixture::SetUp();
+    CaptureEvents();
+  }
+};
+
+TEST_F(CastleEventFixture, AStartedTableIsRecordedAsCastle) {
+  auto table = MultiSeatCastleTable(3);
+  ASSERT_TRUE(table.has_value());
+  std::vector<std::string> started;
+  for (const std::string& line : events_) {
+    if (line.find(R"("event":"game_started")") != std::string::npos) started.push_back(line);
+  }
+  ASSERT_EQ(started.size(), 1u);
+  EXPECT_NE(started[0].find(R"("variant":"castle")"), std::string::npos) << started[0];
+  EXPECT_NE(started[0].find(R"("players":3)"), std::string::npos) << started[0];
 }
 
 }  // namespace

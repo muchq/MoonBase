@@ -163,7 +163,7 @@ class TapeTest : public HubWireFixture {
  protected:
   void SetUp() override {
     HubWireFixture::SetUp();
-    golf_->AttachTape(TapeClient(deja_));
+    hub_->AttachTape(TapeClient(deja_));
   }
 
   // A deja::Client speaking to `transport`.
@@ -194,7 +194,7 @@ class TapeTest : public HubWireFixture {
 
   // Drains one poll's worth: PollTapeOnce, then the next lobby frame.
   std::string PollAndRead(opal::http::WebSocket& socket) {
-    EXPECT_TRUE(golf_->PollTapeOnce());
+    EXPECT_TRUE(hub_->PollTapeOnce());
     return EventPayload(NextFrame(socket), "lobby");
   }
 
@@ -206,14 +206,14 @@ class TapeTest : public HubWireFixture {
 TEST_F(TapeTest, NoGlasshouseOccupantMeansNoHttpAtAll) {
   deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected")}));
   // Nobody connected at all.
-  EXPECT_FALSE(golf_->PollTapeOnce());
+  EXPECT_FALSE(hub_->PollTapeOnce());
 
   // Connected, in a room, but standing on the plane the room starts with.
   json session;
   auto socket = DialReady(session);
   ASSERT_TRUE(socket->Send(CommandFrame("lobby", kJoinPayload)).ok());
   (void)EventPayload(NextFrame(*socket), "lobby");
-  EXPECT_FALSE(golf_->PollTapeOnce());
+  EXPECT_FALSE(hub_->PollTapeOnce());
 
   // A sphere is not glass either.
   ASSERT_TRUE(socket
@@ -221,19 +221,19 @@ TEST_F(TapeTest, NoGlasshouseOccupantMeansNoHttpAtAll) {
                                                R"({"sphere":{"radius":53}}}}})"))
                   .ok());
   (void)EventPayload(NextFrame(*socket), "lobby");
-  EXPECT_FALSE(golf_->PollTapeOnce());
+  EXPECT_FALSE(hub_->PollTapeOnce());
 
   EXPECT_TRUE(deja_->asked().empty()) << "deja was asked with nobody on any glass";
 
   // The first standing occupant of a glasshouse opens it...
   ASSERT_TRUE(socket->Send(CommandFrame("lobby", kGlasshouse)).ok());
   (void)EventPayload(NextFrame(*socket), "lobby");
-  EXPECT_TRUE(golf_->PollTapeOnce());
+  EXPECT_TRUE(hub_->PollTapeOnce());
   EXPECT_EQ(deja_->asked().size(), 1u);
 
   // ...and the last leaver closes it again.
   ASSERT_TRUE(socket->Send(CommandFrame("lobby", R"({"action":{"leave":{}}})")).ok());
-  EXPECT_FALSE(golf_->PollTapeOnce());
+  EXPECT_FALSE(hub_->PollTapeOnce());
   EXPECT_EQ(deja_->asked().size(), 1u) << "the tape kept polling after the glass emptied";
 }
 
@@ -246,7 +246,7 @@ TEST_F(TapeTest, ATapeSplatPinsItsBytes) {
   auto socket = StandOnGlass(session);
   deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected")}));
   // The first poll takes the newest seq and shows nothing (see below).
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
   deja_->Answer(Tape({Event(2, "muchq.com GET /wp-login.php 404 bot probe", "anomaly")}));
 
   EXPECT_EQ(PollAndRead(*socket),
@@ -267,7 +267,7 @@ TEST_F(TapeTest, AnEventWithNoGuessesOmitsThePredictorMembers) {
   json session;
   auto socket = StandOnGlass(session);
   deja_->Answer(Tape({NoGuess(1, /*net_guesses=*/true)}));
-  ASSERT_TRUE(golf_->PollTapeOnce());  // priming
+  ASSERT_TRUE(hub_->PollTapeOnce());  // priming
   deja_->Answer(Tape({NoGuess(2, /*net_guesses=*/true)}));
 
   EXPECT_EQ(PollAndRead(*socket),
@@ -303,10 +303,10 @@ TEST_F(TapeTest, EveryClientInTheRoomLandsTheEventOnTheSameSpot) {
   (void)EventPayload(NextFrame(*host), "lobby");
 
   deja_->Answer(Tape({Event(100, "muchq.com GET / 200 browser", "expected")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());  // priming
+  ASSERT_TRUE(hub_->PollTapeOnce());  // priming
   deja_->Answer(Tape({Event(101, "muchq.com GET /thoughts 200 browser", "novel"),
                       Event(102, "muchq.com GET /golf 200 browser", "expected")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
 
   for (const int seq : {101, 102}) {
     const json to_host = json::parse(EventPayload(NextFrame(*host), "lobby"))["update"]["tape"];
@@ -326,10 +326,10 @@ TEST_F(TapeTest, ALateJoinerIsHandedTheWallAsItStands) {
   json host_session;
   auto host = StandOnGlass(host_session);
   deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());  // priming
+  ASSERT_TRUE(hub_->PollTapeOnce());  // priming
   deja_->Answer(Tape({Event(2, "muchq.com GET /golf 200 browser", "expected"),
                       Event(3, "muchq.com GET /thoughts 200 browser", "novel")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
   const json first = json::parse(EventPayload(NextFrame(*host), "lobby"))["update"]["tape"];
   const json second = json::parse(EventPayload(NextFrame(*host), "lobby"))["update"]["tape"];
 
@@ -353,16 +353,16 @@ TEST_F(TapeTest, AnEventAlreadyOnTheWallIsNotSplattedTwice) {
   json session;
   auto socket = StandOnGlass(session);
   deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());  // priming
+  ASSERT_TRUE(hub_->PollTapeOnce());  // priming
   deja_->Answer(Tape({Event(2, "muchq.com GET /golf 200 browser", "expected")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
   EXPECT_EQ(json::parse(EventPayload(NextFrame(*socket), "lobby"))["update"]["tape"]["seq"], 2);
 
   // deja answers with the old event again, plus one new one.
   deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected"),
                       Event(2, "muchq.com GET /golf 200 browser", "expected"),
                       Event(3, "muchq.com GET /thoughts 200 browser", "novel")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
 
   // The next frame is 3, not a redraw of 1 or 2.
   EXPECT_EQ(json::parse(EventPayload(NextFrame(*socket), "lobby"))["update"]["tape"]["seq"], 3);
@@ -376,14 +376,14 @@ TEST_F(TapeTest, ARecoveryPollShowsAtMostAWallful) {
   json session;
   auto socket = StandOnGlass(session);
   deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());  // priming
+  ASSERT_TRUE(hub_->PollTapeOnce());  // priming
 
   std::vector<std::string> backlog;
   for (int seq = 2; seq <= 201; ++seq) {
     backlog.push_back(Event(seq, "muchq.com GET / 200 browser", "expected"));
   }
   deja_->Answer(Tape(backlog));
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
 
   EXPECT_EQ(metrics_->CounterTotal("lobby_tape_splats", {}),
             static_cast<double>(World::kTapeMemory));
@@ -397,7 +397,7 @@ TEST_F(TapeTest, ARecoveryPollShowsAtMostAWallful) {
   EXPECT_EQ(last["seq"], 201);
   // Everything skipped was still consumed, so the next ask starts past it.
   deja_->Answer(Tape({}));
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
   EXPECT_EQ(deja_->asked().back(), "/deja/v1/recent?after=201");
 }
 
@@ -407,10 +407,10 @@ TEST_F(TapeTest, ResumingAfterAnEmptyRoomStartsFromTheNewestSeq) {
   json session;
   auto socket = StandOnGlass(session);
   deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());  // the very first poll primes too
+  ASSERT_TRUE(hub_->PollTapeOnce());  // the very first poll primes too
 
   ASSERT_TRUE(socket->Send(CommandFrame("lobby", R"({"action":{"leave":{}}})")).ok());
-  EXPECT_FALSE(golf_->PollTapeOnce());
+  EXPECT_FALSE(hub_->PollTapeOnce());
 
   // Ten minutes of traffic nobody was there for.
   std::vector<std::string> backlog;
@@ -424,13 +424,13 @@ TEST_F(TapeTest, ResumingAfterAnEmptyRoomStartsFromTheNewestSeq) {
   // priming flag: spending it here would leave the next one treating the
   // whole backlog as news.
   deja_->Die();
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
   deja_->Answer(Tape(backlog));
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
 
   // Nothing from the backlog reaches the glass...
   deja_->Answer(Tape({Event(61, "muchq.com GET /golf 200 browser", "novel")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
   EXPECT_EQ(json::parse(EventPayload(NextFrame(*socket), "lobby"))["update"]["tape"]["seq"], 61)
       << "the backlog was replayed onto the wall";
   // ...and the resume asked from the newest seq the backlog carried.
@@ -444,20 +444,20 @@ TEST_F(TapeTest, ADejaThatIsDownOrLyingNeverReachesTheRoom) {
   json session;
   auto socket = StandOnGlass(session);
   deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());  // priming
+  ASSERT_TRUE(hub_->PollTapeOnce());  // priming
 
   deja_->Die();
-  EXPECT_TRUE(golf_->PollTapeOnce());
+  EXPECT_TRUE(hub_->PollTapeOnce());
   deja_->Answer(R"({"events":"not a list"})");
-  EXPECT_TRUE(golf_->PollTapeOnce());
+  EXPECT_TRUE(hub_->PollTapeOnce());
   deja_->Answer("<html>502 Bad Gateway</html>");
-  EXPECT_TRUE(golf_->PollTapeOnce());
+  EXPECT_TRUE(hub_->PollTapeOnce());
 
   EXPECT_EQ(metrics_->CounterTotal("lobby_tape_polls", {{"result", "failed"}}), 3);
   EXPECT_EQ(metrics_->CounterTotal("lobby_tape_splats", {}), 0);
 
   deja_->Answer(Tape({Event(2, "muchq.com GET /golf 200 browser", "expected")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
   EXPECT_EQ(json::parse(EventPayload(NextFrame(*socket), "lobby"))["update"]["tape"]["seq"], 2);
 }
 
@@ -479,10 +479,10 @@ TEST_F(TapeTest, ASlowDejaDoesNotHoldTheHubLock) {
   (void)EventPayload(NextFrame(*host), "lobby");
 
   deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());  // priming, ungated
+  ASSERT_TRUE(hub_->PollTapeOnce());  // priming, ungated
   deja_->Answer(Tape({Event(2, "muchq.com GET /golf 200 browser", "expected")}));
   deja_->Gate();
-  std::thread poll([this] { golf_->PollTapeOnce(); });
+  std::thread poll([this] { hub_->PollTapeOnce(); });
   ASSERT_TRUE(WaitFor([this] { return deja_->parked(); })) << "the poll never reached deja";
 
   ASSERT_TRUE(
@@ -506,13 +506,13 @@ TEST_F(TapeTest, TheTapeCountsWhatItAsksForAndWhatItShows) {
   json session;
   auto socket = StandOnGlass(session);
   deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
   EXPECT_EQ(metrics_->CounterTotal("lobby_tape_polls", {{"result", "ok"}}), 1);
   EXPECT_EQ(metrics_->CounterTotal("lobby_tape_splats", {}), 0) << "a priming poll shows nothing";
 
   deja_->Answer(Tape({Event(2, "muchq.com GET /golf 200 browser", "expected"),
                       Event(3, "muchq.com GET /thoughts 200 browser", "novel")}));
-  ASSERT_TRUE(golf_->PollTapeOnce());
+  ASSERT_TRUE(hub_->PollTapeOnce());
   (void)EventPayload(NextFrame(*socket), "lobby");
   (void)EventPayload(NextFrame(*socket), "lobby");
   // Two events on one wall, not two per viewer and not one per poll.
@@ -523,7 +523,7 @@ TEST_F(TapeTest, TheTapeCountsWhatItAsksForAndWhatItShows) {
   EXPECT_EQ(metrics_->CounterTotal("lobby_tape_poller_active", {}), 1);
 
   ASSERT_TRUE(socket->Send(CommandFrame("lobby", R"({"action":{"leave":{}}})")).ok());
-  EXPECT_FALSE(golf_->PollTapeOnce());
+  EXPECT_FALSE(hub_->PollTapeOnce());
   EXPECT_EQ(metrics_->CounterTotal("lobby_tape_poller_active", {}), 0);
   EXPECT_EQ(metrics_->CounterTotal("lobby_tape_polls", {{"result", "ok"}}), 2)
       << "an unoccupied cycle is not a poll";
@@ -539,8 +539,8 @@ TEST_F(TapeTest, StartTapePollingStartsExactlyOnePoller) {
   deja_->Answer(Tape({Event(1, "muchq.com GET / 200 browser", "expected")}));
   deja_->Gate();
 
-  golf_->StartTapePolling(TapeClient(deja_));
-  golf_->StartTapePolling(TapeClient(deja_));
+  hub_->StartTapePolling(TapeClient(deja_));
+  hub_->StartTapePolling(TapeClient(deja_));
 
   ASSERT_TRUE(WaitFor([this] { return deja_->parked(); }))
       << "the poll thread never asked deja anything";

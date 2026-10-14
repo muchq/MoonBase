@@ -169,7 +169,7 @@ class PongFixture : public GamesHubStreamFixture {
       Seat& seat, const std::function<bool(const moonbase::games::PongView&)>& done,
       int ticks = 4000) {
     for (int i = 0; i < ticks; ++i) {
-      golf_->TickPongOnce();
+      hub_->TickPongOnce();
       while (true) {
         auto received = seat.stream.Receive(std::chrono::milliseconds(0));
         if (!received.ok() || !received->has_value()) break;
@@ -270,9 +270,9 @@ TEST_F(PongFixture, FramesReachTheSeatsAndAWatcher) {
   ASSERT_TRUE(watching.has_value());
   EXPECT_EQ(watching->as_gameState_or_null()->view.phase, "playing");
 
-  EXPECT_EQ(golf_->TickPongOnce(), 1);
+  EXPECT_EQ(hub_->TickPongOnce(), 1);
   EXPECT_FALSE(LatestFrame(started->table.alice).has_value()) << "every other tick";
-  EXPECT_EQ(golf_->TickPongOnce(), 1);
+  EXPECT_EQ(hub_->TickPongOnce(), 1);
   for (Seat* seat : {&started->table.alice, &started->table.bob, &carol}) {
     const auto frame = LatestFrame(*seat);
     ASSERT_TRUE(frame.has_value()) << seat->player_id;
@@ -300,8 +300,8 @@ TEST_F(PongFixture, AResumeWhileTheOldWireIsStillOpenReclaimsTheSeat) {
   ASSERT_TRUE(joined.has_value());
   EXPECT_EQ(joined->as_gameJoined_or_null()->view.gameId, table.game_id);
 
-  golf_->TickPongOnce();
-  golf_->TickPongOnce();
+  hub_->TickPongOnce();
+  hub_->TickPongOnce();
   const auto frame = LatestFrame(*back);
   ASSERT_TRUE(frame.has_value()) << "the rally does not reach the resumed seat";
   EXPECT_EQ(frame->gameId, table.game_id);
@@ -310,18 +310,18 @@ TEST_F(PongFixture, AResumeWhileTheOldWireIsStillOpenReclaimsTheSeat) {
 // Ticks count on from the clock, so a rally taken up mid-game, here or
 // on another instance, never draws a frame a client would call stale.
 TEST_F(PongFixture, FrameTicksCountOnFromTheClockAcrossATakeUp) {
-  golf_->SetClock([] { return absl::FromUnixMillis(1'800'000'000'000); });
+  hub_->SetClock([] { return absl::FromUnixMillis(1'800'000'000'000); });
   auto started = StartedTable("smallcat");
   ASSERT_TRUE(started.has_value());
-  golf_->TickPongOnce();
-  golf_->TickPongOnce();
+  hub_->TickPongOnce();
+  hub_->TickPongOnce();
   const auto before = LatestFrame(started->table.alice);
   ASSERT_TRUE(before.has_value());
   EXPECT_EQ(before->tick, 1'800'000'000'000 / 1000 * pong::kTicksPerSecond + 2);
-  golf_->DropPongRalliesForTest();
+  hub_->DropPongRalliesForTest();
   SendHandled(started->table.alice, Paddle(0));
-  golf_->TickPongOnce();
-  golf_->TickPongOnce();
+  hub_->TickPongOnce();
+  hub_->TickPongOnce();
   const auto after = LatestFrame(started->table.alice);
   ASSERT_TRUE(after.has_value());
   EXPECT_GE(after->tick, before->tick);
@@ -331,7 +331,7 @@ TEST_F(PongFixture, ASeatsPaddleChasesWhereItPoints) {
   auto started = StartedTable("smallcat");
   ASSERT_TRUE(started.has_value());
   SendHandled(started->table.alice, Paddle(10'000));
-  for (int i = 0; i < 100; ++i) golf_->TickPongOnce();
+  for (int i = 0; i < 100; ++i) hub_->TickPongOnce();
   const auto frame = LatestFrame(started->table.alice);
   ASSERT_TRUE(frame.has_value());
   const pong::Court court = pong::CourtOf(pong::Variant::kSmallcat);
@@ -360,7 +360,7 @@ TEST_F(PongFixture, AMissCostsALife) {
   const std::string bob = started->table.bob.player_id;
   // Ticked one at a time until the point is stored: it is the table's.
   for (int tick = 0; tick < 4000 && StoredTable(started->table).points() == 0; ++tick) {
-    golf_->TickPongOnce();
+    hub_->TickPongOnce();
   }
   EXPECT_EQ(StoredTable(started->table).lives()[1], pong::kLives - 1);
   const auto view = AwaitPongView(
@@ -371,7 +371,7 @@ TEST_F(PongFixture, AMissCostsALife) {
   EXPECT_EQ(LivesOf(*view, started->table.alice.player_id), pong::kLives);
   EXPECT_EQ(view->phase, "playing");
   // The next serve heads for the end that missed, bob's paddle where it was.
-  for (int i = 0; i < pong::kServeWaitTicks + 4; ++i) golf_->TickPongOnce();
+  for (int i = 0; i < pong::kServeWaitTicks + 4; ++i) hub_->TickPongOnce();
   const auto served = LatestFrame(started->table.alice);
   ASSERT_TRUE(served.has_value());
   EXPECT_GT(served->velocity.z, 0) << "toward bob";
@@ -409,7 +409,7 @@ TEST_F(PongFixture, TheLastLifeEndsTheGameAndCreditsTheRoom) {
   for (const auto& player : room->players) {
     EXPECT_EQ(player.gamesPlayed, 1) << player.playerId;
   }
-  EXPECT_EQ(golf_->TickPongOnce(), 0) << "no rally between games";
+  EXPECT_EQ(hub_->TickPongOnce(), 0) << "no rally between games";
 }
 
 TEST_F(PongFixture, EitherSeatStartsTheNextGame) {
@@ -428,7 +428,7 @@ TEST_F(PongFixture, EitherSeatStartsTheNextGame) {
   EXPECT_EQ(next->variant, "3d");
   EXPECT_EQ(LivesOf(*next, started->table.bob.player_id), pong::kLives);
   EXPECT_EQ(next->scoreSheet.size(), 1u);
-  EXPECT_EQ(golf_->TickPongOnce(), 1);
+  EXPECT_EQ(hub_->TickPongOnce(), 1);
 }
 
 TEST_F(PongFixture, LeavingAGameInPlayAbandonsItToTheOtherSeat) {
@@ -445,7 +445,7 @@ TEST_F(PongFixture, LeavingAGameInPlayAbandonsItToTheOtherSeat) {
   auto ended = ReceivePong(started->table.alice.stream, "gameEnded");
   ASSERT_TRUE(ended.has_value());
   EXPECT_EQ(ended->as_gameEnded_or_null()->result.ending, "abandoned");
-  EXPECT_EQ(golf_->TickPongOnce(), 0);
+  EXPECT_EQ(hub_->TickPongOnce(), 0);
   // The abandoned game counts: a win for alice, a game for both.
   const std::string alice = started->table.alice.player_id;
   const auto room = AwaitRoomState(
@@ -468,10 +468,10 @@ TEST_F(PongFixture, LeavingAGameInPlayAbandonsItToTheOtherSeat) {
 TEST_F(PongFixture, APaddleMidRallyDoesNotServeAgain) {
   auto started = StartedTable("smallcat");
   ASSERT_TRUE(started.has_value());
-  for (int i = 0; i < pong::kServeWaitTicks + 10; ++i) golf_->TickPongOnce();
+  for (int i = 0; i < pong::kServeWaitTicks + 10; ++i) hub_->TickPongOnce();
   SendHandled(started->table.alice, Paddle(0));
-  golf_->TickPongOnce();
-  golf_->TickPongOnce();
+  hub_->TickPongOnce();
+  hub_->TickPongOnce();
   const auto frame = LatestFrame(started->table.alice);
   ASSERT_TRUE(frame.has_value());
   EXPECT_EQ(frame->serveIn, 0);
@@ -488,7 +488,7 @@ TEST_F(PongFixture, APaddleAtATableNotInPlayIsDropped) {
   ASSERT_TRUE(alice.stream.Send(Pong(PongMove::FromCreategame({}))).ok());
   ASSERT_TRUE(ReceivePong(alice.stream, "gameJoined").has_value());
   SendUnrefused(alice, Paddle(5));
-  EXPECT_EQ(golf_->PongRalliesHosted(), 0u);
+  EXPECT_EQ(hub_->PongRalliesHosted(), 0u);
 }
 
 TEST_F(PongFixture, APaddleBetweenGamesIsDropped) {
@@ -499,7 +499,7 @@ TEST_F(PongFixture, APaddleBetweenGamesIsDropped) {
                 return view.phase == "ended";
               }).has_value());
   SendUnrefused(started->table.alice, Paddle(5));
-  EXPECT_EQ(golf_->PongRalliesHosted(), 0u);
+  EXPECT_EQ(hub_->PongRalliesHosted(), 0u);
 }
 
 // Each game's end is told once: not again when the next starts, nor when
@@ -515,8 +515,8 @@ TEST_F(PongFixture, AGamesEndIsToldOnce) {
   EXPECT_THAT(PongHeardUntil(alice, [](const auto& view) { return view.phase == "playing"; }),
               ::testing::Not(::testing::Contains("gameEnded")));
   // Nor right after the new game's view: its rally's first frame is next.
-  golf_->TickPongOnce();
-  golf_->TickPongOnce();
+  hub_->TickPongOnce();
+  hub_->TickPongOnce();
   while (true) {
     auto received = alice.stream.Receive(kReceiveBudget);
     ASSERT_TRUE(received.ok() && received->has_value());
@@ -557,10 +557,10 @@ TEST_F(PongFixture, ARallyWhoseTableIsGoneStops) {
   SendHandled(started->table.bob, Paddle(0));
   store_->Enqueue({HubStore::DeleteGame{started->table.room_id, started->table.game_id}});
   store_->Flush();
-  for (int tick = 0; tick < 4000 && golf_->PongRalliesHosted() > 0; ++tick) {
-    golf_->TickPongOnce();
+  for (int tick = 0; tick < 4000 && hub_->PongRalliesHosted() > 0; ++tick) {
+    hub_->TickPongOnce();
   }
-  EXPECT_EQ(golf_->PongRalliesHosted(), 0u);
+  EXPECT_EQ(hub_->PongRalliesHosted(), 0u);
   EXPECT_TRUE(RoomStateWhere(started->table.alice, [](const auto& state) {
                 return state.games.empty();
               }).has_value());
@@ -576,8 +576,8 @@ TEST_F(PongFixture, AWatcherGetsUpWithLeaveGame) {
   auto left = ReceivePong(carol.stream, "gameLeft");
   ASSERT_TRUE(left.has_value());
   EXPECT_EQ(left->as_gameLeft_or_null()->gameId, started->table.game_id);
-  golf_->TickPongOnce();
-  golf_->TickPongOnce();
+  hub_->TickPongOnce();
+  hub_->TickPongOnce();
   EXPECT_FALSE(LatestFrame(carol).has_value()) << "no frames once up";
 }
 
@@ -626,7 +626,7 @@ TEST_F(PongFixture, TheTablesOnePlayerSeatsABotWhoPlaysItsPaddle) {
                   .has_value());
   // The first serve heads for the bot's end, off its line: it chases.
   const pong::Court court = pong::CourtOf(pong::Variant::kSmallcat);
-  for (int i = 0; i < pong::kServeWaitTicks + 60; ++i) golf_->TickPongOnce();
+  for (int i = 0; i < pong::kServeWaitTicks + 60; ++i) hub_->TickPongOnce();
   const auto frame = LatestFrame(alice);
   ASSERT_TRUE(frame.has_value());
   EXPECT_NE(frame->paddles[1].y, court.height / 2);
@@ -665,14 +665,14 @@ TEST_F(PongFixture, TheBotLeavesWithItsPlayer) {
 TEST_F(PongFixture, AnotherInstancesCommitTakesTheRally) {
   auto started = StartedTable("smallcat");
   ASSERT_TRUE(started.has_value());
-  EXPECT_EQ(golf_->PongRalliesHosted(), 1u);
+  EXPECT_EQ(hub_->PongRalliesHosted(), 1u);
   auto stored = store_->LoadGame(started->table.room_id, started->table.game_id);
   ASSERT_TRUE(stored.ok() && stored->has_value());
   HubStore::GameRow row = **stored;
   row.state.emplace(*std::get<pong::Table>(*row.state).point(0));
   ++row.version;
   ASSERT_TRUE(store_->CommitGameSave(row, "hub-elsewhere").ok());
-  golf_->OnNotify("room_" + started->table.room_id, "hub-elsewhere");
+  hub_->OnNotify("room_" + started->table.room_id, "hub-elsewhere");
   const auto moved = AwaitPongView(
       started->table.alice.stream,
       [&](const auto& view) {
@@ -680,12 +680,12 @@ TEST_F(PongFixture, AnotherInstancesCommitTakesTheRally) {
       },
       "the other instance's point");
   ASSERT_TRUE(moved.has_value());
-  EXPECT_EQ(golf_->PongRalliesHosted(), 0u);
-  EXPECT_EQ(golf_->TickPongOnce(), 0);
+  EXPECT_EQ(hub_->PongRalliesHosted(), 0u);
+  EXPECT_EQ(hub_->TickPongOnce(), 0);
   // A seat here steers nothing now: running a second rally beside the
   // other instance's would score the paddle that cannot move here.
   SendHandled(started->table.alice, Paddle(0));
-  EXPECT_EQ(golf_->PongRalliesHosted(), 0u);
+  EXPECT_EQ(hub_->PongRalliesHosted(), 0u);
 }
 
 // A point whose commit finds another instance got there first hands the
@@ -705,7 +705,7 @@ TEST_F(PongFixture, APointThatLosesItsCommitHandsTheRallyOn) {
       started->table.alice, [&](const auto& view) { return LivesOf(view, alice) < pong::kLives; });
   ASSERT_TRUE(view.has_value());
   EXPECT_EQ(LivesOf(*view, started->table.bob.player_id), pong::kLives) << "bob's miss lost";
-  EXPECT_EQ(golf_->PongRalliesHosted(), 0u);
+  EXPECT_EQ(hub_->PongRalliesHosted(), 0u);
 }
 
 // After a restart nothing ticks the table until a seat moves its paddle,
@@ -713,11 +713,11 @@ TEST_F(PongFixture, APointThatLosesItsCommitHandsTheRallyOn) {
 TEST_F(PongFixture, ASeatsPaddleTakesUpATableNobodyIsTicking) {
   auto started = StartedTable("smallcat");
   ASSERT_TRUE(started.has_value());
-  golf_->DropPongRalliesForTest();
-  EXPECT_EQ(golf_->TickPongOnce(), 0);
+  hub_->DropPongRalliesForTest();
+  EXPECT_EQ(hub_->TickPongOnce(), 0);
   SendHandled(started->table.alice, Paddle(0));
-  EXPECT_EQ(golf_->PongRalliesHosted(), 1u);
-  EXPECT_EQ(golf_->TickPongOnce(), 1);
+  EXPECT_EQ(hub_->PongRalliesHosted(), 1u);
+  EXPECT_EQ(hub_->TickPongOnce(), 1);
 }
 
 // A store whose game commits can be taken down: a point the store could
@@ -781,12 +781,12 @@ TEST_F(PongOutageFixture, APointTheStoreCannotTakeIsPlayedAgain) {
   SendHandled(started->table.bob, Paddle(0));
   outage_->down = true;
   // Long enough for bob to miss twice over.
-  for (int i = 0; i < 600; ++i) golf_->TickPongOnce();
-  EXPECT_EQ(golf_->PongRalliesHosted(), 1u) << "the rally plays on";
+  for (int i = 0; i < 600; ++i) hub_->TickPongOnce();
+  EXPECT_EQ(hub_->PongRalliesHosted(), 1u) << "the rally plays on";
   EXPECT_EQ(StoredTable(started->table).lives()[1], pong::kLives);
   outage_->down = false;
   for (int tick = 0; tick < 4000 && StoredTable(started->table).points() == 0; ++tick) {
-    golf_->TickPongOnce();
+    hub_->TickPongOnce();
   }
   EXPECT_EQ(StoredTable(started->table).lives()[1], pong::kLives - 1) << "one point, once";
 }
@@ -821,6 +821,103 @@ TEST_F(PaddleBudgetFixture, PaddlesSpendTheirOwnBudget) {
       break;
     }
   }
+}
+
+
+// The seat cap (#1621).
+TEST_F(PongFixture, AThirdSeatIsRefused) {
+  ExpectSeatCap<PongMove>(2, Pong,
+                      [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+                        return ReceivePong(stream, wanted);
+                      });
+}
+
+
+// Pong's branches of the hub (#1621): the status the room lists a table under, the commands pong
+// counts, and the record of a table's next game.
+TEST_F(PongFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
+  auto started = StartedTable("smallcat");
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ExpectListedStatus(table.alice, table.game_id, "playing");
+  SendHandled(table.bob, Paddle(0));
+  ASSERT_TRUE(
+      TickUntil(table.alice, [](const auto& view) { return view.phase == "ended"; }).has_value());
+  ExpectListedStatus(table.alice, table.game_id, "ended");
+  ASSERT_TRUE(table.bob.stream.Send(PongStart("3d")).ok());
+  ASSERT_TRUE(AwaitPongView(
+                  table.bob.stream,
+                  [](const auto& view) {
+                    return view.phase == "playing" && view.scoreSheet.size() == 1;
+                  },
+                  "the next game")
+                  .has_value());
+  ExpectListedStatus(table.bob, table.game_id, "playing");
+}
+
+TEST_F(PongFixture, CommandsAreCountedOnThePongSeries) {
+  auto started = StartedTable("smallcat");
+  ASSERT_TRUE(started.has_value());
+  EXPECT_EQ(metrics_->CounterTotal("pong_commands", {{"command", "createGame"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("pong_commands", {{"command", "joinGame"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("pong_commands", {{"command", "startGame"}}), 1);
+}
+
+// A pong game in the stats archive (#1571), the first and the next.
+class PongEventFixture : public PongFixture {
+ protected:
+  void SetUp() override {
+    PongFixture::SetUp();
+    CaptureEvents();
+  }
+};
+
+TEST_F(PongEventFixture, EachGameIsRecordedStartedAndFinishedAsPong) {
+  auto started = StartedTable("smallcat");
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  SendHandled(table.bob, Paddle(0));
+  ASSERT_TRUE(
+      TickUntil(table.alice, [](const auto& view) { return view.phase == "ended"; }).has_value());
+  ASSERT_TRUE(table.bob.stream.Send(PongStart("3d")).ok());
+  ASSERT_TRUE(AwaitPongView(
+                  table.bob.stream,
+                  [](const auto& view) {
+                    return view.phase == "playing" && view.scoreSheet.size() == 1;
+                  },
+                  "the next game")
+                  .has_value());
+  const auto games = GameLines();
+  ASSERT_EQ(games.size(), 3u);
+  EXPECT_THAT(games[0], ::testing::HasSubstr(R"("event":"game_started")"));
+  EXPECT_THAT(games[1], ::testing::HasSubstr(R"("event":"game_finished")"));
+  EXPECT_THAT(games[1], ::testing::HasSubstr(R"("outcome":"completed")"));
+  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("event":"game_started")"));
+  for (const auto& line : games) {
+    EXPECT_THAT(line, ::testing::HasSubstr(R"("variant":"pong")"));
+    EXPECT_THAT(line, ::testing::HasSubstr(R"("players":2)"));
+  }
+}
+
+// An instance that takes the table on after its first game ended counts
+// that game as told: the next game's start does not tell it again.
+TEST_F(PongFixture, ATakenOverTableDoesNotRetellAFinishedGame) {
+  auto started = StartedTable("smallcat");
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  SendHandled(table.bob, Paddle(0));
+  ASSERT_TRUE(
+      TickUntil(table.alice, [](const auto& view) { return view.phase == "ended"; }).has_value());
+
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto bob = OpenSeatVia(*instance->client, table.bob.resume_token);
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceivePong(bob->stream, "gameJoined").has_value());
+  ASSERT_TRUE(bob->stream.Send(PongStart("3d")).ok());
+  const auto cases = CasesUntilQuiet(bob->stream);
+  EXPECT_THAT(cases, ::testing::Contains("pong.gameState"));
+  EXPECT_THAT(cases, ::testing::Not(::testing::Contains("pong.gameEnded")));
 }
 
 }  // namespace

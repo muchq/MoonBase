@@ -25,8 +25,10 @@
 #include <thread>
 #include <type_traits>
 #include <utility>
+#include <string_view>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "domains/games/apis/games_hub/games_hub_handler.h"
 #include "domains/games/apis/games_hub/hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
@@ -525,6 +527,73 @@ inline std::shared_ptr<CapturingMetricsRecorder> MakeCapturingMetricsRecorder() 
   return std::make_shared<CapturingMetricsRecorder>("games_hub_test");
 }
 
+// A whole second hub sharing the first one's durable pieces — the
+// hub_store_race_test pattern. Restoring from the shared store is what a
+// process restart looks like from the store's side, so resuming here
+// exercises the membership-decides-the-resync branch of Play() without
+// simulating a wire failure.
+//
+// One trap: the shared MemoryChatStore's member guard was wired to the
+// FIRST handler in the fixture's SetUp, so appends through this instance
+// authorize against instance one's membership. Reads (history) are
+// unguarded and safe; treat this instance as read-only for chat unless
+// the guard is rewired.
+struct SecondInstance {
+  std::shared_ptr<GamesHub> hub;
+  std::shared_ptr<CapturingMetricsRecorder> metrics;
+  std::unique_ptr<moonbase::games::GamesHubServer> server;
+  std::unique_ptr<moonbase::games::GamesHubClient> client;
+  std::vector<std::shared_ptr<opal::http::WebSocket>> sessions;
+
+  // The sweep the fixture's TearDown runs for its own recorder, run here for
+  // this instance's — paths that only ever fire on a second instance (the
+  // store-level chat rejections, some chat_failures stages) otherwise sit
+  // outside the emit→declare check entirely (#1327).
+  ~SecondInstance() {
+    for (auto& session : sessions) session->Close();
+    ExpectOnlyDeclaredCounterSeries(*metrics);
+  }
+};
+
+inline std::unique_ptr<SecondInstance> BuildSecondInstance(
+    std::shared_ptr<TicketVault> vault, std::shared_ptr<HubStore> store,
+    std::shared_ptr<ChatStore> chat_store,
+    std::shared_ptr<CapturingMetricsRecorder> metrics = MakeCapturingMetricsRecorder(),
+    std::chrono::seconds grace = std::chrono::seconds(60)) {
+  auto instance = std::make_unique<SecondInstance>();
+  instance->metrics = std::move(metrics);
+  auto ids = std::make_shared<RemoteIdGenerator>();
+  instance->hub = std::make_shared<GamesHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
+                                             grace, instance->metrics, std::move(store),
+                                             std::move(chat_store), UnlimitedRateLimits());
+  EXPECT_TRUE(instance->hub->RestoreFromStore().ok());
+  instance->server = std::make_unique<moonbase::games::GamesHubServer>(
+      std::make_shared<GamesHubHandler>(vault, ids, instance->hub));
+
+  auto loopback = std::make_shared<opal::http::Loopback>();
+  EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
+  opal::ClientConfig config;
+  config.retry.max_attempts = 1;
+  config.http_client = loopback;
+  SecondInstance* raw = instance.get();
+  config.websocket_dialer = [raw](const opal::http::WebSocketDialRequest& request)
+      -> opal::Outcome<std::shared_ptr<opal::http::WebSocket>> {
+    auto [near, far] = opal::http::InMemoryWebSocketPair::Create();
+    opal::http::HttpRequest upgrade;
+    upgrade.method = "GET";
+    upgrade.target = request.target;
+    upgrade.headers = request.headers;
+    raw->sessions.push_back(far);
+    raw->server->StreamRouter()->ServeSession()(upgrade, far);
+    return near;
+  };
+  auto client = moonbase::games::GamesHubClient::Create(std::move(config));
+  EXPECT_TRUE(client.ok());
+  if (!client.ok()) return nullptr;
+  instance->client = std::make_unique<moonbase::games::GamesHubClient>(std::move(*client));
+  return instance;
+}
+
 class GamesHubStreamFixture : public testing::Test {
  protected:
   // The default fixture uses the production memory implementations; the
@@ -554,7 +623,7 @@ class GamesHubStreamFixture : public testing::Test {
   /// receive budget can wait out.
   virtual std::chrono::seconds GracePeriod() { return std::chrono::seconds(60); }
   /// The race suites' scheduling seam; empty unless a suite overrides.
-  virtual HubTestHooks MakeGolfHooks() { return {}; }
+  virtual HubTestHooks MakeHubHooks() { return {}; }
 
   void SetUp() override { BuildHub(); }
 
@@ -578,18 +647,18 @@ class GamesHubStreamFixture : public testing::Test {
           [guard](const std::string& room_id, const std::string& player_id,
                   const MemberAction& action) { return (*guard)(room_id, player_id, action); });
     }
-    golf_ = std::make_shared<GamesHub>(vault_, MakeDealer(), ids_,
+    hub_ = std::make_shared<GamesHub>(vault_, MakeDealer(), ids_,
                                       /*grace_period=*/GracePeriod(), metrics_, store_, chat_store_,
-                                      MakeRateLimits(), MakeGolfHooks());
+                                      MakeRateLimits(), MakeHubHooks());
     if (default_memory_chat) {
-      *guard = [golf = golf_.get()](const std::string& room_id, const std::string& player_id,
+      *guard = [hub = hub_.get()](const std::string& room_id, const std::string& player_id,
                                     const MemberAction& action) {
-        return golf->WithMember(room_id, player_id, action);
+        return hub->WithMember(room_id, player_id, action);
       };
     }
-    const absl::Status restored = golf_->RestoreFromStore();
+    const absl::Status restored = hub_->RestoreFromStore();
     ASSERT_TRUE(restored.ok()) << restored;
-    handler_ = std::make_shared<GamesHubHandler>(vault_, ids_, golf_);
+    handler_ = std::make_shared<GamesHubHandler>(vault_, ids_, hub_);
     server_ = std::make_unique<moonbase::games::GamesHubServer>(handler_);
 
     auto loopback = std::make_shared<opal::http::Loopback>();
@@ -615,6 +684,9 @@ class GamesHubStreamFixture : public testing::Test {
   }
 
   void TearDown() override {
+    // The writer goes first: the hub's teardown can end a game, and
+    // `events_` must outlive every line it writes.
+    if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
     // Idempotent; unblocks any session a failed test body left parked so
     // the registry's teardown joins cannot hang.
     for (auto& session : sessions_) session->Close();
@@ -701,6 +773,85 @@ class GamesHubStreamFixture : public testing::Test {
     }
     return room;
   }
+
+  // A game's seat cap, as a table of `seats` refuses the next join: the
+  // host opens it in the envelope `wrap` puts a move in, `seats - 1` more
+  // join, and one more is turned away.
+  template <typename MoveUnion, typename Wrap, typename Receive>
+  void ExpectSeatCap(int seats, Wrap wrap, Receive receive) {
+    auto room = SeatedRoom(seats + 1);
+    ASSERT_TRUE(room.has_value());
+    Seat& host = room->seats.front();
+    ASSERT_TRUE(host.stream.Send(wrap(MoveUnion::FromCreategame(moonbase::games::CreateGame{}))).ok());
+    auto created = receive(host.stream, "gameJoined");
+    ASSERT_TRUE(created.has_value());
+    moonbase::games::JoinGame join;
+    join.gameId = created->as_gameJoined_or_null()->view.gameId;
+    for (int i = 1; i < seats; ++i) {
+      ASSERT_TRUE(room->seats[i].stream.Send(wrap(MoveUnion::FromJoingame(join))).ok());
+      ASSERT_TRUE(receive(room->seats[i].stream, "gameJoined").has_value()) << "seat " << i;
+    }
+    ASSERT_TRUE(room->seats[seats].stream.Send(wrap(MoveUnion::FromJoingame(join))).ok());
+    auto refused = ReceiveCase(room->seats[seats].stream, "commandRejected");
+    ASSERT_TRUE(refused.has_value());
+    EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "game is full");
+  }
+
+  // The room lists the table under `want`, as `seat` asks for the room
+  // now: the last roomState before the stream goes quiet is the answer,
+  // later than any broadcast queued ahead of it.
+  void ExpectListedStatus(Seat& seat, const std::string& game_id, const std::string& want) {
+    ASSERT_TRUE(
+        seat.stream
+            .Send(moonbase::games::GameCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
+            .ok());
+    std::optional<moonbase::games::RoomState> last;
+    while (true) {
+      auto received = seat.stream.Receive(std::chrono::milliseconds(200));
+      if (!received.ok() || !received->has_value()) break;
+      if (const auto* room = (*received)->as_roomState_or_null()) last = *room;
+    }
+    ASSERT_TRUE(last.has_value()) << "no roomState after GetRoomState";
+    std::string seen = "<unlisted>";
+    for (const auto& game : last->games) {
+      if (game.gameId == game_id) seen = game.status;
+    }
+    EXPECT_EQ(seen, want) << "table " << game_id;
+  }
+
+  // What `stream` receives until it goes quiet, by case: a game's
+  // envelope as `<game>.<update>`.
+  static std::vector<std::string> CasesUntilQuiet(moonbase::games::PlayClientStream& stream) {
+    std::vector<std::string> cases;
+    while (true) {
+      auto received = stream.Receive(std::chrono::milliseconds(300));
+      if (!received.ok() || !received->has_value()) return cases;
+      const auto& event = **received;
+      std::string name = event.case_name();
+      if (const auto* chess = event.as_chess_or_null()) {
+        name += "." + std::string(chess->update.case_name());
+      } else if (const auto* pong = event.as_pong_or_null()) {
+        name += "." + std::string(pong->update.case_name());
+      } else if (const auto* spades = event.as_spades_or_null()) {
+        name += "." + std::string(spades->update.case_name());
+      }
+      cases.push_back(std::move(name));
+    }
+  }
+
+  // The stats archive (#1571) as the hub writes it, from CaptureEvents on.
+  void CaptureEvents() {
+    hub_->SetEventWriter([this](absl::Time, std::string_view line) { events_.emplace_back(line); });
+  }
+  // The archive's game lines, in order.
+  std::vector<std::string> GameLines() const {
+    std::vector<std::string> games;
+    for (const std::string& line : events_) {
+      if (line.find(R"("event":"game_)") != std::string::npos) games.push_back(line);
+    }
+    return games;
+  }
+  std::vector<std::string> events_;
 
   // Room with two seats in a started game: with the NoShuffleDealer the
   // first seat holds the aces and the second the kings, Q♠ seeding the
@@ -853,7 +1004,7 @@ class GamesHubStreamFixture : public testing::Test {
   // meter underneath means values still go nowhere.
   std::shared_ptr<CapturingMetricsRecorder> metrics_ = MakeCapturingMetricsRecorder();
   std::shared_ptr<IdGenerator> ids_ = std::make_shared<SequentialIdGenerator>();
-  std::shared_ptr<GamesHub> golf_;
+  std::shared_ptr<GamesHub> hub_;
   std::shared_ptr<GamesHubHandler> handler_;
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::unique_ptr<moonbase::games::GamesHubClient> client_;

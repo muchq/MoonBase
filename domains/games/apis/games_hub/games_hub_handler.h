@@ -20,7 +20,7 @@ namespace games_hub {
 class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
  public:
   GamesHubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<IdGenerator> ids,
-                  std::shared_ptr<GamesHub> golf);
+                  std::shared_ptr<GamesHub> hub);
 
   // Note: operation IO generates as <Op>Input/<Op>Output regardless of
   // the named shapes bound in the model, and every namespace's shapes
@@ -46,7 +46,7 @@ class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
  private:
   const std::shared_ptr<TicketVault> vault_;
   const std::shared_ptr<IdGenerator> ids_;
-  const std::shared_ptr<GamesHub> golf_;
+  const std::shared_ptr<GamesHub> hub_;
 };
 
 }  // namespace games_hub

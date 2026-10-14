@@ -110,34 +110,6 @@ TEST(WinnersAmong, OrdinaryFinishMatchesTheEngineKnockerTiesIncluded) {
   EXPECT_EQ(WinnersAmong(state, {"andy", "mercy"}), (std::unordered_set<int>{1}));
 }
 
-// A whole second hub sharing the first one's durable pieces — the
-// hub_store_race_test pattern. Restoring from the shared store is what a
-// process restart looks like from the store's side, so resuming here
-// exercises the membership-decides-the-resync branch of Play() without
-// simulating a wire failure.
-//
-// One trap: the shared MemoryChatStore's member guard was wired to the
-// FIRST handler in the fixture's SetUp, so appends through this instance
-// authorize against instance one's membership. Reads (history) are
-// unguarded and safe; treat this instance as read-only for chat unless
-// the guard is rewired.
-struct SecondInstance {
-  std::shared_ptr<GamesHub> golf;
-  std::shared_ptr<CapturingMetricsRecorder> metrics;
-  std::unique_ptr<moonbase::games::GamesHubServer> server;
-  std::unique_ptr<moonbase::games::GamesHubClient> client;
-  std::vector<std::shared_ptr<opal::http::WebSocket>> sessions;
-
-  // The sweep the fixture's TearDown runs for its own recorder, run here for
-  // this instance's — paths that only ever fire on a second instance (the
-  // store-level chat rejections, some chat_failures stages) otherwise sit
-  // outside the emit→declare check entirely (#1327).
-  ~SecondInstance() {
-    for (auto& session : sessions) session->Close();
-    ExpectOnlyDeclaredCounterSeries(*metrics);
-  }
-};
-
 // Forwards everything except LoadRecent, which always fails — the only
 // way to reach the handler's failed-history-load branch, since
 // MemoryChatStore's own LoadRecent cannot return a non-ok status.
@@ -430,44 +402,6 @@ class HeldPublishStore final : public HubStore {
   std::vector<Op> held_;
 };
 
-std::unique_ptr<SecondInstance> BuildSecondInstance(
-    std::shared_ptr<TicketVault> vault, std::shared_ptr<HubStore> store,
-    std::shared_ptr<ChatStore> chat_store,
-    std::shared_ptr<CapturingMetricsRecorder> metrics = MakeCapturingMetricsRecorder(),
-    std::chrono::seconds grace = std::chrono::seconds(60)) {
-  auto instance = std::make_unique<SecondInstance>();
-  instance->metrics = std::move(metrics);
-  auto ids = std::make_shared<RemoteIdGenerator>();
-  instance->golf = std::make_shared<GamesHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
-                                             grace, instance->metrics, std::move(store),
-                                             std::move(chat_store), UnlimitedRateLimits());
-  EXPECT_TRUE(instance->golf->RestoreFromStore().ok());
-  instance->server = std::make_unique<moonbase::games::GamesHubServer>(
-      std::make_shared<GamesHubHandler>(vault, ids, instance->golf));
-
-  auto loopback = std::make_shared<opal::http::Loopback>();
-  EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
-  opal::ClientConfig config;
-  config.retry.max_attempts = 1;
-  config.http_client = loopback;
-  SecondInstance* raw = instance.get();
-  config.websocket_dialer = [raw](const opal::http::WebSocketDialRequest& request)
-      -> opal::Outcome<std::shared_ptr<opal::http::WebSocket>> {
-    auto [near, far] = opal::http::InMemoryWebSocketPair::Create();
-    opal::http::HttpRequest upgrade;
-    upgrade.method = "GET";
-    upgrade.target = request.target;
-    upgrade.headers = request.headers;
-    raw->sessions.push_back(far);
-    raw->server->StreamRouter()->ServeSession()(upgrade, far);
-    return near;
-  };
-  auto client = moonbase::games::GamesHubClient::Create(std::move(config));
-  EXPECT_TRUE(client.ok());
-  if (!client.ok()) return nullptr;
-  instance->client = std::make_unique<moonbase::games::GamesHubClient>(std::move(*client));
-  return instance;
-}
 
 }  // namespace
 
@@ -982,7 +916,7 @@ TEST_F(GamesHubStreamFixture, ABotMentionIsAnsweredInTheRoomAfterTheAsker) {
   config.http_client = std::make_shared<OneReplyMicrogpt>("whoever knocks last");
   auto client = microgpt::Client::Create(std::move(config));
   ASSERT_TRUE(client.ok());
-  golf_->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*client)));
+  hub_->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*client)));
 
   auto alice = OpenSeat();
   auto bob = OpenSeat();
@@ -1061,7 +995,7 @@ TEST_F(GamesHubStreamFixture, AWordchainCommandIsAnsweredByMithrilInTheRoom) {
   config.http_client = std::make_shared<OneLadderMithril>();
   auto client = mithril::Client::Create(std::move(config));
   ASSERT_TRUE(client.ok());
-  golf_->StartWordchain(std::make_shared<mithril::Client>(std::move(*client)));
+  hub_->StartWordchain(std::make_shared<mithril::Client>(std::move(*client)));
 
   auto alice = OpenSeat();
   auto bob = OpenSeat();
@@ -1102,12 +1036,12 @@ TEST_F(GamesHubStreamFixture, BothBotsAnswerTheirOwnAsksInOneRoom) {
   gpt.http_client = std::make_shared<OneReplyMicrogpt>("whoever knocks last");
   auto microgpt_client = microgpt::Client::Create(std::move(gpt));
   ASSERT_TRUE(microgpt_client.ok());
-  golf_->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*microgpt_client)));
+  hub_->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*microgpt_client)));
   opal::ClientConfig ladder = mithril::DefaultClientConfig("http://mithril:8083");
   ladder.http_client = std::make_shared<OneLadderMithril>();
   auto mithril_client = mithril::Client::Create(std::move(ladder));
   ASSERT_TRUE(mithril_client.ok());
-  golf_->StartWordchain(std::make_shared<mithril::Client>(std::move(*mithril_client)));
+  hub_->StartWordchain(std::make_shared<mithril::Client>(std::move(*mithril_client)));
 
   auto alice = OpenSeat();
   ASSERT_TRUE(alice.has_value());
@@ -1424,7 +1358,7 @@ TEST_F(GamesHubStreamFixture, AHeldRoomAdoptsItsRowsSurfaceOnReconcile) {
       BuildSecondInstance(vault_, std::make_shared<TornSnapshotStore>(store_), chat_store_);
   ASSERT_NE(instance, nullptr);
   // The wake any sibling's write sends: the held room re-reads its rows.
-  instance->golf->OnNotify(RoomChannel(room_id), "remote-instance");
+  instance->hub->OnNotify(RoomChannel(room_id), "remote-instance");
   auto carol = OpenSeatVia(*instance->client, std::nullopt);
   ASSERT_TRUE(carol.has_value());
   ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
@@ -1511,8 +1445,8 @@ TEST_F(GamesHubStreamFixture, BootCatchUpProjectsNothingWhenRowsNeverMoved) {
   // in play. Neither alice nor carol resumed here — their rows are what
   // a crashed instance leaves behind — yet nothing has moved since the
   // restore read these same rows, so both catch-ups must stay quiet.
-  instance->golf->OnChannelActive(RoomChannel(room_id));
-  instance->golf->OnChannelActive(ChatChannel(room_id));
+  instance->hub->OnChannelActive(RoomChannel(room_id));
+  instance->hub->OnChannelActive(ChatChannel(room_id));
   auto leftover = resumed->stream.Receive(std::chrono::milliseconds(50));
   EXPECT_TRUE(!leftover.ok() || !leftover->has_value())
       << "boot catch-up projected a frame though no row moved";
@@ -1765,7 +1699,7 @@ TEST_F(GamesHubStreamFixture, ParkedSeatWhoseRoomASiblingDeletedExpiresCleanly) 
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
   bool member = true;
   while (member && std::chrono::steady_clock::now() < deadline) {
-    member = instance->golf->WithMember(room_id, carol->player_id, [] {});
+    member = instance->hub->WithMember(room_id, carol->player_id, [] {});
     if (member) std::this_thread::sleep_for(std::chrono::milliseconds(25));
   }
   ASSERT_FALSE(member) << "the expiry never dropped the deleted room";
@@ -1810,7 +1744,7 @@ TEST_F(GamesHubStreamFixture, HeartbeatStampsOnlyRoomsThisInstanceHoldsSeatsIn) 
     return false;
   });
 
-  instance->golf->StampHeldRooms();
+  instance->hub->StampHeldRooms();
   const auto touches = spy->Touches();
   ASSERT_EQ(touches.size(), 1u);
   // erin holds a seat but no room, so she adds nothing.
@@ -1851,7 +1785,7 @@ TEST_F(GamesHubStreamFixture, RoomHeartbeatStampsAndSweepsOnItsInterval) {
   const std::string room_id = CreateRoomFor(*carol);
   ASSERT_FALSE(room_id.empty());
 
-  instance->golf->StartRoomHeartbeat(std::chrono::milliseconds(20));
+  instance->hub->StartRoomHeartbeat(std::chrono::milliseconds(20));
   EXPECT_TRUE(spy->AwaitTouchOf(room_id, std::chrono::seconds(5)))
       << "the heartbeat never stamped a room with a live seat";
   EXPECT_EQ(spy->AwaitSweep(std::chrono::seconds(5)),
@@ -1905,7 +1839,7 @@ TEST_F(GamesHubStreamFixture, BootGraceCedesASeatObservedConnectedMidWindow) {
   auto bob_back = OpenSeat(bob->resume_token);
   ASSERT_TRUE(bob_back.has_value());
   ASSERT_TRUE(ReceiveCase(bob_back->stream, "sessionReady").has_value());
-  instance->golf->OnChannelActive(RoomChannel(room_id));
+  instance->hub->OnChannelActive(RoomChannel(room_id));
   // He parks again, still inside the sibling's window: this
   // generation's registry owns his fresh grace now.
   bob_back->stream.Close();
@@ -2010,12 +1944,12 @@ TEST_F(GamesHubStreamFixture, RestoreFromStoreRefusesASecondCall) {
 
   auto instance = BuildSecondInstance(vault_, store_, chat_store_, MakeCapturingMetricsRecorder());
   ASSERT_NE(instance, nullptr);
-  const absl::Status again = instance->golf->RestoreFromStore();
+  const absl::Status again = instance->hub->RestoreFromStore();
   EXPECT_EQ(again.code(), absl::StatusCode::kFailedPrecondition) << again;
 
   // The fixture's own hub restored an empty store — no thread armed —
   // and must refuse a second call all the same.
-  const absl::Status empty_again = golf_->RestoreFromStore();
+  const absl::Status empty_again = hub_->RestoreFromStore();
   EXPECT_EQ(empty_again.code(), absl::StatusCode::kFailedPrecondition) << empty_again;
 }
 
@@ -2794,7 +2728,7 @@ TEST_F(GamesHubStreamFixture, DrainMetricsCountBatchesAndZeroWakes) {
   const double delivered_before = metrics_->CounterTotal("chat_rows_delivered");
   const double drains_before = metrics_->CounterTotal("chat_catch_up_drains");
 
-  golf_->OnNotify(ChatChannel(room_id), "remote-instance");
+  hub_->OnNotify(ChatChannel(room_id), "remote-instance");
   for (auto* seat : {&*alice, &*bob}) {
     ASSERT_TRUE(ReceiveCase(seat->stream, "roomChat").has_value());
     ASSERT_TRUE(ReceiveCase(seat->stream, "roomChat").has_value());
@@ -2805,7 +2739,7 @@ TEST_F(GamesHubStreamFixture, DrainMetricsCountBatchesAndZeroWakes) {
   // Redundant wake: one more drain, nothing counted as delivered — the
   // batch-of-zero the windowed average needs. OnNotify pumps synchronously,
   // so no waiting.
-  golf_->OnNotify(ChatChannel(room_id), "remote-instance");
+  hub_->OnNotify(ChatChannel(room_id), "remote-instance");
   EXPECT_EQ(metrics_->CounterTotal("chat_rows_delivered") - delivered_before, 2);
   EXPECT_EQ(metrics_->CounterTotal("chat_catch_up_drains") - drains_before, 2);
 }
@@ -2833,19 +2767,19 @@ TEST_F(GamesHubStreamFixture, WithMemberRunsOnlyForCurrentMembers) {
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
 
   bool ran = false;
-  EXPECT_TRUE(golf_->WithMember(room_id, alice->player_id, [&] { ran = true; }));
+  EXPECT_TRUE(hub_->WithMember(room_id, alice->player_id, [&] { ran = true; }));
   EXPECT_TRUE(ran);
 
   ran = false;
-  EXPECT_FALSE(golf_->WithMember(room_id, "nobody", [&] { ran = true; }));
-  EXPECT_FALSE(golf_->WithMember("no-such-room", alice->player_id, [&] { ran = true; }));
+  EXPECT_FALSE(hub_->WithMember(room_id, "nobody", [&] { ran = true; }));
+  EXPECT_FALSE(hub_->WithMember("no-such-room", alice->player_id, [&] { ran = true; }));
   EXPECT_FALSE(ran) << "the action must not run when the seat is not there";
 
   // Leaving revokes it, which is what keeps a chat append off a seat
   // that is already gone.
   ASSERT_TRUE(bob->stream.Send(GameCommands::FromLeaveroom(moonbase::games::LeaveRoom{})).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomLeft").has_value());
-  EXPECT_FALSE(golf_->WithMember(room_id, bob->player_id, [&] { ran = true; }));
+  EXPECT_FALSE(hub_->WithMember(room_id, bob->player_id, [&] { ran = true; }));
   EXPECT_FALSE(ran);
 
   // And a message from the revoked seat is refused rather than echoed.
@@ -2911,17 +2845,7 @@ class GameEventFixture : public GolfGameFixture {
  protected:
   void SetUp() override {
     GolfGameFixture::SetUp();
-    golf_->SetEventWriter(
-        [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
-  }
-
-  // The writer goes before anything else does. A hub tears down by
-  // joining its boot reaper, which reaps parked seats — a leave, which
-  // can end a game, which records one; and `events_` is a member of this
-  // class, so it is already gone by the time the base's `golf_` is.
-  void TearDown() override {
-    if (golf_ != nullptr) golf_->SetEventWriter(nullptr);
-    GolfGameFixture::TearDown();
+    CaptureEvents();
   }
 
   // The event names in order, with their fields, for an assertion that
@@ -2946,8 +2870,6 @@ class GameEventFixture : public GolfGameFixture {
     }
     return rooms;
   }
-
-  std::vector<std::string> events_;
 };
 
 TEST_F(GameEventFixture, TheFunnelIsRecordedFromTheRoomToTheGameThatEndedIt) {
@@ -2978,7 +2900,7 @@ TEST_F(GameEventFixture, TheFunnelIsRecordedFromTheRoomToTheGameThatEndedIt) {
   // not the end of it. Alice leaving after him empties the room.
   table->bob.stream.Close();
   table->alice.stream.Close();
-  golf_->registry().Drain(std::chrono::seconds(1));
+  hub_->registry().Drain(std::chrono::seconds(1));
 
   EXPECT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "game_started",
                                               "game_finished", "room_closed"));
@@ -3160,15 +3082,15 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAClosedRoomWritesNothing) {
 
   auto instance = BuildSecondInstance(vault_, store_, chat_store_);
   ASSERT_NE(instance, nullptr);
-  instance->golf->SetEventWriter(
+  instance->hub->SetEventWriter(
       [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
 
   alice->stream.Close();
-  golf_->registry().Drain(std::chrono::seconds(1));
+  hub_->registry().Drain(std::chrono::seconds(1));
   store_->Flush();
   ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_closed"));
 
-  instance->golf->OnChannelActive(RoomChannel(room_id));
+  instance->hub->OnChannelActive(RoomChannel(room_id));
 
   EXPECT_THAT(sibling_events, ::testing::IsEmpty()) << "the room would be counted closed twice";
 }
@@ -3186,7 +3108,7 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNoth
   std::vector<std::string> sibling_events;
   auto instance = BuildSecondInstance(vault_, store_, chat_store_);
   ASSERT_NE(instance, nullptr);
-  instance->golf->SetEventWriter(
+  instance->hub->SetEventWriter(
       [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
 
   ASSERT_TRUE(
@@ -3196,7 +3118,7 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNoth
 
   // The wake the sibling would get from the finish commit's NOTIFY: it
   // reads the terminal row and runs the ceremony from it.
-  instance->golf->OnChannelActive(RoomChannel(table->room_id));
+  instance->hub->OnChannelActive(RoomChannel(table->room_id));
 
   EXPECT_THAT(Names(), ::testing::Contains("game_finished"))
       << "the finishing instance records the game";
@@ -3218,7 +3140,7 @@ TEST_F(GameEventFixture, ASiblingThatRebasedOntoAFinishRecordsNothing) {
   std::vector<std::string> sibling_events;  // outlives the hub, as above
   auto instance = BuildSecondInstance(vault_, store_, chat_store_);
   ASSERT_NE(instance, nullptr);
-  instance->golf->SetEventWriter(
+  instance->hub->SetEventWriter(
       [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
   // Alice moves to the sibling, which now holds the game as live.
   auto resumed = OpenSeatVia(*instance->client, table->alice.resume_token);
