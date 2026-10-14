@@ -93,11 +93,7 @@ func TestHubEventValuesAgreeBetweenGamesHubAndStats(t *testing.T) {
 	reader, err := os.ReadFile(statsGames)
 	require.NoError(t, err)
 
-	// The outcomes are the kOutcome* constants beside the event names;
-	// the surfaces are SurfaceKindName's three, spelled in the switch
-	// that names them.
-	fromHeader := cppConstants(t, header, "kOutcome")
-	assert.Equal(t, fromHeader, goWords(t, reader,
+	assert.Equal(t, cppConstants(t, header, "kOutcome"), goWords(t, reader,
 		regexp.MustCompile(`hubOutcomes = map\[string\]bool\{([^}]*)\}`), "hubOutcomes"),
 		"an ending the hub can write that stats would count as \"other\"")
 
@@ -105,14 +101,7 @@ func TestHubEventValuesAgreeBetweenGamesHubAndStats(t *testing.T) {
 		regexp.MustCompile(`hubVariants = map\[string\]bool\{([^}]*)\}`), "hubVariants"),
 		"a game the hub can host that stats would count as \"other\"")
 
-	// SurfaceKindName: return "sphere"; return "glasshouse"; return "plane";
-	var fromSurface []string
-	for _, match := range regexp.MustCompile(`return "([a-z_]+)";`).FindAllSubmatch(
-		surfaceKindNameBody(t, surface), -1) {
-		fromSurface = append(fromSurface, string(match[1]))
-	}
-	sort.Strings(fromSurface)
-	assert.Equal(t, fromSurface, goWords(t, reader,
+	assert.Equal(t, surfaceWords(t, surface), goWords(t, reader,
 		regexp.MustCompile(`hubSurfaces = map\[string\]bool\{([^}]*)\}`), "hubSurfaces"),
 		"a shape a room can be that stats would count as \"other\"")
 }
@@ -199,14 +188,21 @@ func TestEveryHubGameHasItsPromProxyTiles(t *testing.T) {
 	}
 }
 
-// The body of SurfaceKindName, which is where the three spellings live —
-// SurfaceJson renders them through it, so this is the declaration site.
-func surfaceKindNameBody(t *testing.T, source []byte) []byte {
+// The surface spellings, sorted, from SurfaceKindName's `return "…";`
+// lines — SurfaceJson renders them through it, so it is the declaration
+// site.
+func surfaceWords(t *testing.T, source []byte) []string {
 	t.Helper()
 	body := regexp.MustCompile(`(?s)SurfaceKindName\(const Surface& surface\) \{(.*?)\n\}`).
 		FindSubmatch(source)
 	require.NotNil(t, body, "no SurfaceKindName in %s", hubSurfaceH)
-	return body[1]
+	var words []string
+	for _, match := range regexp.MustCompile(`return "([a-z_]+)";`).FindAllSubmatch(body[1], -1) {
+		words = append(words, string(match[1]))
+	}
+	require.NotEmpty(t, words, "no surface spellings in SurfaceKindName")
+	sort.Strings(words)
+	return words
 }
 
 // The JSON keys are the other half of the vocabulary, and the quieter
@@ -305,13 +301,7 @@ func TestHubEventVocabularyAgreesWithDeja(t *testing.T) {
 	assert.Equal(t, cppConstants(t, header, "kOutcome"), rustWords("OUTCOMES"),
 		"an ending the hub can write that deja would read as \"other\"")
 
-	var surfaces []string
-	for _, match := range regexp.MustCompile(`return "([a-z_]+)";`).FindAllSubmatch(
-		surfaceKindNameBody(t, surface), -1) {
-		surfaces = append(surfaces, string(match[1]))
-	}
-	sort.Strings(surfaces)
-	assert.Equal(t, surfaces, rustWords("SURFACES"),
+	assert.Equal(t, surfaceWords(t, surface), rustWords("SURFACES"),
 		"a shape a room can be that deja would read as \"other\"")
 
 	assert.Equal(t, gameWords(t), rustWords("VARIANTS"),
