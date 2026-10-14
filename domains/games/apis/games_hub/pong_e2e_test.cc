@@ -832,5 +832,82 @@ TEST_F(PongFixture, AThirdSeatIsRefused) {
                       });
 }
 
+
+// Pong's branches of the hub (#1621), pinned before they move to pong's
+// adapter: the status the room lists a table under, the commands pong
+// counts, and the record of a table's next game.
+TEST_F(PongFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
+  auto started = StartedTable("smallcat");
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ExpectListedStatus(table.alice, table.game_id, "playing");
+  SendHandled(table.bob, Paddle(0));
+  ASSERT_TRUE(
+      TickUntil(table.alice, [](const auto& view) { return view.phase == "ended"; }).has_value());
+  ExpectListedStatus(table.alice, table.game_id, "ended");
+  ASSERT_TRUE(table.bob.stream.Send(PongStart("3d")).ok());
+  ASSERT_TRUE(AwaitPongView(
+                  table.bob.stream, [](const auto& view) { return view.phase == "playing"; },
+                  "the next game")
+                  .has_value());
+  ExpectListedStatus(table.bob, table.game_id, "playing");
+}
+
+TEST_F(PongFixture, CommandsAreCountedOnPongsSeries) {
+  auto started = StartedTable("smallcat");
+  ASSERT_TRUE(started.has_value());
+  EXPECT_EQ(metrics_->CounterTotal("pong_commands", {{"command", "createGame"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("pong_commands", {{"command", "joinGame"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("pong_commands", {{"command", "startGame"}}), 1);
+}
+
+// A pong game in the stats archive (#1571), the first and the next.
+class PongEventFixture : public PongFixture {
+ protected:
+  void SetUp() override {
+    PongFixture::SetUp();
+    hub_->SetEventWriter(
+        [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
+  }
+  // The writer goes first: the hub's teardown can end a game, and
+  // `events_` dies before the base's hub does.
+  void TearDown() override {
+    if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
+    PongFixture::TearDown();
+  }
+  std::vector<std::string> GameLines() const {
+    std::vector<std::string> games;
+    for (const std::string& line : events_) {
+      if (line.find(R"("event":"game_)") != std::string::npos) games.push_back(line);
+    }
+    return games;
+  }
+  std::vector<std::string> events_;
+};
+
+TEST_F(PongEventFixture, EachGameIsRecordedStartedAndFinishedAsPong) {
+  auto started = StartedTable("smallcat");
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  SendHandled(table.bob, Paddle(0));
+  ASSERT_TRUE(
+      TickUntil(table.alice, [](const auto& view) { return view.phase == "ended"; }).has_value());
+  ASSERT_TRUE(table.bob.stream.Send(PongStart("3d")).ok());
+  ASSERT_TRUE(AwaitPongView(
+                  table.bob.stream, [](const auto& view) { return view.phase == "playing"; },
+                  "the next game")
+                  .has_value());
+  const auto games = GameLines();
+  ASSERT_EQ(games.size(), 3u);
+  EXPECT_THAT(games[0], ::testing::HasSubstr(R"("event":"game_started")"));
+  EXPECT_THAT(games[1], ::testing::HasSubstr(R"("event":"game_finished")"));
+  EXPECT_THAT(games[1], ::testing::HasSubstr(R"("outcome":"completed")"));
+  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("event":"game_started")"));
+  for (const auto& line : games) {
+    EXPECT_THAT(line, ::testing::HasSubstr(R"("variant":"pong")"));
+    EXPECT_THAT(line, ::testing::HasSubstr(R"("players":2)"));
+  }
+}
+
 }  // namespace
 }  // namespace games_hub
