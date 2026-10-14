@@ -567,5 +567,44 @@ TEST_F(SpadesFixture, AFifthSeatIsRefused) {
                       });
 }
 
+
+// Spades's branches of the hub (#1621), pinned before they move to
+// spades's adapter: the commands spades counts, and the view a resumed
+// seat gets back.
+TEST_F(SpadesFixture, CommandsAreCountedOnSpadessSeries) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  EXPECT_EQ(metrics_->CounterTotal("spades_commands", {{"command", "createGame"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("spades_commands", {{"command", "joinGame"}}), 3);
+  EXPECT_EQ(metrics_->CounterTotal("spades_commands", {{"command", "startGame"}}), 1);
+}
+
+TEST_F(SpadesFixture, AResumedSpadesSeatGetsItsOwnViewBack) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Seat& dealer = started->table.seats[0];
+  const SpadesView& before = started->views[0];
+  dealer.stream.Close();
+  ASSERT_TRUE(ReceiveCase(started->table.seats[1].stream, "roomState").has_value());
+  auto resumed = OpenSeat(dealer.resume_token);
+  ASSERT_TRUE(resumed.has_value());
+  EXPECT_EQ(resumed->player_id, dealer.player_id);
+  auto ready = ReceiveCase(resumed->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  // The seat's own view, in spades's envelope, redacted for its viewer.
+  auto joined = ReceiveSpades(resumed->stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  const auto& view = joined->as_gameJoined_or_null()->view;
+  EXPECT_EQ(view.gameId, started->table.game_id);
+  EXPECT_EQ(view.phase, before.phase);
+  ASSERT_EQ(view.players.size(), 4u);
+  EXPECT_EQ(view.players[0].hand.size(), before.players[0].hand.size());
+  EXPECT_FALSE(view.players[0].hand.empty());
+  for (std::size_t i = 1; i < view.players.size(); ++i) {
+    EXPECT_TRUE(view.players[i].hand.empty()) << "seat " << i;
+  }
+}
+
 }  // namespace
 }  // namespace games_hub
