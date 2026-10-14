@@ -267,6 +267,14 @@ exports_files([
     "world.h",
 ])
 
+# Every file in the package, read by //deploy/consolidated:consolidated_test
+# for the hub's retired name.
+filegroup(
+    name = "package_files",
+    srcs = glob(["**"]),
+    visibility = ["//deploy/consolidated:__pkg__"],
+)
+
 # The hub's domain events (#1571): one JSON line per room, chat, and
 # table milestone, for the stats pipeline to read out of S3 months later.
 # Pure line builders, testable without a hub.

@@ -17,10 +17,12 @@
 package deploy_test
 
 import (
+	"io/fs"
 	"net/url"
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -1341,6 +1343,46 @@ func TestNoDeployConfigNamesGamesHub(t *testing.T) {
 					strings.TrimSpace(line))
 			}
 		}
+	}
+}
+
+// The same rename in the hub's own package (#1621): the hub is GamesHub in
+// hub.{h,cc} and serves every game, so no source there is spelled for
+// golf_hub, and outside golf's own golf_* files no class or suite is named
+// for golf. Golf the game keeps its envelope, so only those spellings are
+// refused.
+func TestNoGamesHubSourceNamesGolfHub(t *testing.T) {
+	const pkg = "../../domains/games/apis/games_hub"
+	suite := regexp.MustCompile(`\b(?:class|struct) Golf\w*|\bTEST(?:_F)?\(Golf\w*,`)
+	read := 0
+	err := filepath.WalkDir(pkg, func(file string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		contents, err := os.ReadFile(file)
+		if err != nil {
+			return err
+		}
+		read++
+		golfs := strings.HasPrefix(path.Base(file), "golf")
+		for i, line := range strings.Split(string(contents), "\n") {
+			lower := strings.ToLower(line)
+			if strings.Contains(lower, "golf_hub") || strings.Contains(lower, "golfhub") {
+				t.Errorf("%s:%d names golf_hub (%q); the hub is GamesHub in hub.{h,cc}",
+					file, i+1, strings.TrimSpace(line))
+			}
+			if !golfs && suite.MatchString(line) {
+				t.Errorf("%s:%d names a hub-wide class or suite for golf (%q); golf's own live "+
+					"in its golf_* files", file, i+1, strings.TrimSpace(line))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking %s: %v", pkg, err)
+	}
+	if read < 50 {
+		t.Fatalf("read %d files under %s; the package's files are this test's data", read, pkg)
 	}
 }
 
