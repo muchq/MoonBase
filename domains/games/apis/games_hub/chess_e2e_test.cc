@@ -1209,8 +1209,8 @@ TEST_F(ChessFixture, OnlyAChessTableTakesAChallenge) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "that table plays golf");
 }
 
-// A chess game in the stats archive: started as chess at its two
-// seats, finished once, by the commit that ended it.
+// Each chess game in the stats archive, the first and the next: started as
+// chess at its two seats, finished once, by the commit that ended it.
 class ChessEventFixture : public ChessFixture {
  protected:
   void SetUp() override {
@@ -1219,19 +1219,29 @@ class ChessEventFixture : public ChessFixture {
   }
 };
 
-TEST_F(ChessEventFixture, AChessGameIsRecordedStartedAndFinishedAsChess) {
+TEST_F(ChessEventFixture, EachGameIsRecordedStartedAndFinishedAsChess) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
-  ASSERT_TRUE(started->table.bob.stream.Send(Resign()).ok());
-  ASSERT_TRUE(Ended(started->table.alice).has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  ASSERT_EQ(GameLines().size(), 2u) << "the finish is recorded by the commit that ended it";
+  moonbase::games::ChessStartGame next;
+  next.setupId = "qvr-basic";
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame(next))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  table.alice.stream, [](const auto& v) { return v.phase == "playing"; },
+                  "the next game")
+                  .has_value());
   const auto games = GameLines();
-  ASSERT_EQ(games.size(), 2u);
+  ASSERT_EQ(games.size(), 3u);
   EXPECT_THAT(games[0], ::testing::HasSubstr(R"("event":"game_started")"));
-  EXPECT_THAT(games[0], ::testing::HasSubstr(R"("variant":"chess")"));
-  EXPECT_THAT(games[0], ::testing::HasSubstr(R"("players":2)"));
   EXPECT_THAT(games[1], ::testing::HasSubstr(R"("event":"game_finished")"));
-  EXPECT_THAT(games[1], ::testing::HasSubstr(R"("variant":"chess")"));
   EXPECT_THAT(games[1], ::testing::HasSubstr(R"("outcome":"completed")"));
+  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("event":"game_started")"));
+  for (const auto& line : games) EXPECT_THAT(line, ::testing::HasSubstr(R"("variant":"chess")"));
+  EXPECT_THAT(games[0], ::testing::HasSubstr(R"("players":2)"));
+  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("players":2)"));
 }
 
 // A store that cannot take a game's finish while `down` holds, counting
@@ -1927,28 +1937,6 @@ TEST_F(ChessFixture, CommandsAreCountedOnTheChessSeries) {
   EXPECT_EQ(metrics_->CounterTotal("chess_commands", {{"command", "joinGame"}}), 1);
   EXPECT_EQ(metrics_->CounterTotal("chess_commands", {{"command", "startGame"}}), 1);
   EXPECT_EQ(metrics_->CounterTotal("chess_commands", {{"command", "resign"}}), 1);
-}
-
-// A table's next game is a game of its own in the stats archive: started
-// as chess, like the first.
-TEST_F(ChessEventFixture, TheNextGameIsRecordedStartedAsChess) {
-  auto started = StartedTable();
-  ASSERT_TRUE(started.has_value());
-  Table& table = started->table;
-  ASSERT_TRUE(table.bob.stream.Send(Resign()).ok());
-  ASSERT_TRUE(Ended(table.alice).has_value());
-  moonbase::games::ChessStartGame next;
-  next.setupId = "qvr-basic";
-  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame(next))).ok());
-  ASSERT_TRUE(AwaitChessView(
-                  table.alice.stream, [](const auto& v) { return v.phase == "playing"; },
-                  "the next game")
-                  .has_value());
-  const auto games = GameLines();
-  ASSERT_EQ(games.size(), 3u);
-  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("event":"game_started")"));
-  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("variant":"chess")"));
-  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("players":2)"));
 }
 
 // An instance that takes the table on after its first game ended counts
