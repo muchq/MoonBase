@@ -21,6 +21,7 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "domains/ai/libs/deja_cpp/client.h"
+#include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/apis/games_hub/chat_store.h"
 #include "domains/games/apis/games_hub/chess_bots.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
@@ -100,10 +101,9 @@ struct HubTestHooks {
 ///
 /// Redaction discipline: every game broadcast is staged per recipient
 /// (StageGameViewsLocked, JoinedEventLocked) with views built by each
-/// game's ViewLocked/CastleViewLocked/RummyViewLocked — per-viewer state
-/// (golf's own peeks and held draw, castle's and rummy's own hand faces)
-/// has exactly one place per game
-/// to land and no identical-bytes path can leak it.
+/// game's Adapter::ViewOf — per-viewer state (golf's own peeks and held
+/// draw, castle's, rummy's and spades' own hand faces) has exactly one
+/// place per game to land and no identical-bytes path can leak it.
 ///
 /// Chat observability (#1226): chat_appends{result}, chat_rows_delivered,
 /// chat_catch_up_drains (one per drain, empty drains included, so
@@ -150,13 +150,14 @@ class GamesHub final {
   /// first event's value — which is the bug (#1323), not a fix for it.
   ///
   /// hub_commands{command} and hub_events{event} take the case names of
-  /// games.smithy's stream unions, golf_commands and golf_events those of
-  /// golf.smithy's, so their blocks are a copy of the model.
-  /// StreamSeriesMatchTheModelUnions parses the .smithy file and fails on
-  /// any drift, in either direction — that test is what makes a hand-kept
-  /// copy tolerable. The generated unions already hold this list (the
-  /// kNames array behind case_name()); a opal-cpp accessor exposing it
-  /// would let this block be derived and the parser test deleted.
+  /// games.smithy's stream unions, and each game's <game>_commands and
+  /// <game>_events those of its envelope's, listed in its adapter — so
+  /// those blocks are a copy of the model. The *SeriesMatchTheModelUnions
+  /// tests parse the .smithy files and fail on any drift, in either
+  /// direction — that is what makes a hand-kept copy tolerable. The
+  /// generated unions already hold these lists (the kNames array behind
+  /// case_name()); an opal-cpp accessor exposing it would let them be
+  /// derived and the parser tests deleted.
   ///
   /// hub_rejections carries the bounded `kind` (see RejectKind), never
   /// the free-text reason: the reason strings are ~30 literals spread across
@@ -866,18 +867,9 @@ class GamesHub final {
   /// Builders; callers hold mu_.
   moonbase::games::RoomState RoomStateLocked(const std::string& room_id, const Room& room) const;
   void StageRoomStateLocked(const std::string& room_id, Outbox& outbox) const;
-  moonbase::games::GameView ViewLocked(const std::string& game_id, const GameEntry& entry,
-                                       const std::string& viewer_id) const;
-  moonbase::games::ChessView ChessViewLocked(const std::string& game_id,
-                                             const GameEntry& entry) const;
-  moonbase::games::PongView PongViewLocked(const std::string& game_id,
-                                           const GameEntry& entry) const;
-  moonbase::games::CastleView CastleViewLocked(const std::string& game_id, const GameEntry& entry,
-                                               const std::string& viewer_id) const;
-  moonbase::games::RummyView RummyViewLocked(const std::string& game_id, const GameEntry& entry,
-                                             const std::string& viewer_id) const;
-  moonbase::games::SpadesView SpadesViewLocked(const std::string& game_id, const GameEntry& entry,
-                                               const std::string& viewer_id) const;
+  /// What the table's views read besides its engine (adapter.h), as of
+  /// now.
+  TableContext ContextOf(const std::string& game_id, const GameEntry& entry) const;
   /// One viewer's gameJoined in the table's own vocabulary.
   moonbase::games::GameEvents JoinedEventLocked(const std::string& game_id, const GameEntry& entry,
                                                 const std::string& viewer_id) const;

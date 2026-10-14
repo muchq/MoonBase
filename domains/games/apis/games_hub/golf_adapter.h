@@ -1,6 +1,7 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_GOLF_ADAPTER_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_GOLF_ADAPTER_H
 
+#include <array>
 #include <unordered_set>
 
 #include "domains/games/apis/games_hub/adapter.h"
@@ -22,8 +23,32 @@ std::string PlayerIdAt(const golf::GameState& state, int seat);
 
 template <>
 struct Adapter<golf::GameState> {
+  using Engine = golf::GameState;
+  using Move = moonbase::games::GolfMove;
+  using Update = moonbase::games::GolfUpdate;
+  using View = moonbase::games::GameView;
   static constexpr GameKind kKind = GameKind::kGolf;
   static constexpr std::size_t kMaxSeats = 4;
+  static constexpr unsigned kCapabilities = 0;
+
+  static constexpr std::string_view kCommandSeries = "golf_commands";
+  static constexpr std::array<std::string_view, 11> kCommands = {
+      "createGame",      "joinGame", "startGame",    "leaveGame", "peekCard", "drawCard",
+      "takeFromDiscard", "swapCard", "discardDrawn", "knock",     "hideCards"};
+  static constexpr std::string_view kEventSeries = "golf_events";
+  static constexpr std::array<std::string_view, 8> kEvents = {
+      "gameJoined",  "gameState",     "gameCreated", "gameStarted",
+      "turnChanged", "playerKnocked", "gameEnded",   "gameLeft"};
+  static const Move* MoveOf(const moonbase::games::GameCommands& commands) {
+    const auto* command = commands.as_golf_or_null();
+    return command == nullptr ? nullptr : &command->move;
+  }
+  static const Update* UpdateOf(const moonbase::games::GameEvents& events) {
+    const auto* event = events.as_golf_or_null();
+    return event == nullptr ? nullptr : &event->update;
+  }
+  static moonbase::games::GameEvents Wrap(Update update);
+
   static std::string Phase(const golf::GameState& state);
   static std::string Turn(const golf::GameState& state);
   static std::size_t GamesFinished(const golf::GameState&) { return 0; }
@@ -37,6 +62,18 @@ struct Adapter<golf::GameState> {
                                                      int64_t) {
     return state.removePlayer(seat);
   }
+
+  // Own peeks and the held draw ride only to their seat; every card
+  // shows once the game ends.
+  static View ViewOf(const TableContext& context, const golf::GameState* state,
+                     const std::string& viewer);
+  static moonbase::games::GameEvents StateEvent(View view);
+  static moonbase::games::GameEvents JoinedEvent(View view);
+  static std::vector<moonbase::games::GameEvents> GamesEnded(const golf::GameState&, std::size_t) {
+    return {};
+  }
+  static std::optional<moonbase::games::GameEvents> ClosedEvent(
+      const golf::GameState& state, const std::vector<std::string>& roster);
 };
 
 }  // namespace games_hub

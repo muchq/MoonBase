@@ -74,86 +74,6 @@ moonbase::games::ChatMessage ChatEvent(const ChatRow& row) {
   return message;
 }
 
-GameEvents GolfUpdateEvent(GolfUpdate update) {
-  moonbase::games::GolfEvent event;
-  event.update = std::move(update);
-  return GameEvents::FromGolf(std::move(event));
-}
-
-GameEvents CastleUpdateEvent(CastleUpdate update) {
-  moonbase::games::CastleEvent event;
-  event.update = std::move(update);
-  return GameEvents::FromCastle(std::move(event));
-}
-
-GameEvents RummyUpdateEvent(RummyUpdate update) {
-  moonbase::games::RummyEvent event;
-  event.update = std::move(update);
-  return GameEvents::FromRummy(std::move(event));
-}
-
-GameEvents ChessUpdateEvent(ChessUpdate update) {
-  moonbase::games::ChessEvent event;
-  event.update = std::move(update);
-  return GameEvents::FromChess(std::move(event));
-}
-
-GameEvents PongUpdateEvent(PongUpdate update) {
-  moonbase::games::PongEvent event;
-  event.update = std::move(update);
-  return GameEvents::FromPong(std::move(event));
-}
-
-GameEvents SpadesUpdateEvent(SpadesUpdate update) {
-  moonbase::games::SpadesEvent event;
-  event.update = std::move(update);
-  return GameEvents::FromSpades(std::move(event));
-}
-
-// The shared lifecycle announcements, in the table's own envelope. Each
-// game's update union carries the same case for them, so one generic
-// build serves every game: `make` picks the case off whichever union.
-template <typename Make>
-GameEvents InTableEnvelope(GameKind kind, const Make& make) {
-  switch (kind) {
-    case GameKind::kCastle:
-      return CastleUpdateEvent(make(CastleUpdate{}));
-    case GameKind::kRummy:
-      return RummyUpdateEvent(make(RummyUpdate{}));
-    case GameKind::kChess:
-      return ChessUpdateEvent(make(ChessUpdate{}));
-    case GameKind::kPong:
-      return PongUpdateEvent(make(PongUpdate{}));
-    case GameKind::kSpades:
-      return SpadesUpdateEvent(make(SpadesUpdate{}));
-    case GameKind::kGolf:
-      break;
-  }
-  return GolfUpdateEvent(make(GolfUpdate{}));
-}
-GameEvents CreatedEvent(GameKind kind, moonbase::games::GameCreated created) {
-  return InTableEnvelope(kind, [&](auto tag) { return decltype(tag)::FromGamecreated(created); });
-}
-GameEvents StartedEvent(GameKind kind) {
-  return InTableEnvelope(kind, [](auto tag) {
-    return decltype(tag)::FromGamestarted(moonbase::games::GameStarted{});
-  });
-}
-// Pong has no turns (CurrentTurnOf names nobody), so no turnChanged.
-GameEvents TurnEvent(GameKind kind, moonbase::games::TurnChanged turn) {
-  return InTableEnvelope(kind, [&](auto tag) {
-    if constexpr (requires { decltype(tag)::FromTurnchanged(turn); }) {
-      return decltype(tag)::FromTurnchanged(turn);
-    } else {
-      LOG(DFATAL) << "a turn announced at a table without turns";
-      return decltype(tag)::FromGamestarted(moonbase::games::GameStarted{});
-    }
-  });
-}
-GameEvents LeftEvent(GameKind kind, moonbase::games::GameLeft left) {
-  return InTableEnvelope(kind, [&](auto tag) { return decltype(tag)::FromGameleft(left); });
-}
-
 // Bounded rebase-retry for the conditional commits: each miss adopts the
 // stored truth, so giving up leaves a consistent hub and a client who
 // can simply resend.
@@ -170,83 +90,6 @@ absl::Status HeldInHand(const std::vector<cards::Card>& hand,
     }
   }
   return absl::OkStatus();
-}
-
-std::string RummyMoveName(rummy::MoveKind kind) {
-  switch (kind) {
-    case rummy::MoveKind::DrawStock:
-      return "drawStock";
-    case rummy::MoveKind::DrawDiscard:
-      return "drawDiscard";
-    case rummy::MoveKind::TakeDown:
-      return "takeDown";
-    case rummy::MoveKind::Meld:
-      return "meld";
-    case rummy::MoveKind::LayOff:
-      return "layOff";
-    case rummy::MoveKind::Discard:
-      return "discard";
-  }
-  return "drawStock";
-}
-
-std::string GinMoveName(rummy::GinMoveKind kind) {
-  switch (kind) {
-    case rummy::GinMoveKind::Pass:
-      return "pass";
-    case rummy::GinMoveKind::DrawStock:
-      return "drawStock";
-    case rummy::GinMoveKind::DrawDiscard:
-      return "drawDiscard";
-    case rummy::GinMoveKind::Discard:
-      return "discard";
-    case rummy::GinMoveKind::Knock:
-      return "knock";
-  }
-  return "pass";
-}
-
-std::string GinStageName(rummy::GinStage stage) {
-  switch (stage) {
-    case rummy::GinStage::Upcard:
-      return "upcard";
-    case rummy::GinStage::StockOnly:
-    case rummy::GinStage::Draw:
-      return "draw";
-    case rummy::GinStage::Play:
-      return "play";
-  }
-  return "draw";
-}
-
-// A seat's running score: what the deals it won scored, off the sheet.
-int RummyPointsOf(const rummy::TableState& table, const std::string& id) {
-  int points = 0;
-  for (const rummy::DealScore& line : table.getScoreSheet()) {
-    if (line.winner == id) points += line.points;
-  }
-  return points;
-}
-
-std::string GinEndingName(rummy::GinEnding ending) {
-  switch (ending) {
-    case rummy::GinEnding::Knock:
-      return "knock";
-    case rummy::GinEnding::Gin:
-      return "gin";
-    case rummy::GinEnding::Undercut:
-      return "undercut";
-    case rummy::GinEnding::Draw:
-      return "draw";
-  }
-  return "draw";
-}
-
-std::vector<moonbase::games::Card> WireCards(const std::vector<cards::Card>& cards) {
-  std::vector<moonbase::games::Card> wire;
-  wire.reserve(cards.size());
-  for (const cards::Card& card : cards) wire.push_back(WireCard(card));
-  return wire;
 }
 
 // A startGame's or a challenge's fields, absent ones taking the defaults:
@@ -298,18 +141,6 @@ std::string CurrentTurnOf(const HostedState& state) {
 std::string InstanceId() {
   absl::BitGen gen;
   return absl::StrCat("hub-", absl::Hex(absl::Uniform<uint64_t>(gen), absl::kZeroPad16));
-}
-
-// A spades game's end as the wire spells it: the winning team's seats.
-moonbase::games::SpadesResult SpadesResultOf(const spades::Table& table,
-                                             const spades::GameScore& game) {
-  moonbase::games::SpadesResult result;
-  result.ending = game.winner.has_value() ? "points" : "abandoned";
-  for (int seat = 0; seat < table.hand().seats(); ++seat) {
-    if (game.winner == table.teamOf(seat)) result.winners.push_back(table.seats()[seat]);
-  }
-  result.scores = game.scores;
-  return result;
 }
 
 // The per-seat stat deltas a finish that closes the table applies — the
@@ -404,7 +235,9 @@ GamesHub::GamesHub(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::De
 // Each entry is written out in full so it greps against its emit site as one
 // string. That is the point of listing them at all: the declaration and the
 // emit sites have to agree, and a reader checking that should not have to
-// assemble a series out of two nested loops first.
+// assemble a series out of two nested loops first. Each game's envelope is
+// the exception: its series are its union's cases, listed in its adapter
+// (GameCounterSeries) beside the union they copy.
 //
 // hub_e2e_test pins one of the two directions. ExpectOnlyDeclaredCounterSeries
 // runs in every stream test's TearDown — and in every SecondInstance's
@@ -418,108 +251,10 @@ GamesHub::GamesHub(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::De
 // union cases and are pinned both ways by the *SeriesMatchTheModelUnions
 // tests in hub_e2e_test.
 const std::vector<GamesHub::CounterSeries>& GamesHub::DeclaredCounterSeries() {
-  static const auto* kSeries = new std::vector<CounterSeries>{
-      {"castle_commands", {{"command", "createGame"}}},
-      {"castle_commands", {{"command", "joinGame"}}},
-      {"castle_commands", {{"command", "startGame"}}},
-      {"castle_commands", {{"command", "leaveGame"}}},
-      {"castle_commands", {{"command", "swapForSetup"}}},
-      {"castle_commands", {{"command", "ready"}}},
-      {"castle_commands", {{"command", "playFromHand"}}},
-      {"castle_commands", {{"command", "playFaceUp"}}},
-      {"castle_commands", {{"command", "playFaceDown"}}},
-      {"castle_commands", {{"command", "pickUp"}}},
-      {"castle_events", {{"event", "gameJoined"}}},
-      {"castle_events", {{"event", "gameState"}}},
-      {"castle_events", {{"event", "gameCreated"}}},
-      {"castle_events", {{"event", "gameStarted"}}},
-      {"castle_events", {{"event", "turnChanged"}}},
-      {"castle_events", {{"event", "gameEnded"}}},
-      {"castle_events", {{"event", "gameLeft"}}},
-      {"rummy_commands", {{"command", "createGame"}}},
-      {"rummy_commands", {{"command", "joinGame"}}},
-      {"rummy_commands", {{"command", "startGame"}}},
-      {"rummy_commands", {{"command", "leaveGame"}}},
-      {"rummy_commands", {{"command", "chooseVariant"}}},
-      {"rummy_commands", {{"command", "pass"}}},
-      {"rummy_commands", {{"command", "drawStock"}}},
-      {"rummy_commands", {{"command", "drawDiscard"}}},
-      {"rummy_commands", {{"command", "takeDown"}}},
-      {"rummy_commands", {{"command", "meld"}}},
-      {"rummy_commands", {{"command", "layOff"}}},
-      {"rummy_commands", {{"command", "discard"}}},
-      {"rummy_commands", {{"command", "knock"}}},
-      {"rummy_events", {{"event", "gameJoined"}}},
-      {"rummy_events", {{"event", "gameState"}}},
-      {"rummy_events", {{"event", "gameCreated"}}},
-      {"rummy_events", {{"event", "gameStarted"}}},
-      {"rummy_events", {{"event", "turnChanged"}}},
-      {"rummy_events", {{"event", "gameEnded"}}},
-      {"rummy_events", {{"event", "gameLeft"}}},
-      {"chess_commands", {{"command", "createGame"}}},
-      {"chess_commands", {{"command", "joinGame"}}},
-      {"chess_commands", {{"command", "startGame"}}},
-      {"chess_commands", {{"command", "leaveGame"}}},
-      {"chess_commands", {{"command", "play"}}},
-      {"chess_commands", {{"command", "resign"}}},
-      {"chess_commands", {{"command", "addBot"}}},
-      {"chess_commands", {{"command", "watch"}}},
-      {"chess_commands", {{"command", "history"}}},
-      {"chess_commands", {{"command", "review"}}},
-      {"chess_commands", {{"command", "publish"}}},
-      {"chess_commands", {{"command", "challenge"}}},
-      {"chess_commands", {{"command", "createRoundRobin"}}},
-      {"chess_commands", {{"command", "withdraw"}}},
-      {"chess_commands", {{"command", "forfeit"}}},
-      {"chess_commands", {{"command", "roundRobins"}}},
-      {"chess_commands", {{"command", "playRoundRobin"}}},
-      {"chess_events", {{"event", "gameJoined"}}},
-      {"chess_events", {{"event", "gameState"}}},
-      {"chess_events", {{"event", "gameCreated"}}},
-      {"chess_events", {{"event", "gameStarted"}}},
-      {"chess_events", {{"event", "turnChanged"}}},
-      {"chess_events", {{"event", "gameEnded"}}},
-      {"chess_events", {{"event", "gameLeft"}}},
-      {"chess_events", {{"event", "history"}}},
-      {"chess_events", {{"event", "review"}}},
-      {"chess_events", {{"event", "published"}}},
-      {"chess_events", {{"event", "roundRobin"}}},
-      {"chess_events", {{"event", "roundRobins"}}},
-      {"pong_commands", {{"command", "createGame"}}},
-      {"pong_commands", {{"command", "joinGame"}}},
-      {"pong_commands", {{"command", "startGame"}}},
-      {"pong_commands", {{"command", "leaveGame"}}},
-      {"pong_commands", {{"command", "paddle"}}},
-      {"pong_commands", {{"command", "addBot"}}},
-      {"pong_commands", {{"command", "watch"}}},
-      {"pong_commands", {{"command", "createRoundRobin"}}},
-      {"pong_commands", {{"command", "withdraw"}}},
-      {"pong_commands", {{"command", "forfeit"}}},
-      {"pong_commands", {{"command", "roundRobins"}}},
-      {"pong_commands", {{"command", "playRoundRobin"}}},
-      {"pong_events", {{"event", "gameJoined"}}},
-      {"pong_events", {{"event", "gameState"}}},
-      {"pong_events", {{"event", "gameCreated"}}},
-      {"pong_events", {{"event", "gameStarted"}}},
-      {"pong_events", {{"event", "gameEnded"}}},
-      {"pong_events", {{"event", "gameLeft"}}},
-      {"pong_events", {{"event", "frame"}}},
-      {"pong_events", {{"event", "roundRobin"}}},
-      {"pong_events", {{"event", "roundRobins"}}},
-      {"spades_commands", {{"command", "createGame"}}},
-      {"spades_commands", {{"command", "joinGame"}}},
-      {"spades_commands", {{"command", "startGame"}}},
-      {"spades_commands", {{"command", "leaveGame"}}},
-      {"spades_commands", {{"command", "bid"}}},
-      {"spades_commands", {{"command", "play"}}},
-      {"spades_commands", {{"command", "deal"}}},
-      {"spades_events", {{"event", "gameJoined"}}},
-      {"spades_events", {{"event", "gameState"}}},
-      {"spades_events", {{"event", "gameCreated"}}},
-      {"spades_events", {{"event", "gameStarted"}}},
-      {"spades_events", {{"event", "turnChanged"}}},
-      {"spades_events", {{"event", "gameEnded"}}},
-      {"spades_events", {{"event", "gameLeft"}}},
+  static const auto* kSeries = [] {
+    // Each game's envelope first, from its adapter's lists.
+    auto* series = new std::vector<CounterSeries>(GameCounterSeries());
+    series->insert(series->end(), {
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -531,44 +266,24 @@ const std::vector<GamesHub::CounterSeries>& GamesHub::DeclaredCounterSeries() {
       {"chat_rows_delivered", {}},
       {"hub_admissions_refused", {{"reason", "bad_ticket"}}},
       {"hub_admissions_refused", {{"reason", "seat_conflict"}}},
-      // The room layer's own GameCommands cases on hub_commands, golf's
-      // envelope on golf_commands — CountCommand's naming, spelled out
-      // (see the model-pin note above).
+      // The room layer's own GameCommands cases on hub_commands —
+      // CountCommand's naming, spelled out (see the model-pin note above).
       {"hub_commands", {{"command", "createRoom"}}},
       {"hub_commands", {{"command", "joinRoom"}}},
       {"hub_commands", {{"command", "leaveRoom"}}},
       {"hub_commands", {{"command", "getRoomState"}}},
       {"hub_commands", {{"command", "chat"}}},
-      {"golf_commands", {{"command", "createGame"}}},
-      {"golf_commands", {{"command", "joinGame"}}},
-      {"golf_commands", {{"command", "startGame"}}},
-      {"golf_commands", {{"command", "leaveGame"}}},
-      {"golf_commands", {{"command", "peekCard"}}},
-      {"golf_commands", {{"command", "drawCard"}}},
-      {"golf_commands", {{"command", "takeFromDiscard"}}},
-      {"golf_commands", {{"command", "swapCard"}}},
-      {"golf_commands", {{"command", "discardDrawn"}}},
-      {"golf_commands", {{"command", "knock"}}},
-      {"golf_commands", {{"command", "hideCards"}}},
       {"hub_disconnects", {{"kind", "clean"}}},
       {"hub_disconnects", {{"kind", "abrupt"}}},
-      // The room layer's own GameEvents cases on hub_events, golf's
-      // envelope on golf_events — Send's naming.
+      // The room layer's own GameEvents cases on hub_events — Send's
+      // naming.
       {"hub_events", {{"event", "sessionReady"}}},
       {"hub_events", {{"event", "roomState"}}},
       {"hub_events", {{"event", "roomLeft"}}},
       {"hub_events", {{"event", "roomChat"}}},
       {"hub_events", {{"event", "roomChatHistory"}}},
       {"hub_events", {{"event", "commandRejected"}}},
-      {"golf_events", {{"event", "gameJoined"}}},
-      {"golf_events", {{"event", "gameState"}}},
-      {"golf_events", {{"event", "gameCreated"}}},
-      {"golf_events", {{"event", "gameStarted"}}},
-      {"golf_events", {{"event", "turnChanged"}}},
-      {"golf_events", {{"event", "playerKnocked"}}},
-      {"golf_events", {{"event", "gameEnded"}}},
-      {"golf_events", {{"event", "gameLeft"}}},
-      // The lobby envelope on its own series, castle's precedent: the
+      // The lobby envelope on its own series, as each game's is: the
       // LobbyAction and LobbyUpdate cases, pinned by
       // LobbySeriesMatchTheModelUnions.
       {"lobby_commands", {{"command", "join"}}},
@@ -626,7 +341,9 @@ const std::vector<GamesHub::CounterSeries>& GamesHub::DeclaredCounterSeries() {
       {"bot_requests", {{"bot", "mithril"}, {"result", "rate_limited"}}},
       {"bot_requests", {{"bot", "mithril"}, {"result", "unreachable"}}},
       {"bot_requests", {{"bot", "mithril"}, {"result", "error"}}},
-  };
+    });
+    return series;
+  }();
   return *kSeries;
 }
 
@@ -2957,7 +2674,8 @@ void GamesHub::EngineMove(const std::string& player_id, const MoveFn& move, Move
           moonbase::games::PlayerKnocked knocked;
           knocked.playerId = player_id;
           for (const std::string& recipient : ref->entry->roster) {
-            outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromPlayerknocked(knocked)));
+            outbox.To(recipient,
+                      Adapter<golf::GameState>::Wrap(GolfUpdate::FromPlayerknocked(knocked)));
           }
         }
 
@@ -2968,9 +2686,9 @@ void GamesHub::EngineMove(const std::string& player_id, const MoveFn& move, Move
           const bool countdown_started = !was_countdown && updated.revealCountdownActive();
           if (effects.peek_fanout && !countdown_started) {
             // A quiet peek: only the peeker's view changed.
-            moonbase::games::GameStateUpdate update;
-            update.view = ViewLocked(ref->game_id, *ref->entry, player_id);
-            outbox.To(player_id, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
+            outbox.To(player_id,
+                      StateEventOf(ref->entry->kind, ContextOf(ref->game_id, *ref->entry),
+                                   ref->entry->state, player_id));
           } else {
             StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
           }
@@ -2980,7 +2698,8 @@ void GamesHub::EngineMove(const std::string& player_id, const MoveFn& move, Move
               moonbase::games::TurnChanged turn;
               turn.playerId = current_turn;
               for (const std::string& recipient : ref->entry->roster) {
-                outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromTurnchanged(turn)));
+                outbox.To(recipient,
+                          Adapter<golf::GameState>::Wrap(GolfUpdate::FromTurnchanged(turn)));
               }
             }
           }
@@ -3360,15 +3079,8 @@ void GamesHub::WatchMove(const std::string& player_id, const std::string& game_i
       } else {
         StopWatchingLocked(player_id);
         entry->watchers.insert(player_id);
-        if (kind == GameKind::kPong) {
-          moonbase::games::PongGameState update;
-          update.view = PongViewLocked(game_id, *entry);
-          outbox.To(player_id, PongUpdateEvent(PongUpdate::FromGamestate(std::move(update))));
-        } else {
-          moonbase::games::ChessGameState update;
-          update.view = ChessViewLocked(game_id, *entry);
-          outbox.To(player_id, ChessUpdateEvent(ChessUpdate::FromGamestate(std::move(update))));
-        }
+        outbox.To(player_id,
+                  StateEventOf(entry->kind, ContextOf(game_id, *entry), entry->state, player_id));
       }
     }
   }
@@ -3395,7 +3107,7 @@ void GamesHub::ChessHistoryMove(const std::string& player_id) {
   for (const HubStore::ChessGameRow& row : history->games) {
     answer.games.push_back(ChessSummaryOf(row));
   }
-  Send(player_id, ChessUpdateEvent(ChessUpdate::FromHistory(std::move(answer))));
+  Send(player_id, Adapter<chess_play::Table>::Wrap(ChessUpdate::FromHistory(std::move(answer))));
 }
 
 void GamesHub::ChessReviewMove(const std::string& player_id,
@@ -3421,7 +3133,7 @@ void GamesHub::ChessReviewMove(const std::string& player_id,
     Reject(player_id, RejectKind::kState, "no such game in this room");
     return;
   }
-  Send(player_id, ChessUpdateEvent(ChessUpdate::FromReview(ChessReviewOf(**row))));
+  Send(player_id, Adapter<chess_play::Table>::Wrap(ChessUpdate::FromReview(ChessReviewOf(**row))));
 }
 
 void GamesHub::PublishChessMove(const std::string& player_id, bool published) {
@@ -3458,7 +3170,7 @@ void GamesHub::StagePublishedLocked(const Room& room, bool published,
   update.published = published;
   update.by = by;
   for (const auto& [member_id, member] : room.members) {
-    outbox.To(member_id, ChessUpdateEvent(ChessUpdate::FromPublished(update)));
+    outbox.To(member_id, Adapter<chess_play::Table>::Wrap(ChessUpdate::FromPublished(update)));
   }
 }
 
@@ -3681,9 +3393,10 @@ void GamesHub::RoundRobinsMove(const std::string& player_id, GameKind kind) {
     return;
   }
   if (kind == GameKind::kPong) {
-    Send(player_id, PongUpdateEvent(PongUpdate::FromRoundrobins(std::move(pong))));
+    Send(player_id, Adapter<pong::Table>::Wrap(PongUpdate::FromRoundrobins(std::move(pong))));
   } else {
-    Send(player_id, ChessUpdateEvent(ChessUpdate::FromRoundrobins(std::move(chess))));
+    Send(player_id,
+         Adapter<chess_play::Table>::Wrap(ChessUpdate::FromRoundrobins(std::move(chess))));
   }
 }
 
@@ -3809,9 +3522,9 @@ void GamesHub::StageRoundRobinLocked(const Room& room, const HubStore::ChessEven
                                     Outbox& outbox) const {
   // In its own game's envelope.
   const GameEvents event = row.kind == GameKind::kPong
-                               ? PongUpdateEvent(PongUpdate::FromRoundrobin(
+                               ? Adapter<pong::Table>::Wrap(PongUpdate::FromRoundrobin(
                                      PongRoundRobinOf(row, LiveTablesLocked(room, row.event_id))))
-                               : ChessUpdateEvent(ChessUpdate::FromRoundrobin(
+                               : Adapter<chess_play::Table>::Wrap(ChessUpdate::FromRoundrobin(
                                      RoundRobinOf(row, LiveTablesLocked(room, row.event_id))));
   for (const auto& [member_id, member] : room.members) outbox.To(member_id, event);
 }
@@ -4290,7 +4003,7 @@ int GamesHub::TickPongOnce() {
         frame.paddles.push_back(point);
       }
       frame.serveIn = rally.serve_wait;
-      const GameEvents event = PongUpdateEvent(PongUpdate::FromFrame(frame));
+      const GameEvents event = Adapter<pong::Table>::Wrap(PongUpdate::FromFrame(frame));
       for (const std::string& recipient : entry->roster) {
         if (!PongBotLevel(recipient).has_value()) frames.emplace_back(recipient, game_id, event);
       }
@@ -4705,23 +4418,16 @@ void GamesHub::TrackActive(int delta) {
 // rummy_*, lobby_*, voice_*).
 void GamesHub::CountCommand(const GameCommands& command) {
   if (!metrics_) return;
-  if (const auto* golf = command.as_golf_or_null()) {
-    metrics_->RecordCounter("golf_commands", 1, {{"command", std::string(golf->move.case_name())}});
-  } else if (const auto* castle = command.as_castle_or_null()) {
-    metrics_->RecordCounter("castle_commands", 1,
-                            {{"command", std::string(castle->move.case_name())}});
-  } else if (const auto* rummy = command.as_rummy_or_null()) {
-    metrics_->RecordCounter("rummy_commands", 1,
-                            {{"command", std::string(rummy->move.case_name())}});
-  } else if (const auto* chess = command.as_chess_or_null()) {
-    metrics_->RecordCounter("chess_commands", 1,
-                            {{"command", std::string(chess->move.case_name())}});
-  } else if (const auto* pong = command.as_pong_or_null()) {
-    metrics_->RecordCounter("pong_commands", 1, {{"command", std::string(pong->move.case_name())}});
-  } else if (const auto* spades = command.as_spades_or_null()) {
-    metrics_->RecordCounter("spades_commands", 1,
-                            {{"command", std::string(spades->move.case_name())}});
-  } else if (const auto* lobby = command.as_lobby_or_null()) {
+  const bool counted = AnyAdapter([&](auto adapter) {
+    using A = decltype(adapter);
+    const auto* move = A::MoveOf(command);
+    if (move == nullptr) return false;
+    metrics_->RecordCounter(std::string(A::kCommandSeries), 1,
+                            {{"command", std::string(move->case_name())}});
+    return true;
+  });
+  if (counted) return;
+  if (const auto* lobby = command.as_lobby_or_null()) {
     metrics_->RecordCounter("lobby_commands", 1,
                             {{"command", std::string(lobby->action.case_name())}});
   } else if (const auto* voice = command.as_voice_or_null()) {
@@ -4735,22 +4441,16 @@ void GamesHub::CountCommand(const GameCommands& command) {
 void GamesHub::Send(const std::string& player_id, GameEvents event,
                    opal::server::DeliveryClass delivery) {
   if (metrics_) {
-    if (const auto* golf = event.as_golf_or_null()) {
-      metrics_->RecordCounter("golf_events", 1, {{"event", std::string(golf->update.case_name())}});
-    } else if (const auto* castle = event.as_castle_or_null()) {
-      metrics_->RecordCounter("castle_events", 1,
-                              {{"event", std::string(castle->update.case_name())}});
-    } else if (const auto* rummy = event.as_rummy_or_null()) {
-      metrics_->RecordCounter("rummy_events", 1,
-                              {{"event", std::string(rummy->update.case_name())}});
-    } else if (const auto* chess = event.as_chess_or_null()) {
-      metrics_->RecordCounter("chess_events", 1,
-                              {{"event", std::string(chess->update.case_name())}});
-    } else if (const auto* pong = event.as_pong_or_null()) {
-      metrics_->RecordCounter("pong_events", 1, {{"event", std::string(pong->update.case_name())}});
-    } else if (const auto* spades = event.as_spades_or_null()) {
-      metrics_->RecordCounter("spades_events", 1,
-                              {{"event", std::string(spades->update.case_name())}});
+    const bool counted = AnyAdapter([&](auto adapter) {
+      using A = decltype(adapter);
+      const auto* update = A::UpdateOf(event);
+      if (update == nullptr) return false;
+      metrics_->RecordCounter(std::string(A::kEventSeries), 1,
+                              {{"event", std::string(update->case_name())}});
+      return true;
+    });
+    if (counted) {
+      // The game's own series.
     } else if (const auto* lobby = event.as_lobby_or_null()) {
       metrics_->RecordCounter("lobby_events", 1,
                               {{"event", std::string(lobby->update.case_name())}});
@@ -4812,626 +4512,21 @@ void GamesHub::StageRoomStateLocked(const std::string& room_id, Outbox& outbox) 
   }
 }
 
-moonbase::games::GameView GamesHub::ViewLocked(const std::string& game_id, const GameEntry& entry,
-                                              const std::string& viewer_id) const {
-  moonbase::games::GameView view;
-  view.gameId = game_id;
-
-  if (!entry.started()) {
-    view.phase = "waiting";
-    view.drawPileCount = 0;
-    view.discardCount = 0;
-    view.allPlayersPeeked = false;
-    for (const std::string& roster_id : entry.roster) {
-      moonbase::games::GamePlayer player;
-      player.playerId = roster_id;
-      player.cards.resize(4);
-      player.hasPeeked = false;
-      view.players.push_back(std::move(player));
-    }
-    return view;
-  }
-
-  const golf::GameState& state = entry.golf();
-  const bool ended = state.isOver();
-  view.phase = Adapter<golf::GameState>::Phase(state);
-  if (!ended) view.currentPlayerId = PlayerIdAt(state, state.getWhoseTurn());
-  view.drawPileCount = static_cast<int>(state.getDrawPile().size());
-  view.discardCount = static_cast<int>(state.getDiscardPile().size());
-  if (!state.getDiscardPile().empty()) view.discardTop = WireCard(state.getDiscardPile().back());
-  // Only a real seat's knock is advertised: an abandonment end carries
-  // the kAbandoned sentinel, not a knock somebody would be blamed for.
-  if (state.getWhoKnocked() >= 0) view.knockedPlayerId = PlayerIdAt(state, state.getWhoKnocked());
-  view.allPlayersPeeked = state.allPlayersPeeked();
-  // The drawn card rides only to the player who is looking at it.
-  if (state.getPeekedAtDrawPile() && !ended &&
-      PlayerIdAt(state, state.getWhoseTurn()) == viewer_id && !state.getDrawPile().empty()) {
-    view.drawnCard = WireCard(state.getDrawPile().back());
-  }
-
-  for (const golf::Player& seat : state.getPlayers()) {
-    const std::string occupant = seat.getName().value_or("");
-    moonbase::games::GamePlayer player;
-    player.playerId = occupant;
-    player.cards.resize(4);
-    player.hasPeeked = seat.hasCompletedPeeks();
-    if (ended) {
-      const std::vector<cards::Card> hand = seat.allCards();
-      for (int i = 0; i < 4; ++i) {
-        player.cards[i].card = WireCard(hand[static_cast<std::size_t>(i)]);
-        player.revealedIndexes.push_back(i);
-      }
-      player.score = seat.score();
-    } else if (occupant == viewer_id) {
-      for (const golf::Position position : seat.getPeeked()) {
-        const int index = golf::indexOfPosition(position);
-        player.cards[static_cast<std::size_t>(index)].card = WireCard(seat.cardAt(position));
-        player.revealedIndexes.push_back(index);
-      }
-    }
-    view.players.push_back(std::move(player));
-  }
-  return view;
-}
-
-moonbase::games::ChessView GamesHub::ChessViewLocked(const std::string& game_id,
-                                                    const GameEntry& entry) const {
-  moonbase::games::ChessView view;
-  view.gameId = game_id;
-  if (entry.event.has_value()) view.roundRobinId = entry.event->event_id;
-  view.inCheck = false;
-  view.defaultSetupId = chess_play::kDefaultChessSetup;
-  for (const chess_play::ChessSetupOption& available : chess_play::AvailableChessSetups()) {
-    moonbase::games::ChessSetupOption option;
-    option.setupId = available.id;
-    option.name = available.name;
-    view.availableSetups.push_back(std::move(option));
-  }
-  if (!entry.started()) {
-    view.phase = "waiting";
-    if (entry.terms.has_value()) view.terms = WireTerms(*entry.terms);
-    for (const std::string& roster_id : entry.roster) {
-      moonbase::games::ChessPlayer player;
-      player.playerId = roster_id;
-      if (ChessBotElo(roster_id).has_value()) player.bot = true;
-      view.players.push_back(std::move(player));
-    }
-    return view;
-  }
-  const chess_play::Table& table = entry.chess();
-  const chess_play::GameState& state = table.game();
-  const int64_t now = NowMs();
-  view.phase = Adapter<chess_play::Table>::Phase(table);
-  view.variant = state.variant();
-  view.setupId = state.setupId();
-  view.setupName = std::string(*chess_play::ChessSetupName(state.setupId()));
-  for (int seat = 0; seat < chess_play::GameState::kSeats; ++seat) {
-    moonbase::games::ChessPlayer player;
-    player.playerId = state.players().at(seat);
-    player.color = std::string(chess_play::ColorName(state.colorOf(seat)));
-    if (ChessBotElo(player.playerId).has_value()) player.bot = true;
-    view.players.push_back(std::move(player));
-  }
-  view.fen = state.fen();
-  view.moves = state.moves();
-  if (!state.isOver()) {
-    view.sideToMove = std::string(chess_play::ColorName(state.sideToMove()));
-    view.currentPlayerId = state.players().at(state.whoseTurn());
-  }
-  view.inCheck = state.inCheck();
-  view.legalMoves = state.legalMoves();
-  moonbase::games::ChessClock clock;
-  clock.whiteMs = state.remainingMs(chess_play::Color::kWhite, now);
-  clock.blackMs = state.remainingMs(chess_play::Color::kBlack, now);
-  clock.initialMs = state.timeControl().initial_ms;
-  clock.incrementMs = state.timeControl().increment_ms;
-  view.clock = clock;
-  if (state.isOver()) view.result = WireChessResult(chess_play::ScoreOf(state));
-  for (const chess_play::GameScore& score : table.scoreSheet()) {
-    moonbase::games::ChessScoreLine line;
-    line.winner = score.winner;
-    line.ending = std::string(chess_play::EndingName(score.ending));
-    view.scoreSheet.push_back(std::move(line));
-  }
-  return view;
-}
-
-moonbase::games::PongView GamesHub::PongViewLocked(const std::string& game_id,
-                                                  const GameEntry& entry) const {
-  moonbase::games::PongView view;
-  view.gameId = game_id;
-  if (entry.event.has_value()) view.roundRobinId = entry.event->event_id;
-  if (!entry.started()) {
-    view.phase = "waiting";
-    for (const std::string& roster_id : entry.roster) {
-      moonbase::games::PongPlayer player;
-      player.playerId = roster_id;
-      if (PongBotLevel(roster_id).has_value()) player.bot = true;
-      view.players.push_back(std::move(player));
-    }
-    return view;
-  }
-  const pong::Table& table = entry.pong();
-  view.phase = Adapter<pong::Table>::Phase(table);
-  view.variant = std::string(pong::VariantName(table.variant()));
-  const pong::Court court = pong::CourtOf(table.variant());
-  moonbase::games::PongCourt wire;
-  wire.width = court.width;
-  wire.height = court.height;
-  wire.depth = court.depth;
-  wire.paddleWidth = court.paddle_width;
-  wire.paddleHeight = court.paddle_height;
-  wire.ballRadius = court.ball_radius;
-  wire.inset = court.inset;
-  wire.playerSpeed = court.player_speed;
-  wire.ticksPerSecond = pong::kTicksPerSecond;
-  view.court = wire;
-  for (int seat = 0; seat < pong::kSeats; ++seat) {
-    moonbase::games::PongPlayer player;
-    player.playerId = table.players()[seat];
-    player.lives = table.lives()[seat];
-    if (PongBotLevel(player.playerId).has_value()) player.bot = true;
-    view.players.push_back(std::move(player));
-  }
-  for (const pong::GameScore& score : table.scoreSheet()) {
-    moonbase::games::PongScoreLine line;
-    line.winner = score.winner.value_or("");
-    line.ending = std::string(pong::EndingName(score.ending));
-    view.scoreSheet.push_back(std::move(line));
-  }
-  if (!table.inPlay() && !view.scoreSheet.empty()) {
-    moonbase::games::PongResult result;
-    result.winner = view.scoreSheet.back().winner;
-    result.ending = view.scoreSheet.back().ending;
-    view.result = std::move(result);
-  }
-  return view;
-}
-
-moonbase::games::CastleView GamesHub::CastleViewLocked(const std::string& game_id,
-                                                      const GameEntry& entry,
-                                                      const std::string& viewer_id) const {
-  moonbase::games::CastleView view;
-  view.gameId = game_id;
-  if (!entry.started()) {
-    view.phase = "waiting";
-    view.drawPileCount = 0;
-    view.pileCount = 0;
-    for (const std::string& roster_id : entry.roster) {
-      moonbase::games::CastlePlayer player;
-      player.playerId = roster_id;
-      player.ready = false;
-      player.handCount = 0;
-      player.faceDownCount = 0;
-      player.out = false;
-      view.players.push_back(std::move(player));
-    }
-    return view;
-  }
-
-  const castle::GameState& state = entry.castle();
-  const bool ended = state.isOver();
-  view.phase = Adapter<castle::GameState>::Phase(state);
-  const std::string current = CurrentTurnOf(*entry.state);
-  if (!ended && !current.empty()) view.currentPlayerId = current;
-  view.drawPileCount = static_cast<int>(state.getDrawPile().size());
-  view.pileCount = static_cast<int>(state.getPile().size());
-  // The run on top, top last: the price of the next play, and the cards
-  // a table shows.
-  const std::vector<cards::Card>& pile = state.getPile();
-  for (std::size_t i = pile.size() - state.runOnTop(); i < pile.size(); ++i) {
-    view.run.push_back(WireCard(pile[i]));
-  }
-  view.finished = state.getFinished();
-  if (const auto& play = state.getLastPlay(); play.has_value()) {
-    moonbase::games::CastleLastPlay last;
-    last.playerId = play->playerId;
-    for (const cards::Card& card : play->cards) last.cards.push_back(WireCard(card));
-    last.burned = play->burned;
-    last.pickedUp = play->pickedUp;
-    view.lastPlay = std::move(last);
-  }
-  for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
-    const castle::Player& seat = state.getPlayer(static_cast<int>(i));
-    moonbase::games::CastlePlayer player;
-    player.playerId = seat.getId();
-    player.ready = seat.isReady();
-    player.handCount = static_cast<int>(seat.getHand().size());
-    // The viewer's own seat, on turn: whether a play exists, or else
-    // the pile is theirs to pick up (a blind row flips instead). Nobody
-    // else's hand is the viewer's to read, and an over game seats nobody
-    // on turn.
-    player.canPlay = seat.getId() == viewer_id && state.getWhoseTurn() == static_cast<int>(i) &&
-                     state.hasLegalPlay(static_cast<int>(i));
-    // Own hand faces only, everyone's once the game ends; face-down
-    // rows are a count for everyone, their holder included.
-    if (ended || seat.getId() == viewer_id) {
-      for (const cards::Card& card : seat.getHand()) player.hand.push_back(WireCard(card));
-    }
-    for (const cards::Card& card : seat.getFaceUp()) player.faceUp.push_back(WireCard(card));
-    player.faceDownCount = static_cast<int>(seat.getFaceDown().size());
-    player.out = seat.isOut();
-    view.players.push_back(std::move(player));
-  }
-  return view;
-}
-
-// One seat's spades table: its own hand by suit (♠ ♥ ♣ ♦, colours
-// alternating) and rank, everyone else's as a count.
-moonbase::games::SpadesView GamesHub::SpadesViewLocked(const std::string& game_id,
-                                                      const GameEntry& entry,
-                                                      const std::string& viewer_id) const {
-  moonbase::games::SpadesView view;
-  view.gameId = game_id;
-  view.handNumber = 0;
-  view.spadesBroken = false;
-  if (!entry.started()) {
-    view.phase = "waiting";
-    for (std::size_t i = 0; i < entry.roster.size(); ++i) {
-      moonbase::games::SpadesPlayer player;
-      player.playerId = entry.roster[i];
-      player.team = 0;
-      player.handCount = 0;
-      player.tricks = 0;
-      view.players.push_back(std::move(player));
-    }
-    return view;
-  }
-  const spades::Table& table = entry.spades();
-  const spades::Hand& hand = table.hand();
-  const auto id_of = [&table](int seat) { return table.seats().at(seat); };
-  view.phase = std::string(spades::phaseName(table.phase()));
-  view.mode = std::string(spades::modeName(table.mode()));
-  view.handSize = spades::handSize(hand.seats());
-  view.dealer = id_of(hand.dealer());
-  const std::string turn = CurrentTurnOf(*entry.state);
-  if (!turn.empty()) view.currentPlayerId = turn;
-  view.handNumber = table.handNumber();
-  view.spadesBroken = hand.spadesBroken();
-  static constexpr std::array<int, 4> kSuitOrder = {2, 3, 1, 0};  // ♣ ♦ ♥ ♠ → ♠ ♥ ♣ ♦
-  const auto sorted = [](std::vector<cards::Card> cards) {
-    std::sort(cards.begin(), cards.end(), [](const cards::Card& a, const cards::Card& b) {
-      const int suit_a = kSuitOrder[static_cast<int>(a.getSuit())];
-      const int suit_b = kSuitOrder[static_cast<int>(b.getSuit())];
-      if (suit_a != suit_b) return suit_a < suit_b;
-      return a.getRank() < b.getRank();
-    });
-    std::vector<moonbase::games::Card> wire;
-    for (const cards::Card& card : cards) wire.push_back(WireCard(card));
-    return wire;
-  };
-  const int viewer = table.playerIndex(viewer_id);
-  for (int seat = 0; seat < hand.seats(); ++seat) {
-    moonbase::games::SpadesPlayer player;
-    player.playerId = id_of(seat);
-    player.team = table.teamOf(seat);
-    player.handCount = static_cast<int>(hand.hands()[seat].size());
-    if (seat == viewer) player.hand = sorted(hand.hands()[seat]);
-    player.bid = hand.bids()[seat];
-    player.tricks = hand.tricks()[seat];
-    view.players.push_back(std::move(player));
-  }
-  const auto plays_of = [&](const std::vector<spades::TrickPlay>& plays) {
-    std::vector<moonbase::games::SpadesTrickPlay> wire;
-    for (const spades::TrickPlay& play : plays) {
-      moonbase::games::SpadesTrickPlay played;
-      played.playerId = id_of(play.seat);
-      played.card = WireCard(play.card);
-      wire.push_back(std::move(played));
-    }
-    return wire;
-  };
-  view.trick = plays_of(hand.current());
-  if (hand.last().has_value()) {
-    moonbase::games::SpadesTrick last;
-    last.plays = plays_of(hand.last()->plays);
-    last.winner = id_of(hand.last()->winner);
-    view.lastTrick = std::move(last);
-  }
-  if (viewer >= 0 && !table.isOver()) view.legal = sorted(hand.legalPlays(viewer));
-  for (int team = 0; team < table.teams(); ++team) {
-    moonbase::games::SpadesTeam side;
-    for (int seat = team; seat < hand.seats(); seat += table.teams()) {
-      side.players.push_back(id_of(seat));
-    }
-    side.score = table.scores()[team];
-    side.bags = table.bags()[team];
-    side.gamesWon = table.gamesWon()[team];
-    view.teams.push_back(std::move(side));
-  }
-  for (const spades::HandLine& line : table.hands()) {
-    moonbase::games::SpadesHandLine wire;
-    wire.bids.assign(line.bids.begin(), line.bids.end());
-    wire.tricks.assign(line.tricks.begin(), line.tricks.end());
-    wire.points.assign(line.points.begin(), line.points.end());
-    wire.scores.assign(line.scores.begin(), line.scores.end());
-    view.hands.push_back(std::move(wire));
-  }
-  if (const std::optional<spades::GameScore> result = table.result(); result.has_value()) {
-    view.result = SpadesResultOf(table, *result);
-  }
-  if (table.left().has_value()) view.left = id_of(*table.left());
-  return view;
-}
-
-moonbase::games::RummyView GamesHub::RummyViewLocked(const std::string& game_id,
-                                                    const GameEntry& entry,
-                                                    const std::string& viewer_id) const {
-  moonbase::games::RummyView view;
-  view.gameId = game_id;
-  view.dealNumber = 0;
-  view.stockCount = 0;
-  view.canDrawStock = false;
-  view.discardCount = 0;
-  if (!entry.started()) {
-    view.phase = "waiting";
-    for (const std::string& roster_id : entry.roster) {
-      moonbase::games::RummyPlayer player;
-      player.playerId = roster_id;
-      player.handCount = 0;
-      view.players.push_back(std::move(player));
-      moonbase::games::RummyStanding standing;
-      standing.playerId = roster_id;
-      standing.handsWon = 0;
-      standing.points = 0;
-      view.standings.push_back(std::move(standing));
-    }
-    return view;
-  }
-
-  const rummy::TableState& table = entry.rummy();
-  view.phase = Adapter<rummy::TableState>::Phase(table);
-  for (const rummy::DealScore& line : table.getScoreSheet()) {
-    moonbase::games::RummyScoreLine scored;
-    scored.variant = std::string(rummy::variantName(line.variant));
-    scored.winner = line.winner;
-    scored.points = line.points;
-    view.scoreSheet.push_back(std::move(scored));
-  }
-  view.dealNumber = table.getDealNumber();
-  if (table.getDealNumber() > 0) view.variant = std::string(rummy::variantName(table.getVariant()));
-  for (std::size_t i = 0; i < table.getSeats().size(); ++i) {
-    moonbase::games::RummyStanding standing;
-    standing.playerId = table.getSeats()[i];
-    standing.handsWon = table.getWins()[i];
-    standing.points = RummyPointsOf(table, standing.playerId);
-    view.standings.push_back(std::move(standing));
-  }
-  if (table.getPhase() == rummy::TablePhase::Choosing) {
-    moonbase::games::RummyChoosing choosing;
-    choosing.dealer = table.getSeats().at(table.getDealer());
-    for (const rummy::Variant variant :
-         rummy::variantsFor(static_cast<int>(table.getSeats().size()))) {
-      choosing.options.push_back(std::string(rummy::variantName(variant)));
-    }
-    view.choosing = std::move(choosing);
-  }
-
-  const std::optional<rummy::Deal>& deal = table.getDeal();
-  // A deal that is over shows every hand: between deals the last one is
-  // what the table looks at.
-  const bool shown = deal.has_value() && rummy::dealPhase(*deal) != rummy::Phase::Playing;
-  if (deal.has_value()) {
-    if (!shown) {
-      view.currentPlayerId = CurrentTurnOf(*entry.state);
-    } else {
-      moonbase::games::RummyDealResult result;
-      result.variant = std::string(rummy::variantName(table.getVariant()));
-      result.winner = rummy::dealWinner(*deal);
-      result.points = rummy::dealWinnerPoints(*deal);
-      const auto& seats = rummy::dealPlayers(*deal);
-      for (std::size_t i = 0; i < seats.size(); ++i) {
-        moonbase::games::RummyScore score;
-        score.playerId = seats[i].id;
-        score.deadwood = rummy::dealDeadwood(*deal, static_cast<int>(i));
-        result.scores.push_back(std::move(score));
-      }
-      if (const rummy::GinState* gin = table.ginDeal();
-          gin != nullptr && gin->getResult().has_value()) {
-        const rummy::GinResult& ended = *gin->getResult();
-        moonbase::games::RummyGinResult reckoning;
-        reckoning.ending = GinEndingName(ended.ending);
-        if (ended.knocker >= 0) reckoning.knocker = seats.at(ended.knocker).id;
-        for (std::size_t i = 0; i < ended.hands.size(); ++i) {
-          moonbase::games::RummyArrangedHand hand;
-          hand.playerId = seats.at(i).id;
-          for (const auto& meld : ended.hands[i].melds) hand.melds.push_back(WireCards(meld));
-          hand.deadwood = WireCards(ended.hands[i].deadwood);
-          reckoning.hands.push_back(std::move(hand));
-        }
-        reckoning.laidOff = WireCards(ended.laidOff);
-        result.gin = std::move(reckoning);
-      }
-      view.lastDeal = std::move(result);
-    }
-    std::visit(
-        [&](const auto& d) {
-          view.stockCount = static_cast<int>(d.getStock().size());
-          view.discardCount = static_cast<int>(d.getDiscard().size());
-          if (!d.getDiscard().empty()) view.discardTop = WireCard(d.getDiscard().back());
-          view.discardPile = WireCards(d.getDiscard());
-          if (!shown) {
-            view.canDrawStock = d.canDrawStock();
-            if (d.getTakenDiscard().has_value()) view.takenDiscard = WireCard(*d.getTakenDiscard());
-          }
-        },
-        *deal);
-    if (const rummy::GameState* basic = table.rummyDeal(); basic != nullptr) {
-      if (!shown) {
-        view.stage = basic->getStage() == rummy::Stage::Draw ? "draw" : "play";
-        view.canDrawDiscard =
-            basic->getStage() == rummy::Stage::Draw && !basic->getDiscard().empty();
-      }
-      for (const rummy::Meld& meld : basic->getMelds()) {
-        moonbase::games::RummyTableMeld table_meld;
-        table_meld.owner = meld.owner;
-        table_meld.cards = WireCards(meld.cards);
-        view.melds.push_back(std::move(table_meld));
-      }
-      if (const auto& move = basic->getLastMove(); move.has_value()) {
-        moonbase::games::RummyLastMove last;
-        last.playerId = move->playerId;
-        last.move = RummyMoveName(move->kind);
-        last.cards = WireCards(move->cards);
-        if (move->meld >= 0) last.meldIndex = move->meld;
-        view.lastMove = std::move(last);
-      }
-    } else if (const rummy::GinState* gin = table.ginDeal(); gin != nullptr) {
-      if (!shown) {
-        view.stage = GinStageName(gin->getStage());
-        view.canDrawDiscard = gin->canDrawDiscard();
-      }
-      if (const auto& move = gin->getLastMove(); move.has_value()) {
-        moonbase::games::RummyLastMove last;
-        last.playerId = move->playerId;
-        last.move = GinMoveName(move->kind);
-        last.cards = WireCards(move->cards);
-        view.lastMove = std::move(last);
-      }
-    }
-  }
-  for (const std::string& seat_id : table.getSeats()) {
-    moonbase::games::RummyPlayer player;
-    player.playerId = seat_id;
-    player.handCount = 0;
-    const int at = deal.has_value()
-                       ? std::visit([&](const auto& d) { return d.playerIndex(seat_id); }, *deal)
-                       : -1;
-    if (at >= 0) {
-      const std::vector<cards::Card>& hand = rummy::dealPlayers(*deal).at(at).hand;
-      player.handCount = static_cast<int>(hand.size());
-      // Own hand faces only while a deal is on, everyone's once it ends.
-      if (shown || seat_id == viewer_id) player.hand = WireCards(hand);
-    }
-    view.players.push_back(std::move(player));
-  }
-  return view;
+TableContext GamesHub::ContextOf(const std::string& game_id, const GameEntry& entry) const {
+  return TableContext{game_id, entry.roster, entry.watchers, entry.terms, entry.event, NowMs()};
 }
 
 GameEvents GamesHub::JoinedEventLocked(const std::string& game_id, const GameEntry& entry,
                                       const std::string& viewer_id) const {
-  if (entry.kind == GameKind::kCastle) {
-    moonbase::games::CastleGameJoined joined;
-    joined.view = CastleViewLocked(game_id, entry, viewer_id);
-    return CastleUpdateEvent(CastleUpdate::FromGamejoined(std::move(joined)));
-  }
-  if (entry.kind == GameKind::kChess) {
-    moonbase::games::ChessGameJoined joined;
-    joined.view = ChessViewLocked(game_id, entry);
-    return ChessUpdateEvent(ChessUpdate::FromGamejoined(std::move(joined)));
-  }
-  if (entry.kind == GameKind::kPong) {
-    moonbase::games::PongGameJoined joined;
-    joined.view = PongViewLocked(game_id, entry);
-    return PongUpdateEvent(PongUpdate::FromGamejoined(std::move(joined)));
-  }
-  if (entry.kind == GameKind::kSpades) {
-    moonbase::games::SpadesGameJoined joined;
-    joined.view = SpadesViewLocked(game_id, entry, viewer_id);
-    return SpadesUpdateEvent(SpadesUpdate::FromGamejoined(std::move(joined)));
-  }
-  if (entry.kind == GameKind::kRummy) {
-    moonbase::games::RummyGameJoined joined;
-    joined.view = RummyViewLocked(game_id, entry, viewer_id);
-    return RummyUpdateEvent(RummyUpdate::FromGamejoined(std::move(joined)));
-  }
-  moonbase::games::GameJoined joined;
-  joined.view = ViewLocked(game_id, entry, viewer_id);
-  return GolfUpdateEvent(GolfUpdate::FromGamejoined(std::move(joined)));
+  return JoinedEventOf(entry.kind, ContextOf(game_id, entry), entry.state, viewer_id);
 }
 
 void GamesHub::StageGameViewsLocked(const std::string& game_id, const GameEntry& entry,
                                    Outbox& outbox) const {
-  // Chess hides nothing: one view for every seat and every watcher.
-  std::optional<moonbase::games::ChessView> chess_view;
-  if (entry.kind == GameKind::kChess) chess_view = ChessViewLocked(game_id, entry);
-  // Nor does pong.
-  if (entry.kind == GameKind::kPong) {
-    moonbase::games::PongGameState update;
-    update.view = PongViewLocked(game_id, entry);
-    const GameEvents event = PongUpdateEvent(PongUpdate::FromGamestate(std::move(update)));
-    for (const std::string& recipient : entry.roster) outbox.To(recipient, event);
-    for (const std::string& watcher : entry.watchers) outbox.To(watcher, event);
-    if (entry.started()) {
-      const auto& sheet = entry.pong().scoreSheet();
-      for (std::size_t i = entry.games_announced; i < sheet.size(); ++i) {
-        moonbase::games::PongGameEnded ended;
-        ended.result.winner = sheet[i].winner.value_or("");
-        ended.result.ending = std::string(pong::EndingName(sheet[i].ending));
-        const GameEvents told = PongUpdateEvent(PongUpdate::FromGameended(ended));
-        for (const std::string& recipient : entry.roster) outbox.To(recipient, told);
-        for (const std::string& watcher : entry.watchers) outbox.To(watcher, told);
-      }
-      entry.games_announced = sheet.size();
-    }
-  }
-  for (const std::string& recipient : entry.roster) {
-    if (entry.kind == GameKind::kPong) continue;  // staged above
-    if (entry.kind == GameKind::kCastle) {
-      moonbase::games::CastleGameState update;
-      update.view = CastleViewLocked(game_id, entry, recipient);
-      outbox.To(recipient, CastleUpdateEvent(CastleUpdate::FromGamestate(std::move(update))));
-      continue;
-    }
-    if (chess_view.has_value()) {
-      moonbase::games::ChessGameState update;
-      update.view = *chess_view;
-      outbox.To(recipient, ChessUpdateEvent(ChessUpdate::FromGamestate(std::move(update))));
-      continue;
-    }
-    if (entry.kind == GameKind::kSpades) {
-      moonbase::games::SpadesGameState update;
-      update.view = SpadesViewLocked(game_id, entry, recipient);
-      outbox.To(recipient, SpadesUpdateEvent(SpadesUpdate::FromGamestate(std::move(update))));
-      continue;
-    }
-    if (entry.kind == GameKind::kRummy) {
-      moonbase::games::RummyGameState update;
-      update.view = RummyViewLocked(game_id, entry, recipient);
-      outbox.To(recipient, RummyUpdateEvent(RummyUpdate::FromGamestate(std::move(update))));
-      continue;
-    }
-    moonbase::games::GameStateUpdate update;
-    update.view = ViewLocked(game_id, entry, recipient);
-    outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromGamestate(std::move(update))));
-  }
-  if (chess_view.has_value()) {
-    for (const std::string& watcher : entry.watchers) {
-      moonbase::games::ChessGameState update;
-      update.view = *chess_view;
-      outbox.To(watcher, ChessUpdateEvent(ChessUpdate::FromGamestate(std::move(update))));
-    }
-  }
-  // Each finished game's result after the views, once, from the sheet: an
-  // instance that learns of a game's end only after the next began still
-  // owes it.
-  if (entry.kind == GameKind::kChess && entry.started()) {
-    for (moonbase::games::ChessResult& result :
-         ChessResultsSince(entry.chess(), entry.games_announced)) {
-      moonbase::games::ChessGameEnded ended;
-      ended.result = std::move(result);
-      for (const std::string& recipient : entry.roster) {
-        outbox.To(recipient, ChessUpdateEvent(ChessUpdate::FromGameended(ended)));
-      }
-      for (const std::string& watcher : entry.watchers) {
-        outbox.To(watcher, ChessUpdateEvent(ChessUpdate::FromGameended(ended)));
-      }
-    }
-    entry.games_announced = entry.chess().scoreSheet().size();
-  }
-  // Each spades game's end after the views, once, from the table's games:
-  // an instance that learns of a game's end only after the next began
-  // still owes it.
-  if (entry.kind == GameKind::kSpades && entry.started()) {
-    const spades::Table& table = entry.spades();
-    for (std::size_t i = entry.games_announced; i < table.games().size(); ++i) {
-      moonbase::games::SpadesGameEnded ended;
-      ended.result = SpadesResultOf(table, table.games()[i]);
-      const GameEvents event = SpadesUpdateEvent(SpadesUpdate::FromGameended(std::move(ended)));
-      for (const std::string& recipient : entry.roster) outbox.To(recipient, event);
-    }
-    entry.games_announced = table.games().size();
-  }
+  Staged staged;
+  entry.games_announced =
+      StageViews(entry.kind, ContextOf(game_id, entry), entry.state, entry.games_announced, staged);
+  for (auto& [recipient, event] : staged) outbox.To(recipient, std::move(event));
   // A pairing's result follows the game's own ending.
   for (const auto& [room_id, round_robin_id] : round_robins_moved_) {
     const auto room = rooms_.find(room_id);
@@ -5444,86 +4539,20 @@ void GamesHub::StageGameViewsLocked(const std::string& game_id, const GameEntry&
   round_robins_moved_.clear();
 }
 
+// Final views (every card face up), with the result of a game the close
+// ended, to the seats and any watcher, then whatever the game tells its
+// seats of the close; the table is done and gone locally. A leaver hears
+// none of it: the roster no longer names it, and its gameLeft said it was
+// out.
 void GamesHub::StageGameOverLocked(Room& room, const std::string& game_id, Outbox& outbox) {
   const auto game = room.games.find(game_id);
   if (game == room.games.end() || !game->second.started()) return;
-  if (game->second.kind == GameKind::kCastle) {
-    // Final views (every hand face up), then the finish order; the
-    // engine names a loser only for a game over by play, and an
-    // abandonment has no finish order at all — nobody went out.
-    const castle::GameState& state = game->second.castle();
-    moonbase::games::CastleGameEnded ended;
-    ended.finished = state.getFinished();
-    ended.loser = state.loser();
-    StageGameViewsLocked(game_id, game->second, outbox);
-    for (const std::string& recipient : game->second.roster) {
-      outbox.To(recipient, CastleUpdateEvent(CastleUpdate::FromGameended(ended)));
-      player_game_.erase(recipient);
-    }
-    room.games.erase(game);
-    return;
-  }
-  if (game->second.kind == GameKind::kChess || game->second.kind == GameKind::kPong ||
-      game->second.kind == GameKind::kSpades) {
-    // Final views, and with them the result of a game the close ended
-    // (StageGameViewsLocked), to the seats and any watcher; one between games
-    // was said when it ended. A leaver hears neither: the roster no longer
-    // names it, and its gameLeft said it was out.
-    StageGameViewsLocked(game_id, game->second, outbox);
-    for (const std::string& recipient : game->second.roster) player_game_.erase(recipient);
-    room.games.erase(game);
-    return;
-  }
-  if (game->second.kind == GameKind::kRummy) {
-    // The table broke up: final views, then the evening's standings. Each
-    // deal's own result was its view's lastDeal as it ended.
-    const rummy::TableState& table = game->second.rummy();
-    moonbase::games::RummyGameEnded ended;
-    ended.dealsPlayed = table.getDealNumber();
-    for (std::size_t i = 0; i < table.getSeats().size(); ++i) {
-      moonbase::games::RummyStanding standing;
-      standing.playerId = table.getSeats()[i];
-      standing.handsWon = table.getWins()[i];
-      standing.points = RummyPointsOf(table, standing.playerId);
-      ended.standings.push_back(std::move(standing));
-    }
-    StageGameViewsLocked(game_id, game->second, outbox);
-    for (const std::string& recipient : game->second.roster) {
-      outbox.To(recipient, RummyUpdateEvent(RummyUpdate::FromGameended(ended)));
-      player_game_.erase(recipient);
-    }
-    room.games.erase(game);
-    return;
-  }
-  const golf::GameState& state = game->second.golf();
-
-  // Seat order, so the display string is stable. Winners come from the
-  // roster's seats; the scores keep every seat, abandoned or not.
-  const auto winner_indexes = WinnersAmong(state, game->second.roster);
-  std::vector<std::string> winner_ids;
-  for (std::size_t i = 0; i < state.getPlayers().size(); ++i) {
-    if (winner_indexes.contains(static_cast<int>(i))) {
-      winner_ids.push_back(state.getPlayer(static_cast<int>(i)).getName().value_or(""));
-    }
-  }
-
-  moonbase::games::GameEnded ended;
-  ended.winner = absl::StrJoin(winner_ids, " & ");
-  ended.winners = winner_ids;
-  for (const golf::Player& seat : state.getPlayers()) {
-    moonbase::games::FinalScore score;
-    score.playerId = seat.getName().value_or("");
-    score.score = seat.score();
-    ended.finalScores.push_back(std::move(score));
-  }
-
-  // Final views (everything face up), then the result; the game itself
-  // is done and gone locally.
-  StageGameViewsLocked(game_id, game->second, outbox);
-  for (const std::string& recipient : game->second.roster) {
-    outbox.To(recipient, GolfUpdateEvent(GolfUpdate::FromGameended(ended)));
-    player_game_.erase(recipient);
-  }
+  const GameEntry& entry = game->second;
+  StageGameViewsLocked(game_id, entry, outbox);
+  Staged staged;
+  StageClosedNotice(entry.kind, ContextOf(game_id, entry), entry.state, staged);
+  for (auto& [recipient, event] : staged) outbox.To(recipient, std::move(event));
+  for (const std::string& recipient : entry.roster) player_game_.erase(recipient);
   room.games.erase(game);
 }
 
