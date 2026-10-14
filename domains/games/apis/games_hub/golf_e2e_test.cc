@@ -77,6 +77,8 @@ TEST_F(GolfFixture, TheRoomListsEachPhaseOfTheTable) {
 TEST_F(GolfFixture, CommandsAreCountedOnTheGolfSeries) {
   auto table = SeatedTable();
   ASSERT_TRUE(table.has_value());
+  ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
+  ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
   ASSERT_NO_FATAL_FAILURE(Peek(table->alice, 0));
   ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
   ASSERT_NO_FATAL_FAILURE(Peek(table->bob, 0));

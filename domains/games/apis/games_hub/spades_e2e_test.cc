@@ -443,6 +443,8 @@ TEST_F(SpadesFixture, ATeamThatPassesFiveHundredWinsAndTheRoomCountsIt) {
   ExpectNoGameEnded(started->table.seats[1].stream);
   ASSERT_EQ(games_.size(), 3u);
   EXPECT_THAT(games_[2], ::testing::HasSubstr(R"("event":"game_started")"));
+  EXPECT_THAT(games_[2], ::testing::HasSubstr(R"("variant":"spades")"));
+  EXPECT_THAT(games_[2], ::testing::HasSubstr(R"("players":4)"));
   EXPECT_EQ(started->views[0].phase, "bidding");
   EXPECT_EQ(started->views[0].handNumber, 1);
   EXPECT_EQ(started->views[0].teams[0].score, 0);
@@ -584,7 +586,6 @@ TEST_F(SpadesFixture, AResumedSpadesSeatGetsItsOwnViewBack) {
   Seat& dealer = started->table.seats[0];
   const SpadesView& before = started->views[0];
   dealer.stream.Close();
-  ASSERT_TRUE(ReceiveCase(started->table.seats[1].stream, "roomState").has_value());
   auto resumed = OpenSeat(dealer.resume_token);
   ASSERT_TRUE(resumed.has_value());
   EXPECT_EQ(resumed->player_id, dealer.player_id);

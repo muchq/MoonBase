@@ -846,7 +846,10 @@ TEST_F(PongFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
   ExpectListedStatus(table.alice, table.game_id, "ended");
   ASSERT_TRUE(table.bob.stream.Send(PongStart("3d")).ok());
   ASSERT_TRUE(AwaitPongView(
-                  table.bob.stream, [](const auto& view) { return view.phase == "playing"; },
+                  table.bob.stream,
+                  [](const auto& view) {
+                    return view.phase == "playing" && view.scoreSheet.size() == 1;
+                  },
                   "the next game")
                   .has_value());
   ExpectListedStatus(table.bob, table.game_id, "playing");
@@ -878,7 +881,10 @@ TEST_F(PongEventFixture, EachGameIsRecordedStartedAndFinishedAsPong) {
       TickUntil(table.alice, [](const auto& view) { return view.phase == "ended"; }).has_value());
   ASSERT_TRUE(table.bob.stream.Send(PongStart("3d")).ok());
   ASSERT_TRUE(AwaitPongView(
-                  table.bob.stream, [](const auto& view) { return view.phase == "playing"; },
+                  table.bob.stream,
+                  [](const auto& view) {
+                    return view.phase == "playing" && view.scoreSheet.size() == 1;
+                  },
                   "the next game")
                   .has_value());
   const auto games = GameLines();
