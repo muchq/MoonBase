@@ -554,8 +554,8 @@ class LobbyDeliveryFixture : public LobbyFixture {
     opal::server::DeliveryClass delivery;
   };
 
-  GolfTestHooks MakeGolfHooks() override {
-    GolfTestHooks hooks;
+  HubTestHooks MakeGolfHooks() override {
+    HubTestHooks hooks;
     hooks.on_send = [this](const std::string& to, const moonbase::games::GameEvents& event,
                            const opal::server::DeliveryClass& delivery) {
       const auto* lobby = event.as_lobby_or_null();
@@ -632,8 +632,8 @@ TEST_F(LobbyFixture, LeavingTheWorldDropsTheReadersCoalescingState) {
 // out while the seat is still held, and only then does the seat park.
 class LobbyRaceFixture : public LobbyFixture {
  protected:
-  GolfTestHooks MakeGolfHooks() override {
-    GolfTestHooks hooks;
+  HubTestHooks MakeGolfHooks() override {
+    HubTestHooks hooks;
     hooks.before_seat_release = [this](const std::string&) { Park("seat"); };
     hooks.after_world_sent = [this] { Park("world"); };
     return hooks;
@@ -773,8 +773,8 @@ TEST_F(LobbyRaceFixture, AClosedSocketLeavesTheWorldBeforeTheSeatParks) {
 // it back while the old session is still unwinding.
 class SeatReleaseFixture : public SeamFixture {
  protected:
-  GolfTestHooks MakeGolfHooks() override {
-    GolfTestHooks hooks;
+  HubTestHooks MakeGolfHooks() override {
+    HubTestHooks hooks;
     hooks.after_seat_release = [this](const std::string&) { Park("released"); };
     return hooks;
   }

@@ -28,7 +28,7 @@
 #include <vector>
 
 #include "domains/games/apis/games_hub/games_hub_handler.h"
-#include "domains/games/apis/games_hub/golf_hub.h"
+#include "domains/games/apis/games_hub/hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/id_generator.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
@@ -79,7 +79,7 @@ inline const std::set<std::string>& NonCounterInstruments() {
 // limiter or drops a stream is checking those series here without saying so.
 inline void ExpectOnlyDeclaredCounterSeries(
     const futility::otel::CapturingMetricsRecorder& recorder) {
-  const auto& declared = GolfHub::DeclaredCounterSeries();
+  const auto& declared = GamesHub::DeclaredCounterSeries();
   for (const auto& entry : recorder.Entries()) {
     if (NonCounterInstruments().count(entry.name) > 0) continue;
     const bool found = std::any_of(declared.begin(), declared.end(), [&](const auto& series) {
@@ -358,7 +358,7 @@ std::optional<moonbase::games::PongView> AwaitPongView(
 }
 
 // Effectively-unlimited stream budgets (#1240) for suites whose flows
-// send at test speed, not human speed. Every direct GolfHub
+// send at test speed, not human speed. Every direct GamesHub
 // construction in a test should pass this unless the test is about the
 // limiter itself.
 inline RateLimits UnlimitedRateLimits() {
@@ -411,12 +411,12 @@ inline std::string ReadModel(const std::string& path) {
   return buffer.str();
 }
 
-// The label values GolfHub::DeclaredCounterSeries() carries for one
+// The label values GamesHub::DeclaredCounterSeries() carries for one
 // stream counter.
 inline std::set<std::string> DeclaredLabelValues(const std::string& counter,
                                                  const std::string& label) {
   std::set<std::string> values;
-  for (const auto& series : GolfHub::DeclaredCounterSeries()) {
+  for (const auto& series : GamesHub::DeclaredCounterSeries()) {
     if (series.name != counter) continue;
     const auto value = series.attributes.find(label);
     if (value != series.attributes.end()) values.insert(value->second);
@@ -554,7 +554,7 @@ class GamesHubStreamFixture : public testing::Test {
   /// receive budget can wait out.
   virtual std::chrono::seconds GracePeriod() { return std::chrono::seconds(60); }
   /// The race suites' scheduling seam; empty unless a suite overrides.
-  virtual GolfTestHooks MakeGolfHooks() { return {}; }
+  virtual HubTestHooks MakeGolfHooks() { return {}; }
 
   void SetUp() override { BuildHub(); }
 
@@ -578,7 +578,7 @@ class GamesHubStreamFixture : public testing::Test {
           [guard](const std::string& room_id, const std::string& player_id,
                   const MemberAction& action) { return (*guard)(room_id, player_id, action); });
     }
-    golf_ = std::make_shared<GolfHub>(vault_, MakeDealer(), ids_,
+    golf_ = std::make_shared<GamesHub>(vault_, MakeDealer(), ids_,
                                       /*grace_period=*/GracePeriod(), metrics_, store_, chat_store_,
                                       MakeRateLimits(), MakeGolfHooks());
     if (default_memory_chat) {
@@ -853,7 +853,7 @@ class GamesHubStreamFixture : public testing::Test {
   // meter underneath means values still go nowhere.
   std::shared_ptr<CapturingMetricsRecorder> metrics_ = MakeCapturingMetricsRecorder();
   std::shared_ptr<IdGenerator> ids_ = std::make_shared<SequentialIdGenerator>();
-  std::shared_ptr<GolfHub> golf_;
+  std::shared_ptr<GamesHub> golf_;
   std::shared_ptr<GamesHubHandler> handler_;
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::unique_ptr<moonbase::games::GamesHubClient> client_;

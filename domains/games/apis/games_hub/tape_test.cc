@@ -560,7 +560,7 @@ TEST(TapeShutdown, TheDestructorWakesThePollThreadInsteadOfWaitingForIt) {
   auto client = deja::Client::Create(std::move(config));
   ASSERT_TRUE(client.ok()) << client.error().message();
 
-  auto hub = std::make_unique<GolfHub>(
+  auto hub = std::make_unique<GamesHub>(
       std::make_shared<InMemoryTicketVault>(/*ticket_ttl=*/std::chrono::seconds(60),
                                             /*resume_ttl=*/std::chrono::seconds(60)),
       std::make_shared<cards::NoShuffleDealer>(), std::make_shared<SequentialIdGenerator>(),

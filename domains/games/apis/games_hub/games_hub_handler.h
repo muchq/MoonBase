@@ -3,7 +3,7 @@
 
 #include <memory>
 
-#include "domains/games/apis/games_hub/golf_hub.h"
+#include "domains/games/apis/games_hub/hub.h"
 #include "domains/games/apis/games_hub/id_generator.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "moonbase/games/server.h"
@@ -14,13 +14,13 @@ namespace games_hub {
 /// the one stream, Play, forwarded whole to the room hub.
 ///
 /// A new game is one more envelope member on Play — castle (#77) and the
-/// lobby (#1490) ride GolfHub's room layer (rooms, chat, grace, the store,
+/// lobby (#1490) ride GamesHub's room layer (rooms, chat, grace, the store,
 /// per-viewer redaction) that way — so the next game extends the room
 /// host, and the README says which union shape it copies.
 class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
  public:
   GamesHubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<IdGenerator> ids,
-                  std::shared_ptr<GolfHub> golf);
+                  std::shared_ptr<GamesHub> golf);
 
   // Note: operation IO generates as <Op>Input/<Op>Output regardless of
   // the named shapes bound in the model, and every namespace's shapes
@@ -46,7 +46,7 @@ class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
  private:
   const std::shared_ptr<TicketVault> vault_;
   const std::shared_ptr<IdGenerator> ids_;
-  const std::shared_ptr<GolfHub> golf_;
+  const std::shared_ptr<GamesHub> golf_;
 };
 
 }  // namespace games_hub

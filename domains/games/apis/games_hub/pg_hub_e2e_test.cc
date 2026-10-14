@@ -71,7 +71,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     return std::make_shared<PgChatStore>(std::make_shared<pg::Client>(url_));
   }
 
-  std::unique_ptr<pg::Listener> MakeListener(const std::shared_ptr<GolfHub>& golf) {
+  std::unique_ptr<pg::Listener> MakeListener(const std::shared_ptr<GamesHub>& golf) {
     auto listener = std::make_unique<pg::Listener>(
         url_,
         [golf](const std::string& channel, const std::string& payload) {
@@ -106,7 +106,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
   // destructor unblocks parked sessions and detaches the listener before
   // the members unwind (listener before golf, by declaration order).
   struct Instance {
-    std::shared_ptr<GolfHub> golf;
+    std::shared_ptr<GamesHub> golf;
     std::shared_ptr<CapturingMetricsRecorder> metrics;
     std::shared_ptr<HubStore> store;
     std::unique_ptr<moonbase::games::GamesHubServer> server;
@@ -129,7 +129,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     auto vault = MakeVault();
     auto ids = std::make_shared<RemoteIdGenerator>();
     instance->golf =
-        std::make_shared<GolfHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
+        std::make_shared<GamesHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
                                   /*grace_period=*/std::chrono::seconds(60), instance->metrics,
                                   instance->store, MakeChatStore(), UnlimitedRateLimits());
     const absl::Status restored = instance->golf->RestoreFromStore();
@@ -408,7 +408,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
   struct Generation {
     std::unique_ptr<moonbase::games::GamesHubServer> server;
     std::unique_ptr<moonbase::games::GamesHubClient> client;
-    std::shared_ptr<GolfHub> golf;
+    std::shared_ptr<GamesHub> golf;
     std::shared_ptr<HubStore> store;
   };
   std::vector<Generation> retired_;
@@ -901,7 +901,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesSweepingOneClockEndTheGameOnce) {
   ASSERT_NE(remote, nullptr);
   DetachOnScopeExit detach{this, remote.get()};
   std::atomic<int64_t> now_ms{1'800'000'000'000};
-  for (GolfHub* hub : {golf_.get(), remote->golf.get()}) {
+  for (GamesHub* hub : {golf_.get(), remote->golf.get()}) {
     hub->SetClock([&now_ms] { return absl::FromUnixMillis(now_ms.load()); });
     hub->SetChessOpener([](std::string_view setup_id)
                             -> absl::StatusOr<chess_play::ChessSetup> {
@@ -1230,7 +1230,7 @@ TEST_F(PgGamesHubFixture, AChallengePostedOnOneInstanceStartsOnAnother) {
   auto remote = BuildInstance();
   ASSERT_NE(remote, nullptr);
   DetachOnScopeExit detach{this, remote.get()};
-  for (GolfHub* hub : {golf_.get(), remote->golf.get()}) {
+  for (GamesHub* hub : {golf_.get(), remote->golf.get()}) {
     hub->SetChessOpener([](std::string_view setup_id) -> absl::StatusOr<chess_play::ChessSetup> {
       const auto name = chess_play::ChessSetupName(setup_id);
       const auto variant = chess_play::ChessSetupVariant(setup_id);

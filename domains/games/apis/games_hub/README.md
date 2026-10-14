@@ -85,7 +85,7 @@ never replaces one queued ahead of it (`MoveCoalescing`, pinned by
 `move_coalescing_test`; the hub's use of it by `lobby_e2e_test`). The
 rules and the map are `World` (`world.cc`), pinned by `world_test`.
 
-Hosted by `GolfHub` (`golf_hub.cc`) as the room stream's `lobby` member,
+Hosted by `GamesHub` (`hub.cc`) as the room stream's `lobby` member,
 the world is the session's: its room's, or the plaza's — the well-known
 room `plaza` — while unroomed; a `roomId` on `join` can only agree with
 that. Joining, creating, or leaving a room leaves the world (the client

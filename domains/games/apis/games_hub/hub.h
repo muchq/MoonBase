@@ -1,5 +1,5 @@
-#ifndef DOMAINS_GAMES_APIS_GAMES_HUB_GOLF_HUB_H
-#define DOMAINS_GAMES_APIS_GAMES_HUB_GOLF_HUB_H
+#ifndef DOMAINS_GAMES_APIS_GAMES_HUB_HUB_H
+#define DOMAINS_GAMES_APIS_GAMES_HUB_HUB_H
 
 #include <chrono>
 #include <condition_variable>
@@ -64,7 +64,7 @@ namespace games_hub {
 /// Scheduling seams for the race tests, unset in production. A hook runs
 /// on the hub's thread and must not call into the hub; each says whether
 /// it holds mu_.
-struct GolfTestHooks {
+struct HubTestHooks {
   /// Outside mu_, on the close path, after the world entry is gone and
   /// playerLeft has fanned out, before the seat parks for a resume to
   /// reclaim.
@@ -82,7 +82,7 @@ struct GolfTestHooks {
       on_send;
 };
 
-/// GolfHub is the room hub (#1187): seat admission, rooms,
+/// GamesHub is the room hub (#1187): seat admission, rooms,
 /// chat, and the game layer, behind GamesHubHandler::Play. The name is
 /// golf's; the room layer, castle (#77), rummy (#245), chess and the lobby
 /// (#1490) live here too. A room hosts tables of any game (#79): golf on
@@ -136,7 +136,7 @@ struct GolfTestHooks {
 /// sender sees is a message that was stored; remote appends reach local
 /// members through PumpChat on the room's chat wake, and joiners get
 /// SendChatHistory.
-class GolfHub final {
+class GamesHub final {
  public:
   using Registry = opal::server::SessionRegistry<moonbase::games::GameEvents>;
 
@@ -189,17 +189,17 @@ class GolfHub final {
   /// transaction and needs nothing from this handler.
   /// `limits` are the per-session stream budgets (#1240); the defaults
   /// serve production and tests inject extremes to pin the behavior.
-  explicit GolfHub(std::shared_ptr<TicketVault> vault,
+  explicit GamesHub(std::shared_ptr<TicketVault> vault,
                    std::shared_ptr<cards::Dealer> dealer = std::make_shared<cards::Dealer>(),
                    std::shared_ptr<IdGenerator> ids = std::make_shared<WhimsicalIdGenerator>(),
                    std::chrono::seconds grace_period = std::chrono::minutes(5),
                    std::shared_ptr<futility::otel::MetricsRecorder> metrics = nullptr,
                    std::shared_ptr<HubStore> store = nullptr,
                    std::shared_ptr<ChatStore> chat_store = nullptr, RateLimits limits = {},
-                   GolfTestHooks hooks = {});
+                   HubTestHooks hooks = {});
 
   /// Joins the boot reaper before the members it walks are torn down.
-  ~GolfHub();
+  ~GamesHub();
 
   /// Runs `action` while mu_ holds (room_id, player_id) to be a current
   /// member, or returns false without running it. Membership cannot
@@ -923,7 +923,7 @@ class GolfHub final {
   const std::shared_ptr<HubStore> store_;
   const std::shared_ptr<ChatStore> chat_store_;
   const RateLimits limits_;
-  const GolfTestHooks hooks_;
+  const HubTestHooks hooks_;
   /// ADR-0020 reconnect grace, shared by the registry's per-seat timers
   /// and the boot reaper's one cohort deadline. Zero disables both.
   const std::chrono::seconds grace_period_;
@@ -1046,14 +1046,14 @@ class GolfHub final {
   std::thread pong_ticks_;
 
   /// Set before serving and read without a lock thereafter, like the
-  /// tape's client; one per responder. Cleared first in ~GolfHub: their
+  /// tape's client; one per responder. Cleared first in ~GamesHub: their
   /// workers deliver through PumpChat, so they must be gone before
   /// anything that reaches.
   std::vector<std::unique_ptr<RoomBot>> bots_;
 
   // Declared last: destroyed first, joining registry threads before the
   // maps its on_expired callback touches go away. (The boot reaper is
-  // joined earlier still, explicitly, in ~GolfHub.)
+  // joined earlier still, explicitly, in ~GamesHub.)
   Registry registry_;
 };
 

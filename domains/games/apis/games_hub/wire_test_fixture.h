@@ -27,7 +27,7 @@
 #include <vector>
 
 #include "domains/games/apis/games_hub/games_hub_handler.h"
-#include "domains/games/apis/games_hub/golf_hub.h"
+#include "domains/games/apis/games_hub/hub.h"
 #include "domains/games/apis/games_hub/id_generator.h"
 #include "domains/games/apis/games_hub/rate_limiter.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
@@ -76,7 +76,7 @@ inline RateLimits WireRateLimits() {
 // does not name (#1323).
 inline void ExpectOnlyDeclaredCounterSeriesOnTheWire(
     const futility::otel::CapturingMetricsRecorder& recorder) {
-  const auto& declared = GolfHub::DeclaredCounterSeries();
+  const auto& declared = GamesHub::DeclaredCounterSeries();
   for (const auto& entry : recorder.Entries()) {
     if (entry.name == "hub_sessions_active" || entry.name == "lobby_tape_poller_active" ||
         entry.name == "bot_latency_us") {
@@ -141,7 +141,7 @@ class HubWireFixture : public ::testing::Test {
                                                        /*resume_ttl=*/std::chrono::seconds(60));
     auto ids = std::make_shared<SequentialIdGenerator>();
     golf_ =
-        std::make_shared<GolfHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
+        std::make_shared<GamesHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
                                   /*grace_period=*/std::chrono::seconds(60), metrics_, MakeStore(),
                                   /*chat_store=*/nullptr, MakeRateLimits(), MakeGolfHooks());
     ASSERT_TRUE(golf_->RestoreFromStore().ok());
@@ -151,7 +151,7 @@ class HubWireFixture : public ::testing::Test {
   }
 
   virtual RateLimits MakeRateLimits() { return WireRateLimits(); }
-  virtual GolfTestHooks MakeGolfHooks() { return {}; }
+  virtual HubTestHooks MakeGolfHooks() { return {}; }
   /// Null selects the production memory store.
   virtual std::shared_ptr<HubStore> MakeStore() { return nullptr; }
 
@@ -225,7 +225,7 @@ class HubWireFixture : public ::testing::Test {
 
   std::shared_ptr<futility::otel::CapturingMetricsRecorder> metrics_ =
       std::make_shared<futility::otel::CapturingMetricsRecorder>("games_hub_test");
-  std::shared_ptr<GolfHub> golf_;
+  std::shared_ptr<GamesHub> golf_;
   std::shared_ptr<GamesHubHandler> handler_;
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::shared_ptr<opal::http::Loopback> loopback_ = std::make_shared<opal::http::Loopback>();

@@ -116,7 +116,7 @@ class GatedChatStore final : public ChatStore {
 class HubChatRaceFixture : public GamesHubStreamFixture {
  protected:
   struct Instance {
-    std::shared_ptr<GolfHub> golf;
+    std::shared_ptr<GamesHub> golf;
     std::shared_ptr<CapturingMetricsRecorder> metrics;
     std::unique_ptr<moonbase::games::GamesHubServer> server;
     std::unique_ptr<moonbase::games::GamesHubClient> client;
@@ -157,7 +157,7 @@ class HubChatRaceFixture : public GamesHubStreamFixture {
     auto instance = std::make_unique<Instance>();
     instance->metrics = MakeCapturingMetricsRecorder();
     auto ids = std::make_shared<RemoteIdGenerator>();
-    instance->golf = std::make_shared<GolfHub>(vault_, std::make_shared<cards::NoShuffleDealer>(),
+    instance->golf = std::make_shared<GamesHub>(vault_, std::make_shared<cards::NoShuffleDealer>(),
                                                ids, std::chrono::seconds(60), instance->metrics,
                                                store_, chat_store_, UnlimitedRateLimits());
     EXPECT_TRUE(instance->golf->RestoreFromStore().ok());

@@ -7,7 +7,7 @@
 // The pinned surface, exactly: the lobby command frames as the client
 // mints them, and the lobby events as it reads them; and the terminal
 // Unauthenticated frame. The route, the session mint and resume bodies,
-// and the room layer's own frames are golf_wire_test's pins; the tape on
+// and the room layer's own frames are hub_wire_test's pins; the tape on
 // a glasshouse's glass is tape_test's, which needs a deja to poll.
 //
 // The harness is wire_test_fixture.h's; non-Beast, so it runs with no

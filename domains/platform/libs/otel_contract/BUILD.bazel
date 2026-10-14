@@ -27,7 +27,7 @@ go_test(
         "//domains/ai/apis/deja:src/hub.rs",
         "//domains/games/apis/games_hub:game_events.cc",
         "//domains/games/apis/games_hub:game_events.h",
-        "//domains/games/apis/games_hub:golf_hub.cc",
+        "//domains/games/apis/games_hub:hub.cc",
         "//domains/games/apis/games_hub:hosted_game.h",
         "//domains/games/apis/games_hub:surface.h",
         "//domains/games/apis/games_hub:world.h",

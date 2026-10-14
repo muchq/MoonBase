@@ -122,7 +122,7 @@ TEST(WinnersAmong, OrdinaryFinishMatchesTheEngineKnockerTiesIncluded) {
 // unguarded and safe; treat this instance as read-only for chat unless
 // the guard is rewired.
 struct SecondInstance {
-  std::shared_ptr<GolfHub> golf;
+  std::shared_ptr<GamesHub> golf;
   std::shared_ptr<CapturingMetricsRecorder> metrics;
   std::unique_ptr<moonbase::games::GamesHubServer> server;
   std::unique_ptr<moonbase::games::GamesHubClient> client;
@@ -438,7 +438,7 @@ std::unique_ptr<SecondInstance> BuildSecondInstance(
   auto instance = std::make_unique<SecondInstance>();
   instance->metrics = std::move(metrics);
   auto ids = std::make_shared<RemoteIdGenerator>();
-  instance->golf = std::make_shared<GolfHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
+  instance->golf = std::make_shared<GamesHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
                                              grace, instance->metrics, std::move(store),
                                              std::move(chat_store), UnlimitedRateLimits());
   EXPECT_TRUE(instance->golf->RestoreFromStore().ok());
@@ -1855,10 +1855,10 @@ TEST_F(GamesHubStreamFixture, RoomHeartbeatStampsAndSweepsOnItsInterval) {
   EXPECT_TRUE(spy->AwaitTouchOf(room_id, std::chrono::seconds(5)))
       << "the heartbeat never stamped a room with a live seat";
   EXPECT_EQ(spy->AwaitSweep(std::chrono::seconds(5)),
-            std::chrono::duration_cast<std::chrono::seconds>(GolfHub::kRoomStaleAfter))
+            std::chrono::duration_cast<std::chrono::seconds>(GamesHub::kRoomStaleAfter))
       << "the heartbeat never swept, or swept at the wrong threshold";
   EXPECT_EQ(spy->AwaitFeedSweep(std::chrono::seconds(5)),
-            std::chrono::duration_cast<std::chrono::seconds>(GolfHub::kPublishedChessKept))
+            std::chrono::duration_cast<std::chrono::seconds>(GamesHub::kPublishedChessKept))
       << "the heartbeat never swept the public chess feed (#1637), or at the wrong age";
 }
 
@@ -2167,7 +2167,7 @@ TEST_F(GamesHubStreamFixture, ChatMetricsCountOutcomesWithoutIdentifiers) {
 // it is the only guard against the reverse mistake, a series declared here that
 // no emit site ever writes, which nothing else in the suite can see.
 TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) {
-  const std::vector<GolfHub::CounterSeries> kExpected = {
+  const std::vector<GamesHub::CounterSeries> kExpected = {
       {"castle_commands", {{"command", "createGame"}}},
       {"castle_commands", {{"command", "joinGame"}}},
       {"castle_commands", {{"command", "startGame"}}},
@@ -2369,7 +2369,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
 
   // Count first, so dropping an entry from the handler's list fails here rather
   // than only failing whichever per-series assertion happened to cover it.
-  EXPECT_EQ(GolfHub::DeclaredCounterSeries().size(), kExpected.size());
+  EXPECT_EQ(GamesHub::DeclaredCounterSeries().size(), kExpected.size());
 
   const auto entries = capture->Entries();
   for (const auto& series : kExpected) {
