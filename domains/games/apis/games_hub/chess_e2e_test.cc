@@ -93,8 +93,8 @@ class ChessFixture : public GamesHubStreamFixture {
  protected:
   void SetUp() override {
     GamesHubStreamFixture::SetUp();
-    golf_->SetClock([this] { return absl::FromUnixMillis(now_ms_.load()); });
-    golf_->SetChessOpener(
+    hub_->SetClock([this] { return absl::FromUnixMillis(now_ms_.load()); });
+    hub_->SetChessOpener(
         [this](std::string_view setup_id) -> absl::StatusOr<chess_play::ChessSetup> {
           if (setup_id == refused_setup_) return absl::UnavailableError("the opener is down");
           auto setup = chess_play::SelectChessSetup(setup_id, setup_gen_);
@@ -338,11 +338,11 @@ TEST_F(ChessFixture, TheSweepEndsAGameWhoseSideToMoveRanOutOfTime) {
 
   // Black's three minutes, less a millisecond: nothing to sweep.
   now_ms_ += 179'999;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
   ExpectNoEvent(table.bob.stream);
 
   now_ms_ += 1;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 1);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 1);
   for (Seat* seat : {&table.alice, &table.bob}) {
     auto result = Ended(*seat);
     ASSERT_TRUE(result.has_value());
@@ -350,7 +350,7 @@ TEST_F(ChessFixture, TheSweepEndsAGameWhoseSideToMoveRanOutOfTime) {
     EXPECT_EQ(result->ending, "timeout");
   }
   // A finished game is nothing to sweep.
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
 }
 
 TEST_F(ChessFixture, ThePawnSideOutOfTimeOnlyDraws) {
@@ -358,7 +358,7 @@ TEST_F(ChessFixture, ThePawnSideOutOfTimeOnlyDraws) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
   now_ms_ += 180'000;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 1);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 1);
   auto result = Ended(started->table.bob);
   ASSERT_TRUE(result.has_value());
   EXPECT_FALSE(result->winner.has_value());
@@ -426,8 +426,8 @@ TEST_F(ChessFixture, TheClockThreadFlagsOnItsOwn) {
   opening_.fen = kQuiet;
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
-  golf_->StartChessClocks(std::chrono::milliseconds(10));
-  golf_->StartChessClocks(std::chrono::milliseconds(10));
+  hub_->StartChessClocks(std::chrono::milliseconds(10));
+  hub_->StartChessClocks(std::chrono::milliseconds(10));
   now_ms_ += 180'000;
   auto result = Ended(started->table.alice);
   ASSERT_TRUE(result.has_value());
@@ -574,7 +574,7 @@ TEST_F(ChessFixture, AMoveBeforeTheStartIsRefused) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "game not started");
   // Nor is a pending table anything to sweep, however late it is.
   now_ms_ += 10'000'000;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
 }
 
 // The rest of the room watches a table (#1633): the seats' own view,
@@ -1208,13 +1208,13 @@ class ChessEventFixture : public ChessFixture {
  protected:
   void SetUp() override {
     ChessFixture::SetUp();
-    golf_->SetEventWriter(
+    hub_->SetEventWriter(
         [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
   }
   // The writer goes first: the hub's teardown can end a game, and
   // `events_` dies before the base's hub does.
   void TearDown() override {
-    if (golf_ != nullptr) golf_->SetEventWriter(nullptr);
+    if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
     ChessFixture::TearDown();
   }
   std::vector<std::string> events_;
@@ -1303,18 +1303,18 @@ TEST_F(ChessOutageFixture, AFlagTheStoreCannotTakeWaitsBeforeItsRetry) {
   ASSERT_TRUE(started.has_value());
   now_ms_ += 180'000;
   outage_->down = true;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
   EXPECT_EQ(outage_->finishes, 1);
   now_ms_ += GamesHub::kChessFlagRetry.count() - 1;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
   EXPECT_EQ(outage_->finishes, 1);
   now_ms_ += 1;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
   EXPECT_EQ(outage_->finishes, 2);
   // Back up: the next retry lands the flag.
   outage_->down = false;
   now_ms_ += GamesHub::kChessFlagRetry.count();
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 1);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 1);
   auto result = Ended(started->table.bob);
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->ending, "timeout");
@@ -1328,17 +1328,17 @@ TEST_F(ChessOutageFixture, AGameThatEndsWhileItsFlagWaitsLeavesNoRetryBehind) {
   ASSERT_TRUE(started.has_value());
   now_ms_ += 180'000;
   outage_->down = true;
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
-  EXPECT_EQ(golf_->ChessFlagRetriesPending(), 1u);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->ChessFlagRetriesPending(), 1u);
   // The control: another sweep inside the retry window keeps it.
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
-  EXPECT_EQ(golf_->ChessFlagRetriesPending(), 1u);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->ChessFlagRetriesPending(), 1u);
   // The store comes back and the game ends another way.
   outage_->down = false;
   ASSERT_TRUE(started->table.bob.stream.Send(Resign()).ok());
   ASSERT_TRUE(Ended(started->table.alice).has_value());
-  EXPECT_EQ(golf_->SweepChessClocksOnce(), 0);
-  EXPECT_EQ(golf_->ChessFlagRetriesPending(), 0u);
+  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->ChessFlagRetriesPending(), 0u);
 }
 
 // Without a setup named, the hub starts ordinary chess.
@@ -1740,7 +1740,7 @@ TEST_F(ChessFixture, ThePublicFeedServesGamesThatEndedPublished) {
 TEST_F(ChessFixture, AGameEndingPublishedAsksToIndexItsPlayers) {
   std::mutex mu;
   std::vector<std::pair<std::string, std::string>> asked;
-  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+  hub_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
     const std::lock_guard<std::mutex> lock(mu);
     asked.emplace_back(ask.player_id, ask.month);
   });
@@ -1774,7 +1774,7 @@ TEST_F(ChessFixture, AGameEndingPublishedAsksToIndexItsPlayers) {
 TEST_F(ChessFixture, AGameEndedByALeaveAsksToIndexWhoeverLeftToo) {
   std::mutex mu;
   std::vector<std::string> asked;
-  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+  hub_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
     const std::lock_guard<std::mutex> lock(mu);
     asked.push_back(ask.player_id);
   });
@@ -1796,7 +1796,7 @@ TEST_F(ChessFixture, AGameEndingInAMonthsFirstMinuteAsksForTheMonthBeforeToo) {
   constexpr int64_t kFebruary = 1'801'440'000'000;  // 2027-02-01T00:00:00Z
   std::mutex mu;
   std::vector<std::pair<std::string, std::string>> asked;
-  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+  hub_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
     const std::lock_guard<std::mutex> lock(mu);
     asked.emplace_back(ask.player_id, ask.month);
   });
@@ -1834,7 +1834,7 @@ TEST_F(ChessFixture, AGameEndingInAMonthsFirstMinuteAsksForTheMonthBeforeToo) {
 TEST_F(ChessFixture, ATableThatHasAlreadyEndedAsksNoOneAgain) {
   std::mutex mu;
   std::vector<std::string> asked;
-  golf_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
+  hub_->SetChessIndexer([&](const one_d4::IndexAsk& ask) {
     const std::lock_guard<std::mutex> lock(mu);
     asked.push_back(ask.player_id);
   });

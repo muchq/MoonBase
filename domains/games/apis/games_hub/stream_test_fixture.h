@@ -554,7 +554,7 @@ class GamesHubStreamFixture : public testing::Test {
   /// receive budget can wait out.
   virtual std::chrono::seconds GracePeriod() { return std::chrono::seconds(60); }
   /// The race suites' scheduling seam; empty unless a suite overrides.
-  virtual HubTestHooks MakeGolfHooks() { return {}; }
+  virtual HubTestHooks MakeHubHooks() { return {}; }
 
   void SetUp() override { BuildHub(); }
 
@@ -578,18 +578,18 @@ class GamesHubStreamFixture : public testing::Test {
           [guard](const std::string& room_id, const std::string& player_id,
                   const MemberAction& action) { return (*guard)(room_id, player_id, action); });
     }
-    golf_ = std::make_shared<GamesHub>(vault_, MakeDealer(), ids_,
+    hub_ = std::make_shared<GamesHub>(vault_, MakeDealer(), ids_,
                                       /*grace_period=*/GracePeriod(), metrics_, store_, chat_store_,
-                                      MakeRateLimits(), MakeGolfHooks());
+                                      MakeRateLimits(), MakeHubHooks());
     if (default_memory_chat) {
-      *guard = [golf = golf_.get()](const std::string& room_id, const std::string& player_id,
+      *guard = [golf = hub_.get()](const std::string& room_id, const std::string& player_id,
                                     const MemberAction& action) {
         return golf->WithMember(room_id, player_id, action);
       };
     }
-    const absl::Status restored = golf_->RestoreFromStore();
+    const absl::Status restored = hub_->RestoreFromStore();
     ASSERT_TRUE(restored.ok()) << restored;
-    handler_ = std::make_shared<GamesHubHandler>(vault_, ids_, golf_);
+    handler_ = std::make_shared<GamesHubHandler>(vault_, ids_, hub_);
     server_ = std::make_unique<moonbase::games::GamesHubServer>(handler_);
 
     auto loopback = std::make_shared<opal::http::Loopback>();
@@ -853,7 +853,7 @@ class GamesHubStreamFixture : public testing::Test {
   // meter underneath means values still go nowhere.
   std::shared_ptr<CapturingMetricsRecorder> metrics_ = MakeCapturingMetricsRecorder();
   std::shared_ptr<IdGenerator> ids_ = std::make_shared<SequentialIdGenerator>();
-  std::shared_ptr<GamesHub> golf_;
+  std::shared_ptr<GamesHub> hub_;
   std::shared_ptr<GamesHubHandler> handler_;
   std::unique_ptr<moonbase::games::GamesHubServer> server_;
   std::unique_ptr<moonbase::games::GamesHubClient> client_;

@@ -46,7 +46,7 @@ class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
  private:
   const std::shared_ptr<TicketVault> vault_;
   const std::shared_ptr<IdGenerator> ids_;
-  const std::shared_ptr<GamesHub> golf_;
+  const std::shared_ptr<GamesHub> hub_;
 };
 
 }  // namespace games_hub

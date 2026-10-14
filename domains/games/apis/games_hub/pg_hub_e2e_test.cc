@@ -48,13 +48,13 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     ASSERT_TRUE(db.Exec("TRUNCATE rooms, published_chess_games CASCADE").ok());
     ASSERT_TRUE(db.Exec("TRUNCATE tickets, resume_tokens").ok());
     GamesHubStreamFixture::SetUp();
-    listener_ = MakeListener(golf_);
+    listener_ = MakeListener(hub_);
   }
 
   // Listeners reference their handler, and handlers hold a raw listener
   // pointer for channel churn — detach before either side dies.
   void TearDown() override {
-    if (golf_ != nullptr) golf_->AttachListener(nullptr);
+    if (hub_ != nullptr) hub_->AttachListener(nullptr);
     listener_.reset();
     GamesHubStreamFixture::TearDown();
   }
@@ -93,13 +93,13 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
   // path and its store then writes the goodbyes a real crash never
   // would — every DB assertion must come before TearDown.
   void RestartHub() {
-    golf_->AttachListener(nullptr);
+    hub_->AttachListener(nullptr);
     listener_.reset();
     if (store_ != nullptr) store_->Flush();
     retired_.push_back(
-        {std::move(server_), std::move(client_), std::move(golf_), std::move(store_)});
+        {std::move(server_), std::move(client_), std::move(hub_), std::move(store_)});
     BuildHub();
-    listener_ = MakeListener(golf_);
+    listener_ = MakeListener(hub_);
   }
 
   // A second live hub over the same database. Its
@@ -217,7 +217,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
   };
 
   void DetachListeners(Instance& remote) {
-    if (golf_ != nullptr) golf_->AttachListener(nullptr);
+    if (hub_ != nullptr) hub_->AttachListener(nullptr);
     listener_.reset();
     if (remote.golf != nullptr) remote.golf->AttachListener(nullptr);
     remote.listener.reset();
@@ -901,7 +901,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesSweepingOneClockEndTheGameOnce) {
   ASSERT_NE(remote, nullptr);
   DetachOnScopeExit detach{this, remote.get()};
   std::atomic<int64_t> now_ms{1'800'000'000'000};
-  for (GamesHub* hub : {golf_.get(), remote->golf.get()}) {
+  for (GamesHub* hub : {hub_.get(), remote->golf.get()}) {
     hub->SetClock([&now_ms] { return absl::FromUnixMillis(now_ms.load()); });
     hub->SetChessOpener([](std::string_view setup_id)
                             -> absl::StatusOr<chess_play::ChessSetup> {
@@ -942,7 +942,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesSweepingOneClockEndTheGameOnce) {
                   .has_value());
 
   now_ms += 180'000;
-  const int ended = remote->golf->SweepChessClocksOnce() + golf_->SweepChessClocksOnce();
+  const int ended = remote->golf->SweepChessClocksOnce() + hub_->SweepChessClocksOnce();
   EXPECT_EQ(ended, 1);
   for (Seat* seat : {&alice, &bob}) {
     auto result = ReceiveChess(seat->stream, "gameEnded");
@@ -1087,7 +1087,7 @@ TEST_F(PgGamesHubFixture, CrashedConnectedSeatsRoomIsSweptOnceStale) {
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomChat").has_value());
 
   RestartHub();
-  ASSERT_TRUE(golf_->WithMember(room_id, alice->player_id, [] {}))
+  ASSERT_TRUE(hub_->WithMember(room_id, alice->player_id, [] {}))
       << "the successor never restored the ghost room";
   ASSERT_TRUE(WaitForListenerCount(room_id, 1));
   pg::Client db(url_);
@@ -1097,8 +1097,8 @@ TEST_F(PgGamesHubFixture, CrashedConnectedSeatsRoomIsSweptOnceStale) {
                   .ok());
 
   // One heartbeat tick, by hand: the stamp vouches for nothing here.
-  golf_->StampHeldRooms();
-  golf_->SweepStaleRooms();
+  hub_->StampHeldRooms();
+  hub_->SweepStaleRooms();
   store_->Flush();
 
   auto room = db.Exec("SELECT 1 FROM rooms WHERE room_id = $1", {room_id});
@@ -1111,7 +1111,7 @@ TEST_F(PgGamesHubFixture, CrashedConnectedSeatsRoomIsSweptOnceStale) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
   bool held = true;
   while (held && std::chrono::steady_clock::now() < deadline) {
-    held = golf_->WithMember(room_id, alice->player_id, [] {});
+    held = hub_->WithMember(room_id, alice->player_id, [] {});
     if (held) std::this_thread::sleep_for(std::chrono::milliseconds(25));
   }
   EXPECT_FALSE(held) << "the sweep's wake never dropped the successor's copy";
@@ -1230,7 +1230,7 @@ TEST_F(PgGamesHubFixture, AChallengePostedOnOneInstanceStartsOnAnother) {
   auto remote = BuildInstance();
   ASSERT_NE(remote, nullptr);
   DetachOnScopeExit detach{this, remote.get()};
-  for (GamesHub* hub : {golf_.get(), remote->golf.get()}) {
+  for (GamesHub* hub : {hub_.get(), remote->golf.get()}) {
     hub->SetChessOpener([](std::string_view setup_id) -> absl::StatusOr<chess_play::ChessSetup> {
       const auto name = chess_play::ChessSetupName(setup_id);
       const auto variant = chess_play::ChessSetupVariant(setup_id);
@@ -1383,7 +1383,7 @@ TEST_F(PgGamesHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
                   .has_value());
   // Hold Alice's listener behind the finish and the finishing instance's
   // writer drain. This makes the lost-handoff race deterministic.
-  golf_->AttachListener(nullptr);
+  hub_->AttachListener(nullptr);
   listener_.reset();
   // bob's final turn finishes the game on the other instance.
   ASSERT_TRUE(bob.stream.Send(Move(GolfMove::FromDrawcard(moonbase::games::DrawCard{}))).ok());
@@ -1403,7 +1403,7 @@ TEST_F(PgGamesHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
 
   // Reattach after the terminal write is fully settled. Wait until both
   // instances have issued LISTEN before poking the primary.
-  listener_ = MakeListener(golf_);
+  listener_ = MakeListener(hub_);
   ASSERT_TRUE(WaitForListenerCount(table->room_id, 2));
   pg::Client db(url_);
   ASSERT_TRUE(db.Exec("SELECT pg_notify($1, 'finish-sync')", {RoomChannel(table->room_id)}).ok());
@@ -1443,7 +1443,7 @@ TEST_F(PgGamesHubFixture, ARebaseOntoARemoteFinishStillGetsTheCeremony) {
 
   // Hold alice's listener behind everything that follows, so her
   // instance learns of the finish only through its own commit.
-  golf_->AttachListener(nullptr);
+  hub_->AttachListener(nullptr);
   listener_.reset();
   // bob abandons on his instance: alice is the last seat standing, so the
   // game resolves there and its row turns terminal.
@@ -1465,7 +1465,7 @@ TEST_F(PgGamesHubFixture, ARebaseOntoARemoteFinishStillGetsTheCeremony) {
 
   // The wake she missed arrives with the reattach: the ceremony she is
   // owed, then a lobby with the table gone and her free at last.
-  listener_ = MakeListener(golf_);
+  listener_ = MakeListener(hub_);
   ASSERT_TRUE(WaitForListenerCount(table->room_id, 2));
   pg::Client db(url_);
   ASSERT_TRUE(db.Exec("SELECT pg_notify($1, 'finish-sync')", {RoomChannel(table->room_id)}).ok());
@@ -1895,7 +1895,7 @@ class PgLaggingWriterFixture : public PgGamesHubFixture {
   void SetUp() override {
     PgGamesHubFixture::SetUp();
     if (IsSkipped()) return;
-    golf_->AttachListener(nullptr);
+    hub_->AttachListener(nullptr);
     listener_.reset();
   }
   std::shared_ptr<HubStore> MakeStore() override {

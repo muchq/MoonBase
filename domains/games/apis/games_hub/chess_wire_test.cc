@@ -43,9 +43,9 @@ class ChessWireTest : public HubWireFixture {
  protected:
   void SetUp() override {
     HubWireFixture::SetUp();
-    golf_->SetClock([] { return absl::FromUnixMillis(1'800'000'000'000); });
+    hub_->SetClock([] { return absl::FromUnixMillis(1'800'000'000'000); });
     // White Kg6 Pe7 against Kh8: e7e8q mates.
-    golf_->SetChessOpener([this](std::string_view setup_id) {
+    hub_->SetChessOpener([this](std::string_view setup_id) {
       auto setup = chess_play::SelectChessSetup(setup_id, setup_gen_);
       if (setup.ok()) {
         setup->opening = chess_play::Opening{"7k/4P3/6K1/8/8/8/8/8 w - - 0 1", 0};

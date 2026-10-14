@@ -26,7 +26,7 @@ class VoiceWireTest : public HubWireFixture {
     HubWireFixture::SetUp();
     moonbase::games::IceServer stun;
     stun.urls = {"stun:stun.example:3478"};
-    golf_->SetIceServers({stun});
+    hub_->SetIceServers({stun});
   }
 
   std::shared_ptr<opal::http::WebSocket> DialReady() {

@@ -982,7 +982,7 @@ TEST_F(GamesHubStreamFixture, ABotMentionIsAnsweredInTheRoomAfterTheAsker) {
   config.http_client = std::make_shared<OneReplyMicrogpt>("whoever knocks last");
   auto client = microgpt::Client::Create(std::move(config));
   ASSERT_TRUE(client.ok());
-  golf_->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*client)));
+  hub_->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*client)));
 
   auto alice = OpenSeat();
   auto bob = OpenSeat();
@@ -1061,7 +1061,7 @@ TEST_F(GamesHubStreamFixture, AWordchainCommandIsAnsweredByMithrilInTheRoom) {
   config.http_client = std::make_shared<OneLadderMithril>();
   auto client = mithril::Client::Create(std::move(config));
   ASSERT_TRUE(client.ok());
-  golf_->StartWordchain(std::make_shared<mithril::Client>(std::move(*client)));
+  hub_->StartWordchain(std::make_shared<mithril::Client>(std::move(*client)));
 
   auto alice = OpenSeat();
   auto bob = OpenSeat();
@@ -1102,12 +1102,12 @@ TEST_F(GamesHubStreamFixture, BothBotsAnswerTheirOwnAsksInOneRoom) {
   gpt.http_client = std::make_shared<OneReplyMicrogpt>("whoever knocks last");
   auto microgpt_client = microgpt::Client::Create(std::move(gpt));
   ASSERT_TRUE(microgpt_client.ok());
-  golf_->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*microgpt_client)));
+  hub_->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*microgpt_client)));
   opal::ClientConfig ladder = mithril::DefaultClientConfig("http://mithril:8083");
   ladder.http_client = std::make_shared<OneLadderMithril>();
   auto mithril_client = mithril::Client::Create(std::move(ladder));
   ASSERT_TRUE(mithril_client.ok());
-  golf_->StartWordchain(std::make_shared<mithril::Client>(std::move(*mithril_client)));
+  hub_->StartWordchain(std::make_shared<mithril::Client>(std::move(*mithril_client)));
 
   auto alice = OpenSeat();
   ASSERT_TRUE(alice.has_value());
@@ -2015,7 +2015,7 @@ TEST_F(GamesHubStreamFixture, RestoreFromStoreRefusesASecondCall) {
 
   // The fixture's own hub restored an empty store — no thread armed —
   // and must refuse a second call all the same.
-  const absl::Status empty_again = golf_->RestoreFromStore();
+  const absl::Status empty_again = hub_->RestoreFromStore();
   EXPECT_EQ(empty_again.code(), absl::StatusCode::kFailedPrecondition) << empty_again;
 }
 
@@ -2794,7 +2794,7 @@ TEST_F(GamesHubStreamFixture, DrainMetricsCountBatchesAndZeroWakes) {
   const double delivered_before = metrics_->CounterTotal("chat_rows_delivered");
   const double drains_before = metrics_->CounterTotal("chat_catch_up_drains");
 
-  golf_->OnNotify(ChatChannel(room_id), "remote-instance");
+  hub_->OnNotify(ChatChannel(room_id), "remote-instance");
   for (auto* seat : {&*alice, &*bob}) {
     ASSERT_TRUE(ReceiveCase(seat->stream, "roomChat").has_value());
     ASSERT_TRUE(ReceiveCase(seat->stream, "roomChat").has_value());
@@ -2805,7 +2805,7 @@ TEST_F(GamesHubStreamFixture, DrainMetricsCountBatchesAndZeroWakes) {
   // Redundant wake: one more drain, nothing counted as delivered — the
   // batch-of-zero the windowed average needs. OnNotify pumps synchronously,
   // so no waiting.
-  golf_->OnNotify(ChatChannel(room_id), "remote-instance");
+  hub_->OnNotify(ChatChannel(room_id), "remote-instance");
   EXPECT_EQ(metrics_->CounterTotal("chat_rows_delivered") - delivered_before, 2);
   EXPECT_EQ(metrics_->CounterTotal("chat_catch_up_drains") - drains_before, 2);
 }
@@ -2833,19 +2833,19 @@ TEST_F(GamesHubStreamFixture, WithMemberRunsOnlyForCurrentMembers) {
   ASSERT_TRUE(ReceiveCase(alice->stream, "roomState").has_value());
 
   bool ran = false;
-  EXPECT_TRUE(golf_->WithMember(room_id, alice->player_id, [&] { ran = true; }));
+  EXPECT_TRUE(hub_->WithMember(room_id, alice->player_id, [&] { ran = true; }));
   EXPECT_TRUE(ran);
 
   ran = false;
-  EXPECT_FALSE(golf_->WithMember(room_id, "nobody", [&] { ran = true; }));
-  EXPECT_FALSE(golf_->WithMember("no-such-room", alice->player_id, [&] { ran = true; }));
+  EXPECT_FALSE(hub_->WithMember(room_id, "nobody", [&] { ran = true; }));
+  EXPECT_FALSE(hub_->WithMember("no-such-room", alice->player_id, [&] { ran = true; }));
   EXPECT_FALSE(ran) << "the action must not run when the seat is not there";
 
   // Leaving revokes it, which is what keeps a chat append off a seat
   // that is already gone.
   ASSERT_TRUE(bob->stream.Send(GameCommands::FromLeaveroom(moonbase::games::LeaveRoom{})).ok());
   ASSERT_TRUE(ReceiveCase(bob->stream, "roomLeft").has_value());
-  EXPECT_FALSE(golf_->WithMember(room_id, bob->player_id, [&] { ran = true; }));
+  EXPECT_FALSE(hub_->WithMember(room_id, bob->player_id, [&] { ran = true; }));
   EXPECT_FALSE(ran);
 
   // And a message from the revoked seat is refused rather than echoed.
@@ -2911,16 +2911,16 @@ class GameEventFixture : public GolfGameFixture {
  protected:
   void SetUp() override {
     GolfGameFixture::SetUp();
-    golf_->SetEventWriter(
+    hub_->SetEventWriter(
         [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
   }
 
   // The writer goes before anything else does. A hub tears down by
   // joining its boot reaper, which reaps parked seats — a leave, which
   // can end a game, which records one; and `events_` is a member of this
-  // class, so it is already gone by the time the base's `golf_` is.
+  // class, so it is already gone by the time the base's `hub_` is.
   void TearDown() override {
-    if (golf_ != nullptr) golf_->SetEventWriter(nullptr);
+    if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
     GolfGameFixture::TearDown();
   }
 
@@ -2978,7 +2978,7 @@ TEST_F(GameEventFixture, TheFunnelIsRecordedFromTheRoomToTheGameThatEndedIt) {
   // not the end of it. Alice leaving after him empties the room.
   table->bob.stream.Close();
   table->alice.stream.Close();
-  golf_->registry().Drain(std::chrono::seconds(1));
+  hub_->registry().Drain(std::chrono::seconds(1));
 
   EXPECT_THAT(Names(), ::testing::ElementsAre("room_created", "room_joined", "game_started",
                                               "game_finished", "room_closed"));
@@ -3164,7 +3164,7 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAClosedRoomWritesNothing) {
       [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
 
   alice->stream.Close();
-  golf_->registry().Drain(std::chrono::seconds(1));
+  hub_->registry().Drain(std::chrono::seconds(1));
   store_->Flush();
   ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_closed"));
 

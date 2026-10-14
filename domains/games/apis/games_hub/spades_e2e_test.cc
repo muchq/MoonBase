@@ -77,14 +77,14 @@ class SpadesFixture : public GamesHubStreamFixture {
  protected:
   void SetUp() override {
     GamesHubStreamFixture::SetUp();
-    golf_->SetEventWriter([this](absl::Time, std::string_view line) {
+    hub_->SetEventWriter([this](absl::Time, std::string_view line) {
       if (line.find(R"("event":"game_)") != std::string::npos) games_.emplace_back(line);
     });
   }
   // The writer goes first: the hub's teardown can end a game, and
   // `games_` dies before the base's hub does.
   void TearDown() override {
-    if (golf_ != nullptr) golf_->SetEventWriter(nullptr);
+    if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
     GamesHubStreamFixture::TearDown();
   }
   // The stats archive's game lines (#1571), in order.

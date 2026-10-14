@@ -352,7 +352,7 @@ TEST_F(HubWireTest, AWordchainReplyCarriesItsLadderOnTheWire) {
   config.http_client = std::make_shared<OneLadderMithril>();
   auto client = mithril::Client::Create(std::move(config));
   ASSERT_TRUE(client.ok());
-  golf_->StartWordchain(std::make_shared<mithril::Client>(std::move(*client)));
+  hub_->StartWordchain(std::make_shared<mithril::Client>(std::move(*client)));
 
   json creator_session;
   auto creator = DialReady(creator_session);
@@ -464,7 +464,7 @@ class SeatReleaseWireTest : public HubWireTest {
     Release();
     HubWireTest::TearDown();
   }
-  HubTestHooks MakeGolfHooks() override {
+  HubTestHooks MakeHubHooks() override {
     HubTestHooks hooks;
     hooks.before_seat_release = [this](const std::string&) {
       std::unique_lock<std::mutex> lock(mu_);

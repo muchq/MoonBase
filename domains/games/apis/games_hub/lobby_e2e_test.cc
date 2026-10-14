@@ -53,7 +53,7 @@ GameCommands LeaveWorld() { return Lobby(LobbyAction::FromLeave(moonbase::games:
 
 // A fixture whose hub hooks park at a named seam until the test releases
 // them, so an interleaving is the test's and not the scheduler's. A
-// subclass installs the hooks (MakeGolfHooks) as
+// subclass installs the hooks (MakeHubHooks) as
 // `Park("<stage>")` calls.
 //
 // The in-memory wire completes a session's parked Receive inline on the
@@ -351,7 +351,7 @@ TEST_F(LobbyFixture, ASiblingsMemberDropLeavesTheWorldToo) {
   ASSERT_TRUE(ReceiveLobby(alice->stream, "playerJoined").has_value());
 
   store_->Enqueue({HubStore::DeleteMember{room_id, bob->player_id}});
-  golf_->OnNotify(RoomChannel(room_id), "sibling");
+  hub_->OnNotify(RoomChannel(room_id), "sibling");
   auto left = ReceiveLobby(alice->stream, "playerLeft");
   ASSERT_TRUE(left.has_value());
   EXPECT_EQ(left->as_playerLeft_or_null()->playerId, bob->player_id);
@@ -383,7 +383,7 @@ TEST_F(LobbyFixture, ASiblingsMemberDropLeavesVoiceToo) {
   ASSERT_TRUE(ReceiveVoice(alice->stream, "joined").has_value());
 
   store_->Enqueue({HubStore::DeleteMember{room_id, bob->player_id}});
-  golf_->OnNotify(RoomChannel(room_id), "sibling");
+  hub_->OnNotify(RoomChannel(room_id), "sibling");
   auto left = ReceiveVoice(alice->stream, "left");
   ASSERT_TRUE(left.has_value());
   EXPECT_EQ(left->as_left_or_null()->playerId, bob->player_id);
@@ -460,7 +460,7 @@ TEST_F(LobbyFixture, ASiblingsRoomDeleteLeavesVoiceToo) {
   ASSERT_TRUE(ReceiveVoice(alice->stream, "joined").has_value());
 
   store_->Enqueue({HubStore::DeleteRoom{room_id}});
-  golf_->OnNotify(RoomChannel(room_id), "sibling");
+  hub_->OnNotify(RoomChannel(room_id), "sibling");
   // Whoever is still in when the other goes hears one left.
   EXPECT_EQ(metrics_->CounterTotal("voice_events", {{"event", "left"}}), 1);
   for (auto* seat : {&*alice, &*bob}) {
@@ -533,7 +533,7 @@ TEST_F(LobbyFixture, ASiblingsRoomDeleteLeavesTheWorldToo) {
   ASSERT_TRUE(ReceiveLobby(alice->stream, "playerJoined").has_value());
 
   store_->Enqueue({HubStore::DeleteRoom{room_id}});
-  golf_->OnNotify(RoomChannel(room_id), "sibling");
+  hub_->OnNotify(RoomChannel(room_id), "sibling");
   // Which of the two hears it is the members' order; that one of them
   // does is the fan-out.
   EXPECT_EQ(metrics_->CounterTotal("lobby_events", {{"event", "playerLeft"}}), 1);
@@ -554,7 +554,7 @@ class LobbyDeliveryFixture : public LobbyFixture {
     opal::server::DeliveryClass delivery;
   };
 
-  HubTestHooks MakeGolfHooks() override {
+  HubTestHooks MakeHubHooks() override {
     HubTestHooks hooks;
     hooks.on_send = [this](const std::string& to, const moonbase::games::GameEvents& event,
                            const opal::server::DeliveryClass& delivery) {
@@ -614,25 +614,25 @@ TEST_F(LobbyFixture, LeavingTheWorldDropsTheReadersCoalescingState) {
   ASSERT_TRUE(bob->stream.Send(JoinWorld()).ok());
   ASSERT_TRUE(ReceiveLobby(bob->stream, "worldState").has_value());
   ASSERT_TRUE(ReceiveLobby(alice->stream, "playerJoined").has_value());
-  EXPECT_EQ(golf_->MoveCoalescingReaders(), 2u);
+  EXPECT_EQ(hub_->MoveCoalescingReaders(), 2u);
 
   ASSERT_TRUE(alice->stream.Send(LeaveWorld()).ok());
   ASSERT_TRUE(ReceiveLobby(bob->stream, "playerLeft").has_value());
-  EXPECT_EQ(golf_->MoveCoalescingReaders(), 1u);
+  EXPECT_EQ(hub_->MoveCoalescingReaders(), 1u);
 
   bob->stream.Close();
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (golf_->MoveCoalescingReaders() != 0 && std::chrono::steady_clock::now() < deadline) {
+  while (hub_->MoveCoalescingReaders() != 0 && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  EXPECT_EQ(golf_->MoveCoalescingReaders(), 0u);
+  EXPECT_EQ(hub_->MoveCoalescingReaders(), 0u);
 }
 
 // The close path at its seam: the world entry goes and playerLeft fans
 // out while the seat is still held, and only then does the seat park.
 class LobbyRaceFixture : public LobbyFixture {
  protected:
-  HubTestHooks MakeGolfHooks() override {
+  HubTestHooks MakeHubHooks() override {
     HubTestHooks hooks;
     hooks.before_seat_release = [this](const std::string&) { Park("seat"); };
     hooks.after_world_sent = [this] { Park("world"); };
@@ -773,7 +773,7 @@ TEST_F(LobbyRaceFixture, AClosedSocketLeavesTheWorldBeforeTheSeatParks) {
 // it back while the old session is still unwinding.
 class SeatReleaseFixture : public SeamFixture {
  protected:
-  HubTestHooks MakeGolfHooks() override {
+  HubTestHooks MakeHubHooks() override {
     HubTestHooks hooks;
     hooks.after_seat_release = [this](const std::string&) { Park("released"); };
     return hooks;

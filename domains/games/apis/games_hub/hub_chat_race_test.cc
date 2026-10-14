@@ -138,7 +138,7 @@ class HubChatRaceFixture : public GamesHubStreamFixture {
     auto shared = std::make_shared<MemoryChatStore>([this](const std::string& room_id,
                                                            const std::string& player_id,
                                                            const MemberAction& action) {
-      if (golf_ != nullptr && golf_->WithMember(room_id, player_id, action)) return true;
+      if (hub_ != nullptr && hub_->WithMember(room_id, player_id, action)) return true;
       return remote_ != nullptr && remote_->golf->WithMember(room_id, player_id, action);
     });
     gated_ = std::make_shared<GatedChatStore>(std::move(shared));
@@ -300,7 +300,7 @@ TEST_F(HubChatRaceFixture, RedundantWakesDeliverNothingNew) {
   ASSERT_GT(ExpectNextChat(pair->bob, "first"), 0);
 
   remote_->golf->OnNotify(ChatChannel(pair->room_id), "primary");  // duplicate
-  golf_->OnNotify(ChatChannel(pair->room_id), "own-commit");       // our own echo
+  hub_->OnNotify(ChatChannel(pair->room_id), "own-commit");       // our own echo
 
   ASSERT_TRUE(SendChat(pair->alice, "sentinel"));
   ASSERT_GT(ExpectNextChat(pair->alice, "sentinel"), 0);
