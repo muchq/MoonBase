@@ -1,6 +1,6 @@
 #include "domains/games/apis/games_hub/pong_adapter.h"
 
-#include "domains/games/apis/games_hub/pong_bots.h"
+#include "absl/strings/str_cat.h"
 #include "domains/games/libs/pong/rally.h"
 
 namespace games_hub {
@@ -112,6 +112,50 @@ std::vector<moonbase::games::GameEvents> Adapter<pong::Table>::GamesEnded(const 
     events.push_back(Wrap(Update::FromGameended(ended)));
   }
   return events;
+}
+
+namespace {
+
+// A variant named, or smallcat unnamed.
+std::optional<pong::Variant> VariantNamed(const std::optional<std::string>& named,
+                                          std::string& name) {
+  name = named.value_or(std::string(pong::VariantName(pong::Variant::kSmallcat)));
+  return pong::ParseVariant(name);
+}
+
+}  // namespace
+
+Action<pong::Table, Adapter<pong::Table>::Start> Adapter<pong::Table>::Decode(const Move& move,
+                                                                              const std::string&) {
+  // startGame is pong's own shape: it names the variant. On a table whose
+  // game ended, the next game; otherwise the first.
+  if (const auto* start = move.as_startGame_or_null()) {
+    std::string name;
+    const std::optional<pong::Variant> variant = VariantNamed(start->variant, name);
+    if (!variant.has_value()) {
+      return Refusal{RejectKind::kRules, absl::StrCat("unknown pong variant: ", name)};
+    }
+    return StartGame<Start>{Start{*variant}, /*next_game=*/true};
+  }
+  if (const auto* paddle = move.as_paddle_or_null()) return Steer{*paddle};
+  if (const auto* add = move.as_addBot_or_null()) return AddBot{PongBotId(add->level), false};
+  if (const auto* watch = move.as_watch_or_null()) return WatchTable{watch->gameId};
+  if (const auto* create = move.as_createRoundRobin_or_null()) {
+    std::string name;
+    const std::optional<pong::Variant> variant = VariantNamed(create->variant, name);
+    if (!variant.has_value()) {
+      return Refusal{RejectKind::kRules, absl::StrCat("unknown pong variant: ", name)};
+    }
+    return CreateRoundRobin{create->entrants, ChessTerms{}, *variant};
+  }
+  if (const auto* withdraw = move.as_withdraw_or_null()) return Withdraw{*withdraw};
+  if (const auto* forfeit = move.as_forfeit_or_null()) return Forfeit{*forfeit};
+  if (move.as_roundRobins_or_null() != nullptr) return ListRoundRobins{};
+  if (const auto* play = move.as_playRoundRobin_or_null()) return PlayRoundRobin{*play};
+  if (move.as_createGame_or_null() != nullptr) return CreateTable{};
+  if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};
+  if (move.as_leaveGame_or_null() != nullptr) return LeaveTable{};
+  return Refusal{RejectKind::kUnknown, "unknown move"};
 }
 
 }  // namespace games_hub

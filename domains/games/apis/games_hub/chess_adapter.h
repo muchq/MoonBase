@@ -2,10 +2,25 @@
 #define DOMAINS_GAMES_APIS_GAMES_HUB_CHESS_ADAPTER_H
 
 #include <array>
+#include <functional>
+#include <string_view>
 
 #include "domains/games/apis/games_hub/adapter.h"
+#include "domains/games/apis/games_hub/chess_bots.h"
 
 namespace games_hub {
+
+/// A chess clock the starter did not name: three minutes and two seconds.
+inline constexpr chess_play::TimeControl kDefaultChessClock{180'000, 2'000};
+
+/// Where a chess table starts, by the setup its terms name: the hub's,
+/// which tests fix.
+using ChessOpener =
+    std::function<absl::StatusOr<chess_play::ChessSetup>(std::string_view setup_id)>;
+
+/// A startGame's or a challenge's fields, absent ones taking the defaults:
+/// the standard position, three minutes and two seconds.
+ChessTerms TermsFrom(const moonbase::games::ChessStartGame& fields);
 
 template <>
 struct Adapter<chess_play::Table> {
@@ -13,9 +28,16 @@ struct Adapter<chess_play::Table> {
   using Move = moonbase::games::ChessMove;
   using Update = moonbase::games::ChessUpdate;
   using View = moonbase::games::ChessView;
+  /// A game's terms, and the setup the hub's opener draws from them
+  /// (Prepare); a start nothing prepared has none, and is refused.
+  struct Start {
+    ChessTerms terms{std::string(chess_play::kDefaultChessSetup), kDefaultChessClock};
+    std::optional<chess_play::ChessSetup> setup;
+  };
   static constexpr GameKind kKind = GameKind::kChess;
   static constexpr std::size_t kMaxSeats = chess_play::GameState::kSeats;
-  static constexpr unsigned kCapabilities = kWatchable;
+  static constexpr unsigned kCapabilities = kWatchable | kNextGame | kRoundRobins | kOpenings;
+  static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "chess_commands";
   static constexpr std::array<std::string_view, 17> kCommands = {
@@ -66,6 +88,31 @@ struct Adapter<chess_play::Table> {
   static std::optional<moonbase::games::GameEvents> ClosedEvent(const chess_play::Table&,
                                                                 const std::vector<std::string>&) {
     return std::nullopt;
+  }
+
+  // The clock is read as each move is applied, so a move that waited on
+  // the hub's lock is charged from when it landed.
+  static Action<chess_play::Table, Start> Decode(const Move& move, const std::string& player_id);
+  static absl::StatusOr<chess_play::Table> Open(const OpenContext& context, const Start& start,
+                                                std::deque<cards::Card>);
+  /// A challenge's table starts on its terms once its second seat fills.
+  static std::optional<StartGame<Start>> FilledStart(const std::optional<ChessTerms>& terms,
+                                                     const std::optional<EventTag>&) {
+    if (!terms.has_value()) return std::nullopt;
+    return StartGame<Start>{Start{*terms, std::nullopt}};
+  }
+  static bool IsBot(std::string_view player_id) { return ChessBotElo(player_id).has_value(); }
+
+  static absl::Status Prepare(Start& start, const ChessOpener& opener);
+  static absl::StatusOr<chess_play::Table> Next(const chess_play::Table& table, const Start& start,
+                                                const MoveContext& context) {
+    return table.next(start.setup->variant, start.setup->opening, start.terms.time_control,
+                      context.now_ms, start.setup->id);
+  }
+  // A round robin's table plays its one game on the round robin's terms.
+  static void RoundRobinStart(Start& start, const std::optional<ChessTerms>& table_terms,
+                              const HubStore::ChessEventRow*) {
+    if (table_terms.has_value()) start.terms = *table_terms;
   }
 };
 

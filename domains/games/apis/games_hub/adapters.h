@@ -3,6 +3,7 @@
 
 #include <concepts>
 #include <cstddef>
+#include <deque>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -57,13 +58,45 @@ concept GameAdapter = requires(
     A::GamesEnded(engine, std::size_t{0})
   } -> std::same_as<std::vector<moonbase::games::GameEvents>>;
   { A::ClosedEvent(engine, roster) } -> std::same_as<std::optional<moonbase::games::GameEvents>>;
+  { A::kOpenStartsAGame } -> std::convertible_to<bool>;
+  {
+    A::Decode(std::declval<const typename A::Move&>(), id)
+  } -> std::same_as<Action<typename A::Engine, typename A::Start>>;
+  {
+    A::Open(std::declval<const OpenContext&>(), std::declval<const typename A::Start&>(),
+            std::deque<cards::Card>{})
+  } -> std::same_as<absl::StatusOr<typename A::Engine>>;
+  {
+    A::FilledStart(std::declval<const std::optional<ChessTerms>&>(),
+                   std::declval<const std::optional<EventTag>&>())
+  } -> std::same_as<std::optional<StartGame<typename A::Start>>>;
+  { A::IsBot(std::string_view{}) } -> std::same_as<bool>;
 };
+
+/// A capability's hooks, held by every adapter that declares it.
+template <typename A>
+concept CapableAdapter =
+    ((A::kCapabilities & kNextGame) == 0 ||
+     requires(const typename A::Engine& engine, const typename A::Start& start) {
+       {
+         A::Next(engine, start, std::declval<const MoveContext&>())
+       } -> std::same_as<absl::StatusOr<typename A::Engine>>;
+     }) &&
+    ((A::kCapabilities & kRoundRobins) == 0 ||
+     ((A::kCapabilities & kNextGame) != 0 &&
+      requires(typename A::Start& start) {
+        A::RoundRobinStart(start, std::declval<const std::optional<ChessTerms>&>(),
+                           std::declval<const HubStore::ChessEventRow*>());
+      })) &&
+    ((A::kCapabilities & kOpenings) == 0 || requires(typename A::Start& start) {
+      { A::Prepare(start, std::declval<const ChessOpener&>()) } -> std::same_as<absl::Status>;
+    });
 
 /// Each HostedState alternative has a full adapter that names the GameKind
 /// at its index, so a kind and its engine never disagree.
 template <std::size_t... I>
 constexpr bool KindsLineUp(std::index_sequence<I...>) {
-  return ((GameAdapter<Adapter<EngineAt<I>>> &&
+  return ((GameAdapter<Adapter<EngineAt<I>>> && CapableAdapter<Adapter<EngineAt<I>>> &&
            std::is_same_v<typename Adapter<EngineAt<I>>::Engine, EngineAt<I>> &&
            Adapter<EngineAt<I>>::kKind == static_cast<GameKind>(I)) &&
           ...);
@@ -141,6 +174,16 @@ inline bool HasCapability(GameKind kind, Capability capability) {
   return ForKind(kind, [capability](auto adapter) {
     return (decltype(adapter)::kCapabilities & capability) != 0;
   });
+}
+
+/// Whether opening a `kind` table starts a game the event log records.
+inline bool OpenStartsAGame(GameKind kind) {
+  return ForKind(kind, [](auto adapter) { return decltype(adapter)::kOpenStartsAGame; });
+}
+
+/// Whether the id is a bot some game seats.
+inline bool IsBotId(std::string_view player_id) {
+  return AnyAdapter([player_id](auto adapter) { return decltype(adapter)::IsBot(player_id); });
 }
 
 /// The shared lifecycle announcements, in the table's own envelope. Each

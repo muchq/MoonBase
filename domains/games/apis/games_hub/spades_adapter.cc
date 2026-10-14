@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "absl/strings/str_cat.h"
 #include "domains/games/apis/games_hub/wire_cards.h"
 
 namespace games_hub {
@@ -182,6 +183,53 @@ std::vector<moonbase::games::GameEvents> Adapter<spades::Table>::GamesEnded(
     events.push_back(Wrap(Update::FromGameended(std::move(ended))));
   }
   return events;
+}
+
+// A play names its card: a card the hand does not hold is the stale-view
+// refusal, named in the wire's spelling.
+Action<spades::Table, Adapter<spades::Table>::Start> Adapter<spades::Table>::Decode(
+    const Move& move, const std::string&) {
+  using SpadesTransition = Transition<spades::Table>;
+  if (const auto* start = move.as_startGame_or_null()) {
+    Start named;
+    if (start->mode.has_value()) {
+      named.mode = spades::parseMode(*start->mode);
+      if (!named.mode.has_value()) {
+        return Refusal{RejectKind::kRules, absl::StrCat("unknown spades mode: ", *start->mode)};
+      }
+    }
+    return StartGame<Start>{named};
+  }
+  if (move.as_createGame_or_null() != nullptr) return CreateTable{};
+  if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};
+  if (move.as_leaveGame_or_null() != nullptr) return LeaveTable{};
+  if (const auto* bid = move.as_bid_or_null()) {
+    return SpadesTransition{
+        [tricks = bid->tricks](const spades::Table& table, int seat, const MoveContext&) {
+          return table.bid(seat, tricks);
+        }};
+  }
+  if (const auto* play = move.as_play_or_null()) {
+    const std::optional<cards::Card> card = CardFromWire(play->card);
+    if (!card.has_value()) {
+      return Refusal{RejectKind::kInvalid,
+                     absl::StrCat("no such card: ", play->card.rank, play->card.suit)};
+    }
+    return SpadesTransition{[card = *card](const spades::Table& table, int seat,
+                                           const MoveContext&) -> absl::StatusOr<spades::Table> {
+      absl::StatusOr<spades::Table> next = table.play(seat, card);
+      if (next.status().code() == absl::StatusCode::kNotFound) {
+        return HeldInHand(table.hand().hands()[seat], {card});
+      }
+      return next;
+    }};
+  }
+  if (move.as_deal_or_null() != nullptr) {
+    return SpadesTransition{[](const spades::Table& table, int, const MoveContext& context) {
+      return table.deal(context.deck());
+    }};
+  }
+  return Refusal{RejectKind::kUnknown, "unknown move"};
 }
 
 }  // namespace games_hub

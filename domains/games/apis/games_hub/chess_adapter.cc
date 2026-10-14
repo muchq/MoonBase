@@ -1,6 +1,6 @@
 #include "domains/games/apis/games_hub/chess_adapter.h"
 
-#include "domains/games/apis/games_hub/chess_bots.h"
+#include "absl/strings/str_cat.h"
 #include "domains/games/apis/games_hub/chess_results.h"
 #include "domains/games/apis/games_hub/round_robin_wire.h"
 
@@ -19,6 +19,18 @@ StatsDeltas GameDeltas(const chess_play::GameState& state) {
 }
 
 }  // namespace
+
+ChessTerms TermsFrom(const moonbase::games::ChessStartGame& fields) {
+  ChessTerms terms{fields.setupId.value_or(std::string(chess_play::kDefaultChessSetup)),
+                   kDefaultChessClock};
+  if (fields.initialSeconds.has_value()) {
+    terms.time_control.initial_ms = int64_t{*fields.initialSeconds} * 1000;
+  }
+  if (fields.incrementSeconds.has_value()) {
+    terms.time_control.increment_ms = int64_t{*fields.incrementSeconds} * 1000;
+  }
+  return terms;
+}
 
 // A game in play, one ended with the table waiting on the next, or the
 // table closed by a leave.
@@ -136,6 +148,80 @@ std::vector<moonbase::games::GameEvents> Adapter<chess_play::Table>::GamesEnded(
     events.push_back(Wrap(Update::FromGameended(std::move(ended))));
   }
   return events;
+}
+
+Action<chess_play::Table, Adapter<chess_play::Table>::Start> Adapter<chess_play::Table>::Decode(
+    const Move& move, const std::string&) {
+  using ChessTransition = Transition<chess_play::Table>;
+  // startGame is chess's own shape: it names the clock. On a table whose
+  // game ended, the next game; otherwise the first.
+  if (const auto* start = move.as_startGame_or_null()) {
+    return StartGame<Start>{Start{TermsFrom(*start), std::nullopt}, /*next_game=*/true};
+  }
+  if (const auto* add = move.as_addBot_or_null()) return AddBot{ChessBotId(add->elo), true};
+  if (const auto* watch = move.as_watch_or_null()) return WatchTable{watch->gameId};
+  if (move.as_history_or_null() != nullptr) return AskHistory{};
+  if (const auto* review = move.as_review_or_null()) return AskReview{*review};
+  if (const auto* publish = move.as_publish_or_null()) return Publish{publish->published};
+  if (const auto* challenge = move.as_challenge_or_null()) {
+    ChessTerms terms = TermsFrom(*challenge);
+    if (!chess_play::ChessSetupName(terms.setup_id).has_value()) {
+      return Refusal{RejectKind::kRules, absl::StrCat("unknown chess setup: ", terms.setup_id)};
+    }
+    return PostTerms{std::move(terms)};
+  }
+  if (const auto* create = move.as_createRoundRobin_or_null()) {
+    ChessTerms terms = TermsFrom(create->terms.value_or(moonbase::games::ChessStartGame{}));
+    if (!chess_play::ChessSetupName(terms.setup_id).has_value()) {
+      return Refusal{RejectKind::kRules, absl::StrCat("unknown chess setup: ", terms.setup_id)};
+    }
+    return CreateRoundRobin{create->entrants, std::move(terms), pong::Variant::kSmallcat};
+  }
+  if (const auto* withdraw = move.as_withdraw_or_null()) return Withdraw{*withdraw};
+  if (const auto* forfeit = move.as_forfeit_or_null()) return Forfeit{*forfeit};
+  if (move.as_roundRobins_or_null() != nullptr) return ListRoundRobins{};
+  if (const auto* play = move.as_playRoundRobin_or_null()) return PlayRoundRobin{*play};
+  if (move.as_createGame_or_null() != nullptr) return CreateTable{};
+  if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};
+  if (move.as_leaveGame_or_null() != nullptr) return LeaveTable{};
+  if (const auto* play = move.as_play_or_null()) {
+    return ChessTransition{
+        [uci = play->uci](const chess_play::Table& table, int seat, const MoveContext& context) {
+          return table.inGame([&](const chess_play::GameState& game) {
+            return game.move(seat, uci, context.now_ms);
+          });
+        }};
+  }
+  if (move.as_resign_or_null() != nullptr) {
+    return ChessTransition{
+        [](const chess_play::Table& table, int seat, const MoveContext& context) {
+          return table.inGame(
+              [&](const chess_play::GameState& game) { return game.resign(seat, context.now_ms); });
+        }};
+  }
+  return Refusal{RejectKind::kUnknown, "unknown move"};
+}
+
+// A pairing's table seats its white as the round robin drew it.
+absl::StatusOr<chess_play::Table> Adapter<chess_play::Table>::Open(const OpenContext& context,
+                                                                   const Start& start,
+                                                                   std::deque<cards::Card>) {
+  if (!start.setup.has_value()) return absl::InvalidArgumentError("a chess setup is required");
+  chess_play::Opening opening = start.setup->opening;
+  if (context.pairing != nullptr) {
+    const auto& roster = context.roster;
+    opening.white_seat = static_cast<int>(
+        std::find(roster.begin(), roster.end(), context.pairing->white) - roster.begin());
+  }
+  return chess_play::Table::open(context.roster, start.setup->variant, opening,
+                                 start.terms.time_control, context.now_ms, start.setup->id);
+}
+
+absl::Status Adapter<chess_play::Table>::Prepare(Start& start, const ChessOpener& opener) {
+  auto setup = opener(start.terms.setup_id);
+  if (!setup.ok()) return setup.status();
+  start.setup = *std::move(setup);
+  return absl::OkStatus();
 }
 
 }  // namespace games_hub

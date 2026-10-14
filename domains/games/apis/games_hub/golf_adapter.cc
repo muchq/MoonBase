@@ -173,4 +173,82 @@ std::optional<moonbase::games::GameEvents> Adapter<golf::GameState>::ClosedEvent
   return Wrap(Update::FromGameended(std::move(ended)));
 }
 
+namespace {
+
+using GolfTransition = Transition<golf::GameState>;
+using GolfAction = Action<golf::GameState, Adapter<golf::GameState>::Start>;
+
+// A move naming one of the mover's four cards by its index.
+GolfAction AtCard(int index,
+                  absl::StatusOr<golf::GameState> (golf::GameState::*move)(int, golf::Position)
+                      const,
+                  bool announce_turn) {
+  const auto position = golf::positionFromIndex(index);
+  if (!position.has_value()) return Refusal{RejectKind::kInvalid, "invalid card index"};
+  GolfTransition transition{
+      [position, move](const golf::GameState& state, int seat, const MoveContext&) {
+        return (state.*move)(seat, *position);
+      }};
+  transition.announce_turn = announce_turn;
+  return transition;
+}
+
+GolfTransition BySeat(absl::StatusOr<golf::GameState> (golf::GameState::*move)(int) const,
+                      bool announce_turn) {
+  GolfTransition transition{[move](const golf::GameState& state, int seat, const MoveContext&) {
+    return (state.*move)(seat);
+  }};
+  transition.announce_turn = announce_turn;
+  return transition;
+}
+
+}  // namespace
+
+Action<golf::GameState, Adapter<golf::GameState>::Start> Adapter<golf::GameState>::Decode(
+    const Move& move, const std::string& player_id) {
+  if (move.as_createGame_or_null() != nullptr) return CreateTable{};
+  if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};
+  if (move.as_startGame_or_null() != nullptr) return StartGame<Start>{};
+  if (move.as_leaveGame_or_null() != nullptr) return LeaveTable{};
+  if (const auto* peek = move.as_peekCard_or_null()) {
+    const auto position = golf::positionFromIndex(peek->cardIndex);
+    if (!position.has_value()) return Refusal{RejectKind::kInvalid, "invalid card index"};
+    GolfTransition transition{
+        [position](const golf::GameState& state, int seat, const MoveContext&) {
+          return state.peekOwnCard(seat, *position);
+        }};
+    transition.announce_turn = false;
+    // The opening own-card reveal: only the peeker's view changes, until
+    // a peek starts the reveal countdown everyone sees.
+    transition.views_to_all = [](const golf::GameState& before, const golf::GameState& after) {
+      return !before.revealCountdownActive() && after.revealCountdownActive();
+    };
+    return transition;
+  }
+  if (move.as_hideCards_or_null() != nullptr) return BySeat(&golf::GameState::hideCards, false);
+  // The wire's drawCard is the engine's draw-pile peek — unrelated to
+  // peekCard, which is the opening own-card reveal.
+  if (move.as_drawCard_or_null() != nullptr) {
+    return BySeat(&golf::GameState::peekAtDrawPile, false);
+  }
+  if (const auto* take = move.as_takeFromDiscard_or_null()) {
+    return AtCard(take->cardIndex, &golf::GameState::swapForDiscardPile, true);
+  }
+  if (const auto* swap = move.as_swapCard_or_null()) {
+    return AtCard(swap->cardIndex, &golf::GameState::swapForDrawPile, true);
+  }
+  if (move.as_discardDrawn_or_null() != nullptr) {
+    return BySeat(&golf::GameState::swapDrawForDiscardPile, true);
+  }
+  if (move.as_knock_or_null() != nullptr) {
+    // playerKnocked first; the knock passes no turn of its own.
+    GolfTransition transition = BySeat(&golf::GameState::knock, false);
+    moonbase::games::PlayerKnocked knocked;
+    knocked.playerId = player_id;
+    transition.first = Wrap(Update::FromPlayerknocked(std::move(knocked)));
+    return transition;
+  }
+  return Refusal{RejectKind::kUnknown, "unknown move"};
+}
+
 }  // namespace games_hub

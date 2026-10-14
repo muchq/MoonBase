@@ -13,9 +13,11 @@ struct Adapter<castle::GameState> {
   using Move = moonbase::games::CastleMove;
   using Update = moonbase::games::CastleUpdate;
   using View = moonbase::games::CastleView;
+  struct Start {};
   static constexpr GameKind kKind = GameKind::kCastle;
   static constexpr std::size_t kMaxSeats = 4;
   static constexpr unsigned kCapabilities = 0;
+  static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "castle_commands";
   static constexpr std::array<std::string_view, 10> kCommands = {
@@ -61,6 +63,17 @@ struct Adapter<castle::GameState> {
   }
   static std::optional<moonbase::games::GameEvents> ClosedEvent(
       const castle::GameState& state, const std::vector<std::string>& roster);
+
+  static Action<castle::GameState, Start> Decode(const Move& move, const std::string& player_id);
+  static absl::StatusOr<castle::GameState> Open(const OpenContext& context, const Start&,
+                                                std::deque<cards::Card> deck) {
+    return castle::dealCastleGame(context.game_id, context.roster, std::move(deck));
+  }
+  static std::optional<StartGame<Start>> FilledStart(const std::optional<ChessTerms>&,
+                                                     const std::optional<EventTag>&) {
+    return std::nullopt;
+  }
+  static bool IsBot(std::string_view) { return false; }
 };
 
 }  // namespace games_hub

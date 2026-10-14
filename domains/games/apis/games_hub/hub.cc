@@ -74,37 +74,15 @@ moonbase::games::ChatMessage ChatEvent(const ChatRow& row) {
   return message;
 }
 
+template <typename... F>
+struct Overloaded : F... {
+  using F::operator()...;
+};
+
 // Bounded rebase-retry for the conditional commits: each miss adopts the
 // stored truth, so giving up leaves a consistent hub and a client who
 // can simply resend.
 constexpr int kMaxCommitAttempts = 3;
-
-// The stale-view refusal for a rummy move: the first named card the hand
-// does not hold, spelled the way the player sees it.
-absl::Status HeldInHand(const std::vector<cards::Card>& hand,
-                        const std::vector<cards::Card>& named) {
-  for (const cards::Card& card : named) {
-    if (std::find(hand.begin(), hand.end(), card) == hand.end()) {
-      const moonbase::games::Card wire = WireCard(card);
-      return absl::NotFoundError(absl::StrCat("not in your hand: ", wire.rank, wire.suit));
-    }
-  }
-  return absl::OkStatus();
-}
-
-// A startGame's or a challenge's fields, absent ones taking the defaults:
-// the standard position, three minutes and two seconds.
-ChessTerms TermsFrom(const moonbase::games::ChessStartGame& fields) {
-  ChessTerms terms{fields.setupId.value_or(std::string(chess_play::kDefaultChessSetup)),
-                   GamesHub::kDefaultChessClock};
-  if (fields.initialSeconds.has_value()) {
-    terms.time_control.initial_ms = int64_t{*fields.initialSeconds} * 1000;
-  }
-  if (fields.incrementSeconds.has_value()) {
-    terms.time_control.increment_ms = int64_t{*fields.incrementSeconds} * 1000;
-  }
-  return terms;
-}
 
 // A challenge's terms as the lobby lists them: "Standard starting
 // position · 3+2", a clock of whole minutes in minutes and any other in
@@ -1562,35 +1540,14 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
     return;
   }
 
-  if (const auto* golf_command = command.as_golf_or_null()) {
-    HandleMove(player_id, golf_command->move);
-    return;
-  }
-
-  if (const auto* castle_command = command.as_castle_or_null()) {
-    HandleCastleMove(player_id, castle_command->move);
-    return;
-  }
-
-  if (const auto* rummy_command = command.as_rummy_or_null()) {
-    HandleRummyMove(player_id, rummy_command->move);
-    return;
-  }
-
-  if (const auto* chess_command = command.as_chess_or_null()) {
-    HandleChessMove(player_id, chess_command->move);
-    return;
-  }
-
-  if (const auto* pong_command = command.as_pong_or_null()) {
-    HandlePongMove(player_id, pong_command->move);
-    return;
-  }
-
-  if (const auto* spades_command = command.as_spades_or_null()) {
-    HandleSpadesMove(player_id, spades_command->move);
-    return;
-  }
+  const bool played = AnyAdapter([&](auto adapter) {
+    using A = decltype(adapter);
+    const auto* move = A::MoveOf(command);
+    if (move == nullptr) return false;
+    HandleGameMove<typename A::Engine>(player_id, *move);
+    return true;
+  });
+  if (played) return;
 
   if (const auto* lobby = command.as_lobby_or_null()) {
     HandleLobby(player_id, lobby->action);
@@ -1731,585 +1688,75 @@ void GamesHub::SetIceServers(std::vector<moonbase::games::IceServer> servers) {
   voice_.SetIceServers(std::move(servers));
 }
 
-void GamesHub::HandleMove(const std::string& player_id, const GolfMove& move) {
-  if (move.as_createGame_or_null() != nullptr) {
-    CreateGameMove(player_id, GameKind::kGolf);
-    return;
-  }
-  if (const auto* join = move.as_joinGame_or_null()) {
-    JoinGameMove(player_id, join->gameId, GameKind::kGolf);
-    return;
-  }
-  if (move.as_startGame_or_null() != nullptr) {
-    StartGameMove(player_id);
-    return;
-  }
-  if (move.as_leaveGame_or_null() != nullptr) {
-    Outbox outbox;
-    Writes writes;
-    bool in_game = false;
-    {
-      const std::lock_guard<std::mutex> lock(mu_);
-      in_game = player_game_.contains(player_id);
-      if (in_game) LeaveGameLocked(player_id, outbox, writes);
-      EnqueueWritesLocked(writes);
-    }
+template <typename E>
+void GamesHub::HandleGameMove(const std::string& player_id,
+                              const typename Adapter<E>::Move& move) {
+  using A = Adapter<E>;
+  constexpr GameKind kind = A::kKind;
+  auto action = A::Decode(move, player_id);
+  std::visit(
+      Overloaded{
+          [&](Refusal& refusal) { Reject(player_id, std::move(refusal)); },
+          [&](CreateTable&) { CreateGameMove(player_id, kind); },
+          [&](JoinTable& join) { JoinGameMove(player_id, join.game_id, kind); },
+          [&](LeaveTable&) { LeaveTableMove(player_id, kind); },
+          [&](StartGame<typename A::Start>& start) { StartMove<E>(player_id, std::move(start)); },
+          [&](Transition<E>& transition) { TableEngineMove<E>(player_id, transition); },
+          [&](WatchTable& watch) { WatchMove(player_id, watch.game_id, kind); },
+          [&](AddBot& bot) { AddBotMove(player_id, bot, kind); },
+          [&](PostTerms& post) { PostTermsMove(player_id, std::move(post.terms), kind); },
+          [&](AskHistory&) { ChessHistoryMove(player_id); },
+          [&](AskReview& ask) { ChessReviewMove(player_id, ask.review); },
+          [&](Publish& publish) { PublishChessMove(player_id, publish.published); },
+          [&](CreateRoundRobin& create) {
+            CreateRoundRobinMove(player_id, create.entrants, kind, create.terms, create.variant);
+          },
+          [&](Withdraw& withdraw) { WithdrawMove(player_id, withdraw.withdraw, kind); },
+          [&](Forfeit& forfeit) { ForfeitMove(player_id, forfeit.forfeit, kind); },
+          [&](ListRoundRobins&) { RoundRobinsMove(player_id, kind); },
+          [&](PlayRoundRobin& play) { PlayRoundRobinMove(player_id, play.play, kind); },
+          [&](Steer& steer) { PaddleMove(player_id, steer.paddle); },
+      },
+      action);
+}
+
+void GamesHub::LeaveTableMove(const std::string& player_id, GameKind kind) {
+  Outbox outbox;
+  Writes writes;
+  bool in_game = false;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    in_game = player_game_.contains(player_id);
     if (in_game) {
-      Deliver(outbox);
-    } else {
-      Reject(player_id, RejectKind::kState, "not in a game");
-    }
-    return;
-  }
-
-  if (const auto* peek = move.as_peekCard_or_null()) {
-    const auto position = golf::positionFromIndex(peek->cardIndex);
-    if (!position.has_value()) {
-      Reject(player_id, RejectKind::kInvalid, "invalid card index");
-      return;
-    }
-    EngineMove(
-        player_id,
-        [position](const golf::GameState& state, int seat) {
-          return state.peekOwnCard(seat, *position);
-        },
-        MoveEffects{.peek_fanout = true});
-    return;
-  }
-
-  if (move.as_hideCards_or_null() != nullptr) {
-    EngineMove(
-        player_id, [](const golf::GameState& state, int seat) { return state.hideCards(seat); },
-        MoveEffects{});
-    return;
-  }
-
-  if (move.as_drawCard_or_null() != nullptr) {
-    // The wire's drawCard is the engine's draw-pile peek — unrelated to
-    // peekCard, which is the opening own-card reveal.
-    EngineMove(
-        player_id,
-        [](const golf::GameState& state, int seat) { return state.peekAtDrawPile(seat); },
-        MoveEffects{});
-    return;
-  }
-
-  if (const auto* take = move.as_takeFromDiscard_or_null()) {
-    const auto position = golf::positionFromIndex(take->cardIndex);
-    if (!position.has_value()) {
-      Reject(player_id, RejectKind::kInvalid, "invalid card index");
-      return;
-    }
-    EngineMove(
-        player_id,
-        [position](const golf::GameState& state, int seat) {
-          return state.swapForDiscardPile(seat, *position);
-        },
-        MoveEffects{.announce_turn = true});
-    return;
-  }
-
-  if (const auto* swap = move.as_swapCard_or_null()) {
-    const auto position = golf::positionFromIndex(swap->cardIndex);
-    if (!position.has_value()) {
-      Reject(player_id, RejectKind::kInvalid, "invalid card index");
-      return;
-    }
-    EngineMove(
-        player_id,
-        [position](const golf::GameState& state, int seat) {
-          return state.swapForDrawPile(seat, *position);
-        },
-        MoveEffects{.announce_turn = true});
-    return;
-  }
-
-  if (move.as_discardDrawn_or_null() != nullptr) {
-    EngineMove(
-        player_id,
-        [](const golf::GameState& state, int seat) { return state.swapDrawForDiscardPile(seat); },
-        MoveEffects{.announce_turn = true});
-    return;
-  }
-
-  if (move.as_knock_or_null() != nullptr) {
-    EngineMove(
-        player_id, [](const golf::GameState& state, int seat) { return state.knock(seat); },
-        MoveEffects{.announce_knock = true});
-    return;
-  }
-
-  Reject(player_id, RejectKind::kUnknown, "unknown move");
-}
-
-template <typename Move>
-bool GamesHub::LifecycleMove(const std::string& player_id, const Move& move, GameKind kind) {
-  if (move.as_createGame_or_null() != nullptr) {
-    CreateGameMove(player_id, kind);
-    return true;
-  }
-  if (const auto* join = move.as_joinGame_or_null()) {
-    JoinGameMove(player_id, join->gameId, kind);
-    return true;
-  }
-  if (move.as_startGame_or_null() != nullptr) {
-    StartGameMove(player_id);
-    return true;
-  }
-  if (move.as_leaveGame_or_null() != nullptr) {
-    Outbox outbox;
-    Writes writes;
-    bool in_game = false;
-    {
-      const std::lock_guard<std::mutex> lock(mu_);
-      in_game = player_game_.contains(player_id);
-      if (in_game) {
-        LeaveGameLocked(player_id, outbox, writes);
-      } else if (kind == GameKind::kChess || kind == GameKind::kPong) {
-        if (const auto watched = StopWatchingLocked(player_id)) {
-          // A watcher gets up the way a seat does.
-          in_game = true;
-          moonbase::games::GameLeft ack;
-          ack.gameId = *watched;
-          outbox.To(player_id, LeftEvent(kind, std::move(ack)));
-        }
-      }
-      EnqueueWritesLocked(writes);
-    }
-    if (in_game) {
-      Deliver(outbox);
-    } else {
-      Reject(player_id, RejectKind::kState, "not in a game");
-    }
-    return true;
-  }
-  return false;
-}
-
-void GamesHub::HandleCastleMove(const std::string& player_id, const CastleMove& move) {
-  if (LifecycleMove(player_id, move, GameKind::kCastle)) return;
-
-  if (const auto* swap = move.as_swapForSetup_or_null()) {
-    const auto named = CardsFromWire({swap->handCard, swap->faceUpCard});
-    if (!named.ok()) {
-      Reject(player_id, RejectKind::kInvalid, std::string(named.status().message()));
-      return;
-    }
-    const cards::Card hand_card = named->front();
-    const cards::Card face_up_card = named->back();
-    TableEngineMove<castle::GameState>(
-        player_id, GameKind::kCastle,
-        [hand_card, face_up_card](const castle::GameState& state,
-                                  int seat) -> absl::StatusOr<castle::GameState> {
-          const castle::Player& player = state.getPlayer(seat);
-          const auto hand = RowIndexesOf(player.getHand(), {hand_card});
-          if (!hand.ok()) return hand.status();
-          const auto face_up = RowIndexesOf(player.getFaceUp(), {face_up_card});
-          if (!face_up.ok()) return face_up.status();
-          return state.swapForSetup(seat, hand->front(), face_up->front());
-        });
-    return;
-  }
-  if (move.as_ready_or_null() != nullptr) {
-    TableEngineMove<castle::GameState>(
-        player_id, GameKind::kCastle,
-        [](const castle::GameState& state, int seat) { return state.ready(seat); });
-    return;
-  }
-  // A play names its cards; the row it names them in says which slots the
-  // engine is being asked for. A card the row does not hold is a refusal,
-  // never the neighbour that happens to sit at that offset. An empty row
-  // goes to the engine as it stands, so the answer names the row in play
-  // rather than a card missing from the wrong one.
-  if (const auto* play = move.as_playFromHand_or_null()) {
-    const auto named = CardsFromWire(play->cards);
-    if (!named.ok()) {
-      Reject(player_id, RejectKind::kInvalid, std::string(named.status().message()));
-      return;
-    }
-    const std::vector<cards::Card> cards = *named;
-    TableEngineMove<castle::GameState>(
-        player_id, GameKind::kCastle,
-        [cards](const castle::GameState& state, int seat) -> absl::StatusOr<castle::GameState> {
-          const std::vector<cards::Card>& row = state.getPlayer(seat).getHand();
-          if (row.empty()) return state.playFromHand(seat, {});
-          const auto indexes = RowIndexesOf(row, cards);
-          if (!indexes.ok()) return indexes.status();
-          return state.playFromHand(seat, *indexes);
-        });
-    return;
-  }
-  if (const auto* play = move.as_playFaceUp_or_null()) {
-    const auto named = CardsFromWire(play->cards);
-    if (!named.ok()) {
-      Reject(player_id, RejectKind::kInvalid, std::string(named.status().message()));
-      return;
-    }
-    const std::vector<cards::Card> cards = *named;
-    TableEngineMove<castle::GameState>(
-        player_id, GameKind::kCastle,
-        [cards](const castle::GameState& state, int seat) -> absl::StatusOr<castle::GameState> {
-          const std::vector<cards::Card>& row = state.getPlayer(seat).getFaceUp();
-          if (row.empty()) return state.playFaceUp(seat, {});
-          const auto indexes = RowIndexesOf(row, cards);
-          if (!indexes.ok()) return indexes.status();
-          return state.playFaceUp(seat, *indexes);
-        });
-    return;
-  }
-  if (const auto* play = move.as_playFaceDown_or_null()) {
-    const int index = play->index;
-    TableEngineMove<castle::GameState>(player_id, GameKind::kCastle,
-                                       [index](const castle::GameState& state, int seat) {
-                                         return state.playFaceDown(seat, index);
-                                       });
-    return;
-  }
-  if (move.as_pickUp_or_null() != nullptr) {
-    TableEngineMove<castle::GameState>(
-        player_id, GameKind::kCastle,
-        [](const castle::GameState& state, int seat) { return state.pickUp(seat); });
-    return;
-  }
-
-  Reject(player_id, RejectKind::kUnknown, "unknown move");
-}
-
-// Spades' moves (#1658). A play names its card: a card the hand does not
-// hold is the stale-view refusal, named in the wire's spelling.
-void GamesHub::HandleSpadesMove(const std::string& player_id, const SpadesMove& move) {
-  // startGame is spades' own shape: it names the mode.
-  if (const auto* start = move.as_startGame_or_null()) {
-    std::optional<spades::Mode> mode;
-    if (start->mode.has_value()) {
-      mode = spades::parseMode(*start->mode);
-      if (!mode.has_value()) {
-        Reject(player_id, RejectKind::kRules, absl::StrCat("unknown spades mode: ", *start->mode));
-        return;
+      LeaveGameLocked(player_id, outbox, writes);
+    } else if (HasCapability(kind, kWatchable)) {
+      if (const auto watched = StopWatchingLocked(player_id)) {
+        // A watcher gets up the way a seat does.
+        in_game = true;
+        moonbase::games::GameLeft ack;
+        ack.gameId = *watched;
+        outbox.To(player_id, LeftEvent(kind, std::move(ack)));
       }
     }
-    StartGameMove(player_id, kDefaultChessClock, std::nullopt, std::nullopt, mode);
-    return;
+    EnqueueWritesLocked(writes);
   }
-  if (LifecycleMove(player_id, move, GameKind::kSpades)) return;
-  if (const auto* bid = move.as_bid_or_null()) {
-    TableEngineMove<spades::Table>(player_id, GameKind::kSpades,
-                                   [tricks = bid->tricks](const spades::Table& table, int seat) {
-                                     return table.bid(seat, tricks);
-                                   });
-    return;
+  if (in_game) {
+    Deliver(outbox);
+  } else {
+    Reject(player_id, RejectKind::kState, "not in a game");
   }
-  if (const auto* play = move.as_play_or_null()) {
-    const std::optional<cards::Card> card = CardFromWire(play->card);
-    if (!card.has_value()) {
-      Reject(player_id, RejectKind::kInvalid,
-             absl::StrCat("no such card: ", play->card.rank, play->card.suit));
-      return;
-    }
-    TableEngineMove<spades::Table>(
-        player_id, GameKind::kSpades,
-        [card = *card](const spades::Table& table, int seat) -> absl::StatusOr<spades::Table> {
-          absl::StatusOr<spades::Table> next = table.play(seat, card);
-          if (next.status().code() == absl::StatusCode::kNotFound) {
-            return HeldInHand(table.hand().hands()[seat], {card});
-          }
-          return next;
-        });
-    return;
-  }
-  if (move.as_deal_or_null() != nullptr) {
-    TableEngineMove<spades::Table>(player_id, GameKind::kSpades,
-                                   [this](const spades::Table& table, int) {
-                                     std::deque<cards::Card> deck =
-                                         dealer_->DealNewUnshuffledDeck();
-                                     dealer_->ShuffleDeck(deck);
-                                     return table.deal(std::move(deck));
-                                   });
-    return;
-  }
-  Reject(player_id, RejectKind::kUnknown, "unknown move");
 }
 
-// Chess's moves: the clock is read inside each, under mu_, so a move that
-// waited on the lock is charged from when it landed.
-void GamesHub::HandleChessMove(const std::string& player_id, const ChessMove& move) {
-  // startGame is chess's own shape: it names the clock.
-  if (const auto* start = move.as_startGame_or_null()) {
-    ChessTerms terms = TermsFrom(*start);
-    // On a table whose game ended, the next game; otherwise the first. A
-    // round robin's table plays its one game on the round robin's terms.
-    bool seated = false;
-    bool tagged = false;
-    {
-      const std::lock_guard<std::mutex> lock(mu_);
-      const auto ref = FindGameLocked(player_id);
-      seated = ref.has_value() && ref->entry->started();
-      tagged = ref.has_value() && ref->entry->event.has_value();
-      if (tagged && ref->entry->terms.has_value()) terms = *ref->entry->terms;
-    }
-    if (seated && tagged) {
-      Reject(player_id, RejectKind::kState, "a round robin's table plays one game");
-      return;
-    }
-    const chess_play::TimeControl time_control = terms.time_control;
-    const auto setup = chess_opener_(terms.setup_id);
-    if (!setup.ok()) {
-      Reject(player_id, RejectKind::kRules, std::string(setup.status().message()));
-      return;
-    }
-    if (!seated) {
-      StartGameMove(player_id, time_control, *setup);
-      return;
-    }
-    TableEngineMove<chess_play::Table>(
-        player_id, GameKind::kChess,
-        [this, setup = *setup, time_control](const chess_play::Table& table, int) {
-          return table.next(setup.variant, setup.opening, time_control, NowMs(), setup.id);
-        });
-    return;
-  }
-  if (const auto* add = move.as_addBot_or_null()) {
-    AddChessBotMove(player_id, add->elo);
-    return;
-  }
-  if (const auto* watch = move.as_watch_or_null()) {
-    WatchMove(player_id, watch->gameId, GameKind::kChess);
-    return;
-  }
-  if (move.as_history_or_null() != nullptr) {
-    ChessHistoryMove(player_id);
-    return;
-  }
-  if (const auto* review = move.as_review_or_null()) {
-    ChessReviewMove(player_id, *review);
-    return;
-  }
-  if (const auto* publish = move.as_publish_or_null()) {
-    PublishChessMove(player_id, publish->published);
-    return;
-  }
-  if (const auto* challenge = move.as_challenge_or_null()) {
-    ChallengeChessMove(player_id, TermsFrom(*challenge));
-    return;
-  }
-  if (const auto* create = move.as_createRoundRobin_or_null()) {
-    const ChessTerms terms = TermsFrom(create->terms.value_or(moonbase::games::ChessStartGame{}));
-    if (!chess_play::ChessSetupName(terms.setup_id).has_value()) {
-      Reject(player_id, RejectKind::kRules, absl::StrCat("unknown chess setup: ", terms.setup_id));
-      return;
-    }
-    CreateRoundRobinMove(player_id, create->entrants, GameKind::kChess, terms,
-                         pong::Variant::kSmallcat);
-    return;
-  }
-  if (const auto* withdraw = move.as_withdraw_or_null()) {
-    WithdrawMove(player_id, *withdraw, GameKind::kChess);
-    return;
-  }
-  if (const auto* forfeit = move.as_forfeit_or_null()) {
-    ForfeitMove(player_id, *forfeit, GameKind::kChess);
-    return;
-  }
-  if (move.as_roundRobins_or_null() != nullptr) {
-    RoundRobinsMove(player_id, GameKind::kChess);
-    return;
-  }
-  if (const auto* play = move.as_playRoundRobin_or_null()) {
-    PlayRoundRobinMove(player_id, *play, GameKind::kChess);
-    return;
-  }
-  if (LifecycleMove(player_id, move, GameKind::kChess)) return;
-  if (const auto* play = move.as_play_or_null()) {
-    TableEngineMove<chess_play::Table>(
-        player_id, GameKind::kChess,
-        [this, uci = play->uci](const chess_play::Table& table, int seat) {
-          return table.inGame([&](const chess_play::GameState& game) {
-            return game.move(seat, uci, NowMs());
-          });
-        });
-    return;
-  }
-  if (move.as_resign_or_null() != nullptr) {
-    TableEngineMove<chess_play::Table>(
-        player_id, GameKind::kChess, [this](const chess_play::Table& table, int seat) {
-          return table.inGame(
-              [&](const chess_play::GameState& game) { return game.resign(seat, NowMs()); });
-        });
-    return;
-  }
-  Reject(player_id, RejectKind::kUnknown, "unknown move");
-}
-
-// Rummy's moves. The ones that put cards down name them: a spelling no
-// card has never reaches the table, and a card the hand does not hold is
-// the engine's NotFound — the same stale-view refusal castle's rows give —
-// named here in the wire's spelling.
-void GamesHub::HandleRummyMove(const std::string& player_id, const RummyMove& move) {
-  if (LifecycleMove(player_id, move, GameKind::kRummy)) return;
-  using Next = absl::StatusOr<rummy::TableState>;
-  using Cards = std::vector<cards::Card>;
-  // A move in the deal in play, by the mover's seat — the table's and the
-  // deal's seats are the same while a deal is on — as each game makes it.
-  // A game without the move has no step: a basic-only move at a gin table
-  // is refused, and the other way round.
-  using BasicStep =
-      std::function<absl::StatusOr<rummy::GameState>(const rummy::GameState&, int, const Cards&)>;
-  using GinStep =
-      std::function<absl::StatusOr<rummy::GinState>(const rummy::GinState&, int, const Cards&)>;
-  // The named cards from `from_hand` on are the hand's; a take-down's
-  // first is the pile's.
-  const auto step = [&](const std::vector<moonbase::games::Card>& wire, BasicStep basic,
-                        GinStep gin, std::size_t from_hand = 0) {
-    auto named = CardsFromWire(wire);
-    if (!named.ok()) {
-      Reject(player_id, RejectKind::kInvalid, std::string(named.status().message()));
-      return;
-    }
-    TableEngineMove<rummy::TableState>(
-        player_id, GameKind::kRummy,
-        [cards = *std::move(named), basic = std::move(basic), gin = std::move(gin), from_hand](
-            const rummy::TableState& table, int seat) -> Next {
-          // The engine's turn and stage come first; only a move it would
-          // make but for a card the hand lacks is stale, and that one is
-          // named in the wire's spelling.
-          const auto held = [&](const auto& deal, auto next) -> decltype(next) {
-            if (next.status().code() == absl::StatusCode::kNotFound) {
-              return HeldInHand(
-                  deal.getPlayer(seat).hand,
-                  Cards(cards.begin() + static_cast<std::ptrdiff_t>(from_hand), cards.end()));
-            }
-            return next;
-          };
-          if (table.ginDeal() != nullptr ? gin != nullptr : basic == nullptr) {
-            return table.inDeal<rummy::GinState>(
-                [&](const rummy::GinState& deal) { return held(deal, gin(deal, seat, cards)); });
-          }
-          return table.inDeal<rummy::GameState>(
-              [&](const rummy::GameState& deal) { return held(deal, basic(deal, seat, cards)); });
-        });
-  };
-
-  if (const auto* choose = move.as_chooseVariant_or_null()) {
-    const std::optional<rummy::Variant> variant = rummy::parseVariant(choose->variant);
-    if (!variant.has_value()) {
-      Reject(player_id, RejectKind::kInvalid, absl::StrCat("no such game: ", choose->variant));
-      return;
-    }
-    TableEngineMove<rummy::TableState>(
-        player_id, GameKind::kRummy,
-        [this, &player_id, chosen = *variant](const rummy::TableState& table, int seat) -> Next {
-          // Under mu_: whether the dealer is here to choose, which lets any
-          // seat deal when they are not.
-          bool dealer_away = false;
-          if (const Room* room = FindRoomLocked(player_id); room != nullptr) {
-            const auto dealer = room->members.find(table.getSeats().at(table.getDealer()));
-            dealer_away = dealer == room->members.end() || !dealer->second.connected;
-          }
-          std::deque<cards::Card> deck = dealer_->DealNewUnshuffledDeck();
-          dealer_->ShuffleDeck(deck);
-          return table.chooseVariant(seat, chosen, std::move(deck), dealer_away);
-        });
-    return;
-  }
-  if (move.as_pass_or_null() != nullptr) {
-    step({}, nullptr,
-         [](const rummy::GinState& deal, int seat, const Cards&) { return deal.pass(seat); });
-    return;
-  }
-  if (move.as_drawStock_or_null() != nullptr) {
-    step(
-        {},
-        [](const rummy::GameState& deal, int seat, const Cards&) { return deal.drawStock(seat); },
-        [](const rummy::GinState& deal, int seat, const Cards&) { return deal.drawStock(seat); });
-    return;
-  }
-  if (const auto* draw = move.as_drawDiscard_or_null()) {
-    // A card named is the top's; a deeper one is a take-down's to take.
-    std::vector<moonbase::games::Card> named;
-    if (draw->card.has_value()) named.push_back(*draw->card);
-    const auto top = [](const std::vector<cards::Card>& pile, const Cards& cards) -> absl::Status {
-      if (!cards.empty() && (pile.empty() || pile.back() != cards.front())) {
-        return absl::InvalidArgumentError(
-            "a draw takes the top card: take the pile down with takeDown");
-      }
-      return absl::OkStatus();
+std::function<void()> GamesHub::FilledStartLocked(const std::string& player_id,
+                                                  const GameEntry& entry) {
+  return ForKind(entry.kind, [&](auto adapter) -> std::function<void()> {
+    using A = decltype(adapter);
+    auto start = A::FilledStart(entry.terms, entry.event);
+    if (!start.has_value()) return nullptr;
+    return [this, player_id, start = *std::move(start)] {
+      StartMove<typename A::Engine>(player_id, start);
     };
-    step(
-        named,
-        [top](const rummy::GameState& deal, int seat,
-              const Cards& cards) -> absl::StatusOr<rummy::GameState> {
-          // The engine's turn and stage refusals come first.
-          auto drew = deal.drawDiscard(seat);
-          if (!drew.ok()) return drew;
-          if (auto ok = top(deal.getDiscard(), cards); !ok.ok()) return ok;
-          return drew;
-        },
-        [](const rummy::GinState& deal, int seat,
-           const Cards& cards) -> absl::StatusOr<rummy::GinState> {
-          if (!cards.empty() &&
-              (deal.getDiscard().empty() || deal.getDiscard().back() != cards.front())) {
-            return absl::InvalidArgumentError("gin takes only the discard pile's top card");
-          }
-          return deal.drawDiscard(seat);
-        });
-    return;
-  }
-  if (const auto* take_down = move.as_takeDown_or_null()) {
-    // Exactly one play: a meld with hand cards, or a lay-off.
-    const bool melds = take_down->cards.has_value();
-    if (melds == take_down->meldIndex.has_value()) {
-      Reject(player_id, RejectKind::kInvalid,
-             "a take-down melds cards from hand or lays off onto a meld");
-      return;
-    }
-    std::vector<moonbase::games::Card> named{take_down->card};
-    if (melds) named.insert(named.end(), take_down->cards->begin(), take_down->cards->end());
-    step(
-        named,
-        [index = take_down->meldIndex](const rummy::GameState& deal, int seat, const Cards& cards) {
-          if (index.has_value()) return deal.takeDownAndLayOff(seat, cards.front(), *index);
-          return deal.takeDownAndMeld(seat, cards.front(), Cards(cards.begin() + 1, cards.end()));
-        },
-        nullptr, /*from_hand=*/1);
-    return;
-  }
-  if (const auto* meld = move.as_meld_or_null()) {
-    step(
-        meld->cards,
-        [](const rummy::GameState& deal, int seat, const Cards& cards) {
-          return deal.meld(seat, cards);
-        },
-        nullptr);
-    return;
-  }
-  if (const auto* lay_off = move.as_layOff_or_null()) {
-    step(
-        {lay_off->card},
-        [index = lay_off->meldIndex](const rummy::GameState& deal, int seat, const Cards& cards) {
-          return deal.layOff(seat, cards.front(), index);
-        },
-        nullptr);
-    return;
-  }
-  if (const auto* discard = move.as_discard_or_null()) {
-    step(
-        {discard->card},
-        [](const rummy::GameState& deal, int seat, const Cards& cards) {
-          return deal.discard(seat, cards.front());
-        },
-        [](const rummy::GinState& deal, int seat, const Cards& cards) {
-          return deal.discard(seat, cards.front());
-        });
-    return;
-  }
-  if (const auto* knock = move.as_knock_or_null()) {
-    step({knock->card}, nullptr, [](const rummy::GinState& deal, int seat, const Cards& cards) {
-      return deal.knock(seat, cards.front());
-    });
-    return;
-  }
-
-  Reject(player_id, RejectKind::kUnknown, "unknown move");
+  });
 }
 
 void GamesHub::CreateGameMove(const std::string& player_id, GameKind kind) {
@@ -2377,8 +1824,7 @@ void GamesHub::JoinGameMove(const std::string& player_id, const std::string& gam
   }
   Outbox outbox;
   std::optional<Refusal> refusal;
-  std::optional<ChessTerms> challenge;
-  bool pong_pairing = false;
+  std::function<void()> filled;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     Room* room = FindRoomLocked(player_id);
@@ -2447,9 +1893,7 @@ void GamesHub::JoinGameMove(const std::string& player_id, const std::string& gam
           StopWatchingLocked(player_id);
           player_game_[player_id] = game_id;
           if (entry.roster.size() >= MaxSeatsOf(entry.kind)) {
-            challenge = entry.terms;
-            // A pong pairing's table starts when it fills.
-            pong_pairing = entry.kind == GameKind::kPong && entry.event.has_value();
+            filled = FilledStartLocked(player_id, entry);
           }
 
           outbox.To(player_id, JoinedEventLocked(game_id, entry, player_id));
@@ -2474,17 +1918,56 @@ void GamesHub::JoinGameMove(const std::string& player_id, const std::string& gam
     Reject(player_id, std::move(*refusal));
     return;
   }
-  if (pong_pairing) {
-    StartPongMove(player_id, pong::Variant::kSmallcat);  // the round robin's, whatever this says
-    return;
-  }
-  StartChallengeMove(player_id, challenge);
+  if (filled) filled();
 }
 
-void GamesHub::StartGameMove(const std::string& player_id, chess_play::TimeControl time_control,
-                            std::optional<chess_play::ChessSetup> chess_setup,
-                            std::optional<pong::Variant> pong_variant,
-                            std::optional<spades::Mode> spades_mode) {
+template <typename E>
+void GamesHub::StartMove(const std::string& player_id,
+                         StartGame<typename Adapter<E>::Start> request) {
+  using A = Adapter<E>;
+  bool seated = false;
+  if (request.next_game) {
+    bool tagged = false;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      const auto ref = FindGameLocked(player_id);
+      seated = ref.has_value() && ref->entry->started();
+      tagged = ref.has_value() && ref->entry->event.has_value();
+      if constexpr ((A::kCapabilities & kRoundRobins) != 0) {
+        if (tagged) {
+          const auto held = ref->room->round_robins.find(ref->entry->event->event_id);
+          A::RoundRobinStart(request.start, ref->entry->terms,
+                             held == ref->room->round_robins.end() ? nullptr : &held->second);
+        }
+      }
+    }
+    if (seated && tagged) {
+      Reject(player_id, RejectKind::kState, "a round robin's table plays one game");
+      return;
+    }
+  }
+  // The opening is drawn off the lock.
+  if constexpr ((A::kCapabilities & kOpenings) != 0) {
+    if (const absl::Status opened = A::Prepare(request.start, chess_opener_); !opened.ok()) {
+      Reject(player_id, RejectKind::kRules, std::string(opened.message()));
+      return;
+    }
+  }
+  if constexpr ((A::kCapabilities & kNextGame) != 0) {
+    if (seated) {
+      TableEngineMove<E>(player_id,
+                         Transition<E>{[start = std::move(request.start)](
+                                           const E& engine, int, const MoveContext& context) {
+                           return A::Next(engine, start, context);
+                         }});
+      return;
+    }
+  }
+  StartGameMove<E>(player_id, std::move(request.start));
+}
+
+template <typename E>
+void GamesHub::StartGameMove(const std::string& player_id, typename Adapter<E>::Start start) {
   Outbox outbox;
   std::optional<Refusal> refusal;
   {
@@ -2505,73 +1988,26 @@ void GamesHub::StartGameMove(const std::string& player_id, chess_play::TimeContr
         }
         std::deque<cards::Card> deck = dealer_->DealNewUnshuffledDeck();
         dealer_->ShuffleDeck(deck);
-        std::optional<HostedState> dealt;
-        if (ref->entry->kind == GameKind::kRummy) {
-          // Seated, not dealt: the table opens with its first seat to deal,
-          // and the dealer's chooseVariant is each deal's start.
-          auto table = rummy::TableState::open(ref->game_id, ref->entry->roster);
-          if (!table.ok()) {
-            refusal = Refusal{RejectKind::kRules, std::string(table.status().message())};
-            break;
-          }
-          dealt.emplace(*std::move(table));
-        } else if (ref->entry->kind == GameKind::kChess) {
-          if (!chess_setup.has_value()) {
-            refusal = Refusal{RejectKind::kRules, "a chess setup is required"};
-            break;
-          }
-          chess_play::Opening opening = chess_setup->opening;
-          if (const Pairing* pairing = PairingOfLocked(*ref->room, *ref->entry);
-              pairing != nullptr) {
-            const auto& roster = ref->entry->roster;
-            opening.white_seat = static_cast<int>(
-                std::find(roster.begin(), roster.end(), pairing->white) - roster.begin());
-          }
-          auto chess_game =
-              chess_play::Table::open(ref->entry->roster, chess_setup->variant, opening,
-                                      time_control, NowMs(), chess_setup->id);
-          if (!chess_game.ok()) {
-            refusal = Refusal{RejectKind::kRules, std::string(chess_game.status().message())};
-            break;
-          }
-          dealt.emplace(*std::move(chess_game));
-        } else if (ref->entry->kind == GameKind::kPong) {
-          auto pong_table = pong::Table::open(ref->entry->roster,
-                                              pong_variant.value_or(pong::Variant::kSmallcat));
-          if (!pong_table.ok()) {
-            refusal = Refusal{RejectKind::kRules, std::string(pong_table.status().message())};
-            break;
-          }
-          dealt.emplace(*std::move(pong_table));
-        } else if (ref->entry->kind == GameKind::kSpades) {
-          // Unnamed, four seats play partners and fewer cutthroat.
-          const spades::Mode mode = spades_mode.value_or(
-              ref->entry->roster.size() == spades::kPartnersSeats ? spades::Mode::kPartners
-                                                                  : spades::Mode::kCutthroat);
-          auto spades_table = spades::Table::open(mode, ref->entry->roster, std::move(deck));
-          if (!spades_table.ok()) {
-            refusal = Refusal{RejectKind::kRules, std::string(spades_table.status().message())};
-            break;
-          }
-          dealt.emplace(*std::move(spades_table));
-        } else if (ref->entry->kind == GameKind::kCastle) {
-          auto castle_deal =
-              castle::dealCastleGame(ref->game_id, ref->entry->roster, std::move(deck));
-          if (!castle_deal.ok()) {
-            refusal = Refusal{RejectKind::kRules, std::string(castle_deal.status().message())};
-            break;
-          }
-          dealt.emplace(*std::move(castle_deal));
-        } else {
-          auto golf_deal = golf::dealGolfGame(ref->game_id, ref->entry->roster, std::move(deck));
-          if (!golf_deal.ok()) {
-            refusal = Refusal{RejectKind::kRules, std::string(golf_deal.status().message())};
-            break;
-          }
-          dealt.emplace(*std::move(golf_deal));
+        const OpenContext context{ref->game_id, ref->entry->roster, NowMs(),
+                                  PairingOfLocked(*ref->room, *ref->entry)};
+        // The table opens on its own game, on `start` when the envelope
+        // that asked is that game's and on the game's defaults otherwise.
+        absl::StatusOr<HostedState> dealt =
+            ForKind(ref->entry->kind, [&](auto adapter) -> absl::StatusOr<HostedState> {
+              using T = decltype(adapter);
+              typename T::Start table_start{};
+              if constexpr (std::is_same_v<T, Adapter<E>>) table_start = start;
+              auto opened = T::Open(context, table_start, std::move(deck));
+              if (!opened.ok()) return opened.status();
+              return HostedState(*std::move(opened));
+            });
+        if (!dealt.ok()) {
+          refusal = Refusal{RejectKind::kRules, std::string(dealt.status().message())};
+          break;
         }
-        const Commit commit = CommitEntryLocked(ref->room_id, ref->game_id, *ref->entry,
-                                                ref->entry->roster, dealt, nullptr);
+        const Commit commit =
+            CommitEntryLocked(ref->room_id, ref->game_id, *ref->entry, ref->entry->roster,
+                              std::optional<HostedState>(*std::move(dealt)), nullptr);
         if (commit == Commit::kRebased) continue;  // the roster (or starter) raced us; redeal
         if (commit == Commit::kGone) {
           DropGameLocked(*ref, outbox);
@@ -2584,8 +2020,7 @@ void GamesHub::StartGameMove(const std::string& player_id, chess_play::TimeContr
           break;
         }
         started = true;
-        // A rummy table's games are its deals, each recorded as it is dealt.
-        if (ref->entry->kind != GameKind::kRummy) {
+        if (OpenStartsAGame(ref->entry->kind)) {
           RecordLocked([&id = ref->room_id, variant = GameKindName(ref->entry->kind),
                         seats = ref->entry->roster.size()](absl::Time now) {
             return GameStartedLine(now, id, variant, seats);
@@ -2610,7 +2045,8 @@ void GamesHub::StartGameMove(const std::string& player_id, chess_play::TimeContr
   }
 }
 
-void GamesHub::EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects) {
+template <typename E>
+void GamesHub::TableEngineMove(const std::string& player_id, const Transition<E>& move) {
   Outbox outbox;
   Writes writes;
   std::optional<Refusal> refusal;
@@ -2619,96 +2055,8 @@ void GamesHub::EngineMove(const std::string& player_id, const MoveFn& move, Move
     auto ref = FindGameLocked(player_id);
     if (!ref.has_value()) {
       refusal = Refusal{RejectKind::kState, "not in a game"};
-    } else if (!ref->entry->started()) {
-      refusal = Refusal{RejectKind::kState, "game not started"};
     } else {
-      bool landed = false;
-      // The move loop: pure transition off the entry, then the
-      // conditional commit; a miss adopts the stored truth and replays
-      // the transition against it. The kind is re-read each attempt: a
-      // rebase adopts whatever the store holds under this code.
-      for (int attempt = 0; attempt < kMaxCommitAttempts && !refusal.has_value(); ++attempt) {
-        if (ref->entry->kind != GameKind::kGolf) {
-          refusal = Refusal{RejectKind::kState,
-                            absl::StrCat("that table plays ", GameKindName(ref->entry->kind))};
-          break;
-        }
-        const golf::GameState& state = ref->entry->golf();
-        const int seat = state.playerIndex(player_id);
-        if (seat < 0) {
-          refusal = Refusal{RejectKind::kState, "not seated in this game"};
-          break;
-        }
-        auto next = move(state, seat);
-        if (!next.ok()) {
-          // The engine said no: a rules refusal, not a desync.
-          refusal = Refusal{RejectKind::kRules, std::string(next.status().message())};
-          break;
-        }
-        const bool was_countdown = state.revealCountdownActive();
-        // Compare occupant ids, not seat indexes — a mid-round leave
-        // renumbers seats.
-        const std::string previous_turn =
-            effects.announce_turn ? PlayerIdAt(state, state.getWhoseTurn()) : std::string();
-        const bool over = next->isOver();
-        std::vector<HubStore::StatsDelta> deltas;
-        if (over) deltas = Adapter<golf::GameState>::ClosedDeltas(*next, ref->entry->roster);
-        const Commit commit =
-            CommitEntryLocked(ref->room_id, ref->game_id, *ref->entry, ref->entry->roster,
-                              HostedState(*std::move(next)), over ? &deltas : nullptr);
-        if (commit == Commit::kRebased) continue;  // another instance moved first
-        if (commit == Commit::kGone) {
-          DropGameLocked(*ref, outbox);
-          StageRoomStateLocked(ref->room_id, outbox);
-          refusal = Refusal{RejectKind::kState, "game no longer exists"};
-          break;
-        }
-        if (commit == Commit::kUnavailable) {
-          refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
-          break;
-        }
-        landed = true;
-        const golf::GameState& updated = ref->entry->golf();
-
-        if (effects.announce_knock) {
-          moonbase::games::PlayerKnocked knocked;
-          knocked.playerId = player_id;
-          for (const std::string& recipient : ref->entry->roster) {
-            outbox.To(recipient,
-                      Adapter<golf::GameState>::Wrap(GolfUpdate::FromPlayerknocked(knocked)));
-          }
-        }
-
-        if (over) {
-          // Finalize stages the definitive face-up views itself.
-          FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox);
-        } else {
-          const bool countdown_started = !was_countdown && updated.revealCountdownActive();
-          if (effects.peek_fanout && !countdown_started) {
-            // A quiet peek: only the peeker's view changed.
-            outbox.To(player_id,
-                      StateEventOf(ref->entry->kind, ContextOf(ref->game_id, *ref->entry),
-                                   ref->entry->state, player_id));
-          } else {
-            StageGameViewsLocked(ref->game_id, *ref->entry, outbox);
-          }
-          if (effects.announce_turn) {
-            const std::string current_turn = PlayerIdAt(updated, updated.getWhoseTurn());
-            if (current_turn != previous_turn) {
-              moonbase::games::TurnChanged turn;
-              turn.playerId = current_turn;
-              for (const std::string& recipient : ref->entry->roster) {
-                outbox.To(recipient,
-                          Adapter<golf::GameState>::Wrap(GolfUpdate::FromTurnchanged(turn)));
-              }
-            }
-          }
-        }
-        break;
-      }
-      if (!refusal.has_value() && !landed) {
-        refusal = Refusal{RejectKind::kState, "game changed; try again"};
-      }
+      refusal = ApplyTableEngineMoveLocked<E>(*ref, player_id, move, outbox);
     }
     EnqueueWritesLocked(writes);
   }
@@ -2719,49 +2067,41 @@ void GamesHub::EngineMove(const std::string& player_id, const MoveFn& move, Move
   }
 }
 
-template <typename Engine>
-void GamesHub::TableEngineMove(const std::string& player_id, GameKind kind,
-                              const TableMoveFn<Engine>& move) {
-  Outbox outbox;
-  Writes writes;
-  std::optional<Refusal> refusal;
-  {
-    const std::lock_guard<std::mutex> lock(mu_);
-    auto ref = FindGameLocked(player_id);
-    if (!ref.has_value()) {
-      refusal = Refusal{RejectKind::kState, "not in a game"};
-    } else {
-      refusal = ApplyTableEngineMoveLocked<Engine>(*ref, player_id, kind, move, outbox);
-    }
-    EnqueueWritesLocked(writes);
-  }
-  if (refusal.has_value()) {
-    Reject(player_id, std::move(*refusal));
-  } else {
-    Deliver(outbox);
-  }
-}
-
-template <typename Engine>
+template <typename E>
 std::optional<Refusal> GamesHub::ApplyTableEngineMoveLocked(GameRef ref,
                                                            const std::string& player_id,
-                                                           GameKind kind,
-                                                           const TableMoveFn<Engine>& move,
+                                                           const Transition<E>& move,
                                                            Outbox& outbox) {
+  constexpr GameKind kind = Adapter<E>::kKind;
   if (!ref.entry->started()) return Refusal{RejectKind::kState, "game not started"};
+  // The move loop: pure transition off the entry, then the conditional
+  // commit; a miss adopts the stored truth and replays the transition
+  // against it. The kind is re-read each attempt: a rebase adopts
+  // whatever the store holds under this code.
   for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
     if (ref.entry->kind != kind) {
       return Refusal{RejectKind::kState,
                      absl::StrCat("that table plays ", GameKindName(ref.entry->kind))};
     }
-    const Engine& state = std::get<Engine>(*ref.entry->state);
+    const E& state = std::get<E>(*ref.entry->state);
     const int seat = state.playerIndex(player_id);
     if (seat < 0) return Refusal{RejectKind::kState, "not seated in this game"};
-    auto next = move(state, seat);
+    const MoveContext context{
+        NowMs(),
+        [this] {
+          std::deque<cards::Card> deck = dealer_->DealNewUnshuffledDeck();
+          dealer_->ShuffleDeck(deck);
+          return deck;
+        },
+        [room = ref.room](const std::string& id) {
+          const auto member = room->members.find(id);
+          return member == room->members.end() || !member->second.connected;
+        }};
+    auto next = move.next(state, seat, context);
     if (!next.ok()) {
       // A card the seat's row does not hold (absl::NotFound: castle's
-      // RowIndexesOf, rummy's engine) is a client acting on a view
-      // the table has moved past, not a rules refusal.
+      // RowIndexesOf, rummy's and spades' engines) is a client acting on
+      // a view the table has moved past, not a rules refusal.
       const RejectKind reject_kind = next.status().code() == absl::StatusCode::kNotFound
                                          ? RejectKind::kState
                                          : RejectKind::kRules;
@@ -2770,11 +2110,13 @@ std::optional<Refusal> GamesHub::ApplyTableEngineMoveLocked(GameRef ref,
     // Occupant ids, not seats: the engine renumbers on a leave. The
     // opening turn (setup done) reads as a change from nobody.
     const std::string previous_turn = CurrentTurnOf(*ref.entry->state);
+    std::optional<E> before;
+    if (move.views_to_all) before.emplace(state);
     const bool over = next->isOver();
     HostedState next_state(*std::move(next));
     // A finish credits the room's stats in the same conditional commit
-    // that lands it: the table's end, or a rummy deal's (#1609), which
-    // leaves the table dealing on.
+    // that lands it: the table's end, or a game's that leaves the table
+    // playing on (a rummy deal, #1609).
     std::optional<std::vector<HubStore::StatsDelta>> deltas =
         DealEndDeltas(*ref.entry->state, next_state);
     const bool deal_ended = deltas.has_value();
@@ -2783,7 +2125,7 @@ std::optional<Refusal> GamesHub::ApplyTableEngineMoveLocked(GameRef ref,
     const Commit commit =
         CommitEntryLocked(ref.room_id, ref.game_id, *ref.entry, ref.entry->roster,
                           std::move(next_state), deltas.has_value() ? &*deltas : nullptr);
-    if (commit == Commit::kRebased) continue;
+    if (commit == Commit::kRebased) continue;  // another instance moved first
     if (commit == Commit::kGone) {
       DropGameLocked(ref, outbox);
       StageRoomStateLocked(ref.room_id, outbox);
@@ -2798,11 +2140,20 @@ std::optional<Refusal> GamesHub::ApplyTableEngineMoveLocked(GameRef ref,
         return GameStartedLine(now, id, variant, seats);
       });
     }
+    if (move.first.has_value()) {
+      for (const std::string& recipient : ref.entry->roster) outbox.To(recipient, *move.first);
+    }
     if (over) {
+      // Finalize stages the definitive final views itself.
       FinalizeGameLocked(ref.room_id, *ref.room, ref.game_id, outbox);
       return std::nullopt;
     }
-    StageGameViewsLocked(ref.game_id, *ref.entry, outbox);
+    if (!move.views_to_all || move.views_to_all(*before, std::get<E>(*ref.entry->state))) {
+      StageGameViewsLocked(ref.game_id, *ref.entry, outbox);
+    } else {
+      outbox.To(player_id, StateEventOf(kind, ContextOf(ref.game_id, *ref.entry), ref.entry->state,
+                                        player_id));
+    }
     if (deal_ended) {
       // The hand is the room's too: its stats moved.
       MirrorStatsLocked(*ref.room, *deltas);
@@ -2810,12 +2161,14 @@ std::optional<Refusal> GamesHub::ApplyTableEngineMoveLocked(GameRef ref,
     // Either way the table's status in the room's listing moved.
     if (deal_ended || deal_started) StageRoomStateLocked(ref.room_id, outbox);
     // Between deals nobody is on turn, and that is no turn to announce.
-    const std::string current_turn = CurrentTurnOf(*ref.entry->state);
-    if (current_turn != previous_turn && !current_turn.empty()) {
-      moonbase::games::TurnChanged turn;
-      turn.playerId = current_turn;
-      for (const std::string& recipient : ref.entry->roster) {
-        outbox.To(recipient, TurnEvent(kind, turn));
+    if (move.announce_turn) {
+      const std::string current_turn = CurrentTurnOf(*ref.entry->state);
+      if (current_turn != previous_turn && !current_turn.empty()) {
+        moonbase::games::TurnChanged turn;
+        turn.playerId = current_turn;
+        for (const std::string& recipient : ref.entry->roster) {
+          outbox.To(recipient, TurnEvent(kind, turn));
+        }
       }
     }
     return std::nullopt;
@@ -2886,10 +2239,12 @@ int GamesHub::SweepChessClocksOnce() {
       // A rebase may find the game already ended elsewhere, or moved on:
       // the refusal says so, and the seat on turn sent nothing to refuse.
       const auto refusal = ApplyTableEngineMoveLocked<chess_play::Table>(
-          ref, state.players().at(state.whoseTurn()), GameKind::kChess,
-          [now](const chess_play::Table& table, int) {
-            return table.inGame([now](const chess_play::GameState& game) { return game.flag(now); });
-          },
+          ref, state.players().at(state.whoseTurn()),
+          Transition<chess_play::Table>{
+              [now](const chess_play::Table& table, int, const MoveContext&) {
+                return table.inGame(
+                    [now](const chess_play::GameState& game) { return game.flag(now); });
+              }},
           outbox);
       if (refusal.has_value() && refusal->kind == RejectKind::kUnavailable) {
         // The store is down: try this game again later, not every tick.
@@ -2906,24 +2261,24 @@ int GamesHub::SweepChessClocksOnce() {
 
 void GamesHub::SetChessBotEngine(ChessBotEngine engine) { chess_bot_engine_ = std::move(engine); }
 
-void GamesHub::AddChessBotMove(const std::string& player_id, int elo) {
+void GamesHub::AddBotMove(const std::string& player_id, const AddBot& bot, GameKind kind) {
   Outbox outbox;
   std::optional<Refusal> refusal;
-  std::optional<ChessTerms> challenge;
+  std::function<void()> filled;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     auto ref = FindGameLocked(player_id);
     bool seated = false;
     if (ref.has_value() && ref->entry->event.has_value()) {
       refusal = Refusal{RejectKind::kState, "a round robin's pairing is played by its pair"};
-    } else if (chess_bot_engine_ == nullptr) {
+    } else if (bot.engine && chess_bot_engine_ == nullptr) {
       refusal = Refusal{RejectKind::kState, "no chess engine"};
     } else if (!ref.has_value()) {
       refusal = Refusal{RejectKind::kState, "not in a game"};
     } else {
       for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
         GameEntry& entry = *ref->entry;
-        if (entry.kind != GameKind::kChess) {
+        if (entry.kind != kind) {
           refusal = Refusal{RejectKind::kState,
                             absl::StrCat("that table plays ", GameKindName(entry.kind))};
           break;
@@ -2937,7 +2292,7 @@ void GamesHub::AddChessBotMove(const std::string& player_id, int elo) {
           break;
         }
         std::vector<std::string> roster = entry.roster;
-        roster.push_back(ChessBotId(elo));
+        roster.push_back(bot.bot_id);
         const Commit commit =
             CommitEntryLocked(ref->room_id, ref->game_id, entry, roster, std::nullopt, nullptr);
         if (commit == Commit::kRebased) continue;
@@ -2952,12 +2307,14 @@ void GamesHub::AddChessBotMove(const std::string& player_id, int elo) {
           break;
         }
         seated = true;
-        challenge = entry.terms;
+        filled = FilledStartLocked(player_id, entry);
         StageGameViewsLocked(ref->game_id, entry, outbox);
         StageRoomStateLocked(ref->room_id, outbox);
         break;
       }
-      if (!refusal.has_value() && !seated) refusal = Refusal{RejectKind::kState, "game changed; try again"};
+      if (!refusal.has_value() && !seated) {
+        refusal = Refusal{RejectKind::kState, "game changed; try again"};
+      }
     }
   }
   if (refusal.has_value()) {
@@ -2965,14 +2322,10 @@ void GamesHub::AddChessBotMove(const std::string& player_id, int elo) {
     return;
   }
   Deliver(outbox);
-  StartChallengeMove(player_id, challenge);
+  if (filled) filled();
 }
 
-void GamesHub::ChallengeChessMove(const std::string& player_id, ChessTerms terms) {
-  if (!chess_play::ChessSetupName(terms.setup_id).has_value()) {
-    Reject(player_id, RejectKind::kRules, absl::StrCat("unknown chess setup: ", terms.setup_id));
-    return;
-  }
+void GamesHub::PostTermsMove(const std::string& player_id, ChessTerms terms, GameKind kind) {
   Outbox outbox;
   std::optional<Refusal> refusal;
   {
@@ -2985,7 +2338,7 @@ void GamesHub::ChallengeChessMove(const std::string& player_id, ChessTerms terms
       const std::optional<ChessTerms> next = std::move(terms);
       for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
         GameEntry& entry = *ref->entry;
-        if (entry.kind != GameKind::kChess) {
+        if (entry.kind != kind) {
           refusal = Refusal{RejectKind::kState,
                             absl::StrCat("that table plays ", GameKindName(entry.kind))};
           break;
@@ -3028,18 +2381,6 @@ void GamesHub::ChallengeChessMove(const std::string& player_id, ChessTerms terms
   // A vanished table's news is true either way.
   Deliver(outbox);
   if (refusal.has_value()) Reject(player_id, std::move(*refusal));
-}
-
-void GamesHub::StartChallengeMove(const std::string& player_id,
-                                 const std::optional<ChessTerms>& terms) {
-  if (!terms.has_value()) return;
-  // The opening is drawn off the lock, as a startGame's is.
-  const auto setup = chess_opener_(terms->setup_id);
-  if (!setup.ok()) {
-    Reject(player_id, RejectKind::kRules, std::string(setup.status().message()));
-    return;
-  }
-  StartGameMove(player_id, terms->time_control, *setup);
 }
 
 void GamesHub::WatchMove(const std::string& player_id, const std::string& game_id, GameKind kind) {
@@ -3655,11 +2996,14 @@ int GamesHub::PlayChessBotsOnce() {
       // engine's fault, and waits out the retry like a failed ask.
       bool moved_on = false;
       const auto refusal = ApplyTableEngineMoveLocked<chess_play::Table>(
-          ref, turn.bot_id, GameKind::kChess,
-          [this, &turn, &moved_on, asked_at, uci = *answer](const chess_play::Table& table, int seat) {
+          ref, turn.bot_id,
+          Transition<chess_play::Table>{[&turn, &moved_on, asked_at, uci = *answer](
+                                            const chess_play::Table& table, int seat,
+                                            const MoveContext& context) {
             if (table.scoreSheet().size() != turn.game_no) {
               moved_on = true;
-              return absl::StatusOr<chess_play::Table>(absl::FailedPreconditionError("the position moved on"));
+              return absl::StatusOr<chess_play::Table>(
+                  absl::FailedPreconditionError("the position moved on"));
             }
             return table.inGame([&](const chess_play::GameState& state)
                                     -> absl::StatusOr<chess_play::GameState> {
@@ -3667,9 +3011,9 @@ int GamesHub::PlayChessBotsOnce() {
                 moved_on = true;
                 return absl::FailedPreconditionError("the position moved on");
               }
-              return state.move(seat, uci, NowMs());
+              return state.move(seat, uci, context.now_ms);
             });
-          },
+          }},
           outbox);
       if (refusal.has_value()) {
         LOG(INFO) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/" << turn.game_id
@@ -3729,92 +3073,6 @@ moonbase::games::PongVector WireVector(const pong::Vec3& v) {
 
 }  // namespace
 
-void GamesHub::HandlePongMove(const std::string& player_id, const PongMove& move) {
-  // startGame is pong's own shape: it names the variant.
-  if (const auto* start = move.as_startGame_or_null()) {
-    const std::string name =
-        start->variant.value_or(std::string(pong::VariantName(pong::Variant::kSmallcat)));
-    const std::optional<pong::Variant> variant = pong::ParseVariant(name);
-    if (!variant.has_value()) {
-      Reject(player_id, RejectKind::kRules, absl::StrCat("unknown pong variant: ", name));
-      return;
-    }
-    StartPongMove(player_id, *variant);
-    return;
-  }
-  if (const auto* paddle = move.as_paddle_or_null()) {
-    PaddleMove(player_id, *paddle);
-    return;
-  }
-  if (const auto* add = move.as_addBot_or_null()) {
-    AddPongBotMove(player_id, add->level);
-    return;
-  }
-  if (const auto* watch = move.as_watch_or_null()) {
-    WatchMove(player_id, watch->gameId, GameKind::kPong);
-    return;
-  }
-  if (const auto* create = move.as_createRoundRobin_or_null()) {
-    const std::string name =
-        create->variant.value_or(std::string(pong::VariantName(pong::Variant::kSmallcat)));
-    const std::optional<pong::Variant> variant = pong::ParseVariant(name);
-    if (!variant.has_value()) {
-      Reject(player_id, RejectKind::kRules, absl::StrCat("unknown pong variant: ", name));
-      return;
-    }
-    CreateRoundRobinMove(player_id, create->entrants, GameKind::kPong, ChessTerms{}, *variant);
-    return;
-  }
-  if (const auto* withdraw = move.as_withdraw_or_null()) {
-    WithdrawMove(player_id, *withdraw, GameKind::kPong);
-    return;
-  }
-  if (const auto* forfeit = move.as_forfeit_or_null()) {
-    ForfeitMove(player_id, *forfeit, GameKind::kPong);
-    return;
-  }
-  if (move.as_roundRobins_or_null() != nullptr) {
-    RoundRobinsMove(player_id, GameKind::kPong);
-    return;
-  }
-  if (const auto* play = move.as_playRoundRobin_or_null()) {
-    PlayRoundRobinMove(player_id, *play, GameKind::kPong);
-    return;
-  }
-  if (LifecycleMove(player_id, move, GameKind::kPong)) return;
-  Reject(player_id, RejectKind::kUnknown, "unknown move");
-}
-
-void GamesHub::StartPongMove(const std::string& player_id, pong::Variant variant) {
-  // On a table whose game ended, the next game; otherwise the first. A
-  // round robin's table plays its one game on the round robin's variant.
-  bool seated = false;
-  bool tagged = false;
-  {
-    const std::lock_guard<std::mutex> lock(mu_);
-    const auto ref = FindGameLocked(player_id);
-    seated = ref.has_value() && ref->entry->started();
-    tagged = ref.has_value() && ref->entry->event.has_value();
-    if (tagged) {
-      if (const auto held = ref->room->round_robins.find(ref->entry->event->event_id);
-          held != ref->room->round_robins.end()) {
-        variant = held->second.pong_variant;
-      }
-    }
-  }
-  if (seated && tagged) {
-    Reject(player_id, RejectKind::kState, "a round robin's table plays one game");
-    return;
-  }
-  if (!seated) {
-    StartGameMove(player_id, kDefaultChessClock, std::nullopt, variant);
-    return;
-  }
-  TableEngineMove<pong::Table>(
-      player_id, GameKind::kPong,
-      [variant](const pong::Table& table, int) { return table.next(variant); });
-}
-
 void GamesHub::PaddleMove(const std::string& player_id, const moonbase::games::PongPaddle& paddle) {
   {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -3837,65 +3095,6 @@ void GamesHub::PaddleMove(const std::string& player_id, const moonbase::games::P
     }
   }
   Reject(player_id, RejectKind::kState, "not seated at a pong table");
-}
-
-void GamesHub::AddPongBotMove(const std::string& player_id, int level) {
-  Outbox outbox;
-  std::optional<Refusal> refusal;
-  {
-    const std::lock_guard<std::mutex> lock(mu_);
-    auto ref = FindGameLocked(player_id);
-    bool seated = false;
-    if (!ref.has_value()) {
-      refusal = Refusal{RejectKind::kState, "not in a game"};
-    } else if (ref->entry->event.has_value()) {
-      refusal = Refusal{RejectKind::kState, "a round robin's pairing is played by its pair"};
-    } else {
-      for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
-        GameEntry& entry = *ref->entry;
-        if (entry.kind != GameKind::kPong) {
-          refusal = Refusal{RejectKind::kState,
-                            absl::StrCat("that table plays ", GameKindName(entry.kind))};
-          break;
-        }
-        if (entry.started()) {
-          refusal = Refusal{RejectKind::kState, "game already started"};
-          break;
-        }
-        if (entry.roster.size() >= MaxSeatsOf(entry.kind)) {
-          refusal = Refusal{RejectKind::kState, "the table is full"};
-          break;
-        }
-        std::vector<std::string> roster = entry.roster;
-        roster.push_back(PongBotId(level));
-        const Commit commit =
-            CommitEntryLocked(ref->room_id, ref->game_id, entry, roster, std::nullopt, nullptr);
-        if (commit == Commit::kRebased) continue;
-        if (commit == Commit::kGone) {
-          DropGameLocked(*ref, outbox);
-          StageRoomStateLocked(ref->room_id, outbox);
-          refusal = Refusal{RejectKind::kState, "game no longer exists"};
-          break;
-        }
-        if (commit == Commit::kUnavailable) {
-          refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
-          break;
-        }
-        seated = true;
-        StageGameViewsLocked(ref->game_id, entry, outbox);
-        StageRoomStateLocked(ref->room_id, outbox);
-        break;
-      }
-      if (!refusal.has_value() && !seated) {
-        refusal = Refusal{RejectKind::kState, "game changed; try again"};
-      }
-    }
-  }
-  if (refusal.has_value()) {
-    Reject(player_id, std::move(*refusal));
-    return;
-  }
-  Deliver(outbox);
 }
 
 void GamesHub::HostPongLocked(const std::string& room_id, const std::string& game_id,

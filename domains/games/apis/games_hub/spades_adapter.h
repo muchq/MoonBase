@@ -13,9 +13,15 @@ struct Adapter<spades::Table> {
   using Move = moonbase::games::SpadesMove;
   using Update = moonbase::games::SpadesUpdate;
   using View = moonbase::games::SpadesView;
+  /// The mode a startGame names; unnamed, four seats play partners and
+  /// fewer cutthroat.
+  struct Start {
+    std::optional<spades::Mode> mode;
+  };
   static constexpr GameKind kKind = GameKind::kSpades;
   static constexpr std::size_t kMaxSeats = spades::kMaxSeats;
   static constexpr unsigned kCapabilities = 0;
+  static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "spades_commands";
   static constexpr std::array<std::string_view, 7> kCommands = {
@@ -62,6 +68,21 @@ struct Adapter<spades::Table> {
                                                                 const std::vector<std::string>&) {
     return std::nullopt;
   }
+
+  // Bids, plays and the next hand's deal (#1658).
+  static Action<spades::Table, Start> Decode(const Move& move, const std::string& player_id);
+  static absl::StatusOr<spades::Table> Open(const OpenContext& context, const Start& start,
+                                            std::deque<cards::Card> deck) {
+    const spades::Mode mode = start.mode.value_or(context.roster.size() == spades::kPartnersSeats
+                                                      ? spades::Mode::kPartners
+                                                      : spades::Mode::kCutthroat);
+    return spades::Table::open(mode, context.roster, std::move(deck));
+  }
+  static std::optional<StartGame<Start>> FilledStart(const std::optional<ChessTerms>&,
+                                                     const std::optional<EventTag>&) {
+    return std::nullopt;
+  }
+  static bool IsBot(std::string_view) { return false; }
 };
 
 }  // namespace games_hub

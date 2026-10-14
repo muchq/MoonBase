@@ -132,4 +132,78 @@ std::optional<moonbase::games::GameEvents> Adapter<castle::GameState>::ClosedEve
   return Wrap(Update::FromGameended(std::move(ended)));
 }
 
+namespace {
+
+using CastleTransition = Transition<castle::GameState>;
+
+// A play from the row `row_of` reads, naming its cards. A card the row
+// does not hold is a refusal, never the neighbour that happens to sit at
+// that offset. An empty row goes to the engine as it stands, so the
+// answer names the row in play rather than a card missing from the wrong
+// one.
+Action<castle::GameState, Adapter<castle::GameState>::Start> PlayFromRow(
+    const std::vector<moonbase::games::Card>& wire,
+    const std::vector<cards::Card>& (castle::Player::*row_of)() const,
+    absl::StatusOr<castle::GameState> (castle::GameState::*play)(int, const std::vector<int>&)
+        const) {
+  const auto named = CardsFromWire(wire);
+  if (!named.ok()) return Refusal{RejectKind::kInvalid, std::string(named.status().message())};
+  return CastleTransition{
+      [cards = *named, row_of, play](const castle::GameState& state, int seat,
+                                     const MoveContext&) -> absl::StatusOr<castle::GameState> {
+        const std::vector<cards::Card>& row = (state.getPlayer(seat).*row_of)();
+        if (row.empty()) return (state.*play)(seat, {});
+        const auto indexes = RowIndexesOf(row, cards);
+        if (!indexes.ok()) return indexes.status();
+        return (state.*play)(seat, *indexes);
+      }};
+}
+
+}  // namespace
+
+Action<castle::GameState, Adapter<castle::GameState>::Start> Adapter<castle::GameState>::Decode(
+    const Move& move, const std::string&) {
+  if (move.as_createGame_or_null() != nullptr) return CreateTable{};
+  if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};
+  if (move.as_startGame_or_null() != nullptr) return StartGame<Start>{};
+  if (move.as_leaveGame_or_null() != nullptr) return LeaveTable{};
+  if (const auto* swap = move.as_swapForSetup_or_null()) {
+    const auto named = CardsFromWire({swap->handCard, swap->faceUpCard});
+    if (!named.ok()) return Refusal{RejectKind::kInvalid, std::string(named.status().message())};
+    return CastleTransition{[hand_card = named->front(), face_up_card = named->back()](
+                                const castle::GameState& state, int seat,
+                                const MoveContext&) -> absl::StatusOr<castle::GameState> {
+      const castle::Player& player = state.getPlayer(seat);
+      const auto hand = RowIndexesOf(player.getHand(), {hand_card});
+      if (!hand.ok()) return hand.status();
+      const auto face_up = RowIndexesOf(player.getFaceUp(), {face_up_card});
+      if (!face_up.ok()) return face_up.status();
+      return state.swapForSetup(seat, hand->front(), face_up->front());
+    }};
+  }
+  if (move.as_ready_or_null() != nullptr) {
+    return CastleTransition{[](const castle::GameState& state, int seat, const MoveContext&) {
+      return state.ready(seat);
+    }};
+  }
+  if (const auto* play = move.as_playFromHand_or_null()) {
+    return PlayFromRow(play->cards, &castle::Player::getHand, &castle::GameState::playFromHand);
+  }
+  if (const auto* play = move.as_playFaceUp_or_null()) {
+    return PlayFromRow(play->cards, &castle::Player::getFaceUp, &castle::GameState::playFaceUp);
+  }
+  if (const auto* play = move.as_playFaceDown_or_null()) {
+    return CastleTransition{
+        [index = play->index](const castle::GameState& state, int seat, const MoveContext&) {
+          return state.playFaceDown(seat, index);
+        }};
+  }
+  if (move.as_pickUp_or_null() != nullptr) {
+    return CastleTransition{[](const castle::GameState& state, int seat, const MoveContext&) {
+      return state.pickUp(seat);
+    }};
+  }
+  return Refusal{RejectKind::kUnknown, "unknown move"};
+}
+
 }  // namespace games_hub

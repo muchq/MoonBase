@@ -4,6 +4,7 @@
 #include <array>
 
 #include "domains/games/apis/games_hub/adapter.h"
+#include "domains/games/apis/games_hub/pong_bots.h"
 
 namespace games_hub {
 
@@ -13,9 +14,14 @@ struct Adapter<pong::Table> {
   using Move = moonbase::games::PongMove;
   using Update = moonbase::games::PongUpdate;
   using View = moonbase::games::PongView;
+  /// The variant a game plays.
+  struct Start {
+    pong::Variant variant = pong::Variant::kSmallcat;
+  };
   static constexpr GameKind kKind = GameKind::kPong;
   static constexpr std::size_t kMaxSeats = pong::kSeats;
-  static constexpr unsigned kCapabilities = kWatchable;
+  static constexpr unsigned kCapabilities = kWatchable | kNextGame | kRoundRobins;
+  static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "pong_commands";
   static constexpr std::array<std::string_view, 12> kCommands = {
@@ -59,6 +65,31 @@ struct Adapter<pong::Table> {
   static std::optional<moonbase::games::GameEvents> ClosedEvent(const pong::Table&,
                                                                 const std::vector<std::string>&) {
     return std::nullopt;
+  }
+
+  // Its own startGame, a seat's paddle, a bot to the second seat, and
+  // watching.
+  static Action<pong::Table, Start> Decode(const Move& move, const std::string& player_id);
+  static absl::StatusOr<pong::Table> Open(const OpenContext& context, const Start& start,
+                                          std::deque<cards::Card>) {
+    return pong::Table::open(context.roster, start.variant);
+  }
+  /// A pairing's table starts when it fills, on the round robin's variant.
+  static std::optional<StartGame<Start>> FilledStart(const std::optional<ChessTerms>&,
+                                                     const std::optional<EventTag>& event) {
+    if (!event.has_value()) return std::nullopt;
+    return StartGame<Start>{Start{}, /*next_game=*/true};
+  }
+  static bool IsBot(std::string_view player_id) { return PongBotLevel(player_id).has_value(); }
+
+  static absl::StatusOr<pong::Table> Next(const pong::Table& table, const Start& start,
+                                          const MoveContext&) {
+    return table.next(start.variant);
+  }
+  // A round robin's table plays its one game on the round robin's variant.
+  static void RoundRobinStart(Start& start, const std::optional<ChessTerms>&,
+                              const HubStore::ChessEventRow* row) {
+    if (row != nullptr) start.variant = row->pong_variant;
   }
 };
 

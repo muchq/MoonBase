@@ -1,5 +1,6 @@
 #include "domains/games/apis/games_hub/rummy_adapter.h"
 
+#include "absl/strings/str_cat.h"
 #include "domains/games/apis/games_hub/wire_cards.h"
 
 namespace games_hub {
@@ -321,6 +322,167 @@ std::optional<moonbase::games::GameEvents> Adapter<rummy::TableState>::ClosedEve
     ended.standings.push_back(std::move(standing));
   }
   return Wrap(Update::FromGameended(std::move(ended)));
+}
+
+namespace {
+
+using Cards = std::vector<cards::Card>;
+using RummyAction = Action<rummy::TableState, Adapter<rummy::TableState>::Start>;
+// A move in the deal in play, by the mover's seat — the table's and the
+// deal's seats are the same while a deal is on — as each game makes it.
+// A game without the move has no step: a basic-only move at a gin table
+// is refused, and the other way round.
+using BasicStep =
+    std::function<absl::StatusOr<rummy::GameState>(const rummy::GameState&, int, const Cards&)>;
+using GinStep =
+    std::function<absl::StatusOr<rummy::GinState>(const rummy::GinState&, int, const Cards&)>;
+
+// The named cards from `from_hand` on are the hand's; a take-down's first
+// is the pile's.
+RummyAction Step(const std::vector<moonbase::games::Card>& wire, BasicStep basic, GinStep gin,
+                 std::size_t from_hand = 0) {
+  auto named = CardsFromWire(wire);
+  if (!named.ok()) return Refusal{RejectKind::kInvalid, std::string(named.status().message())};
+  return Transition<rummy::TableState>{
+      [cards = *std::move(named), basic = std::move(basic), gin = std::move(gin), from_hand](
+          const rummy::TableState& table, int seat,
+          const MoveContext&) -> absl::StatusOr<rummy::TableState> {
+        // The engine's turn and stage come first; only a move it would
+        // make but for a card the hand lacks is stale, and that one is
+        // named in the wire's spelling.
+        const auto held = [&](const auto& deal, auto next) -> decltype(next) {
+          if (next.status().code() == absl::StatusCode::kNotFound) {
+            return HeldInHand(
+                deal.getPlayer(seat).hand,
+                Cards(cards.begin() + static_cast<std::ptrdiff_t>(from_hand), cards.end()));
+          }
+          return next;
+        };
+        if (table.ginDeal() != nullptr ? gin != nullptr : basic == nullptr) {
+          return table.inDeal<rummy::GinState>(
+              [&](const rummy::GinState& deal) { return held(deal, gin(deal, seat, cards)); });
+        }
+        return table.inDeal<rummy::GameState>(
+            [&](const rummy::GameState& deal) { return held(deal, basic(deal, seat, cards)); });
+      }};
+}
+
+}  // namespace
+
+// The moves that put cards down name them: a spelling no card has never
+// reaches the table, and a card the hand does not hold is the engine's
+// NotFound — the same stale-view refusal castle's rows give — named here
+// in the wire's spelling.
+RummyAction Adapter<rummy::TableState>::Decode(const Move& move, const std::string&) {
+  if (move.as_createGame_or_null() != nullptr) return CreateTable{};
+  if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};
+  if (move.as_startGame_or_null() != nullptr) return StartGame<Start>{};
+  if (move.as_leaveGame_or_null() != nullptr) return LeaveTable{};
+  if (const auto* choose = move.as_chooseVariant_or_null()) {
+    const std::optional<rummy::Variant> variant = rummy::parseVariant(choose->variant);
+    if (!variant.has_value()) {
+      return Refusal{RejectKind::kInvalid, absl::StrCat("no such game: ", choose->variant)};
+    }
+    return Transition<rummy::TableState>{
+        [chosen = *variant](const rummy::TableState& table, int seat,
+                            const MoveContext& context) -> absl::StatusOr<rummy::TableState> {
+          // Whether the dealer is here to choose, which lets any seat deal
+          // when they are not.
+          const bool dealer_away = context.away(table.getSeats().at(table.getDealer()));
+          return table.chooseVariant(seat, chosen, context.deck(), dealer_away);
+        }};
+  }
+  if (move.as_pass_or_null() != nullptr) {
+    return Step({}, nullptr, [](const rummy::GinState& deal, int seat, const Cards&) {
+      return deal.pass(seat);
+    });
+  }
+  if (move.as_drawStock_or_null() != nullptr) {
+    return Step(
+        {},
+        [](const rummy::GameState& deal, int seat, const Cards&) { return deal.drawStock(seat); },
+        [](const rummy::GinState& deal, int seat, const Cards&) { return deal.drawStock(seat); });
+  }
+  if (const auto* draw = move.as_drawDiscard_or_null()) {
+    // A card named is the top's; a deeper one is a take-down's to take.
+    std::vector<moonbase::games::Card> named;
+    if (draw->card.has_value()) named.push_back(*draw->card);
+    const auto top = [](const std::vector<cards::Card>& pile, const Cards& cards) -> absl::Status {
+      if (!cards.empty() && (pile.empty() || pile.back() != cards.front())) {
+        return absl::InvalidArgumentError(
+            "a draw takes the top card: take the pile down with takeDown");
+      }
+      return absl::OkStatus();
+    };
+    return Step(
+        named,
+        [top](const rummy::GameState& deal, int seat,
+              const Cards& cards) -> absl::StatusOr<rummy::GameState> {
+          // The engine's turn and stage refusals come first.
+          auto drew = deal.drawDiscard(seat);
+          if (!drew.ok()) return drew;
+          if (auto ok = top(deal.getDiscard(), cards); !ok.ok()) return ok;
+          return drew;
+        },
+        [](const rummy::GinState& deal, int seat,
+           const Cards& cards) -> absl::StatusOr<rummy::GinState> {
+          if (!cards.empty() &&
+              (deal.getDiscard().empty() || deal.getDiscard().back() != cards.front())) {
+            return absl::InvalidArgumentError("gin takes only the discard pile's top card");
+          }
+          return deal.drawDiscard(seat);
+        });
+  }
+  if (const auto* take_down = move.as_takeDown_or_null()) {
+    // Exactly one play: a meld with hand cards, or a lay-off.
+    const bool melds = take_down->cards.has_value();
+    if (melds == take_down->meldIndex.has_value()) {
+      return Refusal{RejectKind::kInvalid,
+                     "a take-down melds cards from hand or lays off onto a meld"};
+    }
+    std::vector<moonbase::games::Card> named{take_down->card};
+    if (melds) named.insert(named.end(), take_down->cards->begin(), take_down->cards->end());
+    return Step(
+        named,
+        [index = take_down->meldIndex](const rummy::GameState& deal, int seat, const Cards& cards) {
+          if (index.has_value()) return deal.takeDownAndLayOff(seat, cards.front(), *index);
+          return deal.takeDownAndMeld(seat, cards.front(), Cards(cards.begin() + 1, cards.end()));
+        },
+        nullptr, /*from_hand=*/1);
+  }
+  if (const auto* meld = move.as_meld_or_null()) {
+    return Step(
+        meld->cards,
+        [](const rummy::GameState& deal, int seat, const Cards& cards) {
+          return deal.meld(seat, cards);
+        },
+        nullptr);
+  }
+  if (const auto* lay_off = move.as_layOff_or_null()) {
+    return Step(
+        {lay_off->card},
+        [index = lay_off->meldIndex](const rummy::GameState& deal, int seat, const Cards& cards) {
+          return deal.layOff(seat, cards.front(), index);
+        },
+        nullptr);
+  }
+  if (const auto* discard = move.as_discard_or_null()) {
+    return Step(
+        {discard->card},
+        [](const rummy::GameState& deal, int seat, const Cards& cards) {
+          return deal.discard(seat, cards.front());
+        },
+        [](const rummy::GinState& deal, int seat, const Cards& cards) {
+          return deal.discard(seat, cards.front());
+        });
+  }
+  if (const auto* knock = move.as_knock_or_null()) {
+    return Step({knock->card}, nullptr,
+                [](const rummy::GinState& deal, int seat, const Cards& cards) {
+                  return deal.knock(seat, cards.front());
+                });
+  }
+  return Refusal{RejectKind::kUnknown, "unknown move"};
 }
 
 }  // namespace games_hub
