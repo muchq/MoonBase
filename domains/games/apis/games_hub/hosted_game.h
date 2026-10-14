@@ -59,14 +59,9 @@ inline std::optional<GameKind> ParseGameKind(std::string_view name) {
   return std::nullopt;
 }
 
-inline GameKind KindOf(const HostedState& state) {
-  if (std::holds_alternative<castle::GameState>(state)) return GameKind::kCastle;
-  if (std::holds_alternative<rummy::TableState>(state)) return GameKind::kRummy;
-  if (std::holds_alternative<chess_play::Table>(state)) return GameKind::kChess;
-  if (std::holds_alternative<pong::Table>(state)) return GameKind::kPong;
-  if (std::holds_alternative<spades::Table>(state)) return GameKind::kSpades;
-  return GameKind::kGolf;
-}
+/// A state's kind is its alternative's index; adapters.h holds every
+/// adapter's kKind to it.
+inline GameKind KindOf(const HostedState& state) { return static_cast<GameKind>(state.index()); }
 
 inline bool IsOver(const HostedState& state) {
   return std::visit([](const auto& engine) { return engine.isOver(); }, state);

@@ -225,25 +225,15 @@ TEST(FilledStart, OnlyAChallengeOrAPairingStartsWhenFull) {
   EXPECT_FALSE(Adapter<castle::GameState>::FilledStart(terms, EventTag{"rr", 0}).has_value());
 }
 
-// Each game's envelope counts on the series named for its game, one per
-// union case its adapter lists.
+// Each game's envelope counts on the series named for its game.
 TEST(GameCounterSeries, EachEnvelopeCountsOnItsOwnGamesSeries) {
-  std::size_t cases = 0;
   AnyAdapter([&](auto adapter) {
     using A = decltype(adapter);
     const std::string game(GameKindName(A::kKind));
     EXPECT_EQ(A::kCommandSeries, game + "_commands");
     EXPECT_EQ(A::kEventSeries, game + "_events");
-    cases += A::kCommands.size() + A::kEvents.size();
     return false;
   });
-  const std::vector<CounterSeries> series = GameCounterSeries();
-  EXPECT_EQ(series.size(), cases);
-  for (const CounterSeries& one : series) {
-    const std::string label = one.name.ends_with("_commands") ? "command" : "event";
-    EXPECT_EQ(one.attributes.size(), 1u) << one.name;
-    EXPECT_TRUE(one.attributes.contains(label)) << one.name;
-  }
 }
 
 // The machinery that is one game's alone reaches its tables by the

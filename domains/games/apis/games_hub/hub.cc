@@ -2101,8 +2101,7 @@ std::optional<Refusal> GamesHub::ApplyTableEngineMoveLocked(GameRef ref,
     // Occupant ids, not seats: the engine renumbers on a leave. The
     // opening turn (setup done) reads as a change from nobody.
     const std::string previous_turn = CurrentTurnOf(*ref.entry->state);
-    std::optional<E> before;
-    if (move.views_to_all) before.emplace(state);
+    const bool views_to_all = !move.views_to_all || move.views_to_all(state, *next);
     const bool over = next->isOver();
     HostedState next_state(*std::move(next));
     // A finish credits the room's stats in the same conditional commit
@@ -2139,10 +2138,10 @@ std::optional<Refusal> GamesHub::ApplyTableEngineMoveLocked(GameRef ref,
       FinalizeGameLocked(ref.room_id, *ref.room, ref.game_id, outbox);
       return std::nullopt;
     }
-    if (!move.views_to_all || move.views_to_all(*before, std::get<E>(*ref.entry->state))) {
+    if (views_to_all) {
       StageGameViewsLocked(ref.game_id, *ref.entry, outbox);
     } else {
-      outbox.To(player_id, StateEventOf(kind, ContextOf(ref.game_id, *ref.entry), ref.entry->state,
+      outbox.To(player_id, StateEventOf(kind, ContextLocked(ref.game_id, *ref.entry), ref.entry->state,
                                         player_id));
     }
     if (deal_ended) {
@@ -2408,7 +2407,7 @@ void GamesHub::WatchMove(const std::string& player_id, const std::string& game_i
         StopWatchingLocked(player_id);
         entry->watchers.insert(player_id);
         outbox.To(player_id,
-                  StateEventOf(entry->kind, ContextOf(game_id, *entry), entry->state, player_id));
+                  StateEventOf(entry->kind, ContextLocked(game_id, *entry), entry->state, player_id));
       }
     }
   }
@@ -3686,20 +3685,20 @@ void GamesHub::StageRoomStateLocked(const std::string& room_id, Outbox& outbox) 
   }
 }
 
-TableContext GamesHub::ContextOf(const std::string& game_id, const GameEntry& entry) const {
+TableContext GamesHub::ContextLocked(const std::string& game_id, const GameEntry& entry) const {
   return TableContext{game_id, entry.roster, entry.watchers, entry.terms, entry.event, NowMs()};
 }
 
 GameEvents GamesHub::JoinedEventLocked(const std::string& game_id, const GameEntry& entry,
                                       const std::string& viewer_id) const {
-  return JoinedEventOf(entry.kind, ContextOf(game_id, entry), entry.state, viewer_id);
+  return JoinedEventOf(entry.kind, ContextLocked(game_id, entry), entry.state, viewer_id);
 }
 
 void GamesHub::StageGameViewsLocked(const std::string& game_id, const GameEntry& entry,
                                    Outbox& outbox) const {
   Staged staged;
   entry.games_announced =
-      StageViews(entry.kind, ContextOf(game_id, entry), entry.state, entry.games_announced, staged);
+      StageViews(entry.kind, ContextLocked(game_id, entry), entry.state, entry.games_announced, staged);
   for (auto& [recipient, event] : staged) outbox.To(recipient, std::move(event));
   // A pairing's result follows the game's own ending.
   for (const auto& [room_id, round_robin_id] : round_robins_moved_) {
@@ -3724,7 +3723,7 @@ void GamesHub::StageGameOverLocked(Room& room, const std::string& game_id, Outbo
   const GameEntry& entry = game->second;
   StageGameViewsLocked(game_id, entry, outbox);
   Staged staged;
-  StageClosedNotice(entry.kind, ContextOf(game_id, entry), entry.state, staged);
+  StageClosedNotice(entry.kind, ContextLocked(game_id, entry), entry.state, staged);
   for (auto& [recipient, event] : staged) outbox.To(recipient, std::move(event));
   for (const std::string& recipient : entry.roster) player_game_.erase(recipient);
   room.games.erase(game);

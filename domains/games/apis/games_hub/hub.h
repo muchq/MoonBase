@@ -331,7 +331,6 @@ class GamesHub final {
   /// Where a chess table starts, asked once per game at startGame. The
   /// default resolves the requested server-owned setup; tests fix its
   /// position. Call before serving: read without a lock thereafter.
-  using ChessOpener = games_hub::ChessOpener;
   void SetChessOpener(ChessOpener opener);
 
   /// The wall clock chess's clocks read, absl::Now unless a test fixes
@@ -822,7 +821,7 @@ class GamesHub final {
   void StageRoomStateLocked(const std::string& room_id, Outbox& outbox) const;
   /// What the table's views read besides its engine (adapter.h), as of
   /// now.
-  TableContext ContextOf(const std::string& game_id, const GameEntry& entry) const;
+  TableContext ContextLocked(const std::string& game_id, const GameEntry& entry) const;
   /// One viewer's gameJoined in the table's own vocabulary.
   moonbase::games::GameEvents JoinedEventLocked(const std::string& game_id, const GameEntry& entry,
                                                 const std::string& viewer_id) const;
