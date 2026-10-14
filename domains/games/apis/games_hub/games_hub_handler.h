@@ -11,12 +11,9 @@
 namespace games_hub {
 
 /// The generated service's one handler: session identity here, and
-/// the one stream, Play, forwarded whole to the room hub.
-///
-/// A new game is one more envelope member on Play — castle and the
-/// lobby ride GamesHub's room layer (rooms, chat, grace, the store,
-/// per-viewer redaction) that way — so the next game extends the room
-/// host, and the README says which union shape it copies.
+/// the one stream, Play, forwarded whole to the room hub. A game is one
+/// more envelope member on Play, riding GamesHub's room layer; the README
+/// says what adding one touches.
 class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
  public:
   GamesHubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<IdGenerator> ids,

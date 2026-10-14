@@ -1,7 +1,7 @@
-// The games hub server: sessions, rooms, chat, and every tenant
-// (lobby, voice, golf, castle, rummy, chess) on opal-cpp's streaming stack — generated async
-// handlers (ADR-0021), SessionRegistry fan-out with reconnect grace
-// (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018).
+// The games hub server: sessions, rooms, chat, and every tenant on
+// opal-cpp's streaming stack — generated async handlers (ADR-0021),
+// SessionRegistry fan-out with reconnect grace (ADR-0017/0020/0022), the
+// JSON-text browser wire (ADR-0018).
 //
 //   bazel run //domains/games/apis/games_hub
 //   curl -X POST localhost:8080/games/v2/session -H 'content-type: application/json' -d '{}'
