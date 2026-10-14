@@ -57,7 +57,7 @@ const EVENTS: [&str; 7] = [
 const VARIANTS: [&str; 7] = ["golf", "castle", "rummy", "gin", "chess", "pong", "spades"];
 const SURFACES: [&str; 3] = ["plane", "sphere", "glasshouse"];
 const OUTCOMES: [&str; 2] = ["completed", "abandoned"];
-/// The seats the engine deals a table, from the hub's kMaxSeats (hub.cc).
+/// The seats the engine deals a table, from the hub's kTableSeatCap (adapters.h).
 const MAX_SEATS: i64 = 4;
 const OTHER: &str = "other";
 

@@ -51,16 +51,6 @@
 
 namespace games_hub {
 
-/// winners() restricted to the seats the roster still names — the
-/// forfeit rule. A final state can carry a seat its roster has dropped:
-/// an abandonment that ended the game keeps the departed hand so its
-/// cards and score reach the scorecard (#1236), and such a seat cannot
-/// win — however good its standing score, the game resolved against it.
-/// For an ordinary finish the roster names every seat and this is
-/// exactly the engine's rule, knocker-takes-ties included.
-[[nodiscard]] std::unordered_set<int> WinnersAmong(const golf::GameState& state,
-                                                   const std::vector<std::string>& roster);
-
 /// Scheduling seams for the race tests, unset in production. A hook runs
 /// on the hub's thread and must not call into the hub; each says whether
 /// it holds mu_.
