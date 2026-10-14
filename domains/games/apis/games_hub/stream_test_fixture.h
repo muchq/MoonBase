@@ -534,7 +534,7 @@ inline std::shared_ptr<CapturingMetricsRecorder> MakeCapturingMetricsRecorder() 
 // exercises the membership-decides-the-resync branch of Play() without
 // simulating a wire failure.
 //
-// One trap: the shared MemoryChatStore's member guard was wired to the
+// One trap: the shared MemoryChatStore's member guard is wired to the
 // FIRST handler in the fixture's SetUp, so appends through this instance
 // authorize against instance one's membership. Reads (history) are
 // unguarded and safe; treat this instance as read-only for chat unless

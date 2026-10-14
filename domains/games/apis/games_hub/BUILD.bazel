@@ -3,7 +3,7 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 # The games hub's model: the room layer (games.smithy) and one
-# envelope per tenant — lobby, voice, golf, castle, rummy, chess.
+# envelope per tenant.
 smithy_cpp_server_library(
     name = "games_hub_smithy_server",
     srcs = [
@@ -898,8 +898,8 @@ cc_test(
     ],
 )
 
-# The room host: rooms, seats, chat, and every tenant (lobby, voice, golf,
-# castle, the tape) behind GamesHubHandler's Play.
+# The room host: rooms, seats, chat, and every tenant behind
+# GamesHubHandler's Play.
 cc_library(
     name = "hub",
     srcs = ["hub.cc"],
