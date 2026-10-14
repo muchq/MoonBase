@@ -636,7 +636,7 @@ TEST_F(CastleGameFixture, LeavingMidGameAbandonsItWithNoLoser) {
 }
 
 TEST_F(CastleGameFixture, CastleMovesOnAGolfTableAreRefusedAndEngineRefusalsCountAsRules) {
-  auto golf_table = SeatedTable();
+  auto golf_table = SeatedGolfTable();
   ASSERT_TRUE(golf_table.has_value());
   ASSERT_TRUE(
       golf_table->alice.stream.Send(Castle(CastleMove::FromPickup(moonbase::games::PickUp{})))

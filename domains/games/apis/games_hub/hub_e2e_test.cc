@@ -657,7 +657,7 @@ TEST_F(GamesHubStreamFixture, CleanCloseParksTheSeatAndResumeReclaimsIt) {
 }
 
 TEST_F(HubGameFixture, ChatReachesTheRoom) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
 
   moonbase::games::Chat chat;
@@ -2350,7 +2350,7 @@ TEST(StreamSeriesModelPin, SpadesSeriesMatchTheModelUnions) {
 // hole the kind exists to close. TearDown's sweep enforces the closed set for
 // every test; this one pins which kind each refusal shape maps to.
 TEST_F(GamesHubStreamFixture, RejectionsCountTheBoundedKindNeverTheReason) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
 
   // state: well-formed, but alice is already in a room.
@@ -2648,7 +2648,7 @@ TEST_F(GamesHubStreamFixture, WithMemberRunsOnlyForCurrentMembers) {
 }
 
 TEST_F(HubGameFixture, AbandoningALiveGameResolvesIt) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   // Drain the opening deals so the next gameState each seat sees is the
   // finish ceremony's.
@@ -2729,7 +2729,7 @@ class GameEventFixture : public HubGameFixture {
 };
 
 TEST_F(GameEventFixture, TheFunnelIsRecordedFromTheRoomToTheGameThatEndedIt) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
   ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
@@ -2952,7 +2952,7 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAClosedRoomWritesNothing) {
 }
 
 TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNothing) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
   ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
@@ -2987,7 +2987,7 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNoth
 // the leave goes through — and runs the whole ceremony again. The game
 // it would record is one nobody was sitting at.
 TEST_F(GameEventFixture, ASiblingThatRebasedOntoAFinishRecordsNothing) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
   ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
@@ -3022,7 +3022,7 @@ TEST_F(GameEventFixture, ASiblingThatRebasedOntoAFinishRecordsNothing) {
 // (#1236). A close parks the seat: the table sees the disconnect, nothing
 // ends, and the resume token reclaims the seat with the game intact.
 TEST_F(HubGameFixture, MidGameBrowserCloseParksTheSeatAndTheGameSurvives) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   auto& alice = table->alice;
   ASSERT_TRUE(ReceiveGolf(alice.stream, "gameState").has_value());
@@ -3093,7 +3093,7 @@ class ShortGraceFixture : public HubGameFixture {
 };
 
 TEST_F(ShortGraceFixture, GraceExpiryResolvesTheGameWithEverySeatScored) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   auto& alice = table->alice;
   ASSERT_TRUE(ReceiveGolf(alice.stream, "gameState").has_value());
@@ -3139,7 +3139,7 @@ TEST_F(ShortGraceFixture, GraceExpiryResolvesTheGameWithEverySeatScored) {
 }
 
 TEST_F(HubGameFixture, IllegalMovesRejectInBandAndTheGameContinues) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
 
   // Not bob's turn.
@@ -3248,7 +3248,7 @@ TEST_F(HubGameFixture, PendingGameLifecycleAndLobbySummaries) {
 }
 
 TEST_F(HubGameFixture, RoomStatsAccumulateAcrossGames) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
 
   // Quickest legal game: alice knocks unseen, bob takes his final turn.

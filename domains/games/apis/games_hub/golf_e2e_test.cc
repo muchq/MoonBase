@@ -44,7 +44,7 @@ TEST_F(GolfFixture, AFifthSeatIsRefused) {
 // deal, peeking once every seat has peeked, playing again after the
 // hide, knocked once a seat knocks.
 TEST_F(GolfFixture, TheRoomListsEachPhaseOfTheTable) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   Seat& alice = table->alice;
   Seat& bob = table->bob;
@@ -76,7 +76,7 @@ TEST_F(GolfFixture, TheRoomListsEachPhaseOfTheTable) {
 
 // Golf counts each command on its own series, by the move's name.
 TEST_F(GolfFixture, CommandsAreCountedOnTheGolfSeries) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
   ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
@@ -109,7 +109,7 @@ TEST_F(GolfFixture, ALeaveOnTurnHandsTheTurnToTheNextSeat) {
 }
 
 TEST_F(GolfFixture, FullGameKnockerTieWinsAlone) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   auto& alice = table->alice;
   auto& bob = table->bob;

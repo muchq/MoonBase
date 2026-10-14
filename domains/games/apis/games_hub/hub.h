@@ -202,9 +202,10 @@ class GamesHub final {
   bool WithMember(const std::string& room_id, const std::string& player_id,
                   const MemberAction& action);
 
-  /// The golf stream, on GamesHubHandler::Play's signature: spend the
-  /// ticket, admit the seat, sessionReady and the room resync, then
-  /// commands until the socket closes.
+  /// A session's one stream, every game's and the room's, on
+  /// GamesHubHandler::Play's signature: spend the ticket, admit the seat,
+  /// sessionReady and the room resync, then commands until the socket
+  /// closes.
   opal::eventstream::StreamTask Play(moonbase::games::PlayInput input,
                                      moonbase::games::PlayAsyncServerStream& stream);
 

@@ -318,7 +318,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     if (!seats.bob->stream.Send(Move(GolfMove::FromJoingame(join_game))).ok()) return std::nullopt;
     if (!ReceiveGolf(seats.bob->stream, "gameJoined").has_value()) return std::nullopt;
     // alice's instance must adopt the two-seat roster before she starts.
-    if (!AwaitGameView(
+    if (!AwaitGolfView(
              seats.alice->stream,
              [](const moonbase::games::GameView& view) { return view.players.size() == 2; },
              "alice (primary) gameView with 2 players after bob's seat wake")
@@ -333,7 +333,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     if (!ReceiveGolf(seats.alice->stream, "gameStarted").has_value()) return std::nullopt;
     // bob's start signal is the projected deal (remote refresh sends
     // views, not the started event — the view is the contract).
-    if (!AwaitGameView(
+    if (!AwaitGolfView(
              seats.bob->stream,
              [](const moonbase::games::GameView& view) { return view.phase != "waiting"; },
              "bob (remote) gameView dealt after alice's start wake")
@@ -417,7 +417,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
 namespace {
 
 TEST_F(PgGamesHubFixture, LiveGameSurvivesARestart) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   Seat& alice = table->alice;
   Seat& bob = table->bob;
@@ -542,7 +542,7 @@ TEST_F(PgGamesHubFixture, LiveGameSurvivesARestart) {
 }
 
 TEST_F(PgGamesHubFixture, StatsSurviveARestart) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
 
   // Quickest legal game: alice knocks unseen, bob takes his final turn.
@@ -970,7 +970,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesSweepingOneClockEndTheGameOnce) {
 }
 
 TEST_F(PgGamesHubFixture, PendingGameLifecycleWritesThrough) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   // A second, pending game beside the started one: bob leaves his seat in
   // the started game first, creates a fresh lobby game, and its roster
@@ -1014,7 +1014,7 @@ TEST_F(PgGamesHubFixture, PendingGameLifecycleWritesThrough) {
 }
 
 TEST_F(PgGamesHubFixture, CorruptRowsLoseTheGameNotTheLobby) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   store_->Flush();
 
@@ -1311,12 +1311,12 @@ TEST_F(PgGamesHubFixture, TwoInstancesShareOneGame) {
       ASSERT_TRUE(seat->stream.Send(Move(GolfMove::FromPeekcard(peek))).ok());
     }
   }
-  ASSERT_TRUE(AwaitGameView(
+  ASSERT_TRUE(AwaitGolfView(
                   alice.stream,
                   [](const moonbase::games::GameView& view) { return view.allPlayersPeeked; },
                   "alice (primary) allPlayersPeeked after cross-instance peeks")
                   .has_value());
-  ASSERT_TRUE(AwaitGameView(
+  ASSERT_TRUE(AwaitGolfView(
                   bob.stream,
                   [](const moonbase::games::GameView& view) { return view.allPlayersPeeked; },
                   "bob (remote) allPlayersPeeked after cross-instance peeks")
@@ -1328,7 +1328,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesShareOneGame) {
   ASSERT_TRUE(
       alice.stream.Send(Move(GolfMove::FromDiscarddrawn(moonbase::games::DiscardDrawn{}))).ok());
   // ...lands on bob's instance as two discards and the turn handoff.
-  ASSERT_TRUE(AwaitGameView(
+  ASSERT_TRUE(AwaitGolfView(
                   bob.stream,
                   [&](const moonbase::games::GameView& view) {
                     return view.discardCount == 2 && view.currentPlayerId == bob.player_id;
@@ -1340,7 +1340,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesShareOneGame) {
   ASSERT_TRUE(bob.stream.Send(Move(GolfMove::FromDrawcard(moonbase::games::DrawCard{}))).ok());
   ASSERT_TRUE(
       bob.stream.Send(Move(GolfMove::FromDiscarddrawn(moonbase::games::DiscardDrawn{}))).ok());
-  ASSERT_TRUE(AwaitGameView(
+  ASSERT_TRUE(AwaitGolfView(
                   alice.stream,
                   [&](const moonbase::games::GameView& view) {
                     return view.discardCount == 3 && view.currentPlayerId == alice.player_id;
@@ -1374,7 +1374,7 @@ TEST_F(PgGamesHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
   // Quickest legal game: alice knocks unseen on her instance...
   ASSERT_TRUE(alice.stream.Send(Move(GolfMove::FromKnock(moonbase::games::Knock{}))).ok());
   // ...and the knocked phase reaches bob's projection.
-  ASSERT_TRUE(AwaitGameView(
+  ASSERT_TRUE(AwaitGolfView(
                   bob.stream,
                   [&](const moonbase::games::GameView& view) {
                     return view.knockedPlayerId == alice.player_id;

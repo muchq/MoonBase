@@ -810,7 +810,7 @@ TEST_F(RummyGameFixture, TheRoomListsRummyTablesAndOtherGamesMovesAreRefused) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "that table plays rummy");
 
   // And the other way: a rummy move at a golf table, a rummy join of one.
-  auto golf_table = SeatedTable();
+  auto golf_table = SeatedGolfTable();
   ASSERT_TRUE(golf_table.has_value());
   ASSERT_TRUE(golf_table->alice.stream.Send(DrawStock()).ok());
   refused = ReceiveCase(golf_table->alice.stream, "commandRejected");

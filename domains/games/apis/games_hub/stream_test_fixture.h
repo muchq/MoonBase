@@ -296,7 +296,7 @@ std::optional<moonbase::games::RoomState> AwaitRoomState(
 }
 
 template <typename Predicate>
-std::optional<moonbase::games::GameView> AwaitGameView(
+std::optional<moonbase::games::GameView> AwaitGolfView(
     moonbase::games::PlayClientStream& stream, Predicate&& predicate,
     const std::string& waiting_for, std::chrono::milliseconds budget = kReceiveBudget) {
   return AwaitMatching(
@@ -864,7 +864,7 @@ class GamesHubStreamFixture : public testing::Test {
     std::string room_id;
     std::string game_id;
   };
-  std::optional<Table> SeatedTable() {
+  std::optional<Table> SeatedGolfTable() {
     auto room = SeatedRoom(2);
     if (!room.has_value()) return std::nullopt;
     Seat& alice = room->seats[0];
@@ -978,7 +978,7 @@ class GamesHubStreamFixture : public testing::Test {
     return table;
   }
 
-  // The castle and rummy tables' twins of SeatedTable: two seats in
+  // The castle and rummy tables' twins of SeatedGolfTable: two seats in
   // alice-and-bob form.
   std::optional<Table> SeatedCastleTable() { return AliceAndBob(MultiSeatCastleTable(2)); }
   // Rummy's alice is the seat that opens the deal — seat 1, after the
