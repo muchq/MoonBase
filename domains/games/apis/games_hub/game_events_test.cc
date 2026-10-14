@@ -90,30 +90,6 @@ rummy::TableState RummyDealWon() {
   return *won;
 }
 
-TEST(GameEvents, AGolfGamePlayedOutIsCompleted) {
-  const golf::GameState knocked = Golf(0);
-  ASSERT_TRUE(knocked.isOver());
-
-  const GameFinished finished = *FinishedOf(HostedState(knocked), 2);
-  EXPECT_EQ(finished.variant, "golf");
-  EXPECT_EQ(finished.outcome, "completed");
-  EXPECT_EQ(finished.players, 2u);
-}
-
-// Golf's forced finish supersedes any knock with the kAbandoned
-// sentinel, which is the only thing that tells the two endings apart:
-// the scorecard keeps every seat either way.
-TEST(GameEvents, AGolfGameLeftBelowTwoSeatsIsAbandoned) {
-  const golf::GameState lone = *Golf(golf::GameState::kNoKnock).removePlayer(1);
-  ASSERT_TRUE(lone.isOver());
-  ASSERT_EQ(lone.getWhoKnocked(), golf::GameState::kAbandoned);
-
-  const GameFinished finished = *FinishedOf(HostedState(lone), 1);
-  EXPECT_EQ(finished.variant, "golf");
-  EXPECT_EQ(finished.outcome, "abandoned");
-  EXPECT_EQ(finished.players, 1u);
-}
-
 TEST(GameEvents, ACastleGamePlayedOutIsCompleted) {
   const absl::StatusOr<castle::GameState> over = Castle().playFromHand(0, {0});
   ASSERT_TRUE(over.ok()) << over.status();

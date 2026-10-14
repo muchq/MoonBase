@@ -52,6 +52,15 @@ struct Adapter<pong::Table> {
   static bool DealStarted(const pong::Table& before, const pong::Table& after) {
     return !before.inPlay() && after.inPlay();
   }
+  // As chess's: a game's end, the table playing on or closed by the leave
+  // that ended it.
+  static std::optional<GameEnd> Ended(const pong::Table& table) {
+    if (table.inPlay() || table.scoreSheet().empty() || (table.isOver() && !table.endedByClose())) {
+      return std::nullopt;
+    }
+    return table.scoreSheet().back().ending == pong::Ending::kAbandoned ? GameEnd::kAbandoned
+                                                                        : GameEnd::kCompleted;
+  }
   static absl::StatusOr<pong::Table> WithoutSeat(const pong::Table& table, int seat, int64_t) {
     return table.removePlayer(seat);
   }

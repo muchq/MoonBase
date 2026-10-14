@@ -61,6 +61,12 @@ struct Adapter<golf::GameState> {
     return std::nullopt;
   }
   static bool DealStarted(const golf::GameState&, const golf::GameState&) { return false; }
+  // The engine supersedes any knock with this sentinel when a leave drops
+  // the table below two seats.
+  static std::optional<GameEnd> Ended(const golf::GameState& state) {
+    return state.getWhoKnocked() == golf::GameState::kAbandoned ? GameEnd::kAbandoned
+                                                                : GameEnd::kCompleted;
+  }
   static absl::StatusOr<golf::GameState> WithoutSeat(const golf::GameState& state, int seat,
                                                      int64_t) {
     return state.removePlayer(seat);

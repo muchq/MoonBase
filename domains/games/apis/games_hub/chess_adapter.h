@@ -72,6 +72,13 @@ struct Adapter<chess_play::Table> {
   static bool DealStarted(const chess_play::Table& before, const chess_play::Table& after) {
     return before.game().isOver() && !after.game().isOver();
   }
+  // A game's end, the table playing on or closed by the leave that ended
+  // it. A table closed between games recorded its last when it ended.
+  static std::optional<GameEnd> Ended(const chess_play::Table& table) {
+    if (!table.game().isOver() || (table.isOver() && !table.endedByClose())) return std::nullopt;
+    return table.game().result()->ending == chess_play::Ending::kAbandoned ? GameEnd::kAbandoned
+                                                                           : GameEnd::kCompleted;
+  }
   // The leave reads the clock first: a flag already fallen ends the game
   // on time, not by the leave.
   static absl::StatusOr<chess_play::Table> WithoutSeat(const chess_play::Table& table, int seat,

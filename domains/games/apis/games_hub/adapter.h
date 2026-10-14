@@ -101,6 +101,9 @@ enum Capability : unsigned {
   kChallenges = 1U << 8,
 };
 
+/// How a game ended: played out, or left with too few seats to go on.
+enum class GameEnd { kCompleted, kAbandoned };
+
 /// A round robin as the hub holds it, with the tables playing its
 /// pairings now, by pairing index.
 struct HeldRoundRobin {
@@ -216,6 +219,8 @@ using Action =
 ///                           closing the table credits, if it did
 ///   DealStarted(before, after)
 ///                           whether a transition began the table's next game
+///   Ended(engine)           how the game a finished or closed table last
+///                           played ended, if that ending is not yet recorded
 ///   WithoutSeat(engine, seat, now_ms)
 ///                           the engine once `seat` leaves
 ///   ViewOf(context, engine, viewer)

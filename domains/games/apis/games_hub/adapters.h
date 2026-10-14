@@ -54,6 +54,7 @@ concept GameAdapter = requires(
   { A::ClosedDeltas(engine, roster) } -> std::same_as<StatsDeltas>;
   { A::DealEndDeltas(engine, engine) } -> std::same_as<std::optional<StatsDeltas>>;
   { A::DealStarted(engine, engine) } -> std::same_as<bool>;
+  { A::Ended(engine) } -> std::same_as<std::optional<GameEnd>>;
   { A::WithoutSeat(engine, 0, int64_t{0}) } -> std::same_as<absl::StatusOr<typename A::Engine>>;
   { A::ViewOf(context, &engine, id) } -> std::same_as<typename A::View>;
   { A::StateEvent(view) } -> std::same_as<moonbase::games::GameEvents>;

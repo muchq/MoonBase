@@ -54,6 +54,19 @@ struct Adapter<rummy::TableState> {
   static bool DealStarted(const rummy::TableState& before, const rummy::TableState& after) {
     return after.getDealNumber() > before.getDealNumber();
   }
+  // A table's games are its deals: one broken up by a leave is abandoned,
+  // and one won by play ends once the table deals on to choosing. A
+  // closed table's finished deal was recorded when it finished.
+  static std::optional<GameEnd> Ended(const rummy::TableState& table) {
+    const auto& deal = table.getDeal();
+    if (!deal.has_value()) return std::nullopt;
+    if (rummy::dealPhase(*deal) == rummy::Phase::Abandoned) return GameEnd::kAbandoned;
+    if (rummy::dealPhase(*deal) == rummy::Phase::Over &&
+        table.getPhase() == rummy::TablePhase::Choosing) {
+      return GameEnd::kCompleted;
+    }
+    return std::nullopt;
+  }
   static absl::StatusOr<rummy::TableState> WithoutSeat(const rummy::TableState& table, int seat,
                                                        int64_t) {
     return table.removePlayer(seat);

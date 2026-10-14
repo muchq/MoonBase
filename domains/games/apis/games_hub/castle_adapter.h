@@ -48,6 +48,9 @@ struct Adapter<castle::GameState> {
     return std::nullopt;
   }
   static bool DealStarted(const castle::GameState&, const castle::GameState&) { return false; }
+  static std::optional<GameEnd> Ended(const castle::GameState& state) {
+    return state.getPhase() == castle::Phase::Abandoned ? GameEnd::kAbandoned : GameEnd::kCompleted;
+  }
   static absl::StatusOr<castle::GameState> WithoutSeat(const castle::GameState& state, int seat,
                                                        int64_t) {
     return state.removePlayer(seat);

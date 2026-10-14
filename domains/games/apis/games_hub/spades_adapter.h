@@ -53,6 +53,13 @@ struct Adapter<spades::Table> {
   static bool DealStarted(const spades::Table& before, const spades::Table& after) {
     return before.phase() == spades::Phase::kWon && after.phase() == spades::Phase::kBidding;
   }
+  // A game won, the table dealing on; or one a leave abandoned. A table
+  // closed between games recorded its last when it was won.
+  static std::optional<GameEnd> Ended(const spades::Table& table) {
+    if (table.phase() == spades::Phase::kWon) return GameEnd::kCompleted;
+    if (table.abandonedGame()) return GameEnd::kAbandoned;
+    return std::nullopt;
+  }
   static absl::StatusOr<spades::Table> WithoutSeat(const spades::Table& table, int seat, int64_t) {
     return table.removePlayer(seat);
   }

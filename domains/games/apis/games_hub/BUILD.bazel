@@ -133,6 +133,19 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "golf_adapter_test",
+    size = "small",
+    srcs = ["golf_adapter_test.cc"],
+    deps = [
+        ":adapters",
+        "//domains/games/libs/cards",
+        "//domains/games/libs/cards/golf:game_state",
+        "//domains/games/libs/cards/golf:player",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "protocol_input",
     hdrs = ["protocol_input.h"],
@@ -301,14 +314,6 @@ cc_library(
     deps = [
         ":adapters",
         ":hosted_game",
-        "//domains/games/libs/cards/castle:game_state",
-        "//domains/games/libs/cards/golf:game_state",
-        "//domains/games/libs/cards/rummy:game_state",
-        "//domains/games/libs/cards/rummy:table",
-        "//domains/games/libs/cards/spades:table",
-        "//domains/games/libs/chess_play:game_state",
-        "//domains/games/libs/chess_play:table",
-        "//domains/games/libs/pong:table",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
     ],
