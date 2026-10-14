@@ -313,10 +313,15 @@ TEST(EveryGame, OpensAndRoundTripsThroughItsAdaptersSerde) {
         A::Open(OpenContext{game_id, roster, 0}, start, dealer.DealNewUnshuffledDeck());
     EXPECT_TRUE(opened.ok()) << opened.status();
     if (!opened.ok()) return false;
-    const std::string stored = A::Serialize(*opened);
-    const auto restored = A::Deserialize(stored);
-    EXPECT_TRUE(restored.ok()) << restored.status();
-    if (restored.ok()) EXPECT_EQ(A::Serialize(*restored), stored);
+    const auto left = A::WithoutSeat(*opened, static_cast<int>(A::kMaxSeats) - 1, 0);
+    EXPECT_TRUE(left.ok()) << left.status();
+    if (!left.ok()) return false;
+    for (const auto* engine : {&*opened, &*left}) {
+      const std::string stored = A::Serialize(*engine);
+      const auto restored = A::Deserialize(stored);
+      EXPECT_TRUE(restored.ok()) << restored.status();
+      if (restored.ok()) EXPECT_EQ(A::Serialize(*restored), stored);
+    }
     return false;
   });
 }
