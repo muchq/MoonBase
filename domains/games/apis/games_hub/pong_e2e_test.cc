@@ -899,5 +899,26 @@ TEST_F(PongEventFixture, EachGameIsRecordedStartedAndFinishedAsPong) {
   }
 }
 
+// An instance that takes the table on after its first game ended counts
+// that game as told: the next game's start does not tell it again.
+TEST_F(PongFixture, ATakenOverTableDoesNotRetellAFinishedGame) {
+  auto started = StartedTable("smallcat");
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  SendHandled(table.bob, Paddle(0));
+  ASSERT_TRUE(
+      TickUntil(table.alice, [](const auto& view) { return view.phase == "ended"; }).has_value());
+
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto bob = OpenSeatVia(*instance->client, table.bob.resume_token);
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceivePong(bob->stream, "gameJoined").has_value());
+  ASSERT_TRUE(bob->stream.Send(PongStart("3d")).ok());
+  const auto cases = CasesUntilQuiet(bob->stream);
+  EXPECT_THAT(cases, ::testing::Contains("pong.gameState"));
+  EXPECT_THAT(cases, ::testing::Not(::testing::Contains("pong.gameEnded")));
+}
+
 }  // namespace
 }  // namespace games_hub

@@ -606,5 +606,26 @@ TEST_F(SpadesFixture, AResumedSpadesSeatGetsItsOwnViewBack) {
   }
 }
 
+// An instance that takes the table on after its first game ended counts
+// that game as told: the next deal does not tell it again.
+TEST_F(SpadesFixture, ATakenOverTableDoesNotRetellAFinishedGame) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  ASSERT_NO_FATAL_FAILURE(WinTheFirstGame(*started));
+  for (Seat& seat : started->table.seats) {
+    ASSERT_TRUE(ReceiveSpades(seat.stream, "gameEnded").has_value());
+  }
+
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto dealer = OpenSeatVia(*instance->client, started->table.seats[2].resume_token);
+  ASSERT_TRUE(dealer.has_value());
+  ASSERT_TRUE(ReceiveSpades(dealer->stream, "gameJoined").has_value());
+  ASSERT_TRUE(dealer->stream.Send(DealNext()).ok());
+  const auto cases = CasesUntilQuiet(dealer->stream);
+  EXPECT_THAT(cases, ::testing::Contains("spades.gameState"));
+  EXPECT_THAT(cases, ::testing::Not(::testing::Contains("spades.gameEnded")));
+}
+
 }  // namespace
 }  // namespace games_hub

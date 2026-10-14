@@ -353,6 +353,24 @@ TEST_F(ChessFixture, TheSweepEndsAGameWhoseSideToMoveRanOutOfTime) {
   EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
 }
 
+// A leave reads the clock first: a side whose flag has fallen, unswept,
+// lost on time, not by leaving.
+TEST_F(ChessFixture, ALeaveAfterTheFlagFellIsATimeout) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Play("e2e4")).ok());
+  ASSERT_TRUE(ReceiveChess(table.bob.stream, "turnChanged").has_value());
+  now_ms_ += 180'000;
+  ASSERT_TRUE(
+      table.bob.stream.Send(Chess(ChessMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  auto result = Ended(table.alice);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->winner, table.alice.player_id);
+  EXPECT_EQ(result->ending, "timeout");
+}
+
 TEST_F(ChessFixture, ThePawnSideOutOfTimeOnlyDraws) {
   opening_.fen = kQuiet;
   auto started = StartedTable();
@@ -1934,6 +1952,28 @@ TEST_F(ChessEventFixture, TheNextGameIsRecordedStartedAsChess) {
   EXPECT_THAT(games[2], ::testing::HasSubstr(R"("event":"game_started")"));
   EXPECT_THAT(games[2], ::testing::HasSubstr(R"("variant":"chess")"));
   EXPECT_THAT(games[2], ::testing::HasSubstr(R"("players":2)"));
+}
+
+// An instance that takes the table on after its first game ended counts
+// that game as told: the next game's start does not tell it again.
+TEST_F(ChessFixture, ATakenOverTableDoesNotRetellAFinishedGame) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  auto bob = OpenSeatVia(*instance->client, table.bob.resume_token);
+  ASSERT_TRUE(bob.has_value());
+  ASSERT_TRUE(ReceiveChess(bob->stream, "gameJoined").has_value());
+  moonbase::games::ChessStartGame next;
+  next.setupId = "qvr-basic";
+  ASSERT_TRUE(bob->stream.Send(Chess(ChessMove::FromStartgame(next))).ok());
+  const auto cases = CasesUntilQuiet(bob->stream);
+  EXPECT_THAT(cases, ::testing::Contains("chess.gameState"));
+  EXPECT_THAT(cases, ::testing::Not(::testing::Contains("chess.gameEnded")));
 }
 
 }  // namespace
