@@ -359,11 +359,11 @@ var serviceRegistry = map[string]serviceEntry{
 				`sum(rate(chat_rows_delivered_total[w]))/sum(rate(chat_catch_up_drains_total[w]))`),
 			counter("Chat", "history_replays", "", `chat_history_replays_total`),
 			counter("Chat", "failures", "", `chat_failures_total`),
-			// Each tenant's envelope on the one stream (#1490): golf, castle
-			// (#77), rummy (#245), chess, and the lobby's world. Series and labels carry the game
-			// prefix because a label is a tile's identity across the whole
-			// service, not just its group; chat_* and hub_* are the room
-			// layer's.
+			// Each tenant's envelope on the one stream (#1490): every game the
+			// hub's adapters declare (otel_contract holds this list to them),
+			// and the lobby's world. Series and labels carry the game prefix
+			// because a label is a tile's identity across the whole service,
+			// not just its group; chat_* and hub_* are the room layer's.
 			counter("Golf", "golf_commands", "", `golf_commands_total`),
 			counter("Golf", "golf_events", "", `golf_events_total`),
 			counter("Castle", "castle_commands", "", `castle_commands_total`),
@@ -372,6 +372,10 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("Rummy", "rummy_events", "", `rummy_events_total`),
 			counter("Chess", "chess_commands", "", `chess_commands_total`),
 			counter("Chess", "chess_events", "", `chess_events_total`),
+			counter("Pong", "pong_commands", "", `pong_commands_total`),
+			counter("Pong", "pong_events", "", `pong_events_total`),
+			counter("Spades", "spades_commands", "", `spades_commands_total`),
+			counter("Spades", "spades_events", "", `spades_events_total`),
 			counter("Lobby", "lobby_commands", "", `lobby_commands_total`),
 			counter("Lobby", "lobby_events", "", `lobby_events_total`),
 		},

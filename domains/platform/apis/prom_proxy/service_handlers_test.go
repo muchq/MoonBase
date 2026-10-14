@@ -127,7 +127,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, "1d", response.Window)
 
 	// Custom groups keep registry order and every descriptor is present.
-	require.Len(t, response.Custom, 9)
+	require.Len(t, response.Custom, 11)
 	assert.Equal(t, "Probes", response.Custom[0].Title)
 	assert.Equal(t, "Sessions", response.Custom[1].Title)
 	assert.Equal(t, "Room layer", response.Custom[2].Title)
@@ -136,7 +136,9 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, "Castle", response.Custom[5].Title)
 	assert.Equal(t, "Rummy", response.Custom[6].Title)
 	assert.Equal(t, "Chess", response.Custom[7].Title)
-	assert.Equal(t, "Lobby", response.Custom[8].Title)
+	assert.Equal(t, "Pong", response.Custom[8].Title)
+	assert.Equal(t, "Spades", response.Custom[9].Title)
+	assert.Equal(t, "Lobby", response.Custom[10].Title)
 	assert.Len(t, response.Custom[0].Metrics, 1)
 	assert.Len(t, response.Custom[1].Metrics, 7)
 	assert.Len(t, response.Custom[2].Metrics, 4)
@@ -145,6 +147,8 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	require.Len(t, response.Custom[5].Metrics, 2)
 	require.Len(t, response.Custom[6].Metrics, 2)
 	require.Len(t, response.Custom[7].Metrics, 2)
+	require.Len(t, response.Custom[8].Metrics, 2)
+	require.Len(t, response.Custom[9].Metrics, 2)
 
 	assert.Equal(t, CustomMetricValue{Label: "health_checks", Value: 200.0, Toggleable: true},
 		response.Custom[0].Metrics[0])
@@ -159,7 +163,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, CustomMetricValue{Label: "messages", Value: 212.0, Toggleable: true},
 		response.Custom[3].Metrics[0])
 	// The tenants' envelopes from index 17 (#1490): golf, castle, rummy,
-	// chess, the lobby.
+	// chess, pong, spades, the lobby.
 	// Labels carry the game prefix so a tile's label names it across the
 	// whole service, not just its group.
 	assert.Equal(t, CustomMetricValue{Label: "golf_commands", Value: 217.0, Toggleable: true},
@@ -170,10 +174,14 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 		response.Custom[6].Metrics[0])
 	assert.Equal(t, CustomMetricValue{Label: "chess_commands", Value: 223.0, Toggleable: true},
 		response.Custom[7].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "lobby_commands", Value: 225.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "pong_commands", Value: 225.0, Toggleable: true},
 		response.Custom[8].Metrics[0])
+	assert.Equal(t, CustomMetricValue{Label: "spades_commands", Value: 227.0, Toggleable: true},
+		response.Custom[9].Metrics[0])
+	assert.Equal(t, CustomMetricValue{Label: "lobby_commands", Value: 229.0, Toggleable: true},
+		response.Custom[10].Metrics[0])
 	// The omitted query's descriptor survives with a zero value.
-	last := response.Custom[8].Metrics[1]
+	last := response.Custom[10].Metrics[1]
 	assert.Equal(t, omitted.Label, last.Label)
 	assert.Equal(t, 0.0, last.Value)
 }

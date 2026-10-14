@@ -1,6 +1,10 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
 load("//bazel/rules:oci.bzl", "linux_oci_go")
 
+# Read as text by //domains/platform/libs/otel_contract, which holds the
+# games_hub tiles to the games the hub's adapters declare.
+exports_files(["registry.go"])
+
 go_library(
     name = "prom_proxy_lib",
     srcs = [

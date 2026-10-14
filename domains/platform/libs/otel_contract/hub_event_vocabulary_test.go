@@ -23,17 +23,18 @@ import (
 // grows an eighth event would go unrecorded until this fails.
 
 const (
-	hubEventsHeader = "../../../games/apis/games_hub/game_events.h"
-	hubEventsCc     = "../../../games/apis/games_hub/game_events.cc"
-	hubSurfaceH     = "../../../games/apis/games_hub/surface.h"
-	hubDir          = "../../../games/apis/games_hub/"
-	hubHostedGameH  = "../../../games/apis/games_hub/hosted_game.h"
-	hubCc           = "../../../games/apis/games_hub/hub.cc"
-	adaptersH       = "../../../games/apis/games_hub/adapters.h"
-	hubWorldH       = "../../../games/apis/games_hub/world.h"
-	rummyTableCc    = "../../../games/libs/cards/rummy/table.cc"
-	statsGames      = "../../apis/stats/games.go"
-	dejaHub         = "../../../ai/apis/deja/src/hub.rs"
+	hubEventsHeader   = "../../../games/apis/games_hub/game_events.h"
+	hubEventsCc       = "../../../games/apis/games_hub/game_events.cc"
+	hubSurfaceH       = "../../../games/apis/games_hub/surface.h"
+	hubDir            = "../../../games/apis/games_hub/"
+	hubHostedGameH    = "../../../games/apis/games_hub/hosted_game.h"
+	hubCc             = "../../../games/apis/games_hub/hub.cc"
+	adaptersH         = "../../../games/apis/games_hub/adapters.h"
+	hubWorldH         = "../../../games/apis/games_hub/world.h"
+	rummyTableCc      = "../../../games/libs/cards/rummy/table.cc"
+	statsGames        = "../../apis/stats/games.go"
+	dejaHub           = "../../../ai/apis/deja/src/hub.rs"
+	promProxyRegistry = "../../apis/prom_proxy/registry.go"
 )
 
 // The quoted values of `inline constexpr std::string_view <prefix>… = "…"`.
@@ -179,6 +180,23 @@ func gameWords(t *testing.T) []string {
 	}
 	sort.Strings(sorted)
 	return sorted
+}
+
+// prom_proxy gives each game's envelope a group of its own on the
+// games_hub page, a tile per series. A game the hub hosts without them
+// counts its traffic where nobody looks. (The per-game charts are not
+// pinned: each costs two range queries against the page's budget.)
+func TestEveryHubGameHasItsPromProxyTiles(t *testing.T) {
+	registry, err := os.ReadFile(promProxyRegistry)
+	require.NoError(t, err)
+	for _, game := range hubGames(t) {
+		for _, series := range []string{game.commandSeries, game.eventSeries} {
+			tile := regexp.MustCompile(`counter\("[^"]+", "` + series + `", "", ` + "`" + series +
+				"_total`" + `\)`)
+			assert.True(t, tile.Match(registry),
+				"%s counts on %s and prom_proxy has no tile for it", game.header, series)
+		}
+	}
 }
 
 // The body of SurfaceKindName, which is where the three spellings live —
