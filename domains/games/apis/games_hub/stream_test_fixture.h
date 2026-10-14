@@ -25,8 +25,10 @@
 #include <thread>
 #include <type_traits>
 #include <utility>
+#include <string_view>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "domains/games/apis/games_hub/games_hub_handler.h"
 #include "domains/games/apis/games_hub/hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
@@ -582,9 +584,9 @@ class GamesHubStreamFixture : public testing::Test {
                                       /*grace_period=*/GracePeriod(), metrics_, store_, chat_store_,
                                       MakeRateLimits(), MakeHubHooks());
     if (default_memory_chat) {
-      *guard = [golf = hub_.get()](const std::string& room_id, const std::string& player_id,
+      *guard = [hub = hub_.get()](const std::string& room_id, const std::string& player_id,
                                     const MemberAction& action) {
-        return golf->WithMember(room_id, player_id, action);
+        return hub->WithMember(room_id, player_id, action);
       };
     }
     const absl::Status restored = hub_->RestoreFromStore();
@@ -615,6 +617,9 @@ class GamesHubStreamFixture : public testing::Test {
   }
 
   void TearDown() override {
+    // The writer goes first: the hub's teardown can end a game, and
+    // `events_` must outlive every line it writes.
+    if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
     // Idempotent; unblocks any session a failed test body left parked so
     // the registry's teardown joins cannot hang.
     for (auto& session : sessions_) session->Close();
@@ -706,8 +711,8 @@ class GamesHubStreamFixture : public testing::Test {
   // host opens it in the envelope `wrap` puts a move in, `seats - 1` more
   // join, and one more is turned away.
   template <typename MoveUnion, typename Wrap, typename Receive>
-  void ExpectSeatCap(std::size_t seats, Wrap wrap, Receive receive) {
-    auto room = SeatedRoom(static_cast<int>(seats) + 1);
+  void ExpectSeatCap(int seats, Wrap wrap, Receive receive) {
+    auto room = SeatedRoom(seats + 1);
     ASSERT_TRUE(room.has_value());
     Seat& host = room->seats.front();
     ASSERT_TRUE(host.stream.Send(wrap(MoveUnion::FromCreategame(moonbase::games::CreateGame{}))).ok());
@@ -715,7 +720,7 @@ class GamesHubStreamFixture : public testing::Test {
     ASSERT_TRUE(created.has_value());
     moonbase::games::JoinGame join;
     join.gameId = created->as_gameJoined_or_null()->view.gameId;
-    for (std::size_t i = 1; i < seats; ++i) {
+    for (int i = 1; i < seats; ++i) {
       ASSERT_TRUE(room->seats[i].stream.Send(wrap(MoveUnion::FromJoingame(join))).ok());
       ASSERT_TRUE(receive(room->seats[i].stream, "gameJoined").has_value()) << "seat " << i;
     }
@@ -726,25 +731,40 @@ class GamesHubStreamFixture : public testing::Test {
   }
 
   // The room lists the table under `want`, as `seat` asks for the room
-  // now. Broadcasts queued ahead of the answer are read past; the last
-  // status seen is reported when `want` never comes.
+  // now: the last roomState before the stream goes quiet is the answer,
+  // later than any broadcast queued ahead of it.
   void ExpectListedStatus(Seat& seat, const std::string& game_id, const std::string& want) {
     ASSERT_TRUE(
         seat.stream
             .Send(moonbase::games::GameCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
             .ok());
-    std::string seen = "<unlisted>";
-    for (int i = 0; i < 8; ++i) {
-      auto room = ReceiveCase(seat.stream, "roomState");
-      if (!room.has_value()) break;
-      seen = "<unlisted>";
-      for (const auto& game : room->as_roomState_or_null()->games) {
-        if (game.gameId == game_id) seen = game.status;
-      }
-      if (seen == want) return;
+    std::optional<moonbase::games::RoomState> last;
+    while (true) {
+      auto received = seat.stream.Receive(std::chrono::milliseconds(200));
+      if (!received.ok() || !received->has_value()) break;
+      if (const auto* room = (*received)->as_roomState_or_null()) last = *room;
     }
-    ADD_FAILURE() << "table " << game_id << " listed as " << seen << ", want " << want;
+    ASSERT_TRUE(last.has_value()) << "no roomState after GetRoomState";
+    std::string seen = "<unlisted>";
+    for (const auto& game : last->games) {
+      if (game.gameId == game_id) seen = game.status;
+    }
+    EXPECT_EQ(seen, want) << "table " << game_id;
   }
+
+  // The stats archive (#1571) as the hub writes it, from CaptureEvents on.
+  void CaptureEvents() {
+    hub_->SetEventWriter([this](absl::Time, std::string_view line) { events_.emplace_back(line); });
+  }
+  // The archive's game lines, in order.
+  std::vector<std::string> GameLines() const {
+    std::vector<std::string> games;
+    for (const std::string& line : events_) {
+      if (line.find(R"("event":"game_)") != std::string::npos) games.push_back(line);
+    }
+    return games;
+  }
+  std::vector<std::string> events_;
 
   // Room with two seats in a started game: with the NoShuffleDealer the
   // first seat holds the aces and the second the kings, Q♠ seeding the

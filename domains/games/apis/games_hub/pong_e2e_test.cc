@@ -824,7 +824,7 @@ TEST_F(PaddleBudgetFixture, PaddlesSpendTheirOwnBudget) {
 }
 
 
-// The seat cap (#1621), pinned before it moves to the game's adapter.
+// The seat cap (#1621).
 TEST_F(PongFixture, AThirdSeatIsRefused) {
   ExpectSeatCap<PongMove>(2, Pong,
                       [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
@@ -833,8 +833,7 @@ TEST_F(PongFixture, AThirdSeatIsRefused) {
 }
 
 
-// Pong's branches of the hub (#1621), pinned before they move to pong's
-// adapter: the status the room lists a table under, the commands pong
+// Pong's branches of the hub (#1621): the status the room lists a table under, the commands pong
 // counts, and the record of a table's next game.
 TEST_F(PongFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
   auto started = StartedTable("smallcat");
@@ -853,7 +852,7 @@ TEST_F(PongFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
   ExpectListedStatus(table.bob, table.game_id, "playing");
 }
 
-TEST_F(PongFixture, CommandsAreCountedOnPongsSeries) {
+TEST_F(PongFixture, CommandsAreCountedOnThePongSeries) {
   auto started = StartedTable("smallcat");
   ASSERT_TRUE(started.has_value());
   EXPECT_EQ(metrics_->CounterTotal("pong_commands", {{"command", "createGame"}}), 1);
@@ -866,23 +865,8 @@ class PongEventFixture : public PongFixture {
  protected:
   void SetUp() override {
     PongFixture::SetUp();
-    hub_->SetEventWriter(
-        [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
+    CaptureEvents();
   }
-  // The writer goes first: the hub's teardown can end a game, and
-  // `events_` dies before the base's hub does.
-  void TearDown() override {
-    if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
-    PongFixture::TearDown();
-  }
-  std::vector<std::string> GameLines() const {
-    std::vector<std::string> games;
-    for (const std::string& line : events_) {
-      if (line.find(R"("event":"game_)") != std::string::npos) games.push_back(line);
-    }
-    return games;
-  }
-  std::vector<std::string> events_;
 };
 
 TEST_F(PongEventFixture, EachGameIsRecordedStartedAndFinishedAsPong) {

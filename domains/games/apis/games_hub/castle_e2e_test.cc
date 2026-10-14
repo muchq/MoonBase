@@ -1037,30 +1037,21 @@ TEST_F(ShortGraceCastleFixture, GraceExpiryAbandonsTheTableWithNoLoser) {
 }
 
 
-// The seat cap (#1621), pinned before it moves to the game's adapter.
+// The seat cap (#1621).
 TEST_F(CastleGameFixture, AFifthSeatIsRefused) {
   ExpectSeatCap<CastleMove>(4, Castle,
-                      [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
-                        return ReceiveCastle(stream, wanted);
-                      });
+                            [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+                              return ReceiveCastle(stream, wanted);
+                            });
 }
-
 
 // A castle game in the stats archive (#1571), recorded started as castle.
 class CastleEventFixture : public CastleGameFixture {
  protected:
   void SetUp() override {
     CastleGameFixture::SetUp();
-    hub_->SetEventWriter(
-        [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
+    CaptureEvents();
   }
-  // The writer goes first: the hub's teardown can end a game, and
-  // `events_` dies before the base's hub does.
-  void TearDown() override {
-    if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
-    CastleGameFixture::TearDown();
-  }
-  std::vector<std::string> events_;
 };
 
 TEST_F(CastleEventFixture, AStartedTableIsRecordedAsCastle) {

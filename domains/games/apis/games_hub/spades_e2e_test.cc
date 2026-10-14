@@ -559,7 +559,7 @@ TEST_F(ShuffledSpadesFixture, YourHandIsSortedBySuitThenRank) {
 }
 
 
-// The seat cap (#1621), pinned before it moves to the game's adapter.
+// The seat cap (#1621).
 TEST_F(SpadesFixture, AFifthSeatIsRefused) {
   ExpectSeatCap<SpadesMove>(4, Spades,
                       [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
@@ -568,10 +568,9 @@ TEST_F(SpadesFixture, AFifthSeatIsRefused) {
 }
 
 
-// Spades's branches of the hub (#1621), pinned before they move to
-// spades's adapter: the commands spades counts, and the view a resumed
+// Spades's branches of the hub (#1621): the commands spades counts, and the view a resumed
 // seat gets back.
-TEST_F(SpadesFixture, CommandsAreCountedOnSpadessSeries) {
+TEST_F(SpadesFixture, CommandsAreCountedOnTheSpadesSeries) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
   EXPECT_EQ(metrics_->CounterTotal("spades_commands", {{"command", "createGame"}}), 1);

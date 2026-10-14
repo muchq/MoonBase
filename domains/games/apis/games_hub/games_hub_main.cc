@@ -122,38 +122,38 @@ int main() {
   // meter the aura chain's unary instruments use.
   auto stream_metrics = std::make_shared<futility::otel::MetricsRecorder>("games_hub");
   auto ids = std::make_shared<games_hub::WhimsicalIdGenerator>();
-  auto golf = std::make_shared<games_hub::GamesHub>(vault, std::make_shared<cards::Dealer>(), ids,
+  auto hub = std::make_shared<games_hub::GamesHub>(vault, std::make_shared<cards::Dealer>(), ids,
                                                    /*grace_period=*/std::chrono::minutes(5),
                                                    stream_metrics, store, chat_store);
-  auto handler = std::make_shared<games_hub::GamesHubHandler>(vault, ids, golf);
+  auto handler = std::make_shared<games_hub::GamesHubHandler>(vault, ids, hub);
   // Same policy as the migration above: a database we can't read at boot
   // is a reason to let the supervisor retry, not to serve amnesiac.
-  if (absl::Status restored = golf->RestoreFromStore(); !restored.ok()) {
+  if (absl::Status restored = hub->RestoreFromStore(); !restored.ok()) {
     LOG(ERROR) << "Failed to restore hub state: " << restored;
     return 1;
   }
   // The fan-out's LISTEN side (#1194): commits on other instances
-  // wake this one to re-read and re-broadcast. Declared after golf so
+  // wake this one to re-read and re-broadcast. Declared after hub so
   // it is destroyed (thread joined) first; the detach at shutdown keeps
   // the hub's teardown from touching it.
   std::unique_ptr<pg::Listener> listener;
   if (db_url != nullptr && *db_url != '\0') {
     listener = std::make_unique<pg::Listener>(
         db_url,
-        [&golf](const std::string& channel, const std::string& payload) {
-          golf->OnNotify(channel, payload);
+        [&hub](const std::string& channel, const std::string& payload) {
+          hub->OnNotify(channel, payload);
         },
-        [&golf](const std::string& channel) { golf->OnChannelActive(channel); });
-    golf->AttachListener(listener.get());
+        [&hub](const std::string& channel) { hub->OnChannelActive(channel); });
+    hub->AttachListener(listener.get());
     // Vouches for the rooms this instance holds, so the ones only a
     // crashed instance held go stale for the sweep.
-    golf->StartRoomHeartbeat();
+    hub->StartRoomHeartbeat();
   }
 
   // Chess's clocks run out whether or not anyone moves; with a store, any
   // instance holding the room may land the flag, and one does.
-  golf->StartChessClocks();
-  golf->StartPongTicks();
+  hub->StartChessClocks();
+  hub->StartPongTicks();
 
   // deja's tape on the glasshouse walls (#1554, #1150). DEJA_URL names
   // deja on the app network; unset, glasshouses simply have blank walls.
@@ -169,7 +169,7 @@ int main() {
     // std::move(*tape), not *std::move(tape): Outcome has no rvalue
     // operator*, so the latter binds the const& overload and copies — and
     // deja::Client is move-only.
-    golf->StartTapePolling(std::make_shared<deja::Client>(std::move(*tape)));
+    hub->StartTapePolling(std::make_shared<deja::Client>(std::move(*tape)));
     LOG(INFO) << "Tape: polling deja at " << deja_url;
   } else {
     LOG(INFO) << "Tape: off (DEJA_URL unset; glasshouse walls stay blank)";
@@ -184,7 +184,7 @@ int main() {
       LOG(ERROR) << "Failed to build the microgpt client: " << bot.error().message();
       return 1;
     }
-    golf->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*bot)));
+    hub->StartRoomBot(std::make_shared<microgpt::Client>(std::move(*bot)));
     LOG(INFO) << "Room bot: asking microgpt at " << microgpt_url;
   } else {
     LOG(INFO) << "Room bot: off (MICROGPT_URL unset)";
@@ -199,7 +199,7 @@ int main() {
       LOG(ERROR) << "Failed to build the mithril client: " << wordchain.error().message();
       return 1;
     }
-    golf->StartWordchain(std::make_shared<mithril::Client>(std::move(*wordchain)));
+    hub->StartWordchain(std::make_shared<mithril::Client>(std::move(*wordchain)));
     LOG(INFO) << "Wordchain bot: asking mithril at " << mithril_url;
   } else {
     LOG(INFO) << "Wordchain bot: off (MITHRIL_URL unset)";
@@ -215,13 +215,13 @@ int main() {
       return 1;
     }
     auto client = std::make_shared<chess_engine::Client>(std::move(*engine));
-    golf->SetChessBotEngine(
+    hub->SetChessBotEngine(
         [client](const games_hub::ChessBotAsk& ask) -> absl::StatusOr<std::string> {
           auto move = client->BestMove({ask.fen, ask.moves, ask.movetime_ms, ask.elo});
           if (!move.ok()) return absl::UnavailableError(move.error().message());
           return *std::move(move);
         });
-    golf->StartChessBots();
+    hub->StartChessBots();
     LOG(INFO) << "Chess bots: asking chess_engine at " << chess_engine_url;
   } else {
     LOG(INFO) << "Chess bots: off (CHESS_ENGINE_URL unset)";
@@ -244,7 +244,7 @@ int main() {
           if (!id.ok()) return absl::UnavailableError(id.error().message());
           return absl::OkStatus();
         });
-    golf->SetChessIndexer([queue](const one_d4::IndexAsk& ask) { queue->Submit(ask); });
+    hub->SetChessIndexer([queue](const one_d4::IndexAsk& ask) { queue->Submit(ask); });
     LOG(INFO) << "1d4: asking one_d4 at " << one_d4_url << " to index published games";
   } else {
     LOG(INFO) << "1d4: off (ONE_D4_URL unset; published games wait for an index asked on 1d4)";
@@ -256,7 +256,7 @@ int main() {
   const char* stun_urls = std::getenv("VOICE_STUN_URLS");
   const auto stun = games_hub::StunServersFromList(stun_urls == nullptr ? "" : stun_urls);
   LOG(INFO) << "Voice: " << stun.size() << " STUN server(s)";
-  golf->SetIceServers(stun);
+  hub->SetIceServers(stun);
 
   // The hub's domain events (#1571): one line per room, chat, and table
   // milestone, in the directory log_shipper takes to S3 and the stats
@@ -276,7 +276,7 @@ int main() {
       return 1;
     }
     game_events = *std::move(opened);
-    golf->SetEventWriter([log = game_events](absl::Time when, std::string_view line) {
+    hub->SetEventWriter([log = game_events](absl::Time when, std::string_view line) {
       // A game is not failed over an unwritable log; it is only lost
       // from the archive, loudly.
       if (const absl::Status wrote = log->Append(when, line); !wrote.ok()) {
@@ -390,9 +390,9 @@ int main() {
   int signal_number = 0;
   sigwait(&shutdown_signals, &signal_number);
   LOG(INFO) << "Signal " << signal_number << " received; draining sessions";
-  golf->AttachListener(nullptr);
+  hub->AttachListener(nullptr);
   listener.reset();
-  golf->registry().Drain(std::chrono::seconds(5));
+  hub->registry().Drain(std::chrono::seconds(5));
   transport.Stop();
   return 0;
 }

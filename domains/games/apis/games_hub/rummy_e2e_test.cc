@@ -1063,7 +1063,7 @@ TEST_F(RummyGameFixture, AWaitingTableIsARosterWithNoCards) {
 }
 
 
-// The seat cap (#1621), pinned before it moves to the game's adapter.
+// The seat cap (#1621).
 TEST_F(RummyGameFixture, AFifthSeatIsRefused) {
   ExpectSeatCap<RummyMove>(4, Rummy,
                       [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {

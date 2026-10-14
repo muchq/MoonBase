@@ -122,7 +122,7 @@ TEST(WinnersAmong, OrdinaryFinishMatchesTheEngineKnockerTiesIncluded) {
 // unguarded and safe; treat this instance as read-only for chat unless
 // the guard is rewired.
 struct SecondInstance {
-  std::shared_ptr<GamesHub> golf;
+  std::shared_ptr<GamesHub> hub;
   std::shared_ptr<CapturingMetricsRecorder> metrics;
   std::unique_ptr<moonbase::games::GamesHubServer> server;
   std::unique_ptr<moonbase::games::GamesHubClient> client;
@@ -438,12 +438,12 @@ std::unique_ptr<SecondInstance> BuildSecondInstance(
   auto instance = std::make_unique<SecondInstance>();
   instance->metrics = std::move(metrics);
   auto ids = std::make_shared<RemoteIdGenerator>();
-  instance->golf = std::make_shared<GamesHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
+  instance->hub = std::make_shared<GamesHub>(vault, std::make_shared<cards::NoShuffleDealer>(), ids,
                                              grace, instance->metrics, std::move(store),
                                              std::move(chat_store), UnlimitedRateLimits());
-  EXPECT_TRUE(instance->golf->RestoreFromStore().ok());
+  EXPECT_TRUE(instance->hub->RestoreFromStore().ok());
   instance->server = std::make_unique<moonbase::games::GamesHubServer>(
-      std::make_shared<GamesHubHandler>(vault, ids, instance->golf));
+      std::make_shared<GamesHubHandler>(vault, ids, instance->hub));
 
   auto loopback = std::make_shared<opal::http::Loopback>();
   EXPECT_TRUE(loopback->Start(instance->server->Handler()).ok());
@@ -1424,7 +1424,7 @@ TEST_F(GamesHubStreamFixture, AHeldRoomAdoptsItsRowsSurfaceOnReconcile) {
       BuildSecondInstance(vault_, std::make_shared<TornSnapshotStore>(store_), chat_store_);
   ASSERT_NE(instance, nullptr);
   // The wake any sibling's write sends: the held room re-reads its rows.
-  instance->golf->OnNotify(RoomChannel(room_id), "remote-instance");
+  instance->hub->OnNotify(RoomChannel(room_id), "remote-instance");
   auto carol = OpenSeatVia(*instance->client, std::nullopt);
   ASSERT_TRUE(carol.has_value());
   ASSERT_TRUE(ReceiveCase(carol->stream, "sessionReady").has_value());
@@ -1511,8 +1511,8 @@ TEST_F(GamesHubStreamFixture, BootCatchUpProjectsNothingWhenRowsNeverMoved) {
   // in play. Neither alice nor carol resumed here — their rows are what
   // a crashed instance leaves behind — yet nothing has moved since the
   // restore read these same rows, so both catch-ups must stay quiet.
-  instance->golf->OnChannelActive(RoomChannel(room_id));
-  instance->golf->OnChannelActive(ChatChannel(room_id));
+  instance->hub->OnChannelActive(RoomChannel(room_id));
+  instance->hub->OnChannelActive(ChatChannel(room_id));
   auto leftover = resumed->stream.Receive(std::chrono::milliseconds(50));
   EXPECT_TRUE(!leftover.ok() || !leftover->has_value())
       << "boot catch-up projected a frame though no row moved";
@@ -1765,7 +1765,7 @@ TEST_F(GamesHubStreamFixture, ParkedSeatWhoseRoomASiblingDeletedExpiresCleanly) 
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
   bool member = true;
   while (member && std::chrono::steady_clock::now() < deadline) {
-    member = instance->golf->WithMember(room_id, carol->player_id, [] {});
+    member = instance->hub->WithMember(room_id, carol->player_id, [] {});
     if (member) std::this_thread::sleep_for(std::chrono::milliseconds(25));
   }
   ASSERT_FALSE(member) << "the expiry never dropped the deleted room";
@@ -1810,7 +1810,7 @@ TEST_F(GamesHubStreamFixture, HeartbeatStampsOnlyRoomsThisInstanceHoldsSeatsIn) 
     return false;
   });
 
-  instance->golf->StampHeldRooms();
+  instance->hub->StampHeldRooms();
   const auto touches = spy->Touches();
   ASSERT_EQ(touches.size(), 1u);
   // erin holds a seat but no room, so she adds nothing.
@@ -1851,7 +1851,7 @@ TEST_F(GamesHubStreamFixture, RoomHeartbeatStampsAndSweepsOnItsInterval) {
   const std::string room_id = CreateRoomFor(*carol);
   ASSERT_FALSE(room_id.empty());
 
-  instance->golf->StartRoomHeartbeat(std::chrono::milliseconds(20));
+  instance->hub->StartRoomHeartbeat(std::chrono::milliseconds(20));
   EXPECT_TRUE(spy->AwaitTouchOf(room_id, std::chrono::seconds(5)))
       << "the heartbeat never stamped a room with a live seat";
   EXPECT_EQ(spy->AwaitSweep(std::chrono::seconds(5)),
@@ -1905,7 +1905,7 @@ TEST_F(GamesHubStreamFixture, BootGraceCedesASeatObservedConnectedMidWindow) {
   auto bob_back = OpenSeat(bob->resume_token);
   ASSERT_TRUE(bob_back.has_value());
   ASSERT_TRUE(ReceiveCase(bob_back->stream, "sessionReady").has_value());
-  instance->golf->OnChannelActive(RoomChannel(room_id));
+  instance->hub->OnChannelActive(RoomChannel(room_id));
   // He parks again, still inside the sibling's window: this
   // generation's registry owns his fresh grace now.
   bob_back->stream.Close();
@@ -2010,7 +2010,7 @@ TEST_F(GamesHubStreamFixture, RestoreFromStoreRefusesASecondCall) {
 
   auto instance = BuildSecondInstance(vault_, store_, chat_store_, MakeCapturingMetricsRecorder());
   ASSERT_NE(instance, nullptr);
-  const absl::Status again = instance->golf->RestoreFromStore();
+  const absl::Status again = instance->hub->RestoreFromStore();
   EXPECT_EQ(again.code(), absl::StatusCode::kFailedPrecondition) << again;
 
   // The fixture's own hub restored an empty store — no thread armed —
@@ -2911,17 +2911,7 @@ class GameEventFixture : public GolfGameFixture {
  protected:
   void SetUp() override {
     GolfGameFixture::SetUp();
-    hub_->SetEventWriter(
-        [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
-  }
-
-  // The writer goes before anything else does. A hub tears down by
-  // joining its boot reaper, which reaps parked seats — a leave, which
-  // can end a game, which records one; and `events_` is a member of this
-  // class, so it is already gone by the time the base's `hub_` is.
-  void TearDown() override {
-    if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
-    GolfGameFixture::TearDown();
+    CaptureEvents();
   }
 
   // The event names in order, with their fields, for an assertion that
@@ -2946,8 +2936,6 @@ class GameEventFixture : public GolfGameFixture {
     }
     return rooms;
   }
-
-  std::vector<std::string> events_;
 };
 
 TEST_F(GameEventFixture, TheFunnelIsRecordedFromTheRoomToTheGameThatEndedIt) {
@@ -3160,7 +3148,7 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAClosedRoomWritesNothing) {
 
   auto instance = BuildSecondInstance(vault_, store_, chat_store_);
   ASSERT_NE(instance, nullptr);
-  instance->golf->SetEventWriter(
+  instance->hub->SetEventWriter(
       [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
 
   alice->stream.Close();
@@ -3168,7 +3156,7 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAClosedRoomWritesNothing) {
   store_->Flush();
   ASSERT_THAT(Names(), ::testing::ElementsAre("room_created", "room_closed"));
 
-  instance->golf->OnChannelActive(RoomChannel(room_id));
+  instance->hub->OnChannelActive(RoomChannel(room_id));
 
   EXPECT_THAT(sibling_events, ::testing::IsEmpty()) << "the room would be counted closed twice";
 }
@@ -3186,7 +3174,7 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNoth
   std::vector<std::string> sibling_events;
   auto instance = BuildSecondInstance(vault_, store_, chat_store_);
   ASSERT_NE(instance, nullptr);
-  instance->golf->SetEventWriter(
+  instance->hub->SetEventWriter(
       [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
 
   ASSERT_TRUE(
@@ -3196,7 +3184,7 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNoth
 
   // The wake the sibling would get from the finish commit's NOTIFY: it
   // reads the terminal row and runs the ceremony from it.
-  instance->golf->OnChannelActive(RoomChannel(table->room_id));
+  instance->hub->OnChannelActive(RoomChannel(table->room_id));
 
   EXPECT_THAT(Names(), ::testing::Contains("game_finished"))
       << "the finishing instance records the game";
@@ -3218,7 +3206,7 @@ TEST_F(GameEventFixture, ASiblingThatRebasedOntoAFinishRecordsNothing) {
   std::vector<std::string> sibling_events;  // outlives the hub, as above
   auto instance = BuildSecondInstance(vault_, store_, chat_store_);
   ASSERT_NE(instance, nullptr);
-  instance->golf->SetEventWriter(
+  instance->hub->SetEventWriter(
       [&](absl::Time, std::string_view line) { sibling_events.emplace_back(line); });
   // Alice moves to the sibling, which now holds the game as live.
   auto resumed = OpenSeatVia(*instance->client, table->alice.resume_token);

@@ -10,8 +10,8 @@
 namespace games_hub {
 
 GamesHubHandler::GamesHubHandler(std::shared_ptr<TicketVault> vault,
-                                 std::shared_ptr<IdGenerator> ids, std::shared_ptr<GamesHub> golf)
-    : vault_(std::move(vault)), ids_(std::move(ids)), hub_(std::move(golf)) {}
+                                 std::shared_ptr<IdGenerator> ids, std::shared_ptr<GamesHub> hub)
+    : vault_(std::move(vault)), ids_(std::move(ids)), hub_(std::move(hub)) {}
 
 opal::Outcome<moonbase::games::GetSessionOutput> GamesHubHandler::GetSession(
     const moonbase::games::GetSessionInput& input,

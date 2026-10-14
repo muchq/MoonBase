@@ -1,5 +1,4 @@
-// Golf's branches of the hub (#1621), pinned before they move to golf's
-// adapter: the seat cap, the status the room lists a table under, the
+// Golf's branches of the hub (#1621): the seat cap, the status the room lists a table under, the
 // commands golf counts, and the turn a leave hands on.
 //
 // The NoShuffleDealer deals the pristine deck: the first seat holds the
@@ -75,7 +74,7 @@ TEST_F(GolfFixture, TheRoomListsEachPhaseOfTheTable) {
 }
 
 // Golf counts each command on its own series, by the move's name.
-TEST_F(GolfFixture, CommandsAreCountedOnGolfsSeries) {
+TEST_F(GolfFixture, CommandsAreCountedOnTheGolfSeries) {
   auto table = SeatedTable();
   ASSERT_TRUE(table.has_value());
   ASSERT_NO_FATAL_FAILURE(Peek(table->alice, 0));

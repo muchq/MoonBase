@@ -530,21 +530,10 @@ TEST_F(ChessFixture, LeavingBetweenGamesClosesTheTable) {
 }
 
 TEST_F(ChessFixture, AThirdSeatIsRefused) {
-  auto room = SeatedRoom(3);
-  ASSERT_TRUE(room.has_value());
-  ASSERT_TRUE(room->seats[0]
-                  .stream.Send(Chess(ChessMove::FromCreategame(moonbase::games::CreateGame{})))
-                  .ok());
-  auto created = ReceiveChess(room->seats[0].stream, "gameJoined");
-  ASSERT_TRUE(created.has_value());
-  moonbase::games::JoinGame join;
-  join.gameId = created->as_gameJoined_or_null()->view.gameId;
-  ASSERT_TRUE(room->seats[1].stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
-  ASSERT_TRUE(ReceiveChess(room->seats[1].stream, "gameJoined").has_value());
-  ASSERT_TRUE(room->seats[2].stream.Send(Chess(ChessMove::FromJoingame(join))).ok());
-  auto refused = ReceiveCase(room->seats[2].stream, "commandRejected");
-  ASSERT_TRUE(refused.has_value());
-  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "game is full");
+  ExpectSeatCap<ChessMove>(2, Chess,
+                           [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+                             return ReceiveChess(stream, wanted);
+                           });
 }
 
 TEST_F(ChessFixture, AStartOnOneSeatIsRefused) {
@@ -1208,16 +1197,8 @@ class ChessEventFixture : public ChessFixture {
  protected:
   void SetUp() override {
     ChessFixture::SetUp();
-    hub_->SetEventWriter(
-        [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
+    CaptureEvents();
   }
-  // The writer goes first: the hub's teardown can end a game, and
-  // `events_` dies before the base's hub does.
-  void TearDown() override {
-    if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
-    ChessFixture::TearDown();
-  }
-  std::vector<std::string> events_;
 };
 
 TEST_F(ChessEventFixture, AChessGameIsRecordedStartedAndFinishedAsChess) {
@@ -1225,10 +1206,7 @@ TEST_F(ChessEventFixture, AChessGameIsRecordedStartedAndFinishedAsChess) {
   ASSERT_TRUE(started.has_value());
   ASSERT_TRUE(started->table.bob.stream.Send(Resign()).ok());
   ASSERT_TRUE(Ended(started->table.alice).has_value());
-  std::vector<std::string> games;
-  for (const std::string& line : events_) {
-    if (line.find(R"("event":"game_)") != std::string::npos) games.push_back(line);
-  }
+  const auto games = GameLines();
   ASSERT_EQ(games.size(), 2u);
   EXPECT_THAT(games[0], ::testing::HasSubstr(R"("event":"game_started")"));
   EXPECT_THAT(games[0], ::testing::HasSubstr(R"("variant":"chess")"));
@@ -1905,8 +1883,7 @@ TEST_F(ChessFixture, APublishedGameIsServedByItsArchiveIdAndAPrivateOneIsNot) {
 }
 
 
-// Chess's branches of the hub (#1621), pinned before they move to chess's
-// adapter: the status the room lists a table under, the commands chess
+// Chess's branches of the hub (#1621): the status the room lists a table under, the commands chess
 // counts, and the record of a table's next game.
 TEST_F(ChessFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
   auto started = StartedTable();
@@ -1926,7 +1903,7 @@ TEST_F(ChessFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
   ExpectListedStatus(table.alice, table.game_id, "playing");
 }
 
-TEST_F(ChessFixture, CommandsAreCountedOnChesssSeries) {
+TEST_F(ChessFixture, CommandsAreCountedOnTheChessSeries) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
   ASSERT_TRUE(started->table.bob.stream.Send(Resign()).ok());
@@ -1952,10 +1929,7 @@ TEST_F(ChessEventFixture, TheNextGameIsRecordedStartedAsChess) {
                   table.alice.stream, [](const auto& v) { return v.phase == "playing"; },
                   "the next game")
                   .has_value());
-  std::vector<std::string> games;
-  for (const std::string& line : events_) {
-    if (line.find(R"("event":"game_)") != std::string::npos) games.push_back(line);
-  }
+  const auto games = GameLines();
   ASSERT_EQ(games.size(), 3u);
   EXPECT_THAT(games[2], ::testing::HasSubstr(R"("event":"game_started")"));
   EXPECT_THAT(games[2], ::testing::HasSubstr(R"("variant":"chess")"));
