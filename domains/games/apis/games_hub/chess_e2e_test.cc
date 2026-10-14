@@ -1904,5 +1904,63 @@ TEST_F(ChessFixture, APublishedGameIsServedByItsArchiveIdAndAPrivateOneIsNot) {
   }
 }
 
+
+// Chess's branches of the hub (#1621), pinned before they move to chess's
+// adapter: the status the room lists a table under, the commands chess
+// counts, and the record of a table's next game.
+TEST_F(ChessFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ExpectListedStatus(table.alice, table.game_id, "playing");
+  ASSERT_TRUE(table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  ExpectListedStatus(table.alice, table.game_id, "ended");
+  moonbase::games::ChessStartGame next;
+  next.setupId = "qvr-basic";
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame(next))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  table.alice.stream, [](const auto& v) { return v.phase == "playing"; },
+                  "the next game")
+                  .has_value());
+  ExpectListedStatus(table.alice, table.game_id, "playing");
+}
+
+TEST_F(ChessFixture, CommandsAreCountedOnChesssSeries) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  ASSERT_TRUE(started->table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(started->table.alice).has_value());
+  EXPECT_EQ(metrics_->CounterTotal("chess_commands", {{"command", "createGame"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("chess_commands", {{"command", "joinGame"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("chess_commands", {{"command", "startGame"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("chess_commands", {{"command", "resign"}}), 1);
+}
+
+// A table's next game is a game of its own in the stats archive: started
+// as chess, like the first.
+TEST_F(ChessEventFixture, TheNextGameIsRecordedStartedAsChess) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+  moonbase::games::ChessStartGame next;
+  next.setupId = "qvr-basic";
+  ASSERT_TRUE(table.bob.stream.Send(Chess(ChessMove::FromStartgame(next))).ok());
+  ASSERT_TRUE(AwaitChessView(
+                  table.alice.stream, [](const auto& v) { return v.phase == "playing"; },
+                  "the next game")
+                  .has_value());
+  std::vector<std::string> games;
+  for (const std::string& line : events_) {
+    if (line.find(R"("event":"game_)") != std::string::npos) games.push_back(line);
+  }
+  ASSERT_EQ(games.size(), 3u);
+  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("event":"game_started")"));
+  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("variant":"chess")"));
+  EXPECT_THAT(games[2], ::testing::HasSubstr(R"("players":2)"));
+}
+
 }  // namespace
 }  // namespace games_hub
