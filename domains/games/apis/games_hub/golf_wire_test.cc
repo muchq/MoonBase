@@ -19,7 +19,7 @@
 // GameView (the full key set, card rank/suit spelling included); and the
 // two terminal exception frames (Unauthenticated, SeatConflict); a
 // resume against a live wire, which closes that wire with no frame and
-// admits the resume; and a
+// close code 4001 "superseded" and admits the resume; and a
 // bot's reply with mithril's wordchain ladder, live and replayed. Updates
 // this suite does not drive (peek/draw/swap/knock, turnChanged,
 // gameEnded) share GameView's pinned shape but keep their byte-level

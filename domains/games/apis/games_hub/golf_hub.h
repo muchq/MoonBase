@@ -69,6 +69,9 @@ struct GolfTestHooks {
   /// playerLeft has fanned out, before the seat parks for a resume to
   /// reclaim.
   std::function<void(const std::string& player_id)> before_seat_release;
+  /// Outside mu_, on the close path, right after the seat parks: where a
+  /// resume can take it back while the old session is still unwinding.
+  std::function<void(const std::string& player_id)> after_seat_release;
   /// Under mu_, after a lobby command's world deliveries have gone to the
   /// registry, before the lock is released.
   std::function<void()> after_world_sent;

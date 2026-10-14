@@ -37,7 +37,10 @@ service GamesHub {
 /// ticket rides the upgrade GET as a query member (browsers cannot set
 /// upgrade headers); the gate checks it pre-101 and the handler spends it
 /// (single use). Invalid moves never end the stream — they come back as
-/// commandRejected events; the modeled errors below are terminal.
+/// commandRejected events; the modeled errors below are terminal. A dial
+/// with a player's resume token takes their seat from any older wire,
+/// which closes with WebSocket close code 4001 "superseded": that client
+/// should not redial, or it takes the seat straight back.
 @http(method: "POST", uri: "/games/v2/play")
 operation Play {
     input := {

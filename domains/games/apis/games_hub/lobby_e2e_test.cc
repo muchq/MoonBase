@@ -769,6 +769,47 @@ TEST_F(LobbyRaceFixture, AClosedSocketLeavesTheWorldBeforeTheSeatParks) {
   ExpectNoEvent(bob->stream);
 }
 
+// Parks the close path right after the seat parks, where a resume can take
+// it back while the old session is still unwinding.
+class SeatReleaseFixture : public SeamFixture {
+ protected:
+  GolfTestHooks MakeGolfHooks() override {
+    GolfTestHooks hooks;
+    hooks.after_seat_release = [this](const std::string&) { Park("released"); };
+    return hooks;
+  }
+};
+
+// A resume can land the instant the old session releases the seat; nothing
+// the old session does after that may tell the room the player went away.
+TEST_F(SeatReleaseFixture, AResumeAsTheSeatParksLeavesThePlayerConnectedForTheRoom) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  Arm();
+  Trigger closer(*this, [&] { alice.stream.Close(); });
+  ASSERT_TRUE(WaitParked("released"));
+  auto back = OpenSeat(alice.resume_token);
+  ASSERT_TRUE(back.has_value());
+  ASSERT_TRUE(ReceiveCase(back->stream, "sessionReady").has_value());
+  closer.Join();
+
+  // The room's last word on alice, once it goes quiet.
+  std::optional<bool> connected;
+  while (true) {
+    auto received = bob.stream.Receive(std::chrono::milliseconds(300));
+    if (!received.ok() || !received->has_value()) break;
+    if (const auto* state = (*received)->as_roomState_or_null()) {
+      for (const auto& player : state->players) {
+        if (player.playerId == alice.player_id) connected = player.connected;
+      }
+    }
+  }
+  ASSERT_TRUE(connected.has_value()) << "bob heard nothing about alice";
+  EXPECT_TRUE(*connected) << "the room was told a resumed player went away";
+}
+
 // Grace expiry after a close finds the world already left: whoever
 // remains heard one playerLeft at the close and nothing at the reap.
 class ShortGraceLobbyFixture : public LobbyFixture {
