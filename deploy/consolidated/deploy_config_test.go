@@ -938,7 +938,7 @@ func TestTheWorkerCarriesTheLichessTokenAndToleratesItsAbsence(t *testing.T) {
 	}
 }
 
-// MUCHQ_COM requests read games_hub's public chess feed (#1637). The API
+// MUCHQ_COM requests read games_hub's public chess feed. The API
 // accepts them whatever the worker was given, and a worker without the URL
 // only warns at startup, so a missing line fails every such request at run
 // time instead of here.
@@ -1176,7 +1176,7 @@ var publicRoutes = []struct {
 	{"@get_iili_redirect", []string{"method GET", "path /iili/v1/r/*"}, "iili:8091"},
 	// stats (#1460): read-only aggregates, GET-only on purpose.
 	{"@get_stats", []string{"method GET", "path /stats/v1/*"}, "stats:8092"},
-	// games_hub (#79): the session mint and the one stream (#1490). The
+	// games_hub: the session mint and the one stream. The
 	// websocket matcher carries no method — an upgrade is a GET the
 	// browser makes on its own terms.
 	{"@post_golf_v2_session", []string{"method POST", "path /games/v2/session"}, "games_hub:8089"},
@@ -1330,10 +1330,10 @@ func TestNoDeployConfigNamesR3dr(t *testing.T) {
 	}
 }
 
-// The games hub's database, role, init step and host key are games_hub now
-// (#79); any golf_hub left in the deploy surface is a missed rename. Golf the
-// game keeps its routes, so only the joined spelling is refused.
-func TestNoDeployConfigNamesGamesHub(t *testing.T) {
+// The games hub's database, role, init step and host key are spelled
+// games_hub. Golf the game keeps its routes, so only the joined golf_hub
+// spelling is refused.
+func TestNoDeployConfigNamesGolfHub(t *testing.T) {
 	files := []string{"compose.yaml", "Caddyfile", "Caddyfile.local", "deploy.sh",
 		"local_deploy.sh", "initialize_host.sh"}
 	for _, name := range files {
@@ -1346,11 +1346,9 @@ func TestNoDeployConfigNamesGamesHub(t *testing.T) {
 	}
 }
 
-// The same rename in the hub's own package (#1621): the hub is GamesHub in
-// hub.{h,cc} and serves every game, so no source there is spelled for
-// golf_hub, and outside golf's own golf_* files no class or suite is named
-// for golf. Golf the game keeps its envelope, so only those spellings are
-// refused.
+// The hub's own package: the hub is GamesHub in hub.{h,cc} and serves every
+// game, so no source there is spelled golf_hub, and outside golf's own
+// golf_* files no class or suite is named for golf.
 func TestNoGamesHubSourceNamesGolfHub(t *testing.T) {
 	const pkg = "../../domains/games/apis/games_hub"
 	suite := regexp.MustCompile(
@@ -1387,10 +1385,9 @@ func TestNoGamesHubSourceNamesGolfHub(t *testing.T) {
 	}
 }
 
-// The Go websocket backend is retired: golf went to the hub in #1483 and
-// thoughts in #79, so nothing serves /games/v1. A rollback or a paste from
-// an older compose file would route the public internet at an image that no
-// longer builds, and the route pins above only assert the routes they list.
+// Nothing serves /games/v1 or games_ws_backend: a line naming either would
+// route the public internet at an image that does not build, and the route
+// pins above only assert the routes they list.
 func TestNoDeployConfigNamesTheGoGamesWsBackend(t *testing.T) {
 	forbidden := []string{"games_ws_backend", "/games/v1/"}
 	files := []string{"compose.yaml", "Caddyfile", "Caddyfile.local", "deploy.sh",
