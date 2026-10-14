@@ -2181,165 +2181,92 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
 // limiter, the chat store failures, and the disconnects the closes produce. One
 // scripted session would have covered a small fraction of the roster.
 
-// The hub_*/golf_* command and event declarations are a hand copy of the
-// model's union cases, and this test is what makes a hand copy safe to keep:
-// it reads the model and fails on drift in either direction — a case added to
-// the model without a declaration loses its first event after every deploy
-// (#1323), and a declaration for a case the model no longer has is a
-// permanently flat line on a dashboard. CountCommand and Send name series
-// exactly this way: the room layer's outer case on hub_*, each envelope's
-// inner case on that tenant's series.
+// An envelope's inner cases, as `series`_commands and `series`_events
+// declare them, against `series`.smithy's two unions. `action` and `update`
+// are controls: a parser that quietly matched nothing must fail here, not
+// produce two empty sets that agree.
+void ExpectEnvelopeSeriesMatchTheModel(const std::string& series, const std::string& action_union,
+                                       const std::string& action, const std::string& update_union,
+                                       const std::string& update) {
+  const std::string model = ReadModel("domains/games/apis/games_hub/model/" + series + ".smithy");
+  ASSERT_FALSE(model.empty());
+  const auto actions = ModelUnionCases(model, action_union);
+  const auto updates = ModelUnionCases(model, update_union);
+  ASSERT_NE(std::find(actions.begin(), actions.end(), action), actions.end());
+  ASSERT_NE(std::find(updates.begin(), updates.end(), update), updates.end());
+  EXPECT_EQ(DeclaredLabelValues(series + "_commands", "command"),
+            std::set<std::string>(actions.begin(), actions.end()));
+  EXPECT_EQ(DeclaredLabelValues(series + "_events", "event"),
+            std::set<std::string>(updates.begin(), updates.end()));
+}
+
+// The room layer's and each envelope's command and event declarations are a
+// hand copy of the model's union cases, and these tests are what make a hand
+// copy safe to keep: they read the model and fail on drift in either
+// direction — a case added to the model without a declaration loses its
+// first event after every deploy (#1323), and a declaration for a case the
+// model no longer has is a permanently flat line on a dashboard. The room
+// layer's outer cases count on hub_*, each envelope's inner cases on that
+// tenant's series.
 TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
   const std::string room = ReadModel("domains/games/apis/games_hub/model/games.smithy");
-  const std::string golf = ReadModel("domains/games/apis/games_hub/model/golf.smithy");
-  ASSERT_FALSE(room.empty() || golf.empty());
-
+  ASSERT_FALSE(room.empty());
   const auto outer_commands = ModelUnionCases(room, "GameCommands");
-  const auto moves = ModelUnionCases(golf, "GolfMove");
   const auto outer_events = ModelUnionCases(room, "GameEvents");
-  const auto updates = ModelUnionCases(golf, "GolfUpdate");
-  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "castle"),
-            outer_commands.end());
-  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "rummy"), outer_commands.end());
-  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "chess"), outer_commands.end());
-  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "pong"), outer_commands.end());
-  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "spades"),
-            outer_commands.end());
-  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "lobby"), outer_commands.end());
-
-  // Controls before the comparison: a parser that quietly matched nothing
-  // must fail here, not produce two empty sets that agree.
   ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "createRoom"),
             outer_commands.end());
-  ASSERT_NE(std::find(moves.begin(), moves.end(), "knock"), moves.end());
   ASSERT_NE(std::find(outer_events.begin(), outer_events.end(), "sessionReady"),
             outer_events.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
 
-  // The room layer's own cases on hub_*; golf's envelope, like castle's,
-  // the lobby's and voice's (the tests below), on its own series.
+  const std::set<std::string> envelopes = {"golf", "castle", "rummy", "chess",
+                                           "pong", "spades", "lobby", "voice"};
+  for (const auto& envelope : envelopes) {
+    EXPECT_NE(std::find(outer_commands.begin(), outer_commands.end(), envelope),
+              outer_commands.end())
+        << envelope;
+  }
   std::set<std::string> room_commands;
   for (const auto& name : outer_commands) {
-    if (name != "golf" && name != "castle" && name != "rummy" && name != "chess" &&
-        name != "pong" && name != "spades" && name != "lobby" && name != "voice")
-      room_commands.insert(name);
+    if (!envelopes.contains(name)) room_commands.insert(name);
   }
   std::set<std::string> room_events;
   for (const auto& name : outer_events) {
-    if (name != "golf" && name != "castle" && name != "rummy" && name != "chess" &&
-        name != "pong" && name != "spades" && name != "lobby" && name != "voice")
-      room_events.insert(name);
+    if (!envelopes.contains(name)) room_events.insert(name);
   }
   EXPECT_EQ(DeclaredLabelValues("hub_commands", "command"), room_commands);
   EXPECT_EQ(DeclaredLabelValues("hub_events", "event"), room_events);
-  EXPECT_EQ(DeclaredLabelValues("golf_commands", "command"),
-            std::set<std::string>(moves.begin(), moves.end()));
-  EXPECT_EQ(DeclaredLabelValues("golf_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
 }
 
-// The lobby envelope counts its inner case names on lobby_commands
-// and lobby_events, pinned against lobby.smithy the same way.
+TEST(StreamSeriesModelPin, GolfSeriesMatchTheModelUnions) {
+  ExpectEnvelopeSeriesMatchTheModel("golf", "GolfMove", "knock", "GolfUpdate", "gameEnded");
+}
+
 TEST(StreamSeriesModelPin, LobbySeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/lobby.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto actions = ModelUnionCases(model, "LobbyAction");
-  const auto updates = ModelUnionCases(model, "LobbyUpdate");
-  ASSERT_NE(std::find(actions.begin(), actions.end(), "shape"), actions.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "playerLeft"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("lobby_commands", "command"),
-            std::set<std::string>(actions.begin(), actions.end()));
-  EXPECT_EQ(DeclaredLabelValues("lobby_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("lobby", "LobbyAction", "shape", "LobbyUpdate", "playerLeft");
 }
 
-// A room's voice counts its inner case names on voice_commands and
-// voice_events, pinned against voice.smithy the same way.
 TEST(StreamSeriesModelPin, VoiceSeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/voice.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto actions = ModelUnionCases(model, "VoiceAction");
-  const auto updates = ModelUnionCases(model, "VoiceUpdate");
-  ASSERT_NE(std::find(actions.begin(), actions.end(), "signal"), actions.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "roster"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("voice_commands", "command"),
-            std::set<std::string>(actions.begin(), actions.end()));
-  EXPECT_EQ(DeclaredLabelValues("voice_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("voice", "VoiceAction", "signal", "VoiceUpdate", "roster");
 }
 
-// Castle's envelope counts its inner case names on castle_commands and
-// castle_events, pinned against castle.smithy the same way.
 TEST(StreamSeriesModelPin, CastleSeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/castle.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto moves = ModelUnionCases(model, "CastleMove");
-  const auto updates = ModelUnionCases(model, "CastleUpdate");
-  ASSERT_NE(std::find(moves.begin(), moves.end(), "pickUp"), moves.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("castle_commands", "command"),
-            std::set<std::string>(moves.begin(), moves.end()));
-  EXPECT_EQ(DeclaredLabelValues("castle_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("castle", "CastleMove", "pickUp", "CastleUpdate", "gameEnded");
 }
 
-// Rummy's envelope counts its inner case names on rummy_commands and
-// rummy_events, pinned against rummy.smithy the same way.
 TEST(StreamSeriesModelPin, RummySeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/rummy.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto moves = ModelUnionCases(model, "RummyMove");
-  const auto updates = ModelUnionCases(model, "RummyUpdate");
-  ASSERT_NE(std::find(moves.begin(), moves.end(), "layOff"), moves.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("rummy_commands", "command"),
-            std::set<std::string>(moves.begin(), moves.end()));
-  EXPECT_EQ(DeclaredLabelValues("rummy_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("rummy", "RummyMove", "layOff", "RummyUpdate", "gameEnded");
 }
 
-// Chess's envelope counts its inner case names on chess_commands and
-// chess_events, pinned against chess.smithy the same way.
 TEST(StreamSeriesModelPin, ChessSeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/chess.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto moves = ModelUnionCases(model, "ChessMove");
-  const auto updates = ModelUnionCases(model, "ChessUpdate");
-  ASSERT_NE(std::find(moves.begin(), moves.end(), "resign"), moves.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("chess_commands", "command"),
-            std::set<std::string>(moves.begin(), moves.end()));
-  EXPECT_EQ(DeclaredLabelValues("chess_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("chess", "ChessMove", "resign", "ChessUpdate", "gameEnded");
 }
 
-// Pong's envelope counts its inner case names on pong_commands and
-// pong_events, pinned against pong.smithy the same way.
 TEST(StreamSeriesModelPin, PongSeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/pong.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto moves = ModelUnionCases(model, "PongMove");
-  const auto updates = ModelUnionCases(model, "PongUpdate");
-  ASSERT_NE(std::find(moves.begin(), moves.end(), "paddle"), moves.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "frame"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("pong_commands", "command"),
-            std::set<std::string>(moves.begin(), moves.end()));
-  EXPECT_EQ(DeclaredLabelValues("pong_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("pong", "PongMove", "paddle", "PongUpdate", "frame");
 }
 
-// Spades' envelope, the same way.
 TEST(StreamSeriesModelPin, SpadesSeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/spades.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto moves = ModelUnionCases(model, "SpadesMove");
-  const auto updates = ModelUnionCases(model, "SpadesUpdate");
-  ASSERT_NE(std::find(moves.begin(), moves.end(), "bid"), moves.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("spades_commands", "command"),
-            std::set<std::string>(moves.begin(), moves.end()));
-  EXPECT_EQ(DeclaredLabelValues("spades_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("spades", "SpadesMove", "bid", "SpadesUpdate", "gameEnded");
 }
 
 // The bounded kind is the whole dashboard identity of a rejection (#1327,
