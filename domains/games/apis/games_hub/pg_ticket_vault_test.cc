@@ -11,8 +11,8 @@
 
 namespace {
 
-// Real postgres, because the risky code is the SQL: no in-memory double. Runs when GAMES_HUB_TEST_DB_URL points at
-// a scratch database — e.g.
+// Real postgres, because the risky code is the SQL: no in-memory double.
+// Runs when GAMES_HUB_TEST_DB_URL points at a scratch database — e.g.
 //   GAMES_HUB_TEST_DB_URL=postgresql://user:pass@localhost:5432/games_hub_test
 // and skips otherwise; CI sets it.
 class PgTicketVaultTest : public ::testing::Test {
