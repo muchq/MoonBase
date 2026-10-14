@@ -1,4 +1,4 @@
-// Wire-contract goldens for castle (#77) on the room stream, the way
+// Wire-contract goldens for castle on the room stream, the way
 // golf_wire_test pins golf's: raw eventstream frames and exact payload
 // bytes, because the typed-client suites regenerate both sides together
 // and cannot see a rename. The pinned surface: the castle command
@@ -122,7 +122,7 @@ TEST_F(CastleWireTest, TableFlowPinsCastleCommandAndUpdatePayloadBytes) {
 
   // Both ready; the joiner opens on J♣ — his only ordinary card, the two
   // tens being specials that would burn the pile — and names it, since a
-  // play carries cards rather than hand offsets (#1505). The creator's
+  // play carries cards rather than hand offsets. The creator's
   // view of that turn is the populated shape: the last play with its
   // flags, the run on the pile, and canPlay for the chair now on turn.
   for (auto* seat : {&creator, &joiner}) {

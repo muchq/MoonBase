@@ -7,7 +7,7 @@
 namespace games_hub {
 namespace {
 
-// A deal's finish (#1609): each deal is a game — the seat that went out
+// A deal's finish: each deal is a game — the seat that went out
 // won it and everyone dealt in played it. A leaver is compacted out of the
 // engine's seats, as in castle. No score: rummy's points count up for the
 // winner where golf's count against every seat, so adding them to the

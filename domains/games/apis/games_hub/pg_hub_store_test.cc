@@ -76,7 +76,7 @@ struct Received {
   }
 };
 
-// The persistence integration suite's write-through ops (#1194): the
+// The persistence integration suite's write-through ops: the
 // write-through ops against the real tables. GAMES_HUB_TEST_DB_URL gates
 // it like the rest of the suite.
 class PgHubStoreTest : public ::testing::Test {
@@ -106,7 +106,7 @@ class PgHubStoreTest : public ::testing::Test {
   std::unique_ptr<PgHubStore> store_;
 };
 
-// A castle table (#77) stores its kind and decodes with castle's serde;
+// A castle table stores its kind and decodes with castle's serde;
 // an unstarted one carries the kind alone. Rows from before the column
 // read as golf, which the migration's default says.
 TEST_F(PgHubStoreTest, CastleRowsKeepTheirKindAndDecodeWithCastleSerde) {
@@ -231,7 +231,7 @@ TEST_F(PgHubStoreTest, SpadesRowsKeepTheirKindAndDecodeWithSpadesSerde) {
   EXPECT_EQ(std::get<spades::Table>(*(*reread)->state), bid);
 }
 
-// A challenge's terms (#1633) ride the state column while the table
+// A challenge's terms ride the state column while the table
 // waits, and go when the game starts: the started row is the engine's
 // alone.
 TEST_F(PgHubStoreTest, ChallengeTermsRideTheStateColumnUntilTheStart) {
@@ -306,8 +306,8 @@ TEST_F(PgHubStoreTest, AWaitingTableWithNoTermsStoresNoState) {
   EXPECT_FALSE((*reread)->terms.has_value());
 }
 
-// A rummy table (#245) is the third engine behind the same rows: its kind
-// is stored, and a table mid-deal (#1609) — melds, the card taken from
+// A rummy table is the third engine behind the same rows: its kind
+// is stored, and a table mid-deal — melds, the card taken from
 // the discard, the last move — decodes with the table's serde byte for
 // byte.
 TEST_F(PgHubStoreTest, RummyRowsKeepTheirKindAndDecodeWithRummySerde) {
@@ -427,7 +427,7 @@ TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
   EXPECT_EQ(snapshot->games[0].game_id, "G2");
 }
 
-// The commit path (#1194): the notify must ride exactly the
+// The commit path: the notify must ride exactly the
 // commits that land — a conflicted or replayed commit stays silent.
 TEST_F(PgHubStoreTest, CommitNotifiesExactlyTheSavesThatLand) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
@@ -541,7 +541,7 @@ TEST_F(PgHubStoreTest, FinishCommitAppliesStatsExactlyOnce) {
 
 // Stats move only by a finish's increments. A presence write from an
 // instance that has not yet heard of a finish carries stale stats, and a
-// rummy table finishes a deal every hand (#1609): the write updates
+// rummy table finishes a deal every hand: the write updates
 // presence and leaves the counts to the increments that own them.
 TEST_F(PgHubStoreTest, PresenceWritesLeaveStatsToTheirIncrements) {
   store_->Enqueue(
@@ -602,7 +602,7 @@ PgHubStore::GameRow ChessRow(const chess_play::Table& table, int64_t version) {
 }
 
 // The commit that ends a chess game archives it in the same statement
-// (#1637): once, whichever later commits still carry it, never from a
+//: once, whichever later commits still carry it, never from a
 // commit that missed, and marked with the room's published flag of the
 // moment.
 TEST_F(PgHubStoreTest, ACommitThatEndsAChessGameArchivesItOnce) {
@@ -816,7 +816,7 @@ TEST_F(PgHubStoreTest, AnUnreadableArchivedGameIsDropped) {
   EXPECT_EQ(history->games[0].game_id, "C1");
 }
 
-// The surface a room stands on rides its row (#1554): stored in the
+// The surface a room stands on rides its row: stored in the
 // wire's spelling, set by the create, kept against a second create,
 // changed by SetRoomSurface (a no-op for a room that is not), and read
 // back by both loads. A row from before the column (the migration's
@@ -1030,7 +1030,7 @@ PgHubStore::ChessEventRow Event(int64_t version, const std::string& creator = "a
   return row;
 }
 
-// A round robin (#1647) commits as a games row does, notifying exactly
+// A round robin commits as a games row does, notifying exactly
 // the commits that land; its body round-trips through both loads, and
 // the room's cascade takes it.
 TEST_F(PgHubStoreTest, AnEventCommitsOnItsVersionNotifiesAndDiesWithItsRoom) {

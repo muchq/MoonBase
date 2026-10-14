@@ -77,7 +77,7 @@ struct Adapter<spades::Table> {
     return std::nullopt;
   }
 
-  // Bids, plays and the next hand's deal (#1658).
+  // Bids, plays and the next hand's deal.
   static Action<spades::Table, Start> Decode(const Move& move, const std::string& player_id);
   static absl::StatusOr<spades::Table> Open(const OpenContext& context, const Start& start,
                                             std::deque<cards::Card> deck) {

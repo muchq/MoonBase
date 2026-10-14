@@ -2,9 +2,9 @@ $version: "2.0"
 
 namespace moonbase.lobby
 
-// The lobby's world (#79, #1490): the chill 3D vibe at muchq.com/games
+// The lobby's world: the chill 3D vibe at muchq.com/games
 // (and /thoughts), on the games hub. A world per room: each joined player
-// is a position on the room's surface (#1554), a color, and a shape, and
+// is a position on the room's surface, a color, and a shape, and
 // every change reaches everyone else in the same world. The hub relays
 // and settles positions onto the surface; it simulates nothing, and past
 // the connection it remembers only the surface (stored) and the last 32
@@ -78,7 +78,7 @@ structure ChangeShape {
 /// Leave the world but keep the session; join again to respawn.
 structure LeaveWorld {}
 
-/// Reshape the session's room for everyone in it (#1554): the room's
+/// Reshape the session's room for everyone in it: the room's
 /// world takes this surface, and everyone standing in it is placed at
 /// the nearest point of the new one. Any member may, standing or not;
 /// refused for a geometry the hub cannot host.
@@ -125,7 +125,7 @@ union Geometry {
     sphere: SphereGeometry
 
     /// The plane's floor inside four glass walls standing at its edges
-    /// (#1554). Players stand on the floor under exactly the plane's
+    ///. Players stand on the floor under exactly the plane's
     /// rules — the glass is the boundary it already had, not a place to
     /// stand — and deja's tape splats onto the walls (see TapeSplat).
     ///
@@ -216,7 +216,7 @@ structure PlayerLeft {
     playerId: String
 }
 
-/// One deja event on the glass (#1554, #1150). The hub is deja's second
+/// One deja event on the glass. The hub is deja's second
 /// consumer and the tape is the world's, not the browser's: the hub polls
 /// deja while — and only while — somebody is standing in a glasshouse,
 /// and fans each new event to that world the way playerMoved goes out. A

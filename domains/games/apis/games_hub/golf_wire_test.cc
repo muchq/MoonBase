@@ -122,7 +122,7 @@ TEST_F(GolfWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(KeysOf(view["discardTop"]), (std::set<std::string>{"rank", "suit"}));
 
   // The lobby list flips to playing for everyone in the room, and both
-  // members read as at it (#1490): the table key is the lobby's.
+  // members read as at it: the table key is the lobby's.
   EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
             R"({"games":[{"game":"golf","gameId":"GAME01","playerCount":2,"status":"playing"}],)"
             R"("geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"

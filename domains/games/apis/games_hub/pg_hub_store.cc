@@ -92,7 +92,7 @@ constexpr char kCommitUpdate[] = R"sql(
       SELECT archive_id, game, ended_at FROM archive WHERE published)
     SELECT pg_notify($6, $7) FROM save)sql";
 // An update or finish that lands a chess table whose game is over also
-// archives that game (#1637), guarded on the save the way the finish's
+// archives that game, guarded on the save the way the finish's
 // stats are, with the room's published flag of the moment, and copies it
 // to the public feed when that flag is set; a blank game says there is
 // none to archive, and a later commit still carrying the same ended game
@@ -136,7 +136,7 @@ constexpr char kCommitFinish[] = R"sql(
       SELECT archive_id, game, ended_at FROM archive WHERE published)
     SELECT pg_notify($7, $8) FROM save)sql";
 
-// A round robin's commit (#1647), conditional and notifying as a games
+// A round robin's commit, conditional and notifying as a games
 // row's: the insert lands only into a room that is, the update only on
 // version - 1.
 constexpr char kCommitEventInsert[] = R"sql(
@@ -179,7 +179,7 @@ std::string StatsJson(const std::vector<PgHubStore::StatsDelta>& stats) {
   return rows.dump();
 }
 
-// A waiting table's challenge (#1633), at a game that takes them
+// A waiting table's challenge, at a game that takes them
 // (kChallenges), rides the state column, which is otherwise NULL until the
 // start: {"terms":{...}}. No engine's encoding has a top-level "terms".
 std::string TermsJson(const ChessTerms& terms) {
@@ -259,7 +259,7 @@ std::vector<PgHubStore::ChessGameRow> ChessGamesFrom(const std::string& room_id,
   return games;
 }
 
-// A round robin's body (#1647): what its creator fixed and moderates.
+// A round robin's body: what its creator fixed and moderates.
 // The room, id and version are columns of their own.
 constexpr std::pair<PairingResult, const char*> kResultNames[] = {
     {PairingResult::kWhite, "white"},

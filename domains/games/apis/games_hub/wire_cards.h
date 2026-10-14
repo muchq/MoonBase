@@ -10,7 +10,7 @@
 
 namespace games_hub {
 
-/// The wire's card language and the way back from it (#1505).
+/// The wire's card language and the way back from it.
 ///
 /// Ranks are the canonical display strings (A 2..10 J Q K); suits are
 /// the glyphs the UI renders, a different representation of the same

@@ -764,7 +764,7 @@ class OneReplyMicrogpt final : public opal::http::HttpClient {
   std::string reply_;
 };
 
-// The room bot end to end (#1591): a mention is answered in the room,
+// The room bot end to end: a mention is answered in the room,
 // the reply reaching every member after the asker's own message and
 // flagged as the bot's.
 TEST_F(GamesHubStreamFixture, ABotMentionIsAnsweredInTheRoomAfterTheAsker) {
@@ -801,7 +801,7 @@ TEST_F(GamesHubStreamFixture, ABotMentionIsAnsweredInTheRoomAfterTheAsker) {
   }
 }
 
-// The bot's replies (#1591) replay flagged as the bot's, so a client
+// The bot's replies replay flagged as the bot's, so a client
 // never has to know its name; a player's message carries no flag. No bot
 // is started here, as when MICROGPT_URL is unset: the mention is only
 // chat, and the one reply is the one the test stores itself.
@@ -1121,7 +1121,7 @@ TEST_F(GamesHubStreamFixture, ResumingOnAFreshInstanceReplaysChatHistory) {
   EXPECT_EQ(history->messages[1].playerId, bob->player_id);
   EXPECT_GT(history->messages[1].messageId, history->messages[0].messageId);
 
-  // And his world is the restored room's (#1490): a join naming the
+  // And his world is the restored room's: a join naming the
   // plaza is refused, an unnamed one lands in the room.
   moonbase::games::JoinWorld join_world;
   join_world.roomId = "plaza";
@@ -1140,7 +1140,7 @@ TEST_F(GamesHubStreamFixture, ResumingOnAFreshInstanceReplaysChatHistory) {
   EXPECT_TRUE(world->as_worldState_or_null()->players.empty());
 }
 
-// A room's surface survives the process (#1554): a fresh instance
+// A room's surface survives the process: a fresh instance
 // restoring from the store puts the room's world back on its sphere,
 // so a resumed seat's join lands on the wall, its worldState names the
 // sphere, and a move off the wall is refused by the sphere's rule, not
@@ -1192,7 +1192,7 @@ TEST_F(GamesHubStreamFixture, ASphereRoomSurvivesARestart) {
             "position must be on the sphere (radius 53)");
 }
 
-// A room conjured from a member row alone (#1554) — the boot snapshot
+// A room conjured from a member row alone — the boot snapshot
 // missed its room row — stands on the plane only until the next read of
 // its rows: a wake's reconcile adopts the row's sphere for a room this
 // instance already holds, so a later joiner's world is the sphere the
@@ -1609,7 +1609,7 @@ TEST_F(GamesHubStreamFixture, HeartbeatStampsOnlyRoomsThisInstanceHoldsSeatsIn) 
 
 // The heartbeat thread is StampHeldRooms then SweepStaleRooms on its
 // interval, the sweep at kRoomStaleAfter.
-// What members are told is what the store holds (#1637): by the time
+// What members are told is what the store holds: by the time
 // anyone hears published, the flag is in the row every instance's
 // archive reads, so no game a sibling ends after the announcement is
 // archived on the old flag.
@@ -1649,7 +1649,7 @@ TEST_F(GamesHubStreamFixture, RoomHeartbeatStampsAndSweepsOnItsInterval) {
       << "the heartbeat never swept, or swept at the wrong threshold";
   EXPECT_EQ(spy->AwaitFeedSweep(std::chrono::seconds(5)),
             std::chrono::duration_cast<std::chrono::seconds>(GamesHub::kPublishedChessKept))
-      << "the heartbeat never swept the public chess feed (#1637), or at the wrong age";
+      << "the heartbeat never swept the public chess feed, or at the wrong age";
 }
 
 // The same contract's second window: a seat that entered the cohort
@@ -1893,8 +1893,7 @@ TEST_F(GamesHubStreamFixture, AFailedHistoryLoadDoesNotFailTheResume) {
   EXPECT_EQ(capture->CounterTotal("chat_failures", {{"stage", "cursor_seed"}}), 1);
 }
 
-// What the chat paths count (#1226 item 10), asserted through the
-// capturing recorder — including the rule the epic states outright:
+// What the chat paths count, asserted through the capturing recorder:
 // no room id, player id, or message text may reach a metric name or
 // label. Counts and stages only.
 TEST_F(GamesHubStreamFixture, ChatMetricsCountOutcomesWithoutIdentifiers) {
@@ -2239,7 +2238,7 @@ TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
             std::set<std::string>(updates.begin(), updates.end()));
 }
 
-// The lobby envelope (#1490) counts its inner case names on lobby_commands
+// The lobby envelope counts its inner case names on lobby_commands
 // and lobby_events, pinned against lobby.smithy the same way.
 TEST(StreamSeriesModelPin, LobbySeriesMatchTheModelUnions) {
   const std::string model = ReadModel("domains/games/apis/games_hub/model/lobby.smithy");
@@ -2254,7 +2253,7 @@ TEST(StreamSeriesModelPin, LobbySeriesMatchTheModelUnions) {
             std::set<std::string>(updates.begin(), updates.end()));
 }
 
-// A room's voice (#1590) counts its inner case names on voice_commands and
+// A room's voice counts its inner case names on voice_commands and
 // voice_events, pinned against voice.smithy the same way.
 TEST(StreamSeriesModelPin, VoiceSeriesMatchTheModelUnions) {
   const std::string model = ReadModel("domains/games/apis/games_hub/model/voice.smithy");
@@ -2269,7 +2268,7 @@ TEST(StreamSeriesModelPin, VoiceSeriesMatchTheModelUnions) {
             std::set<std::string>(updates.begin(), updates.end()));
 }
 
-// Castle's envelope (#77) counts its inner case names on castle_commands and
+// Castle's envelope counts its inner case names on castle_commands and
 // castle_events, pinned against castle.smithy the same way.
 TEST(StreamSeriesModelPin, CastleSeriesMatchTheModelUnions) {
   const std::string model = ReadModel("domains/games/apis/games_hub/model/castle.smithy");
@@ -2284,7 +2283,7 @@ TEST(StreamSeriesModelPin, CastleSeriesMatchTheModelUnions) {
             std::set<std::string>(updates.begin(), updates.end()));
 }
 
-// Rummy's envelope (#245) counts its inner case names on rummy_commands and
+// Rummy's envelope counts its inner case names on rummy_commands and
 // rummy_events, pinned against rummy.smithy the same way.
 TEST(StreamSeriesModelPin, RummySeriesMatchTheModelUnions) {
   const std::string model = ReadModel("domains/games/apis/games_hub/model/rummy.smithy");
@@ -2329,7 +2328,7 @@ TEST(StreamSeriesModelPin, PongSeriesMatchTheModelUnions) {
             std::set<std::string>(updates.begin(), updates.end()));
 }
 
-// Spades' envelope, the same way (#1658).
+// Spades' envelope, the same way.
 TEST(StreamSeriesModelPin, SpadesSeriesMatchTheModelUnions) {
   const std::string model = ReadModel("domains/games/apis/games_hub/model/spades.smithy");
   ASSERT_FALSE(model.empty());
@@ -2692,7 +2691,7 @@ TEST_F(HubGameFixture, AbandoningALiveGameResolvesIt) {
   EXPECT_TRUE(room->as_roomState_or_null()->games.empty());
 }
 
-// The hub's domain events (#1571): the funnel a room goes through, and
+// The hub's domain events: the funnel a room goes through, and
 // the once-ness of the game that ends it. A game is played once, so its
 // line comes from the commit that ended it — never from the ceremony,
 // which every instance holding the room runs off the durable terminal
@@ -2780,7 +2779,7 @@ TEST_F(GameEventFixture, ABiggerTableIsRecordedAtTheSizeItWasDealt) {
   EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("players":3)"));
 }
 
-// A rummy table is dealer's choice (#1609): seating it is no game, and
+// A rummy table is dealer's choice: seating it is no game, and
 // each deal is one — started when the dealer deals, finished when a seat
 // goes out — recorded as rummy at either hand size (gin's deals are
 // "gin"; game_events_test pins that).
@@ -2840,7 +2839,7 @@ TEST_F(GameEventFixture, ARefusedJoinIsNoEvent) {
 }
 
 // A room records the surface it chose, and every reshape after it
-// (#1554), in the one spelling the wire and the stored row also use.
+//, in the one spelling the wire and the stored row also use.
 // The radius is not in the line: the question is which shapes people
 // reach for, and a number per room is not a word to group by.
 TEST_F(GameEventFixture, AWorldRecordsTheShapeItChoseAndEveryReshapeAfterIt) {
@@ -3222,7 +3221,7 @@ TEST_F(HubGameFixture, PendingGameLifecycleAndLobbySummaries) {
   EXPECT_EQ(second->as_commandRejected_or_null()->reason, "leave your current game first");
 
   // The lobby sees the pending game: waiting, one seat filled — and who
-  // fills it: alice is at the golf table, bob is idle (#1490).
+  // fills it: alice is at the golf table, bob is idle.
   ASSERT_TRUE(
       bob->stream.Send(GameCommands::FromGetroomstate(moonbase::games::GetRoomState{})).ok());
   auto lobby = ReceiveCase(bob->stream, "roomState");
@@ -3399,7 +3398,7 @@ TEST_F(FailingVaultFixture, GetSessionFailsClosedWhenTheVaultIsDown) {
   ASSERT_FALSE(session.ok());
 }
 
-// Per-session stream budgets (#1240), pinned with tiny buckets whose
+// Per-session stream budgets, pinned with tiny buckets whose
 // refills are effectively never — nothing a test does can accidentally
 // earn a token back, so the refusal path is deterministic.
 class RateLimitedStreamFixture : public GamesHubStreamFixture {

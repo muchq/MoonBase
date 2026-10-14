@@ -268,7 +268,7 @@ const std::vector<GamesHub::CounterSeries>& GamesHub::DeclaredCounterSeries() {
       {"lobby_events", {{"event", "playerLeft"}}},
       {"lobby_events", {{"event", "geometryChanged"}}},
       {"lobby_events", {{"event", "tape"}}},
-      // A room's voice (#1590), the same way: VoiceAction and VoiceUpdate,
+      // A room's voice, the same way: VoiceAction and VoiceUpdate,
       // pinned by VoiceSeriesMatchTheModelUnions.
       {"voice_commands", {{"command", "join"}}},
       {"voice_commands", {{"command", "leave"}}},
@@ -277,7 +277,7 @@ const std::vector<GamesHub::CounterSeries>& GamesHub::DeclaredCounterSeries() {
       {"voice_events", {{"event", "joined"}}},
       {"voice_events", {{"event", "left"}}},
       {"voice_events", {{"event", "signal"}}},
-      // deja's tape (#1554): what was asked for, what came back, and how
+      // deja's tape: what was asked for, what came back, and how
       // much of it reached a wall. lobby_tape_poller_active is the gauge
       // beside them, and gauges are not declared.
       {"lobby_tape_polls", {{"result", "ok"}}},
@@ -758,7 +758,7 @@ GamesHub::Commit GamesHub::CommitEntryLocked(const std::string& room_id, const s
   // end on, TickPongOnce lets it go).
   pong_elsewhere_.erase({room_id, game_id});
   HostPongLocked(room_id, game_id, entry);
-  // The game-finished event (#1571), here and nowhere downstream: this
+  // The game-finished event, here and nowhere downstream: this
   // is the one place that knows the finish landed and that this instance
   // is what ended it. StageGameOverLocked runs the same ceremony on
   // every instance holding the room, off the durable terminal row, and
@@ -1202,7 +1202,7 @@ opal::eventstream::StreamTask GamesHub::Play(moonbase::games::PlayInput input,
   TrackActive(+1);
 
   // Membership decides the resync, not the registry: a player restored
-  // from the store (#1194) admits as new — their old process's
+  // from the store admits as new — their old process's
   // registry died — but their room and game are right here.
   std::optional<std::string> room;
   Outbox resync;
@@ -1236,7 +1236,7 @@ opal::eventstream::StreamTask GamesHub::Play(moonbase::games::PlayInput input,
   }
   Deliver(resync);
 
-  // Per-session budgets (#1240), owned by this coroutine frame: frames
+  // Per-session budgets, owned by this coroutine frame: frames
   // are handled sequentially per session, so no locking, and the state
   // dies with the connection. Every frame draws from its envelope's
   // bucket (lobby, voice, or command); chat draws from its own tighter
@@ -1384,7 +1384,7 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
     {
       const std::lock_guard<std::mutex> lock(mu_);
       if (!player_room_.contains(player_id)) {
-        // The room may live on another instance (#1194): one
+        // The room may live on another instance: one
         // synchronous read materializes it here before refusing.
         if (!rooms_.contains(join->roomId)) {
           store_answered = RefreshRoomLocked(join->roomId, outbox, /*project_always=*/true);
@@ -1509,7 +1509,7 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
     }
     Count("chat_appends", {{"result", "stored"}});
     {
-      // That a room was talking, and how many were in it (#1571). The
+      // That a room was talking, and how many were in it. The
       // text never leaves the process. This path dropped mu_ before the
       // append — the store re-takes it — so it is taken back here, for
       // the room's size and for the writer it guards.
@@ -2106,7 +2106,7 @@ std::optional<Refusal> GamesHub::ApplyTableEngineMoveLocked(GameRef ref,
     HostedState next_state(*std::move(next));
     // A finish credits the room's stats in the same conditional commit
     // that lands it: the table's end, or a game's that leaves the table
-    // playing on (a rummy deal, #1609).
+    // playing on (a rummy deal).
     std::optional<std::vector<HubStore::StatsDelta>> deltas =
         DealEndDeltas(*ref.entry->state, next_state);
     const bool deal_ended = deltas.has_value();
@@ -3286,7 +3286,7 @@ void GamesHub::LeaveEverywhere(const std::string& player_id, Outbox& outbox, Wri
     // messages for the life of the process.
     chat_store_->DropRoom(room_id);
     chat_cursors_.erase(room_id);
-    // The room's last line (#1571), from the instance that emptied it and
+    // The room's last line, from the instance that emptied it and
     // not from the ones that later read the row gone — ReconcileRoomLocked
     // drops a remotely deleted room the same way, and a room closes once.
     RecordLocked([&room_id](absl::Time now) { return RoomClosedLine(now, room_id); });
@@ -3441,7 +3441,7 @@ bool GamesHub::ReapUnlessResumedElsewhere(const std::string& player_id) {
   bool reaped = false;
   {
     const std::lock_guard<std::mutex> lock(mu_);
-    // Cross-instance grace (#1194): the player may have resumed
+    // Cross-instance grace: the player may have resumed
     // on another instance while parked here. One fresh read decides —
     // a member row back at connected belongs to its new instance. The
     // boot reaper leans on the same check from the other side: a row

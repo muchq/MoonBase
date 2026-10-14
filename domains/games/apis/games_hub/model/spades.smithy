@@ -12,7 +12,7 @@ use moonbase.games#LeaveGame
 use moonbase.games#PlayerIds
 use moonbase.games#TurnChanged
 
-// Spades' vocabulary (#1658): two to four seats, in the order they joined,
+// Spades' vocabulary: two to four seats, in the order they joined,
 // playing hands until a team wins the game, then game after game until a
 // seat leaves. Partners seats four, partners across — seats 0 and 2 are
 // team 0, seats 1 and 3 team 1; cutthroat seats two to four, every seat a
@@ -29,7 +29,7 @@ structure SpadesCommand {
 }
 
 /// A hand is bid round the table from the dealer's left, then played
-/// out trick by trick; a play names its card (#1505), so one sent
+/// out trick by trick; a play names its card, so one sent
 /// against a view the table has moved past is refused in band.
 union SpadesMove {
     createGame: CreateGame

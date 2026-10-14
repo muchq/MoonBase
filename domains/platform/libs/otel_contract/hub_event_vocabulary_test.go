@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The games_hub event vocabulary (#1571): the hub writes event names,
+// The games_hub event vocabulary: the hub writes event names,
 // variants, outcomes and surfaces from game_events.h, and the stats
 // reader keys its rollup on the same words, collapsing any it does not
 // know to "other". The two live in different languages; this is the one
@@ -158,7 +158,7 @@ func hubGames(t *testing.T) []hubGame {
 	return games
 }
 
-// Every word a game is recorded under (#1571), sorted: each adapter's
+// Every word a game is recorded under, sorted: each adapter's
 // kName and, since a rummy table's deals are recorded by variant,
 // rummy::recordedName's.
 func gameWords(t *testing.T) []string {
@@ -274,7 +274,7 @@ func TestTheRoomCeilingIsTheReadersAlone(t *testing.T) {
 			"documented as a reader-side ceiling")
 }
 
-// deja reads the same lines as a second source (#1572), and bounds the
+// deja reads the same lines as a second source, and bounds the
 // same four vocabularies itself — it is another process again, and a word
 // it does not know becomes a token rather than a grammar the hub can grow
 // behind its back. Same pin, third language.

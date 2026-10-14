@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// HubEventKey is one row of the per-day games_hub rollup (#1571): one
+// HubEventKey is one row of the per-day games_hub rollup: one
 // event, counted under the values it carries. The columns are the
 // event's own fields, not a shape imposed on them — an event that has no
 // variant leaves it empty because it has none, and a reader filtering on

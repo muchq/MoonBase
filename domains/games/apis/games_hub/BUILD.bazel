@@ -2,7 +2,7 @@ load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_serve
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
-# The games hub's model (#79): the room layer (games.smithy) and one
+# The games hub's model: the room layer (games.smithy) and one
 # envelope per tenant — lobby, voice, golf, castle, rummy, chess.
 smithy_cpp_server_library(
     name = "games_hub_smithy_server",
@@ -36,11 +36,11 @@ smithy_cpp_client_library(
     ],
     namespace = "moonbase::games",
     service = "moonbase.games#GamesHub",
-    # one_d4_worker reads the public chess feed with it (#1637).
+    # one_d4_worker reads the public chess feed with it.
     visibility = ["//domains/games/apis/one_d4_worker:__pkg__"],
 )
 
-# The games a room hosts (#79): the kind a table is created as, and the
+# The games a room hosts: the kind a table is created as, and the
 # engine-state variant a started table carries, shared by the hub and
 # its store.
 cc_library(
@@ -58,7 +58,7 @@ cc_library(
     ],
 )
 
-# Each game's side of the hub (#1621): one Adapter specialization per
+# Each game's side of the hub: one Adapter specialization per
 # engine, dispatched on HostedState by adapters.h.
 cc_library(
     name = "adapters",
@@ -153,7 +153,7 @@ cc_library(
 
 # The wire's card language, both directions, and the translation from
 # the cards a castle move names to the slots the engine addresses
-# (#1505).
+#.
 cc_library(
     name = "wire_cards",
     srcs = ["wire_cards.cc"],
@@ -168,7 +168,7 @@ cc_library(
     ],
 )
 
-# A round robin on the wire (#1647).
+# A round robin on the wire.
 cc_library(
     name = "round_robin_wire",
     srcs = ["round_robin_wire.cc"],
@@ -206,7 +206,7 @@ cc_library(
     ],
 )
 
-# A room's finished chess games on the wire (#1637): summaries, reviews
+# A room's finished chess games on the wire: summaries, reviews
 # and PGN.
 cc_library(
     name = "chess_archive",
@@ -237,7 +237,7 @@ cc_test(
     ],
 )
 
-# A chess round robin's pairings and standings (#1647).
+# A chess round robin's pairings and standings.
 cc_library(
     name = "round_robin",
     srcs = ["round_robin.cc"],
@@ -304,7 +304,7 @@ filegroup(
     visibility = ["//deploy/consolidated:__pkg__"],
 )
 
-# The hub's domain events (#1571): one JSON line per room, chat, and
+# The hub's domain events: one JSON line per room, chat, and
 # table milestone, for the stats pipeline to read out of S3 months later.
 # Pure line builders, testable without a hub.
 cc_library(
@@ -475,7 +475,7 @@ cc_library(
     ],
 )
 
-# The room bots: microgpt's mention and prompt (#1591), and the budgets
+# The room bots: microgpt's mention and prompt, and the budgets
 # and worker every responder is called through, off every stream thread
 # and the hub's lock.
 cc_library(
@@ -551,7 +551,7 @@ cc_test(
     ],
 )
 
-# The postgres-backed vault and the hub's schema (#1194).
+# The postgres-backed vault and the hub's schema.
 cc_library(
     name = "pg_ticket_vault",
     srcs = [
@@ -571,7 +571,7 @@ cc_library(
     ],
 )
 
-# PostgreSQL implementation of HubStore (#1194): staged writes run FIFO
+# PostgreSQL implementation of HubStore: staged writes run FIFO
 # on one writer thread; game commits are synchronous and
 # conditional so multiple instances share one authority.
 cc_library(
@@ -594,7 +594,7 @@ cc_library(
     ],
 )
 
-# PostgreSQL implementation of ChatStore (#1226). Append holds room and
+# PostgreSQL implementation of ChatStore. Append holds room and
 # membership locks across insert, prune, and NOTIFY so authorization,
 # retention, and per-room message ordering commit together.
 cc_library(
@@ -609,10 +609,9 @@ cc_library(
     ],
 )
 
-# The #1226 slice of the persistence integration suite: chat's SQL is
-# the risky code (atomic append, retention under concurrent writers,
-# cascade), so there is no in-memory double here. Real postgres via
-# GAMES_HUB_TEST_DB_URL; skips otherwise.
+# ChatStore against real postgres via GAMES_HUB_TEST_DB_URL; skips
+# otherwise. Chat's SQL is the risky code (atomic append, retention under
+# concurrent writers, cascade), so there is no in-memory double.
 cc_test(
     name = "pg_chat_store_test",
     size = "small",
@@ -636,9 +635,8 @@ cc_test(
     ],
 )
 
-# Step-2/3 slice of the persistence integration suite (#1194): the
-# write-through ops and the synchronous commit+NOTIFY path against real
-# postgres via GAMES_HUB_TEST_DB_URL; skips otherwise.
+# HubStore's write-through ops and synchronous commit+NOTIFY path against
+# real postgres via GAMES_HUB_TEST_DB_URL; skips otherwise.
 cc_test(
     name = "pg_hub_store_test",
     size = "small",
@@ -682,9 +680,8 @@ cc_test(
 )
 
 # Serialized engine states must survive the games table's jsonb state
-# column (#1194; jsonb normalizes
-# keys and spacing, and refuses escaped NULs). Real postgres via
-# GAMES_HUB_TEST_DB_URL; skips otherwise.
+# column (jsonb normalizes keys and spacing, and refuses escaped NULs).
+# Real postgres via GAMES_HUB_TEST_DB_URL; skips otherwise.
 cc_test(
     name = "game_state_jsonb_test",
     size = "small",
@@ -735,7 +732,7 @@ cc_test(
     ],
 )
 
-# Per-session stream budget policy (#1240); the bucket mechanism lives
+# Per-session stream budget policy; the bucket mechanism lives
 # in //domains/platform/libs/futility/rate_limiter, tested there.
 cc_library(
     name = "rate_limiter",
@@ -743,7 +740,7 @@ cc_library(
     deps = ["//domains/platform/libs/futility/rate_limiter:token_bucket"],
 )
 
-# Where a tape event lands on a glasshouse's glass (#1554): a pure
+# Where a tape event lands on a glasshouse's glass: a pure
 # function of deja's seq, which is the only thing every instance and every
 # client in a room already agrees on.
 cc_library(
@@ -786,7 +783,7 @@ cc_test(
     ],
 )
 
-# The lobby's world, its rules and map (#79, #1490): staged deliveries,
+# The lobby's world, its rules and map: staged deliveries,
 # no wire, hosted by GamesHub as the room stream's lobby member.
 cc_library(
     name = "world",
@@ -839,7 +836,7 @@ cc_test(
     ],
 )
 
-# A room's voice (#1590): who is in it and the WebRTC signals between
+# A room's voice: who is in it and the WebRTC signals between
 # them, staged, no wire, hosted by GamesHub as the room stream's voice member.
 cc_library(
     name = "voice",
@@ -864,7 +861,7 @@ cc_test(
     ],
 )
 
-# Chess bots at a table (#1618): Stockfish seat ids and how long they think.
+# Chess bots at a table: Stockfish seat ids and how long they think.
 # Pong bots: smallcat's own opponent, its seat id naming its level.
 cc_library(
     name = "pong_bots",
@@ -956,7 +953,7 @@ cc_library(
     ],
 )
 
-# The generated service's one handler (#79): session identity, and the
+# The generated service's one handler: session identity, and the
 # one Play stream forwarded whole to GamesHub.
 cc_library(
     name = "games_hub_handler",
@@ -976,12 +973,12 @@ cc_library(
     ],
 )
 
-# The restart-survival and multi-instance e2e (#1194): same client flows, durable
+# The restart-survival and multi-instance e2e: same client flows, durable
 # hub, RestartHub between them. Real postgres via GAMES_HUB_TEST_DB_URL;
 # skips otherwise.
 cc_test(
     name = "pg_hub_e2e_test",
-    # Small on purpose (#1241, #1276): normal runtime is ~2s, so a hang
+    # Small on purpose (#1276): normal runtime is ~2s, so a hang
     # fails at the timeout as a loud red rather than passing slowly. Do not
     # raise the ceiling.
     size = "small",
@@ -1024,7 +1021,7 @@ cc_test(
     ],
 )
 
-# Castle's wire goldens (#77): the castle envelope's command and update
+# Castle's wire goldens: the castle envelope's command and update
 # bytes and the dealt setup view, pinned as raw strings like golf's.
 cc_test(
     name = "castle_wire_test",
@@ -1136,7 +1133,7 @@ cc_test(
     ],
 )
 
-# Spades' wire goldens (#1658): the spades envelope's command and update
+# Spades' wire goldens: the spades envelope's command and update
 # bytes, the browser's contract.
 cc_test(
     name = "spades_wire_test",
@@ -1163,7 +1160,7 @@ cc_test(
     ],
 )
 
-# Rummy's wire goldens (#245): the rummy envelope's command and update
+# Rummy's wire goldens: the rummy envelope's command and update
 # bytes, every in-game move's spelling, and the view from each chair.
 cc_test(
     name = "rummy_wire_test",
@@ -1226,7 +1223,7 @@ cc_test(
     ],
 )
 
-# Castle on the room stream (#77): setup, a whole game against an engine
+# Castle on the room stream: setup, a whole game against an engine
 # mirror, redaction, mixed tables, and abandonment.
 cc_test(
     name = "castle_e2e_test",
@@ -1258,7 +1255,7 @@ cc_test(
     ],
 )
 
-# Round robins on the room stream (#1647).
+# Round robins on the room stream.
 cc_test(
     name = "chess_round_robin_e2e_test",
     size = "small",
@@ -1390,7 +1387,7 @@ cc_test(
     ],
 )
 
-# Chess bots (#1618): a fake engine behind the seat Stockfish takes.
+# Chess bots: a fake engine behind the seat Stockfish takes.
 cc_test(
     name = "chess_bot_e2e_test",
     size = "small",
@@ -1421,7 +1418,7 @@ cc_test(
     ],
 )
 
-# Rummy on the room stream (#245): whole games against an engine mirror
+# Rummy on the room stream: whole games against an engine mirror
 # at every table size, redaction, refusals, the refill, abandonment and
 # resume.
 cc_test(
@@ -1618,7 +1615,7 @@ cc_test(
     ],
 )
 
-# The lobby member of the room stream (#1490) through the
+# The lobby member of the room stream through the
 # generated client: the world is the session's room's, or the plaza's.
 cc_test(
     name = "lobby_e2e_test",
@@ -1675,7 +1672,7 @@ cc_test(
     ],
 )
 
-# A room's voice through the raw wire (#1590): the voice envelope's bytes
+# A room's voice through the raw wire: the voice envelope's bytes
 # both ways, and voice ending with the room or the socket.
 cc_test(
     name = "voice_wire_test",
@@ -1702,7 +1699,7 @@ cc_test(
     ],
 )
 
-# deja on the walls (#1554, #1150): the poller through the raw wire with a
+# deja on the walls: the poller through the raw wire with a
 # scripted deja under it — the occupancy gate, the splat bytes, the same
 # spot for every client in the room, dedupe, resume, and a deja having a
 # bad day. Non-Beast like the other wire suites.

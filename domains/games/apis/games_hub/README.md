@@ -1,7 +1,7 @@
 # games_hub — the games hub on opal-cpp event streams
 
-The backend behind muchq.com/games — the lobby (#1490), golf, castle
-(#77), rummy (#245), chess and pong — and its /golf and /thoughts pages (#79), on opal-cpp's
+The backend behind muchq.com/games — the lobby, golf, castle,
+rummy, chess and pong — and its /golf and /thoughts pages, on opal-cpp's
 streaming stack: a modeled protocol with generated async handlers
 (ADR-0021), `SessionRegistry` fan-out with reconnect grace
 (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018), and ticket
@@ -18,12 +18,12 @@ auth ahead of the 101. One session identity opens the one stream.
   layer — rooms, chat, player info with room-scoped stats and the
   member's table (`PlayerInfo.table`: which game, which
   table, pending or in play, absent while idle — how the lobby tells who
-  is free, #1490). Apart from `GameSummary.game` and `Table.game`, the
+  is free). Apart from `GameSummary.game` and `Table.game`, the
   word that names a table's game for the lobby, nothing here knows which
   game a table plays.
 - `model/golf.smithy` — `moonbase.golf`: golf's vocabulary, nested under
   the `golf` member of each streaming union.
-- `model/castle.smithy` — `moonbase.castle`: castle's vocabulary (#77),
+- `model/castle.smithy` — `moonbase.castle`: castle's vocabulary,
   the `castle` member of the same unions. A room hosts tables of any
   game (`GameSummary.game` says which); the shared lifecycle shapes
   (create/join/start/leave and their announcements) are reused, and each
@@ -31,7 +31,7 @@ auth ahead of the 101. One session identity opens the one stream.
   at a table whose vocabulary they do not speak. The room-wide
   `gameCreated` is the one event that crosses: a room hears every table
   in that table's own envelope.
-- `model/rummy.smithy` — `moonbase.rummy`: rummy's vocabulary (#245),
+- `model/rummy.smithy` — `moonbase.rummy`: rummy's vocabulary,
   the `rummy` member, on castle's terms: the shared lifecycle shapes, a
   join refused at another game's table, and moves that name their cards.
   Its shapes are all prefixed `Rummy`, since codegen flattens the
@@ -45,7 +45,7 @@ auth ahead of the 101. One session identity opens the one stream.
 - `model/lobby.smithy` — `moonbase.lobby`: the world's shapes — the
   `lobby` member of the room stream (`LobbyAction`, `LobbyUpdate`) and
   what they carry.
-- `model/voice.smithy` — `moonbase.voice`: a room's voice (#1590) — the
+- `model/voice.smithy` — `moonbase.voice`: a room's voice — the
   `voice` member (`VoiceAction`, `VoiceUpdate`): joining and leaving it,
   and the WebRTC signals between its members.
 
@@ -57,10 +57,10 @@ name appended, which nothing here wants).
 
 ## The lobby's world
 
-A world per room (#1490): a joined player is a position on the room's
+A world per room: a joined player is a position on the room's
 surface, an RGB color in 0..1, and a shape (0 sphere, 1 cube, 2
-pyramid), standing in one room's world. The surface is the room's
-(#1554): the ground plane (`[x, 0, z]`, x and z within ±50); the inside
+pyramid), standing in one room's world. The surface is the room's:
+the ground plane (`[x, 0, z]`, x and z within ±50); the inside
 of a sphere, where a position is a point on the wall and the hub snaps
 one within a unit of it into place and refuses one farther off; or the
 glasshouse, that same plane inside four glass walls at its edges — the
@@ -97,7 +97,7 @@ mints sessions itself and forwards the stream to the hub.
 
 ## A room's voice
 
-Voice for the people in a room (#1590). Audio never reaches the hub:
+Voice for the people in a room. Audio never reaches the hub:
 browsers connect to each other over WebRTC, a full mesh capped at six
 (`Voice::kCapacity`). The hub keeps who is in each room's voice and relays
 each negotiation signal to the one peer it names. `join` answers the
@@ -122,12 +122,12 @@ their own rate bucket, which holds a whole join's candidates. Like the
 world, voice is per instance and nothing is stored. `VOICE_STUN_URLS`
 (comma-separated) names the STUN servers every roster hands out; unset,
 browsers reach each other only on one network. TURN, for browsers STUN
-cannot connect, is still to come (#1590). The rules are `Voice`
+cannot connect, is still to come. The rules are `Voice`
 (`voice.cc`), pinned by `voice_test`; the bytes by `voice_wire_test`.
 
 ## deja on the walls
 
-A glasshouse's glass shows deja's tape (#1554, #1150). The hub is deja's
+A glasshouse's glass shows deja's tape. The hub is deja's
 second consumer, and the tape is world state the hub owns: it polls
 `GET /deja/v1/recent?after=<seq>` over `//domains/ai/libs/deja_cpp`
 every one to two seconds (jittered), dedupes by `seq`, and fans each
@@ -159,7 +159,7 @@ answered them. A wall is a mood rather than a log, so that is left alone.
 ## The room bots
 
 A room chat message that starts with `@bot` (any case, then whitespace or
-nothing) is answered by microgpt-serve (#1591), posted into the room's
+nothing) is answered by microgpt-serve, posted into the room's
 chat as the reserved player id `microgpt` with `bot: true`. The hub makes
 the call, not the browser, so every member sees one reply, it replays in
 history like any message, and microgpt is asked once per mention.
@@ -198,7 +198,7 @@ stored text, so a replay has it too. `MITHRIL_URL` unset leaves it off.
 ## Game events
 
 Seven events, one JSON line each, written to `GAME_EVENT_LOG_DIR` for the
-stats pipeline to read back out of S3 (#1571): `room_created` (the
+stats pipeline to read back out of S3: `room_created` (the
 surface it chose), `room_joined` (the room's size once the joiner was in
 it), `geometry_changed` (the surface it became), `chat_message` (the
 room's size when it was said), `game_started` (variant, seats dealt),
@@ -358,11 +358,11 @@ engine is `libs/cards/golf`'s immutable `GameState`, which also carries
 `libs/cards/castle`'s and rummy's `libs/cards/rummy`'s, stated on each
 engine's `GameState`.
 
-A rummy table is dealer's choice (#1609, `libs/cards/rummy`'s
+A rummy table is dealer's choice (`libs/cards/rummy`'s
 `TableState`): `startGame` seats it between deals, the dealer's
 `chooseVariant` deals, and each deal's end passes the deal to the next
 seat. The variants are `7-card` and `10-card` rummy (one engine, dealt
-seven or ten) and heads-up `gin` (`GinState`, #1610); the view's
+seven or ten) and heads-up `gin` (`GinState`); the view's
 `choosing.options` lists the ones that fit the seats. Gin's reckoning —
 both hands arranged, the defender's lay-offs, the ending — rides
 `lastDeal.gin`. A stored table spells
@@ -413,7 +413,7 @@ could not take waits `kChessFlagRetry` before the next try, so an outage
 stalls the hub for one commit at a time rather than every tick. The row
 stores wall-clock epoch milliseconds, which every instance reads against
 its own clock: instances must agree on the time, as NTP has them. A table's one player may seat a bot in the other chair
-(`addBot`, an Elo of 1320 to 3190, #1618): Stockfish on `chess_engine`,
+(`addBot`, an Elo of 1320 to 3190): Stockfish on `chess_engine`,
 reached at `CHESS_ENGINE_URL`. Its seat's id is `stockfish@<elo>`, which no
 minted id can be, and the view marks it `bot`. Stockfish's
 `UCI_LimitStrength` sandbags too hard for playable mates, so the named Elo
@@ -436,7 +436,7 @@ the views that show it, however it learned of the end.
 The view carries each side's time as of when it was built, and the
 client runs the side to move's down from there.
 
-A table's one seat may post a `challenge` before anyone joins (#1633): a
+A table's one seat may post a `challenge` before anyone joins: a
 setup and clock, absent fields taking `startGame`'s defaults. The view
 carries them as `terms`, and the room's `GameSummary.terms` lists them
 as one line ("Standard starting position · 3+2"); posting again replaces
@@ -450,7 +450,7 @@ opener refusing, an outage) is the filler's refusal and leaves the table
 full and waiting on its terms, for a `startGame`.
 
 Any member at no table may `watch` a chess table in its room, in any
-phase (#1633). The answer is a `gameState`; from then on the watcher hears
+phase. The answer is a `gameState`; from then on the watcher hears
 every `gameState` and `gameEnded` the seats do, a sibling's commits
 re-projected here included, and no `turnChanged`. A watcher's moves are
 refused: it holds no seat. Watching another table switches to it;
@@ -462,7 +462,7 @@ before it started, here or on a sibling) hands them `gameLeft`. Watchers
 live on the table's local entry (`GameEntry::watchers`), never in a row,
 so no watcher count can reach `GameSummary` truthfully across instances.
 
-A room keeps its finished chess games (#1637). The commit that ends a
+A room keeps its finished chess games. The commit that ends a
 game archives it in the same statement (`chess_games`, under an archive
 id of its own, keyed so the later commits that still carry the ended game
 add nothing), marked with whether the room was published then; the
@@ -497,7 +497,7 @@ points, Sonneborn-Berger, then head-to-head) whenever one changes, a
 sibling's change by wake; any member asks for the room's with
 `roundRobins`.
 
-A room's round robins (#1647) are rows of `chess_events`: what each
+A room's round robins are rows of `chess_events`: what each
 event's creator fixed and moderates (entrants, terms, pairings, forfeits,
 withdrawals), committed on the hub's optimistic version with the room's
 NOTIFY in the same statement, and dying with the room. A table playing a
@@ -568,7 +568,7 @@ Frame ticks count on from the clock's whenever a rally is taken up, so
 they never run backwards across instances. A point the store could not
 take is played again.
 
-Pong has round robins on chess's terms (#1647), on its own envelope: a
+Pong has round robins on chess's terms, on its own envelope: a
 pong round robin names a variant instead of a clock, each pairing names
 its winner (pong has no draws), and each game's moves serve and list only
 their own game's round robins, refusing the other's. The row is chess's
@@ -590,7 +590,7 @@ here.
 
 ### Spades
 
-Spades (#1658), on `libs/cards/spades`, at two to four seats in join
+Spades, on `libs/cards/spades`, at two to four seats in join
 order. `startGame` names the mode: `partners` seats four, partners across
 (seats 0 and 2 are team 0); `cutthroat` seats two to four, every seat a
 team of one. Unnamed, four seats play partners and fewer cutthroat. Two
@@ -627,7 +627,7 @@ at game end. Room state carries lobby-safe summaries only.
 ## A game's adapter
 
 Everything the hub knows of one game is its `Adapter<Engine>`
-(`<game>_adapter.{h,cc}`, #1621): its envelope's unions and counter
+(`<game>_adapter.{h,cc}`): its envelope's unions and counter
 series, its kind's word (`kName`: the wire's, the store's and the event
 log's), phase and turn, stats, views and their envelopes, how its move
 union decodes into the hub's actions, how a table opens, how its engine
@@ -647,7 +647,7 @@ which fails to build once a second game opts in.
 
 ## Notes
 
-- Persistence rides `GAMES_HUB_DB_URL` (#1194): credentials
+- Persistence rides `GAMES_HUB_DB_URL`: credentials
   (`PgTicketVault`, hashed at rest, spend = single-row
   `DELETE ... RETURNING`), rooms, membership stats and live games
   (`PgHubStore` — rooms and members staged under the hub lock and applied
@@ -667,7 +667,7 @@ which fails to build once a second game opts in.
 - Player ids are whimsical (`bouncy-coral-quokka-x9k2`) and double as
   display names. Room and game ids
   are 6-char uppercase codes that ride in permalinks.
-- Observability: unary requests ride the shared aura chain (#1185); the
+- Observability: unary requests ride the shared aura chain; the
   stream side counts admissions, live sessions, disconnects, grace
   expiries, and the command/event flow (`hub_*` for the room layer —
   sessions, seats, refusals, its own commands and events — `golf_*`,

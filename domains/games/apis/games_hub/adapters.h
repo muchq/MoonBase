@@ -205,7 +205,7 @@ decltype(auto) VisitAdapter(const HostedState& state, F&& f) {
       state);
 }
 
-/// The word a game is recorded under (#1571): its adapter's
+/// The word a game is recorded under: its adapter's
 /// RecordedName(engine) where it has one, as rummy's does for a table
 /// whose deals are each recorded under its variant's word, and its kind's
 /// otherwise.

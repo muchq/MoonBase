@@ -1,10 +1,10 @@
-// Wire-contract goldens for rummy (#245) on the room stream, the way
+// Wire-contract goldens for rummy on the room stream, the way
 // castle_wire_test pins castle's: raw eventstream frames and exact payload
 // bytes, because the typed-client suites regenerate both sides together
 // and cannot see a rename. The pinned surface: the rummy command envelope
 // ({"move":{...}} inside the `rummy` command) with every move's spelling,
 // the update envelope ({"update":{...}} inside the `rummy` event), the
-// dealer's-choice table (#1609) between deals and dealt, the dealt
+// dealer's-choice table between deals and dealt, the dealt
 // RummyView's full key set from each chair, the view mid-turn (stage,
 // takenDiscard, melds, lastMove), a deal's end, and the table's.
 //

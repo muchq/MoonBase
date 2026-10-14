@@ -23,7 +23,7 @@ namespace {
 using cards::Card;
 
 // Serialized engine states must survive the games table's jsonb state
-// column (#1194), and jsonb is not a byte-preserving container — it re-orders keys
+// column, and jsonb is not a byte-preserving container — it re-orders keys
 // (length-then-bytes, not alphabetical), re-spaces the text, and refuses
 // escaped NULs outright. Real postgres via GAMES_HUB_TEST_DB_URL (the
 // vault suite's pattern); skips otherwise.

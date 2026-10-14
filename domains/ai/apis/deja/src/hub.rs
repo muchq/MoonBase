@@ -1,4 +1,4 @@
-//! games_hub's domain events as deja tokens (#1572): the hub writes one
+//! games_hub's domain events as deja tokens: the hub writes one
 //! JSON line per thing that happened in a room, and this reads that line
 //! into the three things the engine wants — a bounded token, the lane its
 //! sequence belongs to, and when.

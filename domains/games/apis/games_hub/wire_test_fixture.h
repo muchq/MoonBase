@@ -51,7 +51,7 @@ inline constexpr char kSessionPath[] = "/games/v2/session";
 
 inline constexpr std::chrono::milliseconds kWireReceiveBudget{5000};
 
-// Effectively-unlimited stream budgets (#1240), the same numbers as
+// Effectively-unlimited stream budgets, the same numbers as
 // stream_test_fixture.h's UnlimitedRateLimits; a limiter suite tightens one
 // family on top. Spelled here so this header stays free of the generated
 // client.

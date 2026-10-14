@@ -47,7 +47,7 @@ namespace {
 
 using json = nlohmann::json;
 
-// The one route every deployed web client dials (#1490); renaming it
+// The one route every deployed web client dials; renaming it
 // strands them all.
 constexpr char kPlayPath[] = "/games/v2/play";
 

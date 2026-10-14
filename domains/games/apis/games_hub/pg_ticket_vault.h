@@ -12,7 +12,7 @@
 
 namespace games_hub {
 
-/// TicketVault on the hub's postgres database (#1194): credentials
+/// TicketVault on the hub's postgres database: credentials
 /// survive restarts and are visible to every instance, so the session
 /// mint and the WebSocket dial may land on different processes. Spend is
 /// a single-row DELETE ... RETURNING, single-use across instances.

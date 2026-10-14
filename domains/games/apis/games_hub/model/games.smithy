@@ -22,9 +22,9 @@ use moonbase.rummy#RummyEvent
 use moonbase.voice#VoiceCommand
 use moonbase.voice#VoiceEvent
 
-/// The games hub (#79): one service, one session identity, one room layer,
-/// and one stream, Play, on which the lobby (#1490), voice (#1590), golf,
-/// castle (#77), rummy (#245), chess, pong and spades (#1658) each ride as one
+/// The games hub: one service, one session identity, one room layer,
+/// and one stream, Play, on which the lobby, voice, golf,
+/// castle, rummy, chess, pong and spades each ride as one
 /// envelope member per direction.
 @simpleRestJson
 @title("Games Hub")
@@ -157,7 +157,7 @@ operation GetSession {
     output: SessionCredentials
 }
 
-/// The game-agnostic room layer (#79): session identity, room lifecycle,
+/// The game-agnostic room layer: session identity, room lifecycle,
 /// and chat. Apart from GameSummary.game and Table.game — the word that
 /// names a table's game for the lobby — nothing in this
 /// namespace knows which game a table plays; a game contributes only its
@@ -249,7 +249,7 @@ structure PlayerInfo {
 
     /// The table this member is at — pending or in play — absent while
     /// idle. A member at a table is still in the room (chat, presence),
-    /// so the lobby (#1490) reads this to tell who is free. A finished
+    /// so the lobby reads this to tell who is free. A finished
     /// table leaves the room's list, and this with it.
     table: Table
 
@@ -317,7 +317,7 @@ structure ChatMessage {
     messageId: Long
 
     /// The author. A bot's replies carry its reserved id, which no player
-    /// id can equal: "microgpt" answering "@bot" (#1591), "mithril"
+    /// id can equal: "microgpt" answering "@bot", "mithril"
     /// answering "/wordchain". Clients show it as the reply's source.
     @required
     playerId: String

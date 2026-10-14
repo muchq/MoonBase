@@ -1,4 +1,4 @@
-// A bot at a chess table (#1618), end to end through the generated client:
+// A bot at a chess table, end to end through the generated client:
 // Stockfish's seat added by the table's one player, its moves played when
 // it is on turn, and what becomes of it when the engine fails, the
 // position moves on under it, or its player leaves. The engine here is a
@@ -106,7 +106,7 @@ TEST_F(ChessBotFixture, TheTablesOnePlayerSeatsABotAtTheirChosenStrength) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "the table is full");
 }
 
-// A bot fills a challenge's second seat like anyone (#1633): the game
+// A bot fills a challenge's second seat like anyone: the game
 // starts on the posted terms.
 TEST_F(ChessBotFixture, ABotTakesAChallengeOnItsTerms) {
   auto alice = AliceAtATable();

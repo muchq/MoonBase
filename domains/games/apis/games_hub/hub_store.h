@@ -23,7 +23,7 @@ inline std::string RoomChannel(const std::string& room_id) { return "room_" + ro
 /// no instance's id, so every instance holding the room acts on it.
 inline constexpr char kSweepWake[] = "sweep";
 
-/// A chess challenge's terms (#1633): the setup and clock a waiting
+/// A chess challenge's terms: the setup and clock a waiting
 /// table starts on once its second seat fills.
 struct ChessTerms {
   std::string setup_id;
@@ -31,7 +31,7 @@ struct ChessTerms {
   bool operator==(const ChessTerms&) const = default;
 };
 
-/// The round robin pairing a chess table plays (#1647): the event, and
+/// The round robin pairing a chess table plays: the event, and
 /// the pairing's index in it.
 struct EventTag {
   std::string event_id;
@@ -44,7 +44,7 @@ struct EventTag {
 /// rows until their room is deleted so another instance can finish its
 /// ceremony after a delayed wake.
 ///
-/// A room keeps its finished chess games (#1637): a commit that lands a
+/// A room keeps its finished chess games: a commit that lands a
 /// chess table whose game is over archives that game in the same step,
 /// under an id of its own, with when it ended and whether the room was
 /// published then. Later commits still carrying the ended game add
@@ -78,11 +78,11 @@ class HubStore {
     std::optional<EventTag> event = std::nullopt;
   };
 
-  /// A room and the surface it chose at creation (#1554).
+  /// A room and the surface it chose at creation.
   struct RoomRow {
     std::string room_id;
     Surface surface;
-    /// Whether the room publishes its chess games (#1637).
+    /// Whether the room publishes its chess games.
     bool chess_published = false;
   };
 
@@ -113,7 +113,7 @@ class HubStore {
     bool operator==(const EventGame&) const = default;
   };
 
-  /// A round robin in a room (#1647), of chess or pong: what its creator
+  /// A round robin in a room, of chess or pong: what its creator
   /// fixed and moderates. A pairing's result here is one the creator
   /// recorded; the games its tables played are the room's archived chess
   /// games tagged with it, written by the commits that ended them, or for

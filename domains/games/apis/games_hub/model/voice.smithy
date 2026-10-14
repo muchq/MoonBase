@@ -2,7 +2,7 @@ $version: "2.0"
 
 namespace moonbase.voice
 
-// A room's voice (#1590): who in the room is talking, and the WebRTC
+// A room's voice: who in the room is talking, and the WebRTC
 // negotiation between them. Audio never reaches the hub — browsers
 // connect to each other, a full mesh capped at six — so the hub keeps
 // only who is in voice and relays each signal to the one peer it names.

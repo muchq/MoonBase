@@ -1,4 +1,4 @@
-// Wire-contract goldens for spades on the room stream (#1658), the way
+// Wire-contract goldens for spades on the room stream, the way
 // pong_wire_test pins pong's: exact payload bytes, because the
 // typed-client suites regenerate both sides together and cannot see a
 // rename, and the browser reading these lives in another repository. The

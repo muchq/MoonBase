@@ -54,7 +54,7 @@ TEST(WhimsicalIdGenerator, PlayerIdIsLowercaseSlugWithThreeWords) {
   }
 }
 
-// The room bots post as kBotPlayerId (#1591) and kWordchainPlayerId, and
+// The room bots post as kBotPlayerId and kWordchainPlayerId, and
 // their replies are told apart by those ids alone: no generator may mint
 // one. Every minted id has a hyphen and the bots' have none.
 TEST(IdGenerators, NeverMintTheBotsIds) {

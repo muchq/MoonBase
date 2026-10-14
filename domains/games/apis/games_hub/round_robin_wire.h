@@ -15,7 +15,7 @@ namespace games_hub {
 /// setup and its display name, the clock in seconds.
 moonbase::games::ChessTerms WireTerms(const ChessTerms& terms);
 
-/// A round robin as every member sees it (#1647): its pairings with their
+/// A round robin as every member sees it: its pairings with their
 /// results and whether each is void, and the standings round_robin.h
 /// ranks.
 /// `live` names the table playing each pairing now, by its index.
@@ -28,7 +28,7 @@ moonbase::games::ChessRoundRobin RoundRobinOf(const HubStore::ChessEventRow& row
 moonbase::games::PongRoundRobin PongRoundRobinOf(const HubStore::ChessEventRow& row,
                                                  const std::map<int, std::string>& live = {});
 
-/// The row's pairings with the games played for them (#1647): a pairing's
+/// The row's pairings with the games played for them: a pairing's
 /// first archived game is its result, over a forfeit the creator recorded
 /// and over a later game from a table that raced it. A game naming no
 /// pairing, or a winner who isn't in it, decides nothing.

@@ -16,7 +16,7 @@
 
 namespace games_hub {
 
-/// A chess bot's seat (#1618): Stockfish at a strength, named for both.
+/// A chess bot's seat: Stockfish at a strength, named for both.
 /// The `@` keeps it out of the player id space — minted ids are words and
 /// dashes — so a seat's id alone says it is a bot, and how strong.
 inline constexpr std::string_view kChessBotPrefix = "stockfish@";

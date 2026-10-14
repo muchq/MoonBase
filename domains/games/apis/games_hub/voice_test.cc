@@ -1,4 +1,4 @@
-// A room's voice on the Voice itself (#1590): who is in it, what a join,
+// A room's voice on the Voice itself: who is in it, what a join,
 // leave, or signal stages and to whom, and what each is refused for. The
 // hub's wiring of it (the room, the socket, the budget) is voice_wire_test's.
 

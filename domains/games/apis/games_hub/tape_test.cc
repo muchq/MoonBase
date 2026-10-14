@@ -1,4 +1,4 @@
-// deja on the walls (#1554, #1150): the hub is deja's second consumer and
+// deja on the walls: the hub is deja's second consumer and
 // the tape is world state it owns, so this suite drives the poller the way
 // production does — through the raw wire, with a scripted deja underneath —
 // and pins what reaches the glass.

@@ -17,7 +17,7 @@ inline constexpr int kChessHistoryLimit = 100;
 /// An archived game as the history lists it.
 moonbase::games::ChessGameSummary ChessSummaryOf(const HubStore::ChessGameRow& row);
 
-/// An archived game as PGN (#1637). It names no room or table: [Site] is
+/// An archived game as PGN. It names no room or table: [Site] is
 /// the game's own URL, by archive id, unique per game, which is what an
 /// indexer keys a game on; [UTCDate] and [UTCTime] say when it ended.
 std::string ChessPgnOf(int64_t archive_id, const chess_play::GameState& game, int64_t ended_at_ms);

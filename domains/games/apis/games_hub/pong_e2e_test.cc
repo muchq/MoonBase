@@ -824,7 +824,7 @@ TEST_F(PaddleBudgetFixture, PaddlesSpendTheirOwnBudget) {
 }
 
 
-// The seat cap (#1621).
+// The seat cap.
 TEST_F(PongFixture, AThirdSeatIsRefused) {
   ExpectSeatCap<PongMove>(2, Pong,
                       [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
@@ -833,7 +833,7 @@ TEST_F(PongFixture, AThirdSeatIsRefused) {
 }
 
 
-// Pong's branches of the hub (#1621): the status the room lists a table under, the commands pong
+// Pong's branches of the hub: the status the room lists a table under, the commands pong
 // counts, and the record of a table's next game.
 TEST_F(PongFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
   auto started = StartedTable("smallcat");
@@ -863,7 +863,7 @@ TEST_F(PongFixture, CommandsAreCountedOnThePongSeries) {
   EXPECT_EQ(metrics_->CounterTotal("pong_commands", {{"command", "startGame"}}), 1);
 }
 
-// A pong game in the stats archive (#1571), the first and the next.
+// A pong game in the stats archive, the first and the next.
 class PongEventFixture : public PongFixture {
  protected:
   void SetUp() override {

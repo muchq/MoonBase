@@ -1,4 +1,4 @@
-// Beyoncé Rule wire-contract tests for the lobby (#1490): golden
+// Beyoncé Rule wire-contract tests for the lobby: golden
 // fixtures pinning the one stream's route and the lobby envelope's exact
 // bytes, driven through the generated server WITHOUT the generated client
 // — a regeneration that renames what the client reads fails here even
@@ -28,7 +28,7 @@ namespace {
 
 using json = nlohmann::json;
 
-// The one stream's route (#1490); renaming it strands every deployed web
+// The one stream's route; renaming it strands every deployed web
 // client.
 constexpr char kPlayPath[] = "/games/v2/play";
 
@@ -123,7 +123,7 @@ TEST_F(LobbyWireTest, RejectedLobbyCommandsYieldCommandRejectedEvents) {
             R"({"update":{"worldState":{"geometry":{"plane":{}},"players":[]}}})");
 }
 
-// Consumer: a room created on a sphere (#1554). The creator's worldState
+// Consumer: a room created on a sphere. The creator's worldState
 // names the sphere and its radius; a join or move within an avatar's
 // reach of the wall lands ON it (the fan-out carries the snapped
 // position, not the sent one), one farther off is refused with the
@@ -182,7 +182,7 @@ TEST_F(LobbyWireTest, SphereRoomPinsGeometrySnapAndRefusalBytes) {
             R"({"reason":"sphere radius must be within 2..1000"})");
 }
 
-// Consumer: the room changing shape under everyone (#1554). A member's
+// Consumer: the room changing shape under everyone. A member's
 // setGeometry reaches every seat standing in the world, the actor
 // included, as one geometryChanged carrying the surface and everyone's
 // placement on it; a move then obeys the new surface; a geometry the
@@ -225,7 +225,7 @@ TEST_F(LobbyWireTest, SetGeometryPinsGeometryChangedBytes) {
             R"({"reason":"sphere radius must be within 2..1000"})");
 }
 
-// Consumer: a room on the glasshouse (#1554). The geometry rides the wire
+// Consumer: a room on the glasshouse. The geometry rides the wire
 // as its own empty case — no wall height, because the client picks that —
 // and the floor underneath is the plane's to the byte: the same positions
 // land, and the same ones come back refused with the plane's reason.

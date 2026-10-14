@@ -1,4 +1,4 @@
-// Where a tape event lands on the glass (#1554). The hub picks the spot
+// Where a tape event lands on the glass. The hub picks the spot
 // from deja's seq alone and sends it, so every client in a room draws the
 // same event on the same square inch — this is the only thing that makes
 // that true, and the golden block below is the wire it rides on.

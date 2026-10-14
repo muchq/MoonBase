@@ -13,7 +13,7 @@
 
 namespace games_hub {
 
-/// The durable ChatStore (#1226). An append locks the room, inserts,
+/// The durable ChatStore. An append locks the room, inserts,
 /// prunes to the retention window, and notifies, all in one
 /// transaction, so either every part lands or none does.
 ///

@@ -360,7 +360,7 @@ std::optional<moonbase::games::PongView> AwaitPongView(
       predicate, waiting_for, budget);
 }
 
-// Effectively-unlimited stream budgets (#1240) for suites whose flows
+// Effectively-unlimited stream budgets for suites whose flows
 // send at test speed, not human speed. Every direct GamesHub
 // construction in a test should pass this unless the test is about the
 // limiter itself.
@@ -440,7 +440,7 @@ inline moonbase::games::GameCommands Lobby(moonbase::games::LobbyAction action) 
   return moonbase::games::GameCommands::FromLobby(std::move(command));
 }
 
-// A card the way a castle or rummy move names one (#1505) — the wire's own
+// A card the way a castle or rummy move names one — the wire's own
 // spelling, spelled out here rather than borrowed from the hub.
 inline moonbase::games::Card Named(const std::string& rank, const std::string& suit) {
   moonbase::games::Card card;
@@ -477,7 +477,7 @@ inline moonbase::games::GameCommands Pong(moonbase::games::PongMove move) {
   return moonbase::games::GameCommands::FromPong(std::move(command));
 }
 
-// Round robins (#1647).
+// Round robins.
 inline moonbase::games::GameCommands CreateRoundRobin(
     std::vector<std::string> entrants,
     std::optional<moonbase::games::ChessStartGame> terms = std::nullopt) {
@@ -609,7 +609,7 @@ class GamesHubStreamFixture : public testing::Test {
   /// overrides with PgChatStore, which authorizes in its own transaction
   /// and needs nothing from the handler.
   virtual std::shared_ptr<ChatStore> MakeChatStore() { return nullptr; }
-  /// The stream budgets (#1240). Tests get effectively-unlimited
+  /// The stream budgets. Tests get effectively-unlimited
   /// buckets: e2e flows blast frames far faster than any human, and only
   /// the limiter suites want refusals — they override with tiny buckets
   /// whose refills are frozen.
@@ -700,7 +700,7 @@ class GamesHubStreamFixture : public testing::Test {
 
   // Mint a session and open its Play stream; fails the test on any step.
   // The client-parameterized form serves multi-instance suites
-  // (#1194), where each hub instance has its own client.
+  //, where each hub instance has its own client.
   struct Seat {
     std::string player_id;
     std::string resume_token;
@@ -840,7 +840,7 @@ class GamesHubStreamFixture : public testing::Test {
     }
   }
 
-  // The stats archive (#1571) as the hub writes it, from CaptureEvents on.
+  // The stats archive as the hub writes it, from CaptureEvents on.
   void CaptureEvents() {
     hub_->SetEventWriter([this](absl::Time, std::string_view line) { events_.emplace_back(line); });
   }
@@ -947,7 +947,7 @@ class GamesHubStreamFixture : public testing::Test {
         });
   }
 
-  // A started rummy table (#1609), between deals: every seat has read the
+  // A started rummy table, between deals: every seat has read the
   // opening choosing view, and the first seat — the table's creator — is
   // the dealer.
   std::optional<ManySeats> ChoosingRummyTable(int count) {

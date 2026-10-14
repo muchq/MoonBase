@@ -584,7 +584,7 @@ TEST_F(ChessFixture, AMoveBeforeTheStartIsRefused) {
   EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
 }
 
-// The rest of the room watches a table (#1633): the seats' own view,
+// The rest of the room watches a table: the seats' own view,
 // every move and the result, from a member who holds no seat.
 TEST_F(ChessFixture, AWatcherSeesTheTableEveryMoveAndTheResult) {
   auto started = StartedTable({}, 1);
@@ -977,7 +977,7 @@ TEST_F(ChessFixture, AWatcherSeesTheTableClose) {
   EXPECT_EQ(result->ending, "abandoned");
 }
 
-// A table's one seat posts its terms (#1633): the room's list says them,
+// A table's one seat posts its terms: the room's list says them,
 // and the view carries them, before anyone joins.
 TEST_F(ChessFixture, APostedChallengeShowsInTheRoomAndTheView) {
   auto room = SeatedRoom(2);
@@ -1209,7 +1209,7 @@ TEST_F(ChessFixture, OnlyAChessTableTakesAChallenge) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "that table plays golf");
 }
 
-// A chess game in the stats archive (#1571): started as chess at its two
+// A chess game in the stats archive: started as chess at its two
 // seats, finished once, by the commit that ended it.
 class ChessEventFixture : public ChessFixture {
  protected:
@@ -1436,7 +1436,7 @@ TEST_F(DefaultOpeningFixture, TheNextGameCanSelectAnotherCatalogPosition) {
   EXPECT_EQ(view->fen, "4k3/8/8/8/8/8/1r6/3QK3 w - - 0 1");
 }
 
-// A room keeps its finished games (#1637): any member asks, seated or
+// A room keeps its finished games: any member asks, seated or
 // not, and hears them newest first, each with its sides and result.
 TEST_F(ChessFixture, AFinishedGameIsInTheRoomsHistory) {
   auto started = StartedTable({}, 1);
@@ -1901,7 +1901,7 @@ TEST_F(ChessFixture, APublishedGameIsServedByItsArchiveIdAndAPrivateOneIsNot) {
 }
 
 
-// Chess's branches of the hub (#1621): the status the room lists a table under, the commands chess
+// Chess's branches of the hub: the status the room lists a table under, the commands chess
 // counts, and the record of a table's next game.
 TEST_F(ChessFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
   auto started = StartedTable();

@@ -64,7 +64,7 @@ castle::GameState Castle() {
       "game", "v0"};
 }
 
-/// A rummy table (#1609) with a deal in play: seat 0 holds one card after
+/// A rummy table with a deal in play: seat 0 holds one card after
 /// its draw, so a discard goes out.
 rummy::TableState Rummy() {
   rummy::GameState deal{
@@ -261,7 +261,7 @@ TEST(GameEvents, ASpadesTableRecordsOnlyAGamesEnd) {
   EXPECT_FALSE(FinishedOf(*SpadesWon().removePlayer(0), 3).has_value());
 }
 
-// A rummy table's games are its deals (#1609): a deal won by play is a
+// A rummy table's games are its deals: a deal won by play is a
 // game completed, under the deal's variant word — seven-card rummy is "rummy".
 TEST(GameEvents, ARummyDealPlayedOutIsCompleted) {
   const rummy::TableState table = RummyDealWon();
@@ -275,7 +275,7 @@ TEST(GameEvents, ARummyDealPlayedOutIsCompleted) {
   EXPECT_EQ(finished->players, 2u);
 }
 
-/// A gin deal (#1610) played out: from the pristine deck mercy, opening,
+/// A gin deal played out: from the pristine deck mercy, opening,
 /// holds two runs; both pass, she draws the 9♥ and goes gin on it.
 rummy::TableState GinDealWon() {
   auto dealt =

@@ -71,7 +71,7 @@ enum Capability : unsigned {
   /// starts the next. Hooks: Next(engine, start, move context), and
   /// CurrentGameOver(engine), whether the game last started has ended.
   kNextGame = 1U << 1,
-  /// A round robin's pairings play at the game's tables (#1647); implies
+  /// A round robin's pairings play at the game's tables; implies
   /// kNextGame, a pairing being decided by its table's game ending.
   /// Hooks: RoundRobinStart(start, table terms, round robin row), the
   /// start a pairing's table plays on; RoundRobinTerms(row), what its
@@ -103,7 +103,7 @@ enum Capability : unsigned {
   /// and its ordinal, which the stores keep as the room's history.
   kPublished = 1U << 7,
   /// A waiting table may hold posted terms its next seat starts on
-  /// (#1633). The flag is what the store checks: a waiting row's state
+  ///. The flag is what the store checks: a waiting row's state
   /// column is read back as those terms in place of an engine. Posting
   /// them is Decode's, as the PostTerms it returns.
   kChallenges = 1U << 8,
@@ -136,7 +136,7 @@ struct AddBot {
   std::string bot_id;
   bool engine = false;
 };
-/// The terms a waiting table posts for its next seat to start on (#1633).
+/// The terms a waiting table posts for its next seat to start on.
 struct PostTerms {
   ChessTerms terms;
 };
@@ -194,7 +194,7 @@ using Action =
                  WatchTable, AddBot, PostTerms, AskHistory, AskReview, Publish, CreateRoundRobin,
                  Withdraw, Forfeit, ListRoundRobins, PlayRoundRobin, Steer>;
 
-/// A game's side of the hub (#1621), one specialization per engine in the
+/// A game's side of the hub, one specialization per engine in the
 /// game's own <game>_adapter.h. adapters.h dispatches on HostedState and
 /// GameKind, and holds every specialization to the hooks below, so an
 /// engine without one does not compile. Each specialization holds:

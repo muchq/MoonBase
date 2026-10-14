@@ -69,10 +69,10 @@ struct HubTestHooks {
       on_send;
 };
 
-/// GamesHub is the room hub (#1187): seat admission, rooms,
+/// GamesHub is the room hub: seat admission, rooms,
 /// chat, and the game layer, behind GamesHubHandler::Play. The name is
-/// golf's; the room layer, castle (#77), rummy (#245), chess and the lobby
-/// (#1490) live here too. A room hosts tables of any game (#79): golf on
+/// golf's; the room layer, castle, rummy, chess and the lobby
+/// live here too. A room hosts tables of any game: golf on
 /// libs/cards/golf, castle on libs/cards/castle, rummy on libs/cards/rummy
 /// and chess on libs/chess_play, each a member of the stream's unions with
 /// its own per-viewer view. Each tenant's envelope counts on its own series
@@ -101,14 +101,14 @@ struct HubTestHooks {
 /// draw, castle's, rummy's and spades' own hand faces) has exactly one
 /// place per game to land and no identical-bytes path can leak it.
 ///
-/// Chat observability (#1226): chat_appends{result}, chat_rows_delivered,
+/// Chat observability: chat_appends{result}, chat_rows_delivered,
 /// chat_catch_up_drains (one per drain, empty drains included, so
 /// rate(rows)/rate(drains) is how far behind a wake found this instance —
 /// the lag signal), chat_history_replays, and chat_failures{stage}. Counts
 /// and stages only: room ids, player ids, and message text never reach a
 /// metric name or label, and the e2e suite sweeps for exactly that.
 ///
-/// With a store attached, instances are interchangeable (#1194):
+/// With a store attached, instances are interchangeable:
 /// the database is every game's authority. A move loads nothing extra —
 /// the local entry mirrors the stored row — but its result only counts
 /// once the conditional commit lands; a miss rebases the entry from the
@@ -174,7 +174,7 @@ class GamesHub final {
   /// restart nor reaches another instance. A
   /// PgChatStore passed here authorizes against room_members in its own
   /// transaction and needs nothing from this handler.
-  /// `limits` are the per-session stream budgets (#1240); the defaults
+  /// `limits` are the per-session stream budgets; the defaults
   /// serve production and tests inject extremes to pin the behavior.
   explicit GamesHub(std::shared_ptr<TicketVault> vault,
                    std::shared_ptr<cards::Dealer> dealer = std::make_shared<cards::Dealer>(),
@@ -225,7 +225,7 @@ class GamesHub final {
   /// restore already ran.
   absl::Status RestoreFromStore();
 
-  /// Wires the fan-out's LISTEN side (#1194): subscribes every
+  /// Wires the fan-out's LISTEN side: subscribes every
   /// room the hub holds and follows rooms as they come and go. Call
   /// after RestoreFromStore, before serving, with a listener whose
   /// callback forwards to OnNotify. The caller owns the listener and
@@ -251,7 +251,7 @@ class GamesHub final {
   /// Off-lock room reads a catch-up tries before it reads under the lock.
   static constexpr int kCatchUpReadAttempts = 3;
 
-  /// Wires deja's tape onto the glasshouse walls (#1554, #1150) and
+  /// Wires deja's tape onto the glasshouse walls and
   /// starts polling for it. The hub is deja's second consumer and the
   /// tape is world state it owns: it polls, dedupes, picks the splat
   /// point, and fans out; no browser ever talks to deja. Call before
@@ -261,7 +261,7 @@ class GamesHub final {
   /// without a lock, so it is not swapped underneath.
   void StartTapePolling(std::shared_ptr<deja::Client> tape);
 
-  /// Where finished games are recorded for the stats pipeline (#1571):
+  /// Where finished games are recorded for the stats pipeline:
   /// one line per game that ended, written under mu_ on the finishing
   /// instance only. Unset — the default, and what every test that does
   /// not care gets — writes nothing at all; main sets it when
@@ -271,11 +271,11 @@ class GamesHub final {
   /// that would ship rather than an intermediate nobody archives.
   void SetEventWriter(EventWriter writer);
 
-  /// The ICE servers every voice roster hands a joiner (#1590). Call
+  /// The ICE servers every voice roster hands a joiner. Call
   /// before serving; none leaves browsers to their host candidates.
   void SetIceServers(std::vector<moonbase::games::IceServer> servers);
 
-  /// Starts the room bot (#1591): "@bot" mentions in room chat are
+  /// Starts the room bot: "@bot" mentions in room chat are
   /// answered by microgpt through `client`. main starts it when
   /// MICROGPT_URL is set; unstarted, a mention is ordinary chat. Call
   /// once, before serving.
@@ -306,7 +306,7 @@ class GamesHub final {
   /// wherever it is still held.
   void SweepStaleRooms();
 
-  /// How long a published chess game stays in the public feed (#1637).
+  /// How long a published chess game stays in the public feed.
   static constexpr std::chrono::hours kPublishedChessKept{30 * 24};
 
   /// How often the heartbeat stamps and sweeps.
@@ -356,7 +356,7 @@ class GamesHub final {
   /// hub is destroyed. A second call changes nothing.
   void StartChessClocks(std::chrono::milliseconds interval = kChessClockTick);
 
-  /// The engine chess bots ask (#1618); null, the default, seats no bot.
+  /// The engine chess bots ask; null, the default, seats no bot.
   /// Call before serving: read without a lock thereafter.
   void SetChessBotEngine(ChessBotEngine engine);
 
@@ -378,7 +378,7 @@ class GamesHub final {
   int PlayChessBotsOnce();
 
   /// The public chess feed past `after_archive_id` as one PGN archive, at
-  /// most kChessHistoryLimit games (#1637). Reads the store only, so any
+  /// most kChessHistoryLimit games. Reads the store only, so any
   /// instance answers.
   absl::StatusOr<std::string> ExportChessPgn(int64_t after_archive_id);
 
@@ -428,7 +428,7 @@ class GamesHub final {
   /// How long a flag the store could not take waits before the sweep
   /// tries that game again.
   static constexpr std::chrono::milliseconds kChessFlagRetry{5000};
-  /// A room's round robins (#1647) live as long as it does; this many is
+  /// A room's round robins live as long as it does; this many is
   /// an evening's worth, and a bound on what every wake reads.
   static constexpr std::size_t kMaxRoundRobinsPerRoom = 16;
 
@@ -466,15 +466,15 @@ class GamesHub final {
     /// after it announce the rest. Held from a row, the games so far count
     /// as told.
     mutable std::size_t games_announced = 0;
-    /// Members watching this kWatchable table from no seat (#1633): they hear
+    /// Members watching this kWatchable table from no seat: they hear
     /// its views and results. Presence, like the world: held here, never
     /// stored. A table that ends hands them its closed view; one erased
     /// without it hands them gameLeft (DropWatchersLocked).
     std::set<std::string> watchers;
-    /// A waiting chess table's posted challenge (#1633), stored with the
+    /// A waiting chess table's posted challenge, stored with the
     /// row until the game starts on it.
     std::optional<ChessTerms> terms;
-    /// The round robin pairing the table plays (#1647), fixed when it is
+    /// The round robin pairing the table plays, fixed when it is
     /// opened.
     std::optional<EventTag> event;
     [[nodiscard]] bool started() const { return state.has_value(); }
@@ -492,10 +492,10 @@ class GamesHub final {
     /// predate local truth, and reconciling them would roll the room
     /// back to the moment of the read.
     uint64_t revision = 0;
-    /// Whether the room publishes its chess games (#1637), as its row
+    /// Whether the room publishes its chess games, as its row
     /// last said; a reconcile that finds it changed tells the members.
     bool chess_published = false;
-    /// The room's round robins (#1647) by id, as their rows last said; a
+    /// The room's round robins by id, as their rows last said; a
     /// reconcile that finds one changed tells the members.
     std::map<std::string, HubStore::ChessEventRow> round_robins;
   };
@@ -534,16 +534,16 @@ class GamesHub final {
   /// what it decodes to.
   template <typename E>
   void HandleGameMove(const std::string& player_id, const typename Adapter<E>::Move& move);
-  /// A bot to `player_id`'s table's next seat (#1618).
+  /// A bot to `player_id`'s table's next seat.
   void AddBotMove(const std::string& player_id, const AddBot& bot, GameKind kind);
-  /// The table's one seat posts the terms it starts on (#1633).
+  /// The table's one seat posts the terms it starts on.
   void PostTermsMove(const std::string& player_id, ChessTerms terms, GameKind kind);
   /// The start a table makes once its last seat fills (Adapter::
   /// FilledStart), to run once the lock that seated it is released; null
   /// when it makes none. Callers hold mu_.
   std::function<void()> FilledStartLocked(const std::string& player_id, const GameEntry& entry);
   /// `player_id` watches a kWatchable table in its room from no seat
-  /// (#1633); `kind` is the game whose envelope asked.
+  ///; `kind` is the game whose envelope asked.
   void WatchMove(const std::string& player_id, const std::string& game_id, GameKind kind);
   /// Where a pong seat's paddle points.
   void PaddleMove(const std::string& player_id, const moonbase::games::PongPaddle& paddle);
@@ -552,12 +552,12 @@ class GamesHub final {
   void HostPongLocked(const std::string& room_id, const std::string& game_id,
                       const GameEntry& entry);
   /// The room's finished chess games, its review of one, and publishing
-  /// them (#1637). The archive is read off the hub's lock.
+  /// them. The archive is read off the hub's lock.
   void ChessHistoryMove(const std::string& player_id);
   void ChessReviewMove(const std::string& player_id,
                        const moonbase::games::ChessReviewRequest& review);
   void PublishChessMove(const std::string& player_id, bool published);
-  /// Round robins (#1647): any member creates one, its creator withdraws
+  /// Round robins: any member creates one, its creator withdraws
   /// entrants and records forfeits, and any member asks for the room's.
   /// Each takes the game whose envelope asked: a round robin is chess's
   /// or pong's, and each game's moves serve its own. `terms` is chess's,
@@ -569,7 +569,7 @@ class GamesHub final {
   void ForfeitMove(const std::string& player_id, const moonbase::games::ChessForfeit& forfeit,
                    GameKind kind);
   void RoundRobinsMove(const std::string& player_id, GameKind kind);
-  /// Opens a table for the player's pairing with `opponent` (#1647).
+  /// Opens a table for the player's pairing with `opponent`.
   void PlayRoundRobinMove(const std::string& player_id,
                           const moonbase::games::ChessPlayRoundRobin& play, GameKind kind);
   /// The tables playing a round robin's pairings now, by pairing index.
@@ -657,7 +657,7 @@ class GamesHub final {
   /// Epoch milliseconds on the chess clock.
   int64_t NowMs() const;
 
-  /// Stream-side observability (#1187): the aura chain instruments
+  /// Stream-side observability: the aura chain instruments
   /// only unary requests, so admissions, live-session count, disconnects,
   /// and the command/event flow are counted here. All no-ops when no
   /// recorder is injected.
@@ -763,7 +763,7 @@ class GamesHub final {
   void StageWakeLocked(const std::string& room_id, Writes& writes) const;
 
   /// One synchronous conditional commit of the entry's next revision
-  /// (#1194). kCommitted adopts the candidate roster/state at version+1
+  ///. kCommitted adopts the candidate roster/state at version+1
   /// (a MemoryHubStore only this hub writes cannot lose the race; tests
   /// share one across hubs to drive kRebased). kRebased means
   /// another instance committed first: the entry now holds the stored
@@ -875,7 +875,7 @@ class GamesHub final {
   World world_;
   /// The delivery class of each world update (opal #227). Under mu_.
   MoveCoalescing move_coalescing_;
-  /// Each room's voice (#1590); guarded by mu_.
+  /// Each room's voice; guarded by mu_.
   Voice voice_;
 
   /// Where live chat delivery stands for one held room. `delivered` is
@@ -908,7 +908,7 @@ class GamesHub final {
   bool reaper_stop_ = false;
   std::thread boot_reaper_;
 
-  /// deja's tape (#1554). The client is set once before serving and read
+  /// deja's tape. The client is set once before serving and read
   /// without a lock thereafter. tape_seq_ (the newest seq fanned out) and
   /// tape_priming_ (whether the next poll's events are dropped rather than
   /// shown) belong to whoever calls PollTapeOnce and to nobody else;
