@@ -823,18 +823,13 @@ TEST_F(PaddleBudgetFixture, PaddlesSpendTheirOwnBudget) {
   }
 }
 
-
-// The seat cap.
 TEST_F(PongFixture, AThirdSeatIsRefused) {
   ExpectSeatCap<PongMove>(2, Pong,
-                      [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
-                        return ReceivePong(stream, wanted);
-                      });
+                          [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+                            return ReceivePong(stream, wanted);
+                          });
 }
 
-
-// Pong's branches of the hub: the status the room lists a table under, the commands pong
-// counts, and the record of a table's next game.
 TEST_F(PongFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
   auto started = StartedTable("smallcat");
   ASSERT_TRUE(started.has_value());

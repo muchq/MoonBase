@@ -1512,7 +1512,7 @@ TEST_F(GamesHubStreamFixture, BootGraceNeverClaimsASeatRestoredConnected) {
   // registry arms her grace (60s here — far past the test). Await the
   // row flip before watching for the reap: a drain that read her row
   // still connected would spare her for the wrong reason and mask a
-  // deleted restore filter.
+  // missing restore filter.
   alice->stream.Close();
   AwaitSnapshot(*store_, [&](const HubStore::Snapshot& snapshot) {
     for (const auto& member : snapshot.members) {

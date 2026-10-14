@@ -295,8 +295,8 @@ exports_files([
     "world.h",
 ])
 
-# Every file in the package, read by //deploy/consolidated:consolidated_test
-# for the hub's retired name.
+# Every file in the package, which //deploy/consolidated:consolidated_test
+# reads for golf_hub spellings.
 filegroup(
     name = "package_files",
     srcs = glob(["**"]),

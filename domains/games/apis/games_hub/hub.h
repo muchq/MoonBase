@@ -150,10 +150,7 @@ class GamesHub final {
   /// <game>_events those of its envelope's, listed in its adapter — so
   /// those blocks are a copy of the model. The *SeriesMatchTheModelUnions
   /// tests parse the .smithy files and fail on any drift, in either
-  /// direction — that is what makes a hand-kept copy tolerable. The
-  /// generated unions already hold these lists (the kNames array behind
-  /// case_name()); an opal-cpp accessor exposing it would let them be
-  /// derived and the parser tests deleted.
+  /// direction — that is what makes a hand-kept copy tolerable.
   ///
   /// hub_rejections carries the bounded `kind` (see RejectKind), never
   /// the free-text reason: the reason strings are ~30 literals spread across

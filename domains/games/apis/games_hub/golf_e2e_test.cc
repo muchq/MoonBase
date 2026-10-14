@@ -1,5 +1,6 @@
-// Golf's branches of the hub: the seat cap, the status the room lists a table under, the
-// commands golf counts, the turn a leave hands on, and a whole game played to its knock.
+// Golf on the room stream: the seat cap, the status the room lists a table
+// under, the commands golf counts, the turn a leave hands on, and a whole
+// game played to its knock.
 //
 // The NoShuffleDealer deals the pristine deck: the first seat holds the
 // aces, the second the kings, and the first seat opens.

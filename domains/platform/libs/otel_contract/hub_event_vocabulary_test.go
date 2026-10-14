@@ -19,8 +19,8 @@ import (
 // as a vocabulary that drifted rather than one that grew.
 //
 // The event *names* are the sharper half: an unknown value still counts
-// its line, but an unknown event name is skipped entirely, so a hub that
-// grows an eighth event would go unrecorded until this fails.
+// its line, but an unknown event name is skipped entirely, so an event the hub
+// grows would go unrecorded until this fails.
 
 const (
 	hubDir            = "../../../games/apis/games_hub/"

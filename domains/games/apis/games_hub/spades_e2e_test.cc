@@ -560,18 +560,13 @@ TEST_F(ShuffledSpadesFixture, YourHandIsSortedBySuitThenRank) {
   EXPECT_GE(seen.size(), 3u) << "the seed should deal a mixed hand";
 }
 
-
-// The seat cap.
 TEST_F(SpadesFixture, AFifthSeatIsRefused) {
-  ExpectSeatCap<SpadesMove>(4, Spades,
-                      [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
-                        return ReceiveSpades(stream, wanted);
-                      });
+  ExpectSeatCap<SpadesMove>(
+      4, Spades, [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+        return ReceiveSpades(stream, wanted);
+      });
 }
 
-
-// Spades's branches of the hub: the commands spades counts, and the view a resumed
-// seat gets back.
 TEST_F(SpadesFixture, CommandsAreCountedOnTheSpadesSeries) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());

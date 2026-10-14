@@ -1036,13 +1036,11 @@ TEST_F(ShortGraceCastleFixture, GraceExpiryAbandonsTheTableWithNoLoser) {
   EXPECT_EQ(room->as_roomState_or_null()->players[0].gamesWon, 0);
 }
 
-
-// The seat cap.
 TEST_F(CastleGameFixture, AFifthSeatIsRefused) {
-  ExpectSeatCap<CastleMove>(4, Castle,
-                            [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
-                              return ReceiveCastle(stream, wanted);
-                            });
+  ExpectSeatCap<CastleMove>(
+      4, Castle, [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+        return ReceiveCastle(stream, wanted);
+      });
 }
 
 // A castle game in the stats archive, recorded started as castle.

@@ -1900,9 +1900,6 @@ TEST_F(ChessFixture, APublishedGameIsServedByItsArchiveIdAndAPrivateOneIsNot) {
   }
 }
 
-
-// Chess's branches of the hub: the status the room lists a table under, the commands chess
-// counts, and the record of a table's next game.
 TEST_F(ChessFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
