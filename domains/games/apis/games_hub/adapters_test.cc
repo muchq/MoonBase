@@ -6,6 +6,7 @@
 #include <set>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "domains/games/libs/cards/castle/game_state.h"
@@ -174,6 +175,41 @@ TEST(Decode, AGolfKnockAnnouncesItsKnockerAndNoTurn) {
   ASSERT_NE(swapping, nullptr);
   EXPECT_TRUE(swapping->announce_turn);
   EXPECT_FALSE(swapping->first.has_value());
+}
+
+// An opening peek shows only the peeker until the peek that starts the
+// reveal countdown, which every seat sees; peeks after it are the
+// peeker's again.
+TEST(Decode, OnlyThePeekThatStartsTheCountdownReachesEverySeat) {
+  using Golf = Adapter<golf::GameState>;
+  moonbase::games::PeekCard peek;
+  peek.cardIndex = 0;
+  const auto action = Golf::Decode(moonbase::games::GolfMove::FromPeekcard(peek), "ann");
+  const auto* transition = std::get_if<Transition<golf::GameState>>(&action);
+  ASSERT_NE(transition, nullptr);
+  ASSERT_TRUE(transition->views_to_all);
+
+  cards::Dealer dealer;
+  auto dealt = golf::dealGolfGame("tbl", {"ann", "bo"}, dealer.DealNewUnshuffledDeck());
+  ASSERT_TRUE(dealt.ok()) << dealt.status();
+  std::vector<golf::GameState> states{*dealt};
+  for (const auto& [seat, position] :
+       std::vector<std::pair<int, golf::Position>>{{0, golf::Position::TopLeft},
+                                                   {0, golf::Position::TopRight},
+                                                   {1, golf::Position::TopLeft},
+                                                   {1, golf::Position::TopRight}}) {
+    auto next = states.back().peekOwnCard(seat, position);
+    ASSERT_TRUE(next.ok()) << next.status();
+    states.push_back(*std::move(next));
+  }
+  int to_all = 0;
+  for (std::size_t i = 1; i < states.size(); ++i) {
+    const bool starts = !states[i - 1].revealCountdownActive() && states[i].revealCountdownActive();
+    EXPECT_EQ(transition->views_to_all(states[i - 1], states[i]), starts) << "peek " << i;
+    to_all += starts ? 1 : 0;
+  }
+  EXPECT_EQ(to_all, 1);
+  EXPECT_FALSE(transition->views_to_all(states.back(), states.back()));
 }
 
 TEST(Decode, AChallengeOnAnUnknownSetupIsTheRulesRefusal) {
