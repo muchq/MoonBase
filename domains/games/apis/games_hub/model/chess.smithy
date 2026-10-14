@@ -160,8 +160,8 @@ structure ChessWatch {
     gameId: String
 }
 
-/// Seats Stockfish in the empty second seat of a table not yet started
-///, playing at `elo`. Only the table's one player may; the bot
+/// Seats Stockfish in the empty second seat of a table not yet started,
+/// playing at `elo`. Only the table's one player may; the bot
 /// leaves with them. Refused when the hub has no engine to ask.
 structure ChessAddBot {
     @required

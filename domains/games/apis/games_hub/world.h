@@ -65,8 +65,8 @@ class World {
   /// closed socket alike.
   bool Leave(const std::string& player_id, Deliveries& out);
 
-  /// Whether anyone is standing in a world whose surface is a glasshouse
-  ///. The gate on deja's tape and the whole of its cost: false
+  /// Whether anyone is standing in a world whose surface is a glasshouse.
+  /// The gate on deja's tape and the whole of its cost: false
   /// means the hub sends deja no HTTP at all, and the first joiner and
   /// the last leaver are what flip it.
   [[nodiscard]] bool AnyoneInAGlasshouse() const;

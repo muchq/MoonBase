@@ -699,8 +699,8 @@ class GamesHubStreamFixture : public testing::Test {
   }
 
   // Mint a session and open its Play stream; fails the test on any step.
-  // The client-parameterized form serves multi-instance suites
-  //, where each hub instance has its own client.
+  // The client-parameterized form serves multi-instance suites,
+  // where each hub instance has its own client.
   struct Seat {
     std::string player_id;
     std::string resume_token;

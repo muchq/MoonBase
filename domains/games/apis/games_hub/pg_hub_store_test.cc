@@ -601,8 +601,8 @@ PgHubStore::GameRow ChessRow(const chess_play::Table& table, int64_t version) {
           games_hub::GameKind::kChess};
 }
 
-// The commit that ends a chess game archives it in the same statement
-//: once, whichever later commits still carry it, never from a
+// The commit that ends a chess game archives it in the same statement:
+// once, whichever later commits still carry it, never from a
 // commit that missed, and marked with the room's published flag of the
 // moment.
 TEST_F(PgHubStoreTest, ACommitThatEndsAChessGameArchivesItOnce) {

@@ -152,8 +152,7 @@ cc_library(
 )
 
 # The wire's card language, both directions, and the translation from
-# the cards a castle move names to the slots the engine addresses
-#.
+# the cards a castle move names to the slots the engine addresses.
 cc_library(
     name = "wire_cards",
     srcs = ["wire_cards.cc"],

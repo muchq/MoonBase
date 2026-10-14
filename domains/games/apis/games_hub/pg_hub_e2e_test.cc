@@ -1222,8 +1222,8 @@ TEST_F(PgGamesHubFixture, AChallengeSurvivesARestart) {
   EXPECT_EQ(view.terms->initialSeconds, 60);
 }
 
-// A challenge posted on one instance is read back from the row on another
-//: the remote lists its terms, and joining there starts the game
+// A challenge posted on one instance is read back from the row on another:
+// the remote lists its terms, and joining there starts the game
 // on them.
 TEST_F(PgGamesHubFixture, AChallengePostedOnOneInstanceStartsOnAnother) {
   using moonbase::games::ChessMove;
@@ -1684,8 +1684,8 @@ TEST_F(PgGamesHubFixture, SetGeometryReshapesTheRoomOnEveryInstance) {
   EXPECT_NE(world->as_worldState_or_null()->geometry.as_sphere_or_null(), nullptr);
 }
 
-// Publishing a room's chess games reaches every instance holding it
-//: bob, on the remote, hears alice's publish from the primary —
+// Publishing a room's chess games reaches every instance holding it:
+// bob, on the remote, hears alice's publish from the primary —
 // without a `by`, which the row does not carry — and a game that ends
 // on the primary is in bob's history, and in the export the remote
 // serves.

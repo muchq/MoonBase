@@ -124,8 +124,8 @@ union Geometry {
     /// onto it and refuses one farther off.
     sphere: SphereGeometry
 
-    /// The plane's floor inside four glass walls standing at its edges
-    ///. Players stand on the floor under exactly the plane's
+    /// The plane's floor inside four glass walls standing at its edges.
+    /// Players stand on the floor under exactly the plane's
     /// rules — the glass is the boundary it already had, not a place to
     /// stand — and deja's tape splats onto the walls (see TapeSplat).
     ///

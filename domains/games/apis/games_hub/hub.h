@@ -542,8 +542,8 @@ class GamesHub final {
   /// FilledStart), to run once the lock that seated it is released; null
   /// when it makes none. Callers hold mu_.
   std::function<void()> FilledStartLocked(const std::string& player_id, const GameEntry& entry);
-  /// `player_id` watches a kWatchable table in its room from no seat
-  ///; `kind` is the game whose envelope asked.
+  /// `player_id` watches a kWatchable table in its room from no seat;
+  /// `kind` is the game whose envelope asked.
   void WatchMove(const std::string& player_id, const std::string& game_id, GameKind kind);
   /// Where a pong seat's paddle points.
   void PaddleMove(const std::string& player_id, const moonbase::games::PongPaddle& paddle);
@@ -762,8 +762,8 @@ class GamesHub final {
   /// refresh once the writes staged before it have landed.
   void StageWakeLocked(const std::string& room_id, Writes& writes) const;
 
-  /// One synchronous conditional commit of the entry's next revision
-  ///. kCommitted adopts the candidate roster/state at version+1
+  /// One synchronous conditional commit of the entry's next revision.
+  /// kCommitted adopts the candidate roster/state at version+1
   /// (a MemoryHubStore only this hub writes cannot lose the race; tests
   /// share one across hubs to drive kRebased). kRebased means
   /// another instance committed first: the entry now holds the stored

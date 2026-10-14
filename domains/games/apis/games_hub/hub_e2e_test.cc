@@ -2838,8 +2838,8 @@ TEST_F(GameEventFixture, ARefusedJoinIsNoEvent) {
   EXPECT_THAT(events_, ::testing::IsEmpty());
 }
 
-// A room records the surface it chose, and every reshape after it
-//, in the one spelling the wire and the stored row also use.
+// A room records the surface it chose, and every reshape after it,
+// in the one spelling the wire and the stored row also use.
 // The radius is not in the line: the question is which shapes people
 // reach for, and a number per room is not a word to group by.
 TEST_F(GameEventFixture, AWorldRecordsTheShapeItChoseAndEveryReshapeAfterIt) {
