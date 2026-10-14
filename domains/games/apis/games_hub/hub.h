@@ -69,15 +69,12 @@ struct HubTestHooks {
       on_send;
 };
 
-/// GamesHub is the room hub: seat admission, rooms,
-/// chat, and the game layer, behind GamesHubHandler::Play. The name is
-/// golf's; the room layer, castle, rummy, chess and the lobby
-/// live here too. A room hosts tables of any game: golf on
-/// libs/cards/golf, castle on libs/cards/castle, rummy on libs/cards/rummy
-/// and chess on libs/chess_play, each a member of the stream's unions with
-/// its own per-viewer view. Each tenant's envelope counts on its own series
-/// (golf_, castle_, rummy_, chess_, lobby_, voice_); the room layer's own are
-/// hub_*.
+/// GamesHub is the room hub: seat admission, rooms, chat, the lobby and the
+/// game layer, behind GamesHubHandler::Play. A room hosts tables of any
+/// game, each a member of the stream's unions with its own per-viewer view
+/// and its own Adapter (adapters.h). Each tenant's envelope counts on its
+/// own series (each game adapter's, lobby_, voice_); the room layer's own
+/// are hub_*.
 ///
 /// The lobby member is the World (world.h) keyed by the session's room:
 /// a roomed session stands in its room's world, an unroomed one in the
