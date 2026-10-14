@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -67,15 +68,37 @@ enum Capability : unsigned {
   /// One view serves every seat, and members may watch from no seat.
   kWatchable = 1U << 0,
   /// A seated table plays game after game: startGame on one between games
-  /// starts the next. Hooks: Next(engine, start, move context).
+  /// starts the next. Hooks: Next(engine, start, move context), and
+  /// CurrentGameOver(engine), whether the game last started has ended.
   kNextGame = 1U << 1,
-  /// A round robin's pairings play at the game's tables (#1647). Hooks:
-  /// RoundRobinStart(start, table terms, round robin row), the start a
-  /// pairing's table plays on.
+  /// A round robin's pairings play at the game's tables (#1647); implies
+  /// kNextGame, a pairing being decided by its table's game ending.
+  /// Hooks: RoundRobinStart(start, table terms, round robin row), the
+  /// start a pairing's table plays on; RoundRobinTerms(row), what its
+  /// table waits on; RoundRobinEvent(held) and RoundRobinsEvent(helds),
+  /// the round robins in the game's envelope.
   kRoundRobins = 1U << 2,
   /// A start draws its opening from the hub's ChessOpener. Hooks:
   /// Prepare(start, opener).
   kOpenings = 1U << 3,
+  /// The side to move plays on a clock the hub sweeps (implies
+  /// kNextGame). Hooks: FlagDue(engine, now_ms), whether the side to move
+  /// has run out; Flag(engine, now_ms), the game ended on time.
+  kClocked = 1U << 4,
+  /// The hub's chess engine plays the game's bot seats.
+  kEngineBots = 1U << 5,
+  /// The game runs between moves, on the hub's ticks: pong's rallies.
+  kRealtime = 1U << 6,
+  /// A published room's finished games reach the public feed, and the
+  /// hub's indexer is asked after each one's players (implies kNextGame).
+  kPublished = 1U << 7,
+};
+
+/// A round robin as the hub holds it, with the tables playing its
+/// pairings now, by pairing index.
+struct HeldRoundRobin {
+  const HubStore::ChessEventRow& row;
+  std::map<int, std::string> live;
 };
 
 /// A move union's case as the hub runs it, from an adapter's Decode. The

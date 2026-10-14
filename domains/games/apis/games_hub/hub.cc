@@ -16,43 +16,25 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
-#include "absl/strings/str_join.h"
 #include "absl/time/clock.h"
 #include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/apis/games_hub/chess_archive.h"
-#include "domains/games/apis/games_hub/chess_results.h"
 #include "domains/games/apis/games_hub/game_events.h"
-#include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/pong_bots.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
 #include "domains/games/apis/games_hub/round_robin.h"
 #include "domains/games/apis/games_hub/round_robin_wire.h"
 #include "domains/games/apis/games_hub/splat.h"
-#include "domains/games/apis/games_hub/wire_cards.h"
-#include "domains/games/libs/cards/castle/game_state.h"
-#include "domains/games/libs/cards/golf/player.h"
-#include "domains/games/libs/cards/rummy/game_state.h"
-#include "domains/games/libs/cards/rummy/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/pong/rally.h"
 #include "domains/games/libs/pong/table.h"
 
 namespace games_hub {
 
-using moonbase::games::CastleMove;
-using moonbase::games::CastleUpdate;
-using moonbase::games::ChessMove;
 using moonbase::games::ChessUpdate;
 using moonbase::games::GameCommands;
 using moonbase::games::GameEvents;
-using moonbase::games::GolfMove;
-using moonbase::games::GolfUpdate;
-using moonbase::games::PongMove;
 using moonbase::games::PongUpdate;
-using moonbase::games::RummyMove;
-using moonbase::games::RummyUpdate;
-using moonbase::games::SpadesMove;
-using moonbase::games::SpadesUpdate;
 
 namespace {
 
@@ -73,6 +55,13 @@ moonbase::games::ChatMessage ChatEvent(const ChatRow& row) {
   if (row.player_id == kWordchainPlayerId) message.wordchain = WordchainOfText(row.text);
   return message;
 }
+
+// The machinery that is one game's alone, typed on the engine of the game
+// whose adapter opts into it (adapters.h's EngineWith).
+using ClockedTable = EngineWith<kClocked>;
+using Clock = Adapter<ClockedTable>;
+using BotTable = EngineWith<kEngineBots>;
+using RallyTable = EngineWith<kRealtime>;
 
 template <typename... F>
 struct Overloaded : F... {
@@ -711,7 +700,7 @@ GamesHub::Commit GamesHub::CommitEntryLocked(const std::string& room_id, const s
   // state, and the retry then commits over the terminal row. That game
   // was played once, and was recorded by whoever ended it.
   const bool was_over = entry.started() && IsOver(*entry.state);
-  const bool game_was_over = ChessGameOver(entry);
+  const bool game_was_over = GameOverWith<kPublished>(entry.kind, entry.state);
   const bool table_game_was_over = TableGameOver(entry);
   // Who played: a leave that ends the game commits without its leaver.
   const std::vector<std::string> seated = entry.roster;
@@ -755,7 +744,7 @@ GamesHub::Commit GamesHub::CommitEntryLocked(const std::string& room_id, const s
     entry.event = (*stored)->event;
     // Another instance committed the table: its rally is that one's now.
     pong_rallies_.erase({room_id, game_id});
-    if (entry.kind == GameKind::kPong) pong_elsewhere_.insert({room_id, game_id});
+    if (HasCapability(entry.kind, kRealtime)) pong_elsewhere_.insert({room_id, game_id});
     return Commit::kRebased;
   }
   entry.roster = roster;
@@ -787,7 +776,7 @@ GamesHub::Commit GamesHub::CommitEntryLocked(const std::string& room_id, const s
   // The feed dates it by the database's clock, not this one, so in a
   // month's first minute the month before is asked for too. Bots have no
   // games there of their own.
-  if (chess_indexer_ && !game_was_over && ChessGameOver(entry)) {
+  if (chess_indexer_ && !game_was_over && GameOverWith<kPublished>(entry.kind, entry.state)) {
     if (const auto room = rooms_.find(room_id);
         room != rooms_.end() && room->second.chess_published) {
       const absl::Time now = absl::FromUnixMillis(NowMs());
@@ -798,7 +787,7 @@ GamesHub::Commit GamesHub::CommitEntryLocked(const std::string& room_id, const s
         months.push_back(std::move(before));
       }
       for (const std::string& player_id : seated) {
-        if (ChessBotElo(player_id).has_value()) continue;
+        if (IsBotId(player_id)) continue;
         for (const std::string& month : months) chess_indexer_({player_id, month});
       }
     }
@@ -1069,7 +1058,7 @@ bool GamesHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::R
     if (row.version <= entry.version && !owed) continue;  // ours is current
     changed = true;
     // A table another instance committed: its rally is that one's.
-    if (row.kind == GameKind::kPong) {
+    if (HasCapability(row.kind, kRealtime)) {
       pong_rallies_.erase({room_id, row.game_id});
       pong_elsewhere_.insert({room_id, row.game_id});
     }
@@ -2197,14 +2186,14 @@ int GamesHub::SweepChessClocksOnce() {
       const auto room = rooms_.find(retry.first.first);
       if (room == rooms_.end()) return true;
       const auto game = room->second.games.find(retry.first.second);
-      return game == room->second.games.end() || !game->second.started() ||
-             game->second.chess().game().isOver();
+      if (game == room->second.games.end()) return true;
+      const ClockedTable* table = CapableEngine<kClocked>(game->second.state);
+      return table == nullptr || Clock::CurrentGameOver(*table);
     });
     for (const auto& [room_id, room] : rooms_) {
       for (const auto& [game_id, entry] : room.games) {
-        if (entry.kind != GameKind::kChess || !entry.started()) continue;
-        const chess_play::GameState& state = entry.chess().game();
-        if (state.isOver() || state.remainingMs(state.sideToMove(), now) > 0) continue;
+        const ClockedTable* table = CapableEngine<kClocked>(entry.state);
+        if (table == nullptr || !Clock::FlagDue(*table, now)) continue;
         const auto retry = chess_flag_retry_at_.find({room_id, game_id});
         if (retry != chess_flag_retry_at_.end() && now < retry->second) continue;
         flagged.push_back({room_id, game_id});
@@ -2225,12 +2214,10 @@ int GamesHub::SweepChessClocksOnce() {
         continue;
       }
       const auto game = room->second.games.find(flag.game_id);
-      if (game == room->second.games.end() || !game->second.started()) {
-        chess_flag_retry_at_.erase(key);
-        continue;
-      }
-      const chess_play::GameState& state = game->second.chess().game();
-      if (state.isOver()) {
+      const ClockedTable* table = game == room->second.games.end()
+                                      ? nullptr
+                                      : CapableEngine<kClocked>(game->second.state);
+      if (table == nullptr || Clock::CurrentGameOver(*table)) {
         chess_flag_retry_at_.erase(key);
         continue;
       }
@@ -2238,13 +2225,11 @@ int GamesHub::SweepChessClocksOnce() {
       const int64_t now = NowMs();
       // A rebase may find the game already ended elsewhere, or moved on:
       // the refusal says so, and the seat on turn sent nothing to refuse.
-      const auto refusal = ApplyTableEngineMoveLocked<chess_play::Table>(
-          ref, state.players().at(state.whoseTurn()),
-          Transition<chess_play::Table>{
-              [now](const chess_play::Table& table, int, const MoveContext&) {
-                return table.inGame(
-                    [now](const chess_play::GameState& game) { return game.flag(now); });
-              }},
+      const auto refusal = ApplyTableEngineMoveLocked<ClockedTable>(
+          ref, Clock::Turn(*table),
+          Transition<ClockedTable>{[now](const ClockedTable& clocked, int, const MoveContext&) {
+            return Clock::Flag(clocked, now);
+          }},
           outbox);
       if (refusal.has_value() && refusal->kind == RejectKind::kUnavailable) {
         // The store is down: try this game again later, not every tick.
@@ -2712,33 +2697,24 @@ std::optional<games_hub::Refusal> GamesHub::ModerateRoundRobinLocked(
 }
 
 void GamesHub::RoundRobinsMove(const std::string& player_id, GameKind kind) {
-  moonbase::games::ChessRoundRobins chess;
-  moonbase::games::PongRoundRobins pong;
+  std::optional<GameEvents> answer;
   bool in_room = false;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     if (const Room* room = FindRoomLocked(player_id); room != nullptr) {
       in_room = true;
+      std::vector<HeldRoundRobin> held;
       for (const auto& [id, row] : room->round_robins) {
-        if (row.kind != kind) continue;
-        if (kind == GameKind::kPong) {
-          pong.roundRobins.push_back(PongRoundRobinOf(row, LiveTablesLocked(*room, id)));
-        } else {
-          chess.roundRobins.push_back(RoundRobinOf(row, LiveTablesLocked(*room, id)));
-        }
+        if (row.kind == kind) held.push_back({row, LiveTablesLocked(*room, id)});
       }
+      answer = RoundRobinsEventOf(kind, held);
     }
   }
   if (!in_room) {
     Reject(player_id, RejectKind::kState, "not in a room");
     return;
   }
-  if (kind == GameKind::kPong) {
-    Send(player_id, Adapter<pong::Table>::Wrap(PongUpdate::FromRoundrobins(std::move(pong))));
-  } else {
-    Send(player_id,
-         Adapter<chess_play::Table>::Wrap(ChessUpdate::FromRoundrobins(std::move(chess))));
-  }
+  if (answer.has_value()) Send(player_id, *std::move(answer));
 }
 
 void GamesHub::PlayRoundRobinMove(const std::string& player_id,
@@ -2773,8 +2749,7 @@ void GamesHub::PlayRoundRobinMove(const std::string& player_id,
         const std::string room_id = player_room_.at(player_id);
         // A pong pairing starts on the round robin's variant, read when
         // its table fills; only a chess one waits on terms.
-        const std::optional<ChessTerms> terms =
-            kind == GameKind::kChess ? std::optional<ChessTerms>(row.terms) : std::nullopt;
+        const std::optional<ChessTerms> terms = RoundRobinTermsOf(kind, row);
         for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
           std::string game_id = ids_->GameCode();
           while (room->games.contains(game_id)) game_id = ids_->GameCode();
@@ -2813,13 +2788,8 @@ void GamesHub::PlayRoundRobinMove(const std::string& player_id,
   if (refusal.has_value()) Reject(player_id, std::move(*refusal));
 }
 
-bool GamesHub::ChessGameOver(const GameEntry& entry) {
-  return entry.kind == GameKind::kChess && entry.started() && entry.chess().game().isOver();
-}
-
 bool GamesHub::TableGameOver(const GameEntry& entry) {
-  if (entry.kind == GameKind::kPong) return entry.started() && !entry.pong().inPlay();
-  return ChessGameOver(entry);
+  return GameOverWith<kRoundRobins>(entry.kind, entry.state);
 }
 
 std::map<int, std::string> GamesHub::LiveTablesLocked(const Room& room,
@@ -2862,12 +2832,10 @@ void GamesHub::RefreshRoundRobinGamesLocked(const std::string& room_id) {
 void GamesHub::StageRoundRobinLocked(const Room& room, const HubStore::ChessEventRow& row,
                                     Outbox& outbox) const {
   // In its own game's envelope.
-  const GameEvents event = row.kind == GameKind::kPong
-                               ? Adapter<pong::Table>::Wrap(PongUpdate::FromRoundrobin(
-                                     PongRoundRobinOf(row, LiveTablesLocked(room, row.event_id))))
-                               : Adapter<chess_play::Table>::Wrap(ChessUpdate::FromRoundrobin(
-                                     RoundRobinOf(row, LiveTablesLocked(room, row.event_id))));
-  for (const auto& [member_id, member] : room.members) outbox.To(member_id, event);
+  const std::optional<GameEvents> event =
+      RoundRobinEventOf(row.kind, {row, LiveTablesLocked(room, row.event_id)});
+  if (!event.has_value()) return;
+  for (const auto& [member_id, member] : room.members) outbox.To(member_id, *event);
 }
 
 absl::StatusOr<std::string> GamesHub::ExportChessPgn(int64_t after_archive_id) {
@@ -2921,13 +2889,15 @@ int GamesHub::PlayChessBotsOnce() {
       const auto room = rooms_.find(retry.first.first);
       if (room == rooms_.end()) return true;
       const auto game = room->second.games.find(retry.first.second);
-      return game == room->second.games.end() || !game->second.started() ||
-             game->second.chess().scoreSheet().size() != retry.second.game;
+      if (game == room->second.games.end()) return true;
+      const BotTable* table = CapableEngine<kEngineBots>(game->second.state);
+      return table == nullptr || table->scoreSheet().size() != retry.second.game;
     });
     for (const auto& [room_id, room] : rooms_) {
       for (const auto& [game_id, entry] : room.games) {
-        if (entry.kind != GameKind::kChess || !entry.started()) continue;
-        const chess_play::GameState& game = entry.chess().game();
+        const BotTable* table = CapableEngine<kEngineBots>(entry.state);
+        if (table == nullptr) continue;
+        const chess_play::GameState& game = table->game();
         const int seat = game.whoseTurn();
         if (seat < 0) continue;
         const std::string& on_turn = game.players().at(seat);
@@ -2937,7 +2907,7 @@ int GamesHub::PlayChessBotsOnce() {
         // strength and the live remaining clock — not here — so a later
         // bot in this pass is not capped by a snapshot taken before
         // earlier bots thought. Elo stays off the ask (full strength).
-        turns.push_back({room_id, game_id, on_turn, entry.chess().scoreSheet().size(),
+        turns.push_back({room_id, game_id, on_turn, table->scoreSheet().size(),
                          ChessBotAsk{game.startFen(), game.moves(), 0, std::nullopt}});
       }
     }
@@ -2951,9 +2921,10 @@ int GamesHub::PlayChessBotsOnce() {
       const auto room = rooms_.find(turn.room_id);
       if (room == rooms_.end()) continue;
       const auto game = room->second.games.find(turn.game_id);
-      if (game == room->second.games.end() || !game->second.started()) continue;
-      if (game->second.chess().scoreSheet().size() != turn.game_no) continue;
-      const chess_play::GameState& state = game->second.chess().game();
+      if (game == room->second.games.end()) continue;
+      const BotTable* table = CapableEngine<kEngineBots>(game->second.state);
+      if (table == nullptr || table->scoreSheet().size() != turn.game_no) continue;
+      const chess_play::GameState& state = table->game();
       if (state.startFen() != turn.ask.fen || state.moves().size() != turn.ask.moves.size()) {
         continue;
       }
@@ -2995,14 +2966,13 @@ int GamesHub::PlayChessBotsOnce() {
       // else moved on meanwhile. An answer that game refuses is the
       // engine's fault, and waits out the retry like a failed ask.
       bool moved_on = false;
-      const auto refusal = ApplyTableEngineMoveLocked<chess_play::Table>(
+      const auto refusal = ApplyTableEngineMoveLocked<BotTable>(
           ref, turn.bot_id,
-          Transition<chess_play::Table>{[&turn, &moved_on, asked_at, uci = *answer](
-                                            const chess_play::Table& table, int seat,
-                                            const MoveContext& context) {
+          Transition<BotTable>{[&turn, &moved_on, asked_at, uci = *answer](
+                                   const BotTable& table, int seat, const MoveContext& context) {
             if (table.scoreSheet().size() != turn.game_no) {
               moved_on = true;
-              return absl::StatusOr<chess_play::Table>(
+              return absl::StatusOr<BotTable>(
                   absl::FailedPreconditionError("the position moved on"));
             }
             return table.inGame([&](const chess_play::GameState& state)
@@ -3059,7 +3029,7 @@ void GamesHub::StartChessClocks(std::chrono::milliseconds interval) {
 namespace {
 
 // Which point of the table's evening a serve is: it picks the serve's line.
-int ServeNo(const pong::Table& table) {
+int ServeNo(const RallyTable& table) {
   return table.points() + static_cast<int>(table.scoreSheet().size());
 }
 
@@ -3077,11 +3047,12 @@ void GamesHub::PaddleMove(const std::string& player_id, const moonbase::games::P
   {
     const std::lock_guard<std::mutex> lock(mu_);
     const auto ref = FindGameLocked(player_id);
-    if (ref.has_value() && ref->entry->kind == GameKind::kPong) {
+    if (ref.has_value() && HasCapability(ref->entry->kind, kRealtime)) {
       const GameEntry& entry = *ref->entry;
+      const RallyTable* table = CapableEngine<kRealtime>(entry.state);
       // Between games a pointer still moves; there is nothing to steer.
-      if (!entry.started() || !entry.pong().inPlay()) return;
-      const int seat = entry.pong().playerIndex(player_id);
+      if (table == nullptr || !table->inPlay()) return;
+      const int seat = table->playerIndex(player_id);
       if (seat < 0) return;
       const std::pair<std::string, std::string> key{ref->room_id, ref->game_id};
       // Another instance runs this rally: steering it there is beyond
@@ -3099,10 +3070,11 @@ void GamesHub::PaddleMove(const std::string& player_id, const moonbase::games::P
 
 void GamesHub::HostPongLocked(const std::string& room_id, const std::string& game_id,
                              const GameEntry& entry) {
-  if (entry.kind != GameKind::kPong || !entry.started() || !entry.pong().inPlay()) return;
+  const RallyTable* in_play = CapableEngine<kRealtime>(entry.state);
+  if (in_play == nullptr || !in_play->inPlay()) return;
   const auto [live, hosted] = pong_rallies_.try_emplace({room_id, game_id});
   if (!hosted) return;
-  const pong::Table& table = entry.pong();
+  const RallyTable& table = *in_play;
   // Each game, the other seat receives first.
   const int receiver = table.scoreSheet().size() % 2 == 0 ? 1 : 0;
   live->second.rally = pong::Serve(table.variant(), receiver, ServeNo(table));
@@ -3132,13 +3104,14 @@ int GamesHub::TickPongOnce() {
         const auto game = room->second.games.find(game_id);
         if (game != room->second.games.end()) entry = &game->second;
       }
-      if (entry == nullptr || entry->kind != GameKind::kPong || !entry->started() ||
-          !entry->pong().inPlay()) {
+      const RallyTable* in_play =
+          entry == nullptr ? nullptr : CapableEngine<kRealtime>(entry->state);
+      if (in_play == nullptr || !in_play->inPlay()) {
         pong_rallies_.erase(key);
         continue;
       }
       PongRally& live = pong_rallies_.at(key);
-      const pong::Table& table = entry->pong();
+      const RallyTable& table = *in_play;
       std::array<pong::Vec2, pong::kSeats> targets = live.targets;
       for (int seat = 0; seat < pong::kSeats; ++seat) {
         if (const auto level = PongBotLevel(table.players()[seat])) {
@@ -3168,7 +3141,7 @@ int GamesHub::TickPongOnce() {
         }
         if (commit == Commit::kUnavailable) {
           // Nothing stored the point, so it is played again.
-          live.rally = pong::Serve(variant, missed, ServeNo(entry->pong()), paddles);
+          live.rally = pong::Serve(variant, missed, ServeNo(table), paddles);
         } else {
           // The views and the game's end, then the room's stats it moved.
           StageGameViewsLocked(game_id, *entry, outbox);
@@ -3177,12 +3150,13 @@ int GamesHub::TickPongOnce() {
             StageRoomStateLocked(room_id, outbox);
           }
           // A game this point ended has no next serve, and no frame.
-          if (!entry->pong().inPlay()) {
+          const RallyTable* after = CapableEngine<kRealtime>(entry->state);
+          if (after == nullptr || !after->inPlay()) {
             pong_rallies_.erase(key);
             continue;
           }
           if (const auto served = pong_rallies_.find(key); served != pong_rallies_.end()) {
-            served->second.rally = pong::Serve(variant, missed, ServeNo(entry->pong()), paddles);
+            served->second.rally = pong::Serve(variant, missed, ServeNo(*after), paddles);
           }
         }
       }
@@ -3349,9 +3323,8 @@ void GamesHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Wri
     roster.erase(std::remove(roster.begin(), roster.end(), player_id), roster.end());
 
     // A bot holds no table alone: with no player left, it goes too.
-    const bool players_left = std::any_of(roster.begin(), roster.end(), [](const std::string& id) {
-      return !ChessBotElo(id).has_value() && !PongBotLevel(id).has_value();
-    });
+    const bool players_left = std::any_of(roster.begin(), roster.end(),
+                                          [](const std::string& id) { return !IsBotId(id); });
     if (!entry.started() && !players_left) {
       DropWatchersLocked(ref->game_id, entry, outbox);
       for (const std::string& bot : roster) player_game_.erase(bot);

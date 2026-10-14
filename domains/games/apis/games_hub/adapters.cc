@@ -95,4 +95,39 @@ std::vector<CounterSeries> GameCounterSeries() {
   return series;
 }
 
+std::optional<moonbase::games::GameEvents> RoundRobinEventOf(GameKind kind,
+                                                             const HeldRoundRobin& held) {
+  return ForKind(kind, [&](auto adapter) -> std::optional<moonbase::games::GameEvents> {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kRoundRobins>) {
+      return A::RoundRobinEvent(held);
+    } else {
+      return std::nullopt;
+    }
+  });
+}
+
+std::optional<moonbase::games::GameEvents> RoundRobinsEventOf(
+    GameKind kind, const std::vector<HeldRoundRobin>& held) {
+  return ForKind(kind, [&](auto adapter) -> std::optional<moonbase::games::GameEvents> {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kRoundRobins>) {
+      return A::RoundRobinsEvent(held);
+    } else {
+      return std::nullopt;
+    }
+  });
+}
+
+std::optional<ChessTerms> RoundRobinTermsOf(GameKind kind, const HubStore::ChessEventRow& row) {
+  return ForKind(kind, [&](auto adapter) -> std::optional<ChessTerms> {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kRoundRobins>) {
+      return A::RoundRobinTerms(row);
+    } else {
+      return std::nullopt;
+    }
+  });
+}
+
 }  // namespace games_hub

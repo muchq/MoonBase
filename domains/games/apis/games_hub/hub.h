@@ -35,11 +35,7 @@
 #include "domains/games/apis/games_hub/voice.h"
 #include "domains/games/apis/games_hub/wordchain.h"
 #include "domains/games/apis/games_hub/world.h"
-#include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/dealer.h"
-#include "domains/games/libs/cards/golf/game_state.h"
-#include "domains/games/libs/cards/rummy/table.h"
-#include "domains/games/libs/cards/spades/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
 #include "domains/games/libs/one_d4_cpp/index_queue.h"
@@ -459,19 +455,18 @@ class GamesHub final {
   /// CommitEntryLocked (store or not), and with a store the commit only
   /// lands when the stored row holds the predecessor — that condition
   /// is what serializes instances. kind is fixed at creation and says
-  /// which engine the state is; golf()/castle()/rummy() are the typed
-  /// reads.
+  /// which engine the state is; its adapter (adapters.h) reads it.
   struct GameEntry {
     GameKind kind = GameKind::kGolf;
     std::vector<std::string> roster;
     std::optional<HostedState> state;
     int64_t version = 0;
-    /// A chess or pong table's finished games this instance has sent
+    /// A multi-game table's finished games this instance has sent
     /// gameEnded for: whichever path moved the table on, the views staged
     /// after it announce the rest. Held from a row, the games so far count
     /// as told.
     mutable std::size_t games_announced = 0;
-    /// Members watching this chess table from no seat (#1633): they hear
+    /// Members watching this kWatchable table from no seat (#1633): they hear
     /// its views and results. Presence, like the world: held here, never
     /// stored. A table that ends hands them its closed view; one erased
     /// without it hands them gameLeft (DropWatchersLocked).
@@ -483,18 +478,6 @@ class GamesHub final {
     /// opened.
     std::optional<EventTag> event;
     [[nodiscard]] bool started() const { return state.has_value(); }
-    [[nodiscard]] const golf::GameState& golf() const { return std::get<golf::GameState>(*state); }
-    [[nodiscard]] const castle::GameState& castle() const {
-      return std::get<castle::GameState>(*state);
-    }
-    [[nodiscard]] const rummy::TableState& rummy() const {
-      return std::get<rummy::TableState>(*state);
-    }
-    [[nodiscard]] const chess_play::Table& chess() const {
-      return std::get<chess_play::Table>(*state);
-    }
-    [[nodiscard]] const pong::Table& pong() const { return std::get<pong::Table>(*state); }
-    [[nodiscard]] const spades::Table& spades() const { return std::get<spades::Table>(*state); }
   };
 
   struct Room {
@@ -559,7 +542,7 @@ class GamesHub final {
   /// FilledStart), to run once the lock that seated it is released; null
   /// when it makes none. Callers hold mu_.
   std::function<void()> FilledStartLocked(const std::string& player_id, const GameEntry& entry);
-  /// `player_id` watches a chess or pong table in its room from no seat
+  /// `player_id` watches a kWatchable table in its room from no seat
   /// (#1633); `kind` is the game whose envelope asked.
   void WatchMove(const std::string& player_id, const std::string& game_id, GameKind kind);
   /// Where a pong seat's paddle points.
@@ -592,10 +575,8 @@ class GamesHub final {
   /// The tables playing a round robin's pairings now, by pairing index.
   std::map<int, std::string> LiveTablesLocked(const Room& room,
                                               const std::string& round_robin_id) const;
-  /// Whether a chess table's game is over: ended between games or closed.
-  static bool ChessGameOver(const GameEntry& entry);
-  /// Whether a chess or pong table's game is over, a pairing's result if
-  /// the table plays one.
+  /// Whether a round robin game's table has ended the game it last
+  /// started: a pairing's result if the table plays one.
   static bool TableGameOver(const GameEntry& entry);
   /// The pairing a tagged table plays, if its round robin is held.
   const Pairing* PairingOfLocked(const Room& room, const GameEntry& entry) const;

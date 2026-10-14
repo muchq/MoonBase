@@ -1,6 +1,7 @@
 #include "domains/games/apis/games_hub/pong_adapter.h"
 
 #include "absl/strings/str_cat.h"
+#include "domains/games/apis/games_hub/round_robin_wire.h"
 #include "domains/games/libs/pong/rally.h"
 
 namespace games_hub {
@@ -156,6 +157,19 @@ Action<pong::Table, Adapter<pong::Table>::Start> Adapter<pong::Table>::Decode(co
   if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};
   if (move.as_leaveGame_or_null() != nullptr) return LeaveTable{};
   return Refusal{RejectKind::kUnknown, "unknown move"};
+}
+
+moonbase::games::GameEvents Adapter<pong::Table>::RoundRobinEvent(const HeldRoundRobin& held) {
+  return Wrap(Update::FromRoundrobin(PongRoundRobinOf(held.row, held.live)));
+}
+
+moonbase::games::GameEvents Adapter<pong::Table>::RoundRobinsEvent(
+    const std::vector<HeldRoundRobin>& held) {
+  moonbase::games::PongRoundRobins round_robins;
+  for (const HeldRoundRobin& one : held) {
+    round_robins.roundRobins.push_back(PongRoundRobinOf(one.row, one.live));
+  }
+  return Wrap(Update::FromRoundrobins(std::move(round_robins)));
 }
 
 }  // namespace games_hub

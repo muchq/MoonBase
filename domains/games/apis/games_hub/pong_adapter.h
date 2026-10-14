@@ -20,7 +20,7 @@ struct Adapter<pong::Table> {
   };
   static constexpr GameKind kKind = GameKind::kPong;
   static constexpr std::size_t kMaxSeats = pong::kSeats;
-  static constexpr unsigned kCapabilities = kWatchable | kNextGame | kRoundRobins;
+  static constexpr unsigned kCapabilities = kWatchable | kNextGame | kRoundRobins | kRealtime;
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "pong_commands";
@@ -86,11 +86,21 @@ struct Adapter<pong::Table> {
                                           const MoveContext&) {
     return table.next(start.variant);
   }
+  // Ended with the table waiting on the next, or closed.
+  static bool CurrentGameOver(const pong::Table& table) { return !table.inPlay(); }
+
   // A round robin's table plays its one game on the round robin's variant.
   static void RoundRobinStart(Start& start, const std::optional<ChessTerms>&,
                               const HubStore::ChessEventRow* row) {
     if (row != nullptr) start.variant = row->pong_variant;
   }
+  // A pairing's table starts on the round robin's variant when it fills,
+  // and waits on no terms.
+  static std::optional<ChessTerms> RoundRobinTerms(const HubStore::ChessEventRow&) {
+    return std::nullopt;
+  }
+  static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
+  static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
 };
 
 }  // namespace games_hub

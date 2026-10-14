@@ -73,24 +73,47 @@ concept GameAdapter = requires(
   { A::IsBot(std::string_view{}) } -> std::same_as<bool>;
 };
 
-/// A capability's hooks, held by every adapter that declares it.
+/// Each capability's hooks (adapter.h), held by every adapter that
+/// declares it.
+template <typename A>
+concept NextGameHooks = requires(const typename A::Engine& engine, const typename A::Start& start) {
+  {
+    A::Next(engine, start, std::declval<const MoveContext&>())
+  } -> std::same_as<absl::StatusOr<typename A::Engine>>;
+  { A::CurrentGameOver(engine) } -> std::same_as<bool>;
+};
+
+template <typename A>
+concept RoundRobinHooks =
+    NextGameHooks<A> && requires(typename A::Start& start, const HubStore::ChessEventRow& row,
+                                 const HeldRoundRobin& held) {
+      A::RoundRobinStart(start, std::declval<const std::optional<ChessTerms>&>(), &row);
+      { A::RoundRobinTerms(row) } -> std::same_as<std::optional<ChessTerms>>;
+      { A::RoundRobinEvent(held) } -> std::same_as<moonbase::games::GameEvents>;
+      {
+        A::RoundRobinsEvent(std::vector<HeldRoundRobin>{})
+      } -> std::same_as<moonbase::games::GameEvents>;
+    };
+
+template <typename A>
+concept OpeningHooks = requires(typename A::Start& start) {
+  { A::Prepare(start, std::declval<const ChessOpener&>()) } -> std::same_as<absl::Status>;
+};
+
+template <typename A>
+concept ClockHooks = NextGameHooks<A> && requires(const typename A::Engine& engine) {
+  { A::FlagDue(engine, int64_t{0}) } -> std::same_as<bool>;
+  { A::Flag(engine, int64_t{0}) } -> std::same_as<absl::StatusOr<typename A::Engine>>;
+};
+
+template <typename A, Capability C>
+constexpr bool kHas = (A::kCapabilities & C) != 0;
+
 template <typename A>
 concept CapableAdapter =
-    ((A::kCapabilities & kNextGame) == 0 ||
-     requires(const typename A::Engine& engine, const typename A::Start& start) {
-       {
-         A::Next(engine, start, std::declval<const MoveContext&>())
-       } -> std::same_as<absl::StatusOr<typename A::Engine>>;
-     }) &&
-    ((A::kCapabilities & kRoundRobins) == 0 ||
-     ((A::kCapabilities & kNextGame) != 0 &&
-      requires(typename A::Start& start) {
-        A::RoundRobinStart(start, std::declval<const std::optional<ChessTerms>&>(),
-                           std::declval<const HubStore::ChessEventRow*>());
-      })) &&
-    ((A::kCapabilities & kOpenings) == 0 || requires(typename A::Start& start) {
-      { A::Prepare(start, std::declval<const ChessOpener&>()) } -> std::same_as<absl::Status>;
-    });
+    (!kHas<A, kNextGame> || NextGameHooks<A>) && (!kHas<A, kRoundRobins> || RoundRobinHooks<A>) &&
+    (!kHas<A, kOpenings> || OpeningHooks<A>) && (!kHas<A, kClocked> || ClockHooks<A>) &&
+    (!kHas<A, kPublished> || NextGameHooks<A>);
 
 /// Each HostedState alternative has a full adapter that names the GameKind
 /// at its index, so a kind and its engine never disagree.
@@ -168,6 +191,61 @@ decltype(auto) VisitTable(GameKind kind, const std::optional<HostedState>& state
     return f(adapter, engine);
   });
 }
+
+/// The index of the one game whose adapter opts into `C`, kGames unless
+/// exactly one does.
+template <Capability C>
+constexpr std::size_t OnlyGameWith() {
+  return []<std::size_t... I>(std::index_sequence<I...>) {
+    std::size_t found = kGames;
+    std::size_t count = 0;
+    ((kHas<Adapter<EngineAt<I>>, C> ? (found = I, ++count) : count), ...);
+    return count == 1 ? found : kGames;
+  }(std::make_index_sequence<kGames>{});
+}
+
+/// The engine of the one game whose adapter opts into `C`. The machinery
+/// that is one game's alone — chess's clocks, engine bots and public
+/// feed, pong's rallies — is typed on this, and reaches a table through
+/// CapableEngine, never through its kind; a second game opting in fails
+/// here until that machinery serves both.
+template <Capability C>
+struct OnlyEngineWith {
+  static_assert(OnlyGameWith<C>() < kGames, "exactly one game opts into this capability");
+  using type = EngineAt<OnlyGameWith<C>()>;
+};
+template <Capability C>
+using EngineWith = typename OnlyEngineWith<C>::type;
+
+/// The engine a started table plays, if its game is the one opting into
+/// `C`; null otherwise, and before the table starts.
+template <Capability C>
+const EngineWith<C>* CapableEngine(const std::optional<HostedState>& state) {
+  return state.has_value() ? std::get_if<EngineWith<C>>(&*state) : nullptr;
+}
+
+/// Whether a started `kind` table whose game opts into `C` has ended the
+/// game it last started; false for any other table.
+template <Capability C>
+bool GameOverWith(GameKind kind, const std::optional<HostedState>& state) {
+  return VisitTable(kind, state, [](auto adapter, const auto* engine) {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, C> && NextGameHooks<A>) {
+      return engine != nullptr && A::CurrentGameOver(*engine);
+    } else {
+      return false;
+    }
+  });
+}
+
+/// A `kind` round robin in its game's envelope, one or the room's all;
+/// nothing for a game without round robins.
+std::optional<moonbase::games::GameEvents> RoundRobinEventOf(GameKind kind,
+                                                             const HeldRoundRobin& held);
+std::optional<moonbase::games::GameEvents> RoundRobinsEventOf(
+    GameKind kind, const std::vector<HeldRoundRobin>& held);
+/// The terms a `kind` round robin's pairing table waits on.
+std::optional<ChessTerms> RoundRobinTermsOf(GameKind kind, const HubStore::ChessEventRow& row);
 
 /// Whether a `kind` table's adapter opts into `capability`.
 inline bool HasCapability(GameKind kind, Capability capability) {

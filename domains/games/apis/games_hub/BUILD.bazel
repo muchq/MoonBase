@@ -110,6 +110,21 @@ cc_library(
     ],
 )
 
+cc_test(
+    name = "adapters_test",
+    size = "small",
+    srcs = ["adapters_test.cc"],
+    deps = [
+        ":adapters",
+        "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/cards/castle:game_state",
+        "//domains/games/libs/chess_play:game_state",
+        "//domains/games/libs/chess_play:table",
+        "//domains/games/libs/pong:table",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "protocol_input",
     hdrs = ["protocol_input.h"],
@@ -863,7 +878,6 @@ cc_library(
         ":chat_store",
         ":chess_archive",
         ":chess_bots",
-        ":chess_results",
         ":game_events",
         ":games_hub_smithy_server",
         ":hosted_game",
@@ -881,20 +895,12 @@ cc_library(
         ":surface",
         ":ticket_vault",
         ":voice",
-        ":wire_cards",
         ":wordchain",
         ":world",
         "//domains/ai/libs/deja_cpp:client",
         "//domains/ai/libs/microgpt_cpp:client",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards:dealer",
-        "//domains/games/libs/cards/castle:game_state",
-        "//domains/games/libs/cards/castle:player",
-        "//domains/games/libs/cards/golf:game_state",
-        "//domains/games/libs/cards/golf:player",
-        "//domains/games/libs/cards/rummy:game_state",
-        "//domains/games/libs/cards/rummy:table",
-        "//domains/games/libs/cards/spades:table",
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:table",
         "//domains/games/libs/mithril_cpp:client",

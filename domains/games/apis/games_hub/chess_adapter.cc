@@ -224,4 +224,18 @@ absl::Status Adapter<chess_play::Table>::Prepare(Start& start, const ChessOpener
   return absl::OkStatus();
 }
 
+moonbase::games::GameEvents Adapter<chess_play::Table>::RoundRobinEvent(
+    const HeldRoundRobin& held) {
+  return Wrap(Update::FromRoundrobin(RoundRobinOf(held.row, held.live)));
+}
+
+moonbase::games::GameEvents Adapter<chess_play::Table>::RoundRobinsEvent(
+    const std::vector<HeldRoundRobin>& held) {
+  moonbase::games::ChessRoundRobins round_robins;
+  for (const HeldRoundRobin& one : held) {
+    round_robins.roundRobins.push_back(RoundRobinOf(one.row, one.live));
+  }
+  return Wrap(Update::FromRoundrobins(std::move(round_robins)));
+}
+
 }  // namespace games_hub

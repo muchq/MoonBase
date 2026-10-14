@@ -36,7 +36,8 @@ struct Adapter<chess_play::Table> {
   };
   static constexpr GameKind kKind = GameKind::kChess;
   static constexpr std::size_t kMaxSeats = chess_play::GameState::kSeats;
-  static constexpr unsigned kCapabilities = kWatchable | kNextGame | kRoundRobins | kOpenings;
+  static constexpr unsigned kCapabilities =
+      kWatchable | kNextGame | kRoundRobins | kOpenings | kClocked | kEngineBots | kPublished;
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "chess_commands";
@@ -109,10 +110,26 @@ struct Adapter<chess_play::Table> {
     return table.next(start.setup->variant, start.setup->opening, start.terms.time_control,
                       context.now_ms, start.setup->id);
   }
+  // Ended between games, or closed.
+  static bool CurrentGameOver(const chess_play::Table& table) { return table.game().isOver(); }
+
   // A round robin's table plays its one game on the round robin's terms.
   static void RoundRobinStart(Start& start, const std::optional<ChessTerms>& table_terms,
                               const HubStore::ChessEventRow*) {
     if (table_terms.has_value()) start.terms = *table_terms;
+  }
+  static std::optional<ChessTerms> RoundRobinTerms(const HubStore::ChessEventRow& row) {
+    return row.terms;
+  }
+  static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
+  static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
+
+  static bool FlagDue(const chess_play::Table& table, int64_t now_ms) {
+    const chess_play::GameState& game = table.game();
+    return !game.isOver() && game.remainingMs(game.sideToMove(), now_ms) <= 0;
+  }
+  static absl::StatusOr<chess_play::Table> Flag(const chess_play::Table& table, int64_t now_ms) {
+    return table.inGame([now_ms](const chess_play::GameState& game) { return game.flag(now_ms); });
   }
 };
 
