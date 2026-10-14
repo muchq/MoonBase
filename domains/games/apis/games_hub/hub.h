@@ -21,6 +21,7 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "domains/ai/libs/deja_cpp/client.h"
+#include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/apis/games_hub/chat_store.h"
 #include "domains/games/apis/games_hub/chess_bots.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
@@ -34,11 +35,7 @@
 #include "domains/games/apis/games_hub/voice.h"
 #include "domains/games/apis/games_hub/wordchain.h"
 #include "domains/games/apis/games_hub/world.h"
-#include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/dealer.h"
-#include "domains/games/libs/cards/golf/game_state.h"
-#include "domains/games/libs/cards/rummy/table.h"
-#include "domains/games/libs/cards/spades/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
 #include "domains/games/libs/one_d4_cpp/index_queue.h"
@@ -100,10 +97,9 @@ struct HubTestHooks {
 ///
 /// Redaction discipline: every game broadcast is staged per recipient
 /// (StageGameViewsLocked, JoinedEventLocked) with views built by each
-/// game's ViewLocked/CastleViewLocked/RummyViewLocked — per-viewer state
-/// (golf's own peeks and held draw, castle's and rummy's own hand faces)
-/// has exactly one place per game
-/// to land and no identical-bytes path can leak it.
+/// game's Adapter::ViewOf — per-viewer state (golf's own peeks and held
+/// draw, castle's, rummy's and spades' own hand faces) has exactly one
+/// place per game to land and no identical-bytes path can leak it.
 ///
 /// Chat observability (#1226): chat_appends{result}, chat_rows_delivered,
 /// chat_catch_up_drains (one per drain, empty drains included, so
@@ -150,13 +146,14 @@ class GamesHub final {
   /// first event's value — which is the bug (#1323), not a fix for it.
   ///
   /// hub_commands{command} and hub_events{event} take the case names of
-  /// games.smithy's stream unions, golf_commands and golf_events those of
-  /// golf.smithy's, so their blocks are a copy of the model.
-  /// StreamSeriesMatchTheModelUnions parses the .smithy file and fails on
-  /// any drift, in either direction — that test is what makes a hand-kept
-  /// copy tolerable. The generated unions already hold this list (the
-  /// kNames array behind case_name()); a opal-cpp accessor exposing it
-  /// would let this block be derived and the parser test deleted.
+  /// games.smithy's stream unions, and each game's <game>_commands and
+  /// <game>_events those of its envelope's, listed in its adapter — so
+  /// those blocks are a copy of the model. The *SeriesMatchTheModelUnions
+  /// tests parse the .smithy files and fail on any drift, in either
+  /// direction — that is what makes a hand-kept copy tolerable. The
+  /// generated unions already hold these lists (the kNames array behind
+  /// case_name()); an opal-cpp accessor exposing it would let them be
+  /// derived and the parser tests deleted.
   ///
   /// hub_rejections carries the bounded `kind` (see RejectKind), never
   /// the free-text reason: the reason strings are ~30 literals spread across
@@ -334,8 +331,6 @@ class GamesHub final {
   /// Where a chess table starts, asked once per game at startGame. The
   /// default resolves the requested server-owned setup; tests fix its
   /// position. Call before serving: read without a lock thereafter.
-  using ChessOpener =
-      std::function<absl::StatusOr<chess_play::ChessSetup>(std::string_view setup_id)>;
   void SetChessOpener(ChessOpener opener);
 
   /// The wall clock chess's clocks read, absl::Now unless a test fixes
@@ -432,8 +427,6 @@ class GamesHub final {
   /// How long a flag the store could not take waits before the sweep
   /// tries that game again.
   static constexpr std::chrono::milliseconds kChessFlagRetry{5000};
-  /// A chess clock the starter did not name.
-  static constexpr chess_play::TimeControl kDefaultChessClock{180'000, 2'000};
   /// A room's round robins (#1647) live as long as it does; this many is
   /// an evening's worth, and a bound on what every wake reads.
   static constexpr std::size_t kMaxRoundRobinsPerRoom = 16;
@@ -461,19 +454,18 @@ class GamesHub final {
   /// CommitEntryLocked (store or not), and with a store the commit only
   /// lands when the stored row holds the predecessor — that condition
   /// is what serializes instances. kind is fixed at creation and says
-  /// which engine the state is; golf()/castle()/rummy() are the typed
-  /// reads.
+  /// which engine the state is; its adapter (adapters.h) reads it.
   struct GameEntry {
     GameKind kind = GameKind::kGolf;
     std::vector<std::string> roster;
     std::optional<HostedState> state;
     int64_t version = 0;
-    /// A chess or pong table's finished games this instance has sent
+    /// A multi-game table's finished games this instance has sent
     /// gameEnded for: whichever path moved the table on, the views staged
     /// after it announce the rest. Held from a row, the games so far count
     /// as told.
     mutable std::size_t games_announced = 0;
-    /// Members watching this chess table from no seat (#1633): they hear
+    /// Members watching this kWatchable table from no seat (#1633): they hear
     /// its views and results. Presence, like the world: held here, never
     /// stored. A table that ends hands them its closed view; one erased
     /// without it hands them gameLeft (DropWatchersLocked).
@@ -485,18 +477,6 @@ class GamesHub final {
     /// opened.
     std::optional<EventTag> event;
     [[nodiscard]] bool started() const { return state.has_value(); }
-    [[nodiscard]] const golf::GameState& golf() const { return std::get<golf::GameState>(*state); }
-    [[nodiscard]] const castle::GameState& castle() const {
-      return std::get<castle::GameState>(*state);
-    }
-    [[nodiscard]] const rummy::TableState& rummy() const {
-      return std::get<rummy::TableState>(*state);
-    }
-    [[nodiscard]] const chess_play::Table& chess() const {
-      return std::get<chess_play::Table>(*state);
-    }
-    [[nodiscard]] const pong::Table& pong() const { return std::get<pong::Table>(*state); }
-    [[nodiscard]] const spades::Table& spades() const { return std::get<spades::Table>(*state); }
   };
 
   struct Room {
@@ -539,18 +519,6 @@ class GamesHub final {
   /// order when two mutations race.
   using Writes = std::vector<HubStore::Op>;
 
-  using MoveFn = std::function<absl::StatusOr<golf::GameState>(const golf::GameState&, int seat)>;
-  /// A move of castle's or rummy's: the engine's next state, from the
-  /// mover's seat.
-  template <typename Engine>
-  using TableMoveFn = std::function<absl::StatusOr<Engine>(const Engine&, int seat)>;
-  /// What a successful engine move announces beyond the state views.
-  struct MoveEffects {
-    bool announce_turn = false;   // turnChanged when the seat advances
-    bool announce_knock = false;  // playerKnocked first
-    bool peek_fanout = false;     // views to all only once the countdown starts
-  };
-
   /// A player's room, game, and game entry resolved together; fields are
   /// non-null/engaged only as far as the player is actually placed.
   struct GameRef {
@@ -561,30 +529,23 @@ class GamesHub final {
   };
 
   void HandleCommand(const std::string& player_id, const moonbase::games::GameCommands& command);
-  void HandleMove(const std::string& player_id, const moonbase::games::GolfMove& move);
-  void HandleCastleMove(const std::string& player_id, const moonbase::games::CastleMove& move);
-  void HandleRummyMove(const std::string& player_id, const moonbase::games::RummyMove& move);
-  /// Spades' moves (#1658): a bid, a play, and the next hand's deal.
-  void HandleSpadesMove(const std::string& player_id, const moonbase::games::SpadesMove& move);
-  void HandleChessMove(const std::string& player_id, const moonbase::games::ChessMove& move);
-  /// A bot to the second seat of `player_id`'s chess table (#1618).
-  void AddChessBotMove(const std::string& player_id, int elo);
+  /// A move in `E`'s envelope: its adapter decodes it, and the hub runs
+  /// what it decodes to.
+  template <typename E>
+  void HandleGameMove(const std::string& player_id, const typename Adapter<E>::Move& move);
+  /// A bot to `player_id`'s table's next seat (#1618).
+  void AddBotMove(const std::string& player_id, const AddBot& bot, GameKind kind);
   /// The table's one seat posts the terms it starts on (#1633).
-  void ChallengeChessMove(const std::string& player_id, ChessTerms terms);
-  /// After a seat fills `player_id`'s table: a challenge starts on its
-  /// terms. `terms` was read under the lock that seated it.
-  void StartChallengeMove(const std::string& player_id, const std::optional<ChessTerms>& terms);
-  /// `player_id` watches a chess or pong table in its room from no seat
+  void PostTermsMove(const std::string& player_id, ChessTerms terms, GameKind kind);
+  /// The start a table makes once its last seat fills (Adapter::
+  /// FilledStart), to run once the lock that seated it is released; null
+  /// when it makes none. Callers hold mu_.
+  std::function<void()> FilledStartLocked(const std::string& player_id, const GameEntry& entry);
+  /// `player_id` watches a kWatchable table in its room from no seat
   /// (#1633); `kind` is the game whose envelope asked.
   void WatchMove(const std::string& player_id, const std::string& game_id, GameKind kind);
-  /// Pong's moves: its own startGame, a seat's paddle, a bot to the
-  /// second seat, and watching.
-  void HandlePongMove(const std::string& player_id, const moonbase::games::PongMove& move);
-  /// A pong table's first game, or its next, on `variant` (a round
-  /// robin's table on the round robin's, once).
-  void StartPongMove(const std::string& player_id, pong::Variant variant);
+  /// Where a pong seat's paddle points.
   void PaddleMove(const std::string& player_id, const moonbase::games::PongPaddle& paddle);
-  void AddPongBotMove(const std::string& player_id, int level);
   /// Runs a pong table's rally here from a serve, if the table is in play
   /// and nothing here runs it yet. Callers hold mu_.
   void HostPongLocked(const std::string& room_id, const std::string& game_id,
@@ -613,10 +574,8 @@ class GamesHub final {
   /// The tables playing a round robin's pairings now, by pairing index.
   std::map<int, std::string> LiveTablesLocked(const Room& room,
                                               const std::string& round_robin_id) const;
-  /// Whether a chess table's game is over: ended between games or closed.
-  static bool ChessGameOver(const GameEntry& entry);
-  /// Whether a chess or pong table's game is over, a pairing's result if
-  /// the table plays one.
+  /// Whether a round robin game's table has ended the game it last
+  /// started: a pairing's result if the table plays one.
   static bool TableGameOver(const GameEntry& entry);
   /// The pairing a tagged table plays, if its round robin is held.
   const Pairing* PairingOfLocked(const Room& room, const GameEntry& entry) const;
@@ -644,11 +603,6 @@ class GamesHub final {
   /// mu_. The table watched, if any. Every way of sitting down or leaving
   /// the room comes through here first.
   std::optional<std::string> StopWatchingLocked(const std::string& player_id);
-  /// The lifecycle half of castle's, rummy's and chess's move unions, which
-  /// share its shapes (chess's startGame aside, which HandleChessMove takes
-  /// first): true when `move` was one and has been handled.
-  template <typename Move>
-  bool LifecycleMove(const std::string& player_id, const Move& move, GameKind kind);
   /// The lobby member: the session's world is its room's, or the plaza's.
   void HandleLobby(const std::string& player_id, const moonbase::games::LobbyAction& action);
   /// The world key a session stands in, or would: its room, else the plaza.
@@ -674,31 +628,30 @@ class GamesHub final {
   /// in that table's own envelope.
   void CreateGameMove(const std::string& player_id, GameKind kind);
   void JoinGameMove(const std::string& player_id, const std::string& game_id, GameKind kind);
-  /// `time_control` and `chess_setup` are chess's, `pong_variant` pong's,
-  /// `spades_mode` spades', and nothing to any other game.
-  void StartGameMove(const std::string& player_id,
-                     chess_play::TimeControl time_control = kDefaultChessClock,
-                     std::optional<chess_play::ChessSetup> chess_setup = std::nullopt,
-                     std::optional<pong::Variant> pong_variant = std::nullopt,
-                     std::optional<spades::Mode> spades_mode = std::nullopt);
-  /// The shared shape of every in-game engine move: transition, then
-  /// stage the fan-out (views, turn change, game end) the result implies.
-  void EngineMove(const std::string& player_id, const MoveFn& move, MoveEffects effects);
-  /// Castle's and rummy's in-game moves: the same commit loop, and the
-  /// engine's own turn order decides the turnChanged. `kind` is the game
-  /// `Engine` plays; a move on another game's table is refused.
-  template <typename Engine>
-  void TableEngineMove(const std::string& player_id, GameKind kind,
-                       const TableMoveFn<Engine>& move);
+  /// Out of the player's table, or out of watching one at a kWatchable
+  /// game's.
+  void LeaveTableMove(const std::string& player_id, GameKind kind);
+  /// A startGame in `E`'s envelope: on a seated table with next_game, its
+  /// next game; otherwise StartGameMove.
+  template <typename E>
+  void StartMove(const std::string& player_id, StartGame<typename Adapter<E>::Start> request);
+  /// The player's table opens on its own game, on `start` if that game is
+  /// `E` and on its defaults otherwise.
+  template <typename E>
+  void StartGameMove(const std::string& player_id, typename Adapter<E>::Start start);
+  /// Every in-game engine move: the transition, then the fan-out (views,
+  /// turn change, game end) the result implies. A move on another game's
+  /// table is refused.
+  template <typename E>
+  void TableEngineMove(const std::string& player_id, const Transition<E>& move);
   /// TableEngineMove's commit loop on a resolved game, as `player_id`'s
   /// seat: the refusal if there is one, and otherwise the fan-out staged.
   /// The chess clock sweep calls it for the seat on turn, which sent
   /// nothing and so is told nothing of a refusal.
-  template <typename Engine>
+  template <typename E>
   std::optional<games_hub::Refusal> ApplyTableEngineMoveLocked(GameRef ref,
                                                                const std::string& player_id,
-                                                               GameKind kind,
-                                                               const TableMoveFn<Engine>& move,
+                                                               const Transition<E>& move,
                                                                Outbox& outbox);
   /// Epoch milliseconds on the chess clock.
   int64_t NowMs() const;
@@ -714,7 +667,7 @@ class GamesHub final {
   void DeclareMetrics();
   void TrackActive(int delta);
   void CountCommand(const moonbase::games::GameCommands& command);
-  /// Every event leaves through here so golf_events sees each send.
+  /// Every event leaves through here so its series sees each send.
   void Send(const std::string& player_id, moonbase::games::GameEvents event,
             opal::server::DeliveryClass delivery = {});
 
@@ -866,18 +819,9 @@ class GamesHub final {
   /// Builders; callers hold mu_.
   moonbase::games::RoomState RoomStateLocked(const std::string& room_id, const Room& room) const;
   void StageRoomStateLocked(const std::string& room_id, Outbox& outbox) const;
-  moonbase::games::GameView ViewLocked(const std::string& game_id, const GameEntry& entry,
-                                       const std::string& viewer_id) const;
-  moonbase::games::ChessView ChessViewLocked(const std::string& game_id,
-                                             const GameEntry& entry) const;
-  moonbase::games::PongView PongViewLocked(const std::string& game_id,
-                                           const GameEntry& entry) const;
-  moonbase::games::CastleView CastleViewLocked(const std::string& game_id, const GameEntry& entry,
-                                               const std::string& viewer_id) const;
-  moonbase::games::RummyView RummyViewLocked(const std::string& game_id, const GameEntry& entry,
-                                             const std::string& viewer_id) const;
-  moonbase::games::SpadesView SpadesViewLocked(const std::string& game_id, const GameEntry& entry,
-                                               const std::string& viewer_id) const;
+  /// What the table's views read besides its engine (adapter.h), as of
+  /// now.
+  TableContext ContextLocked(const std::string& game_id, const GameEntry& entry) const;
   /// One viewer's gameJoined in the table's own vocabulary.
   moonbase::games::GameEvents JoinedEventLocked(const std::string& game_id, const GameEntry& entry,
                                                 const std::string& viewer_id) const;
