@@ -647,9 +647,8 @@ which fails to build once a second game opts in.
 
 ## Notes
 
-- Persistence rides `GAMES_HUB_DB_URL`: credentials
-  (`PgTicketVault`, hashed at rest, spend = single-row
-  `DELETE ... RETURNING`), rooms, membership stats and live games
+- Persistence rides `GAMES_HUB_DB_URL`: credentials (`PgTicketVault`,
+  hashed at rest, spend = single-row `DELETE ... RETURNING`), rooms, membership stats and live games
   (`PgHubStore` — rooms and members staged under the hub lock and applied
   FIFO by one writer; game commits conditional on a version counter), and
   chat (`PgChatStore`). A deploy keeps games: players resume by token into
@@ -670,14 +669,14 @@ which fails to build once a second game opts in.
 - Observability: unary requests ride the shared aura chain; the
   stream side counts admissions, live sessions, disconnects, grace
   expiries, and the command/event flow (`hub_*` for the room layer —
-  sessions, seats, refusals, its own commands and events — `golf_*`,
-  `castle_*`, `rummy_*`, `chess_*`, `lobby_*` and `voice_*` for each tenant's envelope, `chat_*` for
-  chat). The tape rides the lobby's prefix: `lobby_tape_polls{result}`,
+  sessions, seats, refusals, its own commands and events — each game's
+  adapter's `<game>_*` series, `lobby_*` and `voice_*` for each tenant's
+  envelope, `chat_*` for chat). The tape rides the lobby's prefix: `lobby_tape_polls{result}`,
   `lobby_tape_splats`, and the `lobby_tape_poller_active` gauge, which is
   1 exactly while a glasshouse is occupied.
 - `ALLOWED_ORIGINS` unset admits all origins (local dev); production
   sets the allowlist.
 - Deployed behind Caddy at `/games/v2/*` (`deploy/consolidated`); the
-  muchq.com games, golf, castle, rummy, chess and thoughts UIs' only backend. No game
-  has a route of its own: all ride the one play stream, and the origin
+  muchq.com games and thoughts UIs' only backend. No game has a route of
+  its own: all ride the one play stream, and the origin
   gate is per connection, not per game.
