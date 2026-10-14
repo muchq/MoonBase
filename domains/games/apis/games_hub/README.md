@@ -610,19 +610,35 @@ nobody.
 
 ## Redaction
 
-A castle table redacts by `CastleViewLocked`: own hand faces (everyone's
-once the game ends), every face-up row, face-down rows as counts. A rummy
-table by `RummyViewLocked`: own hand faces (everyone's once the deal
-ends, and between deals), other hands as counts, the stock as a count; the melds, the
-discard's top and the card taken from it this turn are public, and a
-stock draw's `lastMove` names no card. A chess table hides nothing:
-`ChessViewLocked` builds one view for both seats and every watcher. Golf's rules, below,
-are `ViewLocked`'s.
+Each game's view is its adapter's `ViewOf` (`<game>_adapter.cc`), built per
+recipient by `StageViews` (adapters.cc). A castle table redacts own hand
+faces (everyone's once the game ends), every face-up row, face-down rows as
+counts. A rummy table: own hand faces (everyone's once the deal ends, and
+between deals), other hands as counts, the stock as a count; the melds, the
+discard's top and the card taken from it this turn are public, and a stock
+draw's `lastMove` names no card. A spades seat sees its own hand and
+everyone else's as a count. A chess or pong table hides nothing: one view
+serves both seats and every watcher (`kWatchable`).
 
-Every game broadcast is per-recipient (`ViewLocked`): own card faces only
-at the viewer's peeked indexes, the drawn card only to its holder, other
-hands always null slots, scores only at game end. Room state carries
-lobby-safe summaries only.
+A golf view carries own card faces only at the viewer's peeked indexes, the
+drawn card only to its holder, other hands always null slots, scores only
+at game end. Room state carries lobby-safe summaries only.
+
+## A game's adapter
+
+Everything the hub knows of one game is its `Adapter<Engine>`
+(`<game>_adapter.{h,cc}`, #1621): its envelope's unions and counter
+series, phase and turn, stats, views and their envelopes, how its move
+union decodes into the hub's actions, how a table opens, and which shared
+machinery it opts into (`kCapabilities`: watching, next games, round
+robins, openings, clocks, engine bots, rallies, the public feed).
+`adapters.h` holds every engine in `HostedState` to the hooks, so a game
+missing one does not build, and the hub dispatches on the adapter rather
+than on the kind. A new game is its engine, its smithy envelope, a
+`HostedState`/`GameKind` entry, and its adapter. Machinery only one game
+has yet (chess's clocks, engine bots and feed; pong's rallies) is typed on
+that game's engine through `EngineWith`, which fails to build once a
+second game opts in.
 
 ## Notes
 

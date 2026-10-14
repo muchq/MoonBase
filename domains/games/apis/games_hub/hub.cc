@@ -62,6 +62,8 @@ using ClockedTable = EngineWith<kClocked>;
 using Clock = Adapter<ClockedTable>;
 using BotTable = EngineWith<kEngineBots>;
 using RallyTable = EngineWith<kRealtime>;
+using Feed = Adapter<EngineWith<kPublished>>;
+using RallyGame = Adapter<RallyTable>;
 
 template <typename... F>
 struct Overloaded : F... {
@@ -2433,7 +2435,7 @@ void GamesHub::ChessHistoryMove(const std::string& player_id) {
   for (const HubStore::ChessGameRow& row : history->games) {
     answer.games.push_back(ChessSummaryOf(row));
   }
-  Send(player_id, Adapter<chess_play::Table>::Wrap(ChessUpdate::FromHistory(std::move(answer))));
+  Send(player_id, Feed::Wrap(ChessUpdate::FromHistory(std::move(answer))));
 }
 
 void GamesHub::ChessReviewMove(const std::string& player_id,
@@ -2459,7 +2461,7 @@ void GamesHub::ChessReviewMove(const std::string& player_id,
     Reject(player_id, RejectKind::kState, "no such game in this room");
     return;
   }
-  Send(player_id, Adapter<chess_play::Table>::Wrap(ChessUpdate::FromReview(ChessReviewOf(**row))));
+  Send(player_id, Feed::Wrap(ChessUpdate::FromReview(ChessReviewOf(**row))));
 }
 
 void GamesHub::PublishChessMove(const std::string& player_id, bool published) {
@@ -2496,7 +2498,7 @@ void GamesHub::StagePublishedLocked(const Room& room, bool published,
   update.published = published;
   update.by = by;
   for (const auto& [member_id, member] : room.members) {
-    outbox.To(member_id, Adapter<chess_play::Table>::Wrap(ChessUpdate::FromPublished(update)));
+    outbox.To(member_id, Feed::Wrap(ChessUpdate::FromPublished(update)));
   }
 }
 
@@ -3176,7 +3178,7 @@ int GamesHub::TickPongOnce() {
         frame.paddles.push_back(point);
       }
       frame.serveIn = rally.serve_wait;
-      const GameEvents event = Adapter<pong::Table>::Wrap(PongUpdate::FromFrame(frame));
+      const GameEvents event = RallyGame::Wrap(PongUpdate::FromFrame(frame));
       for (const std::string& recipient : entry->roster) {
         if (!PongBotLevel(recipient).has_value()) frames.emplace_back(recipient, game_id, event);
       }
