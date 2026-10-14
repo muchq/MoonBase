@@ -23,8 +23,6 @@ namespace {
 using json = nlohmann::json;
 using Socket = std::shared_ptr<opal::http::WebSocket>;
 
-constexpr char kPlayPath[] = "/games/v2/play";
-
 class SpadesWireTest : public HubWireFixture {
  protected:
   // The next frame on `socket` of `event_type`, skipping any other.

@@ -31,7 +31,6 @@ namespace {
 
 using json = nlohmann::json;
 
-constexpr char kPlayPath[] = "/games/v2/play";
 const std::string kAvailableSetups =
     R"("availableSetups":[{"name":"Standard starting position","setupId":"standard"},)"
     R"({"name":"Random K+P vs K","setupId":"random-kpk"},)"

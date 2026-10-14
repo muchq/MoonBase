@@ -47,10 +47,6 @@ namespace {
 
 using json = nlohmann::json;
 
-// The one route every deployed web client dials; renaming it
-// strands them all.
-constexpr char kPlayPath[] = "/games/v2/play";
-
 class HubWireTest : public HubWireFixture {
  protected:
   std::shared_ptr<opal::http::WebSocket> DialPlay(const std::string& query) {

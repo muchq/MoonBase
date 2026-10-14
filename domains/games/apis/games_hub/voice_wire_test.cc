@@ -17,7 +17,6 @@ namespace {
 
 using json = nlohmann::json;
 
-constexpr char kPlayPath[] = "/games/v2/play";
 constexpr char kJoin[] = R"({"action":{"join":{}}})";
 
 class VoiceWireTest : public HubWireFixture {

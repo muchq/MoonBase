@@ -28,8 +28,6 @@ namespace {
 
 using json = nlohmann::json;
 
-constexpr char kPlayPath[] = "/games/v2/play";
-
 class RummyWireTest : public HubWireFixture {
  protected:
   std::shared_ptr<opal::http::WebSocket> DialReady(json& session) {

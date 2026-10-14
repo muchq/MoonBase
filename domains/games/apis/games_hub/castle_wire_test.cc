@@ -25,10 +25,6 @@ namespace {
 
 using json = nlohmann::json;
 
-// Castle rides the room stream on the one route the deployed client
-// dials; there is no castle route to rename.
-constexpr char kPlayPath[] = "/games/v2/play";
-
 class CastleWireTest : public HubWireFixture {
  protected:
   std::shared_ptr<opal::http::WebSocket> DialReady(json& session) {

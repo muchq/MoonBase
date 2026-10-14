@@ -28,10 +28,6 @@ namespace {
 
 using json = nlohmann::json;
 
-// The one stream's route; renaming it strands every deployed web
-// client.
-constexpr char kPlayPath[] = "/games/v2/play";
-
 // The join the lobby sends: the fixture player, in the lobby envelope,
 // naming no room.
 constexpr char kJoinPayload[] =

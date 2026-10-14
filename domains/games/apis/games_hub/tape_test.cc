@@ -37,7 +37,6 @@ namespace {
 
 using json = nlohmann::json;
 
-constexpr char kPlayPath[] = "/games/v2/play";
 constexpr char kGlasshouse[] = R"({"action":{"setGeometry":{"geometry":{"glasshouse":{}}}}})";
 constexpr char kJoinPayload[] =
     R"({"action":{"join":{"position":[10,0,-5],"color":[0.8,0.2,0.6],"shape":0}}})";

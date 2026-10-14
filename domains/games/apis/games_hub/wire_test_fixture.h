@@ -44,9 +44,10 @@
 
 namespace games_hub {
 
-// The session route every web client mints on; renaming it strands every
-// deployed client, so the string lives here verbatim. The stream routes
-// are each suite's own pin.
+// The routes every deployed web client mints its session on and dials the
+// one stream on, every tenant riding it; renaming either strands them all,
+// so the strings live here verbatim.
+inline constexpr char kPlayPath[] = "/games/v2/play";
 inline constexpr char kSessionPath[] = "/games/v2/session";
 
 inline constexpr std::chrono::milliseconds kWireReceiveBudget{5000};

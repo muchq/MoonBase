@@ -27,9 +27,6 @@ namespace {
 
 using json = nlohmann::json;
 
-// Golf rides the room stream on the one route the deployed client dials.
-constexpr char kPlayPath[] = "/games/v2/play";
-
 class GolfWireTest : public HubWireFixture {
  protected:
   std::shared_ptr<opal::http::WebSocket> DialReady(json& session) {
