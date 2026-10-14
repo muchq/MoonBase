@@ -631,19 +631,19 @@ Everything the hub knows of one game is its `Adapter<Engine>`
 series, its kind's word (`kName`: the wire's, the store's and the event
 log's), phase and turn, stats, views and their envelopes, how its move
 union decodes into the hub's actions, how a table opens, how its engine
-is stored (`Serialize`/`Deserialize`), and which shared machinery it opts
-into (`kCapabilities`: watching, next games, round robins, openings,
-clocks, engine bots, rallies, the public feed, challenges).
+is stored (`Serialize`/`Deserialize`), and which shared machinery it
+opts into (`kCapabilities`: watching, next games, round robins,
+openings, clocks, engine bots, rallies, the public feed, challenges).
 `adapters.h` holds every engine in `HostedState` to the hooks, so a game
-missing one does not build, and the hub and `PgHubStore` dispatch on the
+missing one does not build, and the hub and both stores dispatch on the
 adapter rather than on the kind. A new game is its engine, its smithy
 envelope, a `HostedState`/`GameKind` entry, and its adapter; then the
-game lists downstream (stats `hubVariants`, deja `VARIANTS`, prom_proxy's
-games_hub tiles), which `otel_contract` holds to the adapters, and
-`adapters_test`'s `EveryGame` opens and round-trips it. Machinery only one game
-has yet (chess's clocks, engine bots and feed; pong's rallies) is typed on
-that game's engine through `EngineWith`, which fails to build once a
-second game opts in.
+game lists downstream (stats `hubVariants`, deja `VARIANTS`,
+prom_proxy's games_hub tiles), which `otel_contract` holds to the
+adapters, and `adapters_test`'s `EveryGame` opens and round-trips it.
+Machinery only one game has yet (chess's clocks, engine bots and feed;
+pong's rallies) is typed on that game's engine through `EngineWith`,
+which fails to build once a second game opts in.
 
 ## Notes
 
