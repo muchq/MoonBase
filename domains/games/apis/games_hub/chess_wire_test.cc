@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "absl/time/time.h"
+#include "domains/games/apis/games_hub/memory_hub_store.h"
 #include "domains/games/apis/games_hub/wire_test_fixture.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "opal/http/message.h"

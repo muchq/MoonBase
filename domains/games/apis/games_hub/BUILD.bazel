@@ -1092,6 +1092,7 @@ cc_test(
         ":games_hub_smithy_server",
         ":hub",
         ":id_generator",
+        ":memory_hub_store",
         ":rate_limiter",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
