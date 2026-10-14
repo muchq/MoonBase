@@ -702,6 +702,50 @@ class GamesHubStreamFixture : public testing::Test {
     return room;
   }
 
+  // A game's seat cap, as a table of `seats` refuses the next join: the
+  // host opens it in the envelope `wrap` puts a move in, `seats - 1` more
+  // join, and one more is turned away.
+  template <typename MoveUnion, typename Wrap, typename Receive>
+  void ExpectSeatCap(std::size_t seats, Wrap wrap, Receive receive) {
+    auto room = SeatedRoom(static_cast<int>(seats) + 1);
+    ASSERT_TRUE(room.has_value());
+    Seat& host = room->seats.front();
+    ASSERT_TRUE(host.stream.Send(wrap(MoveUnion::FromCreategame(moonbase::games::CreateGame{}))).ok());
+    auto created = receive(host.stream, "gameJoined");
+    ASSERT_TRUE(created.has_value());
+    moonbase::games::JoinGame join;
+    join.gameId = created->as_gameJoined_or_null()->view.gameId;
+    for (std::size_t i = 1; i < seats; ++i) {
+      ASSERT_TRUE(room->seats[i].stream.Send(wrap(MoveUnion::FromJoingame(join))).ok());
+      ASSERT_TRUE(receive(room->seats[i].stream, "gameJoined").has_value()) << "seat " << i;
+    }
+    ASSERT_TRUE(room->seats[seats].stream.Send(wrap(MoveUnion::FromJoingame(join))).ok());
+    auto refused = ReceiveCase(room->seats[seats].stream, "commandRejected");
+    ASSERT_TRUE(refused.has_value());
+    EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "game is full");
+  }
+
+  // The room lists the table under `want`, as `seat` asks for the room
+  // now. Broadcasts queued ahead of the answer are read past; the last
+  // status seen is reported when `want` never comes.
+  void ExpectListedStatus(Seat& seat, const std::string& game_id, const std::string& want) {
+    ASSERT_TRUE(
+        seat.stream
+            .Send(moonbase::games::GameCommands::FromGetroomstate(moonbase::games::GetRoomState{}))
+            .ok());
+    std::string seen = "<unlisted>";
+    for (int i = 0; i < 8; ++i) {
+      auto room = ReceiveCase(seat.stream, "roomState");
+      if (!room.has_value()) break;
+      seen = "<unlisted>";
+      for (const auto& game : room->as_roomState_or_null()->games) {
+        if (game.gameId == game_id) seen = game.status;
+      }
+      if (seen == want) return;
+    }
+    ADD_FAILURE() << "table " << game_id << " listed as " << seen << ", want " << want;
+  }
+
   // Room with two seats in a started game: with the NoShuffleDealer the
   // first seat holds the aces and the second the kings, Q♠ seeding the
   // discard. Returns nullopt (with an ADD_FAILURE already recorded by the
