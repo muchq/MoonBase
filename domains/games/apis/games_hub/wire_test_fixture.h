@@ -44,14 +44,15 @@
 
 namespace games_hub {
 
-// The session route every web client mints on; renaming it strands every
-// deployed client, so the string lives here verbatim. The stream routes
-// are each suite's own pin.
+// The routes every deployed web client mints its session on and dials the
+// one stream on, every tenant riding it; renaming either strands them all,
+// so the strings live here verbatim.
+inline constexpr char kPlayPath[] = "/games/v2/play";
 inline constexpr char kSessionPath[] = "/games/v2/session";
 
 inline constexpr std::chrono::milliseconds kWireReceiveBudget{5000};
 
-// Effectively-unlimited stream budgets (#1240), the same numbers as
+// Effectively-unlimited stream budgets, the same numbers as
 // stream_test_fixture.h's UnlimitedRateLimits; a limiter suite tightens one
 // family on top. Spelled here so this header stays free of the generated
 // client.

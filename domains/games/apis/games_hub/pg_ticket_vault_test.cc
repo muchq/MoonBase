@@ -11,9 +11,8 @@
 
 namespace {
 
-// Real-postgres suite (#1194's honest test story: the risky code is the
-// SQL, so no in-memory double). Runs when GAMES_HUB_TEST_DB_URL points at
-// a scratch database — e.g.
+// Real postgres, because the risky code is the SQL: no in-memory double.
+// Runs when GAMES_HUB_TEST_DB_URL points at a scratch database — e.g.
 //   GAMES_HUB_TEST_DB_URL=postgresql://user:pass@localhost:5432/games_hub_test
 // and skips otherwise; CI sets it.
 class PgTicketVaultTest : public ::testing::Test {
@@ -76,7 +75,7 @@ TEST_F(PgTicketVaultTest, ResumeTokenIsMultiUseUntilExpiry) {
   EXPECT_FALSE(expired.ResolveResumeToken(*dead).has_value());
 }
 
-// The point of the shared vault (#1194): a credential minted by one instance is
+// The point of the shared vault: a credential minted by one instance is
 // honored by another.
 TEST_F(PgTicketVaultTest, CredentialsAreVisibleAcrossVaultInstances) {
   auto minter = MakeVault();

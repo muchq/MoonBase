@@ -1,4 +1,4 @@
-// The lobby member of the room stream (#1490), driven through the
+// The lobby member of the room stream, driven through the
 // generated client over the in-memory pair: the world is the session's
 // room's, or the plaza's while unroomed; a room change and a closed
 // socket leave it; a roomId on this stream can only agree with that.
@@ -360,7 +360,7 @@ TEST_F(LobbyFixture, ASiblingsMemberDropLeavesTheWorldToo) {
   EXPECT_EQ(Listed(ReceiveLobby(bob->stream, "worldState")), std::vector<std::string>{});
 }
 
-// Voice is the room's too (#1590): a sibling's drop that takes the member
+// Voice is the room's too: a sibling's drop that takes the member
 // out of the room takes them out of its voice, the rest of it told, and
 // they are free to join voice again in whatever room they go to next.
 TEST_F(LobbyFixture, ASiblingsMemberDropLeavesVoiceToo) {

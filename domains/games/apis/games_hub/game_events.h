@@ -11,7 +11,7 @@
 
 namespace games_hub {
 
-/// The hub's domain events (#1571): one JSON object per line, written to
+/// The hub's domain events: one JSON object per line, written to
 /// disk by //domains/platform/libs/event_log and read months later by the
 /// stats pipeline. Not metrics — Prometheus keeps the aggregate and drops
 /// the rows, and the rows are the point.
@@ -88,7 +88,7 @@ std::optional<GameFinished> FinishedOf(const HostedState& state, std::size_t pla
 /// spelling, which is the wire's and the stored row's. Its creator is
 /// the only one in it, so there is nothing to count yet.
 std::string RoomCreatedLine(absl::Time when, std::string_view room, std::string_view surface);
-/// A world was reshaped under whoever was standing in it (#1554), onto
+/// A world was reshaped under whoever was standing in it, onto
 /// `surface`. Nothing records the sphere's radius: the question this
 /// answers is which shapes people reach for, and a radius is a number
 /// per room rather than a word to group by.

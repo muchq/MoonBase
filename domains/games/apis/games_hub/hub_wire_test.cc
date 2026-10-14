@@ -1,5 +1,5 @@
 // Beyoncé Rule wire-contract tests: golden fixtures pinning the raw HTTP
-// bytes and eventstream frames the golf WEB CLIENT (the browser client on
+// bytes and eventstream frames the WEB CLIENT (the browser client on
 // ADR-0018's JSON-text wire) depends on. The typed-client e2e suites
 // cannot catch a wire rename — both sides regenerate together — so every
 // assertion here is on raw strings: paths, status codes, JSON key names,
@@ -12,18 +12,12 @@
 // bodies; sessionReady fresh (no roomId) and resumed (roomId present);
 // roomState; roomLeft; commandRejected; the joiner's roomState-then-
 // roomChatHistory order (history sent even when empty); roomChat's
-// server-assigned messageId and sentAtUnixMillis; the golf command
-// envelope ({"move":{...}}) and update envelope ({"update":{...}})
-// through createGame → gameCreated/gameJoined, joinGame →
-// gameJoined/gameState, startGame → gameStarted plus the dealt opening
-// GameView (the full key set, card rank/suit spelling included); and the
-// two terminal exception frames (Unauthenticated, SeatConflict); a
-// resume against a live wire, which closes that wire with no frame and
-// close code 4001 "superseded" and admits the resume; and a
-// bot's reply with mithril's wordchain ladder, live and replayed. Updates
-// this suite does not drive (peek/draw/swap/knock, turnChanged,
-// gameEnded) share GameView's pinned shape but keep their byte-level
-// coverage in hub_e2e_test's typed assertions only.
+// server-assigned messageId and sentAtUnixMillis; the two terminal
+// exception frames (Unauthenticated, SeatConflict); a resume against a
+// live wire, which closes that wire with no frame and close code 4001
+// "superseded" and admits the resume; and a bot's reply with mithril's
+// wordchain ladder, live and replayed. Each game's envelope is pinned
+// beside its game, in <game>_wire_test.
 //
 // The harness is wire_test_fixture.h's: GamesHub behind the generated
 // GamesHubServer, unary requests through Loopback, streams through
@@ -53,10 +47,6 @@ namespace {
 
 using json = nlohmann::json;
 
-// The one route every deployed web client dials (#1490); renaming it
-// strands them all.
-constexpr char kPlayPath[] = "/games/v2/play";
-
 class HubWireTest : public HubWireFixture {
  protected:
   std::shared_ptr<opal::http::WebSocket> DialPlay(const std::string& query) {
@@ -67,7 +57,7 @@ class HubWireTest : public HubWireFixture {
   }
 };
 
-// Consumer: the golf web client's session mint. It reads exactly these
+// Consumer: the web client's session mint. It reads exactly these
 // three camelCase keys from the response body; the byte-level prefix pins
 // key order and spelling so a codegen change that renames or re-nests any
 // of them fails here, not in a browser.
@@ -91,7 +81,7 @@ TEST_F(HubWireTest, SessionMintPinsRawResponseBody) {
   EXPECT_FALSE(body["resumeToken"].get<std::string>().empty());
 }
 
-// Consumer: the golf web client's reconnect flow. It stores resumeToken
+// Consumer: the web client's reconnect flow. It stores resumeToken
 // and replays it as {"resumeToken": ...}; the hub must return the same
 // playerId and echo the same token (the long-lived credential must not
 // churn), while minting a fresh single-use ticket.
@@ -109,7 +99,7 @@ TEST_F(HubWireTest, ResumeTokenRoundTripsThroughTheRawWire) {
   EXPECT_NE(resumed["ticket"], first["ticket"]);
 }
 
-// Consumer: the golf web client's Play dial error handling. On this wire
+// Consumer: the web client's Play dial error handling. On this wire
 // an unspendable ticket is refused AFTER the upgrade as one terminal
 // exception frame, then a clean close — exactly what the browser's
 // event-stream decoder must surface as its dial failure. (Production
@@ -133,7 +123,7 @@ TEST_F(HubWireTest, InvalidTicketRefusesWithTerminalUnauthenticatedFrame) {
   EXPECT_FALSE(closed->has_value()) << "expected a clean close after the exception frame";
 }
 
-// Consumer: the golf web client's whole happy path, raw end to end: mint
+// Consumer: the web client's whole happy path, raw end to end: mint
 // a session over HTTP, dial Play with the ticket, read sessionReady, send
 // createRoom, read roomState. Pins the envelope headers and the exact
 // payload bytes (key names AND values are deterministic under the
@@ -169,7 +159,7 @@ TEST_F(HubWireTest, ValidSessionStreamsSessionReadyAndRoomStateFrames) {
       R"("playerId":"player-1","totalScore":0}],"roomId":"room-1"})");
 }
 
-// Consumer: the golf web client's in-band error toast. A syntactically
+// Consumer: the web client's in-band error toast. A syntactically
 // valid command the hub refuses (joining a room that does not exist)
 // comes back as a commandRejected EVENT — not an exception, the stream
 // survives — whose payload carries the one "reason" key the UI renders.
@@ -196,102 +186,7 @@ TEST_F(HubWireTest, SemanticallyInvalidCommandYieldsCommandRejectedEvent) {
   EXPECT_EQ(HeaderText(*room, ":event-type"), "roomState");
 }
 
-// Consumer: the golf web client's game UI, whose whole vocabulary is the
-// golf envelope — {"move":{...}} up inside the `golf` command,
-// {"update":{...}} down inside the `golf` event. Under NoShuffleDealer +
-// SequentialIdGenerator every byte is deterministic, so the goldens pin
-// the GolfUpdate member names (gameCreated, gameJoined, gameState,
-// gameStarted) and the full GameView key set: the waiting view on
-// create/join, and the dealt opening view — currentPlayerId, discardTop,
-// and the card rank/suit spelling — on start.
-TEST_F(HubWireTest, GameFlowPinsGolfCommandAndUpdatePayloadBytes) {
-  json creator_session;
-  auto creator = DialReady(creator_session);
-  ASSERT_TRUE(creator->Send(CommandFrame("createRoom", "{}")).ok());
-  (void)EventPayload(NextFrame(*creator), "roomState");
-
-  // createGame, framed exactly as the browser mints it. The creator hears
-  // the room-wide announcement, then their own seat (a gameJoined with the
-  // waiting-phase view: four face-down slots, no optional members), then
-  // the lobby list gaining the game and the creator's table. A member
-  // at no table carries no table key at all (the goldens above).
-  ASSERT_TRUE(creator->Send(CommandFrame("golf", R"({"move":{"createGame":{}}})")).ok());
-  EXPECT_EQ(EventPayload(NextFrame(*creator), "golf"),
-            R"({"update":{"gameCreated":{"createdBy":"player-1","gameId":"GAME01"}}})");
-  EXPECT_EQ(EventPayload(NextFrame(*creator), "golf"),
-            R"({"update":{"gameJoined":{"view":{"allPlayersPeeked":false,"discardCount":0,)"
-            R"("drawPileCount":0,"gameId":"GAME01","phase":"waiting","players":[)"
-            R"({"cards":[{},{},{},{}],"hasPeeked":false,"playerId":"player-1",)"
-            R"("revealedIndexes":[]}]}}}})");
-  EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
-            R"({"games":[{"game":"golf","gameId":"GAME01","playerCount":1,"status":"waiting"}],)"
-            R"("geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
-            R"("playerId":"player-1","table":{"game":"golf","gameId":"GAME01"},)"
-            R"("totalScore":0}],"roomId":"room-1"})");
-
-  // A second session joins the room (that admission sequence is pinned in
-  // the chat-ordering test) and then the game.
-  json joiner_session;
-  auto joiner = DialReady(joiner_session);
-  ASSERT_TRUE(joiner->Send(CommandFrame("joinRoom", R"({"roomId":"room-1"})")).ok());
-  (void)EventPayload(NextFrame(*joiner), "roomState");
-  (void)EventPayload(NextFrame(*joiner), "roomChatHistory");
-  (void)EventPayload(NextFrame(*creator), "roomState");
-
-  ASSERT_TRUE(
-      joiner->Send(CommandFrame("golf", R"({"move":{"joinGame":{"gameId":"GAME01"}}})")).ok());
-  const std::string waiting_pair =
-      R"("view":{"allPlayersPeeked":false,"discardCount":0,)"
-      R"("drawPileCount":0,"gameId":"GAME01","phase":"waiting","players":[)"
-      R"({"cards":[{},{},{},{}],"hasPeeked":false,"playerId":"player-1","revealedIndexes":[]},)"
-      R"({"cards":[{},{},{},{}],"hasPeeked":false,"playerId":"player-2","revealedIndexes":[]}]})";
-  EXPECT_EQ(EventPayload(NextFrame(*joiner), "golf"),
-            R"({"update":{"gameJoined":{)" + waiting_pair + R"(}}})");
-  // The sitting player hears the seat fill as a gameState of the same view.
-  EXPECT_EQ(EventPayload(NextFrame(*creator), "golf"),
-            R"({"update":{"gameState":{)" + waiting_pair + R"(}}})");
-  (void)EventPayload(NextFrame(*joiner), "roomState");
-  (void)EventPayload(NextFrame(*creator), "roomState");
-
-  // startGame: the bare gameStarted marker, then the dealt opening view —
-  // the frame that carries the rest of GameView's keys. Both hands stay
-  // face down even to their owners; only the seeded discard shows a face.
-  ASSERT_TRUE(creator->Send(CommandFrame("golf", R"({"move":{"startGame":{}}})")).ok());
-  EXPECT_EQ(EventPayload(NextFrame(*creator), "golf"), R"({"update":{"gameStarted":{}}})");
-  const auto opening = NextFrame(*creator);
-  const std::string opening_payload = EventPayload(opening, "golf");
-  EXPECT_EQ(opening_payload,
-            R"({"update":{"gameState":{"view":{"allPlayersPeeked":false,)"
-            R"("currentPlayerId":"player-1","discardCount":1,)"
-            R"("discardTop":{"rank":"Q","suit":"♠"},"drawPileCount":43,"gameId":"GAME01",)"
-            R"("phase":"playing","players":[)"
-            R"({"cards":[{},{},{},{}],"hasPeeked":false,"playerId":"player-1",)"
-            R"("revealedIndexes":[]},)"
-            R"({"cards":[{},{},{},{}],"hasPeeked":false,"playerId":"player-2",)"
-            R"("revealedIndexes":[]}]}}}})");
-  // The same pin, spelled as the key set the UI destructures — so a
-  // failure names the missing/renamed member even if bytes drift for an
-  // unrelated reason first.
-  const json view = json::parse(opening_payload)["update"]["gameState"]["view"];
-  EXPECT_EQ(KeysOf(view),
-            (std::set<std::string>{"allPlayersPeeked", "currentPlayerId", "discardCount",
-                                   "discardTop", "drawPileCount", "gameId", "phase", "players"}));
-  EXPECT_EQ(KeysOf(view["players"][0]),
-            (std::set<std::string>{"cards", "hasPeeked", "playerId", "revealedIndexes"}));
-  EXPECT_EQ(KeysOf(view["discardTop"]), (std::set<std::string>{"rank", "suit"}));
-
-  // The lobby list flips to playing for everyone in the room, and both
-  // members read as at it (#1490): the table key is the lobby's.
-  EXPECT_EQ(EventPayload(NextFrame(*creator), "roomState"),
-            R"({"games":[{"game":"golf","gameId":"GAME01","playerCount":2,"status":"playing"}],)"
-            R"("geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
-            R"("playerId":"player-1","table":{"game":"golf","gameId":"GAME01"},)"
-            R"("totalScore":0},)"
-            R"({"connected":true,"gamesPlayed":0,"gamesWon":0,"playerId":"player-2",)"
-            R"("table":{"game":"golf","gameId":"GAME01"},"totalScore":0}],"roomId":"room-1"})");
-}
-
-// Consumer: the golf web client's room-entry and chat rendering. The
+// Consumer: the web client's room-entry and chat rendering. The
 // joiner's admission order is part of the contract: roomState first, then
 // exactly one roomChatHistory — sent even when the room has no chat, so
 // the client hears "history loaded, and it is empty" instead of inferring
@@ -378,7 +273,7 @@ TEST_F(HubWireTest, AWordchainReplyCarriesItsLadderOnTheWire) {
   EXPECT_TRUE(history.ends_with(reply + "]}")) << history;
 }
 
-// Consumer: the golf web client's reconnect flow, this time all the way
+// Consumer: the web client's reconnect flow, this time all the way
 // down the stream. After a drop the client re-POSTs its resumeToken,
 // redials with the fresh ticket, and steers on the resumed sessionReady:
 // resumed true AND the roomId member PRESENT — that key's arrival is what
@@ -413,7 +308,7 @@ TEST_F(HubWireTest, ResumedSessionReadyCarriesRoomIdOnTheWire) {
   EXPECT_EQ(EventPayload(NextFrame(*redialed), "roomChatHistory"), R"({"messages":[]})");
 }
 
-// Consumer: the golf web client's deliberate exit. Only the explicit
+// Consumer: the web client's deliberate exit. Only the explicit
 // leaveRoom command carries leave intent (a close parks the seat), and
 // the ack the UI keys its navigation on is the roomLeft event naming the
 // departed room.

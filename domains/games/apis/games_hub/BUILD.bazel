@@ -2,8 +2,8 @@ load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_serve
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
-# The games hub's model (#79): the room layer (games.smithy) and one
-# envelope per tenant — lobby, voice, golf, castle, rummy, chess.
+# The games hub's model: the room layer (games.smithy) and one
+# envelope per tenant.
 smithy_cpp_server_library(
     name = "games_hub_smithy_server",
     srcs = [
@@ -36,11 +36,11 @@ smithy_cpp_client_library(
     ],
     namespace = "moonbase::games",
     service = "moonbase.games#GamesHub",
-    # one_d4_worker reads the public chess feed with it (#1637).
+    # one_d4_worker reads the public chess feed with it.
     visibility = ["//domains/games/apis/one_d4_worker:__pkg__"],
 )
 
-# The games a room hosts (#79): the kind a table is created as, and the
+# The games a room hosts: the kind a table is created as, and the
 # engine-state variant a started table carries, shared by the hub and
 # its store.
 cc_library(
@@ -58,7 +58,7 @@ cc_library(
     ],
 )
 
-# Each game's side of the hub (#1621): one Adapter specialization per
+# Each game's side of the hub: one Adapter specialization per
 # engine, dispatched on HostedState by adapters.h.
 cc_library(
     name = "adapters",
@@ -94,16 +94,22 @@ cc_library(
         ":wire_cards",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards/castle:game_state",
+        "//domains/games/libs/cards/castle:game_state_serde",
         "//domains/games/libs/cards/castle:player",
         "//domains/games/libs/cards/golf:game_state",
+        "//domains/games/libs/cards/golf:game_state_serde",
         "//domains/games/libs/cards/golf:player",
         "//domains/games/libs/cards/rummy:game_state",
         "//domains/games/libs/cards/rummy:table",
+        "//domains/games/libs/cards/rummy:table_serde",
         "//domains/games/libs/cards/spades:table",
+        "//domains/games/libs/cards/spades:table_serde",
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:table",
+        "//domains/games/libs/chess_play:table_serde",
         "//domains/games/libs/pong:rally",
         "//domains/games/libs/pong:table",
+        "//domains/games/libs/pong:table_serde",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -121,6 +127,21 @@ cc_test(
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:table",
         "//domains/games/libs/pong:table",
+        "@com_google_absl//absl/random",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "golf_adapter_test",
+    size = "small",
+    srcs = ["golf_adapter_test.cc"],
+    deps = [
+        ":adapters",
+        "//domains/games/libs/cards",
+        "//domains/games/libs/cards/golf:game_state",
+        "//domains/games/libs/cards/golf:player",
         "@googletest//:gtest_main",
     ],
 )
@@ -131,8 +152,7 @@ cc_library(
 )
 
 # The wire's card language, both directions, and the translation from
-# the cards a castle move names to the slots the engine addresses
-# (#1505).
+# the cards a castle move names to the slots the engine addresses.
 cc_library(
     name = "wire_cards",
     srcs = ["wire_cards.cc"],
@@ -147,7 +167,7 @@ cc_library(
     ],
 )
 
-# A round robin on the wire (#1647).
+# A round robin on the wire.
 cc_library(
     name = "round_robin_wire",
     srcs = ["round_robin_wire.cc"],
@@ -185,7 +205,7 @@ cc_library(
     ],
 )
 
-# A room's finished chess games on the wire (#1637): summaries, reviews
+# A room's finished chess games on the wire: summaries, reviews
 # and PGN.
 cc_library(
     name = "chess_archive",
@@ -216,7 +236,7 @@ cc_test(
     ],
 )
 
-# A chess round robin's pairings and standings (#1647).
+# A chess round robin's pairings and standings.
 cc_library(
     name = "round_robin",
     srcs = ["round_robin.cc"],
@@ -251,13 +271,21 @@ cc_test(
 )
 
 # Read as text by //domains/platform/libs/otel_contract, which pins this
-# vocabulary against the stats pipeline's reader: the event names and
-# outcomes in the header, the JSON keys the line builders format, the
-# game and surface spellings, and adapters.h's seat cap against the bound
-# the reader counts a table by. games_hub_main.cc is read by
-# //deploy/consolidated:consolidated_test for the event log's file name.
+# vocabulary against its readers downstream: the event names and outcomes
+# in the header, the JSON keys the line builders format, the surface
+# spellings, adapters.h's seat cap against the bound the reader counts a
+# table by, and each <game>_adapter.h's kind name and counter series
+# against the game lists in stats, deja and prom_proxy. games_hub_main.cc
+# is read by //deploy/consolidated:consolidated_test for the event log's
+# file name.
 exports_files([
     "adapters.h",
+    "castle_adapter.h",
+    "chess_adapter.h",
+    "golf_adapter.h",
+    "pong_adapter.h",
+    "rummy_adapter.h",
+    "spades_adapter.h",
     "game_events.cc",
     "game_events.h",
     "games_hub_main.cc",
@@ -267,7 +295,15 @@ exports_files([
     "world.h",
 ])
 
-# The hub's domain events (#1571): one JSON line per room, chat, and
+# Every file in the package, which //deploy/consolidated:consolidated_test
+# reads for the hub's retired name.
+filegroup(
+    name = "package_files",
+    srcs = glob(["**"]),
+    visibility = ["//deploy/consolidated:__pkg__"],
+)
+
+# The hub's domain events: one JSON line per room, chat, and
 # table milestone, for the stats pipeline to read out of S3 months later.
 # Pure line builders, testable without a hub.
 cc_library(
@@ -275,15 +311,8 @@ cc_library(
     srcs = ["game_events.cc"],
     hdrs = ["game_events.h"],
     deps = [
+        ":adapters",
         ":hosted_game",
-        "//domains/games/libs/cards/castle:game_state",
-        "//domains/games/libs/cards/golf:game_state",
-        "//domains/games/libs/cards/rummy:game_state",
-        "//domains/games/libs/cards/rummy:table",
-        "//domains/games/libs/cards/spades:table",
-        "//domains/games/libs/chess_play:game_state",
-        "//domains/games/libs/chess_play:table",
-        "//domains/games/libs/pong:table",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
     ],
@@ -395,10 +424,22 @@ cc_library(
         ":hosted_game",
         ":round_robin",
         ":surface",
-        "//domains/games/libs/cards/golf:game_state",
         "//domains/games/libs/chess_play:game_state",
-        "//domains/games/libs/chess_play:game_state_serde",
         "//domains/games/libs/chess_play:table",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
+# The process-local store, which reads its rows through the adapters.
+cc_library(
+    name = "memory_hub_store",
+    srcs = ["memory_hub_store.cc"],
+    hdrs = ["memory_hub_store.h"],
+    deps = [
+        ":adapters",
+        ":hub_store",
+        ":surface",
+        "//domains/games/libs/chess_play:game_state_serde",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/time",
@@ -412,6 +453,7 @@ cc_test(
     deps = [
         ":hosted_game",
         ":hub_store",
+        ":memory_hub_store",
         ":surface",
         "//domains/games/libs/cards",
         "//domains/games/libs/cards/golf:game_state",
@@ -432,7 +474,7 @@ cc_library(
     ],
 )
 
-# The room bots: microgpt's mention and prompt (#1591), and the budgets
+# The room bots: microgpt's mention and prompt, and the budgets
 # and worker every responder is called through, off every stream thread
 # and the hub's lock.
 cc_library(
@@ -508,7 +550,7 @@ cc_test(
     ],
 )
 
-# The postgres-backed vault and the hub's schema (#1194).
+# The postgres-backed vault and the hub's schema.
 cc_library(
     name = "pg_ticket_vault",
     srcs = [
@@ -528,7 +570,7 @@ cc_library(
     ],
 )
 
-# PostgreSQL implementation of HubStore (#1194): staged writes run FIFO
+# PostgreSQL implementation of HubStore: staged writes run FIFO
 # on one writer thread; game commits are synchronous and
 # conditional so multiple instances share one authority.
 cc_library(
@@ -536,18 +578,12 @@ cc_library(
     srcs = ["pg_hub_store.cc"],
     hdrs = ["pg_hub_store.h"],
     deps = [
+        ":adapters",
         ":hosted_game",
         ":hub_store",
         ":round_robin",
         ":surface",
-        "//domains/games/libs/cards/castle:game_state_serde",
-        "//domains/games/libs/cards/golf:game_state",
-        "//domains/games/libs/cards/golf:game_state_serde",
-        "//domains/games/libs/cards/rummy:table_serde",
-        "//domains/games/libs/cards/spades:table_serde",
         "//domains/games/libs/chess_play:game_state_serde",
-        "//domains/games/libs/chess_play:table_serde",
-        "//domains/games/libs/pong:table_serde",
         "//domains/platform/libs/pg",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
@@ -557,7 +593,7 @@ cc_library(
     ],
 )
 
-# PostgreSQL implementation of ChatStore (#1226). Append holds room and
+# PostgreSQL implementation of ChatStore. Append holds room and
 # membership locks across insert, prune, and NOTIFY so authorization,
 # retention, and per-room message ordering commit together.
 cc_library(
@@ -572,10 +608,9 @@ cc_library(
     ],
 )
 
-# The #1226 slice of the persistence integration suite: chat's SQL is
-# the risky code (atomic append, retention under concurrent writers,
-# cascade), so there is no in-memory double here. Real postgres via
-# GAMES_HUB_TEST_DB_URL; skips otherwise.
+# ChatStore against real postgres via GAMES_HUB_TEST_DB_URL; skips
+# otherwise. Chat's SQL is the risky code (atomic append, retention under
+# concurrent writers, cascade), so there is no in-memory double.
 cc_test(
     name = "pg_chat_store_test",
     size = "small",
@@ -599,9 +634,8 @@ cc_test(
     ],
 )
 
-# Step-2/3 slice of the persistence integration suite (#1194): the
-# write-through ops and the synchronous commit+NOTIFY path against real
-# postgres via GAMES_HUB_TEST_DB_URL; skips otherwise.
+# HubStore's write-through ops and synchronous commit+NOTIFY path against
+# real postgres via GAMES_HUB_TEST_DB_URL; skips otherwise.
 cc_test(
     name = "pg_hub_store_test",
     size = "small",
@@ -645,9 +679,8 @@ cc_test(
 )
 
 # Serialized engine states must survive the games table's jsonb state
-# column (#1194; jsonb normalizes
-# keys and spacing, and refuses escaped NULs). Real postgres via
-# GAMES_HUB_TEST_DB_URL; skips otherwise.
+# column (jsonb normalizes keys and spacing, and refuses escaped NULs).
+# Real postgres via GAMES_HUB_TEST_DB_URL; skips otherwise.
 cc_test(
     name = "game_state_jsonb_test",
     size = "small",
@@ -698,7 +731,7 @@ cc_test(
     ],
 )
 
-# Per-session stream budget policy (#1240); the bucket mechanism lives
+# Per-session stream budget policy; the bucket mechanism lives
 # in //domains/platform/libs/futility/rate_limiter, tested there.
 cc_library(
     name = "rate_limiter",
@@ -706,7 +739,7 @@ cc_library(
     deps = ["//domains/platform/libs/futility/rate_limiter:token_bucket"],
 )
 
-# Where a tape event lands on a glasshouse's glass (#1554): a pure
+# Where a tape event lands on a glasshouse's glass: a pure
 # function of deja's seq, which is the only thing every instance and every
 # client in a room already agrees on.
 cc_library(
@@ -749,7 +782,7 @@ cc_test(
     ],
 )
 
-# The lobby's world, its rules and map (#79, #1490): staged deliveries,
+# The lobby's world, its rules and map: staged deliveries,
 # no wire, hosted by GamesHub as the room stream's lobby member.
 cc_library(
     name = "world",
@@ -802,7 +835,7 @@ cc_test(
     ],
 )
 
-# A room's voice (#1590): who is in it and the WebRTC signals between
+# A room's voice: who is in it and the WebRTC signals between
 # them, staged, no wire, hosted by GamesHub as the room stream's voice member.
 cc_library(
     name = "voice",
@@ -827,7 +860,7 @@ cc_test(
     ],
 )
 
-# Chess bots at a table (#1618): Stockfish seat ids and how long they think.
+# Chess bots at a table: Stockfish seat ids and how long they think.
 # Pong bots: smallcat's own opponent, its seat id naming its level.
 cc_library(
     name = "pong_bots",
@@ -865,8 +898,8 @@ cc_test(
     ],
 )
 
-# The room host: rooms, seats, chat, and every tenant (lobby, voice, golf,
-# castle, the tape) behind GamesHubHandler's Play.
+# The room host: rooms, seats, chat, and every tenant behind
+# GamesHubHandler's Play.
 cc_library(
     name = "hub",
     srcs = ["hub.cc"],
@@ -884,6 +917,7 @@ cc_library(
         ":hub_metrics",
         ":hub_store",
         ":id_generator",
+        ":memory_hub_store",
         ":move_coalescing",
         ":pong_bots",
         ":protocol_input",
@@ -918,7 +952,7 @@ cc_library(
     ],
 )
 
-# The generated service's one handler (#79): session identity, and the
+# The generated service's one handler: session identity, and the
 # one Play stream forwarded whole to GamesHub.
 cc_library(
     name = "games_hub_handler",
@@ -938,12 +972,12 @@ cc_library(
     ],
 )
 
-# The restart-survival and multi-instance e2e (#1194): same client flows, durable
+# The restart-survival and multi-instance e2e: same client flows, durable
 # hub, RestartHub between them. Real postgres via GAMES_HUB_TEST_DB_URL;
 # skips otherwise.
 cc_test(
     name = "pg_hub_e2e_test",
-    # Small on purpose (#1241, #1276): normal runtime is ~2s, so a hang
+    # Small on purpose (#1276): normal runtime is ~2s, so a hang
     # fails at the timeout as a loud red rather than passing slowly. Do not
     # raise the ceiling.
     size = "small",
@@ -986,13 +1020,40 @@ cc_test(
     ],
 )
 
-# Castle's wire goldens (#77): the castle envelope's command and update
+# Castle's wire goldens: the castle envelope's command and update
 # bytes and the dealt setup view, pinned as raw strings like golf's.
 cc_test(
     name = "castle_wire_test",
     size = "small",
     srcs = [
         "castle_wire_test.cc",
+        "wire_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_server",
+        ":hub",
+        ":id_generator",
+        ":rate_limiter",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:eventstream",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
+# Golf's wire goldens: the golf envelope's command and update bytes and
+# GameView, the way castle_wire_test pins castle's.
+cc_test(
+    name = "golf_wire_test",
+    size = "small",
+    srcs = [
+        "golf_wire_test.cc",
         "wire_test_fixture.h",
     ],
     deps = [
@@ -1027,6 +1088,7 @@ cc_test(
         ":games_hub_smithy_server",
         ":hub",
         ":id_generator",
+        ":memory_hub_store",
         ":rate_limiter",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
@@ -1070,7 +1132,7 @@ cc_test(
     ],
 )
 
-# Spades' wire goldens (#1658): the spades envelope's command and update
+# Spades' wire goldens: the spades envelope's command and update
 # bytes, the browser's contract.
 cc_test(
     name = "spades_wire_test",
@@ -1097,7 +1159,7 @@ cc_test(
     ],
 )
 
-# Rummy's wire goldens (#245): the rummy envelope's command and update
+# Rummy's wire goldens: the rummy envelope's command and update
 # bytes, every in-game move's spelling, and the view from each chair.
 cc_test(
     name = "rummy_wire_test",
@@ -1125,11 +1187,11 @@ cc_test(
 )
 
 # Beyoncé Rule wire-contract tests (consumer tier): the raw HTTP bytes and
-# eventstream frames the golf web client depends on, pinned as golden
+# eventstream frames the web client depends on, pinned as golden
 # fixtures driven through the generated server WITHOUT the generated
 # client — a regeneration that renames what the web client reads (the
-# session bodies, the room-layer events and their ordering, the golf
-# command/update envelopes and GameView, the terminal exception frames)
+# session bodies, the room-layer events and their ordering, the terminal
+# exception frames)
 # fails here even though the typed e2e suites (which regenerate with it)
 # still pass. Non-Beast deps only, so it runs with no sandbox setup at all
 # (behind a blocking proxy, Beast needs scripts/make-git-overrides.sh first).
@@ -1160,7 +1222,7 @@ cc_test(
     ],
 )
 
-# Castle on the room stream (#77): setup, a whole game against an engine
+# Castle on the room stream: setup, a whole game against an engine
 # mirror, redaction, mixed tables, and abandonment.
 cc_test(
     name = "castle_e2e_test",
@@ -1192,7 +1254,7 @@ cc_test(
     ],
 )
 
-# Round robins on the room stream (#1647).
+# Round robins on the room stream.
 cc_test(
     name = "chess_round_robin_e2e_test",
     size = "small",
@@ -1241,6 +1303,7 @@ cc_test(
         ":hub",
         ":hub_store",
         ":id_generator",
+        ":memory_hub_store",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/games/libs/pong:rally",
@@ -1304,6 +1367,7 @@ cc_test(
         ":hub",
         ":hub_store",
         ":id_generator",
+        ":memory_hub_store",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/games/libs/chess_cpp:parsed_game",
@@ -1322,7 +1386,7 @@ cc_test(
     ],
 )
 
-# Chess bots (#1618): a fake engine behind the seat Stockfish takes.
+# Chess bots: a fake engine behind the seat Stockfish takes.
 cc_test(
     name = "chess_bot_e2e_test",
     size = "small",
@@ -1353,7 +1417,7 @@ cc_test(
     ],
 )
 
-# Rummy on the room stream (#245): whole games against an engine mirror
+# Rummy on the room stream: whole games against an engine mirror
 # at every table size, redaction, refusals, the refill, abandonment and
 # resume.
 cc_test(
@@ -1471,6 +1535,7 @@ cc_test(
         ":games_hub_handler",
         ":hub",
         ":hub_store",
+        ":memory_hub_store",
         ":id_generator",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
@@ -1535,6 +1600,7 @@ cc_test(
         ":hub",
         ":hub_store",
         ":id_generator",
+        ":memory_hub_store",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
@@ -1548,7 +1614,7 @@ cc_test(
     ],
 )
 
-# The lobby member of the room stream (#1490) through the
+# The lobby member of the room stream through the
 # generated client: the world is the session's room's, or the plaza's.
 cc_test(
     name = "lobby_e2e_test",
@@ -1578,7 +1644,7 @@ cc_test(
     ],
 )
 
-# The lobby's wire, pinned raw the way hub_wire_test pins golf's: the
+# The lobby's wire, pinned raw the way golf_wire_test pins golf's: the
 # one route and the lobby envelope's bytes.
 cc_test(
     name = "lobby_wire_test",
@@ -1605,7 +1671,7 @@ cc_test(
     ],
 )
 
-# A room's voice through the raw wire (#1590): the voice envelope's bytes
+# A room's voice through the raw wire: the voice envelope's bytes
 # both ways, and voice ending with the room or the socket.
 cc_test(
     name = "voice_wire_test",
@@ -1632,7 +1698,7 @@ cc_test(
     ],
 )
 
-# deja on the walls (#1554, #1150): the poller through the raw wire with a
+# deja on the walls: the poller through the raw wire with a
 # scripted deja under it — the occupancy gate, the splat bytes, the same
 # spot for every client in the room, dedupe, resume, and a deja having a
 # bad day. Non-Beast like the other wire suites.
@@ -1675,6 +1741,7 @@ cc_binary(
         ":hub",
         ":hub_store",
         ":id_generator",
+        ":memory_hub_store",
         ":pg_chat_store",
         ":pg_hub_store",
         ":pg_ticket_vault",

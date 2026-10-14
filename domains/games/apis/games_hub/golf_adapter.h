@@ -29,6 +29,7 @@ struct Adapter<golf::GameState> {
   using View = moonbase::games::GameView;
   struct Start {};
   static constexpr GameKind kKind = GameKind::kGolf;
+  static constexpr std::string_view kName = "golf";
   static constexpr std::size_t kMaxSeats = 4;
   static constexpr unsigned kCapabilities = 0;
   static constexpr bool kOpenStartsAGame = true;
@@ -60,6 +61,12 @@ struct Adapter<golf::GameState> {
     return std::nullopt;
   }
   static bool DealStarted(const golf::GameState&, const golf::GameState&) { return false; }
+  // The engine supersedes any knock with this sentinel when a leave drops
+  // the table below two seats.
+  static std::optional<GameEnd> Ended(const golf::GameState& state) {
+    return state.getWhoKnocked() == golf::GameState::kAbandoned ? GameEnd::kAbandoned
+                                                                : GameEnd::kCompleted;
+  }
   static absl::StatusOr<golf::GameState> WithoutSeat(const golf::GameState& state, int seat,
                                                      int64_t) {
     return state.removePlayer(seat);
@@ -86,6 +93,8 @@ struct Adapter<golf::GameState> {
                                                      const std::optional<EventTag>&) {
     return std::nullopt;
   }
+  static std::string Serialize(const golf::GameState& engine);
+  static absl::StatusOr<golf::GameState> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view) { return false; }
 };
 

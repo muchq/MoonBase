@@ -1,4 +1,4 @@
-// Spades on the room stream (#1658), end to end through the generated
+// Spades on the room stream, end to end through the generated
 // client.
 //
 // The NoShuffleDealer deals the pristine deck front first, one card a
@@ -87,7 +87,7 @@ class SpadesFixture : public GamesHubStreamFixture {
     if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
     GamesHubStreamFixture::TearDown();
   }
-  // The stats archive's game lines (#1571), in order.
+  // The stats archive's game lines, in order.
   std::vector<std::string> games_;
 
   // A started table, four seats in partners unless asked otherwise, the
@@ -560,18 +560,13 @@ TEST_F(ShuffledSpadesFixture, YourHandIsSortedBySuitThenRank) {
   EXPECT_GE(seen.size(), 3u) << "the seed should deal a mixed hand";
 }
 
-
-// The seat cap (#1621).
 TEST_F(SpadesFixture, AFifthSeatIsRefused) {
-  ExpectSeatCap<SpadesMove>(4, Spades,
-                      [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
-                        return ReceiveSpades(stream, wanted);
-                      });
+  ExpectSeatCap<SpadesMove>(
+      4, Spades, [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+        return ReceiveSpades(stream, wanted);
+      });
 }
 
-
-// Spades's branches of the hub (#1621): the commands spades counts, and the view a resumed
-// seat gets back.
 TEST_F(SpadesFixture, CommandsAreCountedOnTheSpadesSeries) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());

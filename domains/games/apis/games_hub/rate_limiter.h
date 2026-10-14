@@ -8,7 +8,7 @@ namespace games_hub {
 /// The bucket mechanism is futility's; this file holds the hub's policy.
 using TokenBucket = futility::rate_limiter::TokenBucket;
 
-/// The stream's budgets (#1240), injectable so tests pin behavior with
+/// The stream's budgets, injectable so tests pin behavior with
 /// tiny or huge values instead of racing wall-clock refills. Defaults
 /// are far above human play and far below what it takes to hurt the hub
 /// mutex or the database (#1234).

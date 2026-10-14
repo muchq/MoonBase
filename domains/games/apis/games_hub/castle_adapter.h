@@ -15,6 +15,7 @@ struct Adapter<castle::GameState> {
   using View = moonbase::games::CastleView;
   struct Start {};
   static constexpr GameKind kKind = GameKind::kCastle;
+  static constexpr std::string_view kName = "castle";
   static constexpr std::size_t kMaxSeats = 4;
   static constexpr unsigned kCapabilities = 0;
   static constexpr bool kOpenStartsAGame = true;
@@ -47,6 +48,9 @@ struct Adapter<castle::GameState> {
     return std::nullopt;
   }
   static bool DealStarted(const castle::GameState&, const castle::GameState&) { return false; }
+  static std::optional<GameEnd> Ended(const castle::GameState& state) {
+    return state.getPhase() == castle::Phase::Abandoned ? GameEnd::kAbandoned : GameEnd::kCompleted;
+  }
   static absl::StatusOr<castle::GameState> WithoutSeat(const castle::GameState& state, int seat,
                                                        int64_t) {
     return state.removePlayer(seat);
@@ -73,6 +77,8 @@ struct Adapter<castle::GameState> {
                                                      const std::optional<EventTag>&) {
     return std::nullopt;
   }
+  static std::string Serialize(const castle::GameState& engine);
+  static absl::StatusOr<castle::GameState> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view) { return false; }
 };
 

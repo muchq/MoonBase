@@ -1,7 +1,7 @@
-// The games hub server (#79): sessions, rooms, chat, and every tenant
-// (lobby, voice, golf, castle, rummy, chess) on opal-cpp's streaming stack — generated async
-// handlers (ADR-0021), SessionRegistry fan-out with reconnect grace
-// (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018).
+// The games hub server: sessions, rooms, chat, and every tenant on
+// opal-cpp's streaming stack — generated async handlers (ADR-0021),
+// SessionRegistry fan-out with reconnect grace (ADR-0017/0020/0022), the
+// JSON-text browser wire (ADR-0018).
 //
 //   bazel run //domains/games/apis/games_hub
 //   curl -X POST localhost:8080/games/v2/session -H 'content-type: application/json' -d '{}'
@@ -30,6 +30,7 @@
 #include "domains/games/apis/games_hub/hub.h"
 #include "domains/games/apis/games_hub/hub_store.h"
 #include "domains/games/apis/games_hub/id_generator.h"
+#include "domains/games/apis/games_hub/memory_hub_store.h"
 #include "domains/games/apis/games_hub/migrations.h"
 #include "domains/games/apis/games_hub/pg_chat_store.h"
 #include "domains/games/apis/games_hub/pg_hub_store.h"
@@ -87,7 +88,7 @@ int main() {
   futility::otel::OtelConfig otel_config{.service_name = "games_hub", .service_version = "1.0.0"};
   futility::otel::OtelProvider otel_provider(otel_config);
 
-  // Persistence when GAMES_HUB_DB_URL is set (#1194): credentials, rooms,
+  // Persistence when GAMES_HUB_DB_URL is set: credentials, rooms,
   // games, and chat, restored at boot — tickets,
   // resume tokens, rooms, and live games survive deploys. Unset falls
   // back to all-in-memory — dev parity, same pattern as ALLOWED_ORIGINS
@@ -107,7 +108,7 @@ int main() {
     }
     vault = std::make_shared<games_hub::PgTicketVault>(std::move(db), kTicketTtl, kResumeTtl);
     store = std::make_shared<games_hub::PgHubStore>(std::make_shared<pg::Client>(db_url));
-    // Chat gets its own connection too (#1226): appends are synchronous
+    // Chat gets its own connection too: appends are synchronous
     // in the command path and must not queue behind the write-through.
     chat_store = std::make_shared<games_hub::PgChatStore>(std::make_shared<pg::Client>(db_url));
     LOG(INFO) << "Persistence: postgres (credentials + rooms/games write-through + chat)";
@@ -132,7 +133,7 @@ int main() {
     LOG(ERROR) << "Failed to restore hub state: " << restored;
     return 1;
   }
-  // The fan-out's LISTEN side (#1194): commits on other instances
+  // The fan-out's LISTEN side: commits on other instances
   // wake this one to re-read and re-broadcast. Declared after hub so
   // it is destroyed (thread joined) first; the detach at shutdown keeps
   // the hub's teardown from touching it.
@@ -155,7 +156,7 @@ int main() {
   hub->StartChessClocks();
   hub->StartPongTicks();
 
-  // deja's tape on the glasshouse walls (#1554, #1150). DEJA_URL names
+  // deja's tape on the glasshouse walls. DEJA_URL names
   // deja on the app network; unset, glasshouses simply have blank walls.
   // The poll thread only reaches the network while somebody is standing
   // in one, so this costs nothing on an idle instance.
@@ -175,7 +176,7 @@ int main() {
     LOG(INFO) << "Tape: off (DEJA_URL unset; glasshouse walls stay blank)";
   }
 
-  // The room bot (#1591): "@bot" in room chat is answered by microgpt-serve
+  // The room bot: "@bot" in room chat is answered by microgpt-serve
   // on the app network. Unset, a mention is ordinary chat.
   const char* microgpt_url = std::getenv("MICROGPT_URL");
   if (microgpt_url != nullptr && *microgpt_url != '\0') {
@@ -205,7 +206,7 @@ int main() {
     LOG(INFO) << "Wordchain bot: off (MITHRIL_URL unset)";
   }
 
-  // Chess bots (#1618): Stockfish on chess_engine across the app network,
+  // Chess bots: Stockfish on chess_engine across the app network,
   // a seat at a chess table its player can fill. Unset, no table offers one.
   const char* chess_engine_url = std::getenv("CHESS_ENGINE_URL");
   if (chess_engine_url != nullptr && *chess_engine_url != '\0') {
@@ -250,7 +251,7 @@ int main() {
     LOG(INFO) << "1d4: off (ONE_D4_URL unset; published games wait for an index asked on 1d4)";
   }
 
-  // A room's voice (#1590): the STUN servers a voice roster hands each
+  // A room's voice: the STUN servers a voice roster hands each
   // joiner, so browsers behind NAT can find each other. Unset, browsers
   // get only their host candidates and reach each other on one network.
   const char* stun_urls = std::getenv("VOICE_STUN_URLS");
@@ -258,7 +259,7 @@ int main() {
   LOG(INFO) << "Voice: " << stun.size() << " STUN server(s)";
   hub->SetIceServers(stun);
 
-  // The hub's domain events (#1571): one line per room, chat, and table
+  // The hub's domain events: one line per room, chat, and table
   // milestone, in the directory log_shipper takes to S3 and the stats
   // pipeline reads back. Unset, the hub records nothing — the same shape as DEJA_URL,
   // and what every local run gets. A directory that cannot be opened is
@@ -303,7 +304,7 @@ int main() {
   auto metrics =
       aura::MakeHttpMetricsSink(std::make_shared<futility::otel::HttpMetricsManager>("games_hub"));
 
-  // The unary half of #1240: the stream budgets cannot see GetSession,
+  // The unary budget: the stream budgets cannot see GetSession,
   // and every mint writes a ticket row — the flood a reconnect loop or
   // a scripted client would otherwise run for free. Keyed by the
   // ADR-0012 client address; 20/min absorbs a full reconnect cycle

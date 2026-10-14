@@ -14,7 +14,7 @@
 
 namespace games_hub {
 
-/// A room's voice (#1590): who in each room is in its voice, and the
+/// A room's voice: who in each room is in its voice, and the
 /// WebRTC signals between them. Audio never reaches the hub; this keeps
 /// membership and relays each signal to the one peer it names, nothing
 /// more.

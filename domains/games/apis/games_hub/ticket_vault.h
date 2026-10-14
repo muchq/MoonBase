@@ -25,7 +25,7 @@ std::string RandomId(std::string_view prefix);
 /// and long-lived — a reconnect exchanges one for a fresh ticket and gets
 /// the same playerId back.
 ///
-/// Issue* can fail: a vault backed by a store (PgTicketVault, #1194) can
+/// Issue* can fail: a vault backed by a store (PgTicketVault) can
 /// be unavailable, and minting must say so rather than hand out a
 /// credential nothing recorded. Lookups fail closed instead — an
 /// unavailable store reads as "no such credential" (logged where it
@@ -50,7 +50,7 @@ class TicketVault {
 
 /// Single-process vault: all state in-memory, so a restart forgets every
 /// credential. The default when GAMES_HUB_DB_URL is unset, and the test
-/// mode — the all-in-memory hub is the blessed harness (#1194).
+/// mode — the all-in-memory hub is the blessed harness.
 ///
 /// Thread-safe; expired entries are purged lazily on mints.
 class InMemoryTicketVault final : public TicketVault {

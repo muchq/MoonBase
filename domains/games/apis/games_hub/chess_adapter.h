@@ -35,9 +35,10 @@ struct Adapter<chess_play::Table> {
     std::optional<chess_play::ChessSetup> setup;
   };
   static constexpr GameKind kKind = GameKind::kChess;
+  static constexpr std::string_view kName = "chess";
   static constexpr std::size_t kMaxSeats = chess_play::GameState::kSeats;
-  static constexpr unsigned kCapabilities =
-      kWatchable | kNextGame | kRoundRobins | kOpenings | kClocked | kEngineBots | kPublished;
+  static constexpr unsigned kCapabilities = kWatchable | kNextGame | kRoundRobins | kOpenings |
+                                            kClocked | kEngineBots | kPublished | kChallenges;
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "chess_commands";
@@ -71,6 +72,13 @@ struct Adapter<chess_play::Table> {
   static bool DealStarted(const chess_play::Table& before, const chess_play::Table& after) {
     return before.game().isOver() && !after.game().isOver();
   }
+  // A game's end, the table playing on or closed by the leave that ended
+  // it. A table closed between games recorded its last when it ended.
+  static std::optional<GameEnd> Ended(const chess_play::Table& table) {
+    if (!table.game().isOver() || (table.isOver() && !table.endedByClose())) return std::nullopt;
+    return table.game().result()->ending == chess_play::Ending::kAbandoned ? GameEnd::kAbandoned
+                                                                           : GameEnd::kCompleted;
+  }
   // The leave reads the clock first: a flag already fallen ends the game
   // on time, not by the leave.
   static absl::StatusOr<chess_play::Table> WithoutSeat(const chess_play::Table& table, int seat,
@@ -102,6 +110,8 @@ struct Adapter<chess_play::Table> {
     if (!terms.has_value()) return std::nullopt;
     return StartGame<Start>{Start{*terms, std::nullopt}};
   }
+  static std::string Serialize(const chess_play::Table& engine);
+  static absl::StatusOr<chess_play::Table> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view player_id) { return ChessBotElo(player_id).has_value(); }
 
   static absl::Status Prepare(Start& start, const ChessOpener& opener);
@@ -123,6 +133,27 @@ struct Adapter<chess_play::Table> {
   }
   static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
   static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
+  // A chess round robin's body names no game, and holds nothing beyond
+  // the terms every round robin's body does.
+  static constexpr bool kRoundRobinBodyNamed = false;
+  static std::vector<std::pair<std::string, std::string>> RoundRobinBody(
+      const HubStore::ChessEventRow&) {
+    return {};
+  }
+  static bool FromRoundRobinBody(const std::map<std::string, std::string>&,
+                                 HubStore::ChessEventRow&) {
+    return true;
+  }
+  // A pairing's games are the archived ones its table played (Archived).
+  static std::optional<HubStore::EventGame> TableGame(const chess_play::Table&) {
+    return std::nullopt;
+  }
+  // A table's game once it is over, on its line of the score sheet.
+  static std::optional<HubStore::ChessGameRow> Archived(const chess_play::Table& table) {
+    if (!table.game().isOver()) return std::nullopt;
+    return HubStore::ChessGameRow{
+        0, "", static_cast<int>(table.scoreSheet().size()), table.game(), 0, false};
+  }
 
   static bool FlagDue(const chess_play::Table& table, int64_t now_ms) {
     const chess_play::GameState& game = table.game();

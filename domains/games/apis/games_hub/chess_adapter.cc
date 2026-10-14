@@ -3,6 +3,7 @@
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/games_hub/chess_results.h"
 #include "domains/games/apis/games_hub/round_robin_wire.h"
+#include "domains/games/libs/chess_play/table_serde.h"
 
 namespace games_hub {
 namespace {
@@ -236,6 +237,15 @@ moonbase::games::GameEvents Adapter<chess_play::Table>::RoundRobinsEvent(
     round_robins.roundRobins.push_back(RoundRobinOf(one.row, one.live));
   }
   return Wrap(Update::FromRoundrobins(std::move(round_robins)));
+}
+
+std::string Adapter<chess_play::Table>::Serialize(const chess_play::Table& engine) {
+  return chess_play::serializeTable(engine);
+}
+
+absl::StatusOr<chess_play::Table> Adapter<chess_play::Table>::Deserialize(
+    const std::string& stored) {
+  return chess_play::deserializeTable(stored);
 }
 
 }  // namespace games_hub

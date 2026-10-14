@@ -1,4 +1,4 @@
-// Round robins in a room (#1647), end to end through the generated
+// Round robins in a room, end to end through the generated
 // client: creating one, the creator's forfeits and withdrawals, and what
 // every member hears.
 

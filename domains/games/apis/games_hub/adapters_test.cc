@@ -5,10 +5,13 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "absl/random/random.h"
+#include "absl/status/status.h"
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/chess_play/game_state.h"
@@ -18,6 +21,7 @@
 namespace games_hub {
 namespace {
 
+using moonbase::games::GameCommands;
 using moonbase::games::GameEvents;
 
 // White Kg6 Pe7 against Kh8: e7e8q mates.
@@ -261,13 +265,58 @@ TEST(FilledStart, OnlyAChallengeOrAPairingStartsWhenFull) {
   EXPECT_FALSE(Adapter<castle::GameState>::FilledStart(terms, EventTag{"rr", 0}).has_value());
 }
 
-// Each game's envelope counts on the series named for its game.
-TEST(GameCounterSeries, EachEnvelopeCountsOnItsOwnGamesSeries) {
-  AnyAdapter([&](auto adapter) {
+// A kind is written as its adapter's kName, on GameSummary.game and in the
+// games row's game column, and read back from it; the spellings are the
+// wire's and the store's.
+TEST(KindNames, EachKindIsWrittenAsItsAdaptersNameAndReadBack) {
+  AnyAdapter([](auto adapter) {
     using A = decltype(adapter);
-    const std::string game(GameKindName(A::kKind));
-    EXPECT_EQ(A::kCommandSeries, game + "_commands");
-    EXPECT_EQ(A::kEventSeries, game + "_events");
+    EXPECT_EQ(GameKindName(A::kKind), A::kName);
+    EXPECT_EQ(ParseGameKind(A::kName), A::kKind);
+    return false;
+  });
+  constexpr std::string_view kWire[] = {"golf", "castle", "rummy", "chess", "pong", "spades"};
+  for (std::size_t i = 0; i < std::size(kWire); ++i) {
+    EXPECT_EQ(GameKindName(static_cast<GameKind>(i)), kWire[i]);
+  }
+  EXPECT_EQ(ParseGameKind(""), std::nullopt);
+  EXPECT_EQ(ParseGameKind("Golf"), std::nullopt);
+  EXPECT_EQ(ParseGameKind("gin"), std::nullopt);
+}
+
+// Every game's table opens on its default start and, full and after a
+// leave, round-trips through its adapter's serde to the same bytes.
+TEST(EveryGame, OpensAndRoundTripsThroughItsAdaptersSerde) {
+  AnyAdapter([](auto adapter) {
+    using A = decltype(adapter);
+    SCOPED_TRACE(A::kName);
+    std::vector<std::string> roster;
+    for (std::size_t seat = 0; seat < A::kMaxSeats; ++seat) {
+      roster.push_back("p" + std::to_string(seat));
+    }
+    typename A::Start start;
+    if constexpr (kHas<A, kOpenings>) {
+      const absl::Status prepared = A::Prepare(start, [](std::string_view setup_id) {
+        absl::BitGen gen;
+        return chess_play::SelectChessSetup(setup_id, gen);
+      });
+      EXPECT_TRUE(prepared.ok()) << prepared;
+    }
+    cards::Dealer dealer;
+    const std::string game_id = "tbl";
+    const auto opened =
+        A::Open(OpenContext{game_id, roster, 0}, start, dealer.DealNewUnshuffledDeck());
+    EXPECT_TRUE(opened.ok()) << opened.status();
+    if (!opened.ok()) return false;
+    const auto left = A::WithoutSeat(*opened, static_cast<int>(A::kMaxSeats) - 1, 0);
+    EXPECT_TRUE(left.ok()) << left.status();
+    if (!left.ok()) return false;
+    for (const auto* engine : {&*opened, &*left}) {
+      const std::string stored = A::Serialize(*engine);
+      const auto restored = A::Deserialize(stored);
+      EXPECT_TRUE(restored.ok()) << restored.status();
+      if (restored.ok()) EXPECT_EQ(A::Serialize(*restored), stored);
+    }
     return false;
   });
 }
@@ -292,6 +341,18 @@ TEST(Capabilities, OneGamesMachineryFindsOnlyThatGamesTables) {
   EXPECT_FALSE(HasCapability(GameKind::kSpades, kWatchable));
   EXPECT_TRUE(IsBotId("stockfish@1320"));
   EXPECT_FALSE(IsBotId("alice"));
+}
+
+// A realtime game's steering rides a budget of its own; every other
+// command, its own game's included, rides the shared one.
+TEST(Capabilities, OnlyARealtimeGamesSteeringRidesTheRealtimeBudget) {
+  moonbase::games::PongCommand paddle;
+  paddle.move = moonbase::games::PongMove::FromPaddle(moonbase::games::PongPaddle{});
+  EXPECT_TRUE(OnRealtimeBudget(GameCommands::FromPong(paddle)));
+  moonbase::games::PongCommand start;
+  start.move = moonbase::games::PongMove::FromStartgame(moonbase::games::PongStartGame{});
+  EXPECT_FALSE(OnRealtimeBudget(GameCommands::FromPong(start)));
+  EXPECT_FALSE(OnRealtimeBudget(GameCommands::FromGetroomstate(moonbase::games::GetRoomState{})));
 }
 
 }  // namespace

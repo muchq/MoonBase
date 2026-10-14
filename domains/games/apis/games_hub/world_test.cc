@@ -1,4 +1,4 @@
-// The world's rules on the World itself (#79, #1490): what a join, move,
+// The world's rules on the World itself: what a join, move,
 // shape, or leave is refused for and that a refusal changes nothing;
 // what each admitted command stages, to whom, in what order — the
 // joiner's snapshot ahead of anyone's playerJoined, fan-out that stays
@@ -191,7 +191,7 @@ TEST(World, FanOutStaysInTheRoomsWorldAndNeverEchoes) {
   EXPECT_EQ(out[0].update.as_worldState_or_null()->players[1].playerId, "erin");
 }
 
-// A room told of a sphere settles its world on the wall (#1554): a join
+// A room told of a sphere settles its world on the wall: a join
 // or move within an avatar's reach lands on the wall, exactly, and that
 // is the position everyone hears; one farther off is refused with the
 // radius in the reason; the snapshot names the sphere. A room never told
@@ -242,7 +242,7 @@ TEST(World, ASphereRoomSnapsToItsWallRefusesOffItAndNamesItself) {
   EXPECT_EQ(world.SurfaceOf("S"), Surface::Plane());
 }
 
-// A world changes shape under whoever stands in it (#1554): every
+// A world changes shape under whoever stands in it: every
 // player is placed at the nearest point of the new surface, everyone in
 // that world (the actor is not special: any member may reshape, standing
 // or not) hears one geometryChanged carrying the surface and every
@@ -316,7 +316,7 @@ TEST(World, GeometryAndSurfaceSpellEachOther) {
   EXPECT_EQ(GeometryOf(Surface::Plane()).as_glasshouse_or_null(), nullptr);
 }
 
-// The gate on deja's tape (#1554): standing in a glasshouse is what makes
+// The gate on deja's tape: standing in a glasshouse is what makes
 // the hub poll at all, and nothing else does.
 TEST(World, OnlyAGlasshouseOccupantOpensTheTape) {
   World world;

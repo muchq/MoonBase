@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "absl/status/status.h"
+#include "domains/games/apis/games_hub/memory_hub_store.h"
 #include "domains/games/apis/games_hub/round_robin.h"
 #include "domains/games/libs/cards/card.h"
 #include "domains/games/libs/cards/golf/game_state.h"
@@ -65,7 +66,7 @@ TEST(MemoryHubStoreTest, OpsRoundTripAndRoomDeleteCascades) {
   EXPECT_TRUE(snapshot->games.empty());
 }
 
-// The surface a room stands on rides its row (#1554): the create sets
+// The surface a room stands on rides its row: the create sets
 // it, LoadRoom and LoadSnapshot hand it back, a second create of the
 // same room (two instances minting one code) keeps the first, and
 // SetRoomSurface changes it — for a room that exists; one that does not
@@ -173,7 +174,7 @@ HubStore::GameRow ChessRow(const chess_play::Table& table, int64_t version,
   return row;
 }
 
-// A room's chess history (#1637) is written by the commit that ends a
+// A room's chess history is written by the commit that ends a
 // game, in the same step: a game in play is not in it, an ended game is,
 // once, however many later commits still carry it, and each game is
 // marked with whether the room was published when it ended.
@@ -261,7 +262,7 @@ TEST(MemoryHubStoreTest, AReMintedTableCodeArchivesItsOwnGames) {
   EXPECT_EQ(store.LoadChessHistory("R1", 100)->games.size(), 2u);
 }
 
-// The public feed (#1637): a game ending in a published room is in it,
+// The public feed: a game ending in a published room is in it,
 // room unnamed; one ending private never is; withdrawing stops the next
 // games, not the ones already out; and the feed outlives the room.
 TEST(MemoryHubStoreTest, PublishedGamesFeedInArchiveOrderAndOutliveWithdrawalAndTheRoom) {
@@ -373,7 +374,7 @@ HubStore::ChessEventRow Event(int64_t version, const std::string& creator = "ali
   return row;
 }
 
-// A round robin (#1647) commits as a games row does: version 1 creates
+// A round robin commits as a games row does: version 1 creates
 // it, refused when the id is taken or the room is not; each later
 // version replaces the one before, and nothing else lands.
 TEST(MemoryHubStoreTest, AnEventCommitsOnItsVersionAndDiesWithItsRoom) {

@@ -15,11 +15,11 @@
 
 namespace games_hub {
 
-/// The lobby's worlds (#79, #1490): every joined player is a position on
+/// The lobby's worlds: every joined player is a position on
 /// the room's surface, a color, and a shape, standing in the world of one
 /// room; each change fans out to everyone else in the same world and to
 /// nobody outside it. No persistence: a world is exactly its players,
-/// standing on the surface its room chose (#1554).
+/// standing on the surface its room chose.
 ///
 /// This is the rules and the map, and nothing about wires: it stages
 /// what each session is owed, in delivery order, and GamesHub, which
@@ -65,8 +65,8 @@ class World {
   /// closed socket alike.
   bool Leave(const std::string& player_id, Deliveries& out);
 
-  /// Whether anyone is standing in a world whose surface is a glasshouse
-  /// (#1554). The gate on deja's tape and the whole of its cost: false
+  /// Whether anyone is standing in a world whose surface is a glasshouse.
+  /// The gate on deja's tape and the whole of its cost: false
   /// means the hub sends deja no HTTP at all, and the first joiner and
   /// the last leaver are what flip it.
   [[nodiscard]] bool AnyoneInAGlasshouse() const;

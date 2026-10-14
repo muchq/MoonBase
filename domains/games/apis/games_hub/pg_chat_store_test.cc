@@ -53,7 +53,7 @@ std::vector<std::string> Texts(const std::vector<ChatRow>& rows) {
   return texts;
 }
 
-// Chat's slice of the persistence integration suite (#1226): chat's SQL is
+// Chat's slice of the persistence integration suite: chat's SQL is
 // the risky code, so there is no in-memory double here. Gated on
 // GAMES_HUB_TEST_DB_URL like the rest of the suite.
 class PgChatStoreTest : public ::testing::Test {
@@ -489,7 +489,7 @@ TEST_F(PgChatStoreTest, AppendRacingRoomDeletionRejectsWithoutOrphaning) {
   EXPECT_EQ(CountRows("R1"), 0) << "the cascade took the earlier message too";
 }
 
-// The bot's reply (#1591): the asker's membership row authorizes it, the
+// The bot's reply: the asker's membership row authorizes it, the
 // bot's reserved id authors it, and a non-member asker stores nothing.
 TEST_F(PgChatStoreTest, AppendAsStoresTheAuthorOnTheMembersAuthority) {
   auto reply = store_->AppendAs("R1", "alice", games_hub::kBotPlayerId, "beep", "bot");

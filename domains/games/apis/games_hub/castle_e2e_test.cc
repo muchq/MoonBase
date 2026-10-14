@@ -1,4 +1,4 @@
-// Castle on the room stream (#77): the second game on the hub, end to end
+// Castle on the room stream: the second game on the hub, end to end
 // through the generated client. The NoShuffleDealer deals the pristine
 // deck from the back, so every card is known: alice (seat 0) holds the
 // aces face down and A♣ K♠ K♥ face up; bob the queens and jacks. A hand
@@ -405,7 +405,7 @@ TEST_F(CastleGameFixture, SetupThenAWholeGameAgreesWithTheEngine) {
   EXPECT_EQ(metrics_->CounterTotal("castle_events", {{"event", "gameEnded"}}), 2);
 }
 
-// The point of naming cards (#1505): a move that names a card the row
+// The point of naming cards: a move that names a card the row
 // does not hold is refused, in band, with the card it named — never the
 // card that happens to sit at that offset. The two refusals are different spikes on the dashboard:
 // a card in the wrong row is a client out of sync with its view, a spelling no card has is a client
@@ -636,7 +636,7 @@ TEST_F(CastleGameFixture, LeavingMidGameAbandonsItWithNoLoser) {
 }
 
 TEST_F(CastleGameFixture, CastleMovesOnAGolfTableAreRefusedAndEngineRefusalsCountAsRules) {
-  auto golf_table = SeatedTable();
+  auto golf_table = SeatedGolfTable();
   ASSERT_TRUE(golf_table.has_value());
   ASSERT_TRUE(
       golf_table->alice.stream.Send(Castle(CastleMove::FromPickup(moonbase::games::PickUp{})))
@@ -1036,16 +1036,14 @@ TEST_F(ShortGraceCastleFixture, GraceExpiryAbandonsTheTableWithNoLoser) {
   EXPECT_EQ(room->as_roomState_or_null()->players[0].gamesWon, 0);
 }
 
-
-// The seat cap (#1621).
 TEST_F(CastleGameFixture, AFifthSeatIsRefused) {
-  ExpectSeatCap<CastleMove>(4, Castle,
-                            [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
-                              return ReceiveCastle(stream, wanted);
-                            });
+  ExpectSeatCap<CastleMove>(
+      4, Castle, [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+        return ReceiveCastle(stream, wanted);
+      });
 }
 
-// A castle game in the stats archive (#1571), recorded started as castle.
+// A castle game in the stats archive, recorded started as castle.
 class CastleEventFixture : public CastleGameFixture {
  protected:
   void SetUp() override {

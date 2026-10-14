@@ -1,4 +1,4 @@
-// The persistence e2e (#1194): the same client flows as hub_e2e_test,
+// The persistence e2e: the same client flows as hub_e2e_test,
 // but over durable credentials and the rooms/games write-through — then the process "dies"
 // (RestartHub) and a fresh hub over the same database has to seat everyone back into their live
 // game. The multi-instance tests add a second live instance (BuildInstance): one room and one game
@@ -318,7 +318,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     if (!seats.bob->stream.Send(Move(GolfMove::FromJoingame(join_game))).ok()) return std::nullopt;
     if (!ReceiveGolf(seats.bob->stream, "gameJoined").has_value()) return std::nullopt;
     // alice's instance must adopt the two-seat roster before she starts.
-    if (!AwaitGameView(
+    if (!AwaitGolfView(
              seats.alice->stream,
              [](const moonbase::games::GameView& view) { return view.players.size() == 2; },
              "alice (primary) gameView with 2 players after bob's seat wake")
@@ -333,7 +333,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
     if (!ReceiveGolf(seats.alice->stream, "gameStarted").has_value()) return std::nullopt;
     // bob's start signal is the projected deal (remote refresh sends
     // views, not the started event — the view is the contract).
-    if (!AwaitGameView(
+    if (!AwaitGolfView(
              seats.bob->stream,
              [](const moonbase::games::GameView& view) { return view.phase != "waiting"; },
              "bob (remote) gameView dealt after alice's start wake")
@@ -417,7 +417,7 @@ class PgGamesHubFixture : public GamesHubStreamFixture {
 namespace {
 
 TEST_F(PgGamesHubFixture, LiveGameSurvivesARestart) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   Seat& alice = table->alice;
   Seat& bob = table->bob;
@@ -542,7 +542,7 @@ TEST_F(PgGamesHubFixture, LiveGameSurvivesARestart) {
 }
 
 TEST_F(PgGamesHubFixture, StatsSurviveARestart) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
 
   // Quickest legal game: alice knocks unseen, bob takes his final turn.
@@ -579,7 +579,7 @@ TEST_F(PgGamesHubFixture, StatsSurviveARestart) {
   ASSERT_NE(restored_lobby, nullptr);
   EXPECT_TRUE(restored_lobby->games.empty());
 
-  // A resume also replays the room's chat (#1226) — one history event
+  // A resume also replays the room's chat — one history event
   // after the snapshot, empty here since nobody said anything.
   auto replay = NextEvent(alice_back->stream);
   ASSERT_TRUE(replay.has_value());
@@ -605,7 +605,7 @@ TEST_F(PgGamesHubFixture, StatsSurviveARestart) {
   }
 }
 
-// A castle table is the second engine behind the same rows (#77): its
+// A castle table is the second engine behind the same rows: its
 // state round-trips through the store on a restart, with the last play,
 // the redaction per viewer, and the turn intact.
 TEST_F(PgGamesHubFixture, CastleTableSurvivesARestart) {
@@ -725,7 +725,7 @@ TEST_F(PgGamesHubFixture, CastleTableSurvivesARestart) {
   EXPECT_EQ(rows.games[0].version, version_before + 1);
 }
 
-// A rummy table (#245) behind the same rows: a turn caught mid-way — the
+// A rummy table behind the same rows: a turn caught mid-way — the
 // discard's top taken, a meld down — survives a restart with the taken
 // card still barred from going back, and the turn finishes on the
 // restored table.
@@ -970,7 +970,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesSweepingOneClockEndTheGameOnce) {
 }
 
 TEST_F(PgGamesHubFixture, PendingGameLifecycleWritesThrough) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   // A second, pending game beside the started one: bob leaves his seat in
   // the started game first, creates a fresh lobby game, and its roster
@@ -1014,7 +1014,7 @@ TEST_F(PgGamesHubFixture, PendingGameLifecycleWritesThrough) {
 }
 
 TEST_F(PgGamesHubFixture, CorruptRowsLoseTheGameNotTheLobby) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   store_->Flush();
 
@@ -1117,7 +1117,7 @@ TEST_F(PgGamesHubFixture, CrashedConnectedSeatsRoomIsSweptOnceStale) {
   EXPECT_FALSE(held) << "the sweep's wake never dropped the successor's copy";
 }
 
-// A watcher (#1633) is held where its socket is: a table moved on another
+// A watcher is held where its socket is: a table moved on another
 // instance reaches it through that commit's wake, re-projected here.
 TEST_F(PgGamesHubFixture, AWatcherOnAnotherInstanceSeesTheTableMove) {
   using moonbase::games::ChessMove;
@@ -1222,8 +1222,8 @@ TEST_F(PgGamesHubFixture, AChallengeSurvivesARestart) {
   EXPECT_EQ(view.terms->initialSeconds, 60);
 }
 
-// A challenge posted on one instance is read back from the row on another
-// (#1633): the remote lists its terms, and joining there starts the game
+// A challenge posted on one instance is read back from the row on another:
+// the remote lists its terms, and joining there starts the game
 // on them.
 TEST_F(PgGamesHubFixture, AChallengePostedOnOneInstanceStartsOnAnother) {
   using moonbase::games::ChessMove;
@@ -1281,7 +1281,7 @@ TEST_F(PgGamesHubFixture, AChallengePostedOnOneInstanceStartsOnAnother) {
   EXPECT_EQ(playing->clock->incrementMs, 1'000);
 }
 
-// Two live hubs (#1194), one game. alice plays on
+// Two live hubs, one game. alice plays on
 // the primary instance, bob on the second; every move is a conditional
 // commit whose NOTIFY wakes the other side into re-reading and
 // re-projecting. No instance ever talks to the other directly.
@@ -1311,12 +1311,12 @@ TEST_F(PgGamesHubFixture, TwoInstancesShareOneGame) {
       ASSERT_TRUE(seat->stream.Send(Move(GolfMove::FromPeekcard(peek))).ok());
     }
   }
-  ASSERT_TRUE(AwaitGameView(
+  ASSERT_TRUE(AwaitGolfView(
                   alice.stream,
                   [](const moonbase::games::GameView& view) { return view.allPlayersPeeked; },
                   "alice (primary) allPlayersPeeked after cross-instance peeks")
                   .has_value());
-  ASSERT_TRUE(AwaitGameView(
+  ASSERT_TRUE(AwaitGolfView(
                   bob.stream,
                   [](const moonbase::games::GameView& view) { return view.allPlayersPeeked; },
                   "bob (remote) allPlayersPeeked after cross-instance peeks")
@@ -1328,7 +1328,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesShareOneGame) {
   ASSERT_TRUE(
       alice.stream.Send(Move(GolfMove::FromDiscarddrawn(moonbase::games::DiscardDrawn{}))).ok());
   // ...lands on bob's instance as two discards and the turn handoff.
-  ASSERT_TRUE(AwaitGameView(
+  ASSERT_TRUE(AwaitGolfView(
                   bob.stream,
                   [&](const moonbase::games::GameView& view) {
                     return view.discardCount == 2 && view.currentPlayerId == bob.player_id;
@@ -1340,7 +1340,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesShareOneGame) {
   ASSERT_TRUE(bob.stream.Send(Move(GolfMove::FromDrawcard(moonbase::games::DrawCard{}))).ok());
   ASSERT_TRUE(
       bob.stream.Send(Move(GolfMove::FromDiscarddrawn(moonbase::games::DiscardDrawn{}))).ok());
-  ASSERT_TRUE(AwaitGameView(
+  ASSERT_TRUE(AwaitGolfView(
                   alice.stream,
                   [&](const moonbase::games::GameView& view) {
                     return view.discardCount == 3 && view.currentPlayerId == alice.player_id;
@@ -1374,7 +1374,7 @@ TEST_F(PgGamesHubFixture, RemoteFinishRunsOneCeremonyEverywhere) {
   // Quickest legal game: alice knocks unseen on her instance...
   ASSERT_TRUE(alice.stream.Send(Move(GolfMove::FromKnock(moonbase::games::Knock{}))).ok());
   // ...and the knocked phase reaches bob's projection.
-  ASSERT_TRUE(AwaitGameView(
+  ASSERT_TRUE(AwaitGolfView(
                   bob.stream,
                   [&](const moonbase::games::GameView& view) {
                     return view.knockedPlayerId == alice.player_id;
@@ -1483,7 +1483,7 @@ TEST_F(PgGamesHubFixture, ARebaseOntoARemoteFinishStillGetsTheCeremony) {
   ASSERT_TRUE(ReceiveCase(alice.stream, "roomState").has_value());
 }
 
-// Chat across the real wire (#1226 task 5): a message committed on one
+// Chat across the real wire: a message committed on one
 // instance reaches the other's members via its NOTIFY — or, when the
 // commit raced the receiving side's LISTEN, via the channel-active
 // catch-up read. Which path fired is deliberately invisible: delivery
@@ -1599,7 +1599,7 @@ TEST_F(PgGamesHubFixture, ChatCommittedDuringListenerOutageArrivesAfterReconnect
   EXPECT_EQ(healed->as_roomChat_or_null()->text, "during outage");
 }
 
-// A room's surface crosses instances with its row (#1554): the instance
+// A room's surface crosses instances with its row: the instance
 // that materializes another's room adopts its sphere, so a seat joining
 // the world there lands on the wall, hears the sphere named, and is
 // refused off it by the sphere's rule.
@@ -1635,7 +1635,7 @@ TEST_F(PgGamesHubFixture, AMaterializedRoomStandsOnItsSphere) {
             "position must be on the sphere (radius 53)");
 }
 
-// A room changes shape on every instance (#1554): alice's setGeometry
+// A room changes shape on every instance: alice's setGeometry
 // on the primary reaches bob, standing in the world on the remote,
 // as a geometryChanged with his placement on the sphere — no rejoin —
 // and his next move obeys the sphere; her own join then lands on it.
@@ -1684,8 +1684,8 @@ TEST_F(PgGamesHubFixture, SetGeometryReshapesTheRoomOnEveryInstance) {
   EXPECT_NE(world->as_worldState_or_null()->geometry.as_sphere_or_null(), nullptr);
 }
 
-// Publishing a room's chess games reaches every instance holding it
-// (#1637): bob, on the remote, hears alice's publish from the primary —
+// Publishing a room's chess games reaches every instance holding it:
+// bob, on the remote, hears alice's publish from the primary —
 // without a `by`, which the row does not carry — and a game that ends
 // on the primary is in bob's history, and in the export the remote
 // serves.

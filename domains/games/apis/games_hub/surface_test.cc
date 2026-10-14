@@ -101,7 +101,7 @@ TEST(Surface, PlacePutsAnyPointOnTheSurface) {
   }
 }
 
-// The glasshouse (#1554) is the plane's floor inside four glass walls at
+// The glasshouse is the plane's floor inside four glass walls at
 // the edges it already had: the same positions settle, the same ones are
 // refused, and the glass is not somewhere to stand — a position off the
 // floor is refused exactly as it is on the plane, however tall the walls

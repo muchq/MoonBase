@@ -12,7 +12,7 @@
 
 namespace games_hub {
 
-/// A chess round robin's pairings and standings (#1647): everyone plays
+/// A chess round robin's pairings and standings: everyone plays
 /// everyone once, on the same terms. Pure: the hub stores and serves it.
 
 inline constexpr std::size_t kMinEventEntrants = 3;

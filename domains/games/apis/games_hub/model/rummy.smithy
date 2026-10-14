@@ -12,8 +12,8 @@ use moonbase.games#LeaveGame
 use moonbase.games#StartGame
 use moonbase.games#TurnChanged
 
-// Rummy's vocabulary (#245): the third game on the room layer, played at
-// a dealer's-choice table (#1609) — one deal after another, the dealer
+// Rummy's vocabulary: the third game on the room layer, played at
+// a dealer's-choice table — one deal after another, the dealer
 // picking each deal's variant. It rides the room's Play stream as one
 // `rummy` member per direction and reuses the shared lifecycle shapes, the
 // way castle does; startGame seats the table, and the dealer's
@@ -29,7 +29,7 @@ structure RummyCommand {
 
 /// A turn is a draw (stock or discard), then any melds and lay-offs, then
 /// a discard; a seat that empties its hand wins. Moves name the cards
-/// they mean (#1505): a card the hand does not hold is refused in band,
+/// they mean: a card the hand does not hold is refused in band,
 /// so a move sent against a view the table has moved past costs a
 /// refusal rather than playing a different card.
 union RummyMove {

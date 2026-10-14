@@ -1,4 +1,4 @@
-// Wire-contract goldens for spades on the room stream (#1658), the way
+// Wire-contract goldens for spades on the room stream, the way
 // pong_wire_test pins pong's: exact payload bytes, because the
 // typed-client suites regenerate both sides together and cannot see a
 // rename, and the browser reading these lives in another repository. The
@@ -22,8 +22,6 @@ namespace {
 
 using json = nlohmann::json;
 using Socket = std::shared_ptr<opal::http::WebSocket>;
-
-constexpr char kPlayPath[] = "/games/v2/play";
 
 class SpadesWireTest : public HubWireFixture {
  protected:

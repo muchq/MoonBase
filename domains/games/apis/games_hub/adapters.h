@@ -1,11 +1,14 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_ADAPTERS_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_ADAPTERS_H
 
+#include <array>
 #include <concepts>
 #include <cstddef>
 #include <deque>
+#include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -35,6 +38,7 @@ concept GameAdapter = requires(
     const std::string& id, const std::vector<std::string>& roster,
     const moonbase::games::GameCommands& commands, const moonbase::games::GameEvents& events) {
   { A::kKind } -> std::convertible_to<GameKind>;
+  { A::kName } -> std::convertible_to<std::string_view>;
   { A::kMaxSeats } -> std::convertible_to<std::size_t>;
   { A::kCapabilities } -> std::convertible_to<unsigned>;
   { A::kCommandSeries } -> std::convertible_to<std::string_view>;
@@ -50,6 +54,7 @@ concept GameAdapter = requires(
   { A::ClosedDeltas(engine, roster) } -> std::same_as<StatsDeltas>;
   { A::DealEndDeltas(engine, engine) } -> std::same_as<std::optional<StatsDeltas>>;
   { A::DealStarted(engine, engine) } -> std::same_as<bool>;
+  { A::Ended(engine) } -> std::same_as<std::optional<GameEnd>>;
   { A::WithoutSeat(engine, 0, int64_t{0}) } -> std::same_as<absl::StatusOr<typename A::Engine>>;
   { A::ViewOf(context, &engine, id) } -> std::same_as<typename A::View>;
   { A::StateEvent(view) } -> std::same_as<moonbase::games::GameEvents>;
@@ -71,6 +76,8 @@ concept GameAdapter = requires(
                    std::declval<const std::optional<EventTag>&>())
   } -> std::same_as<std::optional<StartGame<typename A::Start>>>;
   { A::IsBot(std::string_view{}) } -> std::same_as<bool>;
+  { A::Serialize(engine) } -> std::same_as<std::string>;
+  { A::Deserialize(id) } -> std::same_as<absl::StatusOr<typename A::Engine>>;
 };
 
 /// Each capability's hooks (adapter.h), held by every adapter that
@@ -93,6 +100,15 @@ concept RoundRobinHooks =
       {
         A::RoundRobinsEvent(std::vector<HeldRoundRobin>{})
       } -> std::same_as<moonbase::games::GameEvents>;
+      { A::kRoundRobinBodyNamed } -> std::convertible_to<bool>;
+      { A::RoundRobinBody(row) } -> std::same_as<std::vector<std::pair<std::string, std::string>>>;
+      {
+        A::FromRoundRobinBody(std::declval<const std::map<std::string, std::string>&>(),
+                              std::declval<HubStore::ChessEventRow&>())
+      } -> std::same_as<bool>;
+      {
+        A::TableGame(std::declval<const typename A::Engine&>())
+      } -> std::same_as<std::optional<HubStore::EventGame>>;
     };
 
 template <typename A>
@@ -106,6 +122,16 @@ concept ClockHooks = NextGameHooks<A> && requires(const typename A::Engine& engi
   { A::Flag(engine, int64_t{0}) } -> std::same_as<absl::StatusOr<typename A::Engine>>;
 };
 
+template <typename A>
+concept PublishedHooks = NextGameHooks<A> && requires(const typename A::Engine& engine) {
+  { A::Archived(engine) } -> std::same_as<std::optional<HubStore::ChessGameRow>>;
+};
+
+template <typename A>
+concept RealtimeHooks = requires(const typename A::Move& move) {
+  { A::Steers(move) } -> std::same_as<bool>;
+};
+
 template <typename A, Capability C>
 constexpr bool kHas = (A::kCapabilities & C) != 0;
 
@@ -113,7 +139,7 @@ template <typename A>
 concept CapableAdapter =
     (!kHas<A, kNextGame> || NextGameHooks<A>) && (!kHas<A, kRoundRobins> || RoundRobinHooks<A>) &&
     (!kHas<A, kOpenings> || OpeningHooks<A>) && (!kHas<A, kClocked> || ClockHooks<A>) &&
-    (!kHas<A, kPublished> || NextGameHooks<A>);
+    (!kHas<A, kRealtime> || RealtimeHooks<A>) && (!kHas<A, kPublished> || PublishedHooks<A>);
 
 /// Each HostedState alternative has a full adapter that names the GameKind
 /// at its index, so a kind and its engine never disagree.
@@ -125,6 +151,36 @@ constexpr bool KindsLineUp(std::index_sequence<I...>) {
           ...);
 }
 static_assert(KindsLineUp(std::make_index_sequence<kGames>{}));
+
+/// Each kind's word, by kind: its adapter's kName.
+inline constexpr std::array<std::string_view, kGames> kKindNames =
+    []<std::size_t... I>(std::index_sequence<I...>) {
+      return std::array<std::string_view, kGames>{Adapter<EngineAt<I>>::kName...};
+    }(std::make_index_sequence<kGames>{});
+
+constexpr bool NamesAreDistinct() {
+  for (std::size_t i = 0; i < kGames; ++i) {
+    if (kKindNames[i].empty()) return false;
+    for (std::size_t j = 0; j < i; ++j) {
+      if (kKindNames[i] == kKindNames[j]) return false;
+    }
+  }
+  return true;
+}
+static_assert(NamesAreDistinct(), "every game's kName is its own, and not empty");
+
+/// The word a kind is written as: GameSummary.game on the wire, the games
+/// row's game column, and the word its games are recorded under.
+inline std::string_view GameKindName(GameKind kind) {
+  return kKindNames[static_cast<std::size_t>(kind)];
+}
+
+inline std::optional<GameKind> ParseGameKind(std::string_view name) {
+  for (std::size_t i = 0; i < kGames; ++i) {
+    if (kKindNames[i] == name) return static_cast<GameKind>(i);
+  }
+  return std::nullopt;
+}
 
 /// The most seats any game's table holds. Stats and deja bound a table's
 /// players by it, and otel_contract reads this literal to hold them to it.
@@ -147,6 +203,21 @@ decltype(auto) VisitAdapter(const HostedState& state, F&& f) {
         return f(Adapter<std::decay_t<decltype(engine)>>{}, engine);
       },
       state);
+}
+
+/// The word a game is recorded under: its adapter's
+/// RecordedName(engine) where it has one, as rummy's does for a table
+/// whose deals are each recorded under its variant's word, and its kind's
+/// otherwise.
+inline std::string_view VariantWordOf(const HostedState& state) {
+  return VisitAdapter(state, [](auto adapter, const auto& engine) -> std::string_view {
+    using A = decltype(adapter);
+    if constexpr (requires { A::RecordedName(engine); }) {
+      return A::RecordedName(engine);
+    } else {
+      return A::kName;
+    }
+  });
 }
 
 /// `f(Adapter<E>{})` for the engine a `kind` table plays.
@@ -247,6 +318,30 @@ std::optional<moonbase::games::GameEvents> RoundRobinsEventOf(
 /// The terms a `kind` round robin's pairing table waits on.
 std::optional<ChessTerms> RoundRobinTermsOf(GameKind kind, const HubStore::ChessEventRow& row);
 
+/// What a `row.kind` round robin's stored body carries beyond the fields
+/// every round robin's does: its game's word as "game", unless its game's
+/// bodies name none, and its adapter's own fields.
+std::vector<std::pair<std::string, std::string>> RoundRobinBodyOf(
+    const HubStore::ChessEventRow& row);
+
+/// Reads a stored round robin body's string fields onto `row`: its game
+/// from "game" (a body naming none is the one game's whose bodies go
+/// unnamed), then that game's own fields. False when the body is no round
+/// robin game's.
+bool RoundRobinFromBody(const std::map<std::string, std::string>& fields,
+                        HubStore::ChessEventRow& row);
+
+/// The finished game a committed row archives (kPublished's Archived),
+/// and its ordinal; absent for anything else. Its id and stamps are the
+/// store's to give.
+std::optional<HubStore::ChessGameRow> ArchivedChessGame(const HubStore::GameRow& row);
+
+/// The round robins' games their tagged tables' own rows record
+/// (kRoundRobins' TableGame), for both stores' loads: each added to the
+/// event among `events` it names, by table code.
+void AddRoundRobinTableGames(const std::vector<HubStore::GameRow>& games,
+                             std::vector<HubStore::ChessEventRow>& events);
+
 /// Whether a `kind` table's adapter opts into `capability`.
 inline bool HasCapability(GameKind kind, Capability capability) {
   return ForKind(kind, [capability](auto adapter) {
@@ -257,6 +352,20 @@ inline bool HasCapability(GameKind kind, Capability capability) {
 /// Whether opening a `kind` table starts a game the event log records.
 inline bool OpenStartsAGame(GameKind kind) {
   return ForKind(kind, [](auto adapter) { return decltype(adapter)::kOpenStartsAGame; });
+}
+
+/// Whether a command steers a realtime game (kRealtime's Steers), riding
+/// the hub's realtime budget.
+inline bool OnRealtimeBudget(const moonbase::games::GameCommands& commands) {
+  return AnyAdapter([&commands](auto adapter) {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kRealtime>) {
+      const auto* move = A::MoveOf(commands);
+      return move != nullptr && A::Steers(*move);
+    } else {
+      return false;
+    }
+  });
 }
 
 /// Whether the id is a bot some game seats.

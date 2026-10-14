@@ -338,7 +338,7 @@ var serviceRegistry = map[string]serviceEntry{
 			// this series is the only evidence the reaper runs at all — a
 			// broken one is indistinguishable from a hub with no ghosts.
 			counter("Sessions", "hub_restored_reaped", "", `hub_restored_seats_reaped_total`),
-			// The room layer (#1490 phase 6): rooms, chat, and every refusal
+			// The room layer: rooms, chat, and every refusal
 			// whichever tenant raised it, on hub_*; each game's envelope is
 			// its own group.
 			counter("Room layer", "hub_commands", "", `hub_commands_total`),
@@ -359,11 +359,11 @@ var serviceRegistry = map[string]serviceEntry{
 				`sum(rate(chat_rows_delivered_total[w]))/sum(rate(chat_catch_up_drains_total[w]))`),
 			counter("Chat", "history_replays", "", `chat_history_replays_total`),
 			counter("Chat", "failures", "", `chat_failures_total`),
-			// Each tenant's envelope on the one stream (#1490): golf, castle
-			// (#77), rummy (#245), chess, and the lobby's world. Series and labels carry the game
-			// prefix because a label is a tile's identity across the whole
-			// service, not just its group; chat_* and hub_* are the room
-			// layer's.
+			// Each tenant's envelope on the one stream: every game the
+			// hub's adapters declare (otel_contract holds this list to them),
+			// and the lobby's world. Series and labels carry the game prefix
+			// because a label is a tile's identity across the whole service,
+			// not just its group; chat_* and hub_* are the room layer's.
 			counter("Golf", "golf_commands", "", `golf_commands_total`),
 			counter("Golf", "golf_events", "", `golf_events_total`),
 			counter("Castle", "castle_commands", "", `castle_commands_total`),
@@ -372,23 +372,23 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("Rummy", "rummy_events", "", `rummy_events_total`),
 			counter("Chess", "chess_commands", "", `chess_commands_total`),
 			counter("Chess", "chess_events", "", `chess_events_total`),
+			counter("Pong", "pong_commands", "", `pong_commands_total`),
+			counter("Pong", "pong_events", "", `pong_events_total`),
+			counter("Spades", "spades_commands", "", `spades_commands_total`),
+			counter("Spades", "spades_events", "", `spades_events_total`),
 			counter("Lobby", "lobby_commands", "", `lobby_commands_total`),
 			counter("Lobby", "lobby_events", "", `lobby_events_total`),
 		},
 		// command/event/rejection/disconnect/rate_limited/chat_message/
 		// chat_delivery/chat_failure are all toggleable: each expands to a
-		// _rate and a _count panel (see customTimeseriesDef.panels). Base
-		// names match the pre-toggle _rate keys exactly, so a client that
-		// only ever asked for the rate panel keeps reading the same series
-		// name it always did.
+		// _rate and a _count panel (see customTimeseriesDef.panels). A base
+		// name is the rate panel's key, the series name clients read.
 		CustomTimeseries: map[string]customTimeseriesDef{
 			"sessions_active": tsFixed(`sum(hub_sessions_active_gauge)`),
-			// Fixed rather than tsCounter(hub_sessions_total): this key
-			// predates the toggle and is already a count, over a plain 5m
-			// window rather than the chart's own step. Making it toggleable
-			// would rename it away from "session_starts" (tsCounter's base
-			// key becomes both the _rate and _count panel name), breaking
-			// the one client-facing name this key has ever had.
+			// Fixed rather than tsCounter(hub_sessions_total): already a
+			// count, over a plain 5m window rather than the chart's step,
+			// and tsCounter would rename the client-facing "session_starts"
+			// to its _rate and _count panels.
 			"session_starts": tsFixed(`sum(increase(hub_sessions_total[5m]))`),
 			// The room layer's own traffic; each tenant's envelope below.
 			"command":            tsCounter(`hub_commands_total`),

@@ -71,12 +71,18 @@ enum Capability : unsigned {
   /// starts the next. Hooks: Next(engine, start, move context), and
   /// CurrentGameOver(engine), whether the game last started has ended.
   kNextGame = 1U << 1,
-  /// A round robin's pairings play at the game's tables (#1647); implies
+  /// A round robin's pairings play at the game's tables; implies
   /// kNextGame, a pairing being decided by its table's game ending.
   /// Hooks: RoundRobinStart(start, table terms, round robin row), the
   /// start a pairing's table plays on; RoundRobinTerms(row), what its
   /// table waits on; RoundRobinEvent(held) and RoundRobinsEvent(helds),
-  /// the round robins in the game's envelope.
+  /// the round robins in the game's envelope; kRoundRobinBodyNamed,
+  /// whether a stored round robin's body names its game (exactly one
+  /// game's bodies name none, and a body naming none is that game's);
+  /// RoundRobinBody(row) and FromRoundRobinBody(fields, row), the game's
+  /// own string fields in that body, and whether they read back;
+  /// TableGame(engine), the pairing's game a tagged table's own row
+  /// records, for a game whose pairings' games are not archived.
   kRoundRobins = 1U << 2,
   /// A start draws its opening from the hub's ChessOpener. Hooks:
   /// Prepare(start, opener).
@@ -88,11 +94,23 @@ enum Capability : unsigned {
   /// The hub's chess engine plays the game's bot seats.
   kEngineBots = 1U << 5,
   /// The game runs between moves, on the hub's ticks: pong's rallies.
+  /// Hooks: Steers(move), whether a move steers the rally, and so rides
+  /// the hub's realtime rate budget rather than its command budget.
   kRealtime = 1U << 6,
   /// A published room's finished games reach the public feed, and the
   /// hub's indexer is asked after each one's players (implies kNextGame).
+  /// Hooks: Archived(engine), the finished game a committed row archives
+  /// and its ordinal, which the stores keep as the room's history.
   kPublished = 1U << 7,
+  /// A waiting table may hold posted terms its next seat starts on. The
+  /// store checks the flag: a waiting row's state column is read back as
+  /// those terms in place of an engine. Posting them is Decode's, as the
+  /// PostTerms it returns.
+  kChallenges = 1U << 8,
 };
+
+/// How a game ended: played out, or left with too few seats to go on.
+enum class GameEnd { kCompleted, kAbandoned };
 
 /// A round robin as the hub holds it, with the tables playing its
 /// pairings now, by pairing index.
@@ -118,7 +136,7 @@ struct AddBot {
   std::string bot_id;
   bool engine = false;
 };
-/// The terms a waiting table posts for its next seat to start on (#1633).
+/// The terms a waiting table posts for its next seat to start on.
 struct PostTerms {
   ChessTerms terms;
 };
@@ -176,7 +194,7 @@ using Action =
                  WatchTable, AddBot, PostTerms, AskHistory, AskReview, Publish, CreateRoundRobin,
                  Withdraw, Forfeit, ListRoundRobins, PlayRoundRobin, Steer>;
 
-/// A game's side of the hub (#1621), one specialization per engine in the
+/// A game's side of the hub, one specialization per engine in the
 /// game's own <game>_adapter.h. adapters.h dispatches on HostedState and
 /// GameKind, and holds every specialization to the hooks below, so an
 /// engine without one does not compile. Each specialization holds:
@@ -185,7 +203,10 @@ using Action =
 ///                           the engine, its envelope's command and update
 ///                           unions, the view a seat sees, and what a
 ///                           startGame names
-///   kKind, kMaxSeats, kCapabilities
+///   kKind, kName, kMaxSeats, kCapabilities
+///                           the kind, the word it is written as (wire,
+///                           store and event log), its seat cap and the
+///                           shared machinery it opts into
 ///   kOpenStartsAGame        whether opening the table starts a recorded
 ///                           game (rummy's games are its deals instead)
 ///   kCommandSeries, kCommands, kEventSeries, kEvents
@@ -206,6 +227,8 @@ using Action =
 ///                           closing the table credits, if it did
 ///   DealStarted(before, after)
 ///                           whether a transition began the table's next game
+///   Ended(engine)           how the game a finished or closed table last
+///                           played ended, if that ending is not yet recorded
 ///   WithoutSeat(engine, seat, now_ms)
 ///                           the engine once `seat` leaves
 ///   ViewOf(context, engine, viewer)
@@ -226,6 +249,14 @@ using Action =
 ///                           the start a table makes once its last seat
 ///                           fills, if it makes one
 ///   IsBot(player_id)        whether the id is a bot the game seats
+///   Serialize(engine), Deserialize(stored)
+///                           the engine as its games row's state column
+///                           holds it, and back
+///
+/// and, optionally:
+///
+///   RecordedName(engine)    the word a game is recorded under, when it is
+///                           not kName (rummy's deals, by variant)
 template <typename Engine>
 struct Adapter;
 

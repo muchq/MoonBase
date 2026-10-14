@@ -10,13 +10,10 @@
 
 namespace games_hub {
 
-/// The generated service's one handler (#79): session identity here, and
-/// the one stream, Play, forwarded whole to the room hub.
-///
-/// A new game is one more envelope member on Play — castle (#77) and the
-/// lobby (#1490) ride GamesHub's room layer (rooms, chat, grace, the store,
-/// per-viewer redaction) that way — so the next game extends the room
-/// host, and the README says which union shape it copies.
+/// The generated service's one handler: session identity here, and
+/// the one stream, Play, forwarded whole to the room hub. A game is one
+/// more envelope member on Play, riding GamesHub's room layer; the README
+/// says what adding one touches.
 class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
  public:
   GamesHubHandler(std::shared_ptr<TicketVault> vault, std::shared_ptr<IdGenerator> ids,
@@ -30,12 +27,12 @@ class GamesHubHandler final : public moonbase::games::GamesHubAsyncHandler {
       const moonbase::games::GetSessionInput& input,
       const opal::server::RequestContext& context) override;
 
-  /// The public chess feed as PGN (#1637).
+  /// The public chess feed as PGN.
   opal::Outcome<moonbase::games::ExportChessGamesOutput> ExportChessGames(
       const moonbase::games::ExportChessGamesInput& input,
       const opal::server::RequestContext& context) override;
 
-  /// One published game, for its page (#1637).
+  /// One published game, for its page.
   opal::Outcome<moonbase::games::GetChessGameOutput> GetChessGame(
       const moonbase::games::GetChessGameInput& input,
       const opal::server::RequestContext& context) override;

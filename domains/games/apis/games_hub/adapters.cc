@@ -1,8 +1,67 @@
 #include "domains/games/apis/games_hub/adapters.h"
 
+#include <algorithm>
+
 #include "absl/log/log.h"
 
 namespace games_hub {
+namespace {
+
+template <typename A>
+constexpr bool UnnamedRoundRobinBodies() {
+  if constexpr (kHas<A, kRoundRobins>) {
+    return !A::kRoundRobinBodyNamed;
+  } else {
+    return false;
+  }
+}
+
+// The index of the one round robin game whose bodies name no game.
+constexpr std::size_t UnnamedRoundRobinGame() {
+  return []<std::size_t... I>(std::index_sequence<I...>) {
+    std::size_t found = kGames;
+    std::size_t count = 0;
+    ((UnnamedRoundRobinBodies<Adapter<EngineAt<I>>>() ? (found = I, ++count) : count), ...);
+    return count == 1 ? found : kGames;
+  }(std::make_index_sequence<kGames>{});
+}
+static_assert(UnnamedRoundRobinGame() < kGames,
+              "exactly one round robin game's stored bodies name no game");
+
+}  // namespace
+
+std::vector<std::pair<std::string, std::string>> RoundRobinBodyOf(
+    const HubStore::ChessEventRow& row) {
+  return ForKind(row.kind, [&](auto adapter) -> std::vector<std::pair<std::string, std::string>> {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kRoundRobins>) {
+      auto fields = A::RoundRobinBody(row);
+      if (A::kRoundRobinBodyNamed) fields.emplace_back("game", std::string(A::kName));
+      return fields;
+    } else {
+      return {};
+    }
+  });
+}
+
+bool RoundRobinFromBody(const std::map<std::string, std::string>& fields,
+                        HubStore::ChessEventRow& row) {
+  const auto game = fields.find("game");
+  const std::optional<GameKind> kind =
+      game == fields.end() ? std::optional(static_cast<GameKind>(UnnamedRoundRobinGame()))
+                           : ParseGameKind(game->second);
+  if (!kind.has_value()) return false;
+  return ForKind(*kind, [&](auto adapter) {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kRoundRobins>) {
+      if (game != fields.end() && !A::kRoundRobinBodyNamed) return false;
+      row.kind = A::kKind;
+      return A::FromRoundRobinBody(fields, row);
+    } else {
+      return false;
+    }
+  });
+}
 
 moonbase::games::GameEvents CreatedEvent(GameKind kind,
                                          const moonbase::games::GameCreated& created) {
@@ -128,6 +187,54 @@ std::optional<ChessTerms> RoundRobinTermsOf(GameKind kind, const HubStore::Chess
       return std::nullopt;
     }
   });
+}
+
+std::optional<HubStore::ChessGameRow> ArchivedChessGame(const HubStore::GameRow& row) {
+  if (!row.state.has_value()) return std::nullopt;
+  return VisitAdapter(
+      *row.state, [&](auto adapter, const auto& engine) -> std::optional<HubStore::ChessGameRow> {
+        using A = decltype(adapter);
+        if constexpr (kHas<A, kPublished>) {
+          auto archived = A::Archived(engine);
+          if (archived.has_value()) archived->game_id = row.game_id;
+          return archived;
+        } else {
+          return std::nullopt;
+        }
+      });
+}
+
+void AddRoundRobinTableGames(const std::vector<HubStore::GameRow>& games,
+                             std::vector<HubStore::ChessEventRow>& events) {
+  std::vector<std::pair<const HubStore::GameRow*, HubStore::EventGame>> tagged;
+  for (const HubStore::GameRow& game : games) {
+    if (!game.event.has_value()) continue;
+    std::optional<HubStore::EventGame> played =
+        VisitTable(game.kind, game.state,
+                   [](auto adapter, const auto* engine) -> std::optional<HubStore::EventGame> {
+                     using A = decltype(adapter);
+                     if constexpr (kHas<A, kRoundRobins>) {
+                       if (engine != nullptr) return A::TableGame(*engine);
+                     }
+                     return std::nullopt;
+                   });
+    if (!played.has_value()) continue;
+    played->game_id = game.game_id;
+    played->pairing = game.event->pairing;
+    tagged.emplace_back(&game, *std::move(played));
+  }
+  // By code, so every instance reads a pairing's tables in one order.
+  std::sort(tagged.begin(), tagged.end(),
+            [](const auto& a, const auto& b) { return a.first->game_id < b.first->game_id; });
+  for (HubStore::ChessEventRow& event : events) {
+    for (const auto& [game, played] : tagged) {
+      if (game->kind != event.kind || game->room_id != event.room_id ||
+          game->event->event_id != event.event_id) {
+        continue;
+      }
+      event.games.push_back(played);
+    }
+  }
 }
 
 }  // namespace games_hub

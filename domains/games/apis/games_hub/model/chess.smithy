@@ -46,7 +46,7 @@ union ChessMove {
     playRoundRobin: ChessPlayRoundRobin
 }
 
-/// Starts a round robin among the room's members (#1647): everyone plays
+/// Starts a round robin among the room's members: everyone plays
 /// everyone once, on these terms. Any member may, entering 3 to 8 members
 /// by playerId; the pairings follow their order. The creator moderates it.
 /// Every member hears roundRobin. A room keeps at most 16, as long as it
@@ -92,7 +92,7 @@ structure ChessForfeit {
 /// The room's round robins, answered with roundRobins. Any member.
 structure ChessRoundRobinsRequest {}
 
-/// Opens a table for the player's pairing with `opponent` (#1647), from no
+/// Opens a table for the player's pairing with `opponent`, from no
 /// seat: it waits on the round robin's terms, only the opponent can fill
 /// it, each plays the colour the pairing gives, and the game starts when
 /// they sit. It plays that one game, which is the pairing's result; no
@@ -149,7 +149,7 @@ structure ChessTerms {
     incrementSeconds: Integer
 }
 
-/// Watches a chess table in the room, in any phase, from no seat (#1633):
+/// Watches a chess table in the room, in any phase, from no seat:
 /// the answer is a gameState, and from then on every gameState and
 /// gameEnded the seats get. Refused while seated. Watching another table
 /// switches to it; sitting down anywhere, leaveGame (acked with
@@ -160,8 +160,8 @@ structure ChessWatch {
     gameId: String
 }
 
-/// Seats Stockfish in the empty second seat of a table not yet started
-/// (#1618), playing at `elo`. Only the table's one player may; the bot
+/// Seats Stockfish in the empty second seat of a table not yet started,
+/// playing at `elo`. Only the table's one player may; the bot
 /// leaves with them. Refused when the hub has no engine to ask.
 structure ChessAddBot {
     @required
@@ -170,7 +170,7 @@ structure ChessAddBot {
 }
 
 /// Seats two and deals the variant's position, White's clock running.
-/// As `challenge` (#1633), the same fields are the terms a waiting table's
+/// As `challenge`, the same fields are the terms a waiting table's
 /// one seat posts, before anyone joins; posting again replaces them. The
 /// room's GameSummary.terms and every view show them, and the seat that
 /// fills the table, a player's or a bot's, starts the game on them.
@@ -458,7 +458,7 @@ structure ChessView {
     /// waiting, until a startGame or a leave.
     terms: ChessTerms
 
-    /// The round robin whose pairing this table plays (#1647), from its
+    /// The round robin whose pairing this table plays, from its
     /// opening to its close: it plays that one game on the round robin's
     /// terms, with no next game, bot or challenge. Absent at any other table.
     roundRobinId: String

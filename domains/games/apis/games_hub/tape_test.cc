@@ -1,4 +1,4 @@
-// deja on the walls (#1554, #1150): the hub is deja's second consumer and
+// deja on the walls: the hub is deja's second consumer and
 // the tape is world state it owns, so this suite drives the poller the way
 // production does — through the raw wire, with a scripted deja underneath —
 // and pins what reaches the glass.
@@ -37,7 +37,6 @@ namespace {
 
 using json = nlohmann::json;
 
-constexpr char kPlayPath[] = "/games/v2/play";
 constexpr char kGlasshouse[] = R"({"action":{"setGeometry":{"geometry":{"glasshouse":{}}}}})";
 constexpr char kJoinPayload[] =
     R"({"action":{"join":{"position":[10,0,-5],"color":[0.8,0.2,0.6],"shape":0}}})";

@@ -18,7 +18,7 @@
 
 namespace games_hub {
 
-/// The hub's postgres component (#1194), with two write paths
+/// The hub's postgres component, with two write paths
 /// matching what each kind of state can afford. Rooms and members ride
 /// an async outbox: ops staged under the hub's lock and handed over
 /// while still holding it — so queue order is the truth's order — then
@@ -50,7 +50,7 @@ class PgHubStore final : public HubStore {
   /// bad game costs that game, not the boot.
   absl::StatusOr<Snapshot> LoadSnapshot() override;
 
-  /// The synchronous commit path (#1194: load -> pure transition
+  /// The synchronous commit path (load -> pure transition
   /// -> conditional update, retry on miss; NOTIFY rides the same
   /// commit). Returns whether the conditional write landed; false means
   /// the stored row didn't hold version-1 (or, for version 1, the code
@@ -69,7 +69,7 @@ class PgHubStore final : public HubStore {
   absl::StatusOr<bool> CommitGameFinish(const GameRow& row, const std::vector<StatsDelta>& stats,
                                         const std::string& notify_payload) override;
 
-  /// A round robin's conditional commit (#1647), its NOTIFY in the same
+  /// A round robin's conditional commit, its NOTIFY in the same
   /// statement as games rows'. An event whose body no longer decodes is
   /// dropped from the loads with a loud log, as an undecodable game is.
   absl::StatusOr<bool> CommitChessEvent(const ChessEventRow& row,
@@ -84,7 +84,7 @@ class PgHubStore final : public HubStore {
   /// One room's rows, for notify-driven refresh and join-miss lookups.
   absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override;
 
-  /// The room's chess archive (#1637). An archived game that no longer
+  /// The room's chess archive. An archived game that no longer
   /// restores is dropped with a loud log, as an undecodable game row is.
   absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override;
   absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,

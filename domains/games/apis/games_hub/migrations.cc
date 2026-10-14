@@ -3,7 +3,7 @@
 namespace games_hub {
 
 absl::Status RunMigrations(pg::Client& db) {
-  // Credentials (#1194 step 1). Rows hold sha256 hashes of the tokens
+  // Credentials. Rows hold sha256 hashes of the tokens
   // (hashed in SQL by PgTicketVault), never the tokens themselves. The
   // expires_at indexes keep the purge-on-mint deletes cheap.
   static constexpr const char* kStatements[] = {
@@ -21,7 +21,7 @@ absl::Status RunMigrations(pg::Client& db) {
       ))sql",
       R"sql(CREATE INDEX IF NOT EXISTS idx_resume_tokens_expires_at
           ON resume_tokens (expires_at))sql",
-      // Rooms, membership, and games (#1194 step 2). game state is the
+      // Rooms, membership, and games. game state is the
       // serialized engine value (game_state_serde schema); version is the
       // optimistic-concurrency counter the hub owns. Game codes are only
       // unique within a room, hence the composite keys. Deleting a room
@@ -47,15 +47,15 @@ absl::Status RunMigrations(pg::Client& db) {
           version bigint NOT NULL,
           PRIMARY KEY (room_id, game_id)
       ))sql",
-      // Which game a table plays (#77): golf or castle. Rows from before
+      // Which game a table plays: golf or castle. Rows from before
       // the column are golf's, which the default says.
       R"sql(ALTER TABLE games
           ADD COLUMN IF NOT EXISTS game text NOT NULL DEFAULT 'golf')sql",
-      // The surface a room's world stands on (#1554), in the wire's
+      // The surface a room's world stands on, in the wire's
       // spelling; rows from before the column are the plane they were.
       R"sql(ALTER TABLE rooms
           ADD COLUMN IF NOT EXISTS geometry jsonb NOT NULL DEFAULT '{"plane":{}}'::jsonb)sql",
-      // Room chat (#1226). message_id is the ordering key and the
+      // Room chat. message_id is the ordering key and the
       // identity is global, not per-room, so one sequence orders every
       // room's history; sent_at is for display. Bodies are bounded here
       // as well as in ValidateChatText because retention counts rows,
@@ -76,13 +76,13 @@ absl::Status RunMigrations(pg::Client& db) {
       // When a live instance last vouched for a room: every write naming
       // it and every heartbeat from an instance holding a seat in it
       // stamps it. The sweep reaps rooms no one has stamped for an hour
-      // (#1295's residue). Rows from before the column start at migration.
+      // (#1295). Rows from before the column start at migration.
       R"sql(ALTER TABLE rooms
           ADD COLUMN IF NOT EXISTS last_active_at timestamptz NOT NULL DEFAULT now())sql",
       // The sweep's range scan.
       R"sql(CREATE INDEX IF NOT EXISTS idx_rooms_last_active_at
           ON rooms (last_active_at))sql",
-      // A room's finished chess games (#1637), written by the commit that
+      // A room's finished chess games, written by the commit that
       // ends each one. game is the finished game's chess_play serde.
       // published is the room's flag when it ended. A table code
       // can be minted again within a room, so (game_id, ordinal) alone
@@ -114,7 +114,7 @@ absl::Status RunMigrations(pg::Client& db) {
       ))sql",
       R"sql(CREATE INDEX IF NOT EXISTS idx_published_chess_games_ended
           ON published_chess_games (ended_at))sql",
-      // A room's round robins (#1647): what each event's creator fixed
+      // A room's round robins: what each event's creator fixed
       // and moderates, as one body under the hub's optimistic version. A
       // table playing a pairing carries it from its insert, and the commit
       // that archives the table's first game copies it onto the archive

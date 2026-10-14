@@ -22,8 +22,8 @@ inline constexpr std::size_t kChatTextByteLimit = 500;
 /// yields the lock between pages, large enough that draining the whole
 /// retention window is a handful of reads.
 inline constexpr std::size_t kChatCatchUpPage = 16;
-/// The reserved authors of the room bots' replies: microgpt's to "@bot"
-/// (#1591), mithril's to "/wordchain". No player can hold either: every
+/// The reserved authors of the room bots' replies: microgpt's to "@bot",
+/// mithril's to "/wordchain". No player can hold either: every
 /// minted player id has hyphens.
 inline constexpr char kBotPlayerId[] = "microgpt";
 inline constexpr char kWordchainPlayerId[] = "mithril";
@@ -80,7 +80,7 @@ struct ChatRow {
 ///
 /// Implementations and callers keep message text and identifiers out of
 /// logs and metrics alike: failures are described by status and counted
-/// by stage, never by content (#1226).
+/// by stage, never by content.
 class ChatStore {
  public:
   virtual ~ChatStore() = default;

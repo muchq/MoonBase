@@ -406,7 +406,7 @@ class HeldPublishStore final : public HubStore {
 
 }  // namespace
 
-class GolfGameFixture : public GamesHubStreamFixture {};
+class HubGameFixture : public GamesHubStreamFixture {};
 
 namespace {
 
@@ -656,153 +656,8 @@ TEST_F(GamesHubStreamFixture, CleanCloseParksTheSeatAndResumeReclaimsIt) {
   }
 }
 
-TEST_F(GolfGameFixture, FullGameKnockerTieWinsAlone) {
-  auto table = SeatedTable();
-  ASSERT_TRUE(table.has_value());
-  auto& alice = table->alice;
-  auto& bob = table->bob;
-
-  // The opening deal, from alice's chair: her cards face down even to her,
-  // bob's hand nothing but nulls, the seeded discard face up.
-  auto opening = ReceiveGolf(alice.stream, "gameState");
-  ASSERT_TRUE(opening.has_value());
-  {
-    const auto* update = opening->as_gameState_or_null();
-    ASSERT_NE(update, nullptr);
-    EXPECT_EQ(update->view.phase, "playing");
-    ASSERT_TRUE(update->view.currentPlayerId.has_value());
-    EXPECT_EQ(*update->view.currentPlayerId, alice.player_id);
-    EXPECT_EQ(update->view.drawPileCount, 43);
-    ASSERT_TRUE(update->view.discardTop.has_value());
-    EXPECT_EQ(update->view.discardTop->rank, "Q");
-    ASSERT_EQ(update->view.players.size(), 2u);
-    for (const auto& player : update->view.players) {
-      for (const auto& slot : player.cards) EXPECT_FALSE(slot.card.has_value());
-    }
-  }
-  ASSERT_TRUE(ReceiveGolf(bob.stream, "gameState").has_value());
-
-  // Opening peeks. Alice's first peek comes back to her alone, with the
-  // ace face at the peeked index and nothing of bob's hand.
-  moonbase::games::PeekCard peek;
-  peek.cardIndex = 0;
-  ASSERT_TRUE(alice.stream.Send(Move(GolfMove::FromPeekcard(peek))).ok());
-  auto peeked = ReceiveGolf(alice.stream, "gameState");
-  ASSERT_TRUE(peeked.has_value());
-  {
-    const auto& view = peeked->as_gameState_or_null()->view;
-    ASSERT_TRUE(view.players[0].cards[0].card.has_value());
-    EXPECT_EQ(view.players[0].cards[0].card->rank, "A");
-    EXPECT_EQ(view.players[0].revealedIndexes, std::vector<int>{0});
-    for (const auto& slot : view.players[1].cards) EXPECT_FALSE(slot.card.has_value());
-  }
-  peek.cardIndex = 1;
-  ASSERT_TRUE(alice.stream.Send(Move(GolfMove::FromPeekcard(peek))).ok());
-  ASSERT_TRUE(ReceiveGolf(alice.stream, "gameState").has_value());
-
-  peek.cardIndex = 0;
-  ASSERT_TRUE(bob.stream.Send(Move(GolfMove::FromPeekcard(peek))).ok());
-  ASSERT_TRUE(ReceiveGolf(bob.stream, "gameState").has_value());
-  peek.cardIndex = 1;
-  ASSERT_TRUE(bob.stream.Send(Move(GolfMove::FromPeekcard(peek))).ok());
-
-  // The last peek starts the table-wide countdown: everyone hears it, and
-  // bob's view shows his kings but still nothing of alice's aces.
-  auto countdown = ReceiveGolf(bob.stream, "gameState");
-  ASSERT_TRUE(countdown.has_value());
-  {
-    const auto& view = countdown->as_gameState_or_null()->view;
-    EXPECT_EQ(view.phase, "peeking");
-    EXPECT_TRUE(view.allPlayersPeeked);
-    ASSERT_TRUE(view.players[1].cards[0].card.has_value());
-    EXPECT_EQ(view.players[1].cards[0].card->rank, "K");
-    for (const auto& slot : view.players[0].cards) EXPECT_FALSE(slot.card.has_value());
-  }
-  auto alice_countdown = ReceiveGolf(alice.stream, "gameState");
-  ASSERT_TRUE(alice_countdown.has_value());
-  EXPECT_EQ(alice_countdown->as_gameState_or_null()->view.phase, "peeking");
-
-  // Turn moves wait for the hide.
-  ASSERT_TRUE(alice.stream.Send(Move(GolfMove::FromDrawcard(moonbase::games::DrawCard{}))).ok());
-  auto gated = ReceiveCase(alice.stream, "commandRejected");
-  ASSERT_TRUE(gated.has_value());
-
-  ASSERT_TRUE(alice.stream.Send(Move(GolfMove::FromHidecards(moonbase::games::HideCards{}))).ok());
-  auto hidden = ReceiveGolf(alice.stream, "gameState");
-  ASSERT_TRUE(hidden.has_value());
-  {
-    const auto& view = hidden->as_gameState_or_null()->view;
-    EXPECT_EQ(view.phase, "playing");
-    EXPECT_TRUE(view.players[0].revealedIndexes.empty());
-  }
-  ASSERT_TRUE(ReceiveGolf(bob.stream, "gameState").has_value());
-
-  // Alice draws: she sees the face, bob sees only the count drop.
-  ASSERT_TRUE(alice.stream.Send(Move(GolfMove::FromDrawcard(moonbase::games::DrawCard{}))).ok());
-  auto drawn = ReceiveGolf(alice.stream, "gameState");
-  ASSERT_TRUE(drawn.has_value());
-  {
-    const auto& view = drawn->as_gameState_or_null()->view;
-    ASSERT_TRUE(view.drawnCard.has_value());
-    EXPECT_EQ(view.drawnCard->rank, "Q");
-    EXPECT_EQ(view.drawPileCount, 43);  // still on the pile until she commits
-  }
-  auto bob_saw_draw = ReceiveGolf(bob.stream, "gameState");
-  ASSERT_TRUE(bob_saw_draw.has_value());
-  EXPECT_FALSE(bob_saw_draw->as_gameState_or_null()->view.drawnCard.has_value());
-
-  // She rejects it; the turn passes to bob.
-  ASSERT_TRUE(
-      alice.stream.Send(Move(GolfMove::FromDiscarddrawn(moonbase::games::DiscardDrawn{}))).ok());
-  auto turn = ReceiveGolf(alice.stream, "turnChanged");
-  ASSERT_TRUE(turn.has_value());
-  EXPECT_EQ(turn->as_turnChanged_or_null()->playerId, bob.player_id);
-  ASSERT_TRUE(ReceiveGolf(bob.stream, "turnChanged").has_value());
-
-  // Bob knocks; alice takes the final turn; the game resolves. Both hands
-  // cancel to zero, and the knocker takes the tie alone.
-  ASSERT_TRUE(bob.stream.Send(Move(GolfMove::FromKnock(moonbase::games::Knock{}))).ok());
-  auto knocked = ReceiveGolf(alice.stream, "playerKnocked");
-  ASSERT_TRUE(knocked.has_value());
-  EXPECT_EQ(knocked->as_playerKnocked_or_null()->playerId, bob.player_id);
-
-  ASSERT_TRUE(alice.stream.Send(Move(GolfMove::FromDrawcard(moonbase::games::DrawCard{}))).ok());
-  ASSERT_TRUE(ReceiveGolf(alice.stream, "gameState").has_value());
-  ASSERT_TRUE(
-      alice.stream.Send(Move(GolfMove::FromDiscarddrawn(moonbase::games::DiscardDrawn{}))).ok());
-
-  auto ended = ReceiveGolf(alice.stream, "gameEnded");
-  ASSERT_TRUE(ended.has_value());
-  {
-    const auto* result = ended->as_gameEnded_or_null();
-    ASSERT_NE(result, nullptr);
-    EXPECT_EQ(result->winner, bob.player_id);
-    ASSERT_EQ(result->winners.size(), 1u);
-    EXPECT_EQ(result->winners[0], bob.player_id);
-    ASSERT_EQ(result->finalScores.size(), 2u);
-    for (const auto& score : result->finalScores) EXPECT_EQ(score.score, 0);
-  }
-  auto bob_ended = ReceiveGolf(bob.stream, "gameEnded");
-  ASSERT_TRUE(bob_ended.has_value());
-
-  // The final board is face up for everyone, and the room's running stats
-  // credit the knocker's solo win.
-  auto final_alice = ReceiveCase(alice.stream, "roomState");
-  ASSERT_TRUE(final_alice.has_value());
-  {
-    const auto* room = final_alice->as_roomState_or_null();
-    ASSERT_NE(room, nullptr);
-    EXPECT_TRUE(room->games.empty());
-    for (const auto& player : room->players) {
-      EXPECT_EQ(player.gamesPlayed, 1);
-      EXPECT_EQ(player.gamesWon, player.playerId == bob.player_id ? 1 : 0);
-      EXPECT_EQ(player.totalScore, 0);
-    }
-  }
-}
-
-TEST_F(GolfGameFixture, ChatReachesTheRoom) {
-  auto table = SeatedTable();
+TEST_F(HubGameFixture, ChatReachesTheRoom) {
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
 
   moonbase::games::Chat chat;
@@ -909,7 +764,7 @@ class OneReplyMicrogpt final : public opal::http::HttpClient {
   std::string reply_;
 };
 
-// The room bot end to end (#1591): a mention is answered in the room,
+// The room bot end to end: a mention is answered in the room,
 // the reply reaching every member after the asker's own message and
 // flagged as the bot's.
 TEST_F(GamesHubStreamFixture, ABotMentionIsAnsweredInTheRoomAfterTheAsker) {
@@ -946,7 +801,7 @@ TEST_F(GamesHubStreamFixture, ABotMentionIsAnsweredInTheRoomAfterTheAsker) {
   }
 }
 
-// The bot's replies (#1591) replay flagged as the bot's, so a client
+// The bot's replies replay flagged as the bot's, so a client
 // never has to know its name; a player's message carries no flag. No bot
 // is started here, as when MICROGPT_URL is unset: the mention is only
 // chat, and the one reply is the one the test stores itself.
@@ -1266,7 +1121,7 @@ TEST_F(GamesHubStreamFixture, ResumingOnAFreshInstanceReplaysChatHistory) {
   EXPECT_EQ(history->messages[1].playerId, bob->player_id);
   EXPECT_GT(history->messages[1].messageId, history->messages[0].messageId);
 
-  // And his world is the restored room's (#1490): a join naming the
+  // And his world is the restored room's: a join naming the
   // plaza is refused, an unnamed one lands in the room.
   moonbase::games::JoinWorld join_world;
   join_world.roomId = "plaza";
@@ -1285,7 +1140,7 @@ TEST_F(GamesHubStreamFixture, ResumingOnAFreshInstanceReplaysChatHistory) {
   EXPECT_TRUE(world->as_worldState_or_null()->players.empty());
 }
 
-// A room's surface survives the process (#1554): a fresh instance
+// A room's surface survives the process: a fresh instance
 // restoring from the store puts the room's world back on its sphere,
 // so a resumed seat's join lands on the wall, its worldState names the
 // sphere, and a move off the wall is refused by the sphere's rule, not
@@ -1337,7 +1192,7 @@ TEST_F(GamesHubStreamFixture, ASphereRoomSurvivesARestart) {
             "position must be on the sphere (radius 53)");
 }
 
-// A room conjured from a member row alone (#1554) — the boot snapshot
+// A room conjured from a member row alone — the boot snapshot
 // missed its room row — stands on the plane only until the next read of
 // its rows: a wake's reconcile adopts the row's sphere for a room this
 // instance already holds, so a later joiner's world is the sphere the
@@ -1657,7 +1512,7 @@ TEST_F(GamesHubStreamFixture, BootGraceNeverClaimsASeatRestoredConnected) {
   // registry arms her grace (60s here — far past the test). Await the
   // row flip before watching for the reap: a drain that read her row
   // still connected would spare her for the wrong reason and mask a
-  // deleted restore filter.
+  // missing restore filter.
   alice->stream.Close();
   AwaitSnapshot(*store_, [&](const HubStore::Snapshot& snapshot) {
     for (const auto& member : snapshot.members) {
@@ -1754,7 +1609,7 @@ TEST_F(GamesHubStreamFixture, HeartbeatStampsOnlyRoomsThisInstanceHoldsSeatsIn) 
 
 // The heartbeat thread is StampHeldRooms then SweepStaleRooms on its
 // interval, the sweep at kRoomStaleAfter.
-// What members are told is what the store holds (#1637): by the time
+// What members are told is what the store holds: by the time
 // anyone hears published, the flag is in the row every instance's
 // archive reads, so no game a sibling ends after the announcement is
 // archived on the old flag.
@@ -1794,7 +1649,7 @@ TEST_F(GamesHubStreamFixture, RoomHeartbeatStampsAndSweepsOnItsInterval) {
       << "the heartbeat never swept, or swept at the wrong threshold";
   EXPECT_EQ(spy->AwaitFeedSweep(std::chrono::seconds(5)),
             std::chrono::duration_cast<std::chrono::seconds>(GamesHub::kPublishedChessKept))
-      << "the heartbeat never swept the public chess feed (#1637), or at the wrong age";
+      << "the heartbeat never swept the public chess feed, or at the wrong age";
 }
 
 // The same contract's second window: a seat that entered the cohort
@@ -2038,8 +1893,7 @@ TEST_F(GamesHubStreamFixture, AFailedHistoryLoadDoesNotFailTheResume) {
   EXPECT_EQ(capture->CounterTotal("chat_failures", {{"stage", "cursor_seed"}}), 1);
 }
 
-// What the chat paths count (#1226 item 10), asserted through the
-// capturing recorder — including the rule the epic states outright:
+// What the chat paths count, asserted through the capturing recorder:
 // no room id, player id, or message text may reach a metric name or
 // label. Counts and stages only.
 TEST_F(GamesHubStreamFixture, ChatMetricsCountOutcomesWithoutIdentifiers) {
@@ -2327,165 +2181,92 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
 // limiter, the chat store failures, and the disconnects the closes produce. One
 // scripted session would have covered a small fraction of the roster.
 
-// The hub_*/golf_* command and event declarations are a hand copy of the
-// model's union cases, and this test is what makes a hand copy safe to keep:
-// it reads the model and fails on drift in either direction — a case added to
-// the model without a declaration loses its first event after every deploy
-// (#1323), and a declaration for a case the model no longer has is a
-// permanently flat line on a dashboard. CountCommand and Send name series
-// exactly this way: the room layer's outer case on hub_*, each envelope's
-// inner case on that tenant's series.
+// An envelope's inner cases, as `series`_commands and `series`_events
+// declare them, against `series`.smithy's two unions. `action` and `update`
+// are controls: a parser that quietly matched nothing must fail here, not
+// produce two empty sets that agree.
+void ExpectEnvelopeSeriesMatchTheModel(const std::string& series, const std::string& action_union,
+                                       const std::string& action, const std::string& update_union,
+                                       const std::string& update) {
+  const std::string model = ReadModel("domains/games/apis/games_hub/model/" + series + ".smithy");
+  ASSERT_FALSE(model.empty());
+  const auto actions = ModelUnionCases(model, action_union);
+  const auto updates = ModelUnionCases(model, update_union);
+  ASSERT_NE(std::find(actions.begin(), actions.end(), action), actions.end());
+  ASSERT_NE(std::find(updates.begin(), updates.end(), update), updates.end());
+  EXPECT_EQ(DeclaredLabelValues(series + "_commands", "command"),
+            std::set<std::string>(actions.begin(), actions.end()));
+  EXPECT_EQ(DeclaredLabelValues(series + "_events", "event"),
+            std::set<std::string>(updates.begin(), updates.end()));
+}
+
+// The room layer's and each envelope's command and event declarations are a
+// hand copy of the model's union cases, and these tests are what make a hand
+// copy safe to keep: they read the model and fail on drift in either
+// direction — a case added to the model without a declaration loses its
+// first event after every deploy (#1323), and a declaration for a case the
+// model no longer has is a permanently flat line on a dashboard. The room
+// layer's outer cases count on hub_*, each envelope's inner cases on that
+// tenant's series.
 TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
   const std::string room = ReadModel("domains/games/apis/games_hub/model/games.smithy");
-  const std::string golf = ReadModel("domains/games/apis/games_hub/model/golf.smithy");
-  ASSERT_FALSE(room.empty() || golf.empty());
-
+  ASSERT_FALSE(room.empty());
   const auto outer_commands = ModelUnionCases(room, "GameCommands");
-  const auto moves = ModelUnionCases(golf, "GolfMove");
   const auto outer_events = ModelUnionCases(room, "GameEvents");
-  const auto updates = ModelUnionCases(golf, "GolfUpdate");
-  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "castle"),
-            outer_commands.end());
-  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "rummy"), outer_commands.end());
-  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "chess"), outer_commands.end());
-  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "pong"), outer_commands.end());
-  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "spades"),
-            outer_commands.end());
-  ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "lobby"), outer_commands.end());
-
-  // Controls before the comparison: a parser that quietly matched nothing
-  // must fail here, not produce two empty sets that agree.
   ASSERT_NE(std::find(outer_commands.begin(), outer_commands.end(), "createRoom"),
             outer_commands.end());
-  ASSERT_NE(std::find(moves.begin(), moves.end(), "knock"), moves.end());
   ASSERT_NE(std::find(outer_events.begin(), outer_events.end(), "sessionReady"),
             outer_events.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
 
-  // The room layer's own cases on hub_*; golf's envelope, like castle's,
-  // the lobby's and voice's (the tests below), on its own series.
+  const std::set<std::string> envelopes = {"golf", "castle", "rummy", "chess",
+                                           "pong", "spades", "lobby", "voice"};
+  for (const auto& envelope : envelopes) {
+    EXPECT_NE(std::find(outer_commands.begin(), outer_commands.end(), envelope),
+              outer_commands.end())
+        << envelope;
+  }
   std::set<std::string> room_commands;
   for (const auto& name : outer_commands) {
-    if (name != "golf" && name != "castle" && name != "rummy" && name != "chess" &&
-        name != "pong" && name != "spades" && name != "lobby" && name != "voice")
-      room_commands.insert(name);
+    if (!envelopes.contains(name)) room_commands.insert(name);
   }
   std::set<std::string> room_events;
   for (const auto& name : outer_events) {
-    if (name != "golf" && name != "castle" && name != "rummy" && name != "chess" &&
-        name != "pong" && name != "spades" && name != "lobby" && name != "voice")
-      room_events.insert(name);
+    if (!envelopes.contains(name)) room_events.insert(name);
   }
   EXPECT_EQ(DeclaredLabelValues("hub_commands", "command"), room_commands);
   EXPECT_EQ(DeclaredLabelValues("hub_events", "event"), room_events);
-  EXPECT_EQ(DeclaredLabelValues("golf_commands", "command"),
-            std::set<std::string>(moves.begin(), moves.end()));
-  EXPECT_EQ(DeclaredLabelValues("golf_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
 }
 
-// The lobby envelope (#1490) counts its inner case names on lobby_commands
-// and lobby_events, pinned against lobby.smithy the same way.
+TEST(StreamSeriesModelPin, GolfSeriesMatchTheModelUnions) {
+  ExpectEnvelopeSeriesMatchTheModel("golf", "GolfMove", "knock", "GolfUpdate", "gameEnded");
+}
+
 TEST(StreamSeriesModelPin, LobbySeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/lobby.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto actions = ModelUnionCases(model, "LobbyAction");
-  const auto updates = ModelUnionCases(model, "LobbyUpdate");
-  ASSERT_NE(std::find(actions.begin(), actions.end(), "shape"), actions.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "playerLeft"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("lobby_commands", "command"),
-            std::set<std::string>(actions.begin(), actions.end()));
-  EXPECT_EQ(DeclaredLabelValues("lobby_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("lobby", "LobbyAction", "shape", "LobbyUpdate", "playerLeft");
 }
 
-// A room's voice (#1590) counts its inner case names on voice_commands and
-// voice_events, pinned against voice.smithy the same way.
 TEST(StreamSeriesModelPin, VoiceSeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/voice.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto actions = ModelUnionCases(model, "VoiceAction");
-  const auto updates = ModelUnionCases(model, "VoiceUpdate");
-  ASSERT_NE(std::find(actions.begin(), actions.end(), "signal"), actions.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "roster"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("voice_commands", "command"),
-            std::set<std::string>(actions.begin(), actions.end()));
-  EXPECT_EQ(DeclaredLabelValues("voice_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("voice", "VoiceAction", "signal", "VoiceUpdate", "roster");
 }
 
-// Castle's envelope (#77) counts its inner case names on castle_commands and
-// castle_events, pinned against castle.smithy the same way.
 TEST(StreamSeriesModelPin, CastleSeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/castle.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto moves = ModelUnionCases(model, "CastleMove");
-  const auto updates = ModelUnionCases(model, "CastleUpdate");
-  ASSERT_NE(std::find(moves.begin(), moves.end(), "pickUp"), moves.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("castle_commands", "command"),
-            std::set<std::string>(moves.begin(), moves.end()));
-  EXPECT_EQ(DeclaredLabelValues("castle_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("castle", "CastleMove", "pickUp", "CastleUpdate", "gameEnded");
 }
 
-// Rummy's envelope (#245) counts its inner case names on rummy_commands and
-// rummy_events, pinned against rummy.smithy the same way.
 TEST(StreamSeriesModelPin, RummySeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/rummy.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto moves = ModelUnionCases(model, "RummyMove");
-  const auto updates = ModelUnionCases(model, "RummyUpdate");
-  ASSERT_NE(std::find(moves.begin(), moves.end(), "layOff"), moves.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("rummy_commands", "command"),
-            std::set<std::string>(moves.begin(), moves.end()));
-  EXPECT_EQ(DeclaredLabelValues("rummy_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("rummy", "RummyMove", "layOff", "RummyUpdate", "gameEnded");
 }
 
-// Chess's envelope counts its inner case names on chess_commands and
-// chess_events, pinned against chess.smithy the same way.
 TEST(StreamSeriesModelPin, ChessSeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/chess.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto moves = ModelUnionCases(model, "ChessMove");
-  const auto updates = ModelUnionCases(model, "ChessUpdate");
-  ASSERT_NE(std::find(moves.begin(), moves.end(), "resign"), moves.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("chess_commands", "command"),
-            std::set<std::string>(moves.begin(), moves.end()));
-  EXPECT_EQ(DeclaredLabelValues("chess_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("chess", "ChessMove", "resign", "ChessUpdate", "gameEnded");
 }
 
-// Pong's envelope counts its inner case names on pong_commands and
-// pong_events, pinned against pong.smithy the same way.
 TEST(StreamSeriesModelPin, PongSeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/pong.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto moves = ModelUnionCases(model, "PongMove");
-  const auto updates = ModelUnionCases(model, "PongUpdate");
-  ASSERT_NE(std::find(moves.begin(), moves.end(), "paddle"), moves.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "frame"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("pong_commands", "command"),
-            std::set<std::string>(moves.begin(), moves.end()));
-  EXPECT_EQ(DeclaredLabelValues("pong_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("pong", "PongMove", "paddle", "PongUpdate", "frame");
 }
 
-// Spades' envelope, the same way (#1658).
 TEST(StreamSeriesModelPin, SpadesSeriesMatchTheModelUnions) {
-  const std::string model = ReadModel("domains/games/apis/games_hub/model/spades.smithy");
-  ASSERT_FALSE(model.empty());
-  const auto moves = ModelUnionCases(model, "SpadesMove");
-  const auto updates = ModelUnionCases(model, "SpadesUpdate");
-  ASSERT_NE(std::find(moves.begin(), moves.end(), "bid"), moves.end());
-  ASSERT_NE(std::find(updates.begin(), updates.end(), "gameEnded"), updates.end());
-  EXPECT_EQ(DeclaredLabelValues("spades_commands", "command"),
-            std::set<std::string>(moves.begin(), moves.end()));
-  EXPECT_EQ(DeclaredLabelValues("spades_events", "event"),
-            std::set<std::string>(updates.begin(), updates.end()));
+  ExpectEnvelopeSeriesMatchTheModel("spades", "SpadesMove", "bid", "SpadesUpdate", "gameEnded");
 }
 
 // The bounded kind is the whole dashboard identity of a rejection (#1327,
@@ -2495,7 +2276,7 @@ TEST(StreamSeriesModelPin, SpadesSeriesMatchTheModelUnions) {
 // hole the kind exists to close. TearDown's sweep enforces the closed set for
 // every test; this one pins which kind each refusal shape maps to.
 TEST_F(GamesHubStreamFixture, RejectionsCountTheBoundedKindNeverTheReason) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
 
   // state: well-formed, but alice is already in a room.
@@ -2792,8 +2573,8 @@ TEST_F(GamesHubStreamFixture, WithMemberRunsOnlyForCurrentMembers) {
   EXPECT_EQ(rejected->as_commandRejected_or_null()->reason, "not in a room");
 }
 
-TEST_F(GolfGameFixture, AbandoningALiveGameResolvesIt) {
-  auto table = SeatedTable();
+TEST_F(HubGameFixture, AbandoningALiveGameResolvesIt) {
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   // Drain the opening deals so the next gameState each seat sees is the
   // finish ceremony's.
@@ -2837,15 +2618,15 @@ TEST_F(GolfGameFixture, AbandoningALiveGameResolvesIt) {
   EXPECT_TRUE(room->as_roomState_or_null()->games.empty());
 }
 
-// The hub's domain events (#1571): the funnel a room goes through, and
+// The hub's domain events: the funnel a room goes through, and
 // the once-ness of the game that ends it. A game is played once, so its
 // line comes from the commit that ended it — never from the ceremony,
 // which every instance holding the room runs off the durable terminal
 // row, and never from a finish that did not land.
-class GameEventFixture : public GolfGameFixture {
+class GameEventFixture : public HubGameFixture {
  protected:
   void SetUp() override {
-    GolfGameFixture::SetUp();
+    HubGameFixture::SetUp();
     CaptureEvents();
   }
 
@@ -2874,7 +2655,7 @@ class GameEventFixture : public GolfGameFixture {
 };
 
 TEST_F(GameEventFixture, TheFunnelIsRecordedFromTheRoomToTheGameThatEndedIt) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
   ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
@@ -2925,7 +2706,7 @@ TEST_F(GameEventFixture, ABiggerTableIsRecordedAtTheSizeItWasDealt) {
   EXPECT_THAT(events_[3], ::testing::HasSubstr(R"("players":3)"));
 }
 
-// A rummy table is dealer's choice (#1609): seating it is no game, and
+// A rummy table is dealer's choice: seating it is no game, and
 // each deal is one — started when the dealer deals, finished when a seat
 // goes out — recorded as rummy at either hand size (gin's deals are
 // "gin"; game_events_test pins that).
@@ -2984,8 +2765,8 @@ TEST_F(GameEventFixture, ARefusedJoinIsNoEvent) {
   EXPECT_THAT(events_, ::testing::IsEmpty());
 }
 
-// A room records the surface it chose, and every reshape after it
-// (#1554), in the one spelling the wire and the stored row also use.
+// A room records the surface it chose, and every reshape after it,
+// in the one spelling the wire and the stored row also use.
 // The radius is not in the line: the question is which shapes people
 // reach for, and a number per room is not a word to group by.
 TEST_F(GameEventFixture, AWorldRecordsTheShapeItChoseAndEveryReshapeAfterIt) {
@@ -3097,7 +2878,7 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAClosedRoomWritesNothing) {
 }
 
 TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNothing) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
   ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
@@ -3132,7 +2913,7 @@ TEST_F(GameEventFixture, TheInstanceCatchingUpToAnotherInstancesFinishWritesNoth
 // the leave goes through — and runs the whole ceremony again. The game
 // it would record is one nobody was sitting at.
 TEST_F(GameEventFixture, ASiblingThatRebasedOntoAFinishRecordsNothing) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   ASSERT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
   ASSERT_TRUE(ReceiveGolf(table->bob.stream, "gameState").has_value());
@@ -3166,8 +2947,8 @@ TEST_F(GameEventFixture, ASiblingThatRebasedOntoAFinishRecordsNothing) {
 // An accidental browser close mid-game arrives as a clean websocket close
 // (#1236). A close parks the seat: the table sees the disconnect, nothing
 // ends, and the resume token reclaims the seat with the game intact.
-TEST_F(GolfGameFixture, MidGameBrowserCloseParksTheSeatAndTheGameSurvives) {
-  auto table = SeatedTable();
+TEST_F(HubGameFixture, MidGameBrowserCloseParksTheSeatAndTheGameSurvives) {
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   auto& alice = table->alice;
   ASSERT_TRUE(ReceiveGolf(alice.stream, "gameState").has_value());
@@ -3232,13 +3013,13 @@ TEST_F(GolfGameFixture, MidGameBrowserCloseParksTheSeatAndTheGameSurvives) {
 // Grace expiry is the deliberate end of a disconnect (#1236): only after
 // the window runs out does the absence resolve the game — in the
 // survivor's favor, with every seat still on the scorecard.
-class ShortGraceFixture : public GolfGameFixture {
+class ShortGraceFixture : public HubGameFixture {
  protected:
   std::chrono::seconds GracePeriod() override { return std::chrono::seconds(1); }
 };
 
 TEST_F(ShortGraceFixture, GraceExpiryResolvesTheGameWithEverySeatScored) {
-  auto table = SeatedTable();
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
   auto& alice = table->alice;
   ASSERT_TRUE(ReceiveGolf(alice.stream, "gameState").has_value());
@@ -3283,8 +3064,8 @@ TEST_F(ShortGraceFixture, GraceExpiryResolvesTheGameWithEverySeatScored) {
   EXPECT_TRUE(alone);
 }
 
-TEST_F(GolfGameFixture, IllegalMovesRejectInBandAndTheGameContinues) {
-  auto table = SeatedTable();
+TEST_F(HubGameFixture, IllegalMovesRejectInBandAndTheGameContinues) {
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
 
   // Not bob's turn.
@@ -3316,7 +3097,7 @@ TEST_F(GolfGameFixture, IllegalMovesRejectInBandAndTheGameContinues) {
   EXPECT_TRUE(ReceiveGolf(table->alice.stream, "gameState").has_value());
 }
 
-TEST_F(GolfGameFixture, PendingGameLifecycleAndLobbySummaries) {
+TEST_F(HubGameFixture, PendingGameLifecycleAndLobbySummaries) {
   auto alice = OpenSeat();
   auto bob = OpenSeat();
   ASSERT_TRUE(alice.has_value() && bob.has_value());
@@ -3367,7 +3148,7 @@ TEST_F(GolfGameFixture, PendingGameLifecycleAndLobbySummaries) {
   EXPECT_EQ(second->as_commandRejected_or_null()->reason, "leave your current game first");
 
   // The lobby sees the pending game: waiting, one seat filled — and who
-  // fills it: alice is at the golf table, bob is idle (#1490).
+  // fills it: alice is at the golf table, bob is idle.
   ASSERT_TRUE(
       bob->stream.Send(GameCommands::FromGetroomstate(moonbase::games::GetRoomState{})).ok());
   auto lobby = ReceiveCase(bob->stream, "roomState");
@@ -3392,8 +3173,8 @@ TEST_F(GolfGameFixture, PendingGameLifecycleAndLobbySummaries) {
   EXPECT_EQ(TableOf(*after->as_roomState_or_null(), alice->player_id), Idle());
 }
 
-TEST_F(GolfGameFixture, RoomStatsAccumulateAcrossGames) {
-  auto table = SeatedTable();
+TEST_F(HubGameFixture, RoomStatsAccumulateAcrossGames) {
+  auto table = SeatedGolfTable();
   ASSERT_TRUE(table.has_value());
 
   // Quickest legal game: alice knocks unseen, bob takes his final turn.
@@ -3467,7 +3248,7 @@ class CollidingIds final : public IdGenerator {
   int codes_ = 0;
 };
 
-class CollidingIdsFixture : public GolfGameFixture {
+class CollidingIdsFixture : public HubGameFixture {
  protected:
   CollidingIdsFixture() { ids_ = std::make_shared<CollidingIds>(); }
 };
@@ -3544,7 +3325,7 @@ TEST_F(FailingVaultFixture, GetSessionFailsClosedWhenTheVaultIsDown) {
   ASSERT_FALSE(session.ok());
 }
 
-// Per-session stream budgets (#1240), pinned with tiny buckets whose
+// Per-session stream budgets, pinned with tiny buckets whose
 // refills are effectively never — nothing a test does can accidentally
 // earn a token back, so the refusal path is deterministic.
 class RateLimitedStreamFixture : public GamesHubStreamFixture {

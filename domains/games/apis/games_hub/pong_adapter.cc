@@ -3,6 +3,7 @@
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/games_hub/round_robin_wire.h"
 #include "domains/games/libs/pong/rally.h"
+#include "domains/games/libs/pong/table_serde.h"
 
 namespace games_hub {
 namespace {
@@ -170,6 +171,14 @@ moonbase::games::GameEvents Adapter<pong::Table>::RoundRobinsEvent(
     round_robins.roundRobins.push_back(PongRoundRobinOf(one.row, one.live));
   }
   return Wrap(Update::FromRoundrobins(std::move(round_robins)));
+}
+
+std::string Adapter<pong::Table>::Serialize(const pong::Table& engine) {
+  return pong::serializeTable(engine);
+}
+
+absl::StatusOr<pong::Table> Adapter<pong::Table>::Deserialize(const std::string& stored) {
+  return pong::deserializeTable(stored);
 }
 
 }  // namespace games_hub

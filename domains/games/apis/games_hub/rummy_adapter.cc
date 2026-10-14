@@ -2,11 +2,12 @@
 
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/games_hub/wire_cards.h"
+#include "domains/games/libs/cards/rummy/table_serde.h"
 
 namespace games_hub {
 namespace {
 
-// A deal's finish (#1609): each deal is a game — the seat that went out
+// A deal's finish: each deal is a game — the seat that went out
 // won it and everyone dealt in played it. A leaver is compacted out of the
 // engine's seats, as in castle. No score: rummy's points count up for the
 // winner where golf's count against every seat, so adding them to the
@@ -483,6 +484,15 @@ RummyAction Adapter<rummy::TableState>::Decode(const Move& move, const std::stri
                 });
   }
   return Refusal{RejectKind::kUnknown, "unknown move"};
+}
+
+std::string Adapter<rummy::TableState>::Serialize(const rummy::TableState& engine) {
+  return rummy::serializeTableState(engine);
+}
+
+absl::StatusOr<rummy::TableState> Adapter<rummy::TableState>::Deserialize(
+    const std::string& stored) {
+  return rummy::deserializeTableState(stored);
 }
 
 }  // namespace games_hub

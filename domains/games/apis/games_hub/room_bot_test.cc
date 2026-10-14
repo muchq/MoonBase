@@ -1,4 +1,4 @@
-// The room bot (#1591): what counts as a mention, what microgpt is asked,
+// The room bot: what counts as a mention, what microgpt is asked,
 // what comes back into the room, and what is refused or dropped on the
 // way. RoomBot runs against a real MemoryChatStore and a scripted HTTP
 // transport under the real microgpt client, so the prompt is checked as

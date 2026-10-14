@@ -1,4 +1,4 @@
-// Wire-contract tests for a room's voice (#1590): the voice envelope's
+// Wire-contract tests for a room's voice: the voice envelope's
 // exact bytes both ways, driven through the generated server without the
 // generated client, and the hub's part of it — voice is the session's
 // room's, and leaving the room or closing the socket leaves voice with it.
@@ -17,7 +17,6 @@ namespace {
 
 using json = nlohmann::json;
 
-constexpr char kPlayPath[] = "/games/v2/play";
 constexpr char kJoin[] = R"({"action":{"join":{}}})";
 
 class VoiceWireTest : public HubWireFixture {

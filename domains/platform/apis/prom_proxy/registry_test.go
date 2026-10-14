@@ -518,7 +518,7 @@ var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|c
 // shared artifact to pin them together (that is #1308's scope). What these
 // audits do close, on their own side: every tile reads only names in this
 // set, and every name in this set is read by some tile.
-var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:hub_|golf_|chat_|castle_|rummy_|chess_|lobby_)[a-z_]*)(\{[^}]*\})?`)
+var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:hub_|golf_|chat_|castle_|rummy_|chess_|pong_|spades_|lobby_)[a-z_]*)(\{[^}]*\})?`)
 
 var gamesHubExportedNames = map[string]bool{
 	// The castle envelope (#77), from GamesHub::DeclaredCounterSeries().
@@ -541,14 +541,18 @@ var gamesHubExportedNames = map[string]bool{
 	"hub_sessions_total":              true,
 	// The tenants' envelopes (#1490): each game's inner cases on its own
 	// series.
-	"golf_commands_total":  true,
-	"golf_events_total":    true,
-	"rummy_commands_total": true,
-	"rummy_events_total":   true,
-	"chess_commands_total": true,
-	"chess_events_total":   true,
-	"lobby_commands_total": true,
-	"lobby_events_total":   true,
+	"golf_commands_total":   true,
+	"golf_events_total":     true,
+	"rummy_commands_total":  true,
+	"rummy_events_total":    true,
+	"chess_commands_total":  true,
+	"chess_events_total":    true,
+	"pong_commands_total":   true,
+	"pong_events_total":     true,
+	"spades_commands_total": true,
+	"spades_events_total":   true,
+	"lobby_commands_total":  true,
+	"lobby_events_total":    true,
 }
 
 // The one_d4 audit's shape (see TestOneD4QueriesNameRealInstrumentsAndScopeThem

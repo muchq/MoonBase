@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "absl/time/time.h"
+#include "domains/games/apis/games_hub/memory_hub_store.h"
 #include "domains/games/apis/games_hub/wire_test_fixture.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "opal/http/message.h"
@@ -30,7 +31,6 @@ namespace {
 
 using json = nlohmann::json;
 
-constexpr char kPlayPath[] = "/games/v2/play";
 const std::string kAvailableSetups =
     R"("availableSetups":[{"name":"Standard starting position","setupId":"standard"},)"
     R"({"name":"Random K+P vs K","setupId":"random-kpk"},)"
@@ -281,7 +281,7 @@ TEST_F(ChessWireTest, TheModelsBoundsAreRefusedInBand) {
             R"({"reason":"not a legal move: e7e6"})");
 }
 
-// A watcher (#1633) sends the table's id and hears the seats' own view,
+// A watcher sends the table's id and hears the seats' own view,
 // with no seat of its own in it; leaveGame stops the watch.
 TEST_F(ChessWireTest, WatchPinsItsCommandAndTheViewThatAnswersIt) {
   json creator_session;
@@ -311,7 +311,7 @@ TEST_F(ChessWireTest, WatchPinsItsCommandAndTheViewThatAnswersIt) {
             R"({"update":{"gameLeft":{"gameId":"GAME01"}}})");
 }
 
-// The room's history, a review and publishing (#1637): the commands'
+// The room's history, a review and publishing: the commands'
 // spelling and every byte of what answers them.
 TEST_F(ChessWireTest, HistoryReviewAndPublishPinTheirBytes) {
   Played played = PlayedOneGame();
@@ -432,7 +432,7 @@ TEST_F(ChessWireTest, AChallengesBoundsAreRefusedInBand) {
   EXPECT_NE(EventPayload(NextFrame(*creator), "chess").find(R"("terms":)"), std::string::npos);
 }
 
-// A challenge (#1633) is the table's terms posted before anyone joins:
+// A challenge is the table's terms posted before anyone joins:
 // the view carries them structured, the room's list as one line.
 TEST_F(ChessWireTest, ChallengePinsItsCommandTheViewsTermsAndTheRoomsLine) {
   json creator_session;

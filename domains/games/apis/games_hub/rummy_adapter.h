@@ -15,6 +15,7 @@ struct Adapter<rummy::TableState> {
   using View = moonbase::games::RummyView;
   struct Start {};
   static constexpr GameKind kKind = GameKind::kRummy;
+  static constexpr std::string_view kName = "rummy";
   static constexpr std::size_t kMaxSeats = 4;
   static constexpr unsigned kCapabilities = 0;
   // Seated, not dealt: each deal is a game, recorded as it is dealt.
@@ -38,6 +39,11 @@ struct Adapter<rummy::TableState> {
   }
   static moonbase::games::GameEvents Wrap(Update update);
 
+  /// Each deal is recorded under its variant's word.
+  static std::string_view RecordedName(const rummy::TableState& table) {
+    return rummy::recordedName(table.getVariant());
+  }
+
   static std::string Phase(const rummy::TableState& table);
   static std::string Turn(const rummy::TableState& table);
   static std::size_t GamesFinished(const rummy::TableState&) { return 0; }
@@ -47,6 +53,19 @@ struct Adapter<rummy::TableState> {
                                                   const rummy::TableState& after);
   static bool DealStarted(const rummy::TableState& before, const rummy::TableState& after) {
     return after.getDealNumber() > before.getDealNumber();
+  }
+  // A table's games are its deals: one broken up by a leave is abandoned,
+  // and one won by play ends once the table deals on to choosing. A
+  // closed table's finished deal was recorded when it finished.
+  static std::optional<GameEnd> Ended(const rummy::TableState& table) {
+    const auto& deal = table.getDeal();
+    if (!deal.has_value()) return std::nullopt;
+    if (rummy::dealPhase(*deal) == rummy::Phase::Abandoned) return GameEnd::kAbandoned;
+    if (rummy::dealPhase(*deal) == rummy::Phase::Over &&
+        table.getPhase() == rummy::TablePhase::Choosing) {
+      return GameEnd::kCompleted;
+    }
+    return std::nullopt;
   }
   static absl::StatusOr<rummy::TableState> WithoutSeat(const rummy::TableState& table, int seat,
                                                        int64_t) {
@@ -77,6 +96,8 @@ struct Adapter<rummy::TableState> {
                                                      const std::optional<EventTag>&) {
     return std::nullopt;
   }
+  static std::string Serialize(const rummy::TableState& engine);
+  static absl::StatusOr<rummy::TableState> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view) { return false; }
 };
 

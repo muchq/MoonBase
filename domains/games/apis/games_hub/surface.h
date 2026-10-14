@@ -10,7 +10,7 @@
 
 namespace games_hub {
 
-/// The shape of a room's world (#1554): where its players stand. The
+/// The shape of a room's world: where its players stand. The
 /// plane is the ground the lobby always had; the sphere is the inside
 /// of one, centred on the origin, with players on its wall; the
 /// glasshouse is the plane's floor inside four glass walls standing at
@@ -26,7 +26,7 @@ struct Surface {
   static Surface Sphere(double radius) { return {Kind::kSphere, radius}; }
   static Surface Glasshouse() { return {Kind::kGlasshouse}; }
 
-  /// Whether the world has glass to splat deja's tape onto (#1150): the
+  /// Whether the world has glass to splat deja's tape onto: the
   /// gate on every byte of HTTP the hub sends deja's way.
   [[nodiscard]] bool has_glass() const { return kind == Kind::kGlasshouse; }
   /// Whether players stand on the ground plane's floor. The glasshouse's

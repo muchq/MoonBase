@@ -21,8 +21,6 @@ namespace {
 
 using json = nlohmann::json;
 
-constexpr char kPlayPath[] = "/games/v2/play";
-
 class PongWireTest : public HubWireFixture {
  protected:
   void SetUp() override {

@@ -1,21 +1,14 @@
 #include "domains/games/apis/games_hub/game_events.h"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <variant>
 
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_format.h"
 #include "absl/time/time.h"
-#include "domains/games/apis/games_hub/hosted_game.h"
-#include "domains/games/libs/cards/castle/game_state.h"
-#include "domains/games/libs/cards/golf/game_state.h"
-#include "domains/games/libs/cards/rummy/game_state.h"
-#include "domains/games/libs/cards/rummy/table.h"
-#include "domains/games/libs/chess_play/game_state.h"
-#include "domains/games/libs/chess_play/table.h"
-#include "domains/games/libs/pong/table.h"
+#include "domains/games/apis/games_hub/adapters.h"
 
 namespace games_hub {
 namespace {
@@ -45,66 +38,12 @@ std::string RoomTag(std::string_view room) {
 }
 
 std::optional<GameFinished> FinishedOf(const HostedState& state, std::size_t players) {
-  GameFinished finished{VariantWordOf(state), kOutcomeCompleted, players};
-  if (const auto* golf_state = std::get_if<golf::GameState>(&state)) {
-    // The engine supersedes any knock with this sentinel when a leave
-    // drops the table below two seats.
-    if (golf_state->getWhoKnocked() == golf::GameState::kAbandoned)
-      finished.outcome = kOutcomeAbandoned;
-    return finished;
-  }
-  if (const auto* table = std::get_if<rummy::TableState>(&state)) {
-    const auto& deal = table->getDeal();
-    if (!deal.has_value()) return std::nullopt;
-    if (rummy::dealPhase(*deal) == rummy::Phase::Abandoned) {
-      finished.outcome = kOutcomeAbandoned;
-      return finished;
-    }
-    // Won by play, and the table dealt on to choosing: the deal's end. A
-    // closed table's finished deal was recorded when it finished.
-    if (rummy::dealPhase(*deal) == rummy::Phase::Over &&
-        table->getPhase() == rummy::TablePhase::Choosing) {
-      return finished;
-    }
-    return std::nullopt;
-  }
-  if (const auto* table = std::get_if<chess_play::Table>(&state)) {
-    // A game's end, the table playing on or closed by the leave that ended
-    // it. A table closed between games recorded its last when it ended.
-    if (!table->game().isOver() || (table->isOver() && !table->endedByClose())) {
-      return std::nullopt;
-    }
-    if (table->game().result()->ending == chess_play::Ending::kAbandoned) {
-      finished.outcome = kOutcomeAbandoned;
-    }
-    return finished;
-  }
-  if (const auto* table = std::get_if<pong::Table>(&state)) {
-    // As chess's: a game's end, the table playing on or closed by the
-    // leave that ended it.
-    if (table->inPlay() || table->scoreSheet().empty() ||
-        (table->isOver() && !table->endedByClose())) {
-      return std::nullopt;
-    }
-    if (table->scoreSheet().back().ending == pong::Ending::kAbandoned) {
-      finished.outcome = kOutcomeAbandoned;
-    }
-    return finished;
-  }
-  if (const auto* table = std::get_if<spades::Table>(&state)) {
-    // A game won, the table dealing on; or one a leave abandoned. A table
-    // closed between games recorded its last when it was won.
-    if (table->phase() == spades::Phase::kWon) return finished;
-    if (table->abandonedGame()) {
-      finished.outcome = kOutcomeAbandoned;
-      return finished;
-    }
-    return std::nullopt;
-  }
-  if (std::get<castle::GameState>(state).getPhase() == castle::Phase::Abandoned) {
-    finished.outcome = kOutcomeAbandoned;
-  }
-  return finished;
+  const std::optional<GameEnd> ended = VisitAdapter(
+      state, [](auto adapter, const auto& engine) { return decltype(adapter)::Ended(engine); });
+  if (!ended.has_value()) return std::nullopt;
+  return GameFinished{VariantWordOf(state),
+                      *ended == GameEnd::kAbandoned ? kOutcomeAbandoned : kOutcomeCompleted,
+                      players};
 }
 
 std::string RoomCreatedLine(absl::Time when, std::string_view room, std::string_view surface) {

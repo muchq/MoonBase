@@ -216,7 +216,7 @@ TEST_F(MemoryChatStoreTest, RejectsAppendsFromOutsideTheRoom) {
   EXPECT_TRUE(recent->empty());
 }
 
-// The bot's reply (#1591): stored under the bot's reserved id, authorized
+// The bot's reply: stored under the bot's reserved id, authorized
 // by the asker's membership, since the bot is in no room itself.
 TEST_F(MemoryChatStoreTest, AppendAsStoresTheAuthorOnTheMembersAuthority) {
   auto reply = store_.AppendAs("R1", "alice", kBotPlayerId, "beep", "ignored");

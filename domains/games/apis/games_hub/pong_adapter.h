@@ -19,6 +19,7 @@ struct Adapter<pong::Table> {
     pong::Variant variant = pong::Variant::kSmallcat;
   };
   static constexpr GameKind kKind = GameKind::kPong;
+  static constexpr std::string_view kName = "pong";
   static constexpr std::size_t kMaxSeats = pong::kSeats;
   static constexpr unsigned kCapabilities = kWatchable | kNextGame | kRoundRobins | kRealtime;
   static constexpr bool kOpenStartsAGame = true;
@@ -51,6 +52,15 @@ struct Adapter<pong::Table> {
   static bool DealStarted(const pong::Table& before, const pong::Table& after) {
     return !before.inPlay() && after.inPlay();
   }
+  // As chess's: a game's end, the table playing on or closed by the leave
+  // that ended it.
+  static std::optional<GameEnd> Ended(const pong::Table& table) {
+    if (table.inPlay() || table.scoreSheet().empty() || (table.isOver() && !table.endedByClose())) {
+      return std::nullopt;
+    }
+    return table.scoreSheet().back().ending == pong::Ending::kAbandoned ? GameEnd::kAbandoned
+                                                                        : GameEnd::kCompleted;
+  }
   static absl::StatusOr<pong::Table> WithoutSeat(const pong::Table& table, int seat, int64_t) {
     return table.removePlayer(seat);
   }
@@ -70,6 +80,7 @@ struct Adapter<pong::Table> {
   // Its own startGame, a seat's paddle, a bot to the second seat, and
   // watching.
   static Action<pong::Table, Start> Decode(const Move& move, const std::string& player_id);
+  static bool Steers(const Move& move) { return move.as_paddle_or_null() != nullptr; }
   static absl::StatusOr<pong::Table> Open(const OpenContext& context, const Start& start,
                                           std::deque<cards::Card>) {
     return pong::Table::open(context.roster, start.variant);
@@ -80,6 +91,8 @@ struct Adapter<pong::Table> {
     if (!event.has_value()) return std::nullopt;
     return StartGame<Start>{Start{}, /*next_game=*/true};
   }
+  static std::string Serialize(const pong::Table& engine);
+  static absl::StatusOr<pong::Table> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view player_id) { return PongBotLevel(player_id).has_value(); }
 
   static absl::StatusOr<pong::Table> Next(const pong::Table& table, const Start& start,
@@ -101,6 +114,28 @@ struct Adapter<pong::Table> {
   }
   static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
   static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
+  // A pong round robin's body names its game and the variant its pairings
+  // play.
+  static constexpr bool kRoundRobinBodyNamed = true;
+  static std::vector<std::pair<std::string, std::string>> RoundRobinBody(
+      const HubStore::ChessEventRow& row) {
+    return {{"variant", std::string(pong::VariantName(row.pong_variant))}};
+  }
+  static bool FromRoundRobinBody(const std::map<std::string, std::string>& fields,
+                                 HubStore::ChessEventRow& row) {
+    const auto variant = fields.find("variant");
+    if (variant == fields.end()) return false;
+    const std::optional<pong::Variant> parsed = pong::ParseVariant(variant->second);
+    if (!parsed.has_value()) return false;
+    row.pong_variant = *parsed;
+    return true;
+  }
+  // A tagged table plays its pairing's one game: once its sheet has a
+  // line, that is the game, its winner off the sheet.
+  static std::optional<HubStore::EventGame> TableGame(const pong::Table& table) {
+    if (table.scoreSheet().empty()) return std::nullopt;
+    return HubStore::EventGame{0, "", 0, table.scoreSheet().front().winner};
+  }
 };
 
 }  // namespace games_hub

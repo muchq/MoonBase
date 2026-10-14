@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The games_hub event vocabulary (#1571): the hub writes event names,
+// The games_hub event vocabulary: the hub writes event names,
 // variants, outcomes and surfaces from game_events.h, and the stats
 // reader keys its rollup on the same words, collapsing any it does not
 // know to "other". The two live in different languages; this is the one
@@ -19,20 +19,22 @@ import (
 // as a vocabulary that drifted rather than one that grew.
 //
 // The event *names* are the sharper half: an unknown value still counts
-// its line, but an unknown event name is skipped entirely, so a hub that
-// grows an eighth event would go unrecorded until this fails.
+// its line, but an unknown event name is skipped entirely, so an event the hub
+// grows would go unrecorded until this fails.
 
 const (
-	hubEventsHeader = "../../../games/apis/games_hub/game_events.h"
-	hubEventsCc     = "../../../games/apis/games_hub/game_events.cc"
-	hubSurfaceH     = "../../../games/apis/games_hub/surface.h"
-	hubHostedGameH  = "../../../games/apis/games_hub/hosted_game.h"
-	hubCc           = "../../../games/apis/games_hub/hub.cc"
-	adaptersH       = "../../../games/apis/games_hub/adapters.h"
-	hubWorldH       = "../../../games/apis/games_hub/world.h"
-	rummyTableCc    = "../../../games/libs/cards/rummy/table.cc"
-	statsGames      = "../../apis/stats/games.go"
-	dejaHub         = "../../../ai/apis/deja/src/hub.rs"
+	hubDir            = "../../../games/apis/games_hub/"
+	hubEventsHeader   = hubDir + "game_events.h"
+	hubEventsCc       = hubDir + "game_events.cc"
+	hubSurfaceH       = hubDir + "surface.h"
+	hubHostedGameH    = hubDir + "hosted_game.h"
+	hubCc             = hubDir + "hub.cc"
+	adaptersH         = hubDir + "adapters.h"
+	hubWorldH         = hubDir + "world.h"
+	rummyTableCc      = "../../../games/libs/cards/rummy/table.cc"
+	statsGames        = "../../apis/stats/games.go"
+	dejaHub           = "../../../ai/apis/deja/src/hub.rs"
+	promProxyRegistry = "../../apis/prom_proxy/registry.go"
 )
 
 // The quoted values of `inline constexpr std::string_view <prefix>… = "…"`.
@@ -91,11 +93,7 @@ func TestHubEventValuesAgreeBetweenGamesHubAndStats(t *testing.T) {
 	reader, err := os.ReadFile(statsGames)
 	require.NoError(t, err)
 
-	// The outcomes are the kOutcome* constants beside the event names;
-	// the surfaces are SurfaceKindName's three, spelled in the switch
-	// that names them.
-	fromHeader := cppConstants(t, header, "kOutcome")
-	assert.Equal(t, fromHeader, goWords(t, reader,
+	assert.Equal(t, cppConstants(t, header, "kOutcome"), goWords(t, reader,
 		regexp.MustCompile(`hubOutcomes = map\[string\]bool\{([^}]*)\}`), "hubOutcomes"),
 		"an ending the hub can write that stats would count as \"other\"")
 
@@ -103,35 +101,67 @@ func TestHubEventValuesAgreeBetweenGamesHubAndStats(t *testing.T) {
 		regexp.MustCompile(`hubVariants = map\[string\]bool\{([^}]*)\}`), "hubVariants"),
 		"a game the hub can host that stats would count as \"other\"")
 
-	// SurfaceKindName: return "sphere"; return "glasshouse"; return "plane";
-	var fromSurface []string
-	for _, match := range regexp.MustCompile(`return "([a-z_]+)";`).FindAllSubmatch(
-		surfaceKindNameBody(t, surface), -1) {
-		fromSurface = append(fromSurface, string(match[1]))
-	}
-	sort.Strings(fromSurface)
-	assert.Equal(t, fromSurface, goWords(t, reader,
+	assert.Equal(t, surfaceWords(t, surface), goWords(t, reader,
 		regexp.MustCompile(`hubSurfaces = map\[string\]bool\{([^}]*)\}`), "hubSurfaces"),
 		"a shape a room can be that stats would count as \"other\"")
 }
 
-// Every word a game is recorded under (#1571), sorted: GameKindName's —
-// case GameKind::kCastle: return "castle"; ... — and, since a rummy
-// table's deals are recorded by variant, rummy::recordedName's.
+// One game's adapter as this contract reads it: the word its kind is
+// written as, and the counter series its envelope counts on.
+type hubGame struct {
+	header, name, commandSeries, eventSeries string
+}
+
+// Every game the hub hosts, from the one place each is declared: the
+// <game>_adapter.h headers adapters.h includes, each spelling its kName and
+// its series. An adapter header missing from this target's data fails the
+// read; one adapters.h does not include, or a GameKind with no adapter,
+// fails the count against the enum.
+func hubGames(t *testing.T) []hubGame {
+	t.Helper()
+	adapters, err := os.ReadFile(adaptersH)
+	require.NoError(t, err)
+	hosted, err := os.ReadFile(hubHostedGameH)
+	require.NoError(t, err)
+
+	constant := func(source []byte, header, name string) string {
+		matches := regexp.MustCompile(`static constexpr std::string_view `+name+
+			` = "([a-z_]+)";`).FindAllSubmatch(source, -1)
+		require.Len(t, matches, 1, "%s declares %s %d times; want once", header, name, len(matches))
+		return string(matches[0][1])
+	}
+	var games []hubGame
+	for _, include := range regexp.MustCompile(
+		`#include "domains/games/apis/games_hub/(\w+_adapter\.h)"`).FindAllSubmatch(adapters, -1) {
+		header := string(include[1])
+		source, err := os.ReadFile(hubDir + header)
+		require.NoError(t, err, "add //domains/games/apis/games_hub:%s to otel_contract's data", header)
+		games = append(games, hubGame{header, constant(source, header, "kName"),
+			constant(source, header, "kCommandSeries"), constant(source, header, "kEventSeries")})
+	}
+
+	kinds := regexp.MustCompile(`enum class GameKind \{([^}]*)\}`).FindSubmatch(hosted)
+	require.NotNil(t, kinds, "no enum class GameKind in %s", hubHostedGameH)
+	require.Len(t, games, len(regexp.MustCompile(`\bk\w+`).FindAll(kinds[1], -1)),
+		"adapters.h includes a different number of <game>_adapter.h headers than GameKind has kinds")
+	return games
+}
+
+// Every word a game is recorded under, sorted: each adapter's
+// kName and, since a rummy table's deals are recorded by variant,
+// rummy::recordedName's.
 func gameWords(t *testing.T) []string {
 	t.Helper()
 	words := map[string]bool{}
-	for _, site := range []struct{ path, function string }{
-		{hubHostedGameH, `GameKindName\(GameKind kind\)`},
-		{rummyTableCc, `recordedName\(Variant variant\)`},
-	} {
-		source, err := os.ReadFile(site.path)
-		require.NoError(t, err)
-		body := regexp.MustCompile(`(?s)` + site.function + ` \{(.*?)\n\}`).FindSubmatch(source)
-		require.NotNil(t, body, "no %s in %s", site.function, site.path)
-		for _, match := range regexp.MustCompile(`"([a-z_]+)"`).FindAllSubmatch(body[1], -1) {
-			words[string(match[1])] = true
-		}
+	for _, game := range hubGames(t) {
+		words[game.name] = true
+	}
+	source, err := os.ReadFile(rummyTableCc)
+	require.NoError(t, err)
+	body := regexp.MustCompile(`(?s)recordedName\(Variant variant\) \{(.*?)\n\}`).FindSubmatch(source)
+	require.NotNil(t, body, "no recordedName in %s", rummyTableCc)
+	for _, match := range regexp.MustCompile(`"([a-z_]+)"`).FindAllSubmatch(body[1], -1) {
+		words[string(match[1])] = true
 	}
 	var sorted []string
 	for word := range words {
@@ -141,14 +171,38 @@ func gameWords(t *testing.T) []string {
 	return sorted
 }
 
-// The body of SurfaceKindName, which is where the three spellings live —
-// SurfaceJson renders them through it, so this is the declaration site.
-func surfaceKindNameBody(t *testing.T, source []byte) []byte {
+// prom_proxy gives each game's envelope a group of its own on the
+// games_hub page, a tile per series. A game the hub hosts without them
+// counts its traffic where nobody looks. (The per-game charts are not
+// pinned: each costs two range queries against the page's budget.)
+func TestEveryHubGameHasItsPromProxyTiles(t *testing.T) {
+	registry, err := os.ReadFile(promProxyRegistry)
+	require.NoError(t, err)
+	for _, game := range hubGames(t) {
+		for _, series := range []string{game.commandSeries, game.eventSeries} {
+			tile := regexp.MustCompile(`counter\("[^"]+", "` + series + `", "", ` + "`" + series +
+				"_total`" + `\)`)
+			assert.True(t, tile.Match(registry),
+				"%s counts on %s and prom_proxy has no tile for it", game.header, series)
+		}
+	}
+}
+
+// The surface spellings, sorted, from SurfaceKindName's `return "…";`
+// lines — SurfaceJson renders them through it, so it is the declaration
+// site.
+func surfaceWords(t *testing.T, source []byte) []string {
 	t.Helper()
 	body := regexp.MustCompile(`(?s)SurfaceKindName\(const Surface& surface\) \{(.*?)\n\}`).
 		FindSubmatch(source)
 	require.NotNil(t, body, "no SurfaceKindName in %s", hubSurfaceH)
-	return body[1]
+	var words []string
+	for _, match := range regexp.MustCompile(`return "([a-z_]+)";`).FindAllSubmatch(body[1], -1) {
+		words = append(words, string(match[1]))
+	}
+	require.NotEmpty(t, words, "no surface spellings in SurfaceKindName")
+	sort.Strings(words)
+	return words
 }
 
 // The JSON keys are the other half of the vocabulary, and the quieter
@@ -216,7 +270,7 @@ func TestTheRoomCeilingIsTheReadersAlone(t *testing.T) {
 			"documented as a reader-side ceiling")
 }
 
-// deja reads the same lines as a second source (#1572), and bounds the
+// deja reads the same lines as a second source, and bounds the
 // same four vocabularies itself — it is another process again, and a word
 // it does not know becomes a token rather than a grammar the hub can grow
 // behind its back. Same pin, third language.
@@ -247,13 +301,7 @@ func TestHubEventVocabularyAgreesWithDeja(t *testing.T) {
 	assert.Equal(t, cppConstants(t, header, "kOutcome"), rustWords("OUTCOMES"),
 		"an ending the hub can write that deja would read as \"other\"")
 
-	var surfaces []string
-	for _, match := range regexp.MustCompile(`return "([a-z_]+)";`).FindAllSubmatch(
-		surfaceKindNameBody(t, surface), -1) {
-		surfaces = append(surfaces, string(match[1]))
-	}
-	sort.Strings(surfaces)
-	assert.Equal(t, surfaces, rustWords("SURFACES"),
+	assert.Equal(t, surfaceWords(t, surface), rustWords("SURFACES"),
 		"a shape a room can be that deja would read as \"other\"")
 
 	assert.Equal(t, gameWords(t), rustWords("VARIANTS"),

@@ -13,7 +13,7 @@ use moonbase.games#Card
 use moonbase.games#PlayerIds
 use moonbase.games#TurnChanged
 
-// Castle's vocabulary (#77): the shedding game also played as Palace, the
+// Castle's vocabulary: the shedding game also played as Palace, the
 // second game on the room layer. It rides the room's Play stream as one
 // `castle` member per direction — a room hosts tables of either game —
 // and reuses the shared lifecycle
@@ -30,7 +30,7 @@ structure CastleCommand {
 /// card once the hand is gone; a player who cannot play picks the pile
 /// up. The engine refuses anything else in-band (commandRejected).
 ///
-/// A move names the cards it means (#1505). A card the named row does
+/// A move names the cards it means. A card the named row does
 /// not hold is refused in band with that card, so a move sent against a
 /// view the table has moved past costs a refusal rather than playing
 /// whatever took its place.

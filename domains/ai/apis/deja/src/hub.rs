@@ -1,19 +1,12 @@
-//! games_hub's domain events as deja tokens (#1572): the hub writes one
-//! JSON line per thing that happened in a room, and this reads that line
-//! into the three things the engine wants — a bounded token, the lane its
-//! sequence belongs to, and when.
+//! games_hub's domain events as deja tokens: the hub writes one JSON line
+//! per thing that happened in a room, and this reads it into a bounded
+//! token, the lane its sequence belongs to, and when.
 //!
-//! The room is the lane, which is why this source needed no lane-keying
-//! decision: a room's evening already *is* a sequence. A client address
-//! is what a caddy line has instead; neither leaves the lane table.
-//!
-//! With one exception the hub itself writes. `geometry_changed` is
-//! tagged with the *world* it reshaped, and a player who is in no room
-//! is in the plaza — so `hub:plaza` is one lane holding every lobby
-//! reshape by everybody, not one session's sequence. It is kept rather
-//! than dropped: the plaza is a single shared world, so which shapes
-//! people reach for in it is a real question, and it is the room-shaped
-//! lane it is not. Nothing else the hub writes can carry it.
+//! The room is the lane: a room's evening already *is* a sequence. The one
+//! exception is `geometry_changed`, tagged with the *world* it reshaped: a
+//! player in no room is in the plaza, so `hub:plaza` is one lane holding
+//! every lobby reshape by everybody. It is kept, because which shapes people
+//! reach for in the one shared world is a real question.
 
 use serde::Deserialize;
 
@@ -44,7 +37,9 @@ struct HubLine {
 /// trusted from the file: the hub is another process and may ship ahead
 /// of this one, so a word this reader does not know becomes `other` and
 /// the drift is a token instead of a vocabulary growing behind its back.
-/// otel_contract pins these four lists against game_events.h.
+/// otel_contract pins these four lists against the hub: the events and
+/// outcomes against game_events.h, the surfaces against surface.h, and the
+/// variants against each game adapter's kName and rummy's recorded names.
 const EVENTS: [&str; 7] = [
     "room_created",
     "room_joined",
@@ -207,10 +202,6 @@ mod tests {
         );
     }
 
-    // Every factor is bounded here, not upstream: the hub is another
-    // process and may ship ahead of this one. A word this build does not
-    // know is "other", so drift is a token rather than a vocabulary a
-    // release can grow without this reader agreeing.
     #[test]
     fn a_word_this_build_does_not_know_is_other() {
         assert_eq!(
@@ -239,9 +230,6 @@ mod tests {
         assert_eq!(o.lane_key, "hub:abc");
     }
 
-    // The plaza is the lobby, not a room, so this lane is every lobby
-    // player's reshapes interleaved. Pinned because it is the one lane
-    // this source has that is not one session's sequence.
     #[test]
     fn the_lobbys_reshapes_share_one_lane_that_is_not_a_room() {
         let o = obs(
@@ -279,7 +267,6 @@ mod tests {
         assert_eq!(o.lane_key, format!("hub:{}", "z".repeat(64)));
     }
 
-    // Millis on the wire, seconds in an event, like every other source.
     #[test]
     fn the_timestamp_arrives_in_seconds() {
         assert_eq!(

@@ -49,7 +49,7 @@ std::string TruncateUtf8(std::string text, std::size_t max_bytes);
 std::vector<moonbase::microgpt::Message> BotPrompt(const std::vector<ChatRow>& rows,
                                                    int64_t trigger_id);
 
-/// What a room bot answers and how: microgpt answers "@bot" (#1591),
+/// What a room bot answers and how: microgpt answers "@bot",
 /// mithril answers "/wordchain".
 class Responder {
  public:

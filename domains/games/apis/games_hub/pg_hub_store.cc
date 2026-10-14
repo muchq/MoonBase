@@ -1,22 +1,17 @@
 #include "domains/games/apis/games_hub/pg_hub_store.h"
 
 #include <algorithm>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <set>
-#include <type_traits>
+#include <string>
 #include <utility>
 
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
-#include "domains/games/apis/games_hub/hosted_game.h"
-#include "domains/games/libs/cards/castle/game_state_serde.h"
-#include "domains/games/libs/cards/golf/game_state_serde.h"
-#include "domains/games/libs/cards/rummy/table_serde.h"
-#include "domains/games/libs/cards/spades/table_serde.h"
+#include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/libs/chess_play/game_state_serde.h"
-#include "domains/games/libs/chess_play/table_serde.h"
-#include "domains/games/libs/pong/table_serde.h"
 
 namespace games_hub {
 namespace {
@@ -97,7 +92,7 @@ constexpr char kCommitUpdate[] = R"sql(
       SELECT archive_id, game, ended_at FROM archive WHERE published)
     SELECT pg_notify($6, $7) FROM save)sql";
 // An update or finish that lands a chess table whose game is over also
-// archives that game (#1637), guarded on the save the way the finish's
+// archives that game, guarded on the save the way the finish's
 // stats are, with the room's published flag of the moment, and copies it
 // to the public feed when that flag is set; a blank game says there is
 // none to archive, and a later commit still carrying the same ended game
@@ -141,7 +136,7 @@ constexpr char kCommitFinish[] = R"sql(
       SELECT archive_id, game, ended_at FROM archive WHERE published)
     SELECT pg_notify($7, $8) FROM save)sql";
 
-// A round robin's commit (#1647), conditional and notifying as a games
+// A round robin's commit, conditional and notifying as a games
 // row's: the insert lands only into a room that is, the update only on
 // version - 1.
 constexpr char kCommitEventInsert[] = R"sql(
@@ -184,9 +179,9 @@ std::string StatsJson(const std::vector<PgHubStore::StatsDelta>& stats) {
   return rows.dump();
 }
 
-// A waiting chess table's challenge (#1633) rides the state column, which
-// is otherwise NULL until the start: {"terms":{...}}. No engine's encoding
-// has a top-level "terms".
+// A waiting table's challenge, at a game that takes them
+// (kChallenges), rides the state column, which is otherwise NULL until the
+// start: {"terms":{...}}. No engine's encoding has a top-level "terms".
 std::string TermsJson(const ChessTerms& terms) {
   return json{{"terms",
                {{"setupId", terms.setup_id},
@@ -208,25 +203,14 @@ absl::StatusOr<std::optional<ChessTerms>> TermsFromJson(const std::string& state
                     {terms["initialMs"].get<int64_t>(), terms["incrementMs"].get<int64_t>()}};
 }
 
-// The state column is encoded by whichever engine the variant holds; the
-// kind column is what the loads read to pick the decoder back.
+// The state column is encoded by whichever engine the variant holds,
+// through its adapter; the kind column is what the loads read to pick the
+// decoder back.
 std::string StateJson(const PgHubStore::GameRow& row) {
   if (!row.state.has_value()) return row.terms.has_value() ? TermsJson(*row.terms) : "";
-  return std::visit(
-      [](const auto& state) -> std::string {
-        if constexpr (std::is_same_v<std::decay_t<decltype(state)>, rummy::TableState>) {
-          return rummy::serializeTableState(state);
-        } else if constexpr (std::is_same_v<std::decay_t<decltype(state)>, chess_play::Table>) {
-          return chess_play::serializeTable(state);
-        } else if constexpr (std::is_same_v<std::decay_t<decltype(state)>, pong::Table>) {
-          return pong::serializeTable(state);
-        } else if constexpr (std::is_same_v<std::decay_t<decltype(state)>, spades::Table>) {
-          return spades::serializeTable(state);
-        } else {
-          return serializeGameState(state);
-        }
-      },
-      *row.state);
+  return VisitAdapter(*row.state, [](auto adapter, const auto& engine) {
+    return decltype(adapter)::Serialize(engine);
+  });
 }
 
 // The archive's three parameters for a committed row: the ordinal, the
@@ -275,7 +259,7 @@ std::vector<PgHubStore::ChessGameRow> ChessGamesFrom(const std::string& room_id,
   return games;
 }
 
-// A round robin's body (#1647): what its creator fixed and moderates.
+// A round robin's body: what its creator fixed and moderates.
 // The room, id and version are columns of their own.
 constexpr std::pair<PairingResult, const char*> kResultNames[] = {
     {PairingResult::kWhite, "white"},
@@ -301,11 +285,8 @@ std::string EventBodyJson(const PgHubStore::ChessEventRow& row) {
               {"incrementMs", row.terms.time_control.increment_ms}}},
             {"pairings", std::move(pairings)},
             {"withdrawn", row.withdrawn}};
-  // A pong round robin says so; a body without "game" is chess's.
-  if (row.kind == GameKind::kPong) {
-    body["game"] = "pong";
-    body["variant"] = pong::VariantName(row.pong_variant);
-  }
+  // The game's word and its own fields, from its adapter.
+  for (auto& [key, value] : RoundRobinBodyOf(row)) body[key] = std::move(value);
   return body.dump();
 }
 
@@ -329,17 +310,12 @@ absl::Status EventBodyFromJson(const std::string& text, PgHubStore::ChessEventRo
       !terms["incrementMs"].is_number_integer()) {
     return malformed;
   }
-  row.kind = GameKind::kChess;
-  if (body.contains("game")) {
-    if (body["game"] != "pong" || !body.contains("variant") || !body["variant"].is_string()) {
-      return malformed;
-    }
-    const std::optional<pong::Variant> variant =
-        pong::ParseVariant(body["variant"].get<std::string>());
-    if (!variant.has_value()) return malformed;
-    row.kind = GameKind::kPong;
-    row.pong_variant = *variant;
+  if (body.contains("game") && !body["game"].is_string()) return malformed;
+  std::map<std::string, std::string> fields;
+  for (const auto& [key, value] : body.items()) {
+    if (value.is_string()) fields[key] = value.get<std::string>();
   }
+  if (!RoundRobinFromBody(fields, row)) return malformed;
   row.creator = body["creator"].get<std::string>();
   row.entrants = body["entrants"].get<std::vector<std::string>>();
   row.terms = {terms["setupId"].get<std::string>(),
@@ -567,7 +543,7 @@ absl::StatusOr<std::optional<PgHubStore::GameRow>> PgHubStore::LoadGame(
   if (result->rows() == 0) return std::nullopt;
   auto row = RowFromColumns(
       room_id, game_id, result->Get(0, 0).value_or("[]"), result->Get(0, 1).value_or(""),
-      std::atoll(result->Get(0, 2).value_or("0").c_str()), result->Get(0, 3).value_or("golf"),
+      std::atoll(result->Get(0, 2).value_or("0").c_str()), result->Get(0, 3).value_or(""),
       TagFromColumns(result->Get(0, 4).value_or(""), result->Get(0, 5).value_or("")));
   if (!row.ok()) {
     LOG(ERROR) << "game " << room_id << "/" << game_id
@@ -612,7 +588,7 @@ absl::StatusOr<PgHubStore::RoomRows> PgHubStore::LoadRoom(const std::string& roo
     const std::string game_id = games->Get(i, 0).value_or("");
     auto row = RowFromColumns(
         room_id, game_id, games->Get(i, 1).value_or("[]"), games->Get(i, 2).value_or(""),
-        std::atoll(games->Get(i, 3).value_or("0").c_str()), games->Get(i, 4).value_or("golf"),
+        std::atoll(games->Get(i, 3).value_or("0").c_str()), games->Get(i, 4).value_or(""),
         TagFromColumns(games->Get(i, 5).value_or(""), games->Get(i, 6).value_or("")));
     if (!row.ok()) {
       LOG(ERROR) << "dropping game " << room_id << "/" << game_id << ": " << row.status();
@@ -633,7 +609,7 @@ absl::StatusOr<PgHubStore::RoomRows> PgHubStore::LoadRoom(const std::string& roo
                                {room_id});
   if (!event_games.ok()) return event_games.status();
   out.events = EventsFrom(*events, *event_games);
-  AddPongEventGames(out.games, out.events);
+  AddRoundRobinTableGames(out.games, out.events);
   return out;
 }
 
@@ -673,7 +649,7 @@ absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
     // radius whichever column is bad.
     auto row = RowFromColumns(
         room_id, game_id, games->Get(i, 2).value_or("[]"), games->Get(i, 3).value_or(""),
-        std::atoll(games->Get(i, 4).value_or("0").c_str()), games->Get(i, 5).value_or("golf"),
+        std::atoll(games->Get(i, 4).value_or("0").c_str()), games->Get(i, 5).value_or(""),
         TagFromColumns(games->Get(i, 6).value_or(""), games->Get(i, 7).value_or("")));
     if (!row.ok()) {
       LOG(ERROR) << "dropping game " << room_id << "/" << game_id << ": " << row.status();
@@ -691,7 +667,7 @@ absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
                                             " WHERE event_id IS NOT NULL ORDER BY archive_id"));
   if (!event_games.ok()) return event_games.status();
   snapshot.events = EventsFrom(*events, *event_games);
-  AddPongEventGames(snapshot.games, snapshot.events);
+  AddRoundRobinTableGames(snapshot.games, snapshot.events);
   return snapshot;
 }
 
@@ -773,39 +749,22 @@ absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(
     if (!entry.is_string()) return absl::DataLossError("roster is not an array of player ids");
     row.roster.push_back(entry.get<std::string>());
   }
-  if (!state_json.empty()) {
-    if (row.kind == GameKind::kCastle) {
-      auto state = castle::deserializeGameState(state_json);
-      if (!state.ok()) return state.status();
-      row.state.emplace(*std::move(state));
-    } else if (row.kind == GameKind::kRummy) {
-      auto state = rummy::deserializeTableState(state_json);
-      if (!state.ok()) return state.status();
-      row.state.emplace(*std::move(state));
-    } else if (row.kind == GameKind::kChess) {
-      auto terms = TermsFromJson(state_json);
-      if (!terms.ok()) return terms.status();
-      if (terms->has_value()) {
-        row.terms = **terms;
-        return row;
-      }
-      auto state = chess_play::deserializeTable(state_json);
-      if (!state.ok()) return state.status();
-      row.state.emplace(*std::move(state));
-    } else if (row.kind == GameKind::kPong) {
-      auto state = pong::deserializeTable(state_json);
-      if (!state.ok()) return state.status();
-      row.state.emplace(*std::move(state));
-    } else if (row.kind == GameKind::kSpades) {
-      auto state = spades::deserializeTable(state_json);
-      if (!state.ok()) return state.status();
-      row.state.emplace(*std::move(state));
-    } else {
-      auto state = golf::deserializeGameState(state_json);
-      if (!state.ok()) return state.status();
-      row.state.emplace(*std::move(state));
+  if (state_json.empty()) return row;
+  if (HasCapability(row.kind, kChallenges)) {
+    auto terms = TermsFromJson(state_json);
+    if (!terms.ok()) return terms.status();
+    if (terms->has_value()) {
+      row.terms = **terms;
+      return row;
     }
   }
+  auto state = ForKind(row.kind, [&](auto adapter) -> absl::StatusOr<HostedState> {
+    auto engine = decltype(adapter)::Deserialize(state_json);
+    if (!engine.ok()) return engine.status();
+    return HostedState(*std::move(engine));
+  });
+  if (!state.ok()) return state.status();
+  row.state.emplace(*std::move(state));
   return row;
 }
 

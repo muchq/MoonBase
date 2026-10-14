@@ -1,7 +1,7 @@
-// Rummy on the room stream (#245): the third game on the hub, end to end
+// Rummy on the room stream: the third game on the hub, end to end
 // through the generated client.
 //
-// Every table is dealer's choice (#1609): the creator deals first, and the
+// Every table is dealer's choice: the creator deals first, and the
 // seat after the dealer opens. Two kinds of deal. The NoShuffleDealer
 // deals the pristine deck one card a seat from the back, so every card is
 // known: at two seats alice (the opener) holds A♥ A♣ K♥ K♣ Q♥ Q♣ J♥, bob
@@ -515,7 +515,7 @@ TEST_F(RummyGameFixture, OutOfTurnOrOutOfOrderIsRefusedInBand) {
   ExpectNoEvent(bob.stream);
 }
 
-// The point of naming cards (#1505): a card the hand does not hold is a
+// The point of naming cards: a card the hand does not hold is a
 // client out of sync with its view, refused with the card it named; a
 // spelling no card has is a client sending nonsense. Different spikes.
 TEST_F(RummyGameFixture, ACardTheHandDoesNotHoldIsRefusedAsStaleAndNamed) {
@@ -810,7 +810,7 @@ TEST_F(RummyGameFixture, TheRoomListsRummyTablesAndOtherGamesMovesAreRefused) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "that table plays rummy");
 
   // And the other way: a rummy move at a golf table, a rummy join of one.
-  auto golf_table = SeatedTable();
+  auto golf_table = SeatedGolfTable();
   ASSERT_TRUE(golf_table.has_value());
   ASSERT_TRUE(golf_table->alice.stream.Send(DrawStock()).ok());
   refused = ReceiveCase(golf_table->alice.stream, "commandRejected");
@@ -1062,13 +1062,11 @@ TEST_F(RummyGameFixture, AWaitingTableIsARosterWithNoCards) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "game not started");
 }
 
-
-// The seat cap (#1621).
 TEST_F(RummyGameFixture, AFifthSeatIsRefused) {
-  ExpectSeatCap<RummyMove>(4, Rummy,
-                      [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
-                        return ReceiveRummy(stream, wanted);
-                      });
+  ExpectSeatCap<RummyMove>(
+      4, Rummy, [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+        return ReceiveRummy(stream, wanted);
+      });
 }
 
 }  // namespace

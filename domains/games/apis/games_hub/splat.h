@@ -5,7 +5,7 @@
 
 namespace games_hub {
 
-/// Where one tape event lands on a glasshouse's glass (#1554): which wall,
+/// Where one tape event lands on a glasshouse's glass: which wall,
 /// and where on it. `u` runs along the wall and `v` up the glass, both a
 /// fraction in [0, 1) rather than a distance — that is what keeps the
 /// wall's height off the wire and lets the client draw the glass as tall

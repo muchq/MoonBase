@@ -1,6 +1,7 @@
 #include "domains/games/apis/games_hub/castle_adapter.h"
 
 #include "domains/games/apis/games_hub/wire_cards.h"
+#include "domains/games/libs/cards/castle/game_state_serde.h"
 
 namespace games_hub {
 
@@ -204,6 +205,15 @@ Action<castle::GameState, Adapter<castle::GameState>::Start> Adapter<castle::Gam
     }};
   }
   return Refusal{RejectKind::kUnknown, "unknown move"};
+}
+
+std::string Adapter<castle::GameState>::Serialize(const castle::GameState& engine) {
+  return castle::serializeGameState(engine);
+}
+
+absl::StatusOr<castle::GameState> Adapter<castle::GameState>::Deserialize(
+    const std::string& stored) {
+  return castle::deserializeGameState(stored);
 }
 
 }  // namespace games_hub

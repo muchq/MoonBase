@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// HubEventKey is one row of the per-day games_hub rollup (#1571): one
+// HubEventKey is one row of the per-day games_hub rollup: one
 // event, counted under the values it carries. The columns are the
 // event's own fields, not a shape imposed on them — an event that has no
 // variant leaves it empty because it has none, and a reader filtering on
@@ -25,11 +25,11 @@ import (
 // started with finished, but an aggregate keyed by it would be one row
 // per room per day forever and would answer no question this serves.
 //
-// Every value is games_hub's own vocabulary (game_events.h; otel_contract
-// pins the two spellings together), and a word this build does not know
-// collapses to "other" so the line is still counted — the same rule as an
-// unknown agent — and drift shows up as an "other" row rather than as
-// missing events.
+// Every value is games_hub's own vocabulary (game_events.h, surface.h
+// and each game adapter's kName; otel_contract pins the two spellings
+// together), and a word this build does not know collapses to "other"
+// so the line is still counted — the same rule as an unknown agent —
+// and drift shows up as an "other" row rather than as missing events.
 type HubEventKey struct {
 	Date    string
 	Event   string
