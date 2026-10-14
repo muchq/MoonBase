@@ -33,6 +33,7 @@
 #include "absl/time/time.h"
 #include "domains/ai/libs/microgpt_cpp/client.h"
 #include "domains/games/apis/games_hub/chat_store.h"
+#include "domains/games/apis/games_hub/golf_adapter.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 #include "domains/games/libs/mithril_cpp/client.h"
 

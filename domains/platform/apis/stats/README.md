@@ -169,7 +169,7 @@ unbounded — which is one query over the raw partitions in S3, keeping
   neighbours.
 
   The table bound is the engine's four seats, pinned against
-  `hub.cc` in `otel_contract` so raising one raises the other. The
+  `kTableSeatCap` in `adapters.h` by `otel_contract` so raising one raises the other. The
   room bound of 16 is **this reader's alone** — nothing caps a room, and
   a room hosting several tables plus its chat and its world holds more
   than a table does. It is a ceiling on how many rows one room shape may

@@ -58,6 +58,36 @@ cc_library(
     ],
 )
 
+# Each game's side of the hub (#1621): one Adapter specialization per
+# engine, dispatched on HostedState by adapters.h.
+cc_library(
+    name = "adapters",
+    srcs = [
+        "adapter.cc",
+        "castle_adapter.cc",
+        "chess_adapter.cc",
+        "golf_adapter.cc",
+        "pong_adapter.cc",
+        "rummy_adapter.cc",
+        "spades_adapter.cc",
+    ],
+    hdrs = [
+        "adapter.h",
+        "adapters.h",
+        "castle_adapter.h",
+        "chess_adapter.h",
+        "golf_adapter.h",
+        "pong_adapter.h",
+        "rummy_adapter.h",
+        "spades_adapter.h",
+    ],
+    deps = [
+        ":hosted_game",
+        ":hub_store",
+        "@com_google_absl//absl/status:statusor",
+    ],
+)
+
 cc_library(
     name = "protocol_input",
     hdrs = ["protocol_input.h"],
@@ -186,10 +216,11 @@ cc_test(
 # Read as text by //domains/platform/libs/otel_contract, which pins this
 # vocabulary against the stats pipeline's reader: the event names and
 # outcomes in the header, the JSON keys the line builders format, the
-# game and surface spellings, and hub.cc's seat cap against the bound
+# game and surface spellings, and adapters.h's seat cap against the bound
 # the reader counts a table by. games_hub_main.cc is read by
 # //deploy/consolidated:consolidated_test for the event log's file name.
 exports_files([
+    "adapters.h",
     "game_events.cc",
     "game_events.h",
     "games_hub_main.cc",
@@ -806,6 +837,7 @@ cc_library(
         "hub.h",
     ],
     deps = [
+        ":adapters",
         ":chat_store",
         ":chess_archive",
         ":chess_bots",
@@ -1403,6 +1435,7 @@ cc_test(
         "model/voice.smithy",
     ],
     deps = [
+        ":adapters",
         "//domains/ai/libs/microgpt_cpp:client",
         "//domains/games/libs/mithril_cpp:client",
         ":games_hub_smithy_client",
