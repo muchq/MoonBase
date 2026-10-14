@@ -215,8 +215,9 @@ TEST(SessionRegistryContract, ResumeOrAddReportsAddedRefusedAndResumed) {
                 "p1", [&first] { return first.stream->Share(); }, std::chrono::seconds(1)),
             Registry::Admission::kAdded);
 
-  // Same seat while the first connection is live: refused (the hub's
-  // SeatConflict path).
+  // Same seat while the first connection is live: refused (the hub then
+  // closes the live wire and tries again, refusing as SeatConflict only if
+  // the seat still holds).
   Session intruder = MakeSession();
   EXPECT_EQ(registry.ResumeOrAdd(
                 "p1", [&intruder] { return intruder.stream->Share(); }, std::chrono::seconds(1)),

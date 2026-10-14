@@ -1753,6 +1753,15 @@ void GolfHub::UnlistenRoomLocked(const std::string& room_id) {
   listener_->Unlisten(ChatChannel(room_id));
 }
 
+// What a wire a resume takes over is closed with: 4001 tells a browser it
+// was superseded (CloseEvent.code), not dropped (model/games.smithy, Play).
+static const opal::http::CloseReason kSuperseded{.code = 4001, .reason = "superseded"};
+// The kicked session unwinds within the grace, so admission after the kick
+// waits longer than that before refusing.
+static constexpr std::chrono::milliseconds kKickGrace{250};
+static constexpr std::chrono::milliseconds kAdmissionAfterKick{1000};
+static_assert(kKickGrace < kAdmissionAfterKick);
+
 opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
                                             moonbase::games::PlayAsyncServerStream& stream) {
   if (HasEmbeddedNul(input.ticket)) {
@@ -1768,8 +1777,18 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
 
   // The blessed admission call (ADR-0022): pre-first-suspend, on the
   // launching handler thread, where its brief blocking is legal.
-  const auto admission = registry_.ResumeOrAdd(
-      player_id, [&stream] { return stream.Share(); }, std::chrono::seconds(1));
+  const auto mint = [&stream] { return stream.Share(); };
+  auto admission = registry_.ResumeOrAdd(player_id, mint, std::chrono::milliseconds(0));
+  if (admission == Registry::Admission::kRefused) {
+    // The ticket was minted from this player's resume token, so this dial
+    // is the player: the live wire it collides with is one they left, such
+    // as a phone's socket whose close never arrived. Kicking it parks the
+    // seat, and this dial resumes it. The kick waits for no answer from a
+    // peer that may be gone, and tells one that is still there (a
+    // duplicated tab) it was superseded, so it does not redial.
+    registry_.Kick(player_id, kSuperseded, kKickGrace);
+    admission = registry_.ResumeOrAdd(player_id, mint, kAdmissionAfterKick);
+  }
   if (admission == Registry::Admission::kRefused) {
     Count("hub_admissions_refused", {{"reason", "seat_conflict"}});
     co_return opal::Error::Modeled("SeatConflict", "player already has a live connection");
@@ -1843,8 +1862,8 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
       // expiry reaps it, a resume reclaims it. A clean close carries no
       // leave intent: a closed tab sends the same close frame (#1236),
       // and the deliberate exit is the explicit leaveRoom command.
-      // Detach fails only when the entry is already gone — nothing left
-      // to do then.
+      // Detach fails only when the entry is already gone; the session
+      // counters are its alone.
       // The world is presence, not membership: the player leaves it now
       // and rejoins on resume, while the seat parks. Before Detach, so a
       // resume admitted the instant the seat is released finds no stale
@@ -1858,12 +1877,16 @@ opal::eventstream::StreamTask GolfHub::Play(moonbase::games::PlayInput input,
         // And a watch, which a resume asks for again.
         StopWatchingLocked(player_id);
       }
+      // Away before the seat parks too: a resume can take the seat back the
+      // instant it does, and must be the room's last word on the player.
+      SetConnected(player_id, false);
+      if (auto current = CurrentRoom(player_id)) BroadcastRoom(*current);
       if (hooks_.before_seat_release) hooks_.before_seat_release(player_id);
-      if (registry_.Detach(player_id)) {
+      const bool released = registry_.Detach(player_id);
+      if (hooks_.after_seat_release) hooks_.after_seat_release(player_id);
+      if (released) {
         TrackActive(-1);
         Count("hub_disconnects", {{"kind", received.ok() ? "clean" : "abrupt"}});
-        SetConnected(player_id, false);
-        if (auto current = CurrentRoom(player_id)) BroadcastRoom(*current);
       }
       co_return opal::Unit{};
     }

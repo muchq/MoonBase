@@ -37,7 +37,10 @@ service GamesHub {
 /// ticket rides the upgrade GET as a query member (browsers cannot set
 /// upgrade headers); the gate checks it pre-101 and the handler spends it
 /// (single use). Invalid moves never end the stream — they come back as
-/// commandRejected events; the modeled errors below are terminal.
+/// commandRejected events; the modeled errors below are terminal. A dial
+/// with a player's resume token takes their seat from any older wire,
+/// which closes with WebSocket close code 4001 "superseded": that client
+/// should not redial, or it takes the seat straight back.
 @http(method: "POST", uri: "/games/v2/play")
 operation Play {
     input := {
@@ -425,9 +428,10 @@ structure Unauthenticated {
     message: String
 }
 
-/// The player already holds a live seat (ADR-0022 admission refused).
-/// Reconnect after an abrupt loss resumes instead — this fires only while
-/// the old wire is still healthy.
+/// The player's old session was still unwinding when this one dialed: a
+/// dial takes the seat from a live wire (ADR-0022 Kick), and this fires
+/// only when the closed one has not let go within the admission deadline.
+/// The identity is good; dial again with the same resume token.
 @error("client")
 @httpError(409)
 structure SeatConflict {

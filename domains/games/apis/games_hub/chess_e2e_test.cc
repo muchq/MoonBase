@@ -920,6 +920,39 @@ TEST_F(ChessFixture, AResumeDoesNotRestoreTheWatch) {
   EXPECT_FALSE(HearsChess(*resumed));
 }
 
+// A phone that navigates away can leave its socket open on the hub's
+// side; the player coming back with their resume token is seated again,
+// not shown the table as a stranger.
+TEST_F(ChessFixture, AResumeWhileTheOldWireIsStillOpenReclaimsTheSeat) {
+  opening_.fen = kQuiet;
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+
+  auto back = OpenSeat(table.alice.resume_token);
+  ASSERT_TRUE(back.has_value());
+  EXPECT_EQ(back->player_id, table.alice.player_id);
+  auto ready = ReceiveCase(back->stream, "sessionReady");
+  ASSERT_TRUE(ready.has_value());
+  EXPECT_TRUE(ready->as_sessionReady_or_null()->resumed);
+  auto joined = ReceiveChess(back->stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  EXPECT_EQ(joined->as_gameJoined_or_null()->view.currentPlayerId, table.alice.player_id);
+
+  // The wire she left ends cleanly, and the game goes on.
+  while (true) {
+    auto left = table.alice.stream.Receive(std::chrono::seconds(5));
+    ASSERT_TRUE(left.ok()) << left.error().message();
+    if (!left->has_value()) break;
+  }
+  ASSERT_TRUE(back->stream.Send(Play("e2e4")).ok());
+  auto moved = AwaitChessView(
+      table.bob.stream, [](const auto& v) { return !v.moves.empty(); }, "alice's move");
+  ASSERT_TRUE(moved.has_value());
+  EXPECT_EQ(moved->moves, std::vector<std::string>{"e2e4"});
+  EXPECT_EQ(moved->phase, "playing");
+}
+
 // The close a leaving seat causes is the watcher's last word from the
 // table: the final view and the result.
 TEST_F(ChessFixture, AWatcherSeesTheTableClose) {
