@@ -1034,5 +1034,14 @@ TEST_F(ShortGraceCastleFixture, GraceExpiryAbandonsTheTableWithNoLoser) {
   EXPECT_EQ(room->as_roomState_or_null()->players[0].gamesWon, 0);
 }
 
+
+// The seat cap (#1621), pinned before it moves to the game's adapter.
+TEST_F(CastleGameFixture, AFifthSeatIsRefused) {
+  ExpectSeatCap<CastleMove>(4, Castle,
+                      [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+                        return ReceiveCastle(stream, wanted);
+                      });
+}
+
 }  // namespace
 }  // namespace games_hub

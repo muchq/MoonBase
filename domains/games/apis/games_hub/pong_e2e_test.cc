@@ -823,5 +823,14 @@ TEST_F(PaddleBudgetFixture, PaddlesSpendTheirOwnBudget) {
   }
 }
 
+
+// The seat cap (#1621), pinned before it moves to the game's adapter.
+TEST_F(PongFixture, AThirdSeatIsRefused) {
+  ExpectSeatCap<PongMove>(2, Pong,
+                      [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+                        return ReceivePong(stream, wanted);
+                      });
+}
+
 }  // namespace
 }  // namespace games_hub

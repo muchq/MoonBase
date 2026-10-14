@@ -558,5 +558,14 @@ TEST_F(ShuffledSpadesFixture, YourHandIsSortedBySuitThenRank) {
   EXPECT_GE(seen.size(), 3u) << "the seed should deal a mixed hand";
 }
 
+
+// The seat cap (#1621), pinned before it moves to the game's adapter.
+TEST_F(SpadesFixture, AFifthSeatIsRefused) {
+  ExpectSeatCap<SpadesMove>(4, Spades,
+                      [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
+                        return ReceiveSpades(stream, wanted);
+                      });
+}
+
 }  // namespace
 }  // namespace games_hub
