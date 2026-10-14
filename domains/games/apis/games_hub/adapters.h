@@ -1,11 +1,13 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_ADAPTERS_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_ADAPTERS_H
 
+#include <array>
 #include <concepts>
 #include <cstddef>
 #include <deque>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -35,6 +37,7 @@ concept GameAdapter = requires(
     const std::string& id, const std::vector<std::string>& roster,
     const moonbase::games::GameCommands& commands, const moonbase::games::GameEvents& events) {
   { A::kKind } -> std::convertible_to<GameKind>;
+  { A::kName } -> std::convertible_to<std::string_view>;
   { A::kMaxSeats } -> std::convertible_to<std::size_t>;
   { A::kCapabilities } -> std::convertible_to<unsigned>;
   { A::kCommandSeries } -> std::convertible_to<std::string_view>;
@@ -126,6 +129,36 @@ constexpr bool KindsLineUp(std::index_sequence<I...>) {
 }
 static_assert(KindsLineUp(std::make_index_sequence<kGames>{}));
 
+/// Each kind's word, by kind: its adapter's kName.
+inline constexpr std::array<std::string_view, kGames> kKindNames =
+    []<std::size_t... I>(std::index_sequence<I...>) {
+      return std::array<std::string_view, kGames>{Adapter<EngineAt<I>>::kName...};
+    }(std::make_index_sequence<kGames>{});
+
+constexpr bool NamesAreDistinct() {
+  for (std::size_t i = 0; i < kGames; ++i) {
+    if (kKindNames[i].empty()) return false;
+    for (std::size_t j = 0; j < i; ++j) {
+      if (kKindNames[i] == kKindNames[j]) return false;
+    }
+  }
+  return true;
+}
+static_assert(NamesAreDistinct(), "every game's kName is its own, and not empty");
+
+/// The word a kind is written as: GameSummary.game on the wire, the games
+/// row's game column, and the word its games are recorded under.
+inline std::string_view GameKindName(GameKind kind) {
+  return kKindNames[static_cast<std::size_t>(kind)];
+}
+
+inline std::optional<GameKind> ParseGameKind(std::string_view name) {
+  for (std::size_t i = 0; i < kGames; ++i) {
+    if (kKindNames[i] == name) return static_cast<GameKind>(i);
+  }
+  return std::nullopt;
+}
+
 /// The most seats any game's table holds. Stats and deja bound a table's
 /// players by it, and otel_contract reads this literal to hold them to it.
 inline constexpr std::size_t kTableSeatCap = 4;
@@ -147,6 +180,21 @@ decltype(auto) VisitAdapter(const HostedState& state, F&& f) {
         return f(Adapter<std::decay_t<decltype(engine)>>{}, engine);
       },
       state);
+}
+
+/// The word a game is recorded under (#1571): its adapter's
+/// RecordedName(engine) where it has one, as rummy's does for a table
+/// whose deals are each recorded under its variant's word, and its kind's
+/// otherwise.
+inline std::string_view VariantWordOf(const HostedState& state) {
+  return VisitAdapter(state, [](auto adapter, const auto& engine) -> std::string_view {
+    using A = decltype(adapter);
+    if constexpr (requires { A::RecordedName(engine); }) {
+      return A::RecordedName(engine);
+    } else {
+      return A::kName;
+    }
+  });
 }
 
 /// `f(Adapter<E>{})` for the engine a `kind` table plays.

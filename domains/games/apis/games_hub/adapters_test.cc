@@ -5,6 +5,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -259,6 +260,25 @@ TEST(FilledStart, OnlyAChallengeOrAPairingStartsWhenFull) {
   EXPECT_FALSE(Adapter<pong::Table>::FilledStart(std::nullopt, std::nullopt).has_value());
 
   EXPECT_FALSE(Adapter<castle::GameState>::FilledStart(terms, EventTag{"rr", 0}).has_value());
+}
+
+// A kind is written as its adapter's kName, on GameSummary.game and in the
+// games row's game column, and read back from it; the spellings are the
+// wire's and the store's.
+TEST(KindNames, EachKindIsWrittenAsItsAdaptersNameAndReadBack) {
+  AnyAdapter([](auto adapter) {
+    using A = decltype(adapter);
+    EXPECT_EQ(GameKindName(A::kKind), A::kName);
+    EXPECT_EQ(ParseGameKind(A::kName), A::kKind);
+    return false;
+  });
+  constexpr std::string_view kWire[] = {"golf", "castle", "rummy", "chess", "pong", "spades"};
+  for (std::size_t i = 0; i < std::size(kWire); ++i) {
+    EXPECT_EQ(GameKindName(static_cast<GameKind>(i)), kWire[i]);
+  }
+  EXPECT_EQ(ParseGameKind(""), std::nullopt);
+  EXPECT_EQ(ParseGameKind("Golf"), std::nullopt);
+  EXPECT_EQ(ParseGameKind("gin"), std::nullopt);
 }
 
 // Each game's envelope counts on the series named for its game.

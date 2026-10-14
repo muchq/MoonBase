@@ -25,8 +25,9 @@ import (
 // started with finished, but an aggregate keyed by it would be one row
 // per room per day forever and would answer no question this serves.
 //
-// Every value is games_hub's own vocabulary (game_events.h; otel_contract
-// pins the two spellings together), and a word this build does not know
+// Every value is games_hub's own vocabulary (game_events.h, surface.h and
+// each game adapter's kName; otel_contract pins the two spellings
+// together), and a word this build does not know
 // collapses to "other" so the line is still counted — the same rule as an
 // unknown agent — and drift shows up as an "other" row rather than as
 // missing events.

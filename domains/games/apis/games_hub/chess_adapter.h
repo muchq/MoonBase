@@ -35,6 +35,7 @@ struct Adapter<chess_play::Table> {
     std::optional<chess_play::ChessSetup> setup;
   };
   static constexpr GameKind kKind = GameKind::kChess;
+  static constexpr std::string_view kName = "chess";
   static constexpr std::size_t kMaxSeats = chess_play::GameState::kSeats;
   static constexpr unsigned kCapabilities =
       kWatchable | kNextGame | kRoundRobins | kOpenings | kClocked | kEngineBots | kPublished;

@@ -29,6 +29,7 @@ struct Adapter<golf::GameState> {
   using View = moonbase::games::GameView;
   struct Start {};
   static constexpr GameKind kKind = GameKind::kGolf;
+  static constexpr std::string_view kName = "golf";
   static constexpr std::size_t kMaxSeats = 4;
   static constexpr unsigned kCapabilities = 0;
   static constexpr bool kOpenStartsAGame = true;

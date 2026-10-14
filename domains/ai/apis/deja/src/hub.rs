@@ -44,7 +44,9 @@ struct HubLine {
 /// trusted from the file: the hub is another process and may ship ahead
 /// of this one, so a word this reader does not know becomes `other` and
 /// the drift is a token instead of a vocabulary growing behind its back.
-/// otel_contract pins these four lists against game_events.h.
+/// otel_contract pins these four lists against the hub: the events and
+/// outcomes against game_events.h, the surfaces against surface.h, and the
+/// variants against each game adapter's kName and rummy's recorded names.
 const EVENTS: [&str; 7] = [
     "room_created",
     "room_joined",

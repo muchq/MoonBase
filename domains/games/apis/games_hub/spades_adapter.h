@@ -19,6 +19,7 @@ struct Adapter<spades::Table> {
     std::optional<spades::Mode> mode;
   };
   static constexpr GameKind kKind = GameKind::kSpades;
+  static constexpr std::string_view kName = "spades";
   static constexpr std::size_t kMaxSeats = spades::kMaxSeats;
   static constexpr unsigned kCapabilities = 0;
   static constexpr bool kOpenStartsAGame = true;

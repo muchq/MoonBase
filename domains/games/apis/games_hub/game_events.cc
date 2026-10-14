@@ -8,7 +8,7 @@
 #include "absl/strings/ascii.h"
 #include "absl/strings/str_format.h"
 #include "absl/time/time.h"
-#include "domains/games/apis/games_hub/hosted_game.h"
+#include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/cards/rummy/game_state.h"

@@ -15,6 +15,7 @@ struct Adapter<castle::GameState> {
   using View = moonbase::games::CastleView;
   struct Start {};
   static constexpr GameKind kKind = GameKind::kCastle;
+  static constexpr std::string_view kName = "castle";
   static constexpr std::size_t kMaxSeats = 4;
   static constexpr unsigned kCapabilities = 0;
   static constexpr bool kOpenStartsAGame = true;

@@ -15,6 +15,7 @@ struct Adapter<rummy::TableState> {
   using View = moonbase::games::RummyView;
   struct Start {};
   static constexpr GameKind kKind = GameKind::kRummy;
+  static constexpr std::string_view kName = "rummy";
   static constexpr std::size_t kMaxSeats = 4;
   static constexpr unsigned kCapabilities = 0;
   // Seated, not dealt: each deal is a game, recorded as it is dealt.
@@ -37,6 +38,11 @@ struct Adapter<rummy::TableState> {
     return event == nullptr ? nullptr : &event->update;
   }
   static moonbase::games::GameEvents Wrap(Update update);
+
+  /// Each deal is recorded under its variant's word.
+  static std::string_view RecordedName(const rummy::TableState& table) {
+    return rummy::recordedName(table.getVariant());
+  }
 
   static std::string Phase(const rummy::TableState& table);
   static std::string Turn(const rummy::TableState& table);

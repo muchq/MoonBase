@@ -26,6 +26,7 @@ const (
 	hubEventsHeader = "../../../games/apis/games_hub/game_events.h"
 	hubEventsCc     = "../../../games/apis/games_hub/game_events.cc"
 	hubSurfaceH     = "../../../games/apis/games_hub/surface.h"
+	hubDir          = "../../../games/apis/games_hub/"
 	hubHostedGameH  = "../../../games/apis/games_hub/hosted_game.h"
 	hubCc           = "../../../games/apis/games_hub/hub.cc"
 	adaptersH       = "../../../games/apis/games_hub/adapters.h"
@@ -115,23 +116,62 @@ func TestHubEventValuesAgreeBetweenGamesHubAndStats(t *testing.T) {
 		"a shape a room can be that stats would count as \"other\"")
 }
 
-// Every word a game is recorded under (#1571), sorted: GameKindName's —
-// case GameKind::kCastle: return "castle"; ... — and, since a rummy
-// table's deals are recorded by variant, rummy::recordedName's.
+// One game's adapter as this contract reads it: the word its kind is
+// written as, and the counter series its envelope counts on.
+type hubGame struct {
+	header, name, commandSeries, eventSeries string
+}
+
+// Every game the hub hosts, from the one place each is declared: the
+// <game>_adapter.h headers adapters.h includes, each spelling its kName and
+// its series. An adapter header missing from this target's data fails the
+// read; one adapters.h does not include, or a GameKind with no adapter,
+// fails the count against the enum.
+func hubGames(t *testing.T) []hubGame {
+	t.Helper()
+	adapters, err := os.ReadFile(adaptersH)
+	require.NoError(t, err)
+	hosted, err := os.ReadFile(hubHostedGameH)
+	require.NoError(t, err)
+
+	constant := func(source []byte, header, name string) string {
+		matches := regexp.MustCompile(`static constexpr std::string_view `+name+
+			` = "([a-z_]+)";`).FindAllSubmatch(source, -1)
+		require.Len(t, matches, 1, "%s declares %s %d times; want once", header, name, len(matches))
+		return string(matches[0][1])
+	}
+	var games []hubGame
+	for _, include := range regexp.MustCompile(
+		`#include "domains/games/apis/games_hub/(\w+_adapter\.h)"`).FindAllSubmatch(adapters, -1) {
+		header := string(include[1])
+		source, err := os.ReadFile(hubDir + header)
+		require.NoError(t, err, "add //domains/games/apis/games_hub:%s to otel_contract's data", header)
+		games = append(games, hubGame{header, constant(source, header, "kName"),
+			constant(source, header, "kCommandSeries"), constant(source, header, "kEventSeries")})
+	}
+
+	kinds := regexp.MustCompile(`enum class GameKind \{([^}]*)\}`).FindSubmatch(hosted)
+	require.NotNil(t, kinds, "no enum class GameKind in %s", hubHostedGameH)
+	require.Len(t, games, len(regexp.MustCompile(`\bk\w+`).FindAll(kinds[1], -1)),
+		"adapters.h includes a different number of <game>_adapter.h headers than GameKind has kinds")
+	return games
+}
+
+// Every word a game is recorded under (#1571), sorted: each adapter's
+// kName and, since a rummy table's deals are recorded by variant,
+// rummy::recordedName's.
 func gameWords(t *testing.T) []string {
 	t.Helper()
 	words := map[string]bool{}
-	for _, site := range []struct{ path, function string }{
-		{hubHostedGameH, `GameKindName\(GameKind kind\)`},
-		{rummyTableCc, `recordedName\(Variant variant\)`},
-	} {
-		source, err := os.ReadFile(site.path)
-		require.NoError(t, err)
-		body := regexp.MustCompile(`(?s)` + site.function + ` \{(.*?)\n\}`).FindSubmatch(source)
-		require.NotNil(t, body, "no %s in %s", site.function, site.path)
-		for _, match := range regexp.MustCompile(`"([a-z_]+)"`).FindAllSubmatch(body[1], -1) {
-			words[string(match[1])] = true
-		}
+	for _, game := range hubGames(t) {
+		words[game.name] = true
+	}
+	source, err := os.ReadFile(rummyTableCc)
+	require.NoError(t, err)
+	body := regexp.MustCompile(`(?s)recordedName\(Variant variant\) \{(.*?)\n\}`).FindSubmatch(source)
+	require.NotNil(t, body, "no recordedName in %s", rummyTableCc)
+	for _, match := range regexp.MustCompile(`"([a-z_]+)"`).FindAllSubmatch(body[1], -1) {
+		words[string(match[1])] = true
 	}
 	var sorted []string
 	for word := range words {

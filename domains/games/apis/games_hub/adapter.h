@@ -185,7 +185,10 @@ using Action =
 ///                           the engine, its envelope's command and update
 ///                           unions, the view a seat sees, and what a
 ///                           startGame names
-///   kKind, kMaxSeats, kCapabilities
+///   kKind, kName, kMaxSeats, kCapabilities
+///                           the kind, the word it is written as (wire,
+///                           store and event log), its seat cap and the
+///                           shared machinery it opts into
 ///   kOpenStartsAGame        whether opening the table starts a recorded
 ///                           game (rummy's games are its deals instead)
 ///   kCommandSeries, kCommands, kEventSeries, kEvents
@@ -226,6 +229,11 @@ using Action =
 ///                           the start a table makes once its last seat
 ///                           fills, if it makes one
 ///   IsBot(player_id)        whether the id is a bot the game seats
+///
+/// and, optionally:
+///
+///   RecordedName(engine)    the word a game is recorded under, when it is
+///                           not kName (rummy's deals, by variant)
 template <typename Engine>
 struct Adapter;
 

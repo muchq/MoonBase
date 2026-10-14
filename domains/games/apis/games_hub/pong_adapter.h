@@ -19,6 +19,7 @@ struct Adapter<pong::Table> {
     pong::Variant variant = pong::Variant::kSmallcat;
   };
   static constexpr GameKind kKind = GameKind::kPong;
+  static constexpr std::string_view kName = "pong";
   static constexpr std::size_t kMaxSeats = pong::kSeats;
   static constexpr unsigned kCapabilities = kWatchable | kNextGame | kRoundRobins | kRealtime;
   static constexpr bool kOpenStartsAGame = true;

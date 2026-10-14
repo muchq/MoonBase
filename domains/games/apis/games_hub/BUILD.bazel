@@ -251,13 +251,21 @@ cc_test(
 )
 
 # Read as text by //domains/platform/libs/otel_contract, which pins this
-# vocabulary against the stats pipeline's reader: the event names and
-# outcomes in the header, the JSON keys the line builders format, the
-# game and surface spellings, and adapters.h's seat cap against the bound
-# the reader counts a table by. games_hub_main.cc is read by
-# //deploy/consolidated:consolidated_test for the event log's file name.
+# vocabulary against its readers downstream: the event names and outcomes
+# in the header, the JSON keys the line builders format, the surface
+# spellings, adapters.h's seat cap against the bound the reader counts a
+# table by, and each <game>_adapter.h's kind name and counter series
+# against the game lists in stats, deja and prom_proxy. games_hub_main.cc
+# is read by //deploy/consolidated:consolidated_test for the event log's
+# file name.
 exports_files([
     "adapters.h",
+    "castle_adapter.h",
+    "chess_adapter.h",
+    "golf_adapter.h",
+    "pong_adapter.h",
+    "rummy_adapter.h",
+    "spades_adapter.h",
     "game_events.cc",
     "game_events.h",
     "games_hub_main.cc",
@@ -283,6 +291,7 @@ cc_library(
     srcs = ["game_events.cc"],
     hdrs = ["game_events.h"],
     deps = [
+        ":adapters",
         ":hosted_game",
         "//domains/games/libs/cards/castle:game_state",
         "//domains/games/libs/cards/golf:game_state",
@@ -544,6 +553,7 @@ cc_library(
     srcs = ["pg_hub_store.cc"],
     hdrs = ["pg_hub_store.h"],
     deps = [
+        ":adapters",
         ":hosted_game",
         ":hub_store",
         ":round_robin",
