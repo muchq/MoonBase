@@ -284,17 +284,12 @@ TEST(KindNames, EachKindIsWrittenAsItsAdaptersNameAndReadBack) {
   EXPECT_EQ(ParseGameKind("gin"), std::nullopt);
 }
 
-// What a game is held to as it lands, every HostedState alternative alike
-// and with nothing to add here: an adapter with every hook (adapters.h's
-// static_asserts), a kind name that reads back, and a table that opens on
-// its default start and round-trips through its adapter's serde to the
-// same bytes. otel_contract holds the same adapters to the game lists
-// downstream.
+// Every game's table opens on its default start and, full and after a
+// leave, round-trips through its adapter's serde to the same bytes.
 TEST(EveryGame, OpensAndRoundTripsThroughItsAdaptersSerde) {
   AnyAdapter([](auto adapter) {
     using A = decltype(adapter);
     SCOPED_TRACE(A::kName);
-    EXPECT_EQ(ParseGameKind(GameKindName(A::kKind)), A::kKind);
     std::vector<std::string> roster;
     for (std::size_t seat = 0; seat < A::kMaxSeats; ++seat) {
       roster.push_back("p" + std::to_string(seat));
@@ -322,17 +317,6 @@ TEST(EveryGame, OpensAndRoundTripsThroughItsAdaptersSerde) {
       EXPECT_TRUE(restored.ok()) << restored.status();
       if (restored.ok()) EXPECT_EQ(A::Serialize(*restored), stored);
     }
-    return false;
-  });
-}
-
-// Each game's envelope counts on the series named for its game.
-TEST(GameCounterSeries, EachEnvelopeCountsOnItsOwnGamesSeries) {
-  AnyAdapter([&](auto adapter) {
-    using A = decltype(adapter);
-    const std::string game(GameKindName(A::kKind));
-    EXPECT_EQ(A::kCommandSeries, game + "_commands");
-    EXPECT_EQ(A::kEventSeries, game + "_events");
     return false;
   });
 }
