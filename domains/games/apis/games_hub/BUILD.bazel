@@ -1123,6 +1123,7 @@ cc_test(
         "//domains/games/libs/cards/castle:player",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
         "@opal_cpp//runtime:client",
         "@opal_cpp//runtime:core",

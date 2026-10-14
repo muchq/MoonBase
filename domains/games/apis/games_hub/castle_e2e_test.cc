@@ -17,8 +17,10 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "absl/time/time.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 #include "domains/games/libs/cards/card.h"
 #include "domains/games/libs/cards/castle/game_state.h"
@@ -1041,6 +1043,36 @@ TEST_F(CastleGameFixture, AFifthSeatIsRefused) {
                       [](moonbase::games::PlayClientStream& stream, const std::string& wanted) {
                         return ReceiveCastle(stream, wanted);
                       });
+}
+
+
+// A castle game in the stats archive (#1571), recorded started as castle.
+class CastleEventFixture : public CastleGameFixture {
+ protected:
+  void SetUp() override {
+    CastleGameFixture::SetUp();
+    hub_->SetEventWriter(
+        [this](absl::Time, std::string_view line) { events_.emplace_back(line); });
+  }
+  // The writer goes first: the hub's teardown can end a game, and
+  // `events_` dies before the base's hub does.
+  void TearDown() override {
+    if (hub_ != nullptr) hub_->SetEventWriter(nullptr);
+    CastleGameFixture::TearDown();
+  }
+  std::vector<std::string> events_;
+};
+
+TEST_F(CastleEventFixture, AStartedTableIsRecordedAsCastle) {
+  auto table = MultiSeatCastleTable(3);
+  ASSERT_TRUE(table.has_value());
+  std::vector<std::string> started;
+  for (const std::string& line : events_) {
+    if (line.find(R"("event":"game_started")") != std::string::npos) started.push_back(line);
+  }
+  ASSERT_EQ(started.size(), 1u);
+  EXPECT_NE(started[0].find(R"("variant":"castle")"), std::string::npos) << started[0];
+  EXPECT_NE(started[0].find(R"("players":3)"), std::string::npos) << started[0];
 }
 
 }  // namespace
