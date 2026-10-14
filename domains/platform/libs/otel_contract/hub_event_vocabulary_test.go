@@ -23,14 +23,14 @@ import (
 // grows an eighth event would go unrecorded until this fails.
 
 const (
-	hubEventsHeader   = "../../../games/apis/games_hub/game_events.h"
-	hubEventsCc       = "../../../games/apis/games_hub/game_events.cc"
-	hubSurfaceH       = "../../../games/apis/games_hub/surface.h"
 	hubDir            = "../../../games/apis/games_hub/"
-	hubHostedGameH    = "../../../games/apis/games_hub/hosted_game.h"
-	hubCc             = "../../../games/apis/games_hub/hub.cc"
-	adaptersH         = "../../../games/apis/games_hub/adapters.h"
-	hubWorldH         = "../../../games/apis/games_hub/world.h"
+	hubEventsHeader   = hubDir + "game_events.h"
+	hubEventsCc       = hubDir + "game_events.cc"
+	hubSurfaceH       = hubDir + "surface.h"
+	hubHostedGameH    = hubDir + "hosted_game.h"
+	hubCc             = hubDir + "hub.cc"
+	adaptersH         = hubDir + "adapters.h"
+	hubWorldH         = hubDir + "world.h"
 	rummyTableCc      = "../../../games/libs/cards/rummy/table.cc"
 	statsGames        = "../../apis/stats/games.go"
 	dejaHub           = "../../../ai/apis/deja/src/hub.rs"
