@@ -1353,7 +1353,8 @@ func TestNoDeployConfigNamesGamesHub(t *testing.T) {
 // refused.
 func TestNoGamesHubSourceNamesGolfHub(t *testing.T) {
 	const pkg = "../../domains/games/apis/games_hub"
-	suite := regexp.MustCompile(`\b(?:class|struct) Golf\w*|\bTEST(?:_F)?\(Golf\w*,`)
+	suite := regexp.MustCompile(
+		`\b(?:class|struct) Golf\w*|\b(?:TYPED_)?TEST(?:_F|_P|_SUITE(?:_P)?)?\(Golf\w*,`)
 	read := 0
 	err := filepath.WalkDir(pkg, func(file string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
