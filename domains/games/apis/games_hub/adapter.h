@@ -22,8 +22,9 @@ using StatsDeltas = std::vector<HubStore::StatsDelta>;
 ///   kKind, kMaxSeats
 ///   Phase(engine)           the status the room lists the table under
 ///   Turn(engine)            the occupant to move, or ""
-///   GamesFinished(engine)   games the table has ended, for the replay
-///                           cursor of a table an instance takes on
+///   GamesFinished(engine)   games a multi-game table (chess, pong, spades)
+///                           has ended, 0 otherwise: the replay cursor of a
+///                           table an instance takes on
 ///   ClosedDeltas(engine, roster)
 ///                           what a finish that closes the table credits
 ///   DealEndDeltas(before, after)

@@ -17,9 +17,6 @@ namespace games_hub {
 [[nodiscard]] std::unordered_set<int> WinnersAmong(const golf::GameState& state,
                                                    const std::vector<std::string>& roster);
 
-/// Golf's phase word: ended, peeking, knocked or playing.
-std::string PhaseString(const golf::GameState& state);
-
 /// Seats are integer indexes; the occupant's identity is the player id.
 std::string PlayerIdAt(const golf::GameState& state, int seat);
 
@@ -27,7 +24,7 @@ template <>
 struct Adapter<golf::GameState> {
   static constexpr GameKind kKind = GameKind::kGolf;
   static constexpr std::size_t kMaxSeats = 4;
-  static std::string Phase(const golf::GameState& state) { return PhaseString(state); }
+  static std::string Phase(const golf::GameState& state);
   static std::string Turn(const golf::GameState& state);
   static std::size_t GamesFinished(const golf::GameState&) { return 0; }
   static StatsDeltas ClosedDeltas(const golf::GameState& state,

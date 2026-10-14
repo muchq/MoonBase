@@ -29,7 +29,7 @@ std::unordered_set<int> WinnersAmong(const golf::GameState& state,
   return winning;
 }
 
-std::string PhaseString(const golf::GameState& state) {
+std::string Adapter<golf::GameState>::Phase(const golf::GameState& state) {
   if (state.isOver()) return "ended";
   if (state.revealCountdownActive()) return "peeking";
   if (state.getWhoKnocked() >= 0) return "knocked";

@@ -5,20 +5,12 @@
 
 namespace games_hub {
 
-/// Castle's phase word: setup, playing or ended.
-std::string CastlePhaseString(const castle::GameState& state);
-
-/// The occupant at `seat`, or "" for no seat.
-std::string CastlePlayerIdAt(const castle::GameState& state, int seat);
-
 template <>
 struct Adapter<castle::GameState> {
   static constexpr GameKind kKind = GameKind::kCastle;
   static constexpr std::size_t kMaxSeats = 4;
-  static std::string Phase(const castle::GameState& state) { return CastlePhaseString(state); }
-  static std::string Turn(const castle::GameState& state) {
-    return CastlePlayerIdAt(state, state.getWhoseTurn());
-  }
+  static std::string Phase(const castle::GameState& state);
+  static std::string Turn(const castle::GameState& state);
   static std::size_t GamesFinished(const castle::GameState&) { return 0; }
   static StatsDeltas ClosedDeltas(const castle::GameState& state,
                                   const std::vector<std::string>& roster);

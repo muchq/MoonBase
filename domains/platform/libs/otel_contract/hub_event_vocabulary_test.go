@@ -188,10 +188,9 @@ func TestHubEventFieldNamesAgreeBetweenGamesHubAndStats(t *testing.T) {
 
 // The seat cap the reader bounds a table by is the hub's kTableSeatCap,
 // read as text like the rest of the contract; adapters.h holds it to the
-// most seats any game's adapter allows. Raise
-// the engine to five seats without raising the reader and every five-seat
-// table becomes a players of -1: a row that says "past the bound" about a
-// perfectly ordinary game.
+// most seats any game's adapter allows. Raise the engine to five seats
+// without raising the reader and every five-seat table becomes a players
+// of -1: a row that says "past the bound" about a perfectly ordinary game.
 func TestTheTableCapAgreesBetweenGamesHubAndStats(t *testing.T) {
 	adapters, err := os.ReadFile(adaptersH)
 	require.NoError(t, err)

@@ -2,7 +2,7 @@
 
 namespace games_hub {
 
-std::string CastlePhaseString(const castle::GameState& state) {
+std::string Adapter<castle::GameState>::Phase(const castle::GameState& state) {
   switch (state.getPhase()) {
     case castle::Phase::Setup:
       return "setup";
@@ -15,7 +15,8 @@ std::string CastlePhaseString(const castle::GameState& state) {
   return "ended";
 }
 
-std::string CastlePlayerIdAt(const castle::GameState& state, int seat) {
+std::string Adapter<castle::GameState>::Turn(const castle::GameState& state) {
+  const int seat = state.getWhoseTurn();
   if (seat < 0 || seat >= static_cast<int>(state.getPlayers().size())) return "";
   return state.getPlayer(seat).getId();
 }

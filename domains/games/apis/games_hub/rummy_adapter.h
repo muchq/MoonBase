@@ -5,14 +5,11 @@
 
 namespace games_hub {
 
-/// Rummy's phase word: choosing, playing or ended.
-std::string RummyPhaseString(const rummy::TableState& table);
-
 template <>
 struct Adapter<rummy::TableState> {
   static constexpr GameKind kKind = GameKind::kRummy;
   static constexpr std::size_t kMaxSeats = 4;
-  static std::string Phase(const rummy::TableState& table) { return RummyPhaseString(table); }
+  static std::string Phase(const rummy::TableState& table);
   static std::string Turn(const rummy::TableState& table);
   static std::size_t GamesFinished(const rummy::TableState&) { return 0; }
   static StatsDeltas ClosedDeltas(const rummy::TableState& table,

@@ -2,12 +2,10 @@
 
 #include <algorithm>
 #include <deque>
-#include <limits>
 #include <set>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
-#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -20,10 +18,10 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/time/clock.h"
+#include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/apis/games_hub/chess_archive.h"
 #include "domains/games/apis/games_hub/chess_results.h"
 #include "domains/games/apis/games_hub/game_events.h"
-#include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/pong_bots.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
@@ -276,7 +274,8 @@ std::string TermsLine(const ChessTerms& terms) {
                       initial, "+", terms.time_control.increment_ms / 1000);
 }
 
-// The games a table has finished; zero before it starts.
+// The games a chess, pong or spades table has finished; zero for anything
+// else, and before a table starts.
 std::size_t GamesOf(const std::optional<HostedState>& state) {
   if (!state.has_value()) return 0;
   return VisitAdapter(*state, [](auto adapter, const auto& engine) {
@@ -316,8 +315,7 @@ moonbase::games::SpadesResult SpadesResultOf(const spades::Table& table,
 // The per-seat stat deltas a finish that closes the table applies — the
 // payload of CommitGameFinish, and the same numbers FinalizeGameLocked
 // mirrors into the local member rows.
-std::vector<games_hub::HubStore::StatsDelta> StatsDeltasOf(const HostedState& state,
-                                                           const std::vector<std::string>& roster) {
+StatsDeltas StatsDeltasOf(const HostedState& state, const std::vector<std::string>& roster) {
   return VisitAdapter(state, [&](auto adapter, const auto& engine) {
     return decltype(adapter)::ClosedDeltas(engine, roster);
   });
@@ -325,8 +323,7 @@ std::vector<games_hub::HubStore::StatsDelta> StatsDeltasOf(const HostedState& st
 
 // What a transition credits when it ends a game without closing the
 // table; a finish that closes it is StatsDeltasOf's.
-std::optional<std::vector<games_hub::HubStore::StatsDelta>> DealEndDeltas(
-    const HostedState& before, const HostedState& after) {
+std::optional<StatsDeltas> DealEndDeltas(const HostedState& before, const HostedState& after) {
   return VisitPair(
       before, after,
       [](auto adapter, const auto& was, const auto& now) {
@@ -4837,7 +4834,7 @@ moonbase::games::GameView GamesHub::ViewLocked(const std::string& game_id, const
 
   const golf::GameState& state = entry.golf();
   const bool ended = state.isOver();
-  view.phase = PhaseString(state);
+  view.phase = Adapter<golf::GameState>::Phase(state);
   if (!ended) view.currentPlayerId = PlayerIdAt(state, state.getWhoseTurn());
   view.drawPileCount = static_cast<int>(state.getDrawPile().size());
   view.discardCount = static_cast<int>(state.getDiscardPile().size());
@@ -5014,7 +5011,7 @@ moonbase::games::CastleView GamesHub::CastleViewLocked(const std::string& game_i
 
   const castle::GameState& state = entry.castle();
   const bool ended = state.isOver();
-  view.phase = CastlePhaseString(state);
+  view.phase = Adapter<castle::GameState>::Phase(state);
   const std::string current = CurrentTurnOf(*entry.state);
   if (!ended && !current.empty()) view.currentPlayerId = current;
   view.drawPileCount = static_cast<int>(state.getDrawPile().size());
@@ -5183,7 +5180,7 @@ moonbase::games::RummyView GamesHub::RummyViewLocked(const std::string& game_id,
   }
 
   const rummy::TableState& table = entry.rummy();
-  view.phase = RummyPhaseString(table);
+  view.phase = Adapter<rummy::TableState>::Phase(table);
   for (const rummy::DealScore& line : table.getScoreSheet()) {
     moonbase::games::RummyScoreLine scored;
     scored.variant = std::string(rummy::variantName(line.variant));

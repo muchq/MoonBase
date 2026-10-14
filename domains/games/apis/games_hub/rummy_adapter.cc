@@ -17,7 +17,7 @@ StatsDeltas DealDeltas(const rummy::Deal& deal) {
 
 }  // namespace
 
-std::string RummyPhaseString(const rummy::TableState& table) {
+std::string Adapter<rummy::TableState>::Phase(const rummy::TableState& table) {
   switch (table.getPhase()) {
     case rummy::TablePhase::Choosing:
       return "choosing";
