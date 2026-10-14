@@ -1275,6 +1275,60 @@ TEST_F(PgHubStoreTest, AnUnreadableEventIsDropped) {
   EXPECT_EQ(snapshot->events.size(), 1u);
 }
 
+// A round robin's body names its game unless it is chess's, whose bodies
+// name none, and a pong body names its variant beside it. The stored
+// bytes say exactly that, and a body naming anything else is dropped.
+TEST_F(PgHubStoreTest, ARoundRobinBodyNamesEveryGameButChess) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+  store_->Flush();
+  ASSERT_TRUE(*store_->CommitChessEvent(Event(1), ""));
+  PgHubStore::ChessEventRow pong = Event(1);
+  pong.event_id = "E2";
+  pong.kind = games_hub::GameKind::kPong;
+  pong.pong_variant = pong::Variant::kThreeD;
+  ASSERT_TRUE(*store_->CommitChessEvent(pong, ""));
+  const auto body = [&](const std::string& event_id) {
+    return nlohmann::json::parse(
+        *db_->Exec("SELECT body::text FROM chess_events WHERE event_id = $1", {event_id})
+             ->Get(0, 0));
+  };
+  const nlohmann::json chess_body = body("E1");
+  EXPECT_FALSE(chess_body.contains("game"));
+  EXPECT_FALSE(chess_body.contains("variant"));
+  const nlohmann::json pong_body = body("E2");
+  EXPECT_EQ(pong_body["game"], "pong");
+  EXPECT_EQ(pong_body["variant"], pong::VariantName(pong::Variant::kThreeD));
+
+  int n = 0;
+  for (const auto& [key, value] :
+       std::vector<std::pair<std::string, nlohmann::json>>{{"game", "chess"},
+                                                           {"game", "golf"},
+                                                           {"game", "bridge"},
+                                                           {"game", 1},
+                                                           {"variant", "bogus"},
+                                                           {"variant", 3},
+                                                           {"variant", nullptr}}) {
+    nlohmann::json bad = pong_body;
+    if (value.is_null()) {
+      bad.erase(key);
+    } else {
+      bad[key] = value;
+    }
+    ASSERT_TRUE(db_->Exec("INSERT INTO chess_events (room_id, event_id, version, body)"
+                          " VALUES ('R1', $1, 1, $2::jsonb)",
+                          {"B" + std::to_string(++n), bad.dump()})
+                    .ok());
+  }
+  auto room = store_->LoadRoom("R1");
+  ASSERT_TRUE(room.ok()) << room.status();
+  ASSERT_EQ(room->events.size(), 2u);
+  EXPECT_EQ(room->events[0].event_id, "E1");
+  EXPECT_EQ(room->events[0].kind, games_hub::GameKind::kChess);
+  EXPECT_EQ(room->events[1].event_id, "E2");
+  EXPECT_EQ(room->events[1].kind, games_hub::GameKind::kPong);
+  EXPECT_EQ(room->events[1].pong_variant, pong::Variant::kThreeD);
+}
+
 // Two tables racing to play one pairing each end a first game, and the
 // event lists both, in archive order: the store does not pick.
 TEST_F(PgHubStoreTest, TwoTablesPlayingOnePairingAreBothListed) {
