@@ -119,6 +119,11 @@ concept ClockHooks = NextGameHooks<A> && requires(const typename A::Engine& engi
   { A::Flag(engine, int64_t{0}) } -> std::same_as<absl::StatusOr<typename A::Engine>>;
 };
 
+template <typename A>
+concept RealtimeHooks = requires(const typename A::Move& move) {
+  { A::Steers(move) } -> std::same_as<bool>;
+};
+
 template <typename A, Capability C>
 constexpr bool kHas = (A::kCapabilities & C) != 0;
 
@@ -126,7 +131,7 @@ template <typename A>
 concept CapableAdapter =
     (!kHas<A, kNextGame> || NextGameHooks<A>) && (!kHas<A, kRoundRobins> || RoundRobinHooks<A>) &&
     (!kHas<A, kOpenings> || OpeningHooks<A>) && (!kHas<A, kClocked> || ClockHooks<A>) &&
-    (!kHas<A, kPublished> || NextGameHooks<A>);
+    (!kHas<A, kRealtime> || RealtimeHooks<A>) && (!kHas<A, kPublished> || NextGameHooks<A>);
 
 /// Each HostedState alternative has a full adapter that names the GameKind
 /// at its index, so a kind and its engine never disagree.
@@ -328,6 +333,20 @@ inline bool HasCapability(GameKind kind, Capability capability) {
 /// Whether opening a `kind` table starts a game the event log records.
 inline bool OpenStartsAGame(GameKind kind) {
   return ForKind(kind, [](auto adapter) { return decltype(adapter)::kOpenStartsAGame; });
+}
+
+/// Whether a command steers a realtime game (kRealtime's Steers), riding
+/// the hub's realtime budget.
+inline bool OnRealtimeBudget(const moonbase::games::GameCommands& commands) {
+  return AnyAdapter([&commands](auto adapter) {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kRealtime>) {
+      const auto* move = A::MoveOf(commands);
+      return move != nullptr && A::Steers(*move);
+    } else {
+      return false;
+    }
+  });
 }
 
 /// Whether the id is a bot some game seats.

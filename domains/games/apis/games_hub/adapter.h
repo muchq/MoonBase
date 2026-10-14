@@ -92,6 +92,8 @@ enum Capability : unsigned {
   /// The hub's chess engine plays the game's bot seats.
   kEngineBots = 1U << 5,
   /// The game runs between moves, on the hub's ticks: pong's rallies.
+  /// Hooks: Steers(move), whether a move steers the rally, and so rides
+  /// the hub's realtime rate budget rather than its command budget.
   kRealtime = 1U << 6,
   /// A published room's finished games reach the public feed, and the
   /// hub's indexer is asked after each one's players (implies kNextGame).

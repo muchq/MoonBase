@@ -80,6 +80,7 @@ struct Adapter<pong::Table> {
   // Its own startGame, a seat's paddle, a bot to the second seat, and
   // watching.
   static Action<pong::Table, Start> Decode(const Move& move, const std::string& player_id);
+  static bool Steers(const Move& move) { return move.as_paddle_or_null() != nullptr; }
   static absl::StatusOr<pong::Table> Open(const OpenContext& context, const Start& start,
                                           std::deque<cards::Card>) {
     return pong::Table::open(context.roster, start.variant);

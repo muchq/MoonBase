@@ -21,6 +21,7 @@
 namespace games_hub {
 namespace {
 
+using moonbase::games::GameCommands;
 using moonbase::games::GameEvents;
 
 // White Kg6 Pe7 against Kh8: e7e8q mates.
@@ -351,6 +352,18 @@ TEST(Capabilities, OneGamesMachineryFindsOnlyThatGamesTables) {
   EXPECT_FALSE(HasCapability(GameKind::kSpades, kWatchable));
   EXPECT_TRUE(IsBotId("stockfish@1320"));
   EXPECT_FALSE(IsBotId("alice"));
+}
+
+// A realtime game's steering rides a budget of its own; every other
+// command, its own game's included, rides the shared one.
+TEST(Capabilities, OnlyARealtimeGamesSteeringRidesTheRealtimeBudget) {
+  moonbase::games::PongCommand paddle;
+  paddle.move = moonbase::games::PongMove::FromPaddle(moonbase::games::PongPaddle{});
+  EXPECT_TRUE(OnRealtimeBudget(GameCommands::FromPong(paddle)));
+  moonbase::games::PongCommand start;
+  start.move = moonbase::games::PongMove::FromStartgame(moonbase::games::PongStartGame{});
+  EXPECT_FALSE(OnRealtimeBudget(GameCommands::FromPong(start)));
+  EXPECT_FALSE(OnRealtimeBudget(GameCommands::FromGetroomstate(moonbase::games::GetRoomState{})));
 }
 
 }  // namespace

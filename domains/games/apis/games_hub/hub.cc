@@ -1296,8 +1296,7 @@ opal::eventstream::StreamTask GamesHub::Play(moonbase::games::PlayInput input,
     const auto now = std::chrono::steady_clock::now();
     const bool lobby = (*received)->as_lobby_or_null() != nullptr;
     const bool voice = (*received)->as_voice_or_null() != nullptr;
-    const auto* pong = (*received)->as_pong_or_null();
-    const bool paddle = pong != nullptr && pong->move.as_paddle_or_null() != nullptr;
+    const bool paddle = OnRealtimeBudget(**received);
     TokenBucket& budget = lobby    ? lobby_budget
                           : voice  ? voice_budget
                           : paddle ? paddle_budget
