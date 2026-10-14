@@ -81,6 +81,9 @@ struct Adapter<pong::Table> {
     if (!event.has_value()) return std::nullopt;
     return StartGame<Start>{Start{}, /*next_game=*/true};
   }
+  /// The engine as its games row's state column holds it, and back.
+  static std::string Serialize(const pong::Table& engine);
+  static absl::StatusOr<pong::Table> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view player_id) { return PongBotLevel(player_id).has_value(); }
 
   static absl::StatusOr<pong::Table> Next(const pong::Table& table, const Start& start,
@@ -102,6 +105,22 @@ struct Adapter<pong::Table> {
   }
   static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
   static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
+  // A pong round robin's body names its game and the variant its pairings
+  // play.
+  static constexpr bool kRoundRobinBodyNamed = true;
+  static std::vector<std::pair<std::string, std::string>> RoundRobinBody(
+      const HubStore::ChessEventRow& row) {
+    return {{"variant", std::string(pong::VariantName(row.pong_variant))}};
+  }
+  static bool FromRoundRobinBody(const std::map<std::string, std::string>& fields,
+                                 HubStore::ChessEventRow& row) {
+    const auto variant = fields.find("variant");
+    if (variant == fields.end()) return false;
+    const std::optional<pong::Variant> parsed = pong::ParseVariant(variant->second);
+    if (!parsed.has_value()) return false;
+    row.pong_variant = *parsed;
+    return true;
+  }
 };
 
 }  // namespace games_hub

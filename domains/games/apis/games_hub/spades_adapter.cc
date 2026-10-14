@@ -4,6 +4,7 @@
 
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/games_hub/wire_cards.h"
+#include "domains/games/libs/cards/spades/table_serde.h"
 
 namespace games_hub {
 namespace {
@@ -230,6 +231,14 @@ Action<spades::Table, Adapter<spades::Table>::Start> Adapter<spades::Table>::Dec
     }};
   }
   return Refusal{RejectKind::kUnknown, "unknown move"};
+}
+
+std::string Adapter<spades::Table>::Serialize(const spades::Table& engine) {
+  return spades::serializeTable(engine);
+}
+
+absl::StatusOr<spades::Table> Adapter<spades::Table>::Deserialize(const std::string& stored) {
+  return spades::deserializeTable(stored);
 }
 
 }  // namespace games_hub

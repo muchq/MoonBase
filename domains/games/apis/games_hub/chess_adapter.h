@@ -37,8 +37,8 @@ struct Adapter<chess_play::Table> {
   static constexpr GameKind kKind = GameKind::kChess;
   static constexpr std::string_view kName = "chess";
   static constexpr std::size_t kMaxSeats = chess_play::GameState::kSeats;
-  static constexpr unsigned kCapabilities =
-      kWatchable | kNextGame | kRoundRobins | kOpenings | kClocked | kEngineBots | kPublished;
+  static constexpr unsigned kCapabilities = kWatchable | kNextGame | kRoundRobins | kOpenings |
+                                            kClocked | kEngineBots | kPublished | kChallenges;
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "chess_commands";
@@ -103,6 +103,9 @@ struct Adapter<chess_play::Table> {
     if (!terms.has_value()) return std::nullopt;
     return StartGame<Start>{Start{*terms, std::nullopt}};
   }
+  /// The engine as its games row's state column holds it, and back.
+  static std::string Serialize(const chess_play::Table& engine);
+  static absl::StatusOr<chess_play::Table> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view player_id) { return ChessBotElo(player_id).has_value(); }
 
   static absl::Status Prepare(Start& start, const ChessOpener& opener);
@@ -124,6 +127,17 @@ struct Adapter<chess_play::Table> {
   }
   static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
   static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
+  // A chess round robin's body names no game, and holds nothing beyond
+  // the terms every round robin's body does.
+  static constexpr bool kRoundRobinBodyNamed = false;
+  static std::vector<std::pair<std::string, std::string>> RoundRobinBody(
+      const HubStore::ChessEventRow&) {
+    return {};
+  }
+  static bool FromRoundRobinBody(const std::map<std::string, std::string>&,
+                                 HubStore::ChessEventRow&) {
+    return true;
+  }
 
   static bool FlagDue(const chess_play::Table& table, int64_t now_ms) {
     const chess_play::GameState& game = table.game();

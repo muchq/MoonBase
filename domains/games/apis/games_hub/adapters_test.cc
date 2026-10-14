@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 
+#include "absl/random/random.h"
+#include "absl/status/status.h"
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/chess_play/game_state.h"
@@ -279,6 +281,43 @@ TEST(KindNames, EachKindIsWrittenAsItsAdaptersNameAndReadBack) {
   EXPECT_EQ(ParseGameKind(""), std::nullopt);
   EXPECT_EQ(ParseGameKind("Golf"), std::nullopt);
   EXPECT_EQ(ParseGameKind("gin"), std::nullopt);
+}
+
+// What a game is held to as it lands, every HostedState alternative alike
+// and with nothing to add here: an adapter with every hook (adapters.h's
+// static_asserts), a kind name that reads back, and a table that opens on
+// its default start and round-trips through its adapter's serde to the
+// same bytes. otel_contract holds the same adapters to the game lists
+// downstream.
+TEST(EveryGame, OpensAndRoundTripsThroughItsAdaptersSerde) {
+  AnyAdapter([](auto adapter) {
+    using A = decltype(adapter);
+    SCOPED_TRACE(A::kName);
+    EXPECT_EQ(ParseGameKind(GameKindName(A::kKind)), A::kKind);
+    std::vector<std::string> roster;
+    for (std::size_t seat = 0; seat < A::kMaxSeats; ++seat) {
+      roster.push_back("p" + std::to_string(seat));
+    }
+    typename A::Start start;
+    if constexpr (kHas<A, kOpenings>) {
+      const absl::Status prepared = A::Prepare(start, [](std::string_view setup_id) {
+        absl::BitGen gen;
+        return chess_play::SelectChessSetup(setup_id, gen);
+      });
+      EXPECT_TRUE(prepared.ok()) << prepared;
+    }
+    cards::Dealer dealer;
+    const std::string game_id = "tbl";
+    const auto opened =
+        A::Open(OpenContext{game_id, roster, 0}, start, dealer.DealNewUnshuffledDeck());
+    EXPECT_TRUE(opened.ok()) << opened.status();
+    if (!opened.ok()) return false;
+    const std::string stored = A::Serialize(*opened);
+    const auto restored = A::Deserialize(stored);
+    EXPECT_TRUE(restored.ok()) << restored.status();
+    if (restored.ok()) EXPECT_EQ(A::Serialize(*restored), stored);
+    return false;
+  });
 }
 
 // Each game's envelope counts on the series named for its game.

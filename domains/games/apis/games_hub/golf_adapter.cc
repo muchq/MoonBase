@@ -5,6 +5,7 @@
 
 #include "absl/strings/str_join.h"
 #include "domains/games/apis/games_hub/wire_cards.h"
+#include "domains/games/libs/cards/golf/game_state_serde.h"
 #include "domains/games/libs/cards/golf/player.h"
 
 namespace games_hub {
@@ -249,6 +250,14 @@ Action<golf::GameState, Adapter<golf::GameState>::Start> Adapter<golf::GameState
     return transition;
   }
   return Refusal{RejectKind::kUnknown, "unknown move"};
+}
+
+std::string Adapter<golf::GameState>::Serialize(const golf::GameState& engine) {
+  return golf::serializeGameState(engine);
+}
+
+absl::StatusOr<golf::GameState> Adapter<golf::GameState>::Deserialize(const std::string& stored) {
+  return golf::deserializeGameState(stored);
 }
 
 }  // namespace games_hub

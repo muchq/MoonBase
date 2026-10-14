@@ -5,6 +5,7 @@
 #include <concepts>
 #include <cstddef>
 #include <deque>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -74,6 +75,8 @@ concept GameAdapter = requires(
                    std::declval<const std::optional<EventTag>&>())
   } -> std::same_as<std::optional<StartGame<typename A::Start>>>;
   { A::IsBot(std::string_view{}) } -> std::same_as<bool>;
+  { A::Serialize(engine) } -> std::same_as<std::string>;
+  { A::Deserialize(id) } -> std::same_as<absl::StatusOr<typename A::Engine>>;
 };
 
 /// Each capability's hooks (adapter.h), held by every adapter that
@@ -96,6 +99,12 @@ concept RoundRobinHooks =
       {
         A::RoundRobinsEvent(std::vector<HeldRoundRobin>{})
       } -> std::same_as<moonbase::games::GameEvents>;
+      { A::kRoundRobinBodyNamed } -> std::convertible_to<bool>;
+      { A::RoundRobinBody(row) } -> std::same_as<std::vector<std::pair<std::string, std::string>>>;
+      {
+        A::FromRoundRobinBody(std::declval<const std::map<std::string, std::string>&>(),
+                              std::declval<HubStore::ChessEventRow&>())
+      } -> std::same_as<bool>;
     };
 
 template <typename A>
@@ -294,6 +303,19 @@ std::optional<moonbase::games::GameEvents> RoundRobinsEventOf(
     GameKind kind, const std::vector<HeldRoundRobin>& held);
 /// The terms a `kind` round robin's pairing table waits on.
 std::optional<ChessTerms> RoundRobinTermsOf(GameKind kind, const HubStore::ChessEventRow& row);
+
+/// What a `row.kind` round robin's stored body carries beyond the fields
+/// every round robin's does: its game's word as "game", unless its game's
+/// bodies name none, and its adapter's own fields.
+std::vector<std::pair<std::string, std::string>> RoundRobinBodyOf(
+    const HubStore::ChessEventRow& row);
+
+/// Reads a stored round robin body's string fields onto `row`: its game
+/// from "game" (a body naming none is the one game's whose bodies go
+/// unnamed), then that game's own fields. False when the body is no round
+/// robin game's.
+bool RoundRobinFromBody(const std::map<std::string, std::string>& fields,
+                        HubStore::ChessEventRow& row);
 
 /// Whether a `kind` table's adapter opts into `capability`.
 inline bool HasCapability(GameKind kind, Capability capability) {

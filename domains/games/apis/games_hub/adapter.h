@@ -76,7 +76,11 @@ enum Capability : unsigned {
   /// Hooks: RoundRobinStart(start, table terms, round robin row), the
   /// start a pairing's table plays on; RoundRobinTerms(row), what its
   /// table waits on; RoundRobinEvent(held) and RoundRobinsEvent(helds),
-  /// the round robins in the game's envelope.
+  /// the round robins in the game's envelope; kRoundRobinBodyNamed,
+  /// whether a stored round robin's body names its game (exactly one
+  /// game's bodies name none, and a body naming none is that game's);
+  /// RoundRobinBody(row) and FromRoundRobinBody(fields, row), the game's
+  /// own string fields in that body, and whether they read back.
   kRoundRobins = 1U << 2,
   /// A start draws its opening from the hub's ChessOpener. Hooks:
   /// Prepare(start, opener).
@@ -92,6 +96,9 @@ enum Capability : unsigned {
   /// A published room's finished games reach the public feed, and the
   /// hub's indexer is asked after each one's players (implies kNextGame).
   kPublished = 1U << 7,
+  /// A waiting table posts the terms its next seat starts on (#1633), and
+  /// its stored row carries them in place of a state until the start.
+  kChallenges = 1U << 8,
 };
 
 /// A round robin as the hub holds it, with the tables playing its
@@ -229,6 +236,9 @@ using Action =
 ///                           the start a table makes once its last seat
 ///                           fills, if it makes one
 ///   IsBot(player_id)        whether the id is a bot the game seats
+///   Serialize(engine), Deserialize(stored)
+///                           the engine as its games row's state column
+///                           holds it, and back
 ///
 /// and, optionally:
 ///

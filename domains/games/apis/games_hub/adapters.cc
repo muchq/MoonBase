@@ -3,6 +3,63 @@
 #include "absl/log/log.h"
 
 namespace games_hub {
+namespace {
+
+template <typename A>
+constexpr bool UnnamedRoundRobinBodies() {
+  if constexpr (kHas<A, kRoundRobins>) {
+    return !A::kRoundRobinBodyNamed;
+  } else {
+    return false;
+  }
+}
+
+// The index of the one round robin game whose bodies name no game.
+constexpr std::size_t UnnamedRoundRobinGame() {
+  return []<std::size_t... I>(std::index_sequence<I...>) {
+    std::size_t found = kGames;
+    std::size_t count = 0;
+    ((UnnamedRoundRobinBodies<Adapter<EngineAt<I>>>() ? (found = I, ++count) : count), ...);
+    return count == 1 ? found : kGames;
+  }(std::make_index_sequence<kGames>{});
+}
+static_assert(UnnamedRoundRobinGame() < kGames,
+              "exactly one round robin game's stored bodies name no game");
+
+}  // namespace
+
+std::vector<std::pair<std::string, std::string>> RoundRobinBodyOf(
+    const HubStore::ChessEventRow& row) {
+  return ForKind(row.kind, [&](auto adapter) -> std::vector<std::pair<std::string, std::string>> {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kRoundRobins>) {
+      auto fields = A::RoundRobinBody(row);
+      if (A::kRoundRobinBodyNamed) fields.emplace_back("game", std::string(A::kName));
+      return fields;
+    } else {
+      return {};
+    }
+  });
+}
+
+bool RoundRobinFromBody(const std::map<std::string, std::string>& fields,
+                        HubStore::ChessEventRow& row) {
+  const auto game = fields.find("game");
+  const std::optional<GameKind> kind =
+      game == fields.end() ? std::optional(static_cast<GameKind>(UnnamedRoundRobinGame()))
+                           : ParseGameKind(game->second);
+  if (!kind.has_value()) return false;
+  return ForKind(*kind, [&](auto adapter) {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kRoundRobins>) {
+      if (game != fields.end() && !A::kRoundRobinBodyNamed) return false;
+      row.kind = A::kKind;
+      return A::FromRoundRobinBody(fields, row);
+    } else {
+      return false;
+    }
+  });
+}
 
 moonbase::games::GameEvents CreatedEvent(GameKind kind,
                                          const moonbase::games::GameCreated& created) {
