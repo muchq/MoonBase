@@ -102,8 +102,10 @@ enum Capability : unsigned {
   /// Hooks: Archived(engine), the finished game a committed row archives
   /// and its ordinal, which the stores keep as the room's history.
   kPublished = 1U << 7,
-  /// A waiting table posts the terms its next seat starts on (#1633), and
-  /// its stored row carries them in place of a state until the start.
+  /// A waiting table may hold posted terms its next seat starts on
+  /// (#1633). The flag is what the store checks: a waiting row's state
+  /// column is read back as those terms in place of an engine. Posting
+  /// them is Decode's, as the PostTerms it returns.
   kChallenges = 1U << 8,
 };
 
