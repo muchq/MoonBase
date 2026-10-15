@@ -100,6 +100,6 @@ the `text/event-stream` pattern used by OpenAI-compatible APIs.
 
 ## Rate limiting
 
-Both endpoints share a per-IP rate limit of **5 requests/second** with a burst
+Both endpoints share a per-client rate limit of **5 requests/second** with a burst
 of **10**, provided by `server_pal`'s `tower_governor` integration. Requests
 over the limit receive `429 Too Many Requests`.

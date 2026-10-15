@@ -4,11 +4,12 @@ Opinionated Axum router builder with batteries included.
 
 ## Features
 
-- Per-IP rate limiting via `tower_governor` (default: 100 req/s, burst 200)
+- Per-client rate limiting via `tower_governor` (default: 100 req/s, burst 200),
+  keyed on the address derived behind a trusted proxy (see below)
 - One JSON access-log line per request (#1459) — the metrics vocabulary
   (`http_method`, `route`, `service_name`) plus `target`, `status`,
-  `duration_us`, `trace_id`, and `client`/`client_source` (the socket peer
-  the limiter keys on, never the raw x-forwarded-for). Binaries call
+  `duration_us`, `trace_id`, and `client`/`client_source` (the derived
+  client the limiter keys on, never the raw x-forwarded-for). Binaries call
   `server_pal::init_logging()` to install the JSON subscriber; `RUST_LOG`
   still filters. (`tower_http::trace` stays in the stack for its ERROR
   event on failures.)
@@ -26,15 +27,15 @@ use server_pal::{RateLimit, listen_addr_pal, router_builder, serve};
 
 let app = router_builder()
     .route("/my/v1/endpoint", post(my_handler))
-    .rate_limit(Some(RateLimit { per_second: 10, burst: 20 })) // override default
+    .rate_limit(Some(RateLimit { per_second: 10.0, burst: 20 })) // override default
     .build()
     .with_state(my_state);
 
 serve(app, &listen_addr_pal()).await;
 ```
 
-Use `serve()` (rather than `axum::serve` directly) so `tower_governor` can
-extract peer IPs for per-IP rate limiting.
+Use `serve()` (rather than `axum::serve` directly): it stamps each request's
+socket peer, which client derivation starts from.
 
 ## HTTP metrics
 
@@ -85,16 +86,24 @@ arrive at once before that rate binds. `tower_governor`'s own builder takes a
 request every 100 seconds; `RateLimit` converts, so the field means what it
 says.
 
-### Buckets are keyed on the peer IP, which behind a proxy is the proxy
+### Buckets are keyed on the client, derived behind a trusted proxy
 
-The default extractor reads the socket's peer address. Every service in
-`deploy/consolidated` is reached only through Caddy, so external callers all
-key on Caddy's container IP and **share one bucket** — a limit sized as though
-it were per-user throttles everyone at once. The C++ rail keys off a declared
-trust boundary instead (`TRUSTED_PROXY_CIDRS`, opal-cpp ADR-0012); this rail
-has not adopted that yet. Note that simply switching to `SmartIpKeyExtractor`
-would make the key client-controlled, since Caddy appends to `X-Forwarded-For`
-rather than replacing it.
+Behind Caddy every request's socket peer is Caddy, so keying on the peer
+gives every external caller one bucket (#1329). The limiter and the access
+log instead key on the client derived by opal-cpp ADR-0012's walk, the same
+one aura uses: if the peer is not a trusted proxy it is the client and
+`X-Forwarded-For` is ignored; otherwise walk that header right to left past
+trusted hops and take the first untrusted entry. Taking the leftmost entry
+(`tower_governor`'s `SmartIpKeyExtractor`) would make the key
+client-controlled, since Caddy appends to the header rather than replacing it.
+
+The trust boundary is `TRUSTED_PROXY_CIDRS` (comma-separated CIDRs or bare
+addresses), read by `build()` unless `.trusted_proxies(...)` sets it.
+Unset means directly reachable: the peer is always the client. Set but empty
+or malformed panics at startup rather than silently collapsing proxied
+traffic onto one key. `deploy/consolidated/compose.yaml` sets it to Caddy's
+pinned address for every service on this rail, and
+`//deploy/consolidated:consolidated_test` fails if one is missing.
 
 ### `GET /health` is exempt
 
@@ -121,3 +130,4 @@ limiter is the outermost layer.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `8080` | Port to listen on (used by `listen_addr_pal()`) |
+| `TRUSTED_PROXY_CIDRS` | unset | Reverse proxies whose `X-Forwarded-For` entries count; unset trusts none |

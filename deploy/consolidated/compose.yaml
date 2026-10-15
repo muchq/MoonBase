@@ -219,10 +219,11 @@ services:
     ports:
       - "8083:8083"
     environment:
-      - PORT=8083
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
-      - OTEL_SERVICE_NAME=mithril
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=mithril,service.version=${MITHRIL_SHA:-${DEPLOY_SHA:-latest}}
+      PORT: "8083"
+      TRUSTED_PROXY_CIDRS: *caddy_ip
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
+      OTEL_SERVICE_NAME: mithril
+      OTEL_RESOURCE_ATTRIBUTES: service.name=mithril,service.version=${MITHRIL_SHA:-${DEPLOY_SHA:-latest}}
     volumes:
       - /etc/mithril:/etc/mithril
     networks:
@@ -249,10 +250,11 @@ services:
     ports:
       - "8084:8084"
     environment:
-      - PORT=8084
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
-      - OTEL_SERVICE_NAME=posterize
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=posterize,service.version=${POSTERIZE_SHA:-${DEPLOY_SHA:-latest}}
+      PORT: "8084"
+      TRUSTED_PROXY_CIDRS: *caddy_ip
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
+      OTEL_SERVICE_NAME: posterize
+      OTEL_RESOURCE_ATTRIBUTES: service.name=posterize,service.version=${POSTERIZE_SHA:-${DEPLOY_SHA:-latest}}
     volumes:
       - /etc/posterize:/etc/posterize
     networks:
@@ -617,11 +619,12 @@ services:
     ports:
       - "8087:8087"
     environment:
-      - PORT=8087
-      - MODEL_DIR=/etc/microgpt-serve/model
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
-      - OTEL_SERVICE_NAME=microgpt-serve
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=microgpt-serve,service.version=${MICROGPT_SERVE_SHA:-${DEPLOY_SHA:-latest}}
+      PORT: "8087"
+      TRUSTED_PROXY_CIDRS: *caddy_ip
+      MODEL_DIR: /etc/microgpt-serve/model
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
+      OTEL_SERVICE_NAME: microgpt-serve
+      OTEL_RESOURCE_ATTRIBUTES: service.name=microgpt-serve,service.version=${MICROGPT_SERVE_SHA:-${DEPLOY_SHA:-latest}}
     volumes:
       - /etc/microgpt-serve:/etc/microgpt-serve
     networks:
@@ -649,16 +652,17 @@ services:
     restart: always
     logging: *default-logging
     environment:
-      - PORT=8093
-      - ACCESS_LOG=/var/log/caddy/access.log
+      PORT: "8093"
+      TRUSTED_PROXY_CIDRS: *caddy_ip
+      ACCESS_LOG: /var/log/caddy/access.log
       # games_hub's domain events as a second source (#1572). The access
       # log stops at the socket a session opens; this is what rode it.
       # Unset, deja reads caddy alone.
-      - HUB_EVENT_LOG=/var/log/games_hub/game_events.log
-      - DEJA_STATE=/var/lib/deja
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
-      - OTEL_SERVICE_NAME=deja
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=deja,service.version=${DEJA_SHA:-${DEPLOY_SHA:-latest}}
+      HUB_EVENT_LOG: /var/log/games_hub/game_events.log
+      DEJA_STATE: /var/lib/deja
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
+      OTEL_SERVICE_NAME: deja
+      OTEL_RESOURCE_ATTRIBUTES: service.name=deja,service.version=${DEJA_SHA:-${DEPLOY_SHA:-latest}}
     volumes:
       # Read-only: deja observes the live logs Caddy and games_hub write
       # and roll for themselves, and writes nothing but its own

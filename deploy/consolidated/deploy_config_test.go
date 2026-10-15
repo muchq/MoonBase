@@ -128,6 +128,32 @@ func TestEveryServiceOnTheStandardRailsIsProbed(t *testing.T) {
 	}
 }
 
+// Services whose rail keys rate limiting and the access log's client on the
+// ADR-0012 derived address: aura (C++) and server_pal (Rust). Behind Caddy
+// the socket peer is always Caddy, so without the trust boundary every
+// external caller shares one bucket (#1329) — and nothing fails, because
+// unset is also the legitimate direct-connect statement.
+var servicesKeyedOnTheForwardedClient = []string{
+	"deja",
+	"games_hub",
+	"iili",
+	"microgpt-serve",
+	"mithril",
+	"one_d4_v2",
+	"portrait",
+	"posterize",
+}
+
+func TestEveryServiceKeyedOnTheClientTrustsCaddyAlone(t *testing.T) {
+	for _, service := range servicesKeyedOnTheForwardedClient {
+		if !hasLine(activeServiceLines(t, "compose.yaml", service), "TRUSTED_PROXY_CIDRS: *caddy_ip") {
+			t.Errorf("%s does not declare TRUSTED_PROXY_CIDRS: *caddy_ip. Behind Caddy its "+
+				"limiter and access log then key every external caller as Caddy (#1329); "+
+				"alias the anchor rather than repeating the address.", service)
+		}
+	}
+}
+
 // The /health literal lives in three places that nothing structurally ties
 // together: the probe request lines here, prom_proxy's probeFilter (which
 // subtracts route="/health" from every Serving number, #1303), and the
@@ -2512,7 +2538,7 @@ func TestEveryLogDejaReadsIsMountedReadOnly(t *testing.T) {
 	lines := activeServiceLines(t, "compose.yaml", "deja")
 	// Any *_LOG variable, not a list of the two that exist: an allowlist
 	// would pass a third source by not recognising it.
-	paths := regexp.MustCompile(`^- \w*_LOG=(\S+)$`)
+	paths := regexp.MustCompile(`^\w*_LOG: (\S+)$`)
 	var dirs []string
 	for _, line := range lines {
 		if match := paths.FindStringSubmatch(line); match != nil {
@@ -2572,7 +2598,7 @@ func TestDejaTailsTheFileTheHubWrites(t *testing.T) {
 	if suffix == nil {
 		t.Fatal("no kSuffix in event_log.cc; if it moved, follow it here")
 	}
-	want := "- HUB_EVENT_LOG=" + path.Join(dir, string(opened[1])+string(suffix[1]))
+	want := "HUB_EVENT_LOG: " + path.Join(dir, string(opened[1])+string(suffix[1]))
 	if !hasLine(activeServiceLines(t, "compose.yaml", "deja"), want) {
 		t.Errorf("deja does not tail %q; it would follow a path nothing writes and "+
 			"report a stream that never moves", want)

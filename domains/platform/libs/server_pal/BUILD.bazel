@@ -9,6 +9,7 @@ exports_files(["src/lib.rs"])
 rust_library(
     name = "server_pal",
     srcs = [
+        "src/forwarded.rs",
         "src/lib.rs",
     ],
     crate_name = "server_pal",
@@ -31,6 +32,9 @@ rust_test(
     crate = ":server_pal",
     # The vocabulary test asserts the service_name VALUE, so an env-key typo
     # in the reader cannot pass as an empty-but-present field.
-    env = {"OTEL_SERVICE_NAME": "server-pal-under-test"},
+    env = {
+        "OTEL_SERVICE_NAME": "server-pal-under-test",
+        "TRUSTED_PROXY_CIDRS": "172.28.0.2",
+    },
     deps = all_crate_deps(normal_dev = True),
 )
