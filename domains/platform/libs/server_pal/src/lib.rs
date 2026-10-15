@@ -28,7 +28,8 @@ use tower_http::trace::TraceLayer;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
 
 mod forwarded;
-pub use forwarded::{ClientSource, DerivedClient, TrustedProxies, derive_client};
+pub use forwarded::TrustedProxies;
+use forwarded::{DerivedClient, derive_client};
 
 const DEFAULT_PORT: u16 = 8080;
 
@@ -540,6 +541,9 @@ pub struct RateLimit {
     pub burst: u32,
 }
 
+/// How often the limiter forgets clients whose quota has fully refilled.
+const IDLE_CLIENT_SWEEP: Duration = Duration::from_secs(60);
+
 const DEFAULT_RATE_LIMIT: RateLimit = RateLimit {
     per_second: 100.0,
     burst: 200,
@@ -596,6 +600,25 @@ impl KeyExtractor for ClientKeyExtractor {
     }
 }
 
+/// Runs `sweep` on `target` every `every` until the target is dropped. The
+/// thread holds it weakly, so it neither keeps the target alive nor outlives
+/// it by more than one interval.
+fn spawn_sweeper<T: Send + Sync + 'static>(
+    target: std::sync::Weak<T>,
+    every: Duration,
+    sweep: impl Fn(&T) + Send + 'static,
+) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(every);
+            let Some(target) = target.upgrade() else {
+                return;
+            };
+            sweep(&target);
+        }
+    });
+}
+
 pub fn listen_addr_pal() -> String {
     let port = env::var("PORT")
         .ok()
@@ -614,7 +637,12 @@ pub struct RouterBuilder<S: Clone + Send + Sync + 'static> {
     streams: Router<S>,
     rate_limit: Option<RateLimit>,
     trusted_proxies: Option<TrustedProxies>,
+    sweep_every: Duration,
+    sweep_observer: Option<SweepObserver>,
 }
+
+/// Sees the limiter's key count after each idle-client sweep; test-only.
+type SweepObserver = Arc<dyn Fn(usize) + Send + Sync>;
 
 /// The middleware every route carries, rate limiting aside. Shared by the
 /// limited router and the exempt /health one so the two cannot drift: a layer
@@ -658,6 +686,8 @@ pub fn router_builder<S: Clone + Send + Sync + 'static>() -> RouterBuilder<S> {
         streams: Router::new(),
         rate_limit: Some(DEFAULT_RATE_LIMIT),
         trusted_proxies: None,
+        sweep_every: IDLE_CLIENT_SWEEP,
+        sweep_observer: None,
     }
 }
 
@@ -695,6 +725,14 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
         self.build_with_cell(Arc::new(OnceLock::new()))
     }
 
+    /// The seam the sweep tests use.
+    #[cfg(test)]
+    fn sweep(mut self, every: Duration, observer: SweepObserver) -> Self {
+        self.sweep_every = every;
+        self.sweep_observer = Some(observer);
+        self
+    }
+
     /// The seam the metrics tests use: instruments bound to a private
     /// provider, pre-filled so the lazy path never consults the global one.
     #[cfg(test)]
@@ -727,6 +765,20 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
                     .burst_size(burst)
                     .finish()
                     .expect("a non-zero period and burst is a valid quota"),
+            );
+            // Keyed per client, the state map would otherwise hold every
+            // address that ever called until the process restarts.
+            let observer = self.sweep_observer;
+            spawn_sweeper(
+                Arc::downgrade(config.limiter()),
+                self.sweep_every,
+                move |limiter| {
+                    limiter.retain_recent();
+                    limiter.shrink_to_fit();
+                    if let Some(observe) = &observer {
+                        observe(limiter.len());
+                    }
+                },
             );
             // Outermost of the two, so a request rejected further in still
             // costs quota. Applied under `common_layers` instead, a 406 from
@@ -953,6 +1005,65 @@ mod tests {
             status_of(&app, proxied("/nope", "198.51.100.7")).await,
             StatusCode::TOO_MANY_REQUESTS
         );
+    }
+
+    /// Observations of the limiter's key count, one per sweep.
+    fn sweep_log() -> (Arc<std::sync::Mutex<Vec<usize>>>, SweepObserver) {
+        let log: Arc<std::sync::Mutex<Vec<usize>>> = Arc::default();
+        let sink = log.clone();
+        (log, Arc::new(move |len| sink.lock().unwrap().push(len)))
+    }
+
+    fn swept_app(per_second: f64, observer: SweepObserver) -> Router {
+        router_builder::<NoState>()
+            .rate_limit(Some(RateLimit {
+                per_second,
+                burst: 1,
+            }))
+            .trusted_proxies(TrustedProxies::none())
+            .sweep(Duration::from_millis(5), observer)
+            .build()
+            .with_state(NoState)
+    }
+
+    /// Keyed per client, the limiter's state grows with every address that
+    /// ever called; tower_governor never evicts on its own.
+    #[tokio::test]
+    async fn the_limiter_forgets_clients_whose_quota_has_refilled() {
+        let (log, observer) = sweep_log();
+        let app = swept_app(1000.0, observer);
+        status_of(&app, make_request("/nope")).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let seen = log.lock().unwrap().clone();
+        assert_eq!(seen.last(), Some(&0), "{seen:?}");
+    }
+
+    /// The control: a client still inside its window is remembered, or the
+    /// sweep would hand a drained client a fresh bucket.
+    #[tokio::test]
+    async fn the_limiter_remembers_a_client_still_inside_its_window() {
+        let (log, observer) = sweep_log();
+        let app = swept_app(0.0001, observer);
+        status_of(&app, make_request("/nope")).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let seen = log.lock().unwrap().clone();
+        assert_eq!(seen.last(), Some(&1), "{seen:?}");
+        assert_eq!(
+            status_of(&app, make_request("/nope")).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+
+    /// The sweeper holds the limiter weakly and stops once the router is
+    /// gone, so building a router does not leak a thread.
+    #[tokio::test]
+    async fn the_sweeper_stops_with_its_router() {
+        let (log, observer) = sweep_log();
+        drop(swept_app(1000.0, observer));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let settled = log.lock().unwrap().len();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(log.lock().unwrap().len(), settled);
     }
 
     /// A request the Accept check rejects must still cost quota. The governor
@@ -1373,6 +1484,11 @@ mod tests {
             .find(|l| l.contains("\"event\":\"access\""))
             .unwrap_or_else(|| panic!("no access line in: {output}"));
         let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        // Under Bazel (TEST_SRCDIR set) the target must supply the value, so
+        // dropping it from BUILD.bazel cannot pass through the else branch.
+        if env::var("TEST_SRCDIR").is_ok() {
+            assert_eq!(env::var("TRUSTED_PROXY_CIDRS").as_deref(), Ok(PROXY));
+        }
         if env::var("TRUSTED_PROXY_CIDRS").is_ok_and(|cidrs| cidrs == PROXY) {
             assert_eq!(v["client"], "203.0.113.9");
             assert_eq!(v["client_source"], "forwarded");
@@ -1823,14 +1939,14 @@ mod http_metrics_label_tests {
         send_with(&rig, &[("X-Forwarded-For", "203.0.113.7")]).await;
         send_with(
             &rig,
-            &[
-                ("X-Forwarded-For", "203.0.113.7"),
-                ("User-Agent", "games_hub/1.0"),
-            ],
+            &[("X-Forwarded-For", "203.0.113.7"), ("User-Agent", "games_hub/1.0")],
         )
         .await;
 
-        assert_eq!(counted_callers(&rig), vec![(caller_attrs(EDGE_CALLER), 2)]);
+        assert_eq!(
+            counted_callers(&rig),
+            vec![(caller_attrs(EDGE_CALLER), 2)]
+        );
     }
 
     #[tokio::test]
@@ -1842,10 +1958,7 @@ mod http_metrics_label_tests {
 
         assert_eq!(
             counted_callers(&rig),
-            vec![
-                (caller_attrs("games_hub"), 2),
-                (caller_attrs("mcpserver"), 1)
-            ]
+            vec![(caller_attrs("games_hub"), 2), (caller_attrs("mcpserver"), 1)]
         );
     }
 
@@ -1857,7 +1970,10 @@ mod http_metrics_label_tests {
         send_with(&rig, &[("User-Agent", "MoonBase games_hub/1.0")]).await;
         send_with(&rig, &[("User-Agent", "games_hubx/1.0")]).await;
 
-        assert_eq!(counted_callers(&rig), vec![(caller_attrs(OTHER_CALLER), 4)]);
+        assert_eq!(
+            counted_callers(&rig),
+            vec![(caller_attrs(OTHER_CALLER), 4)]
+        );
     }
 
     /// No shared instrument declares a unit (#1294). The collector's

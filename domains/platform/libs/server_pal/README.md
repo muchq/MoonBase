@@ -99,11 +99,15 @@ client-controlled, since Caddy appends to the header rather than replacing it.
 
 The trust boundary is `TRUSTED_PROXY_CIDRS` (comma-separated CIDRs or bare
 addresses), read by `build()` unless `.trusted_proxies(...)` sets it.
-Unset means directly reachable: the peer is always the client. Set but empty
+Unset means directly reachable: the peer is always the client.
+
+Keyed per client, the limiter's state map holds an entry per address; a
+background thread forgets clients whose quota has fully refilled once a
+minute, and stops when the router is dropped. Set but empty
 or malformed panics at startup rather than silently collapsing proxied
 traffic onto one key. `deploy/consolidated/compose.yaml` sets it to Caddy's
-pinned address for every service on this rail, and
-`//deploy/consolidated:consolidated_test` fails if one is missing.
+pinned address, and `//deploy/consolidated:consolidated_test` fails for any
+Caddy upstream that lacks it unless that upstream is exempted by reason.
 
 ### `GET /health` is exempt
 

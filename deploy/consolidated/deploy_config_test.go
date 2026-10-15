@@ -128,28 +128,47 @@ func TestEveryServiceOnTheStandardRailsIsProbed(t *testing.T) {
 	}
 }
 
-// Services whose rail keys rate limiting and the access log's client on the
-// ADR-0012 derived address: aura (C++) and server_pal (Rust). Behind Caddy
-// the socket peer is always Caddy, so without the trust boundary every
-// external caller shares one bucket (#1329) — and nothing fails, because
-// unset is also the legitimate direct-connect statement.
-var servicesKeyedOnTheForwardedClient = []string{
-	"deja",
-	"games_hub",
-	"iili",
-	"microgpt-serve",
-	"mithril",
-	"one_d4_v2",
-	"portrait",
-	"posterize",
+// Upstreams Caddy proxies to that derive no client from x-forwarded-for, so
+// a trust boundary would be read by nothing. Every other upstream runs aura
+// (C++) or server_pal (Rust), whose limiters and access logs key on the
+// ADR-0012 derived client: behind Caddy the socket peer is always Caddy, so
+// without the boundary every external caller shares one bucket (#1329) — and
+// nothing fails, because unset is also the legitimate direct-connect
+// statement. Exempt by reason rather than listing who needs it, so a new
+// upstream fails here until someone decides which it is.
+var upstreamsWithoutAClientKey = map[string]string{
+	"forgejo":    "third-party image",
+	"mcpserver":  "Java; no per-client limiter",
+	"one_d4":     "Java; no per-client limiter",
+	"prom_proxy": "Go; no per-client limiter",
+	"stats":      "Go; no per-client limiter",
 }
 
-func TestEveryServiceKeyedOnTheClientTrustsCaddyAlone(t *testing.T) {
-	for _, service := range servicesKeyedOnTheForwardedClient {
+func TestEveryUpstreamKeyedOnTheClientTrustsCaddyAlone(t *testing.T) {
+	proxied, defaults := caddyUpstreams(t)
+	upstreams := map[string]bool{}
+	for _, routes := range proxied {
+		for _, service := range routes {
+			upstreams[service] = true
+		}
+	}
+	for _, service := range defaults {
+		upstreams[service] = true
+	}
+	for exempt := range upstreamsWithoutAClientKey {
+		if !upstreams[exempt] {
+			t.Errorf("%s is exempt but Caddy no longer proxies to it; drop the exemption", exempt)
+		}
+	}
+	for service := range upstreams {
+		if _, exempt := upstreamsWithoutAClientKey[service]; exempt {
+			continue
+		}
 		if !hasLine(activeServiceLines(t, "compose.yaml", service), "TRUSTED_PROXY_CIDRS: *caddy_ip") {
 			t.Errorf("%s does not declare TRUSTED_PROXY_CIDRS: *caddy_ip. Behind Caddy its "+
 				"limiter and access log then key every external caller as Caddy (#1329); "+
-				"alias the anchor rather than repeating the address.", service)
+				"alias the anchor rather than repeating the address, or exempt it with "+
+				"the reason it derives no client.", service)
 		}
 	}
 }
