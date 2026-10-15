@@ -9,24 +9,25 @@
 #include "domains/games/libs/cards/spades/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
+#include "domains/games/libs/go/table.h"
 #include "domains/games/libs/pong/table.h"
 
 namespace games_hub {
 
-/// The games a room can host: golf, castle, rummy, chess, pong and
-/// spades. A table is
+/// The games a room can host: golf, castle, rummy, chess, pong, spades
+/// and go. A table is
 /// created as one kind and keeps it; the kind names the engine whose
 /// state the entry (and its stored row) carries. Its adapter names the
 /// kind's word (adapters.h's GameKindName).
-enum class GameKind { kGolf, kCastle, kRummy, kChess, kPong, kSpades };
+enum class GameKind { kGolf, kCastle, kRummy, kChess, kPong, kSpades, kGo };
 
 /// The engine truth of a started table, whichever game it plays.
 /// A rummy table is a dealer's-choice table, a deal at a time; a
 /// chess table plays one game after another the same way, and so does a
 /// pong table, whose state is its score and never its rally, and a spades
-/// table, hand after hand and game after game.
+/// table, hand after hand and game after game, and a go table.
 using HostedState = std::variant<golf::GameState, castle::GameState, rummy::TableState,
-                                 chess_play::Table, pong::Table, spades::Table>;
+                                 chess_play::Table, pong::Table, spades::Table, go::Table>;
 
 /// A state's kind is its alternative's index; adapters.h holds every
 /// adapter's kKind to it.

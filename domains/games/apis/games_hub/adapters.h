@@ -17,6 +17,7 @@
 #include "domains/games/apis/games_hub/adapter.h"
 #include "domains/games/apis/games_hub/castle_adapter.h"
 #include "domains/games/apis/games_hub/chess_adapter.h"
+#include "domains/games/apis/games_hub/go_adapter.h"
 #include "domains/games/apis/games_hub/golf_adapter.h"
 #include "domains/games/apis/games_hub/hub_metrics.h"
 #include "domains/games/apis/games_hub/pong_adapter.h"
@@ -276,8 +277,8 @@ constexpr std::size_t OnlyGameWith() {
 }
 
 /// The engine of the one game whose adapter opts into `C`. The machinery
-/// that is one game's alone — chess's clocks, engine bots and public
-/// feed, pong's rallies — is typed on this, and reaches a table through
+/// that is one game's alone — chess's engine bots and public feed, pong's
+/// rallies — is typed on this, and reaches a table through
 /// CapableEngine, never through its kind; a second game opting in fails
 /// here until that machinery serves both.
 template <Capability C>
@@ -303,6 +304,35 @@ bool GameOverWith(GameKind kind, const std::optional<HostedState>& state) {
     using A = decltype(adapter);
     if constexpr (kHas<A, C> && NextGameHooks<A>) {
       return engine != nullptr && A::CurrentGameOver(*engine);
+    } else {
+      return false;
+    }
+  });
+}
+
+/// Whether a started table plays a clocked game (kClocked) whose side to
+/// move has run out at `now_ms`: what the clock sweep flags, for every
+/// game that opts in.
+inline bool FlagDue(const std::optional<HostedState>& state, int64_t now_ms) {
+  if (!state.has_value()) return false;
+  return VisitAdapter(*state, [now_ms](auto adapter, const auto& engine) {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kClocked>) {
+      return A::FlagDue(engine, now_ms);
+    } else {
+      return false;
+    }
+  });
+}
+
+/// Whether a started table plays a clocked game still in play: a flag the
+/// sweep holds for it is still owed.
+inline bool ClockRunning(const std::optional<HostedState>& state) {
+  if (!state.has_value()) return false;
+  return VisitAdapter(*state, [](auto adapter, const auto& engine) {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kClocked>) {
+      return !A::CurrentGameOver(engine);
     } else {
       return false;
     }

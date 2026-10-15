@@ -224,6 +224,14 @@ inline std::optional<moonbase::games::PongUpdate> ReceivePong(
       [](const moonbase::games::GameEvents& event) { return event.as_pong_or_null(); }, budget);
 }
 
+inline std::optional<moonbase::games::GoUpdate> ReceiveGo(
+    moonbase::games::PlayClientStream& stream, const std::string& wanted,
+    std::chrono::milliseconds budget = kReceiveBudget) {
+  return ReceiveEnvelope(
+      stream, wanted, "go",
+      [](const moonbase::games::GameEvents& event) { return event.as_go_or_null(); }, budget);
+}
+
 inline std::optional<moonbase::games::LobbyUpdate> ReceiveLobby(
     moonbase::games::PlayClientStream& stream, const std::string& wanted,
     std::chrono::milliseconds budget = kReceiveBudget) {
@@ -475,6 +483,13 @@ inline moonbase::games::GameCommands Pong(moonbase::games::PongMove move) {
   moonbase::games::PongCommand command;
   command.move = std::move(move);
   return moonbase::games::GameCommands::FromPong(std::move(command));
+}
+
+// And go's.
+inline moonbase::games::GameCommands Go(moonbase::games::GoMove move) {
+  moonbase::games::GoCommand command;
+  command.move = std::move(move);
+  return moonbase::games::GameCommands::FromGo(std::move(command));
 }
 
 // Round robins.

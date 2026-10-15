@@ -30,6 +30,7 @@ go_test(
         "//domains/games/apis/games_hub:chess_adapter.h",
         "//domains/games/apis/games_hub:game_events.cc",
         "//domains/games/apis/games_hub:game_events.h",
+        "//domains/games/apis/games_hub:go_adapter.h",
         "//domains/games/apis/games_hub:golf_adapter.h",
         "//domains/games/apis/games_hub:hosted_game.h",
         "//domains/games/apis/games_hub:hub.cc",

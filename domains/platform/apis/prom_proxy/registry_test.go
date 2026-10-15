@@ -518,7 +518,7 @@ var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|c
 // shared artifact to pin them together (that is #1308's scope). What these
 // audits do close, on their own side: every tile reads only names in this
 // set, and every name in this set is read by some tile.
-var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:hub_|golf_|chat_|castle_|rummy_|chess_|pong_|spades_|lobby_)[a-z_]*)(\{[^}]*\})?`)
+var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:hub_|golf_|chat_|castle_|rummy_|chess_|pong_|spades_|go_|lobby_)[a-z_]*)(\{[^}]*\})?`)
 
 var gamesHubExportedNames = map[string]bool{
 	// The castle envelope (#77), from GamesHub::DeclaredCounterSeries().
@@ -551,6 +551,8 @@ var gamesHubExportedNames = map[string]bool{
 	"pong_events_total":     true,
 	"spades_commands_total": true,
 	"spades_events_total":   true,
+	"go_commands_total":     true,
+	"go_events_total":       true,
 	"lobby_commands_total":  true,
 	"lobby_events_total":    true,
 }

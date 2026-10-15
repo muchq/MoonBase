@@ -403,7 +403,6 @@ class HeldPublishStore final : public HubStore {
   std::vector<Op> held_;
 };
 
-
 }  // namespace
 
 class HubGameFixture : public GamesHubStreamFixture {};
@@ -2058,6 +2057,21 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"spades_events", {{"event", "turnChanged"}}},
       {"spades_events", {{"event", "gameEnded"}}},
       {"spades_events", {{"event", "gameLeft"}}},
+      {"go_commands", {{"command", "createGame"}}},
+      {"go_commands", {{"command", "joinGame"}}},
+      {"go_commands", {{"command", "startGame"}}},
+      {"go_commands", {{"command", "leaveGame"}}},
+      {"go_commands", {{"command", "play"}}},
+      {"go_commands", {{"command", "pass"}}},
+      {"go_commands", {{"command", "resign"}}},
+      {"go_commands", {{"command", "watch"}}},
+      {"go_events", {{"event", "gameJoined"}}},
+      {"go_events", {{"event", "gameState"}}},
+      {"go_events", {{"event", "gameCreated"}}},
+      {"go_events", {{"event", "gameStarted"}}},
+      {"go_events", {{"event", "turnChanged"}}},
+      {"go_events", {{"event", "gameEnded"}}},
+      {"go_events", {{"event", "gameLeft"}}},
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -2218,8 +2232,8 @@ TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
   ASSERT_NE(std::find(outer_events.begin(), outer_events.end(), "sessionReady"),
             outer_events.end());
 
-  const std::set<std::string> envelopes = {"golf", "castle", "rummy", "chess",
-                                           "pong", "spades", "lobby", "voice"};
+  const std::set<std::string> envelopes = {"golf",   "castle", "rummy", "chess", "pong",
+                                           "spades", "go",     "lobby", "voice"};
   for (const auto& envelope : envelopes) {
     EXPECT_NE(std::find(outer_commands.begin(), outer_commands.end(), envelope),
               outer_commands.end())
@@ -2267,6 +2281,10 @@ TEST(StreamSeriesModelPin, PongSeriesMatchTheModelUnions) {
 
 TEST(StreamSeriesModelPin, SpadesSeriesMatchTheModelUnions) {
   ExpectEnvelopeSeriesMatchTheModel("spades", "SpadesMove", "bid", "SpadesUpdate", "gameEnded");
+}
+
+TEST(StreamSeriesModelPin, GoSeriesMatchTheModelUnions) {
+  ExpectEnvelopeSeriesMatchTheModel("go", "GoMove", "pass", "GoUpdate", "turnChanged");
 }
 
 // The bounded kind is the whole dashboard identity of a rejection (#1327,

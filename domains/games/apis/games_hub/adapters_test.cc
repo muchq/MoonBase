@@ -16,6 +16,7 @@
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
+#include "domains/games/libs/go/table.h"
 #include "domains/games/libs/pong/table.h"
 
 namespace games_hub {
@@ -275,7 +276,7 @@ TEST(KindNames, EachKindIsWrittenAsItsAdaptersNameAndReadBack) {
     EXPECT_EQ(ParseGameKind(A::kName), A::kKind);
     return false;
   });
-  constexpr std::string_view kWire[] = {"golf", "castle", "rummy", "chess", "pong", "spades"};
+  constexpr std::string_view kWire[] = {"golf", "castle", "rummy", "chess", "pong", "spades", "go"};
   for (std::size_t i = 0; i < std::size(kWire); ++i) {
     EXPECT_EQ(GameKindName(static_cast<GameKind>(i)), kWire[i]);
   }
@@ -324,12 +325,11 @@ TEST(EveryGame, OpensAndRoundTripsThroughItsAdaptersSerde) {
 // The machinery that is one game's alone reaches its tables by the
 // capability, and passes every other table by.
 TEST(Capabilities, OneGamesMachineryFindsOnlyThatGamesTables) {
-  static_assert(std::is_same_v<EngineWith<kClocked>, chess_play::Table>);
   static_assert(std::is_same_v<EngineWith<kRealtime>, pong::Table>);
   const std::optional<HostedState> chess = HostedState(OpenChess());
-  EXPECT_NE(CapableEngine<kClocked>(chess), nullptr);
+  EXPECT_NE(CapableEngine<kRealtime>(HostedState(*pong::Table::open({"a", "b"}, {}))), nullptr);
   EXPECT_EQ(CapableEngine<kRealtime>(chess), nullptr);
-  EXPECT_EQ(CapableEngine<kClocked>(std::nullopt), nullptr);
+  EXPECT_EQ(CapableEngine<kRealtime>(std::nullopt), nullptr);
 
   const std::optional<HostedState> mated = HostedState(Mated(OpenChess()));
   EXPECT_TRUE(GameOverWith<kRoundRobins>(GameKind::kChess, mated));
@@ -341,6 +341,31 @@ TEST(Capabilities, OneGamesMachineryFindsOnlyThatGamesTables) {
   EXPECT_FALSE(HasCapability(GameKind::kSpades, kWatchable));
   EXPECT_TRUE(IsBotId("stockfish@1320"));
   EXPECT_FALSE(IsBotId("alice"));
+}
+
+// The clock sweep reaches every clocked game's tables, by its adapter's
+// hooks, and passes every other table by.
+TEST(Capabilities, TheClockSweepFindsEveryClockedTableAndNoOther) {
+  const std::optional<HostedState> chess = HostedState(OpenChess());
+  EXPECT_TRUE(ClockRunning(chess));
+  EXPECT_FALSE(FlagDue(chess, 59'999));
+  EXPECT_TRUE(FlagDue(chess, 60'000));
+
+  const std::optional<HostedState> mated = HostedState(Mated(OpenChess()));
+  EXPECT_FALSE(ClockRunning(mated));
+  EXPECT_FALSE(FlagDue(mated, 1'000'000));
+
+  const std::optional<HostedState> go_table =
+      HostedState(*go::Table::open({"ann", "bo"}, 9, go::kDefaultKomi, {60'000, 0}, 0));
+  EXPECT_TRUE(ClockRunning(go_table));
+  EXPECT_FALSE(FlagDue(go_table, 59'999));
+  EXPECT_TRUE(FlagDue(go_table, 60'000));
+
+  const std::optional<HostedState> castle = HostedState(DealCastle());
+  EXPECT_FALSE(ClockRunning(castle));
+  EXPECT_FALSE(FlagDue(castle, 1'000'000));
+  EXPECT_FALSE(ClockRunning(std::nullopt));
+  EXPECT_FALSE(FlagDue(std::nullopt, 1'000'000));
 }
 
 // A realtime game's steering rides a budget of its own; every other
