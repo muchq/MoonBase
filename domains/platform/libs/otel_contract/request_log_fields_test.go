@@ -38,9 +38,9 @@ var requestLogFields = []string{
 }
 
 // client is the address the rail's rate limiter keys on, never the raw
-// x-forwarded-for: the ADR-0012 derived client on C++, the socket peer on
-// Rust (which has not adopted a trust boundary yet — see RateLimit there).
-// client_source says which case produced it, in opal-cpp's vocabulary.
+// x-forwarded-for: the ADR-0012 derived client on both rails (opal-cpp's
+// DeriveClient on C++, server_pal's derive_client on Rust). client_source
+// says which case produced it, in opal-cpp's vocabulary.
 //
 // request_bytes, response_bytes and handler_threw are deliberately not in
 // the list: the C++ rail emits them and the Rust rail cannot without wrapping

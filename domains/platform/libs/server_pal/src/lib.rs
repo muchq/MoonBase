@@ -17,14 +17,19 @@ use opentelemetry_sdk::metrics::{
 use std::env;
 use std::time::Duration;
 use tokio::net::TcpListener;
-use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::key_extractor::KeyExtractor;
+use tower_governor::{GovernorError, GovernorLayer};
 use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tower_http::validate_request::ValidateRequestHeaderLayer;
+
+mod forwarded;
+pub use forwarded::TrustedProxies;
+use forwarded::{DerivedClient, derive_client};
 
 const DEFAULT_PORT: u16 = 8080;
 
@@ -207,21 +212,23 @@ fn trace_id_of(traceparent: &str) -> &str {
 /// dashboard-to-logs pivot is a copy-paste; the raw path-and-query rides in
 /// "target" where an unbounded value is data, not a label. duration_us
 /// matches the histogram's unit. client is the address the limiter keys on
-/// — the socket peer, reported as client_source "direct_peer" (see
-/// RateLimit: this rail has no trusted-proxy boundary yet, so behind Caddy
-/// that is Caddy) — never the raw x-forwarded-for a client can forge;
-/// "unknown" when the request carried no peer at all. Same spelling as
-/// opal-cpp's FormatAccessLog, so a query keyed on the C++ rail's line
-/// reads this one.
-async fn access_log_middleware(req: Request, next: Next) -> Response {
+/// — derived against the trust boundary (`derive_client`), never the raw
+/// x-forwarded-for a client can forge — with client_source naming the
+/// derivation path; "" and "unknown" when the request carried no peer at
+/// all. Same spelling as opal-cpp's FormatAccessLog, so a query keyed on
+/// the C++ rail's line reads this one.
+async fn access_log_middleware(
+    State(trusted): State<Arc<TrustedProxies>>,
+    req: Request,
+    next: Next,
+) -> Response {
     let start = std::time::Instant::now();
     let http_method = bounded_method_label(req.method());
     let route = route_label(&req);
     let target = req.uri().to_string();
-    let (client, client_source) = match req.extensions().get::<ConnectInfo<SocketAddr>>() {
-        Some(ConnectInfo(peer)) => (peer.ip().to_string(), "direct_peer"),
-        None => (String::new(), "unknown"),
-    };
+    let derived = client_of(&req, &trusted);
+    let client = derived.address.map(|a| a.to_string()).unwrap_or_default();
+    let client_source = derived.source.as_str();
     let traceparent = req
         .headers()
         .get("traceparent")
@@ -525,21 +532,17 @@ async fn http_metrics_middleware(
 }
 
 pub struct RateLimit {
-    /// Sustained requests per second, keyed per peer IP.
+    /// Sustained requests per second, keyed per client — the address
+    /// `derive_client` derives against the builder's `TrustedProxies`.
     ///
     /// Fractional rates are allowed: `0.1` is one request every ten seconds.
-    ///
-    /// "Per peer IP" is not per client for anything behind a reverse proxy.
-    /// The default extractor reads the socket's peer address, which for every
-    /// service in `deploy/consolidated` is Caddy — so external callers share a
-    /// single bucket. Sizing a limit as though it were per-user will throttle
-    /// everyone at once. The C++ rail keys off a trusted-proxy boundary
-    /// instead (opal-cpp ADR-0012, `TRUSTED_PROXY_CIDRS` in compose.yaml);
-    /// this rail has not adopted that yet.
     pub per_second: f64,
     /// How many may arrive at once before the sustained rate binds.
     pub burst: u32,
 }
+
+/// How often the limiter forgets clients whose quota has fully refilled.
+const IDLE_CLIENT_SWEEP: Duration = Duration::from_secs(60);
 
 const DEFAULT_RATE_LIMIT: RateLimit = RateLimit {
     per_second: 100.0,
@@ -572,6 +575,50 @@ fn quota_period(per_second: f64) -> Duration {
     period
 }
 
+/// The request's client, derived from its socket peer (`serve` stamps it
+/// via connect_info) against the trust boundary.
+fn client_of<B>(req: &axum::http::Request<B>, trusted: &TrustedProxies) -> DerivedClient {
+    let peer = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(peer)| peer.ip());
+    derive_client(peer, req.headers(), trusted)
+}
+
+/// Keys the governor on `client_of`. A request with no peer cannot be keyed
+/// and is refused, as with tower_governor's own peer extractor.
+#[derive(Clone)]
+struct ClientKeyExtractor(Arc<TrustedProxies>);
+
+impl KeyExtractor for ClientKeyExtractor {
+    type Key = std::net::IpAddr;
+
+    fn extract<T>(&self, req: &axum::http::Request<T>) -> Result<Self::Key, GovernorError> {
+        client_of(req, &self.0)
+            .address
+            .ok_or(GovernorError::UnableToExtractKey)
+    }
+}
+
+/// Runs `sweep` on `target` every `every` until the target is dropped. The
+/// thread holds it weakly, so it neither keeps the target alive nor outlives
+/// it by more than one interval.
+fn spawn_sweeper<T: Send + Sync + 'static>(
+    target: std::sync::Weak<T>,
+    every: Duration,
+    sweep: impl Fn(&T) + Send + 'static,
+) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(every);
+            let Some(target) = target.upgrade() else {
+                return;
+            };
+            sweep(&target);
+        }
+    });
+}
+
 pub fn listen_addr_pal() -> String {
     let port = env::var("PORT")
         .ok()
@@ -589,7 +636,13 @@ pub struct RouterBuilder<S: Clone + Send + Sync + 'static> {
     router: Router<S>,
     streams: Router<S>,
     rate_limit: Option<RateLimit>,
+    trusted_proxies: Option<TrustedProxies>,
+    sweep_every: Duration,
+    sweep_observer: Option<SweepObserver>,
 }
+
+/// Sees the limiter's key count after each idle-client sweep; test-only.
+type SweepObserver = Arc<dyn Fn(usize) + Send + Sync>;
 
 /// The middleware every route carries, rate limiting aside. Shared by the
 /// limited router and the exempt /health one so the two cannot drift: a layer
@@ -632,6 +685,9 @@ pub fn router_builder<S: Clone + Send + Sync + 'static>() -> RouterBuilder<S> {
         router: Router::new(),
         streams: Router::new(),
         rate_limit: Some(DEFAULT_RATE_LIMIT),
+        trusted_proxies: None,
+        sweep_every: IDLE_CLIENT_SWEEP,
+        sweep_observer: None,
     }
 }
 
@@ -648,9 +704,17 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
         self
     }
 
-    /// Override the per-IP rate limit. Use `None` to disable entirely.
+    /// Override the per-client rate limit. Use `None` to disable entirely.
     pub fn rate_limit(mut self, limit: Option<RateLimit>) -> Self {
         self.rate_limit = limit;
+        self
+    }
+
+    /// The reverse proxies whose x-forwarded-for entries count when deriving
+    /// the client the limiter and the access log key on. Unset, `build()`
+    /// reads `TRUSTED_PROXY_CIDRS` (see `TrustedProxies::from_env`).
+    pub fn trusted_proxies(mut self, trusted: TrustedProxies) -> Self {
+        self.trusted_proxies = Some(trusted);
         self
     }
 
@@ -659,6 +723,14 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
     /// whatever meter provider is global by then — see HttpInstruments.
     pub fn build(self) -> Router<S> {
         self.build_with_cell(Arc::new(OnceLock::new()))
+    }
+
+    /// The seam the sweep tests use.
+    #[cfg(test)]
+    fn sweep(mut self, every: Duration, observer: SweepObserver) -> Self {
+        self.sweep_every = every;
+        self.sweep_observer = Some(observer);
+        self
     }
 
     /// The seam the metrics tests use: instruments bound to a private
@@ -671,6 +743,10 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
     }
 
     fn build_with_cell(self, cell: InstrumentsCell) -> Router<S> {
+        let trusted = Arc::new(
+            self.trusted_proxies
+                .unwrap_or_else(|| TrustedProxies::from_env().unwrap_or_else(|e| panic!("{e}"))),
+        );
         // /health is served from its own router so the governor can wrap the
         // service's routes without wrapping the probe. Both carry the identical
         // stack below, so the exemption is the only difference between them.
@@ -684,10 +760,25 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
             assert!(burst > 0, "rate_limit burst must be at least 1");
             let config = Arc::new(
                 GovernorConfigBuilder::default()
+                    .key_extractor(ClientKeyExtractor(trusted.clone()))
                     .per_nanosecond(quota_period(per_second).as_nanos() as u64)
                     .burst_size(burst)
                     .finish()
                     .expect("a non-zero period and burst is a valid quota"),
+            );
+            // Keyed per client, the state map would otherwise hold every
+            // address that ever called until the process restarts.
+            let observer = self.sweep_observer;
+            spawn_sweeper(
+                Arc::downgrade(config.limiter()),
+                self.sweep_every,
+                move |limiter| {
+                    limiter.retain_recent();
+                    limiter.shrink_to_fit();
+                    if let Some(observe) = &observer {
+                        observe(limiter.len());
+                    }
+                },
             );
             // Outermost of the two, so a request rejected further in still
             // costs quota. Applied under `common_layers` instead, a 406 from
@@ -720,11 +811,15 @@ impl<S: Clone + Send + Sync + 'static> RouterBuilder<S> {
                 cell,
                 http_metrics_middleware,
             ))
-            .layer(axum::middleware::from_fn(access_log_middleware))
+            .layer(axum::middleware::from_fn_with_state(
+                trusted,
+                access_log_middleware,
+            ))
     }
 }
 
-/// Bind and serve a router, enabling per-IP rate limiting via connect_info.
+/// Bind and serve a router, stamping each request's socket peer (connect_info)
+/// for the client derivation the limiter and access log key on.
 pub async fn serve(router: Router<()>, addr: &str) {
     let listener = TcpListener::bind(addr).await.unwrap();
     axum::serve(
@@ -745,7 +840,7 @@ mod tests {
     #[derive(Clone)]
     struct NoState;
 
-    // Inject a mock peer IP so GovernorLayer's PeerIpKeyExtractor can extract it.
+    // Inject a mock peer IP so the governor has a client to key on.
     fn make_request(path: &str) -> Request<Body> {
         let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
         let mut req = Request::builder()
@@ -828,6 +923,147 @@ mod tests {
         // Sub-1/s rates stay expressible; the old u64 field could not say this
         // and the drained-bucket tests depend on it.
         assert_eq!(quota_period(0.1), Duration::from_secs(10));
+    }
+
+    /// Caddy's address in deploy/consolidated/compose.yaml.
+    const PROXY: &str = "172.28.0.2";
+
+    /// A request as Caddy forwards it: the socket peer is the proxy, the
+    /// client rides in x-forwarded-for.
+    fn proxied(path: &str, xff: &str) -> Request<Body> {
+        let mut req = make_request(path);
+        req.extensions_mut()
+            .insert(ConnectInfo(SocketAddr::new(PROXY.parse().unwrap(), 40000)));
+        req.headers_mut()
+            .insert("x-forwarded-for", xff.parse().unwrap());
+        req
+    }
+
+    /// One request per bucket, and a bucket never refills within the test.
+    fn one_shot_app(trusted: TrustedProxies) -> Router {
+        router_builder::<NoState>()
+            .rate_limit(Some(RateLimit {
+                per_second: 0.0001,
+                burst: 1,
+            }))
+            .trusted_proxies(trusted)
+            .build()
+            .with_state(NoState)
+    }
+
+    async fn status_of(app: &Router, req: Request<Body>) -> StatusCode {
+        app.clone().oneshot(req).await.unwrap().status()
+    }
+
+    /// The #1329 defect: behind Caddy every caller's socket peer is Caddy,
+    /// so keying on it gives the whole internet one bucket.
+    #[tokio::test]
+    async fn clients_behind_a_trusted_proxy_get_their_own_buckets() {
+        let app = one_shot_app(TrustedProxies::parse(&[PROXY]).unwrap());
+        assert_eq!(
+            status_of(&app, proxied("/nope", "203.0.113.9")).await,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            status_of(&app, proxied("/nope", "203.0.113.9")).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(
+            status_of(&app, proxied("/nope", "198.51.100.7")).await,
+            StatusCode::NOT_FOUND,
+            "a second client shared the first one's bucket: the limiter is keyed on the proxy"
+        );
+    }
+
+    /// Caddy appends to x-forwarded-for rather than replacing it, so a
+    /// client can write anything ahead of its real entry. Keying on the
+    /// leftmost entry (`SmartIpKeyExtractor`) would hand it a fresh bucket
+    /// per request.
+    #[tokio::test]
+    async fn a_spoofed_forwarded_prefix_does_not_buy_a_fresh_bucket() {
+        let app = one_shot_app(TrustedProxies::parse(&[PROXY]).unwrap());
+        assert_eq!(
+            status_of(&app, proxied("/nope", "203.0.113.9")).await,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            status_of(&app, proxied("/nope", "6.6.6.6, 203.0.113.9")).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+
+    /// Without a trust boundary the header is client-authored noise and the
+    /// peer is the client — the direct-connect topology.
+    #[tokio::test]
+    async fn an_untrusted_peers_forwarded_header_is_ignored() {
+        let app = one_shot_app(TrustedProxies::none());
+        assert_eq!(
+            status_of(&app, proxied("/nope", "203.0.113.9")).await,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            status_of(&app, proxied("/nope", "198.51.100.7")).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+
+    /// Observations of the limiter's key count, one per sweep.
+    fn sweep_log() -> (Arc<std::sync::Mutex<Vec<usize>>>, SweepObserver) {
+        let log: Arc<std::sync::Mutex<Vec<usize>>> = Arc::default();
+        let sink = log.clone();
+        (log, Arc::new(move |len| sink.lock().unwrap().push(len)))
+    }
+
+    fn swept_app(per_second: f64, observer: SweepObserver) -> Router {
+        router_builder::<NoState>()
+            .rate_limit(Some(RateLimit {
+                per_second,
+                burst: 1,
+            }))
+            .trusted_proxies(TrustedProxies::none())
+            .sweep(Duration::from_millis(5), observer)
+            .build()
+            .with_state(NoState)
+    }
+
+    /// Keyed per client, the limiter's state grows with every address that
+    /// ever called; tower_governor never evicts on its own.
+    #[tokio::test]
+    async fn the_limiter_forgets_clients_whose_quota_has_refilled() {
+        let (log, observer) = sweep_log();
+        let app = swept_app(1000.0, observer);
+        status_of(&app, make_request("/nope")).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let seen = log.lock().unwrap().clone();
+        assert_eq!(seen.last(), Some(&0), "{seen:?}");
+    }
+
+    /// The control: a client still inside its window is remembered, or the
+    /// sweep would hand a drained client a fresh bucket.
+    #[tokio::test]
+    async fn the_limiter_remembers_a_client_still_inside_its_window() {
+        let (log, observer) = sweep_log();
+        let app = swept_app(0.0001, observer);
+        status_of(&app, make_request("/nope")).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let seen = log.lock().unwrap().clone();
+        assert_eq!(seen.last(), Some(&1), "{seen:?}");
+        assert_eq!(
+            status_of(&app, make_request("/nope")).await,
+            StatusCode::TOO_MANY_REQUESTS
+        );
+    }
+
+    /// The sweeper holds the limiter weakly and stops once the router is
+    /// gone, so building a router does not leak a thread.
+    #[tokio::test]
+    async fn the_sweeper_stops_with_its_router() {
+        let (log, observer) = sweep_log();
+        drop(swept_app(1000.0, observer));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let settled = log.lock().unwrap().len();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(log.lock().unwrap().len(), settled);
     }
 
     /// A request the Accept check rejects must still cost quota. The governor
@@ -1178,10 +1414,10 @@ mod tests {
         assert_eq!(v["status"], 200);
         assert!(v["duration_us"].is_number(), "duration_us: {v}");
         assert_eq!(v["trace_id"], "4bf92f3577b34da6a3ce929d0e0e4736");
-        // The peer the governor keyed on, not the forwarded-for header the
-        // request also carried — the same field the C++ rail's line reports.
+        // The untrusted peer the governor keyed on, not the forwarded-for
+        // header it also carried — the same field the C++ rail's line reports.
         assert_eq!(v["client"], "127.0.0.1");
-        assert_eq!(v["client_source"], "direct_peer");
+        assert_eq!(v["client_source"], "untrusted_header_ignored");
         assert!(v.get("x_forwarded_for").is_none(), "{v}");
         // The value, not just the key. The bazel target sets
         // OTEL_SERVICE_NAME=server-pal-under-test, so under CI an env-key
@@ -1200,6 +1436,66 @@ mod tests {
         let v = access_line("/no/such/path", StatusCode::NOT_FOUND, false).await;
         assert_eq!(v["trace_id"], "");
         assert_eq!(v["client_source"], "direct_peer");
+    }
+
+    /// The access log reports the client the limiter keyed on.
+    #[tokio::test]
+    async fn access_log_reports_the_client_behind_a_trusted_proxy() {
+        let app = router_builder::<NoState>()
+            .route("/w", get(|| async { "w" }))
+            .trusted_proxies(TrustedProxies::parse(&[PROXY]).unwrap())
+            .build()
+            .with_state(NoState);
+        let output = capture_log(async {
+            let resp = app
+                .oneshot(proxied("/w", "6.6.6.6, 203.0.113.9"))
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+        })
+        .await;
+        let line = output
+            .lines()
+            .find(|l| l.contains("\"event\":\"access\""))
+            .unwrap_or_else(|| panic!("no access line in: {output}"));
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        assert_eq!(v["client"], "203.0.113.9");
+        assert_eq!(v["client_source"], "forwarded");
+    }
+
+    /// Unset on the builder, the boundary comes from TRUSTED_PROXY_CIDRS.
+    /// The bazel target sets it to PROXY, so under CI dropping the env read
+    /// fails here; a bare `cargo test` has it unset and the proxy is then
+    /// just a client.
+    #[tokio::test]
+    async fn build_reads_the_trust_boundary_from_the_environment() {
+        let app = router_builder::<NoState>()
+            .route("/w", get(|| async { "w" }))
+            .rate_limit(None)
+            .build()
+            .with_state(NoState);
+        let output = capture_log(async {
+            let resp = app.oneshot(proxied("/w", "203.0.113.9")).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+        })
+        .await;
+        let line = output
+            .lines()
+            .find(|l| l.contains("\"event\":\"access\""))
+            .unwrap_or_else(|| panic!("no access line in: {output}"));
+        let v: serde_json::Value = serde_json::from_str(line).unwrap();
+        // Under Bazel (TEST_SRCDIR set) the target must supply the value, so
+        // dropping it from BUILD.bazel cannot pass through the else branch.
+        if env::var("TEST_SRCDIR").is_ok() {
+            assert_eq!(env::var("TRUSTED_PROXY_CIDRS").as_deref(), Ok(PROXY));
+        }
+        if env::var("TRUSTED_PROXY_CIDRS").is_ok_and(|cidrs| cidrs == PROXY) {
+            assert_eq!(v["client"], "203.0.113.9");
+            assert_eq!(v["client_source"], "forwarded");
+        } else {
+            assert_eq!(v["client"], PROXY);
+            assert_eq!(v["client_source"], "untrusted_header_ignored");
+        }
     }
 
     /// A request with no peer (a chain driven without connect_info) says so
