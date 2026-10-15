@@ -142,7 +142,7 @@ func (s *UnifiedProductionServer) Start(port int) {
 	// Add rate limiting middleware
 	rateLimiter := rate_limit.NewRateLimiterMiddleware(
 		factory,
-		rate_limit.RemoteIpKeyExtractor{},
+		rate_limit.PeerIpKeyExtractor{},
 		rateLimitConfig,
 	)
 	s.mucks.Add(rateLimiter)

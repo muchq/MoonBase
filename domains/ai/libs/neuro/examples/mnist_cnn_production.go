@@ -90,7 +90,7 @@ func (s *CNNProductionServer) Start() {
 	// Add rate limiting middleware (per IP address)
 	rateLimiter := rate_limit.NewRateLimiterMiddleware(
 		factory,
-		rate_limit.RemoteIpKeyExtractor{},
+		rate_limit.PeerIpKeyExtractor{},
 		rateLimitConfig,
 	)
 	s.mucks.Add(rateLimiter)
@@ -606,7 +606,7 @@ func startMockServer() {
 	
 	rateLimiter := rate_limit.NewRateLimiterMiddleware(
 		factory,
-		rate_limit.RemoteIpKeyExtractor{},
+		rate_limit.PeerIpKeyExtractor{},
 		rateLimitConfig,
 	)
 	m.Add(rateLimiter)
