@@ -59,8 +59,6 @@ moonbase::games::ChatMessage ChatEvent(const ChatRow& row) {
 
 // The machinery that is one game's alone, typed on the engine of the game
 // whose adapter opts into it (adapters.h's EngineWith).
-using ClockedTable = EngineWith<kClocked>;
-using Clock = Adapter<ClockedTable>;
 using BotTable = EngineWith<kEngineBots>;
 using RallyTable = EngineWith<kRealtime>;
 using Feed = Adapter<EngineWith<kPublished>>;
@@ -2172,6 +2170,32 @@ void GamesHub::SetChessOpener(ChessOpener opener) { chess_opener_ = std::move(op
 
 void GamesHub::SetClock(std::function<absl::Time()> clock) { clock_ = std::move(clock); }
 
+template <typename E>
+std::optional<Refusal> GamesHub::FlagEngineLocked(GameRef ref, int64_t now_ms, Outbox& outbox) {
+  using A = Adapter<E>;
+  const E& table = std::get<E>(*ref.entry->state);
+  return ApplyTableEngineMoveLocked<E>(
+      ref, A::Turn(table), Transition<E>{[now_ms](const E& clocked, int, const MoveContext&) {
+        return A::Flag(clocked, now_ms);
+      }},
+      outbox);
+}
+
+std::optional<Refusal> GamesHub::FlagLocked(GameRef ref, int64_t now_ms, Outbox& outbox) {
+  std::optional<Refusal> refusal = Refusal{RejectKind::kState, "no clock runs here"};
+  AnyAdapter([&](auto adapter) {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kClocked>) {
+      if (!std::holds_alternative<typename A::Engine>(*ref.entry->state)) return false;
+      refusal = FlagEngineLocked<typename A::Engine>(ref, now_ms, outbox);
+      return true;
+    } else {
+      return false;
+    }
+  });
+  return refusal;
+}
+
 int GamesHub::SweepChessClocksOnce() {
   struct Flagged {
     std::string room_id;
@@ -2187,14 +2211,11 @@ int GamesHub::SweepChessClocksOnce() {
       const auto room = rooms_.find(retry.first.first);
       if (room == rooms_.end()) return true;
       const auto game = room->second.games.find(retry.first.second);
-      if (game == room->second.games.end()) return true;
-      const ClockedTable* table = CapableEngine<kClocked>(game->second.state);
-      return table == nullptr || Clock::CurrentGameOver(*table);
+      return game == room->second.games.end() || !ClockRunning(game->second.state);
     });
     for (const auto& [room_id, room] : rooms_) {
       for (const auto& [game_id, entry] : room.games) {
-        const ClockedTable* table = CapableEngine<kClocked>(entry.state);
-        if (table == nullptr || !Clock::FlagDue(*table, now)) continue;
+        if (!FlagDue(entry.state, now)) continue;
         const auto retry = chess_flag_retry_at_.find({room_id, game_id});
         if (retry != chess_flag_retry_at_.end() && now < retry->second) continue;
         flagged.push_back({room_id, game_id});
@@ -2215,10 +2236,7 @@ int GamesHub::SweepChessClocksOnce() {
         continue;
       }
       const auto game = room->second.games.find(flag.game_id);
-      const ClockedTable* table = game == room->second.games.end()
-                                      ? nullptr
-                                      : CapableEngine<kClocked>(game->second.state);
-      if (table == nullptr || Clock::CurrentGameOver(*table)) {
+      if (game == room->second.games.end() || !ClockRunning(game->second.state)) {
         chess_flag_retry_at_.erase(key);
         continue;
       }
@@ -2226,12 +2244,7 @@ int GamesHub::SweepChessClocksOnce() {
       const int64_t now = NowMs();
       // A rebase may find the game already ended elsewhere, or moved on:
       // the refusal says so, and the seat on turn sent nothing to refuse.
-      const auto refusal = ApplyTableEngineMoveLocked<ClockedTable>(
-          ref, Clock::Turn(*table),
-          Transition<ClockedTable>{[now](const ClockedTable& clocked, int, const MoveContext&) {
-            return Clock::Flag(clocked, now);
-          }},
-          outbox);
+      const std::optional<Refusal> refusal = FlagLocked(ref, now, outbox);
       if (refusal.has_value() && refusal->kind == RejectKind::kUnavailable) {
         // The store is down: try this game again later, not every tick.
         chess_flag_retry_at_[key] = now + kChessFlagRetry.count();

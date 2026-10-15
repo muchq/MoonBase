@@ -328,18 +328,18 @@ class GamesHub final {
   /// position. Call before serving: read without a lock thereafter.
   void SetChessOpener(ChessOpener opener);
 
-  /// The wall clock chess's clocks read, absl::Now unless a test fixes
-  /// it. Call before serving: read without a lock thereafter.
+  /// The wall clock every game's clocks read, absl::Now unless a test
+  /// fixes it. Call before serving: read without a lock thereafter.
   void SetClock(std::function<absl::Time()> clock);
 
-  /// Ends on time every chess game this instance holds whose side to
-  /// move has run out at the clock's now, through the same conditional
-  /// commit a move takes: with several instances holding the room, one
-  /// lands the ending and the rest rebase onto it. Returns how many this
+  /// Ends on time every clocked game (kClocked) this instance holds
+  /// whose side to move has run out at the clock's now, through the same
+  /// conditional commit a move takes: with several instances holding the
+  /// room, one lands the ending and the rest rebase onto it. Returns how many this
   /// call ended.
   int SweepChessClocksOnce();
 
-  /// Chess games whose flag the store refused and that wait to be tried
+  /// Clocked games whose flag the store refused and that wait to be tried
   /// again; for tests.
   std::size_t ChessFlagRetriesPending() {
     const std::lock_guard<std::mutex> lock(mu_);
@@ -648,6 +648,12 @@ class GamesHub final {
                                                                const std::string& player_id,
                                                                const Transition<E>& move,
                                                                Outbox& outbox);
+  /// The sweep's flag on a clocked table whose side to move ran out at
+  /// `now_ms`, as that seat's move; the refusal if the commit found the
+  /// game moved on.
+  std::optional<games_hub::Refusal> FlagLocked(GameRef ref, int64_t now_ms, Outbox& outbox);
+  template <typename E>
+  std::optional<games_hub::Refusal> FlagEngineLocked(GameRef ref, int64_t now_ms, Outbox& outbox);
   /// Epoch milliseconds on the chess clock.
   int64_t NowMs() const;
 

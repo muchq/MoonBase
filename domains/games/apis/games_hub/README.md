@@ -641,9 +641,11 @@ envelope, a `HostedState`/`GameKind` entry, and its adapter; then the
 game lists downstream (stats `hubVariants`, deja `VARIANTS`,
 prom_proxy's games_hub tiles), which `otel_contract` holds to the
 adapters, and `adapters_test`'s `EveryGame` opens and round-trips it.
-Machinery only one game has yet (chess's clocks, engine bots and feed;
-pong's rallies) is typed on that game's engine through `EngineWith`,
-which fails to build once a second game opts in.
+Machinery only one game has yet (chess's engine bots and feed; pong's
+rallies) is typed on that game's engine through `EngineWith`, which fails
+to build once a second game opts in. The clock sweep is every clocked
+game's: it visits each table whose adapter opts into `kClocked`
+(`FlagDue`, `ClockRunning`) and flags it through that adapter's `Flag`.
 
 ## Notes
 
