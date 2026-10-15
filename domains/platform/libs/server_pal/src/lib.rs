@@ -1071,18 +1071,49 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
-    /// Collects the JSON subscriber's output so a test can read the line
-    /// the access log wrote.
-    #[derive(Clone)]
-    struct SharedWriter(Arc<std::sync::Mutex<Vec<u8>>>);
-    impl std::io::Write for SharedWriter {
+    thread_local! {
+        static CAPTURE: std::cell::RefCell<Option<Arc<std::sync::Mutex<Vec<u8>>>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// Appends to the calling thread's capture buffer; a thread with none
+    /// discards the line.
+    struct CaptureWriter;
+    impl std::io::Write for CaptureWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
+            CAPTURE.with(|slot| {
+                if let Some(captured) = slot.borrow().as_ref() {
+                    captured.lock().unwrap().extend_from_slice(buf);
+                }
+            });
             Ok(buf.len())
         }
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    /// Subscriber output for everything `work` logs. One global subscriber
+    /// serves the whole binary and routes each line by thread, so no test
+    /// installs a dispatcher of its own: tracing caches a callsite's interest
+    /// process-wide, and per-thread dispatchers let a parallel test cache
+    /// "never" for the access-log callsite (#1491). `#[tokio::test]` runs
+    /// the request on the test's own thread.
+    async fn capture_log(work: impl std::future::Future<Output = ()>) -> String {
+        static INSTALL: std::sync::Once = std::sync::Once::new();
+        INSTALL.call_once(|| {
+            tracing::subscriber::set_global_default(
+                log_subscriber_builder()
+                    .with_writer(|| CaptureWriter)
+                    .finish(),
+            )
+            .expect("no other test installs a global subscriber");
+        });
+        let buf: Arc<std::sync::Mutex<Vec<u8>>> = Arc::default();
+        CAPTURE.with(|slot| *slot.borrow_mut() = Some(buf.clone()));
+        work.await;
+        CAPTURE.with(|slot| *slot.borrow_mut() = None);
+        String::from_utf8(buf.lock().unwrap().clone()).unwrap()
     }
 
     async fn access_line_for(path: &str, expected_status: StatusCode) -> serde_json::Value {
@@ -1095,32 +1126,11 @@ mod tests {
         expected_status: StatusCode,
         with_headers: bool,
     ) -> String {
-        let buf: Arc<std::sync::Mutex<Vec<u8>>> = Arc::default();
-        let writer_buf = buf.clone();
-        let subscriber = log_subscriber_builder()
-            .with_writer(move || SharedWriter(writer_buf.clone()))
-            .finish();
-        let _guard = tracing::subscriber::set_default(subscriber);
-
         let app = router_builder::<NoState>()
             .route("/widgets/{id}", get(|| async { "w" }))
             .rate_limit(None)
             .build()
             .with_state(NoState);
-        // tracing caches each callsite's interest process-wide, computed
-        // from whatever subscriber the thread that first hits the callsite
-        // has, and the subscriber here is set per thread. A parallel test
-        // with no subscriber can be the first to hit the access-log
-        // callsite and cache "never", which this thread's `info!` then
-        // honours: nothing is written and the buffer reads empty. Hitting
-        // the callsite from here first and rebuilding pins its interest
-        // under this subscriber, after which no later registration flips it.
-        app.clone()
-            .oneshot(make_request("/widgets/warm"))
-            .await
-            .unwrap();
-        tracing::callsite::rebuild_interest_cache();
-        buf.lock().unwrap().clear();
         let mut req = make_request(path);
         if with_headers {
             req.headers_mut()
@@ -1132,9 +1142,11 @@ mod tests {
                     .unwrap(),
             );
         }
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), expected_status);
-        String::from_utf8(buf.lock().unwrap().clone()).unwrap()
+        capture_log(async {
+            let resp = app.oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), expected_status);
+        })
+        .await
     }
 
     async fn access_line(
@@ -1194,22 +1206,16 @@ mod tests {
     /// rather than inventing an address.
     #[tokio::test]
     async fn access_log_without_a_peer_reports_unknown_client() {
-        let buf: Arc<std::sync::Mutex<Vec<u8>>> = Arc::default();
-        let writer_buf = buf.clone();
-        let subscriber = log_subscriber_builder()
-            .with_writer(move || SharedWriter(writer_buf.clone()))
-            .finish();
-        let _guard = tracing::subscriber::set_default(subscriber);
-
         let app = router_builder::<NoState>()
             .route("/w", get(|| async { "w" }))
             .rate_limit(None)
             .build()
             .with_state(NoState);
         let req = Request::builder().uri("/w").body(Body::empty()).unwrap();
-        assert_eq!(app.oneshot(req).await.unwrap().status(), StatusCode::OK);
-
-        let output = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+        let output = capture_log(async {
+            assert_eq!(app.oneshot(req).await.unwrap().status(), StatusCode::OK);
+        })
+        .await;
         let line = output
             .lines()
             .find(|l| l.contains("\"event\":\"access\""))
