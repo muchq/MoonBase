@@ -146,8 +146,8 @@ func TestDistinctPeersGetTheirOwnBuckets(t *testing.T) {
 	assert.Equal(t, 200, statusOf(h, peerRequest("198.51.100.7:5000")))
 }
 
-// New keys are created while other requests look theirs up; the limiter
-// map must not be read outside the lock that guards its writes.
+// Every new key writes the limiter map under its lock, so every read must
+// take the same lock.
 func TestConcurrentNewKeysAreSafe(t *testing.T) {
 	h := oneShotMiddleware().Wrap(FooHandler)
 	var wg sync.WaitGroup

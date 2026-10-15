@@ -46,7 +46,9 @@ Services in the consolidated deploy:
 - Add `last_access` timestamps to tracked keys.
 - Implement a cleanup mechanism (e.g., a background goroutine or lazy eviction during `Wrap`) that removes keys older than a configurable TTL.
 - Handle empty/invalid keys (explicit 400 or safe fallback).
-- Parse `X-Forwarded-For` chain with trusted proxy depth.
+- Keys on the socket peer and never reads `X-Forwarded-For`. A trusted-proxy
+  walk (opal-cpp ADR-0012, as aura and server_pal do it) waits for a Go
+  service that sits behind Caddy with a per-client limiter; none does.
 - Add `Retry-After` headers and configurable burst handling.
 
 ### C++ `domains/platform/libs/futility/rate_limiter`
