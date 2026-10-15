@@ -32,8 +32,19 @@ impl TrustedProxies {
     }
 
     /// `TRUSTED_PROXY_CIDRS`, read as aura reads it.
-    pub fn from_env() -> Result<Self, String> {
-        Self::from_env_value(std::env::var("TRUSTED_PROXY_CIDRS").ok().as_deref())
+    pub(crate) fn from_env() -> Result<Self, String> {
+        Self::from_env_var(std::env::var("TRUSTED_PROXY_CIDRS"))
+    }
+
+    /// Set but not UTF-8 is malformed, not absent.
+    fn from_env_var(var: Result<String, std::env::VarError>) -> Result<Self, String> {
+        match var {
+            Ok(value) => Self::from_env_value(Some(&value)),
+            Err(std::env::VarError::NotPresent) => Self::from_env_value(None),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                Err("TRUSTED_PROXY_CIDRS is not valid UTF-8".into())
+            }
+        }
     }
 
     /// Unset is the deliberate direct-connect statement; set-but-empty is
@@ -56,7 +67,7 @@ impl TrustedProxies {
     }
 
     /// IPv4-mapped IPv6 matches as the embedded IPv4.
-    pub fn contains(&self, address: IpAddr) -> bool {
+    pub(crate) fn contains(&self, address: IpAddr) -> bool {
         let address = address.to_canonical();
         self.networks
             .iter()
@@ -115,7 +126,7 @@ fn in_network(base: IpAddr, prefix: u8, address: IpAddr) -> bool {
 /// Which path produced a derived client — opal's `DerivedClient::Source`,
 /// spelled as its access log spells it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ClientSource {
+pub(crate) enum ClientSource {
     /// Untrusted peer, no x-forwarded-for: the client itself.
     DirectPeer,
     /// Untrusted peer; the header was present and ignored.
@@ -130,7 +141,7 @@ pub enum ClientSource {
 }
 
 impl ClientSource {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             ClientSource::DirectPeer => "direct_peer",
             ClientSource::UntrustedHeaderIgnored => "untrusted_header_ignored",
@@ -142,9 +153,9 @@ impl ClientSource {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DerivedClient {
-    pub address: Option<IpAddr>,
-    pub source: ClientSource,
+pub(crate) struct DerivedClient {
+    pub(crate) address: Option<IpAddr>,
+    pub(crate) source: ClientSource,
 }
 
 /// The walk is anchored at the socket peer, the one fact a client cannot
@@ -154,7 +165,7 @@ pub struct DerivedClient {
 /// skipping trusted entries; the first untrusted entry is the client. A
 /// chain exhausted with everything trusted yields the leftmost entry; a
 /// malformed entry stops the walk at the last vetted position.
-pub fn derive_client(
+pub(crate) fn derive_client(
     peer: Option<IpAddr>,
     headers: &HeaderMap,
     trusted: &TrustedProxies,
@@ -177,14 +188,13 @@ pub fn derive_client(
             source,
         };
     }
-    // An opaque (non-visible-ASCII) value is one malformed entry.
+    // Split on raw bytes: a proxy appends to the client's value in place, so
+    // a byte the client sent must poison only its own element.
     let entries: Vec<Option<&str>> = headers
         .get_all(X_FORWARDED_FOR)
         .iter()
-        .flat_map(|value| match value.to_str() {
-            Ok(text) => text.split(',').map(Some).collect(),
-            Err(_) => vec![None],
-        })
+        .flat_map(|value| value.as_bytes().split(|&b| b == b','))
+        .map(|element| std::str::from_utf8(element).ok())
         .collect();
     for entry in entries.into_iter().rev() {
         let Some(address) = entry.and_then(parse_entry) else {
@@ -493,6 +503,33 @@ mod tests {
         let d = derive_client(Some(ip("10.0.0.1")), &map, &t);
         assert_eq!(d.address, Some(ip("10.0.0.1")));
         assert_eq!(d.source, ClientSource::TrustedTier);
+    }
+
+    /// Proxies append to the client's header in place, so a byte the
+    /// client sent poisons only its own element: the entry the proxy
+    /// appended after it still counts.
+    #[test]
+    fn an_opaque_byte_poisons_only_its_own_element() {
+        let t = trust(&["10.0.0.0/8"]);
+        let mut map = HeaderMap::new();
+        map.append(
+            "x-forwarded-for",
+            axum::http::HeaderValue::from_bytes(b"198.51.100.7\xff, 203.0.113.9").unwrap(),
+        );
+        let d = derive_client(Some(ip("10.0.0.1")), &map, &t);
+        assert_eq!(d.address, Some(ip("203.0.113.9")));
+        assert_eq!(d.source, ClientSource::Forwarded);
+    }
+
+    /// A value that is set but not UTF-8 is malformed, not absent.
+    #[test]
+    fn a_non_unicode_env_value_refuses_to_start() {
+        let not_unicode = std::env::VarError::NotUnicode(std::ffi::OsString::from("x"));
+        assert!(TrustedProxies::from_env_var(Err(not_unicode)).is_err());
+        let unset = TrustedProxies::from_env_var(Err(std::env::VarError::NotPresent)).unwrap();
+        assert!(!unset.contains(ip("172.28.0.2")));
+        let set = TrustedProxies::from_env_var(Ok("172.28.0.2".into())).unwrap();
+        assert!(set.contains(ip("172.28.0.2")));
     }
 
     #[test]
