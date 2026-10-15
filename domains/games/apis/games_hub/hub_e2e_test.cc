@@ -403,7 +403,6 @@ class HeldPublishStore final : public HubStore {
   std::vector<Op> held_;
 };
 
-
 }  // namespace
 
 class HubGameFixture : public GamesHubStreamFixture {};
@@ -2218,8 +2217,8 @@ TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
   ASSERT_NE(std::find(outer_events.begin(), outer_events.end(), "sessionReady"),
             outer_events.end());
 
-  const std::set<std::string> envelopes = {"golf", "castle", "rummy", "chess",
-                                           "pong", "spades", "lobby", "voice"};
+  const std::set<std::string> envelopes = {"golf",   "castle", "rummy", "chess", "pong",
+                                           "spades", "go",     "lobby", "voice"};
   for (const auto& envelope : envelopes) {
     EXPECT_NE(std::find(outer_commands.begin(), outer_commands.end(), envelope),
               outer_commands.end())
