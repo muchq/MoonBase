@@ -16,6 +16,7 @@
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
+#include "domains/games/libs/go/table.h"
 #include "domains/games/libs/pong/table.h"
 
 namespace games_hub {
@@ -275,7 +276,7 @@ TEST(KindNames, EachKindIsWrittenAsItsAdaptersNameAndReadBack) {
     EXPECT_EQ(ParseGameKind(A::kName), A::kKind);
     return false;
   });
-  constexpr std::string_view kWire[] = {"golf", "castle", "rummy", "chess", "pong", "spades"};
+  constexpr std::string_view kWire[] = {"golf", "castle", "rummy", "chess", "pong", "spades", "go"};
   for (std::size_t i = 0; i < std::size(kWire); ++i) {
     EXPECT_EQ(GameKindName(static_cast<GameKind>(i)), kWire[i]);
   }
@@ -353,6 +354,12 @@ TEST(Capabilities, TheClockSweepFindsEveryClockedTableAndNoOther) {
   const std::optional<HostedState> mated = HostedState(Mated(OpenChess()));
   EXPECT_FALSE(ClockRunning(mated));
   EXPECT_FALSE(FlagDue(mated, 1'000'000));
+
+  const std::optional<HostedState> go_table =
+      HostedState(*go::Table::open({"ann", "bo"}, 9, go::kDefaultKomi, {60'000, 0}, 0));
+  EXPECT_TRUE(ClockRunning(go_table));
+  EXPECT_FALSE(FlagDue(go_table, 59'999));
+  EXPECT_TRUE(FlagDue(go_table, 60'000));
 
   const std::optional<HostedState> castle = HostedState(DealCastle());
   EXPECT_FALSE(ClockRunning(castle));

@@ -56,6 +56,7 @@ cc_library(
         "//domains/games/libs/cards/spades:table",
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:table",
+        "//domains/games/libs/go:table",
         "//domains/games/libs/pong:table",
     ],
 )
@@ -69,6 +70,7 @@ cc_library(
         "adapters.cc",
         "castle_adapter.cc",
         "chess_adapter.cc",
+        "go_adapter.cc",
         "golf_adapter.cc",
         "pong_adapter.cc",
         "rummy_adapter.cc",
@@ -79,6 +81,7 @@ cc_library(
         "adapters.h",
         "castle_adapter.h",
         "chess_adapter.h",
+        "go_adapter.h",
         "golf_adapter.h",
         "pong_adapter.h",
         "rummy_adapter.h",
@@ -109,6 +112,8 @@ cc_library(
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:table",
         "//domains/games/libs/chess_play:table_serde",
+        "//domains/games/libs/go:table",
+        "//domains/games/libs/go:table_serde",
         "//domains/games/libs/pong:rally",
         "//domains/games/libs/pong:table",
         "//domains/games/libs/pong:table_serde",
@@ -128,6 +133,7 @@ cc_test(
         "//domains/games/libs/cards/castle:game_state",
         "//domains/games/libs/chess_play:game_state",
         "//domains/games/libs/chess_play:table",
+        "//domains/games/libs/go:table",
         "//domains/games/libs/pong:table",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/status",
@@ -284,6 +290,7 @@ exports_files([
     "adapters.h",
     "castle_adapter.h",
     "chess_adapter.h",
+    "go_adapter.h",
     "golf_adapter.h",
     "pong_adapter.h",
     "rummy_adapter.h",
@@ -1134,6 +1141,34 @@ cc_test(
     ],
 )
 
+# Go's wire goldens: the go envelope's command and update bytes, the
+# browser's contract.
+cc_test(
+    name = "go_wire_test",
+    size = "small",
+    srcs = [
+        "go_wire_test.cc",
+        "wire_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_server",
+        ":hub",
+        ":id_generator",
+        ":rate_limiter",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:eventstream",
+        "@opal_cpp//runtime:http",
+    ],
+)
+
 # Spades' wire goldens: the spades envelope's command and update
 # bytes, the browser's contract.
 cc_test(
@@ -1442,6 +1477,33 @@ cc_test(
         "//domains/games/libs/cards/rummy:game_state",
         "//domains/games/libs/cards/rummy:meld",
         "//domains/games/libs/cards/rummy:table",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
+cc_test(
+    name = "go_e2e_test",
+    size = "small",
+    srcs = [
+        "go_e2e_test.cc",
+        "stream_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_client",
+        ":games_hub_smithy_server",
+        ":hub",
+        ":hub_store",
+        ":id_generator",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "@com_google_absl//absl/time",

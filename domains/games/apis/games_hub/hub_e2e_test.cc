@@ -2057,6 +2057,21 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"spades_events", {{"event", "turnChanged"}}},
       {"spades_events", {{"event", "gameEnded"}}},
       {"spades_events", {{"event", "gameLeft"}}},
+      {"go_commands", {{"command", "createGame"}}},
+      {"go_commands", {{"command", "joinGame"}}},
+      {"go_commands", {{"command", "startGame"}}},
+      {"go_commands", {{"command", "leaveGame"}}},
+      {"go_commands", {{"command", "play"}}},
+      {"go_commands", {{"command", "pass"}}},
+      {"go_commands", {{"command", "resign"}}},
+      {"go_commands", {{"command", "watch"}}},
+      {"go_events", {{"event", "gameJoined"}}},
+      {"go_events", {{"event", "gameState"}}},
+      {"go_events", {{"event", "gameCreated"}}},
+      {"go_events", {{"event", "gameStarted"}}},
+      {"go_events", {{"event", "turnChanged"}}},
+      {"go_events", {{"event", "gameEnded"}}},
+      {"go_events", {{"event", "gameLeft"}}},
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -2266,6 +2281,10 @@ TEST(StreamSeriesModelPin, PongSeriesMatchTheModelUnions) {
 
 TEST(StreamSeriesModelPin, SpadesSeriesMatchTheModelUnions) {
   ExpectEnvelopeSeriesMatchTheModel("spades", "SpadesMove", "bid", "SpadesUpdate", "gameEnded");
+}
+
+TEST(StreamSeriesModelPin, GoSeriesMatchTheModelUnions) {
+  ExpectEnvelopeSeriesMatchTheModel("go", "GoMove", "pass", "GoUpdate", "turnChanged");
 }
 
 // The bounded kind is the whole dashboard identity of a rejection (#1327,

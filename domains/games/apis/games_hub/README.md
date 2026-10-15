@@ -1,20 +1,20 @@
 # games_hub — the games hub on opal-cpp event streams
 
 The backend behind muchq.com/games — the lobby, golf, castle,
-rummy, chess and pong — and its /golf and /thoughts pages, on opal-cpp's
+rummy, chess, pong, spades and go — and its /golf and /thoughts pages, on opal-cpp's
 streaming stack: a modeled protocol with generated async handlers
 (ADR-0021), `SessionRegistry` fan-out with reconnect grace
 (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018), and ticket
 auth ahead of the 101. One session identity opens the one stream.
 
-## The model (nine namespaces)
+## The model (ten namespaces)
 
 - `model/games.smithy` — `moonbase.games`: the service, session identity
   (`POST /games/v2/session`), the public chess feed
   (`GET /games/v2/chess.pgn`), the two terminal stream errors, the one
   stream — `Play` at `/games/v2/play`, its `GameCommands`/`GameEvents`
   unions carrying the room layer's own cases plus one envelope member
-  per tenant (`lobby`, `voice`, `golf`, `castle`, `rummy`, `chess`, `pong`, `spades`) — and the game-agnostic room
+  per tenant (`lobby`, `voice`, `golf`, `castle`, `rummy`, `chess`, `pong`, `spades`, `go`) — and the game-agnostic room
   layer — rooms, chat, player info with room-scoped stats and the
   member's table (`PlayerInfo.table`: which game, which
   table, pending or in play, absent while idle — how the lobby tells who
@@ -42,6 +42,10 @@ auth ahead of the 101. One session identity opens the one stream.
 - `model/pong.smithy` — `moonbase.pong`: pong's vocabulary, the `pong`
   member, on chess's terms: `startGame` names the variant, and `frame`
   carries the rally. Shapes are prefixed `Pong`.
+- `model/go.smithy` — `moonbase.go`: go's vocabulary, the `go`
+  member, on chess's terms: `startGame` names the board, komi and clock,
+  and the moves are `play` (a point), `pass` and `resign`. Shapes are
+  prefixed `Go`.
 - `model/lobby.smithy` — `moonbase.lobby`: the world's shapes — the
   `lobby` member of the room stream (`LobbyAction`, `LobbyUpdate`) and
   what they carry.
@@ -52,7 +56,7 @@ auth ahead of the 101. One session identity opens the one stream.
 A new game is one new model file and one more envelope member on the
 room stream's unions, the way castle, rummy and the lobby joined. Codegen
 flattens every namespace into `moonbase::games`, so shape names must be
-unique across the eight files (a collision gets the foreign namespace's
+unique across the ten files (a collision gets the foreign namespace's
 name appended, which nothing here wants).
 
 ## The lobby's world
@@ -588,6 +592,20 @@ another commit the table since loading it steers nothing: taking the
 rally up there would run a second one, scoring the paddle that cannot move
 here.
 
+### Go
+
+Two seats play one game after another on `libs/go`, as a chess table
+does: 9, 13 or 19 lines (`startGame.size`, 19 unnamed), komi to White
+(6.5 unnamed), and a Fischer clock (ten minutes and five seconds
+unnamed) that the clock sweep flags as it does chess's. The first game's
+Black is the table's creator; each next game swaps colours. Captures, no
+suicide, simple ko. Two passes in a row end a game on Tromp-Taylor area,
+an even score a draw; either seat may resign; a leave abandons a game in
+play and closes the table. The view is one for everyone: the board as
+rows of `.`, `b` and `w`, captures, the last move, both clocks, and the
+result with the count once a game ends on the score. Watching is
+chess's; go has no bots, challenges, round robins or archive.
+
 ### Spades
 
 Spades, on `libs/cards/spades`, at two to four seats in join
@@ -617,7 +635,7 @@ counts. A rummy table: own hand faces (everyone's once the deal ends, and
 between deals), other hands as counts, the stock as a count; the melds, the
 discard's top and the card taken from it this turn are public, and a stock
 draw's `lastMove` names no card. A spades seat sees its own hand and
-everyone else's as a count. A chess or pong table hides nothing: one view
+everyone else's as a count. A chess, pong or go table hides nothing: one view
 serves both seats and every watcher (`kWatchable`).
 
 A golf view carries own card faces only at the viewer's peeked indexes, the

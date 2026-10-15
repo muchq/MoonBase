@@ -17,6 +17,7 @@
 #include "domains/games/apis/games_hub/adapter.h"
 #include "domains/games/apis/games_hub/castle_adapter.h"
 #include "domains/games/apis/games_hub/chess_adapter.h"
+#include "domains/games/apis/games_hub/go_adapter.h"
 #include "domains/games/apis/games_hub/golf_adapter.h"
 #include "domains/games/apis/games_hub/hub_metrics.h"
 #include "domains/games/apis/games_hub/pong_adapter.h"

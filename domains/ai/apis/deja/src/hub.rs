@@ -49,7 +49,7 @@ const EVENTS: [&str; 7] = [
     "game_started",
     "game_finished",
 ];
-const VARIANTS: [&str; 7] = ["golf", "castle", "rummy", "gin", "chess", "pong", "spades"];
+const VARIANTS: [&str; 8] = ["golf", "castle", "rummy", "gin", "chess", "pong", "spades", "go"];
 const SURFACES: [&str; 3] = ["plane", "sphere", "glasshouse"];
 const OUTCOMES: [&str; 2] = ["completed", "abandoned"];
 /// The seats the engine deals a table, from the hub's kTableSeatCap (adapters.h).
