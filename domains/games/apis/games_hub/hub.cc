@@ -222,6 +222,22 @@ const std::vector<GamesHub::CounterSeries>& GamesHub::DeclaredCounterSeries() {
   static const auto* kSeries = [] {
     // Each game's envelope first, from its adapter's lists.
     auto* series = new std::vector<CounterSeries>(GameCounterSeries());
+    // Games played, by every word a game is recorded under and every outcome.
+    AnyAdapter([&](auto adapter) {
+      using A = decltype(adapter);
+      std::vector<std::string_view> games{A::kName};
+      if constexpr (requires { A::kRecordedNames; }) {
+        games.assign(A::kRecordedNames.begin(), A::kRecordedNames.end());
+      }
+      for (const std::string_view game : games) {
+        series->push_back({"games_started", {{"game", std::string(game)}}});
+        for (const std::string_view outcome : {kOutcomeCompleted, kOutcomeAbandoned}) {
+          series->push_back(
+              {"games_finished", {{"game", std::string(game)}, {"outcome", std::string(outcome)}}});
+        }
+      }
+      return false;
+    });
     series->insert(series->end(), {
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
@@ -764,6 +780,7 @@ GamesHub::Commit GamesHub::CommitEntryLocked(const std::string& room_id, const s
   // either would count the game twice.
   if (finish != nullptr && !was_over) {
     if (const auto finished = FinishedOf(*state, roster.size()); finished.has_value()) {
+      CountGameFinished(*finished);
       RecordLocked([&](absl::Time now) { return GameFinishedLine(now, room_id, *finished); });
     }
   }
@@ -2010,6 +2027,7 @@ void GamesHub::StartGameMove(const std::string& player_id, typename Adapter<E>::
         }
         started = true;
         if (OpenStartsAGame(ref->entry->kind)) {
+          CountGameStarted(GameKindName(ref->entry->kind));
           RecordLocked([&id = ref->room_id, variant = GameKindName(ref->entry->kind),
                         seats = ref->entry->roster.size()](absl::Time now) {
             return GameStartedLine(now, id, variant, seats);
@@ -2123,6 +2141,7 @@ std::optional<Refusal> GamesHub::ApplyTableEngineMoveLocked(GameRef ref,
       return Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
     }
     if (deal_started) {
+      CountGameStarted(VariantWordOf(*ref.entry->state));
       RecordLocked([&id = ref.room_id, variant = VariantWordOf(*ref.entry->state),
                     seats = ref.entry->roster.size()](absl::Time now) {
         return GameStartedLine(now, id, variant, seats);
@@ -3622,6 +3641,17 @@ void GamesHub::CountCommand(const GameCommands& command) {
   } else {
     metrics_->RecordCounter("hub_commands", 1, {{"command", std::string(command.case_name())}});
   }
+}
+
+void GamesHub::CountGameStarted(std::string_view game) {
+  if (metrics_) metrics_->RecordCounter("games_started", 1, {{"game", std::string(game)}});
+}
+
+void GamesHub::CountGameFinished(const GameFinished& finished) {
+  if (!metrics_) return;
+  metrics_->RecordCounter(
+      "games_finished", 1,
+      {{"game", std::string(finished.variant)}, {"outcome", std::string(finished.outcome)}});
 }
 
 void GamesHub::Send(const std::string& player_id, GameEvents event,

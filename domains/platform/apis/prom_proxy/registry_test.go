@@ -518,7 +518,7 @@ var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|c
 // shared artifact to pin them together (that is #1308's scope). What these
 // audits do close, on their own side: every tile reads only names in this
 // set, and every name in this set is read by some tile.
-var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:hub_|golf_|chat_|castle_|rummy_|chess_|pong_|spades_|go_|lobby_)[a-z_]*)(\{[^}]*\})?`)
+var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:hub_|games_|golf_|chat_|castle_|rummy_|chess_|pong_|spades_|go_|lobby_)[a-z_]*)(\{[^}]*\})?`)
 
 var gamesHubExportedNames = map[string]bool{
 	// The castle envelope (#77), from GamesHub::DeclaredCounterSeries().
@@ -555,6 +555,9 @@ var gamesHubExportedNames = map[string]bool{
 	"go_events_total":       true,
 	"lobby_commands_total":  true,
 	"lobby_events_total":    true,
+	// Games played (#1670), by game and outcome.
+	"games_started_total":  true,
+	"games_finished_total": true,
 }
 
 // The one_d4 audit's shape (see TestOneD4QueriesNameRealInstrumentsAndScopeThem
@@ -611,6 +614,10 @@ func TestGamesHubQueriesNameRealInstruments(t *testing.T) {
 	for _, match := range regexp.MustCompile(`result="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
 		assert.Contains(t, []string{"stored", "rejected", "unavailable"}, match[1],
 			"games_hub declares no chat_appends result=%q", match[1])
+	}
+	for _, match := range regexp.MustCompile(`outcome="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
+		assert.Contains(t, []string{"completed", "abandoned"}, match[1],
+			"games_hub declares no games_finished outcome=%q", match[1])
 	}
 	for _, match := range regexp.MustCompile(`resumed="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
 		assert.Contains(t, []string{"true", "false"}, match[1],
@@ -1412,4 +1419,28 @@ func TestRegistry_TheQueryBudgetIsBinding(t *testing.T) {
 	}
 	assert.Greater(t, worst*2, maxQueriesPerServicePage,
 		"the budget is more than twice the worst page (%d); it would never catch anything", worst)
+}
+
+// The Games group (#1670): started, completed and abandoned games, and the
+// share of finished games that were abandoned — a mean like
+// chat_catch_up_rows, the tile and the chart one signal.
+func TestRegistry_GamesHubCountsGamesPlayed(t *testing.T) {
+	entry := serviceRegistry["games_hub"]
+	tiles := map[string]customScalarDef{}
+	for _, def := range entry.CustomScalars {
+		if def.Group == "Games" {
+			tiles[def.Label] = def
+		}
+	}
+	assert.Equal(t, `games_started_total`, tiles["games_started"].Counter)
+	assert.Equal(t, `games_finished_total{outcome="completed"}`, tiles["games_completed"].Counter)
+	assert.Equal(t, `games_finished_total{outcome="abandoned"}`, tiles["games_abandoned"].Counter)
+	assert.Len(t, tiles, 4)
+
+	charts := expandCustomTimeseries(entry.CustomTimeseries, "30s")
+	assert.Equal(t, `sum(increase(games_started_total[5m]))`, charts["game_started"])
+	rate := `sum(rate(games_finished_total{outcome="abandoned"}[5m]))/sum(rate(games_finished_total[5m]))`
+	assert.Equal(t, rate, tiles["abandon_rate"].QueryFor(ViewCount, "5m"))
+	assert.Equal(t, rate, charts["game_abandon_rate"],
+		"the tile and the chart must describe the same signal")
 }

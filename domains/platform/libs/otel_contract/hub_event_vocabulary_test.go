@@ -375,3 +375,18 @@ func TestThePlazaIsSpelledTheSameInGamesHubAndDeja(t *testing.T) {
 		"the hub calls the lobby world something deja does not build a lane for: its one "+
 			"non-session lane would go unremarked rather than documented")
 }
+
+// prom_proxy's Games tiles select games_finished by outcome (#1670): each
+// value must be one the hub writes, or the tile reads zero forever.
+func TestPromProxyGameOutcomesAreTheHubs(t *testing.T) {
+	header, err := os.ReadFile(hubEventsHeader)
+	require.NoError(t, err)
+	registry, err := os.ReadFile(promProxyRegistry)
+	require.NoError(t, err)
+	outcomes := cppConstants(t, header, "kOutcome")
+	selected := regexp.MustCompile(`games_finished_total\{outcome="(\w+)"\}`).FindAllSubmatch(registry, -1)
+	require.NotEmpty(t, selected, "prom_proxy selects no games_finished outcome")
+	for _, match := range selected {
+		assert.Contains(t, outcomes, string(match[1]))
+	}
+}

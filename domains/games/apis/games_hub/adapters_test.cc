@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <optional>
 #include <set>
 #include <string>
@@ -14,6 +15,7 @@
 #include "absl/status/status.h"
 #include "domains/games/libs/cards/castle/game_state.h"
 #include "domains/games/libs/cards/dealer.h"
+#include "domains/games/libs/cards/rummy/table.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
 #include "domains/games/libs/go/table.h"
@@ -382,3 +384,14 @@ TEST(Capabilities, OnlyARealtimeGamesSteeringRidesTheRealtimeBudget) {
 
 }  // namespace
 }  // namespace games_hub
+
+TEST(KindNames, EveryRummyVariantIsRecordedUnderADeclaredWord) {
+  using A = games_hub::Adapter<rummy::TableState>;
+  for (const rummy::Variant variant :
+       {rummy::Variant::SevenCard, rummy::Variant::TenCard, rummy::Variant::Gin}) {
+    EXPECT_NE(
+        std::find(A::kRecordedNames.begin(), A::kRecordedNames.end(), rummy::recordedName(variant)),
+        A::kRecordedNames.end())
+        << rummy::variantName(variant);
+  }
+}

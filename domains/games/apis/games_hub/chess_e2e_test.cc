@@ -1928,6 +1928,32 @@ TEST_F(ChessFixture, TheRoomListsTheTablePlayingEndedThenPlayingAgain) {
   ExpectListedStatus(table.alice, table.game_id, "playing");
 }
 
+TEST_F(ChessFixture, AResignedGameCountsStartedAndCompleted) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  ASSERT_TRUE(started->table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(started->table.alice).has_value());
+  EXPECT_EQ(metrics_->CounterTotal("games_started", {{"game", "chess"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("games_finished", {{"game", "chess"}, {"outcome", "completed"}}),
+            1);
+  EXPECT_EQ(metrics_->CounterTotal("games_finished", {{"game", "chess"}, {"outcome", "abandoned"}}),
+            0);
+}
+
+TEST_F(ChessFixture, ALeftGameCountsAbandoned) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(
+      table.alice.stream.Send(Chess(ChessMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
+  ASSERT_TRUE(Ended(table.bob).has_value());
+  EXPECT_EQ(metrics_->CounterTotal("games_started", {{"game", "chess"}}), 1);
+  EXPECT_EQ(metrics_->CounterTotal("games_finished", {{"game", "chess"}, {"outcome", "abandoned"}}),
+            1);
+  EXPECT_EQ(metrics_->CounterTotal("games_finished", {{"game", "chess"}, {"outcome", "completed"}}),
+            0);
+}
+
 TEST_F(ChessFixture, CommandsAreCountedOnTheChessSeries) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
