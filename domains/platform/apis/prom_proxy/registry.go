@@ -380,6 +380,14 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("Go", "go_events", "", `go_events_total`),
 			counter("Lobby", "lobby_commands", "", `lobby_commands_total`),
 			counter("Lobby", "lobby_events", "", `lobby_events_total`),
+			// Games played (#1670), on the stats rollup's game/outcome words;
+			// abandon_rate is abandoned over finished, a mean like
+			// catch_up_rows_avg.
+			counter("Games", "games_started", "", `games_started_total`),
+			counter("Games", "games_completed", "", `games_finished_total{outcome="completed"}`),
+			counter("Games", "games_abandoned", "", `games_finished_total{outcome="abandoned"}`),
+			scalar("Games", "abandon_rate", "",
+				`sum(rate(games_finished_total{outcome="abandoned"}[w]))/sum(rate(games_finished_total[w]))`),
 		},
 		// command/event/rejection/disconnect/rate_limited/chat_message/
 		// chat_delivery/chat_failure are all toggleable: each expands to a
@@ -412,6 +420,11 @@ var serviceRegistry = map[string]serviceEntry{
 			"chess_event":        tsCounter(`chess_events_total`),
 			"lobby_command":      tsCounter(`lobby_commands_total`),
 			"lobby_event":        tsCounter(`lobby_events_total`),
+			// Fixed like session_starts: the page's range-query budget has
+			// room for one toggle-free chart and the rate; the completed and
+			// abandoned counts are tiles.
+			"game_started":      tsFixed(`sum(increase(games_started_total[5m]))`),
+			"game_abandon_rate": tsMean(`games_finished_total{outcome="abandoned"}`, `games_finished_total`),
 		},
 	},
 	"microgpt-serve": {

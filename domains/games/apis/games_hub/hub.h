@@ -24,6 +24,7 @@
 #include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/apis/games_hub/chat_store.h"
 #include "domains/games/apis/games_hub/chess_bots.h"
+#include "domains/games/apis/games_hub/game_events.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/hub_metrics.h"
 #include "domains/games/apis/games_hub/hub_store.h"
@@ -668,6 +669,10 @@ class GamesHub final {
   void DeclareMetrics();
   void TrackActive(int delta);
   void CountCommand(const moonbase::games::GameCommands& command);
+  /// games_started / games_finished, beside the game_* event lines and in
+  /// their vocabulary, whether or not this deployment records those.
+  void CountGameStarted(std::string_view game);
+  void CountGameFinished(const GameFinished& finished);
   /// Every event leaves through here so its series sees each send.
   void Send(const std::string& player_id, moonbase::games::GameEvents event,
             opal::server::DeliveryClass delivery = {});

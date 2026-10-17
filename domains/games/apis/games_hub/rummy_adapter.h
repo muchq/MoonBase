@@ -39,6 +39,9 @@ struct Adapter<rummy::TableState> {
   }
   static moonbase::games::GameEvents Wrap(Update update);
 
+  /// Every word RecordedName can return, for the games_* series declared at
+  /// zero. EveryVariantIsRecordedUnderADeclaredWord holds it to recordedName.
+  static constexpr std::array<std::string_view, 2> kRecordedNames = {"rummy", "gin"};
   /// Each deal is recorded under its variant's word.
   static std::string_view RecordedName(const rummy::TableState& table) {
     return rummy::recordedName(table.getVariant());

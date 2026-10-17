@@ -518,7 +518,7 @@ var promSeriesToken = regexp.MustCompile(`\b[a-z][a-z0-9_]*_(?:total|gauge|sum|c
 // shared artifact to pin them together (that is #1308's scope). What these
 // audits do close, on their own side: every tile reads only names in this
 // set, and every name in this set is read by some tile.
-var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:hub_|golf_|chat_|castle_|rummy_|chess_|pong_|spades_|go_|lobby_)[a-z_]*)(\{[^}]*\})?`)
+var gamesHubSelectorPattern = regexp.MustCompile(`\b((?:hub_|games_|golf_|chat_|castle_|rummy_|chess_|pong_|spades_|go_|lobby_)[a-z_]*)(\{[^}]*\})?`)
 
 var gamesHubExportedNames = map[string]bool{
 	// The castle envelope (#77), from GamesHub::DeclaredCounterSeries().
@@ -1438,10 +1438,7 @@ func TestRegistry_GamesHubCountsGamesPlayed(t *testing.T) {
 	assert.Len(t, tiles, 4)
 
 	charts := expandCustomTimeseries(entry.CustomTimeseries, "30s")
-	for _, key := range []string{"game_started", "game_completed", "game_abandoned"} {
-		assert.Contains(t, charts, key+"_rate")
-		assert.Contains(t, charts, key+"_count")
-	}
+	assert.Equal(t, `sum(increase(games_started_total[5m]))`, charts["game_started"])
 	rate := `sum(rate(games_finished_total{outcome="abandoned"}[5m]))/sum(rate(games_finished_total[5m]))`
 	assert.Equal(t, rate, tiles["abandon_rate"].QueryFor(ViewCount, "5m"))
 	assert.Equal(t, rate, charts["game_abandon_rate"],
