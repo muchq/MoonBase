@@ -115,15 +115,17 @@ func (m *LoggingMiddleware) Wrap(next http.HandlerFunc) http.HandlerFunc {
 import "github.com/muchq/moonbase/domains/platform/libs/resilience4g/rate_limit"
 
 // Create rate limiter middleware
-config := rate_limit.RateLimiterConfig{
+config := &rate_limit.DefaultRateLimitConfig{
     MaxTokens:  100,
     RefillRate: 100,
     OpCost:     1,
 }
 
+// Keys on the socket peer; behind a reverse proxy every request shares
+// the proxy's key.
 rateLimiter := rate_limit.NewRateLimiterMiddleware(
-    rate_limit.TokenBucketRateLimiterFactory{},
-    rate_limit.IpKeyExtractor{},
+    &rate_limit.TokenBucketRateLimiterFactory{},
+    rate_limit.PeerIpKeyExtractor{},
     config,
 )
 

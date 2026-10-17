@@ -6,6 +6,7 @@ import (
 	"github.com/muchq/moonbase/domains/platform/libs/mucks"
 	"net"
 	"net/http"
+	"net/netip"
 	"sync"
 )
 
@@ -22,21 +23,26 @@ func (ConstKeyExtractor) Apply(r *http.Request) string {
 	return "SENTINEL"
 }
 
-type RemoteIpKeyExtractor struct {
+type PeerIpKeyExtractor struct {
 }
 
 // Apply implements the KeyExtractor interface.
-// RemoteIpKeyExtractor tries to read the request's remote-ip
-// from the X-Forwarded-For header. If that header is not present,
-// we fall back to the RemoteAddr of the request.
-// Note that X-Forwarded-For should be populated by the LB and
-// RemoteAddr is only a good fallback in local testing.
-func (RemoteIpKeyExtractor) Apply(r *http.Request) string {
-	ip := r.Header.Get("X-Forwarded-For")
-	if ip == "" {
-		ip, _, _ = net.SplitHostPort(r.RemoteAddr)
+// PeerIpKeyExtractor keys on the socket peer in canonical form (mapped v6
+// as v4, no zone), or "" when RemoteAddr holds no address. It never reads
+// X-Forwarded-For: the header starts life client-authored, so without a
+// trust boundary (opal-cpp ADR-0012, as aura and server_pal implement it)
+// a key read from it is the client's to choose. Behind a reverse proxy
+// every request therefore shares the proxy's key.
+func (PeerIpKeyExtractor) Apply(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return ""
 	}
-	return ip
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return ""
+	}
+	return addr.Unmap().WithZone("").String()
 }
 
 // RateLimiterMiddleware implements mucks.Middleware
@@ -63,7 +69,7 @@ func (m *RateLimiterMiddleware) Wrap(next http.HandlerFunc) http.HandlerFunc {
 
 		// TODO: what should happen if the extracted key is empty?
 
-		err := m.ensureLimiter(key)
+		limiter, err := m.limiterFor(key)
 		if err != nil {
 			// TODO: throttle logging
 			fmt.Println("failing open due to error creating rate limiter: ", err)
@@ -71,7 +77,6 @@ func (m *RateLimiterMiddleware) Wrap(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		limiter := m.Limiters[key]
 		if limiter.Allow(m.Config.GetOpCost()) {
 			next(w, r)
 		} else {
@@ -80,18 +85,18 @@ func (m *RateLimiterMiddleware) Wrap(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (m *RateLimiterMiddleware) ensureLimiter(key string) error {
+func (m *RateLimiterMiddleware) limiterFor(key string) (RateLimiterInterface, error) {
 	m.Mutex.Lock()
 	defer m.Mutex.Unlock()
-	_, ok := m.Limiters[key]
-	if !ok {
-		limiter, err := m.Factory.NewRateLimiter(m.Config)
-		if err != nil {
-			return err
-		}
-		m.Limiters[key] = limiter
+	if limiter, ok := m.Limiters[key]; ok {
+		return limiter, nil
 	}
-	return nil
+	limiter, err := m.Factory.NewRateLimiter(m.Config)
+	if err != nil {
+		return nil, err
+	}
+	m.Limiters[key] = limiter
+	return limiter, nil
 }
 
 func NewRateLimitExceeded() mucks.Problem {
