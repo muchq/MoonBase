@@ -19,9 +19,14 @@ namespace go {
 ///     liberty, after its captures, is refused.
 ///   - Simple ko: a move may not recreate the board as it stood before
 ///     the opponent's last move.
-///   - Two passes in a row end the game on the score: Tromp-Taylor area
-///     (stones, plus empty regions that reach only that colour), komi to
-///     White. An even score is a draw.
+///   - Two passes in a row open the scoring. Either seat marks a group
+///     dead or alive again, a mark withdrawing both seats' acceptance;
+///     once both accept, the game ends on the score: Tromp-Taylor area
+///     (stones, plus empty regions that reach only that colour) with the
+///     dead stones counted as empty points, komi to White. An even score
+///     is a draw. The side to move may instead play a stone, which drops
+///     the marks and plays on; its clock runs throughout, so the scoring
+///     cannot be stalled from the move.
 ///
 /// The truth is the moves played from the empty board; the position,
 /// captures and score follow from replaying them. The clock is chess's
@@ -101,22 +106,30 @@ class GameState {
 
   /// The full truth, validated as `start` validates plus every move legal
   /// in turn and the result, if any, one the moves could have produced: a
-  /// score only after two passes and as the board counts, a timeout only
-  /// on the clock that shows it. For a stored row.
-  [[nodiscard]] static absl::StatusOr<GameState> restore(std::vector<std::string> players, int size,
-                                                         double komi, int black_seat,
-                                                         std::vector<int> moves,
-                                                         TimeControl time_control, Clock clock,
-                                                         std::optional<Result> result);
+  /// score only after two passes and as the board counts with `dead`
+  /// removed, a timeout only on the clock that shows it. `dead` (points,
+  /// ascending) and `accepted` are the scoring's: whole groups of stones,
+  /// and never both accepted while it is still open. For a stored row.
+  [[nodiscard]] static absl::StatusOr<GameState> restore(
+      std::vector<std::string> players, int size, double komi, int black_seat,
+      std::vector<int> moves, TimeControl time_control, Clock clock, std::optional<Result> result,
+      std::vector<int> dead = {}, std::array<bool, 2> accepted = {});
 
   /// The seat on turn places a stone at (x, y). A mover whose time ran out
   /// before it arrived does not move: the game ends on time instead. Off
   /// turn, a finished game, off the board, an occupied point, a suicide or
-  /// a ko recapture is refused.
+  /// a ko recapture is refused. In the scoring it plays on.
   [[nodiscard]] absl::StatusOr<GameState> play(int seat, int x, int y, int64_t now_ms) const;
-  /// The seat on turn passes; the second pass in a row ends the game on
-  /// the score.
+  /// The seat on turn passes; the second pass in a row opens the scoring,
+  /// where a pass is refused.
   [[nodiscard]] absl::StatusOr<GameState> pass(int seat, int64_t now_ms) const;
+  /// Either seat, in the scoring: the group at (x, y) dead, or alive again
+  /// if it was marked. Both acceptances are withdrawn. An empty point is
+  /// refused.
+  [[nodiscard]] absl::StatusOr<GameState> markDead(int seat, int x, int y, int64_t now_ms) const;
+  /// Either seat, in the scoring, accepts the marks; the second
+  /// acceptance ends the game on the score.
+  [[nodiscard]] absl::StatusOr<GameState> accept(int seat, int64_t now_ms) const;
   /// Either seat, on turn or not; after the flag fell, too late: the game
   /// ends on time instead.
   [[nodiscard]] absl::StatusOr<GameState> resign(int seat, int64_t now_ms) const;
@@ -129,6 +142,13 @@ class GameState {
   [[nodiscard]] absl::StatusOr<GameState> removePlayer(int seat, int64_t now_ms) const;
 
   [[nodiscard]] bool isOver() const { return result_.has_value(); }
+  /// Two passes in a row, and not over.
+  [[nodiscard]] bool scoring() const { return !isOver() && twoPasses(); }
+  /// The points of the stones marked dead, ascending.
+  [[nodiscard]] const std::vector<int>& dead() const { return dead_; }
+  [[nodiscard]] bool isDead(int x, int y) const;
+  /// Which seats accept the marks, indexed by seat.
+  [[nodiscard]] const std::array<bool, 2>& accepted() const { return accepted_; }
   [[nodiscard]] const std::optional<Result>& result() const { return result_; }
   [[nodiscard]] int playerIndex(const std::string& id) const;
   [[nodiscard]] const std::vector<std::string>& players() const { return players_; }
@@ -149,7 +169,8 @@ class GameState {
   [[nodiscard]] int whoseTurn() const;
   /// Stones `color` has taken.
   [[nodiscard]] int captures(Color color) const;
-  /// The board's area count now, komi to White.
+  /// The board's area count now, the dead stones counted as empty, komi
+  /// to White.
   [[nodiscard]] Score score() const;
   /// Time left for `color` at `now_ms`: the running side's clock counts
   /// down, never below zero; a finished game's clocks stand still.
@@ -164,7 +185,12 @@ class GameState {
   [[nodiscard]] absl::StatusOr<GameState> placed(int move) const;
   [[nodiscard]] GameState ended(Result result, Clock clock) const;
   [[nodiscard]] Clock chargedTo(int64_t now_ms) const;
-  /// The move charged to the clock, then placed; two passes end it.
+  /// A mark or acceptance's precondition: a seat, in the scoring.
+  [[nodiscard]] absl::Status checkScoring(int seat) const;
+  /// The group of stones at `point`.
+  [[nodiscard]] std::vector<int> groupAt(int point) const;
+  /// The move charged to the clock, then placed; a pass in the scoring is
+  /// refused.
   [[nodiscard]] absl::StatusOr<GameState> moved(int seat, int move, int64_t now_ms) const;
   [[nodiscard]] Result scoreResult() const;
   [[nodiscard]] bool twoPasses() const;
@@ -177,6 +203,8 @@ class GameState {
   TimeControl time_control_;
   Clock clock_;
   std::optional<Result> result_;
+  std::vector<int> dead_;
+  std::array<bool, 2> accepted_{};
 
   // Derived from the moves.
   std::string board_;

@@ -12,7 +12,9 @@ use moonbase.games#TurnChanged
 
 // Go's vocabulary: two seats, one game after another, on a 9, 13 or 19
 // board with a Fischer clock. Captures, no suicide, simple ko; two passes
-// in a row end a game, scored by area (Tromp-Taylor) with komi to White.
+// in a row open the scoring, where the seats mark dead groups and accept,
+// and the game is scored by area (Tromp-Taylor, dead stones counted as
+// empty) with komi to White.
 // It rides the room's Play stream as one `go` member per direction and
 // reuses the shared lifecycle shapes, except startGame, which names the
 // board, komi and clock. Shapes are prefixed `Go`: codegen flattens every
@@ -37,6 +39,8 @@ union GoMove {
     pass: GoPass
     resign: GoResign
     watch: GoWatch
+    markDead: GoMarkDead
+    accept: GoAccept
 }
 
 /// Seats two and opens an empty board, Black's clock running; the first
@@ -72,9 +76,26 @@ structure GoPlay {
     y: Integer
 }
 
-/// The seat on turn passes; a second pass in a row ends the game on the
-/// score.
+/// The seat on turn passes; a second pass in a row opens the scoring
+/// (phase `scoring`), where a pass is refused and a play by the seat on
+/// turn drops the marks and plays on.
 structure GoPass {}
+
+/// Either seat, in the scoring: the group of stones at (x, y) dead, or
+/// alive again if it was marked. Withdraws both seats' acceptance.
+structure GoMarkDead {
+    @required
+    @range(min: 0, max: 18)
+    x: Integer
+
+    @required
+    @range(min: 0, max: 18)
+    y: Integer
+}
+
+/// Either seat, in the scoring, accepts the marks; once both have, the
+/// game ends on the score.
+structure GoAccept {}
 
 /// Either seat, on turn or not.
 structure GoResign {}
@@ -123,7 +144,8 @@ structure GoView {
     @required
     gameId: String
 
-    /// waiting | playing | ended (between games) | closed (a seat left).
+    /// waiting | playing | scoring (after two passes) | ended (between
+    /// games) | closed (a seat left).
     @required
     phase: String
 
@@ -156,6 +178,13 @@ structure GoView {
     moveCount: Integer
 
     clock: GoClock
+
+    /// The stones marked dead, while scoring and in a game it scored;
+    /// absent when there are none.
+    dead: GoPoints
+
+    /// Present only in phase `scoring`.
+    scoring: GoScoring
 
     /// The game's result once it is over.
     result: GoResult
@@ -202,6 +231,32 @@ structure GoLastMove {
     y: Integer
 }
 
+list GoPoints {
+    member: GoPoint
+}
+
+structure GoPoint {
+    @required
+    x: Integer
+
+    @required
+    y: Integer
+}
+
+structure GoScoring {
+    /// The seats that accept the marks as they stand.
+    @required
+    acceptedBy: GoPlayerIds
+
+    /// The count if the marks were accepted now.
+    @required
+    score: GoScore
+}
+
+list GoPlayerIds {
+    member: String
+}
+
 structure GoClock {
     @required
     blackMs: Long
@@ -226,8 +281,8 @@ structure GoResult {
     @required
     ending: String
 
-    /// The area count, komi included in White's, for a game ended on the
-    /// score.
+    /// The area count, dead stones counted as empty and komi included in
+    /// White's, for a game ended on the score.
     score: GoScore
 }
 

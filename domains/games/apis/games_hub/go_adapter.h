@@ -32,8 +32,9 @@ struct Adapter<go::Table> {
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "go_commands";
-  static constexpr std::array<std::string_view, 8> kCommands = {
-      "createGame", "joinGame", "startGame", "leaveGame", "play", "pass", "resign", "watch"};
+  static constexpr std::array<std::string_view, 10> kCommands = {
+      "createGame", "joinGame", "startGame", "leaveGame", "play",
+      "pass",       "resign",   "watch",     "markDead",  "accept"};
   static constexpr std::string_view kEventSeries = "go_events";
   static constexpr std::array<std::string_view, 7> kEvents = {
       "gameJoined",  "gameState", "gameCreated", "gameStarted",

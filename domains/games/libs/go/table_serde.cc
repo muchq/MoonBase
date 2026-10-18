@@ -1,5 +1,6 @@
 #include "domains/games/libs/go/table_serde.h"
 
+#include <array>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
@@ -124,6 +125,12 @@ std::string serializeTable(const Table& table) {
       {"closed", table.isOver()},
       {"endedByClose", table.endedByClose()},
       {"scoreSheet", std::move(sheet)}};
+  // The scoring's, each only once there is something to write, so a row
+  // from before marking reads as one with no marks.
+  if (!game.dead().empty()) row["dead"] = game.dead();
+  if (game.accepted()[0] || game.accepted()[1]) {
+    row["accepted"] = json::array({game.accepted()[0], game.accepted()[1]});
+  }
   if (game.result().has_value()) {
     json result{{"ending", EndingName(game.result()->ending)}};
     if (game.result()->winner.has_value()) result["winner"] = ColorName(*game.result()->winner);
@@ -193,10 +200,29 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
     result = Result{*winner, *ending};
   }
 
+  std::vector<int> dead;
+  if (payload.contains("dead")) {
+    if (!payload["dead"].is_array()) return absl::InvalidArgumentError("dead is an array");
+    for (const json& point : payload["dead"]) {
+      if (!point.is_number_integer()) return absl::InvalidArgumentError("a dead stone is a point");
+      dead.push_back(point.get<int>());
+    }
+  }
+  std::array<bool, 2> accepted{};
+  if (payload.contains("accepted")) {
+    const json& seats = payload["accepted"];
+    if (!seats.is_array() || seats.size() != 2 || !seats[0].is_boolean() ||
+        !seats[1].is_boolean()) {
+      return absl::InvalidArgumentError("accepted is two flags");
+    }
+    accepted = {seats[0].get<bool>(), seats[1].get<bool>()};
+  }
+
   auto game =
       GameState::restore(std::move(players), static_cast<int>(*size), (*komi_field)->get<double>(),
                          static_cast<int>(*black_seat), std::move(moves),
-                         TimeControl{*initial, *increment}, clock, std::move(result));
+                         TimeControl{*initial, *increment}, clock, std::move(result),
+                         std::move(dead), accepted);
   if (!game.ok()) return game.status();
   const auto closed = Flag(payload, "closed");
   if (!closed.ok()) return closed.status();

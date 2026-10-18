@@ -5,8 +5,9 @@
 // command envelope ({"move":{...}} inside the `go` command) and the update
 // envelope ({"update":{...}} inside the `go` event) through createGame,
 // joinGame, startGame naming the board, komi and clock, a play, two
-// passes and the scored gameEnded; resign in the next game; and the
-// model's bounds refused in band.
+// passes into the scoring, a mark and its undoing, both acceptances and
+// the scored gameEnded; resign in the next game; and the model's bounds
+// refused in band.
 
 #include <gtest/gtest.h>
 
@@ -129,6 +130,30 @@ TEST_F(GoWireTest, TableFlowPinsGoCommandAndUpdatePayloadBytes) {
       json::parse(GoCase(*creator, "gameState"))["update"]["gameState"]["view"]["lastMove"].dump(),
       R"({"color":"white","pass":true})");
   ASSERT_TRUE(creator->Send(CommandFrame("go", R"({"move":{"pass":{}}})")).ok());
+  const json scoring = json::parse(GoCase(*creator, "gameState"))["update"]["gameState"]["view"];
+  EXPECT_EQ(scoring["phase"], "scoring");
+  EXPECT_EQ(scoring["scoring"].dump(),
+            R"({"acceptedBy":[],"score":{"black":81.0,"white":0.5}})");
+  EXPECT_FALSE(scoring.contains("dead"));
+  EXPECT_FALSE(scoring.contains("result"));
+
+  // Black's own stone marked dead leaves an empty board: komi alone.
+  ASSERT_TRUE(
+      joiner->Send(CommandFrame("go", R"({"move":{"markDead":{"x":2,"y":1}}})")).ok());
+  const json marked = json::parse(GoCase(*creator, "gameState"))["update"]["gameState"]["view"];
+  EXPECT_EQ(marked["dead"].dump(), R"([{"x":2,"y":1}])");
+  EXPECT_EQ(marked["scoring"]["score"].dump(), R"({"black":0.0,"white":0.5})");
+  ASSERT_TRUE(
+      creator->Send(CommandFrame("go", R"({"move":{"markDead":{"x":2,"y":1}}})")).ok());
+  EXPECT_FALSE(json::parse(GoCase(*creator, "gameState"))["update"]["gameState"]["view"].contains(
+      "dead"));
+
+  ASSERT_TRUE(creator->Send(CommandFrame("go", R"({"move":{"accept":{}}})")).ok());
+  EXPECT_EQ(json::parse(GoCase(*creator, "gameState"))["update"]["gameState"]["view"]["scoring"]
+                ["acceptedBy"]
+                    .dump(),
+            R"(["player-1"])");
+  ASSERT_TRUE(joiner->Send(CommandFrame("go", R"({"move":{"accept":{}}})")).ok());
   const json ended = json::parse(GoCase(*creator, "gameState"))["update"]["gameState"]["view"];
   EXPECT_EQ(ended["phase"], "ended");
   EXPECT_EQ(ended["result"].dump(),
@@ -137,6 +162,7 @@ TEST_F(GoWireTest, TableFlowPinsGoCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(ended["scoreSheet"].dump(), R"([{"ending":"score","winner":"player-1"}])");
   EXPECT_FALSE(ended.contains("sideToMove"));
   EXPECT_FALSE(ended.contains("currentPlayerId"));
+  EXPECT_FALSE(ended.contains("scoring"));
   EXPECT_EQ(GoCase(*creator, "gameEnded"),
             R"({"update":{"gameEnded":{"result":{"ending":"score",)"
             R"("score":{"black":81.0,"white":0.5},"winner":"player-1","winnerColor":"black"}}}})");

@@ -16,6 +16,8 @@ StatsDeltas GameDeltas(const go::GameState& state) {
   return PlayedWon(state.players(), winner);
 }
 
+moonbase::games::GoScore WireScore(const go::Score& score);
+
 moonbase::games::GoResult WireResult(const go::GameState& state) {
   const go::Result& result = *state.result();
   moonbase::games::GoResult wire;
@@ -24,22 +26,24 @@ moonbase::games::GoResult WireResult(const go::GameState& state) {
     wire.winner = state.players().at(state.seatOf(*result.winner));
     wire.winnerColor = std::string(go::ColorName(*result.winner));
   }
-  if (result.ending == go::Ending::kScore) {
-    const go::Score score = state.score();
-    moonbase::games::GoScore counted;
-    counted.black = score.black;
-    counted.white = score.white;
-    wire.score = counted;
-  }
+  if (result.ending == go::Ending::kScore) wire.score = WireScore(state.score());
+  return wire;
+}
+
+moonbase::games::GoScore WireScore(const go::Score& score) {
+  moonbase::games::GoScore wire;
+  wire.black = score.black;
+  wire.white = score.white;
   return wire;
 }
 
 }  // namespace
 
-// A game in play, one ended with the table waiting on the next, or the
-// table closed by a leave.
+// A game in play, one being scored, one ended with the table waiting on
+// the next, or the table closed by a leave.
 std::string Adapter<go::Table>::Phase(const go::Table& table) {
   if (table.isOver()) return "closed";
+  if (table.game().scoring()) return "scoring";
   return table.game().isOver() ? "ended" : "playing";
 }
 
@@ -123,6 +127,24 @@ moonbase::games::GoView Adapter<go::Table>::ViewOf(const TableContext& context,
   clock.initialMs = state.timeControl().initial_ms;
   clock.incrementMs = state.timeControl().increment_ms;
   view.clock = clock;
+  if (!state.dead().empty()) {
+    std::vector<moonbase::games::GoPoint> dead;
+    for (const int point : state.dead()) {
+      moonbase::games::GoPoint at;
+      at.x = point % state.size();
+      at.y = point / state.size();
+      dead.push_back(at);
+    }
+    view.dead = std::move(dead);
+  }
+  if (state.scoring()) {
+    moonbase::games::GoScoring scoring;
+    for (int seat = 0; seat < go::GameState::kSeats; ++seat) {
+      if (state.accepted()[seat]) scoring.acceptedBy.push_back(state.players().at(seat));
+    }
+    scoring.score = WireScore(state.score());
+    view.scoring = std::move(scoring);
+  }
   if (state.isOver()) view.result = WireResult(state);
   for (const go::GameScore& score : table->scoreSheet()) {
     moonbase::games::GoScoreLine line;
@@ -199,6 +221,19 @@ Action<go::Table, Adapter<go::Table>::Start> Adapter<go::Table>::Decode(const Mo
     return GoTransition{[](const go::Table& table, int seat, const MoveContext& context) {
       return table.inGame(
           [&](const go::GameState& game) { return game.pass(seat, context.now_ms); });
+    }};
+  }
+  if (const auto* mark = move.as_markDead_or_null()) {
+    return GoTransition{
+        [x = mark->x, y = mark->y](const go::Table& table, int seat, const MoveContext& context) {
+          return table.inGame(
+              [&](const go::GameState& game) { return game.markDead(seat, x, y, context.now_ms); });
+        }};
+  }
+  if (move.as_accept_or_null() != nullptr) {
+    return GoTransition{[](const go::Table& table, int seat, const MoveContext& context) {
+      return table.inGame(
+          [&](const go::GameState& game) { return game.accept(seat, context.now_ms); });
     }};
   }
   if (move.as_resign_or_null() != nullptr) {
