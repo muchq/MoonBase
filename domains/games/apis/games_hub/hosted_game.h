@@ -52,11 +52,21 @@ struct PongTerms {
   bool operator==(const PongTerms&) const = default;
 };
 
+/// A go challenge's terms: the board, komi and clock its game starts on;
+/// absent fields at the post take these defaults, 19 by 19, komi 6.5, ten
+/// minutes and five seconds.
+struct GoTerms {
+  int size = 19;
+  double komi = go::kDefaultKomi;
+  go::TimeControl time_control{600'000, 5'000};
+  bool operator==(const GoTerms&) const = default;
+};
+
 /// What a game's challenge or round robin plays on, in that game's own
 /// shape. The hub carries it without reading it: each alternative is one
 /// adapter's Terms, and only that adapter reads or stores it (adapters.h
 /// holds them to that).
-using HostedTerms = std::variant<ChessTerms, PongTerms>;
+using HostedTerms = std::variant<ChessTerms, PongTerms, GoTerms>;
 
 }  // namespace games_hub
 

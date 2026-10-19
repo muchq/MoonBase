@@ -41,12 +41,18 @@ union GoMove {
     watch: GoWatch
     markDead: GoMarkDead
     accept: GoAccept
+    challenge: GoStartGame
 }
 
 /// Seats two and opens an empty board, Black's clock running; the first
 /// game's Black is the table's creator. On a table whose game has ended,
 /// either seat starts the next one, colours swapped. Absent fields take
 /// the defaults: 19 by 19, komi 6.5, ten minutes and five seconds.
+/// As `challenge`, the same fields are the terms a waiting table's one
+/// seat posts, before anyone joins; posting again replaces them. The
+/// room's GameSummary.terms and every view show them, and the seat that
+/// fills the table starts the game on them. Terms no game could start on
+/// are refused as they are posted.
 structure GoStartGame {
     /// 9, 13 or 19.
     @range(min: 9, max: 19)
@@ -61,6 +67,22 @@ structure GoStartGame {
 
     /// Added to a side's clock once it moves or passes, 0 to 60.
     @range(min: 0, max: 60)
+    incrementSeconds: Integer
+}
+
+/// A challenge's terms, as `challenge` posted them with the defaults
+/// filled in.
+structure GoTerms {
+    @required
+    size: Integer
+
+    @required
+    komi: Double
+
+    @required
+    initialSeconds: Integer
+
+    @required
     incrementSeconds: Integer
 }
 
@@ -153,6 +175,10 @@ structure GoView {
     size: Integer
 
     komi: Double
+
+    /// The posted challenge's terms; absent once started, or with none
+    /// posted.
+    terms: GoTerms
 
     /// Black's seat first once started; in join order while waiting.
     @required

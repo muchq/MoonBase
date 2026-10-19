@@ -2067,6 +2067,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"go_commands", {{"command", "markDead"}}},
       {"go_commands", {{"command", "accept"}}},
       {"go_commands", {{"command", "watch"}}},
+      {"go_commands", {{"command", "challenge"}}},
       {"go_events", {{"event", "gameJoined"}}},
       {"go_events", {{"event", "gameState"}}},
       {"go_events", {{"event", "gameCreated"}}},

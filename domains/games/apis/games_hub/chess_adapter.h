@@ -148,8 +148,7 @@ struct Adapter<chess_play::Table> {
   // milliseconds.
   static nlohmann::json TermsJson(const ChessTerms& terms);
   static std::optional<ChessTerms> TermsFromJson(const nlohmann::json& stored);
-  // "Standard starting position · 3+2": a clock of whole minutes in
-  // minutes and any other in seconds.
+  // "Standard starting position · 3+2", the clock as ClockLine gives it.
   static std::string TermsLine(const ChessTerms& terms);
   // A pairing's games are the archived ones its table played (Archived).
   static std::optional<HubStore::EventGame> TableGame(const chess_play::Table&) {

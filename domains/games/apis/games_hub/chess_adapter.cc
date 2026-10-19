@@ -235,11 +235,8 @@ std::optional<ChessTerms> Adapter<chess_play::Table>::TermsFromJson(const nlohma
 }
 
 std::string Adapter<chess_play::Table>::TermsLine(const ChessTerms& terms) {
-  const int64_t initial_s = terms.time_control.initial_ms / 1000;
-  const std::string initial =
-      initial_s % 60 == 0 ? absl::StrCat(initial_s / 60) : absl::StrCat(initial_s, "s");
   return absl::StrCat(chess_play::ChessSetupName(terms.setup_id).value_or(terms.setup_id), " · ",
-                      initial, "+", terms.time_control.increment_ms / 1000);
+                      ClockLine(terms.time_control.initial_ms, terms.time_control.increment_ms));
 }
 
 absl::Status Adapter<chess_play::Table>::Prepare(Start& start, const ChessOpener& opener) {

@@ -1,5 +1,6 @@
 #include "domains/games/apis/games_hub/go_adapter.h"
 
+#include "absl/strings/str_cat.h"
 #include "domains/games/libs/go/table_serde.h"
 
 namespace games_hub {
@@ -35,6 +36,20 @@ moonbase::games::GoScore WireScore(const go::Score& score) {
   wire.black = score.black;
   wire.white = score.white;
   return wire;
+}
+
+// A startGame's or a challenge's fields, absent ones taking the defaults.
+GoTerms TermsFrom(const moonbase::games::GoStartGame& fields) {
+  GoTerms terms;
+  if (fields.size.has_value()) terms.size = *fields.size;
+  if (fields.komi.has_value()) terms.komi = *fields.komi;
+  if (fields.initialSeconds.has_value()) {
+    terms.time_control.initial_ms = int64_t{*fields.initialSeconds} * 1000;
+  }
+  if (fields.incrementSeconds.has_value()) {
+    terms.time_control.increment_ms = int64_t{*fields.incrementSeconds} * 1000;
+  }
+  return terms;
 }
 
 }  // namespace
@@ -78,6 +93,15 @@ moonbase::games::GoView Adapter<go::Table>::ViewOf(const TableContext& context,
   view.moveCount = 0;
   if (table == nullptr) {
     view.phase = "waiting";
+    if (context.terms.has_value()) {
+      const GoTerms& terms = std::get<GoTerms>(*context.terms);
+      moonbase::games::GoTerms wire;
+      wire.size = terms.size;
+      wire.komi = terms.komi;
+      wire.initialSeconds = static_cast<int>(terms.time_control.initial_ms / 1000);
+      wire.incrementSeconds = static_cast<int>(terms.time_control.increment_ms / 1000);
+      view.terms = std::move(wire);
+    }
     for (const std::string& roster_id : context.roster) {
       moonbase::games::GoPlayer player;
       player.playerId = roster_id;
@@ -195,16 +219,15 @@ Action<go::Table, Adapter<go::Table>::Start> Adapter<go::Table>::Decode(const Mo
   // startGame is go's own shape: it names the board, komi and clock. On a
   // table whose game ended, the next game; otherwise the first.
   if (const auto* start = move.as_startGame_or_null()) {
-    Start named;
-    if (start->size.has_value()) named.size = *start->size;
-    if (start->komi.has_value()) named.komi = *start->komi;
-    if (start->initialSeconds.has_value()) {
-      named.time_control.initial_ms = int64_t{*start->initialSeconds} * 1000;
+    return StartGame<Start>{TermsFrom(*start), /*next_game=*/true};
+  }
+  if (const auto* challenge = move.as_challenge_or_null()) {
+    GoTerms terms = TermsFrom(*challenge);
+    if (const absl::Status ok = go::CheckRules(terms.size, terms.komi, terms.time_control);
+        !ok.ok()) {
+      return Refusal{RejectKind::kRules, std::string(ok.message())};
     }
-    if (start->incrementSeconds.has_value()) {
-      named.time_control.increment_ms = int64_t{*start->incrementSeconds} * 1000;
-    }
-    return StartGame<Start>{named, /*next_game=*/true};
+    return PostTerms{HostedTerms(std::move(terms))};
   }
   if (const auto* watch = move.as_watch_or_null()) return WatchTable{watch->gameId};
   if (move.as_createGame_or_null() != nullptr) return CreateTable{};
@@ -243,6 +266,32 @@ Action<go::Table, Adapter<go::Table>::Start> Adapter<go::Table>::Decode(const Mo
     }};
   }
   return Refusal{RejectKind::kUnknown, "unknown move"};
+}
+
+nlohmann::json Adapter<go::Table>::TermsJson(const GoTerms& terms) {
+  return {{"size", terms.size},
+          {"komi", terms.komi},
+          {"initialMs", terms.time_control.initial_ms},
+          {"incrementMs", terms.time_control.increment_ms}};
+}
+
+std::optional<GoTerms> Adapter<go::Table>::TermsFromJson(const nlohmann::json& stored) {
+  if (!stored.is_object() || !stored.contains("size") || !stored["size"].is_number_integer() ||
+      !stored.contains("komi") || !stored["komi"].is_number() || !stored.contains("initialMs") ||
+      !stored["initialMs"].is_number_integer() || !stored.contains("incrementMs") ||
+      !stored["incrementMs"].is_number_integer()) {
+    return std::nullopt;
+  }
+  GoTerms terms{stored["size"].get<int>(),
+                stored["komi"].get<double>(),
+                {stored["initialMs"].get<int64_t>(), stored["incrementMs"].get<int64_t>()}};
+  if (!go::CheckRules(terms.size, terms.komi, terms.time_control).ok()) return std::nullopt;
+  return terms;
+}
+
+std::string Adapter<go::Table>::TermsLine(const GoTerms& terms) {
+  return absl::StrCat(terms.size, "×", terms.size, " · komi ", terms.komi, " · ",
+                      ClockLine(terms.time_control.initial_ms, terms.time_control.increment_ms));
 }
 
 std::string Adapter<go::Table>::Serialize(const go::Table& engine) {

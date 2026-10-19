@@ -89,6 +89,11 @@ inline constexpr char kWhiteStone = 'w';
 inline constexpr double kDefaultKomi = 6.5;
 inline constexpr double kMaxKomi = 150;
 
+/// Whether a game could open on a `size` board with `komi` and
+/// `time_control`: a 9, 13 or 19 board, komi a multiple of 0.5 within
+/// kMaxKomi, and a clock with time on it and at most a day.
+absl::Status CheckRules(int size, double komi, const TimeControl& time_control);
+
 class GameState {
  public:
   static constexpr int kSeats = 2;

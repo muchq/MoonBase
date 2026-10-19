@@ -7,6 +7,13 @@
 
 namespace games_hub {
 
+std::string ClockLine(int64_t initial_ms, int64_t increment_ms) {
+  const int64_t initial_s = initial_ms / 1000;
+  const std::string initial =
+      initial_s % 60 == 0 ? absl::StrCat(initial_s / 60) : absl::StrCat(initial_s, "s");
+  return absl::StrCat(initial, "+", increment_ms / 1000);
+}
+
 StatsDeltas PlayedWon(const std::vector<std::string>& players, std::string_view winner) {
   StatsDeltas deltas;
   for (const std::string& id : players) {

@@ -30,6 +30,8 @@
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/game_state_serde.h"
 #include "domains/games/libs/chess_play/table_serde.h"
+#include "domains/games/libs/go/table.h"
+#include "domains/games/libs/go/table_serde.h"
 #include "domains/games/libs/pong/table.h"
 #include "domains/games/libs/pong/table_serde.h"
 #include "domains/games/libs/cards/spades/table.h"
@@ -292,6 +294,14 @@ TEST_F(PgHubStoreTest, AStoredChessTableHasNoTopLevelTerms) {
                               {60'000, 1'000}, 1'000, "kpk-opposition");
   ASSERT_TRUE(opened.ok()) << opened.status();
   const auto encoded = nlohmann::json::parse(chess_play::serializeTable(*opened));
+  ASSERT_TRUE(encoded.is_object());
+  EXPECT_FALSE(encoded.contains("terms"));
+}
+
+TEST_F(PgHubStoreTest, AStoredGoTableHasNoTopLevelTerms) {
+  auto opened = go::Table::open({"alice", "bob"}, 9, go::kDefaultKomi, {60'000, 0}, 1'000);
+  ASSERT_TRUE(opened.ok()) << opened.status();
+  const auto encoded = nlohmann::json::parse(go::serializeTable(*opened));
   ASSERT_TRUE(encoded.is_object());
   EXPECT_FALSE(encoded.contains("terms"));
 }
@@ -1410,25 +1420,44 @@ class PinnedBytesTest : public PgHubStoreTest {
   }
 };
 
-TEST_F(PinnedBytesTest, AWaitingChessTablesTermsAreTheseBytes) {
-  PgHubStore::GameRow waiting{"R1", "K1", {"alice"}, std::nullopt, 1, games_hub::GameKind::kChess};
-  waiting.terms = games_hub::ChessTerms{"kpk-opposition", {60'000, 1'000}};
-  ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
-  EXPECT_EQ(StoredState(), Jsonb(kWaitingChessState));
+// Each game's waiting table, posting its terms.
+struct WaitingTable {
+  games_hub::GameKind kind;
+  games_hub::HostedTerms terms;
+  std::string golden;
+};
+const std::vector<WaitingTable> kWaitingTables = {
+    {games_hub::GameKind::kChess, games_hub::ChessTerms{"kpk-opposition", {60'000, 1'000}},
+     kWaitingChessState},
+    {games_hub::GameKind::kGo, games_hub::GoTerms{9, 5.5, {60'000, 0}},
+     R"({"terms":{"size":9,"komi":5.5,"initialMs":60000,"incrementMs":0}})"},
+};
+
+TEST_F(PinnedBytesTest, AWaitingTablesTermsAreTheseBytes) {
+  for (const WaitingTable& table : kWaitingTables) {
+    ASSERT_TRUE(db_->Exec("DELETE FROM games").ok());
+    PgHubStore::GameRow waiting{"R1", "K1", {"alice"}, std::nullopt, 1, table.kind};
+    waiting.terms = table.terms;
+    ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
+    EXPECT_EQ(StoredState(), Jsonb(table.golden)) << static_cast<int>(table.kind);
+  }
 }
 
-TEST_F(PinnedBytesTest, TheseBytesLoadAsAWaitingChessTableThatWritesThemAgain) {
-  PgHubStore::GameRow waiting{"R1", "K1", {"alice"}, std::nullopt, 1, games_hub::GameKind::kChess};
-  ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
-  ASSERT_TRUE(
-      db_->Exec("UPDATE games SET state = $1::jsonb WHERE game_id = 'K1'", {kWaitingChessState})
-          .ok());
-  auto loaded = store_->LoadGame("R1", "K1");
-  ASSERT_TRUE(loaded.ok() && loaded->has_value());
-  EXPECT_FALSE((*loaded)->state.has_value());
-  ASSERT_TRUE(db_->Exec("DELETE FROM games").ok());
-  ASSERT_TRUE(*store_->CommitGameSave(**loaded, ""));
-  EXPECT_EQ(StoredState(), Jsonb(kWaitingChessState));
+TEST_F(PinnedBytesTest, TheseBytesLoadAsAWaitingTableThatWritesThemAgain) {
+  for (const WaitingTable& table : kWaitingTables) {
+    ASSERT_TRUE(db_->Exec("DELETE FROM games").ok());
+    PgHubStore::GameRow waiting{"R1", "K1", {"alice"}, std::nullopt, 1, table.kind};
+    ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
+    ASSERT_TRUE(
+        db_->Exec("UPDATE games SET state = $1::jsonb WHERE game_id = 'K1'", {table.golden}).ok());
+    auto loaded = store_->LoadGame("R1", "K1");
+    ASSERT_TRUE(loaded.ok() && loaded->has_value()) << static_cast<int>(table.kind);
+    EXPECT_FALSE((*loaded)->state.has_value());
+    EXPECT_EQ((*loaded)->terms, std::optional(table.terms));
+    ASSERT_TRUE(db_->Exec("DELETE FROM games").ok());
+    ASSERT_TRUE(*store_->CommitGameSave(**loaded, ""));
+    EXPECT_EQ(StoredState(), Jsonb(table.golden)) << static_cast<int>(table.kind);
+  }
 }
 
 TEST_F(PinnedBytesTest, RoundRobinBodiesAreTheseBytes) {
