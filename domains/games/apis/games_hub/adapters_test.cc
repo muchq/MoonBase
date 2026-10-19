@@ -465,7 +465,8 @@ TEST(WaitingTerms, ChessTermsRoundTripAndMalformedOnesReadAsNothing) {
 // A waiting go table's terms read back from its state column; ones no
 // game could open on, or in no go shape, read as nothing.
 TEST(WaitingTerms, GoTermsRoundTripAndOnesNoGameCouldOpenOnReadAsNothing) {
-  for (const GoTerms& terms : {GoTerms{}, GoTerms{9, -3, {30'000, 0}}, GoTerms{13, 0.5, {90'000, 3'000}}}) {
+  for (const GoTerms& terms :
+       {GoTerms{}, GoTerms{9, -3, {30'000, 0}}, GoTerms{13, 0.5, {90'000, 3'000}}}) {
     const nlohmann::json stored = WaitingTermsJson(GameKind::kGo, terms);
     EXPECT_EQ(WaitingTermsFromJson(GameKind::kGo, stored), std::optional<HostedTerms>(terms))
         << stored.dump();

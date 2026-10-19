@@ -2,7 +2,6 @@
 #define DOMAINS_GAMES_APIS_GAMES_HUB_GO_ADAPTER_H
 
 #include <array>
-
 #include <nlohmann/json.hpp>
 
 #include "domains/games/apis/games_hub/adapter.h"
