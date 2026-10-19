@@ -106,11 +106,11 @@ class HubStore {
     bool operator==(const EventGame&) const = default;
   };
 
-  /// A round robin in a room, of chess or pong: what its creator
+  /// A round robin in a room, of chess, pong or go: what its creator
   /// fixed and moderates. A pairing's result here is one the creator
   /// recorded; the games its tables played are the room's archived chess
   /// games tagged with it, written by the commits that ended them, or for
-  /// pong each tagged table's one game, off the table's own row
+  /// pong and go each tagged table's one game, off the table's own row
   /// (AddRoundRobinTableGames).
   struct ChessEventRow {
     std::string room_id;

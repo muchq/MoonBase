@@ -73,7 +73,8 @@ structure GoCreateRoundRobin {
 }
 
 /// Seats two and opens an empty board, Black's clock running; the first
-/// game's Black is the table's creator. On a table whose game has ended,
+/// game's Black is the table's creator (a round robin pairing's Black at
+/// its table). On a table whose game has ended,
 /// either seat starts the next one, colours swapped. Absent fields take
 /// the defaults: 19 by 19, komi 6.5, ten minutes and five seconds.
 /// As `challenge`, the same fields are the terms a waiting table's one
@@ -98,7 +99,7 @@ structure GoStartGame {
     incrementSeconds: Integer
 }
 
-/// A challenge's terms, as `challenge` posted them with the defaults
+/// A challenge's or round robin's terms, as posted with the defaults
 /// filled in.
 structure GoTerms {
     @required

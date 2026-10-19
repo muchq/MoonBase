@@ -39,7 +39,8 @@ moonbase::games::ChessTerms WireTerms(const ChessTerms& terms) {
 std::vector<Pairing> EffectivePairings(const HubStore::ChessEventRow& row) {
   std::vector<Pairing> pairings = row.pairings;
   std::vector<HubStore::EventGame> games = row.games;
-  // Stable: a pong pairing's tables all carry archive id 0, in code order.
+  // Stable: a pong or go pairing's tables all carry archive id 0, in code
+  // order.
   std::stable_sort(games.begin(), games.end(),
                    [](const auto& a, const auto& b) { return a.archive_id < b.archive_id; });
   std::vector<bool> played(pairings.size(), false);

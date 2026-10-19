@@ -292,5 +292,63 @@ TEST_F(GoRoundRobinFixture, EachEnvelopeServesItsOwnGamesRoundRobins) {
   EXPECT_EQ(Refused(alice), "that round robin plays chess");
 }
 
+// Leaving a pairing's game in play loses it, as chess's does: the table's
+// sheet scores the abandonment and the pairing takes it.
+TEST_F(GoRoundRobinFixture, LeavingAPairingsGameLosesIt) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  const Paired paired = PairingOf(*created, members->ids[0], members->ids[1]);
+  ASSERT_GE(paired.index, 0);
+  ASSERT_TRUE(PairingStarted(*members, *created).has_value());
+  ASSERT_TRUE(SeatOf(*members, paired.black)
+                  .stream.Send(Go(GoMove::FromLeavegame(moonbase::games::LeaveGame{})))
+                  .ok());
+  const auto scored = HeardWhere(members->room.seats[2], [&](const GoRoundRobin& heard) {
+    return heard.pairings[paired.index].result.has_value();
+  });
+  ASSERT_TRUE(scored.has_value());
+  EXPECT_EQ(scored->pairings[paired.index].result, "white");
+  EXPECT_FALSE(scored->pairings[paired.index].forfeit);
+  EXPECT_FALSE(scored->pairings[paired.index].gameId.has_value());
+}
+
+TEST_F(GoRoundRobinFixture, TheCreatorRecordsAForfeitAndWithdrawsAnEntrant) {
+  auto members = Seated(3);
+  ASSERT_TRUE(members.has_value());
+  const auto created = Created(*members);
+  ASSERT_TRUE(created.has_value());
+  Seat& creator = members->room.seats[0];
+  moonbase::games::ChessForfeit forfeit;
+  forfeit.roundRobinId = created->roundRobinId;
+  forfeit.winner = members->ids[0];
+  forfeit.loser = members->ids[1];
+  ASSERT_TRUE(creator.stream.Send(Go(GoMove::FromForfeit(forfeit))).ok());
+  const auto forfeited = HeardWhere(members->room.seats[1], [](const GoRoundRobin& heard) {
+    for (const auto& pairing : heard.pairings) {
+      if (pairing.forfeit) return true;
+    }
+    return false;
+  });
+  ASSERT_TRUE(forfeited.has_value());
+  for (const auto& pairing : forfeited->pairings) {
+    if (!pairing.forfeit) continue;
+    EXPECT_EQ(pairing.result, pairing.white == members->ids[0] ? "white" : "black");
+  }
+
+  moonbase::games::ChessWithdraw withdraw;
+  withdraw.roundRobinId = created->roundRobinId;
+  withdraw.playerId = members->ids[2];
+  ASSERT_TRUE(creator.stream.Send(Go(GoMove::FromWithdraw(withdraw))).ok());
+  const auto withdrawn = HeardWhere(
+      members->room.seats[1], [](const GoRoundRobin& heard) { return !heard.withdrawn.empty(); });
+  ASSERT_TRUE(withdrawn.has_value());
+  EXPECT_THAT(withdrawn->withdrawn, ::testing::ElementsAre(members->ids[2]));
+  int voided = 0;
+  for (const auto& pairing : withdrawn->pairings) voided += pairing.voided ? 1 : 0;
+  EXPECT_EQ(voided, 2);
+}
+
 }  // namespace
 }  // namespace games_hub

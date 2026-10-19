@@ -575,7 +575,7 @@ take is played again.
 Pong has round robins on chess's terms, on its own envelope: a
 pong round robin names a variant instead of a clock, each pairing names
 its winner (pong has no draws), and each game's moves serve and list only
-their own game's round robins, refusing the other's. The row is chess's
+their own game's round robins, refusing any other's. The row is chess's
 `chess_events` row with `"game":"pong"` and the variant in its body. A
 pairing's table starts on the round robin's variant when its second seat
 fills and plays that one game, with no next game or bot; the game is the
