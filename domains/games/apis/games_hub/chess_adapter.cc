@@ -249,6 +249,28 @@ moonbase::games::ChessRoundRobin Adapter<chess_play::Table>::RoundRobinWire(
   return RoundRobinOf(held.row, held.live);
 }
 
+std::optional<BotTurn<ChessBotAsk>> Adapter<chess_play::Table>::BotTurnOf(
+    const chess_play::Table& table, int64_t now_ms) {
+  const chess_play::GameState& game = table.game();
+  const int seat = game.whoseTurn();
+  if (seat < 0) return std::nullopt;
+  const std::string& on_turn = game.players().at(seat);
+  const std::optional<int> elo = ChessBotElo(on_turn);
+  if (!elo.has_value()) return std::nullopt;
+  return BotTurn<ChessBotAsk>{
+      on_turn, table.scoreSheet().size(), absl::StrCat(game.startFen(), " ", game.moves().size()),
+      ChessBotAsk{game.startFen(), game.moves(),
+                  ChessBotMovetimeMs(game.remainingMs(game.sideToMove(), now_ms), *elo),
+                  std::nullopt}};
+}
+
+absl::StatusOr<chess_play::Table> Adapter<chess_play::Table>::BotMove(
+    const chess_play::Table& table, int seat, std::string_view answer, const MoveContext& context) {
+  return table.inGame([&](const chess_play::GameState& state) {
+    return state.move(seat, std::string(answer), context.now_ms);
+  });
+}
+
 std::string Adapter<chess_play::Table>::Serialize(const chess_play::Table& engine) {
   return chess_play::serializeTable(engine);
 }

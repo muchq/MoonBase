@@ -1,6 +1,7 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_ADAPTER_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_ADAPTER_H
 
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -92,7 +93,11 @@ enum Capability : unsigned {
   /// kNextGame). Hooks: FlagDue(engine, now_ms), whether the side to move
   /// has run out; Flag(engine, now_ms), the game ended on time.
   kClocked = 1U << 4,
-  /// The hub's chess engine plays the game's bot seats.
+  /// The hub's engine for the game plays its bot seats: asked without the
+  /// hub's lock, its answer played only on the position it was asked
+  /// about. Hooks: BotAsk, what the engine is asked; BotTurnOf(engine,
+  /// now_ms), a bot seat's move to make, if one has; BotMove(engine, seat,
+  /// answer, context), the answer played from the seat.
   kEngineBots = 1U << 5,
   /// The game runs between moves, on the hub's ticks: pong's rallies.
   /// Hooks: Steers(move), whether a move steers the rally, and so rides
@@ -195,6 +200,29 @@ using Action =
     std::variant<Refusal, CreateTable, JoinTable, LeaveTable, StartGame<Start>, Transition<Engine>,
                  WatchTable, AddBot, PostTerms, AskHistory, AskReview, Publish, CreateRoundRobin,
                  Withdraw, Forfeit, ListRoundRobins, PlayRoundRobin, Steer>;
+
+/// A bot seat's move to make, as its game reads the table (kEngineBots).
+template <typename Ask>
+struct BotTurn {
+  std::string bot_id;
+  /// Which of the table's games: its count of finished ones. A table keeps
+  /// its id, and can repeat a start, from one game to the next.
+  std::size_t game_no = 0;
+  /// Where the game stands; an answer is played only while it still does.
+  std::string position;
+  /// What the engine is asked; none when the move is the bot's own, made
+  /// without asking (go's acceptance of the marks).
+  std::optional<Ask> ask;
+};
+
+/// How long a bot waits to ask again after its engine failed, or answered
+/// what the game refused: its clock running meanwhile.
+inline constexpr std::chrono::milliseconds kEngineBotRetry{2000};
+
+/// The engine a game's bots ask, answering a move in the game's own words
+/// or why not. Called without the hub's lock, from the bot thread.
+template <typename Ask>
+using BotEngine = std::function<absl::StatusOr<std::string>(const Ask&)>;
 
 /// The round robin moves every round robin game's union names alike, as
 /// the hub runs them; nothing for any other case. createRoundRobin is each

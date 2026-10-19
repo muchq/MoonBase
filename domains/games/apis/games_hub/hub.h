@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -25,6 +26,7 @@
 #include "domains/games/apis/games_hub/chat_store.h"
 #include "domains/games/apis/games_hub/chess_bots.h"
 #include "domains/games/apis/games_hub/game_events.h"
+#include "domains/games/apis/games_hub/go_bots.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
 #include "domains/games/apis/games_hub/hub_metrics.h"
 #include "domains/games/apis/games_hub/hub_store.h"
@@ -354,6 +356,8 @@ class GamesHub final {
   /// The engine chess bots ask; null, the default, seats no bot.
   /// Call before serving: read without a lock thereafter.
   void SetChessBotEngine(ChessBotEngine engine);
+  /// The engine go bots ask, as SetChessBotEngine's.
+  void SetGoBotEngine(GoBotEngine engine);
 
   /// Asked, for each human player, when this instance ends a chess game in
   /// a published room: 1d4 indexes them from the public feed. Called under
@@ -362,15 +366,16 @@ class GamesHub final {
   using ChessIndexer = std::function<void(const one_d4::IndexAsk&)>;
   void SetChessIndexer(ChessIndexer indexer);
 
-  /// Plays the move of every chess bot this instance holds that is on
-  /// turn: the position read under the lock, the engine asked without it
-  /// for ChessBotMovetimeMs of the seat's named strength (capped by the
-  /// side's remaining clock; no UCI Elo), and the answer played through
-  /// the same conditional commit as a player's move — only if the game
-  /// is still where it was asked. An engine that fails is asked again
-  /// for that game after kChessBotRetry, the bot's clock running
-  /// meanwhile. Returns how many moves it played.
-  int PlayChessBotsOnce();
+  /// Plays the move of every bot this instance holds that has one to make
+  /// (kEngineBots): the turn read under the lock, its game's engine asked
+  /// without it, and the answer played through the same conditional
+  /// commit as a player's move — only if the game is still where it was
+  /// asked. A chess bot thinks for ChessBotMovetimeMs of its named
+  /// strength, capped by its side's clock. An engine that fails, or
+  /// answers what the game refuses, is asked again for that game after
+  /// kEngineBotRetry, the bot's clock running meanwhile. Returns how many
+  /// moves it played.
+  int PlayEngineBotsOnce();
 
   /// The public chess feed past `after_archive_id` as one PGN archive, at
   /// most kChessHistoryLimit games. Reads the store only, so any
@@ -382,9 +387,10 @@ class GamesHub final {
   absl::StatusOr<std::optional<moonbase::games::ChessReview>> PublishedChessReview(
       int64_t archive_id);
 
-  /// Starts PlayChessBotsOnce on a thread every `interval` until the hub
-  /// is destroyed. A second call changes nothing.
-  void StartChessBots(std::chrono::milliseconds interval = kChessBotTick);
+  /// Starts PlayEngineBotsOnce on a thread every `interval` until the hub
+  /// is destroyed, if any game's engine is set. A second call changes
+  /// nothing.
+  void StartEngineBots(std::chrono::milliseconds interval = kEngineBotTick);
 
   /// One tick of every pong rally this instance runs: each paddle steps
   /// toward where its seat points (a bot's, where the bot does), the ball
@@ -416,7 +422,7 @@ class GamesHub final {
   static constexpr int kPongFrameEvery = 2;
 
   /// How soon after its turn begins a bot starts to think.
-  static constexpr std::chrono::milliseconds kChessBotTick{100};
+  static constexpr std::chrono::milliseconds kEngineBotTick{100};
 
   /// How late a flag may land after the time ran out.
   static constexpr std::chrono::milliseconds kChessClockTick{250};
@@ -639,6 +645,12 @@ class GamesHub final {
   /// table is refused.
   template <typename E>
   void TableEngineMove(const std::string& player_id, const Transition<E>& move);
+  /// One game's PlayEngineBotsOnce.
+  template <typename A>
+  int PlayBotsOnce();
+  /// Whether a `kind` table's bots have an engine to ask.
+  bool HasBotEngine(GameKind kind) const;
+
   /// TableEngineMove's commit loop on a resolved game, as `player_id`'s
   /// seat: the refusal if there is one, and otherwise the fan-out staged.
   /// The chess clock sweep calls it for the seat on turn, which sent
@@ -945,21 +957,21 @@ class GamesHub final {
   bool chess_clock_stop_ = false;
   std::thread chess_clocks_;
 
-  /// Chess bots: the engine, set before serving; per (room, table) the
-  /// game, counted by the table's finished games, whose engine failed and
-  /// the epoch ms before which it is not asked again (guarded by mu_); and
-  /// the bot thread.
-  struct ChessBotRetry {
+  /// Engine bots: each game's engine, set before serving; per (room,
+  /// table) the game, counted by the table's finished games, whose engine
+  /// failed and the epoch ms before which it is not asked again (guarded
+  /// by mu_); and the bot thread.
+  struct BotRetry {
     std::size_t game;
     int64_t until;
   };
-  ChessBotEngine chess_bot_engine_;
+  std::tuple<ChessBotEngine, GoBotEngine> bot_engines_;
   ChessIndexer chess_indexer_;
-  std::map<std::pair<std::string, std::string>, ChessBotRetry> chess_bot_retry_at_;
-  std::mutex chess_bot_mu_;
-  std::condition_variable chess_bot_cv_;
-  bool chess_bot_stop_ = false;
-  std::thread chess_bots_;
+  std::map<std::pair<std::string, std::string>, BotRetry> bot_retry_at_;
+  std::mutex engine_bot_mu_;
+  std::condition_variable engine_bot_cv_;
+  bool engine_bot_stop_ = false;
+  std::thread engine_bots_;
 
   /// Pong's rallies by (room, table): the motion between points, which no
   /// store holds. A rally is this instance's to run while it is here; the

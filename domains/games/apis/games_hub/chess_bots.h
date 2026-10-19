@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
-#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -77,10 +76,6 @@ inline int ChessBotMovetimeMs(int64_t remaining_ms, int elo) {
   if (usable < kChessBotMovetimeEngineMinMs) return kChessBotMovetimeEngineMinMs;
   return static_cast<int>(std::min(int64_t{budget}, usable));
 }
-
-/// How long the bot waits to ask again after the engine failed to answer —
-/// its clock running meanwhile.
-inline constexpr std::chrono::milliseconds kChessBotRetry{2000};
 
 /// A move asked of the engine: the game's start, its moves since, how
 /// long to think. Elo is not sent — Stockfish runs at full strength and

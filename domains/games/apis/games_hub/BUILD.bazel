@@ -91,6 +91,7 @@ cc_library(
         ":chess_bots",
         ":chess_results",
         ":games_hub_smithy_server",
+        ":go_bots",
         ":hosted_game",
         ":hub_metrics",
         ":hub_store",
@@ -904,6 +905,27 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "go_bots",
+    hdrs = ["go_bots.h"],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//domains/games/libs/go:game_state",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "go_bots_test",
+    size = "small",
+    srcs = ["go_bots_test.cc"],
+    deps = [
+        ":go_bots",
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_test(
     name = "chess_bots_test",
     size = "small",
@@ -929,6 +951,7 @@ cc_library(
         ":chess_bots",
         ":game_events",
         ":games_hub_smithy_server",
+        ":go_bots",
         ":hosted_game",
         ":hub_metrics",
         ":hub_store",
@@ -1476,6 +1499,35 @@ cc_test(
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/games/libs/chess_play:game_state",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
+cc_test(
+    name = "go_bot_e2e_test",
+    size = "small",
+    srcs = [
+        "go_bot_e2e_test.cc",
+        "stream_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_client",
+        ":games_hub_smithy_server",
+        ":hub",
+        ":hub_store",
+        ":id_generator",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
         "@com_google_absl//absl/status",

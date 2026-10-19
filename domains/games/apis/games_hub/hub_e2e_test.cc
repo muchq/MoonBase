@@ -2073,6 +2073,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"go_commands", {{"command", "forfeit"}}},
       {"go_commands", {{"command", "roundRobins"}}},
       {"go_commands", {{"command", "playRoundRobin"}}},
+      {"go_commands", {{"command", "addBot"}}},
       {"go_events", {{"event", "gameJoined"}}},
       {"go_events", {{"event", "gameState"}}},
       {"go_events", {{"event", "gameCreated"}}},

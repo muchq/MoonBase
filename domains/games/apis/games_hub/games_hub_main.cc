@@ -222,7 +222,7 @@ int main() {
           if (!move.ok()) return absl::UnavailableError(move.error().message());
           return *std::move(move);
         });
-    hub->StartChessBots();
+    hub->StartEngineBots();
     LOG(INFO) << "Chess bots: asking chess_engine at " << chess_engine_url;
   } else {
     LOG(INFO) << "Chess bots: off (CHESS_ENGINE_URL unset)";

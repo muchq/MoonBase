@@ -54,6 +54,16 @@ union GoMove {
     forfeit: ChessForfeit
     roundRobins: ChessRoundRobinsRequest
     playRoundRobin: ChessPlayRoundRobin
+    addBot: GoAddBot
+}
+
+/// GNU Go to the table's next seat, at a level (1 weakest, 10 strongest),
+/// for a table not yet started; refused when the hub has no go engine, and
+/// at a round robin's pairing. It accepts the marks in the scoring.
+structure GoAddBot {
+    @required
+    @range(min: 1, max: 10)
+    level: Integer
 }
 
 /// Starts a go round robin among the room's members, as chess's
@@ -265,6 +275,9 @@ structure GoPlayer {
 
     /// black | white, once started.
     color: String
+
+    /// A bot's seat (GNU Go).
+    bot: Boolean
 }
 
 list GoRows {
