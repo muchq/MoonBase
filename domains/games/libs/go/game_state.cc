@@ -121,7 +121,8 @@ absl::StatusOr<GameState> GameState::start(std::vector<std::string> players, int
 absl::StatusOr<GameState> GameState::restore(std::vector<std::string> players, int size,
                                              double komi, int black_seat, std::vector<int> moves,
                                              TimeControl time_control, Clock clock,
-                                             std::optional<Result> result) {
+                                             std::optional<Result> result, std::vector<int> dead,
+                                             std::array<bool, 2> accepted) {
   if (auto ok = CheckSetup(players, size, komi, black_seat, time_control); !ok.ok()) return ok;
   for (const int64_t remaining : clock.remaining_ms) {
     if (remaining < 0) return absl::InvalidArgumentError("a clock out of range");
@@ -129,8 +130,8 @@ absl::StatusOr<GameState> GameState::restore(std::vector<std::string> players, i
   if (clock.turn_started_ms < 0) return absl::InvalidArgumentError("a clock out of range");
   GameState state(std::move(players), size, komi, black_seat, time_control, clock);
   for (std::size_t i = 0; i < moves.size(); ++i) {
-    if (state.twoPasses()) {
-      return absl::InvalidArgumentError(absl::StrCat("move ", i + 1, " after the game ended"));
+    if (state.twoPasses() && moves[i] == kPass) {
+      return absl::InvalidArgumentError(absl::StrCat("move ", i + 1, " passes in the scoring"));
     }
     auto next = state.placed(moves[i]);
     if (!next.ok()) {
@@ -139,9 +140,31 @@ absl::StatusOr<GameState> GameState::restore(std::vector<std::string> players, i
     }
     state = *std::move(next);
   }
-  // Two passes end the game on the score, and nothing else does.
-  if (state.twoPasses() != (result.has_value() && result->ending == Ending::kScore)) {
-    return absl::InvalidArgumentError("a score ends exactly the game two passes end");
+  if (!dead.empty() || accepted[0] || accepted[1]) {
+    if (!state.twoPasses()) return absl::InvalidArgumentError("marks outside the scoring");
+  }
+  if (!std::is_sorted(dead.begin(), dead.end()) ||
+      std::adjacent_find(dead.begin(), dead.end()) != dead.end()) {
+    return absl::InvalidArgumentError("dead points are ascending and distinct");
+  }
+  for (const int point : dead) {
+    if (point < 0 || point >= size * size || state.board_[point] == kEmpty) {
+      return absl::InvalidArgumentError("a dead point holds a stone");
+    }
+    for (const int stone : state.groupAt(point)) {
+      if (!std::binary_search(dead.begin(), dead.end(), stone)) {
+        return absl::InvalidArgumentError("a group is dead whole or not at all");
+      }
+    }
+  }
+  state.dead_ = std::move(dead);
+  if (accepted[0] && accepted[1] && !result.has_value()) {
+    return absl::InvalidArgumentError("both seats accepted and the scoring is still open");
+  }
+  state.accepted_ = accepted;
+  // Only the scoring ends a game on the score.
+  if (result.has_value() && result->ending == Ending::kScore && !state.twoPasses()) {
+    return absl::InvalidArgumentError("a score without two passes");
   }
   if (result.has_value() && result->ending == Ending::kScore && result != state.scoreResult()) {
     return absl::InvalidArgumentError("the stored score is not what the board counts");
@@ -163,6 +186,8 @@ absl::StatusOr<GameState> GameState::placed(int move) const {
   next.previous_board_ = board_;
   next.moves_.push_back(move);
   next.side_to_move_ = Other(side_to_move_);
+  next.dead_.clear();
+  next.accepted_ = {};
   if (move == kPass) return next;
   const int points = size_ * size_;
   if (move < 0 || move >= points) return absl::InvalidArgumentError("off the board");
@@ -193,14 +218,17 @@ bool GameState::twoPasses() const {
 }
 
 Score GameState::score() const {
+  // The dead stones count as the empty points they leave.
+  std::string board = board_;
+  for (const int point : dead_) board[point] = kEmpty;
   Score score{0, komi_};
-  std::vector<bool> seen(board_.size(), false);
-  for (std::size_t start = 0; start < board_.size(); ++start) {
-    if (board_[start] == kBlackStone) {
+  std::vector<bool> seen(board.size(), false);
+  for (std::size_t start = 0; start < board.size(); ++start) {
+    if (board[start] == kBlackStone) {
       ++score.black;
       continue;
     }
-    if (board_[start] == kWhiteStone) {
+    if (board[start] == kWhiteStone) {
       ++score.white;
       continue;
     }
@@ -216,9 +244,9 @@ Score GameState::score() const {
       frontier.pop_back();
       ++region;
       ForNeighbours(at, size_, [&](int next) {
-        if (board_[next] == kBlackStone) reaches_black = true;
-        if (board_[next] == kWhiteStone) reaches_white = true;
-        if (board_[next] == kEmpty && !seen[next]) {
+        if (board[next] == kBlackStone) reaches_black = true;
+        if (board[next] == kWhiteStone) reaches_white = true;
+        if (board[next] == kEmpty && !seen[next]) {
           seen[next] = true;
           frontier.push_back(next);
         }
@@ -244,11 +272,67 @@ absl::StatusOr<GameState> GameState::moved(int seat, int move, int64_t now_ms) c
   if (remainingMs(side_to_move_, now_ms) == 0) {
     return ended(Result{Other(side_to_move_), Ending::kTimeout}, chargedTo(now_ms));
   }
+  if (move == kPass && twoPasses()) {
+    return absl::FailedPreconditionError("the game is being scored: mark, accept, or play on");
+  }
   auto next = placed(move);
   if (!next.ok()) return next.status();
   next->clock_ = chargedTo(now_ms);
   next->clock_.remaining_ms[Index(side_to_move_)] += time_control_.increment_ms;
-  if (next->twoPasses()) next->result_ = next->scoreResult();
+  return next;
+}
+
+absl::Status GameState::checkScoring(int seat) const {
+  if (isOver()) return absl::FailedPreconditionError("the game is over");
+  if (seat < 0 || seat >= kSeats) return absl::InvalidArgumentError("no such seat");
+  if (!scoring()) return absl::FailedPreconditionError("the game is not being scored");
+  return absl::OkStatus();
+}
+
+std::vector<int> GameState::groupAt(int point) const {
+  std::vector<int> group;
+  GroupHasLiberty(board_, size_, point, group);
+  std::sort(group.begin(), group.end());
+  return group;
+}
+
+bool GameState::isDead(int x, int y) const {
+  return std::binary_search(dead_.begin(), dead_.end(), y * size_ + x);
+}
+
+absl::StatusOr<GameState> GameState::markDead(int seat, int x, int y, int64_t now_ms) const {
+  if (auto ok = checkScoring(seat); !ok.ok()) return ok;
+  if (remainingMs(side_to_move_, now_ms) == 0) {
+    return ended(Result{Other(side_to_move_), Ending::kTimeout}, chargedTo(now_ms));
+  }
+  if (x < 0 || y < 0 || x >= size_ || y >= size_) {
+    return absl::InvalidArgumentError("off the board");
+  }
+  const int point = y * size_ + x;
+  if (board_[point] == kEmpty) return absl::InvalidArgumentError("no stone there");
+  GameState next = *this;
+  const std::vector<int> group = groupAt(point);
+  if (isDead(x, y)) {
+    std::erase_if(next.dead_,
+                  [&](int at) { return std::binary_search(group.begin(), group.end(), at); });
+  } else {
+    next.dead_.insert(next.dead_.end(), group.begin(), group.end());
+    std::sort(next.dead_.begin(), next.dead_.end());
+  }
+  next.accepted_ = {};
+  return next;
+}
+
+absl::StatusOr<GameState> GameState::accept(int seat, int64_t now_ms) const {
+  if (auto ok = checkScoring(seat); !ok.ok()) return ok;
+  if (remainingMs(side_to_move_, now_ms) == 0) {
+    return ended(Result{Other(side_to_move_), Ending::kTimeout}, chargedTo(now_ms));
+  }
+  GameState next = *this;
+  next.accepted_[seat] = true;
+  if (next.accepted_[0] && next.accepted_[1]) {
+    return next.ended(next.scoreResult(), chargedTo(now_ms));
+  }
   return next;
 }
 

@@ -25,6 +25,12 @@ Table Passed(const Table& table) {
   return *table.inGame([](const GameState& game) { return game.pass(game.whoseTurn(), kT0); });
 }
 
+Table Accepted(const Table& table, int seat) {
+  return *table.inGame([seat](const GameState& game) { return game.accept(seat, kT0); });
+}
+
+Table Scored(const Table& table) { return Accepted(Accepted(Passed(Passed(table)), 0), 1); }
+
 void ExpectSame(const Table& a, const Table& b) {
   EXPECT_EQ(a.players(), b.players());
   EXPECT_EQ(a.game().size(), b.game().size());
@@ -35,6 +41,8 @@ void ExpectSame(const Table& a, const Table& b) {
   EXPECT_EQ(a.game().clock(), b.game().clock());
   EXPECT_EQ(a.game().timeControl(), b.game().timeControl());
   EXPECT_EQ(a.game().result(), b.game().result());
+  EXPECT_EQ(a.game().dead(), b.game().dead());
+  EXPECT_EQ(a.game().accepted(), b.game().accepted());
   EXPECT_EQ(a.game().captures(Color::kBlack), b.game().captures(Color::kBlack));
   EXPECT_EQ(a.scoreSheet(), b.scoreSheet());
   EXPECT_EQ(a.isOver(), b.isOver());
@@ -44,12 +52,18 @@ void ExpectSame(const Table& a, const Table& b) {
 TEST(TableSerde, RoundTripsEveryShapeATableTakes) {
   // Black takes White's corner stone.
   const Table captured = Moved(Moved(Moved(Open(), 1, 0, kT0 + 500), 0, 0), 0, 1);
-  const Table scored = Passed(Passed(captured));
-  const Table even = Passed(Passed(*Table::open({"ann", "bo"}, 13, 0, kClock, kT0)));
+  const Table scored = Scored(captured);
+  const Table even = Scored(*Table::open({"ann", "bo"}, 13, 0, kClock, kT0));
+  // White's lone stone at (5,5) marked dead, and Black's acceptance.
+  const Table marked = Accepted(
+      *Passed(Passed(Moved(captured, 5, 5))).inGame([](const GameState& game) {
+        return game.markDead(1, 5, 5, kT0);
+      }),
+      0);
   const Table flagged =
       *captured.inGame([](const GameState& game) { return game.flag(kT0 + 120'000); });
   for (const Table& shape :
-       {Open(), captured, scored, even, flagged, *captured.removePlayer(0, kT0),
+       {Open(), captured, scored, even, marked, Scored(Moved(captured, 5, 5)), flagged, *captured.removePlayer(0, kT0),
         *scored.removePlayer(0, kT0), *scored.next(19, -3.5, kClock, kT0 + 9)}) {
     const std::string stored = serializeTable(shape);
     const auto back = deserializeTable(stored);
@@ -60,7 +74,7 @@ TEST(TableSerde, RoundTripsEveryShapeATableTakes) {
 }
 
 TEST(TableSerde, WritesTheDocumentedSchema) {
-  const json row = json::parse(serializeTable(Passed(Passed(Moved(Open(), 2, 1)))));
+  const json row = json::parse(serializeTable(Scored(Moved(Open(), 2, 1))));
   EXPECT_EQ(row["v"], 1);
   EXPECT_EQ(row["players"], json::array({"ann", "bo"}));
   EXPECT_EQ(row["size"], 9);
@@ -72,6 +86,8 @@ TEST(TableSerde, WritesTheDocumentedSchema) {
   EXPECT_EQ(row["remainingMs"], json::array({64'000, 62'000}));
   EXPECT_EQ(row["turnStartedMs"], kT0);
   EXPECT_EQ(row["result"], (json{{"ending", "score"}, {"winner", "black"}}));
+  EXPECT_FALSE(row.contains("dead")) << "written only once a stone is marked";
+  EXPECT_EQ(row["accepted"], json::array({true, true}));
   EXPECT_EQ(row["closed"], false);
   EXPECT_EQ(row["endedByClose"], false);
   EXPECT_EQ(row["scoreSheet"],
@@ -109,6 +125,29 @@ TEST(TableSerde, RefusesWhatPlayCouldNotReach) {
   json version = good;
   version["v"] = 2;
   EXPECT_FALSE(deserializeTable(version.dump()).ok());
+}
+
+TEST(TableSerde, WritesTheMarksAndAcceptancesWhileScoring) {
+  const Table marked = Accepted(
+      *Passed(Passed(Moved(Moved(Open(), 4, 4), 0, 0))).inGame([](const GameState& game) {
+        return game.markDead(0, 0, 0, kT0);
+      }),
+      1);
+  const json row = json::parse(serializeTable(marked));
+  EXPECT_EQ(row["dead"], json::array({0}));
+  EXPECT_EQ(row["accepted"], json::array({false, true}));
+}
+
+// A row from before marking: two passes and a score, no marks written.
+TEST(TableSerde, ReadsARowScoredBeforeMarking) {
+  json row = json::parse(serializeTable(Scored(Moved(Open(), 2, 1))));
+  ASSERT_FALSE(row.contains("dead"));
+  row.erase("accepted");
+  const auto back = deserializeTable(row.dump());
+  ASSERT_TRUE(back.ok()) << back.status();
+  EXPECT_EQ(back->game().result(), (Result{Color::kBlack, Ending::kScore}));
+  row["dead"] = json::array({"x"});
+  EXPECT_FALSE(deserializeTable(row.dump()).ok());
 }
 
 }  // namespace

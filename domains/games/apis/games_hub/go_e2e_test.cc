@@ -32,6 +32,15 @@ GameCommands Play(int x, int y) {
 
 GameCommands Pass() { return Go(GoMove::FromPass(moonbase::games::GoPass{})); }
 
+GameCommands Accept() { return Go(GoMove::FromAccept(moonbase::games::GoAccept{})); }
+
+GameCommands MarkDead(int x, int y) {
+  moonbase::games::GoMarkDead mark;
+  mark.x = x;
+  mark.y = y;
+  return Go(GoMove::FromMarkdead(mark));
+}
+
 GameCommands Resign() { return Go(GoMove::FromResign(moonbase::games::GoResign{})); }
 
 GameCommands Leave() { return Go(GoMove::FromLeavegame(moonbase::games::LeaveGame{})); }
@@ -183,8 +192,49 @@ TEST_F(GoFixture, ACaptureTakesTheStoneOffTheBoard) {
   EXPECT_EQ(view->currentPlayerId, table.bob.player_id);
 }
 
+// White's stone in Black's area, marked dead: Black's whole board, 81 to
+// White's komi.
+TEST_F(GoFixture, TwoPassesOpenTheScoringAndBothAcceptancesEndIt) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  ASSERT_TRUE(table.alice.stream.Send(Play(4, 4)).ok());
+  ASSERT_TRUE(ViewWhere(table.bob, [](const GoView& v) { return v.moveCount == 1; }));
+  ASSERT_TRUE(table.bob.stream.Send(Play(0, 0)).ok());
+  ASSERT_TRUE(ViewWhere(table.alice, [](const GoView& v) { return v.moveCount == 2; }));
+  ASSERT_TRUE(table.alice.stream.Send(Pass()).ok());
+  ASSERT_TRUE(ViewWhere(table.bob, [](const GoView& v) { return v.moveCount == 3; }));
+  ASSERT_TRUE(table.bob.stream.Send(Pass()).ok());
+  auto scoring = ViewWhere(table.alice, [](const GoView& v) { return v.phase == "scoring"; });
+  ASSERT_TRUE(scoring.has_value());
+  ASSERT_TRUE(scoring->scoring.has_value());
+  EXPECT_EQ(scoring->scoring->score.black, 1);
+
+  ASSERT_TRUE(table.bob.stream.Send(Accept()).ok());
+  ASSERT_TRUE(ViewWhere(table.alice, [](const GoView& v) {
+    return v.scoring.has_value() && v.scoring->acceptedBy.size() == 1;
+  }));
+  // A mark withdraws bob's acceptance.
+  ASSERT_TRUE(table.alice.stream.Send(MarkDead(0, 0)).ok());
+  auto marked = ViewWhere(table.bob, [](const GoView& v) { return v.dead.has_value(); });
+  ASSERT_TRUE(marked.has_value());
+  EXPECT_TRUE(marked->scoring->acceptedBy.empty());
+  EXPECT_EQ(marked->scoring->score.black, 81);
+  ASSERT_TRUE(table.alice.stream.Send(Accept()).ok());
+  ASSERT_TRUE(ViewWhere(table.bob, [](const GoView& v) {
+    return v.scoring.has_value() && v.scoring->acceptedBy.size() == 1;
+  }));
+  ASSERT_TRUE(table.bob.stream.Send(Accept()).ok());
+  auto result = Ended(table.alice);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->winner, table.alice.player_id);
+  ASSERT_TRUE(result->score.has_value());
+  EXPECT_EQ(result->score->black, 81);
+  EXPECT_EQ(result->score->white, 6.5);
+}
+
 // Black's one stone owns the whole board: 81 to White's komi.
-TEST_F(GoFixture, TwoPassesEndTheGameOnTheScoreAndTheNextSwapsColours) {
+TEST_F(GoFixture, AScoredGameIsOnTheSheetAndTheNextSwapsColours) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
   Table& table = started->table;
@@ -193,6 +243,12 @@ TEST_F(GoFixture, TwoPassesEndTheGameOnTheScoreAndTheNextSwapsColours) {
   ASSERT_TRUE(table.bob.stream.Send(Pass()).ok());
   ASSERT_TRUE(ViewWhere(table.alice, [](const GoView& v) { return v.moveCount == 2; }));
   ASSERT_TRUE(table.alice.stream.Send(Pass()).ok());
+  ASSERT_TRUE(ViewWhere(table.bob, [](const GoView& v) { return v.phase == "scoring"; }));
+  ASSERT_TRUE(table.alice.stream.Send(Accept()).ok());
+  ASSERT_TRUE(ViewWhere(table.bob, [](const GoView& v) {
+    return v.scoring.has_value() && v.scoring->acceptedBy.size() == 1;
+  }));
+  ASSERT_TRUE(table.bob.stream.Send(Accept()).ok());
   auto ended_view = ViewWhere(table.bob, [](const GoView& v) { return v.phase == "ended"; });
   ASSERT_TRUE(ended_view.has_value());
   EXPECT_FALSE(ended_view->currentPlayerId.has_value());

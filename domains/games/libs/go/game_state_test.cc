@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -33,6 +35,13 @@ GameState Played(GameState state, const std::vector<std::pair<int, int>>& points
 GameState Passed(GameState state, int passes = 2) {
   for (int i = 0; i < passes; ++i) state = *state.pass(state.whoseTurn(), kT0);
   return state;
+}
+
+// Two passes, then both seats accept the board as it stands.
+GameState Scored(GameState state) {
+  state = Passed(std::move(state));
+  state = *state.accept(0, kT0);
+  return *state.accept(1, kT0);
 }
 
 TEST(GameState, StartsOnAnEmptyBoardBlackToMove) {
@@ -111,28 +120,100 @@ TEST(GameState, AKoCanBeRetakenAfterAMoveElsewhere) {
   EXPECT_EQ(retaken.captures(Color::kWhite), 1);
 }
 
-TEST(GameState, TwoPassesInARowEndTheGame) {
+TEST(GameState, TwoPassesInARowOpenTheScoring) {
   const GameState one = *Start().pass(0, kT0);
-  EXPECT_FALSE(one.isOver());
+  EXPECT_FALSE(one.scoring());
   // A pass, a stone, a pass: not two in a row.
   const GameState apart = *Played(one, {{4, 4}}).pass(0, kT0);
-  EXPECT_FALSE(apart.isOver());
-  const GameState ended = *apart.pass(1, kT0);
+  EXPECT_FALSE(apart.scoring());
+  const GameState scoring = *apart.pass(1, kT0);
+  EXPECT_TRUE(scoring.scoring());
+  EXPECT_FALSE(scoring.isOver());
+  EXPECT_EQ(scoring.whoseTurn(), 0);
+  EXPECT_EQ(scoring.pass(0, kT0).status().code(), absl::StatusCode::kFailedPrecondition);
+}
+
+TEST(GameState, BothSeatsAcceptingEndsTheGameOnTheScore) {
+  const GameState scoring = Passed(Played(Start(), {{4, 4}}));
+  const GameState one = *scoring.accept(1, kT0);
+  EXPECT_FALSE(one.isOver());
+  EXPECT_EQ(one.accepted(), (std::array<bool, 2>{false, true}));
+  const GameState ended = *one.accept(0, kT0);
   ASSERT_TRUE(ended.isOver());
-  EXPECT_EQ(ended.result()->ending, Ending::kScore);
+  EXPECT_EQ(ended.result(), (Result{Color::kBlack, Ending::kScore}));
   EXPECT_EQ(ended.whoseTurn(), -1);
-  EXPECT_FALSE(ended.pass(0, kT0).ok());
+  EXPECT_FALSE(ended.accept(0, kT0).ok());
   EXPECT_FALSE(ended.play(0, 0, 0, kT0).ok());
+  EXPECT_EQ(Start().accept(0, kT0).status().code(), absl::StatusCode::kFailedPrecondition);
+}
+
+// White's two stones sit inside Black's area: alive they spoil it, dead
+// they are Black's.
+GameState Invaded() { return Passed(Played(Start(), {{4, 4}, {0, 0}, {6, 6}, {1, 0}})); }
+
+TEST(GameState, MarkingAStoneMarksItsWholeGroupDeadForTheCount) {
+  const GameState scoring = Invaded();
+  EXPECT_EQ(scoring.score(), (Score{2, 8.5}));
+  const GameState marked = *scoring.markDead(0, 1, 0, kT0);
+  EXPECT_TRUE(marked.isDead(0, 0));
+  EXPECT_TRUE(marked.isDead(1, 0));
+  EXPECT_FALSE(marked.isDead(4, 4));
+  EXPECT_EQ(marked.dead(), (std::vector<int>{0, 1}));
+  EXPECT_EQ(marked.at(0, 0), kWhiteStone) << "a dead stone stays on the board";
+  EXPECT_EQ(marked.score(), (Score{81, 6.5}));
+  const GameState ended = *(*marked.accept(0, kT0)).accept(1, kT0);
+  EXPECT_EQ(ended.result(), (Result{Color::kBlack, Ending::kScore}));
+}
+
+TEST(GameState, MarkingAgainRevivesTheGroup) {
+  const GameState revived = *(*Invaded().markDead(1, 0, 0, kT0)).markDead(0, 1, 0, kT0);
+  EXPECT_TRUE(revived.dead().empty());
+  EXPECT_EQ(revived.score(), (Score{2, 8.5}));
+}
+
+TEST(GameState, AMarkWithdrawsBothAcceptances) {
+  const GameState accepted = *Invaded().accept(0, kT0);
+  const GameState marked = *accepted.markDead(1, 0, 0, kT0);
+  EXPECT_EQ(marked.accepted(), (std::array<bool, 2>{false, false}));
+  EXPECT_FALSE(marked.accept(1, kT0)->isOver());
+}
+
+TEST(GameState, OnlyAStoneInTheScoringCanBeMarked) {
+  EXPECT_EQ(Invaded().markDead(0, 8, 8, kT0).status().code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_EQ(Invaded().markDead(0, 9, 0, kT0).status().code(), absl::StatusCode::kInvalidArgument);
+  EXPECT_EQ(Played(Start(), {{4, 4}}).markDead(0, 4, 4, kT0).status().code(),
+            absl::StatusCode::kFailedPrecondition);
+}
+
+TEST(GameState, PlayingOnFromTheScoringResumesTheGame) {
+  const GameState marked = *(*Invaded().markDead(0, 0, 0, kT0)).accept(1, kT0);
+  // White, who did not pass last, is not on turn.
+  EXPECT_FALSE(marked.play(1, 2, 2, kT0).ok());
+  const GameState resumed = *marked.play(0, 2, 0, kT0);
+  EXPECT_FALSE(resumed.scoring());
+  EXPECT_TRUE(resumed.dead().empty());
+  EXPECT_EQ(resumed.accepted(), (std::array<bool, 2>{false, false}));
+  EXPECT_EQ(resumed.at(2, 0), kBlackStone);
+  EXPECT_TRUE(Passed(resumed).scoring());
+}
+
+TEST(GameState, TheClockOnTurnRunsThroughTheScoring) {
+  const GameState scoring = Invaded();
+  EXPECT_EQ(scoring.remainingMs(Color::kBlack, kT0 + 1'000), 59'000);
+  const auto flagged = scoring.flag(kT0 + 60'000);
+  ASSERT_TRUE(flagged.ok());
+  EXPECT_EQ(flagged->result(), (Result{Color::kWhite, Ending::kTimeout}));
+  EXPECT_EQ(scoring.accept(1, kT0 + 60'000)->result(), (Result{Color::kWhite, Ending::kTimeout}));
 }
 
 TEST(GameState, AnEmptyBoardIsKomiForWhite) {
-  const GameState ended = Passed(Start());
+  const GameState ended = Scored(Start());
   EXPECT_EQ(ended.score(), (Score{0, 6.5}));
   EXPECT_EQ(ended.result(), (Result{Color::kWhite, Ending::kScore}));
 }
 
 TEST(GameState, AnEvenScoreIsADraw) {
-  const GameState ended = Passed(Start(9, 0));
+  const GameState ended = Scored(Start(9, 0));
   EXPECT_EQ(ended.result(), (Result{std::nullopt, Ending::kScore}));
 }
 
@@ -144,14 +225,14 @@ TEST(GameState, AreaCountsStonesAndTheEmptyPointsOnlyOneColourReaches) {
     walls.emplace_back(3, y);
     walls.emplace_back(5, y);
   }
-  const GameState ended = Passed(Played(Start(), walls));
+  const GameState ended = Scored(Played(Start(), walls));
   EXPECT_EQ(ended.score(), (Score{36, 42.5}));
   EXPECT_EQ(ended.result(), (Result{Color::kWhite, Ending::kScore}));
 
-  const GameState no_komi = Passed(Played(Start(9, 0), walls));
+  const GameState no_komi = Scored(Played(Start(9, 0), walls));
   EXPECT_EQ(no_komi.result(), (Result{std::nullopt, Ending::kScore}));
 
-  const GameState lone = Passed(Played(Start(), {{4, 4}}));
+  const GameState lone = Scored(Played(Start(), {{4, 4}}));
   EXPECT_EQ(lone.score(), (Score{81, 6.5}));
   EXPECT_EQ(lone.result(), (Result{Color::kBlack, Ending::kScore}));
 }
@@ -206,15 +287,12 @@ TEST(GameState, RestoreReplaysTheMovesAndRefusesWhatPlayCouldNotReach) {
   EXPECT_FALSE(GameState::restore(taken.players(), 9, kDefaultKomi, 0, retake, kMinute,
                                   taken.clock(), std::nullopt)
                    .ok());
-  // A score without two passes, two passes without a score, the wrong
-  // winner, and a timeout the clock does not show.
+  // A score without two passes, the wrong winner, and a timeout the clock
+  // does not show.
   EXPECT_FALSE(GameState::restore(taken.players(), 9, kDefaultKomi, 0, taken.moves(), kMinute,
                                   taken.clock(), Result{Color::kBlack, Ending::kScore})
                    .ok());
   const std::vector<int> passes{kPass, kPass};
-  EXPECT_FALSE(GameState::restore({"ann", "bo"}, 9, kDefaultKomi, 0, passes, kMinute, taken.clock(),
-                                  std::nullopt)
-                   .ok());
   EXPECT_FALSE(GameState::restore({"ann", "bo"}, 9, kDefaultKomi, 0, passes, kMinute, taken.clock(),
                                   Result{Color::kBlack, Ending::kScore})
                    .ok());
@@ -224,6 +302,37 @@ TEST(GameState, RestoreReplaysTheMovesAndRefusesWhatPlayCouldNotReach) {
   EXPECT_FALSE(GameState::restore({"ann", "bo"}, 9, kDefaultKomi, 0, {}, kMinute, taken.clock(),
                                   Result{Color::kWhite, Ending::kTimeout})
                    .ok());
+}
+
+TEST(GameState, RestoreKeepsTheScoringAndRefusesMarksPlayCouldNotMake) {
+  const GameState marked = *(*Invaded().markDead(0, 0, 0, kT0)).accept(1, kT0);
+  const auto restore = [&](std::vector<int> moves, std::vector<int> dead,
+                           std::array<bool, 2> accepted, std::optional<Result> result) {
+    return GameState::restore(marked.players(), 9, kDefaultKomi, 0, std::move(moves), kMinute,
+                              marked.clock(), std::move(result), std::move(dead), accepted);
+  };
+  const auto back = restore(marked.moves(), marked.dead(), marked.accepted(), std::nullopt);
+  ASSERT_TRUE(back.ok()) << back.status();
+  EXPECT_TRUE(back->scoring());
+  EXPECT_EQ(back->dead(), marked.dead());
+  EXPECT_EQ(back->accepted(), marked.accepted());
+
+  EXPECT_FALSE(restore(marked.moves(), {0}, {}, std::nullopt).ok()) << "half a group";
+  EXPECT_FALSE(restore(marked.moves(), {80}, {}, std::nullopt).ok()) << "an empty point";
+  EXPECT_FALSE(restore(marked.moves(), {0, 0, 1}, {}, std::nullopt).ok()) << "a repeat";
+  EXPECT_FALSE(restore(marked.moves(), {}, {true, true}, std::nullopt).ok())
+      << "both accepted and still scoring";
+  std::vector<int> played_on = marked.moves();
+  played_on.push_back(2);
+  EXPECT_FALSE(restore(played_on, {0, 1}, {}, std::nullopt).ok()) << "marks outside the scoring";
+  EXPECT_TRUE(restore(played_on, {}, {}, std::nullopt).ok());
+  std::vector<int> third_pass = marked.moves();
+  third_pass.push_back(kPass);
+  EXPECT_FALSE(restore(third_pass, {}, {}, std::nullopt).ok());
+
+  EXPECT_TRUE(restore(marked.moves(), {0, 1}, {}, Result{Color::kBlack, Ending::kScore}).ok());
+  EXPECT_FALSE(restore(marked.moves(), {}, {}, Result{Color::kBlack, Ending::kScore}).ok())
+      << "a score the marks do not count";
 }
 
 }  // namespace

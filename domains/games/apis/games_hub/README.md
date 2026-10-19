@@ -599,10 +599,15 @@ does: 9, 13 or 19 lines (`startGame.size`, 19 unnamed), komi to White
 (6.5 unnamed), and a Fischer clock (ten minutes and five seconds
 unnamed) that the clock sweep flags as it does chess's. The first game's
 Black is the table's creator; each next game swaps colours. Captures, no
-suicide, simple ko. Two passes in a row end a game on Tromp-Taylor area,
-an even score a draw; either seat may resign; a leave abandons a game in
+suicide, simple ko. Two passes in a row open the scoring: either seat
+marks groups dead (`markDead`, a toggle that withdraws both acceptances)
+and accepts (`accept`); the second acceptance ends the game on
+Tromp-Taylor area with the dead stones counted as empty, an even score a
+draw. The seat on turn may instead play on, which drops the marks; its
+clock runs throughout. Either seat may resign; a leave abandons a game in
 play and closes the table. The view is one for everyone: the board as
-rows of `.`, `b` and `w`, captures, the last move, both clocks, and the
+rows of `.`, `b` and `w`, captures, the last move, both clocks, the dead
+stones and, while scoring, who accepts and the count so far, and the
 result with the count once a game ends on the score. Watching is
 chess's; go has no bots, challenges, round robins or archive.
 
