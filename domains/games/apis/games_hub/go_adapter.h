@@ -2,16 +2,12 @@
 #define DOMAINS_GAMES_APIS_GAMES_HUB_GO_ADAPTER_H
 
 #include <array>
+#include <nlohmann/json.hpp>
 
 #include "domains/games/apis/games_hub/adapter.h"
 #include "domains/games/libs/go/table.h"
 
 namespace games_hub {
-
-/// A go game the starter did not name: 19 by 19, komi 6.5, ten minutes
-/// and five seconds.
-inline constexpr int kDefaultGoSize = 19;
-inline constexpr go::TimeControl kDefaultGoClock{600'000, 5'000};
 
 template <>
 struct Adapter<go::Table> {
@@ -19,22 +15,20 @@ struct Adapter<go::Table> {
   using Move = moonbase::games::GoMove;
   using Update = moonbase::games::GoUpdate;
   using View = moonbase::games::GoView;
-  /// The board, komi and clock a game plays on.
-  struct Start {
-    int size = kDefaultGoSize;
-    double komi = go::kDefaultKomi;
-    go::TimeControl time_control = kDefaultGoClock;
-  };
+  using Terms = GoTerms;
+  /// The board, komi and clock a game plays on: a challenge's terms, or a
+  /// startGame's.
+  using Start = GoTerms;
   static constexpr GameKind kKind = GameKind::kGo;
   static constexpr std::string_view kName = "go";
   static constexpr std::size_t kMaxSeats = go::GameState::kSeats;
-  static constexpr unsigned kCapabilities = kWatchable | kNextGame | kClocked;
+  static constexpr unsigned kCapabilities = kWatchable | kNextGame | kClocked | kChallenges;
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "go_commands";
-  static constexpr std::array<std::string_view, 10> kCommands = {
-      "createGame", "joinGame", "startGame", "leaveGame", "play",
-      "pass",       "resign",   "watch",     "markDead",  "accept"};
+  static constexpr std::array<std::string_view, 11> kCommands = {
+      "createGame", "joinGame", "startGame", "leaveGame", "play",     "pass",
+      "resign",     "watch",    "markDead",  "accept",    "challenge"};
   static constexpr std::string_view kEventSeries = "go_events";
   static constexpr std::array<std::string_view, 7> kEvents = {
       "gameJoined",  "gameState", "gameCreated", "gameStarted",
@@ -89,9 +83,11 @@ struct Adapter<go::Table> {
     return go::Table::open(context.roster, start.size, start.komi, start.time_control,
                            context.now_ms);
   }
-  static std::optional<StartGame<Start>> FilledStart(const std::optional<HostedTerms>&,
+  /// A challenge's table starts on its terms once its second seat fills.
+  static std::optional<StartGame<Start>> FilledStart(const std::optional<HostedTerms>& terms,
                                                      const std::optional<EventTag>&) {
-    return std::nullopt;
+    if (!terms.has_value()) return std::nullopt;
+    return StartGame<Start>{std::get<GoTerms>(*terms)};
   }
   static std::string Serialize(const go::Table& engine);
   static absl::StatusOr<go::Table> Deserialize(const std::string& stored);
@@ -103,6 +99,13 @@ struct Adapter<go::Table> {
   }
   // Ended between games, or closed.
   static bool CurrentGameOver(const go::Table& table) { return table.game().isOver(); }
+
+  // {"size", "komi", "initialMs", "incrementMs"}, the clock in integer
+  // milliseconds; terms no game could open on read as nothing.
+  static nlohmann::json TermsJson(const GoTerms& terms);
+  static std::optional<GoTerms> TermsFromJson(const nlohmann::json& stored);
+  // "9×9 · komi 5.5 · 1+0", the clock as ClockLine gives it.
+  static std::string TermsLine(const GoTerms& terms);
 
   static bool FlagDue(const go::Table& table, int64_t now_ms) {
     const go::GameState& game = table.game();

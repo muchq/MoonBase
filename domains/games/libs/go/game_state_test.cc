@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -62,6 +63,21 @@ TEST(GameState, RefusesABadSetup) {
   EXPECT_FALSE(GameState::start({"ann", "bo"}, 9, 150.5, 0, kMinute, kT0).ok());
   EXPECT_FALSE(GameState::start({"ann", "bo"}, 9, kDefaultKomi, 0, {0, 0}, kT0).ok());
   EXPECT_TRUE(GameState::start({"ann", "bo"}, 19, -7, 1, kMinute, kT0).ok());
+}
+
+// The rules a game opens on, apart from its seats: what a challenge's
+// terms are held to as they are posted.
+TEST(CheckRules, HoldsTheBoardKomiAndClockAsStartDoes) {
+  EXPECT_TRUE(CheckRules(9, kDefaultKomi, kMinute).ok());
+  EXPECT_TRUE(CheckRules(13, -kMaxKomi, kMinute).ok());
+  EXPECT_TRUE(CheckRules(19, 0, {GameState::kMaxClockMs, GameState::kMaxClockMs}).ok());
+  EXPECT_FALSE(CheckRules(10, kDefaultKomi, kMinute).ok());
+  EXPECT_FALSE(CheckRules(9, 6.25, kMinute).ok());
+  EXPECT_FALSE(CheckRules(9, kMaxKomi + 0.5, kMinute).ok());
+  EXPECT_FALSE(CheckRules(9, std::numeric_limits<double>::quiet_NaN(), kMinute).ok());
+  EXPECT_FALSE(CheckRules(9, kDefaultKomi, {0, 0}).ok());
+  EXPECT_FALSE(CheckRules(9, kDefaultKomi, {60'000, -1}).ok());
+  EXPECT_FALSE(CheckRules(9, kDefaultKomi, {GameState::kMaxClockMs + 1, 0}).ok());
 }
 
 TEST(GameState, AStoneWithoutLibertiesIsCaptured) {

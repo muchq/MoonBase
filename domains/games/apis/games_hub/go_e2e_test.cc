@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/time/time.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
@@ -329,6 +330,104 @@ TEST_F(GoFixture, ALeaverLosesByAbandonment) {
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->winner, table.bob.player_id);
   EXPECT_EQ(result->ending, "abandoned");
+}
+
+GameCommands Challenge(moonbase::games::GoStartGame terms) {
+  return Go(GoMove::FromChallenge(std::move(terms)));
+}
+
+// A go table's one seat posts its terms: the room's list says them, and
+// the view carries them, before anyone joins.
+TEST_F(GoFixture, APostedChallengeShowsInTheRoomAndTheView) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  ASSERT_TRUE(alice.stream.Send(Go(GoMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveGo(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  EXPECT_FALSE(created->as_gameJoined_or_null()->view.terms.has_value());
+  moonbase::games::GoStartGame terms = NineByNine();
+  terms.komi = 5.5;
+  ASSERT_TRUE(alice.stream.Send(Challenge(terms)).ok());
+  auto posted = ViewWhere(alice, [](const GoView& v) { return v.terms.has_value(); });
+  ASSERT_TRUE(posted.has_value());
+  EXPECT_EQ(posted->phase, "waiting");
+  EXPECT_EQ(posted->terms->size, 9);
+  EXPECT_EQ(posted->terms->komi, 5.5);
+  EXPECT_EQ(posted->terms->initialSeconds, 60);
+  EXPECT_EQ(posted->terms->incrementSeconds, 0);
+  auto listed = AwaitRoomState(
+      bob.stream, [](const auto& r) { return !r.games.empty() && r.games[0].terms.has_value(); },
+      "the challenge in the room's list");
+  ASSERT_TRUE(listed.has_value());
+  EXPECT_EQ(listed->games[0].terms, "9×9 · komi 5.5 · 1+0");
+}
+
+TEST_F(GoFixture, JoiningAChallengeStartsItOnItsTerms) {
+  auto room = SeatedRoom(2);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  ASSERT_TRUE(alice.stream.Send(Go(GoMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveGo(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  moonbase::games::GoStartGame terms;
+  terms.size = 13;
+  terms.komi = 0.5;
+  terms.initialSeconds = 90;
+  terms.incrementSeconds = 3;
+  ASSERT_TRUE(alice.stream.Send(Challenge(terms)).ok());
+  ASSERT_TRUE(ViewWhere(alice, [](const GoView& v) { return v.terms.has_value(); }));
+  moonbase::games::JoinGame join;
+  join.gameId = created->as_gameJoined_or_null()->view.gameId;
+  ASSERT_TRUE(bob.stream.Send(Go(GoMove::FromJoingame(join))).ok());
+  for (Seat* seat : {&alice, &bob}) {
+    ASSERT_TRUE(ReceiveGo(seat->stream, "gameStarted").has_value()) << seat->player_id;
+    auto playing = ViewWhere(*seat, [](const GoView& v) { return v.phase == "playing"; });
+    ASSERT_TRUE(playing.has_value());
+    EXPECT_EQ(playing->size, 13);
+    EXPECT_EQ(playing->komi, 0.5);
+    ASSERT_TRUE(playing->clock.has_value());
+    EXPECT_EQ(playing->clock->initialMs, 90'000);
+    EXPECT_EQ(playing->clock->incrementMs, 3'000);
+    EXPECT_FALSE(playing->terms.has_value());
+  }
+}
+
+TEST_F(GoFixture, AChallengeTakesStartGamesDefaultsForWhatItLeavesOut) {
+  auto room = SeatedRoom(1);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  ASSERT_TRUE(alice.stream.Send(Go(GoMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  ASSERT_TRUE(ReceiveGo(alice.stream, "gameJoined").has_value());
+  ASSERT_TRUE(alice.stream.Send(Challenge(moonbase::games::GoStartGame{})).ok());
+  auto posted = ViewWhere(alice, [](const GoView& v) { return v.terms.has_value(); });
+  ASSERT_TRUE(posted.has_value());
+  EXPECT_EQ(posted->terms->size, 19);
+  EXPECT_EQ(posted->terms->komi, 6.5);
+  EXPECT_EQ(posted->terms->initialSeconds, 600);
+  EXPECT_EQ(posted->terms->incrementSeconds, 5);
+}
+
+// Terms no game could start on are refused as they are posted, not when
+// the table fills.
+TEST_F(GoFixture, AChallengeNoGameCouldStartOnIsRefused) {
+  auto room = SeatedRoom(1);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  ASSERT_TRUE(alice.stream.Send(Go(GoMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  ASSERT_TRUE(ReceiveGo(alice.stream, "gameJoined").has_value());
+  for (const auto& [size, komi] : std::vector<std::pair<int, double>>{{10, 6.5}, {19, 6.25}}) {
+    moonbase::games::GoStartGame terms;
+    terms.size = size;
+    terms.komi = komi;
+    ASSERT_TRUE(alice.stream.Send(Challenge(terms)).ok());
+    auto refused = ReceiveCase(alice.stream, "commandRejected");
+    ASSERT_TRUE(refused.has_value()) << size << " " << komi;
+    EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
+              size == 10 ? "a board is 9, 13 or 19, not 10" : "komi is a multiple of 0.5 within 150");
+  }
 }
 
 }  // namespace

@@ -462,6 +462,38 @@ TEST(WaitingTerms, ChessTermsRoundTripAndMalformedOnesReadAsNothing) {
   }
 }
 
+// A waiting go table's terms read back from its state column; ones no
+// game could open on, or in no go shape, read as nothing.
+TEST(WaitingTerms, GoTermsRoundTripAndOnesNoGameCouldOpenOnReadAsNothing) {
+  for (const GoTerms& terms :
+       {GoTerms{}, GoTerms{9, -3, {30'000, 0}}, GoTerms{13, 0.5, {90'000, 3'000}}}) {
+    const nlohmann::json stored = WaitingTermsJson(GameKind::kGo, terms);
+    EXPECT_EQ(WaitingTermsFromJson(GameKind::kGo, stored), std::optional<HostedTerms>(terms))
+        << stored.dump();
+  }
+  const nlohmann::json good = WaitingTermsJson(GameKind::kGo, GoTerms{});
+  const auto with = [&good](const std::string& key, nlohmann::json value) {
+    nlohmann::json stored = good;
+    if (value.is_null()) {
+      stored.erase(key);
+    } else {
+      stored[key] = std::move(value);
+    }
+    return stored;
+  };
+  for (const nlohmann::json& malformed :
+       {nlohmann::json("19"), with("size", 10), with("size", 19.0), with("size", nullptr),
+        with("komi", 6.25), with("komi", "6.5"), with("initialMs", 0), with("initialMs", 60000.0),
+        with("incrementMs", -1), with("incrementMs", nullptr)}) {
+    EXPECT_EQ(WaitingTermsFromJson(GameKind::kGo, malformed), std::nullopt) << malformed.dump();
+  }
+}
+
+TEST(WaitingTerms, TheLobbyListsGoTermsByBoardKomiAndClock) {
+  EXPECT_EQ(TermsLineOf(GameKind::kGo, GoTerms{}), "19×19 · komi 6.5 · 10+5");
+  EXPECT_EQ(TermsLineOf(GameKind::kGo, GoTerms{9, -3, {90'000, 0}}), "9×9 · komi -3 · 90s+0");
+}
+
 TEST(WaitingTerms, TheLobbyListsChessTermsBySetupAndClock) {
   EXPECT_EQ(TermsLineOf(GameKind::kChess, kRapid), "K+P vs K — Opposition · 10+5");
   EXPECT_EQ(TermsLineOf(GameKind::kChess, ChessTerms{"standard", {90'000, 0}}),

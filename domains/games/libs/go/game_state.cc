@@ -20,20 +20,8 @@ absl::Status CheckSetup(const std::vector<std::string>& players, int size, doubl
     return absl::InvalidArgumentError("go needs exactly 2 players");
   }
   if (players[0] == players[1]) return absl::InvalidArgumentError("a player cannot play itself");
-  if (size != 9 && size != 13 && size != 19) {
-    return absl::InvalidArgumentError(absl::StrCat("a board is 9, 13 or 19, not ", size));
-  }
-  if (!std::isfinite(komi) || std::abs(komi) > kMaxKomi || komi * 2 != std::floor(komi * 2)) {
-    return absl::InvalidArgumentError("komi is a multiple of 0.5 within 150");
-  }
   if (black_seat != 0 && black_seat != 1) return absl::InvalidArgumentError("black seat is 0 or 1");
-  if (tc.initial_ms <= 0 || tc.increment_ms < 0) {
-    return absl::InvalidArgumentError("a clock needs time on it");
-  }
-  if (tc.initial_ms > GameState::kMaxClockMs || tc.increment_ms > GameState::kMaxClockMs) {
-    return absl::InvalidArgumentError("a clock of more than a day");
-  }
-  return absl::OkStatus();
+  return CheckRules(size, komi, tc);
 }
 
 // The points orthogonally next to `point` on a `size` board.
@@ -72,6 +60,22 @@ bool GroupHasLiberty(const std::string& board, int size, int point, std::vector<
 }
 
 }  // namespace
+
+absl::Status CheckRules(int size, double komi, const TimeControl& tc) {
+  if (size != 9 && size != 13 && size != 19) {
+    return absl::InvalidArgumentError(absl::StrCat("a board is 9, 13 or 19, not ", size));
+  }
+  if (!std::isfinite(komi) || std::abs(komi) > kMaxKomi || komi * 2 != std::floor(komi * 2)) {
+    return absl::InvalidArgumentError("komi is a multiple of 0.5 within 150");
+  }
+  if (tc.initial_ms <= 0 || tc.increment_ms < 0) {
+    return absl::InvalidArgumentError("a clock needs time on it");
+  }
+  if (tc.initial_ms > GameState::kMaxClockMs || tc.increment_ms > GameState::kMaxClockMs) {
+    return absl::InvalidArgumentError("a clock of more than a day");
+  }
+  return absl::OkStatus();
+}
 
 std::string_view ColorName(Color color) { return color == Color::kBlack ? "black" : "white"; }
 

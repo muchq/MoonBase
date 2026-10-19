@@ -14,6 +14,8 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/time/time.h"
 #include "domains/games/apis/games_hub/wire_test_fixture.h"
@@ -202,6 +204,61 @@ TEST_F(GoWireTest, TheModelsBoundsAreRefusedInBand) {
             R"(constraint: Member must be between 0 and 18, inclusive"})");
   ASSERT_TRUE(creator->Send(CommandFrame("go", R"({"move":{"play":{"x":9,"y":0}}})")).ok());
   EXPECT_EQ(Next(*creator, "commandRejected"), R"({"reason":"off the board"})");
+}
+
+// A challenge is the table's terms posted before anyone joins: the view
+// carries them structured, the room's list as one line.
+TEST_F(GoWireTest, ChallengePinsItsCommandTheViewsTermsAndTheRoomsLine) {
+  json creator_session;
+  auto creator = DialReady(kPlayPath, creator_session);
+  ASSERT_TRUE(creator->Send(CommandFrame("createRoom", "{}")).ok());
+  (void)Next(*creator, "roomState");
+  ASSERT_TRUE(creator->Send(CommandFrame("go", R"({"move":{"createGame":{}}})")).ok());
+  (void)Next(*creator, "go");
+  (void)Next(*creator, "go");
+  (void)Next(*creator, "roomState");
+
+  ASSERT_TRUE(creator
+                  ->Send(CommandFrame("go", R"({"move":{"challenge":{"size":13,"komi":5.5,)"
+                                            R"("initialSeconds":300,"incrementSeconds":2}}})"))
+                  .ok());
+  EXPECT_EQ(Next(*creator, "go"),
+            R"({"update":{"gameState":{"view":{"board":[],"gameId":"GAME01","moveCount":0,)"
+            R"("phase":"waiting","players":[{"playerId":"player-1"}],"scoreSheet":[],)"
+            R"("terms":{"incrementSeconds":2,"initialSeconds":300,"komi":5.5,"size":13}}}}})");
+  EXPECT_EQ(Next(*creator, "roomState"),
+            R"({"games":[{"game":"go","gameId":"GAME01","playerCount":1,"status":"waiting",)"
+            R"("terms":"13×13 · komi 5.5 · 5+2"}],)"
+            R"("geometry":{"plane":{}},"players":[{"connected":true,"gamesPlayed":0,"gamesWon":0,)"
+            R"("playerId":"player-1","table":{"game":"go","gameId":"GAME01"},)"
+            R"("totalScore":0}],"roomId":"room-1"})");
+}
+
+// A challenge takes startGame's shape: the decoder holds its bounds and
+// the rules the rest, each refused in band before anything is posted.
+TEST_F(GoWireTest, AChallengesBoundsAndRulesAreRefusedInBand) {
+  json creator_session;
+  auto creator = DialReady(kPlayPath, creator_session);
+  ASSERT_TRUE(creator->Send(CommandFrame("createRoom", "{}")).ok());
+  (void)Next(*creator, "roomState");
+  ASSERT_TRUE(creator->Send(CommandFrame("go", R"({"move":{"createGame":{}}})")).ok());
+  (void)Next(*creator, "go");
+  (void)Next(*creator, "go");
+  (void)Next(*creator, "roomState");
+  for (const auto& [move, reason] : std::vector<std::pair<std::string, std::string>>{
+           {R"({"move":{"challenge":{"size":21}}})",
+            R"({"reason":"Value at '/go/move/challenge/size' failed to satisfy )"
+            R"(constraint: Member must be between 9 and 19, inclusive"})"},
+           {R"({"move":{"challenge":{"size":10}}})",
+            R"({"reason":"a board is 9, 13 or 19, not 10"})"},
+           {R"({"move":{"challenge":{"komi":6.25}}})",
+            R"({"reason":"komi is a multiple of 0.5 within 150"})"}}) {
+    ASSERT_TRUE(creator->Send(CommandFrame("go", move)).ok());
+    EXPECT_EQ(Next(*creator, "commandRejected"), reason) << move;
+  }
+  // The control: inside the bounds and the rules, the terms post.
+  ASSERT_TRUE(creator->Send(CommandFrame("go", R"({"move":{"challenge":{"size":9}}})")).ok());
+  EXPECT_NE(Next(*creator, "go").find(R"("terms":)"), std::string::npos);
 }
 
 }  // namespace

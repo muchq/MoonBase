@@ -262,6 +262,10 @@ using Action =
 template <typename Engine>
 struct Adapter;
 
+/// A clock as the lobby lists it: "3+2", whole minutes in minutes and
+/// any other in seconds ("90s+0").
+std::string ClockLine(int64_t initial_ms, int64_t increment_ms);
+
 /// Everyone in `players` played, and `winner` won ("" for nobody).
 StatsDeltas PlayedWon(const std::vector<std::string>& players, std::string_view winner);
 
