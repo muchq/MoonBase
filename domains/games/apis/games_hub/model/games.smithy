@@ -297,8 +297,9 @@ structure GameSummary {
     playerCount: Integer
 
     /// Text the table's game supplies for the lobby to show as is: what a
-    /// waiting table plays on (chess's challenge: "Standard starting
-    /// position · 3+2"). Absent when there is nothing to say.
+    /// waiting table plays on (a chess challenge's "Standard starting
+    /// position · 3+2", a go one's "9×9 · komi 5.5 · 1+0"). Absent when
+    /// there is nothing to say.
     terms: String
 }
 

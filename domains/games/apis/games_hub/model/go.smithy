@@ -122,8 +122,8 @@ structure GoAccept {}
 /// Either seat, on turn or not.
 structure GoResign {}
 
-/// Watches a go table in the room, in any phase, from no seat, on
-/// chess's terms: the answer is a gameState, and from then on every
+/// Watches a go table in the room, in any phase, from no seat, as chess's
+/// watch does: the answer is a gameState, and from then on every
 /// gameState and gameEnded the seats get.
 structure GoWatch {
     @required

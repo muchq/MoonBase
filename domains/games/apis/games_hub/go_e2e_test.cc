@@ -425,6 +425,8 @@ TEST_F(GoFixture, AChallengeNoGameCouldStartOnIsRefused) {
     ASSERT_TRUE(alice.stream.Send(Challenge(terms)).ok());
     auto refused = ReceiveCase(alice.stream, "commandRejected");
     ASSERT_TRUE(refused.has_value()) << size << " " << komi;
+    EXPECT_EQ(refused->as_commandRejected_or_null()->reason,
+              size == 10 ? "a board is 9, 13 or 19, not 10" : "komi is a multiple of 0.5 within 150");
   }
 }
 

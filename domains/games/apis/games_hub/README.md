@@ -609,7 +609,11 @@ play and closes the table. The view is one for everyone: the board as
 rows of `.`, `b` and `w`, captures, the last move, both clocks, the dead
 stones and, while scoring, who accepts and the count so far, and the
 result with the count once a game ends on the score. Watching is
-chess's; go has no bots, challenges, round robins or archive.
+chess's, and so is a `challenge`: a lone seat posts a board, komi and
+clock, refused as posted when no game could open on them, listed as
+"9×9 · komi 5.5 · 1+0" and stored as
+`{"terms":{"size","komi","initialMs","incrementMs"}}`. Go has no bots,
+round robins or archive.
 
 ### Spades
 
