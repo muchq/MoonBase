@@ -2,13 +2,11 @@
 #define DOMAINS_GAMES_APIS_GAMES_HUB_GO_BOTS_H
 
 #include <charconv>
-#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "absl/status/statusor.h"
 #include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "domains/games/libs/go/game_state.h"
@@ -62,16 +60,15 @@ inline std::optional<int> GtpPoint(std::string_view vertex, int size) {
 
 /// A move asked of the engine: the board, komi, every move so far as GTP
 /// vertices (Black's first, the colours alternating), and the bot's level.
+/// Answered with a vertex, "pass" or "resign"; in the scoring, with the
+/// stones it counts dead as vertices, space separated, none for none.
 struct GoBotAsk {
   int size = 19;
   double komi = go::kDefaultKomi;
   std::vector<std::string> moves;
   int level = kGoBotMinLevel;
+  bool scoring = false;
 };
-
-/// The engine a bot asks, answering a GTP vertex, "pass" or "resign", or
-/// why not. Called without the hub's lock, from the bot thread.
-using GoBotEngine = std::function<absl::StatusOr<std::string>(const GoBotAsk&)>;
 
 }  // namespace games_hub
 

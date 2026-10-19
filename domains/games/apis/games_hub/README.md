@@ -621,8 +621,9 @@ count a draw). Its body names `"game":"go"` beside those terms. A lone
 seat may seat GNU Go (`addBot`, a level of 1 to 10; `gnugo@<level>`, the
 view marking it `bot`), as chess's Stockfish is seated: asked with the
 board, komi and every move as GTP vertices, it answers a vertex, `pass`
-or `resign`. In the scoring it accepts whatever is marked, asking
-nothing, and again after each mark. Without a go engine set the hub
+or `resign`. In the scoring it is asked which stones are dead (their
+vertices, space separated), marks them so as near as whole groups allow,
+and accepts; a mark withdraws its acceptance, so it is asked again. Without a go engine set the hub
 seats none. Go has no archive.
 
 ### Spades

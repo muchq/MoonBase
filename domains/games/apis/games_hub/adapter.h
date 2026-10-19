@@ -1,7 +1,6 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_ADAPTER_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_ADAPTER_H
 
-#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -210,14 +209,8 @@ struct BotTurn {
   std::size_t game_no = 0;
   /// Where the game stands; an answer is played only while it still does.
   std::string position;
-  /// What the engine is asked; none when the move is the bot's own, made
-  /// without asking (go's acceptance of the marks).
-  std::optional<Ask> ask;
+  Ask ask;
 };
-
-/// How long a bot waits to ask again after its engine failed, or answered
-/// what the game refused: its clock running meanwhile.
-inline constexpr std::chrono::milliseconds kEngineBotRetry{2000};
 
 /// The engine a game's bots ask, answering a move in the game's own words
 /// or why not. Called without the hub's lock, from the bot thread.

@@ -1,8 +1,8 @@
 // A bot at a go table, end to end through the generated client: GNU Go's
 // seat added by the table's one player, its moves asked of the engine and
-// played when it is on turn, and its acceptance of the marks in the
-// scoring. The engine here is a fake that answers what the test says;
-// go_engine's own tests cover GNU Go.
+// played when it is on turn, and its marks and acceptance in the scoring.
+// The engine here is a fake that answers what the test says; the engine
+// service's own tests cover GNU Go.
 
 #include <gtest/gtest.h>
 
@@ -43,6 +43,22 @@ GameCommands Pass() { return Go(GoMove::FromPass(moonbase::games::GoPass{})); }
 
 GameCommands Accept() { return Go(GoMove::FromAccept(moonbase::games::GoAccept{})); }
 
+GameCommands Resign() { return Go(GoMove::FromResign(moonbase::games::GoResign{})); }
+
+GameCommands MarkDead(int x, int y) {
+  moonbase::games::GoMarkDead mark;
+  mark.x = x;
+  mark.y = y;
+  return Go(GoMove::FromMarkdead(mark));
+}
+
+std::vector<std::pair<int, int>> DeadOf(const GoView& view) {
+  std::vector<std::pair<int, int>> dead;
+  for (const auto& point : view.dead.value_or(std::vector<moonbase::games::GoPoint>{}))
+    dead.emplace_back(point.x, point.y);
+  return dead;
+}
+
 GameCommands NineByNine() {
   moonbase::games::GoStartGame start;
   start.size = 9;
@@ -59,7 +75,7 @@ class GoBotFixture : public GamesHubStreamFixture {
     hub_->SetClock([this] { return absl::FromUnixMillis(now_ms_.load()); });
     hub_->SetGoBotEngine([this](const GoBotAsk& ask) -> absl::StatusOr<std::string> {
       asks_.push_back(ask);
-      return answer_;
+      return ask.scoring ? dead_ : answer_;
     });
   }
 
@@ -99,6 +115,8 @@ class GoBotFixture : public GamesHubStreamFixture {
   std::atomic<int64_t> now_ms_{kT0};
   std::vector<GoBotAsk> asks_;
   absl::StatusOr<std::string> answer_ = std::string("C3");
+  // The engine's dead stones, in the scoring.
+  absl::StatusOr<std::string> dead_ = std::string("");
 };
 
 TEST_F(GoBotFixture, TheTablesOnePlayerSeatsABotAtTheirChosenLevel) {
@@ -112,8 +130,10 @@ TEST_F(GoBotFixture, TheTablesOnePlayerSeatsABotAtTheirChosenLevel) {
   EXPECT_TRUE(view->players[1].bot.value_or(false));
 }
 
-TEST_F(GoBotFixture, WithNoEngineTheHubSeatsNoBot) {
+// Each game's bots ask its own engine: a chess engine seats no go bot.
+TEST_F(GoBotFixture, WithNoGoEngineTheHubSeatsNoBot) {
   hub_->SetGoBotEngine(nullptr);
+  hub_->SetChessBotEngine([](const ChessBotAsk&) -> absl::StatusOr<std::string> { return "e2e4"; });
   auto alice = AliceAtATable();
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(alice->stream.Send(AddBot(5)).ok());
@@ -177,14 +197,14 @@ TEST_F(GoBotFixture, AResignationEndsTheGame) {
   EXPECT_EQ(ended->result->winner, alice->player_id);
 }
 
-// In the scoring the bot accepts whatever is marked, asking no engine: the
-// player marks the dead, and a mark withdraws both acceptances, so the bot
-// accepts again.
-TEST_F(GoBotFixture, InTheScoringTheBotAcceptsTheMarksWithoutAsking) {
+// In the scoring the bot asks the engine which stones are dead, marks them
+// so, and accepts.
+TEST_F(GoBotFixture, InTheScoringTheBotMarksTheEnginesDeadAndAccepts) {
   auto alice = AliceAtATable();
   ASSERT_TRUE(alice.has_value());
   ASSERT_TRUE(StartedAgainstBot(*alice, 3).has_value());
   answer_ = std::string("pass");
+  dead_ = std::string("E5");
   ASSERT_TRUE(alice->stream.Send(Play(4, 4)).ok());
   ASSERT_TRUE(ViewWhere(*alice, [](const GoView& v) { return v.moveCount == 1; }));
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 1);
@@ -192,16 +212,83 @@ TEST_F(GoBotFixture, InTheScoringTheBotAcceptsTheMarksWithoutAsking) {
   ASSERT_TRUE(alice->stream.Send(Pass()).ok());
   ASSERT_TRUE(ViewWhere(*alice, [](const GoView& v) { return v.phase == "scoring"; }));
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 1);
-  EXPECT_EQ(asks_.size(), 1u);
-  ASSERT_TRUE(ViewWhere(*alice, [](const GoView& v) {
+  ASSERT_EQ(asks_.size(), 2u);
+  EXPECT_TRUE(asks_[1].scoring);
+  EXPECT_EQ(asks_[1].moves, (std::vector<std::string>{"E5", "pass", "pass"}));
+  auto marked = ViewWhere(*alice, [](const GoView& v) {
     return v.scoring.has_value() && v.scoring->acceptedBy.size() == 1;
-  }));
+  });
+  ASSERT_TRUE(marked.has_value());
+  EXPECT_EQ(DeadOf(*marked), (std::vector<std::pair<int, int>>{{4, 4}}));
+  EXPECT_EQ(marked->scoring->acceptedBy, std::vector<std::string>{"gnugo@3"});
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 0);
   ASSERT_TRUE(alice->stream.Send(Accept()).ok());
   auto ended = ViewWhere(*alice, [](const GoView& v) { return v.phase == "ended"; });
   ASSERT_TRUE(ended.has_value());
   EXPECT_EQ(ended->result->ending, "score");
-  EXPECT_EQ(ended->result->winner, alice->player_id);
+  EXPECT_EQ(ended->result->winner, "gnugo@3");
+}
+
+// A mark withdraws both acceptances: the bot asks again, puts its live
+// stones back, and accepts again. A player cannot mark a bot's stones dead
+// and win on the count.
+TEST_F(GoBotFixture, TheBotUndoesAMarkOnItsLiveStonesAndAcceptsAgain) {
+  auto alice = AliceAtATable();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(StartedAgainstBot(*alice, 3).has_value());
+  ASSERT_TRUE(alice->stream.Send(Play(4, 4)).ok());
+  ASSERT_TRUE(ViewWhere(*alice, [](const GoView& v) { return v.moveCount == 1; }));
+  EXPECT_EQ(hub_->PlayEngineBotsOnce(), 1);  // C3
+  ASSERT_TRUE(ViewWhere(*alice, [](const GoView& v) { return v.moveCount == 2; }));
+  ASSERT_TRUE(alice->stream.Send(Pass()).ok());
+  ASSERT_TRUE(ViewWhere(*alice, [](const GoView& v) { return v.moveCount == 3; }));
+  answer_ = std::string("pass");
+  EXPECT_EQ(hub_->PlayEngineBotsOnce(), 1);
+  ASSERT_TRUE(ViewWhere(*alice, [](const GoView& v) { return v.phase == "scoring"; }));
+  EXPECT_EQ(hub_->PlayEngineBotsOnce(), 1);
+  ASSERT_TRUE(ViewWhere(*alice, [](const GoView& v) {
+    return v.scoring.has_value() && v.scoring->acceptedBy.size() == 1;
+  }));
+  ASSERT_TRUE(alice->stream.Send(MarkDead(2, 6)).ok());
+  ASSERT_TRUE(
+      ViewWhere(*alice, [](const GoView& v) { return v.dead.has_value() && v.dead->size() == 1; }));
+  EXPECT_EQ(hub_->PlayEngineBotsOnce(), 1);
+  auto restored = ViewWhere(*alice, [](const GoView& v) {
+    return DeadOf(v).empty() && v.scoring.has_value() && v.scoring->acceptedBy.size() == 1;
+  });
+  ASSERT_TRUE(restored.has_value());
+  EXPECT_EQ(restored->scoring->acceptedBy, std::vector<std::string>{"gnugo@3"});
+}
+
+// The next game swaps colours: the bot, Black, opens it, asked with no
+// moves.
+TEST_F(GoBotFixture, AsBlackInTheNextGameTheBotOpensIt) {
+  auto alice = AliceAtATable();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(StartedAgainstBot(*alice, 3).has_value());
+  ASSERT_TRUE(alice->stream.Send(Resign()).ok());
+  ASSERT_TRUE(ViewWhere(*alice, [](const GoView& v) { return v.phase == "ended"; }));
+  ASSERT_TRUE(alice->stream.Send(NineByNine()).ok());
+  auto next = ViewWhere(*alice, [](const GoView& v) { return v.phase == "playing"; });
+  ASSERT_TRUE(next.has_value());
+  EXPECT_EQ(next->currentPlayerId, "gnugo@3");
+  EXPECT_EQ(hub_->PlayEngineBotsOnce(), 1);
+  ASSERT_EQ(asks_.size(), 1u);
+  EXPECT_TRUE(asks_[0].moves.empty());
+  auto played = ViewWhere(*alice, [](const GoView& v) { return v.moveCount == 1; });
+  ASSERT_TRUE(played.has_value());
+  EXPECT_EQ(played->board[6], "..b......");
+}
+
+// An engine's line may end in whitespace; the vertex is what counts.
+TEST_F(GoBotFixture, AnAnswersSurroundingWhitespaceIsIgnored) {
+  auto alice = AliceAtATable();
+  ASSERT_TRUE(alice.has_value());
+  ASSERT_TRUE(StartedAgainstBot(*alice, 3).has_value());
+  answer_ = std::string(" C3\r\n");
+  ASSERT_TRUE(alice->stream.Send(Play(4, 4)).ok());
+  ASSERT_TRUE(ViewWhere(*alice, [](const GoView& v) { return v.moveCount == 1; }));
+  EXPECT_EQ(hub_->PlayEngineBotsOnce(), 1);
 }
 
 // An answer the game refuses is the engine's fault: it is not played, and
@@ -218,7 +305,7 @@ TEST_F(GoBotFixture, AnAnswerTheGameRefusesWaitsOutTheRetry) {
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 0);
   EXPECT_EQ(asks_.size(), 1u);
   answer_ = std::string("D4");
-  now_ms_ += kEngineBotRetry.count();
+  now_ms_ += GamesHub::kEngineBotRetry.count();
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 1);
   EXPECT_EQ(asks_.size(), 2u);
 }
@@ -234,7 +321,7 @@ TEST_F(GoBotFixture, AnEngineThatFailsWaitsOutTheRetry) {
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 0);
   EXPECT_EQ(asks_.size(), 1u);
   answer_ = std::string("D4");
-  now_ms_ += kEngineBotRetry.count();
+  now_ms_ += GamesHub::kEngineBotRetry.count();
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 1);
 }
 

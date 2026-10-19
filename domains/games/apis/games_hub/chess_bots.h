@@ -87,10 +87,6 @@ struct ChessBotAsk {
   std::optional<int> elo;  // unset: full strength (LimitStrength off)
 };
 
-/// The engine a bot asks, answering a UCI move or why not. Called without
-/// the hub's lock, from the bot thread.
-using ChessBotEngine = std::function<absl::StatusOr<std::string>(const ChessBotAsk&)>;
-
 }  // namespace games_hub
 
 #endif

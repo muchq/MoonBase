@@ -2265,12 +2265,12 @@ int GamesHub::SweepChessClocksOnce() {
   return ended;
 }
 
-void GamesHub::SetChessBotEngine(ChessBotEngine engine) {
-  std::get<ChessBotEngine>(bot_engines_) = std::move(engine);
+void GamesHub::SetChessBotEngine(BotEngine<ChessBotAsk> engine) {
+  std::get<BotEngine<ChessBotAsk>>(bot_engines_) = std::move(engine);
 }
 
-void GamesHub::SetGoBotEngine(GoBotEngine engine) {
-  std::get<GoBotEngine>(bot_engines_) = std::move(engine);
+void GamesHub::SetGoBotEngine(BotEngine<GoBotAsk> engine) {
+  std::get<BotEngine<GoBotAsk>>(bot_engines_) = std::move(engine);
 }
 
 bool GamesHub::HasBotEngine(GameKind kind) const {
@@ -2919,28 +2919,8 @@ int GamesHub::PlayEngineBotsOnce() {
   {
     const std::lock_guard<std::mutex> lock(mu_);
     const int64_t now = NowMs();
-    // A retry holds back the game it was for, and only until it is due.
-    std::erase_if(bot_retry_at_, [this, now](const auto& retry) {
-      if (retry.second.until <= now) return true;
-      const auto room = rooms_.find(retry.first.first);
-      if (room == rooms_.end()) return true;
-      const auto game = room->second.games.find(retry.first.second);
-      if (game == room->second.games.end()) return true;
-      const std::optional<std::size_t> game_no =
-          VisitTable(game->second.kind, game->second.state,
-                     [now](auto adapter, const auto* table) -> std::optional<std::size_t> {
-                       using A = decltype(adapter);
-                       if constexpr (kHas<A, kEngineBots>) {
-                         if (table == nullptr) return std::nullopt;
-                         const auto turn = A::BotTurnOf(*table, now);
-                         if (!turn.has_value()) return std::nullopt;
-                         return turn->game_no;
-                       } else {
-                         return std::nullopt;
-                       }
-                     });
-      return game_no != retry.second.game;
-    });
+    // A retry lapses when due, its table gone or not.
+    std::erase_if(bot_retry_at_, [now](const auto& retry) { return retry.second.until <= now; });
   }
   return [this]<std::size_t... I>(std::index_sequence<I...>) {
     return (0 + ... + [&] {
@@ -2981,11 +2961,19 @@ int GamesHub::PlayBotsOnce() {
     const int64_t now = NowMs();
     for (const auto& [room_id, room] : rooms_) {
       for (const auto& [game_id, entry] : room.games) {
-        if (!entry.state.has_value() || bot_retry_at_.contains({room_id, game_id})) continue;
+        if (!entry.state.has_value()) continue;
         const Engine* table = std::get_if<Engine>(&*entry.state);
         if (table == nullptr) continue;
         auto turn = A::BotTurnOf(*table, now);
-        if (turn.has_value()) turns.push_back({room_id, game_id, *std::move(turn)});
+        if (!turn.has_value()) continue;
+        // A retry holds back the game it was for; one for a finished game
+        // is done with.
+        if (const auto retry = bot_retry_at_.find({room_id, game_id});
+            retry != bot_retry_at_.end()) {
+          if (retry->second.game == turn->game_no) continue;
+          bot_retry_at_.erase(retry);
+        }
+        turns.push_back({room_id, game_id, *std::move(turn)});
       }
     }
   }
@@ -3005,8 +2993,7 @@ int GamesHub::PlayBotsOnce() {
       turn.bot = *std::move(now_turn);
     }
     const auto ask_started = std::chrono::steady_clock::now();
-    const absl::StatusOr<std::string> answer =
-        turn.bot.ask.has_value() ? engine(*turn.bot.ask) : absl::StatusOr<std::string>("");
+    const absl::StatusOr<std::string> answer = engine(turn.bot.ask);
     const auto ask_took = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - ask_started);
     Outbox outbox;

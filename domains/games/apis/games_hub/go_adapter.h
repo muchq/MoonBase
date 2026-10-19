@@ -96,10 +96,11 @@ struct Adapter<go::Table> {
 
   using BotAsk = GoBotAsk;
   // The bot on turn, asked with the game so far; in the scoring, a bot
-  // that has not accepted the marks, accepting them without asking.
+  // that has not accepted the marks, asked which stones are dead.
   static std::optional<BotTurn<GoBotAsk>> BotTurnOf(const go::Table& table, int64_t now_ms);
   // The answer, a GTP vertex, "pass" or "resign"; in the scoring, the
-  // acceptance.
+  // engine's dead stones, marked so as near as whole groups allow, then
+  // accepted.
   static absl::StatusOr<go::Table> BotMove(const go::Table& table, int seat,
                                            std::string_view answer, const MoveContext& context);
 

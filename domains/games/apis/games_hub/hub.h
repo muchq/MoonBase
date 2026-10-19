@@ -355,9 +355,9 @@ class GamesHub final {
 
   /// The engine chess bots ask; null, the default, seats no bot.
   /// Call before serving: read without a lock thereafter.
-  void SetChessBotEngine(ChessBotEngine engine);
+  void SetChessBotEngine(BotEngine<ChessBotAsk> engine);
   /// The engine go bots ask, as SetChessBotEngine's.
-  void SetGoBotEngine(GoBotEngine engine);
+  void SetGoBotEngine(BotEngine<GoBotAsk> engine);
 
   /// Asked, for each human player, when this instance ends a chess game in
   /// a published room: 1d4 indexes them from the public feed. Called under
@@ -423,6 +423,9 @@ class GamesHub final {
 
   /// How soon after its turn begins a bot starts to think.
   static constexpr std::chrono::milliseconds kEngineBotTick{100};
+  /// How long a bot waits to ask again after its engine failed, or answered
+  /// what the game refused: its clock running meanwhile.
+  static constexpr std::chrono::milliseconds kEngineBotRetry{2000};
 
   /// How late a flag may land after the time ran out.
   static constexpr std::chrono::milliseconds kChessClockTick{250};
@@ -965,7 +968,7 @@ class GamesHub final {
     std::size_t game;
     int64_t until;
   };
-  std::tuple<ChessBotEngine, GoBotEngine> bot_engines_;
+  std::tuple<BotEngine<ChessBotAsk>, BotEngine<GoBotAsk>> bot_engines_;
   ChessIndexer chess_indexer_;
   std::map<std::pair<std::string, std::string>, BotRetry> bot_retry_at_;
   std::mutex engine_bot_mu_;

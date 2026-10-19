@@ -59,7 +59,8 @@ union GoMove {
 
 /// GNU Go to the table's next seat, at a level (1 weakest, 10 strongest),
 /// for a table not yet started; refused when the hub has no go engine, and
-/// at a round robin's pairing. It accepts the marks in the scoring.
+/// at a round robin's pairing. In the scoring it marks the stones the engine
+/// counts dead, and accepts.
 structure GoAddBot {
     @required
     @range(min: 1, max: 10)

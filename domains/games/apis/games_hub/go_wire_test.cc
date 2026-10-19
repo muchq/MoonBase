@@ -204,6 +204,37 @@ TEST_F(GoWireTest, TheModelsBoundsAreRefusedInBand) {
             R"(constraint: Member must be between 0 and 18, inclusive"})");
   ASSERT_TRUE(creator->Send(CommandFrame("go", R"({"move":{"play":{"x":9,"y":0}}})")).ok());
   EXPECT_EQ(Next(*creator, "commandRejected"), R"({"reason":"off the board"})");
+  for (const char* level : {"0", "11"}) {
+    ASSERT_TRUE(creator
+                    ->Send(CommandFrame(
+                        "go", std::string(R"({"move":{"addBot":{"level":)") + level + "}}}"))
+                    .ok());
+    EXPECT_EQ(Next(*creator, "commandRejected"),
+              R"({"reason":"Value at '/go/move/addBot/level' failed to satisfy )"
+              R"(constraint: Member must be between 1 and 10, inclusive"})");
+  }
+}
+
+// A bot's seat: named for its level, and marked a bot in the view waiting
+// and in play.
+TEST_F(GoWireTest, AddBotPinsItsCommandAndTheBotsSeat) {
+  hub_->SetGoBotEngine([](const GoBotAsk&) -> absl::StatusOr<std::string> { return "pass"; });
+  json creator_session;
+  auto creator = DialReady(kPlayPath, creator_session);
+  ASSERT_TRUE(creator->Send(CommandFrame("createRoom", "{}")).ok());
+  (void)Next(*creator, "roomState");
+  ASSERT_TRUE(creator->Send(CommandFrame("go", R"({"move":{"createGame":{}}})")).ok());
+  (void)GoCase(*creator, "gameJoined");
+  ASSERT_TRUE(creator->Send(CommandFrame("go", R"({"move":{"addBot":{"level":3}}})")).ok());
+  EXPECT_EQ(GoCase(*creator, "gameState"),
+            R"({"update":{"gameState":{"view":{"board":[],"gameId":"GAME01","moveCount":0,)"
+            R"("phase":"waiting","players":[{"playerId":"player-1"},)"
+            R"({"bot":true,"playerId":"gnugo@3"}],"scoreSheet":[]}}}})");
+  ASSERT_TRUE(creator->Send(CommandFrame("go", R"({"move":{"startGame":{"size":9}}})")).ok());
+  const json playing = json::parse(GoCase(*creator, "gameState"));
+  EXPECT_EQ(playing["update"]["gameState"]["view"]["players"].dump(),
+            R"([{"color":"black","playerId":"player-1"},)"
+            R"({"bot":true,"color":"white","playerId":"gnugo@3"}])");
 }
 
 // A challenge is the table's terms posted before anyone joins: the view

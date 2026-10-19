@@ -251,7 +251,7 @@ TEST_F(ChessBotFixture, AnEngineThatFailsIsAskedAgainOnlyAfterTheRetry) {
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 0);
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 0);
   EXPECT_EQ(asks_.size(), 1u);
-  now_ms_ += kEngineBotRetry.count();
+  now_ms_ += GamesHub::kEngineBotRetry.count();
   answer_ = std::string("e7e8q");
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 1);
   EXPECT_EQ(asks_.size(), 2u);
@@ -362,7 +362,7 @@ TEST_F(ChessBotFixture, AnIllegalAnswerIsAskedAgainOnlyAfterTheRetry) {
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 0);
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 0);
   EXPECT_EQ(asks_.size(), 1u);
-  now_ms_ += kEngineBotRetry.count();
+  now_ms_ += GamesHub::kEngineBotRetry.count();
   answer_ = std::string("e7e8q");
   EXPECT_EQ(hub_->PlayEngineBotsOnce(), 1);
 }
