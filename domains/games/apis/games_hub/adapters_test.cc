@@ -221,6 +221,30 @@ TEST(Decode, OnlyThePeekThatStartsTheCountdownReachesEverySeat) {
   EXPECT_FALSE(transition->views_to_all(states.back(), states.back()));
 }
 
+// Every round robin game's union names withdraw, forfeit, roundRobins and
+// playRoundRobin alike, and the hub runs them alike.
+template <typename A>
+void DecodesTheSharedRoundRobinMoves() {
+  using Move = typename A::Move;
+  const auto withdraw = A::Decode(Move::FromWithdraw({"E1", "carol"}), "alice");
+  ASSERT_TRUE(std::holds_alternative<Withdraw>(withdraw));
+  EXPECT_EQ(std::get<Withdraw>(withdraw).withdraw.playerId, "carol");
+  const auto forfeit = A::Decode(Move::FromForfeit({"E1", "bob", "carol"}), "alice");
+  ASSERT_TRUE(std::holds_alternative<Forfeit>(forfeit));
+  EXPECT_EQ(std::get<Forfeit>(forfeit).forfeit.loser, "carol");
+  EXPECT_TRUE(
+      std::holds_alternative<ListRoundRobins>(A::Decode(Move::FromRoundrobins({}), "alice")));
+  const auto play = A::Decode(Move::FromPlayroundrobin({"E1", "bob"}), "alice");
+  ASSERT_TRUE(std::holds_alternative<PlayRoundRobin>(play));
+  EXPECT_EQ(std::get<PlayRoundRobin>(play).play.opponent, "bob");
+}
+
+TEST(Decode, EveryRoundRobinGameDecodesTheSharedMovesAlike) {
+  DecodesTheSharedRoundRobinMoves<Adapter<chess_play::Table>>();
+  DecodesTheSharedRoundRobinMoves<Adapter<pong::Table>>();
+  DecodesTheSharedRoundRobinMoves<Adapter<go::Table>>();
+}
+
 TEST(Decode, AChallengeOnAnUnknownSetupIsTheRulesRefusal) {
   using Chess = Adapter<chess_play::Table>;
   moonbase::games::ChessStartGame terms;

@@ -106,8 +106,8 @@ struct Adapter<go::Table> {
                               const HubStore::ChessEventRow*) {
     if (table_terms.has_value()) start = std::get<GoTerms>(*table_terms);
   }
-  static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
-  static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
+  using RoundRobins = moonbase::games::GoRoundRobins;
+  static moonbase::games::GoRoundRobin RoundRobinWire(const HeldRoundRobin& held);
   // A go round robin's body names its game, and holds its terms as a
   // waiting table's state column does.
   static constexpr bool kRoundRobinBodyNamed = true;

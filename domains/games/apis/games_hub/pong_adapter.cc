@@ -150,27 +150,15 @@ Action<pong::Table, Adapter<pong::Table>::Start> Adapter<pong::Table>::Decode(co
     }
     return CreateRoundRobin{create->entrants, PongTerms{*variant}};
   }
-  if (const auto* withdraw = move.as_withdraw_or_null()) return Withdraw{*withdraw};
-  if (const auto* forfeit = move.as_forfeit_or_null()) return Forfeit{*forfeit};
-  if (move.as_roundRobins_or_null() != nullptr) return ListRoundRobins{};
-  if (const auto* play = move.as_playRoundRobin_or_null()) return PlayRoundRobin{*play};
+  if (auto round_robin = RoundRobinMove<pong::Table, Start>(move)) return *std::move(round_robin);
   if (move.as_createGame_or_null() != nullptr) return CreateTable{};
   if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};
   if (move.as_leaveGame_or_null() != nullptr) return LeaveTable{};
   return Refusal{RejectKind::kUnknown, "unknown move"};
 }
 
-moonbase::games::GameEvents Adapter<pong::Table>::RoundRobinEvent(const HeldRoundRobin& held) {
-  return Wrap(Update::FromRoundrobin(PongRoundRobinOf(held.row, held.live)));
-}
-
-moonbase::games::GameEvents Adapter<pong::Table>::RoundRobinsEvent(
-    const std::vector<HeldRoundRobin>& held) {
-  moonbase::games::PongRoundRobins round_robins;
-  for (const HeldRoundRobin& one : held) {
-    round_robins.roundRobins.push_back(PongRoundRobinOf(one.row, one.live));
-  }
-  return Wrap(Update::FromRoundrobins(std::move(round_robins)));
+moonbase::games::PongRoundRobin Adapter<pong::Table>::RoundRobinWire(const HeldRoundRobin& held) {
+  return PongRoundRobinOf(held.row, held.live);
 }
 
 std::string Adapter<pong::Table>::Serialize(const pong::Table& engine) {

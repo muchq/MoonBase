@@ -193,7 +193,7 @@ std::optional<moonbase::games::GameEvents> RoundRobinEventOf(GameKind kind,
   return ForKind(kind, [&](auto adapter) -> std::optional<moonbase::games::GameEvents> {
     using A = decltype(adapter);
     if constexpr (kHas<A, kRoundRobins>) {
-      return A::RoundRobinEvent(held);
+      return A::Wrap(A::Update::FromRoundrobin(A::RoundRobinWire(held)));
     } else {
       return std::nullopt;
     }
@@ -205,7 +205,11 @@ std::optional<moonbase::games::GameEvents> RoundRobinsEventOf(
   return ForKind(kind, [&](auto adapter) -> std::optional<moonbase::games::GameEvents> {
     using A = decltype(adapter);
     if constexpr (kHas<A, kRoundRobins>) {
-      return A::RoundRobinsEvent(held);
+      typename A::RoundRobins round_robins;
+      for (const HeldRoundRobin& one : held) {
+        round_robins.roundRobins.push_back(A::RoundRobinWire(one));
+      }
+      return A::Wrap(A::Update::FromRoundrobins(std::move(round_robins)));
     } else {
       return std::nullopt;
     }
