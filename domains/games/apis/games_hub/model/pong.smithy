@@ -47,9 +47,9 @@ union PongMove {
 
 /// Starts a pong round robin among the room's members, as chess's
 /// createRoundRobin does: everyone plays everyone once, on `variant`. The
-/// room's round robins of either game count toward its 16. Withdraw,
+/// room's round robins of every game count toward its 16. Withdraw,
 /// forfeit, roundRobins and playRoundRobin are chess's shapes and rules on
-/// pong's round robins; each refuses a round robin of the other game.
+/// pong's round robins; each refuses a round robin of another game.
 /// A pairing's table plays its one game on the round robin's variant,
 /// starting when its second seat fills, and that game is the pairing's
 /// result.

@@ -166,5 +166,28 @@ TEST(RoundRobinWire, APongRoundRobinNamesItsVariantAndEachPairingsWinner) {
   EXPECT_EQ(view.standings[0].points, 2);
 }
 
+// A go round robin carries its terms, as the wire spells them, and each
+// pairing its colours and white | black | draw, as chess's does.
+TEST(RoundRobinWire, AGoRoundRobinCarriesItsTermsAndChesssPairings) {
+  HubStore::ChessEventRow row = Row({"A", "B", "C"});
+  row.terms = GoTerms{13, 0.5, {90'000, 3'000}};
+  Score(row, "A", "B", 0.5);
+  const auto view = GoRoundRobinOf(row, {{1, "G7"}});
+  EXPECT_EQ(view.terms.size, 13);
+  EXPECT_EQ(view.terms.komi, 0.5);
+  EXPECT_EQ(view.terms.initialSeconds, 90);
+  EXPECT_EQ(view.terms.incrementSeconds, 3);
+  const auto chess = RoundRobinOf([&] {
+    HubStore::ChessEventRow same = row;
+    same.terms = ChessTerms{"standard", {90'000, 3'000}};
+    return same;
+  }(), {{1, "G7"}});
+  EXPECT_EQ(view.pairings, chess.pairings);
+  EXPECT_EQ(view.standings, chess.standings);
+  int drawn = 0;
+  for (const auto& pairing : view.pairings) drawn += pairing.result == "draw" ? 1 : 0;
+  EXPECT_EQ(drawn, 1);
+}
+
 }  // namespace
 }  // namespace games_hub

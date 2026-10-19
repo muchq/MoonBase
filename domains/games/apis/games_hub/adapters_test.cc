@@ -221,6 +221,30 @@ TEST(Decode, OnlyThePeekThatStartsTheCountdownReachesEverySeat) {
   EXPECT_FALSE(transition->views_to_all(states.back(), states.back()));
 }
 
+// Every round robin game's union names withdraw, forfeit, roundRobins and
+// playRoundRobin alike, and the hub runs them alike.
+template <typename A>
+void DecodesTheSharedRoundRobinMoves() {
+  using Move = typename A::Move;
+  const auto withdraw = A::Decode(Move::FromWithdraw({"E1", "carol"}), "alice");
+  ASSERT_TRUE(std::holds_alternative<Withdraw>(withdraw));
+  EXPECT_EQ(std::get<Withdraw>(withdraw).withdraw.playerId, "carol");
+  const auto forfeit = A::Decode(Move::FromForfeit({"E1", "bob", "carol"}), "alice");
+  ASSERT_TRUE(std::holds_alternative<Forfeit>(forfeit));
+  EXPECT_EQ(std::get<Forfeit>(forfeit).forfeit.loser, "carol");
+  EXPECT_TRUE(
+      std::holds_alternative<ListRoundRobins>(A::Decode(Move::FromRoundrobins({}), "alice")));
+  const auto play = A::Decode(Move::FromPlayroundrobin({"E1", "bob"}), "alice");
+  ASSERT_TRUE(std::holds_alternative<PlayRoundRobin>(play));
+  EXPECT_EQ(std::get<PlayRoundRobin>(play).play.opponent, "bob");
+}
+
+TEST(Decode, EveryRoundRobinGameDecodesTheSharedMovesAlike) {
+  DecodesTheSharedRoundRobinMoves<Adapter<chess_play::Table>>();
+  DecodesTheSharedRoundRobinMoves<Adapter<pong::Table>>();
+  DecodesTheSharedRoundRobinMoves<Adapter<go::Table>>();
+}
+
 TEST(Decode, AChallengeOnAnUnknownSetupIsTheRulesRefusal) {
   using Chess = Adapter<chess_play::Table>;
   moonbase::games::ChessStartGame terms;
@@ -397,7 +421,8 @@ const ChessTerms kRapid{"kpk-opposition", {600'000, 5'000}};
 // and reads back as the game whose terms they are.
 TEST(RoundRobinBody, EachGamesTermsRoundTripAsThatGame) {
   for (const HostedTerms& terms :
-       {HostedTerms(kRapid), HostedTerms(PongTerms{pong::Variant::kThreeD})}) {
+       {HostedTerms(kRapid), HostedTerms(PongTerms{pong::Variant::kThreeD}),
+        HostedTerms(GoTerms{13, 0.5, {90'000, 3'000}})}) {
     const nlohmann::json body = RoundRobinBodyOf(RoundRobinRow(terms));
     HubStore::ChessEventRow read;
     read.terms = PongTerms{};
@@ -406,13 +431,18 @@ TEST(RoundRobinBody, EachGamesTermsRoundTripAsThatGame) {
   }
   EXPECT_EQ(RoundRobinKind(RoundRobinRow(kRapid)), GameKind::kChess);
   EXPECT_EQ(RoundRobinKind(RoundRobinRow(PongTerms{})), GameKind::kPong);
+  EXPECT_EQ(RoundRobinKind(RoundRobinRow(GoTerms{})), GameKind::kGo);
 }
 
 // A body reads as a round robin only in its own game's shape: chess's
-// unnamed with its terms, pong's named with a variant it plays.
+// unnamed with its terms, pong's named with a variant it plays, go's named
+// with terms a game could open on.
 TEST(RoundRobinBody, ABodyInNoGamesShapeReadsAsNothing) {
   const nlohmann::json chess = RoundRobinBodyOf(RoundRobinRow(kRapid));
   const nlohmann::json pong = RoundRobinBodyOf(RoundRobinRow(PongTerms{pong::Variant::kThreeD}));
+  const nlohmann::json go = RoundRobinBodyOf(RoundRobinRow(GoTerms{}));
+  nlohmann::json go_board = go;
+  go_board["terms"]["size"] = 10;
   const auto with = [](nlohmann::json body, const std::string& key, nlohmann::json value) {
     if (value.is_null()) {
       body.erase(key);
@@ -435,6 +465,9 @@ TEST(RoundRobinBody, ABodyInNoGamesShapeReadsAsNothing) {
            with(pong, "variant", nullptr),
            with(pong, "variant", "bogus"),
            with(pong, "variant", 3),
+           with(go, "game", nullptr),
+           with(go, "terms", nullptr),
+           go_board,
        }) {
     HubStore::ChessEventRow read;
     EXPECT_FALSE(RoundRobinFromBody(body, read)) << body.dump();

@@ -75,9 +75,9 @@ enum Capability : unsigned {
   /// kNextGame, a pairing being decided by its table's game ending.
   /// Hooks: Terms, what a round robin plays on (a HostedTerms
   /// alternative); RoundRobinStart(start, table terms, round robin row),
-  /// the start a pairing's table plays on; RoundRobinEvent(held) and
-  /// RoundRobinsEvent(helds),
-  /// the round robins in the game's envelope; kRoundRobinBodyNamed,
+  /// the start a pairing's table plays on; RoundRobinWire(held), one in
+  /// the game's wire, and RoundRobins, the wire's list of them, which the
+  /// game's envelope carries; kRoundRobinBodyNamed,
   /// whether a stored round robin's body names its game (exactly one
   /// game's bodies name none, and a body naming none is that game's);
   /// RoundRobinBody(terms) and FromRoundRobinBody(body), the game's own
@@ -195,6 +195,18 @@ using Action =
     std::variant<Refusal, CreateTable, JoinTable, LeaveTable, StartGame<Start>, Transition<Engine>,
                  WatchTable, AddBot, PostTerms, AskHistory, AskReview, Publish, CreateRoundRobin,
                  Withdraw, Forfeit, ListRoundRobins, PlayRoundRobin, Steer>;
+
+/// The round robin moves every round robin game's union names alike, as
+/// the hub runs them; nothing for any other case. createRoundRobin is each
+/// game's own, as its terms are.
+template <typename Engine, typename Start, typename Move>
+std::optional<Action<Engine, Start>> RoundRobinMove(const Move& move) {
+  if (const auto* withdraw = move.as_withdraw_or_null()) return Withdraw{*withdraw};
+  if (const auto* forfeit = move.as_forfeit_or_null()) return Forfeit{*forfeit};
+  if (move.as_roundRobins_or_null() != nullptr) return ListRoundRobins{};
+  if (const auto* play = move.as_playRoundRobin_or_null()) return PlayRoundRobin{*play};
+  return std::nullopt;
+}
 
 /// A game's side of the hub, one specialization per engine in the
 /// game's own <game>_adapter.h. adapters.h dispatches on HostedState and

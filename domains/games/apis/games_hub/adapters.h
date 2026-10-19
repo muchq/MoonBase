@@ -98,10 +98,8 @@ concept RoundRobinHooks =
     requires(typename A::Start& start, const HubStore::ChessEventRow& row,
              const HeldRoundRobin& held, const typename A::Terms& terms) {
       A::RoundRobinStart(start, std::declval<const std::optional<HostedTerms>&>(), &row);
-      { A::RoundRobinEvent(held) } -> std::same_as<moonbase::games::GameEvents>;
-      {
-        A::RoundRobinsEvent(std::vector<HeldRoundRobin>{})
-      } -> std::same_as<moonbase::games::GameEvents>;
+      { A::Wrap(A::Update::FromRoundrobin(A::RoundRobinWire(held))) };
+      { A::Wrap(A::Update::FromRoundrobins(typename A::RoundRobins{})) };
       { A::kRoundRobinBodyNamed } -> std::convertible_to<bool>;
       { A::RoundRobinBody(terms) } -> std::same_as<nlohmann::json>;
       {

@@ -22,6 +22,14 @@ moonbase::games::ChessTerms WireTerms(const ChessTerms& terms);
 moonbase::games::ChessRoundRobin RoundRobinOf(const HubStore::ChessEventRow& row,
                                               const std::map<int, std::string>& live = {});
 
+/// A go challenge's or round robin's terms as the wire spells them, the
+/// clock in seconds.
+moonbase::games::GoTerms WireGoTerms(const GoTerms& terms);
+
+/// A go round robin as every member sees it: chess's, its terms go's.
+moonbase::games::GoRoundRobin GoRoundRobinOf(const HubStore::ChessEventRow& row,
+                                             const std::map<int, std::string>& live = {});
+
 /// A pong round robin as every member sees it: chess's, its terms the
 /// variant and each pairing's result the winner's id, since pong has no
 /// draws.

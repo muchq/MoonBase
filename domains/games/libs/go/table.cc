@@ -19,8 +19,8 @@ GameScore ScoreOf(const GameState& finished) {
 }
 
 absl::StatusOr<Table> Table::open(std::vector<std::string> players, int size, double komi,
-                                  TimeControl time_control, int64_t now_ms) {
-  auto game = GameState::start(std::move(players), size, komi, 0, time_control, now_ms);
+                                  TimeControl time_control, int64_t now_ms, int black_seat) {
+  auto game = GameState::start(std::move(players), size, komi, black_seat, time_control, now_ms);
   if (!game.ok()) return game.status();
   return Table(*std::move(game), {}, false, false);
 }

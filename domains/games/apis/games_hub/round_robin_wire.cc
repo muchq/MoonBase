@@ -39,7 +39,8 @@ moonbase::games::ChessTerms WireTerms(const ChessTerms& terms) {
 std::vector<Pairing> EffectivePairings(const HubStore::ChessEventRow& row) {
   std::vector<Pairing> pairings = row.pairings;
   std::vector<HubStore::EventGame> games = row.games;
-  // Stable: a pong pairing's tables all carry archive id 0, in code order.
+  // Stable: a pong or go pairing's tables all carry archive id 0, in code
+  // order.
   std::stable_sort(games.begin(), games.end(),
                    [](const auto& a, const auto& b) { return a.archive_id < b.archive_id; });
   std::vector<bool> played(pairings.size(), false);
@@ -63,14 +64,18 @@ std::vector<Pairing> EffectivePairings(const HubStore::ChessEventRow& row) {
   return pairings;
 }
 
-moonbase::games::ChessRoundRobin RoundRobinOf(const HubStore::ChessEventRow& row,
-                                              const std::map<int, std::string>& live) {
+namespace {
+
+// What chess's and go's round robins say alike: who plays whom in what
+// colour, how each pairing stands, and the standings.
+template <typename View>
+View ColouredRoundRobinOf(const HubStore::ChessEventRow& row,
+                          const std::map<int, std::string>& live) {
   const std::vector<Pairing> pairings = EffectivePairings(row);
-  moonbase::games::ChessRoundRobin view;
+  View view;
   view.roundRobinId = row.event_id;
   view.creator = row.creator;
   view.entrants = row.entrants;
-  view.terms = WireTerms(std::get<ChessTerms>(row.terms));
   for (std::size_t i = 0; i < pairings.size(); ++i) {
     const Pairing& pairing = pairings[i];
     moonbase::games::ChessPairing wire;
@@ -96,6 +101,31 @@ moonbase::games::ChessRoundRobin RoundRobinOf(const HubStore::ChessEventRow& row
     view.standings.push_back(std::move(wire));
   }
   return view;
+}
+
+}  // namespace
+
+moonbase::games::ChessRoundRobin RoundRobinOf(const HubStore::ChessEventRow& row,
+                                              const std::map<int, std::string>& live) {
+  auto view = ColouredRoundRobinOf<moonbase::games::ChessRoundRobin>(row, live);
+  view.terms = WireTerms(std::get<ChessTerms>(row.terms));
+  return view;
+}
+
+moonbase::games::GoRoundRobin GoRoundRobinOf(const HubStore::ChessEventRow& row,
+                                             const std::map<int, std::string>& live) {
+  auto view = ColouredRoundRobinOf<moonbase::games::GoRoundRobin>(row, live);
+  view.terms = WireGoTerms(std::get<GoTerms>(row.terms));
+  return view;
+}
+
+moonbase::games::GoTerms WireGoTerms(const GoTerms& terms) {
+  moonbase::games::GoTerms wire;
+  wire.size = terms.size;
+  wire.komi = terms.komi;
+  wire.initialSeconds = static_cast<int>(terms.time_control.initial_ms / 1000);
+  wire.incrementSeconds = static_cast<int>(terms.time_control.increment_ms / 1000);
+  return wire;
 }
 
 moonbase::games::PongRoundRobin PongRoundRobinOf(const HubStore::ChessEventRow& row,

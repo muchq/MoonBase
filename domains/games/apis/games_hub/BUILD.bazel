@@ -1395,6 +1395,34 @@ cc_test(
     ],
 )
 
+# Go's round robins: chess's rules on go's tables.
+cc_test(
+    name = "go_round_robin_e2e_test",
+    size = "small",
+    srcs = [
+        "go_round_robin_e2e_test.cc",
+        "stream_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_client",
+        ":games_hub_smithy_server",
+        ":hub",
+        ":hub_store",
+        ":id_generator",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
 # Chess on the room stream: a fixed clock and opening, every ending the hub
 # can reach, the clock sweep, and the seat cap.
 cc_test(

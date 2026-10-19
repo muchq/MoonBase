@@ -178,10 +178,8 @@ Action<chess_play::Table, Adapter<chess_play::Table>::Start> Adapter<chess_play:
     }
     return CreateRoundRobin{create->entrants, HostedTerms(std::move(terms))};
   }
-  if (const auto* withdraw = move.as_withdraw_or_null()) return Withdraw{*withdraw};
-  if (const auto* forfeit = move.as_forfeit_or_null()) return Forfeit{*forfeit};
-  if (move.as_roundRobins_or_null() != nullptr) return ListRoundRobins{};
-  if (const auto* play = move.as_playRoundRobin_or_null()) return PlayRoundRobin{*play};
+  if (auto round_robin = RoundRobinMove<chess_play::Table, Start>(move))
+    return *std::move(round_robin);
   if (move.as_createGame_or_null() != nullptr) return CreateTable{};
   if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};
   if (move.as_leaveGame_or_null() != nullptr) return LeaveTable{};
@@ -246,18 +244,9 @@ absl::Status Adapter<chess_play::Table>::Prepare(Start& start, const ChessOpener
   return absl::OkStatus();
 }
 
-moonbase::games::GameEvents Adapter<chess_play::Table>::RoundRobinEvent(
+moonbase::games::ChessRoundRobin Adapter<chess_play::Table>::RoundRobinWire(
     const HeldRoundRobin& held) {
-  return Wrap(Update::FromRoundrobin(RoundRobinOf(held.row, held.live)));
-}
-
-moonbase::games::GameEvents Adapter<chess_play::Table>::RoundRobinsEvent(
-    const std::vector<HeldRoundRobin>& held) {
-  moonbase::games::ChessRoundRobins round_robins;
-  for (const HeldRoundRobin& one : held) {
-    round_robins.roundRobins.push_back(RoundRobinOf(one.row, one.live));
-  }
-  return Wrap(Update::FromRoundrobins(std::move(round_robins)));
+  return RoundRobinOf(held.row, held.live);
 }
 
 std::string Adapter<chess_play::Table>::Serialize(const chess_play::Table& engine) {

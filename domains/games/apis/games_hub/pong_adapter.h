@@ -110,8 +110,8 @@ struct Adapter<pong::Table> {
                               const HubStore::ChessEventRow* row) {
     if (row != nullptr) start.variant = std::get<PongTerms>(row->terms).variant;
   }
-  static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
-  static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
+  using RoundRobins = moonbase::games::PongRoundRobins;
+  static moonbase::games::PongRoundRobin RoundRobinWire(const HeldRoundRobin& held);
   // A pong round robin's body names its game and the variant its pairings
   // play.
   static constexpr bool kRoundRobinBodyNamed = true;

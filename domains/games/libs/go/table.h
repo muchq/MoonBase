@@ -24,17 +24,19 @@ struct GameScore {
 /// A go table: two seats playing one game after another until one of
 /// them leaves, as a chess table does.
 ///
-///   - It opens on its first game, seat 0 Black. A game's end is a line on
-///     the score sheet, and the table stays open for the next.
+///   - It opens on its first game, the seat it names Black (seat 0 unless
+///     named). A game's end is a line on the score sheet, and the table
+///     stays open for the next.
 ///   - The next game swaps colours.
 ///   - A leave closes the table. In the middle of a game it ends that game
 ///     first — lost by abandonment, or on time if the flag had already
 ///     fallen — and that game is scored; between games it scores nothing.
 class Table {
  public:
+  /// The first game, `black_seat` Black.
   [[nodiscard]] static absl::StatusOr<Table> open(std::vector<std::string> players, int size,
                                                   double komi, TimeControl time_control,
-                                                  int64_t now_ms);
+                                                  int64_t now_ms, int black_seat = 0);
   /// The full truth, for a stored row: refused unless the sheet ends with
   /// the game's result exactly when the game is over, names only the
   /// table's players, and a closed table's game is over.
