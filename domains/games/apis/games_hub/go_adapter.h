@@ -22,17 +22,19 @@ struct Adapter<go::Table> {
   static constexpr GameKind kKind = GameKind::kGo;
   static constexpr std::string_view kName = "go";
   static constexpr std::size_t kMaxSeats = go::GameState::kSeats;
-  static constexpr unsigned kCapabilities = kWatchable | kNextGame | kClocked | kChallenges;
+  static constexpr unsigned kCapabilities = kWatchable | kNextGame | kRoundRobins | kClocked | kChallenges;
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "go_commands";
-  static constexpr std::array<std::string_view, 11> kCommands = {
-      "createGame", "joinGame", "startGame", "leaveGame", "play",     "pass",
-      "resign",     "watch",    "markDead",  "accept",    "challenge"};
+  static constexpr std::array<std::string_view, 16> kCommands = {
+      "createGame",       "joinGame", "startGame", "leaveGame",   "play",
+      "pass",             "resign",   "watch",     "markDead",    "accept",
+      "challenge",        "createRoundRobin", "withdraw",  "forfeit", "roundRobins",
+      "playRoundRobin"};
   static constexpr std::string_view kEventSeries = "go_events";
-  static constexpr std::array<std::string_view, 7> kEvents = {
-      "gameJoined",  "gameState", "gameCreated", "gameStarted",
-      "turnChanged", "gameEnded", "gameLeft"};
+  static constexpr std::array<std::string_view, 9> kEvents = {
+      "gameJoined", "gameState", "gameCreated", "gameStarted", "turnChanged",
+      "gameEnded",  "gameLeft",  "roundRobin",  "roundRobins"};
   static const Move* MoveOf(const moonbase::games::GameCommands& commands) {
     const auto* command = commands.as_go_or_null();
     return command == nullptr ? nullptr : &command->move;
@@ -78,11 +80,9 @@ struct Adapter<go::Table> {
 
   // The clock is read as each move is applied, as chess's is.
   static Action<go::Table, Start> Decode(const Move& move, const std::string& player_id);
+  // A pairing's table opens with the pairing's Black on move.
   static absl::StatusOr<go::Table> Open(const OpenContext& context, const Start& start,
-                                        std::deque<cards::Card>) {
-    return go::Table::open(context.roster, start.size, start.komi, start.time_control,
-                           context.now_ms);
-  }
+                                        std::deque<cards::Card>);
   /// A challenge's table starts on its terms once its second seat fills.
   static std::optional<StartGame<Start>> FilledStart(const std::optional<HostedTerms>& terms,
                                                      const std::optional<EventTag>&) {
@@ -99,6 +99,30 @@ struct Adapter<go::Table> {
   }
   // Ended between games, or closed.
   static bool CurrentGameOver(const go::Table& table) { return table.game().isOver(); }
+
+  // A round robin's table plays its one game on the round robin's terms,
+  // which it waits on.
+  static void RoundRobinStart(Start& start, const std::optional<HostedTerms>& table_terms,
+                              const HubStore::ChessEventRow*) {
+    if (table_terms.has_value()) start = std::get<GoTerms>(*table_terms);
+  }
+  static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
+  static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
+  // A go round robin's body names its game, and holds its terms as a
+  // waiting table's state column does.
+  static constexpr bool kRoundRobinBodyNamed = true;
+  static nlohmann::json RoundRobinBody(const GoTerms& terms) {
+    return {{"terms", TermsJson(terms)}};
+  }
+  static std::optional<GoTerms> FromRoundRobinBody(const nlohmann::json& body) {
+    return body.contains("terms") ? TermsFromJson(body["terms"]) : std::nullopt;
+  }
+  // A tagged table plays its pairing's one game: once its sheet has a
+  // line, that is the game, its winner off the sheet (none for a draw).
+  static std::optional<HubStore::EventGame> TableGame(const go::Table& table) {
+    if (table.scoreSheet().empty()) return std::nullopt;
+    return HubStore::EventGame{0, "", 0, table.scoreSheet().front().winner};
+  }
 
   // {"size", "komi", "initialMs", "incrementMs"}, the clock in integer
   // milliseconds; terms no game could open on read as nothing.

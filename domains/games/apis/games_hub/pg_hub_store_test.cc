@@ -1387,6 +1387,8 @@ PgHubStore::ChessEventRow PinnedEvent(games_hub::GameKind kind) {
   if (kind == games_hub::GameKind::kPong) {
     row.terms = games_hub::PongTerms{pong::Variant::kThreeD};
     row.withdrawn = {"dave", "bob"};
+  } else if (kind == games_hub::GameKind::kGo) {
+    row.terms = games_hub::GoTerms{9, 5.5, {60'000, 0}};
   } else {
     row.terms = games_hub::ChessTerms{"standard", {180'000, 2'000}};
   }
@@ -1397,8 +1399,18 @@ PgHubStore::ChessEventRow PinnedEvent(games_hub::GameKind kind) {
   return row;
 }
 
+// A go body names its game and holds its terms as its waiting table's
+// state column does.
+const std::string kGoEventBody =
+    std::string(R"({"creator":"alice","entrants":["carol","alice","dave","bob"],
+  "game":"go","terms":{"size":9,"komi":5.5,"initialMs":60000,"incrementMs":0},
+  "withdrawn":[],)") +
+    kPairings + "}";
+
 const std::vector<std::pair<games_hub::GameKind, std::string>> kEventBodies = {
-    {games_hub::GameKind::kChess, kChessEventBody}, {games_hub::GameKind::kPong, kPongEventBody}};
+    {games_hub::GameKind::kChess, kChessEventBody},
+    {games_hub::GameKind::kPong, kPongEventBody},
+    {games_hub::GameKind::kGo, kGoEventBody}};
 
 class PinnedBytesTest : public PgHubStoreTest {
  protected:

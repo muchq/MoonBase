@@ -397,7 +397,8 @@ const ChessTerms kRapid{"kpk-opposition", {600'000, 5'000}};
 // and reads back as the game whose terms they are.
 TEST(RoundRobinBody, EachGamesTermsRoundTripAsThatGame) {
   for (const HostedTerms& terms :
-       {HostedTerms(kRapid), HostedTerms(PongTerms{pong::Variant::kThreeD})}) {
+       {HostedTerms(kRapid), HostedTerms(PongTerms{pong::Variant::kThreeD}),
+        HostedTerms(GoTerms{13, 0.5, {90'000, 3'000}})}) {
     const nlohmann::json body = RoundRobinBodyOf(RoundRobinRow(terms));
     HubStore::ChessEventRow read;
     read.terms = PongTerms{};
@@ -406,13 +407,18 @@ TEST(RoundRobinBody, EachGamesTermsRoundTripAsThatGame) {
   }
   EXPECT_EQ(RoundRobinKind(RoundRobinRow(kRapid)), GameKind::kChess);
   EXPECT_EQ(RoundRobinKind(RoundRobinRow(PongTerms{})), GameKind::kPong);
+  EXPECT_EQ(RoundRobinKind(RoundRobinRow(GoTerms{})), GameKind::kGo);
 }
 
 // A body reads as a round robin only in its own game's shape: chess's
-// unnamed with its terms, pong's named with a variant it plays.
+// unnamed with its terms, pong's named with a variant it plays, go's named
+// with terms a game could open on.
 TEST(RoundRobinBody, ABodyInNoGamesShapeReadsAsNothing) {
   const nlohmann::json chess = RoundRobinBodyOf(RoundRobinRow(kRapid));
   const nlohmann::json pong = RoundRobinBodyOf(RoundRobinRow(PongTerms{pong::Variant::kThreeD}));
+  const nlohmann::json go = RoundRobinBodyOf(RoundRobinRow(GoTerms{}));
+  nlohmann::json go_board = go;
+  go_board["terms"]["size"] = 10;
   const auto with = [](nlohmann::json body, const std::string& key, nlohmann::json value) {
     if (value.is_null()) {
       body.erase(key);
@@ -435,6 +441,9 @@ TEST(RoundRobinBody, ABodyInNoGamesShapeReadsAsNothing) {
            with(pong, "variant", nullptr),
            with(pong, "variant", "bogus"),
            with(pong, "variant", 3),
+           with(go, "game", nullptr),
+           with(go, "terms", nullptr),
+           go_board,
        }) {
     HubStore::ChessEventRow read;
     EXPECT_FALSE(RoundRobinFromBody(body, read)) << body.dump();

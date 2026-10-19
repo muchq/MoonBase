@@ -2,6 +2,13 @@ $version: "2.0"
 
 namespace moonbase.go
 
+use moonbase.chess#ChessEntrants
+use moonbase.chess#ChessForfeit
+use moonbase.chess#ChessPairings
+use moonbase.chess#ChessPlayRoundRobin
+use moonbase.chess#ChessRoundRobinsRequest
+use moonbase.chess#ChessStandings
+use moonbase.chess#ChessWithdraw
 use moonbase.games#CreateGame
 use moonbase.games#GameCreated
 use moonbase.games#GameLeft
@@ -42,6 +49,27 @@ union GoMove {
     markDead: GoMarkDead
     accept: GoAccept
     challenge: GoStartGame
+    createRoundRobin: GoCreateRoundRobin
+    withdraw: ChessWithdraw
+    forfeit: ChessForfeit
+    roundRobins: ChessRoundRobinsRequest
+    playRoundRobin: ChessPlayRoundRobin
+}
+
+/// Starts a go round robin among the room's members, as chess's
+/// createRoundRobin does: everyone plays everyone once, on `terms` (absent
+/// fields take startGame's defaults; terms no game could open on are
+/// refused). The room's round robins of every game count toward its 16.
+/// Withdraw, forfeit, roundRobins and playRoundRobin are chess's shapes and
+/// rules on go's round robins; each refuses a round robin of another game.
+/// A pairing's table waits on the terms, starts when its second seat fills
+/// with the pairing's Black to move, and its one game is the pairing's
+/// result.
+structure GoCreateRoundRobin {
+    @required
+    entrants: ChessEntrants
+
+    terms: GoStartGame
 }
 
 /// Seats two and opens an empty board, Black's clock running; the first
@@ -144,6 +172,8 @@ union GoUpdate {
     turnChanged: TurnChanged
     gameEnded: GoGameEnded
     gameLeft: GameLeft
+    roundRobin: GoRoundRobin
+    roundRobins: GoRoundRobins
 }
 
 structure GoGameJoined {
@@ -176,9 +206,14 @@ structure GoView {
 
     komi: Double
 
-    /// The posted challenge's terms; absent once started, or with none
-    /// posted.
+    /// The posted challenge's terms, or the round robin's at its pairing's
+    /// table; absent once started, or with none posted.
     terms: GoTerms
+
+    /// The round robin whose pairing this table plays, from its opening to
+    /// its close: one game, on the round robin's terms, with no next game.
+    /// Absent at any other table.
+    roundRobinId: String
 
     /// Black's seat first once started; in join order while waiting.
     @required
@@ -329,4 +364,43 @@ structure GoScoreLine {
 
     @required
     ending: String
+}
+
+/// The room's go round robins.
+structure GoRoundRobins {
+    @required
+    roundRobins: GoRoundRobinList
+}
+
+list GoRoundRobinList {
+    member: GoRoundRobin
+}
+
+/// A go round robin as every member sees it, sent to them all whenever it
+/// changes: chess's, its terms go's. A pairing's white and black are its
+/// colours, and its result is white | black | draw.
+structure GoRoundRobin {
+    @required
+    roundRobinId: String
+
+    @required
+    creator: String
+
+    /// In the order the pairings were drawn from.
+    @required
+    entrants: ChessEntrants
+
+    @required
+    terms: GoTerms
+
+    /// In round order.
+    @required
+    pairings: ChessPairings
+
+    @required
+    withdrawn: ChessEntrants
+
+    /// Best first, as chess ranks them.
+    @required
+    standings: ChessStandings
 }

@@ -612,8 +612,12 @@ result with the count once a game ends on the score. Watching is
 chess's, and so is a `challenge`: a lone seat posts a board, komi and
 clock, refused as posted when no game could open on them, listed as
 "9×9 · komi 5.5 · 1+0" and stored as
-`{"terms":{"size","komi","initialMs","incrementMs"}}`. Go has no bots,
-round robins or archive.
+`{"terms":{"size","komi","initialMs","incrementMs"}}`. Round robins are
+chess's too, on go's terms: a pairing's table waits on them, starts when
+its second seat fills with the pairing's Black on move, and its one game,
+off the table's own sheet as pong's is, is the pairing's result (an even
+count a draw). Its body names `"game":"go"` beside those terms. Go has no
+bots or archive.
 
 ### Spades
 

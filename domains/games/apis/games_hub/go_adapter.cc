@@ -1,6 +1,9 @@
 #include "domains/games/apis/games_hub/go_adapter.h"
 
+#include <algorithm>
+
 #include "absl/strings/str_cat.h"
+#include "domains/games/apis/games_hub/round_robin_wire.h"
 #include "domains/games/libs/go/table_serde.h"
 
 namespace games_hub {
@@ -91,17 +94,10 @@ moonbase::games::GoView Adapter<go::Table>::ViewOf(const TableContext& context,
   moonbase::games::GoView view;
   view.gameId = context.game_id;
   view.moveCount = 0;
+  if (context.event.has_value()) view.roundRobinId = context.event->event_id;
   if (table == nullptr) {
     view.phase = "waiting";
-    if (context.terms.has_value()) {
-      const GoTerms& terms = std::get<GoTerms>(*context.terms);
-      moonbase::games::GoTerms wire;
-      wire.size = terms.size;
-      wire.komi = terms.komi;
-      wire.initialSeconds = static_cast<int>(terms.time_control.initial_ms / 1000);
-      wire.incrementSeconds = static_cast<int>(terms.time_control.increment_ms / 1000);
-      view.terms = std::move(wire);
-    }
+    if (context.terms.has_value()) view.terms = WireGoTerms(std::get<GoTerms>(*context.terms));
     for (const std::string& roster_id : context.roster) {
       moonbase::games::GoPlayer player;
       player.playerId = roster_id;
@@ -230,6 +226,18 @@ Action<go::Table, Adapter<go::Table>::Start> Adapter<go::Table>::Decode(const Mo
     return PostTerms{HostedTerms(std::move(terms))};
   }
   if (const auto* watch = move.as_watch_or_null()) return WatchTable{watch->gameId};
+  if (const auto* create = move.as_createRoundRobin_or_null()) {
+    GoTerms terms = TermsFrom(create->terms.value_or(moonbase::games::GoStartGame{}));
+    if (const absl::Status ok = go::CheckRules(terms.size, terms.komi, terms.time_control);
+        !ok.ok()) {
+      return Refusal{RejectKind::kRules, std::string(ok.message())};
+    }
+    return CreateRoundRobin{create->entrants, HostedTerms(std::move(terms))};
+  }
+  if (const auto* withdraw = move.as_withdraw_or_null()) return Withdraw{*withdraw};
+  if (const auto* forfeit = move.as_forfeit_or_null()) return Forfeit{*forfeit};
+  if (move.as_roundRobins_or_null() != nullptr) return ListRoundRobins{};
+  if (const auto* play = move.as_playRoundRobin_or_null()) return PlayRoundRobin{*play};
   if (move.as_createGame_or_null() != nullptr) return CreateTable{};
   if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};
   if (move.as_leaveGame_or_null() != nullptr) return LeaveTable{};
@@ -266,6 +274,31 @@ Action<go::Table, Adapter<go::Table>::Start> Adapter<go::Table>::Decode(const Mo
     }};
   }
   return Refusal{RejectKind::kUnknown, "unknown move"};
+}
+
+absl::StatusOr<go::Table> Adapter<go::Table>::Open(const OpenContext& context, const Start& start,
+                                                   std::deque<cards::Card>) {
+  int black_seat = 0;
+  if (context.pairing != nullptr) {
+    const auto& roster = context.roster;
+    black_seat = static_cast<int>(std::find(roster.begin(), roster.end(), context.pairing->black) -
+                                  roster.begin());
+  }
+  return go::Table::open(context.roster, start.size, start.komi, start.time_control,
+                         context.now_ms, black_seat);
+}
+
+moonbase::games::GameEvents Adapter<go::Table>::RoundRobinEvent(const HeldRoundRobin& held) {
+  return Wrap(Update::FromRoundrobin(GoRoundRobinOf(held.row, held.live)));
+}
+
+moonbase::games::GameEvents Adapter<go::Table>::RoundRobinsEvent(
+    const std::vector<HeldRoundRobin>& held) {
+  moonbase::games::GoRoundRobins round_robins;
+  for (const HeldRoundRobin& one : held) {
+    round_robins.roundRobins.push_back(GoRoundRobinOf(one.row, one.live));
+  }
+  return Wrap(Update::FromRoundrobins(std::move(round_robins)));
 }
 
 nlohmann::json Adapter<go::Table>::TermsJson(const GoTerms& terms) {

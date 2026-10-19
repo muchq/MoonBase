@@ -27,6 +27,19 @@ TEST(Table, OpensWithSeatZeroBlack) {
   EXPECT_FALSE(table.isOver());
 }
 
+// A round robin's pairing names its Black, whichever seat that is; the
+// next game still swaps.
+TEST(Table, OpensWithTheSeatItNamesBlack) {
+  auto table = Table::open({"ann", "bo"}, 9, kDefaultKomi, kMinute, kT0, /*black_seat=*/1);
+  ASSERT_TRUE(table.ok()) << table.status();
+  EXPECT_EQ(table->game().blackSeat(), 1);
+  EXPECT_EQ(table->game().whoseTurn(), 1);
+  EXPECT_FALSE(Table::open({"ann", "bo"}, 9, kDefaultKomi, kMinute, kT0, 2).ok());
+  auto next = Resigned(*table, 0).next(9, kDefaultKomi, kMinute, kT0);
+  ASSERT_TRUE(next.ok()) << next.status();
+  EXPECT_EQ(next->game().blackSeat(), 0);
+}
+
 TEST(Table, AGamesEndIsALineOnTheSheet) {
   const Table ended = Resigned(Open(), 0);
   ASSERT_EQ(ended.scoreSheet().size(), 1u);
