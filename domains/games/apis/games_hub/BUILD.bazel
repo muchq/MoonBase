@@ -42,9 +42,9 @@ smithy_cpp_client_library(
     visibility = ["//domains/games/apis/one_d4_worker:__pkg__"],
 )
 
-# The games a room hosts: the kind a table is created as, and the
-# engine-state variant a started table carries, shared by the hub and
-# its store.
+# The games a room hosts: the kind a table is created as, the
+# engine-state variant a started table carries, and the terms variant a
+# challenge or round robin carries, shared by the hub and its store.
 cc_library(
     name = "hosted_game",
     hdrs = ["hosted_game.h"],
@@ -140,6 +140,7 @@ cc_test(
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/status",
         "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
     ],
 )
 
@@ -462,6 +463,7 @@ cc_test(
     size = "small",
     srcs = ["hub_store_test.cc"],
     deps = [
+        ":adapters",
         ":hosted_game",
         ":hub_store",
         ":memory_hub_store",
@@ -659,6 +661,7 @@ cc_test(
         "requires-postgres",
     ],
     deps = [
+        ":adapters",
         ":hosted_game",
         ":pg_hub_store",
         ":pg_ticket_vault",

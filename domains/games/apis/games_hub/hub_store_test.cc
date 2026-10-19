@@ -1,3 +1,4 @@
+#include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/apis/games_hub/hub_store.h"
 
 #include <gmock/gmock.h>
@@ -522,13 +523,12 @@ TEST(MemoryHubStoreTest, APongRoundRobinsPairingsAreScoredByTheirTables) {
   MemoryHubStore store;
   store.Enqueue({HubStore::UpsertRoom{"R1"}});
   HubStore::ChessEventRow event = Event(1);
-  event.kind = GameKind::kPong;
   event.terms = PongTerms{pong::Variant::kThreeD};
   ASSERT_TRUE(*store.CommitChessEvent(event, ""));
   const auto loaded = store.LoadRoom("R1");
   ASSERT_TRUE(loaded.ok());
   ASSERT_EQ(loaded->events.size(), 1u);
-  EXPECT_EQ(loaded->events[0].kind, GameKind::kPong);
+  EXPECT_EQ(RoundRobinKind(loaded->events[0]), GameKind::kPong);
   EXPECT_EQ(loaded->events[0].terms, HostedTerms(PongTerms{pong::Variant::kThreeD}));
 
   const auto pong_row = [](const pong::Table& table, int64_t version, std::optional<EventTag> tag) {

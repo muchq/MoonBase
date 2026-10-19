@@ -75,8 +75,8 @@ enum Capability : unsigned {
   /// kNextGame, a pairing being decided by its table's game ending.
   /// Hooks: Terms, what a round robin plays on (a HostedTerms
   /// alternative); RoundRobinStart(start, table terms, round robin row),
-  /// the start a pairing's table plays on; RoundRobinTerms(row), what its
-  /// table waits on; RoundRobinEvent(held) and RoundRobinsEvent(helds),
+  /// the start a pairing's table plays on; RoundRobinEvent(held) and
+  /// RoundRobinsEvent(helds),
   /// the round robins in the game's envelope; kRoundRobinBodyNamed,
   /// whether a stored round robin's body names its game (exactly one
   /// game's bodies name none, and a body naming none is that game's);

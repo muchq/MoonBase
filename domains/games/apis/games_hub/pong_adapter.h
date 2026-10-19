@@ -110,11 +110,6 @@ struct Adapter<pong::Table> {
                               const HubStore::ChessEventRow* row) {
     if (row != nullptr) start.variant = std::get<PongTerms>(row->terms).variant;
   }
-  // A pairing's table starts on the round robin's variant when it fills,
-  // and waits on no terms.
-  static std::optional<HostedTerms> RoundRobinTerms(const HubStore::ChessEventRow&) {
-    return std::nullopt;
-  }
   static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
   static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
   // A pong round robin's body names its game and the variant its pairings

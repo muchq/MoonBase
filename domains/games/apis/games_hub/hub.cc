@@ -1704,7 +1704,7 @@ void GamesHub::HandleGameMove(const std::string& player_id,
           [&](AskReview& ask) { ChessReviewMove(player_id, ask.review); },
           [&](Publish& publish) { PublishChessMove(player_id, publish.published); },
           [&](CreateRoundRobin& create) {
-            CreateRoundRobinMove(player_id, create.entrants, kind, create.terms);
+            CreateRoundRobinMove(player_id, create.entrants, create.terms);
           },
           [&](Withdraw& withdraw) { WithdrawMove(player_id, withdraw.withdraw, kind); },
           [&](Forfeit& forfeit) { ForfeitMove(player_id, forfeit.forfeit, kind); },
@@ -2523,7 +2523,7 @@ void GamesHub::StagePublishedLocked(const Room& room, bool published,
 }
 
 void GamesHub::CreateRoundRobinMove(const std::string& player_id,
-                                   const std::vector<std::string>& entrants, GameKind kind,
+                                   const std::vector<std::string>& entrants,
                                    const HostedTerms& terms) {
   auto pairings = RoundRobinPairings(entrants);
   if (!pairings.ok()) {
@@ -2564,7 +2564,6 @@ void GamesHub::CreateRoundRobinMove(const std::string& player_id,
       row.version = 1;
       row.creator = player_id;
       row.entrants = entrants;
-      row.kind = kind;
       row.terms = terms;
       row.pairings = *pairings;
       TouchRoomLocked(row.room_id);
@@ -2675,9 +2674,9 @@ std::optional<games_hub::Refusal> GamesHub::ModerateRoundRobinLocked(
       return Refusal{RejectKind::kState, "no such round robin in this room"};
     }
     const HubStore::ChessEventRow& row = held->second;
-    if (row.kind != kind) {
+    if (RoundRobinKind(row) != kind) {
       return Refusal{RejectKind::kState,
-                     absl::StrCat("that round robin plays ", GameKindName(row.kind))};
+                     absl::StrCat("that round robin plays ", GameKindName(RoundRobinKind(row)))};
     }
     // The creator moderates; while they are out of the room, any entrant
     // in it does, but not on what they are party to.
@@ -2726,7 +2725,7 @@ void GamesHub::RoundRobinsMove(const std::string& player_id, GameKind kind) {
       in_room = true;
       std::vector<HeldRoundRobin> held;
       for (const auto& [id, row] : room->round_robins) {
-        if (row.kind == kind) held.push_back({row, LiveTablesLocked(*room, id)});
+        if (RoundRobinKind(row) == kind) held.push_back({row, LiveTablesLocked(*room, id)});
       }
       answer = RoundRobinsEventOf(kind, held);
     }
@@ -2752,9 +2751,9 @@ void GamesHub::PlayRoundRobinMove(const std::string& player_id,
     } else if (const auto held = room->round_robins.find(play.roundRobinId);
                held == room->round_robins.end()) {
       refusal = Refusal{RejectKind::kState, "no such round robin in this room"};
-    } else if (held->second.kind != kind) {
+    } else if (RoundRobinKind(held->second) != kind) {
       refusal = Refusal{RejectKind::kState,
-                        absl::StrCat("that round robin plays ", GameKindName(held->second.kind))};
+                        absl::StrCat("that round robin plays ", GameKindName(RoundRobinKind(held->second)))};
     } else {
       const HubStore::ChessEventRow& row = held->second;
       const auto open =
@@ -2768,9 +2767,10 @@ void GamesHub::PlayRoundRobinMove(const std::string& player_id,
                           absl::StrCat("that pairing is being played at ", table->second)};
       } else {
         const std::string room_id = player_room_.at(player_id);
-        // A pong pairing starts on the round robin's variant, read when
-        // its table fills; only a chess one waits on terms.
-        const std::optional<HostedTerms> terms = RoundRobinTermsOf(kind, row);
+        // A pairing's table waits on the round robin's terms where its
+        // game's waiting tables hold terms, and otherwise reads them when
+        // it fills.
+        const std::optional<HostedTerms> terms = RoundRobinTermsOf(row);
         for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
           std::string game_id = ids_->GameCode();
           while (room->games.contains(game_id)) game_id = ids_->GameCode();
@@ -2854,7 +2854,7 @@ void GamesHub::StageRoundRobinLocked(const Room& room, const HubStore::ChessEven
                                     Outbox& outbox) const {
   // In its own game's envelope.
   const std::optional<GameEvents> event =
-      RoundRobinEventOf(row.kind, {row, LiveTablesLocked(room, row.event_id)});
+      RoundRobinEventOf(RoundRobinKind(row), {row, LiveTablesLocked(room, row.event_id)});
   if (!event.has_value()) return;
   for (const auto& [member_id, member] : room.members) outbox.To(member_id, *event);
 }

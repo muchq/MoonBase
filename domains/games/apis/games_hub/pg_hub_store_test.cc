@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/apis/games_hub/migrations.h"
 #include "domains/games/apis/games_hub/round_robin.h"
 #include "domains/games/libs/cards/card.h"
@@ -1215,7 +1216,6 @@ TEST_F(PgHubStoreTest, APongRoundRobinKeepsItsGameAndIsScoredByItsTables) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
   store_->Flush();
   PgHubStore::ChessEventRow event = Event(1);
-  event.kind = games_hub::GameKind::kPong;
   event.terms = games_hub::PongTerms{pong::Variant::kThreeD};
   ASSERT_TRUE(*store_->CommitChessEvent(event, ""));
 
@@ -1232,14 +1232,14 @@ TEST_F(PgHubStoreTest, APongRoundRobinKeepsItsGameAndIsScoredByItsTables) {
   auto room = store_->LoadRoom("R1");
   ASSERT_TRUE(room.ok()) << room.status();
   ASSERT_EQ(room->events.size(), 1u);
-  EXPECT_EQ(room->events[0].kind, games_hub::GameKind::kPong);
+  EXPECT_EQ(games_hub::RoundRobinKind(room->events[0]), games_hub::GameKind::kPong);
   EXPECT_EQ(room->events[0].terms, games_hub::HostedTerms(games_hub::PongTerms{pong::Variant::kThreeD}));
   ASSERT_EQ(room->events[0].games.size(), 1u);
   EXPECT_EQ(room->events[0].games[0], (PgHubStore::EventGame{0, "P1", 0, "alice"}));
   auto snapshot = store_->LoadSnapshot();
   ASSERT_TRUE(snapshot.ok()) << snapshot.status();
   ASSERT_EQ(snapshot->events.size(), 1u);
-  EXPECT_EQ(snapshot->events[0].kind, games_hub::GameKind::kPong);
+  EXPECT_EQ(games_hub::RoundRobinKind(snapshot->events[0]), games_hub::GameKind::kPong);
   EXPECT_EQ(snapshot->events[0].games.size(), 1u);
 }
 
@@ -1285,7 +1285,6 @@ TEST_F(PgHubStoreTest, ARoundRobinBodyNamesEveryGameButChess) {
   ASSERT_TRUE(*store_->CommitChessEvent(Event(1), ""));
   PgHubStore::ChessEventRow pong = Event(1);
   pong.event_id = "E2";
-  pong.kind = games_hub::GameKind::kPong;
   pong.terms = games_hub::PongTerms{pong::Variant::kThreeD};
   ASSERT_TRUE(*store_->CommitChessEvent(pong, ""));
   const auto body = [&](const std::string& event_id) {
@@ -1324,9 +1323,9 @@ TEST_F(PgHubStoreTest, ARoundRobinBodyNamesEveryGameButChess) {
   ASSERT_TRUE(room.ok()) << room.status();
   ASSERT_EQ(room->events.size(), 2u);
   EXPECT_EQ(room->events[0].event_id, "E1");
-  EXPECT_EQ(room->events[0].kind, games_hub::GameKind::kChess);
+  EXPECT_EQ(games_hub::RoundRobinKind(room->events[0]), games_hub::GameKind::kChess);
   EXPECT_EQ(room->events[1].event_id, "E2");
-  EXPECT_EQ(room->events[1].kind, games_hub::GameKind::kPong);
+  EXPECT_EQ(games_hub::RoundRobinKind(room->events[1]), games_hub::GameKind::kPong);
   EXPECT_EQ(room->events[1].terms, games_hub::HostedTerms(games_hub::PongTerms{pong::Variant::kThreeD}));
 }
 
@@ -1375,7 +1374,6 @@ PgHubStore::ChessEventRow PinnedEvent(games_hub::GameKind kind) {
   row.version = 1;
   row.creator = "alice";
   row.entrants = {"carol", "alice", "dave", "bob"};
-  row.kind = kind;
   if (kind == games_hub::GameKind::kPong) {
     row.terms = games_hub::PongTerms{pong::Variant::kThreeD};
     row.withdrawn = {"dave", "bob"};
@@ -1465,7 +1463,7 @@ TEST_F(PinnedBytesTest, TheseBytesLoadAsRoundRobinsThatWriteThemAgain) {
         events = loaded->events;
       }
       ASSERT_EQ(events.size(), 1u) << static_cast<int>(kind) << " snapshot=" << snapshot;
-      EXPECT_EQ(events[0].kind, kind);
+      EXPECT_EQ(games_hub::RoundRobinKind(events[0]), kind);
       ASSERT_TRUE(db_->Exec("DELETE FROM chess_events").ok());
       ASSERT_TRUE(*store_->CommitChessEvent(events[0], ""));
       EXPECT_EQ(StoredBody(), Jsonb(golden)) << static_cast<int>(kind) << " snapshot=" << snapshot;

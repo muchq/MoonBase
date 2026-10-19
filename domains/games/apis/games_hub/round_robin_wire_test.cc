@@ -148,7 +148,6 @@ TEST(RoundRobinWire, APairingAtATableNamesIt) {
 // winner, whichever side of the pairing won.
 TEST(RoundRobinWire, APongRoundRobinNamesItsVariantAndEachPairingsWinner) {
   HubStore::ChessEventRow row = Row({"A", "B", "C", "D"});
-  row.kind = GameKind::kPong;
   row.terms = PongTerms{pong::Variant::kThreeD};
   Score(row, "A", "D", 1);  // A is first
   Score(row, "C", "A", 0);  // C is first: the second wins

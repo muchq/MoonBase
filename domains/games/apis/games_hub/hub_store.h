@@ -23,8 +23,8 @@ inline std::string RoomChannel(const std::string& room_id) { return "room_" + ro
 /// no instance's id, so every instance holding the room acts on it.
 inline constexpr char kSweepWake[] = "sweep";
 
-/// The round robin pairing a chess table plays: the event, and
-/// the pairing's index in it.
+/// The round robin pairing a table plays: the event, and the pairing's
+/// index in it.
 struct EventTag {
   std::string event_id;
   int pairing = 0;
@@ -118,8 +118,8 @@ class HubStore {
     int64_t version = 0;
     std::string creator;
     std::vector<std::string> entrants;
-    GameKind kind = GameKind::kChess;
-    /// What its pairings play on, in `kind`'s own terms.
+    /// What its pairings play on, in its game's own terms: which game it
+    /// is (adapters.h's RoundRobinKind).
     HostedTerms terms = ChessTerms{};
     std::vector<Pairing> pairings;
     std::set<std::string> withdrawn;

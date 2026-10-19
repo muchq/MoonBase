@@ -132,9 +132,6 @@ struct Adapter<chess_play::Table> {
                               const HubStore::ChessEventRow*) {
     if (table_terms.has_value()) start.terms = std::get<ChessTerms>(*table_terms);
   }
-  static std::optional<HostedTerms> RoundRobinTerms(const HubStore::ChessEventRow& row) {
-    return row.terms;
-  }
   static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
   static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
   // A chess round robin's body names no game, and holds its terms as a

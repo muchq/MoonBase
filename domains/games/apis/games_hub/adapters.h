@@ -98,7 +98,6 @@ concept RoundRobinHooks =
     requires(typename A::Start& start, const HubStore::ChessEventRow& row,
              const HeldRoundRobin& held, const typename A::Terms& terms) {
       A::RoundRobinStart(start, std::declval<const std::optional<HostedTerms>&>(), &row);
-      { A::RoundRobinTerms(row) } -> std::same_as<std::optional<HostedTerms>>;
       { A::RoundRobinEvent(held) } -> std::same_as<moonbase::games::GameEvents>;
       {
         A::RoundRobinsEvent(std::vector<HeldRoundRobin>{})
@@ -196,6 +195,27 @@ constexpr bool TermsLineUp(std::index_sequence<T...>) {
 }
 static_assert(TermsLineUp(std::make_index_sequence<std::variant_size_v<HostedTerms>>{}),
               "every game with terms owns one HostedTerms alternative, and each is one game's");
+
+/// The game whose Terms `T` is.
+template <typename T>
+constexpr GameKind kTermsKind = []<std::size_t... I>(std::index_sequence<I...>) {
+  GameKind kind{};
+  ((kind = [kind] {
+     using A = Adapter<EngineAt<I>>;
+     if constexpr (kHasTerms<A>) {
+       if (std::is_same_v<typename A::Terms, T>) return A::kKind;
+     }
+     return kind;
+   }()),
+   ...);
+  return kind;
+}(std::make_index_sequence<kGames>{});
+
+/// The game a round robin plays: the one whose terms it holds.
+inline GameKind RoundRobinKind(const HubStore::ChessEventRow& row) {
+  return std::visit([](const auto& terms) { return kTermsKind<std::decay_t<decltype(terms)>>; },
+                    row.terms);
+}
 
 /// Each kind's word, by kind: its adapter's kName.
 inline constexpr std::array<std::string_view, kGames> kKindNames =
@@ -389,10 +409,13 @@ std::optional<moonbase::games::GameEvents> RoundRobinEventOf(GameKind kind,
                                                              const HeldRoundRobin& held);
 std::optional<moonbase::games::GameEvents> RoundRobinsEventOf(
     GameKind kind, const std::vector<HeldRoundRobin>& held);
-/// The terms a `kind` round robin's pairing table waits on.
-std::optional<HostedTerms> RoundRobinTermsOf(GameKind kind, const HubStore::ChessEventRow& row);
+/// The terms a round robin's pairing table waits on: the round robin's,
+/// at a game whose waiting tables hold terms (kChallenges); none at any
+/// other, whose pairing tables start on the round robin's terms when
+/// they fill.
+std::optional<HostedTerms> RoundRobinTermsOf(const HubStore::ChessEventRow& row);
 
-/// What a `row.kind` round robin's stored body carries beyond the fields
+/// What a round robin's stored body carries beyond the fields
 /// every round robin's does: its game's word as "game", unless its game's
 /// bodies name none, and its adapter's own fields for its terms.
 nlohmann::json RoundRobinBodyOf(const HubStore::ChessEventRow& row);

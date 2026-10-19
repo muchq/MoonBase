@@ -554,10 +554,10 @@ class GamesHub final {
   void PublishChessMove(const std::string& player_id, bool published);
   /// Round robins: any member creates one, its creator withdraws
   /// entrants and records forfeits, and any member asks for the room's.
-  /// Each takes the game whose envelope asked: a round robin is chess's
-  /// or pong's, and each game's moves serve its own, on its own terms.
+  /// A new one's terms name its game; the rest take the game whose
+  /// envelope asked, each game's moves serving its own round robins.
   void CreateRoundRobinMove(const std::string& player_id, const std::vector<std::string>& entrants,
-                            GameKind kind, const HostedTerms& terms);
+                            const HostedTerms& terms);
   void WithdrawMove(const std::string& player_id, const moonbase::games::ChessWithdraw& withdraw,
                     GameKind kind);
   void ForfeitMove(const std::string& player_id, const moonbase::games::ChessForfeit& forfeit,
