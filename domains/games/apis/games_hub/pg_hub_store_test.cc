@@ -1329,6 +1329,138 @@ TEST_F(PgHubStoreTest, ARoundRobinBodyNamesEveryGameButChess) {
   EXPECT_EQ(room->events[1].pong_variant, pong::Variant::kThreeD);
 }
 
+// Stored bytes are pinned, both ways: a waiting chess table's terms and a
+// round robin's body write exactly these, and these load as rows that
+// write them again. Rows already stored hold these bytes. Compared as
+// jsonb text, which keeps key sets and number types (60000 is not
+// 60000.0) while dropping key order and whitespace.
+constexpr char kWaitingChessState[] =
+    R"({"terms":{"setupId":"kpk-opposition","initialMs":60000,"incrementMs":1000}})";
+
+constexpr char kPairings[] = R"(
+  "pairings":[
+    {"round":1,"white":"alice","black":"bob","result":"white"},
+    {"round":1,"white":"carol","black":"dave","result":"black","forfeit":true},
+    {"round":2,"white":"bob","black":"carol","result":"draw"},
+    {"round":2,"white":"dave","black":"alice"}])";
+
+// Entrants keep their order; a chess body names no game.
+const std::string kChessEventBody =
+    std::string(R"({"creator":"alice","entrants":["carol","alice","dave","bob"],
+  "terms":{"setupId":"standard","initialMs":180000,"incrementMs":2000},
+  "withdrawn":[],)") +
+    kPairings + "}";
+
+// A pong body carries chess's terms, unused, beside its game and variant.
+const std::string kPongEventBody =
+    std::string(R"({"creator":"alice","entrants":["carol","alice","dave","bob"],
+  "terms":{"setupId":"","initialMs":0,"incrementMs":0},
+  "game":"pong","variant":"3d","withdrawn":["bob","dave"],)") +
+    kPairings + "}";
+
+// Every field a body carries: a result of each kind, a forfeit, an
+// unplayed pairing, no withdrawal (chess) and two (pong).
+PgHubStore::ChessEventRow PinnedEvent(games_hub::GameKind kind) {
+  PgHubStore::ChessEventRow row;
+  row.room_id = "R1";
+  row.event_id = "E1";
+  row.version = 1;
+  row.creator = "alice";
+  row.entrants = {"carol", "alice", "dave", "bob"};
+  row.kind = kind;
+  if (kind == games_hub::GameKind::kPong) {
+    row.pong_variant = pong::Variant::kThreeD;
+    row.withdrawn = {"dave", "bob"};
+  } else {
+    row.terms = {"standard", {180'000, 2'000}};
+  }
+  row.pairings = {{1, "alice", "bob", games_hub::PairingResult::kWhite},
+                  {1, "carol", "dave", games_hub::PairingResult::kBlack, true},
+                  {2, "bob", "carol", games_hub::PairingResult::kDraw},
+                  {2, "dave", "alice"}};
+  return row;
+}
+
+const std::vector<std::pair<games_hub::GameKind, std::string>> kEventBodies = {
+    {games_hub::GameKind::kChess, kChessEventBody}, {games_hub::GameKind::kPong, kPongEventBody}};
+
+class PinnedBytesTest : public PgHubStoreTest {
+ protected:
+  void SetUp() override {
+    PgHubStoreTest::SetUp();
+    if (IsSkipped()) return;
+    store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
+    store_->Flush();
+  }
+  // The golden as jsonb would store it.
+  std::string Jsonb(const std::string& golden) {
+    return *db_->Exec("SELECT $1::jsonb::text", {golden})->Get(0, 0);
+  }
+  std::string StoredState() {
+    return *db_->Exec("SELECT state::text FROM games WHERE game_id = 'K1'")->Get(0, 0);
+  }
+  std::string StoredBody() {
+    return *db_->Exec("SELECT body::text FROM chess_events WHERE event_id = 'E1'")->Get(0, 0);
+  }
+};
+
+TEST_F(PinnedBytesTest, AWaitingChessTablesTermsAreTheseBytes) {
+  PgHubStore::GameRow waiting{"R1", "K1", {"alice"}, std::nullopt, 1, games_hub::GameKind::kChess};
+  waiting.terms = games_hub::ChessTerms{"kpk-opposition", {60'000, 1'000}};
+  ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
+  EXPECT_EQ(StoredState(), Jsonb(kWaitingChessState));
+}
+
+TEST_F(PinnedBytesTest, TheseBytesLoadAsAWaitingChessTableThatWritesThemAgain) {
+  PgHubStore::GameRow waiting{"R1", "K1", {"alice"}, std::nullopt, 1, games_hub::GameKind::kChess};
+  ASSERT_TRUE(*store_->CommitGameSave(waiting, ""));
+  ASSERT_TRUE(
+      db_->Exec("UPDATE games SET state = $1::jsonb WHERE game_id = 'K1'", {kWaitingChessState})
+          .ok());
+  auto loaded = store_->LoadGame("R1", "K1");
+  ASSERT_TRUE(loaded.ok() && loaded->has_value());
+  EXPECT_FALSE((*loaded)->state.has_value());
+  ASSERT_TRUE(db_->Exec("DELETE FROM games").ok());
+  ASSERT_TRUE(*store_->CommitGameSave(**loaded, ""));
+  EXPECT_EQ(StoredState(), Jsonb(kWaitingChessState));
+}
+
+TEST_F(PinnedBytesTest, RoundRobinBodiesAreTheseBytes) {
+  for (const auto& [kind, golden] : kEventBodies) {
+    ASSERT_TRUE(db_->Exec("DELETE FROM chess_events").ok());
+    ASSERT_TRUE(*store_->CommitChessEvent(PinnedEvent(kind), ""));
+    EXPECT_EQ(StoredBody(), Jsonb(golden)) << static_cast<int>(kind);
+  }
+}
+
+// Through both loads: a room's, and the snapshot a boot reads.
+TEST_F(PinnedBytesTest, TheseBytesLoadAsRoundRobinsThatWriteThemAgain) {
+  for (const auto& [kind, golden] : kEventBodies) {
+    for (const bool snapshot : {false, true}) {
+      ASSERT_TRUE(db_->Exec("DELETE FROM chess_events").ok());
+      ASSERT_TRUE(db_->Exec("INSERT INTO chess_events (room_id, event_id, version, body)"
+                            " VALUES ('R1', 'E1', 1, $1::jsonb)",
+                            {golden})
+                      .ok());
+      std::vector<PgHubStore::ChessEventRow> events;
+      if (snapshot) {
+        auto loaded = store_->LoadSnapshot();
+        ASSERT_TRUE(loaded.ok()) << loaded.status();
+        events = loaded->events;
+      } else {
+        auto loaded = store_->LoadRoom("R1");
+        ASSERT_TRUE(loaded.ok()) << loaded.status();
+        events = loaded->events;
+      }
+      ASSERT_EQ(events.size(), 1u) << static_cast<int>(kind) << " snapshot=" << snapshot;
+      EXPECT_EQ(events[0].kind, kind);
+      ASSERT_TRUE(db_->Exec("DELETE FROM chess_events").ok());
+      ASSERT_TRUE(*store_->CommitChessEvent(events[0], ""));
+      EXPECT_EQ(StoredBody(), Jsonb(golden)) << static_cast<int>(kind) << " snapshot=" << snapshot;
+    }
+  }
+}
+
 // Two tables racing to play one pairing each end a first game, and the
 // event lists both, in archive order: the store does not pick.
 TEST_F(PgHubStoreTest, TwoTablesPlayingOnePairingAreBothListed) {
