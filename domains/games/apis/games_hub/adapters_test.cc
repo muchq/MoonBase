@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <optional>
 #include <set>
@@ -55,7 +57,7 @@ struct Table {
   std::string game_id = "tbl";
   std::vector<std::string> roster = {};
   std::set<std::string> watchers = {};
-  std::optional<ChessTerms> terms = std::nullopt;
+  std::optional<HostedTerms> terms = std::nullopt;
   std::optional<EventTag> event = std::nullopt;
   TableContext Context() const { return {game_id, roster, watchers, terms, event, 0}; }
 };
@@ -231,7 +233,7 @@ TEST(Decode, AChallengeOnAnUnknownSetupIsTheRulesRefusal) {
   terms.setupId = std::string(chess_play::kDefaultChessSetup);
   const auto posted = Chess::Decode(moonbase::games::ChessMove::FromChallenge(terms), "alice");
   ASSERT_TRUE(std::holds_alternative<PostTerms>(posted));
-  EXPECT_EQ(std::get<PostTerms>(posted).terms.time_control.initial_ms,
+  EXPECT_EQ(std::get<ChessTerms>(std::get<PostTerms>(posted).terms).time_control.initial_ms,
             kDefaultChessClock.initial_ms);
 }
 
@@ -380,6 +382,90 @@ TEST(Capabilities, OnlyARealtimeGamesSteeringRidesTheRealtimeBudget) {
   start.move = moonbase::games::PongMove::FromStartgame(moonbase::games::PongStartGame{});
   EXPECT_FALSE(OnRealtimeBudget(GameCommands::FromPong(start)));
   EXPECT_FALSE(OnRealtimeBudget(GameCommands::FromGetroomstate(moonbase::games::GetRoomState{})));
+}
+
+
+HubStore::ChessEventRow RoundRobinRow(HostedTerms terms) {
+  HubStore::ChessEventRow row;
+  row.terms = std::move(terms);
+  return row;
+}
+
+const ChessTerms kRapid{"kpk-opposition", {600'000, 5'000}};
+
+// A round robin's body holds its game's terms in that game's own fields,
+// and reads back as the game whose terms they are.
+TEST(RoundRobinBody, EachGamesTermsRoundTripAsThatGame) {
+  for (const HostedTerms& terms :
+       {HostedTerms(kRapid), HostedTerms(PongTerms{pong::Variant::kThreeD})}) {
+    const nlohmann::json body = RoundRobinBodyOf(RoundRobinRow(terms));
+    HubStore::ChessEventRow read;
+    read.terms = PongTerms{};
+    ASSERT_TRUE(RoundRobinFromBody(body, read)) << body.dump();
+    EXPECT_EQ(read.terms, terms) << body.dump();
+  }
+  EXPECT_EQ(RoundRobinKind(RoundRobinRow(kRapid)), GameKind::kChess);
+  EXPECT_EQ(RoundRobinKind(RoundRobinRow(PongTerms{})), GameKind::kPong);
+}
+
+// A body reads as a round robin only in its own game's shape: chess's
+// unnamed with its terms, pong's named with a variant it plays.
+TEST(RoundRobinBody, ABodyInNoGamesShapeReadsAsNothing) {
+  const nlohmann::json chess = RoundRobinBodyOf(RoundRobinRow(kRapid));
+  const nlohmann::json pong = RoundRobinBodyOf(RoundRobinRow(PongTerms{pong::Variant::kThreeD}));
+  const auto with = [](nlohmann::json body, const std::string& key, nlohmann::json value) {
+    if (value.is_null()) {
+      body.erase(key);
+    } else {
+      body[key] = std::move(value);
+    }
+    return body;
+  };
+  nlohmann::json float_clock = chess;
+  float_clock["terms"]["initialMs"] = 600'000.0;
+  for (const nlohmann::json& body : {
+           with(chess, "game", "chess"),
+           with(chess, "terms", nullptr),
+           with(chess, "terms", "standard"),
+           float_clock,
+           with(pong, "game", nullptr),
+           with(pong, "game", 1),
+           with(pong, "game", "golf"),
+           with(pong, "game", "bridge"),
+           with(pong, "variant", nullptr),
+           with(pong, "variant", "bogus"),
+           with(pong, "variant", 3),
+       }) {
+    HubStore::ChessEventRow read;
+    EXPECT_FALSE(RoundRobinFromBody(body, read)) << body.dump();
+  }
+}
+
+// A pairing's table waits on its round robin's terms only where waiting
+// tables hold terms.
+TEST(RoundRobinBody, OnlyAChallengeGamesPairingTableWaitsOnTerms) {
+  EXPECT_EQ(RoundRobinTermsOf(RoundRobinRow(kRapid)), std::optional<HostedTerms>(kRapid));
+  EXPECT_EQ(RoundRobinTermsOf(RoundRobinRow(PongTerms{})), std::nullopt);
+}
+
+// A waiting chess table's terms read back from its state column, and
+// nothing else in their place does.
+TEST(WaitingTerms, ChessTermsRoundTripAndMalformedOnesReadAsNothing) {
+  const nlohmann::json stored = WaitingTermsJson(GameKind::kChess, kRapid);
+  EXPECT_EQ(WaitingTermsFromJson(GameKind::kChess, stored), std::optional<HostedTerms>(kRapid));
+  for (const nlohmann::json& malformed :
+       {nlohmann::json("standard"), nlohmann::json::object(),
+        nlohmann::json{{"setupId", "standard"}, {"initialMs", "60000"}, {"incrementMs", 0}},
+        nlohmann::json{{"setupId", "standard"}, {"initialMs", 60000.0}, {"incrementMs", 0}},
+        nlohmann::json{{"setupId", "standard"}, {"initialMs", 60000}}}) {
+    EXPECT_EQ(WaitingTermsFromJson(GameKind::kChess, malformed), std::nullopt) << malformed.dump();
+  }
+}
+
+TEST(WaitingTerms, TheLobbyListsChessTermsBySetupAndClock) {
+  EXPECT_EQ(TermsLineOf(GameKind::kChess, kRapid), "K+P vs K — Opposition · 10+5");
+  EXPECT_EQ(TermsLineOf(GameKind::kChess, ChessTerms{"standard", {90'000, 0}}),
+            "Standard starting position · 90s+0");
 }
 
 }  // namespace

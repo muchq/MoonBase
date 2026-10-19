@@ -1,7 +1,6 @@
 #include "domains/games/apis/games_hub/pg_hub_store.h"
 
 #include <algorithm>
-#include <map>
 #include <nlohmann/json.hpp>
 #include <set>
 #include <string>
@@ -179,35 +178,29 @@ std::string StatsJson(const std::vector<PgHubStore::StatsDelta>& stats) {
   return rows.dump();
 }
 
-// A waiting table's challenge, at a game that takes them
-// (kChallenges), rides the state column, which is otherwise NULL until the
-// start: {"terms":{...}}. No engine's encoding has a top-level "terms".
-std::string TermsJson(const ChessTerms& terms) {
-  return json{{"terms",
-               {{"setupId", terms.setup_id},
-                {"initialMs", terms.time_control.initial_ms},
-                {"incrementMs", terms.time_control.increment_ms}}}}
-      .dump();
-}
-
-absl::StatusOr<std::optional<ChessTerms>> TermsFromJson(const std::string& state_json) {
+// A waiting table's terms, at a game that takes challenges (kChallenges),
+// ride the state column, which is otherwise NULL until the start:
+// {"terms": its adapter's TermsJson}. No engine's encoding has a
+// top-level "terms".
+absl::StatusOr<std::optional<HostedTerms>> TermsFromJson(GameKind kind,
+                                                         const std::string& state_json) {
   const json parsed = json::parse(state_json, /*cb=*/nullptr, /*allow_exceptions=*/false);
   if (!parsed.is_object() || !parsed.contains("terms")) return std::nullopt;
-  const json& terms = parsed["terms"];
-  if (!terms.is_object() || !terms.contains("setupId") || !terms["setupId"].is_string() ||
-      !terms.contains("initialMs") || !terms["initialMs"].is_number_integer() ||
-      !terms.contains("incrementMs") || !terms["incrementMs"].is_number_integer()) {
-    return absl::DataLossError("chess terms are malformed");
+  auto terms = WaitingTermsFromJson(kind, parsed["terms"]);
+  if (!terms.has_value()) {
+    return absl::DataLossError(absl::StrCat(GameKindName(kind), " terms are malformed"));
   }
-  return ChessTerms{terms["setupId"].get<std::string>(),
-                    {terms["initialMs"].get<int64_t>(), terms["incrementMs"].get<int64_t>()}};
+  return terms;
 }
 
 // The state column is encoded by whichever engine the variant holds,
 // through its adapter; the kind column is what the loads read to pick the
 // decoder back.
 std::string StateJson(const PgHubStore::GameRow& row) {
-  if (!row.state.has_value()) return row.terms.has_value() ? TermsJson(*row.terms) : "";
+  if (!row.state.has_value()) {
+    if (!row.terms.has_value()) return "";
+    return json{{"terms", WaitingTermsJson(row.kind, *row.terms)}}.dump();
+  }
   return VisitAdapter(*row.state, [](auto adapter, const auto& engine) {
     return decltype(adapter)::Serialize(engine);
   });
@@ -279,14 +272,10 @@ std::string EventBodyJson(const PgHubStore::ChessEventRow& row) {
   }
   json body{{"creator", row.creator},
             {"entrants", row.entrants},
-            {"terms",
-             {{"setupId", row.terms.setup_id},
-              {"initialMs", row.terms.time_control.initial_ms},
-              {"incrementMs", row.terms.time_control.increment_ms}}},
             {"pairings", std::move(pairings)},
             {"withdrawn", row.withdrawn}};
-  // The game's word and its own fields, from its adapter.
-  for (auto& [key, value] : RoundRobinBodyOf(row)) body[key] = std::move(value);
+  // The game's word and its terms, from its adapter.
+  body.update(RoundRobinBodyOf(row));
   return body.dump();
 }
 
@@ -299,27 +288,14 @@ absl::Status EventBodyFromJson(const std::string& text, PgHubStore::ChessEventRo
   const absl::Status malformed = absl::DataLossError("chess event body is malformed");
   const json body = json::parse(text, /*cb=*/nullptr, /*allow_exceptions=*/false);
   if (!body.is_object() || !body.contains("creator") || !body["creator"].is_string() ||
-      !body.contains("entrants") || !IsStrings(body["entrants"]) || !body.contains("terms") ||
-      !body["terms"].is_object() || !body.contains("pairings") || !body["pairings"].is_array() ||
-      !body.contains("withdrawn") || !IsStrings(body["withdrawn"])) {
+      !body.contains("entrants") || !IsStrings(body["entrants"]) || !body.contains("pairings") ||
+      !body["pairings"].is_array() || !body.contains("withdrawn") ||
+      !IsStrings(body["withdrawn"])) {
     return malformed;
   }
-  const json& terms = body["terms"];
-  if (!terms.contains("setupId") || !terms["setupId"].is_string() || !terms.contains("initialMs") ||
-      !terms["initialMs"].is_number_integer() || !terms.contains("incrementMs") ||
-      !terms["incrementMs"].is_number_integer()) {
-    return malformed;
-  }
-  if (body.contains("game") && !body["game"].is_string()) return malformed;
-  std::map<std::string, std::string> fields;
-  for (const auto& [key, value] : body.items()) {
-    if (value.is_string()) fields[key] = value.get<std::string>();
-  }
-  if (!RoundRobinFromBody(fields, row)) return malformed;
+  if (!RoundRobinFromBody(body, row)) return malformed;
   row.creator = body["creator"].get<std::string>();
   row.entrants = body["entrants"].get<std::vector<std::string>>();
-  row.terms = {terms["setupId"].get<std::string>(),
-               {terms["initialMs"].get<int64_t>(), terms["incrementMs"].get<int64_t>()}};
   row.withdrawn = body["withdrawn"].get<std::set<std::string>>();
   row.pairings.clear();
   for (const json& p : body["pairings"]) {
@@ -751,7 +727,7 @@ absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(
   }
   if (state_json.empty()) return row;
   if (HasCapability(row.kind, kChallenges)) {
-    auto terms = TermsFromJson(state_json);
+    auto terms = TermsFromJson(row.kind, state_json);
     if (!terms.ok()) return terms.status();
     if (terms->has_value()) {
       row.terms = **terms;

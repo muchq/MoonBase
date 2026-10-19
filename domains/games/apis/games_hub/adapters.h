@@ -5,7 +5,6 @@
 #include <concepts>
 #include <cstddef>
 #include <deque>
-#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -13,6 +12,8 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include "domains/games/apis/games_hub/adapter.h"
 #include "domains/games/apis/games_hub/castle_adapter.h"
@@ -73,7 +74,7 @@ concept GameAdapter = requires(
             std::deque<cards::Card>{})
   } -> std::same_as<absl::StatusOr<typename A::Engine>>;
   {
-    A::FilledStart(std::declval<const std::optional<ChessTerms>&>(),
+    A::FilledStart(std::declval<const std::optional<HostedTerms>&>(),
                    std::declval<const std::optional<EventTag>&>())
   } -> std::same_as<std::optional<StartGame<typename A::Start>>>;
   { A::IsBot(std::string_view{}) } -> std::same_as<bool>;
@@ -93,24 +94,32 @@ concept NextGameHooks = requires(const typename A::Engine& engine, const typenam
 
 template <typename A>
 concept RoundRobinHooks =
-    NextGameHooks<A> && requires(typename A::Start& start, const HubStore::ChessEventRow& row,
-                                 const HeldRoundRobin& held) {
-      A::RoundRobinStart(start, std::declval<const std::optional<ChessTerms>&>(), &row);
-      { A::RoundRobinTerms(row) } -> std::same_as<std::optional<ChessTerms>>;
+    NextGameHooks<A> &&
+    requires(typename A::Start& start, const HubStore::ChessEventRow& row,
+             const HeldRoundRobin& held, const typename A::Terms& terms) {
+      A::RoundRobinStart(start, std::declval<const std::optional<HostedTerms>&>(), &row);
       { A::RoundRobinEvent(held) } -> std::same_as<moonbase::games::GameEvents>;
       {
         A::RoundRobinsEvent(std::vector<HeldRoundRobin>{})
       } -> std::same_as<moonbase::games::GameEvents>;
       { A::kRoundRobinBodyNamed } -> std::convertible_to<bool>;
-      { A::RoundRobinBody(row) } -> std::same_as<std::vector<std::pair<std::string, std::string>>>;
+      { A::RoundRobinBody(terms) } -> std::same_as<nlohmann::json>;
       {
-        A::FromRoundRobinBody(std::declval<const std::map<std::string, std::string>&>(),
-                              std::declval<HubStore::ChessEventRow&>())
-      } -> std::same_as<bool>;
+        A::FromRoundRobinBody(std::declval<const nlohmann::json&>())
+      } -> std::same_as<std::optional<typename A::Terms>>;
       {
         A::TableGame(std::declval<const typename A::Engine&>())
       } -> std::same_as<std::optional<HubStore::EventGame>>;
     };
+
+template <typename A>
+concept ChallengeHooks = requires(const typename A::Terms& terms) {
+  { A::TermsJson(terms) } -> std::same_as<nlohmann::json>;
+  {
+    A::TermsFromJson(std::declval<const nlohmann::json&>())
+  } -> std::same_as<std::optional<typename A::Terms>>;
+  { A::TermsLine(terms) } -> std::same_as<std::string>;
+};
 
 template <typename A>
 concept OpeningHooks = requires(typename A::Start& start) {
@@ -140,7 +149,8 @@ template <typename A>
 concept CapableAdapter =
     (!kHas<A, kNextGame> || NextGameHooks<A>) && (!kHas<A, kRoundRobins> || RoundRobinHooks<A>) &&
     (!kHas<A, kOpenings> || OpeningHooks<A>) && (!kHas<A, kClocked> || ClockHooks<A>) &&
-    (!kHas<A, kRealtime> || RealtimeHooks<A>) && (!kHas<A, kPublished> || PublishedHooks<A>);
+    (!kHas<A, kRealtime> || RealtimeHooks<A>) && (!kHas<A, kPublished> || PublishedHooks<A>) &&
+    (!kHas<A, kChallenges> || ChallengeHooks<A>);
 
 /// Each HostedState alternative has a full adapter that names the GameKind
 /// at its index, so a kind and its engine never disagree.
@@ -152,6 +162,60 @@ constexpr bool KindsLineUp(std::index_sequence<I...>) {
           ...);
 }
 static_assert(KindsLineUp(std::make_index_sequence<kGames>{}));
+
+/// A game with terms of its own: one taking challenges or round robins.
+template <typename A>
+constexpr bool kHasTerms = kHas<A, kChallenges> || kHas<A, kRoundRobins>;
+
+/// How many games' adapters name `T` as their Terms.
+template <typename T>
+constexpr std::size_t GamesWithTerms() {
+  return []<std::size_t... I>(std::index_sequence<I...>) {
+    return ([] {
+      using A = Adapter<EngineAt<I>>;
+      if constexpr (kHasTerms<A>) {
+        return std::size_t{std::is_same_v<typename A::Terms, T>};
+      } else {
+        return std::size_t{0};
+      }
+    }() + ... + 0);
+  }(std::make_index_sequence<kGames>{});
+}
+
+/// Each HostedTerms alternative is exactly one game's Terms, so terms
+/// name the one adapter that reads them; and every game with terms names
+/// one of them.
+template <std::size_t... T>
+constexpr bool TermsLineUp(std::index_sequence<T...>) {
+  constexpr std::size_t kTermed = []<std::size_t... I>(std::index_sequence<I...>) {
+    return (std::size_t{kHasTerms<Adapter<EngineAt<I>>>} + ... + 0);
+  }(std::make_index_sequence<kGames>{});
+  return ((GamesWithTerms<std::variant_alternative_t<T, HostedTerms>>() == 1) && ...) &&
+         kTermed == sizeof...(T);
+}
+static_assert(TermsLineUp(std::make_index_sequence<std::variant_size_v<HostedTerms>>{}),
+              "every game with terms owns one HostedTerms alternative, and each is one game's");
+
+/// The game whose Terms `T` is.
+template <typename T>
+constexpr GameKind kTermsKind = []<std::size_t... I>(std::index_sequence<I...>) {
+  GameKind kind{};
+  ((kind = [kind] {
+     using A = Adapter<EngineAt<I>>;
+     if constexpr (kHasTerms<A>) {
+       if (std::is_same_v<typename A::Terms, T>) return A::kKind;
+     }
+     return kind;
+   }()),
+   ...);
+  return kind;
+}(std::make_index_sequence<kGames>{});
+
+/// The game a round robin plays: the one whose terms it holds.
+inline GameKind RoundRobinKind(const HubStore::ChessEventRow& row) {
+  return std::visit([](const auto& terms) { return kTermsKind<std::decay_t<decltype(terms)>>; },
+                    row.terms);
+}
 
 /// Each kind's word, by kind: its adapter's kName.
 inline constexpr std::array<std::string_view, kGames> kKindNames =
@@ -345,21 +409,31 @@ std::optional<moonbase::games::GameEvents> RoundRobinEventOf(GameKind kind,
                                                              const HeldRoundRobin& held);
 std::optional<moonbase::games::GameEvents> RoundRobinsEventOf(
     GameKind kind, const std::vector<HeldRoundRobin>& held);
-/// The terms a `kind` round robin's pairing table waits on.
-std::optional<ChessTerms> RoundRobinTermsOf(GameKind kind, const HubStore::ChessEventRow& row);
+/// The terms a round robin's pairing table waits on: the round robin's,
+/// at a game whose waiting tables hold terms (kChallenges); none at any
+/// other, whose pairing tables start on the round robin's terms when
+/// they fill.
+std::optional<HostedTerms> RoundRobinTermsOf(const HubStore::ChessEventRow& row);
 
-/// What a `row.kind` round robin's stored body carries beyond the fields
+/// What a round robin's stored body carries beyond the fields
 /// every round robin's does: its game's word as "game", unless its game's
-/// bodies name none, and its adapter's own fields.
-std::vector<std::pair<std::string, std::string>> RoundRobinBodyOf(
-    const HubStore::ChessEventRow& row);
+/// bodies name none, and its adapter's own fields for its terms.
+nlohmann::json RoundRobinBodyOf(const HubStore::ChessEventRow& row);
 
-/// Reads a stored round robin body's string fields onto `row`: its game
+/// Reads a stored round robin body's game and terms onto `row`: its game
 /// from "game" (a body naming none is the one game's whose bodies go
-/// unnamed), then that game's own fields. False when the body is no round
-/// robin game's.
-bool RoundRobinFromBody(const std::map<std::string, std::string>& fields,
-                        HubStore::ChessEventRow& row);
+/// unnamed), then that game's terms from its own fields. False when the
+/// body is no round robin game's.
+bool RoundRobinFromBody(const nlohmann::json& body, HubStore::ChessEventRow& row);
+
+/// A `kind` waiting table's posted terms as its state column holds them
+/// (kChallenges' TermsJson), and back: nothing when they don't read as
+/// that game's terms.
+nlohmann::json WaitingTermsJson(GameKind kind, const HostedTerms& terms);
+std::optional<HostedTerms> WaitingTermsFromJson(GameKind kind, const nlohmann::json& stored);
+
+/// A `kind` waiting table's posted terms as the lobby lists them.
+std::string TermsLineOf(GameKind kind, const HostedTerms& terms);
 
 /// The finished game a committed row archives (kPublished's Archived),
 /// and its ordinal; absent for anything else. Its id and stamps are the

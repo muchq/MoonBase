@@ -3,6 +3,8 @@
 
 #include <array>
 
+#include <nlohmann/json.hpp>
+
 #include "domains/games/apis/games_hub/adapter.h"
 #include "domains/games/apis/games_hub/pong_bots.h"
 
@@ -14,6 +16,7 @@ struct Adapter<pong::Table> {
   using Move = moonbase::games::PongMove;
   using Update = moonbase::games::PongUpdate;
   using View = moonbase::games::PongView;
+  using Terms = PongTerms;
   /// The variant a game plays.
   struct Start {
     pong::Variant variant = pong::Variant::kSmallcat;
@@ -86,7 +89,7 @@ struct Adapter<pong::Table> {
     return pong::Table::open(context.roster, start.variant);
   }
   /// A pairing's table starts when it fills, on the round robin's variant.
-  static std::optional<StartGame<Start>> FilledStart(const std::optional<ChessTerms>&,
+  static std::optional<StartGame<Start>> FilledStart(const std::optional<HostedTerms>&,
                                                      const std::optional<EventTag>& event) {
     if (!event.has_value()) return std::nullopt;
     return StartGame<Start>{Start{}, /*next_game=*/true};
@@ -103,32 +106,24 @@ struct Adapter<pong::Table> {
   static bool CurrentGameOver(const pong::Table& table) { return !table.inPlay(); }
 
   // A round robin's table plays its one game on the round robin's variant.
-  static void RoundRobinStart(Start& start, const std::optional<ChessTerms>&,
+  static void RoundRobinStart(Start& start, const std::optional<HostedTerms>&,
                               const HubStore::ChessEventRow* row) {
-    if (row != nullptr) start.variant = row->pong_variant;
-  }
-  // A pairing's table starts on the round robin's variant when it fills,
-  // and waits on no terms.
-  static std::optional<ChessTerms> RoundRobinTerms(const HubStore::ChessEventRow&) {
-    return std::nullopt;
+    if (row != nullptr) start.variant = std::get<PongTerms>(row->terms).variant;
   }
   static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
   static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
   // A pong round robin's body names its game and the variant its pairings
   // play.
   static constexpr bool kRoundRobinBodyNamed = true;
-  static std::vector<std::pair<std::string, std::string>> RoundRobinBody(
-      const HubStore::ChessEventRow& row) {
-    return {{"variant", std::string(pong::VariantName(row.pong_variant))}};
+  static nlohmann::json RoundRobinBody(const PongTerms& terms) {
+    return {{"variant", pong::VariantName(terms.variant)}};
   }
-  static bool FromRoundRobinBody(const std::map<std::string, std::string>& fields,
-                                 HubStore::ChessEventRow& row) {
-    const auto variant = fields.find("variant");
-    if (variant == fields.end()) return false;
-    const std::optional<pong::Variant> parsed = pong::ParseVariant(variant->second);
-    if (!parsed.has_value()) return false;
-    row.pong_variant = *parsed;
-    return true;
+  static std::optional<PongTerms> FromRoundRobinBody(const nlohmann::json& body) {
+    if (!body.contains("variant") || !body["variant"].is_string()) return std::nullopt;
+    const std::optional<pong::Variant> parsed =
+        pong::ParseVariant(body["variant"].get<std::string>());
+    if (!parsed.has_value()) return std::nullopt;
+    return PongTerms{*parsed};
   }
   // A tagged table plays its pairing's one game: once its sheet has a
   // line, that is the game, its winner off the sheet.

@@ -89,7 +89,7 @@ struct Adapter<golf::GameState> {
                                               std::deque<cards::Card> deck) {
     return golf::dealGolfGame(context.game_id, context.roster, std::move(deck));
   }
-  static std::optional<StartGame<Start>> FilledStart(const std::optional<ChessTerms>&,
+  static std::optional<StartGame<Start>> FilledStart(const std::optional<HostedTerms>&,
                                                      const std::optional<EventTag>&) {
     return std::nullopt;
   }

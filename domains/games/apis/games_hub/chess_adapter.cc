@@ -80,7 +80,7 @@ moonbase::games::ChessView Adapter<chess_play::Table>::ViewOf(const TableContext
   }
   if (table == nullptr) {
     view.phase = "waiting";
-    if (context.terms.has_value()) view.terms = WireTerms(*context.terms);
+    if (context.terms.has_value()) view.terms = WireTerms(std::get<ChessTerms>(*context.terms));
     for (const std::string& roster_id : context.roster) {
       moonbase::games::ChessPlayer player;
       player.playerId = roster_id;
@@ -169,14 +169,14 @@ Action<chess_play::Table, Adapter<chess_play::Table>::Start> Adapter<chess_play:
     if (!chess_play::ChessSetupName(terms.setup_id).has_value()) {
       return Refusal{RejectKind::kRules, absl::StrCat("unknown chess setup: ", terms.setup_id)};
     }
-    return PostTerms{std::move(terms)};
+    return PostTerms{HostedTerms(std::move(terms))};
   }
   if (const auto* create = move.as_createRoundRobin_or_null()) {
     ChessTerms terms = TermsFrom(create->terms.value_or(moonbase::games::ChessStartGame{}));
     if (!chess_play::ChessSetupName(terms.setup_id).has_value()) {
       return Refusal{RejectKind::kRules, absl::StrCat("unknown chess setup: ", terms.setup_id)};
     }
-    return CreateRoundRobin{create->entrants, std::move(terms), pong::Variant::kSmallcat};
+    return CreateRoundRobin{create->entrants, HostedTerms(std::move(terms))};
   }
   if (const auto* withdraw = move.as_withdraw_or_null()) return Withdraw{*withdraw};
   if (const auto* forfeit = move.as_forfeit_or_null()) return Forfeit{*forfeit};
@@ -216,6 +216,30 @@ absl::StatusOr<chess_play::Table> Adapter<chess_play::Table>::Open(const OpenCon
   }
   return chess_play::Table::open(context.roster, start.setup->variant, opening,
                                  start.terms.time_control, context.now_ms, start.setup->id);
+}
+
+nlohmann::json Adapter<chess_play::Table>::TermsJson(const ChessTerms& terms) {
+  return {{"setupId", terms.setup_id},
+          {"initialMs", terms.time_control.initial_ms},
+          {"incrementMs", terms.time_control.increment_ms}};
+}
+
+std::optional<ChessTerms> Adapter<chess_play::Table>::TermsFromJson(const nlohmann::json& stored) {
+  if (!stored.is_object() || !stored.contains("setupId") || !stored["setupId"].is_string() ||
+      !stored.contains("initialMs") || !stored["initialMs"].is_number_integer() ||
+      !stored.contains("incrementMs") || !stored["incrementMs"].is_number_integer()) {
+    return std::nullopt;
+  }
+  return ChessTerms{stored["setupId"].get<std::string>(),
+                    {stored["initialMs"].get<int64_t>(), stored["incrementMs"].get<int64_t>()}};
+}
+
+std::string Adapter<chess_play::Table>::TermsLine(const ChessTerms& terms) {
+  const int64_t initial_s = terms.time_control.initial_ms / 1000;
+  const std::string initial =
+      initial_s % 60 == 0 ? absl::StrCat(initial_s / 60) : absl::StrCat(initial_s, "s");
+  return absl::StrCat(chess_play::ChessSetupName(terms.setup_id).value_or(terms.setup_id), " · ",
+                      initial, "+", terms.time_control.increment_ms / 1000);
 }
 
 absl::Status Adapter<chess_play::Table>::Prepare(Start& start, const ChessOpener& opener) {

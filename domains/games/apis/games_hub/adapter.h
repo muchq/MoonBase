@@ -36,7 +36,7 @@ struct TableContext {
   const std::vector<std::string>& roster;
   /// Members watching from no seat; only a kWatchable table has any.
   const std::set<std::string>& watchers;
-  const std::optional<ChessTerms>& terms;
+  const std::optional<HostedTerms>& terms;
   const std::optional<EventTag>& event;
   /// Epoch milliseconds on the chess clock.
   int64_t now_ms = 0;
@@ -73,14 +73,15 @@ enum Capability : unsigned {
   kNextGame = 1U << 1,
   /// A round robin's pairings play at the game's tables; implies
   /// kNextGame, a pairing being decided by its table's game ending.
-  /// Hooks: RoundRobinStart(start, table terms, round robin row), the
-  /// start a pairing's table plays on; RoundRobinTerms(row), what its
-  /// table waits on; RoundRobinEvent(held) and RoundRobinsEvent(helds),
+  /// Hooks: Terms, what a round robin plays on (a HostedTerms
+  /// alternative); RoundRobinStart(start, table terms, round robin row),
+  /// the start a pairing's table plays on; RoundRobinEvent(held) and
+  /// RoundRobinsEvent(helds),
   /// the round robins in the game's envelope; kRoundRobinBodyNamed,
   /// whether a stored round robin's body names its game (exactly one
   /// game's bodies name none, and a body naming none is that game's);
-  /// RoundRobinBody(row) and FromRoundRobinBody(fields, row), the game's
-  /// own string fields in that body, and whether they read back;
+  /// RoundRobinBody(terms) and FromRoundRobinBody(body), the game's own
+  /// fields in that body, and its terms read back from them, if they do;
   /// TableGame(engine), the pairing's game a tagged table's own row
   /// records, for a game whose pairings' games are not archived.
   kRoundRobins = 1U << 2,
@@ -105,7 +106,9 @@ enum Capability : unsigned {
   /// A waiting table may hold posted terms its next seat starts on. The
   /// store checks the flag: a waiting row's state column is read back as
   /// those terms in place of an engine. Posting them is Decode's, as the
-  /// PostTerms it returns.
+  /// PostTerms it returns. Hooks: Terms, as kRoundRobins'; TermsJson(terms)
+  /// and TermsFromJson(json), the terms as the state column holds them
+  /// and back, if they read; TermsLine(terms), how the lobby lists them.
   kChallenges = 1U << 8,
 };
 
@@ -138,7 +141,7 @@ struct AddBot {
 };
 /// The terms a waiting table posts for its next seat to start on.
 struct PostTerms {
-  ChessTerms terms;
+  HostedTerms terms;
 };
 struct AskHistory {};
 struct AskReview {
@@ -149,8 +152,7 @@ struct Publish {
 };
 struct CreateRoundRobin {
   std::vector<std::string> entrants;
-  ChessTerms terms;
-  pong::Variant variant = pong::Variant::kSmallcat;
+  HostedTerms terms;
 };
 struct Withdraw {
   moonbase::games::ChessWithdraw withdraw;

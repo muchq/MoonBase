@@ -70,7 +70,7 @@ moonbase::games::ChessRoundRobin RoundRobinOf(const HubStore::ChessEventRow& row
   view.roundRobinId = row.event_id;
   view.creator = row.creator;
   view.entrants = row.entrants;
-  view.terms = WireTerms(row.terms);
+  view.terms = WireTerms(std::get<ChessTerms>(row.terms));
   for (std::size_t i = 0; i < pairings.size(); ++i) {
     const Pairing& pairing = pairings[i];
     moonbase::games::ChessPairing wire;
@@ -105,7 +105,7 @@ moonbase::games::PongRoundRobin PongRoundRobinOf(const HubStore::ChessEventRow& 
   view.roundRobinId = row.event_id;
   view.creator = row.creator;
   view.entrants = row.entrants;
-  view.variant = std::string(pong::VariantName(row.pong_variant));
+  view.variant = std::string(pong::VariantName(std::get<PongTerms>(row.terms).variant));
   for (std::size_t i = 0; i < pairings.size(); ++i) {
     const Pairing& pairing = pairings[i];
     moonbase::games::PongPairing wire;
