@@ -369,7 +369,7 @@ HubStore::ChessEventRow Event(int64_t version, const std::string& creator = "ali
   row.version = version;
   row.creator = creator;
   row.entrants = {"alice", "bob", "carol"};
-  row.terms = {"standard", {180'000, 2'000}};
+  row.terms = ChessTerms{"standard", {180'000, 2'000}};
   row.pairings = *RoundRobinPairings(row.entrants);
   return row;
 }
@@ -523,13 +523,13 @@ TEST(MemoryHubStoreTest, APongRoundRobinsPairingsAreScoredByTheirTables) {
   store.Enqueue({HubStore::UpsertRoom{"R1"}});
   HubStore::ChessEventRow event = Event(1);
   event.kind = GameKind::kPong;
-  event.pong_variant = pong::Variant::kThreeD;
+  event.terms = PongTerms{pong::Variant::kThreeD};
   ASSERT_TRUE(*store.CommitChessEvent(event, ""));
   const auto loaded = store.LoadRoom("R1");
   ASSERT_TRUE(loaded.ok());
   ASSERT_EQ(loaded->events.size(), 1u);
   EXPECT_EQ(loaded->events[0].kind, GameKind::kPong);
-  EXPECT_EQ(loaded->events[0].pong_variant, pong::Variant::kThreeD);
+  EXPECT_EQ(loaded->events[0].terms, HostedTerms(PongTerms{pong::Variant::kThreeD}));
 
   const auto pong_row = [](const pong::Table& table, int64_t version, std::optional<EventTag> tag) {
     HubStore::GameRow row{"R1",    "G1",           table.players(), HostedState(table),

@@ -55,7 +55,7 @@ struct Table {
   std::string game_id = "tbl";
   std::vector<std::string> roster = {};
   std::set<std::string> watchers = {};
-  std::optional<ChessTerms> terms = std::nullopt;
+  std::optional<HostedTerms> terms = std::nullopt;
   std::optional<EventTag> event = std::nullopt;
   TableContext Context() const { return {game_id, roster, watchers, terms, event, 0}; }
 };
@@ -231,7 +231,7 @@ TEST(Decode, AChallengeOnAnUnknownSetupIsTheRulesRefusal) {
   terms.setupId = std::string(chess_play::kDefaultChessSetup);
   const auto posted = Chess::Decode(moonbase::games::ChessMove::FromChallenge(terms), "alice");
   ASSERT_TRUE(std::holds_alternative<PostTerms>(posted));
-  EXPECT_EQ(std::get<PostTerms>(posted).terms.time_control.initial_ms,
+  EXPECT_EQ(std::get<ChessTerms>(std::get<PostTerms>(posted).terms).time_control.initial_ms,
             kDefaultChessClock.initial_ms);
 }
 

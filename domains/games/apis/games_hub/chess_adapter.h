@@ -5,6 +5,8 @@
 #include <functional>
 #include <string_view>
 
+#include <nlohmann/json.hpp>
+
 #include "domains/games/apis/games_hub/adapter.h"
 #include "domains/games/apis/games_hub/chess_bots.h"
 
@@ -28,6 +30,7 @@ struct Adapter<chess_play::Table> {
   using Move = moonbase::games::ChessMove;
   using Update = moonbase::games::ChessUpdate;
   using View = moonbase::games::ChessView;
+  using Terms = ChessTerms;
   /// A game's terms, and the setup the hub's opener draws from them
   /// (Prepare); a start nothing prepared has none, and is refused.
   struct Start {
@@ -105,10 +108,10 @@ struct Adapter<chess_play::Table> {
   static absl::StatusOr<chess_play::Table> Open(const OpenContext& context, const Start& start,
                                                 std::deque<cards::Card>);
   /// A challenge's table starts on its terms once its second seat fills.
-  static std::optional<StartGame<Start>> FilledStart(const std::optional<ChessTerms>& terms,
+  static std::optional<StartGame<Start>> FilledStart(const std::optional<HostedTerms>& terms,
                                                      const std::optional<EventTag>&) {
     if (!terms.has_value()) return std::nullopt;
-    return StartGame<Start>{Start{*terms, std::nullopt}};
+    return StartGame<Start>{Start{std::get<ChessTerms>(*terms), std::nullopt}};
   }
   static std::string Serialize(const chess_play::Table& engine);
   static absl::StatusOr<chess_play::Table> Deserialize(const std::string& stored);
@@ -123,27 +126,34 @@ struct Adapter<chess_play::Table> {
   // Ended between games, or closed.
   static bool CurrentGameOver(const chess_play::Table& table) { return table.game().isOver(); }
 
-  // A round robin's table plays its one game on the round robin's terms.
-  static void RoundRobinStart(Start& start, const std::optional<ChessTerms>& table_terms,
+  // A round robin's table plays its one game on the round robin's terms,
+  // which it waits on.
+  static void RoundRobinStart(Start& start, const std::optional<HostedTerms>& table_terms,
                               const HubStore::ChessEventRow*) {
-    if (table_terms.has_value()) start.terms = *table_terms;
+    if (table_terms.has_value()) start.terms = std::get<ChessTerms>(*table_terms);
   }
-  static std::optional<ChessTerms> RoundRobinTerms(const HubStore::ChessEventRow& row) {
+  static std::optional<HostedTerms> RoundRobinTerms(const HubStore::ChessEventRow& row) {
     return row.terms;
   }
   static moonbase::games::GameEvents RoundRobinEvent(const HeldRoundRobin& held);
   static moonbase::games::GameEvents RoundRobinsEvent(const std::vector<HeldRoundRobin>& held);
-  // A chess round robin's body names no game, and holds nothing beyond
-  // the terms every round robin's body does.
+  // A chess round robin's body names no game, and holds its terms as a
+  // waiting table's state column does.
   static constexpr bool kRoundRobinBodyNamed = false;
-  static std::vector<std::pair<std::string, std::string>> RoundRobinBody(
-      const HubStore::ChessEventRow&) {
-    return {};
+  static nlohmann::json RoundRobinBody(const ChessTerms& terms) {
+    return {{"terms", TermsJson(terms)}};
   }
-  static bool FromRoundRobinBody(const std::map<std::string, std::string>&,
-                                 HubStore::ChessEventRow&) {
-    return true;
+  static std::optional<ChessTerms> FromRoundRobinBody(const nlohmann::json& body) {
+    return body.contains("terms") ? TermsFromJson(body["terms"]) : std::nullopt;
   }
+
+  // {"setupId", "initialMs", "incrementMs"}, the clock in integer
+  // milliseconds.
+  static nlohmann::json TermsJson(const ChessTerms& terms);
+  static std::optional<ChessTerms> TermsFromJson(const nlohmann::json& stored);
+  // "Standard starting position · 3+2": a clock of whole minutes in
+  // minutes and any other in seconds.
+  static std::string TermsLine(const ChessTerms& terms);
   // A pairing's games are the archived ones its table played (Archived).
   static std::optional<HubStore::EventGame> TableGame(const chess_play::Table&) {
     return std::nullopt;

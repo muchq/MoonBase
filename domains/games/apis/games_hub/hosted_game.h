@@ -1,6 +1,7 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_HOSTED_GAME_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_HOSTED_GAME_H
 
+#include <string>
 #include <variant>
 
 #include "domains/games/libs/cards/castle/game_state.h"
@@ -36,6 +37,26 @@ inline GameKind KindOf(const HostedState& state) { return static_cast<GameKind>(
 inline bool IsOver(const HostedState& state) {
   return std::visit([](const auto& engine) { return engine.isOver(); }, state);
 }
+
+/// A chess challenge's or round robin's terms: the setup and clock its
+/// games start on.
+struct ChessTerms {
+  std::string setup_id;
+  chess_play::TimeControl time_control;
+  bool operator==(const ChessTerms&) const = default;
+};
+
+/// A pong round robin's terms: the variant its pairings play.
+struct PongTerms {
+  pong::Variant variant = pong::Variant::kSmallcat;
+  bool operator==(const PongTerms&) const = default;
+};
+
+/// What a game's challenge or round robin plays on, in that game's own
+/// shape. The hub carries it without reading it: each alternative is one
+/// adapter's Terms, and only that adapter reads or stores it (adapters.h
+/// holds them to that).
+using HostedTerms = std::variant<ChessTerms, PongTerms>;
 
 }  // namespace games_hub
 

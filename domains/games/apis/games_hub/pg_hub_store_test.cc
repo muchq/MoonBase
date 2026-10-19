@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -244,8 +245,8 @@ TEST_F(PgHubStoreTest, ChallengeTermsRideTheStateColumnUntilTheStart) {
   ASSERT_TRUE(reread.ok() && reread->has_value());
   EXPECT_FALSE((*reread)->state.has_value());
   ASSERT_TRUE((*reread)->terms.has_value());
-  EXPECT_EQ((*reread)->terms->setup_id, "kpk-opposition");
-  EXPECT_EQ((*reread)->terms->time_control, (chess_play::TimeControl{60'000, 1'000}));
+  EXPECT_EQ((*reread)->terms,
+            games_hub::HostedTerms(games_hub::ChessTerms{"kpk-opposition", {60'000, 1'000}}));
 
   auto opened =
       chess_play::Table::open({"alice", "bob"}, "kpk", {"8/8/8/4k3/8/8/4P3/4K3 w - - 0 1", 0},
@@ -1025,7 +1026,7 @@ PgHubStore::ChessEventRow Event(int64_t version, const std::string& creator = "a
   row.version = version;
   row.creator = creator;
   row.entrants = {"alice", "bob", "carol"};
-  row.terms = {"standard", {180'000, 2'000}};
+  row.terms = games_hub::ChessTerms{"standard", {180'000, 2'000}};
   row.pairings = *games_hub::RoundRobinPairings(row.entrants);
   return row;
 }
@@ -1215,7 +1216,7 @@ TEST_F(PgHubStoreTest, APongRoundRobinKeepsItsGameAndIsScoredByItsTables) {
   store_->Flush();
   PgHubStore::ChessEventRow event = Event(1);
   event.kind = games_hub::GameKind::kPong;
-  event.pong_variant = pong::Variant::kThreeD;
+  event.terms = games_hub::PongTerms{pong::Variant::kThreeD};
   ASSERT_TRUE(*store_->CommitChessEvent(event, ""));
 
   pong::Table table = *pong::Table::open({"bob", "alice"}, pong::Variant::kThreeD);
@@ -1232,7 +1233,7 @@ TEST_F(PgHubStoreTest, APongRoundRobinKeepsItsGameAndIsScoredByItsTables) {
   ASSERT_TRUE(room.ok()) << room.status();
   ASSERT_EQ(room->events.size(), 1u);
   EXPECT_EQ(room->events[0].kind, games_hub::GameKind::kPong);
-  EXPECT_EQ(room->events[0].pong_variant, pong::Variant::kThreeD);
+  EXPECT_EQ(room->events[0].terms, games_hub::HostedTerms(games_hub::PongTerms{pong::Variant::kThreeD}));
   ASSERT_EQ(room->events[0].games.size(), 1u);
   EXPECT_EQ(room->events[0].games[0], (PgHubStore::EventGame{0, "P1", 0, "alice"}));
   auto snapshot = store_->LoadSnapshot();
@@ -1285,7 +1286,7 @@ TEST_F(PgHubStoreTest, ARoundRobinBodyNamesEveryGameButChess) {
   PgHubStore::ChessEventRow pong = Event(1);
   pong.event_id = "E2";
   pong.kind = games_hub::GameKind::kPong;
-  pong.pong_variant = pong::Variant::kThreeD;
+  pong.terms = games_hub::PongTerms{pong::Variant::kThreeD};
   ASSERT_TRUE(*store_->CommitChessEvent(pong, ""));
   const auto body = [&](const std::string& event_id) {
     return nlohmann::json::parse(
@@ -1326,7 +1327,7 @@ TEST_F(PgHubStoreTest, ARoundRobinBodyNamesEveryGameButChess) {
   EXPECT_EQ(room->events[0].kind, games_hub::GameKind::kChess);
   EXPECT_EQ(room->events[1].event_id, "E2");
   EXPECT_EQ(room->events[1].kind, games_hub::GameKind::kPong);
-  EXPECT_EQ(room->events[1].pong_variant, pong::Variant::kThreeD);
+  EXPECT_EQ(room->events[1].terms, games_hub::HostedTerms(games_hub::PongTerms{pong::Variant::kThreeD}));
 }
 
 // Stored bytes are pinned, both ways: a waiting chess table's terms and a
@@ -1351,8 +1352,15 @@ const std::string kChessEventBody =
   "withdrawn":[],)") +
     kPairings + "}";
 
-// A pong body carries chess's terms, unused, beside its game and variant.
+// A pong body names its game and variant, and holds no clock.
 const std::string kPongEventBody =
+    std::string(R"({"creator":"alice","entrants":["carol","alice","dave","bob"],
+  "game":"pong","variant":"3d","withdrawn":["bob","dave"],)") +
+    kPairings + "}";
+
+// Pong bodies stored before pong had terms of its own carry chess's,
+// unused and zeroed.
+const std::string kLegacyPongEventBody =
     std::string(R"({"creator":"alice","entrants":["carol","alice","dave","bob"],
   "terms":{"setupId":"","initialMs":0,"incrementMs":0},
   "game":"pong","variant":"3d","withdrawn":["bob","dave"],)") +
@@ -1369,10 +1377,10 @@ PgHubStore::ChessEventRow PinnedEvent(games_hub::GameKind kind) {
   row.entrants = {"carol", "alice", "dave", "bob"};
   row.kind = kind;
   if (kind == games_hub::GameKind::kPong) {
-    row.pong_variant = pong::Variant::kThreeD;
+    row.terms = games_hub::PongTerms{pong::Variant::kThreeD};
     row.withdrawn = {"dave", "bob"};
   } else {
-    row.terms = {"standard", {180'000, 2'000}};
+    row.terms = games_hub::ChessTerms{"standard", {180'000, 2'000}};
   }
   row.pairings = {{1, "alice", "bob", games_hub::PairingResult::kWhite},
                   {1, "carol", "dave", games_hub::PairingResult::kBlack, true},
@@ -1433,14 +1441,18 @@ TEST_F(PinnedBytesTest, RoundRobinBodiesAreTheseBytes) {
   }
 }
 
-// Through both loads: a room's, and the snapshot a boot reads.
+// Through both loads: a room's, and the snapshot a boot reads. Each
+// stored body writes back as its game's current body.
 TEST_F(PinnedBytesTest, TheseBytesLoadAsRoundRobinsThatWriteThemAgain) {
-  for (const auto& [kind, golden] : kEventBodies) {
+  std::vector<std::tuple<games_hub::GameKind, std::string, std::string>> bodies;
+  for (const auto& [kind, golden] : kEventBodies) bodies.emplace_back(kind, golden, golden);
+  bodies.emplace_back(games_hub::GameKind::kPong, kLegacyPongEventBody, kPongEventBody);
+  for (const auto& [kind, stored, golden] : bodies) {
     for (const bool snapshot : {false, true}) {
       ASSERT_TRUE(db_->Exec("DELETE FROM chess_events").ok());
       ASSERT_TRUE(db_->Exec("INSERT INTO chess_events (room_id, event_id, version, body)"
                             " VALUES ('R1', 'E1', 1, $1::jsonb)",
-                            {golden})
+                            {stored})
                       .ok());
       std::vector<PgHubStore::ChessEventRow> events;
       if (snapshot) {

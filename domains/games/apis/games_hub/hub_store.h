@@ -23,14 +23,6 @@ inline std::string RoomChannel(const std::string& room_id) { return "room_" + ro
 /// no instance's id, so every instance holding the room acts on it.
 inline constexpr char kSweepWake[] = "sweep";
 
-/// A chess challenge's terms: the setup and clock a waiting
-/// table starts on once its second seat fills.
-struct ChessTerms {
-  std::string setup_id;
-  chess_play::TimeControl time_control;
-  bool operator==(const ChessTerms&) const = default;
-};
-
 /// The round robin pairing a chess table plays: the event, and
 /// the pairing's index in it.
 struct EventTag {
@@ -71,8 +63,9 @@ class HubStore {
     /// Which game the table plays, fixed at creation; `state` is that
     /// engine's once started.
     GameKind kind = GameKind::kGolf;
-    /// A waiting chess table's posted challenge; dropped once started.
-    std::optional<ChessTerms> terms = std::nullopt;
+    /// The terms a waiting table posted for its next seat to start on, or
+    /// its round robin's; dropped once started.
+    std::optional<HostedTerms> terms = std::nullopt;
     /// The pairing the table plays, fixed at creation: only the insert
     /// writes it, and the table's first game is archived as the pairing's.
     std::optional<EventTag> event = std::nullopt;
@@ -126,9 +119,8 @@ class HubStore {
     std::string creator;
     std::vector<std::string> entrants;
     GameKind kind = GameKind::kChess;
-    /// Chess's terms, or pong's variant: the other is unused.
-    ChessTerms terms;
-    pong::Variant pong_variant = pong::Variant::kSmallcat;
+    /// What its pairings play on, in `kind`'s own terms.
+    HostedTerms terms = ChessTerms{};
     std::vector<Pairing> pairings;
     std::set<std::string> withdrawn;
     /// Loaded, never written: the games played for the event's pairings,

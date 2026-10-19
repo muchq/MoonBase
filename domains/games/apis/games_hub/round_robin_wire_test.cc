@@ -23,7 +23,7 @@ HubStore::ChessEventRow Row(std::vector<std::string> entrants) {
   row.version = 3;
   row.creator = entrants[0];
   row.entrants = std::move(entrants);
-  row.terms = {"standard", {300'000, 3'000}};
+  row.terms = ChessTerms{"standard", {300'000, 3'000}};
   row.pairings = *RoundRobinPairings(row.entrants);
   return row;
 }
@@ -149,7 +149,7 @@ TEST(RoundRobinWire, APairingAtATableNamesIt) {
 TEST(RoundRobinWire, APongRoundRobinNamesItsVariantAndEachPairingsWinner) {
   HubStore::ChessEventRow row = Row({"A", "B", "C", "D"});
   row.kind = GameKind::kPong;
-  row.pong_variant = pong::Variant::kThreeD;
+  row.terms = PongTerms{pong::Variant::kThreeD};
   Score(row, "A", "D", 1);  // A is first
   Score(row, "C", "A", 0);  // C is first: the second wins
   const auto view = PongRoundRobinOf(row);

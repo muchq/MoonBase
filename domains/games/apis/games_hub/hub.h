@@ -466,9 +466,9 @@ class GamesHub final {
     /// stored. A table that ends hands them its closed view; one erased
     /// without it hands them gameLeft (DropWatchersLocked).
     std::set<std::string> watchers;
-    /// A waiting chess table's posted challenge, stored with the
-    /// row until the game starts on it.
-    std::optional<ChessTerms> terms;
+    /// A waiting table's posted challenge, or its round robin's terms,
+    /// stored with the row until the game starts on them.
+    std::optional<HostedTerms> terms;
     /// The round robin pairing the table plays, fixed when it is
     /// opened.
     std::optional<EventTag> event;
@@ -532,7 +532,7 @@ class GamesHub final {
   /// A bot to `player_id`'s table's next seat.
   void AddBotMove(const std::string& player_id, const AddBot& bot, GameKind kind);
   /// The table's one seat posts the terms it starts on.
-  void PostTermsMove(const std::string& player_id, ChessTerms terms, GameKind kind);
+  void PostTermsMove(const std::string& player_id, HostedTerms terms, GameKind kind);
   /// The start a table makes once its last seat fills (Adapter::
   /// FilledStart), to run once the lock that seated it is released; null
   /// when it makes none. Callers hold mu_.
@@ -555,10 +555,9 @@ class GamesHub final {
   /// Round robins: any member creates one, its creator withdraws
   /// entrants and records forfeits, and any member asks for the room's.
   /// Each takes the game whose envelope asked: a round robin is chess's
-  /// or pong's, and each game's moves serve its own. `terms` is chess's,
-  /// `variant` pong's.
+  /// or pong's, and each game's moves serve its own, on its own terms.
   void CreateRoundRobinMove(const std::string& player_id, const std::vector<std::string>& entrants,
-                            GameKind kind, const ChessTerms& terms, pong::Variant variant);
+                            GameKind kind, const HostedTerms& terms);
   void WithdrawMove(const std::string& player_id, const moonbase::games::ChessWithdraw& withdraw,
                     GameKind kind);
   void ForfeitMove(const std::string& player_id, const moonbase::games::ChessForfeit& forfeit,
@@ -776,13 +775,13 @@ class GamesHub final {
   /// (the entry is untouched; the caller drops it). kUnavailable: the
   /// commit's fate is unknown; nothing was adopted.
   enum class Commit { kCommitted, kRebased, kGone, kUnavailable };
-  /// `terms` is a waiting chess table's challenge to commit; null keeps
-  /// the entry's. A started row carries none.
+  /// `terms` is a waiting table's terms to commit; null keeps the
+  /// entry's. A started row carries none.
   Commit CommitEntryLocked(const std::string& room_id, const std::string& game_id, GameEntry& entry,
                            const std::vector<std::string>& roster,
                            const std::optional<HostedState>& state,
                            const std::vector<HubStore::StatsDelta>* finish,
-                           const std::optional<ChessTerms>* terms = nullptr);
+                           const std::optional<HostedTerms>* terms = nullptr);
 
   /// Shared chat/room dispatch for OnNotify and OnChannelActive.
   /// `from_active` skips the own-instance filter (active has no payload)

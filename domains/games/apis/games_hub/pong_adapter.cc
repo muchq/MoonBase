@@ -148,7 +148,7 @@ Action<pong::Table, Adapter<pong::Table>::Start> Adapter<pong::Table>::Decode(co
     if (!variant.has_value()) {
       return Refusal{RejectKind::kRules, absl::StrCat("unknown pong variant: ", name)};
     }
-    return CreateRoundRobin{create->entrants, ChessTerms{}, *variant};
+    return CreateRoundRobin{create->entrants, PongTerms{*variant}};
   }
   if (const auto* withdraw = move.as_withdraw_or_null()) return Withdraw{*withdraw};
   if (const auto* forfeit = move.as_forfeit_or_null()) return Forfeit{*forfeit};

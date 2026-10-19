@@ -95,7 +95,7 @@ struct Adapter<rummy::TableState> {
                                                 std::deque<cards::Card>) {
     return rummy::TableState::open(context.game_id, context.roster);
   }
-  static std::optional<StartGame<Start>> FilledStart(const std::optional<ChessTerms>&,
+  static std::optional<StartGame<Start>> FilledStart(const std::optional<HostedTerms>&,
                                                      const std::optional<EventTag>&) {
     return std::nullopt;
   }

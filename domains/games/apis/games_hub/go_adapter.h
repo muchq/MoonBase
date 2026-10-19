@@ -88,7 +88,7 @@ struct Adapter<go::Table> {
     return go::Table::open(context.roster, start.size, start.komi, start.time_control,
                            context.now_ms);
   }
-  static std::optional<StartGame<Start>> FilledStart(const std::optional<ChessTerms>&,
+  static std::optional<StartGame<Start>> FilledStart(const std::optional<HostedTerms>&,
                                                      const std::optional<EventTag>&) {
     return std::nullopt;
   }

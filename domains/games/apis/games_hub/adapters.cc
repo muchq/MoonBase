@@ -30,35 +30,70 @@ static_assert(UnnamedRoundRobinGame() < kGames,
 
 }  // namespace
 
-std::vector<std::pair<std::string, std::string>> RoundRobinBodyOf(
-    const HubStore::ChessEventRow& row) {
-  return ForKind(row.kind, [&](auto adapter) -> std::vector<std::pair<std::string, std::string>> {
+nlohmann::json RoundRobinBodyOf(const HubStore::ChessEventRow& row) {
+  return ForKind(row.kind, [&](auto adapter) {
     using A = decltype(adapter);
     if constexpr (kHas<A, kRoundRobins>) {
-      auto fields = A::RoundRobinBody(row);
-      if (A::kRoundRobinBodyNamed) fields.emplace_back("game", std::string(A::kName));
+      nlohmann::json fields = A::RoundRobinBody(std::get<typename A::Terms>(row.terms));
+      if (A::kRoundRobinBodyNamed) fields["game"] = A::kName;
       return fields;
     } else {
-      return {};
+      return nlohmann::json::object();
     }
   });
 }
 
-bool RoundRobinFromBody(const std::map<std::string, std::string>& fields,
-                        HubStore::ChessEventRow& row) {
-  const auto game = fields.find("game");
+bool RoundRobinFromBody(const nlohmann::json& body, HubStore::ChessEventRow& row) {
+  const bool named = body.contains("game");
+  if (named && !body["game"].is_string()) return false;
   const std::optional<GameKind> kind =
-      game == fields.end() ? std::optional(static_cast<GameKind>(UnnamedRoundRobinGame()))
-                           : ParseGameKind(game->second);
+      named ? ParseGameKind(body["game"].get<std::string>())
+            : std::optional(static_cast<GameKind>(UnnamedRoundRobinGame()));
   if (!kind.has_value()) return false;
   return ForKind(*kind, [&](auto adapter) {
     using A = decltype(adapter);
     if constexpr (kHas<A, kRoundRobins>) {
-      if (game != fields.end() && !A::kRoundRobinBodyNamed) return false;
+      if (named != A::kRoundRobinBodyNamed) return false;
+      auto terms = A::FromRoundRobinBody(body);
+      if (!terms.has_value()) return false;
       row.kind = A::kKind;
-      return A::FromRoundRobinBody(fields, row);
+      row.terms = *std::move(terms);
+      return true;
     } else {
       return false;
+    }
+  });
+}
+
+nlohmann::json WaitingTermsJson(GameKind kind, const HostedTerms& terms) {
+  return ForKind(kind, [&](auto adapter) {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kChallenges>) {
+      return A::TermsJson(std::get<typename A::Terms>(terms));
+    } else {
+      return nlohmann::json();
+    }
+  });
+}
+
+std::optional<HostedTerms> WaitingTermsFromJson(GameKind kind, const nlohmann::json& stored) {
+  return ForKind(kind, [&](auto adapter) -> std::optional<HostedTerms> {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kChallenges>) {
+      return A::TermsFromJson(stored);
+    } else {
+      return std::nullopt;
+    }
+  });
+}
+
+std::string TermsLineOf(GameKind kind, const HostedTerms& terms) {
+  return ForKind(kind, [&](auto adapter) {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kChallenges>) {
+      return A::TermsLine(std::get<typename A::Terms>(terms));
+    } else {
+      return std::string();
     }
   });
 }
@@ -178,8 +213,8 @@ std::optional<moonbase::games::GameEvents> RoundRobinsEventOf(
   });
 }
 
-std::optional<ChessTerms> RoundRobinTermsOf(GameKind kind, const HubStore::ChessEventRow& row) {
-  return ForKind(kind, [&](auto adapter) -> std::optional<ChessTerms> {
+std::optional<HostedTerms> RoundRobinTermsOf(GameKind kind, const HubStore::ChessEventRow& row) {
+  return ForKind(kind, [&](auto adapter) -> std::optional<HostedTerms> {
     using A = decltype(adapter);
     if constexpr (kHas<A, kRoundRobins>) {
       return A::RoundRobinTerms(row);
