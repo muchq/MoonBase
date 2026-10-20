@@ -322,7 +322,9 @@ TEST(GameState, RestoreReplaysTheMovesAndRefusesWhatPlayCouldNotReach) {
 
 // A stored clock past a day, or a turn started past any real epoch, is
 // refused: the clock's arithmetic holds only within those bounds.
-TEST(GameState, RestoreRefusesAClockOutOfBounds) {
+// A clock past the bound is one an uncapped increment once stored: it comes
+// back at the bound rather than losing the game.
+TEST(GameState, RestoreRefusesAClockOutOfBoundsAndTrimsOneTooLong) {
   auto open = GameState::start({"ann", "bo"}, 9, kDefaultKomi, 0, kMinute, 1'000);
   ASSERT_TRUE(open.ok());
   const auto restore = [&](Clock clock) {
@@ -332,7 +334,15 @@ TEST(GameState, RestoreRefusesAClockOutOfBounds) {
   ASSERT_TRUE(restore(open->clock()).ok());  // the control
   Clock too_long = open->clock();
   too_long.remaining_ms[1] = GameState::kMaxClockMs + 1;
-  EXPECT_FALSE(restore(too_long).ok());
+  const auto trimmed = restore(too_long);
+  ASSERT_TRUE(trimmed.ok()) << trimmed.status();
+  EXPECT_EQ(trimmed->clock().remaining_ms[1], GameState::kMaxClockMs);
+  Clock negative = open->clock();
+  negative.remaining_ms[0] = -1;
+  EXPECT_FALSE(restore(negative).ok());
+  Clock before_epoch = open->clock();
+  before_epoch.turn_started_ms = -1;
+  EXPECT_FALSE(restore(before_epoch).ok());
   Clock far_future = open->clock();
   far_future.turn_started_ms = GameState::kMaxEpochMs + 1;
   EXPECT_FALSE(restore(far_future).ok());
