@@ -98,19 +98,9 @@ absl::StatusOr<std::vector<GameScore>> ReadSheet(const json& payload) {
   return sheet;
 }
 
-}  // namespace
-
-std::string serializeTable(const Table& table) {
-  const GameState& game = table.game();
+json GameJson(const GameState& game) {
   json players = json::array();
   for (const std::string& id : game.players()) players.push_back(Sanitized(id));
-  json sheet = json::array();
-  for (const GameScore& line : table.scoreSheet()) {
-    json entry{{"ending", EndingName(line.ending)}};
-    if (line.winner.has_value()) entry["winner"] = Sanitized(*line.winner);
-    if (line.winner_color.has_value()) entry["winnerColor"] = ColorName(*line.winner_color);
-    sheet.push_back(std::move(entry));
-  }
   json row{
       {"v", kSchemaVersion},
       {"players", std::move(players)},
@@ -121,10 +111,7 @@ std::string serializeTable(const Table& table) {
       {"initialMs", game.timeControl().initial_ms},
       {"incrementMs", game.timeControl().increment_ms},
       {"remainingMs", json::array({game.clock().remaining_ms[0], game.clock().remaining_ms[1]})},
-      {"turnStartedMs", game.clock().turn_started_ms},
-      {"closed", table.isOver()},
-      {"endedByClose", table.endedByClose()},
-      {"scoreSheet", std::move(sheet)}};
+      {"turnStartedMs", game.clock().turn_started_ms}};
   // The scoring's, each only once there is something to write, so a row
   // from before marking reads as one with no marks.
   if (!game.dead().empty()) row["dead"] = game.dead();
@@ -136,14 +123,18 @@ std::string serializeTable(const Table& table) {
     if (game.result()->winner.has_value()) result["winner"] = ColorName(*game.result()->winner);
     row["result"] = std::move(result);
   }
-  return row.dump();
+  return row;
 }
 
-absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
-  const json payload = json::parse(serialized, nullptr, /*allow_exceptions=*/false);
+absl::StatusOr<json> Parsed(const std::string& serialized) {
+  json payload = json::parse(serialized, nullptr, /*allow_exceptions=*/false);
   if (payload.is_discarded() || !payload.is_object()) {
     return absl::InvalidArgumentError("a go row is a JSON object");
   }
+  return payload;
+}
+
+absl::StatusOr<GameState> ReadGame(const json& payload) {
   const auto version = Integer(payload, "v");
   if (!version.ok()) return version.status();
   if (*version != kSchemaVersion) {
@@ -218,19 +209,49 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
     accepted = {seats[0].get<bool>(), seats[1].get<bool>()};
   }
 
-  auto game =
-      GameState::restore(std::move(players), static_cast<int>(*size), (*komi_field)->get<double>(),
+  return GameState::restore(std::move(players), static_cast<int>(*size), (*komi_field)->get<double>(),
                          static_cast<int>(*black_seat), std::move(moves),
                          TimeControl{*initial, *increment}, clock, std::move(result),
                          std::move(dead), accepted);
+}
+
+}  // namespace
+
+std::string serializeTable(const Table& table) {
+  json row = GameJson(table.game());
+  json sheet = json::array();
+  for (const GameScore& line : table.scoreSheet()) {
+    json entry{{"ending", EndingName(line.ending)}};
+    if (line.winner.has_value()) entry["winner"] = Sanitized(*line.winner);
+    if (line.winner_color.has_value()) entry["winnerColor"] = ColorName(*line.winner_color);
+    sheet.push_back(std::move(entry));
+  }
+  row["closed"] = table.isOver();
+  row["endedByClose"] = table.endedByClose();
+  row["scoreSheet"] = std::move(sheet);
+  return row.dump();
+}
+
+absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
+  const auto payload = Parsed(serialized);
+  if (!payload.ok()) return payload.status();
+  auto game = ReadGame(*payload);
   if (!game.ok()) return game.status();
-  const auto closed = Flag(payload, "closed");
+  const auto closed = Flag(*payload, "closed");
   if (!closed.ok()) return closed.status();
-  const auto ended_by_close = Flag(payload, "endedByClose");
+  const auto ended_by_close = Flag(*payload, "endedByClose");
   if (!ended_by_close.ok()) return ended_by_close.status();
-  auto sheet = ReadSheet(payload);
+  auto sheet = ReadSheet(*payload);
   if (!sheet.ok()) return sheet.status();
   return Table::restore(*std::move(game), *std::move(sheet), *closed, *ended_by_close);
+}
+
+std::string serializeGameState(const GameState& game) { return GameJson(game).dump(); }
+
+absl::StatusOr<GameState> deserializeGameState(const std::string& serialized) {
+  const auto payload = Parsed(serialized);
+  if (!payload.ok()) return payload.status();
+  return ReadGame(*payload);
 }
 
 }  // namespace go
