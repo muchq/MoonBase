@@ -28,14 +28,14 @@ struct Adapter<go::Table> {
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "go_commands";
-  static constexpr std::array<std::string_view, 17> kCommands = {
+  static constexpr std::array<std::string_view, 18> kCommands = {
       "createGame", "joinGame", "startGame",   "leaveGame",      "play",      "pass",
       "resign",     "watch",    "markDead",    "accept",         "challenge", "createRoundRobin",
-      "withdraw",   "forfeit",  "roundRobins", "playRoundRobin", "addBot"};
+      "withdraw",   "forfeit",  "roundRobins", "playRoundRobin", "addBot",    "history"};
   static constexpr std::string_view kEventSeries = "go_events";
-  static constexpr std::array<std::string_view, 9> kEvents = {
+  static constexpr std::array<std::string_view, 10> kEvents = {
       "gameJoined", "gameState", "gameCreated", "gameStarted", "turnChanged",
-      "gameEnded",  "gameLeft",  "roundRobin",  "roundRobins"};
+      "gameEnded",  "gameLeft",  "roundRobin",  "roundRobins", "history"};
   static const Move* MoveOf(const moonbase::games::GameCommands& commands) {
     const auto* command = commands.as_go_or_null();
     return command == nullptr ? nullptr : &command->move;
@@ -156,6 +156,13 @@ struct Adapter<go::Table> {
     return table.inGame([now_ms](const go::GameState& game) { return game.flag(now_ms); });
   }
 };
+
+/// How many finished games a history lists.
+inline constexpr int kGoHistoryLimit = 100;
+
+/// A room's finished go games as its history answers them, each with its
+/// SGF record.
+moonbase::games::GoHistory GoHistoryOf(const std::vector<HubStore::GoGameRow>& games);
 
 }  // namespace games_hub
 

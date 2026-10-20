@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "absl/time/time.h"
+#include "domains/games/apis/games_hub/memory_hub_store.h"
 #include "domains/games/apis/games_hub/wire_test_fixture.h"
 
 namespace games_hub {
@@ -30,6 +31,9 @@ class GoWireTest : public HubWireFixture {
   void SetUp() override {
     HubWireFixture::SetUp();
     hub_->SetClock([] { return absl::FromUnixMillis(1'800'000'000'000); });
+  }
+  std::shared_ptr<HubStore> MakeStore() override {
+    return std::make_shared<MemoryHubStore>([] { return int64_t{1'800'000'000'000}; });
   }
   // The next frame on `socket` of `event_type`, skipping any other.
   static std::string Next(opal::http::WebSocket& socket, const std::string& event_type) {
@@ -184,6 +188,28 @@ TEST_F(GoWireTest, TableFlowPinsGoCommandAndUpdatePayloadBytes) {
   EXPECT_EQ(GoCase(*joiner, "gameEnded"),
             R"({"update":{"gameEnded":{"result":{"ending":"resignation","winner":"player-2",)"
             R"("winnerColor":"black"}}}})");
+}
+
+// The room's finished games, each with its record: summary and SGF bytes.
+TEST_F(GoWireTest, HistoryPinsItsCommandAndEachGamesRecord) {
+  auto [creator, joiner] = SeatedPair();
+  ASSERT_TRUE(creator
+                  ->Send(CommandFrame("go", R"({"move":{"startGame":{"size":9,"komi":0.5,)"
+                                            R"("initialSeconds":60,"incrementSeconds":2}}})"))
+                  .ok());
+  (void)GoCase(*creator, "gameStarted");
+  ASSERT_TRUE(creator->Send(CommandFrame("go", R"({"move":{"play":{"x":2,"y":1}}})")).ok());
+  (void)GoCase(*joiner, "turnChanged");
+  ASSERT_TRUE(joiner->Send(CommandFrame("go", R"({"move":{"resign":{}}})")).ok());
+  (void)GoCase(*joiner, "gameEnded");
+
+  ASSERT_TRUE(joiner->Send(CommandFrame("go", R"({"move":{"history":{}}})")).ok());
+  EXPECT_EQ(GoCase(*joiner, "history"),
+            R"({"update":{"history":{"games":[{"archiveId":1,"black":"player-1",)"
+            R"("endedAtMs":1800000000000,"gameId":"GAME01","komi":0.5,"ordinal":1,)"
+            R"("result":{"ending":"resignation","winner":"player-1","winnerColor":"black"},)"
+            R"x("sgf":"(;FF[4]GM[1]CA[UTF-8]SZ[9]KM[0.5]PB[player-1]PW[player-2])x"
+            R"x(DT[2027-01-15]RE[B+R];B[cb])","size":9,"white":"player-2"}]}}})x");
 }
 
 // The model's bounds are the decoder's: refused in band, and the game does

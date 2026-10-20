@@ -558,6 +558,8 @@ class GamesHub final {
   /// The room's finished chess games, its review of one, and publishing
   /// them. The archive is read off the hub's lock.
   void ChessHistoryMove(const std::string& player_id);
+  /// The room's finished go games, each with its SGF record.
+  void GoHistoryMove(const std::string& player_id);
   void ChessReviewMove(const std::string& player_id,
                        const moonbase::games::ChessReviewRequest& review);
   void PublishChessMove(const std::string& player_id, bool published);

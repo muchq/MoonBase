@@ -9,6 +9,7 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "domains/games/apis/games_hub/round_robin_wire.h"
+#include "domains/games/libs/go/sgf.h"
 #include "domains/games/libs/go/table_serde.h"
 
 namespace games_hub {
@@ -243,6 +244,7 @@ Action<go::Table, Adapter<go::Table>::Start> Adapter<go::Table>::Decode(const Mo
     return CreateRoundRobin{create->entrants, HostedTerms(std::move(terms))};
   }
   if (auto round_robin = RoundRobinMove<go::Table, Start>(move)) return *std::move(round_robin);
+  if (move.as_history_or_null() != nullptr) return AskHistory{};
   if (move.as_createGame_or_null() != nullptr) return CreateTable{};
   if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};
   if (move.as_leaveGame_or_null() != nullptr) return LeaveTable{};
@@ -422,6 +424,26 @@ std::string Adapter<go::Table>::Serialize(const go::Table& engine) {
 
 absl::StatusOr<go::Table> Adapter<go::Table>::Deserialize(const std::string& stored) {
   return go::deserializeTable(stored);
+}
+
+moonbase::games::GoHistory GoHistoryOf(const std::vector<HubStore::GoGameRow>& games) {
+  moonbase::games::GoHistory history;
+  for (const HubStore::GoGameRow& row : games) {
+    const go::GameState& game = row.game;
+    moonbase::games::GoGameSummary summary;
+    summary.archiveId = row.archive_id;
+    summary.gameId = row.game_id;
+    summary.ordinal = row.ordinal;
+    summary.black = game.players().at(game.seatOf(go::Color::kBlack));
+    summary.white = game.players().at(game.seatOf(go::Color::kWhite));
+    summary.size = game.size();
+    summary.komi = game.komi();
+    summary.result = WireResult(game);
+    summary.endedAtMs = row.ended_at_ms;
+    summary.sgf = go::ToSgf(game, row.ended_at_ms);
+    history.games.push_back(std::move(summary));
+  }
+  return history;
 }
 
 }  // namespace games_hub

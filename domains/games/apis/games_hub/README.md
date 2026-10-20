@@ -624,8 +624,12 @@ board, komi and every move as GTP vertices, it answers a vertex, `pass`
 or `resign`. In the scoring it is asked which stones are dead (their
 vertices, space separated), marks them so as near as whole groups allow,
 and accepts; a mark withdraws its acceptance, so it is asked again. Without a go engine set the hub
-seats none: GNU Go is on `go_engine`, reached at `GO_ENGINE_URL`. Go has
-no archive.
+seats none: GNU Go is on `go_engine`, reached at `GO_ENGINE_URL`. A
+finished game is archived as chess's is, in the same statement and table
+(`chess_games`, `kind` `go`), and any member asks for `history`: the
+newest 100, each with its SGF record (`libs/go`'s `ToSgf`). A go game is
+never published and never tagged with its round robin, which reads its
+tables instead; go has no public feed.
 
 ### Spades
 

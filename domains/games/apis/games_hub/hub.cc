@@ -1700,7 +1700,13 @@ void GamesHub::HandleGameMove(const std::string& player_id,
           [&](WatchTable& watch) { WatchMove(player_id, watch.game_id, kind); },
           [&](AddBot& bot) { AddBotMove(player_id, bot, kind); },
           [&](PostTerms& post) { PostTermsMove(player_id, std::move(post.terms), kind); },
-          [&](AskHistory&) { ChessHistoryMove(player_id); },
+          [&](AskHistory&) {
+            if constexpr (kind == GameKind::kGo) {
+              GoHistoryMove(player_id);
+            } else {
+              ChessHistoryMove(player_id);
+            }
+          },
           [&](AskReview& ask) { ChessReviewMove(player_id, ask.review); },
           [&](Publish& publish) { PublishChessMove(player_id, publish.published); },
           [&](CreateRoundRobin& create) {
@@ -2473,6 +2479,21 @@ void GamesHub::ChessHistoryMove(const std::string& player_id) {
     answer.games.push_back(ChessSummaryOf(row));
   }
   Send(player_id, Feed::Wrap(ChessUpdate::FromHistory(std::move(answer))));
+}
+
+void GamesHub::GoHistoryMove(const std::string& player_id) {
+  const auto room_id = CurrentRoom(player_id);
+  if (!room_id.has_value()) {
+    Reject(player_id, RejectKind::kState, "not in a room");
+    return;
+  }
+  auto games = store_->LoadGoHistory(*room_id, kGoHistoryLimit);
+  if (!games.ok()) {
+    Reject(player_id, RejectKind::kUnavailable, "storage unavailable; try again");
+    return;
+  }
+  Send(player_id,
+       Adapter<go::Table>::Wrap(moonbase::games::GoUpdate::FromHistory(GoHistoryOf(*games))));
 }
 
 void GamesHub::ChessReviewMove(const std::string& player_id,
