@@ -26,7 +26,9 @@ func TestModelForwardPass(t *testing.T) {
 
 func TestModelTraining(t *testing.T) {
 	model := NewModel()
-	model.Add(layers.NewDense(2, 4, activations.NewReLU()))
+	// A sigmoid hidden layer cannot start dead, so the loss always moves
+	// from wherever its random weights begin.
+	model.Add(layers.NewDense(2, 4, activations.NewSigmoid()))
 	model.Add(layers.NewDense(4, 1, activations.NewSigmoid()))
 	model.SetLoss(loss.NewMSE())
 	model.SetOptimizer(NewSGD(0.1, 0.0))

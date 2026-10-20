@@ -624,7 +624,8 @@ board, komi and every move as GTP vertices, it answers a vertex, `pass`
 or `resign`. In the scoring it is asked which stones are dead (their
 vertices, space separated), marks them so as near as whole groups allow,
 and accepts; a mark withdraws its acceptance, so it is asked again. Without a go engine set the hub
-seats none. Go has no archive.
+seats none: GNU Go is on `go_engine`, reached at `GO_ENGINE_URL`. Go has
+no archive.
 
 ### Spades
 

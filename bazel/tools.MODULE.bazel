@@ -64,6 +64,20 @@ http_file(
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
+# GNU Go for the go_engine image (#1668), built from its 3.8 release
+# source by //bazel/3p:gnugo.BUILD: there is no release binary. GPL-3:
+# go_engine runs it as a child process over GTP and nothing links it.
+http_archive(
+    name = "gnugo",
+    build_file = "//bazel/3p:gnugo.BUILD",
+    sha256 = "da68d7a65f44dcf6ce6e4e630b6f6dd9897249d34425920bfdd4e07ff1866a72",
+    strip_prefix = "gnugo-3.8",
+    urls = [
+        "https://ftp.gnu.org/gnu/gnugo/gnugo-3.8.tar.gz",
+        "https://ftpmirror.gnu.org/gnu/gnugo/gnugo-3.8.tar.gz",
+    ],
+)
+
 # Stockfish's own release build for the chess_engine image (#1618). It is
 # GPL-3: chess_engine runs it as a child process and nothing links it.
 # sse41-popcnt rather than avx2: any x86-64 host from the last decade runs

@@ -123,6 +123,11 @@ check "a MODULE.bazel edit forces a full build" \
   test "$(decide)" = "full"
 
 reset_to_base
+commit_change_to bazel/3p/gnugo.BUILD '# flag dropped'
+check "an external repo's BUILD file edit forces a full build" \
+  test "$(decide)" = "full"
+
+reset_to_base
 commit_change_to bazel/rules/testdata/Probe.java 'probe changed'
 DECISION=$(decide)
 check "a rules testdata fixture keeps the bazel-diff path" \
