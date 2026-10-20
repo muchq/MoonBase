@@ -80,3 +80,30 @@ cc_test(
         "@nlohmann_json//:json",
     ],
 )
+
+# A game's SGF record, as the archive hands it out.
+cc_library(
+    name = "sgf",
+    srcs = ["sgf.cc"],
+    hdrs = ["sgf.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":game_state",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
+    ],
+)
+
+# GNU Go reads each record back: the contract an SGF reader holds us to.
+cc_test(
+    name = "sgf_test",
+    size = "small",
+    srcs = ["sgf_test.cc"],
+    data = ["@gnugo"],
+    env = {"GNUGO": "$(rootpath @gnugo)"},
+    deps = [
+        ":game_state",
+        ":sgf",
+        "@googletest//:gtest_main",
+    ],
+)

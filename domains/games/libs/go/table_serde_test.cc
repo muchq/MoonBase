@@ -150,5 +150,36 @@ TEST(TableSerde, ReadsARowScoredBeforeMarking) {
   EXPECT_FALSE(deserializeTable(row.dump()).ok());
 }
 
+// A finished game as the archive keeps it: the marks, the acceptances
+// and the result, read back through GameState::restore.
+TEST(GameStateSerde, RoundTripsAMarkedGameAsTheTableRowLessTableFields) {
+  const Table marked = Accepted(
+      Accepted(*Passed(Passed(Moved(Moved(Open(), 4, 4), 0, 0))).inGame([](const GameState& game) {
+        return game.markDead(0, 0, 0, kT0);
+      }),
+               1),
+      0);
+  const GameState& game = marked.game();
+  ASSERT_TRUE(game.isOver());
+  const std::string serialized = serializeGameState(game);
+  const auto back = deserializeGameState(serialized);
+  ASSERT_TRUE(back.ok()) << back.status();
+  ExpectSame(*Table::restore(*back, marked.scoreSheet(), false, false), marked);
+
+  json expected = json::parse(serializeTable(marked));
+  for (const char* table_field : {"closed", "endedByClose", "scoreSheet"}) {
+    expected.erase(table_field);
+  }
+  EXPECT_EQ(json::parse(serialized), expected);
+}
+
+TEST(GameStateSerde, RefusesWhatPlayCouldNotReach) {
+  json game = json::parse(serializeGameState(Moved(Open(), 4, 4).game()));
+  EXPECT_TRUE(deserializeGameState(game.dump()).ok());  // the control
+  game["moves"].push_back(40);
+  EXPECT_FALSE(deserializeGameState(game.dump()).ok());
+  EXPECT_FALSE(deserializeGameState("not json").ok());
+}
+
 }  // namespace
 }  // namespace go

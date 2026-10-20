@@ -22,6 +22,12 @@ namespace go {
 [[nodiscard]] std::string serializeTable(const Table& table);
 [[nodiscard]] absl::StatusOr<Table> deserializeTable(const std::string& serialized);
 
+/// The archive's column for a go game: the table's schema less its own
+/// fields (closed, endedByClose, scoreSheet), read through
+/// GameState::restore.
+[[nodiscard]] std::string serializeGameState(const GameState& game);
+[[nodiscard]] absl::StatusOr<GameState> deserializeGameState(const std::string& serialized);
+
 }  // namespace go
 
 #endif  // DOMAINS_GAMES_LIBS_GO_TABLE_SERDE_H
