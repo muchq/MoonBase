@@ -154,7 +154,7 @@ int main() {
 
   // Chess's clocks run out whether or not anyone moves; with a store, any
   // instance holding the room may land the flag, and one does.
-  hub->StartChessClocks();
+  hub->StartClocks();
   hub->StartPongTicks();
 
   // deja's tape on the glasshouse walls. DEJA_URL names

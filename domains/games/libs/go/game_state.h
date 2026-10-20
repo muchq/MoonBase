@@ -100,6 +100,8 @@ class GameState {
   /// Bounds a stored clock must keep for its arithmetic to hold: a day on
   /// any clock or increment.
   static constexpr int64_t kMaxClockMs = 24LL * 60 * 60 * 1000;
+  /// The latest epoch ms a stored turn may have started at.
+  static constexpr int64_t kMaxEpochMs = 1'000'000'000'000'000;
 
   /// An empty `size` board, Black (`black_seat`) to move, its clock
   /// running from `now_ms`. Refuses anything but two distinct seats, a

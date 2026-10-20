@@ -129,9 +129,13 @@ absl::StatusOr<GameState> GameState::restore(std::vector<std::string> players, i
                                              std::array<bool, 2> accepted) {
   if (auto ok = CheckSetup(players, size, komi, black_seat, time_control); !ok.ok()) return ok;
   for (const int64_t remaining : clock.remaining_ms) {
-    if (remaining < 0) return absl::InvalidArgumentError("a clock out of range");
+    if (remaining < 0 || remaining > kMaxClockMs) {
+      return absl::InvalidArgumentError("a clock out of range");
+    }
   }
-  if (clock.turn_started_ms < 0) return absl::InvalidArgumentError("a clock out of range");
+  if (clock.turn_started_ms < 0 || clock.turn_started_ms > kMaxEpochMs) {
+    return absl::InvalidArgumentError("a turn that started out of range");
+  }
   GameState state(std::move(players), size, komi, black_seat, time_control, clock);
   for (std::size_t i = 0; i < moves.size(); ++i) {
     if (state.twoPasses() && moves[i] == kPass) {

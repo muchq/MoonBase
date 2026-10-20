@@ -320,6 +320,28 @@ TEST(GameState, RestoreReplaysTheMovesAndRefusesWhatPlayCouldNotReach) {
                    .ok());
 }
 
+// A stored clock past a day, or a turn started past any real epoch, is
+// refused: the clock's arithmetic holds only within those bounds.
+TEST(GameState, RestoreRefusesAClockOutOfBounds) {
+  auto open = GameState::start({"ann", "bo"}, 9, kDefaultKomi, 0, kMinute, 1'000);
+  ASSERT_TRUE(open.ok());
+  const auto restore = [&](Clock clock) {
+    return GameState::restore(open->players(), 9, kDefaultKomi, 0, {}, kMinute, clock,
+                              std::nullopt);
+  };
+  ASSERT_TRUE(restore(open->clock()).ok());  // the control
+  Clock too_long = open->clock();
+  too_long.remaining_ms[1] = GameState::kMaxClockMs + 1;
+  EXPECT_FALSE(restore(too_long).ok());
+  Clock far_future = open->clock();
+  far_future.turn_started_ms = GameState::kMaxEpochMs + 1;
+  EXPECT_FALSE(restore(far_future).ok());
+  Clock at_bounds = open->clock();
+  at_bounds.remaining_ms = {GameState::kMaxClockMs, GameState::kMaxClockMs};
+  at_bounds.turn_started_ms = GameState::kMaxEpochMs;
+  EXPECT_TRUE(restore(at_bounds).ok());
+}
+
 TEST(GameState, RestoreKeepsTheScoringAndRefusesMarksPlayCouldNotMake) {
   const GameState marked = *(*Invaded().markDead(0, 0, 0, kT0)).accept(1, kT0);
   const auto restore = [&](std::vector<int> moves, std::vector<int> dead,

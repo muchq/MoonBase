@@ -347,11 +347,11 @@ GamesHub::~GamesHub() {
   heartbeat_cv_.notify_all();
   if (heartbeat_.joinable()) heartbeat_.join();
   {
-    const std::lock_guard<std::mutex> lock(chess_clock_mu_);
-    chess_clock_stop_ = true;
+    const std::lock_guard<std::mutex> lock(clock_mu_);
+    clock_stop_ = true;
   }
-  chess_clock_cv_.notify_all();
-  if (chess_clocks_.joinable()) chess_clocks_.join();
+  clock_cv_.notify_all();
+  if (clocks_.joinable()) clocks_.join();
   {
     const std::lock_guard<std::mutex> lock(engine_bot_mu_);
     engine_bot_stop_ = true;
@@ -2203,7 +2203,7 @@ std::optional<Refusal> GamesHub::FlagLocked(GameRef ref, int64_t now_ms, Outbox&
   return refusal;
 }
 
-int GamesHub::SweepChessClocksOnce() {
+int GamesHub::SweepClocksOnce() {
   struct Flagged {
     std::string room_id;
     std::string game_id;
@@ -2214,7 +2214,7 @@ int GamesHub::SweepChessClocksOnce() {
     const int64_t now = NowMs();
     // A retry outlives nothing: a game gone from here, or over, whether it
     // ended on this instance or another, is no longer waiting on the store.
-    std::erase_if(chess_flag_retry_at_, [this](const auto& retry) {
+    std::erase_if(flag_retry_at_, [this](const auto& retry) {
       const auto room = rooms_.find(retry.first.first);
       if (room == rooms_.end()) return true;
       const auto game = room->second.games.find(retry.first.second);
@@ -2223,8 +2223,8 @@ int GamesHub::SweepChessClocksOnce() {
     for (const auto& [room_id, room] : rooms_) {
       for (const auto& [game_id, entry] : room.games) {
         if (!FlagDue(entry.state, now)) continue;
-        const auto retry = chess_flag_retry_at_.find({room_id, game_id});
-        if (retry != chess_flag_retry_at_.end() && now < retry->second) continue;
+        const auto retry = flag_retry_at_.find({room_id, game_id});
+        if (retry != flag_retry_at_.end() && now < retry->second) continue;
         flagged.push_back({room_id, game_id});
       }
     }
@@ -2239,12 +2239,12 @@ int GamesHub::SweepChessClocksOnce() {
       const std::pair<std::string, std::string> key{flag.room_id, flag.game_id};
       const auto room = rooms_.find(flag.room_id);
       if (room == rooms_.end()) {
-        chess_flag_retry_at_.erase(key);
+        flag_retry_at_.erase(key);
         continue;
       }
       const auto game = room->second.games.find(flag.game_id);
       if (game == room->second.games.end() || !ClockRunning(game->second.state)) {
-        chess_flag_retry_at_.erase(key);
+        flag_retry_at_.erase(key);
         continue;
       }
       const GameRef ref{flag.room_id, &room->second, flag.game_id, &game->second};
@@ -2254,9 +2254,9 @@ int GamesHub::SweepChessClocksOnce() {
       const std::optional<Refusal> refusal = FlagLocked(ref, now, outbox);
       if (refusal.has_value() && refusal->kind == RejectKind::kUnavailable) {
         // The store is down: try this game again later, not every tick.
-        chess_flag_retry_at_[key] = now + kChessFlagRetry.count();
+        flag_retry_at_[key] = now + kFlagRetry.count();
       } else {
-        chess_flag_retry_at_.erase(key);
+        flag_retry_at_.erase(key);
       }
       if (!refusal.has_value()) ++ended;
     }
@@ -3057,14 +3057,14 @@ void GamesHub::StartEngineBots(std::chrono::milliseconds interval) {
   });
 }
 
-void GamesHub::StartChessClocks(std::chrono::milliseconds interval) {
-  if (chess_clocks_.joinable()) return;
-  chess_clocks_ = std::thread([this, interval] {
+void GamesHub::StartClocks(std::chrono::milliseconds interval) {
+  if (clocks_.joinable()) return;
+  clocks_ = std::thread([this, interval] {
     while (true) {
-      SweepChessClocksOnce();
-      std::unique_lock<std::mutex> lock(chess_clock_mu_);
-      chess_clock_cv_.wait_for(lock, interval, [this] { return chess_clock_stop_; });
-      if (chess_clock_stop_) return;
+      SweepClocksOnce();
+      std::unique_lock<std::mutex> lock(clock_mu_);
+      clock_cv_.wait_for(lock, interval, [this] { return clock_stop_; });
+      if (clock_stop_) return;
     }
   });
 }

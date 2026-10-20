@@ -302,10 +302,10 @@ TEST_F(GoFixture, TheSweepEndsAGameWhoseSideToMoveRanOutOfTime) {
   Table& table = started->table;
   now_ms_ += 59'999;
   // Black's minute, less a millisecond: nothing to sweep.
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 0);
 
   now_ms_ += 1;
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 1);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 1);
   for (Seat* seat : {&table.alice, &table.bob}) {
     auto result = Ended(*seat);
     ASSERT_TRUE(result.has_value());
@@ -313,7 +313,7 @@ TEST_F(GoFixture, TheSweepEndsAGameWhoseSideToMoveRanOutOfTime) {
     EXPECT_EQ(result->winnerColor, "white");
     EXPECT_EQ(result->ending, "timeout");
   }
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 0);
 }
 
 TEST_F(GoFixture, ALeaverLosesByAbandonment) {
