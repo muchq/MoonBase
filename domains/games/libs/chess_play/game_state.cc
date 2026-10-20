@@ -380,7 +380,8 @@ absl::StatusOr<GameState> GameState::move(int seat, std::string_view uci, int64_
     return absl::InvalidArgumentError(absl::StrCat("not a legal move: ", uci));
   }
   Clock clock = chargedTo(now_ms);
-  clock.remaining_ms[Index(side_to_move_)] += time_control_.increment_ms;
+  int64_t& remaining = clock.remaining_ms[Index(side_to_move_)];
+  remaining = std::min(remaining + time_control_.increment_ms, kMaxClockMs);
   std::vector<std::string> moves = moves_;
   moves.emplace_back(uci);
   GameState next(players_, variant_, setup_id_, start_fen_, white_seat_, std::move(moves),

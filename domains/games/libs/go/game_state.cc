@@ -286,7 +286,8 @@ absl::StatusOr<GameState> GameState::moved(int seat, int move, int64_t now_ms) c
   auto next = placed(move);
   if (!next.ok()) return next.status();
   next->clock_ = chargedTo(now_ms);
-  next->clock_.remaining_ms[Index(side_to_move_)] += time_control_.increment_ms;
+  int64_t& remaining = next->clock_.remaining_ms[Index(side_to_move_)];
+  remaining = std::min(remaining + time_control_.increment_ms, kMaxClockMs);
   return next;
 }
 

@@ -342,6 +342,19 @@ TEST(GameState, RestoreRefusesAClockOutOfBounds) {
   EXPECT_TRUE(restore(at_bounds).ok());
 }
 
+// The increment tops a clock up to the bound, not past it: past it, the
+// game it ends a move in would not restore.
+TEST(GameState, AnIncrementStopsAtTheClocksBound) {
+  const TimeControl longest{GameState::kMaxClockMs, 60'000};
+  const GameState open = Start(9, kDefaultKomi, longest);
+  auto next = open.play(0, 2, 2, kT0 + 1'000);
+  ASSERT_TRUE(next.ok()) << next.status();
+  EXPECT_EQ(next->clock().remaining_ms[0], GameState::kMaxClockMs);
+  EXPECT_TRUE(GameState::restore(next->players(), 9, kDefaultKomi, 0, next->moves(), longest,
+                                 next->clock(), std::nullopt)
+                  .ok());
+}
+
 TEST(GameState, RestoreKeepsTheScoringAndRefusesMarksPlayCouldNotMake) {
   const GameState marked = *(*Invaded().markDead(0, 0, 0, kT0)).accept(1, kT0);
   const auto restore = [&](std::vector<int> moves, std::vector<int> dead,

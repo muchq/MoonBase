@@ -384,6 +384,19 @@ TEST(GameStateTest, RestoreRefusesAClockOutOfRange) {
   EXPECT_FALSE(restore({300'000, GameState::kMaxClockMs + 1}, open.clock()).ok());
 }
 
+// The increment tops a clock up to the bound, not past it: past it, the
+// game it ends a move in would not restore.
+TEST(GameStateTest, AnIncrementStopsAtTheClocksBound) {
+  const TimeControl longest{GameState::kMaxClockMs, 60'000};
+  const GameState open = Start(kKpk, 0, longest);
+  auto next = open.move(0, "e2e4", kT0 + 1'000);
+  ASSERT_TRUE(next.ok()) << next.status();
+  EXPECT_EQ(next->clock().remaining_ms[0], GameState::kMaxClockMs);
+  EXPECT_TRUE(GameState::restore(next->players(), "kpk", kKpk, 0, next->moves(), longest,
+                                 next->clock(), std::nullopt, next->setupId())
+                  .ok());
+}
+
 TEST(ChessSetupTest, EveryNamedSetupIsPlayableAndCarriesItsStableIdentity) {
   struct Expected {
     const char* id;
