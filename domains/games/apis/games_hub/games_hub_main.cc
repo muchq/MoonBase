@@ -152,8 +152,8 @@ int main() {
     hub->StartRoomHeartbeat();
   }
 
-  // Chess's clocks run out whether or not anyone moves; with a store, any
-  // instance holding the room may land the flag, and one does.
+  // A clocked game's clock runs out whether or not anyone moves; with a
+  // store, any instance holding the room may land the flag, and one does.
   hub->StartClocks();
   hub->StartPongTicks();
 

@@ -38,13 +38,13 @@ struct TableContext {
   const std::set<std::string>& watchers;
   const std::optional<HostedTerms>& terms;
   const std::optional<EventTag>& event;
-  /// Epoch milliseconds on the chess clock.
+  /// Epoch milliseconds on the hub's clock.
   int64_t now_ms = 0;
 };
 
 /// What an engine move may draw on from the hub, as it is applied.
 struct MoveContext {
-  /// Epoch milliseconds on the chess clock.
+  /// Epoch milliseconds on the hub's clock.
   int64_t now_ms = 0;
   /// A freshly shuffled deck from the hub's dealer.
   std::function<std::deque<cards::Card>()> deck;
