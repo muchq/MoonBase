@@ -1,10 +1,12 @@
 #include "domains/games/libs/go/sgf.h"
 
 #include <cmath>
+#include <cstdint>
 #include <string>
 #include <string_view>
 
 #include "absl/strings/str_cat.h"
+#include "absl/time/time.h"
 
 namespace go {
 namespace {
@@ -46,11 +48,12 @@ std::string Point(int move, int size) {
 
 }  // namespace
 
-std::string SgfOf(const GameState& game, std::string_view date) {
-  std::string sgf = absl::StrCat("(;FF[4]GM[1]CA[UTF-8]SZ[", game.size(), "]KM[", game.komi(),
-                                 "]PB[", Text(game.players()[game.seatOf(Color::kBlack)]), "]PW[",
-                                 Text(game.players()[game.seatOf(Color::kWhite)]), "]");
-  if (!date.empty()) absl::StrAppend(&sgf, "DT[", date, "]");
+std::string ToSgf(const GameState& game, int64_t ended_at_ms) {
+  std::string sgf = absl::StrCat(
+      "(;FF[4]GM[1]CA[UTF-8]SZ[", game.size(), "]KM[", game.komi(), "]PB[",
+      Text(game.players()[game.seatOf(Color::kBlack)]), "]PW[",
+      Text(game.players()[game.seatOf(Color::kWhite)]), "]DT[",
+      absl::FormatTime("%Y-%m-%d", absl::FromUnixMillis(ended_at_ms), absl::UTCTimeZone()), "]");
   if (game.isOver()) absl::StrAppend(&sgf, "RE[", ResultOf(game), "]");
   Color mover = Color::kBlack;
   for (const int move : game.moves()) {

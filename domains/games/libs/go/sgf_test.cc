@@ -2,13 +2,14 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -16,6 +17,8 @@ namespace go {
 namespace {
 
 constexpr int64_t kT0 = 1'800'000'000'000;
+// 2026-10-20, noon UTC.
+constexpr int64_t kEnded = 1'792'497'600'000;
 constexpr TimeControl kMinute{60'000, 0};
 
 GameState Start(std::vector<std::string> players = {"ann", "bo"}, double komi = kDefaultKomi) {
@@ -39,20 +42,20 @@ GameState Scored(GameState state) {
 
 TEST(Sgf, WritesTheHeaderThenEachMoveAPassEmpty) {
   const GameState ended = Scored(Played(Start(), {{2, 2}, {6, 6}}));
-  EXPECT_EQ(SgfOf(ended, "2026-10-20"),
+  EXPECT_EQ(ToSgf(ended, kEnded),
             "(;FF[4]GM[1]CA[UTF-8]SZ[9]KM[6.5]PB[ann]PW[bo]DT[2026-10-20]RE[W+6.5]"
             ";B[cc];W[gg];B[];W[])");
 }
 
-TEST(Sgf, AGameInPlayHasNoResultAndNoDateUnlessGiven) {
-  EXPECT_EQ(SgfOf(Played(Start(), {{0, 8}})),
-            "(;FF[4]GM[1]CA[UTF-8]SZ[9]KM[6.5]PB[ann]PW[bo];B[ai])");
+TEST(Sgf, AGameInPlayHasNoResult) {
+  EXPECT_EQ(ToSgf(Played(Start(), {{0, 8}}), kEnded),
+            "(;FF[4]GM[1]CA[UTF-8]SZ[9]KM[6.5]PB[ann]PW[bo]DT[2026-10-20];B[ai])");
 }
 
 TEST(Sgf, EachEndingIsSpelledAsSgfSpellsIt) {
   const GameState open = Start();
   const auto result_of = [](const GameState& game) {
-    const std::string sgf = SgfOf(game);
+    const std::string sgf = ToSgf(game, kEnded);
     const std::size_t at = sgf.find("RE[");
     return at == std::string::npos ? std::string() : sgf.substr(at + 3, sgf.find(']', at) - at - 3);
   };
@@ -64,7 +67,7 @@ TEST(Sgf, EachEndingIsSpelledAsSgfSpellsIt) {
 }
 
 TEST(Sgf, EscapesWhatWouldCloseOrQuoteAName) {
-  const std::string sgf = SgfOf(Start({"a]b", "c\\d"}));
+  const std::string sgf = ToSgf(Start({"a]b", "c\\d"}), kEnded);
   EXPECT_NE(sgf.find("PB[a\\]b]"), std::string::npos) << sgf;
   EXPECT_NE(sgf.find("PW[c\\\\d]"), std::string::npos) << sgf;
 }
@@ -79,7 +82,7 @@ TEST(Sgf, GnuGoLoadsTheGameOntoTheSameBoard) {
   const std::string dir = std::getenv("TEST_TMPDIR");
   const std::string sgf_path = dir + "/game.sgf";
   const std::string commands_path = dir + "/commands";
-  std::ofstream(sgf_path) << SgfOf(game);
+  std::ofstream(sgf_path) << ToSgf(game, kEnded);
   std::ofstream(commands_path) << "loadsgf " << sgf_path
                                << "\nlist_stones black\nlist_stones white\nget_komi\nquit\n";
   FILE* out = popen((std::string(gnugo) + " --mode gtp < " + commands_path).c_str(), "r");

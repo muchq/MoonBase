@@ -152,7 +152,7 @@ TEST(TableSerde, ReadsARowScoredBeforeMarking) {
 
 // A finished game as the archive keeps it: the marks, the acceptances
 // and the result, read back through GameState::restore.
-TEST(GameStateSerde, RoundTripsAMarkedGameAndWritesTheTablesFieldsLessTheTables) {
+TEST(GameStateSerde, RoundTripsAMarkedGameAsTheTableRowLessTableFields) {
   const Table marked = Accepted(
       Accepted(*Passed(Passed(Moved(Moved(Open(), 4, 4), 0, 0))).inGame([](const GameState& game) {
         return game.markDead(0, 0, 0, kT0);
