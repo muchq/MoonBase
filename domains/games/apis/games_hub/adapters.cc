@@ -221,14 +221,16 @@ std::optional<HostedTerms> RoundRobinTermsOf(const HubStore::ChessEventRow& row)
   return row.terms;
 }
 
-std::optional<HubStore::ChessGameRow> ArchivedChessGame(const HubStore::GameRow& row) {
+std::optional<HubStore::ArchivedGame> ArchivedGameOf(const HubStore::GameRow& row) {
   if (!row.state.has_value()) return std::nullopt;
   return VisitAdapter(
-      *row.state, [&](auto adapter, const auto& engine) -> std::optional<HubStore::ChessGameRow> {
+      *row.state, [&](auto adapter, const auto& engine) -> std::optional<HubStore::ArchivedGame> {
         using A = decltype(adapter);
-        if constexpr (kHas<A, kPublished>) {
+        if constexpr (kHas<A, kArchived>) {
           auto archived = A::Archived(engine);
-          if (archived.has_value()) archived->game_id = row.game_id;
+          if (archived.has_value()) {
+            std::visit([&](auto& game) { game.game_id = row.game_id; }, *archived);
+          }
           return archived;
         } else {
           return std::nullopt;

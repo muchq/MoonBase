@@ -14,6 +14,7 @@
 #include "domains/games/apis/games_hub/round_robin.h"
 #include "domains/games/apis/games_hub/surface.h"
 #include "domains/games/libs/chess_play/game_state.h"
+#include "domains/games/libs/go/game_state.h"
 
 namespace games_hub {
 
@@ -93,6 +94,18 @@ class HubStore {
     /// The room was published when it ended.
     bool published = false;
   };
+
+  /// One finished go game in its room's archive, as ChessGameRow keeps a
+  /// chess game: never published, since go has no public feed.
+  struct GoGameRow {
+    int64_t archive_id = 0;
+    std::string game_id;
+    int ordinal = 0;
+    go::GameState game;
+    int64_t ended_at_ms = 0;
+  };
+  /// What an archiving commit keeps, by the game it is.
+  using ArchivedGame = std::variant<ChessGameRow, GoGameRow>;
 
   /// A game played for a round robin's pairing: the first game of a table
   /// tagged with it, as the commit that ended it archived it. A tagged
@@ -251,6 +264,10 @@ class HubStore {
   /// The room's newest `limit` finished chess games, and whether it
   /// publishes; NotFound for a room that is not.
   virtual absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) = 0;
+  /// The room's newest `limit` finished go games; NotFound for a room
+  /// that is not.
+  virtual absl::StatusOr<std::vector<GoGameRow>> LoadGoHistory(const std::string& room_id,
+                                                               int limit) = 0;
   /// One archived game of the room; absent when the room has none such.
   virtual absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
                                                                     const ChessGameKey& key) = 0;

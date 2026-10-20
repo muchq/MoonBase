@@ -1870,6 +1870,10 @@ class LaggingHubStore final : public HubStore {
   absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
     return inner_->LoadChessHistory(room_id, limit);
   }
+  absl::StatusOr<std::vector<GoGameRow>> LoadGoHistory(const std::string& room_id,
+                                                       int limit) override {
+    return inner_->LoadGoHistory(room_id, limit);
+  }
   absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
                                                             const ChessGameKey& key) override {
     return inner_->LoadChessGame(room_id, key);

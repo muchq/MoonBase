@@ -55,7 +55,11 @@ union GoMove {
     roundRobins: ChessRoundRobinsRequest
     playRoundRobin: ChessPlayRoundRobin
     addBot: GoAddBot
+    history: GoHistoryRequest
 }
+
+/// The room's finished games, newest first: answered with a history.
+structure GoHistoryRequest {}
 
 /// GNU Go to the table's next seat, at a level (1 weakest, 10 strongest),
 /// for a table not yet started; refused when the hub has no go engine, and
@@ -186,6 +190,58 @@ union GoUpdate {
     gameLeft: GameLeft
     roundRobin: GoRoundRobin
     roundRobins: GoRoundRobins
+    history: GoHistory
+}
+
+/// The room's finished go games, newest first, at most 100, each with its
+/// record. The room's history lives as long as the room does; go has no
+/// public feed.
+structure GoHistory {
+    @required
+    games: GoGameSummaries
+}
+
+list GoGameSummaries {
+    member: GoGameSummary
+}
+
+/// One finished game with its whole record: a history is read to list
+/// the games and hand each one's SGF out, with nothing more to ask for.
+structure GoGameSummary {
+    /// The game's identity, increasing in the order games were archived.
+    @required
+    archiveId: Long
+
+    /// The table it was played at.
+    @required
+    gameId: String
+
+    /// The game's position on its table's scoreSheet, from 1.
+    @required
+    ordinal: Integer
+
+    @required
+    black: String
+
+    @required
+    white: String
+
+    @required
+    size: Integer
+
+    @required
+    komi: Double
+
+    @required
+    result: GoResult
+
+    /// When it ended, epoch milliseconds.
+    @required
+    endedAtMs: Long
+
+    /// The game as an SGF (FF[4]) record.
+    @required
+    sgf: String
 }
 
 structure GoGameJoined {

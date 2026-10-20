@@ -60,7 +60,7 @@ moonbase::games::ChatMessage ChatEvent(const ChatRow& row) {
 // The machinery that is one game's alone, typed on the engine of the game
 // whose adapter opts into it (adapters.h's EngineWith).
 using RallyTable = EngineWith<kRealtime>;
-using Feed = Adapter<EngineWith<kPublished>>;
+using Feed = Adapter<chess_play::Table>;
 using RallyGame = Adapter<RallyTable>;
 
 template <typename... F>
@@ -705,7 +705,7 @@ GamesHub::Commit GamesHub::CommitEntryLocked(const std::string& room_id, const s
   // state, and the retry then commits over the terminal row. That game
   // was played once, and was recorded by whoever ended it.
   const bool was_over = entry.started() && IsOver(*entry.state);
-  const bool game_was_over = GameOverWith<kPublished>(entry.kind, entry.state);
+  const bool game_was_over = GameOverWith<kArchived>(entry.kind, entry.state);
   const bool table_game_was_over = TableGameOver(entry);
   // Who played: a leave that ends the game commits without its leaver.
   const std::vector<std::string> seated = entry.roster;
@@ -782,7 +782,8 @@ GamesHub::Commit GamesHub::CommitEntryLocked(const std::string& room_id, const s
   // The feed dates it by the database's clock, not this one, so in a
   // month's first minute the month before is asked for too. Bots have no
   // games there of their own.
-  if (chess_indexer_ && !game_was_over && GameOverWith<kPublished>(entry.kind, entry.state)) {
+  if (chess_indexer_ && entry.kind == Feed::kKind && !game_was_over &&
+      GameOverWith<kArchived>(entry.kind, entry.state)) {
     if (const auto room = rooms_.find(room_id);
         room != rooms_.end() && room->second.chess_published) {
       const absl::Time now = absl::FromUnixMillis(NowMs());
@@ -1699,7 +1700,13 @@ void GamesHub::HandleGameMove(const std::string& player_id,
           [&](WatchTable& watch) { WatchMove(player_id, watch.game_id, kind); },
           [&](AddBot& bot) { AddBotMove(player_id, bot, kind); },
           [&](PostTerms& post) { PostTermsMove(player_id, std::move(post.terms), kind); },
-          [&](AskHistory&) { ChessHistoryMove(player_id); },
+          [&](AskHistory&) {
+            if constexpr (kind == GameKind::kGo) {
+              GoHistoryMove(player_id);
+            } else {
+              ChessHistoryMove(player_id);
+            }
+          },
           [&](AskReview& ask) { ChessReviewMove(player_id, ask.review); },
           [&](Publish& publish) { PublishChessMove(player_id, publish.published); },
           [&](CreateRoundRobin& create) {
@@ -2472,6 +2479,21 @@ void GamesHub::ChessHistoryMove(const std::string& player_id) {
     answer.games.push_back(ChessSummaryOf(row));
   }
   Send(player_id, Feed::Wrap(ChessUpdate::FromHistory(std::move(answer))));
+}
+
+void GamesHub::GoHistoryMove(const std::string& player_id) {
+  const auto room_id = CurrentRoom(player_id);
+  if (!room_id.has_value()) {
+    Reject(player_id, RejectKind::kState, "not in a room");
+    return;
+  }
+  auto games = store_->LoadGoHistory(*room_id, kGoHistoryLimit);
+  if (!games.ok()) {
+    Reject(player_id, RejectKind::kUnavailable, "storage unavailable; try again");
+    return;
+  }
+  Send(player_id,
+       Adapter<go::Table>::Wrap(moonbase::games::GoUpdate::FromHistory(GoHistoryOf(*games))));
 }
 
 void GamesHub::ChessReviewMove(const std::string& player_id,

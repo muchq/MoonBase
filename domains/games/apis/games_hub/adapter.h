@@ -102,11 +102,11 @@ enum Capability : unsigned {
   /// Hooks: Steers(move), whether a move steers the rally, and so rides
   /// the hub's realtime rate budget rather than its command budget.
   kRealtime = 1U << 6,
-  /// A published room's finished games reach the public feed, and the
-  /// hub's indexer is asked after each one's players (implies kNextGame).
+  /// Finished games are kept as the room's history (implies kNextGame).
   /// Hooks: Archived(engine), the finished game a committed row archives
-  /// and its ordinal, which the stores keep as the room's history.
-  kPublished = 1U << 7,
+  /// and its ordinal. Chess's alone, in a published room, reach the public
+  /// feed, and the hub's indexer is asked after each one's players.
+  kArchived = 1U << 7,
   /// A waiting table may hold posted terms its next seat starts on. The
   /// store checks the flag: a waiting row's state column is read back as
   /// those terms in place of an engine. Posting them is Decode's, as the

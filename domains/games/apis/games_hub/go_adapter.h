@@ -24,18 +24,18 @@ struct Adapter<go::Table> {
   static constexpr std::string_view kName = "go";
   static constexpr std::size_t kMaxSeats = go::GameState::kSeats;
   static constexpr unsigned kCapabilities =
-      kWatchable | kNextGame | kRoundRobins | kClocked | kChallenges | kEngineBots;
+      kWatchable | kNextGame | kRoundRobins | kClocked | kChallenges | kEngineBots | kArchived;
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "go_commands";
-  static constexpr std::array<std::string_view, 17> kCommands = {
+  static constexpr std::array<std::string_view, 18> kCommands = {
       "createGame", "joinGame", "startGame",   "leaveGame",      "play",      "pass",
       "resign",     "watch",    "markDead",    "accept",         "challenge", "createRoundRobin",
-      "withdraw",   "forfeit",  "roundRobins", "playRoundRobin", "addBot"};
+      "withdraw",   "forfeit",  "roundRobins", "playRoundRobin", "addBot",    "history"};
   static constexpr std::string_view kEventSeries = "go_events";
-  static constexpr std::array<std::string_view, 9> kEvents = {
+  static constexpr std::array<std::string_view, 10> kEvents = {
       "gameJoined", "gameState", "gameCreated", "gameStarted", "turnChanged",
-      "gameEnded",  "gameLeft",  "roundRobin",  "roundRobins"};
+      "gameEnded",  "gameLeft",  "roundRobin",  "roundRobins", "history"};
   static const Move* MoveOf(const moonbase::games::GameCommands& commands) {
     const auto* command = commands.as_go_or_null();
     return command == nullptr ? nullptr : &command->move;
@@ -135,6 +135,12 @@ struct Adapter<go::Table> {
     return HubStore::EventGame{0, "", 0, table.scoreSheet().front().winner};
   }
 
+  // A table's game once it is over, on its line of the score sheet.
+  static std::optional<HubStore::ArchivedGame> Archived(const go::Table& table) {
+    if (!table.game().isOver()) return std::nullopt;
+    return HubStore::GoGameRow{0, "", static_cast<int>(table.scoreSheet().size()), table.game(), 0};
+  }
+
   // {"size", "komi", "initialMs", "incrementMs"}, the clock in integer
   // milliseconds; terms no game could open on read as nothing.
   static nlohmann::json TermsJson(const GoTerms& terms);
@@ -150,6 +156,13 @@ struct Adapter<go::Table> {
     return table.inGame([now_ms](const go::GameState& game) { return game.flag(now_ms); });
   }
 };
+
+/// How many finished games a history lists.
+inline constexpr int kGoHistoryLimit = 100;
+
+/// A room's finished go games as its history answers them, each with its
+/// SGF record.
+moonbase::games::GoHistory GoHistoryOf(const std::vector<HubStore::GoGameRow>& games);
 
 }  // namespace games_hub
 

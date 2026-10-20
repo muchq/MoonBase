@@ -87,6 +87,8 @@ class PgHubStore final : public HubStore {
   /// The room's chess archive. An archived game that no longer
   /// restores is dropped with a loud log, as an undecodable game row is.
   absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override;
+  absl::StatusOr<std::vector<GoGameRow>> LoadGoHistory(const std::string& room_id,
+                                                       int limit) override;
   absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
                                                             const ChessGameKey& key) override;
   absl::StatusOr<std::vector<PublishedChessGame>> LoadPublishedChess(int64_t after_archive_id,

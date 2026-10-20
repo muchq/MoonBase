@@ -8,6 +8,7 @@
 #include "absl/time/time.h"
 #include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/libs/chess_play/game_state_serde.h"
+#include "domains/games/libs/go/table_serde.h"
 
 namespace games_hub {
 
@@ -82,6 +83,20 @@ absl::StatusOr<HubStore::RoomRows> MemoryHubStore::LoadRoom(const std::string& r
   return rows;
 }
 
+namespace {
+
+// Keyed as postgres keys it: the same table code, line and game.
+template <typename Row, typename Serialize>
+bool Known(const std::vector<Row>& kept, const Row& archived, Serialize serialize) {
+  const std::string serialized = serialize(archived.game);
+  return std::any_of(kept.begin(), kept.end(), [&](const Row& row) {
+    return row.game_id == archived.game_id && row.ordinal == archived.ordinal &&
+           serialize(row.game) == serialized;
+  });
+}
+
+}  // namespace
+
 bool MemoryHubStore::CommitGameLocked(const GameRow& row) {
   if (!rooms_.contains(row.room_id)) return false;
   const Key key{row.room_id, row.game_id};
@@ -95,29 +110,30 @@ bool MemoryHubStore::CommitGameLocked(const GameRow& row) {
   if (game != games_.end()) stored.event = game->second.event;
   games_.erase(key);
   games_.emplace(key, stored);
-  if (auto archived = ArchivedChessGame(stored); archived.has_value()) {
-    // Keyed as postgres keys it: the same table code, line and game.
-    RoomData& room = rooms_.at(row.room_id);
-    const std::string serialized = chess_play::serializeGameState(archived->game);
-    const bool known = std::any_of(
-        room.chess_games.begin(), room.chess_games.end(), [&](const ChessGameRow& kept) {
-          return kept.game_id == archived->game_id && kept.ordinal == archived->ordinal &&
-                 chess_play::serializeGameState(kept.game) == serialized;
-        });
-    if (!known) {
-      archived->archive_id = ++last_archive_id_;
-      archived->ended_at_ms = now_ms_();
-      archived->published = room.chess_published;
-      if (archived->published) {
-        published_.push_back({archived->archive_id, archived->game, archived->ended_at_ms});
-      }
-      if (stored.event.has_value() && archived->ordinal == 1) {
-        room.event_games.push_back({stored.event->event_id,
-                                    {archived->archive_id, row.game_id, stored.event->pairing,
-                                     ChessWinner(archived->game)}});
-      }
-      room.chess_games.push_back(*std::move(archived));
+  auto archived = ArchivedGameOf(stored);
+  if (!archived.has_value()) return true;
+  RoomData& room = rooms_.at(row.room_id);
+  if (auto* chess = std::get_if<ChessGameRow>(&*archived)) {
+    if (Known(room.chess_games, *chess, chess_play::serializeGameState)) return true;
+    chess->archive_id = ++last_archive_id_;
+    chess->ended_at_ms = now_ms_();
+    chess->published = room.chess_published;
+    if (chess->published)
+      published_.push_back({chess->archive_id, chess->game, chess->ended_at_ms});
+    if (stored.event.has_value() && chess->ordinal == 1) {
+      room.event_games.push_back(
+          {stored.event->event_id,
+           {chess->archive_id, row.game_id, stored.event->pairing, ChessWinner(chess->game)}});
     }
+    room.chess_games.push_back(std::move(*chess));
+  } else {
+    // A round robin scores go off its tables (TableGame), and go has no
+    // feed: the archive is its history alone.
+    auto& go = std::get<GoGameRow>(*archived);
+    if (Known(room.go_games, go, go::serializeGameState)) return true;
+    go.archive_id = ++last_archive_id_;
+    go.ended_at_ms = now_ms_();
+    room.go_games.push_back(std::move(go));
   }
   return true;
 }
@@ -226,6 +242,19 @@ absl::StatusOr<std::vector<HubStore::PublishedChessGame>> MemoryHubStore::LoadPu
     if (game.archive_id > after_archive_id) page.push_back(game);
   }
   return page;
+}
+
+absl::StatusOr<std::vector<HubStore::GoGameRow>> MemoryHubStore::LoadGoHistory(
+    const std::string& room_id, int limit) {
+  const std::lock_guard<std::mutex> lock(mu_);
+  const auto room = rooms_.find(room_id);
+  if (room == rooms_.end()) return absl::NotFoundError("no such room");
+  const auto& games = room->second.go_games;
+  std::vector<GoGameRow> history;
+  for (auto game = games.rbegin(); game != games.rend() && std::ssize(history) < limit; ++game) {
+    history.push_back(*game);
+  }
+  return history;
 }
 
 }  // namespace games_hub

@@ -231,6 +231,10 @@ class TornSnapshotStore final : public HubStore {
   absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
     return delegate_->LoadChessHistory(room_id, limit);
   }
+  absl::StatusOr<std::vector<GoGameRow>> LoadGoHistory(const std::string& room_id,
+                                                       int limit) override {
+    return delegate_->LoadGoHistory(room_id, limit);
+  }
   absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
                                                             const ChessGameKey& key) override {
     return delegate_->LoadChessGame(room_id, key);
@@ -287,6 +291,10 @@ class TouchSpyStore final : public HubStore {
   }
   absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
     return delegate_->LoadChessHistory(room_id, limit);
+  }
+  absl::StatusOr<std::vector<GoGameRow>> LoadGoHistory(const std::string& room_id,
+                                                       int limit) override {
+    return delegate_->LoadGoHistory(room_id, limit);
   }
   absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
                                                             const ChessGameKey& key) override {
@@ -384,6 +392,10 @@ class HeldPublishStore final : public HubStore {
   }
   absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
     return delegate_->LoadChessHistory(room_id, limit);
+  }
+  absl::StatusOr<std::vector<GoGameRow>> LoadGoHistory(const std::string& room_id,
+                                                       int limit) override {
+    return delegate_->LoadGoHistory(room_id, limit);
   }
   absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
                                                             const ChessGameKey& key) override {
@@ -2074,6 +2086,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"go_commands", {{"command", "roundRobins"}}},
       {"go_commands", {{"command", "playRoundRobin"}}},
       {"go_commands", {{"command", "addBot"}}},
+      {"go_commands", {{"command", "history"}}},
       {"go_events", {{"event", "gameJoined"}}},
       {"go_events", {{"event", "gameState"}}},
       {"go_events", {{"event", "gameCreated"}}},
@@ -2083,6 +2096,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"go_events", {{"event", "gameLeft"}}},
       {"go_events", {{"event", "roundRobin"}}},
       {"go_events", {{"event", "roundRobins"}}},
+      {"go_events", {{"event", "history"}}},
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -2417,6 +2431,10 @@ class FailingLoadRoomHubStore final : public HubStore {
   }
   absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
     return delegate_->LoadChessHistory(room_id, limit);
+  }
+  absl::StatusOr<std::vector<GoGameRow>> LoadGoHistory(const std::string& room_id,
+                                                       int limit) override {
+    return delegate_->LoadGoHistory(room_id, limit);
   }
   absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
                                                             const ChessGameKey& key) override {
