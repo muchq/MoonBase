@@ -209,10 +209,10 @@ absl::StatusOr<GameState> ReadGame(const json& payload) {
     accepted = {seats[0].get<bool>(), seats[1].get<bool>()};
   }
 
-  return GameState::restore(std::move(players), static_cast<int>(*size), (*komi_field)->get<double>(),
-                         static_cast<int>(*black_seat), std::move(moves),
-                         TimeControl{*initial, *increment}, clock, std::move(result),
-                         std::move(dead), accepted);
+  return GameState::restore(std::move(players), static_cast<int>(*size),
+                            (*komi_field)->get<double>(), static_cast<int>(*black_seat),
+                            std::move(moves), TimeControl{*initial, *increment}, clock,
+                            std::move(result), std::move(dead), accepted);
 }
 
 }  // namespace
