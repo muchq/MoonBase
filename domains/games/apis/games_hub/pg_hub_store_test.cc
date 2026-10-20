@@ -1291,14 +1291,79 @@ TEST_F(PgHubStoreTest, AGoGameIsArchivedInItsOwnHistoryAndNeverPublished) {
   ASSERT_TRUE(chess.ok()) << chess.status();
   EXPECT_TRUE(chess->games.empty());
   EXPECT_FALSE(store_->LoadChessGame("R1", {(*history)[0].archive_id, "", 0})->has_value());
-  auto feed = store_->LoadPublishedChess(0, 100);
-  ASSERT_TRUE(feed.ok()) << feed.status();
-  EXPECT_TRUE(feed->empty());
+  // Counted, not read: the feed's read would drop a go row it holds.
+  auto fed = db_->Exec("SELECT count(*) FROM published_chess_games");
+  ASSERT_TRUE(fed.ok()) << fed.status();
+  EXPECT_EQ(fed->Get(0, 0).value_or(""), "0");
   auto room = store_->LoadRoom("R1");
   ASSERT_TRUE(room.ok()) << room.status();
   ASSERT_EQ(room->events.size(), 1u);
   EXPECT_EQ(room->events[0].games.size(), 1u) << "the table's game, counted once";
   EXPECT_FALSE(store_->LoadGoHistory("nowhere", 100).ok());
+}
+
+// Chess and go share the archive and each reads only its own: a page is
+// its limit of its own games, a table code minted again for the other
+// game names its own, a go game reaches neither the feed nor an event,
+// whichever commit ends it.
+TEST_F(PgHubStoreTest, ChessAndGoShareTheArchiveEachReadingOnlyItsOwn) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::SetChessPublished{"R1", true}});
+  store_->Flush();
+  PgHubStore::ChessEventRow event = Event(1);
+  event.terms = games_hub::GoTerms{9, go::kDefaultKomi, {60'000, 0}};
+  ASSERT_TRUE(*store_->CommitChessEvent(event, ""));
+  const auto chess_game = [&](const std::string& game_id) {
+    PgHubStore::GameRow row = ChessRow(ChessOpened(), 1);
+    row.game_id = game_id;
+    ASSERT_TRUE(*store_->CommitGameSave(row, ""));
+    row.state.emplace(Mated(ChessOpened()));
+    row.version = 2;
+    ASSERT_TRUE(*store_->CommitGameSave(row, ""));
+  };
+  // Ended by a save, not a finish: the update's statement archives too.
+  const auto go_game = [&](const std::string& game_id) {
+    go::Table table = *go::Table::open({"bob", "alice"}, 9, go::kDefaultKomi, {60'000, 0}, 1'000);
+    PgHubStore::GameRow row{
+        "R1", game_id, table.players(), games_hub::HostedState(table), 1, games_hub::GameKind::kGo};
+    row.event = games_hub::EventTag{"E1", 0};
+    ASSERT_TRUE(*store_->CommitGameSave(row, ""));
+    row.state.emplace(
+        *table.inGame([](const go::GameState& game) { return game.resign(1, 2'000); }));
+    row.version = 2;
+    ASSERT_TRUE(*store_->CommitGameSave(row, ""));
+  };
+  chess_game("T1");
+  store_->Enqueue({PgHubStore::DeleteGame{"R1", "T1"}});
+  store_->Flush();
+  go_game("T1");
+  chess_game("C2");
+  go_game("T2");
+
+  auto chess = store_->LoadChessHistory("R1", 1);
+  ASSERT_TRUE(chess.ok()) << chess.status();
+  ASSERT_EQ(chess->games.size(), 1u);
+  EXPECT_EQ(chess->games[0].game_id, "C2");
+  auto go_games = store_->LoadGoHistory("R1", 2);
+  ASSERT_TRUE(go_games.ok()) << go_games.status();
+  ASSERT_EQ(go_games->size(), 2u);
+  EXPECT_EQ((*go_games)[0].game_id, "T2");
+  EXPECT_EQ((*go_games)[1].game_id, "T1");
+  auto by_table = store_->LoadChessGame("R1", {std::nullopt, "T1", 1});
+  ASSERT_TRUE(by_table.ok()) << by_table.status();
+  ASSERT_TRUE(by_table->has_value()) << "T1's chess game, not the go game minted after it";
+  EXPECT_EQ((*by_table)->game_id, "T1");
+
+  auto fed = db_->Exec("SELECT count(*) FROM published_chess_games");
+  ASSERT_TRUE(fed.ok()) << fed.status();
+  EXPECT_EQ(fed->Get(0, 0).value_or(""), "2") << "the two chess games alone";
+  auto tagged = db_->Exec(
+      "SELECT count(*) FROM chess_games WHERE event_id IS NOT NULL OR pairing IS NOT NULL");
+  ASSERT_TRUE(tagged.ok()) << tagged.status();
+  EXPECT_EQ(tagged->Get(0, 0).value_or(""), "0");
+  auto room = store_->LoadRoom("R1");
+  ASSERT_TRUE(room.ok()) << room.status();
+  ASSERT_EQ(room->events.size(), 1u);
+  EXPECT_EQ(room->events[0].games.size(), 2u) << "each go table's game, once";
 }
 
 TEST_F(PgHubStoreTest, AnUnreadableEventIsDropped) {

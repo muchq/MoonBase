@@ -205,7 +205,10 @@ list GoGameSummaries {
     member: GoGameSummary
 }
 
+/// One finished game with its whole record: a history is read to list
+/// the games and hand each one's SGF out, with nothing more to ask for.
 structure GoGameSummary {
+    /// The game's identity, increasing in the order games were archived.
     @required
     archiveId: Long
 

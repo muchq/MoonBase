@@ -296,6 +296,39 @@ TEST_F(GoFixture, EitherSeatMayResignOffTurn) {
   EXPECT_FALSE(result->score.has_value());
 }
 
+// A finished game is in the room's go history with its record; a
+// published room's go game is not chess's to index.
+TEST_F(GoFixture, AFinishedGameIsInTheRoomsHistoryAndNeverIndexed) {
+  std::atomic<int> asked{0};
+  hub_->SetChessIndexer([&](const one_d4::IndexAsk&) { ++asked; });
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Table& table = started->table;
+  moonbase::games::ChessPublish publish;
+  publish.published = true;
+  ASSERT_TRUE(
+      table.alice.stream.Send(Chess(moonbase::games::ChessMove::FromPublish(publish))).ok());
+  ASSERT_TRUE(ReceiveChess(table.alice.stream, "published").has_value());
+  ASSERT_TRUE(table.alice.stream.Send(Play(2, 2)).ok());
+  ASSERT_TRUE(ViewWhere(table.bob, [](const GoView& view) { return view.moveCount == 1; }));
+  ASSERT_TRUE(table.bob.stream.Send(Resign()).ok());
+  ASSERT_TRUE(Ended(table.alice).has_value());
+
+  ASSERT_TRUE(
+      table.bob.stream.Send(Go(GoMove::FromHistory(moonbase::games::GoHistoryRequest{}))).ok());
+  auto history = ReceiveGo(table.bob.stream, "history");
+  ASSERT_TRUE(history.has_value());
+  const auto& games = history->as_history_or_null()->games;
+  ASSERT_EQ(games.size(), 1u);
+  EXPECT_EQ(games[0].gameId, table.game_id);
+  EXPECT_EQ(games[0].black, table.alice.player_id);
+  EXPECT_EQ(games[0].white, table.bob.player_id);
+  EXPECT_EQ(games[0].result.ending, "resignation");
+  EXPECT_EQ(games[0].result.winner, table.alice.player_id);
+  EXPECT_NE(games[0].sgf.find("RE[B+R];B[cc])"), std::string::npos) << games[0].sgf;
+  EXPECT_EQ(asked.load(), 0);
+}
+
 TEST_F(GoFixture, TheSweepEndsAGameWhoseSideToMoveRanOutOfTime) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
