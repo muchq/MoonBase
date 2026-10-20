@@ -222,11 +222,11 @@ int main() {
           if (!move.ok()) return absl::UnavailableError(move.error().message());
           return *std::move(move);
         });
-    hub->StartChessBots();
     LOG(INFO) << "Chess bots: asking chess_engine at " << chess_engine_url;
   } else {
     LOG(INFO) << "Chess bots: off (CHESS_ENGINE_URL unset)";
   }
+  hub->StartEngineBots();
 
   // 1d4: a chess game that ends in a published room asks one_d4 to index
   // its players' month from the public feed, on a thread of its own.

@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
-#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -78,10 +77,6 @@ inline int ChessBotMovetimeMs(int64_t remaining_ms, int elo) {
   return static_cast<int>(std::min(int64_t{budget}, usable));
 }
 
-/// How long the bot waits to ask again after the engine failed to answer —
-/// its clock running meanwhile.
-inline constexpr std::chrono::milliseconds kChessBotRetry{2000};
-
 /// A move asked of the engine: the game's start, its moves since, how
 /// long to think. Elo is not sent — Stockfish runs at full strength and
 /// the seat's named Elo only sized the think time.
@@ -91,10 +86,6 @@ struct ChessBotAsk {
   int movetime_ms = 0;
   std::optional<int> elo;  // unset: full strength (LimitStrength off)
 };
-
-/// The engine a bot asks, answering a UCI move or why not. Called without
-/// the hub's lock, from the bot thread.
-using ChessBotEngine = std::function<absl::StatusOr<std::string>(const ChessBotAsk&)>;
 
 }  // namespace games_hub
 

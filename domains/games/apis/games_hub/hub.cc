@@ -59,7 +59,6 @@ moonbase::games::ChatMessage ChatEvent(const ChatRow& row) {
 
 // The machinery that is one game's alone, typed on the engine of the game
 // whose adapter opts into it (adapters.h's EngineWith).
-using BotTable = EngineWith<kEngineBots>;
 using RallyTable = EngineWith<kRealtime>;
 using Feed = Adapter<EngineWith<kPublished>>;
 using RallyGame = Adapter<RallyTable>;
@@ -354,11 +353,11 @@ GamesHub::~GamesHub() {
   chess_clock_cv_.notify_all();
   if (chess_clocks_.joinable()) chess_clocks_.join();
   {
-    const std::lock_guard<std::mutex> lock(chess_bot_mu_);
-    chess_bot_stop_ = true;
+    const std::lock_guard<std::mutex> lock(engine_bot_mu_);
+    engine_bot_stop_ = true;
   }
-  chess_bot_cv_.notify_all();
-  if (chess_bots_.joinable()) chess_bots_.join();
+  engine_bot_cv_.notify_all();
+  if (engine_bots_.joinable()) engine_bots_.join();
   {
     const std::lock_guard<std::mutex> lock(pong_tick_mu_);
     pong_tick_stop_ = true;
@@ -2266,7 +2265,24 @@ int GamesHub::SweepChessClocksOnce() {
   return ended;
 }
 
-void GamesHub::SetChessBotEngine(ChessBotEngine engine) { chess_bot_engine_ = std::move(engine); }
+void GamesHub::SetChessBotEngine(BotEngine<ChessBotAsk> engine) {
+  std::get<BotEngine<ChessBotAsk>>(bot_engines_) = std::move(engine);
+}
+
+void GamesHub::SetGoBotEngine(BotEngine<GoBotAsk> engine) {
+  std::get<BotEngine<GoBotAsk>>(bot_engines_) = std::move(engine);
+}
+
+bool GamesHub::HasBotEngine(GameKind kind) const {
+  return ForKind(kind, [this](auto adapter) {
+    using A = decltype(adapter);
+    if constexpr (kHas<A, kEngineBots>) {
+      return std::get<BotEngine<typename A::BotAsk>>(bot_engines_) != nullptr;
+    } else {
+      return false;
+    }
+  });
+}
 
 void GamesHub::AddBotMove(const std::string& player_id, const AddBot& bot, GameKind kind) {
   Outbox outbox;
@@ -2278,8 +2294,8 @@ void GamesHub::AddBotMove(const std::string& player_id, const AddBot& bot, GameK
     bool seated = false;
     if (ref.has_value() && ref->entry->event.has_value()) {
       refusal = Refusal{RejectKind::kState, "a round robin's pairing is played by its pair"};
-    } else if (bot.engine && chess_bot_engine_ == nullptr) {
-      refusal = Refusal{RejectKind::kState, "no chess engine"};
+    } else if (bot.engine && !HasBotEngine(kind)) {
+      refusal = Refusal{RejectKind::kState, absl::StrCat("no ", GameKindName(kind), " engine")};
     } else if (!ref.has_value()) {
       refusal = Refusal{RejectKind::kState, "not in a game"};
     } else {
@@ -2889,80 +2905,95 @@ std::optional<std::string> GamesHub::StopWatchingLocked(const std::string& playe
   return std::nullopt;
 }
 
-int GamesHub::PlayChessBotsOnce() {
-  if (chess_bot_engine_ == nullptr) return 0;
+namespace {
+
+// The same turn of the same bot: an answer to one is played only on it.
+template <typename Ask>
+bool SameTurn(const BotTurn<Ask>& a, const BotTurn<Ask>& b) {
+  return a.bot_id == b.bot_id && a.game_no == b.game_no && a.position == b.position;
+}
+
+}  // namespace
+
+int GamesHub::PlayEngineBotsOnce() {
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    const int64_t now = NowMs();
+    // A retry lapses when due, its table gone or not.
+    std::erase_if(bot_retry_at_, [now](const auto& retry) { return retry.second.until <= now; });
+  }
+  return [this]<std::size_t... I>(std::index_sequence<I...>) {
+    return (0 + ... + [&] {
+      using A = Adapter<EngineAt<I>>;
+      if constexpr (kHas<A, kEngineBots>) {
+        return PlayBotsOnce<A>();
+      } else {
+        return 0;
+      }
+    }());
+  }(std::make_index_sequence<kGames>{});
+}
+
+template <typename A>
+int GamesHub::PlayBotsOnce() {
+  using Engine = typename A::Engine;
+  using Ask = typename A::BotAsk;
+  const BotEngine<Ask>& engine = std::get<BotEngine<Ask>>(bot_engines_);
+  if (engine == nullptr) return 0;
   struct Turn {
     std::string room_id;
     std::string game_id;
-    std::string bot_id;
-    // Which of the table's games: its count of finished ones. A table
-    // keeps its id, and can repeat a start, from one game to the next.
-    std::size_t game_no;
-    ChessBotAsk ask;
+    BotTurn<Ask> bot;
+  };
+  // The table a turn was read at, if it is still there and started.
+  const auto table_at = [this](const Turn& turn) -> std::pair<GameEntry*, const Engine*> {
+    const auto room = rooms_.find(turn.room_id);
+    if (room == rooms_.end()) return {nullptr, nullptr};
+    const auto game = room->second.games.find(turn.game_id);
+    if (game == room->second.games.end() || !game->second.state.has_value()) {
+      return {nullptr, nullptr};
+    }
+    return {&game->second, std::get_if<Engine>(&*game->second.state)};
   };
   std::vector<Turn> turns;
   {
     const std::lock_guard<std::mutex> lock(mu_);
     const int64_t now = NowMs();
-    // A retry holds back the game it was for, and only until it is due.
-    std::erase_if(chess_bot_retry_at_, [this, now](const auto& retry) {
-      if (retry.second.until <= now) return true;
-      const auto room = rooms_.find(retry.first.first);
-      if (room == rooms_.end()) return true;
-      const auto game = room->second.games.find(retry.first.second);
-      if (game == room->second.games.end()) return true;
-      const BotTable* table = CapableEngine<kEngineBots>(game->second.state);
-      return table == nullptr || table->scoreSheet().size() != retry.second.game;
-    });
     for (const auto& [room_id, room] : rooms_) {
       for (const auto& [game_id, entry] : room.games) {
-        const BotTable* table = CapableEngine<kEngineBots>(entry.state);
+        if (!entry.state.has_value()) continue;
+        const Engine* table = std::get_if<Engine>(&*entry.state);
         if (table == nullptr) continue;
-        const chess_play::GameState& game = table->game();
-        const int seat = game.whoseTurn();
-        if (seat < 0) continue;
-        const std::string& on_turn = game.players().at(seat);
-        const std::optional<int> elo = ChessBotElo(on_turn);
-        if (!elo.has_value() || chess_bot_retry_at_.contains({room_id, game_id})) continue;
-        // Movetime is filled just before the ask, from the seat's named
-        // strength and the live remaining clock — not here — so a later
-        // bot in this pass is not capped by a snapshot taken before
-        // earlier bots thought. Elo stays off the ask (full strength).
-        turns.push_back({room_id, game_id, on_turn, table->scoreSheet().size(),
-                         ChessBotAsk{game.startFen(), game.moves(), 0, std::nullopt}});
+        auto turn = A::BotTurnOf(*table, now);
+        if (!turn.has_value()) continue;
+        // A retry holds back the game it was for; one for a finished game
+        // is done with.
+        if (const auto retry = bot_retry_at_.find({room_id, game_id});
+            retry != bot_retry_at_.end()) {
+          if (retry->second.game == turn->game_no) continue;
+          bot_retry_at_.erase(retry);
+        }
+        turns.push_back({room_id, game_id, *std::move(turn)});
       }
     }
   }
-  // The engine is asked without mu_: it thinks for a movetime, and the
-  // hub serves everyone else meanwhile.
+  // The engine is asked without mu_: it thinks, and the hub serves
+  // everyone else meanwhile.
   int played = 0;
   for (Turn& turn : turns) {
     {
+      // Read again just before the ask, so a later bot in this pass is
+      // asked on its clock now, not on a snapshot taken before earlier
+      // bots thought.
       const std::lock_guard<std::mutex> lock(mu_);
-      const auto room = rooms_.find(turn.room_id);
-      if (room == rooms_.end()) continue;
-      const auto game = room->second.games.find(turn.game_id);
-      if (game == room->second.games.end()) continue;
-      const BotTable* table = CapableEngine<kEngineBots>(game->second.state);
-      if (table == nullptr || table->scoreSheet().size() != turn.game_no) continue;
-      const chess_play::GameState& state = table->game();
-      if (state.startFen() != turn.ask.fen || state.moves().size() != turn.ask.moves.size()) {
-        continue;
-      }
-      const int seat = state.whoseTurn();
-      if (seat < 0 || state.players().at(seat) != turn.bot_id) continue;
-      // Strength → think time; Elo is not put on the ask (full-strength
-      // Stockfish). The side's remaining clock only caps the budget.
-      const std::optional<int> strength = ChessBotElo(turn.bot_id);
-      turn.ask.movetime_ms = ChessBotMovetimeMs(
-          state.remainingMs(state.sideToMove(), NowMs()), strength.value_or(1320));
-      turn.ask.elo = std::nullopt;
+      const Engine* table = table_at(turn).second;
+      if (table == nullptr) continue;
+      auto now_turn = A::BotTurnOf(*table, NowMs());
+      if (!now_turn.has_value() || !SameTurn(*now_turn, turn.bot)) continue;
+      turn.bot = *std::move(now_turn);
     }
     const auto ask_started = std::chrono::steady_clock::now();
-    LOG(INFO) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/" << turn.game_id
-              << ": asking movetimeMs=" << turn.ask.movetime_ms
-              << " moves=" << turn.ask.moves.size() << " fen=" << turn.ask.fen;
-    const absl::StatusOr<std::string> answer = chess_bot_engine_(turn.ask);
+    const absl::StatusOr<std::string> answer = engine(turn.bot.ask);
     const auto ask_took = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - ask_started);
     Outbox outbox;
@@ -2970,51 +3001,40 @@ int GamesHub::PlayChessBotsOnce() {
       const std::lock_guard<std::mutex> lock(mu_);
       const std::pair<std::string, std::string> key{turn.room_id, turn.game_id};
       if (!answer.ok()) {
-        LOG(WARNING) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/"
-                     << turn.game_id << ": movetimeMs=" << turn.ask.movetime_ms << " after "
-                     << ask_took.count() << "ms: " << answer.status();
-        chess_bot_retry_at_[key] = {turn.game_no, NowMs() + kChessBotRetry.count()};
+        LOG(WARNING) << A::kName << " bot " << turn.bot.bot_id << " in " << turn.room_id << "/"
+                     << turn.game_id << " after " << ask_took.count() << "ms: " << answer.status();
+        bot_retry_at_[key] = {turn.bot.game_no, NowMs() + kEngineBotRetry.count()};
         continue;
       }
+      const auto [entry, table] = table_at(turn);
+      if (table == nullptr) continue;
       const auto room = rooms_.find(turn.room_id);
-      if (room == rooms_.end()) continue;
-      const auto game = room->second.games.find(turn.game_id);
-      if (game == room->second.games.end() || !game->second.started()) continue;
-      const GameRef ref{turn.room_id, &room->second, turn.game_id, &game->second};
-      const std::size_t asked_at = turn.ask.moves.size();
-      // Only on the game it was asked about: the same game of the table,
-      // the same start and as many moves, the bot still on turn. Anything
-      // else moved on meanwhile. An answer that game refuses is the
-      // engine's fault, and waits out the retry like a failed ask.
+      const GameRef ref{turn.room_id, &room->second, turn.game_id, entry};
+      // Only on the turn it was asked about; anything else moved on
+      // meanwhile. An answer the game refuses is the engine's fault, and
+      // waits out the retry like a failed ask.
       bool moved_on = false;
-      const auto refusal = ApplyTableEngineMoveLocked<BotTable>(
-          ref, turn.bot_id,
-          Transition<BotTable>{[&turn, &moved_on, asked_at, uci = *answer](
-                                   const BotTable& table, int seat, const MoveContext& context) {
-            if (table.scoreSheet().size() != turn.game_no) {
+      const auto refusal = ApplyTableEngineMoveLocked<Engine>(
+          ref, turn.bot.bot_id,
+          Transition<Engine>{[&turn, &moved_on, &answer](const Engine& table, int seat,
+                                                         const MoveContext& context) {
+            const auto now_turn = A::BotTurnOf(table, context.now_ms);
+            if (!now_turn.has_value() || !SameTurn(*now_turn, turn.bot)) {
               moved_on = true;
-              return absl::StatusOr<BotTable>(
-                  absl::FailedPreconditionError("the position moved on"));
+              return absl::StatusOr<Engine>(absl::FailedPreconditionError("the position moved on"));
             }
-            return table.inGame([&](const chess_play::GameState& state)
-                                    -> absl::StatusOr<chess_play::GameState> {
-              if (state.startFen() != turn.ask.fen || state.moves().size() != asked_at) {
-                moved_on = true;
-                return absl::FailedPreconditionError("the position moved on");
-              }
-              return state.move(seat, uci, context.now_ms);
-            });
+            return A::BotMove(table, seat, *answer, context);
           }},
           outbox);
       if (refusal.has_value()) {
-        LOG(INFO) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/" << turn.game_id
-                  << ": " << turn.ask.moves.size() << " moves in, uci=" << *answer << " after "
-                  << ask_took.count() << "ms, not played: " << refusal->reason;
-        if (!moved_on) chess_bot_retry_at_[key] = {turn.game_no, NowMs() + kChessBotRetry.count()};
+        LOG(INFO) << A::kName << " bot " << turn.bot.bot_id << " in " << turn.room_id << "/"
+                  << turn.game_id << ": " << turn.bot.position << ", answer " << *answer
+                  << " after " << ask_took.count() << "ms, not played: " << refusal->reason;
+        if (!moved_on) bot_retry_at_[key] = {turn.bot.game_no, NowMs() + kEngineBotRetry.count()};
       } else {
-        LOG(INFO) << "chess bot " << turn.bot_id << " in " << turn.room_id << "/" << turn.game_id
-                  << ": played " << *answer << " after " << ask_took.count()
-                  << "ms (movetimeMs=" << turn.ask.movetime_ms << ")";
+        LOG(INFO) << A::kName << " bot " << turn.bot.bot_id << " in " << turn.room_id << "/"
+                  << turn.game_id << ": played " << *answer << " after " << ask_took.count()
+                  << "ms";
         ++played;
       }
     }
@@ -3023,14 +3043,16 @@ int GamesHub::PlayChessBotsOnce() {
   return played;
 }
 
-void GamesHub::StartChessBots(std::chrono::milliseconds interval) {
-  if (chess_bots_.joinable() || chess_bot_engine_ == nullptr) return;
-  chess_bots_ = std::thread([this, interval] {
+void GamesHub::StartEngineBots(std::chrono::milliseconds interval) {
+  const bool any = std::apply([](const auto&... engines) { return ((engines != nullptr) || ...); },
+                              bot_engines_);
+  if (engine_bots_.joinable() || !any) return;
+  engine_bots_ = std::thread([this, interval] {
     while (true) {
-      PlayChessBotsOnce();
-      std::unique_lock<std::mutex> lock(chess_bot_mu_);
-      chess_bot_cv_.wait_for(lock, interval, [this] { return chess_bot_stop_; });
-      if (chess_bot_stop_) return;
+      PlayEngineBotsOnce();
+      std::unique_lock<std::mutex> lock(engine_bot_mu_);
+      engine_bot_cv_.wait_for(lock, interval, [this] { return engine_bot_stop_; });
+      if (engine_bot_stop_) return;
     }
   });
 }

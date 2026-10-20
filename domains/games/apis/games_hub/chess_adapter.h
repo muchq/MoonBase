@@ -117,6 +117,16 @@ struct Adapter<chess_play::Table> {
   static absl::StatusOr<chess_play::Table> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view player_id) { return ChessBotElo(player_id).has_value(); }
 
+  using BotAsk = ChessBotAsk;
+  // The bot on turn, asked to think for its named strength's time, capped
+  // by its side's clock at `now_ms`; Elo is not sent (full strength).
+  static std::optional<BotTurn<ChessBotAsk>> BotTurnOf(const chess_play::Table& table,
+                                                       int64_t now_ms);
+  // The answer, a UCI move.
+  static absl::StatusOr<chess_play::Table> BotMove(const chess_play::Table& table, int seat,
+                                                   std::string_view answer,
+                                                   const MoveContext& context);
+
   static absl::Status Prepare(Start& start, const ChessOpener& opener);
   static absl::StatusOr<chess_play::Table> Next(const chess_play::Table& table, const Start& start,
                                                 const MoveContext& context) {

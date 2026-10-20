@@ -422,15 +422,16 @@ reached at `CHESS_ENGINE_URL`. Its seat's id is `stockfish@<elo>`, which no
 minted id can be, and the view marks it `bot`. Stockfish's
 `UCI_LimitStrength` sandbags too hard for playable mates, so the named Elo
 only sizes think time — the engine is asked at full strength.
-`PlayChessBotsOnce`, every 100 ms on each instance, asks for the move of
-every bot on turn without the hub's lock — thinking for
+`PlayEngineBotsOnce`, every 100 ms on each instance, asks each game's
+engine (`kEngineBots`) for the move of every bot with one to make, without
+the hub's lock — a chess bot thinking for
 `ChessBotStrengthThinkMs` of the seat (UI tiers 50–4000 ms, values between
 them interpolate), capped by the side to move's remaining time less a
 small reserve; a near-flag seat still asks the engine's 10 ms minimum —
 and plays the answer through the move's own commit only if the game is
 still where it was asked. Ask, answer, and elapsed time are logged. An
-engine that fails is asked again after `kChessBotRetry`, the bot's clock
-running meanwhile. A bot holds no table alone: its player leaving a table
+engine that fails, or answers what the game refuses, is asked again after
+`kEngineBotRetry`, the bot's clock running meanwhile. A bot holds no table alone: its player leaving a table
 not yet started takes it, and a game against it counts for the player, the
 bot being no member.
 Each game's end credits the winner a
@@ -616,8 +617,14 @@ clock, refused as posted when no game could open on them, listed as
 chess's too, on go's terms: a pairing's table waits on them, starts when
 its second seat fills with the pairing's Black on move, and its one game,
 off the table's own sheet as pong's is, is the pairing's result (an even
-count a draw). Its body names `"game":"go"` beside those terms. Go has no
-bots or archive.
+count a draw). Its body names `"game":"go"` beside those terms. A lone
+seat may seat GNU Go (`addBot`, a level of 1 to 10; `gnugo@<level>`, the
+view marking it `bot`), as chess's Stockfish is seated: asked with the
+board, komi and every move as GTP vertices, it answers a vertex, `pass`
+or `resign`. In the scoring it is asked which stones are dead (their
+vertices, space separated), marks them so as near as whole groups allow,
+and accepts; a mark withdraws its acceptance, so it is asked again. Without a go engine set the hub
+seats none. Go has no archive.
 
 ### Spades
 

@@ -1,8 +1,13 @@
 #include "domains/games/apis/games_hub/go_adapter.h"
 
 #include <algorithm>
+#include <set>
 
+#include "absl/strings/ascii.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
 #include "domains/games/apis/games_hub/round_robin_wire.h"
 #include "domains/games/libs/go/table_serde.h"
 
@@ -101,6 +106,7 @@ moonbase::games::GoView Adapter<go::Table>::ViewOf(const TableContext& context,
     for (const std::string& roster_id : context.roster) {
       moonbase::games::GoPlayer player;
       player.playerId = roster_id;
+      if (IsBot(roster_id)) player.bot = true;
       view.players.push_back(std::move(player));
     }
     return view;
@@ -113,6 +119,7 @@ moonbase::games::GoView Adapter<go::Table>::ViewOf(const TableContext& context,
     moonbase::games::GoPlayer player;
     player.playerId = state.players().at(state.seatOf(color));
     player.color = std::string(go::ColorName(color));
+    if (IsBot(player.playerId)) player.bot = true;
     view.players.push_back(std::move(player));
   }
   for (int y = 0; y < state.size(); ++y) {
@@ -226,6 +233,7 @@ Action<go::Table, Adapter<go::Table>::Start> Adapter<go::Table>::Decode(const Mo
     return PostTerms{HostedTerms(std::move(terms))};
   }
   if (const auto* watch = move.as_watch_or_null()) return WatchTable{watch->gameId};
+  if (const auto* add = move.as_addBot_or_null()) return AddBot{GoBotId(add->level), true};
   if (const auto* create = move.as_createRoundRobin_or_null()) {
     GoTerms terms = TermsFrom(create->terms.value_or(moonbase::games::GoStartGame{}));
     if (const absl::Status ok = go::CheckRules(terms.size, terms.komi, terms.time_control);
@@ -283,6 +291,99 @@ absl::StatusOr<go::Table> Adapter<go::Table>::Open(const OpenContext& context, c
   }
   return go::Table::open(context.roster, start.size, start.komi, start.time_control,
                          context.now_ms, black_seat);
+}
+
+namespace {
+
+GoBotAsk AskOf(const go::GameState& game, int level, bool scoring) {
+  GoBotAsk ask{game.size(), game.komi(), {}, level, scoring};
+  for (const int point : game.moves()) ask.moves.push_back(GtpVertex(point, game.size()));
+  return ask;
+}
+
+// How many points the marks and the engine's dead stones disagree on.
+std::size_t Disagreement(const go::GameState& game, const std::set<int>& dead) {
+  std::size_t apart = 0;
+  for (const int point : game.dead()) apart += dead.contains(point) ? 0 : 1;
+  for (const int point : dead) {
+    apart += game.isDead(point % game.size(), point / game.size()) ? 0 : 1;
+  }
+  return apart;
+}
+
+// The marks moved toward the engine's dead stones a group at a time, while
+// each toggle brings them closer (a group is marked whole, so an engine
+// naming part of one is met as near as can be), then accepted.
+absl::StatusOr<go::GameState> MarkedAndAccepted(const go::GameState& game, int seat,
+                                                std::string_view answer, int64_t now_ms) {
+  std::set<int> dead;
+  for (const std::string_view vertex : absl::StrSplit(answer, ' ', absl::SkipEmpty())) {
+    const std::optional<int> point = GtpPoint(vertex, game.size());
+    if (!point.has_value() || *point == go::kPass) {
+      return absl::InvalidArgumentError(absl::StrCat("not a dead stone: ", vertex));
+    }
+    dead.insert(*point);
+  }
+  go::GameState marked = game;
+  for (bool closer = true; closer;) {
+    closer = false;
+    std::set<int> apart = dead;
+    for (const int point : marked.dead()) {
+      if (apart.erase(point) == 0) apart.insert(point);
+    }
+    for (const int point : apart) {
+      auto toggled = marked.markDead(seat, point % game.size(), point / game.size(), now_ms);
+      if (!toggled.ok() || Disagreement(*toggled, dead) >= Disagreement(marked, dead)) continue;
+      marked = *std::move(toggled);
+      closer = true;
+      break;
+    }
+  }
+  return marked.accept(seat, now_ms);
+}
+
+}  // namespace
+
+std::optional<BotTurn<GoBotAsk>> Adapter<go::Table>::BotTurnOf(const go::Table& table, int64_t) {
+  const go::GameState& game = table.game();
+  if (table.isOver() || game.isOver()) return std::nullopt;
+  const std::size_t game_no = table.scoreSheet().size();
+  if (game.scoring()) {
+    for (int seat = 0; seat < go::GameState::kSeats; ++seat) {
+      const std::string& id = game.players().at(seat);
+      const std::optional<int> level = GoBotLevel(id);
+      if (!level.has_value() || game.accepted()[seat]) continue;
+      return BotTurn<GoBotAsk>{
+          id, game_no,
+          absl::StrCat("scoring ", game.moves().size(), " ", absl::StrJoin(game.dead(), ","), " ",
+                       game.accepted()[0], game.accepted()[1]),
+          AskOf(game, *level, /*scoring=*/true)};
+    }
+    return std::nullopt;
+  }
+  const int seat = game.whoseTurn();
+  if (seat < 0) return std::nullopt;
+  const std::string& on_turn = game.players().at(seat);
+  const std::optional<int> level = GoBotLevel(on_turn);
+  if (!level.has_value()) return std::nullopt;
+  return BotTurn<GoBotAsk>{on_turn, game_no, absl::StrCat(game.moves().size()),
+                           AskOf(game, *level, /*scoring=*/false)};
+}
+
+absl::StatusOr<go::Table> Adapter<go::Table>::BotMove(const go::Table& table, int seat,
+                                                      std::string_view answer,
+                                                      const MoveContext& context) {
+  answer = absl::StripAsciiWhitespace(answer);
+  return table.inGame([&](const go::GameState& game) -> absl::StatusOr<go::GameState> {
+    if (game.scoring()) return MarkedAndAccepted(game, seat, answer, context.now_ms);
+    if (absl::EqualsIgnoreCase(answer, "resign")) return game.resign(seat, context.now_ms);
+    const std::optional<int> point = GtpPoint(answer, game.size());
+    if (!point.has_value()) {
+      return absl::InvalidArgumentError(absl::StrCat("not a vertex: ", answer));
+    }
+    if (*point == go::kPass) return game.pass(seat, context.now_ms);
+    return game.play(seat, *point % game.size(), *point / game.size(), context.now_ms);
+  });
 }
 
 moonbase::games::GoRoundRobin Adapter<go::Table>::RoundRobinWire(const HeldRoundRobin& held) {

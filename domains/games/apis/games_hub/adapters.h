@@ -136,6 +136,15 @@ concept PublishedHooks = NextGameHooks<A> && requires(const typename A::Engine& 
 };
 
 template <typename A>
+concept EngineBotHooks = requires(const typename A::Engine& engine) {
+  typename A::BotAsk;
+  { A::BotTurnOf(engine, int64_t{0}) } -> std::same_as<std::optional<BotTurn<typename A::BotAsk>>>;
+  {
+    A::BotMove(engine, 0, std::string_view{}, std::declval<const MoveContext&>())
+  } -> std::same_as<absl::StatusOr<typename A::Engine>>;
+};
+
+template <typename A>
 concept RealtimeHooks = requires(const typename A::Move& move) {
   { A::Steers(move) } -> std::same_as<bool>;
 };
@@ -148,7 +157,7 @@ concept CapableAdapter =
     (!kHas<A, kNextGame> || NextGameHooks<A>) && (!kHas<A, kRoundRobins> || RoundRobinHooks<A>) &&
     (!kHas<A, kOpenings> || OpeningHooks<A>) && (!kHas<A, kClocked> || ClockHooks<A>) &&
     (!kHas<A, kRealtime> || RealtimeHooks<A>) && (!kHas<A, kPublished> || PublishedHooks<A>) &&
-    (!kHas<A, kChallenges> || ChallengeHooks<A>);
+    (!kHas<A, kChallenges> || ChallengeHooks<A>) && (!kHas<A, kEngineBots> || EngineBotHooks<A>);
 
 /// Each HostedState alternative has a full adapter that names the GameKind
 /// at its index, so a kind and its engine never disagree.
@@ -339,7 +348,7 @@ constexpr std::size_t OnlyGameWith() {
 }
 
 /// The engine of the one game whose adapter opts into `C`. The machinery
-/// that is one game's alone — chess's engine bots and public feed, pong's
+/// that is one game's alone — chess's public feed, pong's
 /// rallies — is typed on this, and reaches a table through
 /// CapableEngine, never through its kind; a second game opting in fails
 /// here until that machinery serves both.

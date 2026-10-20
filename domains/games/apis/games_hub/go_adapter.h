@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include "domains/games/apis/games_hub/adapter.h"
+#include "domains/games/apis/games_hub/go_bots.h"
 #include "domains/games/libs/go/table.h"
 
 namespace games_hub {
@@ -22,15 +23,15 @@ struct Adapter<go::Table> {
   static constexpr GameKind kKind = GameKind::kGo;
   static constexpr std::string_view kName = "go";
   static constexpr std::size_t kMaxSeats = go::GameState::kSeats;
-  static constexpr unsigned kCapabilities = kWatchable | kNextGame | kRoundRobins | kClocked | kChallenges;
+  static constexpr unsigned kCapabilities =
+      kWatchable | kNextGame | kRoundRobins | kClocked | kChallenges | kEngineBots;
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "go_commands";
-  static constexpr std::array<std::string_view, 16> kCommands = {
-      "createGame",       "joinGame", "startGame", "leaveGame",   "play",
-      "pass",             "resign",   "watch",     "markDead",    "accept",
-      "challenge",        "createRoundRobin", "withdraw",  "forfeit", "roundRobins",
-      "playRoundRobin"};
+  static constexpr std::array<std::string_view, 17> kCommands = {
+      "createGame", "joinGame", "startGame",   "leaveGame",      "play",      "pass",
+      "resign",     "watch",    "markDead",    "accept",         "challenge", "createRoundRobin",
+      "withdraw",   "forfeit",  "roundRobins", "playRoundRobin", "addBot"};
   static constexpr std::string_view kEventSeries = "go_events";
   static constexpr std::array<std::string_view, 9> kEvents = {
       "gameJoined", "gameState", "gameCreated", "gameStarted", "turnChanged",
@@ -91,7 +92,17 @@ struct Adapter<go::Table> {
   }
   static std::string Serialize(const go::Table& engine);
   static absl::StatusOr<go::Table> Deserialize(const std::string& stored);
-  static bool IsBot(std::string_view) { return false; }
+  static bool IsBot(std::string_view player_id) { return GoBotLevel(player_id).has_value(); }
+
+  using BotAsk = GoBotAsk;
+  // The bot on turn, asked with the game so far; in the scoring, a bot
+  // that has not accepted the marks, asked which stones are dead.
+  static std::optional<BotTurn<GoBotAsk>> BotTurnOf(const go::Table& table, int64_t now_ms);
+  // The answer, a GTP vertex, "pass" or "resign"; in the scoring, the
+  // engine's dead stones, marked so as near as whole groups allow, then
+  // accepted.
+  static absl::StatusOr<go::Table> BotMove(const go::Table& table, int seat,
+                                           std::string_view answer, const MoveContext& context);
 
   static absl::StatusOr<go::Table> Next(const go::Table& table, const Start& start,
                                         const MoveContext& context) {
