@@ -1,0 +1,64 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library", "go_test")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+load("//bazel/rules:oci.bzl", "linux_oci_go")
+
+# A go engine behind HTTP (#1668): GNU Go run as a child process and
+# spoken to over GTP. GNU Go is GPL-3, so it is never linked into
+# anything; games_hub reaches it over the app network.
+
+go_library(
+    name = "go_engine_lib",
+    srcs = [
+        "gtp.go",
+        "handler.go",
+        "pool.go",
+        "query.go",
+    ],
+    importpath = "github.com/muchq/moonbase/domains/games/apis/go_engine",
+    visibility = ["//visibility:public"],
+    deps = ["//domains/platform/libs/mucks"],
+)
+
+go_test(
+    name = "go_engine_test",
+    size = "small",
+    srcs = [
+        "gtp_test.go",
+        "handler_test.go",
+        "pool_test.go",
+        "query_test.go",
+    ],
+    data = ["@gnugo"],
+    embed = [":go_engine_lib"],
+    env = {"GNUGO": "$(rootpath @gnugo)"},
+    rundir = ".",
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)
+
+go_binary(
+    name = "go_engine",
+    srcs = ["main.go"],
+    visibility = ["//visibility:public"],
+    deps = [":go_engine_lib"],
+)
+
+# The engine binary, and its license beside it: shipping GNU Go's binary
+# carries GPL-3's terms, and the source is the 3.8 release it is built
+# from.
+pkg_tar(
+    name = "gnugo_layer",
+    srcs = [
+        "@gnugo",
+        "@gnugo//:COPYING",
+    ],
+    mode = "0755",
+    package_dir = "/gnugo",
+)
+
+linux_oci_go(
+    bin_name = "go_engine",
+    extra_tars = [":gnugo_layer"],
+)

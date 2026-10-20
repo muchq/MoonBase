@@ -78,6 +78,9 @@ services:
       # Chess bots (#1618): Stockfish's moves for a bot's seat, asked of
       # chess_engine across the app network. Unset, no table offers a bot.
       CHESS_ENGINE_URL: http://chess_engine:8094
+      # Go bots (#1668): GNU Go's moves for a bot's seat, asked of
+      # go_engine across the app network. Unset, no table offers a bot.
+      GO_ENGINE_URL: http://go_engine:8095
       # 1d4: a chess game that ends in a published room asks one_d4 to
       # index its players' month from the public feed. Unset, nothing
       # reaches 1d4 until someone asks there.
@@ -205,6 +208,36 @@ services:
     healthcheck:
       # Steady /health probe (#1307); see games_hub's for the full rationale.
       test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8094 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # GNU Go behind HTTP for go bots (#1668). Internal only, as
+  # chess_engine is. GNU Go is GPL-3 and runs here as a child process,
+  # never linked.
+  go_engine:
+    image: ghcr.io/muchq/go_engine:${GO_ENGINE_SHA:-${DEPLOY_SHA:-latest}}
+    labels:
+      com.muchq.description: "GNU Go over HTTP for go bots"
+    restart: always
+    logging: *default-logging
+    environment:
+      - PORT=8095
+      - GNUGO_PATH=/gnugo/gnugo
+      # GNU Go holds a few tens of MB and answers a 19×19 move in under a
+      # second; one process serves the room's bots.
+      - ENGINES=1
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      # Steady /health probe (#1307); see games_hub's for the full rationale.
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8095 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
       interval: 30s
       timeout: 5s
       retries: 3

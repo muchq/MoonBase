@@ -40,6 +40,7 @@
 #include "domains/games/apis/games_hub/voice.h"
 #include "domains/games/libs/cards/dealer.h"
 #include "domains/games/libs/chess_engine_cpp/production_client.h"
+#include "domains/games/libs/go_engine_cpp/production_client.h"
 #include "domains/games/libs/mithril_cpp/production_client.h"
 #include "domains/games/libs/one_d4_cpp/index_queue.h"
 #include "domains/games/libs/one_d4_cpp/production_client.h"
@@ -225,6 +226,26 @@ int main() {
     LOG(INFO) << "Chess bots: asking chess_engine at " << chess_engine_url;
   } else {
     LOG(INFO) << "Chess bots: off (CHESS_ENGINE_URL unset)";
+  }
+
+  // Go bots: GNU Go on go_engine across the app network, as chess's are
+  // seated. Unset, no table offers one.
+  const char* go_engine_url = std::getenv("GO_ENGINE_URL");
+  if (go_engine_url != nullptr && *go_engine_url != '\0') {
+    auto engine = go_engine::CreateProductionClient(go_engine_url);
+    if (!engine.ok()) {
+      LOG(ERROR) << "Failed to build the go_engine client: " << engine.error().message();
+      return 1;
+    }
+    auto client = std::make_shared<go_engine::Client>(std::move(*engine));
+    hub->SetGoBotEngine([client](const games_hub::GoBotAsk& ask) -> absl::StatusOr<std::string> {
+      auto answer = client->Genmove({ask.size, ask.komi, ask.moves, ask.level, ask.scoring});
+      if (!answer.ok()) return absl::UnavailableError(answer.error().message());
+      return *std::move(answer);
+    });
+    LOG(INFO) << "Go bots: asking go_engine at " << go_engine_url;
+  } else {
+    LOG(INFO) << "Go bots: off (GO_ENGINE_URL unset)";
   }
   hub->StartEngineBots();
 

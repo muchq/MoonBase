@@ -1905,6 +1905,8 @@ cc_binary(
         "//domains/games/libs/cards:dealer",
         "//domains/games/libs/chess_engine_cpp:client",
         "//domains/games/libs/chess_engine_cpp:production_client",
+        "//domains/games/libs/go_engine_cpp:client",
+        "//domains/games/libs/go_engine_cpp:production_client",
         "//domains/games/libs/mithril_cpp:production_client",
         "//domains/games/libs/one_d4_cpp:client",
         "//domains/games/libs/one_d4_cpp:index_queue",

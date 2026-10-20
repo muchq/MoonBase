@@ -21,6 +21,7 @@ individually targetable.
   - [`iili`](../../domains/iili/apis/iili) (port 8091, `/iili/v1/*`)
   - [`deja`](../../domains/ai/apis/deja) (port 8093, `/deja/v1/*`: the tape, and one POST at `/deja/v1/next`)
   - [`chess_engine`](../../domains/games/apis/chess_engine) (port 8094, internal only: Stockfish for chess bots)
+  - [`go_engine`](../../domains/games/apis/go_engine) (port 8095, internal only: GNU Go for go bots)
 
 - **i.iili.uk** - Short-link redirects (#1359)
   - Caddy rewrites `GET|HEAD /r/{slug}` → `iili` `/iili/v1/r/{slug}`
