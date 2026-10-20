@@ -22,6 +22,9 @@ FULL_BUILD_PATHSPECS=(
   # archive_override bump would otherwise miss every consumer.
   MODULE.bazel
   'bazel/*.MODULE.bazel'
+  # An external repo's BUILD file, named by a pin's build_file: no target
+  # in //... owns it, so bazel-diff sees no change at all.
+  'bazel/3p/*.BUILD'
 )
 
 # Fail loudly when BASE_REVISION does not resolve. An unfetched origin/main,

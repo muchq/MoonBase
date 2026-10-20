@@ -17,11 +17,12 @@ import (
 // fakeEngine plays the engine's side of a GTP conversation over pipes:
 // every command recorded and answered "=", but genmove and
 // final_status_list answered with `answer`, and play refused with
-// `refusal` when set.
+// `refusal` when set (only the play `refused`, when that is set too).
 type fakeEngine struct {
 	commands chan string
 	answer   string
 	refusal  string
+	refused  string
 }
 
 func startFake(t *testing.T, fake *fakeEngine) *GTP {
@@ -40,7 +41,7 @@ func startFake(t *testing.T, fake *fakeEngine) *GTP {
 				return
 			case strings.HasPrefix(line, "genmove ") || strings.HasPrefix(line, "final_status_list "):
 				io.WriteString(fromEngine, "= "+fake.answer+"\n\n")
-			case strings.HasPrefix(line, "play ") && fake.refusal != "":
+			case strings.HasPrefix(line, "play ") && fake.refusal != "" && (fake.refused == "" || line == fake.refused):
 				io.WriteString(fromEngine, "? "+fake.refusal+"\n\n")
 			default:
 				io.WriteString(fromEngine, "=\n\n")
@@ -109,6 +110,17 @@ func TestAMoveTheEngineRefusesIsAnIllegalGame(t *testing.T) {
 	engine := startFake(t, &fakeEngine{answer: "C3", refusal: "illegal move"})
 	_, err := engine.Ask(context.Background(), Query{Size: 9, Komi: 6.5, Moves: []string{"E5"}, Level: 1})
 	assert.ErrorIs(t, err, ErrIllegal)
+}
+
+// A refusal mid-game is read through to the ask's own answer, so the next
+// exchange reads its own answers, not the last one's.
+func TestAfterARefusalTheNextAskReadsItsOwnAnswer(t *testing.T) {
+	engine := startFake(t, &fakeEngine{answer: "C3", refusal: "illegal move", refused: "play white E5"})
+	_, err := engine.Ask(context.Background(), Query{Size: 9, Komi: 6.5, Moves: []string{"E5", "E5", "D4"}, Level: 1})
+	require.ErrorIs(t, err, ErrIllegal)
+	answer, err := engine.Ask(context.Background(), Query{Size: 9, Komi: 6.5, Moves: []string{"E5"}, Level: 1})
+	require.NoError(t, err)
+	assert.Equal(t, "C3", answer)
 }
 
 func TestAnEngineThatStopsAnsweringMissesTheDeadline(t *testing.T) {

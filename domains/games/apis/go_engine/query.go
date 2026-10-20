@@ -15,7 +15,7 @@ const (
 	MinLevel = 1
 	MaxLevel = 10
 	maxKomi  = 150
-	maxMoves = 1000
+	maxMoves = 2000
 )
 
 // gtpColumns are GTP's: A to T, skipping I.

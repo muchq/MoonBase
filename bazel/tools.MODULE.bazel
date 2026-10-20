@@ -72,7 +72,10 @@ http_archive(
     build_file = "//bazel/3p:gnugo.BUILD",
     sha256 = "da68d7a65f44dcf6ce6e4e630b6f6dd9897249d34425920bfdd4e07ff1866a72",
     strip_prefix = "gnugo-3.8",
-    urls = ["https://ftp.gnu.org/gnu/gnugo/gnugo-3.8.tar.gz"],
+    urls = [
+        "https://ftp.gnu.org/gnu/gnugo/gnugo-3.8.tar.gz",
+        "https://ftpmirror.gnu.org/gnu/gnugo/gnugo-3.8.tar.gz",
+    ],
 )
 
 # Stockfish's own release build for the chess_engine image (#1618). It is

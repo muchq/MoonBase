@@ -24,7 +24,7 @@ traffic inside does not, because it is made between containers on
 (`ONE_D4_BASE_URL`) and to one_d4_v2 (`ONE_D4_V2_BASE_URL`), games_hub to
 deja (`DEJA_URL`), to microgpt-serve for the room bot (`MICROGPT_URL`) and
 to mithril for `/wordchain` in room chat (`MITHRIL_URL`), to chess_engine
-for a chess bot's moves (`CHESS_ENGINE_URL`), to go_engine for a go bot's
+for a chess bot's moves (`CHESS_ENGINE_URL`), to go_engine for a go bot's moves
 (`GO_ENGINE_URL`), to one_d4 to index the players
 of a game that ended published (`ONE_D4_URL`), and prom_proxy to
 prometheus (`PROMETHEUS_URL`). Every

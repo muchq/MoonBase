@@ -17,8 +17,10 @@ type Asker interface {
 }
 
 // askTimeout is how long a query may take — waiting for an engine,
-// replaying the game, the answer — before it is given up. GNU Go answers
-// a 19×19 move in well under a second at any level.
+// replaying the game, the answer — before it is given up. On a full core
+// GNU Go's level-10 19×19 middle-game move took up to 1.7 s, and its dead
+// stones at a game's end (both sides passed) up to 1.4 s; the deploy's half
+// a core doubles that.
 const askTimeout = 10 * time.Second
 
 type genmoveResponse struct {

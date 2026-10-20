@@ -17,7 +17,7 @@ POST /go_engine/v1/genmove
 
 `ENGINES` GNU Go processes (default 2; the consolidated deploy sets 1) are started up front and serve one query at a time each, each replaying the game from a cleared board. An engine that fails or misses its deadline is killed, and its slot starts a fresh one on next use. Every ask is logged with the board, the move count, the level, the answer or error, and how long it took.
 
-GNU Go is GPL-3. It runs here as a child process, spoken to over GTP, and is never linked into anything. There is no release binary: the image ships one built from the 3.8 release source (`@gnugo`, pinned in `bazel/tools.MODULE.bazel` and built by `bazel/3p/gnugo.BUILD`) at `/gnugo/gnugo`, with its license `COPYING` beside it. The tests run that same binary.
+GNU Go is GPL-3. It runs here as a child process, spoken to over GTP, and is never linked into anything. There is no release binary: the image ships one built from the 3.8 release source for the build host (CI's x86-64 Linux; a local image built elsewhere carries that host's binary) (`@gnugo`, pinned in `bazel/tools.MODULE.bazel` and built by `bazel/3p/gnugo.BUILD`) at `/gnugo/gnugo`, with its license `COPYING` beside it. The tests run that same binary.
 
 Internal only: there is no published port and no caddy route. games_hub calls it across the app network on port 8095.
 

@@ -3,8 +3,9 @@
 # The release's autotools build is replaced here rather than wrapped:
 # rules_foreign_cc's configure checks fail against the hermetic toolchain's
 # sysroot. config.h is what that release's ./configure writes on Linux
-# x86-64 with --without-readline --without-curses --disable-color; the
-# pattern sources it generates are generated below by its own tools, with
+# x86-64 with --without-readline --without-curses --disable-color, less
+# HAVE_CURSES_H and HAVE_TERM_H (read only under TERMINFO, which is unset,
+# and the hermetic sysroot has neither header); the pattern sources it generates are generated below by its own tools, with
 # the arguments its patterns/Makefile.am gives them.
 #
 # GPL-3: go_engine runs the binary as a child process, and nothing links it.

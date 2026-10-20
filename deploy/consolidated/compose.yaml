@@ -225,15 +225,17 @@ services:
     environment:
       - PORT=8095
       - GNUGO_PATH=/gnugo/gnugo
-      # GNU Go holds a few tens of MB and answers a 19×19 move in under a
-      # second; one process serves the room's bots.
+      # GNU Go holds a few tens of MB; one process serves the hub's bots,
+      # which ask one at a time.
       - ENGINES=1
     networks:
       - app_network
     deploy:
       resources:
         limits:
-          cpus: '0.25'
+          # A level-10 19×19 move takes up to 1.7 s of a full core; half a
+          # core keeps it well inside go_engine's 10 s.
+          cpus: '0.5'
           memory: 128M
     healthcheck:
       # Steady /health probe (#1307); see games_hub's for the full rationale.
