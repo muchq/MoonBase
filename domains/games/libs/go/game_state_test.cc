@@ -320,6 +320,51 @@ TEST(GameState, RestoreReplaysTheMovesAndRefusesWhatPlayCouldNotReach) {
                    .ok());
 }
 
+// A stored clock past a day, or a turn started past any real epoch, is
+// refused: the clock's arithmetic holds only within those bounds.
+// A clock past the bound is one an uncapped increment once stored: it comes
+// back at the bound rather than losing the game.
+TEST(GameState, RestoreRefusesAClockOutOfBoundsAndTrimsOneTooLong) {
+  auto open = GameState::start({"ann", "bo"}, 9, kDefaultKomi, 0, kMinute, 1'000);
+  ASSERT_TRUE(open.ok());
+  const auto restore = [&](Clock clock) {
+    return GameState::restore(open->players(), 9, kDefaultKomi, 0, {}, kMinute, clock,
+                              std::nullopt);
+  };
+  ASSERT_TRUE(restore(open->clock()).ok());  // the control
+  Clock too_long = open->clock();
+  too_long.remaining_ms[1] = GameState::kMaxClockMs + 1;
+  const auto trimmed = restore(too_long);
+  ASSERT_TRUE(trimmed.ok()) << trimmed.status();
+  EXPECT_EQ(trimmed->clock().remaining_ms[1], GameState::kMaxClockMs);
+  Clock negative = open->clock();
+  negative.remaining_ms[0] = -1;
+  EXPECT_FALSE(restore(negative).ok());
+  Clock before_epoch = open->clock();
+  before_epoch.turn_started_ms = -1;
+  EXPECT_FALSE(restore(before_epoch).ok());
+  Clock far_future = open->clock();
+  far_future.turn_started_ms = GameState::kMaxEpochMs + 1;
+  EXPECT_FALSE(restore(far_future).ok());
+  Clock at_bounds = open->clock();
+  at_bounds.remaining_ms = {GameState::kMaxClockMs, GameState::kMaxClockMs};
+  at_bounds.turn_started_ms = GameState::kMaxEpochMs;
+  EXPECT_TRUE(restore(at_bounds).ok());
+}
+
+// The increment tops a clock up to the bound, not past it: past it, the
+// game it ends a move in would not restore.
+TEST(GameState, AnIncrementStopsAtTheClocksBound) {
+  const TimeControl longest{GameState::kMaxClockMs, 60'000};
+  const GameState open = Start(9, kDefaultKomi, longest);
+  auto next = open.play(0, 2, 2, kT0 + 1'000);
+  ASSERT_TRUE(next.ok()) << next.status();
+  EXPECT_EQ(next->clock().remaining_ms[0], GameState::kMaxClockMs);
+  EXPECT_TRUE(GameState::restore(next->players(), 9, kDefaultKomi, 0, next->moves(), longest,
+                                 next->clock(), std::nullopt)
+                  .ok());
+}
+
 TEST(GameState, RestoreKeepsTheScoringAndRefusesMarksPlayCouldNotMake) {
   const GameState marked = *(*Invaded().markDead(0, 0, 0, kT0)).accept(1, kT0);
   const auto restore = [&](std::vector<int> moves, std::vector<int> dead,

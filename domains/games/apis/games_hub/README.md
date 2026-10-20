@@ -409,11 +409,11 @@ it. A move that arrives after its mover's time ran out is not played:
 the game ends on time; so does a leave that finds the mover's time gone.
 The time a move is charged at is read under the hub's lock, so waiting on
 it costs nobody, and no turn starts before the one it follows. Nobody
-moving is `SweepChessClocksOnce`'s, every 250 ms on each instance
-(`StartChessClocks`, from main): a flag is a conditional commit like a
+moving is `SweepClocksOnce`'s, every 250 ms on each instance
+(`StartClocks`, from main): a flag is a conditional commit like a
 move, so of several instances holding the room one lands it and the rest
 rebase onto it. Each flag takes the lock on its own, and one the store
-could not take waits `kChessFlagRetry` before the next try, so an outage
+could not take waits `kFlagRetry` before the next try, so an outage
 stalls the hub for one commit at a time rather than every tick. The row
 stores wall-clock epoch milliseconds, which every instance reads against
 its own clock: instances must agree on the time, as NTP has them. A table's one player may seat a bot in the other chair

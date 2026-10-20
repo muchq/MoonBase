@@ -942,7 +942,7 @@ TEST_F(PgGamesHubFixture, TwoInstancesSweepingOneClockEndTheGameOnce) {
                   .has_value());
 
   now_ms += 180'000;
-  const int ended = remote->golf->SweepChessClocksOnce() + hub_->SweepChessClocksOnce();
+  const int ended = remote->golf->SweepClocksOnce() + hub_->SweepClocksOnce();
   EXPECT_EQ(ended, 1);
   for (Seat* seat : {&alice, &bob}) {
     auto result = ReceiveChess(seat->stream, "gameEnded");

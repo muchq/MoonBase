@@ -338,11 +338,11 @@ TEST_F(ChessFixture, TheSweepEndsAGameWhoseSideToMoveRanOutOfTime) {
 
   // Black's three minutes, less a millisecond: nothing to sweep.
   now_ms_ += 179'999;
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 0);
   ExpectNoEvent(table.bob.stream);
 
   now_ms_ += 1;
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 1);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 1);
   for (Seat* seat : {&table.alice, &table.bob}) {
     auto result = Ended(*seat);
     ASSERT_TRUE(result.has_value());
@@ -350,7 +350,7 @@ TEST_F(ChessFixture, TheSweepEndsAGameWhoseSideToMoveRanOutOfTime) {
     EXPECT_EQ(result->ending, "timeout");
   }
   // A finished game is nothing to sweep.
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 0);
 }
 
 // A leave reads the clock first: a side whose flag has fallen, unswept,
@@ -376,7 +376,7 @@ TEST_F(ChessFixture, ThePawnSideOutOfTimeOnlyDraws) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
   now_ms_ += 180'000;
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 1);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 1);
   auto result = Ended(started->table.bob);
   ASSERT_TRUE(result.has_value());
   EXPECT_FALSE(result->winner.has_value());
@@ -444,8 +444,8 @@ TEST_F(ChessFixture, TheClockThreadFlagsOnItsOwn) {
   opening_.fen = kQuiet;
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
-  hub_->StartChessClocks(std::chrono::milliseconds(10));
-  hub_->StartChessClocks(std::chrono::milliseconds(10));
+  hub_->StartClocks(std::chrono::milliseconds(10));
+  hub_->StartClocks(std::chrono::milliseconds(10));
   now_ms_ += 180'000;
   auto result = Ended(started->table.alice);
   ASSERT_TRUE(result.has_value());
@@ -581,7 +581,7 @@ TEST_F(ChessFixture, AMoveBeforeTheStartIsRefused) {
   EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "game not started");
   // Nor is a pending table anything to sweep, however late it is.
   now_ms_ += 10'000'000;
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 0);
 }
 
 // The rest of the room watches a table: the seats' own view,
@@ -1300,7 +1300,7 @@ class ChessOutageFixture : public ChessFixture {
   std::shared_ptr<FinishOutageStore> outage_;
 };
 
-// A flag the store cannot take is tried again after kChessFlagRetry, not
+// A flag the store cannot take is tried again after kFlagRetry, not
 // on every tick: during an outage the sweep does not hammer the store
 // with the hub's lock held.
 TEST_F(ChessOutageFixture, AFlagTheStoreCannotTakeWaitsBeforeItsRetry) {
@@ -1309,18 +1309,18 @@ TEST_F(ChessOutageFixture, AFlagTheStoreCannotTakeWaitsBeforeItsRetry) {
   ASSERT_TRUE(started.has_value());
   now_ms_ += 180'000;
   outage_->down = true;
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 0);
   EXPECT_EQ(outage_->finishes, 1);
-  now_ms_ += GamesHub::kChessFlagRetry.count() - 1;
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  now_ms_ += GamesHub::kFlagRetry.count() - 1;
+  EXPECT_EQ(hub_->SweepClocksOnce(), 0);
   EXPECT_EQ(outage_->finishes, 1);
   now_ms_ += 1;
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 0);
   EXPECT_EQ(outage_->finishes, 2);
   // Back up: the next retry lands the flag.
   outage_->down = false;
-  now_ms_ += GamesHub::kChessFlagRetry.count();
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 1);
+  now_ms_ += GamesHub::kFlagRetry.count();
+  EXPECT_EQ(hub_->SweepClocksOnce(), 1);
   auto result = Ended(started->table.bob);
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(result->ending, "timeout");
@@ -1334,17 +1334,17 @@ TEST_F(ChessOutageFixture, AGameThatEndsWhileItsFlagWaitsLeavesNoRetryBehind) {
   ASSERT_TRUE(started.has_value());
   now_ms_ += 180'000;
   outage_->down = true;
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
-  EXPECT_EQ(hub_->ChessFlagRetriesPending(), 1u);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 0);
+  EXPECT_EQ(hub_->FlagRetriesPending(), 1u);
   // The control: another sweep inside the retry window keeps it.
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
-  EXPECT_EQ(hub_->ChessFlagRetriesPending(), 1u);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 0);
+  EXPECT_EQ(hub_->FlagRetriesPending(), 1u);
   // The store comes back and the game ends another way.
   outage_->down = false;
   ASSERT_TRUE(started->table.bob.stream.Send(Resign()).ok());
   ASSERT_TRUE(Ended(started->table.alice).has_value());
-  EXPECT_EQ(hub_->SweepChessClocksOnce(), 0);
-  EXPECT_EQ(hub_->ChessFlagRetriesPending(), 0u);
+  EXPECT_EQ(hub_->SweepClocksOnce(), 0);
+  EXPECT_EQ(hub_->FlagRetriesPending(), 0u);
 }
 
 // Without a setup named, the hub starts ordinary chess.

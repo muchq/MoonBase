@@ -340,18 +340,18 @@ class GamesHub final {
   /// conditional commit a move takes: with several instances holding the
   /// room, one lands the ending and the rest rebase onto it. Returns how many this
   /// call ended.
-  int SweepChessClocksOnce();
+  int SweepClocksOnce();
 
   /// Clocked games whose flag the store refused and that wait to be tried
   /// again; for tests.
-  std::size_t ChessFlagRetriesPending() {
+  std::size_t FlagRetriesPending() {
     const std::lock_guard<std::mutex> lock(mu_);
-    return chess_flag_retry_at_.size();
+    return flag_retry_at_.size();
   }
 
-  /// Starts SweepChessClocksOnce on a thread every `interval` until the
+  /// Starts SweepClocksOnce on a thread every `interval` until the
   /// hub is destroyed. A second call changes nothing.
-  void StartChessClocks(std::chrono::milliseconds interval = kChessClockTick);
+  void StartClocks(std::chrono::milliseconds interval = kClockTick);
 
   /// The engine chess bots ask; null, the default, seats no bot.
   /// Call before serving: read without a lock thereafter.
@@ -428,10 +428,10 @@ class GamesHub final {
   static constexpr std::chrono::milliseconds kEngineBotRetry{2000};
 
   /// How late a flag may land after the time ran out.
-  static constexpr std::chrono::milliseconds kChessClockTick{250};
+  static constexpr std::chrono::milliseconds kClockTick{250};
   /// How long a flag the store could not take waits before the sweep
   /// tries that game again.
-  static constexpr std::chrono::milliseconds kChessFlagRetry{5000};
+  static constexpr std::chrono::milliseconds kFlagRetry{5000};
   /// A room's round robins live as long as it does; this many is
   /// an evening's worth, and a bound on what every wake reads.
   static constexpr std::size_t kMaxRoundRobinsPerRoom = 16;
@@ -656,7 +656,7 @@ class GamesHub final {
 
   /// TableEngineMove's commit loop on a resolved game, as `player_id`'s
   /// seat: the refusal if there is one, and otherwise the fan-out staged.
-  /// The chess clock sweep calls it for the seat on turn, which sent
+  /// The clock sweep calls it for the seat on turn, which sent
   /// nothing and so is told nothing of a refusal.
   template <typename E>
   std::optional<games_hub::Refusal> ApplyTableEngineMoveLocked(GameRef ref,
@@ -669,7 +669,7 @@ class GamesHub final {
   std::optional<games_hub::Refusal> FlagLocked(GameRef ref, int64_t now_ms, Outbox& outbox);
   template <typename E>
   std::optional<games_hub::Refusal> FlagEngineLocked(GameRef ref, int64_t now_ms, Outbox& outbox);
-  /// Epoch milliseconds on the chess clock.
+  /// Epoch milliseconds on the hub's clock.
   int64_t NowMs() const;
 
   /// Stream-side observability: the aura chain instruments
@@ -949,16 +949,16 @@ class GamesHub final {
   bool heartbeat_stop_ = false;
   std::thread heartbeat_;
 
-  /// Chess's opening and clock, set before serving.
+  /// Chess's opening and every game's clock, set before serving.
   ChessOpener chess_opener_;
   /// Per (room, game): the epoch ms before which the sweep does not retry
   /// a flag the store refused as unavailable. Guarded by mu_.
-  std::map<std::pair<std::string, std::string>, int64_t> chess_flag_retry_at_;
+  std::map<std::pair<std::string, std::string>, int64_t> flag_retry_at_;
   std::function<absl::Time()> clock_;
-  std::mutex chess_clock_mu_;
-  std::condition_variable chess_clock_cv_;
-  bool chess_clock_stop_ = false;
-  std::thread chess_clocks_;
+  std::mutex clock_mu_;
+  std::condition_variable clock_cv_;
+  bool clock_stop_ = false;
+  std::thread clocks_;
 
   /// Engine bots: each game's engine, set before serving; per (room,
   /// table) the game, counted by the table's finished games, whose engine
