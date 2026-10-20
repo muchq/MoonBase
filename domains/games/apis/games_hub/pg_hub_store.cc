@@ -11,6 +11,7 @@
 #include "absl/strings/str_cat.h"
 #include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/libs/chess_play/game_state_serde.h"
+#include "domains/games/libs/go/table_serde.h"
 
 namespace games_hub {
 namespace {
@@ -78,10 +79,11 @@ constexpr char kCommitUpdate[] = R"sql(
       RETURNING version),
     archive AS (
       INSERT INTO chess_games (room_id, game_id, ordinal, game, published, event_id, pairing,
-                               winner)
-      SELECT $1, $2, NULLIF($8, '')::integer, NULLIF($9, '')::jsonb, r.chess_published,
-             CASE WHEN $8 = '1' THEN g.event_id END, CASE WHEN $8 = '1' THEN g.pairing END,
-             NULLIF($10, '')
+                               winner, kind)
+      SELECT $1, $2, NULLIF($8, '')::integer, NULLIF($9, '')::jsonb,
+             r.chess_published AND $11 = 'chess',
+             CASE WHEN $8 = '1' AND $11 = 'chess' THEN g.event_id END,
+             CASE WHEN $8 = '1' AND $11 = 'chess' THEN g.pairing END, NULLIF($10, ''), $11
       FROM rooms r JOIN games g ON g.room_id = r.room_id AND g.game_id = $2
       WHERE r.room_id = $1 AND $9 <> '' AND EXISTS (SELECT 1 FROM save)
       ON CONFLICT DO NOTHING
@@ -101,6 +103,10 @@ constexpr char kCommitUpdate[] = R"sql(
 // snapshot, which the save does not change); a rematch is not the
 // pairing's. The winner rides along so an event's results read without
 // restoring a game.
+//
+// A go game is archived beside chess's, by its kind, as its room's
+// history alone: never published, since go has no feed, and never
+// tagged, since a round robin scores go off its tables (TableGame).
 //
 // The finishing commit adds the stat deltas, guarded on the save landing
 // so a conflicted (or retried) finish applies them zero times, not
@@ -122,10 +128,11 @@ constexpr char kCommitFinish[] = R"sql(
         AND EXISTS (SELECT 1 FROM save)),
     archive AS (
       INSERT INTO chess_games (room_id, game_id, ordinal, game, published, event_id, pairing,
-                               winner)
-      SELECT $1, $2, NULLIF($9, '')::integer, NULLIF($10, '')::jsonb, r.chess_published,
-             CASE WHEN $9 = '1' THEN g.event_id END, CASE WHEN $9 = '1' THEN g.pairing END,
-             NULLIF($11, '')
+                               winner, kind)
+      SELECT $1, $2, NULLIF($9, '')::integer, NULLIF($10, '')::jsonb,
+             r.chess_published AND $12 = 'chess',
+             CASE WHEN $9 = '1' AND $12 = 'chess' THEN g.event_id END,
+             CASE WHEN $9 = '1' AND $12 = 'chess' THEN g.pairing END, NULLIF($11, ''), $12
       FROM rooms r JOIN games g ON g.room_id = r.room_id AND g.game_id = $2
       WHERE r.room_id = $1 AND $10 <> '' AND EXISTS (SELECT 1 FROM save)
       ON CONFLICT DO NOTHING
@@ -206,18 +213,23 @@ std::string StateJson(const PgHubStore::GameRow& row) {
   });
 }
 
-// The archive's three parameters for a committed row: the ordinal, the
-// finished game and its winner (blank for a draw), or three blanks when
-// the row archives nothing.
+// The archive's four parameters for a committed row: the ordinal, the
+// finished game, its winner (blank for a draw, and for go, which no
+// event reads) and its kind, or blanks when the row archives nothing.
 std::vector<std::string> ArchiveParams(const PgHubStore::GameRow& row) {
-  const auto archived = ArchivedChessGame(row);
-  if (!archived.has_value()) return {"", "", ""};
-  return {std::to_string(archived->ordinal), chess_play::serializeGameState(archived->game),
-          ChessWinner(archived->game).value_or("")};
+  const auto archived = ArchivedGameOf(row);
+  if (!archived.has_value()) return {"", "", "", ""};
+  if (const auto* chess = std::get_if<PgHubStore::ChessGameRow>(&*archived)) {
+    return {std::to_string(chess->ordinal), chess_play::serializeGameState(chess->game),
+            ChessWinner(chess->game).value_or(""), std::string(GameKindName(GameKind::kChess))};
+  }
+  const auto& go = std::get<PgHubStore::GoGameRow>(*archived);
+  return {std::to_string(go.ordinal), go::serializeGameState(go.game), "",
+          std::string(GameKindName(GameKind::kGo))};
 }
 
 // Milliseconds truncated, not rounded: ended_at holds microseconds.
-constexpr char kChessGameColumns[] =
+constexpr char kArchivedGameColumns[] =
     "archive_id, game_id, ordinal, game::text,"
     " floor(extract(epoch FROM ended_at) * 1000)::bigint, published";
 
@@ -231,7 +243,7 @@ std::optional<EventTag> TagFromColumns(const std::string& event_id, const std::s
   return EventTag{event_id, std::atoi(pairing.c_str())};
 }
 
-// Rows of kChessGameColumns, each restored through the game's serde: one
+// Rows of kArchivedGameColumns, each restored through the game's serde: one
 // that no longer restores costs that game, logged, as a games row does.
 std::vector<PgHubStore::ChessGameRow> ChessGamesFrom(const std::string& room_id,
                                                      const pg::Result& result) {
@@ -652,8 +664,8 @@ absl::StatusOr<PgHubStore::ChessHistory> PgHubStore::LoadChessHistory(const std:
   auto room = db_->Exec("SELECT chess_published FROM rooms WHERE room_id = $1", {room_id});
   if (!room.ok()) return room.status();
   if (room->rows() == 0) return absl::NotFoundError("no such room");
-  auto games = db_->Exec(absl::StrCat("SELECT ", kChessGameColumns,
-                                      " FROM chess_games WHERE room_id = $1"
+  auto games = db_->Exec(absl::StrCat("SELECT ", kArchivedGameColumns,
+                                      " FROM chess_games WHERE room_id = $1 AND kind = 'chess'"
                                       " ORDER BY archive_id DESC LIMIT $2::integer"),
                          {room_id, std::to_string(limit)});
   if (!games.ok()) return games.status();
@@ -665,12 +677,14 @@ absl::StatusOr<std::optional<PgHubStore::ChessGameRow>> PgHubStore::LoadChessGam
   auto games =
       key.archive_id.has_value()
           ? db_->Exec(
-                absl::StrCat("SELECT ", kChessGameColumns,
-                             " FROM chess_games WHERE room_id = $1 AND archive_id = $2::bigint"),
+                absl::StrCat("SELECT ", kArchivedGameColumns,
+                             " FROM chess_games WHERE room_id = $1 AND archive_id = $2::bigint"
+                             " AND kind = 'chess'"),
                 {room_id, std::to_string(*key.archive_id)})
-          : db_->Exec(absl::StrCat("SELECT ", kChessGameColumns,
+          : db_->Exec(absl::StrCat("SELECT ", kArchivedGameColumns,
                                    " FROM chess_games WHERE room_id = $1 AND game_id = $2"
-                                   " AND ordinal = $3::integer ORDER BY archive_id DESC LIMIT 1"),
+                                   " AND ordinal = $3::integer AND kind = 'chess'"
+                                   " ORDER BY archive_id DESC LIMIT 1"),
                       {room_id, key.game_id, std::to_string(key.ordinal)});
   if (!games.ok()) return games.status();
   auto rows = ChessGamesFrom(room_id, *games);
@@ -742,6 +756,32 @@ absl::StatusOr<PgHubStore::GameRow> PgHubStore::RowFromColumns(
   if (!state.ok()) return state.status();
   row.state.emplace(*std::move(state));
   return row;
+}
+
+absl::StatusOr<std::vector<HubStore::GoGameRow>> PgHubStore::LoadGoHistory(
+    const std::string& room_id, int limit) {
+  auto room = db_->Exec("SELECT 1 FROM rooms WHERE room_id = $1", {room_id});
+  if (!room.ok()) return room.status();
+  if (room->rows() == 0) return absl::NotFoundError("no such room");
+  auto games = db_->Exec(absl::StrCat("SELECT ", kArchivedGameColumns,
+                                      " FROM chess_games WHERE room_id = $1 AND kind = 'go'"
+                                      " ORDER BY archive_id DESC LIMIT $2::integer"),
+                         {room_id, std::to_string(limit)});
+  if (!games.ok()) return games.status();
+  std::vector<GoGameRow> history;
+  for (int i = 0; i < games->rows(); ++i) {
+    const std::string game_id = games->Get(i, 1).value_or("");
+    auto game = go::deserializeGameState(games->Get(i, 3).value_or(""));
+    if (!game.ok()) {
+      LOG(ERROR) << "dropping archived go game " << room_id << "/" << game_id << ": "
+                 << game.status();
+      continue;
+    }
+    history.push_back({std::atoll(games->Get(i, 0).value_or("0").c_str()), game_id,
+                       std::atoi(games->Get(i, 2).value_or("0").c_str()), *std::move(game),
+                       std::atoll(games->Get(i, 4).value_or("0").c_str())});
+  }
+  return history;
 }
 
 }  // namespace games_hub

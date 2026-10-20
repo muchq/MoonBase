@@ -131,8 +131,8 @@ concept ClockHooks = NextGameHooks<A> && requires(const typename A::Engine& engi
 };
 
 template <typename A>
-concept PublishedHooks = NextGameHooks<A> && requires(const typename A::Engine& engine) {
-  { A::Archived(engine) } -> std::same_as<std::optional<HubStore::ChessGameRow>>;
+concept ArchivedHooks = NextGameHooks<A> && requires(const typename A::Engine& engine) {
+  { A::Archived(engine) } -> std::same_as<std::optional<HubStore::ArchivedGame>>;
 };
 
 template <typename A>
@@ -156,7 +156,7 @@ template <typename A>
 concept CapableAdapter =
     (!kHas<A, kNextGame> || NextGameHooks<A>) && (!kHas<A, kRoundRobins> || RoundRobinHooks<A>) &&
     (!kHas<A, kOpenings> || OpeningHooks<A>) && (!kHas<A, kClocked> || ClockHooks<A>) &&
-    (!kHas<A, kRealtime> || RealtimeHooks<A>) && (!kHas<A, kPublished> || PublishedHooks<A>) &&
+    (!kHas<A, kRealtime> || RealtimeHooks<A>) && (!kHas<A, kArchived> || ArchivedHooks<A>) &&
     (!kHas<A, kChallenges> || ChallengeHooks<A>) && (!kHas<A, kEngineBots> || EngineBotHooks<A>);
 
 /// Each HostedState alternative has a full adapter that names the GameKind
@@ -442,10 +442,10 @@ std::optional<HostedTerms> WaitingTermsFromJson(GameKind kind, const nlohmann::j
 /// A `kind` waiting table's posted terms as the lobby lists them.
 std::string TermsLineOf(GameKind kind, const HostedTerms& terms);
 
-/// The finished game a committed row archives (kPublished's Archived),
+/// The finished game a committed row archives (kArchived's Archived),
 /// and its ordinal; absent for anything else. Its id and stamps are the
 /// store's to give.
-std::optional<HubStore::ChessGameRow> ArchivedChessGame(const HubStore::GameRow& row);
+std::optional<HubStore::ArchivedGame> ArchivedGameOf(const HubStore::GameRow& row);
 
 /// The round robins' games their tagged tables' own rows record
 /// (kRoundRobins' TableGame), for both stores' loads: each added to the

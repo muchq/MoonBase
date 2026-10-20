@@ -41,7 +41,7 @@ struct Adapter<chess_play::Table> {
   static constexpr std::string_view kName = "chess";
   static constexpr std::size_t kMaxSeats = chess_play::GameState::kSeats;
   static constexpr unsigned kCapabilities = kWatchable | kNextGame | kRoundRobins | kOpenings |
-                                            kClocked | kEngineBots | kPublished | kChallenges;
+                                            kClocked | kEngineBots | kArchived | kChallenges;
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "chess_commands";
@@ -165,7 +165,7 @@ struct Adapter<chess_play::Table> {
     return std::nullopt;
   }
   // A table's game once it is over, on its line of the score sheet.
-  static std::optional<HubStore::ChessGameRow> Archived(const chess_play::Table& table) {
+  static std::optional<HubStore::ArchivedGame> Archived(const chess_play::Table& table) {
     if (!table.game().isOver()) return std::nullopt;
     return HubStore::ChessGameRow{
         0, "", static_cast<int>(table.scoreSheet().size()), table.game(), 0, false};

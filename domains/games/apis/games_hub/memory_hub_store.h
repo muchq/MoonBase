@@ -37,6 +37,8 @@ class MemoryHubStore final : public HubStore {
                                                   const std::string& game_id) override;
   absl::StatusOr<RoomRows> LoadRoom(const std::string& room_id) override;
   absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override;
+  absl::StatusOr<std::vector<GoGameRow>> LoadGoHistory(const std::string& room_id,
+                                                       int limit) override;
   absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
                                                             const ChessGameKey& key) override;
   absl::StatusOr<std::vector<PublishedChessGame>> LoadPublishedChess(int64_t after_archive_id,
@@ -48,8 +50,9 @@ class MemoryHubStore final : public HubStore {
   struct RoomData {
     Surface surface;
     bool chess_published = false;
-    /// Oldest first.
+    /// Oldest first, each.
     std::vector<ChessGameRow> chess_games;
+    std::vector<GoGameRow> go_games = {};
     /// By event id.
     std::map<std::string, ChessEventRow> events = {};
     /// Each with its event's id, in archive order.

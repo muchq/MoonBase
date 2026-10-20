@@ -24,7 +24,7 @@ struct Adapter<go::Table> {
   static constexpr std::string_view kName = "go";
   static constexpr std::size_t kMaxSeats = go::GameState::kSeats;
   static constexpr unsigned kCapabilities =
-      kWatchable | kNextGame | kRoundRobins | kClocked | kChallenges | kEngineBots;
+      kWatchable | kNextGame | kRoundRobins | kClocked | kChallenges | kEngineBots | kArchived;
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "go_commands";
@@ -133,6 +133,12 @@ struct Adapter<go::Table> {
   static std::optional<HubStore::EventGame> TableGame(const go::Table& table) {
     if (table.scoreSheet().empty()) return std::nullopt;
     return HubStore::EventGame{0, "", 0, table.scoreSheet().front().winner};
+  }
+
+  // A table's game once it is over, on its line of the score sheet.
+  static std::optional<HubStore::ArchivedGame> Archived(const go::Table& table) {
+    if (!table.game().isOver()) return std::nullopt;
+    return HubStore::GoGameRow{0, "", static_cast<int>(table.scoreSheet().size()), table.game(), 0};
   }
 
   // {"size", "komi", "initialMs", "incrementMs"}, the clock in integer

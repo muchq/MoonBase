@@ -136,6 +136,9 @@ absl::Status RunMigrations(pg::Client& db) {
           ADD COLUMN IF NOT EXISTS winner text)sql",
       R"sql(CREATE INDEX IF NOT EXISTS idx_chess_games_event
           ON chess_games (room_id, event_id, archive_id) WHERE event_id IS NOT NULL)sql",
+      // The archive holds every kArchived game's, chess's and go's, by kind.
+      R"sql(ALTER TABLE chess_games
+          ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'chess')sql",
   };
   for (const char* statement : kStatements) {
     if (auto result = db.Exec(statement); !result.ok()) return result.status();

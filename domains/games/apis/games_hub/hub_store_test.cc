@@ -15,6 +15,8 @@
 #include "domains/games/libs/cards/golf/game_state.h"
 #include "domains/games/libs/chess_play/game_state.h"
 #include "domains/games/libs/chess_play/table.h"
+#include "domains/games/libs/go/game_state.h"
+#include "domains/games/libs/go/table.h"
 #include "domains/games/libs/pong/table.h"
 
 namespace games_hub {
@@ -203,6 +205,40 @@ TEST(MemoryHubStoreTest, ACommitThatEndsAChessGameArchivesItOnce) {
   EXPECT_EQ(history->games[0].game.moves(), std::vector<std::string>{"e7e8q"});
   EXPECT_EQ(history->games[0].ended_at_ms, 10'000);
   EXPECT_FALSE(history->games[0].published);
+}
+
+// As postgres keeps it: a go game in its own history, once, never in
+// chess's or the public feed, and not one of its round robin's games.
+TEST(MemoryHubStoreTest, AGoGameIsArchivedInItsOwnHistoryAndNeverPublished) {
+  int64_t now = 10'000;
+  MemoryHubStore store([&] { return now; });
+  store.Enqueue({HubStore::UpsertRoom{"R1"}, HubStore::SetChessPublished{"R1", true}});
+  go::Table table = *go::Table::open({"bob", "alice"}, 9, go::kDefaultKomi, {60'000, 0}, 1'000);
+  HubStore::GameRow row{"R1", "G1", table.players(), table, 1, GameKind::kGo};
+  row.event = EventTag{"E1", 0};
+  ASSERT_TRUE(*store.CommitGameSave(row, ""));
+  auto history = store.LoadGoHistory("R1", 100);
+  ASSERT_TRUE(history.ok()) << history.status();
+  EXPECT_TRUE(history->empty()) << "a game in play is not history";
+
+  table = *table.inGame([](const go::GameState& game) { return game.resign(1, 2'000); });
+  row.state.emplace(table);
+  row.version = 2;
+  ASSERT_TRUE(*store.CommitGameFinish(row, {}, ""));
+  row.version = 3;
+  ASSERT_TRUE(*store.CommitGameSave(row, ""));
+
+  history = store.LoadGoHistory("R1", 100);
+  ASSERT_TRUE(history.ok());
+  ASSERT_EQ(history->size(), 1u);
+  EXPECT_EQ((*history)[0].game_id, "G1");
+  EXPECT_EQ((*history)[0].ordinal, 1);
+  EXPECT_EQ((*history)[0].game.result(), (go::Result{go::Color::kBlack, go::Ending::kResignation}));
+  EXPECT_EQ((*history)[0].ended_at_ms, 10'000);
+  EXPECT_TRUE(store.LoadChessHistory("R1", 100)->games.empty());
+  EXPECT_FALSE(store.LoadChessGame("R1", {(*history)[0].archive_id, "", 0})->has_value());
+  EXPECT_TRUE(store.LoadPublishedChess(0, 100)->empty());
+  EXPECT_FALSE(store.LoadGoHistory("nowhere", 100).ok());
 }
 
 TEST(MemoryHubStoreTest, ATablesGamesAreArchivedNewestFirstEachWithItsPublishedMark) {

@@ -1253,6 +1253,54 @@ TEST_F(PgHubStoreTest, APongRoundRobinKeepsItsGameAndIsScoredByItsTables) {
   EXPECT_EQ(snapshot->events[0].games.size(), 1u);
 }
 
+// A go game is archived as a chess game is, in a history of its own:
+// never chess's, never in the public feed, and its round robin still
+// scored off its table alone.
+TEST_F(PgHubStoreTest, AGoGameIsArchivedInItsOwnHistoryAndNeverPublished) {
+  store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::SetChessPublished{"R1", true}});
+  store_->Flush();
+  PgHubStore::ChessEventRow event = Event(1);
+  event.terms = games_hub::GoTerms{9, go::kDefaultKomi, {60'000, 0}};
+  ASSERT_TRUE(*store_->CommitChessEvent(event, ""));
+
+  go::Table table = *go::Table::open({"bob", "alice"}, 9, go::kDefaultKomi, {60'000, 0}, 1'000);
+  PgHubStore::GameRow row{
+      "R1", "G1", table.players(), games_hub::HostedState(table), 1, games_hub::GameKind::kGo};
+  row.event = games_hub::EventTag{"E1", 0};
+  ASSERT_TRUE(*store_->CommitGameSave(row, ""));
+  auto history = store_->LoadGoHistory("R1", 100);
+  ASSERT_TRUE(history.ok()) << history.status();
+  EXPECT_TRUE(history->empty()) << "a game in play is not history";
+
+  table = *table.inGame([](const go::GameState& game) { return game.resign(1, 2'000); });
+  row.state.emplace(table);
+  row.version = 2;
+  ASSERT_TRUE(*store_->CommitGameFinish(row, {}, ""));
+  row.version = 3;
+  ASSERT_TRUE(*store_->CommitGameSave(row, "")) << "a later commit carrying the same game";
+
+  history = store_->LoadGoHistory("R1", 100);
+  ASSERT_TRUE(history.ok()) << history.status();
+  ASSERT_EQ(history->size(), 1u);
+  EXPECT_EQ((*history)[0].game_id, "G1");
+  EXPECT_EQ((*history)[0].ordinal, 1);
+  EXPECT_EQ((*history)[0].game.result(), (go::Result{go::Color::kBlack, go::Ending::kResignation}));
+  EXPECT_GT((*history)[0].ended_at_ms, 0);
+
+  auto chess = store_->LoadChessHistory("R1", 100);
+  ASSERT_TRUE(chess.ok()) << chess.status();
+  EXPECT_TRUE(chess->games.empty());
+  EXPECT_FALSE(store_->LoadChessGame("R1", {(*history)[0].archive_id, "", 0})->has_value());
+  auto feed = store_->LoadPublishedChess(0, 100);
+  ASSERT_TRUE(feed.ok()) << feed.status();
+  EXPECT_TRUE(feed->empty());
+  auto room = store_->LoadRoom("R1");
+  ASSERT_TRUE(room.ok()) << room.status();
+  ASSERT_EQ(room->events.size(), 1u);
+  EXPECT_EQ(room->events[0].games.size(), 1u) << "the table's game, counted once";
+  EXPECT_FALSE(store_->LoadGoHistory("nowhere", 100).ok());
+}
+
 TEST_F(PgHubStoreTest, AnUnreadableEventIsDropped) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}});
   store_->Flush();

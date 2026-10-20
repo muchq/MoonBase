@@ -1272,6 +1272,10 @@ class FinishOutageStore final : public HubStore {
   absl::StatusOr<ChessHistory> LoadChessHistory(const std::string& room_id, int limit) override {
     return delegate_.LoadChessHistory(room_id, limit);
   }
+  absl::StatusOr<std::vector<GoGameRow>> LoadGoHistory(const std::string& room_id,
+                                                       int limit) override {
+    return delegate_.LoadGoHistory(room_id, limit);
+  }
   absl::StatusOr<std::optional<ChessGameRow>> LoadChessGame(const std::string& room_id,
                                                             const ChessGameKey& key) override {
     return delegate_.LoadChessGame(room_id, key);
