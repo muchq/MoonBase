@@ -118,7 +118,8 @@ bool MemoryHubStore::CommitGameLocked(const GameRow& row) {
     chess->archive_id = ++last_archive_id_;
     chess->ended_at_ms = now_ms_();
     chess->published = room.chess_published;
-    if (chess->published) published_.push_back({chess->archive_id, chess->game, chess->ended_at_ms});
+    if (chess->published)
+      published_.push_back({chess->archive_id, chess->game, chess->ended_at_ms});
     if (stored.event.has_value() && chess->ordinal == 1) {
       room.event_games.push_back(
           {stored.event->event_id,
