@@ -76,16 +76,19 @@ TEST(Sgf, EscapesWhatWouldCloseOrQuoteAName) {
 TEST(Sgf, GnuGoLoadsTheGameOntoTheSameBoard) {
   const char* gnugo = std::getenv("GNUGO");
   ASSERT_NE(gnugo, nullptr);
-  const GameState game = Played(Start(), {{1, 0}, {0, 0}, {0, 1}, {5, 5}, {3, 3}});
+  const char* tmpdir = std::getenv("TEST_TMPDIR");
+  ASSERT_NE(tmpdir, nullptr);
+  const GameState game =
+      *Played(Start({"a]b", "c\\d"}), {{1, 0}, {0, 0}, {0, 1}, {5, 5}, {3, 3}}).pass(1, kT0);
   ASSERT_EQ(game.at(0, 0), kEmpty) << "the corner stone is captured";
 
-  const std::string dir = std::getenv("TEST_TMPDIR");
+  const std::string dir = tmpdir;
   const std::string sgf_path = dir + "/game.sgf";
   const std::string commands_path = dir + "/commands";
   std::ofstream(sgf_path) << ToSgf(game, kEnded);
   std::ofstream(commands_path) << "loadsgf " << sgf_path
                                << "\nlist_stones black\nlist_stones white\nget_komi\nquit\n";
-  FILE* out = popen((std::string(gnugo) + " --mode gtp < " + commands_path).c_str(), "r");
+  FILE* out = popen((std::string(gnugo) + " --mode gtp < " + commands_path + " 2>&1").c_str(), "r");
   ASSERT_NE(out, nullptr);
   std::string reply;
   char buffer[4096];
@@ -118,6 +121,7 @@ TEST(Sgf, GnuGoLoadsTheGameOntoTheSameBoard) {
     for (std::string word; words >> word;) vertices.insert(word);
     return vertices;
   };
+  EXPECT_EQ(answers[0], "black") << "white's pass leaves black to play: " << reply;
   EXPECT_EQ(listed(answers[1]), stones(kBlackStone)) << reply;
   EXPECT_EQ(listed(answers[2]), stones(kWhiteStone)) << reply;
   EXPECT_EQ(answers[3], "6.5") << reply;
