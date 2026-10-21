@@ -78,9 +78,6 @@ flowchart LR
     muchq_com["muchq.com"]
     iili_uk["iili.uk"]
     one_d4_net["1d4.net"]
-  end
-
-  subgraph ext["Other sites"]
     tty1_uk["tty1.uk"]
   end
 
