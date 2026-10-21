@@ -329,6 +329,43 @@ TEST_F(GoFixture, AFinishedGameIsInTheRoomsHistoryAndNeverIndexed) {
   EXPECT_EQ(asked.load(), 0);
 }
 
+// A member at no go table hears no gameEnded: the room's state, sent to
+// every member, shows the table's game ended, and by then the history
+// holds it. The lobby asks again on that.
+TEST_F(GoFixture, ABystanderSeesAGameEndInTheRoomAndFindsItInTheHistory) {
+  auto room = SeatedRoom(3);
+  ASSERT_TRUE(room.has_value());
+  Seat& alice = room->seats[0];
+  Seat& bob = room->seats[1];
+  Seat& carol = room->seats[2];
+  ASSERT_TRUE(alice.stream.Send(Go(GoMove::FromCreategame(moonbase::games::CreateGame{}))).ok());
+  auto created = ReceiveGo(alice.stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  const std::string game_id = created->as_gameJoined_or_null()->view.gameId;
+  moonbase::games::JoinGame join;
+  join.gameId = game_id;
+  ASSERT_TRUE(bob.stream.Send(Go(GoMove::FromJoingame(join))).ok());
+  ASSERT_TRUE(ReceiveGo(bob.stream, "gameJoined").has_value());
+  ASSERT_TRUE(alice.stream.Send(StartGo(NineByNine())).ok());
+  ASSERT_TRUE(ReceiveGo(bob.stream, "gameStarted").has_value());
+  ASSERT_TRUE(bob.stream.Send(Resign()).ok());
+
+  const auto ended = AwaitRoomState(
+      carol.stream,
+      [&](const moonbase::games::RoomState& state) {
+        return std::any_of(state.games.begin(), state.games.end(), [&](const auto& game) {
+          return game.gameId == game_id && game.status == "ended";
+        });
+      },
+      "the go table's game ended");
+  ASSERT_TRUE(ended.has_value());
+  ASSERT_TRUE(carol.stream.Send(Go(GoMove::FromHistory(moonbase::games::GoHistoryRequest{}))).ok());
+  auto history = ReceiveGo(carol.stream, "history");
+  ASSERT_TRUE(history.has_value());
+  ASSERT_EQ(history->as_history_or_null()->games.size(), 1u);
+  EXPECT_EQ(history->as_history_or_null()->games[0].gameId, game_id);
+}
+
 TEST_F(GoFixture, TheSweepEndsAGameWhoseSideToMoveRanOutOfTime) {
   auto started = StartedTable();
   ASSERT_TRUE(started.has_value());
