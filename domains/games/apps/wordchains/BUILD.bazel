@@ -18,7 +18,7 @@ genrule(
     name = "generate_graph_json",
     srcs = ["@english_words//file"],
     outs = ["word_graph.json"],
-    cmd = "$(location :wordchains_generator) generate-graph --dictionary-path $(location @english_words//file) --output-path $@",
+    cmd = "$(execpath :wordchains_generator) generate-graph --dictionary-path $(execpath @english_words//file) --output-path $@",
     tools = [":wordchains_generator"],
     visibility = ["//domains/games/apps/wordchains_ios:__pkg__"],
 )

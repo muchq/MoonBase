@@ -28,7 +28,7 @@ genrule(
     name = "ca_certificates_crt",
     srcs = ["@distroless_base_linux_amd64"],
     outs = ["ca-certificates.crt"],
-    cmd = "bash $(location extract_ca_certificates.sh) $(location @distroless_base_linux_amd64//:distroless_base_linux_amd64) $@",
+    cmd = "bash $(execpath extract_ca_certificates.sh) $(execpath @distroless_base_linux_amd64//:distroless_base_linux_amd64) $@",
     tools = ["extract_ca_certificates.sh"],
     visibility = ["//visibility:private"],
 )

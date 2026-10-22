@@ -251,7 +251,7 @@ cc_binary(
     name = "joseki_" + db,
     srcs = ["patterns/%s.sgf" % db],
     outs = ["patterns/%s.db" % db],
-    cmd = "$(location :joseki) %s $< > $@" % prefix,
+    cmd = "$(execpath :joseki) %s $< > $@" % prefix,
     tools = [":joseki"],
 ) for db, prefix in [
     ("gogo", "JG"),
@@ -277,8 +277,8 @@ genrule(
     name = "josekidb_c",
     srcs = ["patterns/%s.db" % db for db in JOSEKI_DBS],
     outs = ["patterns/josekidb.c"],
-    cmd = "$(location :mkpat) -C joseki " + " ".join([
-        "-i $(location patterns/%s.db)" % db
+    cmd = "$(execpath :mkpat) -C joseki " + " ".join([
+        "-i $(execpath patterns/%s.db)" % db
         for db in JOSEKI_DBS
     ]) + " -o $@",
     tools = [":mkpat"],
@@ -289,11 +289,11 @@ genrule(
     name = out + "_c",
     srcs = ["patterns/%s.db" % db for db in dbs] + (["patterns/%s.dtr" % dtr] if dtr else []),
     outs = ["patterns/%s.c" % out],
-    cmd = "$(location :mkpat) %s %s%s %s -o $@" % (
+    cmd = "$(execpath :mkpat) %s %s%s %s -o $@" % (
         flags,
-        ("-t $(location patterns/%s.dtr) " % dtr) if dtr else "",
+        ("-t $(execpath patterns/%s.dtr) " % dtr) if dtr else "",
         name,
-        " ".join(["-i $(location patterns/%s.db)" % db for db in dbs]),
+        " ".join(["-i $(execpath patterns/%s.db)" % db for db in dbs]),
     ),
     tools = [":mkpat"],
 ) for out, flags, name, dbs, dtr in [
@@ -404,7 +404,7 @@ genrule(
     name = "eyes_c",
     srcs = ["patterns/eyes.db"],
     outs = ["patterns/eyes.c"],
-    cmd = "$(location :mkeyes) < $< > $@",
+    cmd = "$(execpath :mkeyes) < $< > $@",
     tools = [":mkeyes"],
 )
 
@@ -412,7 +412,7 @@ genrule(
     name = "fuseki%d_c" % size,
     srcs = ["patterns/fuseki%d.dbz" % size],
     outs = ["patterns/fuseki%d.c" % size],
-    cmd = "$(location :uncompress_fuseki) %d $< c > $@" % size,
+    cmd = "$(execpath :uncompress_fuseki) %d $< c > $@" % size,
     tools = [":uncompress_fuseki"],
 ) for size in [
     9,
@@ -430,7 +430,7 @@ genrule(
     name = "mcpat_c",
     srcs = ["patterns/%s.db" % db for db in MC_DBS],
     outs = ["patterns/mcpat.c"],
-    cmd = "$(location :mkmcpat) $(SRCS) > $@",
+    cmd = "$(execpath :mkmcpat) $(SRCS) > $@",
     tools = [":mkmcpat"],
 )
 

@@ -1,4 +1,4 @@
-bazel_dep(name = "rules_rs", version = "0.0.110")
+bazel_dep(name = "rules_rs", version = "0.1.3")
 
 # One list: crates resolved for a triple rustc is not configured for, or the
 # reverse, covers a different set of targets than it looks like.
