@@ -239,7 +239,7 @@ jobs:
           rm -rf "$AGENT_TOOLSDIRECTORY"
           df -h
 
-      - uses: bazel-contrib/setup-bazel@0.19.0
+      - uses: bazel-contrib/setup-bazel@0.19.1
         with:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
@@ -380,7 +380,7 @@ jobs:
           rm -rf "$AGENT_TOOLSDIRECTORY"
           df -h
 
-      - uses: bazel-contrib/setup-bazel@0.19.0
+      - uses: bazel-contrib/setup-bazel@0.19.1
         if: steps.filter.outputs.changed == 'true'
         with:
           bazelisk-cache: true
@@ -548,7 +548,7 @@ jobs:
         working-directory: domains/games/apps/wordchains_ios
         run: swift test
 
-      - uses: bazel-contrib/setup-bazel@0.19.0
+      - uses: bazel-contrib/setup-bazel@0.19.1
         if: steps.filter.outputs.changed == 'true'
         with:
           bazelisk-cache: true

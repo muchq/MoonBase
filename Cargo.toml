@@ -59,10 +59,10 @@ rmcp = { version = "3.0.1", features = ["client", "server", "macros", "transport
 schemars = "1.2.1"
 serde_yaml_ng = "0.10.0"
 microgpt = { path = "domains/ai/libs/microgpt" }
-rustyline = "18.0.1"
+rustyline = "19.0.0"
 tokenizers = { version = "0.23.1", default-features = false, features = ["fancy-regex"] }
 tower_governor = "0.8.0"
 wordchains = { path = "domains/games/libs/wordchains" }
-opentelemetry = { version = "0.32", features = ["metrics"] }
-opentelemetry_sdk = { version = "0.32", features = ["metrics"] }
-opentelemetry-otlp = { version = "0.32", default-features = false, features = ["metrics", "http-proto", "reqwest-blocking-client"] }
+opentelemetry = { version = "0.33", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.33", features = ["metrics"] }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["metrics", "http-proto", "reqwest-blocking-client"] }
