@@ -27,7 +27,7 @@ func NewPrometheusClient(baseURL string) (*PrometheusClient, error) {
 }
 
 func (c *PrometheusClient) Query(ctx context.Context, query string) (*QueryResponse, error) {
-	result, warnings, err := c.client.Query(ctx, query, time.Now())
+	result, warnings, _, err := c.client.Query(ctx, query, time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func (c *PrometheusClient) QueryRange(ctx context.Context, query string, start, 
 		return nil, err
 	}
 
-	result, warnings, err := c.client.QueryRange(ctx, query, v1.Range{
+	result, warnings, _, err := c.client.QueryRange(ctx, query, v1.Range{
 		Start: start,
 		End:   end,
 		Step:  time.Duration(stepDuration),
