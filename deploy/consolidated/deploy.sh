@@ -529,7 +529,18 @@ ssh "$HOST" << EOF
   # Reload Caddy configuration. Target the admin API on IPv4 explicitly: inside
   # the container \`localhost\` resolves to ::1 first, but Caddy's admin endpoint
   # listens only on 127.0.0.1:2019, so the default localhost reload is refused.
-  sudo -E docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --address 127.0.0.1:2019
+  # A container \`up\` just recreated binds that endpoint a moment after it
+  # counts as running, so a refused reload is retried rather than fatal.
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if sudo -E docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --address 127.0.0.1:2019; then
+      break
+    fi
+    if [ "\$attempt" -eq 10 ]; then
+      echo "Caddy's admin API never accepted the config; the reload did not run" >&2
+      exit 1
+    fi
+    sleep 1
+  done
 EOF
 
 # Reap images no container holds, once the new stack is serving. `docker image

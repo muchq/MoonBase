@@ -127,6 +127,17 @@ case "$1" in
     exit 0
     ;;
 esac
+# A just-recreated Caddy refuses its first FAKE_RELOAD_REFUSALS reloads, the
+# way its admin API does in the moments before it binds.
+case "$*" in
+  "compose exec caddy caddy reload"*)
+    echo reload >> "$DOCKER_LOG.reloads"
+    if [ "$(grep -c . "$DOCKER_LOG.reloads")" -le "${FAKE_RELOAD_REFUSALS:-0}" ]; then
+      echo 'Error: sending configuration to instance: performing request: Post "http://127.0.0.1:2019/load": dial tcp 127.0.0.1:2019: connect: connection refused' >&2
+      exit 1
+    fi
+    ;;
+esac
 # Records what compose would have been invoked with, including the pin
 # variables visible in its environment — that's how a stale exported pin
 # beating the .env file becomes observable.
@@ -206,6 +217,12 @@ case "$url" in
 esac
 STUB
 
+  # The remote half waits between reload attempts; the wait is not under test.
+  cat > "$STUBS/sleep" <<'STUB'
+#!/bin/bash
+exit 0
+STUB
+
   chmod +x "$STUBS"/*
 }
 
@@ -261,6 +278,7 @@ reset_host() {
   rm -rf "$HOSTDIR"
   mkdir -p "$HOSTDIR"
   : > "$DOCKER_LOG"
+  rm -f "$DOCKER_LOG.reloads"
   {
     echo "ONE_D4_DB_PASSWORD=supersecret"
     echo "ONE_D4_SENTRY_DSN=https://sentry.example"
@@ -280,7 +298,7 @@ deploy() { # deploy <args...> -> exit code, output in $WORK/out.txt
       FAKE_RESTARTS="${FAKE_RESTARTS:-}" FAKE_IMAGES="$IMAGES" \
       FAKE_REGISTRY_DOWN="${FAKE_REGISTRY_DOWN:-}" FAKE_NO_REPO="${FAKE_NO_REPO:-}" \
       FAKE_STALE_TOKEN="${FAKE_STALE_TOKEN:-}" FAKE_TAG_PAGE="${FAKE_TAG_PAGE:-}" \
-      REGISTRY_LOG="$REGISTRY_LOG" \
+      FAKE_RELOAD_REFUSALS="${FAKE_RELOAD_REFUSALS:-}" REGISTRY_LOG="$REGISTRY_LOG" \
       bash deploy/consolidated/deploy.sh "$@"
   ) > "$WORK/out.txt" 2>&1
 }
@@ -329,6 +347,23 @@ check "reaches compose" test -s "$DOCKER_LOG"
 # in the environment, where compose prefers it over the file.
 check "cleared pin is absent from compose's environment" \
   bash -c '! grep -q "POSTERIZE_SHA=posterizepin" "$0"' "$DOCKER_LOG"
+
+reloads() { grep -c . "$DOCKER_LOG.reloads" 2>/dev/null || echo 0; }
+
+echo "caddy reload while its admin API is still starting"
+reset_host "DEPLOY_SHA=$SHA"
+FAKE_RELOAD_REFUSALS=2 deploy -y
+rc=$?
+check "exits 0" test $rc -eq 0
+check "retries the reload until Caddy answers" test "$(reloads)" -eq 3
+
+echo "caddy admin API never answers"
+reset_host "DEPLOY_SHA=$SHA"
+FAKE_RELOAD_REFUSALS=1000 deploy -y
+rc=$?
+check "fails the deploy" test $rc -ne 0
+check "gives up after a bounded number of attempts" test "$(reloads)" -lt 1000
+check "says the reload did not run" grep -q "reload did not run" "$WORK/out.txt"
 
 echo "unpublished commit"
 reset_host "DEPLOY_SHA=stackwidesha"
