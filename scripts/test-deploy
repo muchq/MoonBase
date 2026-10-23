@@ -217,10 +217,10 @@ case "$url" in
 esac
 STUB
 
-  # The remote half waits between reload attempts; the wait is not under test.
+  # The remote half waits between reload attempts. Counted, not slept.
   cat > "$STUBS/sleep" <<'STUB'
 #!/bin/bash
-exit 0
+echo "sleep $*" >> "$DOCKER_LOG.sleeps"
 STUB
 
   chmod +x "$STUBS"/*
@@ -278,7 +278,7 @@ reset_host() {
   rm -rf "$HOSTDIR"
   mkdir -p "$HOSTDIR"
   : > "$DOCKER_LOG"
-  rm -f "$DOCKER_LOG.reloads"
+  rm -f "$DOCKER_LOG.reloads" "$DOCKER_LOG.sleeps"
   {
     echo "ONE_D4_DB_PASSWORD=supersecret"
     echo "ONE_D4_SENTRY_DSN=https://sentry.example"
@@ -356,6 +356,8 @@ FAKE_RELOAD_REFUSALS=2 deploy -y
 rc=$?
 check "exits 0" test $rc -eq 0
 check "retries the reload until Caddy answers" test "$(reloads)" -eq 3
+# Back-to-back attempts land inside the same few milliseconds the first one did.
+check "waits before each retry" test "$(grep -c . "$DOCKER_LOG.sleeps" 2>/dev/null || echo 0)" -eq 2
 
 echo "caddy admin API never answers"
 reset_host "DEPLOY_SHA=$SHA"

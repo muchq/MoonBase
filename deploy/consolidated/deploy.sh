@@ -536,7 +536,7 @@ ssh "$HOST" << EOF
       break
     fi
     if [ "\$attempt" -eq 10 ]; then
-      echo "Caddy's admin API never accepted the config; the reload did not run" >&2
+      echo "Caddy reload failed after 10 attempts; the reload did not run" >&2
       exit 1
     fi
     sleep 1
