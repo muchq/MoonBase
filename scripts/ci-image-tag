@@ -1,0 +1,14 @@
+#!/bin/bash
+# Prints the ci-base tag for a Dockerfile: df- plus the first 12 hex digits of
+# its sha256. CI runs its container jobs on this tag rather than :latest, so a
+# PR that edits the Dockerfile runs on the image it describes. The Dockerfile
+# COPYs nothing, so its own bytes are the whole build input.
+#
+#   ci-image-tag [DOCKERFILE]   default: .github/docker/Dockerfile.ci
+set -euo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+DOCKERFILE=${1:-$REPO/.github/docker/Dockerfile.ci}
+
+sum=$(sha256sum <"$DOCKERFILE")
+echo "df-${sum:0:12}"
