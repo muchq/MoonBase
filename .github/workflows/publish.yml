@@ -23,7 +23,7 @@ jobs:
   test-and-publish:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/muchq/moonbase/ci-base:latest
+      image: ghcr.io/muchq/moonbase/ci-base:claude-great-gauss-lqkl3i  # TEMP: revert before merge
 
     # The same postgres branch.yml runs, for the same reason: `bazel test //...`
     # reaches the DB-gated suites, and one_d4's fail rather than skip when CI is
