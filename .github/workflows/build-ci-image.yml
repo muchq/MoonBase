@@ -2,7 +2,7 @@ name: Build CI Docker Image
 
 on:
   push:
-    branches: [ main, claude/great-gauss-lqkl3i ]  # TEMP: revert before merge
+    branches: [ main ]
     paths:
       # Only rebuild when these files change
       - '.github/docker/Dockerfile.ci'
