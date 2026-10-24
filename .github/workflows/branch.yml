@@ -23,7 +23,7 @@ jobs:
   test-deploy:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/muchq/moonbase/ci-base:claude-great-gauss-lqkl3i  # TEMP: revert before merge
+      image: ghcr.io/muchq/moonbase/ci-base:latest
 
     steps:
       - uses: actions/checkout@v7
@@ -161,7 +161,7 @@ jobs:
   format-check:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/muchq/moonbase/ci-base:claude-great-gauss-lqkl3i  # TEMP: revert before merge
+      image: ghcr.io/muchq/moonbase/ci-base:latest
 
     steps:
       - uses: actions/checkout@v7
@@ -199,7 +199,7 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/muchq/moonbase/ci-base:claude-great-gauss-lqkl3i  # TEMP: revert before merge
+      image: ghcr.io/muchq/moonbase/ci-base:latest
 
     # A real postgres for the DB-gated suites (pg_test, pg_ticket_vault_test):
     # without it they skip silently and none of the SQL is exercised on main.
@@ -352,7 +352,7 @@ jobs:
     name: sanitize (${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/muchq/moonbase/ci-base:claude-great-gauss-lqkl3i  # TEMP: revert before merge
+      image: ghcr.io/muchq/moonbase/ci-base:latest
     strategy:
       fail-fast: false
       matrix:
