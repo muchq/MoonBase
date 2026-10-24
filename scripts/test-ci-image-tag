@@ -1,0 +1,61 @@
+#!/bin/bash
+# Pins scripts/ci-image-tag, the content tag CI's container jobs run on. A PR
+# that edits Dockerfile.ci validates itself only if the tag moves with the
+# Dockerfile and nothing else, and only if no job still runs on :latest, which
+# lags the Dockerfile until main rebuilds it.
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+SUBJECT=$REPO/scripts/ci-image-tag
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+FAILURES=0
+pass() { echo "  ok    $1"; }
+fail() {
+  echo "  FAIL  $1"
+  FAILURES=$((FAILURES + 1))
+}
+check() {
+  local desc=$1
+  shift
+  if "$@"; then pass "$desc"; else fail "$desc"; fi
+}
+# Equal and non-empty: two failed runs print nothing, and nothing equals nothing.
+same() { [ -n "$1" ] && [ "$1" = "$2" ]; }
+
+echo "ci-image-tag"
+
+printf 'FROM ubuntu:26.04\n' > "$WORK/Dockerfile.a"
+printf 'FROM ubuntu:26.04\nRUN true\n' > "$WORK/Dockerfile.b"
+
+a1=$("$SUBJECT" "$WORK/Dockerfile.a")
+a2=$("$SUBJECT" "$WORK/Dockerfile.a")
+b=$("$SUBJECT" "$WORK/Dockerfile.b")
+repo_tag=$("$SUBJECT")
+repo_tag_from_elsewhere=$(cd "$WORK" && "$SUBJECT")
+
+check "is a docker tag naming its source" grep -Eqx 'df-[0-9a-f]{12}' <<<"$a1"
+check "is stable for the same Dockerfile" same "$a1" "$a2"
+check "moves when the Dockerfile changes" \
+  bash -c '[ -n "$1" ] && [ -n "$2" ] && [ "$1" != "$2" ]' _ "$a1" "$b"
+check "defaults to the repo's Dockerfile.ci" \
+  same "$repo_tag" "$("$SUBJECT" "$REPO/.github/docker/Dockerfile.ci")"
+check "does not depend on the working directory" \
+  same "$repo_tag" "$repo_tag_from_elsewhere"
+check "fails on a missing Dockerfile" \
+  bash -c '[ -x "$1" ] && ! "$1" "$2/nope" >/dev/null 2>&1' _ "$SUBJECT" "$WORK"
+
+echo "workflows"
+
+# A container job on :latest runs on whatever main last built, not on the
+# Dockerfile in the PR under test.
+latest=$(grep -rn 'ci-base:latest' "$REPO/.github/workflows" || true)
+check "no workflow runs a job on ci-base:latest" test -z "$latest"
+[ -z "$latest" ] || echo "$latest" | sed 's/^/    /'
+
+if [ "$FAILURES" -ne 0 ]; then
+  echo "$FAILURES check(s) failed"
+  exit 1
+fi
+echo "all checks passed"
