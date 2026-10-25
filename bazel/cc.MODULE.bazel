@@ -2,7 +2,6 @@ bazel_dep(name = "rules_cc", version = "0.2.26")
 bazel_dep(name = "abseil-cpp", version = "20260817.0", repo_name = "com_google_absl")
 bazel_dep(name = "check", version = "0.15.2.bcr.2")
 bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
-bazel_dep(name = "rules_foreign_cc", version = "0.16.0")
 bazel_dep(name = "libpng", version = "1.6.58.bcr.1")
 bazel_dep(name = "nlohmann_json", version = "3.12.0.bcr.2")
 bazel_dep(name = "opentelemetry-cpp", version = "1.29.0")
@@ -30,6 +29,16 @@ single_version_override(
 
 raylib_ext = use_extension("//bazel/extensions:raylib.bzl", "raylib")
 use_repo(raylib_ext, "raylib")
+
+bazel_dep(name = "glfw", version = "3.4.0.bcr.4")
+
+# glfw links xkbcommon, whose parser rules_bison generates with a helper that
+# calls getenv without <cstdlib>; LLVM 23's libc++ no longer brings it in.
+single_version_override(
+    module_name = "rules_bison",
+    patch_strip = 1,
+    patches = ["//bazel/3p:rules_bison_runfiles_cstdlib.patch"],
+)
 
 # Floor: earlier releases miss <iterator>.
 bazel_dep(name = "rules_cc_autoconf", version = "0.29.0")
