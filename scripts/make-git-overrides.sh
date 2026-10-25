@@ -237,12 +237,14 @@ if [ ! -d "$RAYLIB" ]; then
   git -c advice.detachedHead=false clone -q --depth 1 --branch "$RAYLIB_TAG" \
     https://github.com/raysan5/raylib.git "$RAYLIB.tmp"
   rm -rf "$RAYLIB.tmp/.git"
-  cp "$(dirname "$0")/../bazel/3p/raylib.BUILD" "$RAYLIB.tmp/BUILD.bazel"
   # --override_repository needs a repo-boundary marker; unlike
   # --override_module there is no MODULE.bazel to serve as one.
   touch "$RAYLIB.tmp/REPO.bazel"
   mv "$RAYLIB.tmp" "$RAYLIB"
 fi
+# Every run, not just the clone's first: the BUILD file changes without the
+# tag, and a stale copy builds the old rules with nothing reporting it.
+cp "$(dirname "$0")/../bazel/3p/raylib.BUILD" "$RAYLIB/BUILD.bazel"
 echo "common --override_repository=+raylib+raylib=$RAYLIB" >> "$RC.tmp"
 
 mv "$RC.tmp" "$RC"
