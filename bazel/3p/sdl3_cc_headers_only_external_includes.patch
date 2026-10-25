@@ -1,0 +1,17 @@
+--- a/cc_headers_only.bzl
++++ b/cc_headers_only.bzl
+@@ -17,7 +17,13 @@
+             headers = merged.headers,
+             includes = merged.includes,
+             quote_includes = merged.quote_includes,
+-            system_includes = merged.system_includes,
++            # --features=external_include_paths files the include paths of
++            # external repos under external_includes, which only the private
++            # API can set; -isystem is where they would go anyway.
++            system_includes = depset(transitive = [
++                merged.system_includes,
++                getattr(merged, "external_includes", depset()),
++            ]),
+         )),
+     ]
+ 

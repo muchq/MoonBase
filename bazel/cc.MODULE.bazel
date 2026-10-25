@@ -15,8 +15,18 @@ bazel_dep(name = "curl", version = "8.22.0")
 # postgres:18 image in deploy/consolidated/compose.yaml.
 bazel_dep(name = "postgres", version = "18.4")
 
-sdl3_ext = use_extension("//bazel/extensions:sdl3.bzl", "sdl3")
-use_repo(sdl3_ext, "sdl3")
+# Native cc rules; the X11, Wayland and ALSA headers come from the BCR too, and
+# SDL loads those libraries at runtime by soname.
+bazel_dep(name = "sdl3", version = "3.4.18")
+
+# sdl3 forwards its runtime-loaded libraries' headers through a rule that drops
+# the include paths --features=external_include_paths (.bazelrc) moves aside,
+# so the X11 and Wayland headers go missing. The patch forwards them.
+single_version_override(
+    module_name = "sdl3",
+    patch_strip = 1,
+    patches = ["//bazel/3p:sdl3_cc_headers_only_external_includes.patch"],
+)
 
 raylib_ext = use_extension("//bazel/extensions:raylib.bzl", "raylib")
 use_repo(raylib_ext, "raylib")
