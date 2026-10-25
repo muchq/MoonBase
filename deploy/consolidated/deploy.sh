@@ -519,12 +519,11 @@ ssh "$HOST" << EOF
   echo "${env_line}" >> ~/.env.tmp
   mv ~/.env.tmp ~/.env
   chmod 600 ~/.env
-  # Export only after the rewrite: exporting the old file first would leave a
-  # replaced pin in the environment, where it outranks the .env file.
-  export \$(cat ~/.env | grep -v '^#' | xargs)
 
-  sudo -E docker compose -f compose.yaml -f docker-compose.observability.yml pull ${TARGET_SERVICE}
-  sudo -E docker compose -f compose.yaml -f docker-compose.observability.yml up -d ${up_flags} ${TARGET_SERVICE}
+  # Compose reads ~/.env itself, as the project directory's .env. Nothing is
+  # exported: a variable in the environment would outrank the file.
+  sudo docker compose -f compose.yaml -f docker-compose.observability.yml pull ${TARGET_SERVICE}
+  sudo docker compose -f compose.yaml -f docker-compose.observability.yml up -d ${up_flags} ${TARGET_SERVICE}
 
   # Reload Caddy configuration. Target the admin API on IPv4 explicitly: inside
   # the container \`localhost\` resolves to ::1 first, but Caddy's admin endpoint
@@ -532,7 +531,7 @@ ssh "$HOST" << EOF
   # A container \`up\` just recreated binds that endpoint a moment after it
   # counts as running, so a refused reload is retried rather than fatal.
   for attempt in 1 2 3 4 5 6 7 8 9 10; do
-    if sudo -E docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --address 127.0.0.1:2019; then
+    if sudo docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --address 127.0.0.1:2019; then
       break
     fi
     if [ "\$attempt" -eq 10 ]; then
