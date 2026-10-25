@@ -828,7 +828,6 @@ services:
     volumes:
       - forgejo_data:/data
       - /etc/forgejo:/data/gitea/conf
-      - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
     networks:
       - app_network

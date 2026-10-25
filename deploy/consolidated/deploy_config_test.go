@@ -2474,6 +2474,20 @@ func mountsWritable(t *testing.T, file, service, dir string) bool {
 	return hasLine(activeServiceLines(t, file, service), "- "+dir+":"+dir)
 }
 
+// The deploy host runs Ubuntu 26.04, which has no /etc/timezone. Compose
+// creates a missing bind source as an empty directory, and runc then refuses
+// to mount it over the image's /etc/timezone file, so the container never
+// starts. /etc/localtime carries the zone on its own.
+func TestNoServiceBindsTheHostsEtcTimezone(t *testing.T) {
+	for _, file := range []string{"compose.yaml", "docker-compose.observability.yml"} {
+		for _, line := range activeLines(t, file) {
+			if strings.HasPrefix(line, "- /etc/timezone:") {
+				t.Errorf("%s binds %q; the host has no such file", file, line)
+			}
+		}
+	}
+}
+
 // LOG_DIRS is the shipper's whole source list, and a label whose
 // directory it cannot see ships nothing while looking configured: the
 // files sit on the host counted only in the pass log's `skipped`. Read
