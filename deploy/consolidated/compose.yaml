@@ -816,7 +816,7 @@ services:
           memory: 256M
 
   forgejo:
-    image: codeberg.org/forgejo/forgejo:16
+    image: codeberg.org/forgejo/forgejo:17
     restart: always
     logging: *default-logging
     ports:
