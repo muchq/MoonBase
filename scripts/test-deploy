@@ -84,9 +84,13 @@ STUB
 
   # Only docker is really run; mkdir/cp/chown against absolute host paths
   # (/var/www, /etc/forgejo) are neutralised so a test can't touch this machine.
+  # -E draws the warning sudo-rs (Ubuntu 26.04's sudo) prints before ignoring it.
   cat > "$STUBS/sudo" <<'STUB'
 #!/bin/bash
-[ "$1" = "-E" ] && shift
+if [ "$1" = "-E" ]; then
+  echo "sudo: preserving the entire environment is not supported, '-E' is ignored" >&2
+  shift
+fi
 case "$1" in
   docker) exec "$@" ;;
   *) exit 0 ;;
@@ -322,6 +326,8 @@ check "pulls and ups every service" \
   grep -q -- "up -d --remove-orphans" "$DOCKER_LOG"
 check "keeps .env at mode 600" \
   test "$(stat -c '%a' "$HOSTDIR/.env" 2>/dev/null || stat -f '%Lp' "$HOSTDIR/.env")" = 600
+check "does not ask sudo to preserve the environment" \
+  bash -c '! grep -q "is ignored" "$0"' "$WORK/out.txt"
 
 echo "targeted deploy"
 reset_host "DEPLOY_SHA=stackwidesha" "POSTERIZE_SHA=posterizepin"
