@@ -1,4 +1,4 @@
-bazel_dep(name = "rules_cc", version = "0.2.26")
+bazel_dep(name = "rules_cc", version = "0.2.27")
 bazel_dep(name = "abseil-cpp", version = "20260817.0", repo_name = "com_google_absl")
 bazel_dep(name = "check", version = "0.15.2.bcr.2")
 bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
@@ -41,4 +41,4 @@ single_version_override(
 )
 
 # Floor: earlier releases miss <iterator>.
-bazel_dep(name = "rules_cc_autoconf", version = "0.29.0")
+bazel_dep(name = "rules_cc_autoconf", version = "0.33.1")
