@@ -20,10 +20,19 @@ defaults:
     shell: bash
 
 jobs:
+  # The image the container jobs below run on: ci-base tagged by this
+  # commit's Dockerfile.ci, built first if no image has that tag yet.
+  ci-image:
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-ci-image.yml
+
   test-deploy:
     runs-on: ubuntu-latest
+    needs: ci-image
     container:
-      image: ghcr.io/muchq/moonbase/ci-base:latest
+      image: ${{ needs.ci-image.outputs.image }}
 
     steps:
       - uses: actions/checkout@v7
@@ -76,6 +85,11 @@ jobs:
       # network, no clones.
       - name: Test make-git-overrides
         run: ./scripts/test-make-git-overrides
+
+      # The tag every container job runs on. It has to move with Dockerfile.ci
+      # and nothing else, or a PR that edits the image tests the old one.
+      - name: Test ci-image-tag
+        run: ./scripts/test-ci-image-tag
 
   # The workflows themselves (#1061): actionlint, with shellcheck over every
   # run block in the shell the workflow declares. Its own job so it never
@@ -160,8 +174,9 @@ jobs:
 
   format-check:
     runs-on: ubuntu-latest
+    needs: ci-image
     container:
-      image: ghcr.io/muchq/moonbase/ci-base:latest
+      image: ${{ needs.ci-image.outputs.image }}
 
     steps:
       - uses: actions/checkout@v7
@@ -198,8 +213,9 @@ jobs:
 
   build-and-test:
     runs-on: ubuntu-latest
+    needs: ci-image
     container:
-      image: ghcr.io/muchq/moonbase/ci-base:latest
+      image: ${{ needs.ci-image.outputs.image }}
 
     # A real postgres for the DB-gated suites (pg_test, pg_ticket_vault_test):
     # without it they skip silently and none of the SQL is exercised on main.
@@ -351,8 +367,9 @@ jobs:
   sanitize:
     name: sanitize (${{ matrix.sanitizer }})
     runs-on: ubuntu-latest
+    needs: ci-image
     container:
-      image: ghcr.io/muchq/moonbase/ci-base:latest
+      image: ${{ needs.ci-image.outputs.image }}
     strategy:
       fail-fast: false
       matrix:
