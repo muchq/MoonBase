@@ -1,3 +1,0 @@
-# Tubing
-
-![image](tubing.gif)

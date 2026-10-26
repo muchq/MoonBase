@@ -9,11 +9,8 @@ Computer graphics, image processing, and rendering.
 
 ## Apps
 
-- [**Mandelbrot**](apps/mandelbrot): Mandelbrot set generator with zoom capabilities.
-- [**Tubing**](apps/tubing): Graphics demonstration.
 - [**Tracy Demo**](apps/tracy_demo): Demo for the Tracy ray tracer.
 - [**Sobel CLI**](apps/sobel_cli): Command-line tool for Sobel edge detection.
-- [**Raylib Example**](apps/raylib_example): Basic Raylib usage example.
 
 ## Libraries
 
@@ -23,4 +20,6 @@ Computer graphics, image processing, and rendering.
 - [**Imagine**](libs/imagine): Image processing utilities in Java, Go, and Rust.
 - [**Image Core**](libs/image_core): Fundamental C++ image processing library.
 - [**PNG++**](libs/png_plusplus): C++ wrapper for libpng.
-- [**Trill**](libs/trill): C++ graphics utility library.
+
+The SDL3 and raylib demos (Mandelbrot, Tubing, Raylib Example, Trill) live in
+[muchq/experimental](https://github.com/muchq/experimental).
