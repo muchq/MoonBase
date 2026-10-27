@@ -883,7 +883,7 @@
     },
     "@@container_structure_test+//:repositories.bzl%extension": {
       "general": {
-        "bzlTransitiveDigest": "+F2V2xkFkT3NCrzzY4KEPfFsvVqpm8So3hPVcHaIpAU=",
+        "bzlTransitiveDigest": "+b+jCRFtIkxpxwXmJ0Xw5IsYjiONSURHWxwmJfFSXTo=",
         "usagesDigest": "uXk1ym4ketE3OMAHoR5fUuuv8pOmi0aSyCe28koTwfA=",
         "recordedInputs": [
           "REPO_MAPPING:aspect_bazel_lib+,bazel_tools bazel_tools",
