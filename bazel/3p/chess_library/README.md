@@ -15,7 +15,7 @@ PGN reader, and magic-bitboard attack tables. MIT.
 
 Every other third-party C++ dependency here comes through bzlmod, and this
 one wanted to. It is not in the Bazel Central Registry, which would make it
-an `http_archive` in a module extension like `//bazel/extensions:raylib` —
+an `http_archive` in a module extension —
 except that upstream publishes **no releases and no tags**, so the only
 fetchable URL is a GitHub source archive.
 

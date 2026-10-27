@@ -42,7 +42,7 @@
 # lockfile. Two other kinds cannot be found that way and are handled after
 # it: modules pinned with archive_override, which have no source.json for
 # the scan to walk (opal_cpp), and repos created by module extensions,
-# which are not modules at all (the bats toolchain, raylib).
+# which are not modules at all (the bats toolchain).
 # (container_structure_test needs no special case — it is a registry
 # module, so the scan already covers it.)
 set -euo pipefail
@@ -156,9 +156,9 @@ done
 # every bazel command in a sandbox died before analysis with a 403 on its
 # archive URL. Not "the scan missed one": it could not have seen it.
 #
-# Read out of the MODULE.bazel files rather than listed here, for the same
-# reason the raylib tag below is: a hardcoded pin next to a "keep in sync"
-# comment fails silently the first time somebody bumps the commit, and
+# Read out of the MODULE.bazel files rather than listed here: a hardcoded
+# pin next to a "keep in sync" comment fails silently the first time
+# somebody bumps the commit, and
 # --override_module wins, so the stale clone is quietly what gets built.
 #
 # Nothing to fetch from the registry for these, unlike the loop above — an
@@ -194,9 +194,8 @@ while IFS=$'\t' read -r name url strip_prefix; do
   echo "common --override_module=$name=$out${subdir:+/$subdir}" >> "$RC.tmp"
 done < <(archive_override_pins "${MODULE_FILES[@]}")
 
-# Two repos come from module extensions rather than the registry, so the
-# lockfile scan above cannot see them and --override_module does not apply.
-# They need --override_repository against their canonical names, which are
+# Repos created by module extensions rather than the registry are invisible
+# to the lockfile scan above, and --override_module does not apply. They need --override_repository against their canonical names, which are
 # derived from the extension that declares them and will change if that
 # wiring does — if analysis 403s on one of these, re-read the name Bazel
 # printed in the error and update it here.
@@ -217,35 +216,5 @@ for repo in aspect_bazel_lib++toolchains+bats_toolchains bazel_lib++toolchains+b
   echo "common --override_repository=$repo=$BATS" >> "$RC.tmp"
 done
 
-# raylib: //bazel/extensions:raylib.bzl fetches the archive and supplies the
-# BUILD file from this repo (bazel/3p/raylib.BUILD). An override does not
-# carry that over, so the clone gets it copied in as its own BUILD.bazel.
-#
-# The tag is read out of the extension rather than written here. A hardcoded
-# pin plus a "keep in sync" comment is what the old wrapper did, and it fails
-# silently in the worst direction: --override_repository wins, so a bumped
-# raylib would keep building the stale sources against the new BUILD file
-# with nothing reporting a mismatch.
-RAYLIB_BZL="$(dirname "$0")/../bazel/extensions/raylib.bzl"
-RAYLIB_TAG="$(grep -oE 'raylib/archive/refs/tags/[^"]+' "$RAYLIB_BZL" | head -1)"
-RAYLIB_TAG="${RAYLIB_TAG##*/}"
-RAYLIB_TAG="${RAYLIB_TAG%.zip}"
-[ -n "$RAYLIB_TAG" ] || { echo "could not read the raylib tag from $RAYLIB_BZL" >&2; exit 1; }
-RAYLIB="$DEST/raylib-$RAYLIB_TAG"
-if [ ! -d "$RAYLIB" ]; then
-  echo ">> raylib/$RAYLIB_TAG  <-  raysan5/raylib @ $RAYLIB_TAG"
-  git -c advice.detachedHead=false clone -q --depth 1 --branch "$RAYLIB_TAG" \
-    https://github.com/raysan5/raylib.git "$RAYLIB.tmp"
-  rm -rf "$RAYLIB.tmp/.git"
-  # --override_repository needs a repo-boundary marker; unlike
-  # --override_module there is no MODULE.bazel to serve as one.
-  touch "$RAYLIB.tmp/REPO.bazel"
-  mv "$RAYLIB.tmp" "$RAYLIB"
-fi
-# Every run, not just the clone's first: the BUILD file changes without the
-# tag, and a stale copy builds the old rules with nothing reporting it.
-cp "$(dirname "$0")/../bazel/3p/raylib.BUILD" "$RAYLIB/BUILD.bazel"
-echo "common --override_repository=+raylib+raylib=$RAYLIB" >> "$RC.tmp"
-
 mv "$RC.tmp" "$RC"
-echo "wrote $RC ($(grep -c override_module "$RC") module overrides + 3 repo overrides)"
+echo "wrote $RC ($(grep -c override_module "$RC") module overrides + $(grep -c override_repository "$RC") repo overrides)"

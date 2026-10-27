@@ -67,8 +67,7 @@ pinned in a `MODULE.bazel` with `archive_override` — `opal_cpp` — are
 not served by the registry, so they have no `source.json` for the scan to
 walk; they are read straight out of the `MODULE.bazel` files and cloned
 at their pinned commit. And repos created by module extensions are not
-modules at all: the `bats` toolchain gets an empty stub, and `raylib`
-gets a clone plus this repo's own `bazel/3p/raylib.BUILD`.
+modules at all: the `bats` toolchain gets an empty stub.
 
 `opal_cpp` is worth knowing about specifically, because it fails
 earlier and louder than the rest. Bazel resolves the module graph before
@@ -94,8 +93,8 @@ inherited `EXTRA_MODULES="rules_perl/0.5.0"` line downgraded a
 lockfile-resolved 1.1.0 and broke `@openssl` loading, taking every `bazel
 query` that reached it down with it.) A repo created by a module
 extension is the other case — it needs `--override_repository` against
-the canonical name from Bazel's error, following the `bats`/`raylib`
-blocks at the bottom of the script. A module added with a *new*
+the canonical name from Bazel's error, following the `bats`
+block at the bottom of the script. A module added with a *new*
 `archive_override` needs nothing: the script reads those out of the
 `MODULE.bazel` files on every run, so a bumped commit is picked up the
 same way a bumped lockfile version is.
