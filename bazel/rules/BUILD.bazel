@@ -63,6 +63,20 @@ java_binary(
     visibility = ["//visibility:private"],
 )
 
+sh_test(
+    name = "distrust_roots_reproducible_test",
+    size = "small",
+    srcs = ["distrust_roots_reproducible_test.sh"],
+    args = [
+        "$(rootpath :distrust_roots)",
+        "$(rootpath :ca_certificates_crt)",
+    ],
+    data = [
+        ":ca_certificates_crt",
+        ":distrust_roots",
+    ],
+)
+
 java_test(
     name = "distrusted_roots_test",
     size = "small",
