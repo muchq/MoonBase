@@ -4,3 +4,7 @@ commandTests:
     command: "java"
     args: ["--version"]
     expectedOutput: ["openjdk 25"]
+fileExistenceTests:
+  - name: "Truststore at the path the entrypoint passes as javax.net.ssl.trustStore"
+    path: "/etc/ssl/certs/java/cacerts"
+    shouldExist: true
