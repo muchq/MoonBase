@@ -34,16 +34,13 @@ genrule(
     visibility = ["//visibility:private"],
 )
 
-# The distroless roots, less the ones we distrust, as the PEM bundle every
-# image gets and a JKS truststore for the java images. Neither the pinned
-# distroless nor the pinned zulu base has dropped the roots in OpenJDK's
-# eMudhra advisory (https://openjdk.org/emudhra), so we drop them here.
-# Bumping a base image cannot bring them back.
+# The distroless roots, less the ones we distrust (see DistrustRoots.java),
+# as the PEM bundle every image gets and a JKS truststore for the java images.
+# Filtering here means a base image bump cannot bring a distrusted root back.
 #
-# The java images use this store and not the JDK's own cacerts, so all of
-# our runtimes trust the same set of roots. Overwriting the JDK's cacerts in
-# a layer is not an option: JAVA_HOME is a symlink to a directory named per
-# architecture, and one layer has to serve both architectures.
+# The java images use this store, not the JDK's own cacerts, so that Java,
+# Go and C++ trust one set of roots. Rust is not covered: server_pal's
+# reqwest client compiles in webpki-root-certs and never reads the image.
 genrule(
     name = "trusted_roots",
     srcs = [":ca_certificates_crt"],
