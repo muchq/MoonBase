@@ -34,7 +34,8 @@ import java.util.regex.Pattern;
 public class DistrustRoots {
 
   // SHA-256 of the roots that OpenJDK's eMudhra advisory removes
-  // (https://openjdk.org/emudhra, JDK-8395690).
+  // (https://openjdk.org/emudhra, JDK-8395690), and of eMudhra's other two
+  // roots. The JDK never shipped those two, but the Debian bundle does.
   private static final Set<String> DISTRUSTED =
       Set.of(
           // emSign Root CA - G1
@@ -44,7 +45,11 @@ public class DistrustRoots {
           // emSign ECC Root CA - G3
           "86A1ECBA089C4A8D3BBE2734C612BA341D813E043CF9E8A862CD5C57A36BBE6B",
           // AAA Certificate Services
-          "D7A7A0FB5D7E2731D771E9484EBCDEF71D5F0C3E0A2948782BC83EE0EA699EF4");
+          "D7A7A0FB5D7E2731D771E9484EBCDEF71D5F0C3E0A2948782BC83EE0EA699EF4",
+          // emSign Root CA - C1
+          "125609AA301DA0A249B97A8239CB6A34216F44DCAC9F3954B14292F2E8C8608F",
+          // emSign ECC Root CA - C3
+          "BC4D809B15189D78DB3E1D8CF4F9726A795DA1643CA5F1358E1DDB0EDC0D7EB3");
 
   private static final Pattern PEM =
       Pattern.compile("-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----\n?", Pattern.DOTALL);

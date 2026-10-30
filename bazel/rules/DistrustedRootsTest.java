@@ -27,6 +27,10 @@ public class DistrustedRootsTest {
     "emSign Root CA - G2",
     "emSign ECC Root CA - G3",
     "AAA Certificate Services",
+    // Not in the JDK's cacerts, so the advisory never names them. They are in
+    // the Debian bundle, which the java images now trust as well.
+    "emSign Root CA - C1",
+    "emSign ECC Root CA - C3",
   };
 
   // An empty or truncated store "passes" the distrust check and then fails
