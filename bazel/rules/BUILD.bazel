@@ -116,7 +116,7 @@ genrule(
     srcs = [":ca-certificates.crt"],
     outs = ["cert.pem"],
     cmd = "cp $< $@",
-    visibility = ["//visibility:private"],
+    visibility = ["//domains/platform/libs/server_pal:__pkg__"],
 )
 
 pkg_tar(

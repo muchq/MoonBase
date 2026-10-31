@@ -267,6 +267,22 @@ async fn access_log_middleware(
 /// keep the returned provider alive for the process lifetime — dropping
 /// it shuts down the exporter. Shared by every server_pal service so the
 /// http_server_* instruments actually export.
+/// Trust roots for the OTLP client: the image's CA bundle, which
+/// //bazel/rules:trusted_roots builds for every image. They are found the way
+/// OpenSSL finds them: SSL_CERT_FILE if it is set, otherwise
+/// /etc/ssl/certs/ca-certificates.crt and the other usual paths.
+fn otlp_roots() -> Vec<reqwest::Certificate> {
+    let loaded = rustls_native_certs::load_native_certs();
+    for e in &loaded.errors {
+        eprintln!("warning: loading CA certificates: {e}");
+    }
+    loaded
+        .certs
+        .iter()
+        .filter_map(|der| reqwest::Certificate::from_der(der).ok())
+        .collect()
+}
+
 pub fn init_otel() -> Option<SdkMeterProvider> {
     let endpoint = env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok()?;
 
@@ -275,20 +291,18 @@ pub fn init_otel() -> Option<SdkMeterProvider> {
     // build its TLS client below. Idempotent — Err means already installed.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // reqwest 0.13 dropped its webpki-roots feature and forces
-    // rustls-platform-verifier, which reads the system trust store — absent
-    // in our minimal container images. Left to its own devices the OTLP
-    // exporter builds a default reqwest client that fails ("No CA
-    // certificates were loaded from the system") and panics. Build the
-    // client ourselves with Mozilla's roots bundled into the binary
-    // (tls_certs_only, reqwest's stable roots API), so it needs nothing from
-    // the host.
+    // Left to its own devices the OTLP exporter builds a default reqwest
+    // client, which panics if rustls-platform-verifier finds no roots. Build
+    // the client ourselves from otlp_roots, and turn metrics off if there are
+    // none.
     // The blocking client spins up its own runtime, so it must be built off
     // the async main thread (opentelemetry-otlp's default path does the same).
+    let roots = otlp_roots();
+    if roots.is_empty() {
+        eprintln!("warning: no CA certificates for the OTLP http client; metrics disabled");
+        return None;
+    }
     let http_client = match std::thread::spawn(|| {
-        let roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS
-            .iter()
-            .filter_map(|der| reqwest::Certificate::from_der(der).ok());
         reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(5))
             .tls_certs_only(roots)
@@ -2053,5 +2067,25 @@ mod http_metrics_label_tests {
             }
         }
         assert!(found, "no duration data point was exported");
+    }
+}
+
+#[cfg(test)]
+mod otlp_roots_tests {
+    use super::*;
+
+    /// The OTLP client trusts the roots in the image's CA bundle and nothing
+    /// else, so that //bazel/rules:trusted_roots decides for Rust what it
+    /// decides for Java, Go and C++. Roots compiled into the binary would
+    /// bring back what that rule removes, whatever the image carries.
+    ///
+    /// The test target points SSL_CERT_FILE at that same bundle.
+    #[test]
+    fn trusts_exactly_the_bundle_at_ssl_cert_file() {
+        let path = env::var("SSL_CERT_FILE").expect("the test target sets SSL_CERT_FILE");
+        let bundle = std::fs::read_to_string(&path).unwrap();
+        let in_bundle = bundle.matches("-----BEGIN CERTIFICATE-----").count();
+        assert!(in_bundle >= 100, "only {in_bundle} roots in {path}");
+        assert_eq!(otlp_roots().len(), in_bundle);
     }
 }
