@@ -3483,6 +3483,7 @@ dependencies = [
  "opentelemetry_sdk",
  "reqwest",
  "rustls",
+ "rustls-native-certs",
  "serde_json",
  "tokio",
  "tower",
@@ -3490,7 +3491,6 @@ dependencies = [
  "tower_governor",
  "tracing",
  "tracing-subscriber",
- "webpki-root-certs",
 ]
 
 [[package]]

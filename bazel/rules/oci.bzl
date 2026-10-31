@@ -128,10 +128,15 @@ def linux_oci_java(bin_name):
         base = "@java_base",
         entrypoint = [
             "java",
+            # Our trust roots, not the JDK's. See //bazel/rules:trusted_roots.
+            "-Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts",
             "-jar",
             "/app/" + uber_jar_name,
         ],
-        tars = [":" + tar_name],
+        tars = [
+            "//bazel/rules:java_trust_store_layer",
+            ":" + tar_name,
+        ],
     )
 
     _push_and_load(image_name = image_name, bin_name = bin_name)

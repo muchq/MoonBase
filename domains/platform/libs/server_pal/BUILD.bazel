@@ -30,10 +30,13 @@ rust_test(
     name = "server_pal_test",
     size = "small",
     crate = ":server_pal",
+    data = ["//bazel/rules:ca_certificates_pem"],
     # The vocabulary test asserts the service_name VALUE, so an env-key typo
     # in the reader cannot pass as an empty-but-present field.
     env = {
         "OTEL_SERVICE_NAME": "server-pal-under-test",
+        # The bundle every image ships, for otlp_roots_tests.
+        "SSL_CERT_FILE": "$(rootpath //bazel/rules:ca_certificates_pem)",
         "TRUSTED_PROXY_CIDRS": "172.28.0.2",
     },
     deps = all_crate_deps(normal_dev = True),
