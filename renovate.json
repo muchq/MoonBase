@@ -15,6 +15,12 @@
         "azul/zulu-openjdk"
       ],
       "allowedVersions": "/^(25|29|33|37)$/"
+    },
+    {
+      "description": "llvm 0.8.26 breaks macOS cc_library links (hermeticbuild/hermetic-llvm#893).",
+      "matchManagers": ["bazel-module"],
+      "matchPackageNames": ["llvm"],
+      "allowedVersions": "!/^0\\.8\\.26$/"
     }
   ]
 }
