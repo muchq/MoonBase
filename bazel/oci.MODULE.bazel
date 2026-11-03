@@ -5,7 +5,7 @@ bazel_dep(name = "container_structure_test", version = "1.22.1")
 oci = use_extension("@rules_oci//oci:extensions.bzl", "oci")
 oci.pull(
     name = "docker_lib_ubuntu",
-    digest = "sha256:c098726dd9b9733f3e885f8de0ef375206a311b0a317eadc40d347b1115fb944",
+    digest = "sha256:6a06111c3b0a8600feadb270aec771dc239bf407b25625f93f44ab00e11f4d3c",
     image = "docker.io/library/ubuntu",
     platforms = [
         "linux/amd64",
@@ -15,7 +15,7 @@ oci.pull(
 )
 oci.pull(
     name = "java_base",
-    digest = "sha256:c786fa46ef8fae89e191a2c783c0c8f49118ef16d6c0bbd2d6048bd53b7b0a27",
+    digest = "sha256:96298e33de6950e933cec3eb83cedebc954e1f9545ca990efca4c6cf1dbe1e43",
     image = "docker.io/azul/zulu-openjdk",
     platforms = [
         "linux/amd64",

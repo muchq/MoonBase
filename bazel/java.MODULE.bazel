@@ -60,7 +60,7 @@ maven.install(
         "io.netty:netty-codec",
         "io.netty:netty-handler",
         "io.netty:netty-transport",
-        "io.sentry:sentry-logback:8.61.1",
+        "io.sentry:sentry-logback:8.62.0",
         "jakarta.annotation:jakarta.annotation-api:3.0.0",
         "org.junit.jupiter:junit-jupiter-api",
         "org.junit.jupiter:junit-jupiter-engine",

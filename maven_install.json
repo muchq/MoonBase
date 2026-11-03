@@ -42,7 +42,7 @@
     "io.netty:netty-common": 1498958496,
     "io.netty:netty-handler": 1278819283,
     "io.netty:netty-transport": 320927026,
-    "io.sentry:sentry-logback": -1039741426,
+    "io.sentry:sentry-logback": -1029238322,
     "jakarta.annotation:jakarta.annotation-api": -906475446,
     "org.assertj:assertj-core": -1145412507,
     "org.eclipse.jetty.websocket:websocket-jetty-server": -39664684,
@@ -153,8 +153,8 @@
     "io.netty:netty-transport": -1075172341,
     "io.netty:netty-transport-native-unix-common": 81535987,
     "io.projectreactor:reactor-core": 1846691143,
-    "io.sentry:sentry": -2008232360,
-    "io.sentry:sentry-logback": 641529991,
+    "io.sentry:sentry": -244287872,
+    "io.sentry:sentry-logback": 721578997,
     "jakarta.annotation:jakarta.annotation-api": 196616042,
     "jakarta.inject:jakarta.inject-api": 188991469,
     "jakarta.validation:jakarta.validation-api": -1708329466,
@@ -794,15 +794,15 @@
     },
     "io.sentry:sentry": {
       "shasums": {
-        "jar": "3df180f4e0fd85ff2245eb25d5dda0ef39a7318dc0ece3aaa853c79dea67ae01"
+        "jar": "5e7f398cf3115f10bce52fe0fa411e32ac6e84e0ac6d50673e5701739af3f319"
       },
-      "version": "8.61.1"
+      "version": "8.62.0"
     },
     "io.sentry:sentry-logback": {
       "shasums": {
-        "jar": "f90c8f140198cd59cb58df2da270f4e8f04be8c775c14d6ae418eb761af02933"
+        "jar": "d1e40041ecaedfe3d6e57794084a7cfa9667aa81a55d2a5413dd77161df393c2"
       },
-      "version": "8.61.1"
+      "version": "8.62.0"
     },
     "jakarta.annotation:jakarta.annotation-api": {
       "shasums": {
