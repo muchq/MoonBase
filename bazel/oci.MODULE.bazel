@@ -15,7 +15,7 @@ oci.pull(
 )
 oci.pull(
     name = "java_base",
-    digest = "sha256:96298e33de6950e933cec3eb83cedebc954e1f9545ca990efca4c6cf1dbe1e43",
+    digest = "sha256:daf3a676e6a355acdbcabf9c06217f4d11a1abfa6503cdc36ffa05e1226e3375",
     image = "docker.io/azul/zulu-openjdk",
     platforms = [
         "linux/amd64",
