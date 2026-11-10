@@ -22,7 +22,7 @@ osx.frameworks(names = [
     "Metal",
 ])
 
-bazel_dep(name = "bazel_features", version = "1.54.1")
+bazel_dep(name = "bazel_features", version = "1.55.0")
 
 bazel_dep(name = "buildifier_prebuilt", version = "10.1.0", dev_dependency = True)
 

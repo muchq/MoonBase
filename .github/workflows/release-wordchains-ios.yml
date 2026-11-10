@@ -144,7 +144,7 @@ jobs:
         working-directory: domains/games/apps/wordchains_ios
         run: swift test
 
-      - uses: bazel-contrib/setup-bazel@0.19.1
+      - uses: bazel-contrib/setup-bazel@0.19.2
         with:
           bazelisk-cache: true
           disk-cache: release-wordchains-ios
