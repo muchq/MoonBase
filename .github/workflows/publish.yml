@@ -61,7 +61,7 @@ jobs:
       - name: Configure git safe directory
         run: git config --global --add safe.directory /__w/MoonBase/MoonBase
 
-      - uses: bazel-contrib/setup-bazel@0.19.1
+      - uses: bazel-contrib/setup-bazel@0.19.2
         with:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
