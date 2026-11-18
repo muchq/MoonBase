@@ -11,8 +11,8 @@
     {
       "description": "java_base tracks Java LTS majors only (every fourth release from 21).",
       "matchPackageNames": [
-        "docker.io/azul/zulu-openjdk",
-        "azul/zulu-openjdk"
+        "docker.io/library/azul-zulu",
+        "azul-zulu"
       ],
       "allowedVersions": "/^(25|29|33|37)$/"
     },

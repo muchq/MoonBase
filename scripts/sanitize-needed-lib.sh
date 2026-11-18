@@ -5,6 +5,11 @@
 # (and the BUILD / proto / .bzl files that shape it), plus the config and
 # toolchain class already tracked for full builds — a .bazelrc or llvm pin
 # change can alter sanitizer codegen without touching a .cc.
+#
+# oci.MODULE.bazel is in FULL_BUILD_PATHSPECS (image digests reshape every
+# linux_oci_* consumer for bazel-diff) but is excluded here: a Java/base
+# digest pin does not change C++ sanitizer codegen, and running the matrix
+# for it only exposes TSan to unrelated CI ASLR flakes.
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=diff-build-lib.sh
@@ -12,6 +17,7 @@ source "$SCRIPT_DIR/diff-build-lib.sh"
 
 SANITIZE_PATHSPECS=(
   "${FULL_BUILD_PATHSPECS[@]}"
+  ':(exclude)bazel/oci.MODULE.bazel'
   ':(glob)domains/**/*.c'
   ':(glob)domains/**/*.cc'
   ':(glob)domains/**/*.cpp'
