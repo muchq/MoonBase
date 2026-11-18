@@ -4,6 +4,8 @@ Artificial Intelligence and Machine Learning libraries and services.
 
 ## Apps
 
+- [**ncm (cli)**](apps/ncm_cli): Two-stage next-concept training, evaluation, generation, and a pluggable agent harness.
+
 - [**impact-mcp**](apps/impact_mcp): A local-first AI agent that helps engineers amplify their impact, close gaps against a customizable rubric, and communicate contributions clearly — for better project results and career growth.
 - [**microgpt (cli)**](apps/microgpt_cli): CLI agent for local training, inference, and model inspection. Wraps the full microgpt workflow in a single binary.
 
@@ -13,6 +15,8 @@ Artificial Intelligence and Machine Learning libraries and services.
 - [**microgpt-serve**](apis/microgpt_serve): HTTP inference service for microgpt. Loads a trained checkpoint and serves generation requests via a JSON API, built on server_pal.
 
 ## Libraries
+
+- [**ncm**](libs/ncm): Experimental Rust/Candle residual VQ tokenizer and prompt-conditioned next-concept transformer.
 
 - [**deja_cpp**](libs/deja_cpp): deja's tape for C++ consumers — a smithy model of `GET /deja/v1/recent`, a client on the opal-cpp transport, and a wire test pinning deja's own `recent` fixture byte for byte (#1554).
 - [**Neuro**](libs/neuro): A pure Go implementation of a deep neural network library suitable for training classification models on images, text, and audio data. Features support for various layer types, optimizers, and inference utilities.

@@ -1,0 +1,19 @@
+[package]
+name = "ncm"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+metal = ["candle-core/metal", "candle-nn/metal"]
+cuda = ["candle-core/cuda", "candle-nn/cuda"]
+
+[dependencies]
+candle-core.workspace = true
+candle-nn.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokenizers.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

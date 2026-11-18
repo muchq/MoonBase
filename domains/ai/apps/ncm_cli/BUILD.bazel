@@ -1,0 +1,25 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+rust_binary(
+    name = "ncm",
+    srcs = ["src/main.rs"],
+    crate_features = select({
+        "//:is_mac": ["metal"],
+        "//conditions:default": [],
+    }),
+    crate_name = "ncm_cli",
+    deps = ["//domains/ai/libs/ncm"] + all_crate_deps(cargo_only = True),
+)
+
+sh_test(
+    name = "smoke_test",
+    size = "small",
+    srcs = ["smoke_test.sh"],
+    data = [
+        "testdata/tiny.jsonl",
+        "testdata/tiny-config.json",
+        ":ncm",
+    ],
+)
