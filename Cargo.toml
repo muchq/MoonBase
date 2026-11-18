@@ -2,6 +2,8 @@
 resolver = "2"
 
 members = [
+    "domains/ai/libs/ncm",
+    "domains/ai/apps/ncm_cli",
     "domains/ai/apps/impact_mcp",
     "domains/ai/apps/microgpt_cli",
     "domains/ai/apis/deja",

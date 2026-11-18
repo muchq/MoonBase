@@ -1,0 +1,37 @@
+load("@crates//:defs.bzl", "all_crate_deps")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+
+rust_library(
+    name = "ncm",
+    srcs = [
+        "src/agent.rs",
+        "src/data.rs",
+        "src/lib.rs",
+        "src/model.rs",
+        "src/pipeline.rs",
+    ],
+    crate_features = select({
+        "//:is_mac": ["metal"],
+        "//conditions:default": [],
+    }),
+    visibility = ["//visibility:public"],
+    deps = all_crate_deps(),
+)
+
+rust_test(
+    name = "system_test",
+    size = "small",
+    srcs = ["tests/system.rs"],
+    deps = [":ncm"] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)
+
+rust_test(
+    name = "unit_test",
+    size = "small",
+    crate = ":ncm",
+    deps = all_crate_deps(normal_dev = True),
+)
