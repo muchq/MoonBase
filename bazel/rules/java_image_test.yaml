@@ -1,9 +1,12 @@
 schemaVersion: 2.0.0
 commandTests:
-  - name: "JDK version is 25"
+  # Java4Shell (CVE-2026-114938): 25.0.5.0.3 and earlier are vulnerable.
+  # Assert the patched build we pin in bazel/oci.MODULE.bazel; a bare
+  # "openjdk 25" still matches the vulnerable line.
+  - name: "JDK is the Java4Shell-patched 25.0.5.1"
     command: "java"
     args: ["--version"]
-    expectedOutput: ["openjdk 25"]
+    expectedOutput: ["openjdk 25\\.0\\.5\\.1"]
 fileExistenceTests:
   - name: "Truststore at the path the entrypoint passes as javax.net.ssl.trustStore"
     path: "/etc/ssl/certs/java/cacerts"

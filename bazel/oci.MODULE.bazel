@@ -15,8 +15,11 @@ oci.pull(
 )
 oci.pull(
     name = "java_base",
-    digest = "sha256:daf3a676e6a355acdbcabf9c06217f4d11a1abfa6503cdc36ffa05e1226e3375",
-    image = "docker.io/azul/zulu-openjdk",
+    # Azul's Docker Official Image (azul-zulu), not the older
+    # azul/zulu-openjdk namespace — that one still ships 25.0.5.0.3 and has
+    # no 25.0.5.1 tag. Digested so Renovate bumps the pin when tag 25 moves.
+    digest = "sha256:6e688994387052ff293aee39ff306684134ed868e6167fd957080874d9a0e9f9",
+    image = "docker.io/library/azul-zulu",
     platforms = [
         "linux/amd64",
         "linux/arm64/v8",
