@@ -126,6 +126,14 @@ commit_change_to bazel/tools.MODULE.bazel 'llvm pin bumped'
 check "a bazel/*.MODULE.bazel change turns sanitizers on" \
   test "$(decide)" = "true"
 
+# oci.MODULE.bazel pins container digests; that forces a full build for
+# bazel-diff, but it does not change C++ sanitizer codegen. Keep sanitize
+# off so a Java base-image bump is not held by the TSan matrix.
+reset_to_base
+commit_change_to bazel/oci.MODULE.bazel 'digest bumped'
+check "an oci.MODULE.bazel digest pin keeps sanitizers off" \
+  test "$(decide)" = "false"
+
 reset_to_base
 commit_change_to bazel/rules/java.bzl '# macros changed'
 check "a bazel/rules *.bzl change turns sanitizers on" \
