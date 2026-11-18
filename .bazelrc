@@ -154,6 +154,11 @@ test:ubsan --test_env=UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 build:tsan --config=sanitizer
 build:tsan --@llvm//config:tsan=true
 test:tsan --test_env=TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1
+# TSan remaps the process address space; Bazel's processwrapper-sandbox
+# leaves ASLR on and TSan aborts before any test runs ("incompatible
+# memory layout but was unable to disable ASLR"). Local spawn skips that
+# sandbox for the TestRunner only — asan/ubsan do not need it.
+test:tsan --spawn_strategy=local
 
 # Platform-specific configurations
 build:macos --features=-module_maps
