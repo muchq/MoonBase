@@ -4,9 +4,11 @@
 # that, CI aborts before any race check with "incompatible memory layout but
 # was unable to disable ASLR" (PR #1706).
 #
-# Load-bearing pieces: the wrapper, its sh_binary, test:tsan --run_under in
-# .bazelrc, and seccomp=unconfined on the sanitize job (Docker's default
-# profile blocks personality(2), so setarch -R returns EPERM).
+# Load-bearing pieces: the wrapper under bazel/, its sh_binary, test:tsan
+# --run_under in .bazelrc, and seccomp=unconfined on the sanitize job
+# (Docker's default profile blocks personality(2), so setarch -R returns
+# EPERM). The binary is not under scripts/ — that directory must stay
+# unpackaged so root can export //:scripts/... for deploy dry-runs.
 #
 # Set REQUIRE_ASLR_CLEAR=1 (sanitize tsan leg) to fail when setarch cannot
 # clear ASLR. Elsewhere EPERM is a skip — the wiring pins still run.
@@ -28,13 +30,16 @@ check() {
 
 echo "tsan ASLR run-under"
 
-check ".bazelrc routes tsan tests through //scripts:run_without_aslr" \
-  grep -qx 'test:tsan --run_under=//scripts:run_without_aslr' "$REPO/.bazelrc"
+check ".bazelrc routes tsan tests through //bazel:run_without_aslr" \
+  grep -qx 'test:tsan --run_under=//bazel:run_without_aslr' "$REPO/.bazelrc"
 
-check "scripts/BUILD.bazel declares the run_without_aslr binary" \
-  grep -q 'name = "run_without_aslr"' "$REPO/scripts/BUILD.bazel"
+check "bazel/BUILD.bazel declares the run_without_aslr binary" \
+  grep -q 'name = "run_without_aslr"' "$REPO/bazel/BUILD.bazel"
 
-WRAPPER=$REPO/scripts/run_without_aslr.sh
+check "scripts/ stays unpackaged so root //:scripts/... exports keep working" \
+  test ! -e "$REPO/scripts/BUILD.bazel"
+
+WRAPPER=$REPO/bazel/run_without_aslr.sh
 check "the wrapper script exists and is executable" \
   test -x "$WRAPPER"
 

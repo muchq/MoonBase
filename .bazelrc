@@ -162,7 +162,7 @@ test:tsan --test_env=TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1
 # tests abort with "incompatible memory layout" or setarch EPERM before
 # any race check — asan/ubsan do not need them.
 test:tsan --spawn_strategy=local
-test:tsan --run_under=//scripts:run_without_aslr
+test:tsan --run_under=//bazel:run_without_aslr
 
 # Platform-specific configurations
 build:macos --features=-module_maps

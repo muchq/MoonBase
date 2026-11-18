@@ -1,0 +1,10 @@
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+
+# Prefix for TSan tests (test:tsan --run_under). Lives here rather than under
+# scripts/ because that directory must stay unpackaged — root exports_files
+# serves scripts/* as //:scripts/... for deploy dry-runs.
+sh_binary(
+    name = "run_without_aslr",
+    srcs = ["run_without_aslr.sh"],
+    visibility = ["//visibility:public"],
+)
