@@ -2,8 +2,14 @@
 # Pins the TSan ASLR escape hatch: tests under --config=tsan must start with
 # ADDR_NO_RANDOMIZE so ThreadSanitizer can remap its shadow memory. Without
 # that, CI aborts before any race check with "incompatible memory layout but
-# was unable to disable ASLR" (PR #1706). The load-bearing pieces are the
-# wrapper, its sh_binary, and the test:tsan --run_under line in .bazelrc.
+# was unable to disable ASLR" (PR #1706).
+#
+# Load-bearing pieces: the wrapper, its sh_binary, test:tsan --run_under in
+# .bazelrc, and seccomp=unconfined on the sanitize job (Docker's default
+# profile blocks personality(2), so setarch -R returns EPERM).
+#
+# Set REQUIRE_ASLR_CLEAR=1 (sanitize tsan leg) to fail when setarch cannot
+# clear ASLR. Elsewhere EPERM is a skip — the wiring pins still run.
 set -uo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
@@ -32,18 +38,34 @@ WRAPPER=$REPO/scripts/run_without_aslr.sh
 check "the wrapper script exists and is executable" \
   test -x "$WRAPPER"
 
+# The sanitize job must lift Docker's default seccomp or setarch -R is EPERM
+# and every TSan test dies before running.
+check "sanitize job allows personality via seccomp=unconfined" \
+  grep -q 'seccomp=unconfined' "$REPO/.github/workflows/branch.yml"
+
 case "$(uname -s)" in
   Linux)
-    # ADDR_NO_RANDOMIZE is 0x0040000. Without the flag, personality is 0 on a
-    # stock Linux; with setarch -R it must be set. Skip the positive check
-    # when setarch is missing — the wrapper then becomes a no-op by design,
-    # and CI's ubuntu image is what has to carry util-linux.
-    if command -v setarch >/dev/null 2>&1; then
-      PERSONA=$("$WRAPPER" python3 -c 'import ctypes; print(ctypes.CDLL(None).personality(0xffffffff))')
-      check "wrapper sets ADDR_NO_RANDOMIZE (personality & 0x40000)" \
-        test $((PERSONA & 0x40000)) -ne 0
+    if ! command -v setarch >/dev/null 2>&1; then
+      if [ "${REQUIRE_ASLR_CLEAR:-0}" = 1 ]; then
+        fail "setarch is required here but not installed"
+      else
+        echo "  skip  setarch not installed; wrapper no-op path untested here"
+      fi
     else
-      echo "  skip  setarch not installed; wrapper no-op path untested here"
+      SETARCH_ERR=$(mktemp)
+      PERSONA=$("$WRAPPER" python3 -c 'import ctypes; print(ctypes.CDLL(None).personality(0xffffffff))' 2>"$SETARCH_ERR") || true
+      if grep -q 'Operation not permitted' "$SETARCH_ERR"; then
+        rm -f "$SETARCH_ERR"
+        if [ "${REQUIRE_ASLR_CLEAR:-0}" = 1 ]; then
+          fail "setarch -R is EPERM; sanitize needs seccomp=unconfined"
+        else
+          echo "  skip  setarch -R is EPERM here; sanitize job opts lift seccomp"
+        fi
+      else
+        rm -f "$SETARCH_ERR"
+        check "wrapper sets ADDR_NO_RANDOMIZE (personality & 0x40000)" \
+          test $((PERSONA & 0x40000)) -ne 0
+      fi
     fi
     ;;
   *)

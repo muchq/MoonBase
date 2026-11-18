@@ -154,12 +154,13 @@ test:ubsan --test_env=UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
 build:tsan --config=sanitizer
 build:tsan --@llvm//config:tsan=true
 test:tsan --test_env=TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1
-# TSan remaps the process address space. Two layers, both required on the
-# CI container: processwrapper-sandbox blocks TSan from clearing ASLR
-# (spawn_strategy=local), and the kernel's ASLR itself must be off for the
-# test process (run_under setarch -R). Without both, tests abort with
-# "incompatible memory layout but was unable to disable ASLR" before any
-# race check runs — asan/ubsan do not need either.
+# TSan remaps the process address space. On the CI sanitize job three
+# layers are required: processwrapper-sandbox blocks TSan from clearing
+# ASLR (spawn_strategy=local); the test process needs ADDR_NO_RANDOMIZE
+# (run_under setarch -R); and Docker's default seccomp must allow
+# personality(2) (seccomp=unconfined on the sanitize job). Without those,
+# tests abort with "incompatible memory layout" or setarch EPERM before
+# any race check — asan/ubsan do not need them.
 test:tsan --spawn_strategy=local
 test:tsan --run_under=//scripts:run_without_aslr
 

@@ -377,6 +377,11 @@ jobs:
     needs: ci-image
     container:
       image: ${{ needs.ci-image.outputs.image }}
+      # Default Docker seccomp blocks personality(2). TSan's run_under uses
+      # setarch -R to clear ASLR; without this every tsan test dies with
+      # "Operation not permitted" before any race check (#1706). asan/ubsan
+      # do not need it; the matrix shares one job definition.
+      options: --security-opt seccomp=unconfined
     strategy:
       fail-fast: false
       matrix:
@@ -437,6 +442,14 @@ jobs:
           fi
           echo "targets=$TARGETS" >> "$GITHUB_OUTPUT"
           echo "Sanitizing: $TARGETS"
+
+      # Catch a missing seccomp opt before burning a full TSan rebuild:
+      # setarch -R must actually clear ASLR in this container.
+      - name: Verify TSan can clear ASLR
+        if: steps.filter.outputs.changed == 'true' && matrix.sanitizer == 'tsan'
+        env:
+          REQUIRE_ASLR_CLEAR: "1"
+        run: ./scripts/test-run-without-aslr
 
       - name: Test under ${{ matrix.sanitizer }}
         if: steps.filter.outputs.changed == 'true'
