@@ -38,8 +38,12 @@ check ".bazelrc routes tsan tests through //bazel:run_without_aslr" \
 check ".bazelrc runs tsan's test runner unsandboxed" \
   grep -qx 'test:tsan --strategy=TestRunner=local' "$REPO/.bazelrc"
 
+# The TestRunner line is the only strategy flag allowed to name local or
+# standalone: any other form (--spawn_strategy, a mnemonic, a regexp, a
+# fallback list) can reach compiles.
 check ".bazelrc leaves compiles sandboxed under every config" \
-  bash -c '! grep -qE "^[^#]*--(spawn_strategy|genrule_strategy|strategy(=[A-Za-z]*Compile[A-Za-z]*)?)[= ]+\"?(local|standalone)" "$1"' _ "$REPO/.bazelrc"
+  bash -c '! grep -vx "test:tsan --strategy=TestRunner=local" "$1" |
+    grep -qE "^[^#]*strategy[^#]*(local|standalone)"' _ "$REPO/.bazelrc"
 
 check "bazel/BUILD.bazel declares the run_without_aslr binary" \
   grep -q 'name = "run_without_aslr"' "$REPO/bazel/BUILD.bazel"
