@@ -7,7 +7,7 @@ ENV LC_ALL=C.UTF-8
 # Install all dependencies at image build time.
 RUN apt-get update && \
     apt-get install -y \
-    curl wget docker.io clang-format-18 build-essential git make \
+    curl wget docker.io clang-format-18 build-essential git jq make \
     openjdk-21-jdk && \
     ln -s "$(which clang-format-18)" /usr/local/bin/clang-format && \
     apt-get clean && \
