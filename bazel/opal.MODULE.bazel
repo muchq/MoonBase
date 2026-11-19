@@ -28,9 +28,9 @@ bazel_dep(name = "opal_cpp", version = "0.0.0")
 # games_hub kicks a player's stale wire when their resume collides with it.
 archive_override(
     module_name = "opal_cpp",
-    integrity = "sha256-5+QzDvFtDh+YF/wkHTy8136eWuMuUdG1RZ/JeMmJM+8=",
-    strip_prefix = "opal-cpp-b3b109681fa2e3ef67962db101a912a6e72957a6",
+    integrity = "sha256-fCGYPnbwuAF1AAeUycmKZr5U97/G+EErCZkTj62zg4M=",
+    strip_prefix = "opal-cpp-0.3.0",
     urls = [
-        "https://github.com/muchq/opal-cpp/archive/b3b109681fa2e3ef67962db101a912a6e72957a6.tar.gz",
+        "https://github.com/muchq/opal-cpp/archive/refs/tags/v0.3.0.tar.gz",
     ],
 )
