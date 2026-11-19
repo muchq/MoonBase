@@ -128,6 +128,18 @@ fi
 equals "an unchanged pin reuses its clone directory" "$OLD_DIR" \
   "$(override_dir /dest opal_cpp "$(override_ref "$old_url")")"
 
+# ------------------------------------------------- BCR patch application
+
+# Bazel applies a source.json's patches in listed order, and one can depend on
+# another: opentracing-cpp's generate_headers.patch edits what
+# rules_cc_loads.patch wrote. Alphabetical order fails to apply.
+equals "lists patches in source.json order, not sorted" \
+  "module_dot_bazel.patch rules_cc_loads.patch generate_headers.patch" \
+  "$(bcr_patches '{"patches": {"module_dot_bazel.patch": "sha256-a",
+    "rules_cc_loads.patch": "sha256-b", "generate_headers.patch": "sha256-c"}}' |
+    tr '\n' ' ' | sed 's/ $//')"
+equals "a module without patches lists none" "" "$(bcr_patches '{"url": "x"}')"
+
 if [ "$FAILURES" -eq 0 ]; then
   echo "all checks passed"
 else

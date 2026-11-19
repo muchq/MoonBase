@@ -131,7 +131,7 @@ for mod in $modules; do
     # patch that cannot find its target fails the script instead of blocking
     # on "Skip this patch?" forever in a non-interactive run.
     strip="$(jq -r '.patch_strip // 0' <<<"$src")"
-    for p in $(jq -r '(.patches // {}) | keys[]' <<<"$src"); do
+    for p in $(bcr_patches "$src"); do
       fetch "$REGISTRY/modules/$mod/patches/$p" |
         patch -s --batch -p"$strip" -d "$root"
     done
