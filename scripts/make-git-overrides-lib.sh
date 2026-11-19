@@ -78,3 +78,9 @@ override_subdir() {
 override_dir() {
   printf '%s/%s-%s' "$1" "$2" "$3"
 }
+
+# A source.json's patch names, one per line, in the order Bazel applies them.
+# keys_unsorted: a patch can depend on an earlier one, and keys sorts.
+bcr_patches() {
+  jq -r '(.patches // {}) | keys_unsorted[]' <<<"$1"
+}

@@ -5,9 +5,11 @@
 # was unable to disable ASLR" (PR #1706).
 #
 # Load-bearing pieces: the wrapper under bazel/, its sh_binary, test:tsan
-# --run_under in .bazelrc, and seccomp=unconfined on the sanitize job
-# (Docker's default profile blocks personality(2), so setarch -R returns
-# EPERM). The binary is not under scripts/ — that directory must stay
+# --run_under and --strategy=TestRunner=local in .bazelrc (the test process
+# must run unsandboxed; compiles must not, or the hermetic glibc's start.S
+# finds glibc's #error-stub bits/wordsize.h), and seccomp=unconfined on the
+# sanitize job (Docker's default profile blocks personality(2), so setarch -R
+# returns EPERM). The binary is not under scripts/ — that directory must stay
 # unpackaged so root can export //:scripts/... for deploy dry-runs.
 #
 # Set REQUIRE_ASLR_CLEAR=1 (sanitize tsan leg) to fail when setarch cannot
@@ -32,6 +34,16 @@ echo "tsan ASLR run-under"
 
 check ".bazelrc routes tsan tests through //bazel:run_without_aslr" \
   grep -qx 'test:tsan --run_under=//bazel:run_without_aslr' "$REPO/.bazelrc"
+
+check ".bazelrc runs tsan's test runner unsandboxed" \
+  grep -qx 'test:tsan --strategy=TestRunner=local' "$REPO/.bazelrc"
+
+# The TestRunner line is the only strategy flag allowed to name local or
+# standalone: any other form (--spawn_strategy, a mnemonic, a regexp, a
+# fallback list) can reach compiles.
+check ".bazelrc leaves compiles sandboxed under every config" \
+  bash -c '! grep -vx "test:tsan --strategy=TestRunner=local" "$1" |
+    grep -qE "^[^#]*strategy[^#]*(local|standalone)"' _ "$REPO/.bazelrc"
 
 check "bazel/BUILD.bazel declares the run_without_aslr binary" \
   grep -q 'name = "run_without_aslr"' "$REPO/bazel/BUILD.bazel"
