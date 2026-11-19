@@ -130,6 +130,12 @@ equals "an unchanged pin reuses its clone directory" "$OLD_DIR" \
 
 # ------------------------------------------------- BCR patch application
 
+if ! command -v jq >/dev/null; then
+  fail "jq is installed (bcr_patches and make-git-overrides need it)"
+fi
+equals "make-git-overrides applies patches via bcr_patches" 1 \
+  "$(grep -c 'for p in $(bcr_patches "$src")' "$REPO/scripts/make-git-overrides.sh")"
+
 # Bazel applies a source.json's patches in listed order, and one can depend on
 # another: opentracing-cpp's generate_headers.patch edits what
 # rules_cc_loads.patch wrote. Alphabetical order fails to apply.
