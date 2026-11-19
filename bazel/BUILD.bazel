@@ -1,13 +1,4 @@
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
-
-sh_test(
-    name = "bazelrc_strategy_test",
-    size = "small",
-    srcs = ["bazelrc_strategy_test.sh"],
-    args = ["$(rootpath //:.bazelrc)"],
-    data = ["//:.bazelrc"],
-)
 
 # Prefix for TSan tests (test:tsan --run_under). Lives here rather than under
 # scripts/ because that directory must stay unpackaged — root exports_files

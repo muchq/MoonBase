@@ -162,7 +162,7 @@ test:tsan --test_env=TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1
 # tests abort with "incompatible memory layout" or setarch EPERM before
 # any race check — asan/ubsan do not need them. Only TestRunner runs local:
 # compiles stay sandboxed, since the hermetic glibc does not build without
-# one (//bazel:bazelrc_strategy_test).
+# one (scripts/test-run-without-aslr).
 test:tsan --strategy=TestRunner=local
 test:tsan --run_under=//bazel:run_without_aslr
 
