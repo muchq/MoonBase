@@ -231,7 +231,9 @@ func firstToken(line string) string {
 }
 
 // serviceBlock returns the lines of one compose service, identified by its
-// two-space-indented key and continuing through every more-indented line.
+// two-space-indented key and continuing through every more-indented line. It
+// is the text as written: `<<: *anchor` merges stay unexpanded, unlike in
+// composeServiceLines.
 func serviceBlock(t *testing.T, name, service string) string {
 	t.Helper()
 	var block []string
@@ -771,9 +773,9 @@ func expandMerge(t *testing.T, line string, anchors map[string][]string) []strin
 		t.Fatalf("%q merges an anchor no top-level x- block defines", line)
 	}
 	pad := strings.Repeat(" ", len(line)-len(strings.TrimLeft(line, " "))-2)
-	expanded := make([]string, len(body))
-	for i, b := range body {
-		expanded[i] = pad + b
+	var expanded []string
+	for _, b := range body {
+		expanded = append(expanded, expandMerge(t, pad+b, anchors)...)
 	}
 	return expanded
 }
@@ -1772,39 +1774,6 @@ func gatesOnCompleted(t *testing.T, service, oneShot string) bool {
 		previous = trimmed
 	}
 	return false
-}
-
-// games_hub's boot runs its migrations against the database games_hub_db_init
-// provisions, so it gates on that one-shot the way one_d4 gates on its
-// migrate step: without the condition it races the provisioning and
-// crash-loops on a role that does not exist yet.
-func TestGamesHubGatesOnDbInitCompletedSuccessfully(t *testing.T) {
-	if !gatesOnCompleted(t, "games_hub", "games_hub_db_init") {
-		t.Errorf("games_hub does not gate on games_hub_db_init with "+
-			"service_completed_successfully (depends_on: %v).", dependsOn(t, "games_hub"))
-	}
-}
-
-// The init step is a one-shot: under `restart: always` it would exit 0 and be
-// brought straight back forever, and service_completed_successfully never
-// fires for a container that keeps restarting — games_hub would never start.
-func TestGamesHubDbInitIsAOneShot(t *testing.T) {
-	lines := composeServiceLines(t, "compose.yaml")["games_hub_db_init"]
-	if len(lines) == 0 {
-		t.Fatal("no games_hub_db_init service in compose.yaml — games_hub's depends_on gate " +
-			"has nothing to wait for.")
-	}
-	restart := ""
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "restart:") {
-			restart = strings.TrimSpace(strings.TrimPrefix(trimmed, "restart:"))
-		}
-	}
-	if restart != `"no"` {
-		t.Errorf("games_hub_db_init restart policy is %q, want \"no\": a one-shot under any "+
-			"other policy is a restart loop that never completes.", restart)
-	}
 }
 
 // The hub's password is read only from the host's ~/.env and interpolated into
@@ -3814,13 +3783,10 @@ func TestNoDeployConfigFallsBackToLatest(t *testing.T) {
 }
 
 // A password pasted into SQL by the shell is SQL: one containing a quote
-// breaks the statement, and a crafted one runs its own. The db_init steps hand
-// the value to psql as a variable (-v) and quote it with :'name', so the
-// shell expansion never sits on the line that builds the statement.
-//
-// The shell never expands the password at all: on psql's command line it is
-// readable by anyone on the host through ps, so psql reads it from its own
-// environment with \getenv.
+// breaks the statement, and a crafted one runs its own. On psql's command line
+// it is readable by anyone on the host through ps. So the shell never expands
+// it: psql reads it from its own environment with \getenv and quotes it with
+// :'pw'.
 var shellExpandedPassword = regexp.MustCompile(`\$\$\{?[A-Z0-9_]*PASSWORD`)
 
 func TestDbInitNeverPastesAPasswordIntoSql(t *testing.T) {
@@ -3919,50 +3885,69 @@ func TestInitializeHostKeepsTheScriptOffStdin(t *testing.T) {
 //
 // Every *_db_init step is the one x-db-init block with its own DB_NAME and
 // DB_PASSWORD, so a fix to the provisioning script, or a Postgres bump, is one
-// edit rather than one per database.
-func TestEveryDbInitStepIsTheSharedOne(t *testing.T) {
+// edit rather than one per database. The service named by the step's prefix
+// connects as role DB_NAME to database DB_NAME, and gates on the step
+// completing: without the gate it races the provisioning and crash-loops on a
+// role that does not exist yet.
+//
+// The step is a one-shot: under any restart policy but "no" it exits 0 and is
+// brought straight back, service_completed_successfully never fires, and the
+// service never starts.
+//
+// DB_NAME must not be the cluster's bootstrap superuser, which the step runs
+// as: it would set that role's password to the service's. The script refuses
+// at run time too; this catches it in review.
+func TestEveryDbInitStepProvisionsWhatItsServiceConnectsTo(t *testing.T) {
+	urlPattern := regexp.MustCompile(`postgresql://([^:@\s]+):[^@\s]*@[^/\s]+/([A-Za-z0-9_]+)`)
+	services := composeServiceLines(t, "compose.yaml")
+	bootstrap := ""
+	for _, line := range services["shared_postgres"] {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), "- POSTGRES_USER="); ok {
+			bootstrap = v
+		}
+	}
+	if bootstrap == "" {
+		t.Fatal("shared_postgres sets no POSTGRES_USER; this test is reading less than it claims")
+	}
+
 	steps := 0
-	for service := range composeServiceLines(t, "compose.yaml") {
-		if !strings.HasSuffix(service, "_db_init") {
+	for step, lines := range services {
+		service, ok := strings.CutSuffix(step, "_db_init")
+		if !ok {
 			continue
 		}
 		steps++
-		block := serviceBlock(t, "compose.yaml", service)
-		if !strings.Contains(block, "<<: *db-init") {
-			t.Errorf("%s does not merge the shared x-db-init step", service)
-		}
-		for _, own := range []string{"command:", "entrypoint:", "image:"} {
-			if strings.Contains(block, own) {
-				t.Errorf("%s declares its own %s; the shared step is the one script", service, own)
+
+		merged := false
+		for _, line := range strings.Split(serviceBlock(t, "compose.yaml", step), "\n") {
+			merged = merged || line == "<<: *db-init"
+			for _, own := range []string{"command:", "entrypoint:", "image:"} {
+				if strings.HasPrefix(line, own) {
+					t.Errorf("%s declares its own %s; the shared step is the one script", step, own)
+				}
 			}
 		}
-	}
-	if steps < 3 {
-		t.Fatalf("found %d db_init steps; this test is reading less than it claims", steps)
-	}
-}
-
-// The step creates a role and a database both named DB_NAME, and the service
-// that waits on it connects as that role to that database. A mismatch is a
-// healthy init and a service that cannot log in.
-func TestEachDbInitProvisionsWhatItsServiceConnectsTo(t *testing.T) {
-	urlPattern := regexp.MustCompile(`postgresql://([^:@\s]+):[^@\s]*@[^/\s]+/([A-Za-z0-9_]+)`)
-	pairs := map[string]string{
-		"games_hub": "games_hub_db_init",
-		"iili":      "iili_db_init",
-		"stats":     "stats_db_init",
-	}
-	services := composeServiceLines(t, "compose.yaml")
-	for service, step := range pairs {
-		if !gatesOnCompleted(t, service, step) {
-			t.Errorf("%s does not gate on %s completing", service, step)
+		if !merged {
+			t.Errorf("%s does not merge the shared x-db-init step", step)
 		}
-		name := ""
-		for _, line := range services[step] {
-			if v, ok := strings.CutPrefix(strings.TrimSpace(line), "DB_NAME:"); ok {
+
+		name, restart := "", ""
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if v, ok := strings.CutPrefix(trimmed, "DB_NAME:"); ok {
 				name = strings.TrimSpace(v)
 			}
+			if v, ok := strings.CutPrefix(trimmed, "restart:"); ok {
+				restart = strings.TrimSpace(v)
+			}
 		}
+		if restart != `"no"` {
+			t.Errorf("%s restart policy is %q, want \"no\"", step, restart)
+		}
+		if name == bootstrap {
+			t.Errorf("%s provisions DB_NAME %q, the bootstrap superuser", step, name)
+		}
+
 		var user, database string
 		for _, line := range services[service] {
 			if m := urlPattern.FindStringSubmatch(line); m != nil {
@@ -3973,5 +3958,12 @@ func TestEachDbInitProvisionsWhatItsServiceConnectsTo(t *testing.T) {
 			t.Errorf("%s provisions DB_NAME %q, but %s connects as %q to database %q",
 				step, name, service, user, database)
 		}
+		if !gatesOnCompleted(t, service, step) {
+			t.Errorf("%s does not gate on %s with service_completed_successfully "+
+				"(depends_on: %v)", service, step, dependsOn(t, service))
+		}
+	}
+	if steps < 3 {
+		t.Fatalf("found %d db_init steps; this test is reading less than it claims", steps)
 	}
 }
