@@ -13,7 +13,9 @@ x-default-logging: &default-logging
 # Idempotent, so it runs on every deploy, as the instance's bootstrap
 # superuser. The docker-entrypoint initdb.d hook can't do this: it only fires
 # on a fresh data volume. psql reads both values from its own environment, so
-# neither reaches SQL text or a command line.
+# neither passes through the shell or appears on a command line. It refuses a
+# DB_NAME that names a superuser or the role it runs as: that would hand the
+# service's password to the role that administers every database.
 x-db-init: &db-init
   image: postgres:18.7@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a
   restart: "no"
@@ -24,6 +26,10 @@ x-db-init: &db-init
       psql -v ON_ERROR_STOP=1 <<'SQL'
       \getenv name DB_NAME
       \getenv pw DB_PASSWORD
+      SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'name' AND (rolsuper OR rolname = current_user)) AS privileged \gset
+      \if :privileged
+        DO $$$$ BEGIN RAISE EXCEPTION 'DB_NAME names a superuser or the provisioning role'; END $$$$;
+      \endif
       SELECT NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'name') AS create_role \gset
       \if :create_role
         CREATE ROLE :"name" LOGIN;
@@ -40,6 +46,8 @@ x-db-init: &db-init
     shared_postgres:
       condition: service_healthy
 
+# Separate from x-db-init because a merge is shallow: each step's own
+# environment: replaces the whole map rather than adding to it.
 x-db-init-env: &db-init-env
   PGHOST: shared_postgres
   PGUSER: one_d4
