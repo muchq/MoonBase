@@ -170,7 +170,10 @@ if [ -n "$TARGET_SERVICE" ] && ! service_names | grep -qx "$TARGET_SERVICE"; the
 fi
 
 # One round trip; the host's .env is both the pin store and the secrets file.
-host_env=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'cat ~/.env' 2>/dev/null || true)
+# A host with no .env yet reads as empty; only a failed connection is unread.
+host_env_read=1
+host_env=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$HOST" 'cat ~/.env 2>/dev/null || true' 2>/dev/null) \
+  || host_env_read=0
 host_pin() { printf '%s\n' "$host_env" | sed -n "s/^$1=//p" | tail -1; }
 
 # What the host records is only the intent; the containers are the fact. They
@@ -399,6 +402,21 @@ elif [ "$deployed_sha" = "$DEPLOY_SHA" ]; then
   echo "(already the deployed revision)"
 fi
 
+# The pins below are carried over from what was read, so a deploy that could
+# not read them would rewrite the host's .env without them.
+if [ "$host_env_read" -ne 1 ]; then
+  echo "Error: could not read ~/.env on $HOST; deploying would drop its pins." >&2
+  exit 1
+fi
+
+# compose.yaml interpolates every service on every command and refuses
+# without DEPLOY_SHA, so one service cannot be deployed onto a host that has
+# never had the whole stack pinned.
+if [ -n "$TARGET_SERVICE" ] && [ -z "$(host_pin DEPLOY_SHA)" ]; then
+  echo "Error: $HOST has no DEPLOY_SHA pin. Run a full deploy first." >&2
+  exit 1
+fi
+
 if [ "$ASSUME_YES" -ne 1 ]; then
   printf 'Proceed? [y/N] '
   read -r reply || reply=""
@@ -446,8 +464,8 @@ fi
 
 # The scp below replaces the host's ~/.env wholesale, and the local copy holds
 # secrets only — so carry over the pins this deploy isn't replacing. Without
-# this a --service run drops DEPLOY_SHA, and every other service would come
-# back on :latest at the next reboot.
+# this a --service run drops DEPLOY_SHA, and compose would refuse to start
+# the stack at all.
 preserved_pins=""
 for var in $all_pin_vars; do
   case " $replaced_vars " in
