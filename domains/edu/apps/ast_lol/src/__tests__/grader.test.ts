@@ -49,6 +49,19 @@ describe('firstDiff', () => {
     expect(firstDiff([], {})).toMatchObject({ reason: 'expected array, got object' });
     expect(firstDiff(null, 'x')).toMatchObject({ reason: 'expected null, got string' });
   });
+
+  it('compares arrays by their elements, ignoring other properties', () => {
+    const tagged = Object.assign([1, 2], { note: 'extra' });
+    expect(firstDiff([1, 2], tagged)).toBeNull();
+  });
+
+  it('compares every own property of arrays when asked to', () => {
+    const tagged = Object.assign([1, 2], { note: 'extra' });
+    expect(firstDiff([1, 2], tagged, '', { arrayProperties: true })).toMatchObject({
+      path: '.note',
+      reason: "unexpected key 'note'",
+    });
+  });
 });
 
 describe('show / showPretty', () => {
@@ -178,6 +191,26 @@ describe('gradeSubmission', () => {
     );
     expect(report.status).toBe('pass');
     expect(shared.n).toBe(1);
+  });
+
+  describe('immutable inputs', () => {
+    const countItems = (immutableInputs: boolean) =>
+      challenge({
+        immutableInputs,
+        tests: [{ name: 'counts items', args: [[1, 2]], expected: 2 }],
+        solution: 'function f(items) { return items.length; }',
+      });
+    const tagsItsInput = js('function f(items) { items.seen = true; return items.length; }');
+
+    it('fails a correct answer that changed its input, naming where', () => {
+      const report = gradeSubmission(countItems(true), tagsItsInput);
+      expect(report.tests[0]).toMatchObject({ status: 'fail' });
+      expect(report.tests[0].message).toContain('Input changed at arguments[0].seen');
+    });
+
+    it('does not check challenges that make no such promise', () => {
+      expect(gradeSubmission(countItems(false), tagsItsInput).status).toBe('pass');
+    });
   });
 
   it('flags a returned Promise as asynchronous', () => {

@@ -133,7 +133,7 @@ function runEntry(call: Entry, args: unknown[], immutable = false): RunOutcome {
   }
   if (immutable) {
     try {
-      const diff = firstDiff(args, input);
+      const diff = firstDiff(args, input, '', { arrayProperties: true });
       if (diff !== null) outcome.mutationPath = `arguments${diff.path}`;
     } catch {
       outcome.mutationPath = 'arguments (the input structure can no longer be compared)';

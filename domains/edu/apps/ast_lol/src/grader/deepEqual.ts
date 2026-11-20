@@ -13,6 +13,9 @@ export interface Diff {
   reason: string;
 }
 
+const nonIndexProperties = (array: unknown[]): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(array).filter(([key]) => !/^(0|[1-9]\d*)$/.test(key)));
+
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
@@ -22,13 +25,27 @@ function typeName(v: unknown): string {
   return typeof v;
 }
 
+export interface DiffOptions {
+  /**
+   * Also compare an array's non-index own properties. Results are compared by
+   * their elements; the immutability check needs every property, since a
+   * submission can change an input array without touching its elements.
+   */
+  arrayProperties?: boolean;
+}
+
 /**
  * First structural difference between expected and actual, or null when
  * deep-equal. Object key order is insignificant; a key holding undefined
  * and a missing key are different (that distinction bites in AST shapes:
  * `alias: null` is part of the contract, `alias: undefined` is a bug).
  */
-export function firstDiff(expected: unknown, actual: unknown, path = ''): Diff | null {
+export function firstDiff(
+  expected: unknown,
+  actual: unknown,
+  path = '',
+  options: DiffOptions = {},
+): Diff | null {
   if (Object.is(expected, actual)) return null;
 
   if (typeName(expected) !== typeName(actual)) {
@@ -50,17 +67,11 @@ export function firstDiff(expected: unknown, actual: unknown, path = ''): Diff |
       };
     }
     for (let i = 0; i < expected.length; i++) {
-      const diff = firstDiff(expected[i], actual[i], `${path}[${i}]`);
+      const diff = firstDiff(expected[i], actual[i], `${path}[${i}]`, options);
       if (diff !== null) return diff;
     }
-    // Arrays may also carry own properties. Include them so an immutable
-    // input contract cannot overlook additions to an argument array.
-    const extra = (array: unknown[]) => Object.fromEntries(
-      Object.entries(array).filter(([key]) => !/^(0|[1-9]\d*)$/.test(key)),
-    );
-    const extraDiff = firstDiff(extra(expected), extra(actual), path);
-    if (extraDiff !== null) return extraDiff;
-    return null;
+    if (!options.arrayProperties) return null;
+    return firstDiff(nonIndexProperties(expected), nonIndexProperties(actual), path, options);
   }
 
   if (isPlainObject(expected) && isPlainObject(actual)) {
@@ -85,7 +96,7 @@ export function firstDiff(expected: unknown, actual: unknown, path = ''): Diff |
       }
     }
     for (const key of Object.keys(expected)) {
-      const diff = firstDiff(expected[key], actual[key], `${path}.${key}`);
+      const diff = firstDiff(expected[key], actual[key], `${path}.${key}`, options);
       if (diff !== null) return diff;
     }
     return null;
