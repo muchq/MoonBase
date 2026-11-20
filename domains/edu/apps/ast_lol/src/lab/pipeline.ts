@@ -31,7 +31,7 @@ export function inspectPipeline(language: LabLanguage, source: string) {
   try {
     if (source.length > labLimits.maxSourceLength) {
       throw new Error(
-        `Keep lab examples under ${labLimits.maxSourceLength.toLocaleString()} characters.`,
+        `Keep lab examples under ${labLimits.maxSourceLength.toLocaleString('en-US')} characters.`,
       );
     }
     return language === 'expr' ? inspectExpr(source) : inspectSql(source);
