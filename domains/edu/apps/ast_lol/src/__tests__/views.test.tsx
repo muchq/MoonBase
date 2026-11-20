@@ -224,9 +224,10 @@ describe('ChallengeView', () => {
 
   it('shows provided code for challenges with a prelude', () => {
     at('/challenge/sql-select-parse');
-    const provided = screen.getByText(/Provided code/);
-    expect(provided).toBeInTheDocument();
-    expect(provided.closest('details')?.textContent).toContain('function parseExprFrom');
+    const provided = screen.getByText(/Provided code/).closest('details');
+    expect(provided?.querySelector('pre code')?.textContent).toBe(
+      challengeById('sql-select-parse')!.prelude,
+    );
   });
 
   it('editing back to the exact starter clears the draft without Reset', async () => {
