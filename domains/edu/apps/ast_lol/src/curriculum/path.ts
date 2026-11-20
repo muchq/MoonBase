@@ -11,6 +11,11 @@ export function learningPath(track: ProgressState['track']): Step[] {
     .filter((t) => t.number <= 3 || (track === 'formatter' ? t.id === 'tier6' : t.id !== 'tier6'))
     .flatMap((t) => t.steps);
 }
+/**
+ * Whether Continue moves past a step. A challenge must be solved. A lesson
+ * only needs reading: its checks are optional practice, and answering them
+ * is what marks the lesson completed.
+ */
 export function stepFinished(step: Step, progress: ProgressState): boolean {
   return (
     progress.completed[stepId(step)] !== undefined ||

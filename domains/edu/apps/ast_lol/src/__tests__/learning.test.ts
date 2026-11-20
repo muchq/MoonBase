@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { lessonPractice, practiceKey } from '../curriculum/learning';
-import { learningPath, pathForStep } from '../curriculum/path';
-import { lessons, stepId } from '../curriculum/registry';
+import { learningPath, pathForStep, stepFinished } from '../curriculum/path';
+import { lessons, orderedSteps, stepId } from '../curriculum/registry';
+import { getProgress, markCompleted, markRead, resetProgressForTests } from '../state/progress';
 
 describe('learning paths', () => {
   const shared = [
@@ -97,5 +98,22 @@ describe('lesson checks', () => {
   it.each(Object.entries(lessonPractice))('%s: no two questions share a key', (lesson, checks) => {
     const keys = checks.map((check) => practiceKey(lesson, check));
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+describe('when Continue moves past a step', () => {
+  const step = (id: string) => orderedSteps.find((s) => stepId(s) === id)!;
+  const finished = (id: string) => stepFinished(step(id), getProgress());
+
+  it.each([
+    ['an untouched lesson', false, 'tokens', () => {}],
+    ['a lesson read without answering its checks', true, 'tokens', () => markRead('tokens')],
+    ['a completed lesson', true, 'tokens', () => markCompleted('tokens')],
+    ['a challenge only marked read', false, 'expr-tokenize', () => markRead('expr-tokenize')],
+    ['a solved challenge', true, 'expr-tokenize', () => markCompleted('expr-tokenize')],
+  ] as const)('%s: moves on is %s', (_label, expected, id, record) => {
+    resetProgressForTests();
+    record();
+    expect(finished(id)).toBe(expected);
   });
 });
