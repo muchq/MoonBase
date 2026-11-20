@@ -534,7 +534,7 @@ jobs:
         working-directory: domains/iili/apps/iili_web
         run: npm run build
 
-  # ast_lol uses npm/Vite; always run typecheck, tests, and build on every PR.
+  # ast_lol uses npm/Vite; always run typecheck, tests, build and browser tests on every PR.
   test-ast-lol:
     runs-on: ubuntu-latest
     steps:
@@ -561,6 +561,15 @@ jobs:
       - name: Build
         working-directory: domains/edu/apps/ast_lol
         run: npm run build
+
+      # The real editor and grading worker, which jsdom cannot run.
+      - name: Install Chromium
+        working-directory: domains/edu/apps/ast_lol
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser tests
+        working-directory: domains/edu/apps/ast_lol
+        run: npm run test:browser
 
   # iOS targets can't build on Ubuntu; run Swift tests on macOS when relevant files change.
   test-ios:
