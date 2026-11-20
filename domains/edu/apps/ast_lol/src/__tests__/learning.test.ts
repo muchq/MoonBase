@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lessonPractice } from '../curriculum/learning';
+import { lessonPractice, practiceKey } from '../curriculum/learning';
 import { learningPath, pathForStep } from '../curriculum/path';
 import { lessons, stepId } from '../curriculum/registry';
 
@@ -86,4 +86,16 @@ describe('lesson checks', () => {
       }
     },
   );
+
+  // Saved answers are keyed by question, so reordering or inserting questions
+  // keeps each answer with its own question.
+  it('keys a saved answer by its lesson and question text', () => {
+    const [first] = lessonPractice.tokens;
+    expect(practiceKey('tokens', first)).toBe(`tokens:${first.question}`);
+  });
+
+  it.each(Object.entries(lessonPractice))('%s: no two questions share a key', (lesson, checks) => {
+    const keys = checks.map((check) => practiceKey(lesson, check));
+    expect(new Set(keys).size).toBe(keys.length);
+  });
 });

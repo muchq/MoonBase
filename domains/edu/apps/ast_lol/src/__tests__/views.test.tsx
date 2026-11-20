@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import App from '../App';
 import { challengeById, challenges, lessons, stepId, tiers } from '../curriculum/registry';
+import { lessonPractice, practiceKey } from '../curriculum/learning';
 import { learningPath, stepTitle } from '../curriculum/path';
 import type { GradeReport } from '../grader/types';
 import {
@@ -84,38 +85,37 @@ describe('HomeView step status', () => {
   const challengeTitle = challengeById('expr-tokenize')!.title;
 
   it.each([
-    ['nothing yet', () => {}, null],
-    ['opened', () => markVisited('tokens'), 'Visited'],
-    ['marked as read', () => markRead('tokens'), 'Read'],
-    ['completed before reading checks existed', () => markCompleted('tokens'), 'Previously completed'],
+    ['nothing yet', null, () => {}],
+    ['opened', 'Visited', () => markVisited('tokens')],
+    ['marked as read', 'Read', () => markRead('tokens')],
+    ['completed before reading checks existed', 'Previously completed', () => markCompleted('tokens')],
     [
       'completed with every check answered',
+      'Practiced',
       () => {
         markCompleted('tokens');
-        markPracticed('tokens:0');
-        markPracticed('tokens:1');
+        for (const check of lessonPractice.tokens) markPracticed(practiceKey('tokens', check));
       },
-      'Practiced',
     ],
-  ])('a lesson %s shows %s', (_, record, status) => {
+  ])('a lesson %s shows %s', (_, status, record) => {
     record();
     at('/');
     expect(statusOf(lessonTitle)).toBe(status);
   });
 
   it.each([
-    ['nothing yet', () => {}, null],
-    ['whose reference was opened', () => markStudied('expr-tokenize'), 'Reference consulted'],
-    ['solved', () => markCompleted('expr-tokenize'), 'Solved'],
+    ['nothing yet', null, () => {}],
+    ['whose reference was opened', 'Reference consulted', () => markStudied('expr-tokenize')],
+    ['solved', 'Solved', () => markCompleted('expr-tokenize')],
     [
       'solved after opening the reference',
+      'Solved · reference consulted',
       () => {
         markStudied('expr-tokenize');
         markCompleted('expr-tokenize');
       },
-      'Solved · reference consulted',
     ],
-  ])('a challenge %s shows %s', (_, record, status) => {
+  ])('a challenge %s shows %s', (_, status, record) => {
     record();
     at('/');
     expect(statusOf(challengeTitle)).toBe(status);
@@ -280,9 +280,11 @@ describe('learning experience', () => {
     const checks = screen.getAllByRole('group');
     await user.click(within(checks[0]).getByRole('radio', { name: 'Five' }));
     await user.click(within(checks[0]).getByRole('button', { name: 'Check reasoning' }));
-    expect(getProgress().practiced['tokens:0']).toBeUndefined();
+    const firstKey = practiceKey('tokens', lessonPractice.tokens[0]);
+    expect(getProgress().practiced[firstKey]).toBeUndefined();
     await user.click(within(checks[0]).getByRole('radio', { name: 'Three' }));
     await user.click(within(checks[0]).getByRole('button', { name: 'Check reasoning' }));
+    expect(getProgress().practiced[firstKey]).toBeDefined();
     await user.click(
       within(checks[1]).getByRole('radio', {
         name: 'To consume a decimal point only when a digit follows',

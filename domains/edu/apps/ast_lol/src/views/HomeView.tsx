@@ -1,7 +1,7 @@
 import { Link } from 'react-router';
 import { challenges, stepId, tiers } from '../curriculum/registry';
 import { learningPath, stepFinished, stepPath, stepTitle } from '../curriculum/path';
-import { tierGuide, lessonPractice } from '../curriculum/learning';
+import { lessonPractice, practiceKey, tierGuide } from '../curriculum/learning';
 import type { Step, Tier } from '../curriculum/types';
 import { setTrack, useProgress } from '../state/progress';
 
@@ -13,7 +13,7 @@ function StepCard({ step }: { step: Step }) {
   const visited = progress.visited[id] !== undefined;
   const studied = progress.studied[id] !== undefined;
   const practiced = (lessonPractice[id] ?? []).every(
-    (_, i) => progress.practiced[`${id}:${i}`] !== undefined,
+    (check) => progress.practiced[practiceKey(id, check)] !== undefined,
   );
   const status = solved
     ? step.kind === 'lesson'

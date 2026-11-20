@@ -322,3 +322,11 @@ export const tierGuide: Record<string, { outcome: string; prerequisites: string;
       effort: '3–5 hours',
     },
   };
+
+/**
+ * Where a lesson check's answer is saved. Keyed by the question text rather
+ * than its position, so reordering or adding questions keeps each saved
+ * answer with its own question.
+ */
+export const practiceKey = (lessonId: string, check: PracticeCheck): string =>
+  `${lessonId}:${check.question}`;

@@ -1,22 +1,20 @@
 import { useState } from 'react';
-import { lessonPractice, type PracticeCheck } from '../curriculum/learning';
+import { lessonPractice, practiceKey, type PracticeCheck } from '../curriculum/learning';
 import { getProgress, markCompleted, markPracticed, useProgress } from '../state/progress';
 
 function Question({
   item,
-  index,
   lessonId,
   onPass,
 }: {
   item: PracticeCheck;
-  index: number;
   lessonId: string;
   onPass: () => void;
 }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [checked, setChecked] = useState(false);
   const progress = useProgress();
-  const key = `${lessonId}:${index}`;
+  const key = practiceKey(lessonId, item);
   const passed = progress.practiced[key] !== undefined;
   return (
     <fieldset className="practice-question">
@@ -66,15 +64,15 @@ export default function LessonPractice({ lessonId }: { lessonId: string }) {
   const items = lessonPractice[lessonId] ?? [];
   if (!items.length) return null;
   const onPass = () => {
-    if (items.every((_, i) => getProgress().practiced[`${lessonId}:${i}`] !== undefined))
+    if (items.every((item) => getProgress().practiced[practiceKey(lessonId, item)] !== undefined))
       markCompleted(lessonId);
   };
   return (
     <section className="lesson-practice" aria-labelledby="practice-heading">
       <h3 id="practice-heading">Check your understanding</h3>
       <p>Predict before running code. These checks are optional; your practice is saved.</p>
-      {items.map((item, index) => (
-        <Question key={`${lessonId}:${index}`} {...{ item, index, lessonId, onPass }} />
+      {items.map((item) => (
+        <Question key={practiceKey(lessonId, item)} {...{ item, lessonId, onPass }} />
       ))}
     </section>
   );
