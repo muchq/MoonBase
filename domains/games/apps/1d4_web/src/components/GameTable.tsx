@@ -9,10 +9,8 @@ import GameDetailPanel from './GameDetailPanel';
 // sit beside the player names, so the table fits a laptop-width screen without
 // scrolling. Click the row for everything else.
 const COLUMNS = [
-  // Narrow, and kept despite the note above about column count: the two that
-  // were removed were the game URL and a timestamp, both wide. A site name is
-  // not, and without it two players sharing a handle across platforms read as
-  // the same person (#1540).
+  // Without it two players sharing a handle across platforms read as the same
+  // person (#1540).
   { id: 'platform', label: 'Site', sort: true },
   { id: 'whiteUsername', label: 'White', sort: true },
   { id: 'blackUsername', label: 'Black', sort: true },
@@ -26,6 +24,35 @@ const COLUMNS = [
 // Badges past this collapse into a "+N" counter, keeping every row one line
 // tall; the detail panel lists them all.
 const VISIBLE_MOTIFS = 2;
+
+// Which motifs earn the visible slots, most significant first. Unlisted motifs
+// follow in the server's order.
+const MOTIF_RANK = [
+  'checkmate',
+  'smothered_mate',
+  'back_rank_mate',
+  'promotion_with_checkmate',
+  'double_check',
+  'discovered_check',
+  'fork',
+  'skewer',
+  'cross_pin',
+  'discovered_attack',
+  'pin',
+  'promotion_with_check',
+  'promotion',
+];
+
+function rankMotifs(labels: string[]): string[] {
+  const rank = (l: string) => {
+    const i = MOTIF_RANK.indexOf(l);
+    return i < 0 ? MOTIF_RANK.length : i;
+  };
+  // Array.prototype.sort is stable, so ties keep the server's order.
+  return [...labels].sort((a, b) => rank(a) - rank(b));
+}
+
+const motifName = (label: string) => label.replace(/_/g, ' ');
 
 // Unrated games store 0, so 0 renders like a missing rating: not at all.
 function Rating({ elo }: { elo: number | null }) {
@@ -96,7 +123,7 @@ function renderCell(
         </>
       );
     case 'motifs': {
-      const labels = Object.keys(game.occurrences ?? {});
+      const labels = rankMotifs(Object.keys(game.occurrences ?? {}));
       const hidden = labels.slice(VISIBLE_MOTIFS);
       return (
         <span className="motifs">
@@ -109,10 +136,14 @@ function renderCell(
           ))}
           {hidden.length > 0 && (
             <span
-              className="motif-badge motif-more"
-              title={hidden.map((l) => l.replace(/_/g, ' ')).join(', ')}
+              className="motif-badge"
+              title={hidden.map(motifName).join(', ')}
             >
               +{hidden.length}
+              <span className="sr-only">
+                {' more: '}
+                {hidden.map(motifName).join(', ')}
+              </span>
             </span>
           )}
         </span>

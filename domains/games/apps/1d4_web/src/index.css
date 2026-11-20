@@ -281,20 +281,15 @@ tr.selected td {
   gap: 0.25rem;
 }
 
-/* In the table the cell has a fixed budget whatever the motif names are: long
-   badges ellipsize (the title still has them) and the counter never shrinks. */
-td .motifs {
-  max-width: 13rem;
-}
-
+/* In the table each badge has a fixed width budget, so the cell's width is
+   bounded whatever the motif names are. Short names fit whole; long ones
+   ellipsize (their title leads with the name). Nothing shrinks, so "fork" is
+   never cut to make room for a long neighbour. */
 td .motifs .motif-badge {
-  min-width: 0;
+  flex-shrink: 0;
+  max-width: 6rem;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-td .motifs .motif-more {
-  flex-shrink: 0;
 }
 
 .motif-badge {
@@ -453,7 +448,6 @@ td .motifs .motif-more {
 .month-picker-year {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  line-height: 1;
 }
 
 .month-picker-step {

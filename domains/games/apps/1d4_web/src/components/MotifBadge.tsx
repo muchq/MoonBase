@@ -6,16 +6,18 @@ interface Props {
 }
 
 export default function MotifBadge({ label, occurrences }: Props) {
-  const title =
-    occurrences && occurrences.length > 0
-      ? occurrences
-          .map((o) => `Move ${o.moveNumber} (${o.side}): ${o.description}`)
-          .join('\n')
-      : undefined;
+  const name = label.replace(/_/g, ' ');
+  // Led by the name: in the table a long badge is ellipsized.
+  const title = [
+    name,
+    ...(occurrences ?? []).map(
+      (o) => `Move ${o.moveNumber} (${o.side}): ${o.description}`
+    ),
+  ].join('\n');
 
   return (
     <span className="motif-badge" title={title}>
-      {label.replace(/_/g, ' ')}
+      {name}
     </span>
   );
 }
