@@ -216,8 +216,11 @@ describe('test banks catch common mistakes', () => {
     '%s: changing an input it promises not to change',
     (_id, c) => {
       const report = gradeSubmission(c, { language: 'javascript', code: mutatesItsInput(c) });
+      const messages = new Set(report.tests.map((t) => t.message));
       expect(report.status).toBe('fail');
-      expect(report.tests.some((t) => t.message?.includes('Input changed'))).toBe(true);
+      expect([...messages]).toEqual([
+        'Input changed at arguments[0].mutated. Rebuild changed nodes instead of mutating the input.',
+      ]);
     },
   );
 });

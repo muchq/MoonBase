@@ -203,9 +203,11 @@ describe('gradeSubmission', () => {
     const tagsItsInput = js('function f(items) { items.seen = true; return items.length; }');
 
     it('fails a correct answer that changed its input, naming where', () => {
-      const report = gradeSubmission(countItems(true), tagsItsInput);
-      expect(report.tests[0]).toMatchObject({ status: 'fail' });
-      expect(report.tests[0].message).toContain('Input changed at arguments[0].seen');
+      const [result] = gradeSubmission(countItems(true), tagsItsInput).tests;
+      expect(result.status).toBe('fail');
+      expect(result.message).toBe(
+        'Input changed at arguments[0].seen. Rebuild changed nodes instead of mutating the input.',
+      );
     });
 
     it('does not check challenges that make no such promise', () => {
