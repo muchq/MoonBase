@@ -193,6 +193,34 @@ describe('gradeSubmission', () => {
     expect(shared.n).toBe(1);
   });
 
+  describe('custom inputs the grader cannot print', () => {
+    // Result panes and the mutation check both print the input as JSON.
+    const passThrough = (immutableInputs: boolean) =>
+      challenge({
+        immutableInputs,
+        solution: 'function f(x) { return 1; }',
+        tests: [{ name: 'built in', args: [0], expected: 1 }],
+        custom: { describe: 'any value', placeholder: '0', toArgs: (values) => values },
+      });
+    const unprintable =
+      "Could not build this test's input: it must print as JSON, so no BigInt values or cycles";
+    const cycle = '(() => { const o = {}; o.self = o; return o; })()';
+
+    it.each([
+      ['a BigInt', '1n', false],
+      ['a cycle', cycle, false],
+      ['a cycle, on a challenge that checks for mutation', cycle, true],
+    ] as const)('reports %s as an input error, keeping every other result', (_, source, immutable) => {
+      const report = gradeSubmission(passThrough(immutable), js('function f(x) { return 1; }'), [
+        { id: 'custom-1', name: 'mine', source },
+      ]);
+      expect(report.tests.map((t) => [t.name, t.status, t.message])).toEqual([
+        ['built in', 'pass', undefined],
+        ['mine', 'error', unprintable],
+      ]);
+    });
+  });
+
   describe('immutable inputs', () => {
     const countItems = (immutableInputs: boolean) =>
       challenge({

@@ -336,12 +336,21 @@ export function gradeSubmission(
       emit(inputError(id, custom, spec.name, e));
       return;
     }
+    // The input pane and the mutation check both print the input as JSON.
+    let inputText: string;
+    try {
+      inputText = showPretty(args);
+    } catch {
+      const unprintable = new Error('it must print as JSON, so no BigInt values or cycles');
+      emit(inputError(id, custom, spec.name, unprintable));
+      return;
+    }
     const logs: string[] = [];
     compiled.setSink(logs);
     const outcome = runEntry(compiled.call!, args, challenge.immutableInputs);
     compiled.setSink(null);
     const graded = gradeOutcome(spec, outcome, args, oracle, codeLines, headerLines);
-    emit({ id, custom, logs, inputText: showPretty(args), ...graded });
+    emit({ id, custom, logs, inputText, ...graded });
   };
 
   challenge.tests.forEach((spec, i) => {
