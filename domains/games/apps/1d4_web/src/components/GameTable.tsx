@@ -5,10 +5,9 @@ import MotifBadge from './MotifBadge';
 import GameDetailPanel from './GameDetailPanel';
 
 
-// The game link and indexed-at timestamp live in GameDetailPanel instead of
-// here — eleven columns left the motifs column, the one that actually needs
-// room, squeezed to nothing on a laptop-width screen. Click the row to get
-// both back.
+// The game link and indexed-at timestamp live in GameDetailPanel, and ratings
+// sit beside the player names, so the table fits a laptop-width screen without
+// scrolling. Click the row for everything else.
 const COLUMNS = [
   // Narrow, and kept despite the note above about column count: the two that
   // were removed were the game URL and a timestamp, both wide. A site name is
@@ -17,8 +16,6 @@ const COLUMNS = [
   { id: 'platform', label: 'Site', sort: true },
   { id: 'whiteUsername', label: 'White', sort: true },
   { id: 'blackUsername', label: 'Black', sort: true },
-  { id: 'whiteElo', label: 'White ELO', sort: true },
-  { id: 'blackElo', label: 'Black ELO', sort: true },
   { id: 'timeClass', label: 'Time', sort: true },
   { id: 'eco', label: 'ECO', sort: true },
   { id: 'result', label: 'Result', sort: true },
@@ -26,8 +23,13 @@ const COLUMNS = [
   { id: 'motifs', label: 'Motifs', sort: false },
 ];
 
-function formatElo(v: number | null): string {
-  return v != null ? String(v) : '—';
+// Badges past this collapse into a "+N" counter, keeping every row one line
+// tall; the detail panel lists them all.
+const VISIBLE_MOTIFS = 2;
+
+// Unrated games store 0, so 0 renders like a missing rating: not at all.
+function Rating({ elo }: { elo: number | null }) {
+  return elo ? <span className="rating">{elo}</span> : null;
 }
 
 function formatDate(val: string | number | null | undefined): string {
@@ -60,42 +62,62 @@ function renderCell(
     // pointer. A real <button> buys Enter/Space and expand/collapse state for
     // free, and costs no column width.
     case 'whiteUsername':
-      return toggle ? (
-        <button
-          type="button"
-          className="row-toggle"
-          ref={toggle.register}
-          aria-expanded={toggle.isExpanded}
-          // Only while the panel exists: aria-controls pointing at an absent
-          // id is a dangling reference.
-          aria-controls={toggle.isExpanded ? toggle.panelId : undefined}
-          onClick={(e) => {
-            // Without this the row handler fires too and toggles a second
-            // time, landing back exactly where it started.
-            e.stopPropagation();
-            toggle.onToggle();
-          }}
-        >
-          {game.whiteUsername}
-        </button>
-      ) : (
-        game.whiteUsername
+      return (
+        <>
+          {toggle ? (
+            <button
+              type="button"
+              className="row-toggle"
+              ref={toggle.register}
+              aria-expanded={toggle.isExpanded}
+              // Only while the panel exists: aria-controls pointing at an
+              // absent id is a dangling reference.
+              aria-controls={toggle.isExpanded ? toggle.panelId : undefined}
+              onClick={(e) => {
+                // Without this the row handler fires too and toggles a second
+                // time, landing back exactly where it started.
+                e.stopPropagation();
+                toggle.onToggle();
+              }}
+            >
+              {game.whiteUsername}
+            </button>
+          ) : (
+            game.whiteUsername
+          )}
+          <Rating elo={game.whiteElo} />
+        </>
       );
-    case 'motifs':
+    case 'blackUsername':
+      return (
+        <>
+          {game.blackUsername}
+          <Rating elo={game.blackElo} />
+        </>
+      );
+    case 'motifs': {
+      const labels = Object.keys(game.occurrences ?? {});
+      const hidden = labels.slice(VISIBLE_MOTIFS);
       return (
         <span className="motifs">
-          {Object.keys(game.occurrences ?? {}).map((label) => (
+          {labels.slice(0, VISIBLE_MOTIFS).map((label) => (
             <MotifBadge
               key={label}
               label={label}
               occurrences={game.occurrences?.[label]}
             />
           ))}
+          {hidden.length > 0 && (
+            <span
+              className="motif-badge motif-more"
+              title={hidden.map((l) => l.replace(/_/g, ' ')).join(', ')}
+            >
+              +{hidden.length}
+            </span>
+          )}
         </span>
       );
-    case 'whiteElo':
-    case 'blackElo':
-      return formatElo(g[colId] as number | null);
+    }
     case 'playedAt':
       return formatDate(g[colId] as string | number | null);
     default:

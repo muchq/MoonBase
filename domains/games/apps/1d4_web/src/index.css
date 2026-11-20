@@ -191,31 +191,27 @@ table {
   font-size: 0.875rem;
 }
 
-/* The games table carries nine columns (the game link and indexed-at date
-   moved into GameDetailPanel — see GameTable.tsx). This is a floor, not the
-   thing keeping badges intact: because the `nowrap` rule below makes every
-   cell's min-content its full text, the table's own intrinsic minimum already
-   sits near this value — measured 816px with short usernames and 993px with
-   ones like `only_strong_moves`, against the 832px below. So it binds only at
-   the short end, and what actually stops a badge being cut mid-word is
-   `white-space: nowrap` on `.motif-badge`. Kept because the short-username
-   case is real, and scoped to this table so the shorter index-requests table
-   still fits a phone without a scrollbar. */
+/* A floor for the games table, so on a narrow screen the wrapper scrolls
+   instead of crushing columns. Scoped to this table so the shorter
+   index-requests table still fits a phone without a scrollbar. */
 .table-wrap--wide table {
   min-width: 52rem;
 }
 
 /* Every value in this table is an atom — a username, an ELO, an ISO date. None
    of them mean anything broken across two lines, and "2026-07-" over "25" is
-   what a squeezed column produces before the min-width above can catch it. The
-   motifs cell opts back in: it is a flex container whose badges are meant to
-   wrap, just never mid-badge. */
+   what a squeezed column produces before the min-width above can catch it. */
 .table-wrap--wide td {
   white-space: nowrap;
 }
 
-.table-wrap--wide td .motifs {
-  white-space: normal;
+/* A rating reads as an annotation on the name beside it. */
+.rating {
+  margin-left: 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 /* The Site column reads as secondary: it disambiguates the row, it is not what
@@ -281,8 +277,24 @@ tr.selected td {
 /* Motif badges */
 .motifs {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.25rem;
+}
+
+/* In the table the cell has a fixed budget whatever the motif names are: long
+   badges ellipsize (the title still has them) and the counter never shrinks. */
+td .motifs {
+  max-width: 13rem;
+}
+
+td .motifs .motif-badge {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+td .motifs .motif-more {
+  flex-shrink: 0;
 }
 
 .motif-badge {
@@ -293,6 +305,9 @@ tr.selected td {
   font-size: 0.75rem;
   font-weight: 500;
   color: var(--text-muted);
+  /* Short enough to sit inside a plain text line, so a row with badges is no
+     taller than one without. */
+  line-height: 1.25;
   /* A badge is one token. Without this "discovered attack" breaks across two
      lines inside its own pill and the second word hangs outside the cell. */
   white-space: nowrap;
@@ -438,6 +453,7 @@ tr.selected td {
 .month-picker-year {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 .month-picker-step {
