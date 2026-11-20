@@ -368,10 +368,12 @@ method) still answer on any path; that is by design, not fall-through.
 ## The shared database
 
 `shared_postgres` is the one Postgres instance on the host. `one_d4`,
-`games_hub` and `iili` each keep a database on it; `games_hub_db_init` and
-`iili_db_init` provision their roles and databases on every deploy
-(idempotently — the `docker-entrypoint-initdb.d` hook only fires on a
-fresh volume).
+`games_hub`, `iili` and (under the `stats` profile) `stats` each keep a
+database on it. Each `*_db_init` step is the shared `x-db-init` block in
+`compose.yaml` with its own `DB_NAME`: on every deploy it creates that role and
+database if missing and sets the role's password (idempotently — the
+`docker-entrypoint-initdb.d` hook only fires on a fresh volume). It refuses a
+`DB_NAME` that names a superuser.
 Queries for games_hub's rooms, members, tables and chat are in its
 [README](../../domains/games/apis/games_hub/README.md#ops-rooms-in-postgres).
 
