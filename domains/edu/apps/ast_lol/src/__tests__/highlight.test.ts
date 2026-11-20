@@ -8,7 +8,11 @@ const classesOf = (code: string, lang: string, text: string) =>
 describe('highlightSpans', () => {
   it('splits code into spans that reassemble to the source exactly', () => {
     const code = 'function f(x) {\n  return x + 1; // done\n}\n';
-    expect(highlightSpans(code).map((span) => span.text).join('')).toBe(code);
+    expect(
+      highlightSpans(code)
+        .map((span) => span.text)
+        .join(''),
+    ).toBe(code);
   });
 
   it('styles JavaScript keywords', () => {

@@ -1,4 +1,11 @@
-import { walkChallenge, rowExprChallenge, joinChallenge, sortChallenge, predicateChallenge, counterexampleChallenge } from './practice';
+import {
+  counterexampleChallenge,
+  joinChallenge,
+  predicateChallenge,
+  rowExprChallenge,
+  sortChallenge,
+  walkChallenge,
+} from './practice';
 import { tier1 } from './tier1';
 import { tier2 } from './tier2';
 import { tier3 } from './tier3';
@@ -40,15 +47,23 @@ const tier0: Tier = {
   ],
 };
 
-const extraSteps: Record<string, ChallengeDef[]> = {
-  traversal: [walkChallenge], execution: [rowExprChallenge, joinChallenge, sortChallenge],
-  optimizers: [predicateChallenge], 'sql-optimize': [counterexampleChallenge],
+/** Practice challenges, each placed right after the step (by id) it drills. */
+const practiceAfter: Record<string, ChallengeDef[]> = {
+  traversal: [walkChallenge],
+  execution: [rowExprChallenge, joinChallenge, sortChallenge],
+  optimizers: [predicateChallenge],
+  'sql-optimize': [counterexampleChallenge],
 };
-export const tiers: Tier[] = [tier0, tier1, tier2, tier3, tier4, tier5, tier6].map(tier => ({
+
+export const tiers: Tier[] = [tier0, tier1, tier2, tier3, tier4, tier5, tier6].map((tier) => ({
   ...tier,
-  steps: tier.steps.flatMap(step => {
+  steps: tier.steps.flatMap((step) => {
     const id = step.kind === 'lesson' ? step.lesson.id : step.challenge.id;
-    return [step, ...(extraSteps[id] ?? []).map(challenge => ({ kind: 'challenge' as const, challenge }))];
+    const practice = (practiceAfter[id] ?? []).map((challenge) => ({
+      kind: 'challenge' as const,
+      challenge,
+    }));
+    return [step, ...practice];
   }),
 }));
 

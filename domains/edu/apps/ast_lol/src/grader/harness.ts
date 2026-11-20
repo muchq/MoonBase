@@ -153,7 +153,14 @@ function gradeOutcome(
   const { name, hint } = spec;
 
   if (outcome.mutationPath !== undefined) {
-    return { name, status: 'fail', message: `Input changed at ${outcome.mutationPath}. Rebuild changed nodes instead of mutating the input.`, hint };
+    return {
+      name,
+      status: 'fail',
+      message:
+        `Input changed at ${outcome.mutationPath}. ` +
+        'Rebuild changed nodes instead of mutating the input.',
+      hint,
+    };
   }
 
   if (spec.throws !== undefined) {

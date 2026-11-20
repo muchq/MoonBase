@@ -205,36 +205,40 @@ describe('learning experience', () => {
   it('persists a theme choice and applies it to the document', async () => {
     const user = userEvent.setup();
     at('/');
-    await user.selectOptions(screen.getByRole('combobox', {name:'Theme'}), 'light');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Theme' }), 'light');
     expect(document.documentElement.dataset.theme).toBe('light');
     expect(JSON.parse(localStorage.getItem('astlol:v1')!).theme).toBe('light');
-    await user.selectOptions(screen.getByRole('combobox', {name:'Theme'}), 'dark');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Theme' }), 'dark');
     expect(document.documentElement.dataset.theme).toBe('dark');
-    await user.selectOptions(screen.getByRole('combobox', {name:'Theme'}), 'system');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Theme' }), 'system');
     expect(document.documentElement.dataset.theme).toBe('system');
   });
 
   it('records reading explicitly, and practice only after correct checks', async () => {
     const user = userEvent.setup();
     at('/lesson/tokens');
-    await user.click(screen.getByRole('button', {name:'Mark as read'}));
+    await user.click(screen.getByRole('button', { name: 'Mark as read' }));
     expect(getProgress().read.tokens).toBeDefined();
     expect(getProgress().completed.tokens).toBeUndefined();
     const checks = screen.getAllByRole('group');
-    await user.click(within(checks[0]).getByRole('radio', {name:'Five'}));
-    await user.click(within(checks[0]).getByRole('button', {name:'Check reasoning'}));
+    await user.click(within(checks[0]).getByRole('radio', { name: 'Five' }));
+    await user.click(within(checks[0]).getByRole('button', { name: 'Check reasoning' }));
     expect(getProgress().practiced['tokens:0']).toBeUndefined();
-    await user.click(within(checks[0]).getByRole('radio', {name:'Three'}));
-    await user.click(within(checks[0]).getByRole('button', {name:'Check reasoning'}));
-    await user.click(within(checks[1]).getByRole('radio', {name:'To consume a decimal point only when a digit follows'}));
-    await user.click(within(checks[1]).getByRole('button', {name:'Check reasoning'}));
+    await user.click(within(checks[0]).getByRole('radio', { name: 'Three' }));
+    await user.click(within(checks[0]).getByRole('button', { name: 'Check reasoning' }));
+    await user.click(
+      within(checks[1]).getByRole('radio', {
+        name: 'To consume a decimal point only when a digit follows',
+      }),
+    );
+    await user.click(within(checks[1]).getByRole('button', { name: 'Check reasoning' }));
     expect(getProgress().completed.tokens).toBeDefined();
   });
 
   it('lets the learner choose a formatter path and remembers it', async () => {
     const user = userEvent.setup();
     at('/');
-    await user.click(screen.getByRole('radio', {name:'Code formatter'}));
+    await user.click(screen.getByRole('radio', { name: 'Code formatter' }));
     expect(getProgress().track).toBe('formatter');
   });
 
@@ -242,7 +246,7 @@ describe('learning experience', () => {
     const user = userEvent.setup();
     at('/challenge/expr-tokenize');
     await user.click(screen.getByText(/Reference solution/));
-    await waitFor(()=>expect(getProgress().studied['expr-tokenize']).toBeDefined());
+    await waitFor(() => expect(getProgress().studied['expr-tokenize']).toBeDefined());
     expect(getProgress().completed['expr-tokenize']).toBeUndefined();
   });
 });

@@ -403,6 +403,16 @@ function equivalenceAndCostCheck(opts: { label: string; mustReduce: boolean }): 
   };
 }
 
+// Identity rewrites that are wrong next to a non-boolean operand: `TRUE AND id`
+// coerces id, so replacing it with `id` changes what the comparison sees.
+const coercionCases = [
+  '(TRUE AND id) = id',
+  '(id AND TRUE) = id',
+  '(FALSE OR id) = id',
+  '(id OR FALSE) = id',
+  '(TRUE AND 5) = FALSE',
+];
+
 const sqlSimplify: ChallengeDef = {
   id: 'sql-simplify',
   immutableInputs: true,
@@ -432,11 +442,13 @@ function simplifyPlan(plan) {
 }`,
   solution: SIMPLIFY_SOLUTION,
   tests: [
-    ...['(TRUE AND id) = id', '(id AND TRUE) = id', '(FALSE OR id) = id', '(id OR FALSE) = id', '(TRUE AND 5) = FALSE'].map(predicate => ({
+    ...coercionCases.map((predicate) => ({
       name: `preserve coercion: ${predicate}`,
       args: [planOf(`SELECT id FROM users WHERE ${predicate}`)],
       expected: simplifyPredicates(planOf(`SELECT id FROM users WHERE ${predicate}`)),
-      hint: 'Eliminate an identity only next to a proven boolean-or-null expression. Bare columns have unknown types.',
+      hint:
+        'Eliminate an identity only next to a proven boolean-or-null expression. ' +
+        'Bare columns have unknown types.',
     })),
     {
       name: 'TRUE AND p drops to p, and the Filter survives',
@@ -826,7 +838,12 @@ function equivalenceFailure(plan: Plan, naive: Plan): ReturnType<CheckFn> | null
   if (problems.length > 0) {
     return { pass: false, message: `Your plan is not well-formed: ${problems.join('; ')}.` };
   }
-  for (const {label, db} of [{label:'demo', db:demoDb}, {label:'bench', db:benchDb}, ...semanticDatabases]) {
+  const databases = [
+    { label: 'demo', db: demoDb },
+    { label: 'bench', db: benchDb },
+    ...semanticDatabases,
+  ];
+  for (const { label, db } of databases) {
     const expectedRows = executePlan(naive, db);
     let actualRows;
     try {
@@ -839,10 +856,9 @@ function equivalenceFailure(plan: Plan, naive: Plan): ReturnType<CheckFn> | null
     }
     const diff = firstDiff(expectedRows, actualRows);
     if (diff !== null) {
-      const which = label;
       return {
         pass: false,
-        message: `Your plan changes the result on the ${which} database: first difference at rows${diff.path} (${diff.reason}). Equivalence first, speed second.`,
+        message: `Your plan changes the result on the ${label} database: first difference at rows${diff.path} (${diff.reason}). Equivalence first, speed second.`,
         expectedText: `${showPretty(expectedRows.slice(0, 5))}\n… (first rows shown)`,
         actualText: `${showPretty(actualRows.slice(0, 5))}\n… (first rows shown)`,
       };

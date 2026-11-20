@@ -16,7 +16,14 @@ export default function App() {
           <Route path="/" element={<HomeView />} />
           <Route path="/lesson/:id" element={<LessonView />} />
           <Route path="/challenge/:id" element={<ChallengeView />} />
-          <Route path="/lab" element={<Suspense fallback={<p>Loading pipeline…</p>}><LabView /></Suspense>} />
+          <Route
+            path="/lab"
+            element={
+              <Suspense fallback={<p>Loading pipeline…</p>}>
+                <LabView />
+              </Suspense>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

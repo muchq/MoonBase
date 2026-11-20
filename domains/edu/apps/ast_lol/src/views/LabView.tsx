@@ -36,10 +36,7 @@ export default function LabView() {
   const [stage, setStage] = useState('ast');
   const [width, setWidth] = useState(60);
   const editor = useRef<HTMLTextAreaElement>(null);
-  const lab = useMemo(
-    () => inspectPipeline(submitted.language, submitted.source),
-    [submitted],
-  );
+  const lab = useMemo(() => inspectPipeline(submitted.language, submitted.source), [submitted]);
 
   const stages = submitted.language === 'sql' ? sqlStages : exprStages;
   const active = stages.includes(stage) ? stage : 'ast';
@@ -221,7 +218,9 @@ function Stage({
 
   const data = stageData(name, lab);
   if (data === undefined) {
-    return <p>Resolve the query before inspecting this stage. Check the resolved tab for errors.</p>;
+    return (
+      <p>Resolve the query before inspecting this stage. Check the resolved tab for errors.</p>
+    );
   }
   return (
     <>
@@ -277,7 +276,10 @@ function Cost({ before, after }: { before: ExecutionStats; after: ExecutionStats
           </div>
         ))}
       </div>
-      <p>This teaching meter counts cells, not elapsed time. Compare plans and explain where work disappeared.</p>
+      <p>
+        This teaching meter counts cells, not elapsed time. Compare plans and explain where work
+        disappeared.
+      </p>
     </>
   );
 }

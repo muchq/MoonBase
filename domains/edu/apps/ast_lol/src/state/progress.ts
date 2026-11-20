@@ -25,7 +25,18 @@ export interface ProgressState {
 
 const KEY = 'astlol:v1';
 
-const empty = (): ProgressState => ({ version: 1, completed: {}, visited: {}, read: {}, practiced: {}, studied: {}, track: 'engine', theme: 'system', drafts: {}, customTests: {} });
+const empty = (): ProgressState => ({
+  version: 1,
+  completed: {},
+  visited: {},
+  read: {},
+  practiced: {},
+  studied: {},
+  track: 'engine',
+  theme: 'system',
+  drafts: {},
+  customTests: {},
+});
 
 let cached: ProgressState = load();
 const listeners = new Set<() => void>();
@@ -36,7 +47,9 @@ function load(): ProgressState {
     if (raw === null) return empty();
     const parsed = JSON.parse(raw) as ProgressState;
     if (parsed.version !== 1) return empty();
-    return { ...empty(), ...parsed,
+    return {
+      ...empty(),
+      ...parsed,
       track: parsed.track === 'formatter' ? 'formatter' : 'engine',
       theme: parsed.theme === 'light' || parsed.theme === 'dark' ? parsed.theme : 'system',
     };

@@ -30,7 +30,9 @@ export const exprEnvironment = { x: 3, y: 2 };
 export function inspectPipeline(language: LabLanguage, source: string) {
   try {
     if (source.length > labLimits.maxSourceLength) {
-      throw new Error(`Keep lab examples under ${labLimits.maxSourceLength.toLocaleString()} characters.`);
+      throw new Error(
+        `Keep lab examples under ${labLimits.maxSourceLength.toLocaleString()} characters.`,
+      );
     }
     return language === 'expr' ? inspectExpr(source) : inspectSql(source);
   } catch (e) {

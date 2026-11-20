@@ -33,7 +33,12 @@ export default function LessonView() {
         <div dangerouslySetInnerHTML={{ __html: lessonHtml[lesson.id] ?? '' }} />
       </article>
       <div className="lesson-actions">
-        <button className="btn" type="button" onClick={() => markRead(lesson.id)} disabled={progress.read[lesson.id] !== undefined}>
+        <button
+          className="btn"
+          type="button"
+          onClick={() => markRead(lesson.id)}
+          disabled={progress.read[lesson.id] !== undefined}
+        >
           {progress.read[lesson.id] ? 'Read' : 'Mark as read'}
         </button>
         <span>Read, practice, then implement. You can move on at any time.</span>

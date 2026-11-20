@@ -2,10 +2,25 @@ import TreeValue from './TreeValue';
 import type { GradeReport, TestResult } from '../grader/types';
 import type { RunningTest } from '../grader/client';
 
+/** A value's text, plus a structural view when the text is a JSON object or array. */
 function ValuePane({ text }: { text: string }) {
   let parsed: unknown;
-  try { parsed = JSON.parse(text); } catch { /* Diagnostics need not be JSON. */ }
-  return <><pre>{text}</pre>{typeof parsed === 'object' && parsed !== null && <details><summary>Inspect structure</summary><TreeValue value={parsed} /></details>}</>;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // Diagnostics need not be JSON.
+  }
+  return (
+    <>
+      <pre>{text}</pre>
+      {typeof parsed === 'object' && parsed !== null && (
+        <details>
+          <summary>Inspect structure</summary>
+          <TreeValue value={parsed} />
+        </details>
+      )}
+    </>
+  );
 }
 
 function ResultRow({ result, expanded }: { result: TestResult; expanded: boolean }) {
@@ -24,8 +39,18 @@ function ResultRow({ result, expanded }: { result: TestResult; expanded: boolean
         {(failed || result.logs.length > 0 || result.inputText !== undefined) && (
           <div className="test-detail">
             {result.message !== undefined && <div className="message">{result.message}</div>}
-            {result.hint !== undefined && <details className="hint"><summary>Show a debugging hint</summary><p>{result.hint}</p></details>}
-            {result.inputText !== undefined && <details><summary>Test input</summary><ValuePane text={result.inputText} /></details>}
+            {result.hint !== undefined && (
+              <details className="hint">
+                <summary>Show a debugging hint</summary>
+                <p>{result.hint}</p>
+              </details>
+            )}
+            {result.inputText !== undefined && (
+              <details>
+                <summary>Test input</summary>
+                <ValuePane text={result.inputText} />
+              </details>
+            )}
             {hasPanes && (
               <div className={`diff-panes ${result.expectedText && result.actualText ? 'two' : ''}`}>
                 {result.expectedText !== undefined && (
@@ -79,7 +104,7 @@ export default function TestResults({ report, running }: TestResultsProps) {
       </div>
     );
   }
-  const firstFailure = report.tests.find(t => t.status !== 'pass' && t.status !== 'skipped')?.id;
+  const firstFailure = report.tests.find((t) => t.status !== 'pass' && t.status !== 'skipped')?.id;
   const passed = report.tests.filter((t) => t.status === 'pass').length;
   const summaryClass = report.status === 'pass' ? 'pass' : report.status === 'timeout' ? 'timeout' : 'fail';
   return (

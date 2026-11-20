@@ -29,7 +29,10 @@ const highlight = HighlightStyle.define([
   { tag: tags.comment, color: 'var(--text-muted)', fontStyle: 'italic' },
   { tag: [tags.string, tags.special(tags.string)], color: 'var(--syntax-string)' },
   { tag: tags.number, color: 'var(--syntax-number)' },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: 'var(--syntax-function)' },
+  {
+    tag: [tags.function(tags.variableName), tags.function(tags.propertyName)],
+    color: 'var(--syntax-function)',
+  },
   { tag: tags.propertyName, color: 'var(--accent)' },
   { tag: [tags.operator, tags.punctuation], color: 'var(--text)' },
   { tag: tags.bool, color: 'var(--syntax-number)' },

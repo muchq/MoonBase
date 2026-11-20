@@ -165,8 +165,15 @@ export default function ChallengeView() {
           <article className="prose">
             <h2>{challenge.title}</h2>
             <div className="signature">{challenge.signature}</div>
-            <p className="challenge-method">Predict one case. Implement or repair. Add a regression test. Then explain why it works.</p>
-            {challenge.immutableInputs && <p className="contract-note">Input immutability is checked: return new values where something changes.</p>}
+            <p className="challenge-method">
+              Predict one case. Implement or repair. Add a regression test. Then explain why it
+              works.
+            </p>
+            {challenge.immutableInputs && (
+              <p className="contract-note">
+                Input immutability is checked: return new values where something changes.
+              </p>
+            )}
             {/* Course-authored markdown rendered at build time; no user content. */}
             <div dangerouslySetInnerHTML={{ __html: challengeHtml[challenge.id] ?? '' }} />
           </article>

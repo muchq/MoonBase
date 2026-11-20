@@ -47,14 +47,18 @@ const lit = (value: SqlValue): SqlExpr => ({ type: 'Lit', value });
 
 const isLit = (e: SqlExpr): e is Extract<SqlExpr, { type: 'Lit' }> => e.type === 'Lit';
 
-/** A conservative proof that an expression returns only boolean or null.
- * Columns have no declared types in AstQL's catalog, so cannot be assumed
- * to be predicates. This distinction matters inside comparisons too.
+const predicateOps = ['AND', 'OR', '=', '<>', '<', '<=', '>', '>='];
+
+/**
+ * Whether an expression provably returns only boolean or null. Conservative:
+ * AstQL's catalog declares no column types, so a bare column is never a
+ * predicate. Identity rewrites like `TRUE AND x -> x` are safe only when this
+ * holds, because AND coerces x and a comparison above it sees the difference.
  */
 export function isPredicate(expr: SqlExpr): boolean {
   if (expr.type === 'Lit') return expr.value === null || typeof expr.value === 'boolean';
   if (expr.type === 'Not' || expr.type === 'IsNull') return true;
-  return expr.type === 'Binary' && ['AND', 'OR', '=', '<>', '<', '<=', '>', '>='].includes(expr.op);
+  return expr.type === 'Binary' && predicateOps.includes(expr.op);
 }
 
 /**
