@@ -239,12 +239,20 @@ export const sortChallenge: ChallengeDef = {
   });
 }`,
   tests: [
-    ...(['ASC', 'DESC'] as const).map((dir) => ({
-      name: `nulls stay last in ${dir}`,
-      args: [[{ 't.x': null }, { 't.x': 2 }, { 't.x': 1 }], [{ expr: sqlExpr('t.x'), dir }]],
-      expected: (dir === 'ASC' ? [1, 2, null] : [2, 1, null]).map((x) => ({ 't.x': x })),
-      hint: 'Handle null placement before applying the direction to the non-null comparison.',
-    })),
+    // The null starts at each position: a comparator that only handles a null
+    // on one side can still pass when the sort happens to ask the other way.
+    ...(['ASC', 'DESC'] as const).flatMap((dir) =>
+      [
+        [null, 2, 1],
+        [2, null, 1],
+        [2, 1, null],
+      ].map((input) => ({
+        name: `nulls stay last in ${dir}, from ${JSON.stringify(input)}`,
+        args: [input.map((x) => ({ 't.x': x })), [{ expr: sqlExpr('t.x'), dir }]],
+        expected: (dir === 'ASC' ? [1, 2, null] : [2, 1, null]).map((x) => ({ 't.x': x })),
+        hint: 'Handle null placement before applying the direction to the non-null comparison.',
+      })),
+    ),
     {
       name: 'ties preserve input order',
       args: [

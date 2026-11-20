@@ -189,6 +189,32 @@ describe('test banks catch common mistakes', () => {
     ).toBe('fail');
   });
 
+  it('expr-walk: visiting the right child first', () => {
+    const leftFirst = 'visit(node.left); visit(node.right);';
+    const rightFirst = 'visit(node.right); visit(node.left);';
+    expect(gradeMistake('expr-walk', leftFirst, rightFirst)).toBe('fail');
+  });
+
+  it('expr-walk: skipping a unary operand', () => {
+    const unary = "if (node.type === 'Unary') visit(node.operand);";
+    expect(gradeMistake('expr-walk', unary, '')).toBe('fail');
+  });
+
+  it('sql-join: keeping a row whose ON condition is null', () => {
+    const matches = 'evalExpr(on, row) === true';
+    expect(gradeMistake('sql-join', matches, 'evalExpr(on, row) !== false')).toBe('fail');
+  });
+
+  it('sql-sort: stopping at the first tied key instead of comparing the next', () => {
+    expect(gradeMistake('sql-sort', 'if (x === y) continue;', 'if (x === y) return 0;')).toBe('fail');
+  });
+
+  it('sql-sort: putting nulls first when sorting descending', () => {
+    const nullsLast = 'if (x === null) return 1;';
+    const nullsFollowDirection = "if (x === null) return key.dir === 'DESC' ? -1 : 1;";
+    expect(gradeMistake('sql-sort', nullsLast, nullsFollowDirection)).toBe('fail');
+  });
+
   it('sql-simplify: dropping an identity next to a non-boolean operand', () => {
     expect(gradeMistake('sql-simplify', ' && isPredicate(right)', '')).toBe('fail');
   });
