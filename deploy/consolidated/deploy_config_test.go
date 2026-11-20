@@ -3490,7 +3490,7 @@ func TestPostgresSuitesStillRunInCI(t *testing.T) {
 // `docker image prune` takes images. The three spellings that would take more
 // are one word away, and the postgres data is a local volume.
 func TestTheDeployScriptsNeverPruneVolumes(t *testing.T) {
-	for _, name := range []string{"deploy.sh", "local_deploy.sh", "initialize_host.sh"} {
+	for _, name := range []string{"deploy.sh", "local_deploy.sh", "initialize_host.sh", "host_setup.sh"} {
 		script := readConfig(t, name)
 		for _, banned := range []string{"--volumes", "system prune", "volume prune"} {
 			if strings.Contains(script, banned) {
@@ -3508,7 +3508,7 @@ func TestTheDeployScriptsNeverPruneVolumes(t *testing.T) {
 // their docker invocations, so a line-scoped check would miss the split form.
 func TestImagePruneIsNotFilteredByReference(t *testing.T) {
 	joiner := regexp.MustCompile(`\\\n\s*`)
-	for _, name := range []string{"deploy.sh", "local_deploy.sh", "initialize_host.sh"} {
+	for _, name := range []string{"deploy.sh", "local_deploy.sh", "initialize_host.sh", "host_setup.sh"} {
 		for _, line := range strings.Split(joiner.ReplaceAllString(readConfig(t, name), " "), "\n") {
 			if strings.Contains(line, "image prune") && strings.Contains(line, "reference") {
 				t.Errorf("%s filters `image prune` by reference; dockerd rejects that filter"+
@@ -3714,4 +3714,118 @@ func withoutComment(line string) string {
 		line = line[:i]
 	}
 	return strings.TrimRight(line, " \t")
+}
+
+// Image pins.
+//
+// A floating tag is whatever the registry says today: a deploy, a reboot or a
+// `compose pull` can swap the image under an unchanged file. Third-party
+// images carry a digest; ours carry the commit they were built from, and a
+// missing pin refuses to start rather than falling back to :latest.
+var digestPin = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
+
+func TestEveryImageIsPinned(t *testing.T) {
+	images := 0
+	for _, file := range []string{"compose.yaml", "docker-compose.observability.yml"} {
+		for service, lines := range composeServiceLines(t, file) {
+			for _, line := range lines {
+				key := withoutComment(line)
+				if !strings.HasPrefix(key, "    image:") {
+					continue
+				}
+				images++
+				image := strings.TrimSpace(strings.TrimPrefix(key, "    image:"))
+				if strings.HasPrefix(image, "ghcr.io/muchq/") {
+					if strings.Contains(image, "latest") {
+						t.Errorf("%s: %s falls back to a floating tag: %q", file, service, image)
+					}
+					continue
+				}
+				if !digestPin.MatchString(image) {
+					t.Errorf("%s: %s is not pinned by digest: %q", file, service, image)
+				}
+			}
+		}
+	}
+	if images < 10 {
+		t.Fatalf("found %d images; this test is reading less than it claims", images)
+	}
+}
+
+// The service.version our telemetry reports is the same pin, with the same
+// refusal.
+func TestNoDeployConfigFallsBackToLatest(t *testing.T) {
+	for _, file := range []string{"compose.yaml", "docker-compose.observability.yml"} {
+		for i, line := range strings.Split(readConfig(t, file), "\n") {
+			if strings.Contains(withoutComment(line), ":-latest}") {
+				t.Errorf("%s:%d falls back to latest: %q", file, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
+// A password pasted into SQL by the shell is SQL: one containing a quote
+// breaks the statement, and a crafted one runs its own. The db_init steps hand
+// the value to psql as a variable (-v) and quote it with :'name', so the
+// shell expansion never sits on the line that builds the statement.
+var pastedIntoSqlLiteral = regexp.MustCompile(`'[^']*\$\$\{`)
+
+func TestDbInitNeverPastesAPasswordIntoSql(t *testing.T) {
+	steps := 0
+	for service, lines := range composeServiceLines(t, "compose.yaml") {
+		if !strings.HasSuffix(service, "_db_init") {
+			continue
+		}
+		steps++
+		for _, line := range lines {
+			if pastedIntoSqlLiteral.MatchString(line) {
+				t.Errorf("%s pastes a shell-expanded password into SQL: %q", service, strings.TrimSpace(line))
+			}
+		}
+	}
+	if steps < 3 {
+		t.Fatalf("found %d db_init steps; this test is reading less than it claims", steps)
+	}
+}
+
+// Host setup.
+//
+// host_setup.sh runs on the live host over ssh, where a wrong order is a
+// lockout rather than a failed step: sshd reloaded with a config it cannot
+// parse, or password login disabled for a user with no key.
+
+func TestHostSetupValidatesSshdBeforeReloadingIt(t *testing.T) {
+	script := readConfig(t, "host_setup.sh")
+	validate := strings.Index(script, "if ! sudo sshd -t; then")
+	reload := strings.Index(script, "reload-or-restart ssh")
+	if validate < 0 || reload < 0 || validate > reload {
+		t.Errorf("host_setup.sh must run `sshd -t` before reloading ssh (sshd -t at %d, reload at %d)",
+			validate, reload)
+	}
+}
+
+func TestHostSetupChecksForAKeyBeforeDisablingPasswords(t *testing.T) {
+	script := readConfig(t, "host_setup.sh")
+	check := strings.Index(script, "if ! grep -q '^ssh-' ~/.ssh/authorized_keys")
+	disable := strings.Index(script, "PasswordAuthentication no")
+	if check < 0 || disable < 0 || check > disable {
+		t.Errorf("host_setup.sh must refuse to disable password login before confirming the login "+
+			"user has a key (key check at %d, PasswordAuthentication no at %d)", check, disable)
+	}
+}
+
+func TestInitializeHostProvisionsTheHostDeployShipsTo(t *testing.T) {
+	assignment := regexp.MustCompile(`(?m)^HOST=(?:\$\{HOST:-)?([^}\s]+)`)
+	hosts := map[string]string{}
+	for _, name := range []string{"deploy.sh", "initialize_host.sh"} {
+		m := assignment.FindStringSubmatch(readConfig(t, name))
+		if m == nil {
+			t.Fatalf("%s assigns no HOST", name)
+		}
+		hosts[name] = m[1]
+	}
+	if hosts["deploy.sh"] != hosts["initialize_host.sh"] {
+		t.Errorf("initialize_host.sh provisions %q but deploy.sh ships to %q",
+			hosts["initialize_host.sh"], hosts["deploy.sh"])
+	}
 }

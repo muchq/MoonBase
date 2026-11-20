@@ -1,6 +1,6 @@
 services:
   prometheus:
-    image: prom/prometheus:v3.16.0
+    image: prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
     restart: always
     ports:
       # Loopback only: reach it with `ssh -L 9090:127.0.0.1:9090`. Public, the
@@ -26,7 +26,7 @@ services:
           memory: 1G
 
   otelcol:
-    image: otel/opentelemetry-collector-contrib:0.165.0
+    image: otel/opentelemetry-collector-contrib:0.165.0@sha256:e40d61f10c9a617cca1ffd1be4d7e2b3a4b0f0001798ff07e58cabe82e618cea
     restart: always
     command: ["--config=/etc/otel-collector-config.yml"]
     volumes:
@@ -44,7 +44,7 @@ services:
           memory: 512M
 
   cadvisor:
-    image: ghcr.io/google/cadvisor:v0.60.6
+    image: ghcr.io/google/cadvisor:v0.60.6@sha256:b8e7d1093144fd088f425ff003d75a4aa405de075db78dae3bc563730b1bd07a
     restart: always
     volumes:
       - /:/rootfs:ro
@@ -66,7 +66,7 @@ services:
   # container still under its cgroup limit (Stockfish on chess_engine).
   # disable-defaults keeps this from becoming a second full host agent.
   node_exporter:
-    image: prom/node-exporter:v1.12.1
+    image: prom/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
     restart: always
     command:
       - '--path.procfs=/host/proc'

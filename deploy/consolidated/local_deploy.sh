@@ -41,6 +41,9 @@ if [ -f ".env" ]; then
   export $(cat .env | grep -v '^#' | xargs)
 fi
 
+# compose.yaml refuses to start without a pin; locally, :latest is the choice.
+export DEPLOY_SHA="${DEPLOY_SHA:-latest}"
+
 # Ensure the shared network exists with the pinned subnet AND an ip-range that
 # keeps the dynamic pool off Caddy's static 172.28.0.2 (opal-cpp ADR-0012).
 # The observability compose file marks this network `external: true`, so Compose
