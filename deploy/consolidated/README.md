@@ -57,10 +57,18 @@ To set up a fresh Lightsail (or similar) instance:
 ./deploy/consolidated/initialize_host.sh
 ```
 
-This script will:
-1. Update system packages
-2. Install Docker and Docker Compose
-3. Create the Forgejo config directory (`/etc/forgejo`)
+It runs [`host_setup.sh`](host_setup.sh) on the host, which:
+1. Updates system packages
+2. Installs Docker from Docker's apt repository, refusing anything older than 28.0
+3. Enables unattended security upgrades
+4. Disables SSH password and root login, after checking the login user has a key
+5. Runs fail2ban on the host's sshd (Forgejo's SSH on 222 is a Docker port fail2ban cannot ban on)
+6. Creates the Forgejo config directory (`/etc/forgejo`)
+
+Every step converges, so rerunning it on a provisioned host is how an edit to
+`host_setup.sh` reaches the host. A rerun also applies pending upgrades, and an
+upgraded `docker-ce` or `containerd.io` restarts every container: run it when a
+brief outage is acceptable. `HOST=user@host` overrides the target.
 
 **Requirements:**
 - SSH access to the host configured (e.g., `ssh ubuntu@consolidated.cmptr.info`)

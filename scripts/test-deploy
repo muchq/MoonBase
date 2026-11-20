@@ -50,6 +50,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 shift # host
+[ -n "${FAKE_SSH_DOWN:-}" ] && { echo "ssh: connect to host: Connection timed out" >&2; exit 255; }
 export HOME="$FAKE_HOST"
 cd "$FAKE_HOST" || exit 1
 if [ $# -gt 0 ]; then bash -c "$*"; else bash -s; fi
@@ -303,6 +304,7 @@ deploy() { # deploy <args...> -> exit code, output in $WORK/out.txt
       FAKE_REGISTRY_DOWN="${FAKE_REGISTRY_DOWN:-}" FAKE_NO_REPO="${FAKE_NO_REPO:-}" \
       FAKE_STALE_TOKEN="${FAKE_STALE_TOKEN:-}" FAKE_TAG_PAGE="${FAKE_TAG_PAGE:-}" \
       FAKE_RELOAD_REFUSALS="${FAKE_RELOAD_REFUSALS:-}" REGISTRY_LOG="$REGISTRY_LOG" \
+      FAKE_SSH_DOWN="${FAKE_SSH_DOWN:-}" \
       bash deploy/consolidated/deploy.sh "$@"
   ) > "$WORK/out.txt" 2>&1
 }
@@ -341,6 +343,32 @@ check "preserves the stack-wide pin" host_env_has "DEPLOY_SHA=stackwidesha"
 check "preserves another service's pin" host_env_has "POSTERIZE_SHA=posterizepin"
 check "does not reap other services" \
   bash -c '! grep -q -- "--remove-orphans" "$0"' "$DOCKER_LOG"
+
+echo "targeted deploy on a host with no stack-wide pin"
+# compose.yaml refuses to interpolate without DEPLOY_SHA, for every service and
+# not just the named one, so a targeted deploy here could only fail halfway.
+reset_host "POSTERIZE_SHA=posterizepin"
+deploy --service mithril -y
+rc=$?
+check "refuses to deploy" test $rc -ne 0
+check "asks for a full deploy" grep -q "full deploy" "$WORK/out.txt"
+check "leaves the host's pins untouched" host_env_lacks MITHRIL_SHA
+check "runs no compose commands" test ! -s "$DOCKER_LOG"
+
+echo "host .env unreadable"
+reset_host "DEPLOY_SHA=stackwidesha" "POSTERIZE_SHA=posterizepin"
+FAKE_SSH_DOWN=1 deploy --service mithril -y
+rc=$?
+check "refuses to deploy" test $rc -ne 0
+check "says it could not read the host" grep -q "could not read" "$WORK/out.txt"
+
+echo "first deploy to a host with no .env"
+reset_host
+rm -f "$HOSTDIR/.env"
+deploy -y
+rc=$?
+check "exits 0" test $rc -eq 0
+check "pins DEPLOY_SHA" host_env_has "DEPLOY_SHA=$SHA"
 
 echo "full deploy clears per-service pins"
 reset_host "DEPLOY_SHA=stackwidesha" "POSTERIZE_SHA=posterizepin"

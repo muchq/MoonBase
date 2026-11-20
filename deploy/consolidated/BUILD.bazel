@@ -39,6 +39,7 @@ go_test(
         # in the runfiles tree too.
         "deploy.sh",
         "docker-compose.observability.yml",
+        "host_setup.sh",
         "initialize_host.sh",
         "local_deploy.sh",
         "o11y/otel-collector.yml",

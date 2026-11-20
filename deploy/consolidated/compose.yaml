@@ -10,7 +10,7 @@ x-default-logging: &default-logging
 
 services:
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
     restart: always
     logging: *default-logging
     ports:
@@ -46,7 +46,7 @@ services:
   # The smithy event-stream games hub (/games/v2/*): the lobby (#1490),
   # golf and castle (#77) on one play stream.
   games_hub:
-    image: ghcr.io/muchq/games_hub:${GAMES_HUB_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/games_hub:${GAMES_HUB_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "Games hub on smithy event streams (/games/v2/*)"
     restart: always
@@ -93,7 +93,7 @@ services:
       GAME_EVENT_LOG_DIR: /var/log/games_hub
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: games_hub
-      OTEL_RESOURCE_ATTRIBUTES: service.name=games_hub,service.version=${GAMES_HUB_SHA:-${DEPLOY_SHA:-latest}}
+      OTEL_RESOURCE_ATTRIBUTES: service.name=games_hub,service.version=${GAMES_HUB_SHA:-${DEPLOY_SHA:?unset}}
     volumes:
       - /var/log/games_hub:/var/log/games_hub
     networks:
@@ -121,7 +121,7 @@ services:
       start_period: 15s
 
   portrait:
-    image: ghcr.io/muchq/portrait:${PORTRAIT_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/portrait:${PORTRAIT_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "Ray-traced scene renderer"
     restart: always
@@ -133,7 +133,7 @@ services:
       TRUSTED_PROXY_CIDRS: *caddy_ip
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: portrait
-      OTEL_RESOURCE_ATTRIBUTES: service.name=portrait,service.version=${PORTRAIT_SHA:-${DEPLOY_SHA:-latest}}
+      OTEL_RESOURCE_ATTRIBUTES: service.name=portrait,service.version=${PORTRAIT_SHA:-${DEPLOY_SHA:?unset}}
     volumes:
       - /etc/portrait:/etc/portrait
     networks:
@@ -157,7 +157,7 @@ services:
       start_period: 15s
 
   prom_proxy:
-    image: ghcr.io/muchq/prom_proxy:${PROM_PROXY_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/prom_proxy:${PROM_PROXY_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "Metrics API behind the dashboard"
     restart: always
@@ -179,7 +179,7 @@ services:
   # published and no caddy route; games_hub calls it across the app network.
   # Stockfish is GPL-3 and runs here as a child process, never linked.
   chess_engine:
-    image: ghcr.io/muchq/chess_engine:${CHESS_ENGINE_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/chess_engine:${CHESS_ENGINE_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "Stockfish over HTTP for chess bots"
     restart: always
@@ -211,7 +211,7 @@ services:
   # chess_engine is. GNU Go is GPL-3 and runs here as a child process,
   # never linked.
   go_engine:
-    image: ghcr.io/muchq/go_engine:${GO_ENGINE_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/go_engine:${GO_ENGINE_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "GNU Go over HTTP for go bots"
     restart: always
@@ -240,7 +240,7 @@ services:
       start_period: 15s
 
   mithril:
-    image: ghcr.io/muchq/mithril:${MITHRIL_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/mithril:${MITHRIL_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "Word-ladder solver (wordchains)"
     restart: always
@@ -250,7 +250,7 @@ services:
       TRUSTED_PROXY_CIDRS: *caddy_ip
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: mithril
-      OTEL_RESOURCE_ATTRIBUTES: service.name=mithril,service.version=${MITHRIL_SHA:-${DEPLOY_SHA:-latest}}
+      OTEL_RESOURCE_ATTRIBUTES: service.name=mithril,service.version=${MITHRIL_SHA:-${DEPLOY_SHA:?unset}}
     volumes:
       - /etc/mithril:/etc/mithril
     networks:
@@ -269,7 +269,7 @@ services:
       start_period: 15s
 
   posterize:
-    image: ghcr.io/muchq/posterize:${POSTERIZE_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/posterize:${POSTERIZE_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "Image blur and edge detection"
     restart: always
@@ -279,7 +279,7 @@ services:
       TRUSTED_PROXY_CIDRS: *caddy_ip
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: posterize
-      OTEL_RESOURCE_ATTRIBUTES: service.name=posterize,service.version=${POSTERIZE_SHA:-${DEPLOY_SHA:-latest}}
+      OTEL_RESOURCE_ATTRIBUTES: service.name=posterize,service.version=${POSTERIZE_SHA:-${DEPLOY_SHA:?unset}}
     volumes:
       - /etc/posterize:/etc/posterize
     networks:
@@ -298,7 +298,7 @@ services:
       start_period: 15s
 
   one_d4_v2:
-    image: ghcr.io/muchq/one_d4_v2:${ONE_D4_V2_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/one_d4_v2:${ONE_D4_V2_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "one_d4 v2 API: /v2/analyze on the C++ detectors (#1389 phase 6)"
     restart: always
@@ -308,7 +308,7 @@ services:
       TRUSTED_PROXY_CIDRS: *caddy_ip
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: one_d4_v2
-      OTEL_RESOURCE_ATTRIBUTES: service.name=one_d4_v2,service.version=${ONE_D4_V2_SHA:-${DEPLOY_SHA:-latest}}
+      OTEL_RESOURCE_ATTRIBUTES: service.name=one_d4_v2,service.version=${ONE_D4_V2_SHA:-${DEPLOY_SHA:?unset}}
     networks:
       # one-d4-v2 for Java callers: java.net.URI gives a hostname containing
       # an underscore a null host. Caddy keeps using the service key.
@@ -330,7 +330,7 @@ services:
       start_period: 10s
 
   iili:
-    image: ghcr.io/muchq/iili:${IILI_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/iili:${IILI_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "URL shortener v2 API (C++)"
     restart: always
@@ -341,7 +341,7 @@ services:
       TRUSTED_PROXY_CIDRS: *caddy_ip
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: iili
-      OTEL_RESOURCE_ATTRIBUTES: service.name=iili,service.version=${IILI_SHA:-${DEPLOY_SHA:-latest}}
+      OTEL_RESOURCE_ATTRIBUTES: service.name=iili,service.version=${IILI_SHA:-${DEPLOY_SHA:?unset}}
     networks:
       - app_network
     depends_on:
@@ -360,7 +360,7 @@ services:
       start_period: 10s
 
   mcpserver:
-    image: ghcr.io/muchq/mcpserver:${MCPSERVER_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/mcpserver:${MCPSERVER_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "Model Context Protocol server"
     restart: always
@@ -372,7 +372,7 @@ services:
       - ONE_D4_V2_BASE_URL=http://one-d4-v2:8090
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=mcpserver
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=mcpserver,service.version=${MCPSERVER_SHA:-${DEPLOY_SHA:-latest}}
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=mcpserver,service.version=${MCPSERVER_SHA:-${DEPLOY_SHA:?unset}}
     volumes:
       - /etc/mcpserver:/etc/mcpserver
     depends_on:
@@ -405,7 +405,7 @@ services:
   # wrote them on first boot. POSTGRES_* is ignored on an initialized cluster,
   # so changing them here does nothing — that needs a migration.
   shared_postgres:
-    image: postgres:18
+    image: postgres:18.7@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a
     labels:
       com.muchq.description: "Shared PostgreSQL for MoonBase services"
     restart: always
@@ -435,7 +435,7 @@ services:
   # deploy. Runs as the instance's bootstrap superuser. The docker-entrypoint
   # initdb.d hook can't do this: it only fires on a fresh data volume.
   games_hub_db_init:
-    image: postgres:18
+    image: postgres:18.7@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a
     restart: "no"
     logging: *default-logging
     environment:
@@ -449,7 +449,10 @@ services:
       - |
         psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'games_hub'" | grep -q 1 \
           || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE games_hub LOGIN"
-        psql -v ON_ERROR_STOP=1 -c "ALTER ROLE games_hub WITH LOGIN PASSWORD '$${GAMES_HUB_DB_PASSWORD}'"
+        psql -v ON_ERROR_STOP=1 <<'SQL'
+        \getenv pw GAMES_HUB_DB_PASSWORD
+        ALTER ROLE games_hub WITH LOGIN PASSWORD :'pw';
+        SQL
         psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = 'games_hub'" | grep -q 1 \
           || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE games_hub OWNER games_hub"
     networks:
@@ -462,7 +465,7 @@ services:
   # provisioned under: renaming those is a live-database operation, not a
   # rename of this file.
   iili_db_init:
-    image: postgres:18
+    image: postgres:18.7@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a
     restart: "no"
     logging: *default-logging
     environment:
@@ -476,7 +479,10 @@ services:
       - |
         psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'r3dr_v2'" | grep -q 1 \
           || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE r3dr_v2 LOGIN"
-        psql -v ON_ERROR_STOP=1 -c "ALTER ROLE r3dr_v2 WITH LOGIN PASSWORD '$${R3DR_V2_DB_PASSWORD}'"
+        psql -v ON_ERROR_STOP=1 <<'SQL'
+        \getenv pw R3DR_V2_DB_PASSWORD
+        ALTER ROLE r3dr_v2 WITH LOGIN PASSWORD :'pw';
+        SQL
         psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = 'r3dr_v2'" | grep -q 1 \
           || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE r3dr_v2 OWNER r3dr_v2"
     networks:
@@ -493,7 +499,7 @@ services:
   # service (#1418 measured that coupling as an error-loop until one_d4
   # came up).
   one_d4_migrate:
-    image: ghcr.io/muchq/one_d4_migrate:${ONE_D4_MIGRATE_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/one_d4_migrate:${ONE_D4_MIGRATE_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "one_d4 schema migrations (one-shot)"
     restart: "no"
@@ -515,7 +521,7 @@ services:
         condition: service_healthy
 
   one_d4:
-    image: ghcr.io/muchq/one_d4:${ONE_D4_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/one_d4:${ONE_D4_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "Chess corpus API: index submits, ChessQL queries (indexing runs in one_d4_worker)"
     restart: always
@@ -529,7 +535,7 @@ services:
       - SENTRY_DSN=${ONE_D4_SENTRY_DSN}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=one_d4
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4,service.version=${ONE_D4_SHA:-${DEPLOY_SHA:-latest}}
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4,service.version=${ONE_D4_SHA:-${DEPLOY_SHA:?unset}}
       # Query events (#1465) roll into this directory; log_shipper ships them.
       - QUERY_EVENT_LOG_DIR=/var/log/one_d4
     volumes:
@@ -577,7 +583,7 @@ services:
   # place, so this gates on that one-shot finishing rather than on the Java
   # service being up — the two services now deploy in either order (#1419).
   one_d4_worker:
-    image: ghcr.io/muchq/one_d4_worker:${ONE_D4_WORKER_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/one_d4_worker:${ONE_D4_WORKER_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "Chess index worker (C++)"
     restart: always
@@ -607,7 +613,7 @@ services:
       - ONE_D4_GAMES_HUB_URL=http://games_hub:8089
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otelcol:4318
       - OTEL_SERVICE_NAME=one_d4_worker
-      - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4_worker,service.version=${ONE_D4_WORKER_SHA:-${DEPLOY_SHA:-latest}}
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=one_d4_worker,service.version=${ONE_D4_WORKER_SHA:-${DEPLOY_SHA:?unset}}
     networks:
       - app_network
     depends_on:
@@ -628,7 +634,7 @@ services:
           memory: 512M
 
   microgpt-serve:
-    image: ghcr.io/muchq/microgpt-serve:${MICROGPT_SERVE_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/microgpt-serve:${MICROGPT_SERVE_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "microgpt text generation API"
     restart: always
@@ -639,7 +645,7 @@ services:
       MODEL_DIR: /etc/microgpt-serve/model
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: microgpt-serve
-      OTEL_RESOURCE_ATTRIBUTES: service.name=microgpt-serve,service.version=${MICROGPT_SERVE_SHA:-${DEPLOY_SHA:-latest}}
+      OTEL_RESOURCE_ATTRIBUTES: service.name=microgpt-serve,service.version=${MICROGPT_SERVE_SHA:-${DEPLOY_SHA:?unset}}
     volumes:
       - /etc/microgpt-serve:/etc/microgpt-serve
     networks:
@@ -661,7 +667,7 @@ services:
       start_period: 15s
 
   deja:
-    image: ghcr.io/muchq/deja:${DEJA_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/deja:${DEJA_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "Next-event predictor over Caddy's access log and the hub's events (Rust)"
     restart: always
@@ -677,7 +683,7 @@ services:
       DEJA_STATE: /var/lib/deja
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: deja
-      OTEL_RESOURCE_ATTRIBUTES: service.name=deja,service.version=${DEJA_SHA:-${DEPLOY_SHA:-latest}}
+      OTEL_RESOURCE_ATTRIBUTES: service.name=deja,service.version=${DEJA_SHA:-${DEPLOY_SHA:?unset}}
     volumes:
       # Read-only: deja observes the live logs Caddy and games_hub write
       # and roll for themselves, and writes nothing but its own
@@ -703,7 +709,7 @@ services:
       start_period: 15s
 
   log_shipper:
-    image: ghcr.io/muchq/log_shipper:${LOG_SHIPPER_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/log_shipper:${LOG_SHIPPER_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "Rolled-log to S3 shipper: Caddy access logs, one_d4 query events, games_hub game events (Go)"
     restart: always
@@ -734,7 +740,7 @@ services:
           memory: 128M
 
   stats_db_init:
-    image: postgres:18
+    image: postgres:18.7@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a
     restart: "no"
     logging: *default-logging
     profiles:
@@ -750,7 +756,10 @@ services:
       - |
         psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'stats'" | grep -q 1 \
           || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE stats LOGIN"
-        psql -v ON_ERROR_STOP=1 -c "ALTER ROLE stats WITH LOGIN PASSWORD '$${STATS_DB_PASSWORD}'"
+        psql -v ON_ERROR_STOP=1 <<'SQL'
+        \getenv pw STATS_DB_PASSWORD
+        ALTER ROLE stats WITH LOGIN PASSWORD :'pw';
+        SQL
         psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = 'stats'" | grep -q 1 \
           || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE stats OWNER stats"
     networks:
@@ -760,7 +769,7 @@ services:
         condition: service_healthy
 
   stats:
-    image: ghcr.io/muchq/stats:${STATS_SHA:-${DEPLOY_SHA:-latest}}
+    image: ghcr.io/muchq/stats:${STATS_SHA:-${DEPLOY_SHA:?unset}}
     labels:
       com.muchq.description: "Log-derived stats aggregator and API (Go)"
     restart: always
@@ -796,7 +805,7 @@ services:
           memory: 256M
 
   forgejo:
-    image: codeberg.org/forgejo/forgejo:17
+    image: codeberg.org/forgejo/forgejo:17.0.2@sha256:879f4f10a98e3e167b32cde5f7ae3af0163d50bfacf567559a27a0e95a95670c
     restart: always
     logging: *default-logging
     ports:
