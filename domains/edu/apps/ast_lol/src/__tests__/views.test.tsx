@@ -3,7 +3,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import App from '../App';
-import { challengeById, challenges, lessons, tiers } from '../curriculum/registry';
+import { challengeById, challenges, lessons, stepId, tiers } from '../curriculum/registry';
+import { learningPath, stepTitle } from '../curriculum/path';
 import type { GradeReport } from '../grader/types';
 import {
   getProgress,
@@ -13,6 +14,7 @@ import {
   markStudied,
   markVisited,
   resetProgressForTests,
+  setTrack,
 } from '../state/progress';
 
 // CodeMirror needs real layout APIs jsdom lacks; a textarea keeps the
@@ -302,5 +304,123 @@ describe('learning experience', () => {
     await user.click(screen.getByText(/Reference solution/));
     await waitFor(() => expect(getProgress().studied['expr-tokenize']).toBeDefined());
     expect(getProgress().completed['expr-tokenize']).toBeUndefined();
+  });
+});
+
+describe('track-aware navigation', () => {
+  const engine = learningPath('engine');
+  const formatter = learningPath('formatter');
+  const branchPoint = engine.findIndex((step) => stepId(step) === 'sql-select-parse');
+  const titleOf = (id: string) => stepTitle(engine.concat(formatter).find((s) => stepId(s) === id)!);
+  const finishSharedSteps = () => engine.slice(0, branchPoint + 1).forEach((s) => markCompleted(stepId(s)));
+
+  it('lists the chosen track first, labelled as selected', async () => {
+    const user = userEvent.setup();
+    at('/');
+    const sections = () =>
+      [...document.querySelectorAll('.track-section')].map((section) => [
+        section.querySelector('.eyebrow')?.textContent,
+        section.querySelector('h2')?.textContent,
+      ]);
+    expect(sections()).toEqual([
+      ['Your selected path', 'Query engine & optimizer'],
+      ['Explore the other path', 'Code formatter'],
+    ]);
+    await user.click(screen.getByRole('radio', { name: 'Code formatter' }));
+    expect(sections()).toEqual([
+      ['Your selected path', 'Code formatter'],
+      ['Explore the other path', 'Query engine & optimizer'],
+    ]);
+  });
+
+  it.each([
+    ['engine', 'resolution'],
+    ['formatter', 'layout'],
+  ] as const)('after the shared steps, Continue on the %s track opens %s', (track, nextId) => {
+    finishSharedSteps();
+    setTrack(track);
+    at('/');
+    const resume = document.querySelector('.resume-link');
+    expect(resume?.textContent).toBe(`continue ${titleOf(nextId)}`);
+    expect(resume?.getAttribute('href')).toBe(`/lesson/${nextId}`);
+  });
+
+  it.each([
+    ['engine', 'resolution'],
+    ['formatter', 'layout'],
+  ] as const)('Next from the shared SQL parser follows the %s track to %s', (track, nextId) => {
+    setTrack(track);
+    at('/challenge/sql-select-parse');
+    const next = screen.getByRole('link', { name: `Next: ${titleOf(nextId)}` });
+    expect(next.getAttribute('href')).toBe(`/lesson/${nextId}`);
+  });
+
+  it('offers both branches after the shared SQL parser', () => {
+    at('/challenge/sql-select-parse');
+    const links = [...document.querySelectorAll('.branch-links a')].map((a) => [
+      a.textContent,
+      a.getAttribute('href'),
+    ]);
+    expect(links).toEqual([
+      ['Query engine and optimizer', '/lesson/resolution'],
+      ['Code formatter', '/lesson/layout'],
+    ]);
+  });
+
+  it('offers no branch choice on any other step', () => {
+    at('/challenge/expr-tokenize');
+    expect(document.querySelectorAll('.branch-links')).toHaveLength(0);
+  });
+
+  it.each([
+    ['engine', engine],
+    ['formatter', formatter],
+  ] as const)('the last step of the %s track points home, not onward', (track, path) => {
+    setTrack(track);
+    const last = path[path.length - 1];
+    at(last.kind === 'lesson' ? `/lesson/${stepId(last)}` : `/challenge/${stepId(last)}`);
+    const done = screen.getByRole('link', { name: 'Track complete · explore the other branch' });
+    expect(done.getAttribute('href')).toBe('/');
+  });
+});
+
+describe('test results', () => {
+  const failing = (n: number, inputText?: string) => ({
+    id: `builtin-${n}`,
+    name: `failing ${n}`,
+    custom: false,
+    status: 'fail' as const,
+    message: `failure ${n}`,
+    expectedText: '1',
+    actualText: '2',
+    logs: [],
+    ...(inputText === undefined ? {} : { inputText }),
+  });
+  const showReport = async (tests: GradeReport['tests']) => {
+    mockRunGrader.mockResolvedValueOnce({ challengeId: 'expr-tokenize', status: 'fail', tests });
+    const user = userEvent.setup();
+    at('/challenge/expr-tokenize');
+    await user.click(screen.getByRole('button', { name: 'Run tests' }));
+    await waitFor(() => expect(screen.getByText('failing 1')).toBeInTheDocument());
+  };
+  const rowOf = (name: string) => screen.getByText(name).closest('details')!;
+
+  it('opens only the first failure, leaving passes and later failures closed', async () => {
+    const passing = { ...failing(0), name: 'passing 0', status: 'pass' as const, message: undefined };
+    await showReport([passing, failing(1), failing(2)]);
+    expect(['passing 0', 'failing 1', 'failing 2'].map((name) => rowOf(name).open)).toEqual([
+      false,
+      true,
+      false,
+    ]);
+  });
+
+  it('shows the test input, with a structure view only for JSON objects and arrays', async () => {
+    await showReport([failing(1, '{\n  "x": 1\n}'), failing(2, '"plain"')]);
+    // Every summary inside a result row, after the row's own.
+    const panes = (name: string) =>
+      [...rowOf(name).querySelectorAll(':scope details summary')].map((summary) => summary.textContent);
+    expect(panes('failing 1')).toEqual(['Test input', 'Inspect structure', 'root 1 fields']);
+    expect(panes('failing 2')).toEqual(['Test input']);
   });
 });
