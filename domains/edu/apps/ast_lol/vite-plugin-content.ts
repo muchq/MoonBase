@@ -4,8 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { Marked } from 'marked';
 import { gfmHeadingId } from 'marked-gfm-heading-id';
 import type { Plugin } from 'vite';
-import { javascriptLanguage } from '@codemirror/lang-javascript';
-import { classHighlighter, highlightTree } from '@lezer/highlight';
+import { highlightSpans, highlightedLanguages } from './src/lang/highlight';
 
 /**
  * Serves the course's markdown (lessons and challenge statements) to the app
@@ -17,22 +16,31 @@ import { classHighlighter, highlightTree } from '@lezer/highlight';
 export const CONTENT_ID = 'virtual:astlol-content';
 const RESOLVED_ID = `\0${CONTENT_ID}`;
 
-const CONTENT_DIR = fileURLToPath(new URL('./src/content', import.meta.url));
+// Resolved when the plugin loads content, not on import, so tests can import
+// renderDoc from an environment whose module URLs are not file: URLs.
+const contentDir = (): string => fileURLToPath(new URL('./src/content', import.meta.url));
+
+const escapeHtml = (text: string): string =>
+  text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+
+function renderCode(text: string, lang = ''): string {
+  if (!(highlightedLanguages as readonly string[]).includes(lang)) {
+    return `<pre><code>${escapeHtml(text)}</code></pre>`;
+  }
+  const html = highlightSpans(text, lang)
+    .map(({ text, classes }) =>
+      classes ? `<span class="${classes}">${escapeHtml(text)}</span>` : escapeHtml(text),
+    )
+    .join('');
+  return `<pre><code>${html}</code></pre>`;
+}
 
 // gfmHeadingId so in-document links to sections resolve; the slugs match
 // GitHub's, which is what the author of a markdown link is writing against.
-const escapeHtml = (text: string): string => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-const renderer = new Marked({ gfm: true, renderer: {
-  code({ text, lang }) {
-    if (!['js', 'javascript', 'ts', 'typescript'].includes(lang ?? '')) return `<pre><code>${escapeHtml(text)}</code></pre>`;
-    let out = '', offset = 0;
-    highlightTree(javascriptLanguage.parser.parse(text), classHighlighter, (from, to, classes) => {
-      out += escapeHtml(text.slice(offset, from)) + `<span class="${classes}">${escapeHtml(text.slice(from, to))}</span>`;
-      offset = to;
-    });
-    return `<pre><code>${out + escapeHtml(text.slice(offset))}</code></pre>`;
-  },
-}}, gfmHeadingId());
+const renderer = new Marked(
+  { gfm: true, renderer: { code: ({ text, lang }) => renderCode(text, lang) } },
+  gfmHeadingId(),
+);
 
 export function renderDoc(markdown: string): string {
   const html = renderer.parse(markdown, { async: false });
@@ -65,8 +73,8 @@ export default function astlolContent(): Plugin {
     load(id) {
       if (id !== RESOLVED_ID) return null;
       const watch = (f: string) => this.addWatchFile(f);
-      const lessons = renderDir(join(CONTENT_DIR, 'lessons'), watch);
-      const challenges = renderDir(join(CONTENT_DIR, 'challenges'), watch);
+      const lessons = renderDir(join(contentDir(), 'lessons'), watch);
+      const challenges = renderDir(join(contentDir(), 'challenges'), watch);
       return [
         `export const lessonHtml = ${JSON.stringify(lessons)};`,
         `export const challengeHtml = ${JSON.stringify(challenges)};`,
