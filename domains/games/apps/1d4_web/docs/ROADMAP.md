@@ -6,7 +6,7 @@
 
 React 18 + TypeScript SPA built with Vite 6, deployed to Cloudflare Workers at [1d4.net](https://1d4.net).
 
-- **Games view** — Browse indexed games; sortable columns (player, ELO, time class, ECO, result, motifs); motif badges with occurrence count tooltips; click-through to chess.com; pagination.
+- **Games view** — Browse indexed games; sortable columns (player, time class, ECO, result); ratings beside names; motif badges with occurrence count tooltips; click-through to chess.com; pagination.
 - **Index view** — Enqueue index requests (username, platform, start/end month); status table with auto-polling while any request is pending or processing (TanStack Query `refetchInterval`).
 - **Query view** — ChessQL textarea; syntax help; example-chip shortcuts; results table; limit selector.
 - **Foundation** — Tailwind CSS v4; react-router-dom v6; TanStack Query v5; Vitest + React Testing Library (30 tests); CI build/typecheck/test job on every PR.
@@ -200,7 +200,7 @@ All three views (Games, Index, Query) are fully usable on a 375px viewport witho
 
 ### Current Issues (as of Phase 1)
 
-- Games table: 10+ columns overflow on small screens.
+- Games table: still scrolls sideways below ~1100px with long usernames.
 - Index form: date inputs are tight on narrow screens.
 - Query view: results table has same overflow issue as games table.
 - `GameDetailPanel` (Phase 2): board + occurrence list need responsive stacking.
