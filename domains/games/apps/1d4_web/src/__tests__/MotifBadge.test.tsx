@@ -8,10 +8,13 @@ describe('MotifBadge', () => {
     expect(screen.getByText('discovered attack')).toBeInTheDocument();
   });
 
-  it('has no title attribute when no occurrences provided', () => {
-    render(<MotifBadge label="fork" />);
-    const badge = screen.getByText('fork');
-    expect(badge).not.toHaveAttribute('title');
+  // A badge can be ellipsized in the table, so its tooltip always names it.
+  it('names the motif in its tooltip when no occurrences are provided', () => {
+    render(<MotifBadge label="discovered_attack" />);
+    expect(screen.getByText('discovered attack')).toHaveAttribute(
+      'title',
+      'discovered attack'
+    );
   });
 
   it('builds tooltip text from a single occurrence', () => {
@@ -28,7 +31,7 @@ describe('MotifBadge', () => {
     const badge = screen.getByText('fork');
     expect(badge).toHaveAttribute(
       'title',
-      'Move 12 (white): Knight forks king and queen'
+      'fork\nMove 12 (white): Knight forks king and queen'
     );
   });
 
@@ -41,7 +44,7 @@ describe('MotifBadge', () => {
     const badge = screen.getByText('pin');
     expect(badge).toHaveAttribute(
       'title',
-      'Move 5 (white): Pin on d-file\nMove 20 (black): Absolute pin'
+      'pin\nMove 5 (white): Pin on d-file\nMove 20 (black): Absolute pin'
     );
   });
 });

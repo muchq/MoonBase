@@ -120,11 +120,9 @@ describe('GameTable', () => {
     expect(screen.getByText('Carol')).toBeInTheDocument();
   });
 
-  // The whole point of the column set is that it is short. Without this,
-  // re-adding a Game or Indexed column — the two that crushed Motifs — is a
-  // silently green change. Asserted as an exact list rather than two absence
-  // checks so any twelfth column has to be a deliberate edit here too.
-  it('shows only the nine columns that earn their width', () => {
+  // The column set is short so the table fits a laptop. Asserted as an exact
+  // list so any added column is a deliberate edit here.
+  it('shows only the columns that earn their width', () => {
     render(<GameTable games={mockGames} />);
     const headers = Array.from(
       screen.getByRole('table').querySelectorAll('thead th')
@@ -133,8 +131,6 @@ describe('GameTable', () => {
       'Site',
       'White',
       'Black',
-      'White ELO',
-      'Black ELO',
       'Time',
       'ECO',
       'Result',
@@ -200,8 +196,8 @@ describe('GameTable', () => {
   });
 
   // jsdom has no layout, so this cannot assert the rendered result — only that
-  // the hook the stylesheet hangs the fix on is still here. Nine columns still
-  // do not fit a laptop, and without the modifier the browser keeps honouring
+  // the hook the stylesheet hangs the fix on is still here. The columns do not
+  // fit a phone, and without the modifier the browser keeps honouring
   // width:100% by crushing the last ones instead of letting the wrapper scroll:
   // ISO dates break after the month and motif badges split mid-word.
   it('marks the games table as wide so its columns scroll instead of being crushed', () => {
@@ -222,15 +218,17 @@ describe('GameTable', () => {
     // string. process.cwd() is the vitest root, i.e. this package.
     const css = readFileSync('src/index.css', 'utf8');
     expect(css).not.toHaveLength(0);
+    // Anchored to a line start so `.motifs` cannot match inside `td .motifs`.
     const rule = (selector: string) =>
-      css.match(new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
+      css.match(
+        new RegExp(
+          `^${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`,
+          'm'
+        )
+      )?.[1] ?? '';
 
-    // Not just `\d`: that matched `0` and `4px` as happily as `52rem`, so it
-    // could not tell a real floor from a zeroed or unit-less one. Pin the unit
-    // and a lower bound instead. The band is wide on purpose — the exact number
-    // is a judgement call, but a floor below the table's own min-content
-    // (measured 816px with short usernames) is inert, and one far above it
-    // reintroduces the laptop scrolling this modifier exists to bound.
+    // Unit and band pinned, not just `\d`, which matches `0` and `4px` alike.
+    // Below the band the floor is inert; far above it, laptops scroll again.
     const minWidth = rule('.table-wrap--wide table').match(
       /min-width:\s*(\d+(?:\.\d+)?)rem/
     );
@@ -238,8 +236,19 @@ describe('GameTable', () => {
     expect(Number(minWidth![1])).toBeGreaterThanOrEqual(48);
     expect(Number(minWidth![1])).toBeLessThanOrEqual(64);
     expect(rule('.table-wrap--wide td')).toMatch(/white-space:\s*nowrap/);
-    // Badges wrap between themselves; only mid-badge breaking is the bug.
-    expect(rule('.table-wrap--wide td .motifs')).toMatch(/white-space:\s*normal/);
+    // One line per row however many motifs a game has: a wrapping badge list
+    // makes row height track motif count.
+    expect(rule('.motifs')).toMatch(/flex-wrap:\s*nowrap/);
+    // And bounded width however long the names are: each badge is capped and
+    // ellipsized, and none shrinks, so a short name is never cut for a long one.
+    const badge = rule('td .motifs .motif-badge');
+    const cap = badge.match(/max-width:\s*(\d+(?:\.\d+)?)rem/);
+    expect(cap).not.toBeNull();
+    expect(Number(cap![1])).toBeGreaterThanOrEqual(4);
+    expect(Number(cap![1])).toBeLessThanOrEqual(8);
+    expect(badge).toMatch(/text-overflow:\s*ellipsis/);
+    expect(badge).toMatch(/overflow:\s*hidden/);
+    expect(badge).toMatch(/flex-shrink:\s*0/);
     // The wrapper has to be the thing that scrolls, or the min-width just
     // overflows the page and the columns are off-screen instead of squeezed.
     expect(rule('.table-wrap')).toMatch(/overflow-x:\s*auto/);
@@ -263,5 +272,101 @@ describe('platform', () => {
 
     expect(screen.queryByText('CHESS_COM')).toBeNull();
     expect(screen.queryByText('LICHESS')).toBeNull();
+  });
+});
+
+// Ratings ride along in the player cells rather than spending two columns.
+describe('ratings', () => {
+  it("shows each player's rating beside their name", () => {
+    render(<GameTable games={mockGames} />);
+    const row = screen.getAllByRole('row')[1];
+    expect(row).toHaveTextContent('Alice1800');
+    expect(row).toHaveTextContent('Bob1750');
+  });
+
+  // Unrated games (muchq.com) store 0; a column of zeros says nothing.
+  it('omits a rating of zero or none', () => {
+    const unrated = { ...mockGames[0], whiteElo: 0, blackElo: null };
+    render(<GameTable games={[unrated]} />);
+    const cells = screen.getAllByRole('row')[1].querySelectorAll('td');
+    expect(cells[1]).toHaveTextContent(/^Alice$/);
+    expect(cells[2]).toHaveTextContent(/^Bob$/);
+  });
+
+  // The rating sits outside the toggle so the button's name stays the player.
+  it('keeps the rating out of the expand button', () => {
+    render(<GameTable games={mockGames} onRowClick={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Alice' })).toBeInTheDocument();
+  });
+});
+
+describe('motif overflow', () => {
+  const many = ['fork', 'pin', 'skewer', 'checkmate', 'double_check'];
+  const game: GameRow = {
+    ...mockGames[0],
+    occurrences: Object.fromEntries(
+      many.map((motif) => [
+        motif,
+        [{ gameUrl: 'g', motif, moveNumber: 1, side: 'white', description: motif }],
+      ])
+    ),
+  };
+
+  it('shows two badges and counts the rest', () => {
+    render(<GameTable games={[game]} />);
+    expect(screen.getByText('checkmate')).toBeInTheDocument();
+    expect(screen.getByText('double check')).toBeInTheDocument();
+    expect(screen.queryByText('fork')).toBeNull();
+    const more = screen.getByTitle('fork, skewer, pin');
+    expect(more).toHaveTextContent(/^\+3/);
+  });
+
+  // The title is pointer-only, so the hidden names are in the text as well.
+  it('names the hidden motifs to assistive tech', () => {
+    render(<GameTable games={[game]} />);
+    expect(screen.getByTitle('fork, skewer, pin')).toHaveTextContent(
+      '+3 more: fork, skewer, pin'
+    );
+  });
+
+  // The server lists stored motifs by first ply, then appends derived ones
+  // (fork, checkmate, ...), so its order would bury the result-deciding ones.
+  it('shows the most significant motifs, not the first the server lists', () => {
+    const serverOrder = ['check', 'pin', 'promotion', 'fork', 'checkmate'];
+    const ranked: GameRow = {
+      ...mockGames[0],
+      occurrences: Object.fromEntries(
+        serverOrder.map((motif) => [
+          motif,
+          [{ gameUrl: 'g', motif, moveNumber: 1, side: 'white', description: motif }],
+        ])
+      ),
+    };
+    render(<GameTable games={[ranked]} />);
+    expect(screen.getByText('checkmate')).toBeInTheDocument();
+    expect(screen.getByText('fork')).toBeInTheDocument();
+    expect(screen.getByTitle('pin, promotion, check')).toBeInTheDocument();
+  });
+
+  it('keeps server order among motifs it does not rank', () => {
+    const unranked = ['zugzwang', 'overloaded_piece', 'new_motif'];
+    const g: GameRow = {
+      ...mockGames[0],
+      occurrences: Object.fromEntries(
+        unranked.map((motif) => [
+          motif,
+          [{ gameUrl: 'g', motif, moveNumber: 1, side: 'white', description: motif }],
+        ])
+      ),
+    };
+    render(<GameTable games={[g]} />);
+    expect(screen.getByText('zugzwang')).toBeInTheDocument();
+    expect(screen.getByText('overloaded piece')).toBeInTheDocument();
+    expect(screen.getByTitle('new motif')).toBeInTheDocument();
+  });
+
+  it('shows no counter when every motif fits', () => {
+    render(<GameTable games={mockGames} />);
+    expect(screen.queryByText(/^\+\d+$/)).toBeNull();
   });
 });
