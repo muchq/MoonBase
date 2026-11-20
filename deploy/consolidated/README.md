@@ -28,9 +28,14 @@ individually targetable.
   - SPA lives on Cloudflare at `iili.uk` (not this host)
 
 - **Observability Stack**
-  - Prometheus (port 9090)
-  - OpenTelemetry Collector (ports 4318, 8889)
+  - Prometheus (port 9090, bound to the host's loopback: `ssh -L 9090:127.0.0.1:9090`)
+  - OpenTelemetry Collector (ports 4318, 8889 internal)
   - cAdvisor (port 8080 internal)
+
+The ports above are container ports on `app_network`. The host publishes only
+Caddy's 80 and 443 and Forgejo's git SSH on 222: Docker's published ports
+bypass the host firewall, so anything else would skip Caddy's route
+allow-lists and bot refusals. `deploy_config_test` enforces this.
 
 - **Caddy** - Reverse proxy and web server
   - Handles HTTPS certificates automatically

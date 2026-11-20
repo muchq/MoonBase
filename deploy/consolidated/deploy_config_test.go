@@ -3586,3 +3586,79 @@ func TestTheRemoteDeployBlockStopsAtTheFirstFailure(t *testing.T) {
 			" exits 0 and the deploy reports success over a stack that is not serving")
 	}
 }
+
+// Published ports.
+//
+// Docker writes its own iptables rules for a published port, ahead of ufw, so
+// a "8088:8080" is reachable from the internet whatever the host firewall
+// says. Every route allow-list, CORS grant and bot refusal in the Caddyfile
+// holds only for traffic that goes through Caddy; a backend's own published
+// port is a way around all of it. So the edge is Caddy's 80 and 443 plus
+// Forgejo's git SSH, and anything else an operator wants from the host is
+// bound to loopback and reached over an SSH tunnel.
+var publicHostPorts = map[string][]string{
+	"caddy":   {"80:80", "443:443"},
+	"forgejo": {"222:22"},
+}
+
+func TestOnlyTheEdgePublishesAPortBeyondLoopback(t *testing.T) {
+	for _, file := range []string{"compose.yaml", "docker-compose.observability.yml"} {
+		for service, lines := range composeServiceLines(t, file) {
+			for _, mapping := range publishedPorts(lines) {
+				if strings.HasPrefix(mapping, "127.0.0.1:") {
+					continue
+				}
+				if slices.Contains(publicHostPorts[service], mapping) {
+					continue
+				}
+				t.Errorf("%s: %s publishes %q on every host interface. Docker's iptables rules "+
+					"bypass the host firewall, so this port skips Caddy's route allow-lists, CORS "+
+					"and bot refusals. Drop the mapping (Caddy reaches it over app_network) or bind "+
+					"it as 127.0.0.1:HOST:CONTAINER.", file, service, mapping)
+			}
+		}
+	}
+}
+
+// Guards the guard: the edge must still be published, or the parse above has
+// stopped finding ports and the test passes on nothing.
+func TestTheEdgeStillPublishesItsPorts(t *testing.T) {
+	services := composeServiceLines(t, "compose.yaml")
+	for service, want := range publicHostPorts {
+		got := publishedPorts(services[service])
+		for _, mapping := range want {
+			if !slices.Contains(got, mapping) {
+				t.Errorf("%s no longer publishes %q (found %v)", service, mapping, got)
+			}
+		}
+	}
+}
+
+// The entries of a service's ports: list, unquoted and without comments.
+func publishedPorts(serviceLines []string) []string {
+	var mappings []string
+	inPorts := false
+	for _, line := range serviceLines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if line == "    ports:" {
+			inPorts = true
+			continue
+		}
+		if !inPorts {
+			continue
+		}
+		if !strings.HasPrefix(line, "      ") || !strings.HasPrefix(trimmed, "- ") {
+			inPorts = false
+			continue
+		}
+		entry := strings.TrimPrefix(trimmed, "- ")
+		if i := strings.Index(entry, "#"); i >= 0 {
+			entry = entry[:i]
+		}
+		mappings = append(mappings, strings.Trim(strings.TrimSpace(entry), `"'`))
+	}
+	return mappings
+}

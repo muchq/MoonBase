@@ -3,7 +3,9 @@ services:
     image: prom/prometheus:v3.16.0
     restart: always
     ports:
-      - "9090:9090"
+      # Loopback only: reach it with `ssh -L 9090:127.0.0.1:9090`. Public, the
+      # lifecycle API below would let anyone stop it.
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./o11y/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
@@ -33,9 +35,6 @@ services:
       # Read-only, and the reason the Host page can report the machine rather
       # than this container — cadvisor below has had the equivalent all along.
       - /:/hostfs:ro
-    ports:
-      - "4318:4318"   # OTLP HTTP receiver
-      - "8889:8889"   # Prometheus metrics endpoint
     networks:
       - app_network
     deploy:
