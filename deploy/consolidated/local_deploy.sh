@@ -35,14 +35,17 @@ fi
 # Change to local_docker directory
 cd local_docker
 
+# compose.yaml refuses to start without a pin; locally, :latest is the choice.
+# Written to .env rather than exported so the `down` printed below works too.
+if ! grep -q '^DEPLOY_SHA=' .env 2>/dev/null; then
+  echo "DEPLOY_SHA=latest" >> .env
+fi
+
 # Export environment variables if .env exists
 if [ -f ".env" ]; then
   echo "Loading environment variables..."
   export $(cat .env | grep -v '^#' | xargs)
 fi
-
-# compose.yaml refuses to start without a pin; locally, :latest is the choice.
-export DEPLOY_SHA="${DEPLOY_SHA:-latest}"
 
 # Ensure the shared network exists with the pinned subnet AND an ip-range that
 # keeps the dynamic pool off Caddy's static 172.28.0.2 (opal-cpp ADR-0012).
@@ -59,12 +62,8 @@ elif ! docker network inspect muchq_network \
   docker network create --subnet 172.28.0.0/16 --ip-range 172.28.1.0/24 --gateway 172.28.0.1 muchq_network
 fi
 
-# Pull only the published images (skip prom_proxy for now)
-echo "Pulling published images..."
-docker pull ghcr.io/muchq/portrait:latest || echo "Warning: Failed to pull portrait" 
-docker pull caddy:2-alpine
-docker pull prom/prometheus:v3.5.0
-docker pull otel/opentelemetry-collector-contrib:0.133.0
+echo "Pulling images..."
+docker compose -f compose.yaml -f docker-compose.observability.yml pull --ignore-pull-failures
 
 # Start services (prom_proxy will need to be built locally or skipped)
 echo "Starting services..."
