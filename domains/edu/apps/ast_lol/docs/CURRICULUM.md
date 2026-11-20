@@ -161,10 +161,10 @@ demand, and retain raw JSON alongside expandable structural views. The pipeline
 lab uses the reference engine to connect source, tokens, trees, plans, results,
 cost, and layout. It is an observation tool, not a grading bypass.
 
-The browser smoke suite covers the actual CodeMirror editor and module worker,
-a nonterminating submission, persisted drafts/progress/theme, the formatter
-branch, pipeline inspection, and mobile overflow. Screenshots are written to a
-temporary directory printed by the script.
+The browser checks (`npm run test:browser`, run in CI) cover the actual
+CodeMirror editor and module worker, a nonterminating submission, persisted
+drafts/progress/theme, the formatter branch, pipeline inspection, and mobile
+overflow. Set `SCREENSHOT_DIR` to also save screenshots.
 
 ## Known simplifications (deliberate)
 

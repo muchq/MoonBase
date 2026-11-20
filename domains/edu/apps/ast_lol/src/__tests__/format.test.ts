@@ -232,3 +232,22 @@ describe('formatSelect', () => {
     }
   });
 });
+
+describe('formatSelect at boundary widths', () => {
+  const queries = [
+    'SELECT name FROM users',
+    'SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id ' +
+      'WHERE o.total > 2 AND u.city IS NOT NULL ORDER BY o.total DESC',
+  ];
+
+  it.each(queries)('round-trips and is stable at every width that matters: %s', (query) => {
+    const ast = parseSql(query);
+    const oneLine = formatSelect(ast, 1000).length;
+    for (const width of [20, 40, 60, oneLine - 1, oneLine, oneLine + 1]) {
+      const formatted = formatSelect(ast, width);
+      const reparsed = parseSql(formatted);
+      expect(reparsed, `width ${width}`).toEqual(ast);
+      expect(formatSelect(reparsed, width), `width ${width}`).toBe(formatted);
+    }
+  });
+});

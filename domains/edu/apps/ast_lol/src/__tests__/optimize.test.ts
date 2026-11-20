@@ -4,6 +4,7 @@ import {
   buildPlan,
   conjunctsOf,
   demoDb,
+  evalRowExpr,
   executePlan,
   executeWithStats,
   optimizePlan,
@@ -20,6 +21,7 @@ import {
   type Plan,
   type SqlExpr,
 } from '../lang/sql';
+import { seededDatabase } from '../curriculum/validation';
 
 const expr = (source: string): SqlExpr => parseSqlExpr(tokenizeSql(source));
 
@@ -239,20 +241,54 @@ describe('optimizePlan', () => {
 });
 
 describe('optimizer soundness under ill-typed logical operands', () => {
-  // TRUE AND x → x is only meaning-preserving because the executor coerces
-  // AND/OR/NOT operands consistently (non-true, non-null counts as false).
-  // This query made the pre-coercion engine diverge: for the null city,
-  // city = 'x' is null, and the inner AND folded differently than it ran.
+  // AND/OR/NOT coerce their operands (non-true, non-null counts as false), so
+  // `TRUE AND x` is x coerced, not x. Replacing it with x is sound only when x
+  // is already boolean or null, and a comparison above it sees the difference:
+  // `(TRUE AND id) = id` compares a boolean with a number.
   it.each([
     "SELECT name FROM users WHERE NOT ((TRUE AND signup_year) AND (city = 'x'))",
     'SELECT name FROM users WHERE signup_year AND TRUE',
     'SELECT name FROM users WHERE FALSE OR signup_year',
     'SELECT name FROM users WHERE 1 = 1 AND signup_year',
+    'SELECT id FROM users WHERE (TRUE AND id) = id',
+    'SELECT id FROM users WHERE (id AND TRUE) = id',
+    'SELECT id FROM users WHERE (FALSE OR id) = id',
+    'SELECT id FROM users WHERE (id OR FALSE) = id',
+    'SELECT id FROM users WHERE (TRUE AND 5) = FALSE',
   ])('%s: optimized plan returns identical rows', (query) => {
     const naive = planOf(query);
     const optimized = optimizePlan(naive);
     expect(validatePlan(optimized, shopCatalog)).toEqual([]);
-    expect(executePlan(optimized, demoDb)).toEqual(executePlan(naive, demoDb));
+    for (const db of [demoDb, seededDatabase(7), seededDatabase(42)]) {
+      expect(executePlan(optimized, db)).toEqual(executePlan(naive, db));
+    }
+  });
+
+  it('simplifies identities without changing any value, in any context', () => {
+    // Every operand shape, as each identity's other side, inside every kind of
+    // parent, evaluated on every pair of mixed-type values.
+    const operands = ['u.x', 'u.x > 0', 'u.x + 1', 'NOT u.x', 'u.x IS NULL'];
+    const identities = (x: string) => [
+      `TRUE AND (${x})`,
+      `(${x}) AND TRUE`,
+      `FALSE OR (${x})`,
+      `(${x}) OR FALSE`,
+    ];
+    const contexts = (e: string) => [e, `(${e}) = u.y`, `NOT (${e})`, `(${e}) IS NULL`];
+    const values = [null, false, true, 0, 1, -1, 'x'];
+
+    for (const source of operands.flatMap(identities).flatMap(contexts)) {
+      const original = expr(source);
+      const simplified = simplifyExpr(original);
+      for (const x of values) {
+        for (const y of values) {
+          const row = { 'u.x': x, 'u.y': y };
+          expect(evalRowExpr(simplified, row), `${source} at ${JSON.stringify(row)}`).toBe(
+            evalRowExpr(original, row),
+          );
+        }
+      }
+    }
   });
 });
 

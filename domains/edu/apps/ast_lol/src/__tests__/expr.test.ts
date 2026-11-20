@@ -198,3 +198,31 @@ describe('collectVars', () => {
     expect(collectVars(parse('1 + 2'))).toEqual([]);
   });
 });
+
+describe('generated expressions', () => {
+  // A seeded linear congruential generator: the same 80 trees every run.
+  function treeGenerator(seed: number) {
+    const next = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0);
+    const pick = <T>(items: T[]) => items[next() % items.length];
+    const source = (depth: number): string =>
+      depth === 0
+        ? pick(['x', 'y', '0', '1', '2'])
+        : `(${source(depth - 1)} ${pick(['+', '-', '*', '/'])} ${source(depth - 1)})`;
+    return () => parse(source(3));
+  }
+
+  const trees = Array.from({ length: 80 }, treeGenerator(17));
+
+  it('print then parse gives back the same tree', () => {
+    for (const tree of trees) expect(parse(printExpr(tree))).toEqual(tree);
+  });
+
+  it('folding never changes a value, including at zero, infinity and NaN', () => {
+    for (const tree of trees) {
+      for (const x of [0, 1, -3, Infinity, NaN]) {
+        const env = { x, y: 2 };
+        expect(evaluateExpr(foldExpr(tree), env)).toBe(evaluateExpr(tree, env));
+      }
+    }
+  });
+});

@@ -73,7 +73,7 @@ npm run dev        # Vite dev server with Cloudflare Workers runtime
 npm test           # Vitest
 npm run typecheck  # tsc --noEmit
 npx playwright install chromium  # once, for browser checks
-npm run test:browser  # real editor, worker, themes, progress, paths, mobile layouts
+npm run test:browser  # real editor, worker, themes, progress, paths, mobile layouts (CI runs it)
 ```
 
 CI-relevant invariants the suite pins: every reference solution passes its own
