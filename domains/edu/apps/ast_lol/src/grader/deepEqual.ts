@@ -53,6 +53,13 @@ export function firstDiff(expected: unknown, actual: unknown, path = ''): Diff |
       const diff = firstDiff(expected[i], actual[i], `${path}[${i}]`);
       if (diff !== null) return diff;
     }
+    // Arrays may also carry own properties. Include them so an immutable
+    // input contract cannot overlook additions to an argument array.
+    const extra = (array: unknown[]) => Object.fromEntries(
+      Object.entries(array).filter(([key]) => !/^(0|[1-9]\d*)$/.test(key)),
+    );
+    const extraDiff = firstDiff(extra(expected), extra(actual), path);
+    if (extraDiff !== null) return extraDiff;
     return null;
   }
 

@@ -11,7 +11,7 @@ ORDER BY o.total DESC, u.name
 LIMIT 10
 ```
 
-What is in: `SELECT` lists (with `*` and `AS` aliases), one `FROM` table, any number of inner `JOIN … ON`s, `WHERE`, multi-key `ORDER BY` with `ASC`/`DESC`, `LIMIT`, and a full expression language — comparisons, arithmetic, `AND`/`OR`/`NOT`, `IS [NOT] NULL`, literals including `NULL`, `TRUE`, `FALSE`. What is out: `GROUP BY`, subqueries, outer joins, `DISTINCT`, functions. (Each of those is a fine exercise *after* this course; none changes the techniques you are here to learn.)
+What is in: `SELECT` lists (with `*` and `AS` aliases), one `FROM` table, any number of inner `JOIN … ON`s, `WHERE`, multi-key `ORDER BY` with `ASC`/`DESC`, `LIMIT`, and a full expression language — comparisons, arithmetic, `AND`/`OR`/`NOT`, `IS [NOT] NULL`, literals including `NULL`, `TRUE`, `FALSE`. What is out: `GROUP BY`, subqueries, outer joins, `DISTINCT`, functions. (These are advanced extensions: grouping, nested scopes, and outer joins add new semantic obligations. This course first establishes the shared parsing and transformation techniques.)
 
 ## Tokenizing a real dialect
 

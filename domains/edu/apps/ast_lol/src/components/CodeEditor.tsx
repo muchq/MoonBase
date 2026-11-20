@@ -25,14 +25,14 @@ const theme = EditorView.theme(
 );
 
 const highlight = HighlightStyle.define([
-  { tag: tags.keyword, color: '#ff7b72' },
-  { tag: tags.comment, color: '#8b93a7', fontStyle: 'italic' },
-  { tag: [tags.string, tags.special(tags.string)], color: '#a5d6ff' },
-  { tag: tags.number, color: '#79c0ff' },
-  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: '#d2a8ff' },
-  { tag: tags.propertyName, color: '#7ee787' },
-  { tag: [tags.operator, tags.punctuation], color: '#e6e9f0' },
-  { tag: tags.bool, color: '#79c0ff' },
+  { tag: tags.keyword, color: 'var(--syntax-keyword)' },
+  { tag: tags.comment, color: 'var(--text-muted)', fontStyle: 'italic' },
+  { tag: [tags.string, tags.special(tags.string)], color: 'var(--syntax-string)' },
+  { tag: tags.number, color: 'var(--syntax-number)' },
+  { tag: [tags.function(tags.variableName), tags.function(tags.propertyName)], color: 'var(--syntax-function)' },
+  { tag: tags.propertyName, color: 'var(--accent)' },
+  { tag: [tags.operator, tags.punctuation], color: 'var(--text)' },
+  { tag: tags.bool, color: 'var(--syntax-number)' },
 ]);
 
 export interface CodeEditorProps {
@@ -56,6 +56,7 @@ export default function CodeEditor({ value, onChange, onRun }: CodeEditorProps) 
       state: EditorState.create({
         doc: value,
         extensions: [
+          EditorView.contentAttributes.of({ "aria-label": "Code editor" }),
           lineNumbers(),
           history(),
           bracketMatching(),

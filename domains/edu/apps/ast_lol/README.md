@@ -8,7 +8,7 @@ grader runs the user's JavaScript in a browser Web Worker; nothing is uploaded.
 
 ## Shape of the thing
 
-- **Curriculum** (`src/curriculum/`) — 7 tiers, 14 lessons, 18 challenges.
+- **Curriculum** (`src/curriculum/`) — 7 tiers, 14 lessons, 28 reasoning checks, and 24 coding challenges.
   Tiers 1–2 build a toy expression language (tokenize → parse → evaluate →
   traverse → print → fold); tiers 3–5 build AstQL, the course's SQL subset
   (tokenize → Pratt-parse → resolve → plan → execute → optimize), ending in a
@@ -40,6 +40,26 @@ Submissions are JavaScript; the grader takes a `language` field and compiles
 per-language, so TypeScript (a transpile step) or a functional language can be
 added without reshaping anything.
 
+## Learning experience
+
+The homepage shows a shared foundation and two explicit branches. A saved path
+choice controls Continue and next-step navigation without locking any content.
+Each module includes an outcome, prerequisites, and an approximate effort range.
+Lessons offer predict/trace/repair/transfer checks; visits, explicit reading,
+correct practice, passing code, and reference consultation are stored separately.
+Existing v1 drafts and completion timestamps remain readable.
+
+Six additional challenges bridge traversal, SQL row evaluation, joining, sorting,
+and conservative predicate-type analysis. A finite-domain counterexample search
+follows the optimizer integration capstone. The sorting drill starts with a bug
+to repair; the counterexample checker accepts any valid witness.
+
+`/lab` exposes reference tokens, ASTs, folded expressions, resolution, plans,
+results, per-operator costs, and a width-adjustable formatter. It uses the small
+demo database and at most two joins. Source-token selection and expandable tree
+views connect the representations. System / Light / Dark is persistent, follows
+OS changes in System mode, and applies to prose, examples, and the editor.
+
 ## Develop locally
 
 ```bash
@@ -52,10 +72,12 @@ npm run dev        # Vite dev server with Cloudflare Workers runtime
 ```bash
 npm test           # Vitest
 npm run typecheck  # tsc --noEmit
+npx playwright install chromium  # once, for browser checks
+npm run test:browser  # real editor, worker, themes, progress, paths, mobile layouts
 ```
 
 CI-relevant invariants the suite pins: every reference solution passes its own
-test bank, every starter fails it, every custom-test placeholder builds an
+test bank, every starter fails it, known misconception implementations are rejected, immutable-input contracts are enforced, every custom-test placeholder builds an
 input the reference solution accepts, every lesson/challenge id has a rendered
 document (and no orphans), lesson reading links are https, the capstone's
 hardcoded cost budgets match the reference pipeline (and sit strictly below

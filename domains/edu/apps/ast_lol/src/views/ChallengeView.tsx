@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useParams } from 'react-router';
 import { challengeHtml } from 'virtual:astlol-content';
 import CodeEditor from '../components/CodeEditor';
+import HighlightedCode from '../components/HighlightedCode';
 import CustomTests from '../components/CustomTests';
 import StepNav from '../components/StepNav';
 import TestResults from '../components/TestResults';
@@ -13,6 +14,8 @@ import {
   clearDraft,
   getProgress,
   markCompleted,
+  markVisited,
+  markStudied,
   saveDraft,
   setCustomTests,
   useProgress,
@@ -26,6 +29,7 @@ function Workspace({ challenge }: { challenge: ChallengeDef }) {
   const [solutionShown, setSolutionShown] = useState(false);
   const customTests = progress.customTests[challenge.id] ?? [];
   const runningRef = useRef(false);
+  useEffect(() => { markVisited(challenge.id); }, [challenge.id]);
 
   // Drafts persist per challenge, debounced against typing speed. Editing
   // back to the exact starter clears the draft — otherwise the stale draft
@@ -90,7 +94,7 @@ function Workspace({ challenge }: { challenge: ChallengeDef }) {
       {challenge.prelude !== undefined && (
         <details className="provided">
           <summary>Provided code (compiled ahead of yours — call it freely)</summary>
-          <pre>{challenge.prelude}</pre>
+          <HighlightedCode code={challenge.prelude} />
         </details>
       )}
       <div className="panel">
@@ -121,12 +125,16 @@ function Workspace({ challenge }: { challenge: ChallengeDef }) {
       <details
         className="panel solution"
         open={solutionShown}
-        onToggle={(e) => setSolutionShown((e.target as HTMLDetailsElement).open)}
+        onToggle={(e) => {
+          const open = (e.target as HTMLDetailsElement).open;
+          setSolutionShown(open);
+          if (open) markStudied(challenge.id);
+        }}
       >
         <summary>Reference solution — the grading oracle; best read after your own green run</summary>
         {solutionShown && (
           <>
-            <pre>{challenge.solution}</pre>
+            <HighlightedCode code={challenge.solution} />
             <div className="panel-header">
               <span className="spacer" />
               <button type="button" className="btn" onClick={() => setCode(challenge.solution)}>
@@ -157,6 +165,8 @@ export default function ChallengeView() {
           <article className="prose">
             <h2>{challenge.title}</h2>
             <div className="signature">{challenge.signature}</div>
+            <p className="challenge-method">Predict one case. Implement or repair. Add a regression test. Then explain why it works.</p>
+            {challenge.immutableInputs && <p className="contract-note">Input immutability is checked: return new values where something changes.</p>}
             {/* Course-authored markdown rendered at build time; no user content. */}
             <div dangerouslySetInnerHTML={{ __html: challengeHtml[challenge.id] ?? '' }} />
           </article>

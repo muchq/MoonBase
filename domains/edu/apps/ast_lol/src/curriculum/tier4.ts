@@ -99,6 +99,7 @@ const executionLesson: LessonDef = {
 
 const sqlResolve: ChallengeDef = {
   id: 'sql-resolve',
+  immutableInputs: true,
   title: 'Resolve names against a catalog',
   summary: 'Bindings, * expansion, and precise errors — semantic analysis in one function.',
   signature: 'resolve(select, catalog) → { select, errors }',
@@ -300,6 +301,7 @@ function resolve(select, catalog) {
 
 const sqlPlan: ChallengeDef = {
   id: 'sql-plan',
+  immutableInputs: true,
   title: 'Build the logical plan',
   summary: 'Resolved AST → canonical operator tree: Scan, Join, Filter, Sort, Project, Limit.',
   signature: 'buildPlan(select, catalog) → Plan',
@@ -427,6 +429,7 @@ function buildPlan(select, catalog) {
 
 const sqlExecute: ChallengeDef = {
   id: 'sql-execute',
+  immutableInputs: true,
   title: 'Execute the plan',
   summary: 'A working query engine: 3VL predicates, nested-loop joins, stable sorts.',
   signature: 'execute(plan, db) → Row[]',

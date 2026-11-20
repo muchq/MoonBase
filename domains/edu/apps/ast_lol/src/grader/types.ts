@@ -66,6 +66,8 @@ export interface CustomTestSpec {
 /** What the grader needs to know about a challenge; the curriculum adds pedagogy on top. */
 export interface GradableChallenge {
   id: string;
+  /** Enforce the challenge's promise to leave argument values unchanged. */
+  immutableInputs?: boolean;
   /** Name of the function the submission must define. */
   entry: string;
   /**
@@ -111,6 +113,8 @@ export interface TestResult {
   /** Path to the first structural mismatch, e.g. `[3].kind` or `.from.alias`. */
   diffPath?: string;
   hint?: string;
+  /** Reproducible input, also available on passing tests. */
+  inputText?: string;
   /** console output captured while this test ran. */
   logs: string[];
 }

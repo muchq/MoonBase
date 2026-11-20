@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { Marked } from 'marked';
 import { gfmHeadingId } from 'marked-gfm-heading-id';
 import type { Plugin } from 'vite';
+import { javascriptLanguage } from '@codemirror/lang-javascript';
+import { classHighlighter, highlightTree } from '@lezer/highlight';
 
 /**
  * Serves the course's markdown (lessons and challenge statements) to the app
@@ -19,7 +21,18 @@ const CONTENT_DIR = fileURLToPath(new URL('./src/content', import.meta.url));
 
 // gfmHeadingId so in-document links to sections resolve; the slugs match
 // GitHub's, which is what the author of a markdown link is writing against.
-const renderer = new Marked({ gfm: true }, gfmHeadingId());
+const escapeHtml = (text: string): string => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+const renderer = new Marked({ gfm: true, renderer: {
+  code({ text, lang }) {
+    if (!['js', 'javascript', 'ts', 'typescript'].includes(lang ?? '')) return `<pre><code>${escapeHtml(text)}</code></pre>`;
+    let out = '', offset = 0;
+    highlightTree(javascriptLanguage.parser.parse(text), classHighlighter, (from, to, classes) => {
+      out += escapeHtml(text.slice(offset, from)) + `<span class="${classes}">${escapeHtml(text.slice(from, to))}</span>`;
+      offset = to;
+    });
+    return `<pre><code>${out + escapeHtml(text.slice(offset))}</code></pre>`;
+  },
+}}, gfmHeadingId());
 
 export function renderDoc(markdown: string): string {
   const html = renderer.parse(markdown, { async: false });

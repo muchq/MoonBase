@@ -67,14 +67,15 @@ describe('HomeView', () => {
 });
 
 describe('LessonView', () => {
-  it('renders the document, further reading, and completes the lesson on visit', () => {
+  it('renders the document, further reading, and records a visit without claiming completion', () => {
     at('/lesson/tokens');
     expect(screen.getByRole('heading', { name: 'Tokenization' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Crafting Interpreters — Scanning/ })).toHaveAttribute(
       'href',
       'https://craftinginterpreters.com/scanning.html',
     );
-    expect(getProgress().completed['tokens']).toBeDefined();
+    expect(getProgress().visited['tokens']).toBeDefined();
+    expect(getProgress().completed['tokens']).toBeUndefined();
   });
 
   it('redirects an unknown lesson id home', () => {
@@ -135,6 +136,7 @@ describe('ChallengeView', () => {
     await user.click(screen.getByRole('button', { name: 'Run tests' }));
     await waitFor(() => expect(screen.getByText(/0\/1 tests pass/)).toBeInTheDocument());
     expect(screen.getByText(/First difference at result\[0\]\.text/)).toBeInTheDocument();
+    await user.click(screen.getByText('Show a debugging hint'));
     expect(screen.getByText(/Consume digits greedily/)).toBeInTheDocument();
     expect(screen.getByText('expected')).toBeInTheDocument();
     expect(screen.getByText('saw 1')).toBeInTheDocument();
@@ -168,7 +170,7 @@ describe('ChallengeView', () => {
     at('/challenge/sql-select-parse');
     const provided = screen.getByText(/Provided code/);
     expect(provided).toBeInTheDocument();
-    expect(screen.getByText(/function parseExprFrom/)).toBeInTheDocument();
+    expect(provided.closest('details')?.textContent).toContain('function parseExprFrom');
   });
 
   it('editing back to the exact starter clears the draft without Reset', async () => {
@@ -196,5 +198,51 @@ describe('ChallengeView', () => {
       challengeById('expr-eval')!.starter,
     );
     expect(getProgress().drafts['expr-eval']).toBeUndefined();
+  });
+});
+
+describe('learning experience', () => {
+  it('persists a theme choice and applies it to the document', async () => {
+    const user = userEvent.setup();
+    at('/');
+    await user.selectOptions(screen.getByRole('combobox', {name:'Theme'}), 'light');
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(JSON.parse(localStorage.getItem('astlol:v1')!).theme).toBe('light');
+    await user.selectOptions(screen.getByRole('combobox', {name:'Theme'}), 'dark');
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    await user.selectOptions(screen.getByRole('combobox', {name:'Theme'}), 'system');
+    expect(document.documentElement.dataset.theme).toBe('system');
+  });
+
+  it('records reading explicitly, and practice only after correct checks', async () => {
+    const user = userEvent.setup();
+    at('/lesson/tokens');
+    await user.click(screen.getByRole('button', {name:'Mark as read'}));
+    expect(getProgress().read.tokens).toBeDefined();
+    expect(getProgress().completed.tokens).toBeUndefined();
+    const checks = screen.getAllByRole('group');
+    await user.click(within(checks[0]).getByRole('radio', {name:'Five'}));
+    await user.click(within(checks[0]).getByRole('button', {name:'Check reasoning'}));
+    expect(getProgress().practiced['tokens:0']).toBeUndefined();
+    await user.click(within(checks[0]).getByRole('radio', {name:'Three'}));
+    await user.click(within(checks[0]).getByRole('button', {name:'Check reasoning'}));
+    await user.click(within(checks[1]).getByRole('radio', {name:'To consume a decimal point only when a digit follows'}));
+    await user.click(within(checks[1]).getByRole('button', {name:'Check reasoning'}));
+    expect(getProgress().completed.tokens).toBeDefined();
+  });
+
+  it('lets the learner choose a formatter path and remembers it', async () => {
+    const user = userEvent.setup();
+    at('/');
+    await user.click(screen.getByRole('radio', {name:'Code formatter'}));
+    expect(getProgress().track).toBe('formatter');
+  });
+
+  it('records reference consultation separately from a passing submission', async () => {
+    const user = userEvent.setup();
+    at('/challenge/expr-tokenize');
+    await user.click(screen.getByText(/Reference solution/));
+    await waitFor(()=>expect(getProgress().studied['expr-tokenize']).toBeDefined());
+    expect(getProgress().completed['expr-tokenize']).toBeUndefined();
   });
 });

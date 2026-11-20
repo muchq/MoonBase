@@ -9,8 +9,14 @@ import type { CustomTestSpec } from '../grader/types';
 
 export interface ProgressState {
   version: 1;
-  /** Step id → ISO timestamp. Lessons complete on visit, challenges on a green run. */
+  /** Step id → ISO timestamp. Lessons complete after checks; challenges on a green run. */
   completed: Record<string, string>;
+  visited: Record<string, string>;
+  read: Record<string, string>;
+  practiced: Record<string, string>;
+  studied: Record<string, string>;
+  track: 'engine' | 'formatter';
+  theme: 'system' | 'light' | 'dark';
   /** Challenge id → editor draft. */
   drafts: Record<string, string>;
   /** Challenge id → user-authored tests. */
@@ -19,7 +25,7 @@ export interface ProgressState {
 
 const KEY = 'astlol:v1';
 
-const empty = (): ProgressState => ({ version: 1, completed: {}, drafts: {}, customTests: {} });
+const empty = (): ProgressState => ({ version: 1, completed: {}, visited: {}, read: {}, practiced: {}, studied: {}, track: 'engine', theme: 'system', drafts: {}, customTests: {} });
 
 let cached: ProgressState = load();
 const listeners = new Set<() => void>();
@@ -30,7 +36,10 @@ function load(): ProgressState {
     if (raw === null) return empty();
     const parsed = JSON.parse(raw) as ProgressState;
     if (parsed.version !== 1) return empty();
-    return { ...empty(), ...parsed };
+    return { ...empty(), ...parsed,
+      track: parsed.track === 'formatter' ? 'formatter' : 'engine',
+      theme: parsed.theme === 'light' || parsed.theme === 'dark' ? parsed.theme : 'system',
+    };
   } catch {
     return empty();
   }
@@ -60,6 +69,17 @@ export function markCompleted(stepId: string): void {
   if (cached.completed[stepId] !== undefined) return;
   save({ ...cached, completed: { ...cached.completed, [stepId]: new Date().toISOString() } });
 }
+
+function mark(field: 'visited' | 'read' | 'practiced' | 'studied', id: string): void {
+  if (cached[field][id] !== undefined) return;
+  save({ ...cached, [field]: { ...cached[field], [id]: new Date().toISOString() } });
+}
+export const markVisited = (id: string): void => mark('visited', id);
+export const markRead = (id: string): void => mark('read', id);
+export const markPracticed = (id: string): void => mark('practiced', id);
+export const markStudied = (id: string): void => mark('studied', id);
+export const setTrack = (track: ProgressState['track']): void => save({ ...cached, track });
+export const setTheme = (theme: ProgressState['theme']): void => save({ ...cached, theme });
 
 export function saveDraft(challengeId: string, code: string): void {
   save({ ...cached, drafts: { ...cached.drafts, [challengeId]: code } });

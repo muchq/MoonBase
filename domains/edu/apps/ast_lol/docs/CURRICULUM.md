@@ -21,6 +21,31 @@ background. That audience changes the design in specific ways:
   gated. An experienced learner who wants to jump to the optimizer can; the
   tier structure tells them what they signed up to know.
 
+## Practice, evidence, and navigation
+
+The current course contains 24 coding challenges and 28 optional reasoning checks
+across 14 lessons. Predict, trace, repair, implement, and transfer are different
+activities: a learner can execute a supplied recipe without understanding its
+preconditions. Each lesson has two short checks with explanatory feedback.
+New statements include worked examples and transfer questions. A passing finite
+test suite is evidence, never a universal proof of a rewrite.
+
+Tier 2 adds enter/exit traversal practice. Tier 4 separates row expression
+semantics, join generation, and sorting repair before full executor integration.
+Tier 5 adds a conservative boolean-or-null analysis before simplification and
+an open-output counterexample search after the optimizer capstone. Its six-value
+domain is explicit; failure to find a witness is not proof outside that domain.
+
+The homepage presents shared tiers 0–3, then engine/optimizer and formatter
+branches. A saved choice drives Continue and next-step links; direct links into
+either branch use that branch's ordering. Nothing is locked. Effort estimates
+are guidance to validate with learner observation, not measured completion times.
+
+Visits do not complete lessons. Explicit reading and successful checks are
+separate events; reference consultation is recorded separately from passing a
+challenge. Legacy completion timestamps remain available and are labeled as
+previous completion rather than newly demonstrated practice.
+
 ## Why two languages
 
 **Expr** (Tiers 1–2) exists so that every foundational technique is met on a
@@ -45,7 +70,7 @@ curricular work: joins exist because pushdown and pruning are join stories;
 `NULL` exists because 3VL is *the* semantic surprise of SQL; `ORDER BY`/`LIMIT`
 exist to make plan shape (Sort below Project) a real decision. `GROUP BY`,
 subqueries, and outer joins are excluded — each would grow the executor and
-resolver substantially while teaching variations on ideas already present.
+resolver substantially. Aggregation, outer joins, and nested scopes introduce new semantic obligations; they belong in later extensions rather than the shared foundation.
 
 ## Problem selection
 
@@ -93,7 +118,7 @@ formula by CI, so nothing executes plans at module load.
   prescriptive specs give precise diffs (`result.joins[0].on.op`), which is
   what makes tree bugs debuggable.
 - **Semantic grading for the capstone**: any well-formed plan passes if it
-  matches the naive plan's rows on two databases and beats the cost budget
+  matches the naive plan's rows on demo/bench databases plus empty, duplicate-bearing, null-bearing, and seeded skewed fixtures and beats the cost budget
   (reference optimizer cost × 1.25). Skills are prescriptive; the capstone is
   open — matching how the techniques are actually judged in the field.
 - **The reference solution is the oracle.** Custom tests take input only; the
@@ -115,6 +140,31 @@ per-test console capture, runtime errors mapped to the user's line numbers
 reparse-explains-your-string printer checker, and the per-operator cost bill
 on budget failures. The `welcome` lesson teaches the debugging loop
 explicitly.
+
+## Verification and feedback
+
+The grader checks inputs after calls for challenges promising immutability,
+including failed calls and custom tests. It reports the changed argument path.
+Reference agreement alone is insufficient: tests also reject known wrong
+implementations, check generated Expr round trips and folding equivalence,
+exercise mixed-type identity rewrites, and check formatter idempotence at width
+boundaries. Seeded databases keep failures reproducible; cost budgets still use
+the fixed benchmark database.
+
+Boolean identities have type preconditions. `TRUE AND p` may become `p` only if
+`p` is proven boolean-or-null. A bare column has unknown type in the catalog.
+This applies even when the logical expression is nested inside a comparison.
+Both the library optimizer and revealable solution implement this contract.
+
+Results expand the first actionable failure, expose test inputs, offer hints on
+demand, and retain raw JSON alongside expandable structural views. The pipeline
+lab uses the reference engine to connect source, tokens, trees, plans, results,
+cost, and layout. It is an observation tool, not a grading bypass.
+
+The browser smoke suite covers the actual CodeMirror editor and module worker,
+a nonterminating submission, persisted drafts/progress/theme, the formatter
+branch, pipeline inspection, and mobile overflow. Screenshots are written to a
+temporary directory printed by the script.
 
 ## Known simplifications (deliberate)
 

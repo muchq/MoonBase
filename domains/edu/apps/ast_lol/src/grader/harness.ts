@@ -120,14 +120,26 @@ interface RunOutcome {
   threw: boolean;
   value?: unknown;
   error?: unknown;
+  mutationPath?: string;
 }
 
-function runEntry(call: Entry, args: unknown[]): RunOutcome {
+function runEntry(call: Entry, args: unknown[], immutable = false): RunOutcome {
+  const input = structuredClone(args);
+  let outcome: RunOutcome;
   try {
-    return { threw: false, value: call(...structuredClone(args)) };
+    outcome = { threw: false, value: call(...input) };
   } catch (e) {
-    return { threw: true, error: e };
+    outcome = { threw: true, error: e };
   }
+  if (immutable) {
+    try {
+      const diff = firstDiff(args, input);
+      if (diff !== null) outcome.mutationPath = `arguments${diff.path}`;
+    } catch {
+      outcome.mutationPath = 'arguments (the input structure can no longer be compared)';
+    }
+  }
+  return outcome;
 }
 
 function gradeOutcome(
@@ -139,6 +151,10 @@ function gradeOutcome(
   headerLines: number,
 ): Omit<TestResult, 'id' | 'custom' | 'logs'> {
   const { name, hint } = spec;
+
+  if (outcome.mutationPath !== undefined) {
+    return { name, status: 'fail', message: `Input changed at ${outcome.mutationPath}. Rebuild changed nodes instead of mutating the input.`, hint };
+  }
 
   if (spec.throws !== undefined) {
     const want = spec.throws.messageIncludes;
@@ -315,10 +331,10 @@ export function gradeSubmission(
     }
     const logs: string[] = [];
     compiled.setSink(logs);
-    const outcome = runEntry(compiled.call!, args);
+    const outcome = runEntry(compiled.call!, args, challenge.immutableInputs);
     compiled.setSink(null);
     const graded = gradeOutcome(spec, outcome, args, oracle, codeLines, headerLines);
-    emit({ id, custom, logs, ...graded });
+    emit({ id, custom, logs, inputText: showPretty(args), ...graded });
   };
 
   challenge.tests.forEach((spec, i) => {

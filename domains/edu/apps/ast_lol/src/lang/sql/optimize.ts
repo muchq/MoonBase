@@ -47,6 +47,16 @@ const lit = (value: SqlValue): SqlExpr => ({ type: 'Lit', value });
 
 const isLit = (e: SqlExpr): e is Extract<SqlExpr, { type: 'Lit' }> => e.type === 'Lit';
 
+/** A conservative proof that an expression returns only boolean or null.
+ * Columns have no declared types in AstQL's catalog, so cannot be assumed
+ * to be predicates. This distinction matters inside comparisons too.
+ */
+export function isPredicate(expr: SqlExpr): boolean {
+  if (expr.type === 'Lit') return expr.value === null || typeof expr.value === 'boolean';
+  if (expr.type === 'Not' || expr.type === 'IsNull') return true;
+  return expr.type === 'Binary' && ['AND', 'OR', '=', '<>', '<', '<=', '>', '>='].includes(expr.op);
+}
+
 /**
  * Simplify a predicate bottom-up:
  * - strict operators (arithmetic, comparison) fold when both sides are
@@ -83,8 +93,8 @@ export function simplifyExpr(expr: SqlExpr): SqlExpr {
         if ((isLit(left) && left.value === false) || (isLit(right) && right.value === false)) {
           return lit(false);
         }
-        if (isLit(left) && left.value === true) return right;
-        if (isLit(right) && right.value === true) return left;
+        if (isLit(left) && left.value === true && isPredicate(right)) return right;
+        if (isLit(right) && right.value === true && isPredicate(left)) return left;
         if (isLit(left) && isLit(right)) return lit(evalRowExpr(node, {}));
         return node;
       }
@@ -92,8 +102,8 @@ export function simplifyExpr(expr: SqlExpr): SqlExpr {
         if ((isLit(left) && left.value === true) || (isLit(right) && right.value === true)) {
           return lit(true);
         }
-        if (isLit(left) && left.value === false) return right;
-        if (isLit(right) && right.value === false) return left;
+        if (isLit(left) && left.value === false && isPredicate(right)) return right;
+        if (isLit(right) && right.value === false && isPredicate(left)) return left;
         if (isLit(left) && isLit(right)) return lit(evalRowExpr(node, {}));
         return node;
       }
