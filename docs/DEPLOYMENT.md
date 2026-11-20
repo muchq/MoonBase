@@ -48,8 +48,8 @@ forwarded, `games_hub` or `mcpserver` for a direct call whose User-Agent
 names it, `other` for any other. Each callee's page on `/metrics` has a
 Callers group — deja, microgpt-serve and mithril split the hub's calls
 from the public ones, one_d4_v2 mcpserver's — and `deploy_config_test` fails when
-compose wires a caller the rails do not name. Only caddy publishes a
-port, so a request that reaches a callee without caddy came from inside
+compose wires a caller the rails do not name. No callee publishes a port
+on the host, so a request that reaches one without caddy came from inside
 `app_network` and names whatever caller it claims. Prometheus keeps seven
 days,
 so this split is live, not history. Health probes are `other`, so edge and

@@ -467,8 +467,10 @@ mount an empty volume rather than move the cluster.
 
 ### Via the API (no direct DB access)
 
-- **Index requests:** `GET http://localhost:8088/v1/index/{id}` — returns `id`, `status`, `gamesIndexed`, `errorMessage` and a `data` block for that request. `GET http://localhost:8088/v1/index` lists the 50 most recent, newest first, so you do not need the UUID to look around.
-- **Query games:** `POST http://localhost:8088/v1/query` with a ChessQL query (e.g. `white_username = "drawlya"` or `black_username = "drawlya"`) and check the `playedAt` field in the results to see what date ranges are indexed.
+one_d4 publishes no host port; these go through Caddy at `https://api.1d4.net`.
+
+- **Index requests:** `GET https://api.1d4.net/v1/index/{id}` — returns `id`, `status`, `gamesIndexed`, `errorMessage` and a `data` block for that request. `GET https://api.1d4.net/v1/index` lists the 50 most recent, newest first, so you do not need the UUID to look around.
+- **Query games:** `POST https://api.1d4.net/v1/query` with a ChessQL query (e.g. `white_username = "drawlya"` or `black_username = "drawlya"`) and check the `playedAt` field in the results to see what date ranges are indexed.
 
 ### Direct database access
 

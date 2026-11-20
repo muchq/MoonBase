@@ -14,9 +14,9 @@ individually targetable.
   - [`prom_proxy`](../../domains/platform/apis/prom_proxy) (port 8082)
   - [`mithril`](../../domains/games/apis/mithril) (port 8083)
   - [`posterize`](../../domains/graphics/apis/posterize) (port 8084)
-  - [`mcpserver`](../../domains/games/apis/mcpserver) (port 8086)
+  - [`mcpserver`](../../domains/games/apis/mcpserver) (port 8080)
   - [`microgpt-serve`](../../domains/ai/apis/microgpt_serve) (port 8087)
-  - [`one_d4`](../../domains/games/apis/one_d4) (port 8088)
+  - [`one_d4`](../../domains/games/apis/one_d4) (port 8080)
   - [`one_d4_v2`](../../domains/games/apis/one_d4_v2) (port 8090)
   - [`iili`](../../domains/iili/apis/iili) (port 8091, `/iili/v1/*`)
   - [`deja`](../../domains/ai/apis/deja) (port 8093, `/deja/v1/*`: the tape, and one POST at `/deja/v1/next`)
@@ -32,14 +32,14 @@ individually targetable.
   - OpenTelemetry Collector (ports 4318, 8889 internal)
   - cAdvisor (port 8080 internal)
 
-The ports above are container ports on `app_network`. The host publishes only
-Caddy's 80 and 443 and Forgejo's git SSH on 222: Docker's published ports
-bypass the host firewall, so anything else would skip Caddy's route
-allow-lists and bot refusals. `deploy_config_test` enforces this.
-
 - **Caddy** - Reverse proxy and web server
   - Handles HTTPS certificates automatically
   - Routes requests to appropriate backend services
+
+The ports above are container ports on `app_network`. The host publishes only
+Caddy's 80 and 443, Forgejo's git SSH on 222, and Prometheus on loopback: Docker's published ports
+bypass the host firewall, so anything else would skip Caddy's route
+allow-lists and bot refusals. `deploy_config_test` enforces this.
 
 ## Files
 
