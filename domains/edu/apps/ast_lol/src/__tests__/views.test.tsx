@@ -5,7 +5,15 @@ import { MemoryRouter } from 'react-router';
 import App from '../App';
 import { challengeById, challenges, lessons, tiers } from '../curriculum/registry';
 import type { GradeReport } from '../grader/types';
-import { getProgress, markCompleted, resetProgressForTests } from '../state/progress';
+import {
+  getProgress,
+  markCompleted,
+  markPracticed,
+  markRead,
+  markStudied,
+  markVisited,
+  resetProgressForTests,
+} from '../state/progress';
 
 // CodeMirror needs real layout APIs jsdom lacks; a textarea keeps the
 // view's contract (value/onChange/onRun) testable.
@@ -63,6 +71,52 @@ describe('HomeView', () => {
     markCompleted('expr-tokenize');
     at('/');
     expect(screen.getByText(`1/${challenges.length} solved`)).toBeInTheDocument();
+  });
+});
+
+describe('HomeView step status', () => {
+  const statusOf = (title: string) =>
+    screen.getByRole('link', { name: new RegExp(title) }).querySelector('.step-status')
+      ?.textContent ?? null;
+  const lessonTitle = lessons.find((l) => l.id === 'tokens')!.title;
+  const challengeTitle = challengeById('expr-tokenize')!.title;
+
+  it.each([
+    ['nothing yet', () => {}, null],
+    ['opened', () => markVisited('tokens'), 'Visited'],
+    ['marked as read', () => markRead('tokens'), 'Read'],
+    ['completed before reading checks existed', () => markCompleted('tokens'), 'Previously completed'],
+    [
+      'completed with every check answered',
+      () => {
+        markCompleted('tokens');
+        markPracticed('tokens:0');
+        markPracticed('tokens:1');
+      },
+      'Practiced',
+    ],
+  ])('a lesson %s shows %s', (_, record, status) => {
+    record();
+    at('/');
+    expect(statusOf(lessonTitle)).toBe(status);
+  });
+
+  it.each([
+    ['nothing yet', () => {}, null],
+    ['whose reference was opened', () => markStudied('expr-tokenize'), 'Reference consulted'],
+    ['solved', () => markCompleted('expr-tokenize'), 'Solved'],
+    [
+      'solved after opening the reference',
+      () => {
+        markStudied('expr-tokenize');
+        markCompleted('expr-tokenize');
+      },
+      'Solved · reference consulted',
+    ],
+  ])('a challenge %s shows %s', (_, record, status) => {
+    record();
+    at('/');
+    expect(statusOf(challengeTitle)).toBe(status);
   });
 });
 

@@ -118,3 +118,9 @@ export function resetProgressForTests(): void {
   cached = load();
   for (const l of listeners) l();
 }
+
+/** Test-only: re-read storage as a page load would, keeping what is saved. */
+export function reloadProgressForTests(): void {
+  cached = load();
+  for (const l of listeners) l();
+}
