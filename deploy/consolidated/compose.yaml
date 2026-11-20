@@ -8,6 +8,44 @@ x-default-logging: &default-logging
     max-size: 10m
     max-file: "3"
 
+# One-shot provisioning of a service's own role and database on the shared
+# postgres instance: both named DB_NAME, the role's password DB_PASSWORD.
+# Idempotent, so it runs on every deploy, as the instance's bootstrap
+# superuser. The docker-entrypoint initdb.d hook can't do this: it only fires
+# on a fresh data volume. psql reads both values from its own environment, so
+# neither reaches SQL text or a command line.
+x-db-init: &db-init
+  image: postgres:18.7@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a
+  restart: "no"
+  logging: *default-logging
+  entrypoint: ["/bin/bash", "-ec"]
+  command:
+    - |
+      psql -v ON_ERROR_STOP=1 <<'SQL'
+      \getenv name DB_NAME
+      \getenv pw DB_PASSWORD
+      SELECT NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'name') AS create_role \gset
+      \if :create_role
+        CREATE ROLE :"name" LOGIN;
+      \endif
+      ALTER ROLE :"name" WITH LOGIN PASSWORD :'pw';
+      SELECT NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'name') AS create_db \gset
+      \if :create_db
+        CREATE DATABASE :"name" OWNER :"name";
+      \endif
+      SQL
+  networks:
+    - app_network
+  depends_on:
+    shared_postgres:
+      condition: service_healthy
+
+x-db-init-env: &db-init-env
+  PGHOST: shared_postgres
+  PGUSER: one_d4
+  PGDATABASE: one_d4
+  PGPASSWORD: ${ONE_D4_DB_PASSWORD}
+
 services:
   caddy:
     image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
@@ -430,66 +468,22 @@ services:
       retries: 5
       start_period: 10s
 
-  # Idempotent one-shot provisioning of games_hub's own database and role on
-  # the shared postgres instance (MoonBase#1194). Idempotent — safe on every
-  # deploy. Runs as the instance's bootstrap superuser. The docker-entrypoint
-  # initdb.d hook can't do this: it only fires on a fresh data volume.
+  # games_hub's database (MoonBase#1194).
   games_hub_db_init:
-    image: postgres:18.7@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a
-    restart: "no"
-    logging: *default-logging
+    <<: *db-init
     environment:
-      PGHOST: shared_postgres
-      PGUSER: one_d4
-      PGDATABASE: one_d4
-      PGPASSWORD: ${ONE_D4_DB_PASSWORD}
-      GAMES_HUB_DB_PASSWORD: ${GAMES_HUB_DB_PASSWORD:?unset}
-    entrypoint: ["/bin/bash", "-ec"]
-    command:
-      - |
-        psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'games_hub'" | grep -q 1 \
-          || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE games_hub LOGIN"
-        psql -v ON_ERROR_STOP=1 <<'SQL'
-        \getenv pw GAMES_HUB_DB_PASSWORD
-        ALTER ROLE games_hub WITH LOGIN PASSWORD :'pw';
-        SQL
-        psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = 'games_hub'" | grep -q 1 \
-          || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE games_hub OWNER games_hub"
-    networks:
-      - app_network
-    depends_on:
-      shared_postgres:
-        condition: service_healthy
+      <<: *db-init-env
+      DB_NAME: games_hub
+      DB_PASSWORD: ${GAMES_HUB_DB_PASSWORD:?unset}
 
-  # The role, database and password keep the r3dr_v2 names the live rows were
-  # provisioned under: renaming those is a live-database operation, not a
-  # rename of this file.
+  # The r3dr_v2 name is what the live role and database were provisioned
+  # under: renaming them is a live-database operation, not a rename here.
   iili_db_init:
-    image: postgres:18.7@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a
-    restart: "no"
-    logging: *default-logging
+    <<: *db-init
     environment:
-      PGHOST: shared_postgres
-      PGUSER: one_d4
-      PGDATABASE: one_d4
-      PGPASSWORD: ${ONE_D4_DB_PASSWORD}
-      R3DR_V2_DB_PASSWORD: ${R3DR_V2_DB_PASSWORD:?unset}
-    entrypoint: ["/bin/bash", "-ec"]
-    command:
-      - |
-        psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'r3dr_v2'" | grep -q 1 \
-          || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE r3dr_v2 LOGIN"
-        psql -v ON_ERROR_STOP=1 <<'SQL'
-        \getenv pw R3DR_V2_DB_PASSWORD
-        ALTER ROLE r3dr_v2 WITH LOGIN PASSWORD :'pw';
-        SQL
-        psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = 'r3dr_v2'" | grep -q 1 \
-          || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE r3dr_v2 OWNER r3dr_v2"
-    networks:
-      - app_network
-    depends_on:
-      shared_postgres:
-        condition: service_healthy
+      <<: *db-init-env
+      DB_NAME: r3dr_v2
+      DB_PASSWORD: ${R3DR_V2_DB_PASSWORD:?unset}
 
   # The schema step (#1419): applies one_d4's migrations/ .sql files and
   # exits, before anything that needs the tables. Idempotent — safe on every
@@ -740,33 +734,13 @@ services:
           memory: 128M
 
   stats_db_init:
-    image: postgres:18.7@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a
-    restart: "no"
-    logging: *default-logging
+    <<: *db-init
     profiles:
       - stats
     environment:
-      PGHOST: shared_postgres
-      PGUSER: one_d4
-      PGDATABASE: one_d4
-      PGPASSWORD: ${ONE_D4_DB_PASSWORD}
-      STATS_DB_PASSWORD: ${STATS_DB_PASSWORD}
-    entrypoint: ["/bin/bash", "-ec"]
-    command:
-      - |
-        psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'stats'" | grep -q 1 \
-          || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE stats LOGIN"
-        psql -v ON_ERROR_STOP=1 <<'SQL'
-        \getenv pw STATS_DB_PASSWORD
-        ALTER ROLE stats WITH LOGIN PASSWORD :'pw';
-        SQL
-        psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = 'stats'" | grep -q 1 \
-          || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE stats OWNER stats"
-    networks:
-      - app_network
-    depends_on:
-      shared_postgres:
-        condition: service_healthy
+      <<: *db-init-env
+      DB_NAME: stats
+      DB_PASSWORD: ${STATS_DB_PASSWORD}
 
   stats:
     image: ghcr.io/muchq/stats:${STATS_SHA:-${DEPLOY_SHA:?unset}}

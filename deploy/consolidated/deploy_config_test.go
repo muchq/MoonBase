@@ -703,8 +703,10 @@ func composeServiceLines(t *testing.T, name string) map[string][]string {
 		block = nil
 	}
 
+	lines := strings.Split(readConfig(t, name), "\n")
+	anchors := topLevelAnchors(lines)
 	inServices := false
-	for _, line := range strings.Split(readConfig(t, name), "\n") {
+	for _, line := range lines {
 		if !strings.HasPrefix(line, " ") && strings.TrimSpace(line) != "" {
 			flush()
 			current = ""
@@ -725,10 +727,55 @@ func composeServiceLines(t *testing.T, name string) map[string][]string {
 			current = strings.TrimSuffix(trimmed, ":")
 			continue
 		}
-		block = append(block, line)
+		block = append(block, expandMerge(t, line, anchors)...)
 	}
 	flush()
 	return services
+}
+
+// The bodies of top-level `x-name: &anchor` mappings, keyed by anchor, as
+// written: indented two spaces.
+func topLevelAnchors(lines []string) map[string][]string {
+	anchors := map[string][]string{}
+	anchor := ""
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") {
+			anchor = ""
+			if _, name, ok := strings.Cut(withoutComment(line), ": &"); ok {
+				anchor = name
+			}
+			continue
+		}
+		if anchor != "" {
+			anchors[anchor] = append(anchors[anchor], line)
+		}
+	}
+	return anchors
+}
+
+// A `<<: *anchor` line replaced by that anchor's body, re-indented to the
+// line's own depth: what Compose sees when it merges the mapping. Any other
+// line comes back unchanged.
+func expandMerge(t *testing.T, line string, anchors map[string][]string) []string {
+	t.Helper()
+	name, ok := strings.CutPrefix(strings.TrimSpace(withoutComment(line)), "<<: *")
+	if !ok {
+		return []string{line}
+	}
+	body, ok := anchors[name]
+	if !ok {
+		t.Fatalf("%q merges an anchor no top-level x- block defines", line)
+	}
+	pad := strings.Repeat(" ", len(line)-len(strings.TrimLeft(line, " "))-2)
+	expanded := make([]string, len(body))
+	for i, b := range body {
+		expanded[i] = pad + b
+	}
+	return expanded
 }
 
 // The MCP endpoint, which is the one route in this file whose correctness a
@@ -3865,5 +3912,66 @@ func TestInitializeHostKeepsTheScriptOffStdin(t *testing.T) {
 	}
 	if !strings.Contains(script, "</dev/null") {
 		t.Error("initialize_host.sh runs host_setup.sh with an open stdin")
+	}
+}
+
+// Database provisioning.
+//
+// Every *_db_init step is the one x-db-init block with its own DB_NAME and
+// DB_PASSWORD, so a fix to the provisioning script, or a Postgres bump, is one
+// edit rather than one per database.
+func TestEveryDbInitStepIsTheSharedOne(t *testing.T) {
+	steps := 0
+	for service := range composeServiceLines(t, "compose.yaml") {
+		if !strings.HasSuffix(service, "_db_init") {
+			continue
+		}
+		steps++
+		block := serviceBlock(t, "compose.yaml", service)
+		if !strings.Contains(block, "<<: *db-init") {
+			t.Errorf("%s does not merge the shared x-db-init step", service)
+		}
+		for _, own := range []string{"command:", "entrypoint:", "image:"} {
+			if strings.Contains(block, own) {
+				t.Errorf("%s declares its own %s; the shared step is the one script", service, own)
+			}
+		}
+	}
+	if steps < 3 {
+		t.Fatalf("found %d db_init steps; this test is reading less than it claims", steps)
+	}
+}
+
+// The step creates a role and a database both named DB_NAME, and the service
+// that waits on it connects as that role to that database. A mismatch is a
+// healthy init and a service that cannot log in.
+func TestEachDbInitProvisionsWhatItsServiceConnectsTo(t *testing.T) {
+	urlPattern := regexp.MustCompile(`postgresql://([^:@\s]+):[^@\s]*@[^/\s]+/([A-Za-z0-9_]+)`)
+	pairs := map[string]string{
+		"games_hub": "games_hub_db_init",
+		"iili":      "iili_db_init",
+		"stats":     "stats_db_init",
+	}
+	services := composeServiceLines(t, "compose.yaml")
+	for service, step := range pairs {
+		if !gatesOnCompleted(t, service, step) {
+			t.Errorf("%s does not gate on %s completing", service, step)
+		}
+		name := ""
+		for _, line := range services[step] {
+			if v, ok := strings.CutPrefix(strings.TrimSpace(line), "DB_NAME:"); ok {
+				name = strings.TrimSpace(v)
+			}
+		}
+		var user, database string
+		for _, line := range services[service] {
+			if m := urlPattern.FindStringSubmatch(line); m != nil {
+				user, database = m[1], m[2]
+			}
+		}
+		if name == "" || user != name || database != name {
+			t.Errorf("%s provisions DB_NAME %q, but %s connects as %q to database %q",
+				step, name, service, user, database)
+		}
 	}
 }
