@@ -86,10 +86,14 @@ const executeStep = tier4.steps.find(
 );
 if (executeStep?.kind !== 'challenge') throw new Error('Executor milestone requires sql-execute');
 const executeSource = executeStep.challenge.solution;
-export const ROW_EVAL_HELPERS = executeSource.slice(
-  executeSource.indexOf('  // AND'),
-  executeSource.indexOf('  switch (plan.type)'),
-);
+// The executor solution's row evaluator: everything from its AND/OR comment to
+// the plan switch. A missing marker fails here rather than slicing garbage.
+const helpersStart = executeSource.indexOf('  // AND');
+const helpersEnd = executeSource.indexOf('  switch (plan.type)');
+if (helpersStart < 0 || helpersEnd < helpersStart) {
+  throw new Error('sql-execute solution no longer marks its row evaluator');
+}
+const ROW_EVAL_HELPERS = executeSource.slice(helpersStart, helpersEnd);
 
 export const rowExprChallenge: ChallengeDef = {
   id: 'sql-row-expr',
