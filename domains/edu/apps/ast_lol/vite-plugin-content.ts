@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { Marked } from 'marked';
 import { gfmHeadingId } from 'marked-gfm-heading-id';
 import type { Plugin } from 'vite';
-import { highlightSpans, highlightedLanguages } from './src/lang/highlight';
+import { highlightSpans, highlightedLanguages } from './src/lang/highlight.ts';
 
 /**
  * Serves the course's markdown (lessons and challenge statements) to the app
