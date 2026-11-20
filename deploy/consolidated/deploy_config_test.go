@@ -3586,3 +3586,132 @@ func TestTheRemoteDeployBlockStopsAtTheFirstFailure(t *testing.T) {
 			" exits 0 and the deploy reports success over a stack that is not serving")
 	}
 }
+
+// Published ports.
+//
+// Docker writes its own iptables rules for a published port, ahead of ufw, so
+// a "8088:8080" is reachable from the internet whatever the host firewall
+// says. Every route allow-list, CORS grant and bot refusal in the Caddyfile
+// holds only for traffic that goes through Caddy; a backend's own published
+// port is a way around all of it. So the edge is Caddy's 80 and 443 plus
+// Forgejo's git SSH, and anything else an operator wants from the host is
+// bound to loopback and reached over an SSH tunnel.
+var publicHostPorts = map[string][]string{
+	"caddy":   {"80:80", "443:443"},
+	"forgejo": {"222:22"},
+}
+
+func TestOnlyTheEdgePublishesAPortBeyondLoopback(t *testing.T) {
+	for _, file := range []string{"compose.yaml", "docker-compose.observability.yml"} {
+		for service, lines := range composeServiceLines(t, file) {
+			for _, violation := range hostExposures(service, lines) {
+				t.Errorf("%s: %s. Docker's iptables rules bypass the host firewall, so this "+
+					"skips Caddy's route allow-lists, CORS and bot refusals. Drop the mapping "+
+					"(Caddy reaches it over app_network) or bind it as 127.0.0.1:HOST:CONTAINER.",
+					file, violation)
+			}
+		}
+	}
+}
+
+// Every way a service's lines reach the host beyond the edge allow-list. A
+// form this cannot read is reported rather than skipped, so a new spelling
+// fails the test instead of passing it on nothing.
+func hostExposures(service string, lines []string) []string {
+	var violations []string
+	for _, line := range lines {
+		key := withoutComment(line)
+		switch {
+		case strings.HasPrefix(key, "    network_mode:") && strings.Contains(key, "host"):
+			violations = append(violations, service+" shares the host's network, publishing every listener")
+		case strings.HasPrefix(key, "    ports:") && key != "    ports:":
+			violations = append(violations, service+" declares ports in a form this test cannot read: "+strconv.Quote(key))
+		}
+	}
+	for _, mapping := range publishedPorts(lines) {
+		if strings.HasPrefix(mapping, "127.0.0.1:") {
+			continue
+		}
+		if slices.Contains(publicHostPorts[service], mapping) {
+			continue
+		}
+		violations = append(violations, service+" publishes "+strconv.Quote(mapping)+" on every host interface")
+	}
+	return violations
+}
+
+func TestHostExposuresSeesEverySpelling(t *testing.T) {
+	cases := []struct {
+		name    string
+		service string
+		lines   []string
+		exposed bool
+	}{
+		{"internal port", "app", []string{"    ports:", `      - "8080:8080"`}, true},
+		{"explicit wildcard", "app", []string{"    ports:", `      - "0.0.0.0:8080:8080"`}, true},
+		{"long form", "app", []string{"    ports:", "      - target: 8080", "        published: 8080"}, true},
+		{"flow style", "app", []string{`    ports: ["8080:8080"]`}, true},
+		{"commented key", "app", []string{"    ports: # api", `      - "8080:8080"`}, true},
+		{"host network", "app", []string{"    network_mode: host"}, true},
+		{"loopback", "app", []string{"    ports:", `      - "127.0.0.1:9090:9090"`}, false},
+		{"edge", "caddy", []string{"    ports:", `      - "80:80"`, `      - "443:443"`}, false},
+		{"no ports", "app", []string{"    networks:", "      - app_network"}, false},
+	}
+	for _, c := range cases {
+		got := hostExposures(c.service, c.lines)
+		if exposed := len(got) > 0; exposed != c.exposed {
+			t.Errorf("%s: exposed = %v (%v), want %v", c.name, exposed, got, c.exposed)
+		}
+	}
+}
+
+// Guards the guard: the edge must still be published, or the parse above has
+// stopped finding ports and the test passes on nothing.
+func TestTheEdgeStillPublishesItsPorts(t *testing.T) {
+	services := composeServiceLines(t, "compose.yaml")
+	for service, want := range publicHostPorts {
+		got := publishedPorts(services[service])
+		for _, mapping := range want {
+			if !slices.Contains(got, mapping) {
+				t.Errorf("%s no longer publishes %q (found %v)", service, mapping, got)
+			}
+		}
+	}
+}
+
+// The entries of a service's ports: list, unquoted and without comments.
+func publishedPorts(serviceLines []string) []string {
+	var mappings []string
+	inPorts := false
+	for _, line := range serviceLines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if withoutComment(line) == "    ports:" {
+			inPorts = true
+			continue
+		}
+		if !inPorts {
+			continue
+		}
+		if !strings.HasPrefix(line, "      ") || !strings.HasPrefix(trimmed, "- ") {
+			inPorts = false
+			continue
+		}
+		entry := strings.TrimPrefix(trimmed, "- ")
+		if i := strings.Index(entry, "#"); i >= 0 {
+			entry = entry[:i]
+		}
+		mappings = append(mappings, strings.Trim(strings.TrimSpace(entry), `"'`))
+	}
+	return mappings
+}
+
+// A compose line with any trailing comment and whitespace removed.
+func withoutComment(line string) string {
+	if i := strings.Index(line, " #"); i >= 0 {
+		line = line[:i]
+	}
+	return strings.TrimRight(line, " \t")
+}

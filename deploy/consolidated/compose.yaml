@@ -51,8 +51,6 @@ services:
       com.muchq.description: "Games hub on smithy event streams (/games/v2/*)"
     restart: always
     logging: *default-logging
-    ports:
-      - "8089:8089"
     environment:
       PORT: "8089"
       # CSWSH defense: the play socket admits only the deployed UI's
@@ -128,8 +126,6 @@ services:
       com.muchq.description: "Ray-traced scene renderer"
     restart: always
     logging: *default-logging
-    ports:
-      - "8081:8081"
     environment:
       PORT: "8081"
       # x-forwarded-for counts only from Caddy's pinned address; requests
@@ -166,8 +162,6 @@ services:
       com.muchq.description: "Metrics API behind the dashboard"
     restart: always
     logging: *default-logging
-    ports:
-      - "8082:8082"
     environment:
       - PORT=8082
       - PROMETHEUS_URL=http://prometheus:9090
@@ -251,8 +245,6 @@ services:
       com.muchq.description: "Word-ladder solver (wordchains)"
     restart: always
     logging: *default-logging
-    ports:
-      - "8083:8083"
     environment:
       PORT: "8083"
       TRUSTED_PROXY_CIDRS: *caddy_ip
@@ -282,8 +274,6 @@ services:
       com.muchq.description: "Image blur and edge detection"
     restart: always
     logging: *default-logging
-    ports:
-      - "8084:8084"
     environment:
       PORT: "8084"
       TRUSTED_PROXY_CIDRS: *caddy_ip
@@ -313,8 +303,6 @@ services:
       com.muchq.description: "one_d4 v2 API: /v2/analyze on the C++ detectors (#1389 phase 6)"
     restart: always
     logging: *default-logging
-    ports:
-      - "8090:8090"
     environment:
       PORT: "8090"
       TRUSTED_PROXY_CIDRS: *caddy_ip
@@ -347,8 +335,6 @@ services:
       com.muchq.description: "URL shortener v2 API (C++)"
     restart: always
     logging: *default-logging
-    ports:
-      - "8091:8091"
     environment:
       PORT: "8091"
       IILI_DB_URL: postgresql://r3dr_v2:${R3DR_V2_DB_PASSWORD:?unset}@shared_postgres:5432/r3dr_v2
@@ -379,8 +365,6 @@ services:
       com.muchq.description: "Model Context Protocol server"
     restart: always
     logging: *default-logging
-    ports:
-      - "8086:8080"
     environment:
       - PORT=8080
       - APP_NAME=mcpserver
@@ -536,8 +520,6 @@ services:
       com.muchq.description: "Chess corpus API: index submits, ChessQL queries (indexing runs in one_d4_worker)"
     restart: always
     logging: *default-logging
-    ports:
-      - "8088:8080"
     environment:
       - APP_NAME=one_d4
       - PORT=8080
@@ -651,8 +633,6 @@ services:
       com.muchq.description: "microgpt text generation API"
     restart: always
     logging: *default-logging
-    ports:
-      - "8087:8087"
     environment:
       PORT: "8087"
       TRUSTED_PROXY_CIDRS: *caddy_ip
@@ -820,8 +800,8 @@ services:
     restart: always
     logging: *default-logging
     ports:
+      # Git over SSH. The web UI is reached only through Caddy.
       - "222:22"
-      - "3000:3000"
     environment:
       - USER_UID=1000
       - USER_GID=1000
