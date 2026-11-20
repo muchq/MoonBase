@@ -4,10 +4,11 @@
 #
 # Every step converges rather than appends: a file is written only when its
 # content differs, and a service is reloaded only when its file changed. Rerun
-# it after editing it, or to bring a host back to this state.
+# it after editing it, or to bring a host back to this state. A rerun also
+# applies pending upgrades, and an upgraded docker-ce or containerd.io
+# restarts the daemon and every container with it.
 set -euo pipefail
 
-export DEBIAN_FRONTEND=noninteractive
 APT_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
 
 # Writes stdin to $1 with mode $2 when the content differs. Exit status 0
@@ -28,29 +29,29 @@ converge_file() {
 have_systemd() { [ -d /run/systemd/system ]; }
 
 echo "Updating system packages..."
-sudo apt-get update
-sudo apt-get "${APT_OPTS[@]}" upgrade
+sudo env DEBIAN_FRONTEND=noninteractive apt-get update
+sudo env DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" upgrade
 
 echo "Removing distro Docker packages..."
 for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do
   if dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "install ok installed"; then
-    sudo apt-get "${APT_OPTS[@]}" remove "$pkg"
+    sudo env DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" remove "$pkg"
   fi
 done
 
 echo "Setting up Docker's apt repository..."
-sudo apt-get "${APT_OPTS[@]}" install ca-certificates curl
+sudo env DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install ca-certificates curl
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
 codename=$(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
 if echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $codename stable" \
   | converge_file /etc/apt/sources.list.d/docker.list 0644; then
-  sudo apt-get update
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get update
 fi
 
 echo "Installing Docker..."
-sudo apt-get "${APT_OPTS[@]}" install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo env DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # Before 28.0, Docker left loopback-bound published ports and unpublished
 # container addresses reachable from hosts on the same link, which is what
@@ -64,7 +65,7 @@ if [ "$docker_major" -lt 28 ]; then
 fi
 
 echo "Enabling unattended security upgrades..."
-sudo apt-get "${APT_OPTS[@]}" install unattended-upgrades
+sudo env DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install unattended-upgrades
 converge_file /etc/apt/apt.conf.d/20auto-upgrades 0644 <<'EOF' || true
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
@@ -73,7 +74,7 @@ EOF
 echo "Hardening sshd..."
 # Disabling password login on a host whose login user has no key would lock
 # everyone out.
-if ! grep -q '^ssh-' ~/.ssh/authorized_keys 2>/dev/null; then
+if ! grep -Eq '(ssh|ecdsa|sk)-[a-z0-9@.-]+ AAAA' ~/.ssh/authorized_keys 2>/dev/null; then
   echo "~/.ssh/authorized_keys holds no key; refusing to disable password login" >&2
   exit 1
 fi
@@ -102,7 +103,7 @@ echo "Installing fail2ban for sshd..."
 # the host also writes /var/log/auth.log. It covers the host's sshd only:
 # Forgejo's SSH on 222 is a published Docker port, whose traffic never meets
 # the INPUT chain fail2ban bans in.
-sudo apt-get "${APT_OPTS[@]}" install fail2ban python3-systemd
+sudo env DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTS[@]}" install fail2ban python3-systemd
 if converge_file /etc/fail2ban/jail.d/10-moonbase.local 0644 <<'EOF'; then
 [sshd]
 enabled = true

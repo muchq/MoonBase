@@ -65,8 +65,10 @@ It runs [`host_setup.sh`](host_setup.sh) on the host, which:
 5. Runs fail2ban on the host's sshd (Forgejo's SSH on 222 is a Docker port fail2ban cannot ban on)
 6. Creates the Forgejo config directory (`/etc/forgejo`)
 
-Every step converges, so rerunning it on a provisioned host is safe and is how
-an edit to `host_setup.sh` reaches the host. `HOST=user@host` overrides the target.
+Every step converges, so rerunning it on a provisioned host is how an edit to
+`host_setup.sh` reaches the host. A rerun also applies pending upgrades, and an
+upgraded `docker-ce` or `containerd.io` restarts every container: run it when a
+brief outage is acceptable. `HOST=user@host` overrides the target.
 
 **Requirements:**
 - SSH access to the host configured (e.g., `ssh ubuntu@consolidated.cmptr.info`)

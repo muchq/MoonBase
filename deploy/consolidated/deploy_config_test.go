@@ -3724,6 +3724,8 @@ func withoutComment(line string) string {
 // missing pin refuses to start rather than falling back to :latest.
 var digestPin = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
 
+var commitPin = regexp.MustCompile(`^ghcr\.io/muchq/[a-z0-9_-]+:\$\{[A-Z0-9_]+_SHA:-\$\{DEPLOY_SHA:\?unset\}\}$`)
+
 func TestEveryImageIsPinned(t *testing.T) {
 	images := 0
 	for _, file := range []string{"compose.yaml", "docker-compose.observability.yml"} {
@@ -3736,8 +3738,8 @@ func TestEveryImageIsPinned(t *testing.T) {
 				images++
 				image := strings.TrimSpace(strings.TrimPrefix(key, "    image:"))
 				if strings.HasPrefix(image, "ghcr.io/muchq/") {
-					if strings.Contains(image, "latest") {
-						t.Errorf("%s: %s falls back to a floating tag: %q", file, service, image)
+					if !commitPin.MatchString(image) {
+						t.Errorf("%s: %s is not pinned to a commit with no fallback: %q", file, service, image)
 					}
 					continue
 				}
@@ -3768,7 +3770,11 @@ func TestNoDeployConfigFallsBackToLatest(t *testing.T) {
 // breaks the statement, and a crafted one runs its own. The db_init steps hand
 // the value to psql as a variable (-v) and quote it with :'name', so the
 // shell expansion never sits on the line that builds the statement.
-var pastedIntoSqlLiteral = regexp.MustCompile(`'[^']*\$\$\{`)
+//
+// The shell never expands the password at all: on psql's command line it is
+// readable by anyone on the host through ps, so psql reads it from its own
+// environment with \getenv.
+var shellExpandedPassword = regexp.MustCompile(`\$\$\{?[A-Z0-9_]*PASSWORD`)
 
 func TestDbInitNeverPastesAPasswordIntoSql(t *testing.T) {
 	steps := 0
@@ -3778,8 +3784,8 @@ func TestDbInitNeverPastesAPasswordIntoSql(t *testing.T) {
 		}
 		steps++
 		for _, line := range lines {
-			if pastedIntoSqlLiteral.MatchString(line) {
-				t.Errorf("%s pastes a shell-expanded password into SQL: %q", service, strings.TrimSpace(line))
+			if shellExpandedPassword.MatchString(line) {
+				t.Errorf("%s expands a password in the shell: %q", service, strings.TrimSpace(line))
 			}
 		}
 	}
@@ -3806,7 +3812,7 @@ func TestHostSetupValidatesSshdBeforeReloadingIt(t *testing.T) {
 
 func TestHostSetupChecksForAKeyBeforeDisablingPasswords(t *testing.T) {
 	script := readConfig(t, "host_setup.sh")
-	check := strings.Index(script, "if ! grep -q '^ssh-' ~/.ssh/authorized_keys")
+	check := strings.Index(script, "if ! grep -Eq '(ssh|ecdsa|sk)-[a-z0-9@.-]+ AAAA' ~/.ssh/authorized_keys")
 	disable := strings.Index(script, "PasswordAuthentication no")
 	if check < 0 || disable < 0 || check > disable {
 		t.Errorf("host_setup.sh must refuse to disable password login before confirming the login "+
@@ -3827,5 +3833,37 @@ func TestInitializeHostProvisionsTheHostDeployShipsTo(t *testing.T) {
 	if hosts["deploy.sh"] != hosts["initialize_host.sh"] {
 		t.Errorf("initialize_host.sh provisions %q but deploy.sh ships to %q",
 			hosts["initialize_host.sh"], hosts["deploy.sh"])
+	}
+}
+
+// sudo resets the environment, so an exported DEBIAN_FRONTEND never reaches
+// apt: each apt-get names it after sudo itself.
+func TestHostSetupAptIsNoninteractiveUnderSudo(t *testing.T) {
+	calls := 0
+	for i, line := range strings.Split(readConfig(t, "host_setup.sh"), "\n") {
+		code := strings.TrimSpace(withoutComment(line))
+		if strings.HasPrefix(code, "#") || !strings.Contains(code, "apt-get") {
+			continue
+		}
+		calls++
+		if !strings.Contains(code, "sudo env DEBIAN_FRONTEND=noninteractive apt-get") {
+			t.Errorf("host_setup.sh:%d runs apt-get without DEBIAN_FRONTEND past sudo: %q", i+1, code)
+		}
+	}
+	if calls == 0 {
+		t.Fatal("found no apt-get in host_setup.sh; this test is reading less than it claims")
+	}
+}
+
+// Piped in as `bash -s`, the script is every child's stdin, and a package
+// that prompts reads the rest of it as answers: bash then hits EOF and exits
+// 0 having skipped every step after the prompt.
+func TestInitializeHostKeepsTheScriptOffStdin(t *testing.T) {
+	script := readConfig(t, "initialize_host.sh")
+	if strings.Contains(script, "bash -s") {
+		t.Error("initialize_host.sh feeds host_setup.sh to bash on stdin")
+	}
+	if !strings.Contains(script, "</dev/null") {
+		t.Error("initialize_host.sh runs host_setup.sh with an open stdin")
 	}
 }

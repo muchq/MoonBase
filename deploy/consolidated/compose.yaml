@@ -449,7 +449,8 @@ services:
       - |
         psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'games_hub'" | grep -q 1 \
           || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE games_hub LOGIN"
-        psql -v ON_ERROR_STOP=1 -v pw="$${GAMES_HUB_DB_PASSWORD}" <<'SQL'
+        psql -v ON_ERROR_STOP=1 <<'SQL'
+        \getenv pw GAMES_HUB_DB_PASSWORD
         ALTER ROLE games_hub WITH LOGIN PASSWORD :'pw';
         SQL
         psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = 'games_hub'" | grep -q 1 \
@@ -478,7 +479,8 @@ services:
       - |
         psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'r3dr_v2'" | grep -q 1 \
           || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE r3dr_v2 LOGIN"
-        psql -v ON_ERROR_STOP=1 -v pw="$${R3DR_V2_DB_PASSWORD}" <<'SQL'
+        psql -v ON_ERROR_STOP=1 <<'SQL'
+        \getenv pw R3DR_V2_DB_PASSWORD
         ALTER ROLE r3dr_v2 WITH LOGIN PASSWORD :'pw';
         SQL
         psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = 'r3dr_v2'" | grep -q 1 \
@@ -754,7 +756,8 @@ services:
       - |
         psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'stats'" | grep -q 1 \
           || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE stats LOGIN"
-        psql -v ON_ERROR_STOP=1 -v pw="$${STATS_DB_PASSWORD}" <<'SQL'
+        psql -v ON_ERROR_STOP=1 <<'SQL'
+        \getenv pw STATS_DB_PASSWORD
         ALTER ROLE stats WITH LOGIN PASSWORD :'pw';
         SQL
         psql -v ON_ERROR_STOP=1 -tAc "SELECT 1 FROM pg_database WHERE datname = 'stats'" | grep -q 1 \
