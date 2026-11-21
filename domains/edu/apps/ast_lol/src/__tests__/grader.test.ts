@@ -49,6 +49,19 @@ describe('firstDiff', () => {
     expect(firstDiff([], {})).toMatchObject({ reason: 'expected array, got object' });
     expect(firstDiff(null, 'x')).toMatchObject({ reason: 'expected null, got string' });
   });
+
+  it('compares arrays by their elements, ignoring other properties', () => {
+    const tagged = Object.assign([1, 2], { note: 'extra' });
+    expect(firstDiff([1, 2], tagged)).toBeNull();
+  });
+
+  it('compares every own property of arrays when asked to', () => {
+    const tagged = Object.assign([1, 2], { note: 'extra' });
+    expect(firstDiff([1, 2], tagged, '', { arrayProperties: true })).toMatchObject({
+      path: '.note',
+      reason: "unexpected key 'note'",
+    });
+  });
 });
 
 describe('show / showPretty', () => {
@@ -178,6 +191,56 @@ describe('gradeSubmission', () => {
     );
     expect(report.status).toBe('pass');
     expect(shared.n).toBe(1);
+  });
+
+  describe('custom inputs the grader cannot print', () => {
+    // Result panes and the mutation check both print the input as JSON.
+    const passThrough = (immutableInputs: boolean) =>
+      challenge({
+        immutableInputs,
+        solution: 'function f(x) { return 1; }',
+        tests: [{ name: 'built in', args: [0], expected: 1 }],
+        custom: { describe: 'any value', placeholder: '0', toArgs: (values) => values },
+      });
+    const unprintable =
+      "Could not build this test's input: it must print as JSON, so no BigInt values or cycles";
+    const cycle = '(() => { const o = {}; o.self = o; return o; })()';
+
+    it.each([
+      ['a BigInt', '1n', false],
+      ['a cycle', cycle, false],
+      ['a cycle, on a challenge that checks for mutation', cycle, true],
+    ] as const)('reports %s as an input error, keeping every other result', (_, source, immutable) => {
+      const report = gradeSubmission(passThrough(immutable), js('function f(x) { return 1; }'), [
+        { id: 'custom-1', name: 'mine', source },
+      ]);
+      expect(report.tests.map((t) => [t.name, t.status, t.message])).toEqual([
+        ['built in', 'pass', undefined],
+        ['mine', 'error', unprintable],
+      ]);
+    });
+  });
+
+  describe('immutable inputs', () => {
+    const countItems = (immutableInputs: boolean) =>
+      challenge({
+        immutableInputs,
+        tests: [{ name: 'counts items', args: [[1, 2]], expected: 2 }],
+        solution: 'function f(items) { return items.length; }',
+      });
+    const tagsItsInput = js('function f(items) { items.seen = true; return items.length; }');
+
+    it('fails a correct answer that changed its input, naming where', () => {
+      const [result] = gradeSubmission(countItems(true), tagsItsInput).tests;
+      expect(result.status).toBe('fail');
+      expect(result.message).toBe(
+        'Input changed at arguments[0].seen. Rebuild changed nodes instead of mutating the input.',
+      );
+    });
+
+    it('does not check challenges that make no such promise', () => {
+      expect(gradeSubmission(countItems(false), tagsItsInput).status).toBe('pass');
+    });
   });
 
   it('flags a returned Promise as asynchronous', () => {

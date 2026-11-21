@@ -9,11 +9,14 @@ import {
   executeWithStats,
   optimizePlan,
   parseSelect,
+  parseSqlExpr,
   resolve,
   shopCatalog,
   tokenizeSql,
   type Plan,
 } from '../lang/sql';
+
+const expr = (source: string) => parseSqlExpr(tokenizeSql(source));
 
 /**
  * The curriculum's grading contract, proven in CI:
@@ -30,8 +33,8 @@ describe('curriculum registry', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('has the promised shape: 18 challenges, 14 lessons', () => {
-    expect(challenges.length).toBe(18);
+  it('has the promised shape: 24 challenges, 14 lessons', () => {
+    expect(challenges.length).toBe(24);
     expect(lessons.length).toBe(14);
   });
 
@@ -141,4 +144,109 @@ describe('capstone battery', () => {
       }
     }
   });
+});
+
+/**
+ * Each test bank must fail the plausible wrong answer a learner is most likely
+ * to write, not just the empty starter. Each case edits the reference solution
+ * into that mistake, checks the edit applied, and expects the grade to fail.
+ */
+describe('test banks catch common mistakes', () => {
+  const challenge = (id: string) => {
+    const found = challenges.find((c) => c.id === id);
+    if (!found) throw new Error(`no challenge ${id}`);
+    return found;
+  };
+
+  const gradeMistake = (id: string, correct: string, mistaken: string) => {
+    const c = challenge(id);
+    expect(c.solution, `${id}'s solution no longer contains the line to edit`).toContain(correct);
+    const code = c.solution.replaceAll(correct, mistaken);
+    return gradeSubmission(c, { language: 'javascript', code }).status;
+  };
+
+  it('expr-fold: folding a result that is not finite', () => {
+    expect(gradeMistake('expr-fold', 'Number.isFinite(value)', 'true')).toBe('fail');
+  });
+
+  it('sql-row-expr: using JavaScript truthiness for AND/OR/NOT', () => {
+    expect(
+      gradeMistake(
+        'sql-row-expr',
+        'return v === true ? true : v === null ? null : false;',
+        'return v === null ? null : !!v;',
+      ),
+    ).toBe('fail');
+  });
+
+  it('sql-predicate-type: assuming a column holds a boolean', () => {
+    expect(
+      gradeMistake(
+        'sql-predicate-type',
+        "if (expr.type === 'Lit')",
+        "if (expr.type === 'Column') return true; if (expr.type === 'Lit')",
+      ),
+    ).toBe('fail');
+  });
+
+  it('expr-walk: visiting the right child first', () => {
+    const leftFirst = 'visit(node.left); visit(node.right);';
+    const rightFirst = 'visit(node.right); visit(node.left);';
+    expect(gradeMistake('expr-walk', leftFirst, rightFirst)).toBe('fail');
+  });
+
+  it('expr-walk: skipping a unary operand', () => {
+    const unary = "if (node.type === 'Unary') visit(node.operand);";
+    expect(gradeMistake('expr-walk', unary, '')).toBe('fail');
+  });
+
+  it('sql-join: keeping a row whose ON condition is null', () => {
+    const matches = 'evalExpr(on, row) === true';
+    expect(gradeMistake('sql-join', matches, 'evalExpr(on, row) !== false')).toBe('fail');
+  });
+
+  it('sql-sort: stopping at the first tied key instead of comparing the next', () => {
+    expect(gradeMistake('sql-sort', 'if (x === y) continue;', 'if (x === y) return 0;')).toBe('fail');
+  });
+
+  it('sql-sort: putting nulls first when sorting descending', () => {
+    const nullsLast = 'if (x === null) return 1;';
+    const nullsFollowDirection = "if (x === null) return key.dir === 'DESC' ? -1 : 1;";
+    expect(gradeMistake('sql-sort', nullsLast, nullsFollowDirection)).toBe('fail');
+  });
+
+  it('sql-simplify: dropping an identity next to a non-boolean operand', () => {
+    expect(gradeMistake('sql-simplify', ' && isPredicate(right)', '')).toBe('fail');
+  });
+
+  it('sql-counterexample: accepts any witness, and only a witness', () => {
+    const { check } = challenge('sql-counterexample');
+    const args = [expr('TRUE AND u.x'), expr('u.x')];
+    expect(check!({ 'u.x': 'x' }, { args }).pass).toBe(true);
+    expect(check!({ 'u.x': 0 }, { args }).pass).toBe(true);
+    expect(check!({ 'u.x': true }, { args }).pass).toBe(false);
+    expect(check!(null, { args }).pass).toBe(false);
+  });
+
+  // A submission that returns the reference answer, then marks its first
+  // argument: correct output, broken promise.
+  const mutatesItsInput = ({ solution, entry }: { solution: string; entry: string }) => `
+    const reference = (() => { ${solution}; return ${entry}; })();
+    function ${entry}(...args) {
+      const result = reference(...structuredClone(args));
+      args[0].mutated = true;
+      return result;
+    }`;
+
+  it.each(challenges.filter((c) => c.immutableInputs).map((c) => [c.id, c] as const))(
+    '%s: changing an input it promises not to change',
+    (_id, c) => {
+      const report = gradeSubmission(c, { language: 'javascript', code: mutatesItsInput(c) });
+      const messages = new Set(report.tests.map((t) => t.message));
+      expect(report.status).toBe('fail');
+      expect([...messages]).toEqual([
+        'Input changed at arguments[0].mutated. Rebuild changed nodes instead of mutating the input.',
+      ]);
+    },
+  );
 });

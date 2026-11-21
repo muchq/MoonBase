@@ -247,6 +247,7 @@ function print(ast) {
 
 const exprFold: ChallengeDef = {
   id: 'expr-fold',
+  immutableInputs: true,
   title: 'Write a constant folder',
   summary: 'Your first meaning-preserving rewrite — with a guard rail.',
   signature: 'fold(ast) → Expr',

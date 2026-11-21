@@ -1,3 +1,4 @@
+import { semanticDatabases } from './validation';
 import { firstDiff, show, showPretty } from '../grader/deepEqual';
 import type { CheckFn } from '../grader/types';
 import {
@@ -162,6 +163,11 @@ const SIMPLIFY_SOLUTION = `function simplifyPlan(plan) {
     }
   }
   function isLit(e) { return e.type === 'Lit'; }
+  function isPredicate(e) {
+    if (e.type === 'Lit') return e.value === null || typeof e.value === 'boolean';
+    if (e.type === 'Not' || e.type === 'IsNull') return true;
+    return e.type === 'Binary' && ['AND', 'OR', '=', '<>', '<', '<=', '>', '>='].includes(e.op);
+  }
   function simplify(expr) {
     switch (expr.type) {
       case 'Lit':
@@ -190,8 +196,8 @@ const SIMPLIFY_SOLUTION = `function simplifyPlan(plan) {
           if ((isLit(left) && left.value === false) || (isLit(right) && right.value === false)) {
             return { type: 'Lit', value: false };
           }
-          if (isLit(left) && left.value === true) return right;
-          if (isLit(right) && right.value === true) return left;
+          if (isLit(left) && left.value === true && isPredicate(right)) return right;
+          if (isLit(right) && right.value === true && isPredicate(left)) return left;
           if (isLit(left) && isLit(right)) return { type: 'Lit', value: evalConst(node) };
           return node;
         }
@@ -199,8 +205,8 @@ const SIMPLIFY_SOLUTION = `function simplifyPlan(plan) {
           if ((isLit(left) && left.value === true) || (isLit(right) && right.value === true)) {
             return { type: 'Lit', value: true };
           }
-          if (isLit(left) && left.value === false) return right;
-          if (isLit(right) && right.value === false) return left;
+          if (isLit(left) && left.value === false && isPredicate(right)) return right;
+          if (isLit(right) && right.value === false && isPredicate(left)) return left;
           if (isLit(left) && isLit(right)) return { type: 'Lit', value: evalConst(node) };
           return node;
         }
@@ -397,8 +403,19 @@ function equivalenceAndCostCheck(opts: { label: string; mustReduce: boolean }): 
   };
 }
 
+// Identity rewrites that are wrong next to a non-boolean operand: `TRUE AND id`
+// coerces id, so replacing it with `id` changes what the comparison sees.
+const coercionCases = [
+  '(TRUE AND id) = id',
+  '(id AND TRUE) = id',
+  '(FALSE OR id) = id',
+  '(id OR FALSE) = id',
+  '(TRUE AND 5) = FALSE',
+];
+
 const sqlSimplify: ChallengeDef = {
   id: 'sql-simplify',
+  immutableInputs: true,
   title: 'Simplify predicates',
   summary: 'Constant folding with three-valued caution: TRUE AND p, FALSE absorption, strict nulls.',
   signature: 'simplifyPlan(plan) → Plan',
@@ -411,9 +428,10 @@ const sqlSimplify: ChallengeDef = {
 //      types compare to null). EITHER side Lit null -> Lit null (strict
 //      ops are null-in, null-out).
 //   2. AND: a Lit false side -> Lit false (even if the other side is
-//      null — Kleene). A Lit true side -> the other side. Both Lit ->
-//      fold.
-//   3. OR: mirror image (true absorbs, false drops out).
+//      null — Kleene). Drop a Lit true side only if the other side is
+//      proven boolean-or-null. Both Lit -> fold using operand coercion.
+//   3. OR: mirror image (true absorbs; false drops out only beside a
+//      proven boolean-or-null expression). Columns have unknown types.
 //   4. NOT / unary - / IS [NOT] NULL over a Lit -> fold.
 // Then: a Filter whose predicate became Lit true disappears; a Filter
 // that became Lit false or Lit null STAYS (it keeps zero rows — there is
@@ -424,6 +442,14 @@ function simplifyPlan(plan) {
 }`,
   solution: SIMPLIFY_SOLUTION,
   tests: [
+    ...coercionCases.map((predicate) => ({
+      name: `preserve coercion: ${predicate}`,
+      args: [planOf(`SELECT id FROM users WHERE ${predicate}`)],
+      expected: simplifyPredicates(planOf(`SELECT id FROM users WHERE ${predicate}`)),
+      hint:
+        'Eliminate an identity only next to a proven boolean-or-null expression. ' +
+        'Bare columns have unknown types.',
+    })),
     {
       name: 'TRUE AND p drops to p, and the Filter survives',
       args: [planOf("SELECT name FROM users WHERE TRUE AND city = 'london'")],
@@ -490,6 +516,7 @@ function simplifyPlan(plan) {
 
 const sqlPushdown: ChallengeDef = {
   id: 'sql-pushdown',
+  immutableInputs: true,
   title: 'Push filters down',
   summary: 'The optimizer classic: split conjuncts, move each below the join it belongs under.',
   signature: 'pushDown(plan) → Plan',
@@ -619,6 +646,7 @@ function pushDown(plan) {
 
 const sqlPrune: ChallengeDef = {
   id: 'sql-prune',
+  immutableInputs: true,
   title: 'Prune unused columns',
   summary: 'Rows are cheap to count, wide rows are not: project early at the base of joins.',
   signature: 'prune(plan) → Plan',
@@ -739,7 +767,7 @@ export interface CapstoneQuery {
 export const CAPSTONE_HEADROOM = 1.25;
 
 /**
- * The capstone battery: six queries whose naive plans leave real money on
+ * The capstone battery: seven queries whose naive plans leave real money on
  * the table, plus a guard the meter cannot reward. The budget and naive
  * literals are pinned against the formula by curriculum.test.ts — a change
  * to the databases, the cost model, or the reference pipeline fails there
@@ -810,7 +838,12 @@ function equivalenceFailure(plan: Plan, naive: Plan): ReturnType<CheckFn> | null
   if (problems.length > 0) {
     return { pass: false, message: `Your plan is not well-formed: ${problems.join('; ')}.` };
   }
-  for (const db of [demoDb, benchDb]) {
+  const databases = [
+    { label: 'demo', db: demoDb },
+    { label: 'bench', db: benchDb },
+    ...semanticDatabases,
+  ];
+  for (const { label, db } of databases) {
     const expectedRows = executePlan(naive, db);
     let actualRows;
     try {
@@ -823,10 +856,9 @@ function equivalenceFailure(plan: Plan, naive: Plan): ReturnType<CheckFn> | null
     }
     const diff = firstDiff(expectedRows, actualRows);
     if (diff !== null) {
-      const which = db === demoDb ? 'demo' : 'bench';
       return {
         pass: false,
-        message: `Your plan changes the result on the ${which} database: first difference at rows${diff.path} (${diff.reason}). Equivalence first, speed second.`,
+        message: `Your plan changes the result on the ${label} database: first difference at rows${diff.path} (${diff.reason}). Equivalence first, speed second.`,
         expectedText: `${showPretty(expectedRows.slice(0, 5))}\n… (first rows shown)`,
         actualText: `${showPretty(actualRows.slice(0, 5))}\n… (first rows shown)`,
       };
@@ -870,6 +902,7 @@ const capstoneCheck: CheckFn = (actual, ctx) => {
 
 const sqlOptimize: ChallengeDef = {
   id: 'sql-optimize',
+  immutableInputs: true,
   title: 'Capstone: the optimizer',
   summary: 'Simplify, push down, prune — graded on equivalence and a hard cost budget.',
   signature: 'optimize(plan) → Plan',

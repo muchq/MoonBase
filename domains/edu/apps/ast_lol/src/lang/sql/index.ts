@@ -10,6 +10,7 @@ export {
   refBindings,
   planBindings,
   simplifyExpr,
+  isPredicate,
   simplifyPredicates,
   pushDownFilters,
   pruneColumns,

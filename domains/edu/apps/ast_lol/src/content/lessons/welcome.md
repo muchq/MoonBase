@@ -35,3 +35,16 @@ Solutions are plain JavaScript, checked as you submit. A "reveal solution" butto
 If you get stuck: read the failing test's name and hint first, then `console.log` the structure you are building. Tree bugs are almost always visible in the first place the shapes diverge.
 
 One habit to carry through the whole course: when an input catches a bug, don't discard it after the fix — add it as a custom test. A fixed bug with a test on it stays fixed while you rework everything around it; the industry calls this the **Beyoncé rule** — *if you liked it, you should have put a test on it.*
+
+## A practice loop
+
+For each topic, predict a result before running code, trace a worked example,
+then implement or repair a function. End by explaining why it works on a new
+case. The quick checks at the end of every lesson are optional and save your
+practice. Reading a page, passing a check, consulting a solution, and passing
+code are distinct events in your progress.
+
+The curriculum map lets you choose the engine/optimizer or formatter path after
+SQL syntax. That choice guides navigation; every step remains open. Visit the
+[pipeline lab](/lab) to inspect reference tokens, trees, execution costs, and
+formatting at different widths before implementing them yourself.

@@ -47,6 +47,20 @@ const lit = (value: SqlValue): SqlExpr => ({ type: 'Lit', value });
 
 const isLit = (e: SqlExpr): e is Extract<SqlExpr, { type: 'Lit' }> => e.type === 'Lit';
 
+const predicateOps = ['AND', 'OR', '=', '<>', '<', '<=', '>', '>='];
+
+/**
+ * Whether an expression provably returns only boolean or null. Conservative:
+ * AstQL's catalog declares no column types, so a bare column is never a
+ * predicate. Identity rewrites like `TRUE AND x -> x` are safe only when this
+ * holds, because AND coerces x and a comparison above it sees the difference.
+ */
+export function isPredicate(expr: SqlExpr): boolean {
+  if (expr.type === 'Lit') return expr.value === null || typeof expr.value === 'boolean';
+  if (expr.type === 'Not' || expr.type === 'IsNull') return true;
+  return expr.type === 'Binary' && predicateOps.includes(expr.op);
+}
+
 /**
  * Simplify a predicate bottom-up:
  * - strict operators (arithmetic, comparison) fold when both sides are
@@ -83,8 +97,8 @@ export function simplifyExpr(expr: SqlExpr): SqlExpr {
         if ((isLit(left) && left.value === false) || (isLit(right) && right.value === false)) {
           return lit(false);
         }
-        if (isLit(left) && left.value === true) return right;
-        if (isLit(right) && right.value === true) return left;
+        if (isLit(left) && left.value === true && isPredicate(right)) return right;
+        if (isLit(right) && right.value === true && isPredicate(left)) return left;
         if (isLit(left) && isLit(right)) return lit(evalRowExpr(node, {}));
         return node;
       }
@@ -92,8 +106,8 @@ export function simplifyExpr(expr: SqlExpr): SqlExpr {
         if ((isLit(left) && left.value === true) || (isLit(right) && right.value === true)) {
           return lit(true);
         }
-        if (isLit(left) && left.value === false) return right;
-        if (isLit(right) && right.value === false) return left;
+        if (isLit(left) && left.value === false && isPredicate(right)) return right;
+        if (isLit(right) && right.value === false && isPredicate(left)) return left;
         if (isLit(left) && isLit(right)) return lit(evalRowExpr(node, {}));
         return node;
       }
