@@ -143,7 +143,7 @@ func withoutCommentTail(line string) string {
 	return line
 }
 
-// withoutCommentLines blanks comments in C++, Java and Rust source, whole
+// withoutCommentLines blanks comments in C++, Java, Rust and Gleam source, whole
 // lines and trailing tails alike.
 //
 // Every rail's declaration file explains this contract in prose, and the prose
@@ -196,7 +196,7 @@ func TestHttpInstrumentDescriptionsMatchAcrossAllEmitters(t *testing.T) {
 	for _, rail := range descriptionRails[1:] {
 		assert.Equal(t, want, byRail[rail.name],
 			"%s and %s describe the shared HTTP instruments differently. They have to move "+
-				"together — the collector merges these series by name across all three, and keeps "+
+				"together — the collector merges these series by name across every rail, and keeps "+
 				"only the first description it sees.", reference.name, rail.name)
 	}
 }
@@ -207,7 +207,7 @@ func TestHttpInstrumentDescriptionsMatchAcrossAllEmitters(t *testing.T) {
 // "(2xx–3xx)" against yodel's "(2xx-3xx)". Nothing renders it: the two strings
 // are indistinguishable in a diff, in a review, and on a dashboard, and differ
 // only to the byte comparison the collector actually makes. Equality above
-// would be satisfied by all three rails adopting the en-dash together, so pin
+// would be satisfied by every rail adopting the en-dash together, so pin
 // the property that makes the mismatch visible in the first place.
 func TestHttpInstrumentDescriptionsAreAscii(t *testing.T) {
 	for _, rail := range descriptionRails {

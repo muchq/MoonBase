@@ -1,8 +1,8 @@
-// Package otel_contract holds cross-language pins for the metric contract the
-// three emitters share.
+// Package otel_contract holds cross-language pins for the metric contract
+// every emitter shares.
 //
 // Nothing imports it. It exists because prom_proxy asks one PromQL question of
-// Java, Rust and C++ services alike, and several of the properties that makes
+// Java, Rust, C++ and Gleam services alike, and several of the properties that makes
 // correct are properties no single language's test can see.
 package otel_contract
 
@@ -102,14 +102,14 @@ func TestHttpLatencyBucketsMatchAcrossAllEmitters(t *testing.T) {
 	for _, rail := range rails[1:] {
 		assert.Equal(t, want, byRail[rail.name],
 			"%s and %s declare different HTTP latency buckets. They have to move together — "+
-				"prom_proxy's p95 query spans all three, and a mismatched layout makes those "+
+				"prom_proxy's p95 query spans every rail, and a mismatched layout makes those "+
 				"services incomparable on one chart.", reference.name, rail.name)
 	}
 }
 
 // And that the shared layout is the fixed one, not the broken one.
 //
-// Equality alone is satisfied by all three reverting together, which is
+// Equality alone is satisfied by every rail reverting together, which is
 // exactly what a well-meaning "restore the SDK defaults" change would look
 // like. These are the properties that make the layout right for microseconds.
 func TestHttpLatencyBucketsAreShapedForMicroseconds(t *testing.T) {
