@@ -1,6 +1,6 @@
 #!/bin/bash
-# Starts the real release, reading its data from runfiles as it does in the
-# image, and asks it for a ladder over HTTP.
+# Starts the real release from its runfiles and talks to it over HTTP: the
+# compose healthcheck exactly as compose runs it, and a ladder.
 set -euo pipefail
 
 export RUNFILES_DIR="$TEST_SRCDIR"
@@ -31,6 +31,18 @@ check() {
     exit 1
   fi
 }
+
+# The probe command from compose.yaml's mithril_v2 block, on this port.
+PROBE="$(sed -n '/^  mithril_v2:$/,/^  [a-z_0-9-]*:$/p' deploy/consolidated/compose.yaml |
+  sed -n "s/^ *test: \[\"CMD\", \"timeout\", \"4\", \"bash\", \"-c\", '\(.*\)'\]$/\1/p")"
+if [[ -z "$PROBE" ]]; then
+  echo "FAIL: no healthcheck found for mithril_v2 in compose.yaml" >&2
+  exit 1
+fi
+if ! bash -c "${PROBE//\/8096 /\/$PORT }"; then
+  echo "FAIL: the compose healthcheck fails against the release: $PROBE" >&2
+  exit 1
+fi
 
 check health "Ok" "$(curl -sf "http://127.0.0.1:$PORT/health")"
 check ladder '{"path":["cold","cord","card","ward","warm"]}' \

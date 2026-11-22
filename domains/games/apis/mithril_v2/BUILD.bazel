@@ -75,7 +75,10 @@ sh_test(
     name = "mithril_v2_e2e_test",
     size = "small",
     srcs = ["e2e_test.sh"],
-    data = [":mithril_v2_bin"],
+    data = [
+        ":mithril_v2_bin",
+        "//deploy/consolidated:compose.yaml",
+    ],
 )
 
 gleam_format_test(
