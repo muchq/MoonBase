@@ -2,6 +2,7 @@
 //// pushed to the collector on an interval: 64-bit integers as strings,
 //// cumulative temporality, one data point per label set.
 
+import exception
 import gleam/erlang/process
 import gleam/int
 import gleam/io
@@ -214,9 +215,9 @@ fn post_json(url: String, body: String) -> Result(Int, String)
 @external(erlang, "mithril_v2_ffi", "system_time_nanos")
 pub fn system_time_nanos() -> Int
 
-/// Exports a snapshot every `interval_ms`, from a process of its own, for as
-/// long as the service runs. A failed export is logged and the next one
-/// carries the same cumulative totals.
+/// Exports a snapshot every `interval_ms` from a process of its own, unlinked
+/// so that nothing it does can stop the service. A failed export, even one
+/// that crashes, is logged, and the next carries the same cumulative totals.
 pub fn start_exporter(
   metrics: Metrics,
   endpoint: String,
@@ -224,7 +225,7 @@ pub fn start_exporter(
   interval_ms: Int,
 ) -> Nil {
   let started = system_time_nanos()
-  process.spawn(fn() {
+  process.spawn_unlinked(fn() {
     export_loop(metrics, endpoint, resource, interval_ms, started)
   })
   Nil
@@ -232,16 +233,16 @@ pub fn start_exporter(
 
 fn export_loop(metrics, endpoint, resource, interval_ms, started) -> Nil {
   process.sleep(interval_ms)
-  let body =
-    encode(
-      http_metrics.snapshot(metrics),
-      resource,
-      started,
-      system_time_nanos(),
-    )
-  case post(endpoint, body) {
-    Ok(Nil) -> Nil
-    Error(reason) -> io.println_error("OTLP export failed: " <> reason)
+  let outcome =
+    exception.rescue(fn() {
+      let snapshot = http_metrics.snapshot(metrics)
+      post(endpoint, encode(snapshot, resource, started, system_time_nanos()))
+    })
+  case outcome {
+    Ok(Ok(Nil)) -> Nil
+    Ok(Error(reason)) -> io.println_error("OTLP export failed: " <> reason)
+    Error(crash) ->
+      io.println_error("OTLP export crashed: " <> string.inspect(crash))
   }
   export_loop(metrics, endpoint, resource, interval_ms, started)
 }

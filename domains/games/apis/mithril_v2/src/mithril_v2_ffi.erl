@@ -49,13 +49,19 @@ only_letters(Word) ->
 
 %% Plain HTTP through OTP's own client; the collector is on the app network.
 post_json(Url, Body) ->
-    {ok, _} = application:ensure_all_started(inets),
-    Request = {binary_to_list(Url), [], "application/json", Body},
-    Options = [{timeout, 5000}, {connect_timeout, 5000}],
-    case httpc:request(post, Request, Options, [{body_format, binary}]) of
-        {ok, {{_, Status, _}, _, _}} -> {ok, Status};
-        {error, Reason} -> {error, iolist_to_binary(io_lib:format("~0p", [Reason]))}
+    case application:ensure_all_started(inets) of
+        {ok, _} ->
+            Request = {binary_to_list(Url), [], "application/json", Body},
+            Options = [{timeout, 5000}, {connect_timeout, 5000}],
+            case httpc:request(post, Request, Options, [{body_format, binary}]) of
+                {ok, {{_, Status, _}, _, _}} -> {ok, Status};
+                {error, Reason} -> {error, inspect(Reason)}
+            end;
+        {error, Reason} ->
+            {error, inspect(Reason)}
     end.
+
+inspect(Term) -> iolist_to_binary(io_lib:format("~0p", [Term])).
 
 store_graph(Graph) ->
     persistent_term:put({mithril_v2, graph}, Graph),

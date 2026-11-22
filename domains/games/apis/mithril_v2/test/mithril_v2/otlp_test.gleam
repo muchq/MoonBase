@@ -182,7 +182,61 @@ pub fn a_collector_that_refuses_the_export_is_an_error_test() {
   let assert Ok(port) = process.receive(ports, 5000)
 
   otlp.post("http://127.0.0.1:" <> int.to_string(port), "{}")
-  |> should.be_error
+  |> should.equal(Error("collector answered 503"))
   // Nothing is listening on port 1.
   otlp.post("http://127.0.0.1:1", "{}") |> should.be_error
+}
+
+fn collector(received: process.Subject(String)) -> Int {
+  let ports = process.new_subject()
+  let assert Ok(_) =
+    fn(req: request.Request(mist.Connection)) {
+      let assert Ok(req) = mist.read_body(req, 1_000_000)
+      let assert Ok(body) = bit_array.to_string(req.body)
+      process.send(received, body)
+      response.new(200) |> response.set_body(mist.Bytes(bytes_tree.new()))
+    }
+    |> mist.new
+    |> mist.bind("127.0.0.1")
+    |> mist.port(0)
+    |> mist.after_start(fn(port, _, _) { process.send(ports, port) })
+    |> mist.start
+  let assert Ok(port) = process.receive(ports, 5000)
+  port
+}
+
+pub fn the_exporter_sends_a_snapshot_every_interval_test() {
+  let received = process.new_subject()
+  let port = collector(received)
+  let assert Ok(metrics) = http_metrics.start("mithril_v2")
+  otlp.start_exporter(
+    metrics,
+    "http://127.0.0.1:" <> int.to_string(port),
+    [#("service.name", "mithril_v2")],
+    20,
+  )
+  let assert Ok(first) = process.receive(received, 5000)
+  let assert Ok(_second) = process.receive(received, 5000)
+  string.contains(first, "http_server_requests_by_caller") |> should.be_true
+}
+
+// The exporter is not linked to whoever starts it, so a crash in it costs
+// metrics, not the service.
+pub fn a_crashing_exporter_leaves_its_starter_running_test() {
+  // A metrics actor that is already dead, so the first snapshot crashes.
+  let handoff = process.new_subject()
+  let owner =
+    process.spawn_unlinked(fn() {
+      let assert Ok(metrics) = http_metrics.start("mithril_v2")
+      process.send(handoff, metrics)
+      process.sleep_forever()
+    })
+  let assert Ok(metrics) = process.receive(handoff, 5000)
+  process.kill(owner)
+  process.sleep(50)
+
+  otlp.start_exporter(metrics, "http://127.0.0.1:1", [], 10)
+  process.sleep(200)
+  // Still here: a linked exporter's crash would have killed this process.
+  should.be_true(True)
 }
