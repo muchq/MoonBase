@@ -42,9 +42,10 @@ getenv(Name) ->
     end.
 
 %% Letters and letter numbers, the nearest Unicode classes to Rust's
-%% char::is_alphabetic that PCRE names.
+%% char::is_alphabetic that PCRE names. \z, because $ also matches before a
+%% final newline.
 only_letters(Word) ->
-    re:run(Word, <<"^[\\p{L}\\p{Nl}]+$">>, [unicode, ucp, {capture, none}]) =:= match.
+    re:run(Word, <<"^[\\p{L}\\p{Nl}]+\\z">>, [unicode, ucp, {capture, none}]) =:= match.
 
 %% Plain HTTP through OTP's own client; the collector is on the app network.
 post_json(Url, Body) ->

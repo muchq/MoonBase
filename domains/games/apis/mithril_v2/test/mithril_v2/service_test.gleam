@@ -107,9 +107,11 @@ pub fn a_word_that_fails_validation_is_unprocessable_test() {
     "{\"start\":\"co ld\",\"end\":\"warm\"}",
     // A combining accent is a mark, not a letter.
     "{\"start\":\"cafe\\u0301\",\"end\":\"cafe\"}",
+    // Nor is a final newline, which a regex's $ would let through.
+    "{\"start\":\"cold\\n\",\"end\":\"cold\\n\"}",
   ]
   |> list.map(status_of)
-  |> should.equal([422, 422, 422, 422, 422, 422, 422])
+  |> should.equal([422, 422, 422, 422, 422, 422, 422, 422])
 }
 
 pub fn a_body_of_the_wrong_shape_is_unprocessable_test() {
@@ -174,6 +176,13 @@ pub fn a_client_must_accept_json_test() {
   with(post(body), "*/*") |> should.equal(200)
   with(post(body), "application/*") |> should.equal(200)
   with(post(body), "text/html, application/json;q=0.9") |> should.equal(200)
+  // Any one of several Accept headers will do.
+  send(
+    post(body)
+    |> request.prepend_header("accept", "application/json")
+    |> request.prepend_header("accept", "text/html"),
+  ).status
+  |> should.equal(200)
   // Every route, the probe and the fallback included.
   with(get("/health"), "text/html") |> should.equal(406)
   with(get("/nope"), "text/html") |> should.equal(406)

@@ -148,12 +148,12 @@ pub fn encode(path: Option(List(String))) -> String {
   |> json.to_string
 }
 
-// No Accept header accepts anything.
+// No Accept header accepts anything; of several, any one will do.
 fn accepts_json(req: Request(a)) -> Bool {
-  case request.get_header(req, "accept") {
-    Error(Nil) -> True
-    Ok(accept) ->
-      string.split(accept, ",")
+  case list.key_filter(req.headers, "accept") {
+    [] -> True
+    accepts ->
+      list.flat_map(accepts, string.split(_, ","))
       |> list.any(fn(range) {
         case media_type(range) {
           "*/*" | "application/*" | "application/json" -> True
