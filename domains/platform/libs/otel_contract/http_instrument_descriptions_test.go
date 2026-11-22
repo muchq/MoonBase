@@ -62,6 +62,15 @@ var descriptionRails = []struct {
 			regexp.MustCompile(`\("(http_server_[a-z_]*)"\)\s*\n\s*\.with_description\("([^"]*)"\)`),
 		},
 	},
+	{
+		name: "mithril_v2 (Gleam)",
+		path: "../../../games/apis/mithril_v2/src/mithril_v2/http_metrics.gleam",
+		patterns: []*regexp.Regexp{
+			// #("http_server_requests", "HTTP requests received"), on one line
+			// or split across three by the formatter.
+			regexp.MustCompile(`#\(\s*"(http_server_[a-z_]*)",\s*"([^"]*)",?\s*\)`),
+		},
+	},
 }
 
 // descriptionsFrom returns the instrument-name-to-description map a rail
@@ -163,7 +172,7 @@ func withoutCommentLines(source []byte) []byte {
 	return []byte(strings.Join(lines, "\n"))
 }
 
-// The three emitters describe the shared instruments identically.
+// Every emitter describes the shared instruments identically.
 //
 // All of them report into one collector, which merges series by instrument
 // name across services. Its Prometheus exporter keeps the first description it
@@ -175,7 +184,7 @@ func withoutCommentLines(source []byte) []byte {
 //
 // An empty description conflicts with a non-empty one exactly as loudly, so
 // "this rail just won't say" is not a way out; it is how futility got here.
-func TestHttpInstrumentDescriptionsMatchAcrossAllThreeEmitters(t *testing.T) {
+func TestHttpInstrumentDescriptionsMatchAcrossAllEmitters(t *testing.T) {
 	byRail := map[string]map[string]string{}
 	for _, rail := range descriptionRails {
 		byRail[rail.name] = descriptionsFrom(t, rail.path, rail.patterns)

@@ -8,11 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// http_server_requests_by_caller is recorded on the C++ and Rust rails, the
-// two that serve compose-internal calls with no service-local caller of their
-// own (one_d4 on the Java rail tags its callers in its query events). One
-// series per caller only means one thing if both rails spell the callers, and
-// describe the instrument, identically.
+// http_server_requests_by_caller is recorded on the C++, Rust and Gleam rails,
+// the ones that serve compose-internal calls with no service-local caller of
+// their own (one_d4 on the Java rail tags its callers in its query events). One
+// series per caller only means one thing if every rail spells the callers, and
+// describes the instrument, identically.
+
+const gleamMetrics = "../../../games/apis/mithril_v2/src/mithril_v2/http_metrics.gleam"
 
 func TestCallerVocabularyAgreesAcrossRails(t *testing.T) {
 	aura := codeLines(t, "../aura/middleware.h", "kInternalCallers")
@@ -22,6 +24,20 @@ func TestCallerVocabularyAgreesAcrossRails(t *testing.T) {
 		quotedListFrom(t, aura, "aura/middleware.h", regexp.MustCompile(`kInternalCallers\[\] = \{([^}]*)\}`)),
 		quotedListFrom(t, pal, "server_pal", regexp.MustCompile(`INTERNAL_CALLERS: \[&str; \d+\] = \[([^\]]*)\]`)),
 		"the rails name internal callers differently; the same caller would land in two series")
+
+	gleam := codeLines(t, gleamMetrics, "internal_callers")
+	assert.Equal(t,
+		quotedListFrom(t, aura, "aura/middleware.h", regexp.MustCompile(`kInternalCallers\[\] = \{([^}]*)\}`)),
+		quotedListFrom(t, gleam, "mithril_v2", regexp.MustCompile(`internal_callers = \[([^\]]*)\]`)),
+		"mithril_v2 names internal callers differently from aura")
+	for _, word := range []struct{ pattern, want string }{
+		{`pub const edge_caller = "([a-z_]+)"`, "edge"},
+		{`pub const other_caller = "([a-z_]+)"`, "other"},
+	} {
+		g := regexp.MustCompile(word.pattern).FindSubmatch(gleam)
+		require.NotNil(t, g, "mithril_v2 declares no %q caller", word.want)
+		assert.Equal(t, word.want, string(g[1]))
+	}
 
 	for _, word := range []struct{ aura, pal, want string }{
 		{`kEdgeCaller\[\] = "([a-z_]+)"`, `EDGE_CALLER: &str = "([a-z_]+)"`, "edge"},
@@ -36,7 +52,7 @@ func TestCallerVocabularyAgreesAcrossRails(t *testing.T) {
 	}
 }
 
-func TestCallerInstrumentIsDescribedIdenticallyOnBothRails(t *testing.T) {
+func TestCallerInstrumentIsDescribedIdenticallyOnEveryRail(t *testing.T) {
 	futility := codeLines(t, "../futility/otel/http_instrument_descriptions.h", "kHttpInstrumentDescriptions")
 	pal := codeLines(t, "../server_pal/src/lib.rs", "http_server_requests_by_caller")
 
@@ -45,5 +61,11 @@ func TestCallerInstrumentIsDescribedIdenticallyOnBothRails(t *testing.T) {
 	require.NotNil(t, c, "futility declares no description for http_server_requests_by_caller")
 	require.NotNil(t, r, "server_pal declares no description for http_server_requests_by_caller")
 	assert.Equal(t, string(c[1]), string(r[1]),
+		"the collector keeps the first description it sees and logs a conflict for every other")
+
+	gleam := codeLines(t, gleamMetrics, "http_server_requests_by_caller")
+	g := regexp.MustCompile(`#\(\s*"http_server_requests_by_caller",\s*"([^"]*)",?\s*\)`).FindSubmatch(gleam)
+	require.NotNil(t, g, "mithril_v2 declares no description for http_server_requests_by_caller")
+	assert.Equal(t, string(c[1]), string(g[1]),
 		"the collector keeps the first description it sees and logs a conflict for every other")
 }

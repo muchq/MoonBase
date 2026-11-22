@@ -3,6 +3,14 @@ load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
 load("@rules_rs//rs:rust_test.bzl", "rust_test")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
+exports_files(
+    [
+        "data/j4YL7Lh1H2PAgHy_a625LegUoxk94ZOimjzzx0QKI+Y_.graph",
+        "data/words.txt",
+    ],
+    visibility = ["//domains/games/apis/mithril_v2:__pkg__"],
+)
+
 rust_binary(
     name = "mithril",
     srcs = [

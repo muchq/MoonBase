@@ -1,0 +1,21 @@
+bazel_dep(name = "muchq_rules_gleam", version = "0.0.0", repo_name = "rules_gleam")
+git_override(
+    module_name = "muchq_rules_gleam",
+    commit = "503f153f7ff1ebdcf2a5bf13ccdd49e531f65f06",  # v0.3.1
+    remote = "https://github.com/muchq/rules_gleam.git",
+)
+
+gleam = use_extension("@rules_gleam//gleam:extensions.bzl", "gleam")
+gleam.toolchain(version = "1.17.0")
+
+# hpack_erl (mist's HTTP/2 header codec) is plain Erlang: no native code, no
+# build hooks.
+gleam.hex_manifest(
+    manifest = "//domains/games/apis/mithril_v2:manifest.toml",
+    plain_erlang_packages = ["hpack_erl"],
+)
+use_repo(gleam, "gleam_host", "gleam_packages", "gleam_toolchains", "local_config_erlang")
+
+register_toolchains("@gleam_toolchains//:all")
+
+register_toolchains("@local_config_erlang//:erlang_toolchain_definition")

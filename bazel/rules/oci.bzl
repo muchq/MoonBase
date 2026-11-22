@@ -95,15 +95,16 @@ def linux_oci_go(bin_name, extra_tars = []):
 
     _create_oci_image(bin_name, linux_amd_target_name, "/" + bin_name, extra_tars)
 
-def linux_amd64_oci_binary(bin_name):
+def linux_amd64_oci_binary(bin_name, binary = None):
     """
     generate linux amd64 oci container for binary targets
 
     Args:
-      bin_name: the binary target name to be wrapped
+      bin_name: the image name, and the path the binary runs from in it
+      binary: the binary target's name in this package, when it is not bin_name
     """
 
-    _create_oci_image(bin_name, bin_name, "/" + bin_name)
+    _create_oci_image(bin_name, binary or bin_name, "/" + bin_name)
 
 def linux_oci_java(bin_name):
     """

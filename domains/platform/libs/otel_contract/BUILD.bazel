@@ -1,8 +1,8 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_test")
 
 # Cross-language pins for the metric contract prom_proxy reads. No library and
-# no importable code: the sources under test are Java, C++ and Rust, and the
-# properties pinned here are the ones that only exist between them.
+# no importable code: the sources under test are Java, C++, Rust and Gleam, and
+# the properties pinned here are the ones that only exist between them.
 go_test(
     name = "otel_contract_test",
     size = "small",
@@ -39,6 +39,8 @@ go_test(
         "//domains/games/apis/games_hub:spades_adapter.h",
         "//domains/games/apis/games_hub:surface.h",
         "//domains/games/apis/games_hub:world.h",
+        "//domains/games/apis/mithril_v2:src/mithril_v2/http_metrics.gleam",
+        "//domains/games/apis/mithril_v2:src/mithril_v2/service.gleam",
         "//domains/games/apis/one_d4:src/main/java/com/muchq/games/one_d4/api/QueryEvent.java",
         "//domains/games/libs/cards/rummy:table.cc",
         "//domains/platform/apis/prom_proxy:registry.go",

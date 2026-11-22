@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -40,6 +41,11 @@ var rails = []struct {
 		path:    "../server_pal/src/lib.rs",
 		pattern: regexp.MustCompile(`HTTP_LATENCY_BUCKET_BOUNDS_MICROS\s*:\s*\[f64;\s*\d+\]\s*=\s*\[([^\]]*)\]`),
 	},
+	{
+		name:    "mithril_v2 (Gleam)",
+		path:    "../../../games/apis/mithril_v2/src/mithril_v2/http_metrics.gleam",
+		pattern: regexp.MustCompile(`latency_bucket_bounds_micros\s*=\s*\[([^\]]*)\]`),
+	},
 }
 
 var numberPattern = regexp.MustCompile(`\d+(?:\.\d+)?`)
@@ -63,7 +69,9 @@ func boundsFrom(t *testing.T, path string, pattern *regexp.Regexp) []float64 {
 			"too: an unparseable rail is one this test stops checking.", path)
 
 	var bounds []float64
-	for _, literal := range numberPattern.FindAllString(string(match[1]), -1) {
+	// Digit separators, as in Gleam's 10_000.0, are not part of the value.
+	digits := strings.ReplaceAll(string(match[1]), "_", "")
+	for _, literal := range numberPattern.FindAllString(digits, -1) {
 		value, err := strconv.ParseFloat(literal, 64)
 		require.NoError(t, err)
 		bounds = append(bounds, value)
@@ -72,7 +80,7 @@ func boundsFrom(t *testing.T, path string, pattern *regexp.Regexp) []float64 {
 	return bounds
 }
 
-// The three emitters declare the same HTTP latency buckets.
+// Every emitter declares the same HTTP latency buckets.
 //
 // prom_proxy charts p95 for every service through one histogram_quantile
 // expression, whatever language the service is written in. Quantiles are read
@@ -82,7 +90,7 @@ func boundsFrom(t *testing.T, path string, pattern *regexp.Regexp) []float64 {
 //
 // This is the guard #1286 asked for. Before it, the only thing keeping the
 // three aligned was a comment in each asking the next person not to touch it.
-func TestHttpLatencyBucketsMatchAcrossAllThreeEmitters(t *testing.T) {
+func TestHttpLatencyBucketsMatchAcrossAllEmitters(t *testing.T) {
 	byRail := map[string][]float64{}
 	for _, rail := range rails {
 		byRail[rail.name] = boundsFrom(t, rail.path, rail.pattern)

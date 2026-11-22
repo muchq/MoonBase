@@ -114,6 +114,7 @@ flowchart LR
     mcpserver["mcpserver"]
     portrait["portrait"]
     mithril["mithril"]
+    mithril_v2["mithril_v2"]
     chess_engine["chess_engine"]
     go_engine["go_engine"]
     posterize["posterize"]
@@ -212,6 +213,7 @@ flowchart LR
   mcpserver -.->|metrics| otelcol
   portrait -.->|metrics| otelcol
   mithril -.->|metrics| otelcol
+  mithril_v2 -.->|metrics| otelcol
   posterize -.->|metrics| otelcol
   microgpt-serve -.->|metrics| otelcol
   iili -.->|metrics| otelcol

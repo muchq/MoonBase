@@ -109,6 +109,7 @@ var servicesWithSteadyProbes = []string{
 	"mcpserver",
 	"microgpt-serve",
 	"mithril",
+	"mithril_v2",
 	"one_d4",
 	"one_d4_v2",
 	"portrait",

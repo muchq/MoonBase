@@ -70,6 +70,11 @@ func TestRouteSentinelAndHealthLiteralAgreeAcrossRails(t *testing.T) {
 			marker:      "kUnmatchedRoute",
 			declaration: regexp.MustCompile(`kUnmatchedRoute\[\] = "([a-z_]+)"`),
 		},
+		{
+			path:        "../../../games/apis/mithril_v2/src/mithril_v2/service.gleam",
+			marker:      "unmatched_route",
+			declaration: regexp.MustCompile(`pub const unmatched_route = "([a-z_]+)"`),
+		},
 	}
 	for _, sentinel := range sentinels {
 		source := codeLines(t, sentinel.path, sentinel.marker)
@@ -88,4 +93,9 @@ func TestRouteSentinelAndHealthLiteralAgreeAcrossRails(t *testing.T) {
 	assert.Equal(t, "/health", string(health[1]),
 		"aura's health route is %q; prom_proxy subtracts and charts exactly route=\"/health\", "+
 			"and the compose healthchecks probe the same literal (#1307)", health[1])
+
+	gleamSource := codeLines(t, "../../../games/apis/mithril_v2/src/mithril_v2/service.gleam", "health_route")
+	gleamHealth := regexp.MustCompile(`pub const health_route = "(/[a-z]+)"`).FindSubmatch(gleamSource)
+	require.NotNil(t, gleamHealth, "no health_route literal found in mithril_v2's service.gleam")
+	assert.Equal(t, "/health", string(gleamHealth[1]))
 }

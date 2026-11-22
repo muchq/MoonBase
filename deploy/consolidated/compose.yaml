@@ -314,6 +314,35 @@ services:
       retries: 3
       start_period: 15s
 
+  # mithril's word-ladder solver in Gleam, built with rules_gleam. Internal
+  # only: no gateway route and no caller yet, so its traffic is the probe.
+  mithril_v2:
+    image: ghcr.io/muchq/mithril_v2:${MITHRIL_V2_SHA:-${DEPLOY_SHA:?unset}}
+    labels:
+      com.muchq.description: "Word-ladder solver (Gleam)"
+    restart: always
+    logging: *default-logging
+    environment:
+      PORT: "8096"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
+      OTEL_SERVICE_NAME: mithril_v2
+      OTEL_RESOURCE_ATTRIBUTES: service.name=mithril_v2,service.version=${MITHRIL_V2_SHA:-${DEPLOY_SHA:?unset}}
+    networks:
+      - app_network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          # The VM holds the dictionary and graph in about 110M.
+          memory: 256M
+    healthcheck:
+      # Steady /health probe (#1307); see games_hub's for the full rationale.
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8096 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   posterize:
     image: ghcr.io/muchq/posterize:${POSTERIZE_SHA:-${DEPLOY_SHA:?unset}}
     labels:
