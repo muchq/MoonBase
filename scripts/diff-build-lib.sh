@@ -22,6 +22,9 @@ FULL_BUILD_PATHSPECS=(
   # archive_override bump would otherwise miss every consumer.
   MODULE.bazel
   'bazel/*.MODULE.bazel'
+  # Hex pins read by gleam.hex_manifest in bazel/gleam.MODULE.bazel: an input
+  # to the @gleam_packages repo, owned by no target in //... .
+  domains/games/apis/mithril_v2/manifest.toml
   # An external repo's BUILD file, named by a pin's build_file: no target
   # in //... owns it, so bazel-diff sees no change at all.
   'bazel/3p/*.BUILD'

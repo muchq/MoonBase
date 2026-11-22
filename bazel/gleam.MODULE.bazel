@@ -9,7 +9,8 @@ gleam = use_extension("@rules_gleam//gleam:extensions.bzl", "gleam")
 gleam.toolchain(version = "1.17.0")
 
 # hpack_erl (mist's HTTP/2 header codec) is plain Erlang: no native code, no
-# build hooks.
+# build hooks. scripts/diff-build-lib.sh names the manifest, which no target
+# owns, so that a pin bump alone still builds everything.
 gleam.hex_manifest(
     manifest = "//domains/games/apis/mithril_v2:manifest.toml",
     plain_erlang_packages = ["hpack_erl"],
