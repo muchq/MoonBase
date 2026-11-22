@@ -49,6 +49,16 @@ check ladder '{"path":["cold","cord","card","ward","warm"]}' \
   "$(curl -sf -X POST "http://127.0.0.1:$PORT/mithril/v2/wordchain" \
     -H 'content-type: application/json' -d '{"start":"cold","end":"warm"}')"
 
+# A body past 4 MiB is refused by the server's read, not by the handler.
+head -c 4194305 /dev/zero | tr '\0' ' ' >"$TEST_TMPDIR/big.json"
+check "oversized body" 413 "$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "http://127.0.0.1:$PORT/mithril/v2/wordchain" \
+  -H 'content-type: application/json' --data-binary @"$TEST_TMPDIR/big.json")"
+head -c 4194304 /dev/zero | tr '\0' ' ' >"$TEST_TMPDIR/limit.json"
+check "body at the limit" 400 "$(curl -s -o /dev/null -w '%{http_code}' \
+  -X POST "http://127.0.0.1:$PORT/mithril/v2/wordchain" \
+  -H 'content-type: application/json' --data-binary @"$TEST_TMPDIR/limit.json")"
+
 # SIGTERM reaches the VM, which stops.
 kill -TERM "$SERVER_PID"
 for _ in $(seq 1 40); do
