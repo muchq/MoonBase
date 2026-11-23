@@ -183,13 +183,10 @@ fn respond(
     })
     |> result.lazy_unwrap(fn() { text(500, "Internal Server Error") })
   let micros = int.to_float(int.max(env.monotonic_micros() - started, 0))
-  http_metrics.request_finished(
-    metrics,
-    method,
-    builder.route_label(req.path),
-    resp.status,
-    micros,
-  )
+  let route =
+    exception.rescue(fn() { builder.route_label(req.path) })
+    |> result.unwrap(unmatched_route)
+  http_metrics.request_finished(metrics, method, route, resp.status, micros)
   response.map(resp, fn(body) { mist.Bytes(bytes_tree.from_string(body)) })
 }
 

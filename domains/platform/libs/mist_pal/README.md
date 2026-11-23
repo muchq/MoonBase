@@ -19,6 +19,8 @@ Gleam counterpart of the Rust [server_pal](../server_pal).
   case for case.
 - `GET /health` is never rate limited.
 - A handler that crashes answers 500, and is counted.
+- A request's duration runs from its arrival to its response, so it covers
+  the rate-limit check and the body read, as in server_pal.
 
 ## Usage
 

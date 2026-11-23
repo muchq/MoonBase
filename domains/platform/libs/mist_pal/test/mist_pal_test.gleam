@@ -234,3 +234,21 @@ pub fn without_a_route_label_only_health_is_named_test() {
   |> list.map(fn(route) { route.0 })
   |> should.equal([RouteKey("GET", "/health"), RouteKey("GET", "unmatched")])
 }
+
+// A route label that raises costs the series its name, not the response or
+// the gauge.
+pub fn a_crashing_route_label_is_counted_as_unmatched_test() {
+  let assert Ok(server) =
+    mist_pal.new(recording(process.new_subject()))
+    |> mist_pal.port(0)
+    |> mist_pal.route_label(fn(_) { panic as "boom" })
+    |> mist_pal.rate_limit(None)
+    |> mist_pal.trusted_proxies(forwarded.none())
+    |> mist_pal.start
+  status(get(server, "/thing", [])) |> should.equal(200)
+  let snapshot = http_metrics.snapshot(server.metrics)
+  snapshot.active |> should.equal([#("GET", 0)])
+  snapshot.routes
+  |> list.map(fn(route) { #(route.0, { route.1 }.requests) })
+  |> should.equal([#(RouteKey("GET", "unmatched"), 1)])
+}
