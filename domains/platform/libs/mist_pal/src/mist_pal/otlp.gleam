@@ -10,7 +10,8 @@ import gleam/json.{type Json}
 import gleam/list
 import gleam/result
 import gleam/string
-import mithril_v2/http_metrics.{type Metrics, type RouteStats, type Snapshot}
+import mist_pal/env
+import mist_pal/http_metrics.{type Metrics, type RouteStats, type Snapshot}
 
 const cumulative = 2
 
@@ -209,11 +210,31 @@ pub fn post(endpoint: String, body: String) -> Result(Nil, String) {
   }
 }
 
-@external(erlang, "mithril_v2_ffi", "post_json")
+@external(erlang, "mist_pal_ffi", "post_json")
 fn post_json(url: String, body: String) -> Result(Int, String)
 
-@external(erlang, "mithril_v2_ffi", "system_time_nanos")
-pub fn system_time_nanos() -> Int
+/// Starts the exporter when OTEL_EXPORTER_OTLP_ENDPOINT names a collector,
+/// every OTEL_METRIC_EXPORT_INTERVAL ms, describing the resource as
+/// OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES do.
+pub fn start_from_env(metrics: Metrics) -> Nil {
+  case env.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") {
+    Ok(endpoint) -> {
+      let interval =
+        env.getenv("OTEL_METRIC_EXPORT_INTERVAL")
+        |> result.try(int.parse)
+        |> result.unwrap(default_interval_ms)
+      let resource =
+        resource_attributes(
+          env.getenv("OTEL_SERVICE_NAME"),
+          env.getenv("OTEL_RESOURCE_ATTRIBUTES"),
+        )
+      start_exporter(metrics, endpoint, resource, interval)
+      io.println("exporting metrics to " <> endpoint)
+    }
+    Error(Nil) ->
+      io.println("OTEL_EXPORTER_OTLP_ENDPOINT unset; metrics are not exported")
+  }
+}
 
 /// Exports a snapshot every `interval_ms` from a process of its own, unlinked
 /// so that nothing it does can stop the service. A failed export, even one
@@ -224,7 +245,7 @@ pub fn start_exporter(
   resource: List(#(String, String)),
   interval_ms: Int,
 ) -> Nil {
-  let started = system_time_nanos()
+  let started = env.system_time_nanos()
   process.spawn_unlinked(fn() {
     export_loop(metrics, endpoint, resource, interval_ms, started)
   })
@@ -236,7 +257,10 @@ fn export_loop(metrics, endpoint, resource, interval_ms, started) -> Nil {
   let outcome =
     exception.rescue(fn() {
       let snapshot = http_metrics.snapshot(metrics)
-      post(endpoint, encode(snapshot, resource, started, system_time_nanos()))
+      post(
+        endpoint,
+        encode(snapshot, resource, started, env.system_time_nanos()),
+      )
     })
   case outcome {
     Ok(Ok(Nil)) -> Nil

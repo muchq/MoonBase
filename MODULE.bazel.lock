@@ -1078,7 +1078,7 @@
         "bzlTransitiveDigest": "BxBsyGOam1pPIGggDOUOTR8cS17cBKtUkkOSm67iX2w=",
         "usagesDigest": "PBG+PZ27bZ4aE1iUoA9aa89p/9mGVbfCaER1Upgmn0Q=",
         "recordedInputs": [
-          "FILE:@@//domains/games/apis/mithril_v2/manifest.toml ba735273d46d6ce208bc310f8b1f7a430cce199f760f9452632d200b9dd996d3"
+          "FILE:@@//domains/games/apis/mithril_v2/manifest.toml d1751c7c8cbff2f32109ee124803c1fc261cc9bdf30c4998fd1774d5c6b49bef"
         ],
         "generatedRepoSpecs": {
           "gleam_x86_64-apple-darwin": {

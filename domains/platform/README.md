@@ -14,6 +14,7 @@ Core infrastructure, shared services, and foundational libraries.
 - [**Mucks**](libs/mucks): Lightweight HTTP router wrapper for Go with middleware support.
 - [**Resilience4g**](libs/resilience4g): Fault tolerance library for Go (Rate Limiting, Circuit Breakers).
 - [**Server Pal**](libs/server_pal): Rust HTTP server utilities.
+- [**mist_pal**](libs/mist_pal): Gleam HTTP server utilities on mist.
 - [**HTTP Client**](libs/http_client): Shared HTTP client utilities.
 - [**Logging**](libs/logging): Common logging infrastructure.
 - [**caddylog**](libs/caddylog): Caddy access-log lines and the bounded agent, probe, method and route vocabulary (Rust). The agent, probe and method lists are pinned equal to the stats service's; the routes are pinned to the Caddyfile's `path` matchers.

@@ -19,7 +19,7 @@ import (
 // http_metrics_label_tests read data-point attributes off an in-memory
 // exporter, futility's http_metrics_test asserts whole attribute maps through
 // CapturingMetricsRecorder, yodel's OtlpJsonEncoderTest asserts the OTLP
-// JSON with containsExactly, and mithril_v2's otlp_test pins its whole export. (An earlier draft of this file also re-modeled
+// JSON with containsExactly, and mist_pal's otlp_test pins its whole export. (An earlier draft of this file also re-modeled
 // each rail's attribute composition in Go regexes; the export tests replace
 // it — a regex over source can agree with the code while disagreeing with
 // the wire, which is the failure mode this package exists to prevent.)
@@ -71,7 +71,7 @@ func TestRouteSentinelAndHealthLiteralAgreeAcrossRails(t *testing.T) {
 			declaration: regexp.MustCompile(`kUnmatchedRoute\[\] = "([a-z_]+)"`),
 		},
 		{
-			path:        "../../../games/apis/mithril_v2/src/mithril_v2/service.gleam",
+			path:        "../mist_pal/src/mist_pal.gleam",
 			marker:      "unmatched_route",
 			declaration: regexp.MustCompile(`pub const unmatched_route = "([a-z_]+)"`),
 		},
@@ -94,8 +94,8 @@ func TestRouteSentinelAndHealthLiteralAgreeAcrossRails(t *testing.T) {
 		"aura's health route is %q; prom_proxy subtracts and charts exactly route=\"/health\", "+
 			"and the compose healthchecks probe the same literal (#1307)", health[1])
 
-	gleamSource := codeLines(t, "../../../games/apis/mithril_v2/src/mithril_v2/service.gleam", "health_route")
+	gleamSource := codeLines(t, "../mist_pal/src/mist_pal.gleam", "health_route")
 	gleamHealth := regexp.MustCompile(`pub const health_route = "(/[a-z]+)"`).FindSubmatch(gleamSource)
-	require.NotNil(t, gleamHealth, "no health_route literal found in mithril_v2's service.gleam")
+	require.NotNil(t, gleamHealth, "no health_route literal found in mist_pal.gleam")
 	assert.Equal(t, "/health", string(gleamHealth[1]))
 }

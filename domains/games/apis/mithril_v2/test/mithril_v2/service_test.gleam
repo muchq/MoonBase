@@ -6,8 +6,8 @@ import gleam/http/request
 import gleam/http/response.{type Response}
 import gleam/list
 import gleeunit/should
-import mithril_v2/http_metrics
-import mithril_v2/service.{Body, TooLarge}
+import mist_pal.{type Body, Body, TooLarge}
+import mithril_v2/service
 import mithril_v2/wordchain
 
 const wordchain_path = "/mithril/v2/wordchain"
@@ -22,7 +22,7 @@ fn graph() -> wordchain.Graph {
   graph
 }
 
-fn post(body: String) -> request.Request(service.Body) {
+fn post(body: String) -> request.Request(Body) {
   request.new()
   |> request.set_method(http.Post)
   |> request.set_path(wordchain_path)
@@ -30,13 +30,13 @@ fn post(body: String) -> request.Request(service.Body) {
   |> request.set_body(Body(<<body:utf8>>))
 }
 
-fn get(path: String) -> request.Request(service.Body) {
+fn get(path: String) -> request.Request(Body) {
   request.new()
   |> request.set_path(path)
   |> request.set_body(Body(<<>>))
 }
 
-fn send(req: request.Request(service.Body)) -> Response(String) {
+fn send(req: request.Request(Body)) -> Response(String) {
   service.handle(req, graph())
 }
 
@@ -215,14 +215,12 @@ pub fn any_other_path_is_not_found_test() {
 
 pub fn routes_are_labelled_by_template_and_the_rest_as_unmatched_test() {
   [
-    service.route_label(post("")),
-    service.route_label(get(wordchain_path)),
-    service.route_label(get("/health")),
-    service.route_label(get("/nope")),
-    service.route_label(get("/health/")),
+    service.route_label(wordchain_path),
+    service.route_label("/health"),
+    service.route_label("/nope"),
+    service.route_label("/health/"),
   ]
   |> should.equal([
-    wordchain_path,
     wordchain_path,
     "/health",
     "unmatched",
@@ -237,42 +235,4 @@ pub fn v1_quirks_that_are_not_kept_test() {
   status_of("[\"cold\",\"warm\"]") |> should.equal(422)
   send(post("{\"start\":\"cold\",\"start\":\"warm\",\"end\":\"cord\"}")).body
   |> should.equal("{\"path\":[\"cold\",\"cord\"]}")
-}
-
-fn metrics() -> http_metrics.Metrics {
-  let assert Ok(metrics) = http_metrics.start("mithril_v2")
-  metrics
-}
-
-pub fn a_served_request_is_counted_by_caller_route_and_outcome_test() {
-  let metrics = metrics()
-  let req =
-    post("{\"start\":\"cold\",\"end\":\"warm\"}")
-    |> request.set_header("x-forwarded-for", "203.0.113.7")
-  service.instrumented(metrics, req, send).status |> should.equal(200)
-  service.instrumented(metrics, get("/nope"), send).status |> should.equal(404)
-
-  let snapshot = http_metrics.snapshot(metrics)
-  list.key_find(snapshot.callers, "edge") |> should.equal(Ok(1))
-  list.key_find(snapshot.callers, "other") |> should.equal(Ok(1))
-  snapshot.active |> should.equal([#("GET", 0), #("POST", 0)])
-  snapshot.routes
-  |> list.map(fn(route) { #(route.0, { route.1 }.success, { route.1 }.failure) })
-  |> should.equal([
-    #(http_metrics.RouteKey("GET", "unmatched"), 0, 1),
-    #(http_metrics.RouteKey("POST", "/mithril/v2/wordchain"), 1, 0),
-  ])
-}
-
-// A handler that crashes answers 500 and is still counted, so the gauge
-// cannot drift and the failure shows on the dashboard.
-pub fn a_crashing_handler_is_a_counted_500_test() {
-  let metrics = metrics()
-  service.instrumented(metrics, get("/health"), fn(_) { panic as "boom" }).status
-  |> should.equal(500)
-
-  let snapshot = http_metrics.snapshot(metrics)
-  snapshot.active |> should.equal([#("GET", 0)])
-  let assert [#(_, stats)] = snapshot.routes
-  #(stats.requests, stats.failure) |> should.equal(#(1, 1))
 }

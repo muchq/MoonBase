@@ -4,37 +4,23 @@
 //// body not declared JSON; 400 for one that does not parse; 422 for one of
 //// the wrong shape or with a word that fails validation.
 
-import exception
 import gleam/bool
 import gleam/dynamic/decode
 import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
-import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option}
 import gleam/result
 import gleam/string
-import mithril_v2/http_metrics.{type Metrics}
+import mist_pal.{type Body, Body, TooLarge, Unreadable}
 import mithril_v2/wordchain.{type Graph}
 
 pub const wordchain_route = "/mithril/v2/wordchain"
 
-pub const health_route = "/health"
-
-/// The route label for a path no route matches, so scanners cannot mint a
-/// series per path. The spelling is shared with every other rail.
-pub const unmatched_route = "unmatched"
-
 /// The largest body read, in bytes.
 pub const max_body_bytes = 4_194_304
-
-pub type Body {
-  Body(BitArray)
-  TooLarge
-  Unreadable
-}
 
 pub fn handle(req: Request(Body), graph: Graph) -> Response(String) {
   use <- bool.guard(!accepts_json(req), text(406, ""))
@@ -47,42 +33,12 @@ pub fn handle(req: Request(Body), graph: Graph) -> Response(String) {
   }
 }
 
-/// Runs a handler under the http_server_* instruments. A handler that
-/// crashes answers 500, counted like any other failure.
-pub fn instrumented(
-  metrics: Metrics,
-  req: Request(a),
-  handler: fn(Request(a)) -> Response(String),
-) -> Response(String) {
-  let started = monotonic_micros()
-  let method = http_metrics.method_label(req.method)
-  http_metrics.request_started(
-    metrics,
-    method,
-    http_metrics.caller_of(req.headers),
-  )
-  let resp =
-    exception.rescue(fn() { handler(req) })
-    |> result.lazy_unwrap(fn() { text(500, "Internal Server Error") })
-  let micros = int.to_float(int.max(monotonic_micros() - started, 0))
-  http_metrics.request_finished(
-    metrics,
-    method,
-    route_label(req),
-    resp.status,
-    micros,
-  )
-  resp
-}
-
-@external(erlang, "mithril_v2_ffi", "monotonic_micros")
-fn monotonic_micros() -> Int
-
-pub fn route_label(req: Request(a)) -> String {
-  case req.path {
-    "/health" -> health_route
+/// The metric route label for a request path.
+pub fn route_label(path: String) -> String {
+  case path {
+    "/health" -> mist_pal.health_route
     "/mithril/v2/wordchain" -> wordchain_route
-    _ -> unmatched_route
+    _ -> mist_pal.unmatched_route
   }
 }
 

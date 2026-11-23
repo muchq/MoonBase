@@ -14,7 +14,7 @@ import (
 // series per caller only means one thing if every rail spells the callers, and
 // describes the instrument, identically.
 
-const gleamMetrics = "../../../games/apis/mithril_v2/src/mithril_v2/http_metrics.gleam"
+const gleamMetrics = "../mist_pal/src/mist_pal/http_metrics.gleam"
 
 func TestCallerVocabularyAgreesAcrossRails(t *testing.T) {
 	aura := codeLines(t, "../aura/middleware.h", "kInternalCallers")
@@ -28,14 +28,14 @@ func TestCallerVocabularyAgreesAcrossRails(t *testing.T) {
 	gleam := codeLines(t, gleamMetrics, "internal_callers")
 	assert.Equal(t,
 		quotedListFrom(t, aura, "aura/middleware.h", regexp.MustCompile(`kInternalCallers\[\] = \{([^}]*)\}`)),
-		quotedListFrom(t, gleam, "mithril_v2", regexp.MustCompile(`internal_callers = \[([^\]]*)\]`)),
-		"mithril_v2 names internal callers differently from aura")
+		quotedListFrom(t, gleam, "mist_pal", regexp.MustCompile(`internal_callers = \[([^\]]*)\]`)),
+		"mist_pal names internal callers differently from aura")
 	for _, word := range []struct{ pattern, want string }{
 		{`pub const edge_caller = "([a-z_]+)"`, "edge"},
 		{`pub const other_caller = "([a-z_]+)"`, "other"},
 	} {
 		g := regexp.MustCompile(word.pattern).FindSubmatch(gleam)
-		require.NotNil(t, g, "mithril_v2 declares no %q caller", word.want)
+		require.NotNil(t, g, "mist_pal declares no %q caller", word.want)
 		assert.Equal(t, word.want, string(g[1]))
 	}
 
@@ -65,7 +65,7 @@ func TestCallerInstrumentIsDescribedIdenticallyOnEveryRail(t *testing.T) {
 
 	gleam := codeLines(t, gleamMetrics, "http_server_requests_by_caller")
 	g := regexp.MustCompile(`#\(\s*"http_server_requests_by_caller",\s*"([^"]*)",?\s*\)`).FindSubmatch(gleam)
-	require.NotNil(t, g, "mithril_v2 declares no description for http_server_requests_by_caller")
+	require.NotNil(t, g, "mist_pal declares no description for http_server_requests_by_caller")
 	assert.Equal(t, string(c[1]), string(g[1]),
 		"the collector keeps the first description it sees and logs a conflict for every other")
 }

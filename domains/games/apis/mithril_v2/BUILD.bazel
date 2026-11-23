@@ -4,15 +4,6 @@ load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 exports_files(["manifest.toml"])
 
-# The metric constants otel_contract pins against the other rails.
-exports_files(
-    [
-        "src/mithril_v2/http_metrics.gleam",
-        "src/mithril_v2/service.gleam",
-    ],
-    visibility = ["//domains/platform/libs/otel_contract:__pkg__"],
-)
-
 _DATA = [
     "//domains/games/apis/mithril:data/j4YL7Lh1H2PAgHy_a625LegUoxk94ZOimjzzx0QKI+Y_.graph",
     "//domains/games/apis/mithril:data/words.txt",
@@ -20,8 +11,6 @@ _DATA = [
 
 _SRCS = [
     "src/mithril_v2.gleam",
-    "src/mithril_v2/http_metrics.gleam",
-    "src/mithril_v2/otlp.gleam",
     "src/mithril_v2/runtime.gleam",
     "src/mithril_v2/service.gleam",
     "src/mithril_v2/wordchain.gleam",
@@ -29,8 +18,6 @@ _SRCS = [
 ]
 
 _TEST_SRCS = [
-    "test/mithril_v2/http_metrics_test.gleam",
-    "test/mithril_v2/otlp_test.gleam",
     "test/mithril_v2/service_test.gleam",
     "test/mithril_v2/wordchain_test.gleam",
     "test/mithril_v2_test.gleam",
@@ -48,13 +35,10 @@ gleam_package(
     ],
     test_srcs = _TEST_SRCS,
     deps = [
-        "@gleam_packages//:exception",
-        "@gleam_packages//:gleam_erlang",
+        "//domains/platform/libs/mist_pal",
         "@gleam_packages//:gleam_http",
         "@gleam_packages//:gleam_json",
-        "@gleam_packages//:gleam_otp",
         "@gleam_packages//:gleam_stdlib",
-        "@gleam_packages//:mist",
     ],
 )
 
