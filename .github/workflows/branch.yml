@@ -577,7 +577,7 @@ jobs:
         run: npm run test:browser
 
   # iOS targets can't build on Ubuntu; run Swift tests on macOS when relevant
-  # files change, including the Apple rules and Bazel itself.
+  # files change, including the Apple rules, Bazel and its config.
   test-ios:
     runs-on: macos-26
     steps:
@@ -588,7 +588,7 @@ jobs:
       - name: Check for iOS changes
         id: filter
         run: |
-          CHANGED=$(git diff --name-only origin/main...HEAD -- domains/games/apps/wordchains_ios/ domains/games/apps/wordchains/ domains/games/libs/wordchains/ bazel/apple.MODULE.bazel .bazelversion)
+          CHANGED=$(git diff --name-only origin/main...HEAD -- domains/games/apps/wordchains_ios/ domains/games/apps/wordchains/ domains/games/libs/wordchains/ bazel/apple.MODULE.bazel bazel/tools.MODULE.bazel MODULE.bazel .bazelrc .bazelversion)
           if [ -n "$CHANGED" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
@@ -613,6 +613,18 @@ jobs:
           bazel build //domains/games/apps/wordchains_ios:WordChains \
             --ios_minimum_os=17.0 \
             --apple_platform_type=ios
+
+      # App Store Connect rejects a bundle without CFBundleIconName, which
+      # actool writes only when the app's icon set is wired in as app_icons.
+      - name: Check the bundled app icon
+        if: steps.filter.outputs.changed == 'true'
+        run: |
+          plist="$RUNNER_TEMP/WordChains.Info.plist"
+          unzip -p bazel-bin/domains/games/apps/wordchains_ios/WordChains.ipa \
+            Payload/WordChains.app/Info.plist > "$plist"
+          icon=$(plutil -extract CFBundleIconName raw "$plist")
+          echo "CFBundleIconName=$icon"
+          [ "$icon" = AppIcon ]
 
       # swift.enable_testing is needed for @testable imports because the repo
       # builds -c opt, where rules_swift disables testability by default.
