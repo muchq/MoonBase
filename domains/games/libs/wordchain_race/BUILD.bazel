@@ -1,0 +1,91 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# A word ladder race at a games-hub table: the dictionary and puzzles, the
+# race and the table that plays race after race, and its stored form.
+
+cc_library(
+    name = "dictionary",
+    srcs = ["dictionary.cc"],
+    hdrs = ["dictionary.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "dictionary_test",
+    size = "small",
+    srcs = ["dictionary_test.cc"],
+    deps = [
+        ":dictionary",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The word list the hub ships, read the way the hub reads it.
+cc_test(
+    name = "words_test",
+    size = "small",
+    srcs = ["words_test.cc"],
+    data = ["//domains/games/apis/mithril:data/words.txt"],
+    env = {"WORDS": "$(rootpath //domains/games/apis/mithril:data/words.txt)"},
+    deps = [
+        ":dictionary",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "table",
+    srcs = ["table.cc"],
+    hdrs = ["table.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":dictionary",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "table_test",
+    size = "small",
+    srcs = ["table_test.cc"],
+    deps = [
+        ":dictionary",
+        ":table",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The games table's column for a race row. Server-side only.
+cc_library(
+    name = "table_serde",
+    srcs = ["table_serde.cc"],
+    hdrs = ["table_serde.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":table",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_test(
+    name = "table_serde_test",
+    size = "small",
+    srcs = ["table_serde_test.cc"],
+    deps = [
+        ":table",
+        ":table_serde",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+    ],
+)

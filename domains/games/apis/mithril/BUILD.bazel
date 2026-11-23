@@ -8,7 +8,10 @@ exports_files(
         "data/j4YL7Lh1H2PAgHy_a625LegUoxk94ZOimjzzx0QKI+Y_.graph",
         "data/words.txt",
     ],
-    visibility = ["//domains/games/apis/mithril_v2:__pkg__"],
+    visibility = [
+        "//domains/games/apis/mithril_v2:__pkg__",
+        "//domains/games/libs/wordchain_race:__pkg__",
+    ],
 )
 
 rust_binary(
