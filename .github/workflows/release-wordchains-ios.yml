@@ -1,13 +1,14 @@
 name: Release wordchains-ios
 
+# A version is released once: when main's Info.plist names a version with no
+# wordchains-ios-v<version> tag. The tag is the record, so a bump released
+# from any commit, or a version marked done by hand, is never released again.
+# Pushing a tag releases nothing; to retry a failed build, delete its tag.
 on:
   workflow_run:
     workflows: ["Test and Publish"]
     types:
       - completed
-  push:
-    tags:
-      - 'wordchains-ios-v*'
 
 permissions:
   contents: write
@@ -24,120 +25,62 @@ defaults:
 jobs:
   check-and-tag:
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.conclusion == 'success'
     outputs:
-      version: ${{ steps.version_check.outputs.current_version }}
-      should_release: ${{ steps.version_check.outputs.changed }}
+      version: ${{ steps.version_check.outputs.version }}
+      tag: ${{ steps.version_check.outputs.tag }}
+      should_release: ${{ steps.version_check.outputs.release }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 2
 
-      - name: Check if version changed
+      # Ubuntu has no PlistBuddy; plist-string fails rather than printing
+      # nothing, so a broken read can't name a tag that never exists.
+      - name: Check for an untagged version
         id: version_check
         run: |
-          PLIST="domains/games/apps/wordchains_ios/Info.plist"
+          VERSION=$(scripts/plist-string domains/games/apps/wordchains_ios/Info.plist CFBundleShortVersionString)
+          TAG="wordchains-ios-v${VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-          # Get version from current commit
-          CURRENT_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "")
-
-          # Get version from previous commit
-          git checkout HEAD~1 -- "$PLIST" 2>/dev/null || true
-          PREVIOUS_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "")
-
-          # Restore current version
-          git checkout HEAD -- "$PLIST"
-
-          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "previous_version=$PREVIOUS_VERSION" >> "$GITHUB_OUTPUT"
-
-          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ] && [ -n "$CURRENT_VERSION" ]; then
-            echo "Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
-            echo "changed=true" >> "$GITHUB_OUTPUT"
+          # ls-remote exits 0 with no output for a missing ref; a failed
+          # query fails the step instead of reading as "untagged".
+          FOUND=$(git ls-remote --tags origin "refs/tags/$TAG")
+          if [ -n "$FOUND" ]; then
+            echo "$TAG exists; nothing to release"
+            echo "release=false" >> "$GITHUB_OUTPUT"
           else
-            echo "Version unchanged: $CURRENT_VERSION"
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "$TAG does not exist; releasing $VERSION"
+            echo "release=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Create and push tag
-        if: steps.version_check.outputs.changed == 'true'
+        if: steps.version_check.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.version_check.outputs.version }}
+          TAG: ${{ steps.version_check.outputs.tag }}
         run: |
-          VERSION="${{ steps.version_check.outputs.current_version }}"
-          TAG="wordchains-ios-v${VERSION}"
-
-          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
-            echo "Tag $TAG already exists on remote, skipping"
-            exit 0
-          fi
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git tag -a "$TAG" -m "Release wordchains-ios v${VERSION}"
           git push origin "$TAG"
 
-          echo "Created and pushed tag: $TAG"
-
-  prepare:
-    needs: [check-and-tag]
-    if: |
-      always() &&
-      (github.event_name == 'push' ||
-       (needs.check-and-tag.result == 'success' && needs.check-and-tag.outputs.should_release == 'true'))
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.resolve.outputs.version }}
-      tag: ${{ steps.resolve.outputs.tag }}
-      ref: ${{ steps.resolve.outputs.ref }}
-      build_number: ${{ steps.resolve.outputs.build_number }}
-    steps:
-      - name: Resolve version and ref
-        id: resolve
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            TAG="${GITHUB_REF_NAME}"
-            VERSION="${TAG#wordchains-ios-v}"
-            REF="${{ github.ref }}"
-          else
-            VERSION="${{ needs.check-and-tag.outputs.version }}"
-            TAG="wordchains-ios-v${VERSION}"
-            REF="${{ github.event.workflow_run.head_sha }}"
-          fi
-
-          # Auto-increment build number from run number
-          BUILD_NUMBER="${{ github.run_number }}"
-
-          {
-            echo "version=$VERSION"
-            echo "tag=$TAG"
-            echo "ref=$REF"
-            echo "build_number=$BUILD_NUMBER"
-          } >> "$GITHUB_OUTPUT"
-
   build:
-    needs: [prepare]
-    if: always() && needs.prepare.result == 'success'
+    needs: [check-and-tag]
+    if: needs.check-and-tag.outputs.should_release == 'true'
     runs-on: macos-26
+    outputs:
+      signed: ${{ steps.signing.outputs.enabled }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.prepare.outputs.ref }}
-
-      - name: Verify version matches Info.plist
-        if: github.event_name == 'push'
-        run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-          PLIST_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" domains/games/apps/wordchains_ios/Info.plist)
-          if [ "$VERSION" != "$PLIST_VERSION" ]; then
-            echo "Error: Tag version ($VERSION) doesn't match Info.plist ($PLIST_VERSION)"
-            exit 1
-          fi
-          echo "Version verification passed: $VERSION"
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set build number
         run: |
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ needs.prepare.outputs.build_number }}" \
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" \
             domains/games/apps/wordchains_ios/Info.plist
 
       - name: Run unit tests
@@ -190,23 +133,27 @@ jobs:
       # Device (arm64) build when signing is available — simulator builds are
       # rejected by App Store Connect. rules_apple emits a signed IPA directly;
       # re-zipping the .app by hand would break the code signature.
+      # .bazelrc downloads no outputs; the IPA is staged below, and a cache
+      # hit would otherwise leave it unmaterialized.
       - name: Build iOS app
         run: |
           if [ "${{ steps.signing.outputs.enabled }}" = "true" ]; then
             bazel build //domains/games/apps/wordchains_ios:WordChains \
+              --remote_download_outputs=toplevel \
               --ios_minimum_os=17.0 \
               --ios_multi_cpus=arm64 \
               --define=ios_release_signing=true
           else
             bazel build //domains/games/apps/wordchains_ios:WordChains \
+              --remote_download_outputs=toplevel \
               --ios_minimum_os=17.0 \
               --apple_platform_type=ios
           fi
 
       - name: Stage release artifacts
         run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-          BUILD="${{ needs.prepare.outputs.build_number }}"
+          VERSION="${{ needs.check-and-tag.outputs.version }}"
+          BUILD="${{ github.run_number }}"
 
           cp bazel-bin/domains/games/apps/wordchains_ios/WordChains.ipa \
             "WordChains-${VERSION}-${BUILD}.ipa"
@@ -229,7 +176,7 @@ jobs:
             ${{ env.SHA_FILE }}
 
   release:
-    needs: [prepare, build]
+    needs: [check-and-tag, build]
     if: always() && needs.build.result == 'success'
     runs-on: macos-26
     steps:
@@ -243,8 +190,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          VERSION="${{ needs.prepare.outputs.version }}"
-          TAG="${{ needs.prepare.outputs.tag }}"
+          VERSION="${{ needs.check-and-tag.outputs.version }}"
+          TAG="${{ needs.check-and-tag.outputs.tag }}"
           gh release create "$TAG" \
             --title "wordchains-ios v${VERSION}" \
             --generate-notes \
@@ -259,10 +206,16 @@ jobs:
       # See domains/games/apps/wordchains_ios/docs/RELEASE.md for setup.
       - name: Upload to App Store Connect
         env:
+          SIGNED: ${{ needs.build.outputs.signed }}
           APP_STORE_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
         run: |
+          # An unsigned simulator IPA can only be rejected.
+          if [ "$SIGNED" != true ]; then
+            echo "::warning::IPA is unsigned — skipping App Store upload."
+            exit 0
+          fi
           if [ -z "$APP_STORE_KEY_ID" ]; then
             echo "::warning::APP_STORE_CONNECT_API_KEY_ID not set — skipping App Store upload."
             echo "See domains/games/apps/wordchains_ios/docs/RELEASE.md for setup instructions."

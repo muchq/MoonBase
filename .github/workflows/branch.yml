@@ -98,6 +98,11 @@ jobs:
       - name: Test ci-image-tag
         run: ./scripts/test-ci-image-tag
 
+      # The wordchains-ios release reads its version on Linux; an unreadable
+      # one must fail, not compare equal to the last unreadable one.
+      - name: Test plist-string
+        run: ./scripts/test-plist-string
+
   # The workflows themselves (#1061): actionlint, with shellcheck over every
   # run block in the shell the workflow declares. Its own job so it never
   # waits on a build.
@@ -571,7 +576,8 @@ jobs:
         working-directory: domains/edu/apps/ast_lol
         run: npm run test:browser
 
-  # iOS targets can't build on Ubuntu; run Swift tests on macOS when relevant files change.
+  # iOS targets can't build on Ubuntu; run Swift tests on macOS when relevant
+  # files change, including the Apple rules, Bazel and its config.
   test-ios:
     runs-on: macos-26
     steps:
@@ -582,7 +588,7 @@ jobs:
       - name: Check for iOS changes
         id: filter
         run: |
-          CHANGED=$(git diff --name-only origin/main...HEAD -- domains/games/apps/wordchains_ios/ domains/games/libs/wordchains/)
+          CHANGED=$(git diff --name-only origin/main...HEAD -- domains/games/apps/wordchains_ios/ domains/games/apps/wordchains/ domains/games/libs/wordchains/ bazel/apple.MODULE.bazel bazel/tools.MODULE.bazel MODULE.bazel .bazelrc .bazelversion)
           if [ -n "$CHANGED" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
@@ -601,12 +607,30 @@ jobs:
           disk-cache: test-ios
           repository-cache: true
 
+      # .bazelrc downloads no outputs; the IPA is read below, and a cache hit
+      # would otherwise leave it unmaterialized.
       - name: Build iOS app with bazel
         if: steps.filter.outputs.changed == 'true'
         run: |
           bazel build //domains/games/apps/wordchains_ios:WordChains \
+            --remote_download_outputs=toplevel \
             --ios_minimum_os=17.0 \
             --apple_platform_type=ios
+
+      # App Store Connect rejects a bundle whose icon set isn't named in its
+      # Info.plist (ITMS-90713); actool writes the name under CFBundleIcons.
+      - name: Check the bundled app icon
+        if: steps.filter.outputs.changed == 'true'
+        run: |
+          ipa=bazel-bin/domains/games/apps/wordchains_ios/WordChains.ipa
+          plist="$RUNNER_TEMP/WordChains.Info.plist"
+          unzip -p "$ipa" Payload/WordChains.app/Info.plist > "$plist"
+          plutil -p "$plist"
+          unzip -l "$ipa" | grep -E 'Assets\.car|AppIcon' || true
+          icon=$(plutil -extract CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName raw "$plist")
+          echo "CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName=$icon"
+          [ "$icon" = AppIcon ]
+          unzip -l "$ipa" | grep -q 'Payload/WordChains.app/Assets.car$'
 
       # swift.enable_testing is needed for @testable imports because the repo
       # builds -c opt, where rules_swift disables testability by default.

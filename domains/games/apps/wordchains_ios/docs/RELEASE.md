@@ -4,8 +4,10 @@
 
 The iOS release pipeline mirrors the wordchains CLI release process:
 
-1. **Version detection** — CI watches `Info.plist` for `CFBundleShortVersionString` changes
-2. **Tagging** — auto-creates `wordchains-ios-v<VERSION>` git tags
+1. **Version detection** — after each green `main` build, CI reads
+   `CFBundleShortVersionString` from `Info.plist` and releases it if no
+   `wordchains-ios-v<VERSION>` tag exists
+2. **Tagging** — creates that tag; the tag is the record that the version shipped
 3. **Build** — Bazel builds the iOS app on macOS runners (`rules_apple` + `rules_swift`).
    With the code-signing secrets configured, this is a signed **device (arm64)** build;
    without them it falls back to an unsigned simulator build (not App Store uploadable)
@@ -179,9 +181,12 @@ falls back to an unsigned simulator build and skips the App Store upload.
 
 ### 5. App Icon
 
-- [ ] Design a 1024x1024 app icon
-- [ ] Place it at `Sources/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png`
-- [ ] Update the `Contents.json` to reference the filename
+A placeholder icon ships at
+`Sources/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png`. To replace
+it, keep the filename or update `Contents.json`: 1024x1024 PNG, RGB with no
+alpha. `:app_store_test` enforces those rules, plus `arm64` in
+`UIRequiredDeviceCapabilities` and `ITSAppUsesNonExemptEncryption` = false, on
+Linux CI.
 
 ### 6. Word Graph Bundle
 
@@ -200,18 +205,15 @@ To release a new version:
 
 1. Bump `CFBundleShortVersionString` in `Info.plist`
 2. Merge to `main`
-3. CI auto-tags and builds a signed device IPA
+3. Once `main` is green, CI tags `wordchains-ios-v<VERSION>` and builds a signed device IPA
 4. IPA uploads to App Store Connect / TestFlight via `fastlane pilot`
    (once secrets are configured)
 5. Submit for review in App Store Connect (still manual; automatable later
    with `fastlane deliver` or the App Store Connect API)
 
-## Manual Release (Tag Push)
-
-```sh
-git tag -a wordchains-ios-v0.2.0 -m "Release wordchains-ios v0.2.0"
-git push origin wordchains-ios-v0.2.0
-```
+The tag is created before the build. If the build or upload fails, delete the
+tag and re-run the workflow (or push again) to retry. Pushing a tag by hand
+releases nothing: it marks that version as already shipped.
 
 ## Architecture
 
