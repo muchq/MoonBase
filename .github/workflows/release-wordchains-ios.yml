@@ -123,6 +123,8 @@ jobs:
     needs: [prepare]
     if: always() && needs.prepare.result == 'success'
     runs-on: macos-26
+    outputs:
+      signed: ${{ steps.signing.outputs.enabled }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -263,10 +265,16 @@ jobs:
       # See domains/games/apps/wordchains_ios/docs/RELEASE.md for setup.
       - name: Upload to App Store Connect
         env:
+          SIGNED: ${{ needs.build.outputs.signed }}
           APP_STORE_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
           APP_STORE_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           APP_STORE_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
         run: |
+          # An unsigned simulator IPA can only be rejected.
+          if [ "$SIGNED" != true ]; then
+            echo "::warning::IPA is unsigned — skipping App Store upload."
+            exit 0
+          fi
           if [ -z "$APP_STORE_KEY_ID" ]; then
             echo "::warning::APP_STORE_CONNECT_API_KEY_ID not set — skipping App Store upload."
             echo "See domains/games/apps/wordchains_ios/docs/RELEASE.md for setup instructions."
