@@ -98,6 +98,11 @@ jobs:
       - name: Test ci-image-tag
         run: ./scripts/test-ci-image-tag
 
+      # The wordchains-ios release reads its version on Linux; an unreadable
+      # one must fail, not compare equal to the last unreadable one.
+      - name: Test plist-string
+        run: ./scripts/test-plist-string
+
   # The workflows themselves (#1061): actionlint, with shellcheck over every
   # run block in the shell the workflow declares. Its own job so it never
   # waits on a build.
@@ -571,7 +576,8 @@ jobs:
         working-directory: domains/edu/apps/ast_lol
         run: npm run test:browser
 
-  # iOS targets can't build on Ubuntu; run Swift tests on macOS when relevant files change.
+  # iOS targets can't build on Ubuntu; run Swift tests on macOS when relevant
+  # files change, including the Apple rules and Bazel itself.
   test-ios:
     runs-on: macos-26
     steps:
@@ -582,7 +588,7 @@ jobs:
       - name: Check for iOS changes
         id: filter
         run: |
-          CHANGED=$(git diff --name-only origin/main...HEAD -- domains/games/apps/wordchains_ios/ domains/games/libs/wordchains/)
+          CHANGED=$(git diff --name-only origin/main...HEAD -- domains/games/apps/wordchains_ios/ domains/games/apps/wordchains/ domains/games/libs/wordchains/ bazel/apple.MODULE.bazel .bazelversion)
           if [ -n "$CHANGED" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else

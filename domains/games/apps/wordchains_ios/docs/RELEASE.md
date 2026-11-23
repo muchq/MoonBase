@@ -179,9 +179,12 @@ falls back to an unsigned simulator build and skips the App Store upload.
 
 ### 5. App Icon
 
-- [ ] Design a 1024x1024 app icon
-- [ ] Place it at `Sources/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png`
-- [ ] Update the `Contents.json` to reference the filename
+A placeholder icon ships at
+`Sources/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png`. To replace
+it, keep the filename or update `Contents.json`: 1024x1024 PNG, RGB with no
+alpha. `:app_store_test` enforces those rules, plus `arm64` in
+`UIRequiredDeviceCapabilities` and `ITSAppUsesNonExemptEncryption` = false, on
+Linux CI.
 
 ### 6. Word Graph Bundle
 
