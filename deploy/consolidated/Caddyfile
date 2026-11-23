@@ -53,6 +53,11 @@ api.muchq.com {
 		path /mithril/v1/wordchain
 	}
 
+	@post_mithril_v2 {
+		method POST
+		path /mithril/v2/wordchain
+	}
+
 	@post_posterize_blur {
 		method POST
 		path /imagine/v1/blur
@@ -205,6 +210,9 @@ api.muchq.com {
 	}
 	handle @post_mithril {
 		reverse_proxy mithril:8083
+	}
+	handle @post_mithril_v2 {
+		reverse_proxy mithril_v2:8096
 	}
 	handle @post_posterize_blur {
 		reverse_proxy posterize:8084

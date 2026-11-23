@@ -59,6 +59,7 @@ var routes = []siteRoutes{
 		"/microgpt/v1/chat",
 		"/microgpt/v1/generate",
 		"/mithril/v1/wordchain",
+		"/mithril/v2/wordchain",
 		"/portrait/v1/trace",
 		"/stats/v1/*",
 		"/v2/analyze",

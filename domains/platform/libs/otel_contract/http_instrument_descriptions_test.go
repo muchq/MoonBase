@@ -62,6 +62,15 @@ var descriptionRails = []struct {
 			regexp.MustCompile(`\("(http_server_[a-z_]*)"\)\s*\n\s*\.with_description\("([^"]*)"\)`),
 		},
 	},
+	{
+		name: "mithril_v2 (Gleam)",
+		path: "../../../games/apis/mithril_v2/src/mithril_v2/http_metrics.gleam",
+		patterns: []*regexp.Regexp{
+			// #("http_server_requests", "HTTP requests received"), on one line
+			// or split across three by the formatter.
+			regexp.MustCompile(`#\(\s*"(http_server_[a-z_]*)",\s*"([^"]*)",?\s*\)`),
+		},
+	},
 }
 
 // descriptionsFrom returns the instrument-name-to-description map a rail
@@ -134,7 +143,7 @@ func withoutCommentTail(line string) string {
 	return line
 }
 
-// withoutCommentLines blanks comments in C++, Java and Rust source, whole
+// withoutCommentLines blanks comments in C++, Java, Rust and Gleam source, whole
 // lines and trailing tails alike.
 //
 // Every rail's declaration file explains this contract in prose, and the prose
@@ -163,7 +172,7 @@ func withoutCommentLines(source []byte) []byte {
 	return []byte(strings.Join(lines, "\n"))
 }
 
-// The three emitters describe the shared instruments identically.
+// Every emitter describes the shared instruments identically.
 //
 // All of them report into one collector, which merges series by instrument
 // name across services. Its Prometheus exporter keeps the first description it
@@ -175,7 +184,7 @@ func withoutCommentLines(source []byte) []byte {
 //
 // An empty description conflicts with a non-empty one exactly as loudly, so
 // "this rail just won't say" is not a way out; it is how futility got here.
-func TestHttpInstrumentDescriptionsMatchAcrossAllThreeEmitters(t *testing.T) {
+func TestHttpInstrumentDescriptionsMatchAcrossAllEmitters(t *testing.T) {
 	byRail := map[string]map[string]string{}
 	for _, rail := range descriptionRails {
 		byRail[rail.name] = descriptionsFrom(t, rail.path, rail.patterns)
@@ -187,7 +196,7 @@ func TestHttpInstrumentDescriptionsMatchAcrossAllThreeEmitters(t *testing.T) {
 	for _, rail := range descriptionRails[1:] {
 		assert.Equal(t, want, byRail[rail.name],
 			"%s and %s describe the shared HTTP instruments differently. They have to move "+
-				"together — the collector merges these series by name across all three, and keeps "+
+				"together — the collector merges these series by name across every rail, and keeps "+
 				"only the first description it sees.", reference.name, rail.name)
 	}
 }
@@ -198,7 +207,7 @@ func TestHttpInstrumentDescriptionsMatchAcrossAllThreeEmitters(t *testing.T) {
 // "(2xx–3xx)" against yodel's "(2xx-3xx)". Nothing renders it: the two strings
 // are indistinguishable in a diff, in a review, and on a dashboard, and differ
 // only to the byte comparison the collector actually makes. Equality above
-// would be satisfied by all three rails adopting the en-dash together, so pin
+// would be satisfied by every rail adopting the en-dash together, so pin
 // the property that makes the mismatch visible in the first place.
 func TestHttpInstrumentDescriptionsAreAscii(t *testing.T) {
 	for _, rail := range descriptionRails {

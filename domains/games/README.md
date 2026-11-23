@@ -10,6 +10,7 @@ Game engines, services, and libraries.
 
 - [**Games Hub**](apis/games_hub): opal-cpp event-stream backend for the lobby, golf, castle, rummy, chess and thoughts (#79).
 - [**Mithril**](apis/mithril): Rust-based game service.
+- [**Mithril v2**](apis/mithril_v2): Mithril's word-ladder solver in Gleam, built with rules_gleam.
 - [**1d4.net**](apis/one_d4): Chess analysis service.
 - [**MCPServer**](apis/mcpserver): Multi-protocol game server.
 

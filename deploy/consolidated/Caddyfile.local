@@ -53,6 +53,11 @@
 		path /mithril/v1/wordchain
 	}
 
+	@post_mithril_v2 {
+		method POST
+		path /mithril/v2/wordchain
+	}
+
 	@post_posterize_blur {
 		method POST
 		path /imagine/v1/blur
@@ -122,6 +127,9 @@
 	}
 	handle @post_mithril {
 		reverse_proxy localhost:8083
+	}
+	handle @post_mithril_v2 {
+		reverse_proxy localhost:8096
 	}
 	handle @post_posterize_blur {
 		reverse_proxy localhost:8084

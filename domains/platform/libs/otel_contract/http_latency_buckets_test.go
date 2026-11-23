@@ -1,8 +1,8 @@
-// Package otel_contract holds cross-language pins for the metric contract the
-// three emitters share.
+// Package otel_contract holds cross-language pins for the metric contract
+// every emitter shares.
 //
 // Nothing imports it. It exists because prom_proxy asks one PromQL question of
-// Java, Rust and C++ services alike, and several of the properties that makes
+// Java, Rust, C++ and Gleam services alike, and several of the properties that makes
 // correct are properties no single language's test can see.
 package otel_contract
 
@@ -10,6 +10,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -40,6 +41,11 @@ var rails = []struct {
 		path:    "../server_pal/src/lib.rs",
 		pattern: regexp.MustCompile(`HTTP_LATENCY_BUCKET_BOUNDS_MICROS\s*:\s*\[f64;\s*\d+\]\s*=\s*\[([^\]]*)\]`),
 	},
+	{
+		name:    "mithril_v2 (Gleam)",
+		path:    "../../../games/apis/mithril_v2/src/mithril_v2/http_metrics.gleam",
+		pattern: regexp.MustCompile(`latency_bucket_bounds_micros\s*=\s*\[([^\]]*)\]`),
+	},
 }
 
 var numberPattern = regexp.MustCompile(`\d+(?:\.\d+)?`)
@@ -63,7 +69,9 @@ func boundsFrom(t *testing.T, path string, pattern *regexp.Regexp) []float64 {
 			"too: an unparseable rail is one this test stops checking.", path)
 
 	var bounds []float64
-	for _, literal := range numberPattern.FindAllString(string(match[1]), -1) {
+	// Digit separators, as in Gleam's 10_000.0, are not part of the value.
+	digits := strings.ReplaceAll(string(match[1]), "_", "")
+	for _, literal := range numberPattern.FindAllString(digits, -1) {
 		value, err := strconv.ParseFloat(literal, 64)
 		require.NoError(t, err)
 		bounds = append(bounds, value)
@@ -72,7 +80,7 @@ func boundsFrom(t *testing.T, path string, pattern *regexp.Regexp) []float64 {
 	return bounds
 }
 
-// The three emitters declare the same HTTP latency buckets.
+// Every emitter declares the same HTTP latency buckets.
 //
 // prom_proxy charts p95 for every service through one histogram_quantile
 // expression, whatever language the service is written in. Quantiles are read
@@ -82,7 +90,7 @@ func boundsFrom(t *testing.T, path string, pattern *regexp.Regexp) []float64 {
 //
 // This is the guard #1286 asked for. Before it, the only thing keeping the
 // three aligned was a comment in each asking the next person not to touch it.
-func TestHttpLatencyBucketsMatchAcrossAllThreeEmitters(t *testing.T) {
+func TestHttpLatencyBucketsMatchAcrossAllEmitters(t *testing.T) {
 	byRail := map[string][]float64{}
 	for _, rail := range rails {
 		byRail[rail.name] = boundsFrom(t, rail.path, rail.pattern)
@@ -94,14 +102,14 @@ func TestHttpLatencyBucketsMatchAcrossAllThreeEmitters(t *testing.T) {
 	for _, rail := range rails[1:] {
 		assert.Equal(t, want, byRail[rail.name],
 			"%s and %s declare different HTTP latency buckets. They have to move together — "+
-				"prom_proxy's p95 query spans all three, and a mismatched layout makes those "+
+				"prom_proxy's p95 query spans every rail, and a mismatched layout makes those "+
 				"services incomparable on one chart.", reference.name, rail.name)
 	}
 }
 
 // And that the shared layout is the fixed one, not the broken one.
 //
-// Equality alone is satisfied by all three reverting together, which is
+// Equality alone is satisfied by every rail reverting together, which is
 // exactly what a well-meaning "restore the SDK defaults" change would look
 // like. These are the properties that make the layout right for microseconds.
 func TestHttpLatencyBucketsAreShapedForMicroseconds(t *testing.T) {

@@ -10,16 +10,16 @@ import (
 )
 
 // The route-vocabulary literals of the label contract (#1305): the unmatched
-// sentinel and the health route are one spelling across the three rails.
+// sentinel and the health route are one spelling across the rails.
 //
 // This file deliberately pins only what no single language's tests can see —
-// three constants in three languages that must be byte-equal. Everything else
+// constants in four languages that must be byte-equal. Everything else
 // about the label sets is pinned per rail against real exported payloads,
 // which is strictly stronger than a source regex: server_pal's
 // http_metrics_label_tests read data-point attributes off an in-memory
 // exporter, futility's http_metrics_test asserts whole attribute maps through
-// CapturingMetricsRecorder, and yodel's OtlpJsonEncoderTest asserts the OTLP
-// JSON with containsExactly. (An earlier draft of this file also re-modeled
+// CapturingMetricsRecorder, yodel's OtlpJsonEncoderTest asserts the OTLP
+// JSON with containsExactly, and mithril_v2's otlp_test pins its whole export. (An earlier draft of this file also re-modeled
 // each rail's attribute composition in Go regexes; the export tests replace
 // it — a regex over source can agree with the code while disagreeing with
 // the wire, which is the failure mode this package exists to prevent.)
@@ -70,6 +70,11 @@ func TestRouteSentinelAndHealthLiteralAgreeAcrossRails(t *testing.T) {
 			marker:      "kUnmatchedRoute",
 			declaration: regexp.MustCompile(`kUnmatchedRoute\[\] = "([a-z_]+)"`),
 		},
+		{
+			path:        "../../../games/apis/mithril_v2/src/mithril_v2/service.gleam",
+			marker:      "unmatched_route",
+			declaration: regexp.MustCompile(`pub const unmatched_route = "([a-z_]+)"`),
+		},
 	}
 	for _, sentinel := range sentinels {
 		source := codeLines(t, sentinel.path, sentinel.marker)
@@ -88,4 +93,9 @@ func TestRouteSentinelAndHealthLiteralAgreeAcrossRails(t *testing.T) {
 	assert.Equal(t, "/health", string(health[1]),
 		"aura's health route is %q; prom_proxy subtracts and charts exactly route=\"/health\", "+
 			"and the compose healthchecks probe the same literal (#1307)", health[1])
+
+	gleamSource := codeLines(t, "../../../games/apis/mithril_v2/src/mithril_v2/service.gleam", "health_route")
+	gleamHealth := regexp.MustCompile(`pub const health_route = "(/[a-z]+)"`).FindSubmatch(gleamSource)
+	require.NotNil(t, gleamHealth, "no health_route literal found in mithril_v2's service.gleam")
+	assert.Equal(t, "/health", string(gleamHealth[1]))
 }

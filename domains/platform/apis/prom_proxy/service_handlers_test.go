@@ -60,6 +60,7 @@ func TestMetricsHandler_GetServiceCatalog(t *testing.T) {
 		{"mcpserver", true},
 		{"microgpt-serve", true},
 		{"mithril", true},
+		{"mithril_v2", true},
 		{"one_d4", true},
 		{"one_d4_v2", true},
 		{"portrait", true},

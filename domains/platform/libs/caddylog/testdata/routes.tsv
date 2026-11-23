@@ -75,6 +75,7 @@ api.muchq.com	/metrics/v1/summary	/metrics/v1/*
 api.muchq.com	/microgpt/v1/chat	/microgpt/v1/chat
 api.muchq.com	/microgpt/v1/generate	/microgpt/v1/generate
 api.muchq.com	/mithril/v1/wordchain	/mithril/v1/wordchain
+api.muchq.com	/mithril/v2/wordchain	/mithril/v2/wordchain
 gpt.muchq.com	/microgpt/v1/generate	/microgpt/v1/generate
 # The FQDN's trailing dot reaches the same vhost, so it folds to the same
 # site rather than filing real traffic under the unrouted token.

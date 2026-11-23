@@ -109,6 +109,7 @@ var servicesWithSteadyProbes = []string{
 	"mcpserver",
 	"microgpt-serve",
 	"mithril",
+	"mithril_v2",
 	"one_d4",
 	"one_d4_v2",
 	"portrait",
@@ -139,6 +140,7 @@ func TestEveryServiceOnTheStandardRailsIsProbed(t *testing.T) {
 var upstreamsWithoutAClientKey = map[string]string{
 	"forgejo":    "third-party image",
 	"mcpserver":  "Java; no per-client limiter",
+	"mithril_v2": "Gleam; no per-client limiter",
 	"one_d4":     "Java; no per-client limiter",
 	"prom_proxy": "Go; no per-client limiter",
 	"stats":      "Go; no per-client limiter",
@@ -2709,6 +2711,7 @@ var localRoutes = map[string]string{
 	"@post_portrait":        "localhost:8081",
 	"@get_metrics":          "localhost:8082",
 	"@post_mithril":         "localhost:8083",
+	"@post_mithril_v2":      "localhost:8096",
 	"@post_posterize_blur":  "localhost:8084",
 	"@post_posterize_edges": "localhost:8084",
 }

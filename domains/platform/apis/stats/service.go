@@ -56,6 +56,7 @@ var services = []siteServices{
 		"/microgpt/v1/chat":     "microgpt-serve",
 		"/microgpt/v1/generate": "microgpt-serve",
 		"/mithril/v1/wordchain": "mithril",
+		"/mithril/v2/wordchain": "mithril_v2",
 		"/portrait/v1/trace":    "portrait",
 		"/stats/v1/*":           "stats",
 		"/v2/analyze":           "one_d4_v2",

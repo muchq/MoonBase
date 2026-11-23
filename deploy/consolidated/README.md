@@ -13,6 +13,7 @@ individually targetable.
   - [`games_hub`](../../domains/games/apis/games_hub) (port 8089, `/games/v2/*`: the session mint and one stream at `/games/v2/play` for the lobby, golf and castle)
   - [`prom_proxy`](../../domains/platform/apis/prom_proxy) (port 8082)
   - [`mithril`](../../domains/games/apis/mithril) (port 8083)
+  - [`mithril_v2`](../../domains/games/apis/mithril_v2) (port 8096)
   - [`posterize`](../../domains/graphics/apis/posterize) (port 8084)
   - [`mcpserver`](../../domains/games/apis/mcpserver) (port 8080)
   - [`microgpt-serve`](../../domains/ai/apis/microgpt_serve) (port 8087)

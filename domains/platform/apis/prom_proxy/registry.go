@@ -322,7 +322,7 @@ const (
 )
 
 // Catalog order doubles as the UI's tab order.
-var serviceOrder = []string{"games_hub", "mcpserver", "microgpt-serve", "mithril", "one_d4", "one_d4_v2", "portrait", "posterize", "iili", "deja"}
+var serviceOrder = []string{"games_hub", "mcpserver", "microgpt-serve", "mithril", "mithril_v2", "one_d4", "one_d4_v2", "portrait", "posterize", "iili", "deja"}
 
 var serviceRegistry = map[string]serviceEntry{
 	"games_hub": {
@@ -644,6 +644,13 @@ var serviceRegistry = map[string]serviceEntry{
 		CustomScalars: append([]customScalarDef{
 			probesTile("mithril"),
 		}, callerTiles("mithril", "games_hub")...),
+	},
+	// Wordchains in Gleam: the standard instruments, exported by its own OTLP
+	// encoder, and the standard Probes tile. No caller is wired to it yet.
+	"mithril_v2": {
+		CustomScalars: []customScalarDef{
+			probesTile("mithril_v2"),
+		},
 	},
 	// Image blur/edges: server_pal's standard instruments plus the standard
 	// Probes tile (#1307).
