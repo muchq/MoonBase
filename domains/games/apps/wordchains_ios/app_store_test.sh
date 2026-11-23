@@ -31,9 +31,23 @@ value_of() {
 
 # Big-endian unsigned int of $2 bytes at offset $1 in file $3.
 be_uint() { od -An -tu1 -j "$1" -N "$2" "$3" | awk '{ for (i = 1; i <= NF; i++) n = n * 256 + $i } END { print n }'; }
+# Chunk types before the image data. tRNS there makes an RGB image transparent.
+chunks_before_idat() {
+  local offset=8 size len type
+  size=$(wc -c <"$1")
+  while [ "$offset" -lt "$size" ]; do
+    len=$(be_uint "$offset" 4 "$1")
+    type=$(od -An -c -j $((offset + 4)) -N 4 "$1" | tr -d ' \n')
+    [ "$type" = IDAT ] && return
+    echo "$type"
+    offset=$((offset + 12 + len))
+  done
+}
 is_png() { [ "$(od -An -tx1 -N 8 "$1" | tr -d ' \n')" = 89504e470d0a1a0a ]; }
 
 echo "wordchains_ios app store"
+
+command -v jq >/dev/null || fail "jq is installed (reads Contents.json)"
 
 # The release builds arm64 only; a capability the binary lacks fails validation.
 check "requires arm64, not armv7" \
@@ -53,6 +67,7 @@ if [ -n "$icon_name" ] && [ -f "$icon" ] && is_png "$icon"; then
   check "icon is 1024 tall" test "$(be_uint 20 4 "$icon")" = 1024
   # Colour type 2 is RGB. App Store Connect rejects an icon with alpha.
   check "icon has no alpha channel" test "$(be_uint 25 1 "$icon")" = 2
+  check "icon has no tRNS transparency" bash -c '! grep -qx tRNS <<<"$1"' _ "$(chunks_before_idat "$icon")"
 else
   fail "icon is a PNG"
 fi
