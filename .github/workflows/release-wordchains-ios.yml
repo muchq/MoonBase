@@ -44,7 +44,10 @@ jobs:
 
           CURRENT_VERSION=$(scripts/plist-string "$PLIST" "$KEY")
           PREVIOUS_PLIST="$RUNNER_TEMP/Info.previous.plist"
-          if git show "HEAD~1:$PLIST" > "$PREVIOUS_PLIST" 2>/dev/null; then
+          # No parent is a broken checkout, not a new app.
+          git cat-file -e HEAD~1
+          if git cat-file -e "HEAD~1:$PLIST" 2>/dev/null; then
+            git show "HEAD~1:$PLIST" > "$PREVIOUS_PLIST"
             PREVIOUS_VERSION=$(scripts/plist-string "$PREVIOUS_PLIST" "$KEY")
           else
             PREVIOUS_VERSION=""
