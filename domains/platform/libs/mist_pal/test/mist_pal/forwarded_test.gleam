@@ -293,3 +293,34 @@ pub fn source_spellings_match_the_cpp_access_log_test() {
     "unknown",
   ])
 }
+
+// inet reads an octet with a sign; Rust's parser, and so server_pal, does
+// not.
+pub fn a_signed_octet_is_malformed_test() {
+  let t = trust(["10.0.0.0/8"])
+  [
+    "+1.2.3.4",
+    "1.2.3.-0",
+    "[1.+2.3.4]:80",
+    "::FFFF:1.2.+3.4",
+    "1:2:3:4:5:6:1.2.3.+4",
+  ]
+  |> list.each(fn(entry) {
+    client("10.0.0.1", [entry], t) |> should.equal("10.0.0.1")
+  })
+  forwarded.parse(["+10.0.0.0/8"]) |> should.be_error
+  forwarded.parse(["1.-0.0.0/8"]) |> should.be_error
+}
+
+// Entries are trimmed of Unicode White_Space, as Rust's str::trim trims.
+pub fn env_entries_are_trimmed_of_unicode_white_space_test() {
+  forwarded.from_env_value(Ok("10.0.0.0/8,\u{00A0}")) |> should.be_ok
+  forwarded.from_env_value(Ok("10.0.0.0/8\u{3000}")) |> should.be_ok
+  forwarded.from_env_value(Ok("10.0.0.0/8\u{200E}")) |> should.be_error
+}
+
+// An IPv4-mapped address built by hand is still the V4 it embeds.
+pub fn contains_reads_a_mapped_v6_as_its_v4_test() {
+  forwarded.contains(trust(["10.0.0.0/8"]), forwarded.V6(0xffff_0a000001))
+  |> should.be_true
+}

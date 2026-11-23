@@ -72,7 +72,7 @@ pub fn from_env_value(
     Ok(value) ->
       case
         string.split(value, ",")
-        |> list.map(string.trim)
+        |> list.map(trim_white_space)
         |> list.filter(fn(entry) { entry != "" })
       {
         [] ->
@@ -86,7 +86,9 @@ pub fn from_env_value(
   }
 }
 
+/// IPv4-mapped IPv6 matches as the embedded IPv4.
 pub fn contains(trusted: TrustedProxies, address: Address) -> Bool {
+  let address = canonical(address)
   list.any(trusted.networks, fn(network) {
     let #(base, prefix) = network
     case base, address {
@@ -152,16 +154,72 @@ pub fn parse_address(text: String) -> Result(Address, Nil) {
 
 // The address, and whether it was written as IPv4-mapped IPv6.
 fn parse_raw(text: String) -> Result(#(Address, Bool), Nil) {
-  use <- guard(string.contains(text, "%"))
+  // inet reads a v6 zone ("%eth0") as part of the address and an octet
+  // with a sign, neither of which Rust's parser, and so server_pal, takes.
+  use <- guard(
+    string.contains(text, "%")
+    || string.contains(text, "+")
+    || string.contains(text, "-"),
+  )
   use parsed <- result.map(ffi_parse_address(text))
   case parsed {
     #(Family4, value) -> #(V4(value), False)
     #(Family6, value) ->
-      case int.bitwise_shift_right(value, 32) == 0xffff {
-        True -> #(V4(int.bitwise_and(value, 0xffffffff)), True)
-        False -> #(V6(value), False)
+      case canonical(V6(value)) {
+        V4(_) as v4 -> #(v4, True)
+        v6 -> #(v6, False)
       }
   }
+}
+
+// Only ::ffff:0:0/96 embeds an IPv4 address.
+fn canonical(address: Address) -> Address {
+  case address {
+    V6(value) ->
+      case int.bitwise_shift_right(value, 32) == 0xffff {
+        True -> V4(int.bitwise_and(value, 0xffffffff))
+        False -> address
+      }
+    V4(_) -> address
+  }
+}
+
+// Unicode White_Space, the set Rust's str::trim trims.
+fn trim_white_space(text: String) -> String {
+  text
+  |> string.to_utf_codepoints
+  |> list.map(string.utf_codepoint_to_int)
+  |> drop_white_space
+  |> list.reverse
+  |> drop_white_space
+  |> list.reverse
+  |> list.filter_map(string.utf_codepoint)
+  |> string.from_utf_codepoints
+}
+
+fn drop_white_space(codes: List(Int)) -> List(Int) {
+  case codes {
+    [code, ..rest] ->
+      case is_white_space(code) {
+        True -> drop_white_space(rest)
+        False -> codes
+      }
+    [] -> []
+  }
+}
+
+fn is_white_space(code: Int) -> Bool {
+  { code >= 0x09 && code <= 0x0d }
+  || code == 0x20
+  || code == 0x85
+  || code == 0xa0
+  || code == 0x1680
+  || { code >= 0x2000 && code <= 0x200a }
+  || code == 0x2028
+  || code == 0x2029
+  || code == 0x202f
+  || code == 0x205f
+  || code == 0x3000
 }
 
 fn guard(refuse: Bool, next: fn() -> Result(a, Nil)) -> Result(a, Nil) {
@@ -190,13 +248,8 @@ fn ffi_address_to_string(address: Address) -> String
 pub fn from_mist(address: mist.IpAddress) -> Address {
   case address {
     mist.IpV4(a, b, c, d) -> V4(groups([a, b, c, d], 8))
-    mist.IpV6(a, b, c, d, e, f, g, h) -> {
-      let value = groups([a, b, c, d, e, f, g, h], 16)
-      case int.bitwise_shift_right(value, 32) == 0xffff {
-        True -> V4(int.bitwise_and(value, 0xffffffff))
-        False -> V6(value)
-      }
-    }
+    mist.IpV6(a, b, c, d, e, f, g, h) ->
+      canonical(V6(groups([a, b, c, d, e, f, g, h], 16)))
   }
 }
 
