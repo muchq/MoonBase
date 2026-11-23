@@ -1,0 +1,4 @@
+# The gleam CLI's output; Bazel builds elsewhere. The Hex pins live in
+# mithril_v2's manifest.
+/build/
+/manifest.toml

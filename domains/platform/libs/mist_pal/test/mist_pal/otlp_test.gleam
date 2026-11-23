@@ -7,15 +7,15 @@ import gleam/int
 import gleam/string
 import gleeunit/should
 import mist
-import mithril_v2/http_metrics.{RouteKey, RouteStats, Snapshot}
-import mithril_v2/otlp
+import mist_pal/http_metrics.{RouteKey, RouteStats, Snapshot}
+import mist_pal/otlp
 
 fn snapshot() -> http_metrics.Snapshot {
   Snapshot(
-    service_name: "mithril_v2",
+    service_name: "widgets",
     routes: [
       #(
-        RouteKey("POST", "/mithril/v2/wordchain"),
+        RouteKey("POST", "/widgets/v1/widget"),
         RouteStats(
           requests: 3,
           success: 2,
@@ -33,7 +33,7 @@ fn snapshot() -> http_metrics.Snapshot {
 
 const point_times = "\"startTimeUnixNano\":\"1000\",\"timeUnixNano\":\"2000\""
 
-const route_attributes = "\"attributes\":[{\"key\":\"http_method\",\"value\":{\"stringValue\":\"POST\"}},{\"key\":\"route\",\"value\":{\"stringValue\":\"/mithril/v2/wordchain\"}},{\"key\":\"service_name\",\"value\":{\"stringValue\":\"mithril_v2\"}}]"
+const route_attributes = "\"attributes\":[{\"key\":\"http_method\",\"value\":{\"stringValue\":\"POST\"}},{\"key\":\"route\",\"value\":{\"stringValue\":\"/widgets/v1/widget\"}},{\"key\":\"service_name\",\"value\":{\"stringValue\":\"widgets\"}}]"
 
 fn counter(name: String, description: String, value: Int) -> String {
   "{\"name\":\""
@@ -56,7 +56,7 @@ fn caller_point(caller: String, value: Int) -> String {
   <> int.to_string(value)
   <> "\",\"attributes\":[{\"key\":\"caller\",\"value\":{\"stringValue\":\""
   <> caller
-  <> "\"}},{\"key\":\"service_name\",\"value\":{\"stringValue\":\"mithril_v2\"}}]}"
+  <> "\"}},{\"key\":\"service_name\",\"value\":{\"stringValue\":\"widgets\"}}]}"
 }
 
 // The ExportMetricsServiceRequest in OTLP/HTTP's JSON mapping: 64-bit
@@ -66,7 +66,7 @@ fn caller_point(caller: String, value: Int) -> String {
 pub fn a_snapshot_encodes_as_an_otlp_export_request_test() {
   let want =
     "{\"resourceMetrics\":[{\"resource\":{\"attributes\":["
-    <> "{\"key\":\"service.name\",\"value\":{\"stringValue\":\"mithril_v2\"}},"
+    <> "{\"key\":\"service.name\",\"value\":{\"stringValue\":\"widgets\"}},"
     <> "{\"key\":\"service.version\",\"value\":{\"stringValue\":\"abc123\"}}"
     <> "]},\"scopeMetrics\":[{\"scope\":{\"name\":\"http_server\"},\"metrics\":["
     <> counter("http_server_requests", "HTTP requests received", 3)
@@ -84,7 +84,7 @@ pub fn a_snapshot_encodes_as_an_otlp_export_request_test() {
     )
     <> ",{\"name\":\"http_server_requests_active_gauge\",\"description\":\"HTTP requests currently in flight\",\"sum\":{\"aggregationTemporality\":2,\"isMonotonic\":false,\"dataPoints\":[{"
     <> point_times
-    <> ",\"asInt\":\"1\",\"attributes\":[{\"key\":\"http_method\",\"value\":{\"stringValue\":\"POST\"}},{\"key\":\"service_name\",\"value\":{\"stringValue\":\"mithril_v2\"}}]}]}}"
+    <> ",\"asInt\":\"1\",\"attributes\":[{\"key\":\"http_method\",\"value\":{\"stringValue\":\"POST\"}},{\"key\":\"service_name\",\"value\":{\"stringValue\":\"widgets\"}}]}]}}"
     <> ",{\"name\":\"http_server_request_duration_microseconds\",\"description\":\"HTTP request duration in microseconds\",\"histogram\":{\"aggregationTemporality\":2,\"dataPoints\":[{"
     <> point_times
     <> ",\"count\":\"3\",\"sum\":1250.5,\"bucketCounts\":[\"0\",\"1\",\"2\",\"0\",\"0\",\"0\",\"0\",\"0\",\"0\",\"0\",\"0\",\"0\",\"0\",\"0\",\"0\",\"0\"]"
@@ -101,7 +101,7 @@ pub fn a_snapshot_encodes_as_an_otlp_export_request_test() {
 
   otlp.encode(
     snapshot(),
-    [#("service.name", "mithril_v2"), #("service.version", "abc123")],
+    [#("service.name", "widgets"), #("service.version", "abc123")],
     1000,
     2000,
   )
@@ -120,11 +120,11 @@ pub fn instruments_without_points_are_left_out_test() {
 
 pub fn resource_attributes_come_from_the_standard_variables_test() {
   otlp.resource_attributes(
-    Ok("mithril_v2"),
+    Ok("widgets"),
     Ok("service.name=ignored,service.version=abc123, deployment=prod"),
   )
   |> should.equal([
-    #("service.name", "mithril_v2"),
+    #("service.name", "widgets"),
     #("service.version", "abc123"),
     #("deployment", "prod"),
   ])
@@ -208,11 +208,11 @@ fn collector(received: process.Subject(String)) -> Int {
 pub fn the_exporter_sends_a_snapshot_every_interval_test() {
   let received = process.new_subject()
   let port = collector(received)
-  let assert Ok(metrics) = http_metrics.start("mithril_v2")
+  let assert Ok(metrics) = http_metrics.start("widgets")
   otlp.start_exporter(
     metrics,
     "http://127.0.0.1:" <> int.to_string(port),
-    [#("service.name", "mithril_v2")],
+    [#("service.name", "widgets")],
     20,
   )
   let assert Ok(first) = process.receive(received, 5000)
@@ -227,7 +227,7 @@ pub fn a_crashing_exporter_leaves_its_starter_running_test() {
   let handoff = process.new_subject()
   let owner =
     process.spawn_unlinked(fn() {
-      let assert Ok(metrics) = http_metrics.start("mithril_v2")
+      let assert Ok(metrics) = http_metrics.start("widgets")
       process.send(handoff, metrics)
       process.sleep_forever()
     })

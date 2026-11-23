@@ -1,6 +1,8 @@
 //// The few Erlang runtime facilities the service needs that the Gleam
 //// packages it uses do not wrap.
 
+import mist_pal/env
+
 /// A fixed-size, zero-indexed sequence with constant-time reads: an Erlang
 /// tuple.
 pub type Array(a)
@@ -18,13 +20,10 @@ pub fn read_text(path: String) -> Result(String, String)
 @external(erlang, "mithril_v2_ffi", "read_bits")
 pub fn read_bits(path: String) -> Result(BitArray, String)
 
-@external(erlang, "mithril_v2_ffi", "getenv")
-pub fn getenv(name: String) -> Result(String, Nil)
-
 /// The main workspace's runfiles directory, which the release launcher and
 /// gleam_test both export.
 pub fn runfiles_dir() -> String {
-  case getenv("GLEAM_RUNFILES_DIR") {
+  case env.getenv("GLEAM_RUNFILES_DIR") {
     Ok(dir) -> dir
     Error(Nil) -> "."
   }

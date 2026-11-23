@@ -63,8 +63,8 @@ var descriptionRails = []struct {
 		},
 	},
 	{
-		name: "mithril_v2 (Gleam)",
-		path: "../../../games/apis/mithril_v2/src/mithril_v2/http_metrics.gleam",
+		name: "mist_pal (Gleam)",
+		path: "../mist_pal/src/mist_pal/http_metrics.gleam",
 		patterns: []*regexp.Regexp{
 			// #("http_server_requests", "HTTP requests received"), on one line
 			// or split across three by the formatter.

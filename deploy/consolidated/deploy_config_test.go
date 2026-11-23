@@ -131,7 +131,7 @@ func TestEveryServiceOnTheStandardRailsIsProbed(t *testing.T) {
 
 // Upstreams Caddy proxies to that derive no client from x-forwarded-for, so
 // a trust boundary would be read by nothing. Every other upstream runs aura
-// (C++) or server_pal (Rust), whose limiters and access logs key on the
+// (C++), server_pal (Rust) or mist_pal (Gleam), whose limiters key on the
 // ADR-0012 derived client: behind Caddy the socket peer is always Caddy, so
 // without the boundary every external caller shares one bucket (#1329) — and
 // nothing fails, because unset is also the legitimate direct-connect
@@ -140,7 +140,6 @@ func TestEveryServiceOnTheStandardRailsIsProbed(t *testing.T) {
 var upstreamsWithoutAClientKey = map[string]string{
 	"forgejo":    "third-party image",
 	"mcpserver":  "Java; no per-client limiter",
-	"mithril_v2": "Gleam; no per-client limiter",
 	"one_d4":     "Java; no per-client limiter",
 	"prom_proxy": "Go; no per-client limiter",
 	"stats":      "Go; no per-client limiter",

@@ -1,7 +1,7 @@
 import gleam/http
 import gleam/list
 import gleeunit/should
-import mithril_v2/http_metrics.{RouteKey, RouteStats}
+import mist_pal/http_metrics.{RouteKey, RouteStats}
 
 pub fn a_forwarded_request_came_from_the_edge_whoever_it_names_test() {
   http_metrics.caller_of([
@@ -44,13 +44,13 @@ pub fn a_duration_lands_in_the_first_bucket_bounding_it_test() {
 }
 
 fn started() -> http_metrics.Metrics {
-  let assert Ok(metrics) = http_metrics.start("mithril_v2")
+  let assert Ok(metrics) = http_metrics.start("widgets")
   metrics
 }
 
 pub fn every_caller_is_reported_at_zero_before_any_request_test() {
   let snapshot = http_metrics.snapshot(started())
-  snapshot.service_name |> should.equal("mithril_v2")
+  snapshot.service_name |> should.equal("widgets")
   snapshot.routes |> should.equal([])
   snapshot.active |> should.equal([])
   snapshot.callers
@@ -78,7 +78,7 @@ pub fn a_finished_request_is_counted_against_its_route_test() {
   http_metrics.request_finished(
     metrics,
     "POST",
-    "/mithril/v2/wordchain",
+    "/widgets/v1/widget",
     200,
     150.0,
   )
@@ -87,7 +87,7 @@ pub fn a_finished_request_is_counted_against_its_route_test() {
   snapshot.routes
   |> should.equal([
     #(
-      RouteKey("POST", "/mithril/v2/wordchain"),
+      RouteKey("POST", "/widgets/v1/widget"),
       RouteStats(
         requests: 1,
         success: 1,
@@ -125,4 +125,17 @@ pub fn routes_and_methods_are_separate_series_test() {
     #(RouteKey("GET", "unmatched"), 1),
     #(RouteKey("HEAD", "/health"), 1),
   ])
+}
+
+@external(erlang, "mist_pal_test_ffi", "with_byte_255")
+fn with_byte_255(text: String) -> String
+
+// A header value is bytes a client chose, not necessarily text.
+pub fn a_user_agent_that_is_not_utf8_is_another_caller_test() {
+  [
+    [#("user-agent", with_byte_255("games_hub"))],
+    [#("user-agent", with_byte_255("games_hub") <> "/1.0")],
+  ]
+  |> list.map(http_metrics.caller_of)
+  |> should.equal(["other", "other"])
 }

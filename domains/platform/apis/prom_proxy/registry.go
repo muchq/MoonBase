@@ -645,8 +645,8 @@ var serviceRegistry = map[string]serviceEntry{
 			probesTile("mithril"),
 		}, callerTiles("mithril", "games_hub")...),
 	},
-	// Wordchains in Gleam: the standard instruments, exported by its own OTLP
-	// encoder, and the standard Probes tile. No caller is wired to it yet.
+	// Wordchains in Gleam: the standard instruments, exported by mist_pal's
+	// OTLP encoder, and the standard Probes tile. No internal service calls it.
 	"mithril_v2": {
 		CustomScalars: []customScalarDef{
 			probesTile("mithril_v2"),

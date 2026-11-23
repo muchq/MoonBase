@@ -12,7 +12,7 @@ trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
 PORT=""
 for _ in $(seq 1 120); do
-  PORT="$(sed -n 's/^listening on 0\.0\.0\.0:\([0-9]*\)$/\1/p' "$LOG")"
+  PORT="$(sed -n 's/.*"message":"listening on 0\.0\.0\.0:\([0-9]*\)".*/\1/p' "$LOG")"
   [[ -n "$PORT" ]] && break
   kill -0 "$SERVER_PID" 2>/dev/null || break
   sleep 0.25
@@ -58,6 +58,24 @@ head -c 4194304 /dev/zero | tr '\0' ' ' >"$TEST_TMPDIR/limit.json"
 check "body at the limit" 400 "$(curl -s -o /dev/null -w '%{http_code}' \
   -X POST "http://127.0.0.1:$PORT/mithril/v2/wordchain" \
   -H 'content-type: application/json' --data-binary @"$TEST_TMPDIR/limit.json")"
+
+# Every line is one JSON object, the shape mithril v1 logs in: the startup
+# lines, and an access line for each request but the probe's.
+if grep -v '^{"timestamp":"[^"]*Z","level":"[A-Z]*","message":".*}$' "$LOG"; then
+  echo "FAIL: the lines above are not JSON log lines" >&2
+  exit 1
+fi
+check "access lines" 3 "$(grep -c '"event":"access"' "$LOG")"
+grep -q '"message":"reading word graph from ' "$LOG" ||
+  { echo "FAIL: no startup line for the word graph" >&2; cat "$LOG" >&2; exit 1; }
+
+# Every response above carried a Date header from mist's clock, not from the
+# fallback that logs a warning per response.
+if grep -q "Failed to lookup date" "$LOG"; then
+  echo "FAIL: mist's clock is not running" >&2
+  cat "$LOG" >&2
+  exit 1
+fi
 
 # SIGTERM reaches the VM, which stops.
 kill -TERM "$SERVER_PID"

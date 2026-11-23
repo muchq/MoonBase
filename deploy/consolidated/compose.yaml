@@ -324,6 +324,7 @@ services:
     logging: *default-logging
     environment:
       PORT: "8096"
+      TRUSTED_PROXY_CIDRS: *caddy_ip
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otelcol:4318
       OTEL_SERVICE_NAME: mithril_v2
       OTEL_RESOURCE_ATTRIBUTES: service.name=mithril_v2,service.version=${MITHRIL_V2_SHA:-${DEPLOY_SHA:?unset}}

@@ -8,16 +8,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The request-log field vocabulary (#1459): the C++ and Rust rails each
+// The request-log field vocabulary (#1459): the C++, Rust and Gleam rails each
 // emit one JSON object per request, and a reader who pivots from a
-// dashboard to a log query must find the same words on both — including
+// dashboard to a log query must find the same words on every rail — including
 // the label names the metric contract already pins (http_method, route,
 // service_name). Like the sentinel test in http_instrument_labels_test.go,
 // this pins only the
 // cross-language spelling; that the fields actually reach the wire is each
 // rail's own behavioral test (aura's middleware_test reads the served line
 // off a mock log sink, server_pal's access_log tests parse the subscriber's
-// JSON output). The C++ line is rendered by opal-cpp's FormatAccessLog, so
+// JSON output, mist_pal's capture the formatted line). The C++ line is
+// rendered by opal-cpp's FormatAccessLog, so
 // its spelling is pinned where aura asserts on the parsed line rather than
 // in the runtime's source.
 //
@@ -71,6 +72,19 @@ func TestRequestLogFieldSpellingAgreesAcrossRails(t *testing.T) {
 	for _, field := range requestLogFields {
 		assert.Contains(t, event, field,
 			"server_pal's access event no longer carries a %q field; a cross-service "+
+				"log query silently misses this rail", field)
+	}
+	// Gleam: the keys are the tuple labels inside mist_pal's access_fields,
+	// so the pin reads only that function. The formatter may break a tuple
+	// after its opening parenthesis.
+	gleam := string(codeLines(t, "../mist_pal/src/mist_pal.gleam", "fn access_fields("))
+	gleamStart := strings.Index(gleam, "fn access_fields(")
+	gleamEnd := strings.Index(gleam[gleamStart:], "\n}\n")
+	require.GreaterOrEqual(t, gleamEnd, 0, "access_fields has no end")
+	fields := gleam[gleamStart : gleamStart+gleamEnd]
+	for _, field := range requestLogFields {
+		assert.Regexp(t, `#\(\s*"`+field+`"`, fields,
+			"mist_pal's access line no longer carries a %q field; a cross-service "+
 				"log query silently misses this rail", field)
 	}
 }

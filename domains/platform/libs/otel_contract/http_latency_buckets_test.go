@@ -42,8 +42,8 @@ var rails = []struct {
 		pattern: regexp.MustCompile(`HTTP_LATENCY_BUCKET_BOUNDS_MICROS\s*:\s*\[f64;\s*\d+\]\s*=\s*\[([^\]]*)\]`),
 	},
 	{
-		name:    "mithril_v2 (Gleam)",
-		path:    "../../../games/apis/mithril_v2/src/mithril_v2/http_metrics.gleam",
+		name:    "mist_pal (Gleam)",
+		path:    "../mist_pal/src/mist_pal/http_metrics.gleam",
 		pattern: regexp.MustCompile(`latency_bucket_bounds_micros\s*=\s*\[([^\]]*)\]`),
 	},
 }

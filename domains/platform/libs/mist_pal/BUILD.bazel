@@ -1,0 +1,55 @@
+load("@rules_gleam//gleam:defs.bzl", "gleam_format_test", "gleam_package")
+
+# The metric constants otel_contract pins against the other rails.
+exports_files(
+    [
+        "src/mist_pal.gleam",
+        "src/mist_pal/http_metrics.gleam",
+    ],
+    visibility = ["//domains/platform/libs/otel_contract:__pkg__"],
+)
+
+_SRCS = [
+    "src/mist_pal.gleam",
+    "src/mist_pal/env.gleam",
+    "src/mist_pal/forwarded.gleam",
+    "src/mist_pal/http_metrics.gleam",
+    "src/mist_pal/log.gleam",
+    "src/mist_pal/otlp.gleam",
+    "src/mist_pal/rate_limit.gleam",
+    "src/mist_pal_ffi.erl",
+    "src/mist_pal_log.erl",
+]
+
+_TEST_SRCS = [
+    "test/mist_pal/forwarded_test.gleam",
+    "test/mist_pal/http_metrics_test.gleam",
+    "test/mist_pal/log_test.gleam",
+    "test/mist_pal/otlp_test.gleam",
+    "test/mist_pal/rate_limit_test.gleam",
+    "test/mist_pal_test.gleam",
+    "test/mist_pal_test_ffi.erl",
+]
+
+gleam_package(
+    name = "mist_pal",
+    srcs = _SRCS,
+    gleam_toml = "gleam.toml",
+    test_deps = ["@gleam_packages//:gleeunit"],
+    test_srcs = _TEST_SRCS,
+    visibility = ["//visibility:public"],
+    deps = [
+        "@gleam_packages//:exception",
+        "@gleam_packages//:gleam_erlang",
+        "@gleam_packages//:gleam_http",
+        "@gleam_packages//:gleam_json",
+        "@gleam_packages//:gleam_otp",
+        "@gleam_packages//:gleam_stdlib",
+        "@gleam_packages//:mist",
+    ],
+)
+
+gleam_format_test(
+    name = "mist_pal_format_test",
+    srcs = [src for src in _SRCS if src.endswith(".gleam")] + [src for src in _TEST_SRCS if src.endswith(".gleam")],
+)
