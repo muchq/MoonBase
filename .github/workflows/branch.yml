@@ -617,17 +617,20 @@ jobs:
             --ios_minimum_os=17.0 \
             --apple_platform_type=ios
 
-      # App Store Connect rejects a bundle without CFBundleIconName, which
-      # actool writes only when the app's icon set is wired in as app_icons.
+      # App Store Connect rejects a bundle whose icon set isn't named in its
+      # Info.plist (ITMS-90713); actool writes the name under CFBundleIcons.
       - name: Check the bundled app icon
         if: steps.filter.outputs.changed == 'true'
         run: |
+          ipa=bazel-bin/domains/games/apps/wordchains_ios/WordChains.ipa
           plist="$RUNNER_TEMP/WordChains.Info.plist"
-          unzip -p bazel-bin/domains/games/apps/wordchains_ios/WordChains.ipa \
-            Payload/WordChains.app/Info.plist > "$plist"
-          icon=$(plutil -extract CFBundleIconName raw "$plist")
-          echo "CFBundleIconName=$icon"
+          unzip -p "$ipa" Payload/WordChains.app/Info.plist > "$plist"
+          plutil -p "$plist"
+          unzip -l "$ipa" | grep -E 'Assets\.car|AppIcon' || true
+          icon=$(plutil -extract CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName raw "$plist")
+          echo "CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName=$icon"
           [ "$icon" = AppIcon ]
+          unzip -l "$ipa" | grep -q 'Payload/WordChains.app/Assets.car$'
 
       # swift.enable_testing is needed for @testable imports because the repo
       # builds -c opt, where rules_swift disables testability by default.
