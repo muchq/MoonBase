@@ -34,26 +34,27 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 2
 
+      # Ubuntu has no PlistBuddy; plist-string fails rather than printing
+      # nothing, so a broken read can't pass as "version unchanged".
       - name: Check if version changed
         id: version_check
         run: |
           PLIST="domains/games/apps/wordchains_ios/Info.plist"
+          KEY=CFBundleShortVersionString
 
-          # Get version from current commit
-          CURRENT_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "")
-
-          # Get version from previous commit
-          git checkout HEAD~1 -- "$PLIST" 2>/dev/null || true
-          PREVIOUS_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$PLIST" 2>/dev/null || echo "")
-
-          # Restore current version
-          git checkout HEAD -- "$PLIST"
+          CURRENT_VERSION=$(scripts/plist-string "$PLIST" "$KEY")
+          PREVIOUS_PLIST="$RUNNER_TEMP/Info.previous.plist"
+          if git show "HEAD~1:$PLIST" > "$PREVIOUS_PLIST" 2>/dev/null; then
+            PREVIOUS_VERSION=$(scripts/plist-string "$PREVIOUS_PLIST" "$KEY")
+          else
+            PREVIOUS_VERSION=""
+          fi
 
           echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
           echo "previous_version=$PREVIOUS_VERSION" >> "$GITHUB_OUTPUT"
 
-          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ] && [ -n "$CURRENT_VERSION" ]; then
-            echo "Version changed from $PREVIOUS_VERSION to $CURRENT_VERSION"
+          if [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ]; then
+            echo "Version changed from ${PREVIOUS_VERSION:-<none>} to $CURRENT_VERSION"
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "Version unchanged: $CURRENT_VERSION"

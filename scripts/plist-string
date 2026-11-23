@@ -1,0 +1,28 @@
+#!/bin/bash
+# Prints the string value of a top-level key in an XML plist, one key and one
+# value per line as Xcode writes them. Fails, printing nothing, when the key is
+# missing, its value isn't a non-empty <string>, or the file can't be read.
+# Runs where PlistBuddy doesn't (Linux runners).
+#
+#   plist-string PLIST KEY
+set -euo pipefail
+
+[ $# -eq 2 ] || {
+  echo "usage: plist-string PLIST KEY" >&2
+  exit 2
+}
+PLIST=$1
+KEY=$2
+
+value=$(awk -v key="<key>$KEY</key>" '
+  found { if (match($0, /^[ \t]*<string>.*<\/string>[ \t]*$/)) {
+            sub(/^[ \t]*<string>/, ""); sub(/<\/string>[ \t]*$/, ""); print }
+          exit }
+  { line = $0; gsub(/^[ \t]+|[ \t]+$/, "", line); if (line == key) found = 1 }
+' "$PLIST")
+
+if [ -z "$value" ]; then
+  echo "plist-string: no string value for $KEY in $PLIST" >&2
+  exit 1
+fi
+echo "$value"
