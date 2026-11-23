@@ -133,15 +133,19 @@ jobs:
       # Device (arm64) build when signing is available — simulator builds are
       # rejected by App Store Connect. rules_apple emits a signed IPA directly;
       # re-zipping the .app by hand would break the code signature.
+      # .bazelrc downloads no outputs; the IPA is staged below, and a cache
+      # hit would otherwise leave it unmaterialized.
       - name: Build iOS app
         run: |
           if [ "${{ steps.signing.outputs.enabled }}" = "true" ]; then
             bazel build //domains/games/apps/wordchains_ios:WordChains \
+              --remote_download_outputs=toplevel \
               --ios_minimum_os=17.0 \
               --ios_multi_cpus=arm64 \
               --define=ios_release_signing=true
           else
             bazel build //domains/games/apps/wordchains_ios:WordChains \
+              --remote_download_outputs=toplevel \
               --ios_minimum_os=17.0 \
               --apple_platform_type=ios
           fi

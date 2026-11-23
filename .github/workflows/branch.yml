@@ -607,10 +607,13 @@ jobs:
           disk-cache: test-ios
           repository-cache: true
 
+      # .bazelrc downloads no outputs; the IPA is read below, and a cache hit
+      # would otherwise leave it unmaterialized.
       - name: Build iOS app with bazel
         if: steps.filter.outputs.changed == 'true'
         run: |
           bazel build //domains/games/apps/wordchains_ios:WordChains \
+            --remote_download_outputs=toplevel \
             --ios_minimum_os=17.0 \
             --apple_platform_type=ios
 
