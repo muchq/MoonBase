@@ -1,6 +1,6 @@
 -module(mist_pal_test_ffi).
 
--export([request/4, with_byte_255/1]).
+-export([mist_clock_running/0, request/4, with_byte_255/1]).
 
 %% An HTTP request through OTP's client: the status and the response headers,
 %% names lowercased.
@@ -21,3 +21,7 @@ request(Method, Url, Headers, Body) ->
 
 %% Text followed by a byte no UTF-8 string contains.
 with_byte_255(Text) -> <<Text/binary, 255>>.
+
+%% Whether mist's Date-header cache exists. Its OTP application creates it
+%% on start, and without it every response logs a warning.
+mist_clock_running() -> ets:whereis(mist_clock) =/= undefined.

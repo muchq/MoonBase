@@ -252,3 +252,13 @@ pub fn a_crashing_route_label_is_counted_as_unmatched_test() {
   |> list.map(fn(route) { #(route.0, { route.1 }.requests) })
   |> should.equal([#(RouteKey("GET", "unmatched"), 1)])
 }
+
+@external(erlang, "mist_pal_test_ffi", "mist_clock_running")
+fn mist_clock_running() -> Bool
+
+// A Bazel release starts no OTP applications, so mist's own start callback,
+// which runs the clock its Date header reads, never runs unless start does.
+pub fn starting_runs_mists_clock_test() {
+  start(recording(process.new_subject()), None, forwarded.none())
+  mist_clock_running() |> should.be_true
+}

@@ -6,6 +6,7 @@
     monotonic_micros/0,
     parse_address/1,
     post_json/2,
+    start_mist_clock/0,
     system_time_nanos/0
 ]).
 
@@ -54,6 +55,18 @@ post_json(Url, Body) ->
     end.
 
 inspect(Term) -> iolist_to_binary(io_lib:format("~0p", [Term])).
+
+%% mist keeps its Date header in an ETS table that its OTP application's start
+%% callback creates. A release that only runs the entry module starts no
+%% applications, so start the clock here, once.
+start_mist_clock() ->
+    case ets:whereis(mist_clock) of
+        undefined ->
+            {ok, _} = 'mist@internal@clock':start(normal, []),
+            nil;
+        _ ->
+            nil
+    end.
 
 system_time_nanos() -> erlang:system_time(nanosecond).
 

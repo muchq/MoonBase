@@ -59,6 +59,14 @@ check "body at the limit" 400 "$(curl -s -o /dev/null -w '%{http_code}' \
   -X POST "http://127.0.0.1:$PORT/mithril/v2/wordchain" \
   -H 'content-type: application/json' --data-binary @"$TEST_TMPDIR/limit.json")"
 
+# Every response above carried a Date header from mist's clock, not from the
+# fallback that logs a warning per response.
+if grep -q "Failed to lookup date" "$LOG"; then
+  echo "FAIL: mist's clock is not running" >&2
+  cat "$LOG" >&2
+  exit 1
+fi
+
 # SIGTERM reaches the VM, which stops.
 kill -TERM "$SERVER_PID"
 for _ in $(seq 1 40); do

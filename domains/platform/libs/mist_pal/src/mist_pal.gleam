@@ -124,6 +124,7 @@ pub fn start(builder: Builder) -> Result(Server, String) {
     Some(port) -> port
     None -> env.getenv("PORT") |> result.try(int.parse) |> result.unwrap(8080)
   }
+  start_mist_clock()
   let bound = process.new_subject()
   use _ <- result.try(
     fn(req) { respond(builder, req, metrics, limiter, trusted) }
@@ -223,6 +224,9 @@ fn handle(builder: Builder, req: Request(Connection)) -> Response(String) {
   }
   builder.handler(request.set_body(req, body))
 }
+
+@external(erlang, "mist_pal_ffi", "start_mist_clock")
+fn start_mist_clock() -> Nil
 
 fn text(status: Int, body: String) -> Response(String) {
   response.new(status)
