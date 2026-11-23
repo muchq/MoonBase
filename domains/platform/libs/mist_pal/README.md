@@ -17,6 +17,13 @@ Gleam counterpart of the Rust [server_pal](../server_pal).
   `X-Forwarded-For` against `$TRUSTED_PROXY_CIDRS`, by opal-cpp ADR-0012's
   rightmost-untrusted walk; its tests are server_pal's `forwarded.rs` tests,
   case for case.
+- JSON logs on stdout, one flat object per line in server_pal's shape:
+  `timestamp`, `level` and `message`, then the event's fields. Each request
+  but a probe gets an `"event":"access"` line with `service_name`,
+  `http_method`, `route`, `target`, `status`, `duration_us`, `trace_id`,
+  `client` and `client_source`, the fields otel_contract pins across the
+  rails. mist's and OTP's own reports are formatted the same way.
+  `mist_pal/log` writes an app's own lines.
 - `GET /health` is never rate limited.
 - A handler that crashes answers 500, and is counted.
 - A request's duration runs from its arrival to its response, so it covers
@@ -48,8 +55,8 @@ add it as a path dependency in `gleam.toml`.
 
 ## Not ported from server_pal
 
-The JSON access log, response compression, the Accept check and the
-request timeout. A service does its own Accept check; mithril_v2's is in
+Response compression, the Accept check, the request timeout and
+`RUST_LOG`-style level filtering. A service does its own Accept check; mithril_v2's is in
 its handler.
 
 ## Hex packages

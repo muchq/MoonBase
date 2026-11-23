@@ -1,14 +1,21 @@
 //// mithril v2: the word-ladder solver behind /mithril/v2/wordchain.
 
 import mist_pal
+import mist_pal/log
 import mithril_v2/service
 import mithril_v2/wordchain.{type Graph}
 
 pub fn main() -> Nil {
-  let graph = case wordchain.load(wordchain.data_dir()) {
+  let dir = wordchain.data_dir()
+  log.info("reading word graph from " <> dir, [])
+  let graph = case wordchain.load(dir) {
     Ok(graph) -> graph
-    Error(reason) -> panic as { "cannot load the word graph: " <> reason }
+    Error(reason) -> {
+      log.error("cannot load the word graph: " <> reason, [])
+      panic as { "cannot load the word graph: " <> reason }
+    }
   }
+
   // Read by every connection's process without a copy.
   store_graph(graph)
 

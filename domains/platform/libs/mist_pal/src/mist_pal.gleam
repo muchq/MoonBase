@@ -15,13 +15,16 @@ import gleam/erlang/process
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/int
-import gleam/io
+import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import mist.{type Connection, type ResponseData}
 import mist_pal/env
 import mist_pal/forwarded.{type TrustedProxies}
 import mist_pal/http_metrics.{type Metrics}
+import mist_pal/log
 import mist_pal/otlp
 import mist_pal/rate_limit.{type Limiter, type RateLimit}
 
@@ -127,12 +130,12 @@ pub fn start(builder: Builder) -> Result(Server, String) {
   start_mist_clock()
   let bound = process.new_subject()
   use _ <- result.try(
-    fn(req) { respond(builder, req, metrics, limiter, trusted) }
+    fn(req) { respond(builder, req, service_name, metrics, limiter, trusted) }
     |> mist.new
     |> mist.bind("0.0.0.0")
     |> mist.port(port)
     |> mist.after_start(fn(port, _, _) {
-      io.println("listening on 0.0.0.0:" <> int.to_string(port))
+      log.info("listening on 0.0.0.0:" <> int.to_string(port), [])
       process.send(bound, port)
     })
     |> mist.start
@@ -150,16 +153,20 @@ pub fn start(builder: Builder) -> Result(Server, String) {
 pub fn serve(builder: Builder) -> Nil {
   case start(builder) {
     Ok(_) -> process.sleep_forever()
-    Error(reason) -> panic as reason
+    Error(reason) -> {
+      log.error("cannot serve: " <> reason, [])
+      panic as reason
+    }
   }
 }
 
 // The instruments sit outside the limiter, so a 429 is counted as the
 // failure it is. A handler that crashes answers 500, counted the same way,
-// so the in-flight gauge cannot drift.
+// so the in-flight gauge cannot drift, and the reason goes to the log.
 fn respond(
   builder: Builder,
   req: Request(Connection),
+  service_name: String,
   metrics: Metrics,
   limiter: Option(Limiter(forwarded.Address)),
   trusted: TrustedProxies,
@@ -171,38 +178,140 @@ fn respond(
     method,
     http_metrics.caller_of(req.headers),
   )
-  let resp =
+  let peer =
+    mist.get_connection_info(req.body)
+    |> result.map(fn(info) { forwarded.from_mist(info.ip_address) })
+    |> option.from_result
+  let client = forwarded.derive_client(peer, req.headers, trusted)
+  let outcome =
     exception.rescue(fn() {
       case limiter, req.path == health_route {
         Some(limiter), False ->
-          case admit(req, limiter, trusted) {
+          case admit(client, limiter) {
             Ok(Nil) -> handle(builder, req)
             Error(refusal) -> refusal
           }
         _, _ -> handle(builder, req)
       }
     })
-    |> result.lazy_unwrap(fn() { text(500, "Internal Server Error") })
-  let micros = int.to_float(int.max(env.monotonic_micros() - started, 0))
   let route =
     exception.rescue(fn() { builder.route_label(req.path) })
     |> result.unwrap(unmatched_route)
-  http_metrics.request_finished(metrics, method, route, resp.status, micros)
+  let resp = case outcome {
+    Ok(resp) -> resp
+    Error(crash) -> {
+      log.error("request crashed", [
+        #("route", json.string(route)),
+        #("target", json.string(target_of(req))),
+        #("reason", json.string(string.inspect(crash))),
+      ])
+      text(500, "Internal Server Error")
+    }
+  }
+  let micros = int.max(env.monotonic_micros() - started, 0)
+  http_metrics.request_finished(
+    metrics,
+    method,
+    route,
+    resp.status,
+    int.to_float(micros),
+  )
+  // Probes are metered but not logged.
+  case route == health_route {
+    True -> Nil
+    False ->
+      log.info(
+        "request",
+        access_fields(
+          service_name,
+          method,
+          route,
+          req,
+          resp.status,
+          micros,
+          client,
+        ),
+      )
+  }
   response.map(resp, fn(body) { mist.Bytes(bytes_tree.from_string(body)) })
+}
+
+// server_pal's access line (#1459): http_method and route are the bounded
+// labels the metrics carry, so a pivot from a dashboard to the logs is a
+// copy-paste, and the raw path and query ride in target. client is the one
+// the limiter keys on, never the raw x-forwarded-for.
+fn access_fields(
+  service_name: String,
+  method: String,
+  route: String,
+  req: Request(a),
+  status: Int,
+  micros: Int,
+  client: forwarded.DerivedClient,
+) -> List(#(String, json.Json)) {
+  [
+    // "event", not "log": docker's json-file driver wraps each line in an
+    // object whose payload key is "log".
+    #("event", json.string("access")),
+    #("service_name", json.string(service_name)),
+    #("http_method", json.string(method)),
+    #("route", json.string(route)),
+    #("target", json.string(target_of(req))),
+    #("status", json.int(status)),
+    #("duration_us", json.int(micros)),
+    #("trace_id", json.string(trace_id_of(req))),
+    #(
+      "client",
+      json.string(case client.address {
+        Some(address) -> forwarded.address_to_string(address)
+        None -> ""
+      }),
+    ),
+    #("client_source", json.string(forwarded.source_label(client.source))),
+  ]
+}
+
+fn target_of(req: Request(a)) -> String {
+  case req.query {
+    Some(query) -> req.path <> "?" <> query
+    None -> req.path
+  }
+}
+
+// The W3C trace id off a traceparent header, or "" when it is absent or
+// malformed.
+fn trace_id_of(req: Request(a)) -> String {
+  case request.get_header(req, "traceparent") {
+    Error(Nil) -> ""
+    Ok(traceparent) ->
+      case string.split(traceparent, "-") {
+        [_, trace_id, ..] ->
+          case string.length(trace_id) == 32 && is_hex(trace_id) {
+            True -> trace_id
+            False -> ""
+          }
+        _ -> ""
+      }
+  }
+}
+
+fn is_hex(text: String) -> Bool {
+  string.to_utf_codepoints(text)
+  |> list.all(fn(c) {
+    let code = string.utf_codepoint_to_int(c)
+    { code >= 48 && code <= 57 }
+    || { code >= 65 && code <= 70 }
+    || { code >= 97 && code <= 102 }
+  })
 }
 
 // Ahead of the body read and the handler, so every request costs quota,
 // one the handler would refuse included.
 fn admit(
-  req: Request(Connection),
+  client: forwarded.DerivedClient,
   limiter: Limiter(forwarded.Address),
-  trusted: TrustedProxies,
 ) -> Result(Nil, Response(String)) {
-  let peer =
-    mist.get_connection_info(req.body)
-    |> result.map(fn(info) { forwarded.from_mist(info.ip_address) })
-    |> option.from_result
-  case forwarded.derive_client(peer, req.headers, trusted).address {
+  case client.address {
     // A request with no peer cannot be keyed, and is refused, as
     // tower_governor refuses it.
     None -> Error(text(500, "Unable To Extract Key!"))

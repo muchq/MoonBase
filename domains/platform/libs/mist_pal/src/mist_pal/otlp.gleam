@@ -5,13 +5,13 @@
 import exception
 import gleam/erlang/process
 import gleam/int
-import gleam/io
 import gleam/json.{type Json}
 import gleam/list
 import gleam/result
 import gleam/string
 import mist_pal/env
 import mist_pal/http_metrics.{type Metrics, type RouteStats, type Snapshot}
+import mist_pal/log
 
 const cumulative = 2
 
@@ -229,10 +229,13 @@ pub fn start_from_env(metrics: Metrics) -> Nil {
           env.getenv("OTEL_RESOURCE_ATTRIBUTES"),
         )
       start_exporter(metrics, endpoint, resource, interval)
-      io.println("exporting metrics to " <> endpoint)
+      log.info("exporting metrics to " <> endpoint, [])
     }
     Error(Nil) ->
-      io.println("OTEL_EXPORTER_OTLP_ENDPOINT unset; metrics are not exported")
+      log.info(
+        "OTEL_EXPORTER_OTLP_ENDPOINT unset; metrics are not exported",
+        [],
+      )
   }
 }
 
@@ -264,9 +267,9 @@ fn export_loop(metrics, endpoint, resource, interval_ms, started) -> Nil {
     })
   case outcome {
     Ok(Ok(Nil)) -> Nil
-    Ok(Error(reason)) -> io.println_error("OTLP export failed: " <> reason)
+    Ok(Error(reason)) -> log.warning("OTLP export failed: " <> reason, [])
     Error(crash) ->
-      io.println_error("OTLP export crashed: " <> string.inspect(crash))
+      log.error("OTLP export crashed: " <> string.inspect(crash), [])
   }
   export_loop(metrics, endpoint, resource, interval_ms, started)
 }

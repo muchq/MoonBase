@@ -7,6 +7,7 @@ import gleam/http/response.{type Response}
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit
 import gleeunit/should
 import mist_pal.{type Body, Body, TooLarge}
@@ -261,4 +262,86 @@ fn mist_clock_running() -> Bool
 pub fn starting_runs_mists_clock_test() {
   start(recording(process.new_subject()), None, forwarded.none())
   mist_clock_running() |> should.be_true
+}
+
+@external(erlang, "mist_pal_test_ffi", "capture_logs")
+fn capture(run: fn() -> a) -> List(String)
+
+fn access_lines(lines: List(String)) -> List(String) {
+  list.filter(lines, string.contains(_, "\"event\":\"access\""))
+  |> list.map(fn(line) {
+    let assert Ok(#(_, rest)) = string.split_once(line, "\"level\"")
+    "{\"level\"" <> rest
+  })
+}
+
+// One line per request in server_pal's vocabulary (#1459), the client being
+// the one the limiter keys on. duration_us is checked for shape only.
+pub fn a_request_is_logged_as_one_access_line_test() {
+  let assert Ok(loopback) = forwarded.parse(["127.0.0.1"])
+  let server = start(recording(process.new_subject()), None, loopback)
+  let assert [line] =
+    capture(fn() {
+      get(server, "/thing?x=1", [
+        #("x-forwarded-for", "203.0.113.7"),
+        #(
+          "traceparent",
+          "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        ),
+      ])
+    })
+    |> access_lines
+  let assert Ok(#(before, after)) = string.split_once(line, "\"duration_us\":")
+  let assert Ok(#(micros, after)) = string.split_once(after, ",")
+  int.parse(micros) |> should.be_ok
+  before
+  |> should.equal(
+    "{\"level\":\"INFO\",\"message\":\"request\",\"event\":\"access\",\"service_name\":\"\",\"http_method\":\"GET\",\"route\":\"/thing\",\"target\":\"/thing?x=1\",\"status\":200,",
+  )
+  after
+  |> should.equal(
+    "\"trace_id\":\"4bf92f3577b34da6a3ce929d0e0e4736\",\"client\":\"203.0.113.7\",\"client_source\":\"forwarded\"}\n",
+  )
+}
+
+// Probes are metered but not logged: one every 30s per container would bury
+// the traffic.
+pub fn health_is_not_logged_test() {
+  let server = start(recording(process.new_subject()), None, forwarded.none())
+  capture(fn() { get(server, "/health", []) })
+  |> access_lines
+  |> should.equal([])
+}
+
+pub fn a_malformed_traceparent_logs_no_trace_id_test() {
+  let server = start(recording(process.new_subject()), None, forwarded.none())
+  ["", "00", "00-4BF92F3577B34DA6A3CE929D0E0E473G-x-01", "00-abc-01"]
+  |> list.map(fn(traceparent) {
+    capture(fn() { get(server, "/thing", [#("traceparent", traceparent)]) })
+    |> access_lines
+    |> list.map(string.contains(_, "\"trace_id\":\"\""))
+  })
+  |> should.equal([[True], [True], [True], [True]])
+}
+
+// The 500 says nothing to the client, so the reason goes to the log.
+pub fn a_crashing_handler_is_logged_as_an_error_test() {
+  let server = start(fn(_) { panic as "boom" }, None, forwarded.none())
+  let lines = capture(fn() { get(server, "/thing", []) })
+  let assert [crash] =
+    list.filter(lines, string.contains(_, "\"message\":\"request crashed\""))
+  string.contains(crash, "\"level\":\"ERROR\"") |> should.be_true
+  string.contains(crash, "\"route\":\"/thing\"") |> should.be_true
+  string.contains(crash, "boom") |> should.be_true
+  access_lines(lines) |> list.length |> should.equal(1)
+}
+
+// OTP reports each supervised process it starts at info; those are noise on
+// a service's log, and server_pal's has nothing like them.
+pub fn starting_logs_no_supervisor_progress_test() {
+  capture(fn() {
+    start(recording(process.new_subject()), None, forwarded.none())
+  })
+  |> list.filter(string.contains(_, "Supervisor:"))
+  |> should.equal([])
 }

@@ -14,14 +14,17 @@ _SRCS = [
     "src/mist_pal/env.gleam",
     "src/mist_pal/forwarded.gleam",
     "src/mist_pal/http_metrics.gleam",
+    "src/mist_pal/log.gleam",
     "src/mist_pal/otlp.gleam",
     "src/mist_pal/rate_limit.gleam",
     "src/mist_pal_ffi.erl",
+    "src/mist_pal_log.erl",
 ]
 
 _TEST_SRCS = [
     "test/mist_pal/forwarded_test.gleam",
     "test/mist_pal/http_metrics_test.gleam",
+    "test/mist_pal/log_test.gleam",
     "test/mist_pal/otlp_test.gleam",
     "test/mist_pal/rate_limit_test.gleam",
     "test/mist_pal_test.gleam",
