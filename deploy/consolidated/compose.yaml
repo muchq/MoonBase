@@ -314,8 +314,8 @@ services:
       retries: 3
       start_period: 15s
 
-  # mithril's word-ladder solver in Gleam, built with rules_gleam. Internal
-  # only: no gateway route and no caller yet, so its traffic is the probe.
+  # mithril's word-ladder solver in Gleam, built with rules_gleam. Caddy
+  # routes POST /mithril/v2/wordchain here.
   mithril_v2:
     image: ghcr.io/muchq/mithril_v2:${MITHRIL_V2_SHA:-${DEPLOY_SHA:?unset}}
     labels:

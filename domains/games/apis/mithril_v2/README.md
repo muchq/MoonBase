@@ -2,8 +2,8 @@
 
 mithril's word-ladder solver in [Gleam](https://gleam.run), built with
 [rules_gleam](https://github.com/muchq/rules_gleam). It runs in the
-consolidated deploy beside the Rust [mithril](../mithril), with no gateway
-route and no caller yet.
+consolidated deploy beside the Rust [mithril](../mithril); Caddy routes
+`api.muchq.com/mithril/v2/wordchain` to it.
 
 ```
 POST /mithril/v2/wordchain

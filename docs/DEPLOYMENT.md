@@ -172,6 +172,7 @@ flowchart LR
   caddy -->|http| games_hub
   caddy -->|http| portrait
   caddy -->|http| mithril
+  caddy -->|http| mithril_v2
   caddy -->|http| posterize
   caddy -->|http| microgpt-serve
   caddy -->|http| one_d4
@@ -244,7 +245,7 @@ Three SPAs on Cloudflare Workers and six caddy vhosts.
 | `muchq.com` | Workers, `muchq.github.io` repo | its routes call `api.muchq.com` |
 | `iili.uk` | Workers, `domains/iili/apps/iili_web` | calls `api.muchq.com` |
 | `1d4.net` | Workers, `domains/games/apps/1d4_web` | calls `api.1d4.net` |
-| `api.muchq.com` | caddy | games_hub, portrait, prom_proxy, mithril, posterize, microgpt-serve, one_d4, one_d4_v2, iili, stats, deja |
+| `api.muchq.com` | caddy | games_hub, portrait, prom_proxy, mithril, mithril_v2, posterize, microgpt-serve, one_d4, one_d4_v2, iili, stats, deja |
 | `i.iili.uk` | caddy | iili — `GET`/`HEAD` `/r/*` short links. HEAD is the contract: link unfurlers use it |
 | `gpt.muchq.com` | caddy | microgpt-serve |
 | `api.1d4.net` | caddy | one_d4; stats for `GET /stats/v1/one_d4/*` only |
@@ -299,6 +300,7 @@ matcher (#1468).
 | POST | `/portrait/v1/trace` | portrait |
 | GET | `/metrics/v1/*` | prom_proxy |
 | POST | `/mithril/v1/wordchain` | mithril |
+| POST | `/mithril/v2/wordchain` | mithril_v2 |
 | POST | `/imagine/v1/blur`, `/imagine/v1/edges` | posterize |
 | POST | `/microgpt/v1/generate`, `/microgpt/v1/chat` | microgpt-serve |
 | GET | `/1d4/v1/health` | one_d4 |
