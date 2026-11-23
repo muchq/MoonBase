@@ -62,6 +62,4 @@ its handler.
 ## Hex packages
 
 It keeps no manifest of its own. Its Hex dependencies come from the one manifest `bazel/gleam.MODULE.bazel`
-imports, mithril_v2's. rules_gleam refuses a manifest entry that is not from
-Hex, so after `gleam deps download` there, delete the `mist_pal` entry it
-adds to `[packages]`.
+imports, mithril_v2's.

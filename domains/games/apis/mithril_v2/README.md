@@ -38,10 +38,5 @@ An image built anywhere except linux/amd64 (CI's publish job) will not run on
 the deploy host.
 
 Hex dependencies come from `manifest.toml`, which `gleam deps download`
-writes. rules_gleam v0.3.1 refuses a package whose OTP application name differs
-from its Hex name, and mist depends on one, `hpack_erl`, whose application is
-`hpack`. The manifest therefore records its `otp_app` as `hpack_erl`, as
-rules_gleam's own web_service example does. rules_gleam also refuses a
-package that is not from Hex, so the `mist_pal` path dependency has no entry
-in `[packages]`. Whenever the manifest is regenerated, re-apply the first edit
-and delete that entry.
+writes. Commit it as written; rules_gleam imports its Hex entries and skips
+the `mist_pal` path entry, which Bazel builds from its own target.
