@@ -44,9 +44,9 @@ filegroup(
 ios_application(
     name = "WordChains",
     bundle_id = "com.muchq.wordchains",
+    # iPhone only for v1; app_store_test holds it.
     families = [
         "iphone",
-        "ipad",
     ],
     infoplists = [":Info.plist"],
     minimum_os_version = "17.0",
@@ -92,5 +92,8 @@ sh_test(
     size = "small",
     srcs = ["app_store_test.sh"],
     # The sources too: what the code calls decides what the manifest declares.
-    data = ["Info.plist"] + glob(["Sources/**"]),
+    data = [
+        "BUILD.bazel",
+        "Info.plist",
+    ] + glob(["Sources/**"]),
 )
