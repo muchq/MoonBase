@@ -88,17 +88,20 @@ final class RaceSession {
     init(transport: HubTransport) {
         self.transport = transport
         transport.events = HubTransportEvents(
-            status: { [weak self] status in self?.connection = status },
+            status: { [weak self] status in
+                guard let self else { return }
+                self.connection = status
+                // What was asked for on a stream that dropped never reached
+                // the hub: nothing waits on its answer.
+                if status != .connected { self.state.settle() }
+            },
             frame: { [weak self] frame in self?.receive(frame) }
         )
     }
 
+    // A refusal that ends the stream reaches the player as the transport's
+    // status; the state has nothing to do with it.
     private func receive(_ frame: HubFrame) {
-        if case let .refused(exception, message) = frame {
-            // A seat conflict clears on the next dial; anything else ends it.
-            if exception != "SeatConflict" { connection = .lost(message ?? exception) }
-            return
-        }
         state.apply(frame)
     }
 
@@ -124,7 +127,11 @@ final class RaceSession {
 
     // MARK: - The table
 
-    func openTable() { transport.send(.wordchain(.createGame)) }
+    /// A new table: from the room, or once this one has closed.
+    func openTable() {
+        state.opening = true
+        transport.send(.wordchain(.createGame))
+    }
 
     func joinTable(_ gameId: String) {
         state.opening = true
@@ -154,11 +161,6 @@ final class RaceSession {
         transport.send(.wordchain(.leaveGame))
     }
 
-    /// Another table, once this one has closed.
-    func playAgain() {
-        state.opening = true
-        transport.send(.wordchain(.createGame))
-    }
 }
 
 /// The web's: 2 s apart, ten times, inside the hub's 5-minute grace;

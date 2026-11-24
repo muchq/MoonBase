@@ -23,11 +23,11 @@ enum RaceText {
         }
         guard let first = result.winners.first else { return "\(why)nobody finished." }
         let how = runners.first { $0.playerId == first }.map { " in \(steps($0.words))" } ?? ""
-        let names = result.winners.map { you($0, viewer: viewer) }
-        let who = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
-        let verb = names.count > 1 ? "share the win" : "won"
         // Only "you" opens a sentence capitalized: a player's id is as they chose it.
-        let opened = why.isEmpty && who.hasPrefix("you") ? "Y" + who.dropFirst() : who
+        var names = result.winners.map { you($0, viewer: viewer) }
+        if why.isEmpty, names[0] == "you" { names[0] = "You" }
+        let opened = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
+        let verb = names.count > 1 ? "share the win" : "won"
         return "\(why)\(opened) \(verb)\(how)."
     }
 

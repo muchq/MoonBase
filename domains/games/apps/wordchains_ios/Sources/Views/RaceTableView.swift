@@ -52,6 +52,7 @@ struct RaceTableView: View {
                         // Leaving mid-race gives the race up, so it is asked twice.
                         if racing && me != nil { confirmingLeave = true } else { session.leaveTable() }
                     }
+                    .disabled(session.connection != .connected)
                 }
             }
         }
@@ -70,6 +71,16 @@ struct RaceTableView: View {
             if let start = table.start { letters = start.count }
         }
         .onChange(of: climbing, initial: true) { _, now in typing = now }
+        // No word is longer than the puzzle's.
+        .onChange(of: draft) { _, typed in
+            if let length = table.start?.count, typed.count > length { draft = String(typed.prefix(length)) }
+        }
+        // What a sighted player reads in passing, VoiceOver says: why a
+        // word was refused, and how the race ended.
+        .onChange(of: session.state.notice) { _, notice in announce(notice) }
+        .onChange(of: table.result) { _, result in
+            announce(result.map { RaceText.result($0, runners: table.runners, viewer: viewer) })
+        }
     }
 
     private var hint: String? {
@@ -197,7 +208,7 @@ struct RaceTableView: View {
         case .closed:
             VStack(spacing: 12) {
                 Button {
-                    session.playAgain()
+                    session.openTable()
                 } label: {
                     Text(session.state.opening ? "Opening…" : "Play again").frame(maxWidth: .infinity)
                 }
@@ -208,5 +219,11 @@ struct RaceTableView: View {
         case .racing:
             EmptyView()
         }
+    }
+
+    private func announce(_ text: String?) {
+        #if os(iOS)
+        if let text { AccessibilityNotification.Announcement(text).post() }
+        #endif
     }
 }

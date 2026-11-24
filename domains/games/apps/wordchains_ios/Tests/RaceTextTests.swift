@@ -19,13 +19,26 @@ final class RaceTextTests: XCTestCase {
 
     func testTheResultNamesTheWinnerASharedWinOrNobody() {
         func said(_ ending: WordchainEnding, _ winners: [String], to viewer: String) -> String {
-            RaceText.result(WordchainResult(ending: ending, winners: winners, standings: []), runners: runners, viewer: viewer)
+            RaceText.result(WordchainResult(ending: ending, winners: winners), runners: runners, viewer: viewer)
         }
         XCTAssertEqual(said(.finished, ["alice"], to: "alice"), "You won in 4 steps.")
         XCTAssertEqual(said(.finished, ["bob"], to: "alice"), "bob won in 4 steps.")
         XCTAssertEqual(said(.finished, ["alice", "bob"], to: "alice"), "You and bob share the win in 4 steps.")
         XCTAssertEqual(said(.timeout, ["alice", "bob"], to: "cat"), "Time ran out: alice and bob share the win in 4 steps.")
         XCTAssertEqual(said(.leave, [], to: "cat"), "Too few seats stayed: nobody finished.")
+        XCTAssertEqual(said(.finished, [], to: "cat"), "nobody finished.")
+    }
+
+    // Only the viewer is "you"; an id that starts with the letters is as chosen.
+    func testOnlyTheViewerIsYou() {
+        let runners = [WordchainRunner(playerId: "youngsam", words: 3, finishedAtMs: 1, left: false, ladder: nil, wins: 1)]
+        XCTAssertEqual(RaceText.result(WordchainResult(ending: .finished, winners: ["youngsam"]), runners: runners, viewer: "alice"),
+                       "youngsam won in 3 steps.")
+    }
+
+    // A winner the view no longer lists still wins; only the count is unsaid.
+    func testAWinnerMissingFromTheRunnersIsNamedWithoutACount() {
+        XCTAssertEqual(RaceText.result(WordchainResult(ending: .finished, winners: ["dan"]), runners: [], viewer: "alice"), "dan won.")
     }
 
     func testTheClockReadsMinutesAndSecondsAndStopsAtZero() {

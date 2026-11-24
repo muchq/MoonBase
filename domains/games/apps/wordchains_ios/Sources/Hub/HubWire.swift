@@ -91,7 +91,6 @@ enum HubCommand: Equatable {
 
 struct SessionReady: Decodable, Equatable {
     let playerId: String
-    let resumed: Bool
     /// The room a resumed seat is back in.
     let roomId: String?
 }
@@ -140,7 +139,6 @@ struct WordchainResult: Decodable, Equatable {
     /// The fewest words, then the earliest finish; several share a win,
     /// none when nobody finished.
     let winners: [String]
-    let standings: [String]
 }
 
 struct WordchainRunner: Decodable, Equatable {
@@ -168,7 +166,6 @@ struct WordchainView: Decodable, Equatable {
     /// In the order they joined.
     let runners: [WordchainRunner]
     let result: WordchainResult?
-    let racesPlayed: Int
 }
 
 /// A wordchain update, as much of it as the app acts on.

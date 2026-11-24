@@ -14,7 +14,7 @@ private func view(_ phase: WordchainPhase = .racing, gameId: String = "W1", star
         gameId: gameId, phase: phase, start: start, target: start == nil ? nil : "warm", par: start == nil ? nil : 5,
         startedAtMs: start == nil ? nil : 0, deadlineMs: start == nil ? nil : 180_000,
         runners: runners ?? [runner("alice", words: 1, ladder: ["cord"]), runner("bob", words: 3)],
-        result: nil, racesPlayed: 0
+        result: nil
     )
 }
 
@@ -30,14 +30,14 @@ final class RaceStateTests: XCTestCase {
         var state = RaceState()
         state.apply(.roomState(room("AB12")))
         state.apply(.wordchain(.view(view())))
-        state.apply(.sessionReady(SessionReady(playerId: "alice", resumed: true, roomId: "AB12")))
+        state.apply(.sessionReady(SessionReady(playerId: "alice", roomId: "AB12")))
         XCTAssertEqual(state.playerId, "alice")
         XCTAssertEqual(state.room?.roomId, "AB12")
         // A seat that survived comes back as its own gameJoined; one that
         // didn't sends nothing, so the old table must not linger.
         XCTAssertNil(state.table)
 
-        state.apply(.sessionReady(SessionReady(playerId: "alice", resumed: false, roomId: nil)))
+        state.apply(.sessionReady(SessionReady(playerId: "alice", roomId: nil)))
         XCTAssertNil(state.room)
     }
 
@@ -121,7 +121,7 @@ final class RaceSessionTests: XCTestCase {
         let transport = FakeTransport()
         let session = RaceSession(transport: transport)
         transport.events?.status(.connected)
-        transport.events?.frame(.sessionReady(SessionReady(playerId: "alice", resumed: false, roomId: nil)))
+        transport.events?.frame(.sessionReady(SessionReady(playerId: "alice", roomId: nil)))
         return (session, transport)
     }
 
@@ -152,8 +152,8 @@ final class RaceSessionTests: XCTestCase {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
             session.openTable()
-            session.joinTable("W1")
             XCTAssertTrue(session.state.opening)
+            session.joinTable("W1")
             session.start(letters: 3)
             session.retract()
             XCTAssertEqual(transport.sent, [
@@ -182,21 +182,32 @@ final class RaceSessionTests: XCTestCase {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
             transport.events?.frame(.wordchain(.view(view(.closed))))
-            session.playAgain()
+            session.openTable()
             XCTAssertEqual(transport.sent.last, .wordchain(.createGame))
             XCTAssertTrue(session.state.opening)
         }
     }
 
-    // A refusal that ends the stream is a lost connection, except a seat
-    // conflict: the next dial takes the seat back.
-    func testATerminalRefusalIsALossButASeatConflictIsNot() {
+    // A word or table asked for while the stream is down never reaches
+    // the hub, so nothing waits on its answer.
+    func testADropAnswersWhateverWasWaiting() {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
-            transport.events?.frame(.refused(exception: "SeatConflict", message: nil))
-            XCTAssertEqual(session.connection, .connected)
-            transport.events?.frame(.refused(exception: "TooManySessions", message: "slow down"))
-            XCTAssertEqual(session.connection, .lost("slow down"))
+            transport.events?.frame(.wordchain(.view(view())))
+            session.play("card")
+            session.joinTable("W2")
+            transport.events?.status(.connecting)
+            XCTAssertFalse(session.state.sending)
+            XCTAssertFalse(session.state.opening)
+        }
+    }
+
+    func testRoomCommands() {
+        MainActor.assumeIsolated {
+            let (session, transport) = mount()
+            session.createRoom()
+            session.leaveRoom()
+            XCTAssertEqual(transport.sent, [.createRoom, .leaveRoom])
         }
     }
 

@@ -36,11 +36,11 @@ final class HubWireTests: XCTestCase {
     func testSessionReadyNamesThePlayerAndAnyResumedRoom() throws {
         XCTAssertEqual(
             try frame(#"{"event":"sessionReady","payload":{"playerId":"bouncy-quokka","resumed":true,"roomId":"AB12"}}"#),
-            .sessionReady(SessionReady(playerId: "bouncy-quokka", resumed: true, roomId: "AB12"))
+            .sessionReady(SessionReady(playerId: "bouncy-quokka", roomId: "AB12"))
         )
         XCTAssertEqual(
             try frame(#"{"event":"sessionReady","payload":{"playerId":"p","resumed":false}}"#),
-            .sessionReady(SessionReady(playerId: "p", resumed: false, roomId: nil))
+            .sessionReady(SessionReady(playerId: "p", roomId: nil))
         )
     }
 
@@ -103,7 +103,7 @@ final class HubWireTests: XCTestCase {
                 WordchainRunner(playerId: "alice", words: 1, finishedAtMs: nil, left: false, ladder: ["cord"], wins: 0),
                 WordchainRunner(playerId: "bob", words: 3, finishedAtMs: nil, left: false, ladder: nil, wins: 2),
             ],
-            result: nil, racesPlayed: 0
+            result: nil
         ))))
     }
 
@@ -116,7 +116,7 @@ final class HubWireTests: XCTestCase {
         """#
         guard case let .wordchain(.view(view)) = try frame(json) else { return XCTFail("not a view") }
         XCTAssertEqual(view.phase, .over)
-        XCTAssertEqual(view.result, WordchainResult(ending: .timeout, winners: ["bob"], standings: ["bob"]))
+        XCTAssertEqual(view.result, WordchainResult(ending: .timeout, winners: ["bob"]))
         XCTAssertEqual(view.runners.first?.finishedAtMs, 1_700_000_009_000)
         XCTAssertEqual(view.runners.first?.left, true)
     }

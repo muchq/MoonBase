@@ -228,6 +228,17 @@ session mint, then the JSON-text socket, the same protocol the web lobby speaks.
 the app holds no race rules. The resume token is kept in `UserDefaults`. There
 is no chat. The single-player modes need no network.
 
+**App Privacy** (App Store Connect, and `Sources/Resources/PrivacyInfo.xcprivacy`,
+which `:app_store_test` requires while the code uses `UserDefaults`): racing sends
+a server-minted player id (**Identifiers → User ID**) and the race's words
+(**Gameplay Content**) to the hub, for app functionality only, not linked to the
+person, no tracking.
+
+**App Review notes:** a race needs two seats. Tell the reviewer to tap **Race
+friends → Create a room → Open a race table**, then open
+`https://muchq.com/games/room/<code>` in a browser, join the same table as the
+second seat, and tap **Start the race** in the app.
+
 ## Architecture
 
 The iOS app reuses the `wordchains` Rust library indirectly:

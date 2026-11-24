@@ -72,6 +72,17 @@ else
   fail "icon is a PNG"
 fi
 
+# Apple rejects an upload (ITMS-91053) whose code calls a required-reason
+# API its privacy manifest doesn't declare. UserDefaults holds the hub's
+# resume token; CA92.1 is "read and written by this app only".
+MANIFEST=$PKG/Sources/Resources/PrivacyInfo.xcprivacy
+# -R: runfiles are symlinks, which -r skips.
+if grep -Rqw UserDefaults "$PKG/Sources"; then
+  check "a privacy manifest ships in the bundle's resources" test -f "$MANIFEST"
+  check "the manifest declares UserDefaults, for this app's own use (CA92.1)" \
+    bash -c 'tr -d " \t\n" <"$1" | grep -q "<string>NSPrivacyAccessedAPICategoryUserDefaults</string><key>NSPrivacyAccessedAPITypeReasons</key><array><string>CA92.1</string></array>"' _ "$MANIFEST"
+fi
+
 if [ "$FAILURES" -ne 0 ]; then
   echo "$FAILURES failure(s)"
   exit 1

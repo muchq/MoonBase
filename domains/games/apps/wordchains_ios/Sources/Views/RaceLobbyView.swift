@@ -27,6 +27,11 @@ struct RaceLobbyView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { session.connect() }
         }
+        .onChange(of: session.state.notice) { _, notice in
+            #if os(iOS)
+            if let notice, session.state.table == nil { AccessibilityNotification.Announcement(notice).post() }
+            #endif
+        }
     }
 
     private var lobby: some View {
@@ -88,7 +93,7 @@ struct RaceLobbyView: View {
                 TextField("Room code", text: $code)
                     .typedAs(.characters)
                     .textFieldStyle(.roundedBorder)
-                    .onSubmit { session.joinRoom(code) }
+                    .onSubmit { if connected { session.joinRoom(code) } }
                 Button("Join") { session.joinRoom(code) }
                     .buttonStyle(.bordered)
                     .disabled(!connected)

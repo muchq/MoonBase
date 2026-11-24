@@ -15,16 +15,17 @@ import FoundationNetworking
 final class HubSocket: HubTransport {
     static let resumeTokenKey = "games_hub_resume_token"
     private static let mintTimeout: TimeInterval = 10
+    /// How the hub closes a wire whose seat a newer connection took.
+    private static let supersededCloseCode = 4001
 
     var events: HubTransportEvents?
 
     private let playURL: URL
     private let urlSession: URLSession
     private let defaults: UserDefaults
+    private var dialer = Dialer()
     private var socket: URLSessionWebSocketTask?
-    private var dialing: Task<Void, Never>?
-    private var policy = ReconnectPolicy()
-    private var closed = true
+    private var tasks: [Task<Void, Never>] = []
 
     init(playURL: URL = HubEndpoints.production, urlSession: URLSession = .shared, defaults: UserDefaults = .standard) {
         self.playURL = playURL
@@ -32,51 +33,56 @@ final class HubSocket: HubTransport {
         self.defaults = defaults
     }
 
-    /// Idempotent while a dial is under way or a socket is up.
-    func connect() {
-        closed = false
-        policy = ReconnectPolicy()
-        guard socket == nil, dialing == nil else { return }
-        dial()
-    }
-
-    func disconnect() {
-        closed = true
-        dialing?.cancel()
-        dialing = nil
-        socket?.cancel(with: .goingAway, reason: nil)
-        socket = nil
-        events?.status(.idle)
-    }
+    func connect() { run(dialer.connect()) }
+    func disconnect() { run(dialer.disconnect()) }
 
     func send(_ command: HubCommand) {
         guard let socket else { return }
         socket.send(.string(String(decoding: command.encoded(), as: UTF8.self))) { _ in }
     }
 
-    private func dial() {
-        events?.status(.connecting)
-        dialing = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let minted = try await self.mint(resumeToken: self.defaults.string(forKey: Self.resumeTokenKey))
-                self.dialing = nil
-                // Hung up during the mint: no socket, or a torn-down stream
-                // would hold a seat.
-                if self.closed { return }
-                self.defaults.set(minted.resumeToken, forKey: Self.resumeTokenKey)
-                let socket = self.urlSession.webSocketTask(
-                    with: HubEndpoints.socketURL(play: self.playURL, ticket: minted.ticket),
-                    protocols: [HubEndpoints.subprotocol]
-                )
-                self.socket = socket
-                socket.resume()
-                await self.read(socket)
-            } catch {
-                self.dialing = nil
-                self.dropped(nil)
+    /// Carries out what the Dialer decided; it alone decides.
+    private func run(_ effects: [Dialer.Effect]) {
+        for effect in effects {
+            switch effect {
+            case let .status(status):
+                events?.status(status)
+            case .hangUp:
+                tasks.forEach { $0.cancel() }
+                tasks = []
+                socket?.cancel(with: .goingAway, reason: nil)
+                socket = nil
+            case let .dial(gen):
+                tasks.append(Task { [weak self] in await self?.dial(gen) })
+            case let .wait(gen, delay):
+                tasks.append(Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    guard let self else { return }
+                    self.run(self.dialer.retryDue(gen))
+                })
             }
         }
+    }
+
+    private func dial(_ gen: Int) async {
+        let minted: HubSession
+        do {
+            minted = try await mint(resumeToken: defaults.string(forKey: Self.resumeTokenKey))
+        } catch {
+            run(dialer.dropped(gen))
+            return
+        }
+        // Hung up, or replaced, during the mint: no socket.
+        guard dialer.isCurrent(gen) else { return }
+        defaults.set(minted.resumeToken, forKey: Self.resumeTokenKey)
+        socket?.cancel(with: .goingAway, reason: nil)
+        let socket = urlSession.webSocketTask(
+            with: HubEndpoints.socketURL(play: playURL, ticket: minted.ticket),
+            protocols: [HubEndpoints.subprotocol]
+        )
+        self.socket = socket
+        socket.resume()
+        await read(socket, gen)
     }
 
     private func mint(resumeToken: String?) async throws -> HubSession {
@@ -91,17 +97,18 @@ final class HubSocket: HubTransport {
         return try JSONDecoder().decode(HubSession.self, from: data)
     }
 
-    private func read(_ socket: URLSessionWebSocketTask) async {
+    private func read(_ socket: URLSessionWebSocketTask, _ gen: Int) async {
         while true {
             let message: URLSessionWebSocketTask.Message
             do {
                 message = try await socket.receive()
             } catch {
-                dropped(socket)
+                if socket === self.socket { self.socket = nil }
+                run(dialer.dropped(gen, superseded: socket.closeCode.rawValue == Self.supersededCloseCode))
                 return
             }
             // A socket a reconnect replaced has no say.
-            guard socket === self.socket else { return }
+            guard dialer.isCurrent(gen) else { return }
             let data: Data
             switch message {
             case let .string(text): data = Data(text.utf8)
@@ -110,30 +117,15 @@ final class HubSocket: HubTransport {
             }
             // A frame this client can't read is skipped, not fatal.
             guard let frame = try? HubFrame.decode(data) else { continue }
-            if case .sessionReady = frame {
-                // Admission, not an open socket, is progress.
-                policy.admitted()
-                events?.status(.connected)
+            switch frame {
+            case .sessionReady:
+                run(dialer.admitted(gen))
+            case let .refused(exception, message):
+                run(dialer.refused(gen, exception: exception, message: message))
+            default:
+                break
             }
             events?.frame(frame)
-        }
-    }
-
-    /// The socket closed or the mint failed: dial again, or give up.
-    private func dropped(_ from: URLSessionWebSocketTask?) {
-        if let from, from !== socket { return }
-        socket = nil
-        if closed { return }
-        guard let delay = policy.next() else {
-            events?.status(.lost("Lost connection to the games hub"))
-            return
-        }
-        events?.status(.connecting)
-        dialing = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-            guard let self, !self.closed, self.socket == nil else { return }
-            self.dialing = nil
-            self.dial()
         }
     }
 }
