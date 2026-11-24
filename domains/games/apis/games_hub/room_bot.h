@@ -111,6 +111,9 @@ class RoomBot {
   /// call, if any, happens on the worker. No bot answers a bot.
   void OnMessage(const ChatRow& row);
 
+  /// The responder's reserved author: which bot this is.
+  const char* Author() const { return responder_->Author(); }
+
   /// Blocks until nothing is queued or in flight. For tests.
   void Drain();
 

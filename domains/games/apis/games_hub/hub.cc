@@ -1512,6 +1512,8 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
       return;
     }
     Count("chat_appends", {{"result", "stored"}});
+    // A wordchain race in the room: mithril would post its ladder.
+    bool racing = false;
     {
       // That a room was talking, and how many were in it. The
       // text never leaves the process. This path dropped mu_ before the
@@ -1520,6 +1522,13 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
       const std::lock_guard<std::mutex> lock(mu_);
       const auto room = rooms_.find(room_id);
       const std::size_t members = room == rooms_.end() ? 0 : room->second.members.size();
+      if (room != rooms_.end()) {
+        for (const auto& [game_id, entry] : room->second.games) {
+          if (!entry.started()) continue;
+          const auto* race = std::get_if<wordchain_race::Table>(&*entry.state);
+          if (race != nullptr && !race->race().isOver()) racing = true;
+        }
+      }
       RecordLocked(
           [&room_id, members](absl::Time now) { return ChatMessageLine(now, room_id, members); });
     }
@@ -1531,7 +1540,10 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
     // and advancing the cursor over it would skip it for good.
     PumpChat(room_id);
     // After the asker's own row is out, so a reply can only follow it.
-    for (const auto& bot : bots_) bot->OnMessage(*appended);
+    for (const auto& bot : bots_) {
+      if (racing && std::string_view(bot->Author()) == kWordchainPlayerId) continue;
+      bot->OnMessage(*appended);
+    }
     return;
   }
 

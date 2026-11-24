@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -17,6 +18,7 @@
 #include "absl/time/time.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 #include "domains/games/apis/games_hub/wordchain_adapter.h"
+#include "domains/games/libs/mithril_cpp/client.h"
 #include "domains/games/libs/wordchain_race/lexicon.h"
 
 namespace games_hub {
@@ -28,6 +30,22 @@ using moonbase::games::WordchainUpdate;
 using moonbase::games::WordchainView;
 
 constexpr int64_t kT0 = 1'700'000'000'000;
+
+// mithril answering every ladder request with one ladder, counting them.
+class CountingMithril final : public opal::http::HttpClient {
+ public:
+  explicit CountingMithril(std::atomic<int>& asked) : asked_(asked) {}
+  opal::Outcome<opal::http::HttpResponse> Send(const opal::http::HttpRequest&) override {
+    ++asked_;
+    opal::http::HttpResponse response;
+    response.status = 200;
+    response.body = R"({"path":["cold","cord","card","ward","warm"]})";
+    return response;
+  }
+
+ private:
+  std::atomic<int>& asked_;
+};
 
 GameCommands Wordchain(WordchainMove move) {
   moonbase::games::WordchainCommand command;
@@ -324,6 +342,39 @@ TEST_F(WordchainFixture, ALeaveAfterATimeoutLeavesTheTableReadable) {
   EXPECT_TRUE(Adapter<wordchain_race::Table>::Deserialize(
                   Adapter<wordchain_race::Table>::Serialize(table))
                   .ok());
+}
+
+// The chat bot would post the race's own shortest ladder to the room.
+TEST_F(WordchainFixture, TheWordchainBotKeepsQuietWhileARaceRunsInTheRoom) {
+  std::atomic<int> asked{0};
+  opal::ClientConfig config = mithril::DefaultClientConfig("http://mithril:8083");
+  config.http_client = std::make_shared<CountingMithril>(asked);
+  auto client = mithril::Client::Create(std::move(config));
+  ASSERT_TRUE(client.ok());
+  hub_->StartWordchain(std::make_shared<mithril::Client>(std::move(*client)));
+
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  Seat& ann = started->table.seats[0];
+  moonbase::games::Chat chat;
+  chat.text = "/wordchain " + *started->views[0].start + " " + *started->views[0].target;
+  ASSERT_TRUE(ann.stream.Send(GameCommands::FromChat(chat)).ok());
+  auto own = ReceiveCase(ann.stream, "roomChat");
+  ASSERT_TRUE(own.has_value());
+  EXPECT_EQ(own->as_roomChat_or_null()->playerId, ann.player_id);
+  const std::vector<std::string> after = CasesUntilQuiet(ann.stream);
+  EXPECT_EQ(std::count(after.begin(), after.end(), "roomChat"), 0);
+  EXPECT_EQ(asked.load(), 0);
+
+  now_ms_ += 180'000;
+  ASSERT_EQ(hub_->SweepClocksOnce(), 1);
+  ASSERT_TRUE(ann.stream.Send(GameCommands::FromChat(chat)).ok());
+  for (int i = 0; i < 2; ++i) {
+    auto message = ReceiveCase(ann.stream, "roomChat");
+    ASSERT_TRUE(message.has_value()) << i;
+    if (i == 1) EXPECT_EQ(message->as_roomChat_or_null()->playerId, kWordchainPlayerId);
+  }
+  EXPECT_EQ(asked.load(), 1);
 }
 
 TEST_F(WordchainFixture, ATableSeatsFour) {
