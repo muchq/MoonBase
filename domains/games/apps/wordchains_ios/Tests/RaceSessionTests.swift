@@ -245,6 +245,21 @@ final class RaceSessionTests: XCTestCase {
         }
     }
 
+    // A word or table asked for and never sent waits on nothing: the
+    // screen lets it go and says why.
+    func testAFailedSendLetsGoOfWhatWasWaitingAndSaysWhy() {
+        MainActor.assumeIsolated {
+            let (session, transport) = mount()
+            transport.events?.frame(.wordchain(.view(view())))
+            session.play("card")
+            session.joinTable("W2")
+            transport.events?.sendFailed()
+            XCTAssertFalse(session.state.sending)
+            XCTAssertFalse(session.state.opening)
+            XCTAssertEqual(session.state.notice, "Not sent: reconnecting")
+        }
+    }
+
     func testConnectAndDisconnectReachTheTransport() {
         MainActor.assumeIsolated {
             let (session, transport) = mount()

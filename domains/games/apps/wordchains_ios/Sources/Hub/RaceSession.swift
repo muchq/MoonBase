@@ -64,6 +64,7 @@ enum HubConnection: Equatable {
 struct HubTransportEvents {
     let status: (HubConnection) -> Void
     let frame: (HubFrame) -> Void
+    let sendFailed: () -> Void
 }
 
 /// The hub's stream as the session sees it: dial, hang up, send. The real
@@ -96,7 +97,12 @@ final class RaceSession {
                 // the hub: nothing waits on its answer.
                 if status != .connected { self.state.settle() }
             },
-            frame: { [weak self] frame in self?.receive(frame) }
+            frame: { [weak self] frame in self?.receive(frame) },
+            sendFailed: { [weak self] in
+                // Never reached the hub: nothing waits on its answer.
+                self?.state.settle()
+                self?.state.notice = "Not sent: reconnecting"
+            }
         )
     }
 
