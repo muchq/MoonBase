@@ -213,9 +213,11 @@ To release a new version:
 5. Submit for review in App Store Connect (still manual; automatable later
    with `fastlane deliver` or the App Store Connect API)
 
-The tag is created before the build. If the build or upload fails, delete the
-tag and re-run the workflow (or push again) to retry. Pushing a tag by hand
-releases nothing: it marks that version as already shipped.
+The tag is created before the build. If the build or upload fails, fix it and
+bump the version: the fix's merge releases the new one. Re-running the failed
+run replays its own copy of the workflow, broken step included, and a deleted
+tag is only noticed by the next green `main`. Pushing a tag by hand releases
+nothing: it marks that version as already shipped.
 
 ## Racing on the games hub
 
