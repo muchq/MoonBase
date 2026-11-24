@@ -25,13 +25,35 @@ cc_test(
     ],
 )
 
-# The word list the hub ships, read the way the hub reads it.
+# Where puzzles start and end: SCOWL's common words of race length, less
+# the blocklist. Runners may still play any dictionary word between them.
+genrule(
+    name = "common_words",
+    srcs = [
+        "endpoint_blocklist.txt",
+        "@scowl//:common_words",
+    ],
+    outs = ["common_words.txt"],
+    cmd = "cat $(locations @scowl//:common_words) | LC_ALL=C grep -E '^[a-z]{3,5}$$' | " +
+          "LC_ALL=C sort -u | LC_ALL=C grep -vxFf $(location endpoint_blocklist.txt) > $@",
+    visibility = ["//visibility:public"],
+)
+
+# The word lists the hub ships, read the way the hub reads them.
 cc_test(
     name = "words_test",
     size = "small",
     srcs = ["words_test.cc"],
-    data = ["//domains/games/apis/mithril:data/words.txt"],
-    env = {"WORDS": "$(rootpath //domains/games/apis/mithril:data/words.txt)"},
+    data = [
+        "endpoint_blocklist.txt",
+        ":common_words",
+        "//domains/games/apis/mithril:data/words.txt",
+    ],
+    env = {
+        "BLOCKLIST": "$(rootpath endpoint_blocklist.txt)",
+        "COMMON": "$(rootpath :common_words)",
+        "WORDS": "$(rootpath //domains/games/apis/mithril:data/words.txt)",
+    },
     deps = [
         ":dictionary",
         "@googletest//:gtest_main",
