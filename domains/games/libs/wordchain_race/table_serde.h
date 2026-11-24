@@ -12,7 +12,9 @@ namespace wordchain_race {
 /// and Table::restore, so a row play could not reach is refused.
 ///
 /// Schema v1:
-///   {"v":1, "puzzle":{"start":w, "target":w, "optimal":n, "lexicon":name},
+///   {"v":1, "puzzle":{"start":w, "target":w, "optimal":n, "lexicon":name,
+///    "ladder":[w...] (a shortest ladder; absent for rows stored before
+///    puzzles kept one)},
 ///    "runners":[{"id":playerId, "ladder":[w...], "finishedMs":n (absent
 ///    until finished), "left":bool}...], "startedMs":n, "deadlineMs":n,
 ///    "ending":"finished"|"timeout"|"leave" (absent in play),

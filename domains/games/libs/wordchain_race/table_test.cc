@@ -61,7 +61,7 @@ TEST(RaceOpen, TakesAPuzzleWithItsLadderOrWithout) {
 }
 
 TEST(RaceOpen, RefusesALadderThatIsNotThePuzzles) {
-  for (const Words& ladder : {Words{"cold", "cord", "card", "warm"},           // too short for par
+  for (const Words& ladder : {Words{"cold", "bold", "bord", "cord", "card", "ward", "warm"},  // a chain, past par
                               Words{"cord", "card", "ward", "wart", "warm"},  // not from the start
                               Words{"cold", "cord", "card", "ward", "wart"},  // not to the target
                               Words{"cold", "card", "cord", "ward", "warm"}}) {  // a broken rung
