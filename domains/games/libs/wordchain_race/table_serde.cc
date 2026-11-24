@@ -2,6 +2,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <limits>
+
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 
@@ -117,6 +119,9 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
   if (!start.ok()) return start.status();
   if (!target.ok()) return target.status();
   if (!optimal.ok()) return optimal.status();
+  if (*optimal < 0 || *optimal > std::numeric_limits<int>::max()) {
+    return absl::InvalidArgumentError("optimal is out of range");
+  }
 
   auto runners_field = Array(j, "runners");
   if (!runners_field.ok()) return runners_field.status();

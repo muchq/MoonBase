@@ -219,12 +219,45 @@ TEST(Table, ALeaveDownToOneBetweenRacesScoresNothingMore) {
   EXPECT_EQ(table.scoreSheet().size(), 1U);
 }
 
-TEST(TableRestore, RefusesASheetThatDisagreesWithTheRace) {
+TEST(TableRestore, RefusesAFinishedRaceTheSheetDoesNotScore) {
   Table table = InRace(InRace(OpenTable(), 0, kShort), 1, kShort);
   EXPECT_TRUE(Table::restore(table.race(), table.scoreSheet(), false).ok());
   EXPECT_FALSE(Table::restore(table.race(), {}, false).ok());
-  EXPECT_FALSE(Table::restore(OpenTable().race(), {}, true).ok());
-  EXPECT_FALSE(Table::restore(table.race(), {{"zed"}}, false).ok());
+}
+
+TEST(TableRestore, AWinnerLeavingBetweenRacesStillRestores) {
+  Table three = InRace(InRace(InRace(OpenTable({"ann", "bob", "cy"}), 0, kShort), 1, kLong), 2,
+                       kLong);
+  Table left = *three.removePlayer(0);
+  EXPECT_FALSE(left.isOver());
+  EXPECT_TRUE(Table::restore(left.race(), left.scoreSheet(), false).ok());
+
+  Table two = *InRace(InRace(OpenTable(), 0, kShort), 1, kLong).removePlayer(0);
+  EXPECT_TRUE(two.isOver());
+  EXPECT_TRUE(Table::restore(two.race(), two.scoreSheet(), true).ok());
+}
+
+TEST(TableRestore, RefusesSeatsOrAnEndingPlayCannotReach) {
+  // Open with one seat, or closed with two.
+  Table closed = *OpenTable().removePlayer(1);
+  EXPECT_FALSE(Table::restore(closed.race(), closed.scoreSheet(), false).ok());
+  Table done = InRace(InRace(OpenTable(), 0, kShort), 1, kShort);
+  EXPECT_FALSE(Table::restore(done.race(), done.scoreSheet(), true).ok());
+  // Abandoned, but still open.
+  Race abandoned = *Race::restore(kPuzzle, OpenTable().race().runners(), kT0, kT0 + kMinute,
+                                  false, true);
+  EXPECT_FALSE(Table::restore(abandoned, {{std::nullopt}}, false).ok());
+  // A closed table's race is over.
+  EXPECT_FALSE(Table::restore(*Race::restore(kPuzzle, closed.race().runners(), kT0,
+                                             kT0 + kMinute, false, false),
+                              {}, true)
+                   .ok());
+}
+
+TEST(RaceRestore, AcceptsAFinishStampedBeforeTheStartOnAnotherClock) {
+  Race race = Play(Open(), 0, kShort, kT0 - 5);
+  EXPECT_TRUE(
+      Race::restore(kPuzzle, race.runners(), kT0, race.deadlineMs(), false, false).ok());
 }
 
 }  // namespace

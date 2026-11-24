@@ -78,8 +78,10 @@ absl::StatusOr<Race> Race::restore(Puzzle puzzle, std::vector<Runner> runners, i
       last = word;
     }
     const bool reached = last == puzzle.target;
+    // A finish may read before the start: the start and the play can be
+    // stamped by different hosts' clocks. Never after the deadline.
     if (reached != runner.finished_ms.has_value() ||
-        (reached && (*runner.finished_ms < started_ms || *runner.finished_ms > deadline_ms))) {
+        (reached && *runner.finished_ms > deadline_ms)) {
       return absl::InvalidArgumentError(absl::StrCat(runner.player_id, "'s finish disagrees"));
     }
   }
@@ -193,9 +195,15 @@ absl::StatusOr<Table> Table::open(std::vector<std::string> players, Puzzle puzzl
 }
 
 absl::StatusOr<Table> Table::restore(Race race, std::vector<RaceScore> score_sheet, bool closed) {
+  // Open with two seats or more, closed with fewer: removePlayer's rule.
+  if (closed != (race.runners().size() < 2)) {
+    return absl::InvalidArgumentError("the table's seats disagree with its being closed");
+  }
   if (closed && !race.isOver()) return absl::InvalidArgumentError("a closed table's race is over");
-  if (race.isOver() && (score_sheet.empty() || score_sheet.back().winner != race.winner())) {
-    return absl::InvalidArgumentError("the score sheet disagrees with the race");
+  if (race.abandoned() && !closed) return absl::InvalidArgumentError("only a close abandons");
+  // The line's winner may since have left, so the race no longer names them.
+  if (race.isOver() && score_sheet.empty()) {
+    return absl::InvalidArgumentError("a finished race has a line on the sheet");
   }
   return Table(std::move(race), std::move(score_sheet), closed);
 }

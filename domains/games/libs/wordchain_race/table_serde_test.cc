@@ -88,6 +88,9 @@ TEST(TableSerde, RefusesAnotherVersionMalformedJsonOrAnUnplayableRow) {
   j = nlohmann::json::parse(serializeTable(Played()));
   j.erase("deadlineMs");
   EXPECT_FALSE(deserializeTable(j.dump()).ok());
+  j = nlohmann::json::parse(serializeTable(Played()));
+  j["puzzle"]["optimal"] = 4294967301LL;  // wraps to 5 as an int
+  EXPECT_FALSE(deserializeTable(j.dump()).ok());
 }
 
 }  // namespace

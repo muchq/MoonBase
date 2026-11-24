@@ -109,8 +109,11 @@ class Table {
  public:
   [[nodiscard]] static absl::StatusOr<Table> open(std::vector<std::string> players, Puzzle puzzle,
                                                   int64_t now_ms, int64_t duration_ms);
-  /// The full truth, for a stored row: refused unless the sheet has a line
-  /// for each ended race and a closed table's race is over.
+  /// The full truth, for a stored row: refused unless a finished race has
+  /// its line on the sheet, and the table is closed exactly when fewer than
+  /// two seats remain, its race over and abandoned only then. The line's
+  /// winner is not checked against the race: a winner who left between
+  /// races is no longer in it.
   [[nodiscard]] static absl::StatusOr<Table> restore(Race race, std::vector<RaceScore> score_sheet,
                                                      bool closed);
 
