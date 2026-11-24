@@ -150,10 +150,11 @@ struct RaceLobbyView: View {
 
 // iOS-only input and title modifiers, so `swift test` still builds the
 // views for macOS.
-enum Typing { case characters, lowercase }
+/// How a race screen's text field types: room codes in capitals, words in lowercase.
+enum RaceTyping { case characters, lowercase }
 
 extension View {
-    func typedAs(_ typing: Typing) -> some View {
+    func typedAs(_ typing: RaceTyping) -> some View {
         #if os(iOS)
         return self
             .textInputAutocapitalization(typing == .characters ? .characters : .never)

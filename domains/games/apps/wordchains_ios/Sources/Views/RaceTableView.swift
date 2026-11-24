@@ -15,21 +15,20 @@ struct RaceTableView: View {
     @FocusState private var typing: Bool
 
     private var viewer: String { session.state.playerId ?? "" }
-    private var me: WordchainRunner? { table.runners.first { $0.playerId == viewer } }
-    private var ladder: [String] { me?.ladder ?? [] }
-    private var racing: Bool { table.phase == .racing }
-    private var climbing: Bool { racing && me != nil && me?.finishedAtMs == nil }
-    private var seated: Int { table.runners.filter { !$0.left }.count }
+    /// Every decision this screen makes; tested in RaceTableTests.
+    private var model: RaceTable { RaceTable(view: table, viewer: viewer) }
+    private var me: WordchainRunner? { model.me }
+    private var ladder: [String] { model.ladder }
+    private var racing: Bool { model.racing }
+    private var climbing: Bool { model.climbing }
     private var able: Bool { session.connection == .connected && !session.state.sending }
-    /// One race from the next: a new puzzle, a new start.
-    private var race: String { "\(table.start ?? "")|\(table.target ?? "")|\(table.startedAtMs ?? 0)" }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if let hint { Text(hint).font(Theme.bodyFont).foregroundStyle(.secondary) }
+                if let hint = model.hint { Text(hint).font(Theme.bodyFont).foregroundStyle(.secondary) }
                 if let result = table.result {
-                    Text(said(result))
+                    Text(model.said(result))
                         .font(Theme.headlineFont)
                         .foregroundStyle(Theme.warningOrange)
                 }
@@ -44,13 +43,12 @@ struct RaceTableView: View {
             .padding(.horizontal, Theme.cardPadding)
             .padding(.vertical, 16)
         }
-        .navigationTitle(table.isPractice ? "Practice · \(table.gameId)" : "Word chains · \(table.gameId)")
+        .navigationTitle(model.title)
         .toolbar {
             if table.phase != .closed {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Leave") {
-                        // Leaving mid-race gives the race up, so it is asked twice.
-                        if racing && me != nil { confirmingLeave = true } else { session.leaveTable() }
+                        if model.asksBeforeLeaving { confirmingLeave = true } else { session.leaveTable() }
                     }
                     .disabled(session.connection != .connected)
                 }
@@ -60,53 +58,23 @@ struct RaceTableView: View {
             Button("Leave the race", role: .destructive) { session.leaveTable() }
             Button("Stay", role: .cancel) {}
         }
-        // The word typed stays until the hub takes it, so a refused word
-        // can be fixed; a rung added or taken back, or a new race, clears it.
-        .onChange(of: "\(race)#\(ladder.count)") { _, _ in
+        .onChange(of: model.draftKey) { _, _ in
             draft = ""
             session.dismissNotice()
         }
-        // The next race offers the last one's letters.
-        .onChange(of: race, initial: true) { _, _ in
-            if let start = table.start { letters = start.count }
+        .onChange(of: model.lastLetters, initial: true) { _, last in
+            if let last { letters = last }
         }
         .onChange(of: climbing, initial: true) { _, now in typing = now }
-        // No word is longer than the puzzle's.
         .onChange(of: draft) { _, typed in
-            if let length = table.start?.count, typed.count > length { draft = String(typed.prefix(length)) }
+            let capped = model.capped(typed)
+            if capped != typed { draft = capped }
         }
         // What a sighted player reads in passing, VoiceOver says: why a
         // word was refused, and how the race ended.
         .onChange(of: session.state.notice) { _, notice in announce(notice) }
         .onChange(of: table.result) { _, result in
-            announce(result.map(said))
-        }
-    }
-
-    /// A practice race has nobody to beat; a real one, a winner.
-    private func said(_ result: WordchainResult) -> String {
-        table.isPractice
-            ? RaceText.practice(result, runners: table.runners, viewer: viewer, par: table.par)
-            : RaceText.result(result, runners: table.runners, viewer: viewer)
-    }
-
-    private var hint: String? {
-        switch table.phase {
-        case .waiting:
-            // Alone, a race is practice (#1730): nothing is recorded.
-            return seated < 2 ? "Practise alone, or wait for someone to join." : "\(seated) seated: start when everyone’s here."
-        case .racing where climbing && table.isPractice:
-            return "Practice: one letter at a time. Anyone who joins ends it."
-        case .racing where climbing:
-            return "One letter at a time, every rung a word."
-        case .racing where me != nil:
-            return "You reached \(table.target ?? "") in \(RaceText.steps(ladder.count)). Waiting for the others."
-        case .over where table.isPractice:
-            return "Practise again, or wait for someone to join."
-        case .over:
-            return "Anyone can start the next race."
-        default:
-            return nil
+            announce(result.map(model.said))
         }
     }
 
@@ -185,7 +153,7 @@ struct RaceTableView: View {
                         }
                     }
                     Spacer()
-                    if !table.isPractice {
+                    if model.showsWins {
                         Text("\(runner.wins) \(runner.wins == 1 ? "win" : "wins")").font(Theme.captionFont)
                     }
                 }
@@ -193,11 +161,6 @@ struct RaceTableView: View {
             }
         }
         .cardStyle()
-    }
-
-    private var startLabel: String {
-        if seated < 2 { return table.phase == .over ? "Practise again" : "Practise" }
-        return table.phase == .over ? "Next race" : "Start the race"
     }
 
     private func line(_ runner: WordchainRunner) -> String {
@@ -219,7 +182,7 @@ struct RaceTableView: View {
                 Button {
                     session.start(letters: letters)
                 } label: {
-                    Text(startLabel).frame(maxWidth: .infinity)
+                    Text(model.startLabel).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(session.connection != .connected)

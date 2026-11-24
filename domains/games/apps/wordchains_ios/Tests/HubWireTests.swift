@@ -126,11 +126,12 @@ final class HubWireTests: XCTestCase {
           "runners":[{"playerId":"bob","words":4,"finishedAtMs":1700000009000,"left":true,"ladder":["word","worm","warm"],"wins":1}],
           "result":{"ending":"timeout","winners":["bob"],"standings":["bob"]},"racesPlayed":1}}}}}
         """#
-        guard case let .wordchain(.view(view)) = try frame(json) else { return XCTFail("not a view") }
-        XCTAssertEqual(view.phase, .over)
-        XCTAssertEqual(view.result, WordchainResult(ending: .timeout, winners: ["bob"]))
-        XCTAssertEqual(view.runners.first?.finishedAtMs, 1_700_000_009_000)
-        XCTAssertEqual(view.runners.first?.left, true)
+        let expected = WordchainView(
+            gameId: "W1", phase: .over, start: "cold", target: "warm", par: 5, startedAtMs: nil, deadlineMs: nil,
+            runners: [WordchainRunner(playerId: "bob", words: 4, finishedAtMs: 1_700_000_009_000, left: true, ladder: ["word", "worm", "warm"], wins: 1)],
+            result: WordchainResult(ending: .timeout, winners: ["bob"])
+        )
+        XCTAssertEqual(try frame(json), .wordchain(.view(expected)))
     }
 
     func testTableLifecycleUpdates() throws {
