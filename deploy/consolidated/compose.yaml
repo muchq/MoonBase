@@ -96,6 +96,7 @@ services:
     labels:
       com.muchq.description: "Games hub on smithy event streams (/games/v2/*)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8089"
@@ -160,7 +161,7 @@ services:
       # tile instead (#1303). Talks HTTP over bash's /dev/tcp because the
       # ubuntu base image ships no curl and no wget — see one_d4's probe for
       # the longer story, including why `timeout` bounds the probe itself.
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8089 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8089 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -171,6 +172,7 @@ services:
     labels:
       com.muchq.description: "Ray-traced scene renderer"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8081"
@@ -196,7 +198,7 @@ services:
       # error, not evidence the container is sick — unhealthy status is what
       # health-conditioned tooling acts on, and under an orchestrator it
       # means restart. The deploy config test pins this.
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8081 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -204,6 +206,7 @@ services:
 
   prom_proxy:
     image: ghcr.io/muchq/prom_proxy:${PROM_PROXY_SHA:-${DEPLOY_SHA:?unset}}
+    init: true
     labels:
       com.muchq.description: "Metrics API behind the dashboard"
     restart: always
@@ -229,6 +232,7 @@ services:
     labels:
       com.muchq.description: "Stockfish over HTTP for chess bots"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       - PORT=8094
@@ -247,7 +251,7 @@ services:
           memory: 512M
     healthcheck:
       # Steady /health probe (#1307); see games_hub's for the full rationale.
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8094 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8094 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -261,6 +265,7 @@ services:
     labels:
       com.muchq.description: "GNU Go over HTTP for go bots"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       - PORT=8095
@@ -279,7 +284,7 @@ services:
           memory: 128M
     healthcheck:
       # Steady /health probe (#1307); see games_hub's for the full rationale.
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8095 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8095 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -290,6 +295,7 @@ services:
     labels:
       com.muchq.description: "Word-ladder solver (wordchains)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8083"
@@ -308,7 +314,7 @@ services:
           memory: 512M
     healthcheck:
       # Steady /health probe (#1307); see games_hub's for the full rationale.
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8083 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8083 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -321,6 +327,7 @@ services:
     labels:
       com.muchq.description: "Word-ladder solver (Gleam)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8096"
@@ -339,7 +346,7 @@ services:
     healthcheck:
       # Steady /health probe (#1307); see games_hub's for the full rationale.
       # mist refuses a request with no Host header, HTTP/1.0 or not.
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8096 && printf "GET /health HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8096 && printf "GET /health HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -350,6 +357,7 @@ services:
     labels:
       com.muchq.description: "Image blur and edge detection"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8084"
@@ -368,7 +376,7 @@ services:
           memory: 512M
     healthcheck:
       # Steady /health probe (#1307); see games_hub's for the full rationale.
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8084 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8084 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -379,6 +387,7 @@ services:
     labels:
       com.muchq.description: "one_d4 v2 API: /v2/analyze on the C++ detectors (#1389 phase 6)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8090"
@@ -400,7 +409,7 @@ services:
     healthcheck:
       # Steady /health probe; never the analyze route — a 400 for a bad PGN
       # must stay a per-request error, not evidence the container is sick.
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8090 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8090 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -411,6 +420,7 @@ services:
     labels:
       com.muchq.description: "URL shortener v2 API (C++)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8091"
@@ -430,7 +440,7 @@ services:
           cpus: '0.25'
           memory: 256M
     healthcheck:
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8091 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8091 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -441,6 +451,7 @@ services:
     labels:
       com.muchq.description: "Model Context Protocol server"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       - PORT=8080
@@ -469,7 +480,7 @@ services:
       # Served by mcpserver's HealthController — static liveness, no database
       # check, on the azul base whose bash/head/grep this command relies on
       # (same base as one_d4).
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -533,6 +544,7 @@ services:
   # came up).
   one_d4_migrate:
     image: ghcr.io/muchq/one_d4_migrate:${ONE_D4_MIGRATE_SHA:-${DEPLOY_SHA:?unset}}
+    init: true
     labels:
       com.muchq.description: "one_d4 schema migrations (one-shot)"
     restart: "no"
@@ -558,6 +570,7 @@ services:
     labels:
       com.muchq.description: "Chess corpus API: index submits, ChessQL queries (indexing runs in one_d4_worker)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       - APP_NAME=one_d4
@@ -597,7 +610,7 @@ services:
     healthcheck:
       # Check: /health answers 200 with {"status":"DOWN"} when Postgres is
       # unreachable, so only a non-2xx — or no answer at all — fails this.
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -617,6 +630,7 @@ services:
   # service being up — the two services now deploy in either order (#1419).
   one_d4_worker:
     image: ghcr.io/muchq/one_d4_worker:${ONE_D4_WORKER_SHA:-${DEPLOY_SHA:?unset}}
+    init: true
     labels:
       com.muchq.description: "Chess index worker (C++)"
     restart: always
@@ -671,6 +685,7 @@ services:
     labels:
       com.muchq.description: "microgpt text generation API"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8087"
@@ -693,7 +708,7 @@ services:
       # microgpt-serve previously had no healthcheck at all, which is how its
       # dashboard sat empty for hours after a deploy until the first real
       # request arrived.
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8087 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8087 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -704,6 +719,7 @@ services:
     labels:
       com.muchq.description: "Next-event predictor over Caddy's access log and the hub's events (Rust)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8093"
@@ -735,7 +751,7 @@ services:
           memory: 256M
     healthcheck:
       # Steady /health probe (#1307); see games_hub's for the full rationale.
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8093 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8093 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3
@@ -743,6 +759,7 @@ services:
 
   log_shipper:
     image: ghcr.io/muchq/log_shipper:${LOG_SHIPPER_SHA:-${DEPLOY_SHA:?unset}}
+    init: true
     labels:
       com.muchq.description: "Rolled-log to S3 shipper: Caddy access logs, one_d4 query events, games_hub game events (Go)"
     restart: always
@@ -786,6 +803,7 @@ services:
     labels:
       com.muchq.description: "Log-derived stats aggregator and API (Go)"
     restart: always
+    init: true
     logging: *default-logging
     # Same profile as log_shipper: both halves of the pipeline need the
     # stats S3 credentials in ~/.env, so neither starts on a default up -d.
@@ -807,7 +825,7 @@ services:
         condition: service_completed_successfully
     healthcheck:
       # Steady /health probe (#1307); see games_hub's for the full rationale.
-      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8092 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && head -1 <&3 | grep -q " 200"']
+      test: ["CMD", "timeout", "4", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/8092 && printf "GET /health HTTP/1.0\r\n\r\n" >&3 && read -r status <&3 && [[ $$status == HTTP/1.?" 200"* ]]']
       interval: 30s
       timeout: 5s
       retries: 3

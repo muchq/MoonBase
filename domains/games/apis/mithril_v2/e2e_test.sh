@@ -39,6 +39,8 @@ if [[ -z "$PROBE" ]]; then
   echo "FAIL: no healthcheck found for mithril_v2 in compose.yaml" >&2
   exit 1
 fi
+# Compose reads `$$` as a literal `$`; bash would read it as its own PID.
+PROBE="${PROBE//\$\$/\$}"
 if ! bash -c "${PROBE//\/8096 /\/$PORT }"; then
   echo "FAIL: the compose healthcheck fails against the release: $PROBE" >&2
   exit 1

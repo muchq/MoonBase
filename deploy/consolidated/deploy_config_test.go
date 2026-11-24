@@ -636,6 +636,128 @@ func TestHealthchecksAreWrittenInPlaceRatherThanMerged(t *testing.T) {
 	}
 }
 
+// A first-party probe forks nothing.
+//
+// oci.bzl makes the service binary itself PID 1, and none of our runtimes
+// waits on children it did not start. A probe that forks — a pipeline, a
+// command substitution, an external tool — leaves those children under PID 1
+// when timeout kills bash on a slow answer, and they stay zombies for the life
+// of the container. Builtins only: read and [[ ]] do what head and grep did.
+var probeForks = []*regexp.Regexp{
+	regexp.MustCompile(`(^|[^|])\|([^|]|$)`),
+	regexp.MustCompile(`\$\(`),
+	regexp.MustCompile("`"),
+	regexp.MustCompile(`\b(head|grep|cat|sed|awk|tr|cut)\b`),
+}
+
+func TestFirstPartyProbesForkNothing(t *testing.T) {
+	probes := healthcheckProbes(t, "compose.yaml")
+	if _, ok := probes["one_d4"]; !ok {
+		t.Fatal("no healthcheck found for one_d4, which has one; the parser has gone stale")
+	}
+
+	for service, probe := range probes {
+		if !strings.Contains(probe.image, "ghcr.io/muchq/") {
+			continue
+		}
+		for _, line := range probe.lines {
+			for _, fork := range probeForks {
+				if fork.MatchString(line) {
+					t.Errorf("%s's healthcheck forks (%s): %q\nIts binary is PID 1 and never "+
+						"reaps, so a timed-out probe leaves zombies. Use bash builtins.",
+						service, fork, line)
+				}
+			}
+		}
+	}
+}
+
+// The probe guards see a healthcheck however its key line is written.
+func TestHealthcheckProbesSeesEveryFormOfTheKey(t *testing.T) {
+	compose := filepath.Join(t.TempDir(), "compose.yaml")
+	fixture := `services:
+  commented:
+    image: ghcr.io/muchq/a:x
+    healthcheck:  # note
+      test: ["CMD", "a"]
+  aliased:
+    image: ghcr.io/muchq/b:x
+    healthcheck: *probe
+  flow:
+    image: ghcr.io/muchq/c:x
+    healthcheck: {test: ["CMD", "c"]}
+  nested:
+    image: ghcr.io/muchq/d:x
+    labels:
+      healthcheck: x
+`
+	if err := os.WriteFile(compose, []byte(fixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	probes := healthcheckProbes(t, compose)
+	for _, service := range []string{"commented", "aliased", "flow"} {
+		if len(probes[service].lines) == 0 {
+			t.Errorf("healthcheckProbes missed %s's healthcheck", service)
+		}
+	}
+	if _, ok := probes["nested"]; ok {
+		t.Error("healthcheckProbes read a nested `healthcheck` key as the service's")
+	}
+	if got := strings.Join(probes["aliased"].lines, " "); !strings.Contains(got, " *") {
+		t.Errorf("aliased healthcheck reads as %q; the merge guard looks for the alias", got)
+	}
+}
+
+// Every first-party container runs under an init. Its binary is PID 1, which
+// ignores any signal it installs no handler for, so without tini a binary that
+// leaves SIGTERM alone waits out docker's stop timeout and is killed. tini also
+// reaps whatever a service's own children leave behind.
+func TestFirstPartyServicesRunUnderAnInit(t *testing.T) {
+	firstParty := 0
+	for service, block := range composeServiceLines(t, "compose.yaml") {
+		if !hasServiceKeyPrefix(block, "image: ghcr.io/muchq/") {
+			continue
+		}
+		firstParty++
+		if !hasServiceKeyPrefix(block, "init: true") {
+			t.Errorf("%s runs a first-party image without `init: true`", service)
+		}
+	}
+	if firstParty == 0 {
+		t.Fatal("found no first-party services in compose.yaml; this test is reading nothing")
+	}
+}
+
+func TestHasServiceKeyPrefixReadsOnlyTheServicesOwnKeys(t *testing.T) {
+	for _, tc := range []struct {
+		line string
+		want bool
+	}{
+		{"    init: true", true},
+		{"    init: true  # tini", true},
+		{"      init: true", false},
+		{"    init: false", false},
+		{"    restart: always", false},
+	} {
+		if got := hasServiceKeyPrefix([]string{tc.line}, "init: true"); got != tc.want {
+			t.Errorf("hasServiceKeyPrefix(%q) = %v, want %v", tc.line, got, tc.want)
+		}
+	}
+}
+
+// hasServiceKeyPrefix reports whether a service's own mapping, not a nested
+// one, has a line starting with want.
+func hasServiceKeyPrefix(block []string, want string) bool {
+	for _, raw := range block {
+		indent := len(raw) - len(strings.TrimLeft(raw, " "))
+		if indent == 4 && strings.HasPrefix(strings.TrimSpace(withoutComment(raw)), want) {
+			return true
+		}
+	}
+	return false
+}
+
 type healthcheckProbe struct {
 	image string
 	lines []string
@@ -668,7 +790,12 @@ func healthcheckProbes(t *testing.T, name string) map[string]healthcheckProbe {
 			if strings.HasPrefix(trimmed, "image:") {
 				image = trimmed
 			}
-			if trimmed == "healthcheck:" {
+			if rest, ok := strings.CutPrefix(withoutComment(trimmed), "healthcheck:"); ok && indent == 4 {
+				// An alias or flow mapping carries the whole value on the key line.
+				if strings.TrimSpace(rest) != "" {
+					lines = append(lines, trimmed)
+					continue
+				}
 				healthcheckIndent = indent
 				continue
 			}
