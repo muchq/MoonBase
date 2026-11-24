@@ -12,11 +12,12 @@ namespace wordchain_race {
 /// and Table::restore, so a row play could not reach is refused.
 ///
 /// Schema v1:
-///   {"v":1, "puzzle":{"start":w, "target":w, "optimal":n},
+///   {"v":1, "puzzle":{"start":w, "target":w, "optimal":n, "lexicon":name},
 ///    "runners":[{"id":playerId, "ladder":[w...], "finishedMs":n (absent
-///    until finished)}...], "startedMs":n, "deadlineMs":n,
-///    "timedOut":bool, "abandoned":bool,
-///    "scoreSheet":[{"winner":playerId (absent for nobody)}...], "closed":bool}
+///    until finished), "left":bool}...], "startedMs":n, "deadlineMs":n,
+///    "ending":"finished"|"timeout"|"leave" (absent in play),
+///    "scoreSheet":[{"winner":playerId (absent for nobody), "ending":...}...],
+///    "closed":bool}
 [[nodiscard]] std::string serializeTable(const Table& table);
 [[nodiscard]] absl::StatusOr<Table> deserializeTable(const std::string& serialized);
 

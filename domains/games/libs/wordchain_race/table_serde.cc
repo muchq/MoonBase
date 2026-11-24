@@ -14,6 +14,25 @@ using nlohmann::json;
 
 constexpr int kVersion = 1;
 
+std::string_view EndingName(Ending ending) {
+  switch (ending) {
+    case Ending::kFinished:
+      return "finished";
+    case Ending::kTimeout:
+      return "timeout";
+    case Ending::kLeave:
+      return "leave";
+  }
+  return "finished";
+}
+
+absl::StatusOr<Ending> EndingNamed(std::string_view name) {
+  for (Ending ending : {Ending::kFinished, Ending::kTimeout, Ending::kLeave}) {
+    if (EndingName(ending) == name) return ending;
+  }
+  return absl::InvalidArgumentError(absl::StrCat("no ending ", name));
+}
+
 absl::StatusOr<const json*> Field(const json& object, std::string_view key) {
   const auto found = object.find(key);
   if (found == object.end()) return absl::InvalidArgumentError(absl::StrCat(key, " is missing"));
@@ -56,7 +75,9 @@ absl::StatusOr<Runner> ReadRunner(const json& r) {
   if (!id.ok()) return id.status();
   auto ladder_field = Array(r, "ladder");
   if (!ladder_field.ok()) return ladder_field.status();
-  Runner runner{*std::move(id), {}, std::nullopt};
+  auto left = Boolean(r, "left");
+  if (!left.ok()) return left.status();
+  Runner runner{*std::move(id), {}, std::nullopt, *left};
   for (const json& word : **ladder_field) {
     if (!word.is_string()) return absl::InvalidArgumentError("a rung is a word");
     runner.ladder.push_back(word.get<std::string>());
@@ -75,29 +96,32 @@ std::string serializeTable(const Table& table) {
   const Race& race = table.race();
   json runners = json::array();
   for (const Runner& runner : race.runners()) {
-    json r = {{"id", runner.player_id}, {"ladder", runner.ladder}};
+    json r = {{"id", runner.player_id}, {"ladder", runner.ladder}, {"left", runner.left}};
     if (runner.finished_ms.has_value()) r["finishedMs"] = *runner.finished_ms;
     runners.push_back(std::move(r));
   }
   json sheet = json::array();
   for (const RaceScore& score : table.scoreSheet()) {
-    json line = json::object();
+    json line = {{"ending", EndingName(score.ending)}};
     if (score.winner.has_value()) line["winner"] = *score.winner;
     sheet.push_back(std::move(line));
   }
   const Puzzle& puzzle = race.puzzle();
-  return json{
+  json row = {
       {"v", kVersion},
-      {"puzzle", {{"start", puzzle.start}, {"target", puzzle.target}, {"optimal", puzzle.optimal}}},
+      {"puzzle",
+       {{"start", puzzle.start},
+        {"target", puzzle.target},
+        {"optimal", puzzle.optimal},
+        {"lexicon", puzzle.lexicon}}},
       {"runners", std::move(runners)},
       {"startedMs", race.startedMs()},
       {"deadlineMs", race.deadlineMs()},
-      {"timedOut", race.timedOut()},
-      {"abandoned", race.abandoned()},
       {"scoreSheet", std::move(sheet)},
       {"closed", table.isOver()},
-  }
-      .dump();
+  };
+  if (race.ending().has_value()) row["ending"] = EndingName(*race.ending());
+  return row.dump();
 }
 
 absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
@@ -116,6 +140,8 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
   auto start = String(p, "start");
   auto target = String(p, "target");
   auto optimal = Integer(p, "optimal");
+  auto lexicon = String(p, "lexicon");
+  if (!lexicon.ok()) return lexicon.status();
   if (!start.ok()) return start.status();
   if (!target.ok()) return target.status();
   if (!optimal.ok()) return optimal.status();
@@ -138,6 +164,11 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
   for (const json& line : **sheet_field) {
     if (!line.is_object()) return absl::InvalidArgumentError("a score is an object");
     RaceScore score;
+    auto ending_name = String(line, "ending");
+    if (!ending_name.ok()) return ending_name.status();
+    auto ending = EndingNamed(*ending_name);
+    if (!ending.ok()) return ending.status();
+    score.ending = *ending;
     if (line.contains("winner")) {
       auto winner = String(line, "winner");
       if (!winner.ok()) return winner.status();
@@ -148,16 +179,21 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
 
   auto started = Integer(j, "startedMs");
   auto deadline = Integer(j, "deadlineMs");
-  auto timed_out = Boolean(j, "timedOut");
-  auto abandoned = Boolean(j, "abandoned");
   auto closed = Boolean(j, "closed");
-  for (const absl::Status& s : {started.status(), deadline.status(), timed_out.status(),
-                                abandoned.status(), closed.status()}) {
+  for (const absl::Status& s : {started.status(), deadline.status(), closed.status()}) {
     if (!s.ok()) return s;
   }
-  auto race =
-      Race::restore(Puzzle{*std::move(start), *std::move(target), static_cast<int>(*optimal)},
-                    std::move(runners), *started, *deadline, *timed_out, *abandoned);
+  std::optional<Ending> race_ending;
+  if (j.contains("ending")) {
+    auto name = String(j, "ending");
+    if (!name.ok()) return name.status();
+    auto ending = EndingNamed(*name);
+    if (!ending.ok()) return ending.status();
+    race_ending = *ending;
+  }
+  auto race = Race::restore(Puzzle{*std::move(start), *std::move(target), static_cast<int>(*optimal),
+                                   *std::move(lexicon)},
+                            std::move(runners), *started, *deadline, race_ending);
   if (!race.ok()) return race.status();
   return Table::restore(*std::move(race), std::move(sheet), *closed);
 }

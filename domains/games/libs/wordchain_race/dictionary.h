@@ -43,11 +43,14 @@ class Dictionary {
 };
 
 /// A race's puzzle: climb from `start` to `target`. `optimal` counts the
-/// words in a shortest ladder, both ends included.
+/// words in a shortest ladder, both ends included. `lexicon` names the word
+/// lists it was picked from and is played against; PickPuzzle leaves it to
+/// the caller, who chose them.
 struct Puzzle {
   std::string start;
   std::string target;
   int optimal = 0;
+  std::string lexicon;
   bool operator==(const Puzzle&) const = default;
 };
 
