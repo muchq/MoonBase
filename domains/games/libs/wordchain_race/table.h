@@ -143,10 +143,11 @@ class Table {
   [[nodiscard]] static absl::StatusOr<Table> open(std::vector<std::string> players, Puzzle puzzle,
                                                   int64_t now_ms, int64_t duration_ms);
   /// The full truth, for a stored row: refused unless a finished race's
-  /// line ends the sheet, and the table is closed exactly when fewer than
-  /// two seats remain, its race over then.
+  /// line ends the sheet, the table is closed exactly when fewer than two
+  /// seats remain, its race over then, and only a closed table's close
+  /// ended a race.
   [[nodiscard]] static absl::StatusOr<Table> restore(Race race, std::vector<RaceScore> score_sheet,
-                                                     bool closed);
+                                                     bool closed, bool ended_by_close);
 
   /// A change to the race in play; a race it ends is scored. Refused
   /// between races and once the table is closed.
@@ -159,18 +160,24 @@ class Table {
 
   /// Closed: too few seats left.
   [[nodiscard]] bool isOver() const { return closed_; }
+  /// The close ended the race in play, which the sheet's last line scores.
+  [[nodiscard]] bool endedByClose() const { return ended_by_close_; }
   [[nodiscard]] const Race& race() const { return race_; }
   [[nodiscard]] const std::vector<RaceScore>& scoreSheet() const { return score_sheet_; }
   [[nodiscard]] std::vector<std::string> players() const { return race_.players(); }
   [[nodiscard]] int playerIndex(std::string_view id) const { return race_.playerIndex(id); }
 
  private:
-  Table(Race race, std::vector<RaceScore> score_sheet, bool closed)
-      : race_(std::move(race)), score_sheet_(std::move(score_sheet)), closed_(closed) {}
+  Table(Race race, std::vector<RaceScore> score_sheet, bool closed, bool ended_by_close)
+      : race_(std::move(race)),
+        score_sheet_(std::move(score_sheet)),
+        closed_(closed),
+        ended_by_close_(ended_by_close) {}
 
   Race race_;
   std::vector<RaceScore> score_sheet_;
   bool closed_ = false;
+  bool ended_by_close_ = false;
 };
 
 }  // namespace wordchain_race

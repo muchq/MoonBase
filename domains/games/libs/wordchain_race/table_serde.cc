@@ -119,6 +119,7 @@ std::string serializeTable(const Table& table) {
       {"deadlineMs", race.deadlineMs()},
       {"scoreSheet", std::move(sheet)},
       {"closed", table.isOver()},
+      {"endedByClose", table.endedByClose()},
   };
   if (race.ending().has_value()) row["ending"] = EndingName(*race.ending());
   return row.dump();
@@ -180,7 +181,9 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
   auto started = Integer(j, "startedMs");
   auto deadline = Integer(j, "deadlineMs");
   auto closed = Boolean(j, "closed");
-  for (const absl::Status& s : {started.status(), deadline.status(), closed.status()}) {
+  auto ended_by_close = Boolean(j, "endedByClose");
+  for (const absl::Status& s :
+       {started.status(), deadline.status(), closed.status(), ended_by_close.status()}) {
     if (!s.ok()) return s;
   }
   std::optional<Ending> race_ending;
@@ -195,7 +198,7 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
                                    *std::move(lexicon)},
                             std::move(runners), *started, *deadline, race_ending);
   if (!race.ok()) return race.status();
-  return Table::restore(*std::move(race), std::move(sheet), *closed);
+  return Table::restore(*std::move(race), std::move(sheet), *closed, *ended_by_close);
 }
 
 }  // namespace wordchain_race

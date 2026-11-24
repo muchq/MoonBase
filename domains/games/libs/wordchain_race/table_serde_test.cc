@@ -47,6 +47,7 @@ void ExpectSame(const Table& a, const Table& b) {
   EXPECT_EQ(a.race().ending(), b.race().ending());
   EXPECT_EQ(a.scoreSheet(), b.scoreSheet());
   EXPECT_EQ(a.isOver(), b.isOver());
+  EXPECT_EQ(a.endedByClose(), b.endedByClose());
 }
 
 TEST(TableSerde, RoundTripsARaceInPlay) {
@@ -70,6 +71,7 @@ TEST(TableSerde, RoundTripsATableClosedByLeave) {
   ASSERT_TRUE(back.ok()) << back.status();
   ExpectSame(*back, table);
   EXPECT_EQ(back->race().ending(), Ending::kLeave);
+  EXPECT_TRUE(back->endedByClose());
 }
 
 TEST(TableSerde, WritesTheDocumentedSchema) {
@@ -85,6 +87,7 @@ TEST(TableSerde, WritesTheDocumentedSchema) {
   EXPECT_EQ(j["scoreSheet"][0]["winner"], "ann");
   EXPECT_EQ(j["scoreSheet"][0]["ending"], "timeout");
   EXPECT_EQ(j["closed"], false);
+  EXPECT_EQ(j["endedByClose"], false);
   EXPECT_FALSE(nlohmann::json::parse(serializeTable(*Table::open({"a", "b"}, kPuzzle, kT0, 1)))
                    .contains("ending"));
 }

@@ -223,10 +223,11 @@ absl::StatusOr<Table> Table::open(std::vector<std::string> players, Puzzle puzzl
                                   int64_t duration_ms) {
   auto race = Race::open(std::move(players), std::move(puzzle), now_ms, duration_ms);
   if (!race.ok()) return race.status();
-  return Table(*std::move(race), {}, false);
+  return Table(*std::move(race), {}, false, false);
 }
 
-absl::StatusOr<Table> Table::restore(Race race, std::vector<RaceScore> score_sheet, bool closed) {
+absl::StatusOr<Table> Table::restore(Race race, std::vector<RaceScore> score_sheet, bool closed,
+                                     bool ended_by_close) {
   // Open with two seats or more, closed with fewer: removePlayer's rule.
   if (closed != (race.players().size() < 2)) {
     return absl::InvalidArgumentError("the table's seats disagree with its being closed");
@@ -238,7 +239,10 @@ absl::StatusOr<Table> Table::restore(Race race, std::vector<RaceScore> score_she
   if (race.isOver() && (score_sheet.empty() || score_sheet.back() != ScoreOf(race))) {
     return absl::InvalidArgumentError("the score sheet disagrees with the race");
   }
-  return Table(std::move(race), std::move(score_sheet), closed);
+  if (ended_by_close && !closed) {
+    return absl::InvalidArgumentError("only a closed table's close ended a race");
+  }
+  return Table(std::move(race), std::move(score_sheet), closed, ended_by_close);
 }
 
 absl::StatusOr<Table> Table::inRace(
@@ -247,7 +251,7 @@ absl::StatusOr<Table> Table::inRace(
   if (race_.isOver()) return absl::FailedPreconditionError("between races");
   auto after = change(race_);
   if (!after.ok()) return after.status();
-  Table next(*std::move(after), score_sheet_, false);
+  Table next(*std::move(after), score_sheet_, false, false);
   if (next.race_.isOver()) next.score_sheet_.push_back(ScoreOf(next.race_));
   return next;
 }
@@ -257,7 +261,7 @@ absl::StatusOr<Table> Table::next(Puzzle puzzle, int64_t now_ms, int64_t duratio
   if (!race_.isOver()) return absl::FailedPreconditionError("a race is in play");
   auto race = Race::open(race_.players(), std::move(puzzle), now_ms, duration_ms);
   if (!race.ok()) return race.status();
-  return Table(*std::move(race), score_sheet_, false);
+  return Table(*std::move(race), score_sheet_, false, false);
 }
 
 absl::StatusOr<Table> Table::removePlayer(int seat) const {
@@ -265,9 +269,10 @@ absl::StatusOr<Table> Table::removePlayer(int seat) const {
   const bool was_over = race_.isOver();
   auto race = race_.leave(seat);
   if (!race.ok()) return race.status();
-  Table next(*std::move(race), score_sheet_, false);
+  Table next(*std::move(race), score_sheet_, false, false);
   if (next.race_.players().size() < 2) {
     next.closed_ = true;
+    next.ended_by_close_ = !was_over;
     next.race_ = next.race_.endByLeave();
   }
   if (!was_over && next.race_.isOver()) next.score_sheet_.push_back(ScoreOf(next.race_));

@@ -263,6 +263,7 @@ TEST(Table, ALeaveThatEndsTheRaceScoresIt) {
 TEST(Table, ALeaveDownToOneCreditsAFinisherWhoStayed) {
   Table table = *InRace(OpenTable(), 0, kMid).removePlayer(1);
   EXPECT_TRUE(table.isOver());
+  EXPECT_TRUE(table.endedByClose());
   EXPECT_EQ(table.scoreSheet(), (Sheet{{"ann", Ending::kFinished}}));
 }
 
@@ -274,34 +275,44 @@ TEST(Table, ALeaveDownToOneWithNobodyFinishedEndsByLeave) {
   EXPECT_FALSE(table.removePlayer(0).ok());
 }
 
+TEST(Table, AClosedTableSaysWhetherTheCloseEndedARace) {
+  EXPECT_TRUE(OpenTable().removePlayer(1)->endedByClose());
+  Table between = *InRace(OpenTable(), 0, kPar).removePlayer(1);
+  EXPECT_TRUE(between.isOver());
+  EXPECT_FALSE(between.endedByClose());
+  EXPECT_FALSE(OpenTable({"ann", "bob", "cy"}).removePlayer(1)->endedByClose());
+}
+
 TEST(Table, AFinishedRaceKeepsItsWinnerWhenTheyLeave) {
   Table table = InRace(InRace(OpenTable({"ann", "bob", "cy"}), 0, kMid), 1, kLong);
   table = InRace(table, 2, kLong);
   table = *table.removePlayer(0);
   EXPECT_EQ(table.race().winner(), "ann");
   EXPECT_EQ(table.scoreSheet().size(), 1U);
-  EXPECT_TRUE(Table::restore(table.race(), table.scoreSheet(), false).ok());
+  EXPECT_TRUE(Table::restore(table.race(), table.scoreSheet(), false, false).ok());
 
   Table two = *InRace(InRace(OpenTable(), 0, kMid), 1, kLong).removePlayer(0);
   EXPECT_TRUE(two.isOver());
   EXPECT_EQ(two.race().winner(), "ann");
-  EXPECT_TRUE(Table::restore(two.race(), two.scoreSheet(), true).ok());
+  EXPECT_TRUE(Table::restore(two.race(), two.scoreSheet(), true, false).ok());
 }
 
 TEST(TableRestore, RefusesAFinishedRaceTheSheetDoesNotEndWith) {
   Table table = InRace(InRace(OpenTable(), 0, kMid), 1, kMid);
-  EXPECT_TRUE(Table::restore(table.race(), table.scoreSheet(), false).ok());
-  EXPECT_FALSE(Table::restore(table.race(), {}, false).ok());
-  EXPECT_FALSE(Table::restore(table.race(), {{"bob", Ending::kFinished}}, false).ok());
-  EXPECT_FALSE(Table::restore(table.race(), {{"ann", Ending::kTimeout}}, false).ok());
+  EXPECT_TRUE(Table::restore(table.race(), table.scoreSheet(), false, false).ok());
+  EXPECT_FALSE(Table::restore(table.race(), {}, false, false).ok());
+  EXPECT_FALSE(Table::restore(table.race(), {{"bob", Ending::kFinished}}, false, false).ok());
+  EXPECT_FALSE(Table::restore(table.race(), {{"ann", Ending::kTimeout}}, false, false).ok());
 }
 
 TEST(TableRestore, RefusesSeatsThatDisagreeWithBeingClosed) {
   Table closed = *OpenTable().removePlayer(1);
-  EXPECT_TRUE(Table::restore(closed.race(), closed.scoreSheet(), true).ok());
-  EXPECT_FALSE(Table::restore(closed.race(), closed.scoreSheet(), false).ok());
+  EXPECT_TRUE(Table::restore(closed.race(), closed.scoreSheet(), true, true).ok());
+  EXPECT_FALSE(Table::restore(closed.race(), closed.scoreSheet(), false, false).ok());
   Table done = InRace(OpenTable(), 0, kPar);
-  EXPECT_FALSE(Table::restore(done.race(), done.scoreSheet(), true).ok());
+  EXPECT_FALSE(Table::restore(done.race(), done.scoreSheet(), true, false).ok());
+  // Only a closed table's close ended a race.
+  EXPECT_FALSE(Table::restore(done.race(), done.scoreSheet(), false, true).ok());
 }
 
 }  // namespace
