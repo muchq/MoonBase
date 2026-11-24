@@ -8,20 +8,19 @@
 namespace wordchain_race {
 
 /// The lexicon a race is played against: its name, the words a runner may
-/// play, and the common words puzzles start and end on.
+/// play, the common words puzzles start and end on, and the notice their
+/// licenses ask every copy to carry. Holding the notice here keeps it in
+/// any binary that plays a race.
 struct Lexicon {
   std::string_view name;
   const Dictionary& words;
   const Dictionary& endpoints;
+  std::string_view notice;
 };
 
-/// ENABLE's words (:race_words) with SCOWL's common words (:common_words)
-/// for endpoints, built into the binary and read once.
+/// ENABLE's words (:race_words) with SCOWL's scrubbed common words
+/// (common_words.txt) for endpoints, built into the binary and read once.
 [[nodiscard]] const Lexicon& EnableLexicon();
-
-/// SCOWL's copyright notice, which its license asks every copy of a list
-/// derived from it to carry.
-[[nodiscard]] std::string_view ScowlCopyright();
 
 }  // namespace wordchain_race
 

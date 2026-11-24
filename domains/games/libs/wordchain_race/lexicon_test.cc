@@ -19,7 +19,7 @@ TEST(EnableLexicon, HoldsBothListsWhole) {
 }
 
 TEST(EnableLexicon, CarriesScowlsCopyright) {
-  EXPECT_NE(ScowlCopyright().find("Kevin Atkinson"), std::string_view::npos);
+  EXPECT_NE(EnableLexicon().notice.find("Kevin Atkinson"), std::string_view::npos);
 }
 
 }  // namespace

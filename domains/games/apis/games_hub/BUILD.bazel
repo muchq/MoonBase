@@ -1,5 +1,6 @@
 load("@opal_cpp//bazel:defs.bzl", "smithy_cpp_client_library", "smithy_cpp_server_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 # The games hub's model: the room layer (games.smithy) and one
@@ -1978,3 +1979,13 @@ cc_binary(
 )
 
 linux_amd64_oci_binary(bin_name = "games_hub")
+
+# The shipped binary carries SCOWL's notice with the word lists it embeds,
+# as SCOWL's license asks of every copy.
+sh_test(
+    name = "games_hub_notice_test",
+    size = "small",
+    srcs = ["games_hub_notice_test.sh"],
+    args = ["$(rootpath :games_hub)"],
+    data = [":games_hub"],
+)

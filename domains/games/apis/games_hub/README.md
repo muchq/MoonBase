@@ -14,7 +14,8 @@ auth ahead of the 101. One session identity opens the one stream.
   (`GET /games/v2/chess.pgn`), the two terminal stream errors, the one
   stream — `Play` at `/games/v2/play`, its `GameCommands`/`GameEvents`
   unions carrying the room layer's own cases plus one envelope member
-  per tenant (`lobby`, `voice`, `golf`, `castle`, `rummy`, `chess`, `pong`, `spades`, `go`) — and the game-agnostic room
+  per tenant (`lobby`, `voice`, `golf`, `castle`, `rummy`, `chess`, `pong`, `spades`, `go`,
+  `wordchain`) — and the game-agnostic room
   layer — rooms, chat, player info with room-scoped stats and the
   member's table (`PlayerInfo.table`: which game, which
   table, pending or in play, absent while idle — how the lobby tells who

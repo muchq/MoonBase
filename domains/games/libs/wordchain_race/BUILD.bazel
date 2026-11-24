@@ -47,14 +47,14 @@ exports_files([
 genrule(
     name = "lexicon_data",
     srcs = [
-        ":common_words",
+        "SCOWL_COPYRIGHT",
+        "common_words.txt",
         ":race_words",
-        "@scowl//:Copyright",
     ],
     outs = ["lexicon_data.cc"],
-    cmd = "$(location embed.sh) $@ kRaceWordsText=$(location :race_words) " +
-          "kCommonWordsText=$(location :common_words) " +
-          "kScowlCopyrightText=$(location @scowl//:Copyright)",
+    cmd = "$(execpath embed.sh) $@ kRaceWordsText=$(execpath :race_words) " +
+          "kCommonWordsText=$(execpath common_words.txt) " +
+          "kScowlCopyrightText=$(execpath SCOWL_COPYRIGHT)",
     tools = ["embed.sh"],
 )
 

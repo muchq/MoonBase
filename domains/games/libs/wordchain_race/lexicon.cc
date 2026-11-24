@@ -8,10 +8,9 @@ const Lexicon& EnableLexicon() {
   static const Dictionary* const kWords = new Dictionary(Dictionary::FromLines(kRaceWordsText));
   static const Dictionary* const kEndpoints =
       new Dictionary(Dictionary::FromLines(kCommonWordsText));
-  static const Lexicon* const kLexicon = new Lexicon{"enable", *kWords, *kEndpoints};
+  static const Lexicon* const kLexicon =
+      new Lexicon{"enable", *kWords, *kEndpoints, kScowlCopyrightText};
   return *kLexicon;
 }
-
-std::string_view ScowlCopyright() { return kScowlCopyrightText; }
 
 }  // namespace wordchain_race
