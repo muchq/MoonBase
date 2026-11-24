@@ -304,7 +304,8 @@ TEST(KindNames, EachKindIsWrittenAsItsAdaptersNameAndReadBack) {
     EXPECT_EQ(ParseGameKind(A::kName), A::kKind);
     return false;
   });
-  constexpr std::string_view kWire[] = {"golf", "castle", "rummy", "chess", "pong", "spades", "go"};
+  constexpr std::string_view kWire[] = {"golf",   "castle", "rummy", "chess",
+                                        "pong",   "spades", "go",    "wordchain"};
   for (std::size_t i = 0; i < std::size(kWire); ++i) {
     EXPECT_EQ(GameKindName(static_cast<GameKind>(i)), kWire[i]);
   }

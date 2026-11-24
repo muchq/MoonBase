@@ -1512,6 +1512,8 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
       return;
     }
     Count("chat_appends", {{"result", "stored"}});
+    // A wordchain race in the room: mithril would post its ladder.
+    bool racing = false;
     {
       // That a room was talking, and how many were in it. The
       // text never leaves the process. This path dropped mu_ before the
@@ -1520,6 +1522,13 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
       const std::lock_guard<std::mutex> lock(mu_);
       const auto room = rooms_.find(room_id);
       const std::size_t members = room == rooms_.end() ? 0 : room->second.members.size();
+      if (room != rooms_.end()) {
+        for (const auto& [game_id, entry] : room->second.games) {
+          if (!entry.started()) continue;
+          const auto* race = std::get_if<wordchain_race::Table>(&*entry.state);
+          if (race != nullptr && !race->race().isOver()) racing = true;
+        }
+      }
       RecordLocked(
           [&room_id, members](absl::Time now) { return ChatMessageLine(now, room_id, members); });
     }
@@ -1531,7 +1540,10 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
     // and advancing the cursor over it would skip it for good.
     PumpChat(room_id);
     // After the asker's own row is out, so a reply can only follow it.
-    for (const auto& bot : bots_) bot->OnMessage(*appended);
+    for (const auto& bot : bots_) {
+      if (racing && std::string_view(bot->Author()) == kWordchainPlayerId) continue;
+      bot->OnMessage(*appended);
+    }
     return;
   }
 
@@ -2188,8 +2200,13 @@ template <typename E>
 std::optional<Refusal> GamesHub::FlagEngineLocked(GameRef ref, int64_t now_ms, Outbox& outbox) {
   using A = Adapter<E>;
   const E& table = std::get<E>(*ref.entry->state);
+  // The flag falls on the side to move; a game with nobody to move (a
+  // race's one clock) falls on its first seat, which the flag ignores.
+  const std::string turn = A::Turn(table);
+  const std::string& mover =
+      turn.empty() && !ref.entry->roster.empty() ? ref.entry->roster.front() : turn;
   return ApplyTableEngineMoveLocked<E>(
-      ref, A::Turn(table), Transition<E>{[now_ms](const E& clocked, int, const MoveContext&) {
+      ref, mover, Transition<E>{[now_ms](const E& clocked, int, const MoveContext&) {
         return A::Flag(clocked, now_ms);
       }},
       outbox);
@@ -3417,14 +3434,18 @@ void GamesHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Wri
         entry.started() ? WithoutSeat(*entry.state, player_id, NowMs()) : std::nullopt;
     const std::string previous_turn = entry.started() ? CurrentTurnOf(*entry.state) : "";
     const bool over = state.has_value() && IsOver(*state);
-    std::vector<HubStore::StatsDelta> deltas;
+    // A leave can end the game in play and leave the table playing on (a
+    // wordchain race whose last climber left): credited as a move's would be.
+    std::optional<std::vector<HubStore::StatsDelta>> deltas =
+        state.has_value() ? DealEndDeltas(*entry.state, *state) : std::nullopt;
+    const bool deal_ended = deltas.has_value();
     if (over) deltas = StatsDeltasOf(*state, roster);
     // Terms are the poster's: a waiting table someone leaves has none,
     // unless they are its round robin's.
     const std::optional<HostedTerms> terms =
         entry.event.has_value() ? entry.terms : std::optional<HostedTerms>();
     const Commit commit = CommitEntryLocked(ref->room_id, ref->game_id, entry, roster, state,
-                                            over ? &deltas : nullptr, &terms);
+                                            deltas.has_value() ? &*deltas : nullptr, &terms);
     if (commit == Commit::kRebased) continue;
     if (commit == Commit::kGone) {
       DropGameLocked(*ref, outbox);
@@ -3446,6 +3467,7 @@ void GamesHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Wri
       FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox);
     } else {
       StageGameViewsLocked(ref->game_id, entry, outbox);
+      if (deal_ended) MirrorStatsLocked(*ref->room, *deltas);
       // The leaver may have held the turn, or been the seat setup was
       // waiting on: whoever plays next hears it the way a move says it.
       if (entry.started()) {

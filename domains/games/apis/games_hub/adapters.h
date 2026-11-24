@@ -24,6 +24,7 @@
 #include "domains/games/apis/games_hub/pong_adapter.h"
 #include "domains/games/apis/games_hub/rummy_adapter.h"
 #include "domains/games/apis/games_hub/spades_adapter.h"
+#include "domains/games/apis/games_hub/wordchain_adapter.h"
 
 namespace games_hub {
 
