@@ -88,10 +88,12 @@ absl::StatusOr<Race> Race::restore(Puzzle puzzle, std::vector<Runner> runners, i
     }
   }
   Race race(std::move(puzzle), std::move(runners), started_ms, deadline_ms, std::nullopt);
-  // Play ends a race as kFinished exactly when it settles; the clock and a
-  // close end only one that had not.
+  // Play ends a race as kFinished exactly when it settles, and a race in
+  // play has not. The clock and a close end only one that had not, but a
+  // leave afterwards can settle it still: so a timeout or a leave may sit
+  // beside runners who are all done.
   const bool settled = race.settled().has_value();
-  if (settled != (ending == Ending::kFinished)) {
+  if ((!ending.has_value() && settled) || (ending == Ending::kFinished && !settled)) {
     return absl::InvalidArgumentError("the ending disagrees with the runners");
   }
   race.ending_ = ending;

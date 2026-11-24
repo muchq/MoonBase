@@ -74,6 +74,31 @@ TEST(TableSerde, RoundTripsATableClosedByLeave) {
   EXPECT_TRUE(back->endedByClose());
 }
 
+// A leave after the clock ended a race leaves every runner done; the row
+// still reads back as the timeout it was.
+TEST(TableSerde, ALeaveAfterATimeoutStillReadsBack) {
+  Table table = Played();
+  table = *table.removePlayer(1);
+  ASSERT_EQ(table.race().ending(), Ending::kTimeout);
+  auto back = deserializeTable(serializeTable(table));
+  ASSERT_TRUE(back.ok()) << back.status();
+  ExpectSame(*back, table);
+}
+
+TEST(TableSerde, ALeaveDownToOneAfterATimeoutStillReadsBack) {
+  Table table = *Table::open({"ann", "bob"}, kPuzzle, kT0, 60'000);
+  table = *table.inRace([](const Race& race) -> absl::StatusOr<Race> {
+    auto r = Play(race, 0, {"cord", "card", "ward", "wart", "warm"});
+    if (!r.ok()) return r.status();
+    return r->expire(kT0 + 60'000);
+  });
+  table = *table.removePlayer(1);
+  ASSERT_TRUE(table.isOver());
+  auto back = deserializeTable(serializeTable(table));
+  ASSERT_TRUE(back.ok()) << back.status();
+  ExpectSame(*back, table);
+}
+
 TEST(TableSerde, WritesTheDocumentedSchema) {
   nlohmann::json j = nlohmann::json::parse(serializeTable(Played()));
   EXPECT_EQ(j["v"], 1);
