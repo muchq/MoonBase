@@ -26,15 +26,15 @@ std::string EndingWord(Ending ending) {
   return "finished";
 }
 
-// Every runner raced, seated or not, and the winner won.
+// Every runner raced, seated or not, and each winner won.
 StatsDeltas RaceDeltas(const Race& race) {
-  const std::optional<std::string> winner = race.winner();
+  const std::vector<std::string> winners = race.winners();
   StatsDeltas deltas;
   for (const wordchain_race::Runner& runner : race.runners()) {
     HubStore::StatsDelta delta;
     delta.player_id = runner.player_id;
     delta.played = 1;
-    delta.won = winner == runner.player_id ? 1 : 0;
+    delta.won = std::find(winners.begin(), winners.end(), runner.player_id) != winners.end() ? 1 : 0;
     deltas.push_back(std::move(delta));
   }
   return deltas;
@@ -44,7 +44,7 @@ moonbase::games::WordchainResult ResultOf(const RaceScore& score,
                                           std::vector<std::string> standings) {
   moonbase::games::WordchainResult result;
   result.ending = EndingWord(score.ending);
-  result.winner = score.winner;
+  result.winners = score.winners;
   result.standings = std::move(standings);
   return result;
 }
@@ -128,7 +128,10 @@ moonbase::games::WordchainView Adapter<Table>::ViewOf(const TableContext& contex
     if (runner.player_id == viewer || race.isOver()) wire.ladder = runner.ladder;
     wire.wins = static_cast<int>(
         std::count_if(table->scoreSheet().begin(), table->scoreSheet().end(),
-                      [&](const RaceScore& score) { return score.winner == runner.player_id; }));
+                      [&](const RaceScore& score) {
+                        return std::find(score.winners.begin(), score.winners.end(),
+                                         runner.player_id) != score.winners.end();
+                      }));
     view.runners.push_back(std::move(wire));
   }
   if (race.isOver()) view.result = ResultOf(wordchain_race::ScoreOf(race), race.standings());

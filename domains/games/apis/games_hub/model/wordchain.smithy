@@ -95,8 +95,11 @@ structure WordchainResult {
     @required
     ending: String
 
-    /// The finisher with the fewest words; absent when nobody finished.
-    winner: String
+    /// The finishers with the fewest words and, among them, the earliest
+    /// finish: more than one when they share both; empty when nobody
+    /// finished.
+    @required
+    winners: PlayerIds
 
     /// Finishers best first, then everyone else in the order they joined.
     @required

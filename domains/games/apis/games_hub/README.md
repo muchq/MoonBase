@@ -669,14 +669,14 @@ refused in band unless it is an ENABLE word one letter from the runner's
 last, not already on their ladder; `retract` takes the last back until the
 runner finishes. Both lists, less a blocklist, are built into the binary
 with SCOWL's copyright (`wordchain_race:lexicon`). The fewest words wins,
-the earlier finish breaking a tie; a finish on par ends the race at once,
+the earlier finish breaking a tie, and runners level on both share the win; a finish on par ends the race at once,
 since nobody can beat it, and so does every seat finishing. The clock is
 the sweep's like any clocked game's, but a race has nobody to move: the
 flag falls on its first seat, which `Flag` ignores. `startGame` between
 races starts the next. A leave keeps the leaver's ladder and finish in the
 race; with fewer than two seats left the table closes, its race in play
 ending by leave and won by its best finisher, if any. A race is recorded as
-`wordchain` and credits every runner played, the winner won.
+`wordchain` and credits every runner played, each winner won.
 
 ## Redaction
 

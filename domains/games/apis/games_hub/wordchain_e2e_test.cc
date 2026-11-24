@@ -227,7 +227,7 @@ TEST_F(WordchainFixture, AFinishOnParWinsTheRaceAndShowsEveryLadder) {
     ASSERT_TRUE(ended.has_value());
     const auto& result = ended->as_gameEnded_or_null()->result;
     EXPECT_EQ(result.ending, "finished");
-    EXPECT_EQ(result.winner, ann.player_id);
+    EXPECT_EQ(result.winners, std::vector<std::string>{ann.player_id});
   }
   const WordchainView& bobs = started->views[1];
   EXPECT_EQ(bobs.phase, "over");
@@ -259,7 +259,7 @@ TEST_F(WordchainFixture, TheClockEndsARaceNobodyIsToMoveIn) {
     ASSERT_TRUE(ended.has_value());
     const auto& result = ended->as_gameEnded_or_null()->result;
     EXPECT_EQ(result.ending, "timeout");
-    EXPECT_FALSE(result.winner.has_value());
+    EXPECT_TRUE(result.winners.empty());
   }
   EXPECT_EQ(hub_->SweepClocksOnce(), 0);
 }
@@ -304,7 +304,11 @@ TEST_F(WordchainFixture, ALeaveThatEndsARaceOnAnOpenTableCreditsIt) {
   auto ended = ReceiveWordchain(started->table.seats[0].stream, "gameEnded");
   ASSERT_TRUE(ended.has_value());
   EXPECT_EQ(ended->as_gameEnded_or_null()->result.ending, "finished");
-  EXPECT_EQ(ended->as_gameEnded_or_null()->result.winner, started->table.seats[0].player_id);
+  // The hub's clock stood still, so both finished at the same moment on the
+  // same words: a shared win.
+  EXPECT_EQ(ended->as_gameEnded_or_null()->result.winners,
+            (std::vector<std::string>{started->table.seats[0].player_id,
+                                      started->table.seats[1].player_id}));
 
   const std::vector<std::string> lines = GameLines();
   ASSERT_EQ(lines.size(), 2u);
@@ -318,7 +322,7 @@ TEST_F(WordchainFixture, ALeaveThatEndsARaceOnAnOpenTableCreditsIt) {
     won += member.games_won;
   }
   EXPECT_EQ(played, 3);
-  EXPECT_EQ(won, 1);
+  EXPECT_EQ(won, 2);
 }
 
 TEST_F(WordchainFixture, ALeaveAfterATimeoutLeavesTheTableReadable) {
