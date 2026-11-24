@@ -12,6 +12,8 @@ struct RaceTableView: View {
     @State private var draft = ""
     @State private var letters = 4
     @State private var confirmingLeave = false
+    /// The race whose shortest ladder the viewer asked to see.
+    @State private var solvedRace: String?
     @FocusState private var typing: Bool
 
     private var viewer: String { session.state.playerId ?? "" }
@@ -33,6 +35,7 @@ struct RaceTableView: View {
                         .foregroundStyle(Theme.warningOrange)
                 }
                 puzzle
+                if let solution = model.solution { shortestLadder(solution) }
                 if racing, me != nil { myLadder }
                 if let notice = session.state.notice {
                     Text(notice).font(Theme.captionFont).foregroundStyle(Theme.errorRed)
@@ -134,6 +137,20 @@ struct RaceTableView: View {
                     .buttonStyle(.bordered)
                     .disabled(!able || ladder.isEmpty)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func shortestLadder(_ solution: [String]) -> some View {
+        if solvedRace == model.raceKey {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(solution.map { $0.uppercased() }.joined(separator: " → "))
+                    .font(.system(size: 15, design: .monospaced))
+                    .accessibilityLabel("A shortest ladder: \(solution.joined(separator: ", "))")
+                Button("Hide the ladder") { solvedRace = nil }
+            }
+        } else {
+            Button("Show a shortest ladder") { solvedRace = model.raceKey }
         }
     }
 

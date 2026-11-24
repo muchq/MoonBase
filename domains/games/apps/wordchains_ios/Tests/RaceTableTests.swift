@@ -113,4 +113,27 @@ final class RaceTableTests: XCTestCase {
         XCTAssertFalse(table(view(.over, runners: pair)).asksBeforeLeaving)
         XCTAssertFalse(table(view(.waiting, start: nil, runners: pair)).asksBeforeLeaving)
     }
+
+    // MARK: - A shortest ladder
+
+    // Offered once the race is over, never while it runs, and not when the
+    // hub sent none.
+    func testAShortestLadderIsOfferedOnlyOnceTheRaceIsOver() {
+        let ladder = ["cold", "cord", "card", "ward", "warm"]
+        var over = view(.over, runners: pair)
+        over.solution = ladder
+        XCTAssertEqual(table(over).solution, ladder)
+        var racing = view(.racing, runners: pair)
+        racing.solution = ladder
+        XCTAssertNil(table(racing).solution)
+        XCTAssertNil(table(view(.over, runners: pair)).solution)
+        over.solution = []
+        XCTAssertNil(table(over).solution)
+    }
+
+    // A ladder shown for one race is hidden when the next one starts.
+    func testTheShownLadderBelongsToItsRace() {
+        XCTAssertNotEqual(table(view(.over, runners: pair)).raceKey, table(view(.over, startedAtMs: 200_000, runners: pair)).raceKey)
+        XCTAssertEqual(table(view(.over, runners: pair)).raceKey, table(view(.over, runners: [runner("alice", words: 2, ladder: ["cord", "card"])])).raceKey)
+    }
 }
