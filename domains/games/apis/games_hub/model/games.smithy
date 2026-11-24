@@ -23,10 +23,12 @@ use moonbase.rummy#RummyCommand
 use moonbase.rummy#RummyEvent
 use moonbase.voice#VoiceCommand
 use moonbase.voice#VoiceEvent
+use moonbase.wordchain#WordchainCommand
+use moonbase.wordchain#WordchainEvent
 
 /// The games hub: one service, one session identity, one room layer,
 /// and one stream, Play, on which the lobby, voice, golf,
-/// castle, rummy, chess, pong, spades and go each ride as one
+/// castle, rummy, chess, pong, spades, go and wordchain each ride as one
 /// envelope member per direction.
 @simpleRestJson
 @title("Games Hub")
@@ -62,7 +64,7 @@ operation Play {
 
 /// The room layer's own commands, then one envelope per tenant: the
 /// lobby's world, the room's voice, golf's, castle's, rummy's, chess's,
-/// pong's, spades' and go's tables.
+/// pong's, spades', go's and wordchain's tables.
 @streaming
 union GameCommands {
     createRoom: CreateRoom
@@ -79,6 +81,7 @@ union GameCommands {
     pong: PongCommand
     spades: SpadesCommand
     go: GoCommand
+    wordchain: WordchainCommand
 }
 
 @streaming
@@ -98,6 +101,7 @@ union GameEvents {
     pong: PongEvent
     spades: SpadesEvent
     go: GoEvent
+    wordchain: WordchainEvent
 }
 
 /// The public chess feed (moonbase.chess#ChessPublish): every game that
@@ -269,7 +273,7 @@ structure PlayerInfo {
 
 /// A room member's table: which game, which table.
 structure Table {
-    /// golf | castle | rummy | chess | pong | spades | go, as GameSummary.game spells it.
+    /// golf | castle | rummy | chess | pong | spades | go | wordchain, as GameSummary.game spells it.
     @required
     game: String
 
@@ -286,7 +290,7 @@ structure GameSummary {
     @required
     gameId: String
 
-    /// Which game the table plays: golf | castle | rummy | chess | pong | spades | go.
+    /// Which game the table plays: golf | castle | rummy | chess | pong | spades | go | wordchain.
     @required
     game: String
 

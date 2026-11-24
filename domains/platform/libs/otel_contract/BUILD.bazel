@@ -38,6 +38,7 @@ go_test(
         "//domains/games/apis/games_hub:rummy_adapter.h",
         "//domains/games/apis/games_hub:spades_adapter.h",
         "//domains/games/apis/games_hub:surface.h",
+        "//domains/games/apis/games_hub:wordchain_adapter.h",
         "//domains/games/apis/games_hub:world.h",
         "//domains/games/apis/one_d4:src/main/java/com/muchq/games/one_d4/api/QueryEvent.java",
         "//domains/games/libs/cards/rummy:table.cc",

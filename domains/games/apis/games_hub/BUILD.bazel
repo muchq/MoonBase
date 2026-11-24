@@ -17,6 +17,7 @@ smithy_cpp_server_library(
         "model/rummy.smithy",
         "model/spades.smithy",
         "model/voice.smithy",
+        "model/wordchain.smithy",
     ],
     namespace = "moonbase::games",
     service = "moonbase.games#GamesHub",
@@ -35,6 +36,7 @@ smithy_cpp_client_library(
         "model/rummy.smithy",
         "model/spades.smithy",
         "model/voice.smithy",
+        "model/wordchain.smithy",
     ],
     namespace = "moonbase::games",
     service = "moonbase.games#GamesHub",
@@ -58,6 +60,7 @@ cc_library(
         "//domains/games/libs/chess_play:table",
         "//domains/games/libs/go:table",
         "//domains/games/libs/pong:table",
+        "//domains/games/libs/wordchain_race:table",
     ],
 )
 
@@ -75,6 +78,7 @@ cc_library(
         "pong_adapter.cc",
         "rummy_adapter.cc",
         "spades_adapter.cc",
+        "wordchain_adapter.cc",
     ],
     hdrs = [
         "adapter.h",
@@ -86,6 +90,7 @@ cc_library(
         "pong_adapter.h",
         "rummy_adapter.h",
         "spades_adapter.h",
+        "wordchain_adapter.h",
     ],
     deps = [
         ":chess_bots",
@@ -119,6 +124,9 @@ cc_library(
         "//domains/games/libs/pong:rally",
         "//domains/games/libs/pong:table",
         "//domains/games/libs/pong:table_serde",
+        "//domains/games/libs/wordchain_race:lexicon",
+        "//domains/games/libs/wordchain_race:table",
+        "//domains/games/libs/wordchain_race:table_serde",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -300,6 +308,7 @@ exports_files([
     "pong_adapter.h",
     "rummy_adapter.h",
     "spades_adapter.h",
+    "wordchain_adapter.h",
     "game_events.cc",
     "game_events.h",
     "games_hub_main.cc",
@@ -1637,6 +1646,34 @@ cc_test(
 )
 
 cc_test(
+    name = "wordchain_e2e_test",
+    size = "small",
+    srcs = [
+        "wordchain_e2e_test.cc",
+        "stream_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_client",
+        ":games_hub_smithy_server",
+        ":hub",
+        ":hub_store",
+        ":id_generator",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "//domains/games/libs/wordchain_race:lexicon",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
+cc_test(
     name = "golf_e2e_test",
     size = "small",
     srcs = [
@@ -1684,6 +1721,7 @@ cc_test(
         "model/rummy.smithy",
         "model/spades.smithy",
         "model/voice.smithy",
+        "model/wordchain.smithy",
     ],
     deps = [
         ":adapters",

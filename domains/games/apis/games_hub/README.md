@@ -1,13 +1,13 @@
 # games_hub — the games hub on opal-cpp event streams
 
 The backend behind muchq.com/games — the lobby, golf, castle,
-rummy, chess, pong, spades and go — and its /golf and /thoughts pages, on opal-cpp's
+rummy, chess, pong, spades, go and wordchain — and its /golf and /thoughts pages, on opal-cpp's
 streaming stack: a modeled protocol with generated async handlers
 (ADR-0021), `SessionRegistry` fan-out with reconnect grace
 (ADR-0017/0020/0022), the JSON-text browser wire (ADR-0018), and ticket
 auth ahead of the 101. One session identity opens the one stream.
 
-## The model (ten namespaces)
+## The model (eleven namespaces)
 
 - `model/games.smithy` — `moonbase.games`: the service, session identity
   (`POST /games/v2/session`), the public chess feed
@@ -46,6 +46,10 @@ auth ahead of the 101. One session identity opens the one stream.
   member, on chess's terms: `startGame` names the board, komi and clock,
   and the moves are `play` (a point), `pass` and `resign`. Shapes are
   prefixed `Go`.
+- `model/wordchain.smithy` — `moonbase.wordchain`: the word ladder
+  race's vocabulary, the `wordchain` member: `startGame` names the
+  letters and seconds, and the moves are `play` (a word) and `retract`.
+  Shapes are prefixed `Wordchain`.
 - `model/lobby.smithy` — `moonbase.lobby`: the world's shapes — the
   `lobby` member of the room stream (`LobbyAction`, `LobbyUpdate`) and
   what they carry.
@@ -651,6 +655,28 @@ credits every seat played, the winning team's won. A leave closes the
 table: a game in play is abandoned, played by every seat and won by
 nobody.
 
+### Wordchain
+
+A word ladder race (`//domains/games/libs/wordchain_race`): two to four
+seats climb the same puzzle, each on their own ladder, against one clock —
+from the start word to the target, one letter at a time, every rung a
+word. `startGame` names the letters (3 to 5, default 4) and seconds (60 to
+600, default 180). The puzzle is picked from the hub's shuffle, never the
+starter's say: its start and target are SCOWL's common words, and its par
+is the fewest words a ladder can hold, both ends included. A `play` is
+refused in band unless it is an ENABLE word one letter from the runner's
+last, not already on their ladder; `retract` takes the last back until the
+runner finishes. Both lists, less a blocklist, are built into the binary
+with SCOWL's copyright (`wordchain_race:lexicon`). The fewest words wins,
+the earlier finish breaking a tie; a finish on par ends the race at once,
+since nobody can beat it, and so does every seat finishing. The clock is
+the sweep's like any clocked game's, but a race has nobody to move: the
+flag falls on its first seat, which `Flag` ignores. `startGame` between
+races starts the next. A leave keeps the leaver's ladder and finish in the
+race; with fewer than two seats left the table closes, its race in play
+ending by leave and won by its best finisher, if any. A race is recorded as
+`wordchain` and credits every runner played, the winner won.
+
 ## Redaction
 
 Each game's view is its adapter's `ViewOf` (`<game>_adapter.cc`), built per
@@ -660,7 +686,8 @@ counts. A rummy table: own hand faces (everyone's once the deal ends, and
 between deals), other hands as counts, the stock as a count; the melds, the
 discard's top and the card taken from it this turn are public, and a stock
 draw's `lastMove` names no card. A spades seat sees its own hand and
-everyone else's as a count. A chess, pong or go table hides nothing: one view
+everyone else's as a count. A wordchain runner sees its own ladder and
+everyone else's as a count until the race is over. A chess, pong or go table hides nothing: one view
 serves both seats and every watcher (`kWatchable`).
 
 A golf view carries own card faces only at the viewer's peeked indexes, the

@@ -2188,8 +2188,13 @@ template <typename E>
 std::optional<Refusal> GamesHub::FlagEngineLocked(GameRef ref, int64_t now_ms, Outbox& outbox) {
   using A = Adapter<E>;
   const E& table = std::get<E>(*ref.entry->state);
+  // The flag falls on the side to move; a game with nobody to move (a
+  // race's one clock) falls on its first seat, which the flag ignores.
+  const std::string turn = A::Turn(table);
+  const std::string& mover =
+      turn.empty() && !ref.entry->roster.empty() ? ref.entry->roster.front() : turn;
   return ApplyTableEngineMoveLocked<E>(
-      ref, A::Turn(table), Transition<E>{[now_ms](const E& clocked, int, const MoveContext&) {
+      ref, mover, Transition<E>{[now_ms](const E& clocked, int, const MoveContext&) {
         return A::Flag(clocked, now_ms);
       }},
       outbox);

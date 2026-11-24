@@ -44,6 +44,46 @@ exports_files([
     "common_words.txt",
 ])
 
+genrule(
+    name = "lexicon_data",
+    srcs = [
+        ":common_words",
+        ":race_words",
+        "@scowl//:Copyright",
+    ],
+    outs = ["lexicon_data.cc"],
+    cmd = "$(location embed.sh) $@ kRaceWordsText=$(location :race_words) " +
+          "kCommonWordsText=$(location :common_words) " +
+          "kScowlCopyrightText=$(location @scowl//:Copyright)",
+    tools = ["embed.sh"],
+)
+
+# The lists built into the binary, read once: the hub's lexicon.
+cc_library(
+    name = "lexicon",
+    srcs = [
+        "lexicon.cc",
+        ":lexicon_data",
+    ],
+    hdrs = [
+        "lexicon.h",
+        "lexicon_data.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [":dictionary"],
+)
+
+cc_test(
+    name = "lexicon_test",
+    size = "small",
+    srcs = ["lexicon_test.cc"],
+    deps = [
+        ":dictionary",
+        ":lexicon",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The word lists the hub ships, read the way the hub reads them.
 cc_test(
     name = "words_test",

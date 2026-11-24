@@ -378,6 +378,8 @@ var serviceRegistry = map[string]serviceEntry{
 			counter("Spades", "spades_events", "", `spades_events_total`),
 			counter("Go", "go_commands", "", `go_commands_total`),
 			counter("Go", "go_events", "", `go_events_total`),
+			counter("Wordchain", "wordchain_commands", "", `wordchain_commands_total`),
+			counter("Wordchain", "wordchain_events", "", `wordchain_events_total`),
 			counter("Lobby", "lobby_commands", "", `lobby_commands_total`),
 			counter("Lobby", "lobby_events", "", `lobby_events_total`),
 			// Games played (#1670), on the stats rollup's game/outcome words;
