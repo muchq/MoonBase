@@ -113,7 +113,7 @@ absl::StatusOr<Puzzle> PickPuzzle(const Dictionary& dictionary, const Dictionary
       const auto path = dictionary.shortestPath(start, target, kMaxOptimal);
       if (!path.has_value()) continue;
       const int optimal = static_cast<int>(path->size());
-      if (optimal >= kMinOptimal && optimal <= kMaxOptimal) return Puzzle{start, target, optimal};
+      if (optimal >= kMinOptimal && optimal <= kMaxOptimal) return Puzzle{start, target, optimal, ""};
     }
   }
   return absl::NotFoundError(absl::StrCat("no ", letters, "-letter puzzle found"));
