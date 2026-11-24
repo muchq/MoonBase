@@ -122,6 +122,7 @@ std::string serializeTable(const Table& table) {
       {"endedByClose", table.endedByClose()},
   };
   if (race.ending().has_value()) row["ending"] = EndingName(*race.ending());
+  if (!puzzle.ladder.empty()) row["puzzle"]["ladder"] = puzzle.ladder;
   return row.dump();
 }
 
@@ -148,6 +149,16 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
   if (!optimal.ok()) return optimal.status();
   if (*optimal < 0 || *optimal > std::numeric_limits<int>::max()) {
     return absl::InvalidArgumentError("optimal is out of range");
+  }
+  // Absent from rows stored before puzzles kept their ladder.
+  std::vector<std::string> ladder;
+  if (p.contains("ladder")) {
+    auto words = Array(p, "ladder");
+    if (!words.ok()) return words.status();
+    for (const json& word : **words) {
+      if (!word.is_string()) return absl::InvalidArgumentError("a ladder is words");
+      ladder.push_back(word.get<std::string>());
+    }
   }
 
   auto runners_field = Array(j, "runners");
@@ -196,7 +207,7 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
     race_ending = *ending;
   }
   auto race = Race::restore(Puzzle{*std::move(start), *std::move(target), static_cast<int>(*optimal),
-                                   *std::move(lexicon)},
+                                   *std::move(lexicon), std::move(ladder)},
                             std::move(runners), *started, *deadline, race_ending);
   if (!race.ok()) return race.status();
   return Table::restore(*std::move(race), std::move(sheet), *closed, *ended_by_close);

@@ -65,6 +65,8 @@ TEST(PickPuzzle, OptimalLadderWithinBounds) {
     auto path = d.shortestPath(puzzle->start, puzzle->target);
     ASSERT_TRUE(path.has_value());
     EXPECT_EQ(static_cast<int>(path->size()), puzzle->optimal);
+    // The ladder it was picked on: this word list's only one.
+    EXPECT_EQ(puzzle->ladder, *path) << seed;
     EXPECT_GE(puzzle->optimal, kMinOptimal);
     EXPECT_LE(puzzle->optimal, kMaxOptimal);
   }

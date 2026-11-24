@@ -130,6 +130,10 @@ structure WordchainView {
     /// The word list the race is played against: enable.
     lexicon: String
 
+    /// A shortest ladder, start and target included, once the race is
+    /// over; absent before, and for races stored before puzzles kept one.
+    solution: WordchainWords
+
     /// Every runner of the race (or every seat, while waiting), in the
     /// order they joined.
     @required

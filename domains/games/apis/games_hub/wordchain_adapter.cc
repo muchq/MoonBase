@@ -141,7 +141,10 @@ moonbase::games::WordchainView Adapter<Table>::ViewOf(const TableContext& contex
     wire.wins = table->practice() ? 0 : WinsOf(*table, runner.player_id);
     view.runners.push_back(std::move(wire));
   }
-  if (race.isOver()) view.result = ResultOf(wordchain_race::ScoreOf(race), race.standings());
+  if (race.isOver()) {
+    view.result = ResultOf(wordchain_race::ScoreOf(race), race.standings());
+    if (!puzzle.ladder.empty()) view.solution = puzzle.ladder;
+  }
   return view;
 }
 

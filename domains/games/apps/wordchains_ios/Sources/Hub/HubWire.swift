@@ -175,6 +175,10 @@ struct WordchainView: Decodable, Equatable {
     /// A lone seat racing for practice: nobody wins and nothing is
     /// recorded; a join ends it. Absent from a hub older than practice.
     var practice: Bool? = nil
+    /// A shortest ladder, start and target included, once the race is
+    /// over. Absent from a hub older than #1732, and for races stored
+    /// before puzzles kept one.
+    var solution: [String]? = nil
 
     var isPractice: Bool { practice == true }
 }

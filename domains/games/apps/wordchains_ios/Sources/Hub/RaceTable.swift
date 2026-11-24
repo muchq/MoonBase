@@ -53,10 +53,20 @@ struct RaceTable {
             : RaceText.result(result, runners: view.runners, viewer: viewer)
     }
 
+    /// A shortest ladder to show once the race is over: never while it
+    /// runs, since it would show the way.
+    var solution: [String]? {
+        guard !racing, let ladder = view.solution, !ladder.isEmpty else { return nil }
+        return ladder
+    }
+
+    /// Names the race in play, so a ladder shown for one hides at the next.
+    var raceKey: String { "\(view.start ?? "")|\(view.target ?? "")|\(view.startedAtMs ?? 0)" }
+
     /// Changes when the viewer's rung lands or is taken back, or a new race
     /// starts, and only then: the typed word clears on a change, so a
     /// refused word stays to be fixed.
-    var draftKey: String { "\(view.start ?? "")|\(view.target ?? "")|\(view.startedAtMs ?? 0)#\(ladder.count)" }
+    var draftKey: String { "\(raceKey)#\(ladder.count)" }
 
     /// No word is longer than the puzzle's.
     func capped(_ typed: String) -> String {

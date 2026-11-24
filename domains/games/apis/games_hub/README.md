@@ -678,6 +678,11 @@ race; with fewer than two seats left the table closes, its race in play
 ending by leave and won by its best finisher, if any. A race is recorded as
 `wordchain` and credits every runner played, each winner won.
 
+Once a race is over, the view carries `solution`: the shortest ladder the
+puzzle was picked on, start and target included. It is withheld while the
+race runs, since it would show the way, and absent for a race stored
+before puzzles kept their ladder.
+
 A lone seat's `startGame` races alone for practice, on the same puzzles,
 clock and lists, and the view says `practice`. Practice records nothing:
 no game event, no stats, no wins. The lobby lists the table as waiting,

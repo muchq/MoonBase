@@ -51,6 +51,9 @@ struct Puzzle {
   std::string target;
   int optimal = 0;
   std::string lexicon;
+  /// A shortest ladder, start and target included: `optimal` words. Empty
+  /// for a puzzle stored before puzzles kept theirs.
+  std::vector<std::string> ladder;
   bool operator==(const Puzzle&) const = default;
 };
 

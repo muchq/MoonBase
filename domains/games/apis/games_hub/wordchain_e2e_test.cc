@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -318,6 +319,43 @@ TEST_F(WordchainFixture, TheClockEndsARaceNobodyIsToMoveIn) {
     EXPECT_TRUE(result.winners.empty());
   }
   EXPECT_EQ(hub_->SweepClocksOnce(), 0);
+}
+
+// A shortest ladder would show the way: it waits for the race's end.
+TEST_F(WordchainFixture, AShortestLadderShowsOnlyOnceTheRaceIsOver) {
+  auto started = StartedTable();
+  ASSERT_TRUE(started.has_value());
+  for (const WordchainView& view : started->views) EXPECT_FALSE(view.solution.has_value());
+
+  now_ms_ += 180'000;
+  ASSERT_EQ(hub_->SweepClocksOnce(), 1);
+  ASSERT_TRUE(ReadViews(*started));
+  for (const WordchainView& view : started->views) {
+    ASSERT_EQ(view.phase, "over");
+    // The lexicon's own shortest ladder for the puzzle, word for word.
+    EXPECT_EQ(view.solution, Solution(view)) << *view.start << " to " << *view.target;
+  }
+}
+
+// A race stored before puzzles kept their ladder has none to show.
+TEST(WordchainView, ARaceWithoutALadderShowsNoSolution) {
+  using A = Adapter<wordchain_race::Table>;
+  const std::string game_id = "W1";
+  const std::vector<std::string> roster = {"ann"};
+  const std::set<std::string> watchers;
+  const std::optional<HostedTerms> terms;
+  const std::optional<EventTag> event;
+  const TableContext context{game_id, roster, watchers, terms, event, kT0};
+  for (const bool kept : {false, true}) {
+    wordchain_race::Puzzle puzzle{"cold", "warm", 5, "enable", {}};
+    if (kept) puzzle.ladder = {"cold", "cord", "card", "ward", "warm"};
+    auto table = wordchain_race::Table::open(roster, puzzle, kT0, 60'000);
+    ASSERT_TRUE(table.ok()) << table.status();
+    auto over = A::Flag(*table, kT0 + 60'000);
+    ASSERT_TRUE(over.ok()) << over.status();
+    const WordchainView view = A::ViewOf(context, &*over, "ann");
+    EXPECT_EQ(view.solution.has_value(), kept);
+  }
 }
 
 TEST_F(WordchainFixture, StartingAgainAfterARaceRunsTheNextOne) {

@@ -119,6 +119,18 @@ final class HubWireTests: XCTestCase {
         XCTAssertEqual(try practice(""), false)
     }
 
+    // A hub from before #1732, or a race stored before puzzles kept their
+    // ladder, sends none.
+    func testAnOverViewMayCarryAShortestLadder() throws {
+        func solution(_ field: String) throws -> [String]? {
+            let json = #"{"event":"wordchain","payload":{"update":{"gameState":{"view":{"gameId":"W1","phase":"over","runners":[],"racesPlayed":1"# + field + "}}}}}"
+            guard case let .wordchain(.view(view)) = try frame(json) else { return nil }
+            return view.solution
+        }
+        XCTAssertEqual(try solution(#","solution":["cold","cord","card","ward","warm"]"#), ["cold", "cord", "card", "ward", "warm"])
+        XCTAssertNil(try solution(""))
+    }
+
     func testAnOverViewCarriesTheResult() throws {
         let json = #"""
         {"event":"wordchain","payload":{"update":{"gameJoined":{"view":{

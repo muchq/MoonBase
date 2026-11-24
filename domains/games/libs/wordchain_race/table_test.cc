@@ -19,7 +19,7 @@ const Dictionary& Dict() {
   return d;
 }
 
-const Puzzle kPuzzle{"cold", "warm", 5, "test"};
+const Puzzle kPuzzle{"cold", "warm", 5, "test", {}};
 constexpr int64_t kT0 = 1'000'000;
 constexpr int64_t kMinute = 60'000;
 
@@ -51,6 +51,24 @@ TEST(RaceOpen, NeedsOneToFourDistinctRunnersAndATime) {
   EXPECT_EQ(race.deadlineMs(), kT0 + 3 * kMinute);
   EXPECT_FALSE(race.isOver());
   EXPECT_EQ(race.puzzle().lexicon, "test");
+}
+
+TEST(RaceOpen, TakesAPuzzleWithItsLadderOrWithout) {
+  Puzzle with = kPuzzle;
+  with.ladder = {"cold", "cord", "card", "ward", "warm"};
+  EXPECT_TRUE(Race::open({"ann"}, with, kT0, kMinute).ok());
+  EXPECT_TRUE(Race::open({"ann"}, kPuzzle, kT0, kMinute).ok());
+}
+
+TEST(RaceOpen, RefusesALadderThatIsNotThePuzzles) {
+  for (const Words& ladder : {Words{"cold", "bold", "bord", "cord", "card", "ward", "warm"},  // a chain, past par
+                              Words{"cord", "card", "ward", "wart", "warm"},  // not from the start
+                              Words{"cold", "cord", "card", "ward", "wart"},  // not to the target
+                              Words{"cold", "card", "cord", "ward", "warm"}}) {  // a broken rung
+    Puzzle puzzle = kPuzzle;
+    puzzle.ladder = ladder;
+    EXPECT_FALSE(Race::open({"ann"}, puzzle, kT0, kMinute).ok()) << ladder[1];
+  }
 }
 
 TEST(RacePlay, AcceptsADictionaryWordOneLetterFromTheLast) {
