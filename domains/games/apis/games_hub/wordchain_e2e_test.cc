@@ -330,18 +330,10 @@ TEST_F(WordchainFixture, AShortestLadderShowsOnlyOnceTheRaceIsOver) {
   now_ms_ += 180'000;
   ASSERT_EQ(hub_->SweepClocksOnce(), 1);
   ASSERT_TRUE(ReadViews(*started));
-  const auto& words = wordchain_race::EnableLexicon().words;
   for (const WordchainView& view : started->views) {
     ASSERT_EQ(view.phase, "over");
-    ASSERT_TRUE(view.solution.has_value());
-    const std::vector<std::string>& ladder = *view.solution;
-    ASSERT_EQ(static_cast<int>(ladder.size()), *view.par);
-    EXPECT_EQ(ladder.front(), *view.start);
-    EXPECT_EQ(ladder.back(), *view.target);
-    for (std::size_t i = 1; i < ladder.size(); ++i) {
-      EXPECT_TRUE(words.contains(ladder[i])) << ladder[i];
-      EXPECT_TRUE(wordchain_race::OneLetterApart(ladder[i - 1], ladder[i])) << ladder[i];
-    }
+    // The lexicon's own shortest ladder for the puzzle, word for word.
+    EXPECT_EQ(view.solution, Solution(view)) << *view.start << " to " << *view.target;
   }
 }
 
