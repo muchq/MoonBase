@@ -177,7 +177,7 @@ Action<Table, Adapter<Table>::Start> Adapter<Table>::Decode(const Move& move, co
     if (named.duration_ms < 60'000 || named.duration_ms > 600'000) {
       return Refusal{RejectKind::kInvalid, "a race runs 60 to 600 seconds"};
     }
-    return StartGame<Start>{named};
+    return StartGame<Start>{named, /*next_game=*/true};
   }
   if (move.as_createGame_or_null() != nullptr) return CreateTable{};
   if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};

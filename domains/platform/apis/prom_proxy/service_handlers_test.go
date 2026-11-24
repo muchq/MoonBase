@@ -128,7 +128,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, "1d", response.Window)
 
 	// Custom groups keep registry order and every descriptor is present.
-	require.Len(t, response.Custom, 13)
+	require.Len(t, response.Custom, 14)
 	assert.Equal(t, "Probes", response.Custom[0].Title)
 	assert.Equal(t, "Sessions", response.Custom[1].Title)
 	assert.Equal(t, "Room layer", response.Custom[2].Title)

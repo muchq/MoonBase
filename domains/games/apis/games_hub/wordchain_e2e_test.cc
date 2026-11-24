@@ -232,7 +232,7 @@ TEST_F(WordchainFixture, StartingAgainAfterARaceRunsTheNextOne) {
     auto state = ReceiveWordchain(seat.stream, "gameState");
     ASSERT_TRUE(state.has_value());
     const WordchainView& view = state->as_gameState_or_null()->view;
-    if (view.phase != "racing") continue;
+    EXPECT_EQ(view.phase, "racing");
     EXPECT_EQ(view.racesPlayed, 1);
     EXPECT_EQ(view.start->size(), 5u);
   }

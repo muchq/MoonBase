@@ -1649,8 +1649,8 @@ cc_test(
     name = "wordchain_e2e_test",
     size = "small",
     srcs = [
-        "wordchain_e2e_test.cc",
         "stream_test_fixture.h",
+        "wordchain_e2e_test.cc",
     ],
     deps = [
         ":games_hub_handler",
@@ -1661,9 +1661,9 @@ cc_test(
         ":id_generator",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
+        "//domains/games/libs/wordchain_race:lexicon",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
         "//domains/platform/libs/futility/otel:metrics",
-        "//domains/games/libs/wordchain_race:lexicon",
         "@com_google_absl//absl/time",
         "@googletest//:gtest_main",
         "@opal_cpp//runtime:client",

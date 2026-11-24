@@ -2097,6 +2097,18 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"go_events", {{"event", "roundRobin"}}},
       {"go_events", {{"event", "roundRobins"}}},
       {"go_events", {{"event", "history"}}},
+      {"wordchain_commands", {{"command", "createGame"}}},
+      {"wordchain_commands", {{"command", "joinGame"}}},
+      {"wordchain_commands", {{"command", "startGame"}}},
+      {"wordchain_commands", {{"command", "leaveGame"}}},
+      {"wordchain_commands", {{"command", "play"}}},
+      {"wordchain_commands", {{"command", "retract"}}},
+      {"wordchain_events", {{"event", "gameJoined"}}},
+      {"wordchain_events", {{"event", "gameState"}}},
+      {"wordchain_events", {{"event", "gameCreated"}}},
+      {"wordchain_events", {{"event", "gameStarted"}}},
+      {"wordchain_events", {{"event", "gameEnded"}}},
+      {"wordchain_events", {{"event", "gameLeft"}}},
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},
       {"chat_appends", {{"result", "unavailable"}}},
@@ -2213,6 +2225,9 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"games_started", {{"game", "spades"}}},
       {"games_finished", {{"game", "spades"}, {"outcome", "completed"}}},
       {"games_finished", {{"game", "spades"}, {"outcome", "abandoned"}}},
+      {"games_started", {{"game", "wordchain"}}},
+      {"games_finished", {{"game", "wordchain"}, {"outcome", "completed"}}},
+      {"games_finished", {{"game", "wordchain"}, {"outcome", "abandoned"}}},
   };
 
   auto capture = MakeCapturingMetricsRecorder();
@@ -2281,8 +2296,8 @@ TEST(StreamSeriesModelPin, StreamSeriesMatchTheModelUnions) {
   ASSERT_NE(std::find(outer_events.begin(), outer_events.end(), "sessionReady"),
             outer_events.end());
 
-  const std::set<std::string> envelopes = {"golf",   "castle", "rummy", "chess", "pong",
-                                           "spades", "go",     "lobby", "voice"};
+  const std::set<std::string> envelopes = {"golf", "castle", "rummy", "chess",     "pong",
+                                           "spades", "go", "lobby", "voice", "wordchain"};
   for (const auto& envelope : envelopes) {
     EXPECT_NE(std::find(outer_commands.begin(), outer_commands.end(), envelope),
               outer_commands.end())
@@ -2334,6 +2349,11 @@ TEST(StreamSeriesModelPin, SpadesSeriesMatchTheModelUnions) {
 
 TEST(StreamSeriesModelPin, GoSeriesMatchTheModelUnions) {
   ExpectEnvelopeSeriesMatchTheModel("go", "GoMove", "pass", "GoUpdate", "turnChanged");
+}
+
+TEST(StreamSeriesModelPin, WordchainSeriesMatchTheModelUnions) {
+  ExpectEnvelopeSeriesMatchTheModel("wordchain", "WordchainMove", "retract", "WordchainUpdate",
+                                    "gameEnded");
 }
 
 // The bounded kind is the whole dashboard identity of a rejection (#1327,
