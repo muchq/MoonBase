@@ -23,6 +23,8 @@ struct Adapter<wordchain_race::Table> {
   static constexpr GameKind kKind = GameKind::kWordchain;
   static constexpr std::string_view kName = "wordchain";
   static constexpr std::size_t kMaxSeats = wordchain_race::kMaxRunners;
+  // One seat races alone, for practice.
+  static constexpr std::size_t kMinSeats = 1;
   static constexpr unsigned kCapabilities = kNextGame | kClocked;
   static constexpr bool kOpenStartsAGame = true;
 
@@ -42,7 +44,9 @@ struct Adapter<wordchain_race::Table> {
   }
   static moonbase::games::GameEvents Wrap(Update update);
 
+  // A practising table lists as waiting: its seat is open to a racer.
   static std::string Phase(const wordchain_race::Table& table);
+  static bool Practice(const wordchain_race::Table& table) { return table.practice(); }
   // Everyone climbs at once: nobody is ever to move.
   static std::string Turn(const wordchain_race::Table&) { return ""; }
   static std::size_t GamesFinished(const wordchain_race::Table& table) {
@@ -54,12 +58,15 @@ struct Adapter<wordchain_race::Table> {
                                                   const wordchain_race::Table& after);
   static bool DealStarted(const wordchain_race::Table& before,
                           const wordchain_race::Table& after) {
-    return before.race().isOver() && !after.race().isOver();
+    return !after.practice() && before.race().isOver() && !after.race().isOver();
   }
   // As go's: a race's end, the table racing on or closed by the leave that
-  // ended it.
+  // ended it. Practice ends nothing on record.
   static std::optional<GameEnd> Ended(const wordchain_race::Table& table) {
-    if (!table.race().isOver() || (table.isOver() && !table.endedByClose())) return std::nullopt;
+    if (table.practice() || !table.race().isOver() ||
+        (table.isOver() && !table.endedByClose())) {
+      return std::nullopt;
+    }
     return table.race().ending() == wordchain_race::Ending::kLeave ? GameEnd::kAbandoned
                                                                    : GameEnd::kCompleted;
   }

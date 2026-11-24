@@ -292,6 +292,11 @@ std::optional<Action<Engine, Start>> RoundRobinMove(const Move& move) {
 ///
 ///   RecordedName(engine)    the word a game is recorded under, when it is
 ///                           not kName (rummy's deals, by variant)
+///   kMinSeats               the seats a startGame needs, when not two
+///   Practice(engine)        a lone seat practising: opening records no
+///                           game, and a join resets the table to waiting.
+///                           Its adapter's other hooks credit and record
+///                           nothing of it.
 template <typename Engine>
 struct Adapter;
 

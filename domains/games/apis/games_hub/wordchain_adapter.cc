@@ -57,6 +57,21 @@ absl::StatusOr<wordchain_race::Puzzle> PickFor(const Adapter<Table>::Start& star
   return puzzle;
 }
 
+// The race's own phase, practice or not.
+std::string RacePhase(const Table& table) {
+  if (table.isOver()) return "closed";
+  return table.race().isOver() ? "over" : "racing";
+}
+
+// The races `player_id` has won at the table.
+int WinsOf(const Table& table, const std::string& player_id) {
+  return static_cast<int>(std::count_if(
+      table.scoreSheet().begin(), table.scoreSheet().end(), [&](const RaceScore& score) {
+        return std::find(score.winners.begin(), score.winners.end(), player_id) !=
+               score.winners.end();
+      }));
+}
+
 }  // namespace
 
 uint64_t WordchainSeed(const std::deque<cards::Card>& deck) {
@@ -72,16 +87,17 @@ uint64_t WordchainSeed(const std::deque<cards::Card>& deck) {
 }
 
 std::string Adapter<Table>::Phase(const Table& table) {
-  if (table.isOver()) return "closed";
-  return table.race().isOver() ? "over" : "racing";
+  return table.practice() && !table.isOver() ? "waiting" : RacePhase(table);
 }
 
 StatsDeltas Adapter<Table>::ClosedDeltas(const Table& table, const std::vector<std::string>&) {
-  return table.endedByClose() ? RaceDeltas(table.race()) : StatsDeltas{};
+  return table.endedByClose() && !table.practice() ? RaceDeltas(table.race()) : StatsDeltas{};
 }
 
 std::optional<StatsDeltas> Adapter<Table>::DealEndDeltas(const Table& before, const Table& after) {
-  if (before.race().isOver() || !after.race().isOver() || after.isOver()) return std::nullopt;
+  if (after.practice() || before.race().isOver() || !after.race().isOver() || after.isOver()) {
+    return std::nullopt;
+  }
   return RaceDeltas(after.race());
 }
 
@@ -96,6 +112,7 @@ moonbase::games::WordchainView Adapter<Table>::ViewOf(const TableContext& contex
                                                       const std::string& viewer) {
   moonbase::games::WordchainView view;
   view.gameId = context.game_id;
+  view.practice = table != nullptr && table->practice();
   if (table == nullptr) {
     view.phase = "waiting";
     view.racesPlayed = 0;
@@ -111,7 +128,7 @@ moonbase::games::WordchainView Adapter<Table>::ViewOf(const TableContext& contex
   }
   const Race& race = table->race();
   const wordchain_race::Puzzle& puzzle = race.puzzle();
-  view.phase = Phase(*table);
+  view.phase = RacePhase(*table);
   view.start = puzzle.start;
   view.target = puzzle.target;
   view.par = puzzle.optimal;
@@ -126,12 +143,7 @@ moonbase::games::WordchainView Adapter<Table>::ViewOf(const TableContext& contex
     wire.finishedAtMs = runner.finished_ms;
     wire.left = runner.left;
     if (runner.player_id == viewer || race.isOver()) wire.ladder = runner.ladder;
-    wire.wins = static_cast<int>(
-        std::count_if(table->scoreSheet().begin(), table->scoreSheet().end(),
-                      [&](const RaceScore& score) {
-                        return std::find(score.winners.begin(), score.winners.end(),
-                                         runner.player_id) != score.winners.end();
-                      }));
+    wire.wins = table->practice() ? 0 : WinsOf(*table, runner.player_id);
     view.runners.push_back(std::move(wire));
   }
   if (race.isOver()) view.result = ResultOf(wordchain_race::ScoreOf(race), race.standings());

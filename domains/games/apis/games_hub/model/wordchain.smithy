@@ -15,7 +15,7 @@ use moonbase.games#PlayerIds
 // word to the target, one letter at a time, every rung a word. The fewest
 // words wins, the earlier finish breaking a tie; a finish on par cannot be
 // beaten and ends the race. A table races one puzzle after another until
-// fewer than two seats remain. It rides the room's Play stream as one
+// fewer than two seats remain; a lone seat races alone, for practice. It rides the room's Play stream as one
 // `wordchain` member per direction and reuses the shared lifecycle shapes
 // but startGame, which names the race. Shapes are prefixed `Wordchain`:
 // codegen flattens every namespace into one.
@@ -26,8 +26,8 @@ structure WordchainCommand {
     move: WordchainMove
 }
 
-/// startGame opens the first race once two seats are filled, and each
-/// next race once the last is over.
+/// startGame opens the first race, and each next race once the last is
+/// over. A lone seat's races are practice.
 union WordchainMove {
     createGame: CreateGame
     joinGame: JoinGame
@@ -141,6 +141,11 @@ structure WordchainView {
     /// Races this table has ended.
     @required
     racesPlayed: Integer
+
+    /// A lone seat racing for practice: nobody wins and nothing is
+    /// recorded. A join ends it, and the table waits to start a real race.
+    @required
+    practice: Boolean
 }
 
 list WordchainRunners {

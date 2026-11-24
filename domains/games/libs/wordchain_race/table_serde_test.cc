@@ -74,6 +74,16 @@ TEST(TableSerde, RoundTripsATableClosedByLeave) {
   EXPECT_TRUE(back->endedByClose());
 }
 
+TEST(TableSerde, RoundTripsAPracticeTable) {
+  Table table = *Table::open({"ann"}, kPuzzle, kT0, 60'000);
+  for (const Table& t : {table, *table.removePlayer(0)}) {
+    auto back = deserializeTable(serializeTable(t));
+    ASSERT_TRUE(back.ok()) << back.status();
+    ExpectSame(*back, t);
+    EXPECT_TRUE(back->practice());
+  }
+}
+
 // A leave after the clock ended a race leaves every runner done; the row
 // still reads back as the timeout it was.
 TEST(TableSerde, ALeaveAfterATimeoutStillReadsBack) {

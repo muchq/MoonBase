@@ -135,20 +135,21 @@ struct RaceScore {
 /// The line a finished race scores.
 [[nodiscard]] RaceScore ScoreOf(const Race& finished);
 
-/// A race table: two to kMaxRunners seats racing one puzzle after another.
+/// A race table: one to kMaxRunners seats racing one puzzle after another.
 ///
 ///   - A race's end is a line on the score sheet; the table stays open for
 ///     the next, which the hub starts on a fresh puzzle.
 ///   - A leave gives up the seat. With fewer than two seats left the table
 ///     closes, and a race in play ends by leave, its best finisher (if any)
 ///     winning.
+///   - A table of one practises: it stays open until its runner leaves.
 class Table {
  public:
   [[nodiscard]] static absl::StatusOr<Table> open(std::vector<std::string> players, Puzzle puzzle,
                                                   int64_t now_ms, int64_t duration_ms);
   /// The full truth, for a stored row: refused unless a finished race's
-  /// line ends the sheet, the table is closed exactly when fewer than two
-  /// seats remain, its race over then, and only a closed table's close
+  /// line ends the sheet, the table is closed exactly when fewer seats
+  /// remain than it stays open with, its race over then, and only a closed table's close
   /// ended a race.
   [[nodiscard]] static absl::StatusOr<Table> restore(Race race, std::vector<RaceScore> score_sheet,
                                                      bool closed, bool ended_by_close);
@@ -164,6 +165,8 @@ class Table {
 
   /// Closed: too few seats left.
   [[nodiscard]] bool isOver() const { return closed_; }
+  /// A table of one: its runner races alone, for practice.
+  [[nodiscard]] bool practice() const { return race_.runners().size() == 1; }
   /// The close ended the race in play, which the sheet's last line scores.
   /// Its ending is that line's, not always kLeave: a close whose leave left
   /// every runner done settles the race as kFinished.

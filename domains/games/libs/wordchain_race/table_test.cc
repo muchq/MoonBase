@@ -41,8 +41,9 @@ Race Play(Race race, int seat, const Words& words, int64_t at = kT0 + 1000) {
   return race;
 }
 
-TEST(RaceOpen, NeedsTwoToFourDistinctRunnersAndATime) {
-  EXPECT_FALSE(Race::open({"ann"}, kPuzzle, kT0, kMinute).ok());
+TEST(RaceOpen, NeedsOneToFourDistinctRunnersAndATime) {
+  EXPECT_FALSE(Race::open({}, kPuzzle, kT0, kMinute).ok());
+  EXPECT_TRUE(Race::open({"ann"}, kPuzzle, kT0, kMinute).ok());
   EXPECT_FALSE(Race::open({"a", "b", "c", "d", "e"}, kPuzzle, kT0, kMinute).ok());
   EXPECT_FALSE(Race::open({"ann", "ann"}, kPuzzle, kT0, kMinute).ok());
   EXPECT_FALSE(Race::open({"ann", "bob"}, kPuzzle, kT0, 0).ok());
@@ -328,6 +329,53 @@ TEST(TableRestore, RefusesSeatsThatDisagreeWithBeingClosed) {
   EXPECT_FALSE(Table::restore(done.race(), done.scoreSheet(), true, false).ok());
   // Only a closed table's close ended a race.
   EXPECT_FALSE(Table::restore(done.race(), done.scoreSheet(), false, true).ok());
+}
+
+TEST(Practice, ATableOfOneIsPracticeAndRacesOnAlone) {
+  Table table = OpenTable({"ann"});
+  EXPECT_TRUE(table.practice());
+  EXPECT_FALSE(table.isOver());
+  table = InRace(table, 0, kMid);
+  EXPECT_TRUE(table.race().isOver());
+  EXPECT_FALSE(table.isOver());
+  EXPECT_EQ(table.scoreSheet(), (Sheet{{{"ann"}, Ending::kFinished}}));
+  table = *table.next(kPuzzle, kT0 + kMinute, kMinute);
+  EXPECT_TRUE(table.practice());
+  EXPECT_FALSE(table.race().isOver());
+}
+
+TEST(Practice, ATableOfTwoIsNotEvenOnceOneHasLeft) {
+  EXPECT_FALSE(OpenTable().practice());
+  Table left = *OpenTable({"ann", "bob", "cy"}).removePlayer(1);
+  EXPECT_FALSE(left.practice());
+  EXPECT_FALSE(left.removePlayer(0)->practice());
+}
+
+TEST(Practice, TheClockEndsAPracticeRace) {
+  Table table =
+      *OpenTable({"ann"}).inRace([](const Race& race) { return race.expire(kT0 + 3 * kMinute); });
+  EXPECT_EQ(table.scoreSheet(), (Sheet{{{}, Ending::kTimeout}}));
+  EXPECT_FALSE(table.isOver());
+}
+
+TEST(Practice, LeavingClosesThePracticeTable) {
+  Table racing = *OpenTable({"ann"}).removePlayer(0);
+  EXPECT_TRUE(racing.isOver());
+  EXPECT_TRUE(racing.endedByClose());
+  EXPECT_TRUE(racing.practice());
+  Table between = *InRace(OpenTable({"ann"}), 0, kPar).removePlayer(0);
+  EXPECT_TRUE(between.isOver());
+  EXPECT_FALSE(between.endedByClose());
+}
+
+TEST(TableRestore, APracticeTableIsOpenWithItsOneSeatAndClosedWithout) {
+  Table open = InRace(OpenTable({"ann"}), 0, {"cord"});
+  EXPECT_TRUE(Table::restore(open.race(), open.scoreSheet(), false, false).ok());
+  Table done = InRace(OpenTable({"ann"}), 0, kPar);
+  EXPECT_FALSE(Table::restore(done.race(), done.scoreSheet(), true, false).ok());
+  Table closed = *OpenTable({"ann"}).removePlayer(0);
+  EXPECT_TRUE(Table::restore(closed.race(), closed.scoreSheet(), true, true).ok());
+  EXPECT_FALSE(Table::restore(closed.race(), closed.scoreSheet(), false, false).ok());
 }
 
 }  // namespace

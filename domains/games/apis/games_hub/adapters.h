@@ -466,6 +466,32 @@ inline bool OpenStartsAGame(GameKind kind) {
   return ForKind(kind, [](auto adapter) { return decltype(adapter)::kOpenStartsAGame; });
 }
 
+/// The seats a `kind` table starts with: its adapter's kMinSeats, or two.
+inline std::size_t MinSeatsOf(GameKind kind) {
+  return ForKind(kind, [](auto adapter) -> std::size_t {
+    using A = decltype(adapter);
+    if constexpr (requires { A::kMinSeats; }) {
+      return A::kMinSeats;
+    } else {
+      return 2;
+    }
+  });
+}
+
+/// Whether `state` is a lone seat practising (its adapter's
+/// Practice(engine)): nothing it plays is recorded, and a join resets the
+/// table to waiting.
+inline bool IsPractice(const HostedState& state) {
+  return VisitAdapter(state, [](auto adapter, const auto& engine) {
+    using A = decltype(adapter);
+    if constexpr (requires { A::Practice(engine); }) {
+      return A::Practice(engine);
+    } else {
+      return false;
+    }
+  });
+}
+
 /// Whether a command steers a realtime game (kRealtime's Steers), riding
 /// the hub's realtime budget.
 inline bool OnRealtimeBudget(const moonbase::games::GameCommands& commands) {

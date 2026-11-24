@@ -175,6 +175,61 @@ class WordchainFixture : public GamesHubStreamFixture {
     }
   }
 
+  // A room of `seats` whose first seat practises alone at a table the rest
+  // can join; the first seat has heard gameStarted and read its first view.
+  struct Practice {
+    ManySeats table;
+    WordchainView view;
+  };
+  std::optional<Practice> PracticeTable(int seats = 2) {
+    auto room = SeatedRoom(seats);
+    if (!room.has_value()) return std::nullopt;
+    Practice practice{ManySeats{std::move(room->seats), room->room_id, ""}, {}};
+    Seat& ann = practice.table.seats[0];
+    if (!ann.stream.Send(Wordchain(WordchainMove::FromCreategame(moonbase::games::CreateGame{})))
+             .ok()) {
+      return std::nullopt;
+    }
+    auto created = ReceiveWordchain(ann.stream, "gameJoined");
+    if (!created.has_value()) return std::nullopt;
+    practice.table.game_id = created->as_gameJoined_or_null()->view.gameId;
+    if (!ann.stream.Send(Start()).ok()) return std::nullopt;
+    if (!ReceiveWordchain(ann.stream, "gameStarted").has_value()) return std::nullopt;
+    auto state = ReceiveWordchain(ann.stream, "gameState");
+    if (!state.has_value()) return std::nullopt;
+    practice.view = state->as_gameState_or_null()->view;
+    return practice;
+  }
+
+  GameCommands JoinOf(const std::string& game_id) {
+    moonbase::games::JoinGame join;
+    join.gameId = game_id;
+    return Wordchain(WordchainMove::FromJoingame(join));
+  }
+
+  // The last roomState the stream holds once it goes quiet.
+  static std::optional<moonbase::games::RoomState> LastRoomState(
+      moonbase::games::PlayClientStream& stream) {
+    std::optional<moonbase::games::RoomState> last;
+    for (;;) {
+      auto received = stream.Receive(std::chrono::milliseconds(300));
+      if (!received.ok() || !received->has_value()) return last;
+      if (const auto* state = (*received)->as_roomState_or_null()) last = *state;
+    }
+  }
+
+  std::pair<int, int> PlayedAndWon(const std::string& room_id) {
+    auto room = store_->LoadRoom(room_id);
+    EXPECT_TRUE(room.ok());
+    std::pair<int, int> sums{0, 0};
+    if (!room.ok()) return sums;
+    for (const auto& member : room->members) {
+      sums.first += member.games_played;
+      sums.second += member.games_won;
+    }
+    return sums;
+  }
+
   std::atomic<int64_t> now_ms_{kT0};
 };
 
@@ -189,6 +244,7 @@ TEST_F(WordchainFixture, EverySeatRacesThePuzzleOnOneClock) {
   EXPECT_EQ(first.startedAtMs, kT0);
   EXPECT_EQ(first.deadlineMs, kT0 + 180'000);
   EXPECT_EQ(static_cast<int>(Solution(first).size()), *first.par);
+  EXPECT_FALSE(first.practice);
   for (const WordchainView& view : started->views) {
     EXPECT_EQ(view.start, first.start);
     EXPECT_EQ(view.target, first.target);
@@ -379,6 +435,145 @@ TEST_F(WordchainFixture, TheWordchainBotKeepsQuietWhileARaceRunsInTheRoom) {
     if (i == 1) EXPECT_EQ(message->as_roomChat_or_null()->playerId, kWordchainPlayerId);
   }
   EXPECT_EQ(asked.load(), 1);
+}
+
+TEST_F(WordchainFixture, OneSeatRacesAlonePractisingAndNothingIsRecorded) {
+  CaptureEvents();
+  auto practice = PracticeTable();
+  ASSERT_TRUE(practice.has_value());
+  Seat& ann = practice->table.seats[0];
+  EXPECT_TRUE(practice->view.practice);
+  EXPECT_EQ(practice->view.phase, "racing");
+  ASSERT_EQ(practice->view.runners.size(), 1u);
+
+  const std::vector<std::string> ladder = Solution(practice->view);
+  for (std::size_t i = 1; i < ladder.size(); ++i) {
+    ASSERT_TRUE(ann.stream.Send(Play(ladder[i])).ok());
+    ASSERT_TRUE(ReceiveWordchain(ann.stream, "gameState").has_value()) << ladder[i];
+  }
+  auto ended = ReceiveWordchain(ann.stream, "gameEnded");
+  ASSERT_TRUE(ended.has_value());
+  EXPECT_EQ(ended->as_gameEnded_or_null()->result.ending, "finished");
+
+  // Again, on the next puzzle: still practice.
+  ASSERT_TRUE(ann.stream.Send(Start()).ok());
+  auto next = ReceiveWordchain(ann.stream, "gameState");
+  ASSERT_TRUE(next.has_value());
+  const WordchainView& view = next->as_gameState_or_null()->view;
+  EXPECT_TRUE(view.practice);
+  EXPECT_EQ(view.phase, "racing");
+  EXPECT_EQ(view.racesPlayed, 1);
+  EXPECT_EQ(RunnerOf(view, ann.player_id).wins, 0);
+
+  EXPECT_TRUE(GameLines().empty());
+  EXPECT_EQ(PlayedAndWon(practice->table.room_id), std::make_pair(0, 0));
+}
+
+TEST_F(WordchainFixture, APractisingTableListsAsWaitingForASecondSeat) {
+  auto practice = PracticeTable();
+  ASSERT_TRUE(practice.has_value());
+  auto lobby = LastRoomState(practice->table.seats[1].stream);
+  ASSERT_TRUE(lobby.has_value());
+  ASSERT_EQ(lobby->games.size(), 1u);
+  EXPECT_EQ(lobby->games[0].status, "waiting");
+  EXPECT_EQ(lobby->games[0].playerCount, 1);
+}
+
+TEST_F(WordchainFixture, AJoinEndsThePracticeRaceAndTheNextStartIsRecorded) {
+  CaptureEvents();
+  auto practice = PracticeTable();
+  ASSERT_TRUE(practice.has_value());
+  Seat& ann = practice->table.seats[0];
+  Seat& bob = practice->table.seats[1];
+  ASSERT_TRUE(ann.stream.Send(Play(Solution(practice->view)[1])).ok());
+  ASSERT_TRUE(ReceiveWordchain(ann.stream, "gameState").has_value());
+
+  ASSERT_TRUE(bob.stream.Send(JoinOf(practice->table.game_id)).ok());
+  auto joined = ReceiveWordchain(bob.stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  auto anns = ReceiveWordchain(ann.stream, "gameState");
+  ASSERT_TRUE(anns.has_value());
+  for (const WordchainView* view :
+       {&joined->as_gameJoined_or_null()->view, &anns->as_gameState_or_null()->view}) {
+    EXPECT_EQ(view->phase, "waiting");
+    EXPECT_FALSE(view->practice);
+    EXPECT_EQ(view->runners.size(), 2u);
+    EXPECT_FALSE(view->start.has_value());
+  }
+
+  ASSERT_TRUE(ann.stream.Send(Start()).ok());
+  for (Seat* seat : {&ann, &bob}) {
+    ASSERT_TRUE(ReceiveWordchain(seat->stream, "gameStarted").has_value());
+    auto state = ReceiveWordchain(seat->stream, "gameState");
+    ASSERT_TRUE(state.has_value());
+    const WordchainView& view = state->as_gameState_or_null()->view;
+    EXPECT_EQ(view.phase, "racing");
+    EXPECT_FALSE(view.practice);
+    EXPECT_EQ(view.runners.size(), 2u);
+    EXPECT_EQ(view.racesPlayed, 0);
+  }
+  const std::vector<std::string> lines = GameLines();
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_NE(lines[0].find(R"("event":"game_started")"), std::string::npos) << lines[0];
+}
+
+// The practice race's end was told; the real race's must be too.
+TEST_F(WordchainFixture, ATableThatPractisedTellsItsFirstRealRaceEnding) {
+  auto practice = PracticeTable();
+  ASSERT_TRUE(practice.has_value());
+  Seat& ann = practice->table.seats[0];
+  Seat& bob = practice->table.seats[1];
+  now_ms_ += 180'000;
+  ASSERT_EQ(hub_->SweepClocksOnce(), 1);
+  ASSERT_TRUE(ReceiveWordchain(ann.stream, "gameEnded").has_value());
+
+  ASSERT_TRUE(bob.stream.Send(JoinOf(practice->table.game_id)).ok());
+  ASSERT_TRUE(ReceiveWordchain(bob.stream, "gameJoined").has_value());
+  ASSERT_TRUE(ann.stream.Send(Start()).ok());
+  for (Seat* seat : {&ann, &bob}) {
+    ASSERT_TRUE(ReceiveWordchain(seat->stream, "gameStarted").has_value());
+  }
+  now_ms_ += 180'000;
+  ASSERT_EQ(hub_->SweepClocksOnce(), 1);
+  for (Seat* seat : {&ann, &bob}) {
+    auto ended = ReceiveWordchain(seat->stream, "gameEnded");
+    ASSERT_TRUE(ended.has_value());
+    EXPECT_EQ(ended->as_gameEnded_or_null()->result.ending, "timeout");
+  }
+  EXPECT_EQ(PlayedAndWon(practice->table.room_id), std::make_pair(2, 0));
+}
+
+TEST_F(WordchainFixture, LeavingAPracticeTableClosesItAndRecordsNothing) {
+  CaptureEvents();
+  auto practice = PracticeTable();
+  ASSERT_TRUE(practice.has_value());
+  Seat& ann = practice->table.seats[0];
+  ASSERT_TRUE(ann.stream.Send(Leave()).ok());
+  ASSERT_TRUE(ReceiveWordchain(ann.stream, "gameLeft").has_value());
+  auto lobby = LastRoomState(practice->table.seats[1].stream);
+  ASSERT_TRUE(lobby.has_value());
+  EXPECT_TRUE(lobby->games.empty());
+  EXPECT_TRUE(GameLines().empty());
+  EXPECT_EQ(PlayedAndWon(practice->table.room_id), std::make_pair(0, 0));
+}
+
+// Another instance holding the practice race adopts the waiting table.
+TEST_F(WordchainFixture, AnotherInstanceAdoptsTheTableAJoinReset) {
+  auto practice = PracticeTable();
+  ASSERT_TRUE(practice.has_value());
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  ASSERT_TRUE(practice->table.seats[1].stream.Send(JoinOf(practice->table.game_id)).ok());
+  ASSERT_TRUE(ReceiveWordchain(practice->table.seats[1].stream, "gameJoined").has_value());
+  instance->hub->OnNotify(RoomChannel(practice->table.room_id), "primary");
+
+  auto ann = OpenSeatVia(*instance->client, practice->table.seats[0].resume_token);
+  ASSERT_TRUE(ann.has_value());
+  auto joined = ReceiveWordchain(ann->stream, "gameJoined");
+  ASSERT_TRUE(joined.has_value());
+  const WordchainView& view = joined->as_gameJoined_or_null()->view;
+  EXPECT_EQ(view.phase, "waiting");
+  EXPECT_EQ(view.runners.size(), 2u);
 }
 
 TEST_F(WordchainFixture, ATableSeatsFour) {
