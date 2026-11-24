@@ -102,6 +102,8 @@ jobs:
       # one must fail, not compare equal to the last unreadable one.
       - name: Test plist-string
         run: ./scripts/test-plist-string
+      - name: Test require-ios-sdk
+        run: ./scripts/test-require-ios-sdk
 
   # The workflows themselves (#1061): actionlint, with shellcheck over every
   # run block in the shell the workflow declares. Its own job so it never
@@ -578,8 +580,11 @@ jobs:
 
   # iOS targets can't build on Ubuntu; run Swift tests on macOS when relevant
   # files change, including the Apple rules, Bazel and its config.
+  # Xcode 27 (the iOS 27 SDK App Store Connect requires from April 2027,
+  # ITMS-90725) is on the xcode-27 image only; release-wordchains-ios
+  # builds on the same one.
   test-ios:
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
         with:
@@ -594,6 +599,14 @@ jobs:
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # Pinned, so the image moving its default Xcode can't move the build.
+      - name: Select Xcode 27
+        if: steps.filter.outputs.changed == 'true'
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.1.app
+          xcodebuild -version
+          scripts/require-ios-sdk 27
 
       - name: Run wordchains-ios tests
         if: steps.filter.outputs.changed == 'true'
@@ -648,4 +661,4 @@ jobs:
           bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
             --ios_minimum_os=17.0 \
             --features=swift.enable_testing \
-            --ios_simulator_device="iPhone 16"
+            --ios_simulator_device="iPhone 17"

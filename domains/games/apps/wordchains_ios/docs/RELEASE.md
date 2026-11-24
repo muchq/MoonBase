@@ -42,7 +42,7 @@ open Package.swift
 
 In Xcode:
 1. Select the **WordChains** scheme
-2. Choose an iPhone simulator (e.g. iPhone 16 Pro, iOS 18.6)
+2. Choose an iPhone simulator (e.g. iPhone 17, iOS 27)
 3. Press **Cmd+R** to build and run
 
 > **Note:** The app loads `word_graph.json` from the bundle at startup. When
@@ -69,7 +69,7 @@ bazel build //domains/games/apps/wordchains_ios:WordChains \
 bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
   --ios_minimum_os=17.0 \
   --features=swift.enable_testing \
-  --ios_simulator_device="iPhone 16"
+  --ios_simulator_device="iPhone 17"
 ```
 
 > **Simulator runtime:** The build requires an iOS simulator runtime matching

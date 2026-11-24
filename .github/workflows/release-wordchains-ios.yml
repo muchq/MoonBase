@@ -70,7 +70,9 @@ jobs:
   build:
     needs: [check-and-tag]
     if: needs.check-and-tag.outputs.should_release == 'true'
-    runs-on: macos-26
+    # Xcode 27: App Store Connect requires the iOS 27 SDK from April 2027
+    # (ITMS-90725). branch.yml's test-ios builds on the same image.
+    runs-on: xcode-27
     outputs:
       signed: ${{ steps.signing.outputs.enabled }}
       ipa: ${{ steps.stage.outputs.ipa }}
@@ -79,6 +81,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+
+      # Pinned, so the image moving its default Xcode can't move the build.
+      - name: Select Xcode 27
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.1.app
+          xcodebuild -version
+          scripts/require-ios-sdk 27
 
       - name: Set build number
         run: |

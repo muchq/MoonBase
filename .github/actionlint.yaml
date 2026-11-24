@@ -1,0 +1,5 @@
+self-hosted-runner:
+  # GitHub-hosted labels newer than actionlint's built-in list. xcode-27 is
+  # the macOS image with Xcode 27 (test-ios, release-wordchains-ios).
+  labels:
+    - xcode-27

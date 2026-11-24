@@ -1,0 +1,17 @@
+#!/bin/bash
+# Fails unless the selected Xcode's iOS SDK is at least the given major
+# version. App Store Connect refuses uploads built with an SDK below its
+# floor (ITMS-90725: iOS 27 from April 2027), so the iOS jobs check before
+# they build. Usage: require-ios-sdk <major>
+set -euo pipefail
+
+floor=${1:?usage: require-ios-sdk <major>}
+sdk=$(xcrun --sdk iphoneos --show-sdk-version) || {
+  echo "::error::no iOS SDK in the selected Xcode" >&2
+  exit 1
+}
+if [ "${sdk%%.*}" -lt "$floor" ]; then
+  echo "::error::iOS SDK $sdk is older than $floor; select Xcode $floor or later" >&2
+  exit 1
+fi
+echo "iOS SDK $sdk (floor $floor)"
