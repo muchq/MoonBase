@@ -3778,7 +3778,10 @@ moonbase::games::RoomState GamesHub::RoomStateLocked(const std::string& room_id,
     moonbase::games::GameSummary summary;
     summary.gameId = game_id;
     summary.game = std::string(GameKindName(entry.kind));
-    summary.status = entry.started() ? PhaseStringOf(*entry.state) : "waiting";
+    // A practising table's seat is open to a racer: a join resets it.
+    const bool open_seat =
+        !entry.started() || (IsPractice(*entry.state) && !IsOver(*entry.state));
+    summary.status = open_seat ? "waiting" : PhaseStringOf(*entry.state);
     summary.playerCount = static_cast<int>(entry.roster.size());
     if (entry.terms.has_value()) summary.terms = TermsLineOf(entry.kind, *entry.terms);
     state.games.push_back(std::move(summary));

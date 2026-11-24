@@ -82,6 +82,8 @@ class Race {
   [[nodiscard]] Race endByLeave() const;
 
   [[nodiscard]] bool isOver() const { return ending_.has_value(); }
+  /// One runner, racing alone for practice.
+  [[nodiscard]] bool practice() const { return runners_.size() == 1; }
   [[nodiscard]] const std::optional<Ending>& ending() const { return ending_; }
   /// The best finishers, seated or not, once the race is over, in the order
   /// they joined: one, unless several share the fewest words and the same
@@ -166,7 +168,7 @@ class Table {
   /// Closed: too few seats left.
   [[nodiscard]] bool isOver() const { return closed_; }
   /// A table of one: its runner races alone, for practice.
-  [[nodiscard]] bool practice() const { return race_.runners().size() == 1; }
+  [[nodiscard]] bool practice() const { return race_.practice(); }
   /// The close ended the race in play, which the sheet's last line scores.
   /// Its ending is that line's, not always kLeave: a close whose leave left
   /// every runner done settles the race as kFinished.

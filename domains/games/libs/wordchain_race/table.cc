@@ -41,7 +41,7 @@ bool Holds(const Puzzle& puzzle, const Runner& runner, std::string_view word) {
 }
 
 // The seats a table stays open with: its one, practising; two otherwise.
-std::size_t SeatsToStay(const Race& race) { return race.runners().size() == 1 ? 1 : 2; }
+std::size_t SeatsToStay(const Race& race) { return race.practice() ? 1 : 2; }
 
 bool Done(const Runner& runner) { return runner.left || runner.finished_ms.has_value(); }
 

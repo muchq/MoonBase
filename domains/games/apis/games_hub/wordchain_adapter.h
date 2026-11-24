@@ -44,7 +44,6 @@ struct Adapter<wordchain_race::Table> {
   }
   static moonbase::games::GameEvents Wrap(Update update);
 
-  // A practising table lists as waiting: its seat is open to a racer.
   static std::string Phase(const wordchain_race::Table& table);
   static bool Practice(const wordchain_race::Table& table) { return table.practice(); }
   // Everyone climbs at once: nobody is ever to move.

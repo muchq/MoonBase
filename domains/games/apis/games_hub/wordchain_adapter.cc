@@ -57,12 +57,6 @@ absl::StatusOr<wordchain_race::Puzzle> PickFor(const Adapter<Table>::Start& star
   return puzzle;
 }
 
-// The race's own phase, practice or not.
-std::string RacePhase(const Table& table) {
-  if (table.isOver()) return "closed";
-  return table.race().isOver() ? "over" : "racing";
-}
-
 // The races `player_id` has won at the table.
 int WinsOf(const Table& table, const std::string& player_id) {
   return static_cast<int>(std::count_if(
@@ -87,7 +81,8 @@ uint64_t WordchainSeed(const std::deque<cards::Card>& deck) {
 }
 
 std::string Adapter<Table>::Phase(const Table& table) {
-  return table.practice() && !table.isOver() ? "waiting" : RacePhase(table);
+  if (table.isOver()) return "closed";
+  return table.race().isOver() ? "over" : "racing";
 }
 
 StatsDeltas Adapter<Table>::ClosedDeltas(const Table& table, const std::vector<std::string>&) {
@@ -128,7 +123,7 @@ moonbase::games::WordchainView Adapter<Table>::ViewOf(const TableContext& contex
   }
   const Race& race = table->race();
   const wordchain_race::Puzzle& puzzle = race.puzzle();
-  view.phase = RacePhase(*table);
+  view.phase = Phase(*table);
   view.start = puzzle.start;
   view.target = puzzle.target;
   view.par = puzzle.optimal;
