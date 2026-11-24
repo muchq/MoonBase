@@ -619,7 +619,7 @@ jobs:
 
       # App Store Connect rejects a bundle whose icon set isn't named in its
       # Info.plist (ITMS-90713); actool writes the name under CFBundleIcons.
-      - name: Check the bundled app icon
+      - name: Check the bundled app icon and privacy manifest
         if: steps.filter.outputs.changed == 'true'
         run: |
           ipa=bazel-bin/domains/games/apps/wordchains_ios/WordChains.ipa
@@ -631,6 +631,9 @@ jobs:
           echo "CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName=$icon"
           [ "$icon" = AppIcon ]
           unzip -l "$ipa" | grep -q 'Payload/WordChains.app/Assets.car$'
+          # app_store_test checks the source; this checks it shipped, since an
+          # upload without it is rejected (ITMS-91053).
+          unzip -l "$ipa" | grep -q 'Payload/WordChains.app/PrivacyInfo.xcprivacy$'
 
       # swift.enable_testing is needed for @testable imports because the repo
       # builds -c opt, where rules_swift disables testability by default.

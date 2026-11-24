@@ -22,14 +22,14 @@ The iOS release pipeline mirrors the wordchains CLI release process:
 
 A `Package.swift` is provided for running tests locally via Swift Package Manager.
 This exercises the WordGraph BFS algorithms, `isOneLetterAway` validation, and
-graph query helpers — the same logic paths used in the iOS app.
+graph query helpers, and the race client's wire codec, state and text
+(`Sources/Hub`) — the same logic paths used in the iOS app.
 
 ```sh
 cd domains/games/apps/wordchains_ios
 swift test
 ```
 
-All 12 tests should pass (shortest path, all-shortest-paths, graph queries, etc.).
 
 ### Run in the iOS Simulator (Xcode)
 
@@ -89,6 +89,10 @@ Before submitting to the App Store, verify these scenarios:
 - [ ] **Difficulty levels** — Easy (3 letters), Medium (4), Hard (5)
 - [ ] **iPad layout** — views adapt to wider screens
 - [ ] **Dark mode** — colors remain readable in dark appearance
+- [ ] **Race friends** — create a room, join it from the web lobby (muchq.com/games) by
+  its code, open and join a race table from both, race to the end, Next race; a
+  refused word shows the hub's reason; backgrounding and returning keeps the seat;
+  alone at a table, **Practise** races with no wins, and a join ends it
 
 ## Build
 
@@ -214,6 +218,28 @@ To release a new version:
 The tag is created before the build. If the build or upload fails, delete the
 tag and re-run the workflow (or push again) to retry. Pushing a tag by hand
 releases nothing: it marks that version as already shipped.
+
+## Racing on the games hub
+
+**Race friends** on the menu speaks the games hub's play stream
+(`wss://api.muchq.com/games/v2/play`, `domains/games/apis/games_hub`): the
+session mint, then the JSON-text socket, the same protocol the web lobby speaks.
+`Sources/Hub` holds the wire codec (`HubWire`), the race state and the client
+(`RaceSession`), and the socket (`HubSocket`); the hub checks every word, so
+the app holds no race rules. The resume token is kept in `UserDefaults`. There
+is no chat. The single-player modes need no network.
+
+**App Privacy** (App Store Connect, and `Sources/Resources/PrivacyInfo.xcprivacy`,
+which `:app_store_test` requires while the code uses `UserDefaults`): racing sends
+a server-minted player id (**Identifiers → User ID**) and the race's words
+(**Gameplay Content**) to the hub, for app functionality only, not linked to the
+person, no tracking.
+
+**App Review notes:** alone at a table, a reviewer can **Practise**: **Race
+friends → Create a room → Open a race table → Practise** races the clock with
+nothing recorded. To see a real race, open `https://muchq.com/games/room/<code>`
+in a browser, join the same table as a second seat (which ends any practice),
+and tap **Start the race** in the app.
 
 ## Architecture
 

@@ -91,5 +91,6 @@ sh_test(
     name = "app_store_test",
     size = "small",
     srcs = ["app_store_test.sh"],
-    data = ["Info.plist"] + glob(["Sources/Resources/Assets.xcassets/AppIcon.appiconset/**"]),
+    # The sources too: what the code calls decides what the manifest declares.
+    data = ["Info.plist"] + glob(["Sources/**"]),
 )

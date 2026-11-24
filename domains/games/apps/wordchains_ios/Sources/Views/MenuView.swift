@@ -15,6 +15,7 @@ struct MenuView: View {
                     modeSelector
                     difficultySelector
                     playButton
+                    raceButton
                     statsCard
                 }
                 .padding(.horizontal, Theme.cardPadding)
@@ -154,6 +155,31 @@ struct MenuView: View {
     }
 
     // MARK: - Play Button
+
+    // Racing others on the games hub; needs the network, unlike the
+    // single-player modes above.
+    private var raceButton: some View {
+        NavigationLink {
+            RaceLobbyView()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "person.3.fill")
+                    .font(.system(size: 16))
+                Text("Race friends")
+                    .font(.system(size: 18, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(Theme.gradientStart)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Theme.gradientStart.opacity(0.5), lineWidth: 1.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .opacity(animateIn ? 1 : 0)
+        .offset(y: animateIn ? 0 : 50)
+    }
 
     private var playButton: some View {
         Button {
