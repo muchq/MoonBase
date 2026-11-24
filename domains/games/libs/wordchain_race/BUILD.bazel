@@ -1,0 +1,116 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+# A word ladder race at a games-hub table: the dictionary and puzzles, the
+# race and the table that plays race after race, and its stored form.
+
+cc_library(
+    name = "dictionary",
+    srcs = ["dictionary.cc"],
+    hdrs = ["dictionary.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "dictionary_test",
+    size = "small",
+    srcs = ["dictionary_test.cc"],
+    deps = [
+        ":dictionary",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Every word a race accepts: ENABLE's words of race length.
+genrule(
+    name = "race_words",
+    srcs = ["@enable_words//file"],
+    outs = ["race_words.txt"],
+    cmd = "tr -d '\\r' < $(execpath @enable_words//file) | LC_ALL=C grep -E '^[a-z]{3,5}$$' | " +
+          "LC_ALL=C sort -u > $@",
+    visibility = ["//visibility:public"],
+)
+
+# Where puzzles start and end: SCOWL's common words (sizes 10-35, 2020.12.07)
+# of race length, with slurs and explicit words struck by hand. Checked in so
+# every word a puzzle can open on is reviewed; SCOWL_COPYRIGHT is its license,
+# which asks that the notice travel with every copy.
+exports_files([
+    "SCOWL_COPYRIGHT",
+    "common_words.txt",
+])
+
+# The word lists the hub ships, read the way the hub reads them.
+cc_test(
+    name = "words_test",
+    size = "small",
+    srcs = ["words_test.cc"],
+    data = [
+        "common_words.txt",
+        ":race_words",
+    ],
+    env = {
+        "COMMON": "$(rootpath common_words.txt)",
+        "WORDS": "$(rootpath :race_words)",
+    },
+    deps = [
+        ":dictionary",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "table",
+    srcs = ["table.cc"],
+    hdrs = ["table.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":dictionary",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "table_test",
+    size = "small",
+    srcs = ["table_test.cc"],
+    deps = [
+        ":dictionary",
+        ":table",
+        "@com_google_absl//absl/status",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The games table's column for a race row. Server-side only.
+cc_library(
+    name = "table_serde",
+    srcs = ["table_serde.cc"],
+    hdrs = ["table_serde.h"],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":table",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_test(
+    name = "table_serde_test",
+    size = "small",
+    srcs = ["table_serde_test.cc"],
+    deps = [
+        ":table",
+        ":table_serde",
+        "@googletest//:gtest_main",
+        "@nlohmann_json//:json",
+    ],
+)

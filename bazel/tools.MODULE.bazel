@@ -46,6 +46,16 @@ http_file(
     urls = ["https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt"],
 )
 
+# ENABLE, the public-domain word list (2000), as Peter Norvig hosts it: every
+# word a word ladder race accepts. It has plurals and inflections, which a
+# race needs and Webster's Second lacks.
+http_file(
+    name = "enable_words",
+    downloaded_file_path = "enable1.txt",
+    sha256 = "61ba1392a5b6199dd161fae7b483cd262fb8a88c0d49bd2c9ecb6753e755697f",
+    urls = ["https://norvig.com/ngrams/enable1.txt"],
+)
+
 # DB-IP's free IP-to-country table (CC BY 4.0; muchq.com/stats carries the
 # attribution), bundled into the stats image (#1467). DB-IP publishes a new
 # file each month under a dated URL, so a refresh is a pin bump here and
