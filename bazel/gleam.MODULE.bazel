@@ -1,7 +1,7 @@
 bazel_dep(name = "muchq_rules_gleam", version = "0.0.0", repo_name = "rules_gleam")
 git_override(
     module_name = "muchq_rules_gleam",
-    commit = "5b248d12daa30b3c3bcd514587d2edee75cb6ff8",  # v0.3.2
+    commit = "cd2680bc4bc02a625b3e0a5d7d4bc4bdab3416a2",
     remote = "https://github.com/muchq/rules_gleam.git",
 )
 

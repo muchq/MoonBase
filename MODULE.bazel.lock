@@ -1075,7 +1075,7 @@
     },
     "@@muchq_rules_gleam+//gleam:extensions.bzl%gleam": {
       "general": {
-        "bzlTransitiveDigest": "R2ZgTuE7dAc5x/pgk8P4AbXTHab7lpvjzaxy8kRvwxw=",
+        "bzlTransitiveDigest": "FRDWCXlfTPypeeNUxoGPZfPDIM0ZYqGnfLS8Z7D1+Qo=",
         "usagesDigest": "PBG+PZ27bZ4aE1iUoA9aa89p/9mGVbfCaER1Upgmn0Q=",
         "recordedInputs": [
           "FILE:@@//domains/games/apis/mithril_v2/manifest.toml b3bc57749825a10236f9f30594bd29d0b0dbdea7613aba6bd2b2f0022ba1ac9d"
