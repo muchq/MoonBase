@@ -40,14 +40,12 @@ using moonbase::games::PongUpdate;
 namespace {
 
 // A stored state onto its entry. No state is a table waiting to start, a
-// practice table a join reset among them, none of its games told yet.
-template <typename Entry>
-void Adopt(Entry& entry, const std::optional<HostedState>& state) {
-  if (state.has_value()) {
-    entry.state.emplace(*state);
+// practice table a join reset among them.
+void Adopt(std::optional<HostedState>& held, const std::optional<HostedState>& stored) {
+  if (stored.has_value()) {
+    held.emplace(*stored);
   } else {
-    entry.state.reset();
-    entry.games_announced = 0;
+    held.reset();
   }
 }
 
@@ -756,7 +754,7 @@ GamesHub::Commit GamesHub::CommitEntryLocked(const std::string& room_id, const s
     entry.kind = (*stored)->kind;
     entry.roster = (*stored)->roster;
     entry.version = (*stored)->version;
-    Adopt(entry, (*stored)->state);
+    Adopt(entry.state, (*stored)->state);
     entry.terms = (*stored)->terms;
     entry.event = (*stored)->event;
     // Another instance committed the table: its rally is that one's now.
@@ -766,7 +764,7 @@ GamesHub::Commit GamesHub::CommitEntryLocked(const std::string& room_id, const s
   }
   entry.roster = roster;
   entry.terms = next_terms;
-  Adopt(entry, state);
+  Adopt(entry.state, state);
   entry.version = version;
   // The instance that commits a pong table runs its rally (from a game's
   // end on, TickPongOnce lets it go).
@@ -1097,7 +1095,7 @@ bool GamesHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::R
     }
     entry.roster = row.roster;
     entry.version = row.version;
-    Adopt(entry, row.state);
+    Adopt(entry.state, row.state);
     entry.terms = row.terms;
     entry.event = row.event;
     for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
