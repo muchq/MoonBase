@@ -87,7 +87,6 @@ Before submitting to the App Store, verify these scenarios:
 - [ ] **Hint system** — lightbulb button fills the next word on the shortest path
 - [ ] **Scoring** — optimal solve gives 150 pts (100 base + 50 bonus), extra steps reduce score
 - [ ] **Difficulty levels** — Easy (3 letters), Medium (4), Hard (5)
-- [ ] **iPad layout** — views adapt to wider screens
 - [ ] **Dark mode** — colors remain readable in dark appearance
 - [ ] **Race friends** — create a room, join it from the web lobby (muchq.com/games) by
   its code, open and join a race table from both, race to the end, Next race; a
@@ -126,12 +125,12 @@ The following must be completed before the first App Store release.
 
 ### 1. Apple Developer Account
 
-- [ ] Enroll in the [Apple Developer Program](https://developer.apple.com/programs/) ($99/year)
+- [x] Enroll in the [Apple Developer Program](https://developer.apple.com/programs/) ($99/year)
 - [ ] Accept all agreements in [App Store Connect](https://appstoreconnect.apple.com/)
 
 ### 2. App Store Connect — App Registration
 
-- [ ] Create a new app record in App Store Connect
+- [x] Create a new app record in App Store Connect
   - Bundle ID: `com.muchq.wordchains`
   - SKU: `wordchains-ios`
   - Primary language: English
@@ -139,7 +138,6 @@ The following must be completed before the first App Store release.
 - [ ] Upload screenshots for required device sizes:
   - iPhone 6.9" (iPhone 16 Pro Max)
   - iPhone 6.7" (iPhone 15 Plus)
-  - iPad Pro 13" (6th gen)
 - [ ] Set age rating (likely 4+, no objectionable content)
 - [ ] Set pricing (Free)
 
@@ -147,11 +145,11 @@ The following must be completed before the first App Store release.
 
 This is required for automated uploads from GitHub Actions.
 
-- [ ] Go to [App Store Connect > Users and Access > Integrations > App Store Connect API](https://appstoreconnect.apple.com/access/integrations/api)
-- [ ] Generate a new API key with **App Manager** role
-- [ ] Note the **Key ID** and **Issuer ID**
-- [ ] Download the `.p8` private key file (only available once)
-- [ ] Add the following GitHub Actions secrets to the `muchq/MoonBase` repository:
+- [x] Go to [App Store Connect > Users and Access > Integrations > App Store Connect API](https://appstoreconnect.apple.com/access/integrations/api)
+- [x] Generate a new API key with **App Manager** role
+- [x] Note the **Key ID** and **Issuer ID**
+- [x] Download the `.p8` private key file (only available once)
+- [x] Add the following GitHub Actions secrets to the `muchq/MoonBase` repository:
 
 | Secret Name | Value |
 |---|---|
@@ -161,9 +159,9 @@ This is required for automated uploads from GitHub Actions.
 
 ### 4. Code Signing
 
-- [ ] Create an **iOS Distribution** certificate in the Apple Developer portal
-- [ ] Create a provisioning profile for `com.muchq.wordchains` (App Store distribution)
-- [ ] For CI signing, add these additional GitHub Actions secrets:
+- [x] Create an **iOS Distribution** certificate in the Apple Developer portal
+- [x] Create a provisioning profile for `com.muchq.wordchains` (App Store distribution)
+- [x] For CI signing, add these additional GitHub Actions secrets:
 
 | Secret Name | Value |
 |---|---|

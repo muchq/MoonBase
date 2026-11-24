@@ -72,6 +72,13 @@ else
   fail "icon is a PNG"
 fi
 
+# v1 ships on iPhone only: an iPad build needs iPad screenshots, iPad review
+# and a layout nobody has checked. The bundle's device families come from
+# BUILD's `families`; iPad orientations in the plist would mean iPad again.
+check "the app targets iPhone only" \
+  bash -c 'tr -d " \n" <"$1" | grep -q "families=\[\"iphone\",\]"' _ "$PKG/BUILD.bazel"
+check "the plist names no iPad orientations" bash -c '! grep -q "~ipad" "$1"' _ "$PLIST"
+
 # Apple rejects an upload (ITMS-91053) whose code calls a required-reason
 # API its privacy manifest doesn't declare. UserDefaults holds the hub's
 # resume token; CA92.1 is "read and written by this app only".

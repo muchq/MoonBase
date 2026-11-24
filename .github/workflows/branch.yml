@@ -634,6 +634,8 @@ jobs:
           # app_store_test checks the source; this checks it shipped, since an
           # upload without it is rejected (ITMS-91053).
           unzip -l "$ipa" | grep -q 'Payload/WordChains.app/PrivacyInfo.xcprivacy$'
+          # iPhone only (1): an iPad family (2) asks App Review for iPad.
+          [ "$(plutil -extract UIDeviceFamily json -o - "$plist")" = "[1]" ]
 
       # swift.enable_testing is needed for @testable imports because the repo
       # builds -c opt, where rules_swift disables testability by default.
