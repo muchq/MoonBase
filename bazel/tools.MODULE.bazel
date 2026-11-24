@@ -76,36 +76,6 @@ http_file(
 
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
-# SCOWL's common English words (sizes 10-35): where a word ladder race's
-# puzzles start and end. Its license asks that Copyright appear in every
-# copy, so whatever ships a list derived from them ships @scowl//:Copyright
-# beside it.
-http_archive(
-    name = "scowl",
-    build_file_content = """
-filegroup(
-    name = "common_words",
-    srcs = [
-        "final/american-words.10",
-        "final/american-words.20",
-        "final/american-words.35",
-        "final/english-words.10",
-        "final/english-words.20",
-        "final/english-words.35",
-    ],
-    visibility = ["//visibility:public"],
-)
-
-exports_files(["Copyright"])
-""",
-    sha256 = "5587667caa20c4891390c2d42dbb4d5c4c3f41bee77af1457ece3ba23fb859cc",
-    strip_prefix = "scowl-2020.12.07",
-    urls = [
-        "https://downloads.sourceforge.net/wordlist/scowl-2020.12.07.tar.gz",
-        "https://sourceforge.net/projects/wordlist/files/SCOWL/2020.12.07/scowl-2020.12.07.tar.gz/download",
-    ],
-)
-
 # GNU Go for the go_engine image (#1668), built from its 3.8 release
 # source by //bazel/3p:gnugo.BUILD: there is no release binary. GPL-3:
 # go_engine runs it as a child process over GTP and nothing links it.

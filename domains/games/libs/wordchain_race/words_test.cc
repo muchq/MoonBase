@@ -1,6 +1,6 @@
 // The race against the word lists the hub ships: race_words for every word
 // played, and the common words puzzles start and end on. Every letter count a
-// race offers has puzzles, and neither list holds a blocklisted word.
+// race offers has puzzles.
 #include <gtest/gtest.h>
 
 #include <cstdlib>
@@ -43,19 +43,6 @@ TEST(Words, EveryLetterCountHasPuzzles) {
       EXPECT_EQ(static_cast<int>(puzzle->start.size()), letters);
     }
   }
-}
-
-TEST(Words, NeitherListHoldsABlocklistedWord) {
-  const Dictionary blocked = Dictionary::FromLines(Read("BLOCKLIST"));
-  int checked = 0;
-  for (int letters = kMinLetters; letters <= kMaxLetters; ++letters) {
-    for (const std::string& word : blocked.wordsOfLength(letters)) {
-      EXPECT_FALSE(Common().contains(word)) << word;
-      EXPECT_FALSE(Words().contains(word)) << word;
-      ++checked;
-    }
-  }
-  EXPECT_GT(checked, 20);
 }
 
 TEST(Words, PlaysInflectedForms) {

@@ -25,33 +25,24 @@ cc_test(
     ],
 )
 
-# Every word a race accepts: ENABLE's words of race length, less the
-# blocklist.
+# Every word a race accepts: ENABLE's words of race length.
 genrule(
     name = "race_words",
-    srcs = [
-        "blocklist.txt",
-        "@enable_words//file",
-    ],
+    srcs = ["@enable_words//file"],
     outs = ["race_words.txt"],
     cmd = "tr -d '\\r' < $(execpath @enable_words//file) | LC_ALL=C grep -E '^[a-z]{3,5}$$' | " +
-          "LC_ALL=C sort -u | LC_ALL=C grep -vxFf $(execpath blocklist.txt) > $@",
+          "LC_ALL=C sort -u > $@",
     visibility = ["//visibility:public"],
 )
 
-# Where puzzles start and end: SCOWL's common words of race length, less
-# the blocklist.
-genrule(
-    name = "common_words",
-    srcs = [
-        "blocklist.txt",
-        "@scowl//:common_words",
-    ],
-    outs = ["common_words.txt"],
-    cmd = "cat $(execpaths @scowl//:common_words) | LC_ALL=C grep -E '^[a-z]{3,5}$$' | " +
-          "LC_ALL=C sort -u | LC_ALL=C grep -vxFf $(execpath blocklist.txt) > $@",
-    visibility = ["//visibility:public"],
-)
+# Where puzzles start and end: SCOWL's common words (sizes 10-35, 2020.12.07)
+# of race length, with slurs and explicit words struck by hand. Checked in so
+# every word a puzzle can open on is reviewed; SCOWL_COPYRIGHT is its license,
+# which asks that the notice travel with every copy.
+exports_files([
+    "SCOWL_COPYRIGHT",
+    "common_words.txt",
+])
 
 # The word lists the hub ships, read the way the hub reads them.
 cc_test(
@@ -59,13 +50,11 @@ cc_test(
     size = "small",
     srcs = ["words_test.cc"],
     data = [
-        "blocklist.txt",
-        ":common_words",
+        "common_words.txt",
         ":race_words",
     ],
     env = {
-        "BLOCKLIST": "$(rootpath blocklist.txt)",
-        "COMMON": "$(rootpath :common_words)",
+        "COMMON": "$(rootpath common_words.txt)",
         "WORDS": "$(rootpath :race_words)",
     },
     deps = [
