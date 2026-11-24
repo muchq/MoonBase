@@ -271,6 +271,30 @@ final class RaceSessionTests: XCTestCase {
     }
 }
 
+// The real socket's half of a failed send: with no socket to write to, a
+// command is reported failed at once, and nothing else is said.
+final class HubSocketSendTests: XCTestCase {
+    func testASendWithNoSocketIsReportedFailed() {
+        MainActor.assumeIsolated {
+            final class NoTokens: ResumeTokenStore {
+                func load() -> String? { nil }
+                func save(_ token: String) -> Bool { true }
+                func clear() {}
+            }
+            let socket = HubSocket(tokens: NoTokens())
+            var failed = 0, said: [String] = []
+            socket.events = HubTransportEvents(
+                status: { said.append("status \($0)") },
+                frame: { said.append("frame \($0)") },
+                sendFailed: { failed += 1 }
+            )
+            socket.send(.wordchain(.play("card")))
+            XCTAssertEqual(failed, 1)
+            XCTAssertEqual(said, [])
+        }
+    }
+}
+
 final class ReconnectPolicyTests: XCTestCase {
     // 2s x 10 sits inside the hub's 5-minute reconnect grace, as on the web.
     func testTenRetriesTwoSecondsApartThenGivesUp() {

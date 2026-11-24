@@ -71,4 +71,22 @@ final class ResumeTokenTests: XCTestCase {
     func testTheOldKeyIsTheOneThatShipped() {
         XCTAssertEqual(DefaultsTokenStore.key, "games_hub_resume_token")
     }
+
+    // MARK: - The Keychain store
+
+    #if canImport(Security)
+    // An unhosted test bundle may have no Keychain access (errSecMissingEntitlement);
+    // that is the runner, not the store, so the test says so and skips.
+    func testTheKeychainStoreSavesOverwritesAndClears() throws {
+        let store = KeychainTokenStore()
+        store.clear()
+        defer { store.clear() }
+        guard store.save("r-1") else { throw XCTSkip("no Keychain access in this test host") }
+        XCTAssertEqual(store.load(), "r-1")
+        XCTAssertTrue(store.save("r-2"))
+        XCTAssertEqual(store.load(), "r-2")
+        store.clear()
+        XCTAssertNil(store.load())
+    }
+    #endif
 }
