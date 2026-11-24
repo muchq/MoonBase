@@ -15,6 +15,14 @@ absl::Status CheckPuzzle(const Puzzle& puzzle) {
       puzzle.start == puzzle.target || puzzle.optimal < 2) {
     return absl::InvalidArgumentError("not a puzzle");
   }
+  const std::vector<std::string>& ladder = puzzle.ladder;
+  if (ladder.empty()) return absl::OkStatus();
+  bool chained = static_cast<int>(ladder.size()) == puzzle.optimal && ladder.front() == puzzle.start &&
+                 ladder.back() == puzzle.target;
+  for (std::size_t i = 1; chained && i < ladder.size(); ++i) {
+    chained = OneLetterApart(ladder[i - 1], ladder[i]);
+  }
+  if (!chained) return absl::InvalidArgumentError("the puzzle's ladder breaks");
   return absl::OkStatus();
 }
 

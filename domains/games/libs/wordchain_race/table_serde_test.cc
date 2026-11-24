@@ -14,7 +14,7 @@ const Dictionary& Dict() {
   return d;
 }
 
-const Puzzle kPuzzle{"cold", "warm", 5, "enable"};
+const Puzzle kPuzzle{"cold", "warm", 5, "enable", {}};
 constexpr int64_t kT0 = 1'000'000;
 
 absl::StatusOr<Race> Play(Race race, int seat, const std::vector<std::string>& words) {
@@ -107,6 +107,34 @@ TEST(TableSerde, ALeaveDownToOneAfterATimeoutStillReadsBack) {
   auto back = deserializeTable(serializeTable(table));
   ASSERT_TRUE(back.ok()) << back.status();
   ExpectSame(*back, table);
+}
+
+TEST(TableSerde, RoundTripsThePuzzlesLadder) {
+  Puzzle puzzle = kPuzzle;
+  puzzle.ladder = {"cold", "cord", "card", "ward", "warm"};
+  Table table = *Table::open({"ann"}, puzzle, kT0, 60'000);
+  const nlohmann::json row = nlohmann::json::parse(serializeTable(table));
+  EXPECT_EQ(row["puzzle"]["ladder"], nlohmann::json(puzzle.ladder));
+  auto back = deserializeTable(row.dump());
+  ASSERT_TRUE(back.ok()) << back.status();
+  EXPECT_EQ(back->race().puzzle().ladder, puzzle.ladder);
+}
+
+// Rows stored before puzzles kept their ladder read back without one.
+TEST(TableSerde, ReadsARowWithoutALadder) {
+  const nlohmann::json row = nlohmann::json::parse(serializeTable(Played()));
+  ASSERT_FALSE(row["puzzle"].contains("ladder"));
+  auto back = deserializeTable(row.dump());
+  ASSERT_TRUE(back.ok()) << back.status();
+  EXPECT_TRUE(back->race().puzzle().ladder.empty());
+}
+
+TEST(TableSerde, RefusesALadderThatIsNotAListOfWords) {
+  nlohmann::json row = nlohmann::json::parse(serializeTable(Played()));
+  row["puzzle"]["ladder"] = "cold";
+  EXPECT_FALSE(deserializeTable(row.dump()).ok());
+  row["puzzle"]["ladder"] = {"cold", 5};
+  EXPECT_FALSE(deserializeTable(row.dump()).ok());
 }
 
 TEST(TableSerde, WritesTheDocumentedSchema) {

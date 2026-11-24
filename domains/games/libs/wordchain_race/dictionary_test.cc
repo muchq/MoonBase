@@ -65,6 +65,15 @@ TEST(PickPuzzle, OptimalLadderWithinBounds) {
     auto path = d.shortestPath(puzzle->start, puzzle->target);
     ASSERT_TRUE(path.has_value());
     EXPECT_EQ(static_cast<int>(path->size()), puzzle->optimal);
+    // The ladder it was picked on: optimal words, start to target, each a
+    // word one letter from the last.
+    ASSERT_EQ(static_cast<int>(puzzle->ladder.size()), puzzle->optimal);
+    EXPECT_EQ(puzzle->ladder.front(), puzzle->start);
+    EXPECT_EQ(puzzle->ladder.back(), puzzle->target);
+    for (std::size_t i = 1; i < puzzle->ladder.size(); ++i) {
+      EXPECT_TRUE(d.contains(puzzle->ladder[i]));
+      EXPECT_TRUE(OneLetterApart(puzzle->ladder[i - 1], puzzle->ladder[i]));
+    }
     EXPECT_GE(puzzle->optimal, kMinOptimal);
     EXPECT_LE(puzzle->optimal, kMaxOptimal);
   }
