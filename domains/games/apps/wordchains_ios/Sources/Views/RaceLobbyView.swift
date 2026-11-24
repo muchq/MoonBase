@@ -7,6 +7,7 @@ import SwiftUI
 struct RaceLobbyView: View {
     @State private var session = RaceSession(transport: HubSocket())
     @State private var code = ""
+    @State private var backgrounded = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -22,10 +23,15 @@ struct RaceLobbyView: View {
         .inlineTitle()
         .onAppear { session.connect() }
         .onDisappear { session.disconnect() }
-        // A backgrounded app's socket is gone by the time it is back; the
-        // resume token takes the seat again.
+        // A backgrounded app's socket may be dead without having said so;
+        // back in the foreground, dial afresh and the resume token takes the
+        // seat again. A glance at Control Center only goes inactive.
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { session.connect() }
+            if phase == .background { backgrounded = true }
+            if phase == .active, backgrounded {
+                backgrounded = false
+                session.resume()
+            }
         }
         .onChange(of: session.state.notice) { _, notice in
             #if os(iOS)

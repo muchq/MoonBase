@@ -110,9 +110,11 @@ final class RaceSessionTests: XCTestCase {
         var sent: [HubCommand] = []
         var connects = 0
         var disconnects = 0
+        var resumes = 0
         var events: HubTransportEvents?
         func connect() { connects += 1 }
         func disconnect() { disconnects += 1 }
+        func resume() { resumes += 1 }
         func send(_ command: HubCommand) { sent.append(command) }
     }
 
@@ -208,6 +210,38 @@ final class RaceSessionTests: XCTestCase {
             session.createRoom()
             session.leaveRoom()
             XCTAssertEqual(transport.sent, [.createRoom, .leaveRoom])
+        }
+    }
+
+    func testTransportStatusIsTheSessionsConnection() {
+        MainActor.assumeIsolated {
+            let (session, transport) = mount()
+            XCTAssertEqual(session.connection, .connected)
+            transport.events?.status(.lost("slow down"))
+            XCTAssertEqual(session.connection, .lost("slow down"))
+        }
+    }
+
+    // A closed table lingers only as a view, so leaving it is local; but
+    // once Play again has asked for a new table, that one is on its way,
+    // and the player would land at it after leaving. Back waits.
+    func testBackFromAClosedTableWaitsWhileANewOneOpens() {
+        MainActor.assumeIsolated {
+            let (session, transport) = mount()
+            transport.events?.frame(.wordchain(.view(view(.closed))))
+            session.openTable()
+            session.leaveTable()
+            XCTAssertEqual(session.state.table?.phase, .closed)
+            XCTAssertTrue(session.state.opening)
+            XCTAssertEqual(transport.sent, [.wordchain(.createGame)])
+        }
+    }
+
+    func testResumeReachesTheTransport() {
+        MainActor.assumeIsolated {
+            let (session, transport) = mount()
+            session.resume()
+            XCTAssertEqual(transport.resumes, 1)
         }
     }
 

@@ -43,7 +43,7 @@ final class DialerTests: XCTestCase {
             _ = dialer.retryDue(next)
             gen = next
         }
-        XCTAssertEqual(dialer.dropped(gen), [.status(.lost("Lost connection to the games hub"))])
+        XCTAssertEqual(dialer.dropped(gen), [.hangUp, .status(.lost("Lost connection to the games hub"))])
     }
 
     func testAdmissionStartsTheRetryCountOver() {
@@ -96,9 +96,30 @@ final class DialerTests: XCTestCase {
     // every two seconds; the web stops, and so does this.
     func testASupersededWireStopsDialing() {
         var (dialer, gen) = connected()
-        XCTAssertEqual(dialer.dropped(gen, superseded: true), [.status(.lost("Playing on another device"))])
+        XCTAssertEqual(dialer.dropped(gen, superseded: true), [.hangUp, .status(.lost("Playing on another device"))])
         XCTAssertEqual(dialer.retryDue(gen + 1), [])
         XCTAssertEqual(dialer.connect(), [.status(.connecting), .dial(gen + 1)])
+    }
+
+    // MARK: - Coming back to the foreground
+
+    // A backgrounded app's socket may be dead without having said so: back
+    // in the foreground, an admitted connection dials afresh, and the
+    // resume token takes the seat again.
+    func testResumingRedialsEvenWhenAdmitted() {
+        var (dialer, gen) = connected()
+        XCTAssertEqual(dialer.resume(), [.hangUp, .status(.connecting), .dial(gen + 1)])
+        XCTAssertEqual(dialer.dropped(gen), [])
+    }
+
+    // Resuming a connection the player hung up, or one that was lost,
+    // leaves it as it is: Try again is theirs to press.
+    func testResumingAnIdleOrLostConnectionDoesNothing() {
+        var dialer = Dialer()
+        XCTAssertEqual(dialer.resume(), [])
+        var (lost, gen) = connected()
+        _ = lost.refused(gen, exception: "TooManySessions", message: "slow down")
+        XCTAssertEqual(lost.resume(), [])
     }
 
     // MARK: - Hanging up, and stale news

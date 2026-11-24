@@ -39,6 +39,17 @@ struct Dialer {
         return [.status(.connecting), .dial(next())]
     }
 
+    /// Back in the foreground: a backgrounded socket may be dead without
+    /// having said so, so a live or waiting connection dials afresh and the
+    /// resume token takes the seat again. An idle or lost one is the
+    /// player's to restart.
+    mutating func resume() -> [Effect] {
+        guard phase == .dialing || phase == .waiting else { return [] }
+        policy = ReconnectPolicy()
+        phase = .dialing
+        return [.hangUp, .status(.connecting), .dial(next())]
+    }
+
     mutating func disconnect() -> [Effect] {
         phase = .idle
         _ = next()
@@ -68,11 +79,11 @@ struct Dialer {
         guard isCurrent(gen), phase == .dialing else { return [] }
         if superseded {
             phase = .lost
-            return [.status(.lost("Playing on another device"))]
+            return [.hangUp, .status(.lost("Playing on another device"))]
         }
         guard let delay = policy.next() else {
             phase = .lost
-            return [.status(.lost("Lost connection to the games hub"))]
+            return [.hangUp, .status(.lost("Lost connection to the games hub"))]
         }
         phase = .waiting
         return [.status(.connecting), .wait(next(), delay)]

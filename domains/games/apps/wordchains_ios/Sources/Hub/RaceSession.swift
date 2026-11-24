@@ -73,6 +73,7 @@ protocol HubTransport: AnyObject {
     var events: HubTransportEvents? { get set }
     func connect()
     func disconnect()
+    func resume()
     func send(_ command: HubCommand)
 }
 
@@ -107,6 +108,8 @@ final class RaceSession {
 
     func connect() { transport.connect() }
     func disconnect() { transport.disconnect() }
+    /// Back in the foreground; see Dialer.resume.
+    func resume() { transport.resume() }
     func dismissNotice() { state.notice = nil }
 
     // MARK: - The room
@@ -153,9 +156,11 @@ final class RaceSession {
     }
 
     /// A closed table is already gone from the hub: only the view lingers.
+    /// Once Play again has asked for a new table, though, that one is on its
+    /// way and would seat the player after they left: Back waits for it.
     func leaveTable() {
         guard let table = state.table, table.phase != .closed else {
-            state.table = nil
+            if !state.opening { state.table = nil }
             return
         }
         transport.send(.wordchain(.leaveGame))

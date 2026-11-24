@@ -147,6 +147,19 @@ final class HubWireTests: XCTestCase {
         XCTAssertEqual(session, HubSession(playerId: "p", ticket: "t", resumeToken: "r"))
     }
 
+    // The resume token is the player: a mint offers it when there is one,
+    // and asks for a new player with an empty body when there is not.
+    func testTheMintOffersTheResumeTokenOrNothing() throws {
+        XCTAssertEqual(String(decoding: HubEndpoints.mintBody(resumeToken: "r-1"), as: UTF8.self), #"{"resumeToken":"r-1"}"#)
+        XCTAssertEqual(String(decoding: HubEndpoints.mintBody(resumeToken: nil), as: UTF8.self), "{}")
+    }
+
+    // The subprotocol picks the hub's JSON-text frame mode; any other and
+    // the hub speaks binary event-stream frames this client can't read.
+    func testThePlaySocketSpeaksTheJsonTextSubprotocol() {
+        XCTAssertEqual(HubEndpoints.subprotocol, "smithy.eventstream.v1+json")
+    }
+
     func testEndpointsFollowThePlayURL() {
         let play = URL(string: "wss://api.muchq.com/games/v2/play")!
         XCTAssertEqual(HubEndpoints.sessionURL(play: play).absoluteString, "https://api.muchq.com/games/v2/session")

@@ -197,6 +197,7 @@ struct RaceTableView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(session.connection != .connected || session.state.opening)
                 Button("Back to the room") { session.leaveTable() }
+                    .disabled(session.state.opening)
             }
         case .racing:
             EmptyView()

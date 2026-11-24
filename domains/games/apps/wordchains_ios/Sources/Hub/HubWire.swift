@@ -30,6 +30,12 @@ enum HubEndpoints {
         return parts.url!
     }
 
+    /// The mint's body: the resume token, to come back as the same player,
+    /// or nothing, to be a new one.
+    static func mintBody(resumeToken: String?) -> Data {
+        try! JSONSerialization.data(withJSONObject: resumeToken.map { ["resumeToken": $0] } ?? [String: String]())
+    }
+
     static func socketURL(play: URL, ticket: String) -> URL {
         var parts = URLComponents(url: play, resolvingAgainstBaseURL: false)!
         // Percent-encode as encodeURIComponent does, '+' included.

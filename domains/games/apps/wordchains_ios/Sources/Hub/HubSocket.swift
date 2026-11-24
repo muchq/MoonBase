@@ -35,6 +35,7 @@ final class HubSocket: HubTransport {
 
     func connect() { run(dialer.connect()) }
     func disconnect() { run(dialer.disconnect()) }
+    func resume() { run(dialer.resume()) }
 
     func send(_ command: HubCommand) {
         guard let socket else { return }
@@ -89,7 +90,7 @@ final class HubSocket: HubTransport {
         var request = URLRequest(url: HubEndpoints.sessionURL(play: playURL), timeoutInterval: Self.mintTimeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: resumeToken.map { ["resumeToken": $0] } ?? [:])
+        request.httpBody = HubEndpoints.mintBody(resumeToken: resumeToken)
         let (data, response) = try await urlSession.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
