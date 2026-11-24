@@ -69,7 +69,8 @@ bazel build //domains/games/apps/wordchains_ios:WordChains \
 bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
   --ios_minimum_os=17.0 \
   --features=swift.enable_testing \
-  --ios_simulator_device="iPhone 17"
+  --ios_simulator_device="iPhone 17" \
+  --ios_simulator_version=27.0
 ```
 
 > **Simulator runtime:** The build requires an iOS simulator runtime matching

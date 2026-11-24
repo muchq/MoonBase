@@ -654,11 +654,14 @@ jobs:
       # builds -c opt, where rules_swift disables testability by default.
       # Without an explicit simulator device the test runner pairs an ancient
       # device type (iPhone 6s Plus) with the latest iOS runtime and the
-      # simulator fails to boot.
+      # simulator fails to boot. The runtime is pinned too: the xcode-27
+      # image's iOS 27.1 and 27.2 runtimes create no iPhone 17 (simctl exits
+      # 147), and 27.0's does.
       - name: Run iOS unit tests with bazel
         if: steps.filter.outputs.changed == 'true'
         run: |
           bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
             --ios_minimum_os=17.0 \
             --features=swift.enable_testing \
-            --ios_simulator_device="iPhone 17"
+            --ios_simulator_device="iPhone 17" \
+            --ios_simulator_version=27.0
