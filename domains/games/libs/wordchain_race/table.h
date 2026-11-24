@@ -48,7 +48,8 @@ enum class Ending {
 ///     the target finishes the runner.
 ///   - A runner may take back their last word until they finish.
 ///   - The winner is the finisher with the fewest words, the earlier finish
-///     breaking a tie; nobody wins if nobody finished. A finish on par
+///     breaking a tie; finishers level on both share the win. Nobody wins
+///     if nobody finished. A finish on par
 ///     (optimal - 1 words) cannot be beaten, so it ends the race.
 ///
 /// A seat is a runner's place among those still seated, the hub's roster
@@ -82,9 +83,12 @@ class Race {
 
   [[nodiscard]] bool isOver() const { return ending_.has_value(); }
   [[nodiscard]] const std::optional<Ending>& ending() const { return ending_; }
-  /// The best finisher, seated or not, once the race is over.
-  [[nodiscard]] std::optional<std::string> winner() const;
-  /// Finishers best first, then everyone else in the order they joined.
+  /// The best finishers, seated or not, once the race is over, in the order
+  /// they joined: one, unless several share the fewest words and the same
+  /// finish; none if nobody finished.
+  [[nodiscard]] std::vector<std::string> winners() const;
+  /// Finishers best first (fewest words, then earliest; level ones in the
+  /// order they joined), then everyone else in the order they joined.
   [[nodiscard]] std::vector<std::string> standings() const;
 
   [[nodiscard]] const Puzzle& puzzle() const { return puzzle_; }
@@ -120,10 +124,10 @@ class Race {
   std::optional<Ending> ending_;
 };
 
-/// A line of the table's score sheet: how one race ended, and its winner if
-/// it had one.
+/// A line of the table's score sheet: how one race ended, and its winners,
+/// none if nobody finished.
 struct RaceScore {
-  std::optional<std::string> winner;
+  std::vector<std::string> winners;
   Ending ending = Ending::kFinished;
   bool operator==(const RaceScore&) const = default;
 };
@@ -161,6 +165,8 @@ class Table {
   /// Closed: too few seats left.
   [[nodiscard]] bool isOver() const { return closed_; }
   /// The close ended the race in play, which the sheet's last line scores.
+  /// Its ending is that line's, not always kLeave: a close whose leave left
+  /// every runner done settles the race as kFinished.
   [[nodiscard]] bool endedByClose() const { return ended_by_close_; }
   [[nodiscard]] const Race& race() const { return race_; }
   [[nodiscard]] const std::vector<RaceScore>& scoreSheet() const { return score_sheet_; }

@@ -108,7 +108,7 @@ TEST(RaceEnd, AFinishOnParEndsTheRaceAtOnce) {
   Race race = Play(Open({"ann", "bob", "cy"}), 1, kPar);
   EXPECT_TRUE(race.isOver());
   EXPECT_EQ(race.ending(), Ending::kFinished);
-  EXPECT_EQ(race.winner(), "bob");
+  EXPECT_EQ(race.winners(), (Words{"bob"}));
   EXPECT_FALSE(race.play(0, "cord", Dict(), kT0 + 2000).ok());
 }
 
@@ -117,14 +117,29 @@ TEST(RaceEnd, EndsWhenEveryoneFinishesFewestWordsWins) {
   EXPECT_FALSE(race.isOver());
   race = Play(race, 1, kMid, kT0 + 9000);
   EXPECT_EQ(race.ending(), Ending::kFinished);
-  EXPECT_EQ(race.winner(), "bob");
+  EXPECT_EQ(race.winners(), (Words{"bob"}));
   EXPECT_EQ(race.standings(), (Words{"bob", "ann"}));
 }
 
 TEST(RaceEnd, EarlierFinishBreaksATie) {
   Race race = Play(Open(), 1, kMid, kT0 + 1000);
   race = Play(race, 0, kMid, kT0 + 2000);
-  EXPECT_EQ(race.winner(), "bob");
+  EXPECT_EQ(race.winners(), (Words{"bob"}));
+}
+
+TEST(RaceEnd, TheSameWordsAtTheSameMomentIsASharedWin) {
+  Race race = Play(Open({"ann", "bob", "cy"}), 1, kMid, kT0 + 1000);
+  race = Play(race, 0, kMid, kT0 + 1000);
+  race = *race.leave(2);
+  EXPECT_EQ(race.winners(), (Words{"ann", "bob"}));
+  EXPECT_EQ(ScoreOf(race), (RaceScore{{"ann", "bob"}, Ending::kFinished}));
+}
+
+TEST(RaceEnd, TheSameWordsAMillisecondApartIsNot) {
+  Race race = Play(Open({"ann", "bob", "cy"}), 1, kMid, kT0 + 1000);
+  race = Play(race, 0, kMid, kT0 + 1001);
+  race = *race.leave(2);
+  EXPECT_EQ(race.winners(), (Words{"bob"}));
 }
 
 TEST(RaceEnd, ExpireRefusesBeforeTheDeadlineOrOnceOver) {
@@ -141,9 +156,9 @@ TEST(RaceEnd, OnTheClockFinishersBeatTheRestAndNobodyWinsIfNoneFinished) {
   race = *race.expire(kT0 + 3 * kMinute);
   EXPECT_EQ(race.ending(), Ending::kTimeout);
   EXPECT_FALSE(race.timeUp(kT0 + 4 * kMinute));
-  EXPECT_EQ(race.winner(), "cy");
+  EXPECT_EQ(race.winners(), (Words{"cy"}));
   EXPECT_EQ(race.standings(), (Words{"cy", "ann", "bob"}));
-  EXPECT_EQ(Open().expire(kT0 + 3 * kMinute)->winner(), std::nullopt);
+  EXPECT_TRUE(Open().expire(kT0 + 3 * kMinute)->winners().empty());
 }
 
 TEST(RaceLeave, SeatsCountOnlyTheRunnersStillSeated) {
@@ -164,7 +179,7 @@ TEST(RaceLeave, ALeaverKeepsTheirFinishAndCanStillWin) {
   race = Play(race, 0, kLong, kT0 + 2000);
   race = Play(race, 1, kLong, kT0 + 3000);
   EXPECT_EQ(race.ending(), Ending::kFinished);
-  EXPECT_EQ(race.winner(), "ann");
+  EXPECT_EQ(race.winners(), (Words{"ann"}));
 }
 
 TEST(RaceLeave, TheLastUnfinishedRunnerLeavingEndsTheRace) {
@@ -172,7 +187,7 @@ TEST(RaceLeave, TheLastUnfinishedRunnerLeavingEndsTheRace) {
   race = Play(race, 2, kLong);
   race = *race.leave(1);
   EXPECT_EQ(race.ending(), Ending::kFinished);
-  EXPECT_EQ(race.winner(), "ann");
+  EXPECT_EQ(race.winners(), (Words{"ann"}));
 }
 
 TEST(RaceRestore, RefusesALadderThatIsNotAChainOrMisstatesItsFinish) {
@@ -228,14 +243,14 @@ TEST(Table, ScoresEachRaceAndStartsTheNextOnlyBetweenRaces) {
   table = InRace(table, 0, kMid);
   EXPECT_TRUE(table.scoreSheet().empty());
   table = InRace(table, 1, kLong);
-  EXPECT_EQ(table.scoreSheet(), (Sheet{{"ann", Ending::kFinished}}));
+  EXPECT_EQ(table.scoreSheet(), (Sheet{{{"ann"}, Ending::kFinished}}));
   EXPECT_FALSE(table.inRace([](const Race& race) { return race; }).ok());
 
   table = *table.next(kPuzzle, kT0 + kMinute, kMinute);
   EXPECT_FALSE(table.race().isOver());
   table = *table.inRace([](const Race& race) { return race.expire(kT0 + 2 * kMinute); });
   EXPECT_EQ(table.scoreSheet(),
-            (Sheet{{"ann", Ending::kFinished}, {std::nullopt, Ending::kTimeout}}));
+            (Sheet{{{"ann"}, Ending::kFinished}, {{}, Ending::kTimeout}}));
 }
 
 TEST(Table, TheNextRaceSeatsOnlyThoseStillSeated) {
@@ -257,21 +272,21 @@ TEST(Table, ALeaveThatEndsTheRaceScoresIt) {
   Table table = InRace(InRace(OpenTable({"ann", "bob", "cy"}), 0, kMid), 2, kLong);
   table = *table.removePlayer(1);
   EXPECT_FALSE(table.isOver());
-  EXPECT_EQ(table.scoreSheet(), (Sheet{{"ann", Ending::kFinished}}));
+  EXPECT_EQ(table.scoreSheet(), (Sheet{{{"ann"}, Ending::kFinished}}));
 }
 
 TEST(Table, ALeaveDownToOneCreditsAFinisherWhoStayed) {
   Table table = *InRace(OpenTable(), 0, kMid).removePlayer(1);
   EXPECT_TRUE(table.isOver());
   EXPECT_TRUE(table.endedByClose());
-  EXPECT_EQ(table.scoreSheet(), (Sheet{{"ann", Ending::kFinished}}));
+  EXPECT_EQ(table.scoreSheet(), (Sheet{{{"ann"}, Ending::kFinished}}));
 }
 
 TEST(Table, ALeaveDownToOneWithNobodyFinishedEndsByLeave) {
   Table table = *InRace(OpenTable(), 0, {"cord"}).removePlayer(1);
   EXPECT_TRUE(table.isOver());
   EXPECT_EQ(table.race().ending(), Ending::kLeave);
-  EXPECT_EQ(table.scoreSheet(), (Sheet{{std::nullopt, Ending::kLeave}}));
+  EXPECT_EQ(table.scoreSheet(), (Sheet{{{}, Ending::kLeave}}));
   EXPECT_FALSE(table.removePlayer(0).ok());
 }
 
@@ -287,13 +302,13 @@ TEST(Table, AFinishedRaceKeepsItsWinnerWhenTheyLeave) {
   Table table = InRace(InRace(OpenTable({"ann", "bob", "cy"}), 0, kMid), 1, kLong);
   table = InRace(table, 2, kLong);
   table = *table.removePlayer(0);
-  EXPECT_EQ(table.race().winner(), "ann");
+  EXPECT_EQ(table.race().winners(), (Words{"ann"}));
   EXPECT_EQ(table.scoreSheet().size(), 1U);
   EXPECT_TRUE(Table::restore(table.race(), table.scoreSheet(), false, false).ok());
 
   Table two = *InRace(InRace(OpenTable(), 0, kMid), 1, kLong).removePlayer(0);
   EXPECT_TRUE(two.isOver());
-  EXPECT_EQ(two.race().winner(), "ann");
+  EXPECT_EQ(two.race().winners(), (Words{"ann"}));
   EXPECT_TRUE(Table::restore(two.race(), two.scoreSheet(), true, false).ok());
 }
 
@@ -301,8 +316,8 @@ TEST(TableRestore, RefusesAFinishedRaceTheSheetDoesNotEndWith) {
   Table table = InRace(InRace(OpenTable(), 0, kMid), 1, kMid);
   EXPECT_TRUE(Table::restore(table.race(), table.scoreSheet(), false, false).ok());
   EXPECT_FALSE(Table::restore(table.race(), {}, false, false).ok());
-  EXPECT_FALSE(Table::restore(table.race(), {{"bob", Ending::kFinished}}, false, false).ok());
-  EXPECT_FALSE(Table::restore(table.race(), {{"ann", Ending::kTimeout}}, false, false).ok());
+  EXPECT_FALSE(Table::restore(table.race(), {{{"bob"}, Ending::kFinished}}, false, false).ok());
+  EXPECT_FALSE(Table::restore(table.race(), {{{"ann"}, Ending::kTimeout}}, false, false).ok());
 }
 
 TEST(TableRestore, RefusesSeatsThatDisagreeWithBeingClosed) {

@@ -103,7 +103,7 @@ std::string serializeTable(const Table& table) {
   json sheet = json::array();
   for (const RaceScore& score : table.scoreSheet()) {
     json line = {{"ending", EndingName(score.ending)}};
-    if (score.winner.has_value()) line["winner"] = *score.winner;
+    line["winners"] = score.winners;
     sheet.push_back(std::move(line));
   }
   const Puzzle& puzzle = race.puzzle();
@@ -170,10 +170,11 @@ absl::StatusOr<Table> deserializeTable(const std::string& serialized) {
     auto ending = EndingNamed(*ending_name);
     if (!ending.ok()) return ending.status();
     score.ending = *ending;
-    if (line.contains("winner")) {
-      auto winner = String(line, "winner");
-      if (!winner.ok()) return winner.status();
-      score.winner = *std::move(winner);
+    auto winners = Array(line, "winners");
+    if (!winners.ok()) return winners.status();
+    for (const json& winner : **winners) {
+      if (!winner.is_string()) return absl::InvalidArgumentError("a winner is a name");
+      score.winners.push_back(winner.get<std::string>());
     }
     sheet.push_back(std::move(score));
   }

@@ -16,7 +16,7 @@ namespace wordchain_race {
 ///    "runners":[{"id":playerId, "ladder":[w...], "finishedMs":n (absent
 ///    until finished), "left":bool}...], "startedMs":n, "deadlineMs":n,
 ///    "ending":"finished"|"timeout"|"leave" (absent in play),
-///    "scoreSheet":[{"winner":playerId (absent for nobody), "ending":...}...],
+///    "scoreSheet":[{"winners":[playerId...] (empty for nobody), "ending":...}...],
 ///    "closed":bool, "endedByClose":bool}
 [[nodiscard]] std::string serializeTable(const Table& table);
 [[nodiscard]] absl::StatusOr<Table> deserializeTable(const std::string& serialized);

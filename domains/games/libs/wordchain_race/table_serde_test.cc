@@ -62,7 +62,7 @@ TEST(TableSerde, RoundTripsAScoredRaceWithItsFinishesAndLeaver) {
   auto back = deserializeTable(serializeTable(table));
   ASSERT_TRUE(back.ok()) << back.status();
   ExpectSame(*back, table);
-  EXPECT_EQ(back->race().winner(), "ann");
+  EXPECT_EQ(back->race().winners(), (std::vector<std::string>{"ann"}));
 }
 
 TEST(TableSerde, RoundTripsATableClosedByLeave) {
@@ -100,19 +100,25 @@ TEST(TableSerde, ALeaveDownToOneAfterATimeoutStillReadsBack) {
 }
 
 TEST(TableSerde, WritesTheDocumentedSchema) {
-  nlohmann::json j = nlohmann::json::parse(serializeTable(Played()));
-  EXPECT_EQ(j["v"], 1);
-  EXPECT_EQ(j["puzzle"]["start"], "cold");
-  EXPECT_EQ(j["puzzle"]["lexicon"], "enable");
-  EXPECT_EQ(j["runners"][0]["id"], "ann");
-  EXPECT_EQ(j["runners"][0]["finishedMs"], kT0 + 500);
-  EXPECT_FALSE(j["runners"][1].contains("finishedMs"));
-  EXPECT_EQ(j["runners"][2]["left"], true);
-  EXPECT_EQ(j["ending"], "timeout");
-  EXPECT_EQ(j["scoreSheet"][0]["winner"], "ann");
-  EXPECT_EQ(j["scoreSheet"][0]["ending"], "timeout");
-  EXPECT_EQ(j["closed"], false);
-  EXPECT_EQ(j["endedByClose"], false);
+  const nlohmann::json expected = {
+      {"v", 1},
+      {"puzzle", {{"start", "cold"}, {"target", "warm"}, {"optimal", 5}, {"lexicon", "enable"}}},
+      {"runners",
+       {{{"id", "ann"},
+         {"ladder", {"cord", "card", "ward", "wart", "warm"}},
+         {"finishedMs", kT0 + 500},
+         {"left", false}},
+        {{"id", "bob"}, {"ladder", {"cord"}}, {"left", false}},
+        {{"id", "cy"}, {"ladder", nlohmann::json::array()}, {"left", true}}}},
+      {"startedMs", kT0},
+      {"deadlineMs", kT0 + 60'000},
+      {"ending", "timeout"},
+      {"scoreSheet", {{{"winners", {"ann"}}, {"ending", "timeout"}}}},
+      {"closed", false},
+      {"endedByClose", false},
+  };
+  EXPECT_EQ(nlohmann::json::parse(serializeTable(Played())), expected);
+  // A race in play writes no ending.
   EXPECT_FALSE(nlohmann::json::parse(serializeTable(*Table::open({"a", "b"}, kPuzzle, kT0, 1)))
                    .contains("ending"));
 }

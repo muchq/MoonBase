@@ -31,6 +31,19 @@ const Dictionary& Common() {
   return d;
 }
 
+// The lists' sizes, pinned: a regenerated or edited list changes them on
+// purpose, in this test, not by accident.
+TEST(Words, ListsHoldTheirReviewedSizes) {
+  std::size_t words = 0;
+  std::size_t common = 0;
+  for (int letters = kMinLetters; letters <= kMaxLetters; ++letters) {
+    words += Words().wordsOfLength(letters).size();
+    common += Common().wordsOfLength(letters).size();
+  }
+  EXPECT_EQ(words, 13511U);
+  EXPECT_EQ(common, 5786U);
+}
+
 TEST(Words, EveryLetterCountHasPuzzles) {
   for (int letters = kMinLetters; letters <= kMaxLetters; ++letters) {
     EXPECT_GT(Words().wordsOfLength(letters).size(), 500U) << letters;

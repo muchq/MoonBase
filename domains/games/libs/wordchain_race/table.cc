@@ -184,11 +184,16 @@ Race Race::endByLeave() const {
   return next;
 }
 
-std::optional<std::string> Race::winner() const {
-  if (!isOver()) return std::nullopt;
+std::vector<std::string> Race::winners() const {
+  if (!isOver()) return {};
   const auto best = std::min_element(runners_.begin(), runners_.end(), Ahead);
-  if (best == runners_.end() || !best->finished_ms.has_value()) return std::nullopt;
-  return best->player_id;
+  if (best == runners_.end() || !best->finished_ms.has_value()) return {};
+  // Level with the best: neither ahead of the other.
+  std::vector<std::string> ids;
+  for (const Runner& runner : runners_) {
+    if (!Ahead(*best, runner)) ids.push_back(runner.player_id);
+  }
+  return ids;
 }
 
 std::vector<std::string> Race::standings() const {
@@ -218,7 +223,7 @@ int Race::playerIndex(std::string_view id) const {
 }
 
 RaceScore ScoreOf(const Race& finished) {
-  return RaceScore{finished.winner(), finished.ending().value_or(Ending::kFinished)};
+  return RaceScore{finished.winners(), finished.ending().value_or(Ending::kFinished)};
 }
 
 absl::StatusOr<Table> Table::open(std::vector<std::string> players, Puzzle puzzle, int64_t now_ms,
