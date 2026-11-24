@@ -636,6 +636,46 @@ func TestHealthchecksAreWrittenInPlaceRatherThanMerged(t *testing.T) {
 	}
 }
 
+// A probed first-party container runs under an init that reaps.
+//
+// oci.bzl makes the service binary itself PID 1, and none of our runtimes
+// waits on children it did not start. The probes are `timeout ... bash -c`
+// pipelines: when timeout fires on a slow answer, it kills bash and leaves the
+// grep orphaned, the kernel reparents it to PID 1, and it stays a zombie for
+// the life of the container. `init: true` puts docker's tini there instead.
+func TestProbedFirstPartyServicesRunUnderAnInit(t *testing.T) {
+	probes := healthcheckProbes(t, "compose.yaml")
+	services := composeServiceLines(t, "compose.yaml")
+
+	// Guards the guard: one_d4 is probed and first-party, so an empty check
+	// means the parser stopped finding it.
+	if probe, ok := probes["one_d4"]; !ok || !strings.Contains(probe.image, "ghcr.io/muchq/") {
+		t.Fatal("one_d4 is not a probed first-party service here; the parser has gone stale")
+	}
+
+	for service, probe := range probes {
+		if !strings.Contains(probe.image, "ghcr.io/muchq/") {
+			continue
+		}
+		if !hasServiceKey(services[service], "init: true") {
+			t.Errorf("%s has a healthcheck but no `init: true`: its binary is PID 1, so every "+
+				"probe that times out leaves an orphan it never reaps.", service)
+		}
+	}
+}
+
+// hasServiceKey reports whether a service's own mapping, not a nested one,
+// carries the given `key: value` line.
+func hasServiceKey(block []string, want string) bool {
+	for _, raw := range block {
+		indent := len(raw) - len(strings.TrimLeft(raw, " "))
+		if indent == 4 && strings.TrimSpace(withoutComment(raw)) == want {
+			return true
+		}
+	}
+	return false
+}
+
 type healthcheckProbe struct {
 	image string
 	lines []string

@@ -96,6 +96,7 @@ services:
     labels:
       com.muchq.description: "Games hub on smithy event streams (/games/v2/*)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8089"
@@ -171,6 +172,7 @@ services:
     labels:
       com.muchq.description: "Ray-traced scene renderer"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8081"
@@ -229,6 +231,7 @@ services:
     labels:
       com.muchq.description: "Stockfish over HTTP for chess bots"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       - PORT=8094
@@ -261,6 +264,7 @@ services:
     labels:
       com.muchq.description: "GNU Go over HTTP for go bots"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       - PORT=8095
@@ -290,6 +294,7 @@ services:
     labels:
       com.muchq.description: "Word-ladder solver (wordchains)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8083"
@@ -321,6 +326,7 @@ services:
     labels:
       com.muchq.description: "Word-ladder solver (Gleam)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8096"
@@ -350,6 +356,7 @@ services:
     labels:
       com.muchq.description: "Image blur and edge detection"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8084"
@@ -379,6 +386,7 @@ services:
     labels:
       com.muchq.description: "one_d4 v2 API: /v2/analyze on the C++ detectors (#1389 phase 6)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8090"
@@ -411,6 +419,7 @@ services:
     labels:
       com.muchq.description: "URL shortener v2 API (C++)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8091"
@@ -441,6 +450,7 @@ services:
     labels:
       com.muchq.description: "Model Context Protocol server"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       - PORT=8080
@@ -558,6 +568,7 @@ services:
     labels:
       com.muchq.description: "Chess corpus API: index submits, ChessQL queries (indexing runs in one_d4_worker)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       - APP_NAME=one_d4
@@ -671,6 +682,7 @@ services:
     labels:
       com.muchq.description: "microgpt text generation API"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8087"
@@ -704,6 +716,7 @@ services:
     labels:
       com.muchq.description: "Next-event predictor over Caddy's access log and the hub's events (Rust)"
     restart: always
+    init: true
     logging: *default-logging
     environment:
       PORT: "8093"
@@ -786,6 +799,7 @@ services:
     labels:
       com.muchq.description: "Log-derived stats aggregator and API (Go)"
     restart: always
+    init: true
     logging: *default-logging
     # Same profile as log_shipper: both halves of the pipeline need the
     # stats S3 credentials in ~/.env, so neither starts on a default up -d.
