@@ -73,6 +73,8 @@ jobs:
     runs-on: macos-26
     outputs:
       signed: ${{ steps.signing.outputs.enabled }}
+      ipa: ${{ steps.stage.outputs.ipa }}
+      sha: ${{ steps.stage.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -151,6 +153,7 @@ jobs:
           fi
 
       - name: Stage release artifacts
+        id: stage
         run: |
           VERSION="${{ needs.check-and-tag.outputs.version }}"
           BUILD="${{ github.run_number }}"
@@ -161,6 +164,9 @@ jobs:
 
           echo "IPA_FILE=WordChains-${VERSION}-${BUILD}.ipa" >> "$GITHUB_ENV"
           echo "SHA_FILE=WordChains-${VERSION}-${BUILD}.sha256.txt" >> "$GITHUB_ENV"
+          # The release job names these files rather than globbing for them.
+          echo "ipa=WordChains-${VERSION}-${BUILD}.ipa" >> "$GITHUB_OUTPUT"
+          echo "sha=WordChains-${VERSION}-${BUILD}.sha256.txt" >> "$GITHUB_OUTPUT"
 
       - name: Clean up signing keychain
         if: always()
@@ -182,8 +188,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Named, the artifact's files land directly in artifacts/, so the
+      # release names them from the build's outputs: no glob to match.
       - uses: actions/download-artifact@v8
         with:
+          name: wordchains-ios-ipa
           path: artifacts
 
       - name: Create GitHub Release
@@ -192,11 +201,17 @@ jobs:
         run: |
           VERSION="${{ needs.check-and-tag.outputs.version }}"
           TAG="${{ needs.check-and-tag.outputs.tag }}"
+          IPA="artifacts/${{ needs.build.outputs.ipa }}"
+          SHA="artifacts/${{ needs.build.outputs.sha }}"
+          if [ ! -f "$IPA" ] || [ ! -f "$SHA" ]; then
+            echo "::error::$IPA or $SHA missing from the downloaded artifact"
+            ls -R artifacts
+            exit 1
+          fi
           gh release create "$TAG" \
             --title "wordchains-ios v${VERSION}" \
             --generate-notes \
-            artifacts/**/*.ipa \
-            artifacts/**/*.sha256.txt
+            "$IPA" "$SHA"
 
       # Upload to App Store Connect (TestFlight) with fastlane pilot, which is
       # preinstalled on GitHub macOS runners and uses the App Store Connect
@@ -230,7 +245,7 @@ jobs:
             '{key_id: $key_id, issuer_id: $issuer_id, key: $key, in_house: false}' \
             > "$API_KEY_JSON"
 
-          IPA_FILE=$(find artifacts -name "*.ipa" | head -1)
+          IPA_FILE="artifacts/${{ needs.build.outputs.ipa }}"
 
           fastlane pilot upload \
             --ipa "$IPA_FILE" \
