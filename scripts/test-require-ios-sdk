@@ -1,0 +1,56 @@
+#!/bin/bash
+# Pins scripts/require-ios-sdk, which the iOS jobs run before building:
+# App Store Connect refuses an upload built with an iOS SDK older than its
+# floor (ITMS-90725), and the job, not the upload, should be what says so.
+# xcrun is stubbed, so this runs on Linux.
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+SUBJECT=$REPO/scripts/require-ios-sdk
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+FAILURES=0
+pass() { echo "  ok    $1"; }
+fail() {
+  echo "  FAIL  $1"
+  FAILURES=$((FAILURES + 1))
+}
+check() {
+  local desc=$1
+  shift
+  if "$@"; then pass "$desc"; else fail "$desc"; fi
+}
+
+# An xcrun that reports $SDK for `--sdk iphoneos --show-sdk-version`, and
+# fails as a machine without Xcode would when $SDK is empty.
+mkdir -p "$WORK/bin"
+cat >"$WORK/bin/xcrun" <<'STUB'
+#!/bin/bash
+[ "$*" = "--sdk iphoneos --show-sdk-version" ] || exit 2
+[ -n "$SDK" ] || exit 1
+echo "$SDK"
+STUB
+chmod +x "$WORK/bin/xcrun"
+with_sdk() { SDK=$1 PATH="$WORK/bin:$PATH" "$SUBJECT" "${@:2}" >/dev/null 2>&1; }
+refuses() { ! with_sdk "$@"; }
+says() {
+  local out
+  out=$(SDK=$1 PATH="$WORK/bin:$PATH" "$SUBJECT" "$2" 2>&1)
+  grep -q "$3" <<<"$out"
+}
+
+echo "require-ios-sdk"
+check "accepts the floor itself" with_sdk 27.0 27
+check "accepts a later minor" with_sdk 27.2 27
+check "accepts a later major" with_sdk 28.0 27
+check "refuses an older SDK" refuses 26.5 27
+check "refuses when xcrun has no iOS SDK" refuses "" 27
+check "refuses without a floor" refuses 27.0
+# The reason is the point: a red job should say what to change.
+check "names the SDK and the floor when it refuses" says 26.5 27 "iOS SDK 26.5 is older than 27"
+
+if [ "$FAILURES" -ne 0 ]; then
+  echo "$FAILURES failure(s)"
+  exit 1
+fi
