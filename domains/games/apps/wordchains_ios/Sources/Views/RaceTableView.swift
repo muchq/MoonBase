@@ -29,7 +29,7 @@ struct RaceTableView: View {
             VStack(alignment: .leading, spacing: 18) {
                 if let hint { Text(hint).font(Theme.bodyFont).foregroundStyle(.secondary) }
                 if let result = table.result {
-                    Text(RaceText.result(result, runners: table.runners, viewer: viewer))
+                    Text(said(result))
                         .font(Theme.headlineFont)
                         .foregroundStyle(Theme.warningOrange)
                 }
@@ -44,7 +44,7 @@ struct RaceTableView: View {
             .padding(.horizontal, Theme.cardPadding)
             .padding(.vertical, 16)
         }
-        .navigationTitle("Word chains · \(table.gameId)")
+        .navigationTitle(table.isPractice ? "Practice · \(table.gameId)" : "Word chains · \(table.gameId)")
         .toolbar {
             if table.phase != .closed {
                 ToolbarItem(placement: .primaryAction) {
@@ -79,18 +79,30 @@ struct RaceTableView: View {
         // word was refused, and how the race ended.
         .onChange(of: session.state.notice) { _, notice in announce(notice) }
         .onChange(of: table.result) { _, result in
-            announce(result.map { RaceText.result($0, runners: table.runners, viewer: viewer) })
+            announce(result.map(said))
         }
+    }
+
+    /// A practice race has nobody to beat; a real one, a winner.
+    private func said(_ result: WordchainResult) -> String {
+        table.isPractice
+            ? RaceText.practice(result, runners: table.runners, viewer: viewer, par: table.par)
+            : RaceText.result(result, runners: table.runners, viewer: viewer)
     }
 
     private var hint: String? {
         switch table.phase {
         case .waiting:
-            return seated < 2 ? "Waiting for a second seat." : "\(seated) seated: start when everyone’s here."
+            // Alone, a race is practice (#1730): nothing is recorded.
+            return seated < 2 ? "Practise alone, or wait for someone to join." : "\(seated) seated: start when everyone’s here."
+        case .racing where climbing && table.isPractice:
+            return "Practice: one letter at a time. Anyone who joins ends it."
         case .racing where climbing:
             return "One letter at a time, every rung a word."
         case .racing where me != nil:
             return "You reached \(table.target ?? "") in \(RaceText.steps(ladder.count)). Waiting for the others."
+        case .over where table.isPractice:
+            return "Practise again, or wait for someone to join."
         case .over:
             return "Anyone can start the next race."
         default:
@@ -173,12 +185,19 @@ struct RaceTableView: View {
                         }
                     }
                     Spacer()
-                    Text("\(runner.wins) \(runner.wins == 1 ? "win" : "wins")").font(Theme.captionFont)
+                    if !table.isPractice {
+                        Text("\(runner.wins) \(runner.wins == 1 ? "win" : "wins")").font(Theme.captionFont)
+                    }
                 }
                 .accessibilityElement(children: .combine)
             }
         }
         .cardStyle()
+    }
+
+    private var startLabel: String {
+        if seated < 2 { return table.phase == .over ? "Practise again" : "Practise" }
+        return table.phase == .over ? "Next race" : "Start the race"
     }
 
     private func line(_ runner: WordchainRunner) -> String {
@@ -200,10 +219,10 @@ struct RaceTableView: View {
                 Button {
                     session.start(letters: letters)
                 } label: {
-                    Text(table.phase == .over ? "Next race" : "Start the race").frame(maxWidth: .infinity)
+                    Text(startLabel).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(session.connection != .connected || seated < 2)
+                .disabled(session.connection != .connected)
             }
         case .closed:
             VStack(spacing: 12) {

@@ -31,6 +31,18 @@ enum RaceText {
         return "\(why)\(opened) \(verb)\(how)."
     }
 
+    /// A practice race, said against par: there is nobody to beat, whatever
+    /// the hub's result lists.
+    static func practice(_ result: WordchainResult, runners: [WordchainRunner], viewer: String, par: Int?) -> String {
+        guard let me = runners.first(where: { $0.playerId == viewer }), me.finishedAtMs != nil else {
+            return result.ending == .timeout ? "Time ran out." : "Not finished."
+        }
+        let finished = "You finished in \(steps(me.words))"
+        guard let par else { return finished + "." }
+        let target = parSteps(par)
+        return me.words <= target ? finished + ": on par." : finished + "; par is \(target)."
+    }
+
     /// m:ss left, never below zero.
     static func clock(msLeft: Int64) -> String {
         let seconds = max(0, (msLeft + 999) / 1000)

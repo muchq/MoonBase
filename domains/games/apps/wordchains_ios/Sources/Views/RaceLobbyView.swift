@@ -79,7 +79,7 @@ struct RaceLobbyView: View {
 
     private var noRoomCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Race friends up the same ladder, on one clock. Fewest steps wins.")
+            Text("Race friends up the same ladder, on one clock. Fewest steps wins. Alone at a table, practise.")
                 .font(Theme.bodyFont)
             Button {
                 session.createRoom()

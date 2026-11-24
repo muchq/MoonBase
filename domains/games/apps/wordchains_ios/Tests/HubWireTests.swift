@@ -107,6 +107,18 @@ final class HubWireTests: XCTestCase {
         ))))
     }
 
+    // A hub from before practice (#1730) sends no flag: a real race.
+    func testAViewSaysWhetherItIsPractice() throws {
+        func practice(_ flag: String) throws -> Bool? {
+            let json = #"{"event":"wordchain","payload":{"update":{"gameState":{"view":{"gameId":"W1","phase":"racing","runners":[],"racesPlayed":0"# + flag + "}}}}}"
+            guard case let .wordchain(.view(view)) = try frame(json) else { return nil }
+            return view.isPractice
+        }
+        XCTAssertEqual(try practice(#","practice":true"#), true)
+        XCTAssertEqual(try practice(#","practice":false"#), false)
+        XCTAssertEqual(try practice(""), false)
+    }
+
     func testAnOverViewCarriesTheResult() throws {
         let json = #"""
         {"event":"wordchain","payload":{"update":{"gameJoined":{"view":{

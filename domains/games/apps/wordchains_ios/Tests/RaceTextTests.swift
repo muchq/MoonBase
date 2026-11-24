@@ -41,6 +41,21 @@ final class RaceTextTests: XCTestCase {
         XCTAssertEqual(RaceText.result(WordchainResult(ending: .finished, winners: ["dan"]), runners: [], viewer: "alice"), "dan won.")
     }
 
+    // MARK: - Practice
+
+    // A lone seat practising has no one to beat: the result is how it went
+    // against par, never a win, whatever the hub's result lists.
+    func testAPracticeRaceIsSaidAgainstParNotAsAWin() {
+        let finished = [WordchainRunner(playerId: "alice", words: 5, finishedAtMs: 1, left: false, ladder: nil, wins: 0)]
+        let stuck = [WordchainRunner(playerId: "alice", words: 2, finishedAtMs: nil, left: false, ladder: nil, wins: 0)]
+        XCTAssertEqual(RaceText.practice(WordchainResult(ending: .finished, winners: ["alice"]), runners: finished, viewer: "alice", par: 5),
+                       "You finished in 5 steps; par is 4.")
+        XCTAssertEqual(RaceText.practice(WordchainResult(ending: .finished, winners: ["alice"]), runners: finished, viewer: "alice", par: 6),
+                       "You finished in 5 steps: on par.")
+        XCTAssertEqual(RaceText.practice(WordchainResult(ending: .timeout, winners: []), runners: stuck, viewer: "alice", par: 5),
+                       "Time ran out.")
+    }
+
     func testTheClockReadsMinutesAndSecondsAndStopsAtZero() {
         XCTAssertEqual(RaceText.clock(msLeft: 180_000), "3:00")
         XCTAssertEqual(RaceText.clock(msLeft: 61_001), "1:02")

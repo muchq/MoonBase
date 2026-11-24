@@ -91,7 +91,8 @@ Before submitting to the App Store, verify these scenarios:
 - [ ] **Dark mode** — colors remain readable in dark appearance
 - [ ] **Race friends** — create a room, join it from the web lobby (muchq.com/games) by
   its code, open and join a race table from both, race to the end, Next race; a
-  refused word shows the hub's reason; backgrounding and returning keeps the seat
+  refused word shows the hub's reason; backgrounding and returning keeps the seat;
+  alone at a table, **Practise** races with no wins, and a join ends it
 
 ## Build
 
@@ -234,10 +235,11 @@ a server-minted player id (**Identifiers → User ID**) and the race's words
 (**Gameplay Content**) to the hub, for app functionality only, not linked to the
 person, no tracking.
 
-**App Review notes:** a race needs two seats. Tell the reviewer to tap **Race
-friends → Create a room → Open a race table**, then open
-`https://muchq.com/games/room/<code>` in a browser, join the same table as the
-second seat, and tap **Start the race** in the app.
+**App Review notes:** alone at a table, a reviewer can **Practise**: **Race
+friends → Create a room → Open a race table → Practise** races the clock with
+nothing recorded. To see a real race, open `https://muchq.com/games/room/<code>`
+in a browser, join the same table as a second seat (which ends any practice),
+and tap **Start the race** in the app.
 
 ## Architecture
 

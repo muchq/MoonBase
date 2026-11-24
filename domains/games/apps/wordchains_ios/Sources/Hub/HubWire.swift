@@ -166,6 +166,11 @@ struct WordchainView: Decodable, Equatable {
     /// In the order they joined.
     let runners: [WordchainRunner]
     let result: WordchainResult?
+    /// A lone seat racing for practice: nobody wins and nothing is
+    /// recorded; a join ends it. Absent from a hub older than practice.
+    var practice: Bool? = nil
+
+    var isPractice: Bool { practice == true }
 }
 
 /// A wordchain update, as much of it as the app acts on.
