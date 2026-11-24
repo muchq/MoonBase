@@ -20,7 +20,7 @@ absl::Status CheckPuzzle(const Puzzle& puzzle) {
 
 absl::Status CheckIds(const std::vector<std::string>& ids, std::size_t min) {
   if (ids.size() < min || ids.size() > kMaxRunners) {
-    return absl::InvalidArgumentError(absl::StrCat("a race seats 2 to ", kMaxRunners));
+    return absl::InvalidArgumentError(absl::StrCat("a race seats 1 to ", kMaxRunners));
   }
   std::set<std::string> seen;
   for (const std::string& id : ids) {
@@ -40,6 +40,9 @@ bool Holds(const Puzzle& puzzle, const Runner& runner, std::string_view word) {
          std::find(runner.ladder.begin(), runner.ladder.end(), word) != runner.ladder.end();
 }
 
+// The seats a table stays open with: its one, practising; two otherwise.
+std::size_t SeatsToStay(const Race& race) { return race.practice() ? 1 : 2; }
+
 bool Done(const Runner& runner) { return runner.left || runner.finished_ms.has_value(); }
 
 // Finishers before the rest; among finishers fewer words, then the earlier
@@ -55,7 +58,7 @@ bool Ahead(const Runner& a, const Runner& b) {
 
 absl::StatusOr<Race> Race::open(std::vector<std::string> players, Puzzle puzzle, int64_t now_ms,
                                 int64_t duration_ms) {
-  if (absl::Status s = CheckIds(players, 2); !s.ok()) return s;
+  if (absl::Status s = CheckIds(players, 1); !s.ok()) return s;
   if (absl::Status s = CheckPuzzle(puzzle); !s.ok()) return s;
   if (duration_ms <= 0) return absl::InvalidArgumentError("a race needs a clock");
   std::vector<Runner> runners;
@@ -68,7 +71,7 @@ absl::StatusOr<Race> Race::restore(Puzzle puzzle, std::vector<Runner> runners, i
   if (absl::Status s = CheckPuzzle(puzzle); !s.ok()) return s;
   std::vector<std::string> ids;
   for (const Runner& runner : runners) ids.push_back(runner.player_id);
-  if (absl::Status s = CheckIds(ids, 2); !s.ok()) return s;
+  if (absl::Status s = CheckIds(ids, 1); !s.ok()) return s;
   if (deadline_ms <= started_ms) return absl::InvalidArgumentError("a race needs a clock");
   for (const Runner& runner : runners) {
     std::string last = puzzle.start;
@@ -235,8 +238,8 @@ absl::StatusOr<Table> Table::open(std::vector<std::string> players, Puzzle puzzl
 
 absl::StatusOr<Table> Table::restore(Race race, std::vector<RaceScore> score_sheet, bool closed,
                                      bool ended_by_close) {
-  // Open with two seats or more, closed with fewer: removePlayer's rule.
-  if (closed != (race.players().size() < 2)) {
+  // Open with the seats to stay, closed with fewer: removePlayer's rule.
+  if (closed != (race.players().size() < SeatsToStay(race))) {
     return absl::InvalidArgumentError("the table's seats disagree with its being closed");
   }
   if (closed && !race.isOver()) return absl::InvalidArgumentError("a closed table's race is over");
@@ -277,7 +280,7 @@ absl::StatusOr<Table> Table::removePlayer(int seat) const {
   auto race = race_.leave(seat);
   if (!race.ok()) return race.status();
   Table next(*std::move(race), score_sheet_, false, false);
-  if (next.race_.players().size() < 2) {
+  if (next.race_.players().size() < SeatsToStay(next.race_)) {
     next.closed_ = true;
     next.ended_by_close_ = !was_over;
     next.race_ = next.race_.endByLeave();

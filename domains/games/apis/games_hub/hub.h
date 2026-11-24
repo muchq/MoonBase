@@ -481,6 +481,7 @@ class GamesHub final {
     /// The round robin pairing the table plays, fixed when it is
     /// opened.
     std::optional<EventTag> event;
+    /// Not one way: a join returns a practising table to waiting.
     [[nodiscard]] bool started() const { return state.has_value(); }
   };
 

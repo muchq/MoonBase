@@ -39,6 +39,16 @@ using moonbase::games::PongUpdate;
 
 namespace {
 
+// A stored state onto its entry. No state is a table waiting to start, a
+// practice table a join reset among them.
+void Adopt(std::optional<HostedState>& held, const std::optional<HostedState>& stored) {
+  if (stored.has_value()) {
+    held.emplace(*stored);
+  } else {
+    held.reset();
+  }
+}
+
 std::size_t MaxSeatsOf(GameKind kind) {
   return ForKind(kind, [](auto adapter) { return decltype(adapter)::kMaxSeats; });
 }
@@ -744,7 +754,7 @@ GamesHub::Commit GamesHub::CommitEntryLocked(const std::string& room_id, const s
     entry.kind = (*stored)->kind;
     entry.roster = (*stored)->roster;
     entry.version = (*stored)->version;
-    if ((*stored)->state.has_value()) entry.state.emplace(*std::move((*stored)->state));
+    Adopt(entry.state, (*stored)->state);
     entry.terms = (*stored)->terms;
     entry.event = (*stored)->event;
     // Another instance committed the table: its rally is that one's now.
@@ -754,7 +764,7 @@ GamesHub::Commit GamesHub::CommitEntryLocked(const std::string& room_id, const s
   }
   entry.roster = roster;
   entry.terms = next_terms;
-  if (state.has_value()) entry.state.emplace(*state);
+  Adopt(entry.state, state);
   entry.version = version;
   // The instance that commits a pong table runs its rally (from a game's
   // end on, TickPongOnce lets it go).
@@ -1085,7 +1095,7 @@ bool GamesHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::R
     }
     entry.roster = row.roster;
     entry.version = row.version;
-    if (row.state.has_value()) entry.state.emplace(*row.state);
+    Adopt(entry.state, row.state);
     entry.terms = row.terms;
     entry.event = row.event;
     for (const std::string& member_id : entry.roster) player_game_[member_id] = row.game_id;
@@ -1867,7 +1877,8 @@ void GamesHub::JoinGameMove(const std::string& player_id, const std::string& gam
                               absl::StrCat("that table plays ", GameKindName(entry.kind))};
             break;
           }
-          if (entry.started()) {
+          // A join ends a practice race: the table waits to start again.
+          if (entry.started() && !IsPractice(*entry.state)) {
             refusal = Refusal{RejectKind::kState, "game already started"};
             break;
           }
@@ -1995,8 +2006,10 @@ void GamesHub::StartGameMove(const std::string& player_id, typename Adapter<E>::
           refusal = Refusal{RejectKind::kState, "game already started"};
           break;
         }
-        if (ref->entry->roster.size() < 2) {
-          refusal = Refusal{RejectKind::kState, "need at least 2 players to start"};
+        if (const std::size_t seats = MinSeatsOf(ref->entry->kind);
+            ref->entry->roster.size() < seats) {
+          refusal = Refusal{RejectKind::kState,
+                            absl::StrCat("need at least ", seats, " players to start")};
           break;
         }
         std::deque<cards::Card> deck = dealer_->DealNewUnshuffledDeck();
@@ -2033,7 +2046,7 @@ void GamesHub::StartGameMove(const std::string& player_id, typename Adapter<E>::
           break;
         }
         started = true;
-        if (OpenStartsAGame(ref->entry->kind)) {
+        if (OpenStartsAGame(ref->entry->kind) && !IsPractice(*ref->entry->state)) {
           CountGameStarted(GameKindName(ref->entry->kind));
           RecordLocked([&id = ref->room_id, variant = GameKindName(ref->entry->kind),
                         seats = ref->entry->roster.size()](absl::Time now) {
@@ -3765,7 +3778,10 @@ moonbase::games::RoomState GamesHub::RoomStateLocked(const std::string& room_id,
     moonbase::games::GameSummary summary;
     summary.gameId = game_id;
     summary.game = std::string(GameKindName(entry.kind));
-    summary.status = entry.started() ? PhaseStringOf(*entry.state) : "waiting";
+    // A practising table's seat is open to a racer: a join resets it.
+    const bool open_seat =
+        !entry.started() || (IsPractice(*entry.state) && !IsOver(*entry.state));
+    summary.status = open_seat ? "waiting" : PhaseStringOf(*entry.state);
     summary.playerCount = static_cast<int>(entry.roster.size());
     if (entry.terms.has_value()) summary.terms = TermsLineOf(entry.kind, *entry.terms);
     state.games.push_back(std::move(summary));

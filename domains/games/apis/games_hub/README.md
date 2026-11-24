@@ -678,6 +678,12 @@ race; with fewer than two seats left the table closes, its race in play
 ending by leave and won by its best finisher, if any. A race is recorded as
 `wordchain` and credits every runner played, each winner won.
 
+A lone seat's `startGame` races alone for practice, on the same puzzles,
+clock and lists, and the view says `practice`. Practice records nothing:
+no game event, no stats, no wins. The lobby lists the table as waiting,
+and a join ends the practice race and returns the table to waiting for a
+real one. The practiser's leave closes it.
+
 ## Redaction
 
 Each game's view is its adapter's `ViewOf` (`<game>_adapter.cc`), built per
