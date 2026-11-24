@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <initializer_list>
 #include <optional>
 #include <string>
 #include <utility>
@@ -15,6 +16,7 @@
 
 #include "absl/time/time.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
+#include "domains/games/apis/games_hub/wordchain_adapter.h"
 #include "domains/games/libs/wordchain_race/lexicon.h"
 
 namespace games_hub {
@@ -128,6 +130,31 @@ class WordchainFixture : public GamesHubStreamFixture {
       return {};
     }
     return *path;
+  }
+
+  // A ladder one word longer than par: its first step leaves the climb no
+  // shorter, so finishing on it ends nothing by itself.
+  static std::vector<std::string> OffParLadder(const WordchainView& view) {
+    const auto& words = wordchain_race::EnableLexicon().words;
+    const std::size_t par = static_cast<std::size_t>(*view.par);
+    for (const std::string& first : words.wordsOfLength(static_cast<int>(view.start->size()))) {
+      if (!wordchain_race::OneLetterApart(*view.start, first)) continue;
+      auto rest = words.shortestPath(first, *view.target);
+      if (rest.has_value() && rest->size() == par) return *rest;
+    }
+    ADD_FAILURE() << "no ladder one past par from " << *view.start;
+    return {};
+  }
+
+  // Seats `seats` each climb `ladder`, every seat reading each view.
+  static void Climb(Started& started, std::initializer_list<int> seats,
+                    const std::vector<std::string>& ladder) {
+    for (int seat : seats) {
+      for (const std::string& word : ladder) {
+        ASSERT_TRUE(started.table.seats[seat].stream.Send(Play(word)).ok());
+        ASSERT_TRUE(ReadViews(started)) << word;
+      }
+    }
   }
 
   std::atomic<int64_t> now_ms_{kT0};
@@ -246,6 +273,57 @@ TEST_F(WordchainFixture, ALeaveDownToOneClosesTheTable) {
   auto ended = ReceiveWordchain(ann.stream, "gameEnded");
   ASSERT_TRUE(ended.has_value());
   EXPECT_EQ(ended->as_gameEnded_or_null()->result.ending, "leave");
+}
+
+TEST_F(WordchainFixture, ALeaveThatEndsARaceOnAnOpenTableCreditsIt) {
+  CaptureEvents();
+  auto started = StartedTable(3);
+  ASSERT_TRUE(started.has_value());
+  Climb(*started, {0, 1}, OffParLadder(started->views[0]));
+  ASSERT_EQ(started->views[0].phase, "racing");
+
+  ASSERT_TRUE(started->table.seats[2].stream.Send(Leave()).ok());
+  auto ended = ReceiveWordchain(started->table.seats[0].stream, "gameEnded");
+  ASSERT_TRUE(ended.has_value());
+  EXPECT_EQ(ended->as_gameEnded_or_null()->result.ending, "finished");
+  EXPECT_EQ(ended->as_gameEnded_or_null()->result.winner, started->table.seats[0].player_id);
+
+  const std::vector<std::string> lines = GameLines();
+  ASSERT_EQ(lines.size(), 2u);
+  EXPECT_NE(lines[1].find(R"("event":"game_finished")"), std::string::npos) << lines[1];
+  auto room = store_->LoadRoom(started->table.room_id);
+  ASSERT_TRUE(room.ok());
+  int played = 0;
+  int won = 0;
+  for (const auto& member : room->members) {
+    played += member.games_played;
+    won += member.games_won;
+  }
+  EXPECT_EQ(played, 3);
+  EXPECT_EQ(won, 1);
+}
+
+TEST_F(WordchainFixture, ALeaveAfterATimeoutLeavesTheTableReadable) {
+  auto started = StartedTable(3);
+  ASSERT_TRUE(started.has_value());
+  Climb(*started, {0, 1}, OffParLadder(started->views[0]));
+  now_ms_ += 180'000;
+  ASSERT_EQ(hub_->SweepClocksOnce(), 1);
+  // The sweep's views and gameEnded first, then the view after the leave.
+  ASSERT_TRUE(ReceiveWordchain(started->table.seats[0].stream, "gameEnded").has_value());
+  ASSERT_TRUE(started->table.seats[2].stream.Send(Leave()).ok());
+  auto after = ReceiveWordchain(started->table.seats[0].stream, "gameState");
+  ASSERT_TRUE(after.has_value());
+  EXPECT_EQ(after->as_gameState_or_null()->view.runners.size(), 3u);
+
+  auto row = store_->LoadGame(started->table.room_id, started->table.game_id);
+  ASSERT_TRUE(row.ok()) << row.status();
+  ASSERT_TRUE(row->has_value() && (*row)->state.has_value());
+  const auto& table = std::get<wordchain_race::Table>(*(*row)->state);
+  EXPECT_EQ(table.players().size(), 2u);
+  EXPECT_TRUE(Adapter<wordchain_race::Table>::Deserialize(
+                  Adapter<wordchain_race::Table>::Serialize(table))
+                  .ok());
 }
 
 TEST_F(WordchainFixture, ATableSeatsFour) {

@@ -3422,14 +3422,18 @@ void GamesHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Wri
         entry.started() ? WithoutSeat(*entry.state, player_id, NowMs()) : std::nullopt;
     const std::string previous_turn = entry.started() ? CurrentTurnOf(*entry.state) : "";
     const bool over = state.has_value() && IsOver(*state);
-    std::vector<HubStore::StatsDelta> deltas;
+    // A leave can end the game in play and leave the table playing on (a
+    // wordchain race whose last climber left): credited as a move's would be.
+    std::optional<std::vector<HubStore::StatsDelta>> deltas =
+        state.has_value() ? DealEndDeltas(*entry.state, *state) : std::nullopt;
+    const bool deal_ended = deltas.has_value();
     if (over) deltas = StatsDeltasOf(*state, roster);
     // Terms are the poster's: a waiting table someone leaves has none,
     // unless they are its round robin's.
     const std::optional<HostedTerms> terms =
         entry.event.has_value() ? entry.terms : std::optional<HostedTerms>();
     const Commit commit = CommitEntryLocked(ref->room_id, ref->game_id, entry, roster, state,
-                                            over ? &deltas : nullptr, &terms);
+                                            deltas.has_value() ? &*deltas : nullptr, &terms);
     if (commit == Commit::kRebased) continue;
     if (commit == Commit::kGone) {
       DropGameLocked(*ref, outbox);
@@ -3451,6 +3455,7 @@ void GamesHub::LeaveGameLocked(const std::string& player_id, Outbox& outbox, Wri
       FinalizeGameLocked(ref->room_id, *ref->room, ref->game_id, outbox);
     } else {
       StageGameViewsLocked(ref->game_id, entry, outbox);
+      if (deal_ended) MirrorStatsLocked(*ref->room, *deltas);
       // The leaver may have held the turn, or been the seat setup was
       // waiting on: whoever plays next hears it the way a move says it.
       if (entry.started()) {
