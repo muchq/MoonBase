@@ -25,17 +25,31 @@ cc_test(
     ],
 )
 
+# Every word a race accepts: ENABLE's words of race length, less the
+# blocklist.
+genrule(
+    name = "race_words",
+    srcs = [
+        "blocklist.txt",
+        "@enable_words//file",
+    ],
+    outs = ["race_words.txt"],
+    cmd = "tr -d '\\r' < $(location @enable_words//file) | LC_ALL=C grep -E '^[a-z]{3,5}$$' | " +
+          "LC_ALL=C sort -u | LC_ALL=C grep -vxFf $(location blocklist.txt) > $@",
+    visibility = ["//visibility:public"],
+)
+
 # Where puzzles start and end: SCOWL's common words of race length, less
-# the blocklist. Runners may still play any dictionary word between them.
+# the blocklist.
 genrule(
     name = "common_words",
     srcs = [
-        "endpoint_blocklist.txt",
+        "blocklist.txt",
         "@scowl//:common_words",
     ],
     outs = ["common_words.txt"],
     cmd = "cat $(locations @scowl//:common_words) | LC_ALL=C grep -E '^[a-z]{3,5}$$' | " +
-          "LC_ALL=C sort -u | LC_ALL=C grep -vxFf $(location endpoint_blocklist.txt) > $@",
+          "LC_ALL=C sort -u | LC_ALL=C grep -vxFf $(location blocklist.txt) > $@",
     visibility = ["//visibility:public"],
 )
 
@@ -45,14 +59,14 @@ cc_test(
     size = "small",
     srcs = ["words_test.cc"],
     data = [
-        "endpoint_blocklist.txt",
+        "blocklist.txt",
         ":common_words",
-        "//domains/games/apis/mithril:data/words.txt",
+        ":race_words",
     ],
     env = {
-        "BLOCKLIST": "$(rootpath endpoint_blocklist.txt)",
+        "BLOCKLIST": "$(rootpath blocklist.txt)",
         "COMMON": "$(rootpath :common_words)",
-        "WORDS": "$(rootpath //domains/games/apis/mithril:data/words.txt)",
+        "WORDS": "$(rootpath :race_words)",
     },
     deps = [
         ":dictionary",

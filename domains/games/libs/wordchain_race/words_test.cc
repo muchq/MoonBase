@@ -1,7 +1,6 @@
-// The race against the word lists the hub ships: mithril's dictionary for
-// every word played, and the common words puzzles start and end on. Every
-// letter count a race offers has puzzles, and none starts or ends on a
-// blocklisted word.
+// The race against the word lists the hub ships: race_words for every word
+// played, and the common words puzzles start and end on. Every letter count a
+// race offers has puzzles, and neither list holds a blocklisted word.
 #include <gtest/gtest.h>
 
 #include <cstdlib>
@@ -34,7 +33,7 @@ const Dictionary& Common() {
 
 TEST(Words, EveryLetterCountHasPuzzles) {
   for (int letters = kMinLetters; letters <= kMaxLetters; ++letters) {
-    EXPECT_GT(Words().wordsOfLength(letters).size(), 1000U) << letters;
+    EXPECT_GT(Words().wordsOfLength(letters).size(), 500U) << letters;
     EXPECT_GT(Common().wordsOfLength(letters).size(), 300U) << letters;
     for (uint64_t seed = 0; seed < 10; ++seed) {
       auto puzzle = PickPuzzle(Words(), Common(), letters, seed);
@@ -46,16 +45,23 @@ TEST(Words, EveryLetterCountHasPuzzles) {
   }
 }
 
-TEST(Words, NoBlocklistedWordIsCommon) {
+TEST(Words, NeitherListHoldsABlocklistedWord) {
   const Dictionary blocked = Dictionary::FromLines(Read("BLOCKLIST"));
   int checked = 0;
   for (int letters = kMinLetters; letters <= kMaxLetters; ++letters) {
     for (const std::string& word : blocked.wordsOfLength(letters)) {
       EXPECT_FALSE(Common().contains(word)) << word;
+      EXPECT_FALSE(Words().contains(word)) << word;
       ++checked;
     }
   }
   EXPECT_GT(checked, 20);
+}
+
+TEST(Words, PlaysInflectedForms) {
+  for (const char* word : {"bugs", "asked", "aces", "aimed", "cats"}) {
+    EXPECT_TRUE(Words().contains(word)) << word;
+  }
 }
 
 }  // namespace
