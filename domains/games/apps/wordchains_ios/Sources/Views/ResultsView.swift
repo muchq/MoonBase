@@ -88,7 +88,7 @@ struct ResultsView: View {
                 )
                 Divider().frame(height: 44)
                 scoreItem(
-                    value: "\(game.currentPuzzle?.optimalLength ?? 0 - 1)",
+                    value: "\(game.currentPuzzle?.optimalSteps ?? 0)",
                     label: "Optimal",
                     icon: "star"
                 )

@@ -55,8 +55,12 @@ struct Puzzle: Identifiable {
     let id = UUID()
     let start: String
     let target: String
+    /// Words in the shortest chain, both ends included.
     let optimalLength: Int
     let difficulty: Difficulty
+
+    /// Moves in the shortest chain.
+    var optimalSteps: Int { optimalLength }
 }
 
 enum InputResult {
