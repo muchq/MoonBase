@@ -5,9 +5,6 @@ struct WordInputView: View {
     @State private var inputText = ""
     @State private var shakeAttempt = 0
     @FocusState private var isFocused: Bool
-    /// Set by Return: the system resigns focus after onSubmit, and this
-    /// takes it straight back so the keyboard stays up between words.
-    @State private var refocusAfterSubmit = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Nil under Reduce Motion, so state changes land without movement.
@@ -15,8 +12,14 @@ struct WordInputView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            // Always laid out, so an error never shifts the input row.
-            feedbackBanner
+            // The hidden twin holds the row's height, so an error never
+            // shifts the input row; the real banner exists only with a message.
+            ZStack {
+                feedbackBanner(" ").hidden()
+                if !game.feedbackMessage.isEmpty {
+                    feedbackBanner(game.feedbackMessage)
+                }
+            }
 
             HStack(spacing: 12) {
                 undoButton
@@ -37,7 +40,11 @@ struct WordInputView: View {
     // MARK: - Text Field
 
     private var textField: some View {
-        TextField("Enter a word...", text: $inputText)
+        // Vertical axis: Return types a newline instead of submitting, and
+        // submitting is what makes SwiftUI dismiss the keyboard. onChange
+        // turns the newline into a submit, so the keyboard stays up.
+        TextField("Enter a word...", text: $inputText, axis: .vertical)
+            .lineLimit(1)
             .accessibilityIdentifier("word-input")
             .font(.system(size: 18, weight: .medium, design: .rounded))
             #if os(iOS)
@@ -56,17 +63,15 @@ struct WordInputView: View {
                     .stroke(borderColor, lineWidth: isFocused ? 2 : 0)
             )
             .modifier(ShakeEffect(animatableData: CGFloat(shakeAttempt)))
-            .onSubmit {
-                refocusAfterSubmit = true
-                submit()
-            }
-            .onChange(of: isFocused) { _, focused in
-                guard !focused, refocusAfterSubmit else { return }
-                refocusAfterSubmit = false
-                isFocused = true
-            }
             .onAppear { isFocused = true }
-            .onChange(of: inputText) {
+            .onChange(of: inputText) { old, new in
+                if new.contains("\n") {
+                    inputText = new.replacingOccurrences(of: "\n", with: "")
+                    submit()
+                    return
+                }
+                // Stripping the newline is not an edit; keep its result.
+                guard old.replacingOccurrences(of: "\n", with: "") != new else { return }
                 game.lastResult = nil
                 game.showInvalidShake = false
             }
@@ -146,16 +151,16 @@ struct WordInputView: View {
 
     // MARK: - Feedback Banner
 
-    private var feedbackBanner: some View {
+    private func feedbackBanner(_ message: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: feedbackIcon)
                 .font(.system(size: 13, weight: .semibold))
-            // A space keeps the row's height while there is nothing to say.
-            Text(game.feedbackMessage.isEmpty ? " " : game.feedbackMessage)
+            Text(message)
                 .font(Theme.captionFont)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .accessibilityIdentifier("word-feedback")
+                .accessibilityAddTraits(.updatesFrequently)
         }
         .foregroundStyle(Theme.errorRed)
         .padding(.horizontal, 14)
@@ -164,9 +169,6 @@ struct WordInputView: View {
             Capsule()
                 .fill(Theme.errorRed.opacity(0.1))
         )
-        .opacity(game.feedbackMessage.isEmpty ? 0 : 1)
-        .accessibilityHidden(game.feedbackMessage.isEmpty)
-        .accessibilityAddTraits(.updatesFrequently)
     }
 
     private var feedbackIcon: String {

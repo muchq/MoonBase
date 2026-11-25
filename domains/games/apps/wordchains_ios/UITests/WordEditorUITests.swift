@@ -18,13 +18,13 @@ final class WordEditorUITests: XCTestCase {
         for _ in 0..<4 where !play.isHittable { app.swipeUp() }
         XCTAssertTrue(play.isHittable)
         play.tap()
-        XCTAssertTrue(app.textFields["word-input"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.textViews["word-input"].waitForExistence(timeout: 5))
         return app
     }
 
     func testAWholeWordIsTypedIntoOneField() {
         let app = startPuzzle()
-        let field = app.textFields["word-input"]
+        let field = app.textViews["word-input"]
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         field.typeText("zzzz")
         XCTAssertEqual(field.value as? String, "zzzz")
@@ -32,7 +32,7 @@ final class WordEditorUITests: XCTestCase {
 
     func testHintedWordCanBeSubmittedFromTheKeyboardAndUndone() {
         let app = startPuzzle()
-        let field = app.textFields["word-input"]
+        let field = app.textViews["word-input"]
         let undo = app.buttons["word-undo"]
         XCTAssertFalse(undo.isEnabled)
 
@@ -52,7 +52,7 @@ final class WordEditorUITests: XCTestCase {
 
     func testReturnOnAnEmptyFieldKeepsTheKeyboard() {
         let app = startPuzzle()
-        let field = app.textFields["word-input"]
+        let field = app.textViews["word-input"]
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         field.typeText("\n")
         settle()
@@ -62,7 +62,7 @@ final class WordEditorUITests: XCTestCase {
 
     func testEditingAfterARejectionClearsTheStaleError() {
         let app = startPuzzle()
-        let field = app.textFields["word-input"]
+        let field = app.textViews["word-input"]
         let feedback = app.staticTexts["word-feedback"]
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         field.typeText("zzzzz\n")
@@ -73,7 +73,7 @@ final class WordEditorUITests: XCTestCase {
 
     func testHintFillsTheFieldWithoutSubmitting() {
         let app = startPuzzle()
-        let field = app.textFields["word-input"]
+        let field = app.textViews["word-input"]
         app.buttons["word-hint"].tap()
         XCTAssertFalse((field.value as? String ?? "").isEmpty)
         XCTAssertFalse(app.buttons["word-undo"].isEnabled, "The chain has not advanced")
@@ -81,7 +81,7 @@ final class WordEditorUITests: XCTestCase {
 
     func testTypedInvalidWordShowsFeedbackAndKeepsKeyboard() {
         let app = startPuzzle()
-        let field = app.textFields["word-input"]
+        let field = app.textViews["word-input"]
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         field.typeText("zzzzz")
         app.buttons["word-submit"].tap()
@@ -93,7 +93,7 @@ final class WordEditorUITests: XCTestCase {
 
     func testErrorDoesNotMoveTheInputRowOrPushItUnderTheKeyboard() {
         let app = startPuzzle()
-        let field = app.textFields["word-input"]
+        let field = app.textViews["word-input"]
         let submit = app.buttons["word-submit"]
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         field.typeText("zzzzz")
@@ -110,8 +110,9 @@ final class WordEditorUITests: XCTestCase {
         let app = startPuzzle()
         for id in ["word-undo", "word-hint", "word-submit"] {
             let frame = app.buttons[id].frame
-            XCTAssertGreaterThanOrEqual(frame.width, 44, id)
-            XCTAssertGreaterThanOrEqual(frame.height, 44, id)
+            // Frames come back as 43.99999…; compare whole points.
+            XCTAssertGreaterThanOrEqual(frame.width.rounded(), 44, id)
+            XCTAssertGreaterThanOrEqual(frame.height.rounded(), 44, id)
         }
     }
 }
