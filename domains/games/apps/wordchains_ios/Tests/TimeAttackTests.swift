@@ -222,6 +222,15 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertEqual(game.timeAttackSeconds, 60, "59.1s left on the new clock")
     }
 
+    func testRestartingBeforeTheDeadlineDoesNotRecordABest() {
+        let game = sprint()
+        solve(game, at: 10)
+        game.startNewGame(mode: .timeAttack, difficulty: .easy, now: at(20))
+        game.tick(now: at(30))
+        XCTAssertNil(game.timeAttackSummary)
+        XCTAssertEqual(TimeAttackBests(defaults: defaults).best(for: .easy), 0, "A sprint left unfinished doesn't count")
+    }
+
     func testOtherModesHaveNoClock() {
         let game = sprint()
         game.startNewGame(mode: .quickPlay, difficulty: .easy, now: at(0))
