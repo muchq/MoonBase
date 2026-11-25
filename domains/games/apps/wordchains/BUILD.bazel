@@ -1,5 +1,6 @@
 load("@crates//:defs.bzl", "all_crate_deps")
 load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 # Generator binary (host configuration)
 rust_binary(
@@ -13,12 +14,13 @@ rust_binary(
     deps = all_crate_deps(cargo_only = True) + ["//domains/games/libs/wordchains"],
 )
 
-# Rule to generate graph JSON
+# The word graph: ENABLE, the list races check words against, so every mode
+# agrees on what a word is (#1738). The generator keeps words under 9 letters.
 genrule(
     name = "generate_graph_json",
-    srcs = ["@english_words//file"],
+    srcs = ["@enable_words//file"],
     outs = ["word_graph.json"],
-    cmd = "$(execpath :wordchains_generator) generate-graph --dictionary-path $(execpath @english_words//file) --output-path $@",
+    cmd = "$(execpath :wordchains_generator) generate-graph --dictionary-path $(execpath @enable_words//file) --output-path $@",
     tools = [":wordchains_generator"],
     visibility = ["//domains/games/apps/wordchains_ios:__pkg__"],
 )
@@ -50,4 +52,18 @@ rust_binary(
     },
     visibility = ["//visibility:public"],
     deps = all_crate_deps(cargo_only = True) + ["//domains/games/libs/wordchains"],
+)
+
+sh_test(
+    name = "graph_words_test",
+    size = "small",
+    srcs = ["graph_words_test.sh"],
+    args = [
+        "$(rootpath :generate_graph_json)",
+        "$(rootpath //domains/games/libs/wordchain_race:race_words)",
+    ],
+    data = [
+        ":generate_graph_json",
+        "//domains/games/libs/wordchain_race:race_words",
+    ],
 )

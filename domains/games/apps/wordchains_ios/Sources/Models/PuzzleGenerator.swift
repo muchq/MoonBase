@@ -3,10 +3,12 @@ import Foundation
 /// Generates puzzles by picking word pairs with known shortest paths from the word graph.
 struct PuzzleGenerator {
     let graph: WordGraph
+    /// The words a puzzle may start and end on (PuzzleWords); nil, any graph word.
+    var ends: Set<String>? = nil
 
     /// Random puzzle for the given difficulty.
     func randomPuzzle(difficulty: Difficulty) -> Puzzle? {
-        let candidates = graph.words(ofLength: difficulty.letterCount)
+        let candidates = graph.puzzleEnds(ofLength: difficulty.letterCount, among: ends)
         guard candidates.count >= 2 else { return nil }
 
         // Try to find a pair with a path of reasonable length (3-7 steps)
@@ -48,7 +50,7 @@ struct PuzzleGenerator {
 
     /// Deterministic daily puzzle — same puzzle for everyone on the same day.
     func dailyPuzzle(difficulty: Difficulty) -> Puzzle? {
-        let candidates = graph.words(ofLength: difficulty.letterCount).sorted()
+        let candidates = graph.puzzleEnds(ofLength: difficulty.letterCount, among: ends)
         guard candidates.count >= 2 else { return nil }
 
         let calendar = Calendar.current

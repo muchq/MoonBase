@@ -39,13 +39,6 @@ http_jar(
 
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 
-http_file(
-    name = "english_words",
-    downloaded_file_path = "words_alpha.txt",
-    sha256 = "3ed0c94610d8bcf7c11bbb49c56aa49c7234d32b66824df91f554169e572da48",
-    urls = ["https://raw.githubusercontent.com/dwyl/english-words/master/words_alpha.txt"],
-)
-
 # ENABLE, the public-domain word list (2000), as Peter Norvig hosts it: every
 # word a word ladder race accepts. It has plurals and inflections, which a
 # race needs and Webster's Second lacks.
