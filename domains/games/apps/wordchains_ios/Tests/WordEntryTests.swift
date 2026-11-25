@@ -37,6 +37,54 @@ final class WordEntryTests: XCTestCase {
         XCTAssertEqual(game.feedbackMessage, "")
     }
 
+    func testARepeatedReturnForTheTargetWordIsIgnored() {
+        let game = game()
+        game.chain = ["cat", "cot", "cog"]
+        var entry = WordEntry()
+        XCTAssertEqual(entry.change(to: "dog\n", in: game), .reachedTarget)
+        XCTAssertNil(entry.change(to: "dog\n", in: game))
+        XCTAssertEqual(game.feedbackMessage, "")
+    }
+
+    func testReturnOnAHintedWordAfterUndoingItSubmitsIt() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "cot\n", in: game)
+        entry.undo(in: game)
+        entry.hint(in: game)
+        XCTAssertEqual(entry.text, "cot")
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+        XCTAssertEqual(game.chain, ["cat", "cot"])
+    }
+
+    func testAnEditAfterAcceptingForgetsTheAcceptedWord() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "cot\n", in: game)
+        entry.undo(in: game)
+        entry.change(to: "c", in: game)
+        entry.change(to: "", in: game)
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid, "A paste of the word, not a replay")
+    }
+
+    func testAnUnchangedTextBetweenRepeatedReturnsStillIgnoresTheRepeat() {
+        let game = game()
+        var entry = WordEntry()
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+        XCTAssertNil(entry.change(to: "", in: game))
+        XCTAssertNil(entry.change(to: "cot\n", in: game))
+        XCTAssertEqual(game.chain, ["cat", "cot"])
+    }
+
+    func testAfterUndoTheUndoneWordCanBeReturnedAgain() {
+        let game = game()
+        var entry = WordEntry()
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+        entry.undo(in: game)
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+        XCTAssertEqual(game.chain, ["cat", "cot"])
+    }
+
     func testRetypingAnAcceptedWordStillSaysItIsInTheChain() {
         let game = game()
         var entry = WordEntry()

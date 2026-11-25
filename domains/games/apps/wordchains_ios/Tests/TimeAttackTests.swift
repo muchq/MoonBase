@@ -66,6 +66,20 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertEqual(TimeAttack(startingAt: t0, difficulty: .hard).remaining(at: t0), .seconds(180))
     }
 
+    func testAHardSprintRunsForThreeMinutes() {
+        let words = ["stare", "store", "stone", "shone", "shine"]
+        let edges = words.map { word in words.indices.filter { GameState.isOneLetterAway(word, words[$0]) } }
+        let graph = WordGraph(nodes: words, edges: edges)
+        let game = GameState(bests: TimeAttackBests(defaults: defaults), generator: PuzzleGenerator(graph: graph))
+        game.graph = graph
+        game.startNewGame(mode: .timeAttack, difficulty: .hard, now: t0)
+        XCTAssertEqual(game.timeAttackSeconds, 180)
+        game.tick(now: at(90))
+        XCTAssertNil(game.timeAttackSummary)
+        game.tick(now: at(180))
+        XCTAssertNotNil(game.timeAttackSummary)
+    }
+
     func testSuspensionDoesNotPauseTheSprint() {
         // Suspended, the app stops ticking; the time still counts.
         let game = sprint()
@@ -199,6 +213,11 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertEqual(bests.best(for: .hard), 0)
         XCTAssertTrue(bests.record(solved: 1, score: 100, for: .hard).isNewBest)
         XCTAssertFalse(bests.record(solved: 2, score: 300, for: .easy).isNewBest, "A tie is not a new best")
+    }
+
+    func testBestsAreKeyedByWordAndSprintLength() {
+        _ = TimeAttackBests(defaults: defaults).record(solved: 1, score: 150, for: .easy)
+        XCTAssertEqual(defaults.integer(forKey: "timeAttackBest.3.90s"), 150)
     }
 
     func testABestFromASprintOfAnotherLengthDoesNotCount() {

@@ -5,15 +5,16 @@ import Foundation
 /// newline, which submits instead of dismissing the keyboard.
 struct WordEntry {
     private(set) var text = ""
-    /// The word a Return just accepted, until the next change: the field can
-    /// deliver that Return a second time, after the text has cleared.
+    /// The word a Return just accepted, until the text changes or the chain
+    /// moves: the field can deliver that Return a second time, after the
+    /// text has cleared.
     private var accepted: String?
 
     /// Returns the submit result when the change was a Return, else nil.
     @discardableResult
     mutating func change(to new: String, in game: GameState) -> InputResult? {
         let replay = accepted
-        accepted = nil
+        if new != text { accepted = nil }
         guard new.contains("\n") else {
             if new != text {
                 game.lastResult = nil
@@ -23,7 +24,10 @@ struct WordEntry {
             return nil
         }
         let word = new.replacingOccurrences(of: "\n", with: "")
-        if text.isEmpty && word == replay { return nil }
+        if text.isEmpty && word == replay {
+            accepted = replay
+            return nil
+        }
         text = word
         let result = submit(in: game)
         if result == .valid || result == .reachedTarget { accepted = word }
@@ -39,10 +43,12 @@ struct WordEntry {
     }
 
     mutating func hint(in game: GameState) {
+        accepted = nil
         if let next = game.requestHint() { text = next }
     }
 
     mutating func undo(in game: GameState) {
+        accepted = nil
         game.undo()
         text = ""
     }
