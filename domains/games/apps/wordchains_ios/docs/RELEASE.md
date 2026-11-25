@@ -81,9 +81,9 @@ bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
 `WordChainsUITests` exercises the real app's keyboard focus, progressive hints,
 Undo, and invalid-word layout, and captures the error state with the keyboard
 visible. Set `--ios_simulator_version` to an installed runtime for local runs.
-Simulator tests cannot validate physical haptic feel; check that on an iPhone. CI runs it apart from
-`test-ios`, in the iOS UI tests workflow: on main after a `wordchains_ios`
-change, and on a PR labelled `ios-ui`.
+Simulator tests cannot validate physical haptic feel; check that on an iPhone.
+CI runs it apart from `test-ios`, in the iOS UI tests workflow: on main after a
+`wordchains_ios` change, and on a PR labelled `ios-ui`.
 
 ### Manual testing checklist
 
