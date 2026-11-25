@@ -24,6 +24,28 @@ final class WordEntryTests: XCTestCase {
         XCTAssertEqual(entry.text, "")
     }
 
+    // The multi-line field can hand the same Return over twice: the second
+    // arrives after the accepted word has cleared the text, and is not a move.
+    func testARepeatedReturnForAnAcceptedWordIsIgnored() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "cot", in: game)
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+        XCTAssertNil(entry.change(to: "cot\n", in: game))
+        XCTAssertEqual(game.chain, ["cat", "cot"])
+        XCTAssertEqual(entry.text, "")
+        XCTAssertEqual(game.feedbackMessage, "")
+    }
+
+    func testRetypingAnAcceptedWordStillSaysItIsInTheChain() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "cot\n", in: game)
+        entry.change(to: "cot", in: game)
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .alreadyUsed)
+        XCTAssertEqual(game.feedbackMessage, "Already in the chain")
+    }
+
     func testReturnOnARejectedWordKeepsTheTextAndTheError() {
         let game = game()
         var entry = WordEntry()

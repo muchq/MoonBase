@@ -100,7 +100,7 @@ final class GameState {
     var timeAttack: TimeAttack?
     var timeAttackSummary: TimeAttackSummary?
     /// The sprint's clock as the bar shows it; `tick` keeps it current.
-    private(set) var timeAttackSeconds = TimeAttack.seconds(TimeAttack.length)
+    private(set) var timeAttackSeconds = 0
     let bests: TimeAttackBests
 
     // Animation triggers
@@ -156,8 +156,8 @@ final class GameState {
         self.chain = [puzzle.start]
 
         if mode == .timeAttack {
-            timeAttack = TimeAttack(startingAt: now)
-            timeAttackSeconds = TimeAttack.seconds(TimeAttack.length)
+            timeAttack = TimeAttack(startingAt: now, difficulty: difficulty)
+            timeAttackSeconds = TimeAttack.seconds(TimeAttack.length(for: difficulty))
         }
     }
 

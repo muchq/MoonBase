@@ -4,7 +4,14 @@ import Foundation
 /// keeps counting while the app is suspended and the phone sleeps: leaving
 /// the app never buys time, and coming back past the deadline ends the sprint.
 struct TimeAttack {
-    static let length: Duration = .seconds(60)
+    /// Longer words take longer to change, so they get a longer sprint.
+    static func length(for difficulty: Difficulty) -> Duration {
+        switch difficulty {
+        case .easy: .seconds(90)
+        case .medium: .seconds(120)
+        case .hard: .seconds(180)
+        }
+    }
     /// How long a solved puzzle stays on screen before the next one.
     static let celebration: Duration = .milliseconds(800)
 
@@ -14,8 +21,8 @@ struct TimeAttack {
     /// When the solved puzzle gives way to the next; nil while one is in play.
     private(set) var advanceAt: ContinuousClock.Instant?
 
-    init(startingAt now: ContinuousClock.Instant) {
-        deadline = now + Self.length
+    init(startingAt now: ContinuousClock.Instant, difficulty: Difficulty) {
+        deadline = now + Self.length(for: difficulty)
     }
 
     func isOver(at now: ContinuousClock.Instant) -> Bool { now >= deadline }
