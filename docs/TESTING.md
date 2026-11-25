@@ -98,7 +98,9 @@ C++ tests whose dependency closure is also first-party — a build-cost boundary
 not a compatibility one. It is path-gated by `scripts/sanitize-needed`: PRs that
 touch no C++ sources under `domains/`, no domain BUILD/proto/`.bzl` files, and
 none of the Bazel/toolchain config class (`.bazelrc`, module pins, shared
-macros) skip the instrumented rebuilds. Running a heavier target locally is
+macros) skip the instrumented rebuilds. Past the gate, `scripts/sanitize-targets`
+runs only the tests bazel-diff finds impacted, or all of them when the config
+class changed. Running a heavier target locally is
 just the flag above. The legs don't fail fast, because one sanitizer's finding
 shouldn't hide the other two, and ASan and TSan can't be linked into the same
 binary anyway.

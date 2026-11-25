@@ -1,0 +1,31 @@
+#!/bin/bash
+# Writes the tests the sanitize matrix runs to <out-file>, one label per line:
+# the sanitizable tests bazel-diff finds impacted since <base-revision>, or all
+# of them when a config or toolchain change makes that set untrustworthy. An
+# empty file means the change reaches no sanitizable test. Used by the
+# sanitize job in .github/workflows/branch.yml once scripts/sanitize-needed
+# says it should run.
+#
+# Hashing the base checks it out with --force: like diff-build, CI only.
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=sanitize-needed-lib.sh
+source "$SCRIPT_DIR/sanitize-needed-lib.sh"
+
+BASE_REVISION=${1:?usage: sanitize-targets <base-revision> <out-file>}
+OUT=${2:?usage: sanitize-targets <base-revision> <out-file>}
+require_base_revision "$BASE_REVISION"
+
+IMPACTED=-
+if [ "$(sanitize_mode "$BASE_REVISION")" = diff ]; then
+  IMPACTED=/tmp/sanitize_impacted.txt
+  bazel_diff_impacted "$BASE_REVISION" "$IMPACTED"
+else
+  echo "--- [sanitize-targets] config or toolchain changed; sanitizing every test"
+fi
+
+UNIVERSE=/tmp/sanitize_universe.txt
+bazel query "$SANITIZE_UNIVERSE_QUERY" > "$UNIVERSE"
+select_sanitize_targets "$UNIVERSE" "$IMPACTED" "$OUT"
+echo "--- [sanitize-targets] $(grep -c . "$OUT" || true) of $(grep -c . "$UNIVERSE") tests"

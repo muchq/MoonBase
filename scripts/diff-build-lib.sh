@@ -49,6 +49,48 @@ paths_forcing_full_build() {
   git diff --name-only "$base" HEAD -- "${FULL_BUILD_PATHSPECS[@]}"
 }
 
+# The branch name, or the commit in a detached HEAD (as in CI): what to check
+# back out after hashing the base.
+current_ref() {
+  local ref
+  ref=$(git rev-parse --abbrev-ref HEAD)
+  if [ "$ref" = "HEAD" ]; then git rev-parse HEAD; else echo "$ref"; fi
+}
+
+# Writes the labels bazel-diff finds impacted between <base> and HEAD to
+# <out>, one per line, external repos included. Hashing the base means
+# checking it out with --force, which discards every modification to a
+# tracked file: CI only, never a working tree with uncommitted work.
+bazel_diff_impacted() { # bazel_diff_impacted <base> <out>
+  local base=$1 out=$2 ref workspace
+  local version="17.0.2"
+  local sha256="097c7c38c991698b957399b54deb64e9569d638694e79d0f89b0bf50b40d4e77"
+  local jar="/tmp/bazel-diff-${version}.jar"
+  if [ ! -f "$jar" ]; then
+    echo "--- [bazel-diff] downloading ${version}..."
+    curl -fsSL -o "$jar" \
+      "https://github.com/Tinder/bazel-diff/releases/download/${version}/bazel-diff_deploy.jar"
+    echo "$sha256  $jar" | shasum -a 256 -c - || {
+      rm -f "$jar"
+      echo "ERROR: bazel-diff jar checksum mismatch" >&2
+      return 1
+    }
+  fi
+  ref=$(current_ref)
+  workspace=$(bazel info workspace)
+
+  echo "--- [bazel-diff] hashing base ($base)..."
+  git checkout "$base" --quiet --force
+  java -jar "$jar" generate-hashes -w "$workspace" -b "$(which bazel)" /tmp/starting_hashes.json
+  echo "--- [bazel-diff] hashing current ($ref)..."
+  git checkout "$ref" --quiet --force
+  java -jar "$jar" generate-hashes -w "$workspace" -b "$(which bazel)" /tmp/final_hashes.json
+
+  java -jar "$jar" get-impacted-targets -w "$workspace" \
+    -sh /tmp/starting_hashes.json -fh /tmp/final_hashes.json -o "$out"
+  echo "--- [bazel-diff] impacted targets: $(wc -l < "$out")"
+}
+
 # A bazel query over the impacted set, written to a file for --query_file
 # rather than passed inline: a few hundred labels in one argument exceed
 # the kernel's per-argument limit, and the query fails before it runs.
