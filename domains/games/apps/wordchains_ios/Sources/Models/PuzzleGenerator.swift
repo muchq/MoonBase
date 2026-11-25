@@ -16,7 +16,7 @@ struct PuzzleGenerator {
         let candidates = graph.puzzleEnds(ofLength: difficulty.letterCount, among: ends)
         guard candidates.count >= 2 else { return nil }
 
-        // Try to find a pair with a path of reasonable length (3-7 steps)
+        // Try to find a pair with a path of reasonable length (3-8 words)
         for _ in 0..<100 {
             let start = candidates.randomElement()!
             let target = candidates.randomElement()!

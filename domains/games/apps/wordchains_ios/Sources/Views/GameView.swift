@@ -116,7 +116,7 @@ struct GameView: View {
                 Text("Steps")
                     .font(Theme.captionFont)
                     .foregroundStyle(.secondary)
-                Text("\(game.chain.count - 1)")
+                Text("\(game.stepsTaken)")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
                     .foregroundStyle(Theme.gradientStart)
             }

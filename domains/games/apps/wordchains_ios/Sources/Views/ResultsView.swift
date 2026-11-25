@@ -82,13 +82,13 @@ struct ResultsView: View {
         VStack(spacing: 16) {
             HStack(spacing: 0) {
                 scoreItem(
-                    value: "\(game.chain.count - 1)",
+                    value: "\(game.stepsTaken)",
                     label: "Steps",
                     icon: "figure.walk"
                 )
                 Divider().frame(height: 44)
                 scoreItem(
-                    value: "\(game.currentPuzzle?.optimalSteps ?? 0)",
+                    value: "\(game.optimalSteps)",
                     label: "Optimal",
                     icon: "star"
                 )
