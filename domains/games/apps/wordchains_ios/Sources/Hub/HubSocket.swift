@@ -45,7 +45,12 @@ final class HubSocket: HubTransport {
         }
         socket.send(.string(String(decoding: command.encoded(), as: UTF8.self))) { [weak self] error in
             guard error != nil else { return }
-            Task { @MainActor in self?.events?.sendFailed() }
+            Task { @MainActor in
+                // A socket a reconnect replaced has no say: its failure is
+                // not the newer send's.
+                guard let self, self.socket === socket else { return }
+                self.events?.sendFailed()
+            }
         }
     }
 

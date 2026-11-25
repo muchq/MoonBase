@@ -229,8 +229,9 @@ session mint, then the JSON-text socket, the same protocol the web lobby speaks.
 (`RaceSession`), and the socket (`HubSocket`); the hub checks every word, so
 the app holds no race rules. The resume token is kept in the Keychain, this
 device only, so a restored backup can't put a second phone on the same seat;
-a token from 0.1.2 or earlier moves there from `UserDefaults` on first launch,
-which is why the privacy manifest still declares `UserDefaults`. There
+a token from 0.1.2 or earlier is read from `UserDefaults` until the first
+dial moves it there (and stays there if the Keychain refuses it), which is why
+the privacy manifest still declares `UserDefaults`. There
 is no chat. The single-player modes need no network.
 
 **App Privacy** (App Store Connect, and `Sources/Resources/PrivacyInfo.xcprivacy`,

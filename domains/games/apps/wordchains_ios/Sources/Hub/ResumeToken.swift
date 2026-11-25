@@ -13,7 +13,7 @@ protocol ResumeTokenStore {
 
 /// Where the token lived through 0.1.2. UserDefaults rides iCloud and device
 /// backups, so a restored phone held the same seat as the first; it is read
-/// once, to move the token to the Keychain.
+/// only until the token moves to the Keychain (MovingTokenStore).
 struct DefaultsTokenStore: ResumeTokenStore {
     /// The key the app shipped with: renaming it strands every player's seat.
     static let key = "games_hub_resume_token"
@@ -61,26 +61,49 @@ struct KeychainTokenStore: ResumeTokenStore {
     }
 
     func clear() { SecItemDelete(query as CFDictionary) }
+
+    /// The saved item's kSecAttrAccessible, for the test that pins it.
+    func accessibility() -> String? {
+        var request = query
+        request[kSecReturnAttributes as String] = true
+        request[kSecMatchLimit as String] = kSecMatchLimitOne
+        var found: CFTypeRef?
+        guard SecItemCopyMatching(request as CFDictionary, &found) == errSecSuccess,
+              let attributes = found as? [String: Any] else { return nil }
+        return attributes[kSecAttrAccessible as String] as? String
+    }
 }
 #endif
 
-enum ResumeToken {
-    /// Moves a token from the old store once. A token already in the new
-    /// store is newer and wins; a move that fails keeps the old copy, since
-    /// losing the token loses the player.
-    static func migrate(from legacy: ResumeTokenStore, to store: ResumeTokenStore) {
-        guard let old = legacy.load() else { return }
-        if store.load() == nil, !store.save(old) { return }
+/// The app's store: the Keychain, and the old copy in UserDefaults until the
+/// token moves. Every dial saves the token it minted, which is the move; a
+/// save the Keychain refuses keeps the token where it was, and still read,
+/// since losing it loses the player.
+struct MovingTokenStore: ResumeTokenStore {
+    let keychain: ResumeTokenStore
+    let legacy: ResumeTokenStore
+
+    /// The Keychain's token is newer than any old copy.
+    func load() -> String? { keychain.load() ?? legacy.load() }
+
+    func save(_ token: String) -> Bool {
+        guard keychain.save(token) else { return legacy.save(token) }
         legacy.clear()
+        return true
     }
 
-    /// The store the app uses: the Keychain, with any old token moved in.
+    func clear() {
+        keychain.clear()
+        legacy.clear()
+    }
+}
+
+enum ResumeToken {
+    /// The store the app uses.
     static func store(defaults: UserDefaults = .standard) -> ResumeTokenStore {
         let legacy = DefaultsTokenStore(defaults: defaults)
         #if canImport(Security)
-        let keychain = KeychainTokenStore()
-        migrate(from: legacy, to: keychain)
-        return keychain
+        return MovingTokenStore(keychain: KeychainTokenStore(), legacy: legacy)
         #else
         return legacy
         #endif

@@ -20,34 +20,52 @@ final class ResumeTokenTests: XCTestCase {
     }
 
     // MARK: - Moving the old token
+    // The app's store reads the Keychain, then the old copy; every dial saves
+    // the token it minted, which moves it. A move that can't happen leaves
+    // the token where it was, still read: losing it loses the player.
 
-    func testAnOldTokenMovesToTheKeychainAndLeavesUserDefaults() {
+    private func store(keychain: MemoryStore, legacy: MemoryStore) -> ResumeTokenStore {
+        MovingTokenStore(keychain: keychain, legacy: legacy)
+    }
+
+    func testAnOldTokenIsReadUntilItMoves() {
         let legacy = MemoryStore("r-old"), keychain = MemoryStore()
-        ResumeToken.migrate(from: legacy, to: keychain)
-        XCTAssertEqual(keychain.token, "r-old")
+        XCTAssertEqual(store(keychain: keychain, legacy: legacy).load(), "r-old")
+    }
+
+    func testSavingMovesTheTokenToTheKeychainAndDropsTheOldCopy() {
+        let legacy = MemoryStore("r-old"), keychain = MemoryStore()
+        XCTAssertTrue(store(keychain: keychain, legacy: legacy).save("r-1"))
+        XCTAssertEqual(keychain.token, "r-1")
         XCTAssertNil(legacy.token)
     }
 
-    // The Keychain's token is newer: an old one never overwrites it.
-    func testAKeychainTokenWinsAndTheOldOneIsDropped() {
+    // The Keychain's token is newer: an old one never shadows it.
+    func testAKeychainTokenWinsOverAnOldOne() {
         let legacy = MemoryStore("r-old"), keychain = MemoryStore("r-new")
-        ResumeToken.migrate(from: legacy, to: keychain)
-        XCTAssertEqual(keychain.token, "r-new")
-        XCTAssertNil(legacy.token)
+        XCTAssertEqual(store(keychain: keychain, legacy: legacy).load(), "r-new")
     }
 
-    // Losing the token is losing the player: a failed save keeps the old copy.
-    func testAFailedMoveKeepsTheOldToken() {
+    // The Keychain refusing a save must not cost the player: the token is
+    // kept, and read, where it was.
+    func testWhenTheKeychainRefusesTheTokenStaysWhereItWasAndIsStillRead() {
         let legacy = MemoryStore("r-old"), keychain = MemoryStore()
         keychain.refusesSaves = true
-        ResumeToken.migrate(from: legacy, to: keychain)
+        let tokens = store(keychain: keychain, legacy: legacy)
+        XCTAssertEqual(tokens.load(), "r-old")
+        XCTAssertTrue(tokens.save("r-1"))
         XCTAssertNil(keychain.token)
-        XCTAssertEqual(legacy.token, "r-old")
+        XCTAssertEqual(legacy.token, "r-1")
+        XCTAssertEqual(tokens.load(), "r-1")
     }
 
     func testNoTokenStaysNoToken() {
-        let legacy = MemoryStore(), keychain = MemoryStore()
-        ResumeToken.migrate(from: legacy, to: keychain)
+        XCTAssertNil(store(keychain: MemoryStore(), legacy: MemoryStore()).load())
+    }
+
+    func testClearingClearsBoth() {
+        let legacy = MemoryStore("r-old"), keychain = MemoryStore("r-new")
+        store(keychain: keychain, legacy: legacy).clear()
         XCTAssertNil(keychain.token)
         XCTAssertNil(legacy.token)
     }
@@ -85,6 +103,8 @@ final class ResumeTokenTests: XCTestCase {
         XCTAssertEqual(store.load(), "r-1")
         XCTAssertTrue(store.save("r-2"))
         XCTAssertEqual(store.load(), "r-2")
+        // Never backed up, never synced: this device only.
+        XCTAssertEqual(store.accessibility(), kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly as String)
         store.clear()
         XCTAssertNil(store.load())
     }
