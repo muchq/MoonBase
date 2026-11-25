@@ -31,22 +31,27 @@ final class WordEditorUITests: XCTestCase {
         return field.exists ? field : app.textViews["word-input"]
     }
 
+    // `hasFocus` follows the focus engine, not the first responder, so it is
+    // false for a text field with the keyboard up. What the player sees is
+    // the keyboard, and keystrokes still landing in the field.
     func testReturnKeepsTheKeyboardWhetherEmptyOrRejected() {
         let app = startPuzzle()
         let field = wordInput(app)
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
 
         field.typeText("\n")
         settle()
-        XCTAssertTrue(field.hasFocus, "Return on an empty field")
-        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertTrue(keyboard.exists, "Return on an empty field")
 
         field.typeText("zzzzz\n")
         XCTAssertTrue(app.staticTexts["word-feedback"].waitForExistence(timeout: 5))
         XCTAssertEqual(field.value as? String, "zzzzz", "One line, no newline")
         settle()
-        XCTAssertTrue(field.hasFocus, "Return on a rejected word")
-        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertTrue(keyboard.exists, "Return on a rejected word")
+
+        field.typeText("a")
+        XCTAssertEqual(field.value as? String, "zzzzza", "Typing still lands in the field")
     }
 
     func testErrorDoesNotMoveTheInputRowOrPushItUnderTheKeyboard() {
