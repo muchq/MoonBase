@@ -71,12 +71,7 @@ enum InputResult {
     case wrongLength
     case reachedTarget
     case gameComplete
-}
-
-enum WordHint: Equatable {
-    case letter(Int)
-    case word(String)
-    case unavailable
+    case noRoute
 }
 
 @Observable
@@ -107,7 +102,6 @@ final class GameState {
 
     // Animation triggers
     var lastResult: InputResult?
-    private(set) var currentHint: WordHint?
     var showInvalidShake = false
     var showCompletionCelebration = false
 
@@ -137,7 +131,6 @@ final class GameState {
         self.score = 0
         self.showCompletionCelebration = false
         self.lastResult = nil
-        self.currentHint = nil
 
         guard let generator else { return }
 
@@ -193,7 +186,6 @@ final class GameState {
 
         chain.append(normalized)
         showInvalidShake = false
-        currentHint = nil
 
         if normalized == puzzle.target {
             completeRound()
@@ -211,22 +203,12 @@ final class GameState {
         return path.count > 1 ? path[1] : nil
     }
 
-    @discardableResult
-    func requestHint() -> WordHint {
-        lastResult = nil
+    /// `hint()`, but a dead end leaves a message instead of nothing.
+    func requestHint() -> String? {
+        let next = hint()
+        lastResult = next == nil ? .noRoute : nil
         showInvalidShake = false
-        guard let next = hint(), let last = chain.last,
-              let index = zip(last, next).enumerated().first(where: { $0.element.0 != $0.element.1 })?.offset else {
-            currentHint = .unavailable
-            return .unavailable
-        }
-        let result: WordHint
-        switch currentHint {
-        case .letter, .word: result = .word(next)
-        case .none, .unavailable: result = .letter(index)
-        }
-        currentHint = result
-        return result
+        return next
     }
 
     var canUndo: Bool { !isComplete && chain.count > 1 }
@@ -236,7 +218,6 @@ final class GameState {
         chain.removeLast()
         lastResult = nil
         showInvalidShake = false
-        currentHint = nil
     }
 
     private func completeRound() {
@@ -280,7 +261,6 @@ final class GameState {
         showCompletionCelebration = false
         score = 0
         lastResult = nil
-        currentHint = nil
     }
 
     func endTimeAttack() {
@@ -303,6 +283,7 @@ final class GameState {
         case .alreadyUsed: return "Already in the chain"
         case .wrongLength: return "Must be \(difficulty.letterCount) letters"
         case .gameComplete: return "Puzzle complete"
+        case .noRoute: return "No unused route. Undo to try another path."
         case .valid, .reachedTarget, .none: return ""
         }
     }

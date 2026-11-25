@@ -1,8 +1,15 @@
 import XCTest
 
+/// Only what needs a real keyboard and screen. The input logic behind these
+/// (Return submits, stale errors clear, hints, Undo) is in WordEntryTests.
 final class WordEditorUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
+    }
+
+    /// Lets a keyboard dismissal finish, so a check can't pass mid-animation.
+    private func settle() {
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
     }
 
     private func startPuzzle() -> XCUIApplication {
@@ -13,83 +20,62 @@ final class WordEditorUITests: XCTestCase {
         for _ in 0..<4 where !play.isHittable { app.swipeUp() }
         XCTAssertTrue(play.isHittable)
         play.tap()
-        XCTAssertTrue(app.buttons["word-letter-0"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["word-input"].waitForExistence(timeout: 5))
         return app
     }
 
-    func testKeyboardFollowsSelectedTileAndHintsCanBePlayedAndUndone() {
-        let app = startPuzzle()
-        let undo = app.buttons["word-undo"]
-        let play = app.buttons["word-play"]
-        let hint = app.buttons["word-hint"]
-        XCTAssertFalse(undo.isEnabled)
-        XCTAssertFalse(play.isEnabled)
-
-        app.buttons["word-letter-0"].tap()
-        let first = app.textFields["word-letter-0"]
-        XCTAssertTrue(first.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        first.typeText("q")
-        XCTAssertEqual(first.value as? String, "Q")
-        first.typeText("x")
-        XCTAssertEqual(first.value as? String, "X", "Typing again must replace the visible letter")
-        first.typeText("1")
-        XCTAssertEqual(first.value as? String, "X", "Rejected input must not remain in the native field")
-
-        app.buttons["word-letter-1"].tap()
-        let second = app.textFields["word-letter-1"]
-        XCTAssertTrue(second.waitForExistence(timeout: 5))
-        second.typeText("z")
-        XCTAssertEqual(second.value as? String, "Z")
-        XCTAssertTrue(app.buttons["word-letter-0"].exists)
-
-        hint.tap()
-        XCTAssertFalse(play.isEnabled, "The first hint only selects a letter")
-        XCTAssertEqual(hint.label, "Reveal")
-        hint.tap()
-        XCTAssertTrue(play.isEnabled)
-        play.tap()
-        XCTAssertTrue(undo.waitForExistence(timeout: 5))
-        XCTAssertTrue(undo.isEnabled)
-        XCTAssertFalse(play.isEnabled, "A played candidate must be cleared")
-        XCTAssertTrue(app.keyboards.firstMatch.exists, "Keep the keyboard available between moves")
-        undo.tap()
-        XCTAssertFalse(undo.isEnabled)
-        XCTAssertFalse(play.isEnabled)
-        XCTAssertEqual(hint.label, "Hint")
+    /// The one-line, vertical-axis field; which element type iOS reports for
+    /// it is an implementation detail, so accept either.
+    private func wordInput(_ app: XCUIApplication) -> XCUIElement {
+        let field = app.textFields["word-input"]
+        return field.exists ? field : app.textViews["word-input"]
     }
 
-    func testDictionaryErrorDoesNotMoveTheEditorOrCoverItsControls() {
+    // `hasFocus` follows the focus engine, not the first responder, so it is
+    // false for a text field with the keyboard up. What the player sees is
+    // the keyboard, and keystrokes still landing in the field.
+    func testReturnKeepsTheKeyboardWhetherEmptyOrRejected() {
         let app = startPuzzle()
-        app.buttons["word-letter-0"].tap()
-        let field = app.textFields["word-letter-0"]
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        let play = app.buttons["word-play"]
-        let feedback = app.staticTexts["word-feedback"]
-        let originalLabel = field.label
-        let beforeField = field.frame
-        let beforePlay = play.frame
+        let field = wordInput(app)
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
 
-        // Use the actual bundled dictionary and random puzzle, without a test
-        // backdoor in the app. Retry letters only until a word is rejected.
-        for letter in "qxzjvk" {
-            field.typeText(String(letter))
-            if play.isEnabled { play.tap() }
-            if feedback.label == "Not in dictionary" { break }
-            // A valid probe can advance the chain. Restore the original rung.
-            let undo = app.buttons["word-undo"]
-            if undo.isEnabled { undo.tap() }
-        }
-        XCTAssertEqual(feedback.label, "Not in dictionary")
-        XCTAssertEqual(field.label, originalLabel)
-        XCTAssertEqual(field.frame.minY, beforeField.minY, accuracy: 1)
-        XCTAssertEqual(play.frame.minY, beforePlay.minY, accuracy: 1)
+        field.typeText("\n")
+        settle()
+        XCTAssertTrue(keyboard.exists, "Return on an empty field")
+
+        field.typeText("zzzzz\n")
+        XCTAssertTrue(app.staticTexts["word-feedback"].waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "zzzzz", "One line, no newline")
+        settle()
+        XCTAssertTrue(keyboard.exists, "Return on a rejected word")
+
+        field.typeText("a")
+        XCTAssertEqual(field.value as? String, "zzzzza", "Typing still lands in the field")
+    }
+
+    func testErrorDoesNotMoveTheInputRowOrPushItUnderTheKeyboard() {
+        let app = startPuzzle()
+        let field = wordInput(app)
+        let submit = app.buttons["word-submit"]
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        field.typeText("zzzzz")
+        let before = field.frame
+        submit.tap()
+        XCTAssertTrue(app.staticTexts["word-feedback"].waitForExistence(timeout: 5))
+        XCTAssertEqual(field.frame.minY, before.minY, accuracy: 1)
         XCTAssertTrue(field.isHittable)
-        XCTAssertTrue(play.isHittable)
-        XCTAssertLessThanOrEqual(play.frame.maxY, app.keyboards.firstMatch.frame.minY)
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Dictionary error with keyboard visible"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        XCTAssertTrue(submit.isHittable)
+        XCTAssertLessThanOrEqual(submit.frame.maxY, app.keyboards.firstMatch.frame.minY)
+    }
+
+    func testControlsMeetTheMinimumTapTarget() {
+        let app = startPuzzle()
+        for id in ["word-undo", "word-hint", "word-submit"] {
+            let frame = app.buttons[id].frame
+            // Frames come back as 43.99999…; compare whole points.
+            XCTAssertGreaterThanOrEqual(frame.width.rounded(), 44, id)
+            XCTAssertGreaterThanOrEqual(frame.height.rounded(), 44, id)
+        }
     }
 }
