@@ -55,11 +55,15 @@ struct TimeAttackSummary: Equatable {
     let isNewBest: Bool
 }
 
-/// Personal bests, one per difficulty: points are not comparable across them.
+/// Personal bests, one per word length and sprint length: points are not
+/// comparable across either, so a change to a sprint's length starts afresh.
 struct TimeAttackBests {
     var defaults: UserDefaults = .standard
 
-    private func key(_ difficulty: Difficulty) -> String { "timeAttackBest.\(difficulty.letterCount)" }
+    private func key(_ difficulty: Difficulty) -> String {
+        let seconds = TimeAttack.seconds(TimeAttack.length(for: difficulty))
+        return "timeAttackBest.\(difficulty.letterCount).\(seconds)s"
+    }
 
     func best(for difficulty: Difficulty) -> Int { defaults.integer(forKey: key(difficulty)) }
 

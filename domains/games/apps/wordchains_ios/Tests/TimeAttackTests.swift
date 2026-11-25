@@ -201,6 +201,11 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertFalse(bests.record(solved: 2, score: 300, for: .easy).isNewBest, "A tie is not a new best")
     }
 
+    func testABestFromASprintOfAnotherLengthDoesNotCount() {
+        defaults.set(900, forKey: "timeAttackBest.3")
+        XCTAssertEqual(TimeAttackBests(defaults: defaults).best(for: .easy), 0, "A 60-second sprint's best")
+    }
+
     func testBeatingAStandingBestReplacesIt() {
         let bests = TimeAttackBests(defaults: defaults)
         _ = bests.record(solved: 1, score: 150, for: .medium)
