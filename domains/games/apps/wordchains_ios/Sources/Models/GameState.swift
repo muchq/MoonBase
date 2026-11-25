@@ -73,12 +73,6 @@ enum InputResult {
     case gameComplete
 }
 
-enum WordHint: Equatable {
-    case letter(Int)
-    case word(String)
-    case unavailable
-}
-
 @Observable
 final class GameState {
     var graph: WordGraph?
@@ -107,7 +101,6 @@ final class GameState {
 
     // Animation triggers
     var lastResult: InputResult?
-    private(set) var currentHint: WordHint?
     var showInvalidShake = false
     var showCompletionCelebration = false
 
@@ -137,7 +130,6 @@ final class GameState {
         self.score = 0
         self.showCompletionCelebration = false
         self.lastResult = nil
-        self.currentHint = nil
 
         guard let generator else { return }
 
@@ -193,7 +185,6 @@ final class GameState {
 
         chain.append(normalized)
         showInvalidShake = false
-        currentHint = nil
 
         if normalized == puzzle.target {
             completeRound()
@@ -211,24 +202,6 @@ final class GameState {
         return path.count > 1 ? path[1] : nil
     }
 
-    @discardableResult
-    func requestHint() -> WordHint {
-        lastResult = nil
-        showInvalidShake = false
-        guard let next = hint(), let last = chain.last,
-              let index = zip(last, next).enumerated().first(where: { $0.element.0 != $0.element.1 })?.offset else {
-            currentHint = .unavailable
-            return .unavailable
-        }
-        let result: WordHint
-        switch currentHint {
-        case .letter, .word: result = .word(next)
-        case .none, .unavailable: result = .letter(index)
-        }
-        currentHint = result
-        return result
-    }
-
     var canUndo: Bool { !isComplete && chain.count > 1 }
 
     func undo() {
@@ -236,7 +209,6 @@ final class GameState {
         chain.removeLast()
         lastResult = nil
         showInvalidShake = false
-        currentHint = nil
     }
 
     private func completeRound() {
@@ -280,7 +252,6 @@ final class GameState {
         showCompletionCelebration = false
         score = 0
         lastResult = nil
-        currentHint = nil
     }
 
     func endTimeAttack() {
