@@ -55,8 +55,12 @@ struct Puzzle: Identifiable {
     let id = UUID()
     let start: String
     let target: String
+    /// Words in the shortest chain, both ends included.
     let optimalLength: Int
     let difficulty: Difficulty
+
+    /// Moves in the shortest chain.
+    var optimalSteps: Int { optimalLength - 1 }
 }
 
 enum InputResult {
@@ -78,6 +82,11 @@ final class GameState {
     var currentPuzzle: Puzzle?
     var chain: [String] = []
     var isComplete = false
+
+    /// Moves the player has made: the chain less its start word.
+    var stepsTaken: Int { chain.count - 1 }
+    /// Moves in the current puzzle's shortest chain; 0 with no puzzle.
+    var optimalSteps: Int { currentPuzzle?.optimalSteps ?? 0 }
     var score = 0
     var totalScore = 0
     var streak = 0
@@ -199,16 +208,16 @@ final class GameState {
         gamesPlayed += 1
         puzzlesSolved += 1
 
-        let stepsUsed = chain.count
+        let wordsUsed = chain.count
         let optimal = puzzle.optimalLength
-        let isOptimal = stepsUsed == optimal
+        let isOptimal = wordsUsed == optimal
 
         if isOptimal { optimalSolves += 1 }
 
         // Scoring: base 100, bonus for optimal, penalty for extra steps
         let baseScore = 100
         let optimalBonus = isOptimal ? 50 : 0
-        let stepPenalty = max(0, (stepsUsed - optimal)) * 10
+        let stepPenalty = max(0, (wordsUsed - optimal)) * 10
         score = max(10, baseScore + optimalBonus - stepPenalty)
         totalScore += score
 
