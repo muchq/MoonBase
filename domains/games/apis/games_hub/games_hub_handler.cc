@@ -32,7 +32,6 @@ opal::Outcome<moonbase::games::GetSessionOutput> GamesHubHandler::GetSession(
   absl::StatusOr<std::string> ticket = vault_->IssueTicket(player_id);
   if (!ticket.ok()) return opal::Error::Unknown("credential store unavailable");
 
-  hub_->CountSessionMint(ClientTagOf(input.client));
   moonbase::games::GetSessionOutput output;
   output.playerId = player_id;
   output.ticket = *std::move(ticket);
@@ -43,6 +42,8 @@ opal::Outcome<moonbase::games::GetSessionOutput> GamesHubHandler::GetSession(
     if (!resume.ok()) return opal::Error::Unknown("credential store unavailable");
     output.resumeToken = *std::move(resume);
   }
+  // Counted once it is certain: a mint that failed is not one.
+  hub_->CountSessionMint(ClientTagOf(input.client));
   return output;
 }
 

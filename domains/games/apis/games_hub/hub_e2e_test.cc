@@ -3440,6 +3440,42 @@ class FailingVaultFixture : public GamesHubStreamFixture {
 TEST_F(FailingVaultFixture, GetSessionFailsClosedWhenTheVaultIsDown) {
   const auto session = client_->GetSession(moonbase::games::GetSessionInput{});
   ASSERT_FALSE(session.ok());
+  EXPECT_EQ(metrics_->CounterTotal("hub_session_mints", {{"client", "other"}, {"version", "none"}}), 0);
+}
+
+// A vault that issues the ticket and then cannot keep the resume token:
+// the mint fails, and a failed mint is not counted, or a retry would
+// count twice.
+class ResumeDownVault final : public TicketVault {
+ public:
+  absl::StatusOr<std::string> IssueTicket(const std::string& player_id) override {
+    return delegate_.IssueTicket(player_id);
+  }
+  absl::StatusOr<std::string> IssueResumeToken(const std::string&) override {
+    return absl::UnavailableError("vault down");
+  }
+  bool PeekTicket(const std::string& ticket) const override { return delegate_.PeekTicket(ticket); }
+  std::optional<std::string> SpendTicket(const std::string& ticket) override {
+    return delegate_.SpendTicket(ticket);
+  }
+  std::optional<std::string> ResolveResumeToken(const std::string& token) const override {
+    return delegate_.ResolveResumeToken(token);
+  }
+
+ private:
+  InMemoryTicketVault delegate_{std::chrono::seconds(60), std::chrono::seconds(60)};
+};
+
+class ResumeDownVaultFixture : public GamesHubStreamFixture {
+ protected:
+  std::shared_ptr<TicketVault> MakeVault() override { return std::make_shared<ResumeDownVault>(); }
+};
+
+TEST_F(ResumeDownVaultFixture, AFailedResumeTokenIssueDoesNotCountAMint) {
+  moonbase::games::GetSessionInput input;
+  input.client = "web";
+  ASSERT_FALSE(client_->GetSession(input).ok());
+  EXPECT_EQ(metrics_->CounterTotal("hub_session_mints", {{"client", "web"}, {"version", "none"}}), 0);
 }
 
 // Per-session stream budgets, pinned with tiny buckets whose

@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 @testable import WordChains
 
 // What the app does with each frame the hub sends, and what it sends for
@@ -338,6 +341,50 @@ final class HubSocketSendTests: XCTestCase {
             XCTAssertEqual(failed, 1)
             XCTAssertEqual(said, [])
         }
+    }
+}
+
+// The real socket's mint names this build: what the hub counts it under
+// (games_hub client_tag.h).
+final class HubSocketMintTests: XCTestCase {
+    /// Answers every request with a 503, keeping what was asked.
+    final class Recording: URLProtocol {
+        static var asked: [URL] = []
+        static var seen: XCTestExpectation?
+        override class func canInit(with request: URLRequest) -> Bool { true }
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+        override func startLoading() {
+            if let url = request.url {
+                Self.asked.append(url)
+                Self.seen?.fulfill()
+                Self.seen = nil
+            }
+            let response = HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        override func stopLoading() {}
+    }
+
+    func testTheMintAsksAsThisBuildOfTheApp() {
+        final class NoTokens: ResumeTokenStore {
+            func load() -> String? { nil }
+            func save(_ token: String) -> Bool { true }
+            func clear() {}
+        }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [Recording.self]
+        Recording.asked = []
+        Recording.seen = expectation(description: "a mint")
+        let socket = MainActor.assumeIsolated {
+            HubSocket(playURL: URL(string: "wss://hub.test/games/v2/play")!, urlSession: URLSession(configuration: config), tokens: NoTokens())
+        }
+        MainActor.assumeIsolated { socket.connect() }
+        wait(for: [Recording.seen ?? expectation(description: "already seen")], timeout: 5)
+        MainActor.assumeIsolated { socket.disconnect() }
+        XCTAssertEqual(Recording.asked.first?.absoluteString,
+                       "https://hub.test/games/v2/session?client=\(HubEndpoints.appClient)")
+        XCTAssertTrue(HubEndpoints.appClient.hasPrefix("ios"), HubEndpoints.appClient)
     }
 }
 
