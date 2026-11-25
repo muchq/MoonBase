@@ -20,6 +20,8 @@ namespace {
 
 using moonbase::games::GameCommands;
 using moonbase::games::WordchainMove;
+using moonbase::games::WordchainRunner;
+using moonbase::games::WordchainSeekState;
 using moonbase::games::WordchainUpdate;
 using moonbase::games::WordchainView;
 
@@ -47,12 +49,64 @@ GameCommands Start() {
   return Wordchain(WordchainMove::FromStartgame(moonbase::games::WordchainStartGame{}));
 }
 
+GameCommands JoinOf(const std::string& game_id) {
+  moonbase::games::JoinGame join;
+  join.gameId = game_id;
+  return Wordchain(WordchainMove::FromJoingame(std::move(join)));
+}
+
 std::optional<WordchainUpdate> ReceiveWordchain(moonbase::games::PlayClientStream& stream,
                                                 const std::string& wanted) {
   return ReceiveEnvelope(
       stream, wanted, "wordchain",
       [](const moonbase::games::GameEvents& event) { return event.as_wordchain_or_null(); },
       kReceiveBudget);
+}
+
+std::string ReasonOf(moonbase::games::PlayClientStream& stream) {
+  auto refused = ReceiveCase(stream, "commandRejected");
+  return refused.has_value() ? refused->as_commandRejected_or_null()->reason : "(none)";
+}
+
+// A seat with no rungs yet; `viewer` sees its own (empty) ladder.
+WordchainRunner Runner(const std::string& player_id, bool viewer) {
+  WordchainRunner runner;
+  runner.playerId = player_id;
+  if (viewer) runner.ladder = std::vector<std::string>{};
+  return runner;
+}
+
+// A seek's table as its seeker sees it.
+WordchainView Seeking(const std::string& game_id, const std::string& seeker,
+                      std::optional<int> letters, int64_t deadline_ms, bool expired = false) {
+  WordchainView view;
+  view.gameId = game_id;
+  view.phase = "waiting";
+  view.runners = {Runner(seeker, false)};
+  WordchainSeekState seek;
+  seek.letters = letters;
+  seek.deadlineMs = deadline_ms;
+  seek.expired = expired;
+  view.seek = seek;
+  return view;
+}
+
+// The race `actual` shows, as `viewer` should see it the moment it opens on
+// a countdown at `opened_ms`: the puzzle is the hub's shuffle, the rest is
+// the rule.
+WordchainView Opened(const WordchainView& actual, const std::vector<std::string>& seats,
+                     const std::string& viewer, int64_t opened_ms) {
+  WordchainView view;
+  view.gameId = actual.gameId;
+  view.phase = "racing";
+  view.start = actual.start;
+  view.target = actual.target;
+  view.par = actual.par;
+  view.lexicon = "enable";
+  view.startedAtMs = opened_ms + kQuickCountdownMs;
+  view.deadlineMs = opened_ms + kQuickCountdownMs + 180'000;
+  for (const std::string& seat : seats) view.runners.push_back(Runner(seat, seat == viewer));
+  return view;
 }
 
 class QuickRaceFixture : public GamesHubStreamFixture {
@@ -63,13 +117,13 @@ class QuickRaceFixture : public GamesHubStreamFixture {
   }
 
   // A seat in no room, having heard sessionReady.
-  std::optional<Seat> Ready() {
-    auto seat = OpenSeat();
+  static std::optional<Seat> Ready(std::optional<Seat> seat) {
     if (!seat.has_value() || !ReceiveCase(seat->stream, "sessionReady").has_value()) {
       return std::nullopt;
     }
     return seat;
   }
+  std::optional<Seat> Ready() { return Ready(OpenSeat()); }
 
   // The view a seek's sender joins with.
   static std::optional<WordchainView> Seeks(Seat& seat, std::optional<int> letters = std::nullopt) {
@@ -79,28 +133,30 @@ class QuickRaceFixture : public GamesHubStreamFixture {
     return joined->as_gameJoined_or_null()->view;
   }
 
-  // The view a seat reads once its race has started.
-  static std::optional<WordchainView> Started(Seat& seat) {
-    if (!ReceiveWordchain(seat.stream, "gameStarted").has_value()) return std::nullopt;
+  // The next view a seat reads.
+  static std::optional<WordchainView> NextView(Seat& seat) {
     auto state = ReceiveWordchain(seat.stream, "gameState");
     if (!state.has_value()) return std::nullopt;
     return state->as_gameState_or_null()->view;
   }
 
+  // The view a seat reads once its race has started.
+  static std::optional<WordchainView> Started(Seat& seat) {
+    if (!ReceiveWordchain(seat.stream, "gameStarted").has_value()) return std::nullopt;
+    return NextView(seat);
+  }
+
   std::atomic<int64_t> now_ms_{kT0};
 };
+
+// MARK: A seek and its match
 
 TEST_F(QuickRaceFixture, ALoneSeekWaitsAtAPublicTableOnTheHubsDeadline) {
   auto ann = Ready();
   ASSERT_TRUE(ann.has_value());
   auto view = Seeks(*ann);
   ASSERT_TRUE(view.has_value());
-  EXPECT_EQ(view->phase, "waiting");
-  ASSERT_EQ(view->runners.size(), 1u);
-  ASSERT_TRUE(view->seek.has_value());
-  EXPECT_FALSE(view->seek->letters.has_value());
-  EXPECT_EQ(view->seek->deadlineMs, kT0 + kQuickSeekMs);
-  EXPECT_FALSE(view->seek->expired);
+  EXPECT_EQ(*view, Seeking(view->gameId, ann->player_id, std::nullopt, kT0 + kQuickSeekMs));
   auto room = ReceiveCase(ann->stream, "roomState");
   ASSERT_TRUE(room.has_value());
   EXPECT_EQ(room->as_roomState_or_null()->roomId, kQuickRoomId);
@@ -117,36 +173,30 @@ TEST_F(QuickRaceFixture, TwoSeeksMeetAndTheRaceStartsByItselfThreeSecondsLater) 
   ASSERT_TRUE(bobs.has_value());
   EXPECT_EQ(bobs->gameId, anns->gameId);
 
+  const std::vector<std::string> seats = {ann->player_id, bob->player_id};
   std::optional<WordchainView> race;
   for (Seat* seat : {&*ann, &*bob}) {
-    auto view = Started(*seat);
-    ASSERT_TRUE(view.has_value());
-    race = view;
-    EXPECT_EQ(view->phase, "racing");
-    EXPECT_FALSE(view->practice);
-    EXPECT_EQ(view->runners.size(), 2u);
-    EXPECT_EQ(view->startedAtMs, kT0 + 3000);
-    EXPECT_EQ(view->deadlineMs, kT0 + 3000 + 180'000);
-    EXPECT_FALSE(view->seek.has_value());
+    race = Started(*seat);
+    ASSERT_TRUE(race.has_value());
+    EXPECT_EQ(*race, Opened(*race, seats, seat->player_id, kT0));
   }
 
   // The countdown: no word before the start.
   ASSERT_TRUE(ann->stream.Send(Play("zzzz")).ok());
-  auto early = ReceiveCase(ann->stream, "commandRejected");
-  ASSERT_TRUE(early.has_value());
-  EXPECT_EQ(early->as_commandRejected_or_null()->reason, "the race starts in a moment");
+  EXPECT_EQ(ReasonOf(ann->stream), "the race starts in a moment");
 
   // At the start, the ladder's first rung is taken.
-  now_ms_ += 3000;
+  now_ms_ += kQuickCountdownMs;
   const auto ladder =
       wordchain_race::EnableLexicon().words.shortestPath(*race->start, *race->target);
   ASSERT_TRUE(ladder.has_value());
   ASSERT_TRUE(ann->stream.Send(Play((*ladder)[1])).ok());
-  auto played = ReceiveWordchain(ann->stream, "gameState");
+  auto played = NextView(*ann);
   ASSERT_TRUE(played.has_value());
-  const auto& mine = played->as_gameState_or_null()->view.runners[0];
-  EXPECT_EQ(mine.playerId, ann->player_id);
-  EXPECT_EQ(mine.ladder, std::vector<std::string>{(*ladder)[1]});
+  WordchainView expected = Opened(*race, seats, ann->player_id, kT0);
+  expected.runners[0].words = 1;
+  expected.runners[0].ladder = std::vector<std::string>{(*ladder)[1]};
+  EXPECT_EQ(*played, expected);
 
   // Recorded as any wordchain race is.
   const std::vector<std::string> lines = GameLines();
@@ -166,8 +216,38 @@ TEST_F(QuickRaceFixture, AThirdSeekOpensATableOfItsOwn) {
   auto cats = Seeks(*cat);
   ASSERT_TRUE(cats.has_value());
   EXPECT_NE(cats->gameId, anns->gameId);
-  EXPECT_EQ(cats->runners.size(), 1u);
+  EXPECT_EQ(*cats, Seeking(cats->gameId, cat->player_id, std::nullopt, kT0 + kQuickSeekMs));
 }
+
+// A seek on one instance is matched from another: the seek is the table's
+// stored terms, not anything one instance holds.
+TEST_F(QuickRaceFixture, ASeekIsMatchedFromAnotherInstance) {
+  auto ann = Ready();
+  ASSERT_TRUE(ann.has_value());
+  auto anns = Seeks(*ann);
+  ASSERT_TRUE(anns.has_value());
+
+  auto instance = BuildSecondInstance(vault_, store_, chat_store_);
+  ASSERT_NE(instance, nullptr);
+  instance->hub->SetClock([this] { return absl::FromUnixMillis(now_ms_.load()); });
+  auto bob = Ready(OpenSeatVia(*instance->client));
+  ASSERT_TRUE(bob.has_value());
+  auto bobs = Seeks(*bob);
+  ASSERT_TRUE(bobs.has_value());
+  EXPECT_EQ(bobs->gameId, anns->gameId);
+  auto race = Started(*bob);
+  ASSERT_TRUE(race.has_value());
+  const std::vector<std::string> seats = {ann->player_id, bob->player_id};
+  EXPECT_EQ(*race, Opened(*race, seats, bob->player_id, kT0));
+
+  // Woken, the seeker's instance shows them the same race.
+  hub_->OnNotify(RoomChannel(std::string(kQuickRoomId)), "second");
+  auto seen = NextView(*ann);
+  ASSERT_TRUE(seen.has_value());
+  EXPECT_EQ(*seen, Opened(*race, seats, ann->player_id, kT0));
+}
+
+// MARK: Letters
 
 TEST_F(QuickRaceFixture, LettersMatchWhenTheyAgreeOrEitherIsAny) {
   auto ann = Ready();
@@ -176,7 +256,7 @@ TEST_F(QuickRaceFixture, LettersMatchWhenTheyAgreeOrEitherIsAny) {
   ASSERT_TRUE(ann.has_value() && bob.has_value() && cat.has_value());
   auto anns = Seeks(*ann, 5);
   ASSERT_TRUE(anns.has_value());
-  EXPECT_EQ(anns->seek->letters, 5);
+  EXPECT_EQ(*anns, Seeking(anns->gameId, ann->player_id, 5, kT0 + kQuickSeekMs));
   auto bobs = Seeks(*bob, 4);
   ASSERT_TRUE(bobs.has_value());
   EXPECT_NE(bobs->gameId, anns->gameId);
@@ -187,7 +267,7 @@ TEST_F(QuickRaceFixture, LettersMatchWhenTheyAgreeOrEitherIsAny) {
   EXPECT_EQ(cats->gameId, anns->gameId);
   auto view = Started(*cat);
   ASSERT_TRUE(view.has_value());
-  EXPECT_EQ(view->start->size(), 5u);
+  EXPECT_EQ(view->start->size(), 5u) << *view->start;
 }
 
 TEST_F(QuickRaceFixture, AnySeekTakesTheJoinersLetters) {
@@ -198,8 +278,10 @@ TEST_F(QuickRaceFixture, AnySeekTakesTheJoinersLetters) {
   ASSERT_TRUE(Seeks(*bob, 3).has_value());
   auto view = Started(*ann);
   ASSERT_TRUE(view.has_value());
-  EXPECT_EQ(view->start->size(), 3u);
+  EXPECT_EQ(view->start->size(), 3u) << *view->start;
 }
+
+// MARK: The deadline
 
 TEST_F(QuickRaceFixture, AnUnmatchedSeekExpiresKeepsItsSeatAndLeavesThePool) {
   auto ann = Ready();
@@ -208,20 +290,31 @@ TEST_F(QuickRaceFixture, AnUnmatchedSeekExpiresKeepsItsSeatAndLeavesThePool) {
   auto anns = Seeks(*ann);
   ASSERT_TRUE(anns.has_value());
   now_ms_ += kQuickSeekMs - 1;
-  hub_->SweepClocksOnce();
+  EXPECT_EQ(hub_->SweepSeeksOnce(), 0);
   now_ms_ += 1;
-  hub_->SweepClocksOnce();
-  auto expired = ReceiveWordchain(ann->stream, "gameState");
+  EXPECT_EQ(hub_->SweepSeeksOnce(), 1);
+  auto expired = NextView(*ann);
   ASSERT_TRUE(expired.has_value());
-  const WordchainView& view = expired->as_gameState_or_null()->view;
-  EXPECT_EQ(view.gameId, anns->gameId);
-  EXPECT_EQ(view.runners.size(), 1u);
-  ASSERT_TRUE(view.seek.has_value());
-  EXPECT_TRUE(view.seek->expired);
+  EXPECT_EQ(*expired, Seeking(anns->gameId, ann->player_id, std::nullopt, kT0 + kQuickSeekMs,
+                              /*expired=*/true));
 
   auto bobs = Seeks(*bob);
   ASSERT_TRUE(bobs.has_value());
   EXPECT_NE(bobs->gameId, anns->gameId);
+}
+
+// The clock sweep is what runs the deadline.
+TEST_F(QuickRaceFixture, TheClockSweepExpiresSeeks) {
+  auto ann = Ready();
+  ASSERT_TRUE(ann.has_value());
+  auto anns = Seeks(*ann);
+  ASSERT_TRUE(anns.has_value());
+  now_ms_ += kQuickSeekMs;
+  hub_->SweepClocksOnce();
+  auto expired = NextView(*ann);
+  ASSERT_TRUE(expired.has_value());
+  EXPECT_EQ(*expired, Seeking(anns->gameId, ann->player_id, std::nullopt, kT0 + kQuickSeekMs,
+                              /*expired=*/true));
 }
 
 TEST_F(QuickRaceFixture, SeekingAgainFromAnExpiredSeekLooksAgainOnANewDeadline) {
@@ -231,35 +324,33 @@ TEST_F(QuickRaceFixture, SeekingAgainFromAnExpiredSeekLooksAgainOnANewDeadline) 
   auto anns = Seeks(*ann);
   ASSERT_TRUE(anns.has_value());
   now_ms_ += kQuickSeekMs;
-  hub_->SweepClocksOnce();
-  ASSERT_TRUE(ReceiveWordchain(ann->stream, "gameState").has_value());
+  ASSERT_EQ(hub_->SweepSeeksOnce(), 1);
+  ASSERT_TRUE(NextView(*ann).has_value());
 
   now_ms_ += 5000;
   ASSERT_TRUE(ann->stream.Send(Seek()).ok());
-  auto again = ReceiveWordchain(ann->stream, "gameState");
+  auto again = NextView(*ann);
   ASSERT_TRUE(again.has_value());
-  const WordchainView& view = again->as_gameState_or_null()->view;
-  EXPECT_EQ(view.gameId, anns->gameId);
-  ASSERT_TRUE(view.seek.has_value());
-  EXPECT_FALSE(view.seek->expired);
-  EXPECT_EQ(view.seek->deadlineMs, kT0 + kQuickSeekMs + 5000 + kQuickSeekMs);
+  EXPECT_EQ(*again, Seeking(anns->gameId, ann->player_id, std::nullopt,
+                            kT0 + kQuickSeekMs + 5000 + kQuickSeekMs));
 
   auto bobs = Seeks(*bob);
   ASSERT_TRUE(bobs.has_value());
   EXPECT_EQ(bobs->gameId, anns->gameId);
 }
 
+// MARK: Leaving and refusals
+
 TEST_F(QuickRaceFixture, LeavingTheRoomCancelsTheSeek) {
   auto ann = Ready();
   auto bob = Ready();
   ASSERT_TRUE(ann.has_value() && bob.has_value());
   ASSERT_TRUE(Seeks(*ann).has_value());
-  ASSERT_TRUE(
-      ann->stream.Send(GameCommands::FromLeaveroom(moonbase::games::LeaveRoom{})).ok());
+  ASSERT_TRUE(ann->stream.Send(GameCommands::FromLeaveroom(moonbase::games::LeaveRoom{})).ok());
   ASSERT_TRUE(ReceiveCase(ann->stream, "roomLeft").has_value());
   auto bobs = Seeks(*bob);
   ASSERT_TRUE(bobs.has_value());
-  EXPECT_EQ(bobs->runners.size(), 1u);
+  EXPECT_EQ(*bobs, Seeking(bobs->gameId, bob->player_id, std::nullopt, kT0 + kQuickSeekMs));
 }
 
 TEST_F(QuickRaceFixture, ASeekWaitsForAnOpponentAndDoesNotPractise) {
@@ -267,9 +358,7 @@ TEST_F(QuickRaceFixture, ASeekWaitsForAnOpponentAndDoesNotPractise) {
   ASSERT_TRUE(ann.has_value());
   ASSERT_TRUE(Seeks(*ann).has_value());
   ASSERT_TRUE(ann->stream.Send(Start()).ok());
-  auto refused = ReceiveCase(ann->stream, "commandRejected");
-  ASSERT_TRUE(refused.has_value());
-  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "need at least 2 players to start");
+  EXPECT_EQ(ReasonOf(ann->stream), "need at least 2 players to start");
 }
 
 TEST_F(QuickRaceFixture, APrivateRoomsMemberCannotSeek) {
@@ -277,9 +366,7 @@ TEST_F(QuickRaceFixture, APrivateRoomsMemberCannotSeek) {
   ASSERT_TRUE(room.has_value());
   Seat& ann = room->seats[0];
   ASSERT_TRUE(ann.stream.Send(Seek()).ok());
-  auto refused = ReceiveCase(ann.stream, "commandRejected");
-  ASSERT_TRUE(refused.has_value());
-  EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "leave your room to race someone new");
+  EXPECT_EQ(ReasonOf(ann.stream), "leave your room to race someone new");
 }
 
 TEST_F(QuickRaceFixture, ThePoolHasNoCodeNoChatAndNoTablesOfOnesOwnChoosing) {
@@ -292,30 +379,49 @@ TEST_F(QuickRaceFixture, ThePoolHasNoCodeNoChatAndNoTablesOfOnesOwnChoosing) {
   moonbase::games::JoinRoom join;
   join.roomId = std::string(kQuickRoomId);
   ASSERT_TRUE(bob->stream.Send(GameCommands::FromJoinroom(join)).ok());
-  ASSERT_TRUE(ReceiveCase(bob->stream, "commandRejected").has_value());
+  EXPECT_EQ(ReasonOf(bob->stream), "a quick race is found by seeking");
 
   moonbase::games::Chat chat;
   chat.text = "hi";
   ASSERT_TRUE(ann->stream.Send(GameCommands::FromChat(chat)).ok());
-  auto quiet = ReceiveCase(ann->stream, "commandRejected");
-  ASSERT_TRUE(quiet.has_value());
-  EXPECT_EQ(quiet->as_commandRejected_or_null()->reason, "a quick race has no chat");
+  EXPECT_EQ(ReasonOf(ann->stream), "a quick race has no chat");
 
-  ASSERT_TRUE(ann->stream.Send(Wordchain(WordchainMove::FromLeavegame(moonbase::games::LeaveGame{})))
-                  .ok());
+  ASSERT_TRUE(
+      ann->stream.Send(Wordchain(WordchainMove::FromLeavegame(moonbase::games::LeaveGame{}))).ok());
   ASSERT_TRUE(ReceiveWordchain(ann->stream, "gameLeft").has_value());
-  for (GameCommands command :
-       {Wordchain(WordchainMove::FromCreategame(moonbase::games::CreateGame{})),
-        Wordchain(WordchainMove::FromJoingame([&] {
-          moonbase::games::JoinGame join;
-          join.gameId = anns->gameId;
-          return join;
-        }()))}) {
-    ASSERT_TRUE(ann->stream.Send(command).ok());
-    auto refused = ReceiveCase(ann->stream, "commandRejected");
-    ASSERT_TRUE(refused.has_value());
-    EXPECT_EQ(refused->as_commandRejected_or_null()->reason, "a quick race is found by seeking");
+  ASSERT_TRUE(
+      ann->stream.Send(Wordchain(WordchainMove::FromCreategame(moonbase::games::CreateGame{})))
+          .ok());
+  EXPECT_EQ(ReasonOf(ann->stream), "a quick race is found by seeking");
+  ASSERT_TRUE(ann->stream.Send(JoinOf(anns->gameId)).ok());
+  EXPECT_EQ(ReasonOf(ann->stream), "a quick race is found by seeking");
+}
+
+// MARK: Must not change
+
+// A room's table keeps four seats and its starter's say: no seek, no
+// countdown.
+TEST_F(QuickRaceFixture, ARoomTableSeatsFourAndStartsWhenAskedWithNoCountdown) {
+  auto room = SeatedRoom(4);
+  ASSERT_TRUE(room.has_value());
+  auto& seats = room->seats;
+  ASSERT_TRUE(
+      seats[0].stream.Send(Wordchain(WordchainMove::FromCreategame(moonbase::games::CreateGame{})))
+          .ok());
+  auto created = ReceiveWordchain(seats[0].stream, "gameJoined");
+  ASSERT_TRUE(created.has_value());
+  const WordchainView open = created->as_gameJoined_or_null()->view;
+  EXPECT_FALSE(open.seek.has_value());
+  for (std::size_t i = 1; i < seats.size(); ++i) {
+    ASSERT_TRUE(seats[i].stream.Send(JoinOf(open.gameId)).ok());
+    ASSERT_TRUE(ReceiveWordchain(seats[i].stream, "gameJoined").has_value()) << i;
   }
+  ASSERT_TRUE(seats[0].stream.Send(Start()).ok());
+  auto race = Started(seats[0]);
+  ASSERT_TRUE(race.has_value());
+  EXPECT_EQ(race->startedAtMs, kT0);
+  EXPECT_EQ(race->deadlineMs, kT0 + 180'000);
+  EXPECT_EQ(race->runners.size(), 4u);
 }
 
 }  // namespace
