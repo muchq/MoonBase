@@ -49,7 +49,11 @@ struct WordInputView: View {
                     .stroke(borderColor, lineWidth: isFocused ? 2 : 0)
             )
             .modifier(ShakeEffect(animatableData: CGFloat(shakeAttempt)))
-            .onSubmit(submit)
+            .onSubmit {
+                submit()
+                // Return drops focus after this handler; take it back next turn.
+                DispatchQueue.main.async { isFocused = true }
+            }
             .onAppear { isFocused = true }
     }
 

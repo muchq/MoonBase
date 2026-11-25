@@ -37,8 +37,18 @@ final class WordEditorUITests: XCTestCase {
         field.typeText("\n")
         XCTAssertTrue(undo.isEnabled)
         XCTAssertNotEqual(field.value as? String, hinted, "A played word clears the field")
+        XCTAssertTrue(app.keyboards.firstMatch.exists, "Return keeps the keyboard up")
 
         undo.tap()
         XCTAssertFalse(undo.isEnabled)
+    }
+
+    func testReturnOnAnEmptyFieldKeepsTheKeyboard() {
+        let app = startPuzzle()
+        let field = app.textFields["word-input"]
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        field.typeText("\n")
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertTrue(field.hasFocus)
     }
 }
