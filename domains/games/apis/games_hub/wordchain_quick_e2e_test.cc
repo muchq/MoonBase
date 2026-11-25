@@ -146,6 +146,26 @@ class QuickRaceFixture : public GamesHubStreamFixture {
     return NextView(seat);
   }
 
+  // `seat`'s seek taken by a player on another instance that never started
+  // the race: the stored row, two seats and still waiting, as the seeker's
+  // instance adopts it on the wake.
+  bool MatchedElsewhere(Seat& seat) {
+    auto seeking = Seeks(seat);
+    if (!seeking.has_value()) return false;
+    HubStore::GameRow row;
+    row.room_id = std::string(kQuickRoomId);
+    row.game_id = seeking->gameId;
+    row.kind = GameKind::kWordchain;
+    row.roster = {seat.player_id, "player-elsewhere"};
+    row.terms = WordchainTerms{0, now_ms_.load() + kQuickSeekMs, false};
+    row.version = 2;
+    auto landed = store_->CommitGameSave(row, "elsewhere");
+    if (!landed.ok() || !*landed) return false;
+    hub_->OnNotify(RoomChannel(std::string(kQuickRoomId)), "elsewhere");
+    auto matched = NextView(seat);
+    return matched.has_value() && matched->runners.size() == 2;
+  }
+
   std::atomic<int64_t> now_ms_{kT0};
 };
 
@@ -392,26 +412,39 @@ TEST_F(QuickRaceFixture, SeekingAgainTakesAnAlreadyOpenOpponent) {
 TEST_F(QuickRaceFixture, AMatchedSeekWaitingToStartNeitherExpiresNorStartsByHand) {
   auto ann = Ready();
   ASSERT_TRUE(ann.has_value());
-  auto anns = Seeks(*ann);
-  ASSERT_TRUE(anns.has_value());
-  HubStore::GameRow row;
-  row.room_id = std::string(kQuickRoomId);
-  row.game_id = anns->gameId;
-  row.kind = GameKind::kWordchain;
-  row.roster = {ann->player_id, "player-elsewhere"};
-  row.terms = WordchainTerms{0, kT0 + kQuickSeekMs, false};
-  row.version = 2;
-  auto landed = store_->CommitGameSave(row, "elsewhere");
-  ASSERT_TRUE(landed.ok() && *landed);
-  hub_->OnNotify(RoomChannel(std::string(kQuickRoomId)), "elsewhere");
-  auto matched = NextView(*ann);
-  ASSERT_TRUE(matched.has_value());
-  EXPECT_EQ(matched->runners.size(), 2u);
+  ASSERT_TRUE(MatchedElsewhere(*ann));
 
   now_ms_ += kQuickSeekMs;
   EXPECT_EQ(hub_->SweepSeeksOnce(), 0);
   ASSERT_TRUE(ann->stream.Send(Start()).ok());
   EXPECT_EQ(ReasonOf(ann->stream), "a quick race starts when it is matched");
+}
+
+// The joining instance starts a match at once. Gone before it could, its
+// table would wait forever: a sweep that still finds it waiting a while
+// after first seeing it starts it, countdown and all.
+TEST_F(QuickRaceFixture, AMatchTheJoiningInstanceNeverStartedIsStartedByTheSweep) {
+  auto ann = Ready();
+  ASSERT_TRUE(ann.has_value());
+  ASSERT_TRUE(MatchedElsewhere(*ann));
+
+  // First sight: the joining instance may yet start it.
+  hub_->SweepClocksOnce();
+  now_ms_ += kQuickStartOverdueMs - 1;
+  hub_->SweepClocksOnce();
+  // Room noise only: nothing has started the race.
+  for (;;) {
+    auto received = ann->stream.Receive(std::chrono::milliseconds(200));
+    if (!received.ok() || !received->has_value()) break;
+    EXPECT_EQ((*received)->as_wordchain_or_null(), nullptr) << "started before it was overdue";
+  }
+
+  now_ms_ += 1;
+  hub_->SweepClocksOnce();
+  auto race = Started(*ann);
+  ASSERT_TRUE(race.has_value());
+  EXPECT_EQ(*race, Opened(*race, {ann->player_id, "player-elsewhere"}, ann->player_id,
+                          kT0 + kQuickStartOverdueMs));
 }
 
 // MARK: Leaving and refusals
