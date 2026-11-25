@@ -72,6 +72,7 @@ enum InputResult {
     case reachedTarget
     case gameComplete
     case noRoute
+    case timeUp
 }
 
 @Observable
@@ -95,21 +96,27 @@ final class GameState {
     var bestStreak = 0
     var puzzlesSolved = 0
 
-    // Time attack
-    var timeRemaining: Double = 60
-    var timeAttackActive = false
-    var timeAttackScore = 0
+    // Time attack: the sprint in play, and its summary once time is up.
+    var timeAttack: TimeAttack?
+    var timeAttackSummary: TimeAttackSummary?
+    /// The sprint's clock as the bar shows it; `tick` keeps it current.
+    private(set) var timeAttackSeconds = TimeAttack.seconds(TimeAttack.length)
+    let bests: TimeAttackBests
 
     // Animation triggers
     var lastResult: InputResult?
     var showInvalidShake = false
-    var showCompletionCelebration = false
 
     // Stats
     var gamesPlayed = 0
     var optimalSolves = 0
 
-    private var generator: PuzzleGenerator?
+    private(set) var generator: PuzzleGenerator?
+
+    init(bests: TimeAttackBests = TimeAttackBests(), generator: PuzzleGenerator? = nil) {
+        self.bests = bests
+        self.generator = generator
+    }
 
     func loadGraph() {
         isLoading = true
@@ -124,13 +131,14 @@ final class GameState {
         }
     }
 
-    func startNewGame(mode: GameMode, difficulty: Difficulty) {
+    func startNewGame(mode: GameMode, difficulty: Difficulty, now: ContinuousClock.Instant = .now) {
         self.currentMode = mode
         self.difficulty = difficulty
         self.isComplete = false
         self.score = 0
-        self.showCompletionCelebration = false
         self.lastResult = nil
+        self.timeAttack = nil
+        self.timeAttackSummary = nil
 
         guard let generator else { return }
 
@@ -148,13 +156,16 @@ final class GameState {
         self.chain = [puzzle.start]
 
         if mode == .timeAttack {
-            timeRemaining = 60
-            timeAttackActive = true
-            timeAttackScore = 0
+            timeAttack = TimeAttack(startingAt: now)
+            timeAttackSeconds = TimeAttack.seconds(TimeAttack.length)
         }
     }
 
-    func submitWord(_ word: String) -> InputResult {
+    func submitWord(_ word: String, now: ContinuousClock.Instant = .now) -> InputResult {
+        if let sprint = timeAttack, sprint.isOver(at: now) {
+            finishTimeAttack()
+            return .timeUp
+        }
         guard !isComplete else { return .gameComplete }
         let normalized = word.lowercased().trimmingCharacters(in: .whitespaces)
         guard let puzzle = currentPuzzle, let graph else { return .notInDictionary }
@@ -188,7 +199,7 @@ final class GameState {
         showInvalidShake = false
 
         if normalized == puzzle.target {
-            completeRound()
+            completeRound(now: now)
             lastResult = .reachedTarget
             return .reachedTarget
         }
@@ -205,6 +216,7 @@ final class GameState {
 
     /// `hint()`, but a dead end leaves a message instead of nothing.
     func requestHint() -> String? {
+        guard !isComplete else { return nil }
         let next = hint()
         lastResult = next == nil ? .noRoute : nil
         showInvalidShake = false
@@ -220,11 +232,10 @@ final class GameState {
         showInvalidShake = false
     }
 
-    private func completeRound() {
+    private func completeRound(now: ContinuousClock.Instant) {
         guard let puzzle = currentPuzzle else { return }
 
         isComplete = true
-        showCompletionCelebration = true
         gamesPlayed += 1
         puzzlesSolved += 1
 
@@ -247,24 +258,45 @@ final class GameState {
         streak += 1
         bestStreak = max(bestStreak, streak)
 
-        if currentMode == .timeAttack {
-            timeAttackScore += score
+        timeAttack?.solve(points: score, at: now)
+    }
+
+    // MARK: - Time Attack
+
+    /// Moves the sprint along: ends it at the deadline, else brings on the
+    /// next puzzle once a solve's celebration is over. The deadline is
+    /// checked first, so it cancels an advance that falls due with it.
+    func tick(now: ContinuousClock.Instant = .now) {
+        guard let sprint = timeAttack, timeAttackSummary == nil else { return }
+        if sprint.isOver(at: now) {
+            finishTimeAttack()
+            return
+        }
+        // Observation notifies on every set; redraw the bar once a second.
+        let seconds = TimeAttack.seconds(sprint.remaining(at: now))
+        if seconds != timeAttackSeconds { timeAttackSeconds = seconds }
+        if let advanceAt = sprint.advanceAt, now >= advanceAt {
+            nextTimeAttackPuzzle()
         }
     }
 
-    func nextTimeAttackPuzzle() {
-        guard let generator, timeAttackActive else { return }
-        let puzzle = generator.randomPuzzle(difficulty: difficulty)
+    private func nextTimeAttackPuzzle() {
+        timeAttack?.advanced()
+        guard let puzzle = generator?.randomPuzzle(difficulty: difficulty) else { return }
         currentPuzzle = puzzle
-        chain = [puzzle?.start ?? ""]
+        chain = [puzzle.start]
         isComplete = false
-        showCompletionCelebration = false
         score = 0
         lastResult = nil
+        showInvalidShake = false
     }
 
-    func endTimeAttack() {
-        timeAttackActive = false
+    private func finishTimeAttack() {
+        guard let sprint = timeAttack, timeAttackSummary == nil else { return }
+        timeAttackSeconds = 0
+        isComplete = true
+        lastResult = .timeUp
+        timeAttackSummary = bests.record(solved: sprint.solved, score: sprint.score, for: difficulty)
     }
 
     static func isOneLetterAway(_ a: String, _ b: String) -> Bool {
@@ -284,6 +316,7 @@ final class GameState {
         case .wrongLength: return "Must be \(difficulty.letterCount) letters"
         case .gameComplete: return "Puzzle complete"
         case .noRoute: return "No unused route. Undo to try another path."
+        case .timeUp: return "Time's up"
         case .valid, .reachedTarget, .none: return ""
         }
     }

@@ -54,6 +54,7 @@ final class WordEditingTests: XCTestCase {
         for mode in GameMode.allCases {
             let game = game()
             game.currentMode = mode
+            if mode == .timeAttack { game.timeAttack = TimeAttack(startingAt: .now) }
             XCTAssertEqual(game.submitWord("dat"), .valid)
             XCTAssertEqual(game.submitWord("dot"), .valid)
             game.undo()
@@ -66,7 +67,7 @@ final class WordEditingTests: XCTestCase {
             XCTAssertEqual(game.score, 150, "Undo must remain free in \(mode.rawValue)")
             XCTAssertEqual(game.totalScore, 150)
             XCTAssertEqual(game.optimalSolves, 1)
-            XCTAssertEqual(game.timeAttackScore, mode == .timeAttack ? 150 : 0)
+            XCTAssertEqual(game.timeAttack?.score, mode == .timeAttack ? 150 : nil)
         }
     }
 

@@ -12,9 +12,14 @@ final class WordEditorUITests: XCTestCase {
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
     }
 
-    private func startPuzzle() -> XCUIApplication {
+    private func startPuzzle(mode: String? = nil) -> XCUIApplication {
         let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
         app.launch()
+        if let mode {
+            let button = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", mode)).firstMatch
+            XCTAssertTrue(button.waitForExistence(timeout: 30))
+            button.tap()
+        }
         let play = app.buttons["Play"]
         XCTAssertTrue(play.waitForExistence(timeout: 30))
         for _ in 0..<4 where !play.isHittable { app.swipeUp() }
@@ -77,5 +82,32 @@ final class WordEditorUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(frame.width.rounded(), 44, id)
             XCTAssertGreaterThanOrEqual(frame.height.rounded(), 44, id)
         }
+    }
+
+    // A Time Attack solve advances without leaving the game screen: the
+    // keyboard and the input row stay put through the celebration.
+    func testTimeAttackSolveKeepsTheKeyboardUp() {
+        let app = startPuzzle(mode: "Time Attack")
+        let field = wordInput(app)
+        let keyboard = app.keyboards.firstMatch
+        let bar = app.descendants(matching: .any)["time-attack-bar"]
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
+        XCTAssertTrue(bar.waitForExistence(timeout: 5))
+        let row = field.frame.minY
+
+        // Hints walk a shortest route; the longest puzzle is 7 moves.
+        for _ in 0..<8 where !bar.label.contains("1 solved") {
+            app.buttons["word-hint"].tap()
+            app.buttons["word-submit"].tap()
+        }
+        XCTAssertTrue(bar.label.contains("1 solved"), bar.label)
+        XCTAssertTrue(keyboard.exists, "Through the celebration")
+        XCTAssertEqual(field.frame.minY, row, accuracy: 1)
+
+        settle()
+        XCTAssertTrue(keyboard.exists, "On the next puzzle")
+        XCTAssertEqual(field.frame.minY, row, accuracy: 1)
+        field.typeText("a")
+        XCTAssertEqual(field.value as? String, "a", "Typing lands in the next puzzle's field")
     }
 }

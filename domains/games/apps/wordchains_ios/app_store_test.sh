@@ -86,9 +86,9 @@ check "BUILD bundles the puzzle words and SCOWL's notice" \
   bash -c 'grep -q "wordchain_race:common_words.txt\"" "$1" && grep -q "wordchain_race:SCOWL_COPYRIGHT\"" "$1"' _ "$PKG/BUILD.bazel"
 
 # Apple rejects an upload (ITMS-91053) whose code calls a required-reason
-# API its privacy manifest doesn't declare. UserDefaults holds a resume
-# token from 0.1.2 or earlier until it moves to the Keychain; CA92.1 is
-# "read and written by this app only".
+# API its privacy manifest doesn't declare. UserDefaults holds Time Attack
+# personal bests, and a resume token from 0.1.2 or earlier until it moves to
+# the Keychain; CA92.1 is "read and written by this app only".
 MANIFEST=$PKG/Sources/Resources/PrivacyInfo.xcprivacy
 # -R: runfiles are symlinks, which -r skips.
 if grep -Rqw UserDefaults "$PKG/Sources"; then
