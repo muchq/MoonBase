@@ -1,4 +1,4 @@
-load("@rules_apple//apple:ios.bzl", "ios_application", "ios_unit_test")
+load("@rules_apple//apple:ios.bzl", "ios_application", "ios_ui_test", "ios_unit_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("@rules_swift//swift:swift.bzl", "swift_library")
 
@@ -86,6 +86,24 @@ ios_unit_test(
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:macos"],
     deps = [":WordChainsTestLib"],
+)
+
+swift_library(
+    name = "WordChainsUITestLib",
+    testonly = True,
+    srcs = glob(["UITests/**/*.swift"]),
+    target_compatible_with = ["@platforms//os:ios"],
+)
+
+ios_ui_test(
+    name = "WordChainsUITests",
+    timeout = "long",
+    env = {"CREATE_XCRESULT_BUNDLE": "1"},
+    minimum_os_version = "17.0",
+    tags = ["manual"],
+    target_compatible_with = ["@platforms//os:macos"],
+    test_host = ":WordChains",
+    deps = [":WordChainsUITestLib"],
 )
 
 # Runs on Linux: the plist and icon rules App Store Connect enforces, so they

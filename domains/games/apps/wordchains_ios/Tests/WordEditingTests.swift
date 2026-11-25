@@ -16,6 +16,8 @@ final class WordEditingTests: XCTestCase {
         return game
     }
 
+    // MARK: - Letter editing
+
     func testLetterEditingKeepsOtherLettersAndSwitchingStartsFresh() {
         var draft = WordDraft(original: "cat")
         XCTAssertFalse(draft.canSubmit)
@@ -47,6 +49,8 @@ final class WordEditingTests: XCTestCase {
         draft.replace(with: "s")
         XCTAssertFalse(draft.canSubmit)
     }
+
+    // MARK: - Progressive hints
 
     func testHintsRevealPositionThenWordWithoutPlayingIt() {
         let game = game()
@@ -82,6 +86,39 @@ final class WordEditingTests: XCTestCase {
         XCTAssertNil(graph.shortestPath(from: "cat", to: "dog", avoiding: ["cot", "dat"]))
     }
 
+    func testHintStartsWithALetterWhenAnUnavailableRouteBecomesAvailable() {
+        let game = game()
+        let graph = game.graph
+        game.graph = nil
+        XCTAssertEqual(game.requestHint(), .unavailable)
+        XCTAssertEqual(game.requestHint(), .unavailable)
+        game.graph = graph
+        XCTAssertEqual(game.requestHint(), .letter(1))
+        XCTAssertEqual(game.requestHint(), .word("cot"))
+    }
+
+    // MARK: - Undo and scoring
+
+    func testUndoIsFreeAndOnlyTheFinalChainDeterminesScoreInEverySoloMode() {
+        for mode in GameMode.allCases {
+            let game = game()
+            game.currentMode = mode
+            XCTAssertEqual(game.submitWord("dat"), .valid)
+            XCTAssertEqual(game.submitWord("dot"), .valid)
+            game.undo()
+            game.undo()
+            XCTAssertEqual(game.chain, ["cat"])
+            XCTAssertEqual(game.submitWord("cot"), .valid)
+            XCTAssertEqual(game.submitWord("cog"), .valid)
+            XCTAssertEqual(game.submitWord("dog"), .reachedTarget)
+            XCTAssertEqual(game.chain, ["cat", "cot", "cog", "dog"])
+            XCTAssertEqual(game.score, 150, "Undo must remain free in \(mode.rawValue)")
+            XCTAssertEqual(game.totalScore, 150)
+            XCTAssertEqual(game.optimalSolves, 1)
+            XCTAssertEqual(game.timeAttackScore, mode == .timeAttack ? 150 : 0)
+        }
+    }
+
     func testUndoRestoresPreviousWordAndClearsFeedbackWithoutChangingStats() {
         let game = game()
         XCTAssertFalse(game.canUndo)
@@ -102,6 +139,8 @@ final class WordEditingTests: XCTestCase {
         XCTAssertEqual(game.submitWord("cot"), .valid, "An undone word can be played again")
     }
 
+    // MARK: - Completion and validation
+
     func testCompletedPuzzleCannotBeUndoneOrScoredTwice() {
         let game = game()
         XCTAssertEqual(game.submitWord("cot"), .valid)
@@ -112,8 +151,20 @@ final class WordEditingTests: XCTestCase {
         game.undo()
         XCTAssertEqual(game.chain, ["cat", "cot", "cog", "dog"])
         XCTAssertNil(game.hint())
-        XCTAssertEqual(game.submitWord("dot"), .alreadyUsed)
+        XCTAssertEqual(game.submitWord("dot"), .gameComplete)
+        XCTAssertEqual(game.submitWord("dog"), .gameComplete)
+        XCTAssertEqual(game.lastResult, .reachedTarget, "Late input must preserve the winning result")
+        XCTAssertEqual(game.chain, ["cat", "cot", "cog", "dog"])
         XCTAssertEqual(game.puzzlesSolved, 1)
         XCTAssertEqual(game.totalScore, 150)
+    }
+
+    func testUsedWordStillReportsAlreadyUsedDuringAnActivePuzzle() {
+        let game = game()
+        XCTAssertEqual(game.submitWord("cot"), .valid)
+        XCTAssertEqual(game.submitWord("cat"), .alreadyUsed)
+        XCTAssertEqual(game.feedbackMessage, "Already in the chain")
+        XCTAssertEqual(game.chain, ["cat", "cot"])
+        XCTAssertEqual(game.score, 0)
     }
 }

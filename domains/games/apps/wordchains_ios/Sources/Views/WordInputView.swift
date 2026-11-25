@@ -3,8 +3,9 @@ import SwiftUI
 struct WordInputView: View {
     @Bindable var game: GameState
     @State private var draft = WordDraft(original: "")
+    @State private var letterInput = ""
     @State private var shakeAttempt = 0
-    @FocusState private var isFocused: Bool
+    @FocusState private var focusedIndex: Int?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -15,6 +16,7 @@ struct WordInputView: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(2, reservesSpace: true)
                 .accessibilityAddTraits(.updatesFrequently)
+                .accessibilityIdentifier("word-feedback")
 
             HStack(spacing: Theme.tileSpacing) {
                 ForEach(Array(draft.word.enumerated()), id: \.offset) { index, letter in
@@ -34,6 +36,7 @@ struct WordInputView: View {
                         .frame(minHeight: 44)
                 }
                 .disabled(!game.canUndo)
+                .accessibilityIdentifier("word-undo")
 
                 Spacer(minLength: 8)
 
@@ -41,6 +44,7 @@ struct WordInputView: View {
                     Label(hintLabel, systemImage: "lightbulb")
                         .frame(minHeight: 44)
                 }
+                .accessibilityIdentifier("word-hint")
 
                 Spacer(minLength: 8)
 
@@ -50,8 +54,9 @@ struct WordInputView: View {
                         .frame(minWidth: 44, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!draft.canSubmit)
+                .disabled(game.isComplete || !draft.canSubmit)
                 .accessibilityLabel("Play \(draft.word.uppercased())")
+                .accessibilityIdentifier("word-play")
             }
             .font(.subheadline)
             .tint(Theme.gradientStart)
@@ -65,6 +70,14 @@ struct WordInputView: View {
         .onChange(of: game.chain, initial: true) { _, _ in resetDraft() }
         .onChange(of: game.currentPuzzle?.id) { _, _ in resetDraft(keepingSelection: false) }
         .onChange(of: game.feedbackMessage) { _, message in announce(message) }
+        .onChange(of: letterInput) { _, typed in
+            draft.replace(with: typed)
+            // Keep native text storage in sync too. A transforming Binding
+            // alone can leave lowercase or multiple characters on screen.
+            letterInput = draft.replacement.uppercased()
+            game.lastResult = nil
+            game.showInvalidShake = false
+        }
     }
 
     private func letterTile(_ letter: Character, at index: Int) -> some View {
@@ -74,28 +87,23 @@ struct WordInputView: View {
 
         return ZStack {
             if selected {
-                TextField(original, text: Binding(
-                    get: { draft.replacement.uppercased() },
-                    set: {
-                        draft.replace(with: $0)
-                        game.lastResult = nil
-                        game.showInvalidShake = false
-                    }
-                ), prompt: Text(original).foregroundStyle(.primary))
+                TextField(original, text: $letterInput, prompt: Text(original).foregroundStyle(.primary))
                     .multilineTextAlignment(.center)
                     .typedAs(.characters)
                     #if os(iOS)
                     .keyboardType(.asciiCapable)
                     #endif
                     .submitLabel(.go)
-                    .focused($isFocused)
+                    .focused($focusedIndex, equals: index)
                     .onSubmit(submit)
-                    .onAppear { isFocused = true }
+                    .task { focusedIndex = index }
                     .accessibilityLabel("Replace letter \(index + 1), \(original)")
                     .accessibilityHint("Type one letter, then tap Play")
+                    .accessibilityIdentifier("word-letter-\(index)")
             } else {
                 Button {
                     draft.select(index)
+                    letterInput = ""
                 } label: {
                     Text(String(letter).uppercased())
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -104,6 +112,7 @@ struct WordInputView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Letter \(index + 1), \(String(letter).uppercased())")
                 .accessibilityHint("Double tap to replace this letter")
+                .accessibilityIdentifier("word-letter-\(index)")
             }
         }
         .font(Theme.tileFont)
@@ -151,12 +160,14 @@ struct WordInputView: View {
         switch game.requestHint() {
         case .letter(let index):
             draft.select(index)
-            isFocused = true
+            letterInput = ""
+            focusedIndex = index
         case .word(let word):
             if let index = hintedIndex {
                 draft.select(index)
                 draft.replace(with: String(Array(word)[index]))
-                isFocused = true
+                letterInput = draft.replacement.uppercased()
+                focusedIndex = index
             }
         case .unavailable: break
         }
@@ -166,19 +177,22 @@ struct WordInputView: View {
     private func resetDraft(keepingSelection: Bool = true) {
         let selection = keepingSelection ? draft.selectedIndex : nil
         draft = WordDraft(original: game.chain.last ?? "")
+        letterInput = ""
         if let selection {
             draft.select(selection)
         } else {
-            isFocused = false
+            focusedIndex = nil
         }
     }
 
     private func submit() {
-        guard draft.canSubmit else { return }
+        guard !game.isComplete, draft.canSubmit else { return }
         let result = withAnimation(reduceMotion ? nil : Theme.springAnimation) {
             game.submitWord(draft.word)
         }
         switch result {
+        case .gameComplete:
+            return
         case .valid, .reachedTarget:
             resetDraft()
             #if canImport(UIKit)

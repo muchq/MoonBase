@@ -70,6 +70,7 @@ enum InputResult {
     case alreadyUsed
     case wrongLength
     case reachedTarget
+    case gameComplete
 }
 
 enum WordHint: Equatable {
@@ -161,7 +162,7 @@ final class GameState {
     }
 
     func submitWord(_ word: String) -> InputResult {
-        guard !isComplete else { return .alreadyUsed }
+        guard !isComplete else { return .gameComplete }
         let normalized = word.lowercased().trimmingCharacters(in: .whitespaces)
         guard let puzzle = currentPuzzle, let graph else { return .notInDictionary }
         guard let lastWord = chain.last else { return .notInDictionary }
@@ -219,7 +220,11 @@ final class GameState {
             currentHint = .unavailable
             return .unavailable
         }
-        let result: WordHint = currentHint == nil ? .letter(index) : .word(next)
+        let result: WordHint
+        switch currentHint {
+        case .letter, .word: result = .word(next)
+        case .none, .unavailable: result = .letter(index)
+        }
         currentHint = result
         return result
     }
@@ -242,6 +247,9 @@ final class GameState {
         gamesPlayed += 1
         puzzlesSolved += 1
 
+        // Undo is intentionally free in every solo mode: reward the final
+        // chain, not discarded exploration. Daily and Time Attack use the
+        // same rule; multiplayer scoring is owned by the hub.
         let wordsUsed = chain.count
         let optimal = puzzle.optimalLength
         let isOptimal = wordsUsed == optimal
@@ -294,6 +302,7 @@ final class GameState {
         case .notOneLetterAway: return "Change exactly one letter"
         case .alreadyUsed: return "Already in the chain"
         case .wrongLength: return "Must be \(difficulty.letterCount) letters"
+        case .gameComplete: return "Puzzle complete"
         case .valid, .reachedTarget, .none: return ""
         }
     }
