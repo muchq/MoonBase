@@ -67,6 +67,7 @@ bazel build //domains/games/apps/wordchains_ios:WordChains \
 # defaults to -c opt; the explicit simulator device avoids the runner
 # pairing an ancient device type with the newest iOS runtime.)
 bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
+  //domains/games/apps/wordchains_ios:WordChainsUITests \
   --ios_minimum_os=17.0 \
   --features=swift.enable_testing \
   --ios_simulator_device="iPhone 17" \
@@ -77,18 +78,29 @@ bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
 > your Xcode SDK version. If you see "No simulator runtime version available",
 > install the matching runtime: **Xcode > Settings > Platforms > + (iOS)**.
 
+`WordChainsUITests` exercises the real app's keyboard focus, progressive hints,
+Undo, and invalid-word layout, and captures the error state with the keyboard
+visible. Set `--ios_simulator_version` to an installed runtime for local runs.
+Simulator tests cannot validate physical haptic feel; check that on an iPhone.
+
 ### Manual testing checklist
 
 Before submitting to the App Store, verify these scenarios:
 
-- [ ] **Quick Play** — start a game, enter valid words, reach the target word
+- [ ] **Quick Play** — tap a letter tile, type its replacement, tap Play, reach the target word; accepted letters animate into the chain with a light haptic
+- [ ] **Letter editing** — typing again replaces the selected letter, backspace restores it, selecting a different tile starts from the current word; check 3/4/5-letter puzzles, VoiceOver, and Reduce Motion
+- [ ] **Undo** — removes the last move and clears the draft/hint/error; disabled at the start and unavailable after completion
 - [ ] **Daily Challenge** — same puzzle generates for the same date
-- [ ] **Time Attack** — timer counts down, new puzzle loads after solving
+- [ ] **Time Attack** — timer counts down, new puzzle loads after solving (currently tracked in [#1745](https://github.com/muchq/MoonBase/issues/1745))
 - [ ] **Input validation** — wrong length, not in dictionary, not one-letter-away, already used
-- [ ] **Hint system** — lightbulb button fills the next word on the shortest path
+- [ ] **Hint system** — Hint highlights the letter to change; Reveal fills its replacement without submitting; hints avoid used words and suggest Undo when no unused route remains
 - [ ] **Scoring** — optimal solve gives 150 pts (100 base + 50 bonus), extra steps reduce score
+- [ ] **Free Undo** — in every solo mode, explore a detour, undo it, then finish optimally: the final chain still earns 150 points. Undo intentionally carries no score penalty and encourages experimentation.
 - [ ] **Difficulty levels** — Easy (3 letters), Medium (4), Hard (5)
 - [ ] **Dark mode** — colors remain readable in dark appearance
+- [ ] **Quick race — seek** — choose Any/3/4/5 letters, start looking, verify the waiting ladder and 90-second ring/countdown, then Stop looking and confirm matchmaking ends
+- [ ] **Quick race — expiry** — let the seek expire; verify “Nobody came. Keep looking?”, retry with Keep looking, and exit with Stop
+- [ ] **Quick race — match** — match a second player, verify the opponent announcement and 3–2–1 countdown lead into the race; check VoiceOver and Reduce Motion
 - [ ] **Race friends** — create a room, join it from the web lobby (muchq.com/games) by
   its code, open and join a race table from both, race to the end, Next race; a
   refused word shows the hub's reason; backgrounding and returning keeps the seat;

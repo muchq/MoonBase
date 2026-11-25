@@ -4,6 +4,7 @@ struct ChainView: View {
     let chain: [String]
     let target: String
     let difficulty: Difficulty
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -17,7 +18,7 @@ struct ChainView: View {
                             wordTile(word, at: index)
                                 .id(index)
                         }
-                        .transition(.asymmetric(
+                        .transition(reduceMotion ? .opacity : .asymmetric(
                             insertion: .scale(scale: 0.5).combined(with: .opacity).combined(with: .offset(y: 20)),
                             removal: .opacity
                         ))
@@ -31,7 +32,7 @@ struct ChainView: View {
                 .padding(.vertical, 12)
             }
             .onChange(of: chain.count) {
-                withAnimation(Theme.springAnimation) {
+                withAnimation(reduceMotion ? nil : Theme.springAnimation) {
                     proxy.scrollTo(chain.count - 1, anchor: .center)
                 }
             }
@@ -65,6 +66,7 @@ struct ChainView: View {
                                 lineWidth: 2
                             )
                     )
+                    .modifier(ChainLetterArrival(animate: changed && !reduceMotion))
             }
         }
         .padding(.horizontal, 4)
@@ -112,5 +114,20 @@ struct ChainView: View {
         let wordIdx = word.index(word.startIndex, offsetBy: index)
         let prevIdx = previous.index(previous.startIndex, offsetBy: index)
         return word[wordIdx] != previous[prevIdx]
+    }
+}
+
+/// The replaced letter settles into its new rung as the chain grows.
+private struct ChainLetterArrival: ViewModifier {
+    let animate: Bool
+    @State private var arrived = false
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(animate && !arrived ? 0.65 : 1)
+            .offset(y: animate && !arrived ? 12 : 0)
+            .onAppear {
+                withAnimation(animate ? Theme.bounceAnimation : nil) { arrived = true }
+            }
     }
 }

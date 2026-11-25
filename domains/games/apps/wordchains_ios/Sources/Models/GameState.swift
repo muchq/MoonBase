@@ -70,6 +70,13 @@ enum InputResult {
     case alreadyUsed
     case wrongLength
     case reachedTarget
+    case gameComplete
+}
+
+enum WordHint: Equatable {
+    case letter(Int)
+    case word(String)
+    case unavailable
 }
 
 @Observable
@@ -100,6 +107,7 @@ final class GameState {
 
     // Animation triggers
     var lastResult: InputResult?
+    private(set) var currentHint: WordHint?
     var showInvalidShake = false
     var showCompletionCelebration = false
 
@@ -129,6 +137,7 @@ final class GameState {
         self.score = 0
         self.showCompletionCelebration = false
         self.lastResult = nil
+        self.currentHint = nil
 
         guard let generator else { return }
 
@@ -153,6 +162,7 @@ final class GameState {
     }
 
     func submitWord(_ word: String) -> InputResult {
+        guard !isComplete else { return .gameComplete }
         let normalized = word.lowercased().trimmingCharacters(in: .whitespaces)
         guard let puzzle = currentPuzzle, let graph else { return .notInDictionary }
         guard let lastWord = chain.last else { return .notInDictionary }
@@ -183,6 +193,7 @@ final class GameState {
 
         chain.append(normalized)
         showInvalidShake = false
+        currentHint = nil
 
         if normalized == puzzle.target {
             completeRound()
@@ -195,9 +206,37 @@ final class GameState {
     }
 
     func hint() -> String? {
-        guard let puzzle = currentPuzzle, let graph, let lastWord = chain.last else { return nil }
-        guard let path = graph.shortestPath(from: lastWord, to: puzzle.target) else { return nil }
+        guard !isComplete, let puzzle = currentPuzzle, let graph, let lastWord = chain.last else { return nil }
+        guard let path = graph.shortestPath(from: lastWord, to: puzzle.target, avoiding: Set(chain.dropLast())) else { return nil }
         return path.count > 1 ? path[1] : nil
+    }
+
+    @discardableResult
+    func requestHint() -> WordHint {
+        lastResult = nil
+        showInvalidShake = false
+        guard let next = hint(), let last = chain.last,
+              let index = zip(last, next).enumerated().first(where: { $0.element.0 != $0.element.1 })?.offset else {
+            currentHint = .unavailable
+            return .unavailable
+        }
+        let result: WordHint
+        switch currentHint {
+        case .letter, .word: result = .word(next)
+        case .none, .unavailable: result = .letter(index)
+        }
+        currentHint = result
+        return result
+    }
+
+    var canUndo: Bool { !isComplete && chain.count > 1 }
+
+    func undo() {
+        guard canUndo else { return }
+        chain.removeLast()
+        lastResult = nil
+        showInvalidShake = false
+        currentHint = nil
     }
 
     private func completeRound() {
@@ -208,6 +247,9 @@ final class GameState {
         gamesPlayed += 1
         puzzlesSolved += 1
 
+        // Undo is intentionally free in every solo mode: reward the final
+        // chain, not discarded exploration. Daily and Time Attack use the
+        // same rule; multiplayer scoring is owned by the hub.
         let wordsUsed = chain.count
         let optimal = puzzle.optimalLength
         let isOptimal = wordsUsed == optimal
@@ -237,6 +279,8 @@ final class GameState {
         isComplete = false
         showCompletionCelebration = false
         score = 0
+        lastResult = nil
+        currentHint = nil
     }
 
     func endTimeAttack() {
@@ -258,6 +302,7 @@ final class GameState {
         case .notOneLetterAway: return "Change exactly one letter"
         case .alreadyUsed: return "Already in the chain"
         case .wrongLength: return "Must be \(difficulty.letterCount) letters"
+        case .gameComplete: return "Puzzle complete"
         case .valid, .reachedTarget, .none: return ""
         }
     }

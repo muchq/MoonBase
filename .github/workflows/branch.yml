@@ -665,6 +665,7 @@ jobs:
         if: steps.filter.outputs.changed == 'true'
         run: |
           bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
+            //domains/games/apps/wordchains_ios:WordChainsUITests \
             --ios_minimum_os=17.0 \
             --features=swift.enable_testing \
             --ios_simulator_device="iPhone 17" \

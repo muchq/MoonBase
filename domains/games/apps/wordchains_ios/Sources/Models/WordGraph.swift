@@ -11,7 +11,7 @@ struct WordGraph: Codable {
     }
 
     /// BFS for a single shortest path — mirrors `bfs_for_target` in the Rust lib.
-    func shortestPath(from start: String, to target: String) -> [String]? {
+    func shortestPath(from start: String, to target: String, avoiding excluded: Set<String> = []) -> [String]? {
         if start == target { return [start] }
         if start.count != target.count { return nil }
 
@@ -19,7 +19,8 @@ struct WordGraph: Codable {
         guard let startIdx = index[start], index[target] != nil else { return nil }
 
         var parent: [Int: Int] = [:]
-        var visited: Set<Int> = [startIdx]
+        var visited = Set(excluded.compactMap { index[$0] })
+        visited.insert(startIdx)
         var queue: [Int] = [startIdx]
         var head = 0
 
