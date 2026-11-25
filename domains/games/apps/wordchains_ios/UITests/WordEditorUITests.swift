@@ -5,6 +5,11 @@ final class WordEditorUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    /// Lets a keyboard dismissal finish, so a check can't pass mid-animation.
+    private func settle() {
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
+    }
+
     private func startPuzzle() -> XCUIApplication {
         let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
         app.launch()
@@ -37,6 +42,8 @@ final class WordEditorUITests: XCTestCase {
         field.typeText("\n")
         XCTAssertTrue(undo.isEnabled)
         XCTAssertNotEqual(field.value as? String, hinted, "A played word clears the field")
+        settle()
+        XCTAssertTrue(field.hasFocus, "Return keeps the field focused")
         XCTAssertTrue(app.keyboards.firstMatch.exists, "Return keeps the keyboard up")
 
         undo.tap()
@@ -48,8 +55,9 @@ final class WordEditorUITests: XCTestCase {
         let field = app.textFields["word-input"]
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         field.typeText("\n")
-        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        settle()
         XCTAssertTrue(field.hasFocus)
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
     }
 
     func testEditingAfterARejectionClearsTheStaleError() {

@@ -5,6 +5,9 @@ struct WordInputView: View {
     @State private var inputText = ""
     @State private var shakeAttempt = 0
     @FocusState private var isFocused: Bool
+    /// Set by Return: the system resigns focus after onSubmit, and this
+    /// takes it straight back so the keyboard stays up between words.
+    @State private var refocusAfterSubmit = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Nil under Reduce Motion, so state changes land without movement.
@@ -54,9 +57,13 @@ struct WordInputView: View {
             )
             .modifier(ShakeEffect(animatableData: CGFloat(shakeAttempt)))
             .onSubmit {
+                refocusAfterSubmit = true
                 submit()
-                // Return drops focus after this handler; take it back next turn.
-                DispatchQueue.main.async { isFocused = true }
+            }
+            .onChange(of: isFocused) { _, focused in
+                guard !focused, refocusAfterSubmit else { return }
+                refocusAfterSubmit = false
+                isFocused = true
             }
             .onAppear { isFocused = true }
             .onChange(of: inputText) {
