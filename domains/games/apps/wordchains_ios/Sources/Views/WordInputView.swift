@@ -176,7 +176,7 @@ struct WordInputView: View {
     /// Shake and buzz on a rejected word; WordEntry already did the rest.
     private func react(to result: InputResult?) {
         switch result {
-        case nil, .gameComplete, .noRoute, .valid, .reachedTarget:
+        case nil, .gameComplete, .noRoute, .valid, .reachedTarget, .timeUp:
             return
         case .notInDictionary, .notOneLetterAway, .alreadyUsed, .wrongLength:
             if !reduceMotion {

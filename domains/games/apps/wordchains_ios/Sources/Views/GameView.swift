@@ -4,12 +4,24 @@ struct GameView: View {
     @Bindable var game: GameState
     @Environment(\.dismiss) private var dismiss
     @State private var showResults = false
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var isTimeAttack: Bool { game.currentMode == .timeAttack }
 
     var body: some View {
         ZStack {
             Theme.secondaryBackground.ignoresSafeArea()
 
-            if game.isComplete && showResults {
+            if let summary = game.timeAttackSummary {
+                TimeAttackSummaryView(
+                    summary: summary,
+                    difficulty: game.difficulty,
+                    onReplay: { game.startNewGame(mode: .timeAttack, difficulty: game.difficulty) },
+                    onMenu: { dismiss() }
+                )
+                .transition(.opacity)
+            } else if !isTimeAttack && game.isComplete && showResults {
                 ResultsView(
                     game: game,
                     onNewGame: {
@@ -43,15 +55,24 @@ struct GameView: View {
                     .foregroundStyle(Theme.gradientStart)
                 }
             }
-
-            if game.currentMode == .timeAttack {
-                ToolbarItem(placement: .principal) {
-                    timerDisplay
-                }
+        }
+        // One clock for the sprint: suspension pauses this loop, not the
+        // deadline, and the first tick back settles what time it is.
+        .task(id: game.timeAttack?.deadline) {
+            while game.timeAttack != nil, game.timeAttackSummary == nil, !Task.isCancelled {
+                game.tick()
+                try? await Task.sleep(for: .milliseconds(200))
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { game.tick() }
+        }
+        .onChange(of: game.timeAttack?.solved) { old, new in
+            if let old, let new, new > old { celebrateSolve() }
+        }
+        .onDisappear { game.leaveTimeAttack() }
         .onChange(of: game.isComplete) {
-            if game.isComplete {
+            if game.isComplete && !isTimeAttack {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     withAnimation(Theme.springAnimation) {
                         showResults = true
@@ -69,7 +90,11 @@ struct GameView: View {
             Divider()
             chainSection
             Divider()
-            if !game.isComplete {
+            if isTimeAttack {
+                TimeAttackBar(game: game)
+                // Mounted through each solve, so the keyboard stays up.
+                WordInputView(game: game)
+            } else if !game.isComplete {
                 WordInputView(game: game)
             }
         }
@@ -140,24 +165,77 @@ struct GameView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Theme.secondaryBackground)
+        .overlay {
+            if isTimeAttack && game.isComplete && game.timeAttackSummary == nil {
+                solvedBadge
+                    .transition(reduceMotion ? .opacity : .scale.combined(with: .opacity))
+            }
+        }
+        .animation(reduceMotion ? nil : Theme.springAnimation, value: game.isComplete)
     }
 
-    // MARK: - Timer
+    // MARK: - Time Attack
 
-    private var timerDisplay: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "timer")
-                .foregroundStyle(timerColor)
-            Text(String(format: "%.0f", game.timeRemaining))
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .foregroundStyle(timerColor)
-                .monospacedDigit()
+    private var solvedBadge: some View {
+        Text("Solved! +\(game.score)")
+            .font(.system(size: 22, weight: .bold, design: .rounded))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(Capsule().fill(Theme.validGreen))
+            .accessibilityHidden(true)
+    }
+
+    private func celebrateSolve() {
+        #if os(iOS)
+        AccessibilityNotification.Announcement("Solved, plus \(game.score) points").post()
+        #endif
+        #if canImport(UIKit)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        #endif
+    }
+}
+
+/// Time left, puzzles solved and points, just above the input. Fixed height
+/// and monospaced digits, so a ticking clock never moves the input row.
+struct TimeAttackBar: View {
+    let game: GameState
+
+    var body: some View {
+        HStack(spacing: 0) {
+            item(icon: "timer", value: "\(game.timeAttackSeconds)s", color: timerColor)
+            item(icon: "checkmark.circle", value: "\(game.timeAttack?.solved ?? 0)", color: .primary)
+            item(icon: "flame", value: "\(game.timeAttack?.score ?? 0)", color: .primary)
         }
+        .frame(height: 36)
+        .background(Theme.cardBackground)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
+        .accessibilityAddTraits(.updatesFrequently)
+        .accessibilityIdentifier("time-attack-bar")
+    }
+
+    private var spoken: String {
+        let solved = game.timeAttack?.solved ?? 0
+        return "\(game.timeAttackSeconds) seconds left, \(solved) solved, \(game.timeAttack?.score ?? 0) points"
+    }
+
+    private func item(icon: String, value: String, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+            Text(value)
+                .font(.system(size: 18, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .foregroundStyle(color)
+        .frame(maxWidth: .infinity)
     }
 
     private var timerColor: Color {
-        if game.timeRemaining <= 10 { return Theme.errorRed }
-        if game.timeRemaining <= 30 { return Theme.warningOrange }
+        if game.timeAttackSeconds <= 10 { return Theme.errorRed }
+        if game.timeAttackSeconds <= 30 { return Theme.warningOrange }
         return Theme.gradientStart
     }
 }
