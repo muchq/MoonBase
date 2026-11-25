@@ -1,8 +1,15 @@
 import XCTest
 
+/// Only what needs a real keyboard and screen. The input logic behind these
+/// (Return submits, stale errors clear, hints, Undo) is in WordEntryTests.
 final class WordEditorUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
+    }
+
+    /// Lets a keyboard dismissal finish, so a check can't pass mid-animation.
+    private func settle() {
+        _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
     }
 
     private func startPuzzle() -> XCUIApplication {
@@ -13,53 +20,62 @@ final class WordEditorUITests: XCTestCase {
         for _ in 0..<4 where !play.isHittable { app.swipeUp() }
         XCTAssertTrue(play.isHittable)
         play.tap()
-        XCTAssertTrue(app.textFields["word-input"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["word-input"].waitForExistence(timeout: 5))
         return app
     }
 
-    func testAWholeWordIsTypedIntoOneField() {
-        let app = startPuzzle()
+    /// The one-line, vertical-axis field; which element type iOS reports for
+    /// it is an implementation detail, so accept either.
+    private func wordInput(_ app: XCUIApplication) -> XCUIElement {
         let field = app.textFields["word-input"]
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        field.typeText("zzzz")
-        XCTAssertEqual(field.value as? String, "zzzz")
+        return field.exists ? field : app.textViews["word-input"]
     }
 
-    func testHintedWordCanBeSubmittedFromTheKeyboardAndUndone() {
+    // `hasFocus` follows the focus engine, not the first responder, so it is
+    // false for a text field with the keyboard up. What the player sees is
+    // the keyboard, and keystrokes still landing in the field.
+    func testReturnKeepsTheKeyboardWhetherEmptyOrRejected() {
         let app = startPuzzle()
-        let field = app.textFields["word-input"]
-        let undo = app.buttons["word-undo"]
-        XCTAssertFalse(undo.isEnabled)
+        let field = wordInput(app)
+        let keyboard = app.keyboards.firstMatch
+        XCTAssertTrue(keyboard.waitForExistence(timeout: 5))
 
-        app.buttons["word-hint"].tap()
-        let hinted = field.value as? String ?? ""
-        XCTAssertFalse(hinted.isEmpty, "Hint fills the next word")
         field.typeText("\n")
-        XCTAssertTrue(undo.isEnabled)
-        XCTAssertNotEqual(field.value as? String, hinted, "A played word clears the field")
-        XCTAssertTrue(app.keyboards.firstMatch.exists, "Return keeps the keyboard up")
+        settle()
+        XCTAssertTrue(keyboard.exists, "Return on an empty field")
 
-        undo.tap()
-        XCTAssertFalse(undo.isEnabled)
-    }
-
-    func testReturnOnAnEmptyFieldKeepsTheKeyboard() {
-        let app = startPuzzle()
-        let field = app.textFields["word-input"]
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        field.typeText("\n")
-        XCTAssertTrue(app.keyboards.firstMatch.exists)
-        XCTAssertTrue(field.hasFocus)
-    }
-
-    func testEditingAfterARejectionClearsTheStaleError() {
-        let app = startPuzzle()
-        let field = app.textFields["word-input"]
-        let feedback = app.staticTexts["word-feedback"]
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         field.typeText("zzzzz\n")
-        XCTAssertTrue(feedback.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["word-feedback"].waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "zzzzz", "One line, no newline")
+        settle()
+        XCTAssertTrue(keyboard.exists, "Return on a rejected word")
+
         field.typeText("a")
-        XCTAssertFalse(feedback.exists, "The error describes the old text, not this one")
+        XCTAssertEqual(field.value as? String, "zzzzza", "Typing still lands in the field")
+    }
+
+    func testErrorDoesNotMoveTheInputRowOrPushItUnderTheKeyboard() {
+        let app = startPuzzle()
+        let field = wordInput(app)
+        let submit = app.buttons["word-submit"]
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        field.typeText("zzzzz")
+        let before = field.frame
+        submit.tap()
+        XCTAssertTrue(app.staticTexts["word-feedback"].waitForExistence(timeout: 5))
+        XCTAssertEqual(field.frame.minY, before.minY, accuracy: 1)
+        XCTAssertTrue(field.isHittable)
+        XCTAssertTrue(submit.isHittable)
+        XCTAssertLessThanOrEqual(submit.frame.maxY, app.keyboards.firstMatch.frame.minY)
+    }
+
+    func testControlsMeetTheMinimumTapTarget() {
+        let app = startPuzzle()
+        for id in ["word-undo", "word-hint", "word-submit"] {
+            let frame = app.buttons[id].frame
+            // Frames come back as 43.99999…; compare whole points.
+            XCTAssertGreaterThanOrEqual(frame.width.rounded(), 44, id)
+            XCTAssertGreaterThanOrEqual(frame.height.rounded(), 44, id)
+        }
     }
 }

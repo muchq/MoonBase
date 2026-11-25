@@ -29,6 +29,18 @@ final class WordEditingTests: XCTestCase {
         XCTAssertEqual(game.hint(), "dog")
     }
 
+    func testDeadEndHintSaysSoAndUndoClearsIt() {
+        let game = game()
+        game.chain = ["cat", "cot", "dot", "dat"]
+        XCTAssertNil(game.requestHint())
+        XCTAssertEqual(game.lastResult, .noRoute)
+        XCTAssertEqual(game.feedbackMessage, "No unused route. Undo to try another path.")
+        game.undo()
+        XCTAssertEqual(game.feedbackMessage, "")
+        XCTAssertEqual(game.requestHint(), "dog")
+        XCTAssertNil(game.lastResult, "A found hint leaves no message behind")
+    }
+
     func testShortestPathCanAvoidUsedWordsWithoutChangingOrdinarySearch() {
         let graph = game().graph!
         XCTAssertEqual(graph.shortestPath(from: "cat", to: "dog"), ["cat", "cot", "cog", "dog"])

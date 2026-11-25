@@ -78,7 +78,7 @@ bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
 > your Xcode SDK version. If you see "No simulator runtime version available",
 > install the matching runtime: **Xcode > Settings > Platforms > + (iOS)**.
 
-`WordChainsUITests` exercises the real app's typed word entry, hint, and Undo. Set `--ios_simulator_version` to an installed runtime for local runs.
+`WordChainsUITests` covers only what needs a simulator: the keyboard staying up on Return, error layout over the keyboard, and 44pt tap targets. Input logic (Return submits, stale errors clear, hints, Undo) is in `WordEntryTests`, which `swift test` runs. Set `--ios_simulator_version` to an installed runtime for local runs.
 Simulator tests cannot validate physical haptic feel; check that on an iPhone.
 CI runs it apart from `test-ios`, in the iOS UI tests workflow: on main after a
 `wordchains_ios` change, and on a PR labelled `ios-ui`.
@@ -92,10 +92,11 @@ Before submitting to the App Store, verify these scenarios:
 - [ ] **Daily Challenge** — same puzzle generates for the same date
 - [ ] **Time Attack** — timer counts down, new puzzle loads after solving (currently tracked in [#1745](https://github.com/muchq/MoonBase/issues/1745))
 - [ ] **Input validation** — wrong length, not in dictionary, not one-letter-away, already used
-- [ ] **Hint system** — lightbulb fills the next word on the shortest unused path
+- [ ] **Hint system** — lightbulb fills the next word on the shortest unused path without submitting; at a dead end it says to Undo
 - [ ] **Scoring** — optimal solve gives 150 pts (100 base + 50 bonus), extra steps reduce score
 - [ ] **Free Undo** — in every solo mode, explore a detour, undo it, then finish optimally: the final chain still earns 150 points. Undo intentionally carries no score penalty and encourages experimentation.
 - [ ] **Difficulty levels** — Easy (3 letters), Medium (4), Hard (5)
+- [ ] **Accessibility** — VoiceOver reads each error; with Reduce Motion on, the field does not shake
 - [ ] **Dark mode** — colors remain readable in dark appearance
 - [ ] **Quick race — seek** — choose Any/3/4/5 letters, start looking, verify the waiting ladder and 90-second ring/countdown, then Stop looking and confirm matchmaking ends
 - [ ] **Quick race — expiry** — let the seek expire; verify “Nobody came. Keep looking?”, retry with Keep looking, and exit with Stop
