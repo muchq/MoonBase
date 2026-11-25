@@ -357,9 +357,9 @@ jobs:
   #
   # Past the gate, scripts/sanitize-targets narrows the run to the tests
   # bazel-diff finds impacted, or all of them on a config or toolchain change.
-  # Each leg hashes for itself: three parallel hash runs cost runner minutes,
-  # not wall clock, and a separate job feeding the matrix would turn a failed
-  # resolve into skipped — passing — sanitize checks.
+  # Each leg hashes for itself, which puts two //... hash runs ahead of every
+  # leg's build. A separate job feeding the matrix would hash once, but would
+  # turn a failed resolve into skipped — passing — sanitize checks.
   #
   # Scope is the first-party C++ tests whose dependency closure is also
   # first-party: SANITIZE_UNIVERSE_QUERY in scripts/sanitize-needed-lib.sh.

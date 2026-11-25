@@ -178,7 +178,29 @@ reset_to_base
 commit_change_to bazel/oci.MODULE.bazel 'digest bumped'
 check "an oci digest pin does not sanitize everything" test "$(mode)" = "diff"
 
+# Reached through --run_under and register_toolchains, not a dependency edge,
+# so bazel-diff impacts no test when they change.
+reset_to_base
+commit_change_to bazel/run_without_aslr.sh 'exit 0'
+check "a run_under wrapper change sanitizes everything" test "$(mode)" = "full"
+
+reset_to_base
+commit_change_to bazel/BUILD.bazel '# wrapper package'
+check "the run_under wrapper's package sanitizes everything" test "$(mode)" = "full"
+
+reset_to_base
+commit_change_to bazel/toolchains/BUILD.bazel '# protoc runtime'
+check "a registered toolchain change sanitizes everything" test "$(mode)" = "full"
+
+# No merge base: git diff fails, and the safe answer is more testing.
+git checkout -q --orphan unrelated
+git commit -q -m unrelated
+check "an unresolvable merge base sanitizes everything" test "$(mode)" = "full"
+
 echo "target selection"
+
+check "tests tagged no-sanitize are outside the universe" \
+  grep -q "except attr(tags, .*no-sanitize" <<<"$SANITIZE_UNIVERSE_QUERY"
 
 UNIVERSE=$WORK/universe.txt
 IMPACTED=$WORK/impacted.txt
@@ -204,6 +226,15 @@ printf '%s\n' //domains/a:a_lib > "$IMPACTED"
 echo //stale:out > "$SELECTED"
 select_sanitize_targets "$UNIVERSE" "$IMPACTED" "$SELECTED"
 check "an impacted non-test selects nothing" test ! -s "$SELECTED"
+
+printf '%s\n' //domains/a:a_test.cc //domains/a:a_test_lib > "$IMPACTED"
+echo //stale:out > "$SELECTED"
+select_sanitize_targets "$UNIVERSE" "$IMPACTED" "$SELECTED"
+check "an impacted label that only extends a universe label is not selected" \
+  test ! -s "$SELECTED"
+
+check "a missing impact file fails rather than selecting nothing" \
+  fails_saying "No such file" select_sanitize_targets "$UNIVERSE" "$WORK/missing.txt" "$SELECTED"
 
 : > "$UNIVERSE"
 printf '%s\n' //domains/a:a_test > "$IMPACTED"
