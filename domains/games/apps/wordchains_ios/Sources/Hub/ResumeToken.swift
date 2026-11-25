@@ -31,12 +31,14 @@ struct DefaultsTokenStore: ResumeTokenStore {
 
 #if canImport(Security)
 /// The token in the Keychain, this device only: never backed up, never
-/// migrated to another phone.
+/// migrated to another phone. Always the data-protection keychain, iOS's
+/// only one: macOS's older file keychain ignores kSecAttrAccessible.
 struct KeychainTokenStore: ResumeTokenStore {
     private let query: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: "com.muchq.wordchains.hub",
         kSecAttrAccount as String: "resume-token",
+        kSecUseDataProtectionKeychain as String: true,
     ]
 
     func load() -> String? {

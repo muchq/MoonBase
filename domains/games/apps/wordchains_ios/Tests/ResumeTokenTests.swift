@@ -93,8 +93,10 @@ final class ResumeTokenTests: XCTestCase {
     // MARK: - The Keychain store
 
     #if canImport(Security)
-    // An unhosted test bundle may have no Keychain access (errSecMissingEntitlement);
-    // that is the runner, not the store, so the test says so and skips.
+    // An unhosted or unsigned test bundle may have no access to the
+    // data-protection keychain (errSecMissingEntitlement; `swift test` on
+    // macOS has none): that is the runner, not the store, so the test says
+    // so and skips.
     func testTheKeychainStoreSavesOverwritesAndClears() throws {
         let store = KeychainTokenStore()
         store.clear()
