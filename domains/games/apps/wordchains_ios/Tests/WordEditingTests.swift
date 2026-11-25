@@ -54,7 +54,7 @@ final class WordEditingTests: XCTestCase {
         for mode in GameMode.allCases {
             let game = game()
             game.currentMode = mode
-            if mode == .timeAttack { game.timeAttack = TimeAttack(startingAt: .now) }
+            if mode == .timeAttack { game.timeAttack = TimeAttack(startingAt: .now, difficulty: game.difficulty) }
             XCTAssertEqual(game.submitWord("dat"), .valid)
             XCTAssertEqual(game.submitWord("dot"), .valid)
             game.undo()

@@ -25,7 +25,7 @@ struct WordInputView: View {
                 undoButton
                 textField
                 submitButton
-                hintButton
+                if game.hintsAllowed { hintButton }
             }
         }
         .padding(.horizontal, Theme.cardPadding)
@@ -163,7 +163,7 @@ struct WordInputView: View {
     private var feedbackIcon: String {
         switch game.lastResult {
         case .notInDictionary: return "book.closed"
-        case .notOneLetterAway: return "character.cursor.ibeam"
+        case .notOneLetterAway: return "1.circle"
         case .alreadyUsed: return "arrow.uturn.backward"
         case .wrongLength: return "ruler"
         case .noRoute: return "lightbulb.slash"

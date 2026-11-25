@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var game = GameState()
+    @State private var game = GameState(sprintHints: ProcessInfo.processInfo.arguments.contains("-sprintHints"))
 
     var body: some View {
         Group {

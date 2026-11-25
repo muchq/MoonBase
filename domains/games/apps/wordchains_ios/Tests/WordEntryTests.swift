@@ -24,6 +24,75 @@ final class WordEntryTests: XCTestCase {
         XCTAssertEqual(entry.text, "")
     }
 
+    // The multi-line field can hand the same Return over twice: the second
+    // arrives after the accepted word has cleared the text, and is not a move.
+    func testARepeatedReturnForAnAcceptedWordIsIgnored() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "cot", in: game)
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+        XCTAssertNil(entry.change(to: "cot\n", in: game))
+        XCTAssertEqual(game.chain, ["cat", "cot"])
+        XCTAssertEqual(entry.text, "")
+        XCTAssertEqual(game.feedbackMessage, "")
+    }
+
+    func testARepeatedReturnForTheTargetWordIsIgnored() {
+        let game = game()
+        game.chain = ["cat", "cot", "cog"]
+        var entry = WordEntry()
+        XCTAssertEqual(entry.change(to: "dog\n", in: game), .reachedTarget)
+        XCTAssertNil(entry.change(to: "dog\n", in: game))
+        XCTAssertEqual(game.feedbackMessage, "")
+    }
+
+    func testReturnOnAHintedWordAfterUndoingItSubmitsIt() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "cot\n", in: game)
+        entry.undo(in: game)
+        entry.hint(in: game)
+        XCTAssertEqual(entry.text, "cot")
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+        XCTAssertEqual(game.chain, ["cat", "cot"])
+    }
+
+    func testAnEditAfterAcceptingForgetsTheAcceptedWord() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "cot\n", in: game)
+        entry.change(to: "c", in: game)
+        entry.change(to: "", in: game)
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .alreadyUsed, "A paste of the word, not a replay")
+    }
+
+    func testAnUnchangedTextBetweenRepeatedReturnsStillIgnoresTheRepeat() {
+        let game = game()
+        var entry = WordEntry()
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+        XCTAssertNil(entry.change(to: "", in: game))
+        XCTAssertNil(entry.change(to: "cot\n", in: game))
+        XCTAssertEqual(game.chain, ["cat", "cot"])
+    }
+
+    func testAfterUndoTheUndoneWordCanBeReturnedAgain() {
+        let game = game()
+        var entry = WordEntry()
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+        entry.undo(in: game)
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+        XCTAssertEqual(game.chain, ["cat", "cot"])
+    }
+
+    func testRetypingAnAcceptedWordStillSaysItIsInTheChain() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "cot\n", in: game)
+        entry.change(to: "cot", in: game)
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .alreadyUsed)
+        XCTAssertEqual(game.feedbackMessage, "Already in the chain")
+    }
+
     func testReturnOnARejectedWordKeepsTheTextAndTheError() {
         let game = game()
         var entry = WordEntry()

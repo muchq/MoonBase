@@ -100,7 +100,7 @@ final class GameState {
     var timeAttack: TimeAttack?
     var timeAttackSummary: TimeAttackSummary?
     /// The sprint's clock as the bar shows it; `tick` keeps it current.
-    private(set) var timeAttackSeconds = TimeAttack.seconds(TimeAttack.length)
+    private(set) var timeAttackSeconds = 0
     let bests: TimeAttackBests
 
     // Animation triggers
@@ -113,9 +113,14 @@ final class GameState {
 
     private(set) var generator: PuzzleGenerator?
 
-    init(bests: TimeAttackBests = TimeAttackBests(), generator: PuzzleGenerator? = nil) {
+    /// Hints in a sprint too. Players never get them; UI tests launch with
+    /// `-sprintHints` so they can solve a sprint puzzle on a simulator.
+    let sprintHints: Bool
+
+    init(bests: TimeAttackBests = TimeAttackBests(), generator: PuzzleGenerator? = nil, sprintHints: Bool = false) {
         self.bests = bests
         self.generator = generator
+        self.sprintHints = sprintHints
     }
 
     func loadGraph() {
@@ -156,8 +161,8 @@ final class GameState {
         self.chain = [puzzle.start]
 
         if mode == .timeAttack {
-            timeAttack = TimeAttack(startingAt: now)
-            timeAttackSeconds = TimeAttack.seconds(TimeAttack.length)
+            timeAttack = TimeAttack(startingAt: now, difficulty: difficulty)
+            timeAttackSeconds = TimeAttack.seconds(TimeAttack.length(for: difficulty))
         }
     }
 
@@ -215,8 +220,11 @@ final class GameState {
     }
 
     /// `hint()`, but a dead end leaves a message instead of nothing.
+    /// A sprint is against the clock on the player's own words.
+    var hintsAllowed: Bool { currentMode != .timeAttack || sprintHints }
+
     func requestHint() -> String? {
-        guard !isComplete else { return nil }
+        guard hintsAllowed, !isComplete else { return nil }
         let next = hint()
         lastResult = next == nil ? .noRoute : nil
         showInvalidShake = false

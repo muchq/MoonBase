@@ -23,7 +23,7 @@ struct TimeAttackSummaryView: View {
                     .font(Theme.titleFont)
                     .foregroundStyle(Theme.headerGradient)
                     .accessibilityAddTraits(.isHeader)
-                Text("\(difficulty.label) · \(TimeAttack.seconds(TimeAttack.length)) seconds")
+                Text("\(difficulty.label) · \(TimeAttack.seconds(TimeAttack.length(for: difficulty))) seconds")
                     .font(Theme.bodyFont)
                     .foregroundStyle(.secondary)
             }

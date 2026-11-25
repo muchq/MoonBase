@@ -12,8 +12,9 @@ final class WordEditorUITests: XCTestCase {
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
     }
 
-    private func startPuzzle(mode: String? = nil) -> XCUIApplication {
+    private func startPuzzle(mode: String? = nil, arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
+        app.launchArguments = arguments
         app.launch()
         if let mode {
             let button = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", mode)).firstMatch
@@ -59,6 +60,22 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertEqual(field.value as? String, "zzzzza", "Typing still lands in the field")
     }
 
+    // An accepted word leaves the field on screen, not just in the model:
+    // a stale word would ride along with the next keystroke.
+    func testReturnOnAValidWordClearsTheFieldWithNoError() {
+        let app = startPuzzle()
+        let field = wordInput(app)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        app.buttons["word-hint"].tap()
+        let hinted = field.value as? String
+        field.typeText("\n")
+        settle()
+        XCTAssertFalse(app.staticTexts["word-feedback"].exists, "No error after an accepted word")
+        XCTAssertNotEqual(field.value as? String, hinted, "The accepted word left the field")
+        field.typeText("a")
+        XCTAssertEqual(field.value as? String, "a", "The field holds only what was typed since")
+    }
+
     func testErrorDoesNotMoveTheInputRowOrPushItUnderTheKeyboard() {
         let app = startPuzzle()
         let field = wordInput(app)
@@ -86,8 +103,15 @@ final class WordEditorUITests: XCTestCase {
 
     // A Time Attack solve advances without leaving the game screen: the
     // keyboard and the input row stay put through the celebration.
-    func testTimeAttackSolveKeepsTheKeyboardUp() {
+    func testTimeAttackHasNoHintButton() {
         let app = startPuzzle(mode: "Time Attack")
+        XCTAssertTrue(app.descendants(matching: .any)["time-attack-bar"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["word-hint"].exists)
+    }
+
+    // Players get no hints in a sprint; this test turns them on to solve one.
+    func testTimeAttackSolveKeepsTheKeyboardUp() {
+        let app = startPuzzle(mode: "Time Attack", arguments: ["-sprintHints"])
         let field = wordInput(app)
         let keyboard = app.keyboards.firstMatch
         let bar = app.descendants(matching: .any)["time-attack-bar"]
