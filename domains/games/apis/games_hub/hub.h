@@ -446,6 +446,8 @@ class GamesHub final {
   void StartBot(std::shared_ptr<Responder> responder, BotLimits limits);
 
   struct Member {
+    /// The member's chosen name (SetName); empty for none.
+    std::string name;
     bool connected = true;
     int games_played = 0;
     int games_won = 0;
@@ -914,6 +916,9 @@ class GamesHub final {
   std::unordered_map<std::string, ChatCursor> chat_cursors_;
 
   std::unordered_map<std::string, std::string> player_room_;
+  /// Each session's chosen name, carried into every room it joins;
+  /// absent for none. Dropped with the seat when its grace runs out.
+  std::unordered_map<std::string, std::string> player_names_;
   std::unordered_map<std::string, std::string> player_game_;
 
   /// The boot cohort (#1295): members RestoreFromStore rebuilt, minus

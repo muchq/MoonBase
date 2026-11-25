@@ -391,8 +391,8 @@ TEST_F(PgHubStoreTest, PreColumnRowsReadAsGolfAndAnUnknownKindDropsTheRow) {
 }
 
 TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
-  PgHubStore::MemberRow alice{"R1", "alice", true, 2, 1, 9};
-  PgHubStore::MemberRow bob{"R1", "bob", false, 2, 0, 14};
+  PgHubStore::MemberRow alice{"R1", "alice", true, 2, 1, 9, ""};
+  PgHubStore::MemberRow bob{"R1", "bob", false, 2, 0, 14, ""};
   const golf::GameState state = DealtState();
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertMember{alice},
                    PgHubStore::UpsertMember{bob}});
@@ -422,11 +422,12 @@ TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
     }
   }
 
-  // Upserts converge on the latest presence and leave the stats the row
-  // was made with (only a finish's increments move those); deletes remove
-  // exactly their row.
+  // Upserts converge on the latest presence and name and leave the stats
+  // the row was made with (only a finish's increments move those); deletes
+  // remove exactly their row.
   alice.total_score = 12;
   alice.connected = false;
+  alice.display_name = "Ann";
   store_->Enqueue({PgHubStore::UpsertMember{alice}, PgHubStore::DeleteMember{"R1", "bob"},
                    PgHubStore::DeleteGame{"R1", "G1"}});
   store_->Flush();
@@ -435,6 +436,11 @@ TEST_F(PgHubStoreTest, OpsRoundTripThroughSnapshot) {
   ASSERT_EQ(snapshot->members.size(), 1u);
   EXPECT_EQ(snapshot->members[0].total_score, 9);
   EXPECT_FALSE(snapshot->members[0].connected);
+  EXPECT_EQ(snapshot->members[0].display_name, "Ann");
+  auto room = store_->LoadRoom("R1");
+  ASSERT_TRUE(room.ok()) << room.status();
+  ASSERT_EQ(room->members.size(), 1u);
+  EXPECT_EQ(room->members[0].display_name, "Ann");
   ASSERT_EQ(snapshot->games.size(), 1u);
   EXPECT_EQ(snapshot->games[0].game_id, "G2");
 }
@@ -505,8 +511,8 @@ TEST_F(PgHubStoreTest, LoadGameReportsAVanishedGame) {
 // counts the game zero more times, not one.
 TEST_F(PgHubStoreTest, FinishCommitAppliesStatsExactlyOnce) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"},
-                   PgHubStore::UpsertMember{{"R1", "alice", true, 3, 1, 10}},
-                   PgHubStore::UpsertMember{{"R1", "bob", true, 3, 0, 12}}});
+                   PgHubStore::UpsertMember{{"R1", "alice", true, 3, 1, 10, ""}},
+                   PgHubStore::UpsertMember{{"R1", "bob", true, 3, 0, 12, ""}}});
   store_->Flush();
   auto started = store_->CommitGameSave({"R1", "G1", {"alice", "bob"}, std::nullopt, 1}, "start");
   ASSERT_TRUE(started.ok());
@@ -557,7 +563,7 @@ TEST_F(PgHubStoreTest, FinishCommitAppliesStatsExactlyOnce) {
 // presence and leaves the counts to the increments that own them.
 TEST_F(PgHubStoreTest, PresenceWritesLeaveStatsToTheirIncrements) {
   store_->Enqueue(
-      {PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertMember{{"R1", "alice", true, 3, 1, 10}}});
+      {PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertMember{{"R1", "alice", true, 3, 1, 10, ""}}});
   store_->Flush();
   auto started = store_->CommitGameSave({"R1", "G1", {"alice"}, std::nullopt, 1}, "start");
   ASSERT_TRUE(started.ok() && *started);
@@ -566,7 +572,7 @@ TEST_F(PgHubStoreTest, PresenceWritesLeaveStatsToTheirIncrements) {
   ASSERT_TRUE(landed.ok() && *landed) << landed.status();
 
   // The sibling's stale view of alice: her stats from before the finish.
-  store_->Enqueue({PgHubStore::UpsertMember{{"R1", "alice", false, 3, 1, 10}}});
+  store_->Enqueue({PgHubStore::UpsertMember{{"R1", "alice", false, 3, 1, 10, ""}}});
   store_->Flush();
   auto room = store_->LoadRoom("R1");
   ASSERT_TRUE(room.ok()) << room.status();
@@ -870,8 +876,8 @@ TEST_F(PgHubStoreTest, RoomGeometryRoundTripsAndUnreadableRowsAreFlat) {
 
 TEST_F(PgHubStoreTest, LoadRoomScopesToOneRoom) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertRoom{"R2"},
-                   PgHubStore::UpsertMember{{"R1", "alice", true, 0, 0, 0}},
-                   PgHubStore::UpsertMember{{"R2", "carol", true, 0, 0, 0}}});
+                   PgHubStore::UpsertMember{{"R1", "alice", true, 0, 0, 0, ""}},
+                   PgHubStore::UpsertMember{{"R2", "carol", true, 0, 0, 0, ""}}});
   store_->Flush();
   ASSERT_TRUE(*store_->CommitGameSave({"R1", "G1", {"alice"}, std::nullopt, 1}, ""));
   ASSERT_TRUE(*store_->CommitGameSave({"R2", "G2", {"carol"}, std::nullopt, 1}, ""));
@@ -912,7 +918,7 @@ TEST_F(PgHubStoreTest, NotifyOpFiresAfterItsBatch) {
 
 TEST_F(PgHubStoreTest, DeleteRoomCascades) {
   store_->Enqueue(
-      {PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertMember{{"R1", "alice", true, 0, 0, 0}}});
+      {PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertMember{{"R1", "alice", true, 0, 0, 0, ""}}});
   store_->Flush();
   ASSERT_TRUE(*store_->CommitGameSave({"R1", "G1", {"alice"}, std::nullopt, 1}, ""));
   store_->Enqueue({PgHubStore::DeleteRoom{"R1"}});
@@ -929,8 +935,8 @@ TEST_F(PgHubStoreTest, DeleteRoomCascades) {
 // room is the one nobody writes to, so its stamp is the one that ages.
 TEST_F(PgHubStoreTest, EveryWriteNamingARoomMarksItActive) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertRoom{"R2"},
-                   PgHubStore::UpsertMember{{"R1", "alice", true, 0, 0, 0}},
-                   PgHubStore::UpsertMember{{"R1", "bob", true, 0, 0, 0}}});
+                   PgHubStore::UpsertMember{{"R1", "alice", true, 0, 0, 0, ""}},
+                   PgHubStore::UpsertMember{{"R1", "bob", true, 0, 0, 0, ""}}});
   store_->Flush();
   ASSERT_TRUE(*store_->CommitGameSave({"R1", "G1", {"alice"}, std::nullopt, 1}, ""));
 
@@ -954,7 +960,7 @@ TEST_F(PgHubStoreTest, EveryWriteNamingARoomMarksItActive) {
   const std::vector<std::pair<std::string, std::function<void()>>> writes = {
       {"UpsertRoom", enqueued(PgHubStore::UpsertRoom{"R1"})},
       {"SetRoomSurface", enqueued(PgHubStore::SetRoomSurface{"R1", Surface::Sphere(53)})},
-      {"UpsertMember", enqueued(PgHubStore::UpsertMember{{"R1", "alice", false, 0, 0, 0}})},
+      {"UpsertMember", enqueued(PgHubStore::UpsertMember{{"R1", "alice", false, 0, 0, 0, ""}})},
       {"DeleteMember", enqueued(PgHubStore::DeleteMember{"R1", "bob"})},
       {"CommitGameSave",
        [this] {
@@ -994,7 +1000,7 @@ TEST_F(PgHubStoreTest, TouchRoomsStampsExactlyTheNamedRooms) {
 // instance still holding it drops it too. A fresh room stays.
 TEST_F(PgHubStoreTest, SweepDeletesStaleRoomsAndWakesTheirHolders) {
   store_->Enqueue({PgHubStore::UpsertRoom{"R1"}, PgHubStore::UpsertRoom{"R2"},
-                   PgHubStore::UpsertMember{{"R1", "alice", true, 0, 0, 0}}});
+                   PgHubStore::UpsertMember{{"R1", "alice", true, 0, 0, 0, ""}}});
   store_->Flush();
   ASSERT_TRUE(*store_->CommitGameSave({"R1", "G1", {"alice"}, std::nullopt, 1}, ""));
   ASSERT_TRUE(

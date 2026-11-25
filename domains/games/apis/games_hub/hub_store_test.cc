@@ -35,7 +35,7 @@ golf::GameState DealtState() {
 TEST(MemoryHubStoreTest, OpsRoundTripAndRoomDeleteCascades) {
   MemoryHubStore store;
   store.Enqueue(
-      {HubStore::UpsertRoom{"R1"}, HubStore::UpsertMember{{"R1", "alice", true, 2, 1, 9}}});
+      {HubStore::UpsertRoom{"R1"}, HubStore::UpsertMember{{"R1", "alice", true, 2, 1, 9, ""}}});
   store.Flush();
   ASSERT_TRUE(*store.CommitGameSave({"R1", "G1", {"alice"}, std::nullopt, 1}, "ignored"));
 
@@ -59,7 +59,7 @@ TEST(MemoryHubStoreTest, OpsRoundTripAndRoomDeleteCascades) {
 
   // Match PostgreSQL's foreign keys: stale child writes cannot recreate
   // rows after their parent room has disappeared.
-  store.Enqueue({HubStore::UpsertMember{{"R1", "late", true, 0, 0, 0}}});
+  store.Enqueue({HubStore::UpsertMember{{"R1", "late", true, 0, 0, 0, ""}}});
   auto landed = store.CommitGameSave({"R1", "late-game", {"late"}, std::nullopt, 1}, "ignored");
   ASSERT_TRUE(landed.ok());
   EXPECT_FALSE(*landed);
@@ -102,8 +102,8 @@ TEST(MemoryHubStoreTest, RoomSurfaceIsSetByCreateAndChangedBySetRoomSurface) {
 TEST(MemoryHubStoreTest, FinishCommitIsConditionalAtomicAndRetained) {
   MemoryHubStore store;
   store.Enqueue({HubStore::UpsertRoom{"R1"},
-                 HubStore::UpsertMember{{"R1", "alice", true, 3, 1, 10}},
-                 HubStore::UpsertMember{{"R1", "bob", true, 3, 0, 12}}});
+                 HubStore::UpsertMember{{"R1", "alice", true, 3, 1, 10, ""}},
+                 HubStore::UpsertMember{{"R1", "bob", true, 3, 0, 12, ""}}});
   store.Flush();
   ASSERT_TRUE(*store.CommitGameSave({"R1", "G1", {"alice", "bob"}, std::nullopt, 1}, "start"));
 

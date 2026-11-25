@@ -2125,6 +2125,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"hub_commands", {{"command", "leaveRoom"}}},
       {"hub_commands", {{"command", "getRoomState"}}},
       {"hub_commands", {{"command", "chat"}}},
+      {"hub_commands", {{"command", "setName"}}},
       {"golf_commands", {{"command", "createGame"}}},
       {"golf_commands", {{"command", "joinGame"}}},
       {"golf_commands", {{"command", "startGame"}}},
