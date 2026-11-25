@@ -342,17 +342,31 @@ final class HubSocketSendTests: XCTestCase {
 }
 
 final class ReconnectPolicyTests: XCTestCase {
-    // 2s x 10 sits inside the hub's 5-minute reconnect grace, as on the web.
-    func testTenRetriesTwoSecondsApartThenGivesUp() {
+    func testCeilingsDoubleFromHalfASecondToThirtyThenGiveUp() {
         var policy = ReconnectPolicy()
-        for _ in 0..<10 { XCTAssertEqual(policy.next(), 2.0) }
-        XCTAssertNil(policy.next())
+        var ceilings: [TimeInterval] = []
+        while let ceiling = policy.next() { ceilings.append(ceiling) }
+        XCTAssertEqual(ceilings, [0.5, 1, 2, 4, 8, 16, 30, 30, 30, 30])
     }
 
-    func testAdmissionResetsTheCount() {
+    func testResetStartsTheCountOver() {
         var policy = ReconnectPolicy()
         for _ in 0..<10 { _ = policy.next() }
-        policy.admitted()
-        XCTAssertEqual(policy.next(), 2.0)
+        policy.reset()
+        XCTAssertEqual(policy.next(), 0.5)
+    }
+}
+
+final class RetryAfterTests: XCTestCase {
+    func testSecondsAreRead() {
+        XCTAssertEqual(HubEndpoints.retryAfter("60"), 60)
+        XCTAssertEqual(HubEndpoints.retryAfter(" 5 "), 5)
+    }
+
+    // An HTTP-date, a negative or garbage is no answer: the backoff stands.
+    func testAnythingElseIsNoAnswer() {
+        for value in [nil, "", "-1", "soon", "Wed, 21 Oct 2026 07:28:00 GMT", "1.5"] {
+            XCTAssertNil(HubEndpoints.retryAfter(value), "\(String(describing: value))")
+        }
     }
 }

@@ -191,19 +191,22 @@ final class RaceSession {
 
 }
 
-/// The web's: 2 s apart, ten times, inside the hub's 5-minute grace;
-/// admission starts the count over.
+/// The ceiling of each wait: doubling from half a second to thirty, ten
+/// times, inside the hub's 5-minute reconnect grace.
 struct ReconnectPolicy {
-    static let delay: TimeInterval = 2
+    static let base: TimeInterval = 0.5
+    static let cap: TimeInterval = 30
     static let attempts = 10
+    /// A connection admitted this long ago has held: its drop starts over.
+    static let stable: TimeInterval = 30
     private var tried = 0
 
-    /// The wait before the next dial, or nil once it is time to give up.
+    /// The ceiling of the next wait, or nil once it is time to give up.
     mutating func next() -> TimeInterval? {
         guard tried < Self.attempts else { return nil }
-        tried += 1
-        return Self.delay
+        defer { tried += 1 }
+        return min(Self.cap, Self.base * pow(2, Double(tried)))
     }
 
-    mutating func admitted() { tried = 0 }
+    mutating func reset() { tried = 0 }
 }

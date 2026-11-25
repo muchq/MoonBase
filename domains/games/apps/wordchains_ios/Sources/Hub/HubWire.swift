@@ -38,6 +38,13 @@ enum HubEndpoints {
         try! JSONSerialization.data(withJSONObject: resumeToken.map { ["resumeToken": $0] } ?? [String: String]())
     }
 
+    /// A Retry-After in seconds, the form the hub sends; an HTTP-date or
+    /// anything else is no answer, and the backoff stands.
+    static func retryAfter(_ value: String?) -> TimeInterval? {
+        guard let value, let seconds = Int(value.trimmingCharacters(in: .whitespaces)), seconds >= 0 else { return nil }
+        return TimeInterval(seconds)
+    }
+
     static func socketURL(play: URL, ticket: String) -> URL {
         var parts = URLComponents(url: play, resolvingAgainstBaseURL: false)!
         // Percent-encode as encodeURIComponent does, '+' included.

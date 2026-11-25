@@ -2,10 +2,13 @@ import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
+#if canImport(Network)
+import Network
+#endif
 
 /// The hub's stream over URLSession: mint a session, open the socket with
-/// its ticket, read frames until it drops, and dial again on the web's
-/// schedule (ReconnectPolicy). The resume token is the player, kept in the
+/// its ticket, read frames until it drops, and dial again on the Dialer's
+/// schedule, which also hears whether there is a network at all. The resume token is the player, kept in the
 /// Keychain (ResumeToken) so a relaunch, or a drop, comes back to the same
 /// seat within the hub's grace.
 ///
@@ -13,7 +16,7 @@ import FoundationNetworking
 /// admits (games_hub smithy_contract_test, RequireOriginContract).
 @MainActor
 final class HubSocket: HubTransport {
-    private static let mintTimeout: TimeInterval = 10
+    nonisolated static let mintTimeout: TimeInterval = 10
     /// How the hub closes a wire whose seat a newer connection took.
     private static let supersededCloseCode = 4001
 
@@ -25,12 +28,29 @@ final class HubSocket: HubTransport {
     private var dialer = Dialer()
     private var socket: URLSessionWebSocketTask?
     private var tasks: [Task<Void, Never>] = []
+    #if canImport(Network)
+    private let path = NWPathMonitor()
+    #endif
 
     init(playURL: URL = HubEndpoints.production, urlSession: URLSession = .shared, tokens: ResumeTokenStore = ResumeToken.store()) {
         self.playURL = playURL
         self.urlSession = urlSession
         self.tokens = tokens
+        #if canImport(Network)
+        path.pathUpdateHandler = { [weak self] update in
+            let online = update.status == .satisfied
+            Task { @MainActor in
+                guard let self else { return }
+                self.run(self.dialer.pathChanged(online: online))
+            }
+        }
+        path.start(queue: .main)
+        #endif
     }
+
+    #if canImport(Network)
+    deinit { path.cancel() }
+    #endif
 
     func connect() { run(dialer.connect()) }
     func disconnect() { run(dialer.disconnect()) }
@@ -81,6 +101,9 @@ final class HubSocket: HubTransport {
         let minted: HubSession
         do {
             minted = try await mint(resumeToken: tokens.load())
+        } catch let refused as MintRefused {
+            run(dialer.dropped(gen, .mintRefused(status: refused.status, retryAfter: refused.retryAfter)))
+            return
         } catch {
             run(dialer.dropped(gen))
             return
@@ -104,8 +127,10 @@ final class HubSocket: HubTransport {
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = HubEndpoints.mintBody(resumeToken: resumeToken)
         let (data, response) = try await urlSession.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+        guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard (200..<300).contains(http.statusCode) else {
+            throw MintRefused(status: http.statusCode,
+                              retryAfter: HubEndpoints.retryAfter(http.value(forHTTPHeaderField: "Retry-After")))
         }
         return try JSONDecoder().decode(HubSession.self, from: data)
     }
@@ -117,7 +142,7 @@ final class HubSocket: HubTransport {
                 message = try await socket.receive()
             } catch {
                 if socket === self.socket { self.socket = nil }
-                run(dialer.dropped(gen, superseded: socket.closeCode.rawValue == Self.supersededCloseCode))
+                run(dialer.dropped(gen, socket.closeCode.rawValue == Self.supersededCloseCode ? .superseded : .lost))
                 return
             }
             // A socket a reconnect replaced has no say.
@@ -141,4 +166,10 @@ final class HubSocket: HubTransport {
             events?.frame(frame)
         }
     }
+}
+
+/// The mint's non-2xx answer, as the Dialer weighs it.
+private struct MintRefused: Error {
+    let status: Int
+    let retryAfter: TimeInterval?
 }
