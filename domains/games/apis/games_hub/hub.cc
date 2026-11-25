@@ -1,5 +1,7 @@
 #include "domains/games/apis/games_hub/hub.h"
 
+#include "domains/games/apis/games_hub/client_tag.h"
+
 #include <algorithm>
 #include <deque>
 #include <set>
@@ -213,6 +215,10 @@ GamesHub::GamesHub(std::shared_ptr<TicketVault> vault, std::shared_ptr<cards::De
 // — except for the stream command/event blocks, whose values are the model's
 // union cases and are pinned both ways by the *SeriesMatchTheModelUnions
 // tests in hub_e2e_test.
+void GamesHub::CountSessionMint(const ClientTag& tag) {
+  Count("hub_session_mints", {{"client", tag.client}, {"version", tag.version}});
+}
+
 const std::vector<GamesHub::CounterSeries>& GamesHub::DeclaredCounterSeries() {
   static const auto* kSeries = [] {
     // Each game's envelope first, from its adapter's lists.
@@ -233,6 +239,8 @@ const std::vector<GamesHub::CounterSeries>& GamesHub::DeclaredCounterSeries() {
       }
       return false;
     });
+    // Session mints, by who asked (client_tag.h).
+    for (CounterSeries& mint : ClientTagSeries()) series->push_back(std::move(mint));
     series->insert(series->end(), {
       {"chat_appends", {{"result", "stored"}}},
       {"chat_appends", {{"result", "rejected"}}},

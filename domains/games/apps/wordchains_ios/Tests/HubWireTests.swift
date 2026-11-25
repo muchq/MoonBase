@@ -197,12 +197,23 @@ final class HubWireTests: XCTestCase {
         XCTAssertEqual(HubEndpoints.subprotocol, "smithy.eventstream.v1+json")
     }
 
+    // The mint names who asks, for the hub's metrics: the app and its
+    // version, or the app alone when the bundle has none.
+    func testTheMintNamesTheAppAndItsVersion() {
+        let play = URL(string: "wss://api.muchq.com/games/v2/play")!
+        XCTAssertEqual(HubEndpoints.sessionURL(play: play, client: "ios/0.1.9").absoluteString,
+                       "https://api.muchq.com/games/v2/session?client=ios/0.1.9")
+        XCTAssertEqual(HubEndpoints.client(info: ["CFBundleShortVersionString": "0.1.9"]), "ios/0.1.9")
+        XCTAssertEqual(HubEndpoints.client(info: [:]), "ios")
+        XCTAssertEqual(HubEndpoints.client(info: nil), "ios")
+    }
+
     func testEndpointsFollowThePlayURL() {
         let play = URL(string: "wss://api.muchq.com/games/v2/play")!
-        XCTAssertEqual(HubEndpoints.sessionURL(play: play).absoluteString, "https://api.muchq.com/games/v2/session")
+        XCTAssertEqual(HubEndpoints.sessionURL(play: play, client: nil).absoluteString, "https://api.muchq.com/games/v2/session")
         XCTAssertEqual(HubEndpoints.socketURL(play: play, ticket: "a b+c").absoluteString,
                        "wss://api.muchq.com/games/v2/play?ticket=a%20b%2Bc")
         let local = URL(string: "ws://localhost:2015/games/v2/play")!
-        XCTAssertEqual(HubEndpoints.sessionURL(play: local).absoluteString, "http://localhost:2015/games/v2/session")
+        XCTAssertEqual(HubEndpoints.sessionURL(play: local, client: nil).absoluteString, "http://localhost:2015/games/v2/session")
     }
 }

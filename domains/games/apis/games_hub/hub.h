@@ -25,6 +25,7 @@
 #include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/apis/games_hub/chat_store.h"
 #include "domains/games/apis/games_hub/chess_bots.h"
+#include "domains/games/apis/games_hub/client_tag.h"
 #include "domains/games/apis/games_hub/game_events.h"
 #include "domains/games/apis/games_hub/go_bots.h"
 #include "domains/games/apis/games_hub/hosted_game.h"
@@ -166,6 +167,10 @@ class GamesHub final {
   /// Exposed so the tests can assert the emit sites declare nothing this list
   /// does not name.
   static const std::vector<CounterSeries>& DeclaredCounterSeries();
+
+  /// A session minted for `tag`'s client: GetSession is a unary request,
+  /// and this hub's recorder counts it.
+  void CountSessionMint(const ClientTag& tag);
 
   /// Every rooms/members/games mutation goes through HubStore. A null
   /// argument selects MemoryHubStore (main's no-database mode); PostgreSQL

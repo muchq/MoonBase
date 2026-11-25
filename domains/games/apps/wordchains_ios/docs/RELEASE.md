@@ -218,7 +218,10 @@ No manual steps needed here; the BUILD.bazel aliases this artifact.
 
 To release a new version:
 
-1. Bump `CFBundleShortVersionString` in `Info.plist`
+1. Bump `CFBundleShortVersionString` in `Info.plist`, and add the same
+   version to `kIosVersions` in `domains/games/apis/games_hub/client_tag.h`.
+   The hub counts each session mint under its app version; a version missing
+   there counts as `ios/other`, and `client_tag_test` fails until it's added.
 2. Merge to `main`
 3. Once `main` is green, CI tags `wordchains-ios-v<VERSION>` and builds a signed device IPA
 4. IPA uploads to App Store Connect / TestFlight via `fastlane pilot`

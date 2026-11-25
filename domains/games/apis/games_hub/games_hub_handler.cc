@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "absl/status/statusor.h"
+#include "domains/games/apis/games_hub/client_tag.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
 #include "opal/core/error.h"
 
@@ -41,6 +42,8 @@ opal::Outcome<moonbase::games::GetSessionOutput> GamesHubHandler::GetSession(
     if (!resume.ok()) return opal::Error::Unknown("credential store unavailable");
     output.resumeToken = *std::move(resume);
   }
+  // Counted once it is certain: a mint that failed is not one.
+  hub_->CountSessionMint(ClientTagOf(input.client));
   return output;
 }
 

@@ -421,6 +421,26 @@ class HubGameFixture : public GamesHubStreamFixture {};
 
 namespace {
 
+// Every mint is counted under who asked, as its `client` query says:
+// the web, an app version, or other.
+TEST_F(GamesHubStreamFixture, AMintIsCountedUnderTheClientThatAskedForIt) {
+  for (const std::optional<std::string>& client :
+       {std::optional<std::string>("web"), std::optional<std::string>("ios/0.1.9"),
+        std::optional<std::string>("ios/9.9.9"), std::optional<std::string>(std::nullopt),
+        std::optional<std::string>("android/1.0.0")}) {
+    moonbase::games::GetSessionInput input;
+    input.client = client;
+    ASSERT_TRUE(client_->GetSession(input).ok()) << client.value_or("(none)");
+  }
+  const auto mints = [this](const char* client, const char* version) {
+    return metrics_->CounterTotal("hub_session_mints", {{"client", client}, {"version", version}});
+  };
+  EXPECT_EQ(mints("web", "none"), 1);
+  EXPECT_EQ(mints("ios", "0.1.9"), 1);
+  EXPECT_EQ(mints("ios", "other"), 1);
+  EXPECT_EQ(mints("other", "none"), 2);
+}
+
 TEST_F(GamesHubStreamFixture, SessionMintsDistinctPlayersAndResumeTokenRoundTrips) {
   moonbase::games::GetSessionInput input;
   auto first = client_->GetSession(input);
@@ -2191,6 +2211,10 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"hub_seats_expired", {}},
       {"hub_sessions", {{"resumed", "true"}}},
       {"hub_sessions", {{"resumed", "false"}}},
+      {"hub_session_mints", {{"client", "web"}, {"version", "none"}}},
+      {"hub_session_mints", {{"client", "ios"}, {"version", "0.1.9"}}},
+      {"hub_session_mints", {{"client", "ios"}, {"version", "other"}}},
+      {"hub_session_mints", {{"client", "other"}, {"version", "none"}}},
       {"bot_requests", {{"bot", "microgpt"}, {"result", "ok"}}},
       {"bot_requests", {{"bot", "microgpt"}, {"result", "empty"}}},
       {"bot_requests", {{"bot", "microgpt"}, {"result", "busy"}}},
@@ -3416,6 +3440,42 @@ class FailingVaultFixture : public GamesHubStreamFixture {
 TEST_F(FailingVaultFixture, GetSessionFailsClosedWhenTheVaultIsDown) {
   const auto session = client_->GetSession(moonbase::games::GetSessionInput{});
   ASSERT_FALSE(session.ok());
+  EXPECT_EQ(metrics_->CounterTotal("hub_session_mints", {{"client", "other"}, {"version", "none"}}), 0);
+}
+
+// A vault that issues the ticket and then cannot keep the resume token:
+// the mint fails, and a failed mint is not counted, or a retry would
+// count twice.
+class ResumeDownVault final : public TicketVault {
+ public:
+  absl::StatusOr<std::string> IssueTicket(const std::string& player_id) override {
+    return delegate_.IssueTicket(player_id);
+  }
+  absl::StatusOr<std::string> IssueResumeToken(const std::string&) override {
+    return absl::UnavailableError("vault down");
+  }
+  bool PeekTicket(const std::string& ticket) const override { return delegate_.PeekTicket(ticket); }
+  std::optional<std::string> SpendTicket(const std::string& ticket) override {
+    return delegate_.SpendTicket(ticket);
+  }
+  std::optional<std::string> ResolveResumeToken(const std::string& token) const override {
+    return delegate_.ResolveResumeToken(token);
+  }
+
+ private:
+  InMemoryTicketVault delegate_{std::chrono::seconds(60), std::chrono::seconds(60)};
+};
+
+class ResumeDownVaultFixture : public GamesHubStreamFixture {
+ protected:
+  std::shared_ptr<TicketVault> MakeVault() override { return std::make_shared<ResumeDownVault>(); }
+};
+
+TEST_F(ResumeDownVaultFixture, AFailedResumeTokenIssueDoesNotCountAMint) {
+  moonbase::games::GetSessionInput input;
+  input.client = "web";
+  ASSERT_FALSE(client_->GetSession(input).ok());
+  EXPECT_EQ(metrics_->CounterTotal("hub_session_mints", {{"client", "web"}, {"version", "none"}}), 0);
 }
 
 // Per-session stream budgets, pinned with tiny buckets whose

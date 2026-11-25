@@ -23,12 +23,23 @@ enum HubEndpoints {
     /// The public room a quick race's seek waits in (games_hub kQuickRoomId).
     static let quickRoomId = "quick-wordchain"
 
-    /// The mint lives beside the play socket: same host, http(s) for ws(s).
-    static func sessionURL(play: URL) -> URL {
+    /// Who the mint says is asking, for the hub's metrics (games_hub
+    /// client_tag.h): the app and its version, or the app alone.
+    static func client(info: [String: Any]?) -> String {
+        guard let version = info?["CFBundleShortVersionString"] as? String, !version.isEmpty else { return "ios" }
+        return "ios/\(version)"
+    }
+
+    /// This build's.
+    static let appClient = client(info: Bundle.main.infoDictionary)
+
+    /// The mint lives beside the play socket: same host, http(s) for ws(s);
+    /// `client` names who asks.
+    static func sessionURL(play: URL, client: String?) -> URL {
         var parts = URLComponents(url: play, resolvingAgainstBaseURL: false)!
         parts.scheme = play.scheme == "wss" ? "https" : "http"
         parts.path = "/games/v2/session"
-        parts.query = nil
+        parts.queryItems = client.map { [URLQueryItem(name: "client", value: $0)] }
         return parts.url!
     }
 
