@@ -55,6 +55,10 @@ struct WordInputView: View {
                 DispatchQueue.main.async { isFocused = true }
             }
             .onAppear { isFocused = true }
+            .onChange(of: inputText) {
+                game.lastResult = nil
+                game.showInvalidShake = false
+            }
     }
 
     private var borderColor: Color {
@@ -132,6 +136,7 @@ struct WordInputView: View {
                 .font(.system(size: 13, weight: .semibold))
             Text(game.feedbackMessage)
                 .font(Theme.captionFont)
+                .accessibilityIdentifier("word-feedback")
         }
         .foregroundStyle(Theme.errorRed)
         .padding(.horizontal, 14)

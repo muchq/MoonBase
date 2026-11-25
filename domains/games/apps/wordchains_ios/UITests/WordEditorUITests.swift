@@ -51,4 +51,15 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.exists)
         XCTAssertTrue(field.hasFocus)
     }
+
+    func testEditingAfterARejectionClearsTheStaleError() {
+        let app = startPuzzle()
+        let field = app.textFields["word-input"]
+        let feedback = app.staticTexts["word-feedback"]
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        field.typeText("zzzzz\n")
+        XCTAssertTrue(feedback.waitForExistence(timeout: 5))
+        field.typeText("a")
+        XCTAssertFalse(feedback.exists, "The error describes the old text, not this one")
+    }
 }
