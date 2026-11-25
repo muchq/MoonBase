@@ -119,6 +119,15 @@ final class DialerTests: XCTestCase {
         XCTAssertEqual(dialer.dropped(gen), [.status(.connecting), .wait(gen + 1, 0.5)])
     }
 
+    func testAConnectionDroppedJustShortOfHoldingKeepsBackingOff() {
+        var (dialer, gen) = connected()
+        guard case let .wait(next, _) = dialer.dropped(gen).last else { return XCTFail("no retry") }
+        _ = dialer.retryDue(next)
+        _ = dialer.admitted(next)
+        clock += ReconnectPolicy.stable - 1
+        XCTAssertEqual(dialer.dropped(next), [.status(.connecting), .wait(next + 1, 1)])
+    }
+
     // The seat is held for the hub's grace (games_hub_main.cc, five
     // minutes): every wait at its ceiling, every mint at its timeout, still
     // comes back inside it.
@@ -196,6 +205,14 @@ final class DialerTests: XCTestCase {
             XCTAssertEqual(dialer.resume(), [.hangUp, .status(.connecting), .dial(gen + 1)])
             gen += 1
         }
+    }
+
+    // Try again is the player's: offline or not, it dials.
+    func testConnectWhileOfflineStillDials() {
+        var (dialer, gen) = connected()
+        _ = dialer.pathChanged(online: false)
+        _ = dialer.dropped(gen)
+        XCTAssertEqual(dialer.connect(), [.status(.connecting), .dial(gen + 1)])
     }
 
     func testTheNetworkMovesNothingWhileIdleLostOrAlreadyOnline() {

@@ -25,7 +25,7 @@ using MintLimiter = futility::rate_limiter::SlidingWindowRateLimiter<std::string
 
 // A launch: two hundred new players a second for ten minutes, each
 // minting once. None of them is refused for being new.
-TEST(SessionMintLimitsTest, ALaunchsNewClientsAreEachAdmitted) {
+TEST(SessionMintLimitsTest, ALaunchesNewClientsAreEachAdmitted) {
   MintLimiter limiter(SessionMintLimits());
   int refused = 0;
   int client = 0;
