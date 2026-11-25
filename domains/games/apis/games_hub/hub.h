@@ -676,11 +676,15 @@ class GamesHub final {
   /// A startGame in `E`'s envelope: on a seated table with next_game, its
   /// next game; otherwise StartGameMove.
   template <typename E>
-  void StartMove(const std::string& player_id, StartGame<typename Adapter<E>::Start> request);
+  /// `matched`: the hub's own start of a table that filled (FilledStart),
+  /// the one way a pool table starts.
+  void StartMove(const std::string& player_id, StartGame<typename Adapter<E>::Start> request,
+                 bool matched = false);
   /// The player's table opens on its own game, on `start` if that game is
   /// `E` and on its defaults otherwise.
   template <typename E>
-  void StartGameMove(const std::string& player_id, typename Adapter<E>::Start start);
+  void StartGameMove(const std::string& player_id, typename Adapter<E>::Start start,
+                     bool matched = false);
   /// Every in-game engine move: the transition, then the fan-out (views,
   /// turn change, game end) the result implies. A move on another game's
   /// table is refused.
