@@ -632,7 +632,7 @@ jobs:
 
       # App Store Connect rejects a bundle whose icon set isn't named in its
       # Info.plist (ITMS-90713); actool writes the name under CFBundleIcons.
-      - name: Check the bundled app icon and privacy manifest
+      - name: Check the bundled app icon, privacy manifest and puzzle words
         if: steps.filter.outputs.changed == 'true'
         run: |
           ipa=bazel-bin/domains/games/apps/wordchains_ios/WordChains.ipa
@@ -647,6 +647,10 @@ jobs:
           # app_store_test checks the source; this checks it shipped, since an
           # upload without it is rejected (ITMS-91053).
           unzip -l "$ipa" | grep -q 'Payload/WordChains.app/PrivacyInfo.xcprivacy$'
+          # Single-player puzzles start and end on these (#1738); without them
+          # any graph word may, and SCOWL's license asks its notice ship too.
+          unzip -l "$ipa" | grep -q 'Payload/WordChains.app/common_words.txt$'
+          unzip -l "$ipa" | grep -q 'Payload/WordChains.app/SCOWL_COPYRIGHT$'
           # iPhone only (1): an iPad family (2) asks App Review for iPad.
           [ "$(plutil -extract UIDeviceFamily json -o - "$plist")" = "[1]" ]
 

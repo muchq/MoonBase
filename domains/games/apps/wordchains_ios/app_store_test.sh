@@ -79,6 +79,12 @@ check "the app targets iPhone only" \
   bash -c 'tr -d " \n" <"$1" | grep -q "families=\[\"iphone\",\]"' _ "$PKG/BUILD.bazel"
 check "the plist names no iPad orientations" bash -c '! grep -q "~ipad" "$1"' _ "$PLIST"
 
+# Single-player puzzles start and end on the bundled puzzle words (#1738),
+# looked up as PuzzleWords.fileName; SCOWL's license asks its notice travel
+# with them. test-ios checks the IPA; this checks BUILD asks for both.
+check "BUILD bundles the puzzle words and SCOWL's notice" \
+  bash -c 'grep -q "wordchain_race:common_words.txt\"" "$1" && grep -q "wordchain_race:SCOWL_COPYRIGHT\"" "$1"' _ "$PKG/BUILD.bazel"
+
 # Apple rejects an upload (ITMS-91053) whose code calls a required-reason
 # API its privacy manifest doesn't declare. UserDefaults holds a resume
 # token from 0.1.2 or earlier until it moves to the Keychain; CA92.1 is

@@ -117,6 +117,13 @@ struct WordGraph: Codable {
         nodes.filter { $0.count == length }
     }
 
+    /// The words a puzzle of this length may start or end on, sorted: the
+    /// graph's words that are also on the puzzle list, or all of them when
+    /// there is no list.
+    func puzzleEnds(ofLength length: Int, among list: Set<String>?) -> [String] {
+        words(ofLength: length).filter { list?.contains($0) ?? true }.sorted()
+    }
+
     /// Load graph from bundled JSON resource.
     static func loadBundled() -> WordGraph? {
         guard let url = Bundle.main.url(forResource: "word_graph", withExtension: "json") else {

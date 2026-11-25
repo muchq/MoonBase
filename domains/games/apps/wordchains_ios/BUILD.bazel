@@ -54,8 +54,11 @@ ios_application(
         ":release_signing": ":provisioning_profile",
         "//conditions:default": None,
     }),
+    # The puzzle words travel with SCOWL's notice, as its license asks.
     resources = [
         ":word_graph_json",
+        "//domains/games/libs/wordchain_race:SCOWL_COPYRIGHT",
+        "//domains/games/libs/wordchain_race:common_words.txt",
     ] + glob(["Sources/Resources/**"]),
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:ios"],
