@@ -92,7 +92,7 @@ Before submitting to the App Store, verify these scenarios:
 - [ ] **Daily Challenge** — same puzzle generates for the same date
 - [ ] **Time Attack** — the bar above the input counts down from 90 (3 letters), 120 (4) or 180 (5); a solve shows "Solved!" and the next puzzle follows with the keyboard still up; at 0 moves stop and one summary shows solved, points and best; "Beat your best" starts a fresh sprint. Backgrounded past the deadline, returning shows the summary. VoiceOver reads the bar and announces each solve and the summary; with Reduce Motion on, nothing scales. On a compact iPhone the input row never moves.
 - [ ] **Input validation** — wrong length, not in dictionary, not one-letter-away, already used
-- [ ] **Hint system** — lightbulb fills the next word on the shortest unused path without submitting; at a dead end it says to Undo
+- [ ] **Hint system** — lightbulb fills the next word on the shortest unused path without submitting; at a dead end it says to Undo; Time Attack has no lightbulb
 - [ ] **Scoring** — optimal solve gives 150 pts (100 base + 50 bonus), extra steps reduce score
 - [ ] **Free Undo** — in every solo mode, explore a detour, undo it, then finish optimally: the final chain still earns 150 points. Undo intentionally carries no score penalty and encourages experimentation.
 - [ ] **Difficulty levels** — Easy (3 letters), Medium (4), Hard (5)
@@ -222,6 +222,8 @@ To release a new version:
    version to `kIosVersions` in `domains/games/apis/games_hub/client_tag.h`.
    The hub counts each session mint under its app version; a version missing
    there counts as `ios/other`, and `client_tag_test` fails until it's added.
+   `hub_e2e_test` pins every counter series, so add the version's
+   `hub_session_mints` line there too.
 2. Merge to `main`
 3. Once `main` is green, CI tags `wordchains-ios-v<VERSION>` and builds a signed device IPA
 4. IPA uploads to App Store Connect / TestFlight via `fastlane pilot`

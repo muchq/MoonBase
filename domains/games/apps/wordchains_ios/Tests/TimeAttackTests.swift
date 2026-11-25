@@ -80,6 +80,18 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertNotNil(game.timeAttackSummary)
     }
 
+    func testASprintHasNoHints() {
+        let game = sprint()
+        XCTAssertFalse(game.hintsAllowed)
+        XCTAssertNil(game.requestHint())
+        XCTAssertNil(game.lastResult, "No dead-end message: there is a route, just no hint")
+        var entry = WordEntry()
+        entry.change(to: "c", in: game)
+        entry.hint(in: game)
+        XCTAssertEqual(entry.text, "c")
+        XCTAssertEqual(game.chain, ["cat"])
+    }
+
     func testSuspensionDoesNotPauseTheSprint() {
         // Suspended, the app stops ticking; the time still counts.
         let game = sprint()
@@ -259,6 +271,28 @@ final class TimeAttackTests: XCTestCase {
         game.tick(now: at(30))
         XCTAssertNil(game.timeAttackSummary)
         XCTAssertEqual(TimeAttackBests(defaults: defaults).best(for: .easy), 0, "A sprint left unfinished doesn't count")
+    }
+
+    func testTheUITestSwitchKeepsHintsInASprint() {
+        let words = ["cat", "cot", "cog", "dog"]
+        let edges = words.map { word in words.indices.filter { GameState.isOneLetterAway(word, words[$0]) } }
+        let graph = WordGraph(nodes: words, edges: edges)
+        let game = GameState(bests: TimeAttackBests(defaults: defaults), generator: PuzzleGenerator(graph: graph), sprintHints: true)
+        game.graph = graph
+        game.startNewGame(mode: .timeAttack, difficulty: .easy, now: t0)
+        deal(game)
+        XCTAssertTrue(game.hintsAllowed)
+        XCTAssertEqual(game.requestHint(), "cot")
+    }
+
+    func testOtherModesKeepHints() {
+        let game = sprint()
+        for mode in [GameMode.quickPlay, .dailyChallenge] {
+            game.startNewGame(mode: mode, difficulty: .easy, now: at(0))
+            deal(game)
+            XCTAssertTrue(game.hintsAllowed, "\(mode)")
+            XCTAssertEqual(game.requestHint(), "cot", "\(mode)")
+        }
     }
 
     func testOtherModesHaveNoClock() {

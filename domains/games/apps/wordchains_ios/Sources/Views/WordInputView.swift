@@ -25,7 +25,7 @@ struct WordInputView: View {
                 undoButton
                 textField
                 submitButton
-                hintButton
+                if game.hintsAllowed { hintButton }
             }
         }
         .padding(.horizontal, Theme.cardPadding)
