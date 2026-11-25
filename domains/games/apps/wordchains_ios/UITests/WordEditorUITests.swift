@@ -20,13 +20,20 @@ final class WordEditorUITests: XCTestCase {
         for _ in 0..<4 where !play.isHittable { app.swipeUp() }
         XCTAssertTrue(play.isHittable)
         play.tap()
-        XCTAssertTrue(app.textViews["word-input"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["word-input"].waitForExistence(timeout: 5))
         return app
+    }
+
+    /// The one-line, vertical-axis field; which element type iOS reports for
+    /// it is an implementation detail, so accept either.
+    private func wordInput(_ app: XCUIApplication) -> XCUIElement {
+        let field = app.textFields["word-input"]
+        return field.exists ? field : app.textViews["word-input"]
     }
 
     func testReturnKeepsTheKeyboardWhetherEmptyOrRejected() {
         let app = startPuzzle()
-        let field = app.textViews["word-input"]
+        let field = wordInput(app)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
 
         field.typeText("\n")
@@ -44,7 +51,7 @@ final class WordEditorUITests: XCTestCase {
 
     func testErrorDoesNotMoveTheInputRowOrPushItUnderTheKeyboard() {
         let app = startPuzzle()
-        let field = app.textViews["word-input"]
+        let field = wordInput(app)
         let submit = app.buttons["word-submit"]
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         field.typeText("zzzzz")
