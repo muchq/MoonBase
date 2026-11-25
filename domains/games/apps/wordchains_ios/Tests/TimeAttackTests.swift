@@ -98,15 +98,13 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertEqual(early.submitWord("cog", now: at(50)), .valid)
         XCTAssertEqual(early.submitWord("dog", now: at(59.999)), .reachedTarget)
         early.tick(now: at(60))
-        XCTAssertEqual(early.timeAttackSummary?.solved, 1)
-        XCTAssertEqual(early.timeAttackSummary?.score, 150)
+        XCTAssertEqual(early.timeAttackSummary, TimeAttackSummary(solved: 1, score: 150, best: 150, isNewBest: true))
 
         let late = sprint()
         XCTAssertEqual(late.submitWord("cot", now: at(50)), .valid)
         XCTAssertEqual(late.submitWord("cog", now: at(50)), .valid)
         XCTAssertEqual(late.submitWord("dog", now: at(60)), .timeUp)
-        XCTAssertEqual(late.timeAttackSummary?.solved, 0)
-        XCTAssertEqual(late.timeAttackSummary?.score, 0)
+        XCTAssertEqual(late.timeAttackSummary, TimeAttackSummary(solved: 0, score: 0, best: 0, isNewBest: false))
     }
 
     // MARK: - Advancing
@@ -146,7 +144,7 @@ final class TimeAttackTests: XCTestCase {
         game.tick(now: at(61))
         XCTAssertEqual(game.currentPuzzle?.id, solved)
         XCTAssertTrue(game.isComplete)
-        XCTAssertEqual(game.timeAttackSummary?.solved, 1)
+        XCTAssertEqual(game.timeAttackSummary, TimeAttackSummary(solved: 1, score: 150, best: 150, isNewBest: true))
     }
 
     func testWithNoPuzzleToDealTheSprintStillEndsAndCountsTheSolve() {
@@ -161,7 +159,7 @@ final class TimeAttackTests: XCTestCase {
         game.tick(now: at(11))
         XCTAssertTrue(game.isComplete)
         game.tick(now: at(60))
-        XCTAssertEqual(game.timeAttackSummary?.solved, 1)
+        XCTAssertEqual(game.timeAttackSummary, TimeAttackSummary(solved: 1, score: 150, best: 150, isNewBest: true))
     }
 
     // MARK: - The summary and the best
@@ -173,13 +171,17 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertEqual(game.timeAttackSummary, TimeAttackSummary(solved: 1, score: 150, best: 150, isNewBest: true))
         game.tick(now: at(61))
         _ = game.submitWord("cot", now: at(62))
-        XCTAssertEqual(game.timeAttackSummary?.isNewBest, true, "Finishing again must not re-record")
+        XCTAssertEqual(
+            game.timeAttackSummary, TimeAttackSummary(solved: 1, score: 150, best: 150, isNewBest: true),
+            "Finishing again must not re-record"
+        )
         XCTAssertEqual(TimeAttackBests(defaults: defaults).best(for: .easy), 150)
 
         // Beat your best: a fresh sprint, and a lower score keeps the best.
         game.startNewGame(mode: .timeAttack, difficulty: .easy, now: at(100))
         XCTAssertNil(game.timeAttackSummary)
         XCTAssertEqual(game.timeAttack?.solved, 0)
+        XCTAssertEqual(game.timeAttack?.score, 0)
         XCTAssertEqual(game.timeAttackSeconds, 60)
         game.tick(now: at(160))
         XCTAssertEqual(game.timeAttackSummary, TimeAttackSummary(solved: 0, score: 0, best: 150, isNewBest: false))
@@ -215,6 +217,7 @@ final class TimeAttackTests: XCTestCase {
         game.tick(now: at(11))
         XCTAssertEqual(game.currentPuzzle?.id, fresh)
         XCTAssertEqual(game.chain, ["cat", "cot"])
+        XCTAssertEqual(game.timeAttack?.solved, 0)
         XCTAssertEqual(game.timeAttack?.score, 0)
         XCTAssertEqual(game.timeAttackSeconds, 60, "59.1s left on the new clock")
     }
