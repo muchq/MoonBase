@@ -13,6 +13,11 @@ struct RaceState: Equatable {
     var opening = false
     /// The last thing to tell the player: the hub's reason for a refusal.
     var notice: String?
+    /// The letters the last quick race sought; nil for any.
+    var seekLetters: Int?
+
+    /// In the hub's quick race pool, rather than a room of one's own.
+    var inQuickRace: Bool { room?.roomId == HubEndpoints.quickRoomId }
 
     /// The room's race tables, in the hub's order.
     var raceTables: [HubGameSummary] { room?.games.filter { $0.game == "wordchain" } ?? [] }
@@ -146,6 +151,8 @@ final class RaceSession {
         state.opening = true
         transport.send(.wordchain(.joinGame(gameId)))
     }
+
+    func seek(letters: Int?) {}
 
     func start(letters: Int) { transport.send(.wordchain(.startGame(letters: letters))) }
 

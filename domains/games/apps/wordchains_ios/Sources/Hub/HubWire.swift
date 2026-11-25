@@ -20,6 +20,8 @@ enum HubEndpoints {
     /// The socket subprotocol that selects JSON-text frames.
     static let subprotocol = "smithy.eventstream.v1+json"
     static let production = URL(string: "wss://api.muchq.com/games/v2/play")!
+    /// The public room a quick race's seek waits in (games_hub kQuickRoomId).
+    static let quickRoomId = "quick-wordchain"
 
     /// The mint lives beside the play socket: same host, http(s) for ws(s).
     static func sessionURL(play: URL) -> URL {
@@ -57,6 +59,9 @@ enum WordchainMove: Equatable {
     case leaveGame
     case play(String)
     case retract
+    /// A quick race: one opponent from the hub's pool, on these letters or
+    /// any. Sent from one's own seek, it looks again.
+    case seek(letters: Int?)
 }
 
 enum HubCommand: Equatable {
@@ -89,6 +94,7 @@ enum HubCommand: Equatable {
         case .leaveGame: return ["leaveGame": [String: Any]()]
         case let .play(word): return ["play": ["word": word]]
         case .retract: return ["retract": [String: Any]()]
+        case let .seek(letters): return ["seek": letters.map { ["letters": $0] } ?? [String: Any]()]
         }
     }
 }
@@ -159,6 +165,16 @@ struct WordchainRunner: Decodable, Equatable {
     let wins: Int
 }
 
+/// A quick race's seek, on its table while it waits for a second seat.
+struct WordchainSeek: Decodable, Equatable {
+    /// Absent is any.
+    var letters: Int?
+    /// When the pool stops offering it (epoch ms); the hub's.
+    let deadlineMs: Int64
+    /// Past its deadline unmatched: out of the pool, the seat kept.
+    let expired: Bool
+}
+
 struct WordchainView: Decodable, Equatable {
     let gameId: String
     let phase: WordchainPhase
@@ -179,6 +195,8 @@ struct WordchainView: Decodable, Equatable {
     /// over. Absent from a hub older than #1732, and for races stored
     /// before puzzles kept one.
     var solution: [String]? = nil
+    /// A quick race's table looking for its second seat.
+    var seek: WordchainSeek? = nil
 
     var isPractice: Bool { practice == true }
 }
