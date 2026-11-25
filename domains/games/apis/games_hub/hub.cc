@@ -2599,6 +2599,10 @@ bool GamesHub::EnterPoolLocked(const std::string& player_id, Outbox& outbox, Wri
   StageMemberLocked(room_id, player_id, member->second, writes);
   StageWakeLocked(room_id, writes);
   StageRoomStateLocked(room_id, outbox);
+  // Queued now: the seat's commit flushes the queue, and needs the room's
+  // and member's rows under it.
+  EnqueueWritesLocked(writes);
+  writes = {};
   return true;
 }
 
