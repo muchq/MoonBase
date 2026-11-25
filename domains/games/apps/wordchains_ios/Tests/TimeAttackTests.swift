@@ -104,7 +104,7 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertEqual(late.submitWord("cot", now: at(50)), .valid)
         XCTAssertEqual(late.submitWord("cog", now: at(50)), .valid)
         XCTAssertEqual(late.submitWord("dog", now: at(60)), .timeUp)
-        XCTAssertEqual(late.timeAttackSummary, TimeAttackSummary(solved: 0, score: 0, best: 0, isNewBest: false))
+        XCTAssertEqual(late.timeAttackSummary, TimeAttackSummary(solved: 0, score: 0, best: 150, isNewBest: false), "The early sprint set the best")
     }
 
     // MARK: - Advancing
