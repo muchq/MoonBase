@@ -8,10 +8,12 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/time/time.h"
 #include "domains/games/apis/games_hub/stream_test_fixture.h"
 #include "domains/games/apis/games_hub/wordchain_adapter.h"
+#include "domains/games/libs/wordchain_race/lexicon.h"
 
 namespace games_hub {
 namespace {
@@ -105,6 +107,7 @@ TEST_F(QuickRaceFixture, ALoneSeekWaitsAtAPublicTableOnTheHubsDeadline) {
 }
 
 TEST_F(QuickRaceFixture, TwoSeeksMeetAndTheRaceStartsByItselfThreeSecondsLater) {
+  CaptureEvents();
   auto ann = Ready();
   auto bob = Ready();
   ASSERT_TRUE(ann.has_value() && bob.has_value());
@@ -114,9 +117,11 @@ TEST_F(QuickRaceFixture, TwoSeeksMeetAndTheRaceStartsByItselfThreeSecondsLater) 
   ASSERT_TRUE(bobs.has_value());
   EXPECT_EQ(bobs->gameId, anns->gameId);
 
+  std::optional<WordchainView> race;
   for (Seat* seat : {&*ann, &*bob}) {
     auto view = Started(*seat);
     ASSERT_TRUE(view.has_value());
+    race = view;
     EXPECT_EQ(view->phase, "racing");
     EXPECT_FALSE(view->practice);
     EXPECT_EQ(view->runners.size(), 2u);
@@ -130,6 +135,24 @@ TEST_F(QuickRaceFixture, TwoSeeksMeetAndTheRaceStartsByItselfThreeSecondsLater) 
   auto early = ReceiveCase(ann->stream, "commandRejected");
   ASSERT_TRUE(early.has_value());
   EXPECT_EQ(early->as_commandRejected_or_null()->reason, "the race starts in a moment");
+
+  // At the start, the ladder's first rung is taken.
+  now_ms_ += 3000;
+  const auto ladder =
+      wordchain_race::EnableLexicon().words.shortestPath(*race->start, *race->target);
+  ASSERT_TRUE(ladder.has_value());
+  ASSERT_TRUE(ann->stream.Send(Play((*ladder)[1])).ok());
+  auto played = ReceiveWordchain(ann->stream, "gameState");
+  ASSERT_TRUE(played.has_value());
+  const auto& mine = played->as_gameState_or_null()->view.runners[0];
+  EXPECT_EQ(mine.playerId, ann->player_id);
+  EXPECT_EQ(mine.ladder, std::vector<std::string>{(*ladder)[1]});
+
+  // Recorded as any wordchain race is.
+  const std::vector<std::string> lines = GameLines();
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_NE(lines[0].find(R"("event":"game_started")"), std::string::npos) << lines[0];
+  EXPECT_NE(lines[0].find(R"("variant":"wordchain","players":2)"), std::string::npos) << lines[0];
 }
 
 TEST_F(QuickRaceFixture, AThirdSeekOpensATableOfItsOwn) {
