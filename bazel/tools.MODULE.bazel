@@ -40,8 +40,8 @@ http_jar(
 http_file = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_file")
 
 # ENABLE, the public-domain word list (2000), as Peter Norvig hosts it: every
-# word a word ladder race accepts. It has plurals and inflections, which a
-# race needs and Webster's Second lacks.
+# word wordchains accepts, in races and single-player alike. It has plurals
+# and inflections, which a ladder needs and Webster's Second lacks.
 http_file(
     name = "enable_words",
     downloaded_file_path = "enable1.txt",
