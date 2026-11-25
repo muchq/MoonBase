@@ -141,12 +141,16 @@ struct WordInputView: View {
     // MARK: - Feedback Banner
 
     private func feedbackBanner(_ message: String) -> some View {
-        Text(message)
-            .font(Theme.captionFont)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .accessibilityIdentifier("word-feedback")
-            .accessibilityAddTraits(.updatesFrequently)
+        HStack(spacing: 6) {
+            Image(systemName: feedbackIcon)
+                .font(.system(size: 13, weight: .semibold))
+            Text(message)
+                .font(Theme.captionFont)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .accessibilityIdentifier("word-feedback")
+                .accessibilityAddTraits(.updatesFrequently)
+        }
         .foregroundStyle(Theme.errorRed)
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -154,6 +158,17 @@ struct WordInputView: View {
             Capsule()
                 .fill(Theme.errorRed.opacity(0.1))
         )
+    }
+
+    private var feedbackIcon: String {
+        switch game.lastResult {
+        case .notInDictionary: return "book.closed"
+        case .notOneLetterAway: return "1.circle"
+        case .alreadyUsed: return "arrow.uturn.backward"
+        case .wrongLength: return "ruler"
+        case .noRoute: return "lightbulb.slash"
+        default: return "exclamationmark.triangle"
+        }
     }
 
     // MARK: - Actions
