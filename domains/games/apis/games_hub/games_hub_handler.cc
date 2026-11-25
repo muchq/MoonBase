@@ -4,6 +4,7 @@
 #include <utility>
 
 #include "absl/status/statusor.h"
+#include "domains/games/apis/games_hub/client_tag.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
 #include "opal/core/error.h"
 
@@ -31,6 +32,7 @@ opal::Outcome<moonbase::games::GetSessionOutput> GamesHubHandler::GetSession(
   absl::StatusOr<std::string> ticket = vault_->IssueTicket(player_id);
   if (!ticket.ok()) return opal::Error::Unknown("credential store unavailable");
 
+  hub_->CountSessionMint(ClientTagOf(input.client));
   moonbase::games::GetSessionOutput output;
   output.playerId = player_id;
   output.ticket = *std::move(ticket);

@@ -122,7 +122,7 @@ final class HubSocket: HubTransport {
     }
 
     private func mint(resumeToken: String?) async throws -> HubSession {
-        var request = URLRequest(url: HubEndpoints.sessionURL(play: playURL), timeoutInterval: Self.mintTimeout)
+        var request = URLRequest(url: HubEndpoints.sessionURL(play: playURL, client: HubEndpoints.appClient), timeoutInterval: Self.mintTimeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.httpBody = HubEndpoints.mintBody(resumeToken: resumeToken)

@@ -331,6 +331,10 @@ var serviceRegistry = map[string]serviceEntry{
 			scalar("Sessions", "hub_active", "sessions", `sum(hub_sessions_active_gauge)`),
 			counter("Sessions", "hub_started", "", `hub_sessions_total`),
 			counter("Sessions", "hub_resumed", "", `hub_sessions_total{resumed="true"}`),
+			// The app's mints (client_tag.h). The web's, other callers' and
+			// each app version's ride the same series, queried rather than
+			// tiled: the page is at its query budget.
+			counter("Sessions", "hub_mints_ios", "", `hub_session_mints_total{client="ios"}`),
 			counter("Sessions", "hub_refused", "", `hub_admissions_refused_total`),
 			counter("Sessions", "hub_disconnects", "", `hub_disconnects_total`),
 			counter("Sessions", "hub_seats_expired", "", `hub_seats_expired_total`),

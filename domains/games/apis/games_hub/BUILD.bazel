@@ -1002,6 +1002,7 @@ cc_library(
         ":chat_store",
         ":chess_archive",
         ":chess_bots",
+        ":client_tag",
         ":display_name",
         ":game_events",
         ":games_hub_smithy_server",
@@ -1045,6 +1046,26 @@ cc_library(
     ],
 )
 
+# Who minted a session, as a bounded metric label.
+cc_library(
+    name = "client_tag",
+    srcs = ["client_tag.cc"],
+    hdrs = ["client_tag.h"],
+    deps = [":hub_metrics"],
+)
+
+cc_test(
+    name = "client_tag_test",
+    size = "small",
+    srcs = ["client_tag_test.cc"],
+    data = ["//domains/games/apps/wordchains_ios:Info.plist"],
+    deps = [
+        ":client_tag",
+        "@bazel_tools//tools/cpp/runfiles",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The generated service's one handler: session identity, and the
 # one Play stream forwarded whole to GamesHub.
 cc_library(
@@ -1052,6 +1073,7 @@ cc_library(
     srcs = ["games_hub_handler.cc"],
     hdrs = ["games_hub_handler.h"],
     deps = [
+        ":client_tag",
         ":games_hub_smithy_server",
         ":hub",
         ":hub_metrics",

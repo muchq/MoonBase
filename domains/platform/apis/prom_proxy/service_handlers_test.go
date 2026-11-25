@@ -144,7 +144,7 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	assert.Equal(t, "Lobby", response.Custom[12].Title)
 	assert.Equal(t, "Games", response.Custom[13].Title)
 	assert.Len(t, response.Custom[0].Metrics, 1)
-	assert.Len(t, response.Custom[1].Metrics, 7)
+	assert.Len(t, response.Custom[1].Metrics, 8)
 	assert.Len(t, response.Custom[2].Metrics, 4)
 	assert.Len(t, response.Custom[3].Metrics, 5)
 	require.Len(t, response.Custom[4].Metrics, 2)
@@ -163,36 +163,36 @@ func TestMetricsHandler_GetServiceMetrics_MapsEveryFieldDistinctly(t *testing.T)
 	// A gauge: one form, so no toggle offered.
 	assert.Equal(t, CustomMetricValue{Label: "hub_active", Value: 201.0, Unit: "sessions"},
 		response.Custom[1].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "hub_commands", Value: 208.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "hub_commands", Value: 209.0, Toggleable: true},
 		response.Custom[2].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "hub_rejections", Value: 210.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "hub_rejections", Value: 211.0, Toggleable: true},
 		response.Custom[2].Metrics[2])
-	// Chat starts at CustomScalars index 12, so its first value is 200+12.
-	assert.Equal(t, CustomMetricValue{Label: "messages", Value: 212.0, Toggleable: true},
+	// Chat starts at CustomScalars index 13, so its first value is 200+13.
+	assert.Equal(t, CustomMetricValue{Label: "messages", Value: 213.0, Toggleable: true},
 		response.Custom[3].Metrics[0])
-	// The tenants' envelopes from index 17 (#1490): golf, castle, rummy,
+	// The tenants' envelopes from index 18 (#1490): golf, castle, rummy,
 	// chess, pong, spades, go, wordchain, the lobby.
 	// Labels carry the game prefix so a tile's label names it across the
 	// whole service, not just its group.
-	assert.Equal(t, CustomMetricValue{Label: "golf_commands", Value: 217.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "golf_commands", Value: 218.0, Toggleable: true},
 		response.Custom[4].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "castle_commands", Value: 219.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "castle_commands", Value: 220.0, Toggleable: true},
 		response.Custom[5].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "rummy_commands", Value: 221.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "rummy_commands", Value: 222.0, Toggleable: true},
 		response.Custom[6].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "chess_commands", Value: 223.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "chess_commands", Value: 224.0, Toggleable: true},
 		response.Custom[7].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "pong_commands", Value: 225.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "pong_commands", Value: 226.0, Toggleable: true},
 		response.Custom[8].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "spades_commands", Value: 227.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "spades_commands", Value: 228.0, Toggleable: true},
 		response.Custom[9].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "go_commands", Value: 229.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "go_commands", Value: 230.0, Toggleable: true},
 		response.Custom[10].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "wordchain_commands", Value: 231.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "wordchain_commands", Value: 232.0, Toggleable: true},
 		response.Custom[11].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "lobby_commands", Value: 233.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "lobby_commands", Value: 234.0, Toggleable: true},
 		response.Custom[12].Metrics[0])
-	assert.Equal(t, CustomMetricValue{Label: "games_started", Value: 235.0, Toggleable: true},
+	assert.Equal(t, CustomMetricValue{Label: "games_started", Value: 236.0, Toggleable: true},
 		response.Custom[13].Metrics[0])
 	// The omitted query's descriptor survives with a zero value.
 	last := response.Custom[13].Metrics[3]
@@ -735,7 +735,7 @@ func TestMetricsHandler_GetServiceMetrics_RateViewSelectsTheRateForm(t *testing.
 	// answers "" and "rows".
 	assert.Equal(t, "/s", byLabel["hub_commands"].Unit)
 	assert.Equal(t, "rows/s", byLabel["delivered_rows"].Unit)
-	assert.Equal(t, 308.0, byLabel["hub_commands"].Value)
+	assert.Equal(t, 309.0, byLabel["hub_commands"].Value)
 
 	// The fixed-form tiles are untouched by the view: a gauge has no rate, and
 	// the windowed mean is already a ratio of two rates.

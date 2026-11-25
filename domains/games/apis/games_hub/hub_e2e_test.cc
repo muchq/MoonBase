@@ -421,6 +421,26 @@ class HubGameFixture : public GamesHubStreamFixture {};
 
 namespace {
 
+// Every mint is counted under who asked, as its `client` query says:
+// the web, an app version, or other.
+TEST_F(GamesHubStreamFixture, AMintIsCountedUnderTheClientThatAskedForIt) {
+  for (const std::optional<std::string>& client :
+       {std::optional<std::string>("web"), std::optional<std::string>("ios/0.1.9"),
+        std::optional<std::string>("ios/9.9.9"), std::optional<std::string>(std::nullopt),
+        std::optional<std::string>("android/1.0.0")}) {
+    moonbase::games::GetSessionInput input;
+    input.client = client;
+    ASSERT_TRUE(client_->GetSession(input).ok()) << client.value_or("(none)");
+  }
+  const auto mints = [this](const char* client, const char* version) {
+    return metrics_->CounterTotal("hub_session_mints", {{"client", client}, {"version", version}});
+  };
+  EXPECT_EQ(mints("web", "none"), 1);
+  EXPECT_EQ(mints("ios", "0.1.9"), 1);
+  EXPECT_EQ(mints("ios", "other"), 1);
+  EXPECT_EQ(mints("other", "none"), 2);
+}
+
 TEST_F(GamesHubStreamFixture, SessionMintsDistinctPlayersAndResumeTokenRoundTrips) {
   moonbase::games::GetSessionInput input;
   auto first = client_->GetSession(input);
@@ -2191,6 +2211,10 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"hub_seats_expired", {}},
       {"hub_sessions", {{"resumed", "true"}}},
       {"hub_sessions", {{"resumed", "false"}}},
+      {"hub_session_mints", {{"client", "web"}, {"version", "none"}}},
+      {"hub_session_mints", {{"client", "ios"}, {"version", "0.1.9"}}},
+      {"hub_session_mints", {{"client", "ios"}, {"version", "other"}}},
+      {"hub_session_mints", {{"client", "other"}, {"version", "none"}}},
       {"bot_requests", {{"bot", "microgpt"}, {"result", "ok"}}},
       {"bot_requests", {{"bot", "microgpt"}, {"result", "empty"}}},
       {"bot_requests", {{"bot", "microgpt"}, {"result", "busy"}}},

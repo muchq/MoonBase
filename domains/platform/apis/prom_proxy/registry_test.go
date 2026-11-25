@@ -539,6 +539,7 @@ var gamesHubExportedNames = map[string]bool{
 	"hub_seats_expired_total":         true,
 	"hub_sessions_active_gauge":       true,
 	"hub_sessions_total":              true,
+	"hub_session_mints_total":         true,
 	// The tenants' envelopes (#1490): each game's inner cases on its own
 	// series.
 	"golf_commands_total":      true,
@@ -620,6 +621,10 @@ func TestGamesHubQueriesNameRealInstruments(t *testing.T) {
 	for _, match := range regexp.MustCompile(`outcome="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
 		assert.Contains(t, []string{"completed", "abandoned"}, match[1],
 			"games_hub declares no games_finished outcome=%q", match[1])
+	}
+	for _, match := range regexp.MustCompile(`client="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
+		assert.Contains(t, []string{"web", "ios", "other"}, match[1],
+			"games_hub declares no hub_session_mints client=%q", match[1])
 	}
 	for _, match := range regexp.MustCompile(`resumed="([^"]*)"`).FindAllStringSubmatch(joined, -1) {
 		assert.Contains(t, []string{"true", "false"}, match[1],

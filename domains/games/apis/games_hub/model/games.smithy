@@ -177,6 +177,11 @@ operation GetSession {
 /// the same playerId; absent or expired mints a fresh player.
 structure SessionRequest {
     resumeToken: String
+
+    /// Who is asking: `web`, or `ios/<version>`. It labels the mint's
+    /// metric and nothing else; absent or unknown counts as other.
+    @httpQuery("client")
+    client: String
 }
 
 /// The two credentials of the blessed browser auth (opal-cpp ADR-0018):
