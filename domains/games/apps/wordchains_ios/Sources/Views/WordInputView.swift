@@ -5,12 +5,15 @@ struct WordInputView: View {
     @State private var inputText = ""
     @State private var shakeAttempt = 0
     @FocusState private var isFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Nil under Reduce Motion, so state changes land without movement.
+    private var motion: Animation? { reduceMotion ? nil : Theme.quickSpring }
 
     var body: some View {
         VStack(spacing: 12) {
-            if !game.feedbackMessage.isEmpty {
-                feedbackBanner
-            }
+            // Always laid out, so an error never shifts the input row.
+            feedbackBanner
 
             HStack(spacing: 12) {
                 undoButton
@@ -25,6 +28,7 @@ struct WordInputView: View {
             Theme.cardBackground
                 .shadow(color: .black.opacity(0.1), radius: 20, y: -8)
         )
+        .onChange(of: game.feedbackMessage) { _, message in announce(message) }
     }
 
     // MARK: - Text Field
@@ -76,12 +80,13 @@ struct WordInputView: View {
 
     private var undoButton: some View {
         Button {
-            withAnimation(Theme.quickSpring) { game.undo() }
+            withAnimation(motion) { game.undo() }
             inputText = ""
         } label: {
             Image(systemName: "arrow.uturn.backward")
                 .font(.system(size: 18, weight: .semibold))
-                .frame(width: 36, height: 36)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .disabled(!game.canUndo)
         .buttonStyle(.plain)
@@ -99,19 +104,21 @@ struct WordInputView: View {
                 .foregroundStyle(
                     inputText.isEmpty ? Color.secondary : Theme.gradientStart
                 )
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .disabled(inputText.isEmpty)
         .buttonStyle(.plain)
+        .accessibilityLabel("Submit")
+        .accessibilityIdentifier("word-submit")
     }
 
     // MARK: - Hint Button
 
     private var hintButton: some View {
         Button {
-            if let hint = game.hint() {
-                withAnimation(Theme.quickSpring) {
-                    inputText = hint
-                }
+            if let hint = game.requestHint() {
+                withAnimation(motion) { inputText = hint }
             }
         } label: {
             Image(systemName: "lightbulb.fill")
@@ -122,6 +129,8 @@ struct WordInputView: View {
                     Circle()
                         .fill(Theme.hintBlue.opacity(0.12))
                 )
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Hint")
@@ -134,8 +143,11 @@ struct WordInputView: View {
         HStack(spacing: 6) {
             Image(systemName: feedbackIcon)
                 .font(.system(size: 13, weight: .semibold))
-            Text(game.feedbackMessage)
+            // A space keeps the row's height while there is nothing to say.
+            Text(game.feedbackMessage.isEmpty ? " " : game.feedbackMessage)
                 .font(Theme.captionFont)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .accessibilityIdentifier("word-feedback")
         }
         .foregroundStyle(Theme.errorRed)
@@ -145,7 +157,9 @@ struct WordInputView: View {
             Capsule()
                 .fill(Theme.errorRed.opacity(0.1))
         )
-        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .opacity(game.feedbackMessage.isEmpty ? 0 : 1)
+        .accessibilityHidden(game.feedbackMessage.isEmpty)
+        .accessibilityAddTraits(.updatesFrequently)
     }
 
     private var feedbackIcon: String {
@@ -154,6 +168,7 @@ struct WordInputView: View {
         case .notOneLetterAway: return "character.cursor.ibeam"
         case .alreadyUsed: return "arrow.uturn.backward"
         case .wrongLength: return "ruler"
+        case .noRoute: return "lightbulb.slash"
         default: return "exclamationmark.triangle"
         }
     }
@@ -166,16 +181,22 @@ struct WordInputView: View {
         let result = game.submitWord(inputText)
 
         switch result {
-        case .gameComplete:
+        case .gameComplete, .noRoute:
             return
         case .valid, .reachedTarget:
             inputText = ""
         case .notInDictionary, .notOneLetterAway, .alreadyUsed, .wrongLength:
-            withAnimation(Theme.quickSpring) {
-                shakeAttempt += 1
+            if !reduceMotion {
+                withAnimation(Theme.quickSpring) { shakeAttempt += 1 }
             }
             hapticError()
         }
+    }
+
+    private func announce(_ message: String) {
+        #if os(iOS)
+        if !message.isEmpty { AccessibilityNotification.Announcement(message).post() }
+        #endif
     }
 
     private func hapticError() {

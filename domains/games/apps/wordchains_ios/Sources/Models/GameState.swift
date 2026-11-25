@@ -71,6 +71,7 @@ enum InputResult {
     case wrongLength
     case reachedTarget
     case gameComplete
+    case noRoute
 }
 
 @Observable
@@ -202,6 +203,14 @@ final class GameState {
         return path.count > 1 ? path[1] : nil
     }
 
+    /// `hint()`, but a dead end leaves a message instead of nothing.
+    func requestHint() -> String? {
+        let next = hint()
+        lastResult = next == nil ? .noRoute : nil
+        showInvalidShake = false
+        return next
+    }
+
     var canUndo: Bool { !isComplete && chain.count > 1 }
 
     func undo() {
@@ -274,6 +283,7 @@ final class GameState {
         case .alreadyUsed: return "Already in the chain"
         case .wrongLength: return "Must be \(difficulty.letterCount) letters"
         case .gameComplete: return "Puzzle complete"
+        case .noRoute: return "No unused route. Undo to try another path."
         case .valid, .reachedTarget, .none: return ""
         }
     }
