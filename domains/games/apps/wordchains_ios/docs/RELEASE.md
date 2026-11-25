@@ -81,11 +81,13 @@ bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
 
 Before submitting to the App Store, verify these scenarios:
 
-- [ ] **Quick Play** — start a game, enter valid words, reach the target word
+- [ ] **Quick Play** — tap a letter tile, type its replacement, tap Play, reach the target word; accepted letters animate into the chain with a light haptic
+- [ ] **Letter editing** — typing again replaces the selected letter, backspace restores it, selecting a different tile starts from the current word; check 3/4/5-letter puzzles, VoiceOver, and Reduce Motion
+- [ ] **Undo** — removes the last move and clears the draft/hint/error; disabled at the start and unavailable after completion
 - [ ] **Daily Challenge** — same puzzle generates for the same date
 - [ ] **Time Attack** — timer counts down, new puzzle loads after solving
 - [ ] **Input validation** — wrong length, not in dictionary, not one-letter-away, already used
-- [ ] **Hint system** — lightbulb button fills the next word on the shortest path
+- [ ] **Hint system** — Hint highlights the letter to change; Reveal fills its replacement without submitting; hints avoid used words and suggest Undo when no unused route remains
 - [ ] **Scoring** — optimal solve gives 150 pts (100 base + 50 bonus), extra steps reduce score
 - [ ] **Difficulty levels** — Easy (3 letters), Medium (4), Hard (5)
 - [ ] **Dark mode** — colors remain readable in dark appearance

@@ -72,6 +72,12 @@ enum InputResult {
     case reachedTarget
 }
 
+enum WordHint: Equatable {
+    case letter(Int)
+    case word(String)
+    case unavailable
+}
+
 @Observable
 final class GameState {
     var graph: WordGraph?
@@ -100,6 +106,7 @@ final class GameState {
 
     // Animation triggers
     var lastResult: InputResult?
+    private(set) var currentHint: WordHint?
     var showInvalidShake = false
     var showCompletionCelebration = false
 
@@ -129,6 +136,7 @@ final class GameState {
         self.score = 0
         self.showCompletionCelebration = false
         self.lastResult = nil
+        self.currentHint = nil
 
         guard let generator else { return }
 
@@ -153,6 +161,7 @@ final class GameState {
     }
 
     func submitWord(_ word: String) -> InputResult {
+        guard !isComplete else { return .alreadyUsed }
         let normalized = word.lowercased().trimmingCharacters(in: .whitespaces)
         guard let puzzle = currentPuzzle, let graph else { return .notInDictionary }
         guard let lastWord = chain.last else { return .notInDictionary }
@@ -183,6 +192,7 @@ final class GameState {
 
         chain.append(normalized)
         showInvalidShake = false
+        currentHint = nil
 
         if normalized == puzzle.target {
             completeRound()
@@ -195,9 +205,33 @@ final class GameState {
     }
 
     func hint() -> String? {
-        guard let puzzle = currentPuzzle, let graph, let lastWord = chain.last else { return nil }
-        guard let path = graph.shortestPath(from: lastWord, to: puzzle.target) else { return nil }
+        guard !isComplete, let puzzle = currentPuzzle, let graph, let lastWord = chain.last else { return nil }
+        guard let path = graph.shortestPath(from: lastWord, to: puzzle.target, avoiding: Set(chain.dropLast())) else { return nil }
         return path.count > 1 ? path[1] : nil
+    }
+
+    @discardableResult
+    func requestHint() -> WordHint {
+        lastResult = nil
+        showInvalidShake = false
+        guard let next = hint(), let last = chain.last,
+              let index = zip(last, next).enumerated().first(where: { $0.element.0 != $0.element.1 })?.offset else {
+            currentHint = .unavailable
+            return .unavailable
+        }
+        let result: WordHint = currentHint == nil ? .letter(index) : .word(next)
+        currentHint = result
+        return result
+    }
+
+    var canUndo: Bool { !isComplete && chain.count > 1 }
+
+    func undo() {
+        guard canUndo else { return }
+        chain.removeLast()
+        lastResult = nil
+        showInvalidShake = false
+        currentHint = nil
     }
 
     private func completeRound() {
@@ -237,6 +271,8 @@ final class GameState {
         isComplete = false
         showCompletionCelebration = false
         score = 0
+        lastResult = nil
+        currentHint = nil
     }
 
     func endTimeAttack() {
