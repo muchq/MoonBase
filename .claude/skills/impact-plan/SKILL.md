@@ -1,6 +1,6 @@
 ---
 name: impact-plan
-description: Turn a high-level task into a brief a planning lead / coordinator agent can run with, by first making the user pin down who benefits and how impact is measured. Use when the user wants to kick off a large or multi-agent task, says "plan this", "set up a run for", "write a brief for the coordinator", or hands over a goal vague enough that success can't yet be checked. Not for small, already-specified changes.
+description: Turn a high-level task into a brief a planning lead / coordinator agent can run with, by first making the user pin down who benefits and how impact is measured, then launch a recursive coordinator/executor agent tree to run it. Use when the user wants to kick off a large or multi-agent task, says "plan this", "set up a run for", "write a brief for the coordinator", or hands over a goal vague enough that success can't yet be checked. Not for small, already-specified changes.
 ---
 
 # Impact plan
@@ -11,7 +11,9 @@ nothing. This skill makes success a measurable change for a named beneficiary
 *before* any work is split up, and sizes scope to that change rather than to
 the original wording.
 
-Output: one brief file (template at the end). Nothing gets built in this skill.
+Output: one brief file, then (on the user's go) a tree of coordinator and
+executor agents that runs it. The protocol every node follows is
+[`coordinator.md`](coordinator.md).
 
 ## Ground rules
 
@@ -127,7 +129,9 @@ When they differ cosmetically, pick and say so.
 - **Stop early**: what result would show the approach is wrong? (e.g. the
   first 20% of the migration shows no build-time change.) The coordinator
   needs permission to stop, not just to finish.
-- **Budget**: time, agent count, or cost ceiling if the user has one.
+- **Budget**: wall time, max tree depth (default 3), and a spawn or cost
+  ceiling. Depth 3 at branching 5 is up to 125 executors. Ask the user for a
+  ceiling instead of assuming it is fine.
 
 ## 7. Write the brief
 
@@ -168,25 +172,37 @@ Changed from the original ask: <grown / shrunk / reframed, and why>
 ## Done / stop
 Done when: <...>
 Stop early if: <...>
-Budget: <... | none given>
+Budget: <wall time> · max depth <n> · spawn cap <n>
+Models: coordinators <smart model> · executors <cheaper model>
 
 ## Assumptions and open questions
 - ASSUMED: <...>
 - OPEN: <... — who answers it>
 
 ## Instructions to the coordinator
-- Every workstream names the metric it moves or the guardrail it protects.
-  Work that does neither is cut, not deferred.
-- Run phase 0 first and report its result against the gate before starting
-  anything else. Below threshold → stop and report.
-- Measure after with the same instrument as before. No new methodology
-  mid-run.
-- Each workstream ships a check (test, benchmark, query) that would fail if
-  its claimed impact isn't there.
-- Report against the Impact table, not against task completion.
-- If evidence shows the outcome is unreachable as scoped, stop and report;
-  don't finish the task for its own sake.
+Follow `.claude/skills/impact-plan/coordinator.md`. This brief is the root
+contract: Goal = Outcome, Check = the Impact table and guardrails. Phase 0
+(if any) is the first child, and nothing else starts until its gate passes.
+Every node names the metric it moves or the guardrail it protects; work that
+does neither is cut. Report against the Impact table, not task completion.
 ```
 
 Every field is filled or marked `ASSUMED` / `OPEN`. An empty field means the
 interview isn't done.
+
+## 8. Launch
+
+Show the user the brief's outcome, budget and models, and get an explicit go:
+the run spawns long-lived, paid sessions. Then commit the brief to a branch and
+spawn the root coordinator with the root contract from `coordinator.md`.
+
+- **Cloud** (`create_session` available): one session per node, `model` set
+  by role. Nodes outlive this conversation, can spawn their own children, and
+  report up with `send_message`. Pass each child its contract, the brief path,
+  and the parent's session id.
+- **Local** (Agent tool only): one subagent per node with `model` set by role.
+  If subagents can't spawn subagents in this environment, the tree is one level
+  deep: say so and size the children to fit, rather than pretending to recurse.
+
+Then tell the user where to look on return: `plans/<slug>/tree.md` for status,
+`plans/<slug>/BLOCKED.md` for what needs them.
