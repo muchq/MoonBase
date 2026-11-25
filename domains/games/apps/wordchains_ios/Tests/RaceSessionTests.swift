@@ -245,6 +245,21 @@ final class RaceSessionTests: XCTestCase {
         }
     }
 
+    // A word or table asked for and never sent waits on nothing: the
+    // screen lets it go and says why.
+    func testAFailedSendLetsGoOfWhatWasWaitingAndSaysWhy() {
+        MainActor.assumeIsolated {
+            let (session, transport) = mount()
+            transport.events?.frame(.wordchain(.view(view())))
+            session.play("card")
+            session.joinTable("W2")
+            transport.events?.sendFailed()
+            XCTAssertFalse(session.state.sending)
+            XCTAssertFalse(session.state.opening)
+            XCTAssertEqual(session.state.notice, "Not sent: reconnecting")
+        }
+    }
+
     func testConnectAndDisconnectReachTheTransport() {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
@@ -252,6 +267,30 @@ final class RaceSessionTests: XCTestCase {
             session.disconnect()
             XCTAssertEqual(transport.connects, 1)
             XCTAssertEqual(transport.disconnects, 1)
+        }
+    }
+}
+
+// The real socket's half of a failed send: with no socket to write to, a
+// command is reported failed at once, and nothing else is said.
+final class HubSocketSendTests: XCTestCase {
+    func testASendWithNoSocketIsReportedFailed() {
+        MainActor.assumeIsolated {
+            final class NoTokens: ResumeTokenStore {
+                func load() -> String? { nil }
+                func save(_ token: String) -> Bool { true }
+                func clear() {}
+            }
+            let socket = HubSocket(tokens: NoTokens())
+            var failed = 0, said: [String] = []
+            socket.events = HubTransportEvents(
+                status: { said.append("status \($0)") },
+                frame: { said.append("frame \($0)") },
+                sendFailed: { failed += 1 }
+            )
+            socket.send(.wordchain(.play("card")))
+            XCTAssertEqual(failed, 1)
+            XCTAssertEqual(said, [])
         }
     }
 }

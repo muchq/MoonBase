@@ -80,8 +80,9 @@ check "the app targets iPhone only" \
 check "the plist names no iPad orientations" bash -c '! grep -q "~ipad" "$1"' _ "$PLIST"
 
 # Apple rejects an upload (ITMS-91053) whose code calls a required-reason
-# API its privacy manifest doesn't declare. UserDefaults holds the hub's
-# resume token; CA92.1 is "read and written by this app only".
+# API its privacy manifest doesn't declare. UserDefaults holds a resume
+# token from 0.1.2 or earlier until it moves to the Keychain; CA92.1 is
+# "read and written by this app only".
 MANIFEST=$PKG/Sources/Resources/PrivacyInfo.xcprivacy
 # -R: runfiles are symlinks, which -r skips.
 if grep -Rqw UserDefaults "$PKG/Sources"; then

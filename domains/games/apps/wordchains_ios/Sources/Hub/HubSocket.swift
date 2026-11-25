@@ -5,15 +5,14 @@ import FoundationNetworking
 
 /// The hub's stream over URLSession: mint a session, open the socket with
 /// its ticket, read frames until it drops, and dial again on the web's
-/// schedule (ReconnectPolicy). The resume token is the player, kept in
-/// UserDefaults so a relaunch, or a drop, comes back to the same seat
-/// within the hub's grace.
+/// schedule (ReconnectPolicy). The resume token is the player, kept in the
+/// Keychain (ResumeToken) so a relaunch, or a drop, comes back to the same
+/// seat within the hub's grace.
 ///
 /// A native client sends no Origin header, which the hub's origin gate
 /// admits (games_hub smithy_contract_test, RequireOriginContract).
 @MainActor
 final class HubSocket: HubTransport {
-    static let resumeTokenKey = "games_hub_resume_token"
     private static let mintTimeout: TimeInterval = 10
     /// How the hub closes a wire whose seat a newer connection took.
     private static let supersededCloseCode = 4001
@@ -22,24 +21,37 @@ final class HubSocket: HubTransport {
 
     private let playURL: URL
     private let urlSession: URLSession
-    private let defaults: UserDefaults
+    private let tokens: ResumeTokenStore
     private var dialer = Dialer()
     private var socket: URLSessionWebSocketTask?
     private var tasks: [Task<Void, Never>] = []
 
-    init(playURL: URL = HubEndpoints.production, urlSession: URLSession = .shared, defaults: UserDefaults = .standard) {
+    init(playURL: URL = HubEndpoints.production, urlSession: URLSession = .shared, tokens: ResumeTokenStore = ResumeToken.store()) {
         self.playURL = playURL
         self.urlSession = urlSession
-        self.defaults = defaults
+        self.tokens = tokens
     }
 
     func connect() { run(dialer.connect()) }
     func disconnect() { run(dialer.disconnect()) }
     func resume() { run(dialer.resume()) }
 
+    /// A command that can't go out, or fails on the way, is reported so
+    /// the session stops waiting on its answer.
     func send(_ command: HubCommand) {
-        guard let socket else { return }
-        socket.send(.string(String(decoding: command.encoded(), as: UTF8.self))) { _ in }
+        guard let socket else {
+            events?.sendFailed()
+            return
+        }
+        socket.send(.string(String(decoding: command.encoded(), as: UTF8.self))) { [weak self] error in
+            guard error != nil else { return }
+            Task { @MainActor in
+                // A socket a reconnect replaced has no say: its failure is
+                // not the newer send's.
+                guard let self, self.socket === socket else { return }
+                self.events?.sendFailed()
+            }
+        }
     }
 
     /// Carries out what the Dialer decided; it alone decides.
@@ -68,14 +80,14 @@ final class HubSocket: HubTransport {
     private func dial(_ gen: Int) async {
         let minted: HubSession
         do {
-            minted = try await mint(resumeToken: defaults.string(forKey: Self.resumeTokenKey))
+            minted = try await mint(resumeToken: tokens.load())
         } catch {
             run(dialer.dropped(gen))
             return
         }
         // Hung up, or replaced, during the mint: no socket.
         guard dialer.isCurrent(gen) else { return }
-        defaults.set(minted.resumeToken, forKey: Self.resumeTokenKey)
+        _ = tokens.save(minted.resumeToken)
         socket?.cancel(with: .goingAway, reason: nil)
         let socket = urlSession.webSocketTask(
             with: HubEndpoints.socketURL(play: playURL, ticket: minted.ticket),
