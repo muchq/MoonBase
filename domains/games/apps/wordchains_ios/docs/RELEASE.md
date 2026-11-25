@@ -78,9 +78,7 @@ bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
 > your Xcode SDK version. If you see "No simulator runtime version available",
 > install the matching runtime: **Xcode > Settings > Platforms > + (iOS)**.
 
-`WordChainsUITests` exercises the real app's keyboard focus, progressive hints,
-Undo, and invalid-word layout, and captures the error state with the keyboard
-visible. Set `--ios_simulator_version` to an installed runtime for local runs.
+`WordChainsUITests` exercises the real app's typed word entry, hint, and Undo. Set `--ios_simulator_version` to an installed runtime for local runs.
 Simulator tests cannot validate physical haptic feel; check that on an iPhone.
 CI runs it apart from `test-ios`, in the iOS UI tests workflow: on main after a
 `wordchains_ios` change, and on a PR labelled `ios-ui`.
@@ -89,13 +87,12 @@ CI runs it apart from `test-ios`, in the iOS UI tests workflow: on main after a
 
 Before submitting to the App Store, verify these scenarios:
 
-- [ ] **Quick Play** — tap a letter tile, type its replacement, tap Play, reach the target word; accepted letters animate into the chain with a light haptic
-- [ ] **Letter editing** — typing again replaces the selected letter, backspace restores it, selecting a different tile starts from the current word; check 3/4/5-letter puzzles, VoiceOver, and Reduce Motion
-- [ ] **Undo** — removes the last move and clears the draft/hint/error; disabled at the start and unavailable after completion
+- [ ] **Quick Play** — start a game, type valid words, reach the target word
+- [ ] **Undo** — removes the last move and clears the field/error; disabled at the start and unavailable after completion
 - [ ] **Daily Challenge** — same puzzle generates for the same date
 - [ ] **Time Attack** — timer counts down, new puzzle loads after solving (currently tracked in [#1745](https://github.com/muchq/MoonBase/issues/1745))
 - [ ] **Input validation** — wrong length, not in dictionary, not one-letter-away, already used
-- [ ] **Hint system** — Hint highlights the letter to change; Reveal fills its replacement without submitting; hints avoid used words and suggest Undo when no unused route remains
+- [ ] **Hint system** — lightbulb fills the next word on the shortest unused path
 - [ ] **Scoring** — optimal solve gives 150 pts (100 base + 50 bonus), extra steps reduce score
 - [ ] **Free Undo** — in every solo mode, explore a detour, undo it, then finish optimally: the final chain still earns 150 points. Undo intentionally carries no score penalty and encourages experimentation.
 - [ ] **Difficulty levels** — Easy (3 letters), Medium (4), Hard (5)
