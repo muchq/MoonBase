@@ -59,9 +59,9 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertEqual(field.value as? String, "zzzzza", "Typing still lands in the field")
     }
 
-    // The field once handed one Return over twice, and the second copy
-    // reported the accepted word as already in the chain.
-    func testReturnOnAValidWordSubmitsOnceAndClearsTheField() {
+    // An accepted word leaves the field on screen, not just in the model:
+    // a stale word would ride along with the next keystroke.
+    func testReturnOnAValidWordClearsTheFieldWithNoError() {
         let app = startPuzzle()
         let field = wordInput(app)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))

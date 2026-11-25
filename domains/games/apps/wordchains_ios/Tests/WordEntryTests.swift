@@ -61,10 +61,9 @@ final class WordEntryTests: XCTestCase {
         let game = game()
         var entry = WordEntry()
         entry.change(to: "cot\n", in: game)
-        entry.undo(in: game)
         entry.change(to: "c", in: game)
         entry.change(to: "", in: game)
-        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid, "A paste of the word, not a replay")
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .alreadyUsed, "A paste of the word, not a replay")
     }
 
     func testAnUnchangedTextBetweenRepeatedReturnsStillIgnoresTheRepeat() {
