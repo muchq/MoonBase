@@ -7,12 +7,16 @@ import SwiftUI
 struct RaceLobbyView: View {
     @State private var session = RaceSession(transport: HubSocket())
     @State private var code = ""
+    /// The quick race's letters; nil for any.
+    @State private var quickLetters: Int?
     @State private var backgrounded = false
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
-            if let table = session.state.table {
+            if session.state.inQuickRace {
+                quickRace
+            } else if let table = session.state.table {
                 RaceTableView(session: session, table: table)
             } else {
                 lobby
@@ -37,6 +41,27 @@ struct RaceLobbyView: View {
             #if os(iOS)
             if let notice, session.state.table == nil { AccessibilityNotification.Announcement(notice).post() }
             #endif
+        }
+    }
+
+    /// In the pool: the waiting screen until the race's first word, then
+    /// the race table.
+    private var quickRace: some View {
+        TimelineView(.periodic(from: .now, by: 0.25)) { context in
+            let now = Int64(context.date.timeIntervalSince1970 * 1000)
+            if let table = session.state.table {
+                if QuickRace(view: table, viewer: session.state.playerId ?? "").waits(nowMs: now) {
+                    QuickRaceView(session: session, table: table, nowMs: now)
+                } else {
+                    RaceTableView(session: session, table: table)
+                }
+            } else {
+                // Between tables: a seek on its way, or the race's end.
+                VStack(spacing: 16) {
+                    ProgressView("Finding a player…")
+                    Button("Stop", role: .cancel) { session.leaveRoom() }
+                }
+            }
         }
     }
 
@@ -85,14 +110,33 @@ struct RaceLobbyView: View {
 
     private var noRoomCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Race friends up the same ladder, on one clock. Fewest steps wins. Alone at a table, practise.")
+            Text("Race someone new, heads-up: the hub finds you a player.")
+                .font(Theme.bodyFont)
+            Picker("Letters", selection: $quickLetters) {
+                Text("Any").tag(Int?.none)
+                Text("3").tag(Int?.some(3))
+                Text("4").tag(Int?.some(4))
+                Text("5").tag(Int?.some(5))
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Letters")
+            Button {
+                session.seek(letters: quickLetters)
+            } label: {
+                Text("Quick race").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!connected || session.state.opening)
+
+            Divider()
+            Text("Or race friends up the same ladder, on one clock. Fewest steps wins. Alone at a table, practise.")
                 .font(Theme.bodyFont)
             Button {
                 session.createRoom()
             } label: {
                 Text("Create a room").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.bordered)
             .disabled(!connected)
 
             HStack {

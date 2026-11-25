@@ -31,6 +31,12 @@ final class HubWireTests: XCTestCase {
         XCTAssertEqual(text(.wordchain(.retract)), #"{"event":"wordchain","payload":{"move":{"retract":{}}}}"#)
     }
 
+    // Any letters is no field at all: the hub reads an absent one as any.
+    func testASeekNamesItsLettersOrNone() {
+        XCTAssertEqual(text(.wordchain(.seek(letters: nil))), #"{"event":"wordchain","payload":{"move":{"seek":{}}}}"#)
+        XCTAssertEqual(text(.wordchain(.seek(letters: 5))), #"{"event":"wordchain","payload":{"move":{"seek":{"letters":5}}}}"#)
+    }
+
     // MARK: - Frames
 
     func testSessionReadyNamesThePlayerAndAnyResumedRoom() throws {
@@ -117,6 +123,25 @@ final class HubWireTests: XCTestCase {
         XCTAssertEqual(try practice(#","practice":true"#), true)
         XCTAssertEqual(try practice(#","practice":false"#), false)
         XCTAssertEqual(try practice(""), false)
+    }
+
+    // A seek's table carries the seek; any other table, none.
+    func testAViewMayCarryASeek() throws {
+        func seek(_ field: String) throws -> WordchainSeek? {
+            let json = #"{"event":"wordchain","payload":{"update":{"gameJoined":{"view":{"gameId":"W1","phase":"waiting","runners":[],"racesPlayed":0,"practice":false"# + field + "}}}}}"
+            guard case let .wordchain(.view(view)) = try frame(json) else { return nil }
+            return view.seek
+        }
+        XCTAssertEqual(try seek(#","seek":{"letters":4,"deadlineMs":1700000090000,"expired":false}"#),
+                       WordchainSeek(letters: 4, deadlineMs: 1_700_000_090_000, expired: false))
+        XCTAssertEqual(try seek(#","seek":{"deadlineMs":1700000090000,"expired":true}"#),
+                       WordchainSeek(letters: nil, deadlineMs: 1_700_000_090_000, expired: true))
+        XCTAssertNil(try seek(""))
+    }
+
+    // The pool a seek waits in, as the hub names it (games_hub kQuickRoomId).
+    func testThePoolIsTheHubsQuickRoom() {
+        XCTAssertEqual(HubEndpoints.quickRoomId, "quick-wordchain")
     }
 
     // A hub from before #1732, or a race stored before puzzles kept their

@@ -204,6 +204,52 @@ final class RaceSessionTests: XCTestCase {
         }
     }
 
+    // MARK: - Quick race
+
+    func testAQuickRaceSeeksOnTheChosenLettersAndWaitsForItsTable() {
+        MainActor.assumeIsolated {
+            let (session, transport) = mount()
+            session.seek(letters: 5)
+            XCTAssertEqual(transport.sent, [.wordchain(.seek(letters: 5))])
+            XCTAssertTrue(session.state.opening)
+            XCTAssertEqual(session.state.seekLetters, 5)
+            session.seek(letters: nil)
+            XCTAssertEqual(transport.sent.last, .wordchain(.seek(letters: nil)))
+            XCTAssertNil(session.state.seekLetters)
+        }
+    }
+
+    // The pool has no tables of one's choosing and nothing to stay for:
+    // another table is another seek, and getting up leaves the pool.
+    func testInThePoolPlayAgainSeeksAgainAndLeavingLeavesThePool() {
+        MainActor.assumeIsolated {
+            let (session, transport) = mount()
+            session.seek(letters: 3)
+            transport.events?.frame(.roomState(room(HubEndpoints.quickRoomId)))
+            XCTAssertTrue(session.state.inQuickRace)
+            transport.events?.frame(.wordchain(.view(view(.closed))))
+            transport.sent = []
+            session.openTable()
+            XCTAssertEqual(transport.sent, [.wordchain(.seek(letters: 3))])
+            transport.events?.frame(.wordchain(.view(view())))
+            transport.sent = []
+            session.leaveTable()
+            XCTAssertEqual(transport.sent, [.leaveRoom])
+        }
+    }
+
+    // Outside the pool, a table is still a table.
+    func testInARoomPlayAgainAndLeavingAreTheTables() {
+        MainActor.assumeIsolated {
+            let (session, transport) = mount()
+            transport.events?.frame(.roomState(room()))
+            XCTAssertFalse(session.state.inQuickRace)
+            transport.events?.frame(.wordchain(.view(view())))
+            session.leaveTable()
+            XCTAssertEqual(transport.sent, [.wordchain(.leaveGame)])
+        }
+    }
+
     func testRoomCommands() {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
