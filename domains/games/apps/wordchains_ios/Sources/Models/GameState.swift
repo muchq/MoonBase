@@ -104,12 +104,10 @@ final class GameState {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let graph = WordGraph.loadBundled()
-            let ends = PuzzleWords.loadBundled()
+            let generator = graph.map { PuzzleGenerator.bundled(graph: $0) }
             DispatchQueue.main.async {
                 self?.graph = graph
-                if let graph {
-                    self?.generator = PuzzleGenerator(graph: graph, ends: ends)
-                }
+                self?.generator = generator
                 self?.isLoading = false
             }
         }

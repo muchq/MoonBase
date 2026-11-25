@@ -17,6 +17,28 @@ final class PuzzleWordsTests: XCTestCase {
         XCTAssertEqual(PuzzleWords.parse("cat\nDog\n\n  cot \r\n"), ["cat", "dog", "cot"])
     }
 
+    // The app looks the list up by this name, and BUILD bundles it by the
+    // same one (app_store_test checks that side): a rename on either side
+    // would ship the file and silently fall back to any graph word.
+    func testTheListIsLookedUpAsCommonWordsTxt() {
+        XCTAssertEqual(PuzzleWords.fileName, "common_words.txt")
+    }
+
+    func testTheListIsReadFromTheBundleItShipsIn() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("puzzle-words-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "cat\ndog\n".write(to: dir.appendingPathComponent(PuzzleWords.fileName), atomically: true, encoding: .utf8)
+        XCTAssertEqual(PuzzleWords.load(from: try XCTUnwrap(Bundle(url: dir))), ["cat", "dog"])
+    }
+
+    func testABundleWithoutTheListHasNone() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("no-puzzle-words-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertNil(PuzzleWords.load(from: try XCTUnwrap(Bundle(url: dir))))
+    }
+
     // MARK: - Choosing puzzle ends
 
     func testPuzzleEndsAreGraphWordsOfTheLengthOnTheList() {

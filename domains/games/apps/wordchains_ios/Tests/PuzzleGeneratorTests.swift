@@ -21,6 +21,17 @@ final class PuzzleGeneratorTests: XCTestCase {
         }
     }
 
+    // The app builds its generator this way: with the bundle's puzzle words,
+    // never without them while the bundle has them.
+    func testTheAppsGeneratorTakesTheBundlesPuzzleWords() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("generator-words-\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "cat\ndog\n".write(to: dir.appendingPathComponent(PuzzleWords.fileName), atomically: true, encoding: .utf8)
+        let generator = PuzzleGenerator.bundled(graph: graph, in: try XCTUnwrap(Bundle(url: dir)))
+        XCTAssertEqual(generator.ends, ["cat", "dog"])
+    }
+
     func testTheDailyPuzzleStartsAndEndsOnPuzzleWords() {
         let ends: Set<String> = ["cat", "dog", "hat"]
         guard let puzzle = PuzzleGenerator(graph: graph, ends: ends).dailyPuzzle(difficulty: .easy) else {

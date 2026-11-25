@@ -6,6 +6,11 @@ struct PuzzleGenerator {
     /// The words a puzzle may start and end on (PuzzleWords); nil, any graph word.
     var ends: Set<String>? = nil
 
+    /// The app's generator: the graph, with the bundle's puzzle words.
+    static func bundled(graph: WordGraph, in bundle: Bundle = .main) -> PuzzleGenerator {
+        PuzzleGenerator(graph: graph, ends: PuzzleWords.load(from: bundle))
+    }
+
     /// Random puzzle for the given difficulty.
     func randomPuzzle(difficulty: Difficulty) -> Puzzle? {
         let candidates = graph.puzzleEnds(ofLength: difficulty.letterCount, among: ends)
