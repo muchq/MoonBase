@@ -52,12 +52,20 @@ enum class Ending {
 ///     if nobody finished. A finish on par
 ///     (optimal - 1 words) cannot be beaten, so it ends the race.
 ///
+/// How far before a race's start a word is still taken: instances' clocks
+/// differ by about this much, and a countdown is 3 s.
+inline constexpr int64_t kStartSlackMs = 1000;
+
 /// A seat is a runner's place among those still seated, the hub's roster
 /// order: a runner who leaves gives up their seat but stays in the race.
 class Race {
  public:
+  /// The race starts `start_delay_ms` after it opens (a quick race's
+  /// countdown), and its clock runs from the start; nothing is played
+  /// before it.
   [[nodiscard]] static absl::StatusOr<Race> open(std::vector<std::string> players, Puzzle puzzle,
-                                                 int64_t now_ms, int64_t duration_ms);
+                                                 int64_t now_ms, int64_t duration_ms,
+                                                 int64_t start_delay_ms = 0);
   /// The full truth, for a stored row: refused unless every ladder is a
   /// chain from the start that finishes exactly when it reaches the target,
   /// and `ending` is set exactly when the race is over. The dictionary is
@@ -148,7 +156,8 @@ struct RaceScore {
 class Table {
  public:
   [[nodiscard]] static absl::StatusOr<Table> open(std::vector<std::string> players, Puzzle puzzle,
-                                                  int64_t now_ms, int64_t duration_ms);
+                                                  int64_t now_ms, int64_t duration_ms,
+                                                  int64_t start_delay_ms = 0);
   /// The full truth, for a stored row: refused unless a finished race's
   /// line ends the sheet, the table is closed exactly when fewer seats
   /// remain than it stays open with, its race over then, and only a closed table's close
@@ -161,8 +170,8 @@ class Table {
   [[nodiscard]] absl::StatusOr<Table> inRace(
       const std::function<absl::StatusOr<Race>(const Race&)>& change) const;
   /// The next race, for the seated players. Only between races.
-  [[nodiscard]] absl::StatusOr<Table> next(Puzzle puzzle, int64_t now_ms,
-                                           int64_t duration_ms) const;
+  [[nodiscard]] absl::StatusOr<Table> next(Puzzle puzzle, int64_t now_ms, int64_t duration_ms,
+                                           int64_t start_delay_ms = 0) const;
   [[nodiscard]] absl::StatusOr<Table> removePlayer(int seat) const;
 
   /// Closed: too few seats left.

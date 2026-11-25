@@ -2103,6 +2103,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"wordchain_commands", {{"command", "leaveGame"}}},
       {"wordchain_commands", {{"command", "play"}}},
       {"wordchain_commands", {{"command", "retract"}}},
+      {"wordchain_commands", {{"command", "seek"}}},
       {"wordchain_events", {{"event", "gameJoined"}}},
       {"wordchain_events", {{"event", "gameState"}}},
       {"wordchain_events", {{"event", "gameCreated"}}},

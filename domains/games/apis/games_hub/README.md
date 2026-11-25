@@ -689,6 +689,18 @@ no game event, no stats, no wins. The lobby lists the table as waiting,
 and a join ends the practice race and returns the table to waiting for a
 real one. The practiser's leave closes it.
 
+A `seek` is a quick race: one opponent, found in the public pool room
+`quick-wordchain`, which no room code reaches and which has no chat. From
+no room, the seeker enters the pool and takes the second seat of the oldest
+live seek whose letters agree (either may say any; an any seek races the
+joiner's), or opens a seek of their own. A seek's table holds the seek as
+its terms and seats two; it waits for its second seat, never practising,
+and once filled starts by itself on a 3 s countdown, the race's clock
+running from the start. Each seek carries a 90 s deadline the hub sets;
+the clock sweep marks one past it `expired` in the view, and an expired
+seek is never matched. The seeker keeps the seat, and a `seek` from it
+looks again on a fresh deadline. Leaving the room cancels it.
+
 ## Redaction
 
 Each game's view is its adapter's `ViewOf` (`<game>_adapter.cc`), built per

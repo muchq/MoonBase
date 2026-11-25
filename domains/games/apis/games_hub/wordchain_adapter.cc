@@ -110,6 +110,14 @@ moonbase::games::WordchainView Adapter<Table>::ViewOf(const TableContext& contex
   view.practice = table != nullptr && table->practice();
   if (table == nullptr) {
     view.phase = "waiting";
+    if (context.terms.has_value()) {
+      const auto& terms = std::get<WordchainTerms>(*context.terms);
+      moonbase::games::WordchainSeekState seek;
+      if (terms.letters != 0) seek.letters = terms.letters;
+      seek.deadlineMs = terms.deadline_ms;
+      seek.expired = terms.expired;
+      view.seek = std::move(seek);
+    }
     view.racesPlayed = 0;
     for (const std::string& id : context.roster) {
       moonbase::games::WordchainRunner runner;
@@ -192,6 +200,19 @@ Action<Table, Adapter<Table>::Start> Adapter<Table>::Decode(const Move& move, co
     }
     return StartGame<Start>{named, /*next_game=*/true};
   }
+  if (const auto* seek = move.as_seek_or_null()) {
+    WordchainTerms terms;
+    if (seek->letters.has_value()) {
+      if (*seek->letters < wordchain_race::kMinLetters ||
+          *seek->letters > wordchain_race::kMaxLetters) {
+        return Refusal{RejectKind::kInvalid,
+                       absl::StrCat("a race is ", wordchain_race::kMinLetters, " to ",
+                                    wordchain_race::kMaxLetters, " letters")};
+      }
+      terms.letters = *seek->letters;
+    }
+    return Seek{terms};
+  }
   if (move.as_createGame_or_null() != nullptr) return CreateTable{};
   if (const auto* join = move.as_joinGame_or_null()) return JoinTable{join->gameId};
   if (move.as_leaveGame_or_null() != nullptr) return LeaveTable{};
@@ -215,14 +236,51 @@ absl::StatusOr<Table> Adapter<Table>::Open(const OpenContext& context, const Sta
                                            std::deque<cards::Card> deck) {
   auto puzzle = PickFor(start, WordchainSeed(deck));
   if (!puzzle.ok()) return puzzle.status();
-  return Table::open(context.roster, *std::move(puzzle), context.now_ms, start.duration_ms);
+  return Table::open(context.roster, *std::move(puzzle), context.now_ms, start.duration_ms,
+                     start.start_delay_ms);
+}
+
+std::optional<StartGame<Adapter<Table>::Start>> Adapter<Table>::FilledStart(
+    const std::optional<HostedTerms>& terms, const std::optional<EventTag>&) {
+  if (!terms.has_value()) return std::nullopt;
+  Start start;
+  start.start_delay_ms = kQuickCountdownMs;
+  if (const int letters = std::get<WordchainTerms>(*terms).letters; letters != 0) {
+    start.letters = letters;
+  }
+  return StartGame<Start>{start};
+}
+
+nlohmann::json Adapter<Table>::TermsJson(const WordchainTerms& terms) {
+  return {{"letters", terms.letters}, {"deadlineMs", terms.deadline_ms}, {"expired", terms.expired}};
+}
+
+std::optional<WordchainTerms> Adapter<Table>::TermsFromJson(const nlohmann::json& stored) {
+  if (!stored.is_object()) return std::nullopt;
+  const auto letters = stored.find("letters");
+  const auto deadline = stored.find("deadlineMs");
+  const auto expired = stored.find("expired");
+  if (letters == stored.end() || !letters->is_number_integer() || deadline == stored.end() ||
+      !deadline->is_number_integer() || expired == stored.end() || !expired->is_boolean()) {
+    return std::nullopt;
+  }
+  WordchainTerms terms{letters->get<int>(), deadline->get<int64_t>(), expired->get<bool>()};
+  if (terms.letters != 0 &&
+      (terms.letters < wordchain_race::kMinLetters || terms.letters > wordchain_race::kMaxLetters)) {
+    return std::nullopt;
+  }
+  return terms;
+}
+
+std::string Adapter<Table>::TermsLine(const WordchainTerms& terms) {
+  return terms.letters == 0 ? "any letters" : absl::StrCat(terms.letters, " letters");
 }
 
 absl::StatusOr<Table> Adapter<Table>::Next(const Table& table, const Start& start,
                                            const MoveContext& context) {
   auto puzzle = PickFor(start, WordchainSeed(context.deck()));
   if (!puzzle.ok()) return puzzle.status();
-  return table.next(*std::move(puzzle), context.now_ms, start.duration_ms);
+  return table.next(*std::move(puzzle), context.now_ms, start.duration_ms, start.start_delay_ms);
 }
 
 std::string Adapter<Table>::Serialize(const Table& engine) {

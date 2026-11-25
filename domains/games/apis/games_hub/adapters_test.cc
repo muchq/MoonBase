@@ -523,6 +523,29 @@ TEST(WaitingTerms, GoTermsRoundTripAndOnesNoGameCouldOpenOnReadAsNothing) {
   }
 }
 
+// A seek's table, read back from its state column on any instance: its
+// letters, deadline and expiry; letters no race is run on read as nothing.
+TEST(WaitingTerms, WordchainSeeksRoundTripAndLettersNoRaceRunsOnReadAsNothing) {
+  for (const WordchainTerms& terms : {WordchainTerms{}, WordchainTerms{5, 1'700'000'090'000, false},
+                                      WordchainTerms{3, 1'700'000'090'000, true}}) {
+    const nlohmann::json stored = WaitingTermsJson(GameKind::kWordchain, terms);
+    EXPECT_EQ(WaitingTermsFromJson(GameKind::kWordchain, stored), std::optional<HostedTerms>(terms))
+        << stored.dump();
+  }
+  nlohmann::json good = WaitingTermsJson(GameKind::kWordchain, WordchainTerms{});
+  for (const auto& [key, value] : std::vector<std::pair<std::string, nlohmann::json>>{
+           {"letters", 2}, {"letters", 6}, {"letters", "4"}, {"deadlineMs", 1.5}, {"expired", 0}}) {
+    nlohmann::json malformed = good;
+    malformed[key] = value;
+    EXPECT_EQ(WaitingTermsFromJson(GameKind::kWordchain, malformed), std::nullopt)
+        << malformed.dump();
+  }
+  good.erase("expired");
+  EXPECT_EQ(WaitingTermsFromJson(GameKind::kWordchain, good), std::nullopt);
+  EXPECT_EQ(TermsLineOf(GameKind::kWordchain, WordchainTerms{}), "any letters");
+  EXPECT_EQ(TermsLineOf(GameKind::kWordchain, WordchainTerms{4, 0, false}), "4 letters");
+}
+
 TEST(WaitingTerms, TheLobbyListsGoTermsByBoardKomiAndClock) {
   EXPECT_EQ(TermsLineOf(GameKind::kGo, GoTerms{}), "19×19 · komi 6.5 · 10+5");
   EXPECT_EQ(TermsLineOf(GameKind::kGo, GoTerms{9, -3, {90'000, 0}}), "9×9 · komi -3 · 90s+0");

@@ -397,4 +397,38 @@ TEST(TableRestore, APracticeTableIsOpenWithItsOneSeatAndClosedWithout) {
 }
 
 }  // namespace
+// A quick race opens with a countdown: it starts 3 s after it opens, and
+// nothing is played before then, give or take the slack another
+// instance's clock needs. Its clock runs from the start.
+TEST(DelayedStart, AWordBeforeTheStartIsRefusedAndTheClockRunsFromTheStart) {
+  const auto race = Race::open({"ann", "bob"}, kPuzzle, kT0, 3 * kMinute, /*start_delay_ms=*/3000);
+  ASSERT_TRUE(race.ok());
+  EXPECT_EQ(race->startedMs(), kT0 + 3000);
+  EXPECT_EQ(race->deadlineMs(), kT0 + 3000 + 3 * kMinute);
+  const int64_t early = kT0 + 3000 - kStartSlackMs - 1;
+  EXPECT_EQ(race->play(0, "cord", Dict(), early).status(),
+            absl::FailedPreconditionError("the race starts in a moment"));
+  EXPECT_EQ(race->retract(0, kT0).status(),
+            absl::FailedPreconditionError("the race starts in a moment"));
+  EXPECT_TRUE(race->play(0, "cord", Dict(), kT0 + 3000 - kStartSlackMs).ok());
+  EXPECT_TRUE(race->play(0, "cord", Dict(), kT0 + 3000).ok());
+}
+
+TEST(DelayedStart, NoDelayStartsAtOnceAsBefore) {
+  const Race race = Open();
+  EXPECT_EQ(race.startedMs(), kT0);
+  EXPECT_TRUE(race.play(0, "cord", Dict(), kT0).ok());
+}
+
+TEST(DelayedStart, ATableAndItsNextRaceCountDownToo) {
+  const auto table = Table::open({"ann", "bob"}, kPuzzle, kT0, 3 * kMinute, 3000);
+  ASSERT_TRUE(table.ok());
+  EXPECT_EQ(table->race().startedMs(), kT0 + 3000);
+  auto over = table->inRace([](const Race& r) { return r.expire(kT0 + 3000 + 3 * kMinute); });
+  ASSERT_TRUE(over.ok());
+  const auto next = over->next(kPuzzle, kT0 + 10 * kMinute, 3 * kMinute, 3000);
+  ASSERT_TRUE(next.ok());
+  EXPECT_EQ(next->race().startedMs(), kT0 + 10 * kMinute + 3000);
+}
+
 }  // namespace wordchain_race

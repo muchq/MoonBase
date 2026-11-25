@@ -122,6 +122,9 @@ struct HubTestHooks {
 /// sender sees is a message that was stored; remote appends reach local
 /// members through PumpChat on the room's chat wake, and joiners get
 /// SendChatHistory.
+/// The room a wordchain seek waits in: public, and no room code reaches it.
+inline constexpr std::string_view kQuickRoomId = "quick-wordchain";
+
 class GamesHub final {
  public:
   using Registry = opal::server::SessionRegistry<moonbase::games::GameEvents>;
@@ -341,6 +344,9 @@ class GamesHub final {
   /// room, one lands the ending and the rest rebase onto it. Returns how many this
   /// call ended.
   int SweepClocksOnce();
+  /// Marks the pool's unmatched seeks past their deadline expired; how
+  /// many. SweepClocksOnce runs it.
+  int SweepSeeksOnce();
 
   /// Clocked games whose flag the store refused and that wait to be tried
   /// again; for tests.
@@ -545,6 +551,33 @@ class GamesHub final {
   void AddBotMove(const std::string& player_id, const AddBot& bot, GameKind kind);
   /// The table's one seat posts the terms it starts on.
   void PostTermsMove(const std::string& player_id, HostedTerms terms, GameKind kind);
+  /// A quick race: into the pool room, then the second seat of the oldest
+  /// seek that matches, or a seek of one's own; from one's own seek, a
+  /// fresh deadline.
+  void SeekMove(const std::string& player_id, WordchainTerms seek);
+  /// Whether a pool table is a live seek `seek` may take: waiting for its
+  /// second seat, before its deadline, on letters both accept.
+  static bool SeekMatches(const GameEntry& entry, const WordchainTerms& seek, int64_t now_ms);
+  /// Into the pool room from no room, opening it if nobody holds it; false
+  /// when the store could not say. Callers hold mu_.
+  bool EnterPoolLocked(const std::string& player_id, Outbox& outbox, Writes& writes);
+  /// `player_id` takes a seek's second seat, on its letters or theirs.
+  /// Callers hold mu_.
+  std::optional<games_hub::Refusal> TakeSeekLocked(const std::string& player_id,
+                                                   const std::string& game_id,
+                                                   const WordchainTerms& seek, Outbox& outbox,
+                                                   std::function<void()>& filled);
+  /// A seek's terms, as `next` makes them of its waiting entry; nothing
+  /// from `next` refuses. Callers hold mu_.
+  std::optional<games_hub::Refusal> RepostSeekLocked(
+      const GameRef& ref,
+      const std::function<std::optional<WordchainTerms>(const GameEntry&)>& next,
+      Outbox& outbox);
+  /// The table `player_id` opens in their room, on `terms` when given.
+  /// Callers hold mu_.
+  std::optional<games_hub::Refusal> CreateGameLocked(const std::string& player_id, GameKind kind,
+                                                     const std::optional<HostedTerms>& terms,
+                                                     Outbox& outbox);
   /// The start a table makes once its last seat fills (Adapter::
   /// FilledStart), to run once the lock that seated it is released; null
   /// when it makes none. Callers hold mu_.
@@ -643,11 +676,15 @@ class GamesHub final {
   /// A startGame in `E`'s envelope: on a seated table with next_game, its
   /// next game; otherwise StartGameMove.
   template <typename E>
-  void StartMove(const std::string& player_id, StartGame<typename Adapter<E>::Start> request);
+  /// `matched`: the hub's own start of a table that filled (FilledStart),
+  /// the one way a pool table starts.
+  void StartMove(const std::string& player_id, StartGame<typename Adapter<E>::Start> request,
+                 bool matched = false);
   /// The player's table opens on its own game, on `start` if that game is
   /// `E` and on its defaults otherwise.
   template <typename E>
-  void StartGameMove(const std::string& player_id, typename Adapter<E>::Start start);
+  void StartGameMove(const std::string& player_id, typename Adapter<E>::Start start,
+                     bool matched = false);
   /// Every in-game engine move: the transition, then the fan-out (views,
   /// turn change, game end) the result implies. A move on another game's
   /// table is refused.

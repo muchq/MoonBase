@@ -35,6 +35,7 @@ union WordchainMove {
     leaveGame: LeaveGame
     play: WordchainPlay
     retract: WordchainRetract
+    seek: WordchainSeek
 }
 
 /// The race to run; absent fields take 4 letters and 180 seconds.
@@ -56,6 +57,17 @@ structure WordchainPlay {
 
 /// Takes back the sender's last rung, until they finish.
 structure WordchainRetract {}
+
+/// A quick race: one opponent, found in the hub's public pool. The sender
+/// takes the second seat of the oldest seek that matches, or opens one of
+/// their own; the race starts by itself 3 s after the second seat fills.
+/// Sent from a seek of their own that expired, it looks again. Leaving the
+/// room cancels it.
+structure WordchainSeek {
+    /// Absent is any; two seeks match when either is any or both agree.
+    @range(min: 3, max: 5)
+    letters: Integer
+}
 
 /// The wordchain envelope on the event stream.
 structure WordchainEvent {
@@ -150,6 +162,24 @@ structure WordchainView {
     /// recorded. A join ends it, and the table waits to start a real race.
     @required
     practice: Boolean
+
+    /// A quick race's table looking for its second seat; absent elsewhere.
+    seek: WordchainSeekState
+}
+
+/// A seek as its table shows it.
+structure WordchainSeekState {
+    /// Absent is any.
+    letters: Integer
+
+    /// When the pool stops offering it, in epoch milliseconds; the hub's.
+    @required
+    deadlineMs: Long
+
+    /// Past its deadline unmatched: out of the pool, the seat kept. A seek
+    /// sent from the table looks again.
+    @required
+    expired: Boolean
 }
 
 list WordchainRunners {

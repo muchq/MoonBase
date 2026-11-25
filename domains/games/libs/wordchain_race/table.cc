@@ -65,13 +65,16 @@ bool Ahead(const Runner& a, const Runner& b) {
 }  // namespace
 
 absl::StatusOr<Race> Race::open(std::vector<std::string> players, Puzzle puzzle, int64_t now_ms,
-                                int64_t duration_ms) {
+                                int64_t duration_ms, int64_t start_delay_ms) {
   if (absl::Status s = CheckIds(players, 1); !s.ok()) return s;
   if (absl::Status s = CheckPuzzle(puzzle); !s.ok()) return s;
   if (duration_ms <= 0) return absl::InvalidArgumentError("a race needs a clock");
+  if (start_delay_ms < 0) return absl::InvalidArgumentError("a race cannot start in the past");
+  const int64_t started_ms = now_ms + start_delay_ms;
   std::vector<Runner> runners;
   for (std::string& id : players) runners.push_back(Runner{std::move(id), {}, std::nullopt, false});
-  return Race(std::move(puzzle), std::move(runners), now_ms, now_ms + duration_ms, std::nullopt);
+  return Race(std::move(puzzle), std::move(runners), started_ms, started_ms + duration_ms,
+              std::nullopt);
 }
 
 absl::StatusOr<Race> Race::restore(Puzzle puzzle, std::vector<Runner> runners, int64_t started_ms,
@@ -131,6 +134,12 @@ absl::StatusOr<int> Race::playable(int seat, int64_t now_ms) const {
   const int i = runnerOf(seat);
   if (i < 0) return absl::InvalidArgumentError("no such runner");
   if (isOver()) return absl::FailedPreconditionError("the race is over");
+  // Before a countdown's start, nothing; within kStartSlackMs of it, a
+  // word is taken, since another instance's clock may run that far behind
+  // the one that opened the race.
+  if (now_ms < started_ms_ - kStartSlackMs) {
+    return absl::FailedPreconditionError("the race starts in a moment");
+  }
   if (now_ms >= deadline_ms_) return absl::FailedPreconditionError("time is up");
   if (runners_[i].finished_ms.has_value()) {
     return absl::FailedPreconditionError("already finished");
@@ -238,8 +247,9 @@ RaceScore ScoreOf(const Race& finished) {
 }
 
 absl::StatusOr<Table> Table::open(std::vector<std::string> players, Puzzle puzzle, int64_t now_ms,
-                                  int64_t duration_ms) {
-  auto race = Race::open(std::move(players), std::move(puzzle), now_ms, duration_ms);
+                                  int64_t duration_ms, int64_t start_delay_ms) {
+  auto race =
+      Race::open(std::move(players), std::move(puzzle), now_ms, duration_ms, start_delay_ms);
   if (!race.ok()) return race.status();
   return Table(*std::move(race), {}, false, false);
 }
@@ -274,10 +284,11 @@ absl::StatusOr<Table> Table::inRace(
   return next;
 }
 
-absl::StatusOr<Table> Table::next(Puzzle puzzle, int64_t now_ms, int64_t duration_ms) const {
+absl::StatusOr<Table> Table::next(Puzzle puzzle, int64_t now_ms, int64_t duration_ms,
+                                  int64_t start_delay_ms) const {
   if (closed_) return absl::FailedPreconditionError("the table is closed");
   if (!race_.isOver()) return absl::FailedPreconditionError("a race is in play");
-  auto race = Race::open(race_.players(), std::move(puzzle), now_ms, duration_ms);
+  auto race = Race::open(race_.players(), std::move(puzzle), now_ms, duration_ms, start_delay_ms);
   if (!race.ok()) return race.status();
   return Table(*std::move(race), score_sheet_, false, false);
 }
