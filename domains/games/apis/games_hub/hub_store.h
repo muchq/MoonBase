@@ -53,6 +53,8 @@ class HubStore {
     int games_played = 0;
     int games_won = 0;
     int total_score = 0;
+    /// The member's chosen name; empty for none.
+    std::string display_name;
   };
 
   struct GameRow {

@@ -72,6 +72,7 @@ union GameCommands {
     leaveRoom: LeaveRoom
     getRoomState: GetRoomState
     chat: Chat
+    setName: SetName
     lobby: LobbyCommand
     voice: VoiceCommand
     golf: GolfCommand
@@ -214,6 +215,15 @@ structure Chat {
     text: String
 }
 
+/// The sender's display name, shown beside their player id in every
+/// roomState; empty clears it. Trimmed, at most 24 characters of
+/// printable text, never a chat bot's name; two players may share one.
+/// Kept for the session and carried into each room it joins.
+structure SetName {
+    @required
+    name: String
+}
+
 /// First event on every stream: who you are, whether this seat resumed a
 /// parked session (ADR-0020 grace), and the room you are still in if so.
 structure SessionReady {
@@ -251,6 +261,10 @@ list PlayerInfos {
 structure PlayerInfo {
     @required
     playerId: String
+
+    /// The name the player chose (SetName); absent until they choose one,
+    /// when clients show playerId.
+    name: String
 
     @required
     connected: Boolean

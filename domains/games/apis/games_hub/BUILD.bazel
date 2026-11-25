@@ -494,6 +494,28 @@ cc_test(
 )
 
 cc_library(
+    name = "display_name",
+    srcs = ["display_name.cc"],
+    hdrs = ["display_name.h"],
+    deps = [
+        ":chat_store",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "display_name_test",
+    size = "small",
+    srcs = ["display_name_test.cc"],
+    deps = [
+        ":display_name",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
     name = "chat_store",
     srcs = ["chat_store.cc"],
     hdrs = ["chat_store.h"],
@@ -965,6 +987,7 @@ cc_library(
         ":chat_store",
         ":chess_archive",
         ":chess_bots",
+        ":display_name",
         ":game_events",
         ":games_hub_smithy_server",
         ":go_bots",
@@ -1800,6 +1823,35 @@ cc_test(
         ":hub_store",
         ":id_generator",
         ":memory_hub_store",
+        ":ticket_vault",
+        "//domains/games/libs/cards:dealer",
+        "//domains/platform/libs/futility/otel:capturing_metrics_recorder",
+        "//domains/platform/libs/futility/otel:metrics",
+        "@com_google_absl//absl/time",
+        "@googletest//:gtest_main",
+        "@opal_cpp//runtime:client",
+        "@opal_cpp//runtime:core",
+        "@opal_cpp//runtime:http",
+        "@opal_cpp//runtime:http_beast",
+    ],
+)
+
+# Display names beside player ids in roomState, through the generated
+# client.
+cc_test(
+    name = "display_name_e2e_test",
+    size = "small",
+    srcs = [
+        "display_name_e2e_test.cc",
+        "stream_test_fixture.h",
+    ],
+    deps = [
+        ":games_hub_handler",
+        ":games_hub_smithy_client",
+        ":games_hub_smithy_server",
+        ":hub",
+        ":hub_store",
+        ":id_generator",
         ":ticket_vault",
         "//domains/games/libs/cards:dealer",
         "//domains/platform/libs/futility/otel:capturing_metrics_recorder",

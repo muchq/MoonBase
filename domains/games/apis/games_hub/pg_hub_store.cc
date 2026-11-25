@@ -30,9 +30,11 @@ constexpr char kDeleteRoom[] = "DELETE FROM rooms WHERE room_id = $1";
 // is presence, from an instance whose copy of the stats may predate a
 // finish another instance committed.
 constexpr char kUpsertMember[] = R"sql(
-    INSERT INTO room_members (room_id, player_id, connected, games_played, games_won, total_score)
-    VALUES ($1, $2, $3::boolean, $4::integer, $5::integer, $6::integer)
-    ON CONFLICT (room_id, player_id) DO UPDATE SET connected = EXCLUDED.connected)sql";
+    INSERT INTO room_members (room_id, player_id, connected, games_played, games_won, total_score,
+                              display_name)
+    VALUES ($1, $2, $3::boolean, $4::integer, $5::integer, $6::integer, $7)
+    ON CONFLICT (room_id, player_id) DO UPDATE
+    SET connected = EXCLUDED.connected, display_name = EXCLUDED.display_name)sql";
 constexpr char kDeleteMember[] = "DELETE FROM room_members WHERE room_id = $1 AND player_id = $2";
 constexpr char kDeleteGame[] = "DELETE FROM games WHERE room_id = $1 AND game_id = $2";
 // Stamps a room active after a write that names it. Its own statement,
@@ -443,7 +445,7 @@ void PgHubStore::Apply(const Op& op) {
     ExecOrWarn("UpsertMember", kUpsertMember,
                {row.room_id, row.player_id, row.connected ? "true" : "false",
                 std::to_string(row.games_played), std::to_string(row.games_won),
-                std::to_string(row.total_score)});
+                std::to_string(row.total_score), row.display_name});
     Touch(row.room_id);
   } else if (const auto* erase = std::get_if<DeleteMember>(&op)) {
     ExecOrWarn("DeleteMember", kDeleteMember, {erase->room_id, erase->player_id});
@@ -552,7 +554,7 @@ absl::StatusOr<PgHubStore::RoomRows> PgHubStore::LoadRoom(const std::string& roo
   out.chess_published = room->Get(0, 1).value_or("f") == "t";
 
   auto members = db_->Exec(
-      "SELECT player_id, connected, games_played, games_won, total_score"
+      "SELECT player_id, connected, games_played, games_won, total_score, display_name"
       " FROM room_members WHERE room_id = $1",
       {room_id});
   if (!members.ok()) return members.status();
@@ -564,6 +566,7 @@ absl::StatusOr<PgHubStore::RoomRows> PgHubStore::LoadRoom(const std::string& roo
     row.games_played = std::atoi(members->Get(i, 2).value_or("0").c_str());
     row.games_won = std::atoi(members->Get(i, 3).value_or("0").c_str());
     row.total_score = std::atoi(members->Get(i, 4).value_or("0").c_str());
+    row.display_name = members->Get(i, 5).value_or("");
     out.members.push_back(std::move(row));
   }
 
@@ -612,7 +615,7 @@ absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
   }
 
   auto members = db_->Exec(
-      "SELECT room_id, player_id, connected, games_played, games_won, total_score"
+      "SELECT room_id, player_id, connected, games_played, games_won, total_score, display_name"
       " FROM room_members");
   if (!members.ok()) return members.status();
   for (int i = 0; i < members->rows(); ++i) {
@@ -623,6 +626,7 @@ absl::StatusOr<PgHubStore::Snapshot> PgHubStore::LoadSnapshot() {
     row.games_played = std::atoi(members->Get(i, 3).value_or("0").c_str());
     row.games_won = std::atoi(members->Get(i, 4).value_or("0").c_str());
     row.total_score = std::atoi(members->Get(i, 5).value_or("0").c_str());
+    row.display_name = members->Get(i, 6).value_or("");
     snapshot.members.push_back(std::move(row));
   }
 

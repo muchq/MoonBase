@@ -139,6 +139,9 @@ absl::Status RunMigrations(pg::Client& db) {
       // The archive holds every kArchived game's, chess's and go's, by kind.
       R"sql(ALTER TABLE chess_games
           ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT 'chess')sql",
+      // A member's chosen name; empty for none.
+      R"sql(ALTER TABLE room_members
+          ADD COLUMN IF NOT EXISTS display_name text NOT NULL DEFAULT '')sql",
   };
   for (const char* statement : kStatements) {
     if (auto result = db.Exec(statement); !result.ok()) return result.status();

@@ -19,6 +19,7 @@
 #include "absl/time/clock.h"
 #include "domains/games/apis/games_hub/adapters.h"
 #include "domains/games/apis/games_hub/chess_archive.h"
+#include "domains/games/apis/games_hub/display_name.h"
 #include "domains/games/apis/games_hub/game_events.h"
 #include "domains/games/apis/games_hub/memory_hub_store.h"
 #include "domains/games/apis/games_hub/pong_bots.h"
@@ -255,6 +256,7 @@ const std::vector<GamesHub::CounterSeries>& GamesHub::DeclaredCounterSeries() {
       {"hub_commands", {{"command", "leaveRoom"}}},
       {"hub_commands", {{"command", "getRoomState"}}},
       {"hub_commands", {{"command", "chat"}}},
+      {"hub_commands", {{"command", "setName"}}},
       {"hub_disconnects", {{"kind", "clean"}}},
       {"hub_disconnects", {{"kind", "abrupt"}}},
       // The room layer's own GameEvents cases on hub_events — Send's
@@ -403,6 +405,7 @@ absl::Status GamesHub::RestoreFromStore() {
     // instance's rows, and inventing a local answer just diverges from
     // what every other instance projects.
     Member member;
+    member.name = row.display_name;
     member.connected = row.connected;
     member.games_played = row.games_played;
     member.games_won = row.games_won;
@@ -691,6 +694,7 @@ void GamesHub::StageMemberLocked(const std::string& room_id, const std::string& 
   HubStore::MemberRow row;
   row.room_id = room_id;
   row.player_id = player_id;
+  row.display_name = member.name;
   row.connected = member.connected;
   row.games_played = member.games_played;
   row.games_won = member.games_won;
@@ -978,6 +982,7 @@ bool GamesHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::R
   std::map<std::string, Member> members;
   for (const HubStore::MemberRow& row : rows.members) {
     Member member;
+    member.name = row.display_name;
     member.connected = row.connected;
     member.games_played = row.games_played;
     member.games_won = row.games_won;
@@ -1001,7 +1006,8 @@ bool GamesHub::ReconcileRoomLocked(const std::string& room_id, const HubStore::R
   } else {
     for (const auto& [id, member] : members) {
       const auto prior = room.members.find(id);
-      if (prior == room.members.end() || prior->second.connected != member.connected ||
+      if (prior == room.members.end() || prior->second.name != member.name ||
+          prior->second.connected != member.connected ||
           prior->second.games_played != member.games_played ||
           prior->second.games_won != member.games_won ||
           prior->second.total_score != member.total_score) {
@@ -1360,6 +1366,9 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
         while (rooms_.contains(room_id)) room_id = ids_->RoomId();
         world_.SetSurface(room_id, surface);
         const auto [member, inserted] = rooms_[room_id].members.emplace(player_id, Member{});
+        if (const auto named = player_names_.find(player_id); named != player_names_.end()) {
+          member->second.name = named->second;
+        }
         // Born at zero with its room: it provably has no rows, and the
         // creator's first message must pump from the very beginning.
         chat_cursors_.emplace(room_id, ChatCursor{});
@@ -1406,6 +1415,9 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
         const auto room = rooms_.find(join->roomId);
         if (room != rooms_.end()) {
           const auto [member, inserted] = room->second.members.emplace(player_id, Member{});
+          if (const auto named = player_names_.find(player_id); named != player_names_.end()) {
+            member->second.name = named->second;
+          }
           LeaveWorldLocked(player_id);  // out of the plaza's world
           player_room_[player_id] = join->roomId;
           StageMemberLocked(join->roomId, player_id, member->second, writes);
@@ -1475,6 +1487,38 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
     } else {
       Reject(player_id, RejectKind::kState, "not in a room");
     }
+    return;
+  }
+
+  if (const auto* set = command.as_setName_or_null()) {
+    auto name = NormalizeDisplayName(set->name);
+    if (!name.ok()) {
+      Reject(player_id, RejectKind::kInvalid, std::string(name.status().message()));
+      return;
+    }
+    Outbox outbox;
+    Writes writes;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      if (name->empty()) {
+        player_names_.erase(player_id);
+      } else {
+        player_names_[player_id] = *name;
+      }
+      if (const auto room_id = player_room_.find(player_id); room_id != player_room_.end()) {
+        if (const auto room = rooms_.find(room_id->second); room != rooms_.end()) {
+          if (const auto member = room->second.members.find(player_id);
+              member != room->second.members.end()) {
+            member->second.name = *name;
+            StageMemberLocked(room_id->second, player_id, member->second, writes);
+            StageWakeLocked(room_id->second, writes);
+            StageRoomStateLocked(room_id->second, outbox);
+            EnqueueWritesLocked(writes);
+          }
+        }
+      }
+    }
+    Deliver(outbox);
     return;
   }
 
@@ -3531,7 +3575,10 @@ void GamesHub::OnExpired(const std::string& player_id) {
   // Grace ran out (ADR-0020): the seat is gone; free the room and game
   // slots and tell whoever remains. Runs on the registry's expiry thread.
   Count("hub_seats_expired");
-  ReapUnlessResumedElsewhere(player_id);
+  if (ReapUnlessResumedElsewhere(player_id)) {
+    const std::lock_guard<std::mutex> lock(mu_);
+    player_names_.erase(player_id);
+  }
 }
 
 bool GamesHub::ReapUnlessResumedElsewhere(const std::string& player_id) {
@@ -3756,6 +3803,7 @@ moonbase::games::RoomState GamesHub::RoomStateLocked(const std::string& room_id,
   for (const auto& [member_id, member] : room.members) {
     moonbase::games::PlayerInfo info;
     info.playerId = member_id;
+    if (!member.name.empty()) info.name = member.name;
     info.connected = member.connected;
     info.gamesPlayed = member.games_played;
     info.gamesWon = member.games_won;
