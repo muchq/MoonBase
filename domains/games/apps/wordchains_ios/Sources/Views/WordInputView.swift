@@ -2,7 +2,7 @@ import SwiftUI
 
 struct WordInputView: View {
     @Bindable var game: GameState
-    @State private var inputText = ""
+    @State private var entry = WordEntry()
     @State private var shakeAttempt = 0
     @FocusState private var isFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -41,9 +41,12 @@ struct WordInputView: View {
 
     private var textField: some View {
         // Vertical axis: Return types a newline instead of submitting, and
-        // submitting is what makes SwiftUI dismiss the keyboard. onChange
+        // submitting is what makes SwiftUI dismiss the keyboard. WordEntry
         // turns the newline into a submit, so the keyboard stays up.
-        TextField("Enter a word...", text: $inputText, axis: .vertical)
+        TextField("Enter a word...", text: Binding(
+            get: { entry.text },
+            set: { react(to: entry.change(to: $0, in: game)) }
+        ), axis: .vertical)
             .lineLimit(1)
             .accessibilityIdentifier("word-input")
             .font(.system(size: 18, weight: .medium, design: .rounded))
@@ -64,17 +67,6 @@ struct WordInputView: View {
             )
             .modifier(ShakeEffect(animatableData: CGFloat(shakeAttempt)))
             .onAppear { isFocused = true }
-            .onChange(of: inputText) { old, new in
-                if new.contains("\n") {
-                    inputText = new.replacingOccurrences(of: "\n", with: "")
-                    submit()
-                    return
-                }
-                // Stripping the newline is not an edit; keep its result.
-                guard old.replacingOccurrences(of: "\n", with: "") != new else { return }
-                game.lastResult = nil
-                game.showInvalidShake = false
-            }
     }
 
     private var borderColor: Color {
@@ -92,8 +84,7 @@ struct WordInputView: View {
 
     private var undoButton: some View {
         Button {
-            withAnimation(motion) { game.undo() }
-            inputText = ""
+            withAnimation(motion) { entry.undo(in: game) }
         } label: {
             Image(systemName: "arrow.uturn.backward")
                 .font(.system(size: 18, weight: .semibold))
@@ -110,16 +101,16 @@ struct WordInputView: View {
     // MARK: - Submit Button
 
     private var submitButton: some View {
-        Button(action: submit) {
+        Button { react(to: entry.submit(in: game)) } label: {
             Image(systemName: "arrow.up.circle.fill")
                 .font(.system(size: 36))
                 .foregroundStyle(
-                    inputText.isEmpty ? Color.secondary : Theme.gradientStart
+                    entry.text.isEmpty ? Color.secondary : Theme.gradientStart
                 )
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
         }
-        .disabled(inputText.isEmpty)
+        .disabled(entry.text.isEmpty)
         .buttonStyle(.plain)
         .accessibilityLabel("Submit")
         .accessibilityIdentifier("word-submit")
@@ -129,9 +120,7 @@ struct WordInputView: View {
 
     private var hintButton: some View {
         Button {
-            if let hint = game.requestHint() {
-                withAnimation(motion) { inputText = hint }
-            }
+            withAnimation(motion) { entry.hint(in: game) }
         } label: {
             Image(systemName: "lightbulb.fill")
                 .font(.system(size: 20))
@@ -184,16 +173,11 @@ struct WordInputView: View {
 
     // MARK: - Actions
 
-    private func submit() {
-        guard !inputText.isEmpty else { return }
-
-        let result = game.submitWord(inputText)
-
+    /// Shake and buzz on a rejected word; WordEntry already did the rest.
+    private func react(to result: InputResult?) {
         switch result {
-        case .gameComplete, .noRoute:
+        case nil, .gameComplete, .noRoute, .valid, .reachedTarget:
             return
-        case .valid, .reachedTarget:
-            inputText = ""
         case .notInDictionary, .notOneLetterAway, .alreadyUsed, .wrongLength:
             if !reduceMotion {
                 withAnimation(Theme.quickSpring) { shakeAttempt += 1 }

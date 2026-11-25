@@ -78,7 +78,7 @@ bazel test //domains/games/apps/wordchains_ios:WordChainsTests \
 > your Xcode SDK version. If you see "No simulator runtime version available",
 > install the matching runtime: **Xcode > Settings > Platforms > + (iOS)**.
 
-`WordChainsUITests` exercises the real app's typed word entry, hint, Undo, error layout over the keyboard, and 44pt tap targets. Set `--ios_simulator_version` to an installed runtime for local runs.
+`WordChainsUITests` covers only what needs a simulator: the keyboard staying up on Return, error layout over the keyboard, and 44pt tap targets. Input logic (Return submits, stale errors clear, hints, Undo) is in `WordEntryTests`, which `swift test` runs. Set `--ios_simulator_version` to an installed runtime for local runs.
 Simulator tests cannot validate physical haptic feel; check that on an iPhone.
 CI runs it apart from `test-ios`, in the iOS UI tests workflow: on main after a
 `wordchains_ios` change, and on a PR labelled `ios-ui`.

@@ -1,5 +1,7 @@
 import XCTest
 
+/// Only what needs a real keyboard and screen. The input logic behind these
+/// (Return submits, stale errors clear, hints, Undo) is in WordEntryTests.
 final class WordEditorUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -22,72 +24,21 @@ final class WordEditorUITests: XCTestCase {
         return app
     }
 
-    func testAWholeWordIsTypedIntoOneField() {
+    func testReturnKeepsTheKeyboardWhetherEmptyOrRejected() {
         let app = startPuzzle()
         let field = app.textViews["word-input"]
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        field.typeText("zzzz")
-        XCTAssertEqual(field.value as? String, "zzzz")
-    }
 
-    func testHintedWordCanBeSubmittedFromTheKeyboardAndUndone() {
-        let app = startPuzzle()
-        let field = app.textViews["word-input"]
-        let undo = app.buttons["word-undo"]
-        XCTAssertFalse(undo.isEnabled)
-
-        app.buttons["word-hint"].tap()
-        let hinted = field.value as? String ?? ""
-        XCTAssertFalse(hinted.isEmpty, "Hint fills the next word")
-        field.typeText("\n")
-        XCTAssertTrue(undo.isEnabled)
-        XCTAssertNotEqual(field.value as? String, hinted, "A played word clears the field")
-        settle()
-        XCTAssertTrue(field.hasFocus, "Return keeps the field focused")
-        XCTAssertTrue(app.keyboards.firstMatch.exists, "Return keeps the keyboard up")
-
-        undo.tap()
-        XCTAssertFalse(undo.isEnabled)
-    }
-
-    func testReturnOnAnEmptyFieldKeepsTheKeyboard() {
-        let app = startPuzzle()
-        let field = app.textViews["word-input"]
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         field.typeText("\n")
         settle()
-        XCTAssertTrue(field.hasFocus)
+        XCTAssertTrue(field.hasFocus, "Return on an empty field")
         XCTAssertTrue(app.keyboards.firstMatch.exists)
-    }
 
-    func testEditingAfterARejectionClearsTheStaleError() {
-        let app = startPuzzle()
-        let field = app.textViews["word-input"]
-        let feedback = app.staticTexts["word-feedback"]
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         field.typeText("zzzzz\n")
-        XCTAssertTrue(feedback.waitForExistence(timeout: 5))
-        field.typeText("a")
-        XCTAssertFalse(feedback.exists, "The error describes the old text, not this one")
-    }
-
-    func testHintFillsTheFieldWithoutSubmitting() {
-        let app = startPuzzle()
-        let field = app.textViews["word-input"]
-        app.buttons["word-hint"].tap()
-        XCTAssertFalse((field.value as? String ?? "").isEmpty)
-        XCTAssertFalse(app.buttons["word-undo"].isEnabled, "The chain has not advanced")
-    }
-
-    func testTypedInvalidWordShowsFeedbackAndKeepsKeyboard() {
-        let app = startPuzzle()
-        let field = app.textViews["word-input"]
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-        field.typeText("zzzzz")
-        app.buttons["word-submit"].tap()
         XCTAssertTrue(app.staticTexts["word-feedback"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["word-undo"].isEnabled)
-        XCTAssertEqual(field.value as? String, "zzzzz", "A rejected word stays for editing")
+        XCTAssertEqual(field.value as? String, "zzzzz", "One line, no newline")
+        settle()
+        XCTAssertTrue(field.hasFocus, "Return on a rejected word")
         XCTAssertTrue(app.keyboards.firstMatch.exists)
     }
 

@@ -1,0 +1,86 @@
+import XCTest
+@testable import WordChains
+
+final class WordEntryTests: XCTestCase {
+    private func game() -> GameState {
+        let game = GameState()
+        let words = ["cat", "cot", "cog", "dog", "dat", "dot"]
+        let edges = words.map { word in
+            words.indices.filter { GameState.isOneLetterAway(word, words[$0]) }
+        }
+        game.graph = WordGraph(nodes: words, edges: edges)
+        game.difficulty = .easy
+        game.currentPuzzle = Puzzle(start: "cat", target: "dog", optimalLength: 4, difficulty: .easy)
+        game.chain = ["cat"]
+        return game
+    }
+
+    func testReturnSubmitsAValidWordAndClearsTheText() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "cot", in: game)
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+        XCTAssertEqual(game.chain, ["cat", "cot"])
+        XCTAssertEqual(entry.text, "")
+    }
+
+    func testReturnOnARejectedWordKeepsTheTextAndTheError() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "zzz", in: game)
+        XCTAssertEqual(entry.change(to: "zzz\n", in: game), .notInDictionary)
+        XCTAssertEqual(entry.text, "zzz", "A rejected word stays for editing, without the newline")
+        XCTAssertEqual(game.feedbackMessage, "Not in dictionary")
+    }
+
+    func testReturnOnAnEmptyFieldDoesNothing() {
+        let game = game()
+        var entry = WordEntry()
+        XCTAssertNil(entry.change(to: "\n", in: game))
+        XCTAssertEqual(entry.text, "")
+        XCTAssertEqual(game.chain, ["cat"])
+        XCTAssertNil(game.lastResult)
+    }
+
+    func testEditingAfterARejectionClearsTheStaleError() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "zzz\n", in: game)
+        XCTAssertEqual(game.lastResult, .notInDictionary)
+        entry.change(to: "zz", in: game)
+        XCTAssertNil(game.lastResult)
+        XCTAssertFalse(game.showInvalidShake)
+        XCTAssertEqual(game.feedbackMessage, "")
+    }
+
+    func testHintFillsTheTextWithoutSubmitting() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "zzz\n", in: game)
+        entry.hint(in: game)
+        XCTAssertEqual(entry.text, "cot")
+        XCTAssertEqual(game.chain, ["cat"], "The chain has not advanced")
+        XCTAssertEqual(game.feedbackMessage, "", "The old error doesn't label the hinted word")
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+    }
+
+    func testHintAtADeadEndKeepsTheTextAndSaysToUndo() {
+        let game = game()
+        game.chain = ["cat", "cot", "dot", "dat"]
+        var entry = WordEntry()
+        entry.change(to: "da", in: game)
+        entry.hint(in: game)
+        XCTAssertEqual(entry.text, "da")
+        XCTAssertEqual(game.lastResult, .noRoute)
+    }
+
+    func testUndoRemovesTheLastWordAndClearsTheText() {
+        let game = game()
+        var entry = WordEntry()
+        entry.change(to: "cot\n", in: game)
+        entry.change(to: "co", in: game)
+        entry.undo(in: game)
+        XCTAssertEqual(game.chain, ["cat"])
+        XCTAssertEqual(entry.text, "")
+    }
+}
