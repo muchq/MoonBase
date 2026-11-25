@@ -60,7 +60,7 @@ struct Puzzle: Identifiable {
     let difficulty: Difficulty
 
     /// Moves in the shortest chain.
-    var optimalSteps: Int { optimalLength }
+    var optimalSteps: Int { optimalLength - 1 }
 }
 
 enum InputResult {
