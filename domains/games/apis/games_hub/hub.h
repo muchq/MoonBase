@@ -124,6 +124,10 @@ struct HubTestHooks {
 /// SendChatHistory.
 /// The room a wordchain seek waits in: public, and no room code reaches it.
 inline constexpr std::string_view kQuickRoomId = "quick-wordchain";
+/// How long after the sweep first sees a matched pool table still waiting
+/// it starts the table itself: the joining instance, which starts it at
+/// once, is gone.
+inline constexpr int64_t kQuickStartOverdueMs = 5'000;
 
 class GamesHub final {
  public:
@@ -347,6 +351,10 @@ class GamesHub final {
   /// Marks the pool's unmatched seeks past their deadline expired; how
   /// many. SweepClocksOnce runs it.
   int SweepSeeksOnce();
+  /// Starts the pool's matched tables still waiting kQuickStartOverdueMs
+  /// after this instance first saw them so; how many. SweepClocksOnce runs
+  /// it.
+  int StartOverdueMatchesOnce();
 
   /// Clocked games whose flag the store refused and that wait to be tried
   /// again; for tests.
@@ -999,6 +1007,9 @@ class GamesHub final {
   /// Per (room, game): the epoch ms before which the sweep does not retry
   /// a flag the store refused as unavailable. Guarded by mu_.
   std::map<std::pair<std::string, std::string>, int64_t> flag_retry_at_;
+  /// Per pool table: when the sweep first saw it matched and still
+  /// waiting to start. Guarded by mu_.
+  std::map<std::string, int64_t> match_seen_at_;
   std::function<absl::Time()> clock_;
   std::mutex clock_mu_;
   std::condition_variable clock_cv_;

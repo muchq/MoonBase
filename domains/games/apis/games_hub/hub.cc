@@ -2314,6 +2314,7 @@ std::optional<Refusal> GamesHub::FlagLocked(GameRef ref, int64_t now_ms, Outbox&
 
 int GamesHub::SweepClocksOnce() {
   SweepSeeksOnce();
+  StartOverdueMatchesOnce();
   struct Flagged {
     std::string room_id;
     std::string game_id;
@@ -2691,6 +2692,37 @@ std::optional<Refusal> GamesHub::RepostSeekLocked(
     return std::nullopt;
   }
   return Refusal{RejectKind::kState, "game changed; try again"};
+}
+
+int GamesHub::StartOverdueMatchesOnce() {
+  std::vector<std::function<void()>> starts;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    const auto room = rooms_.find(std::string(kQuickRoomId));
+    if (room == rooms_.end()) {
+      match_seen_at_.clear();
+      return 0;
+    }
+    const int64_t now = NowMs();
+    std::map<std::string, int64_t> seen;
+    for (const auto& [game_id, entry] : room->second.games) {
+      if (entry.started() || !entry.terms.has_value() ||
+          entry.roster.size() < SeatsOf(entry.kind, entry.terms)) {
+        continue;
+      }
+      const auto first = match_seen_at_.find(game_id);
+      const int64_t since = first == match_seen_at_.end() ? now : first->second;
+      if (now - since < kQuickStartOverdueMs) {
+        seen.emplace(game_id, since);
+      } else if (auto start = FilledStartLocked(entry.roster.front(), entry)) {
+        starts.push_back(std::move(start));
+      }
+    }
+    // Only tables still matched and waiting stay remembered.
+    match_seen_at_ = std::move(seen);
+  }
+  for (const auto& start : starts) start();
+  return static_cast<int>(starts.size());
 }
 
 int GamesHub::SweepSeeksOnce() {
