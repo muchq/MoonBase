@@ -64,6 +64,30 @@ Turns its goal into ≤5 children. Smart model.
    you can rewrite *that child's* contract, or replace children. Your own
    Goal and Check stay as they are.
 
+## Flat mode
+
+When nodes can't spawn their own children, the root does every node's
+planning and spawning. The tree, contracts, roles and rules are the same;
+only who spawns changes.
+
+1. **Plan the whole tree up front.** Decompose recursively yourself, ≤5
+   children per node, down to executors, within the depth budget. Write every
+   node's contract into `tree.md` before spawning anything.
+2. **Executors**: spawn each as a subagent (cheaper model) once its
+   dependencies are done. Independent ones run in parallel.
+3. **Coordinator nodes**: when all of a node's children are done, spawn one
+   subagent for that node (smart model) to merge its children's branches, run
+   the node's Check, and fix integration breakage. It doesn't spawn anything;
+   it reports to you. Work bottom-up to the root.
+4. **Re-planning and blocks.** A failed or blocked child is handled as its
+   own coordinator would handle it: you apply that node's contract, not the
+   root's, when deciding whether to re-split, rewrite the child's contract, or
+   escalate one level up. Same rules: a node's Goal and Check change only with
+   the agreement of whoever wrote them, and the root's only with the user's.
+5. **Lost depth**, not lost structure: if the planned tree can't be known up
+   front (a node's split depends on what an earlier node finds), plan that
+   subtree when its prerequisite reports done, and update `tree.md`.
+
 ## Stuck
 
 Progress means your Check output changed for the better, or a child finished.

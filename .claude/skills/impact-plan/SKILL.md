@@ -201,8 +201,10 @@ spawn the root coordinator with the root contract from `coordinator.md`.
   report up with `send_message`. Pass each child its contract, the brief path,
   and the parent's session id.
 - **Local** (Agent tool only): one subagent per node with `model` set by role.
-  If subagents can't spawn subagents in this environment, the tree is one level
-  deep: say so and size the children to fit, rather than pretending to recurse.
+  Before planning, probe once: spawn a cheap subagent whose only job is to
+  spawn one sub-subagent and report whether it could. If it can't, run in
+  **flat mode** (`coordinator.md`): the root plans the whole tree itself and is
+  the only node that spawns. Tell the user which mode the run is in.
 
 Then tell the user where to look on return: `plans/<slug>/tree.md` for status,
 `plans/<slug>/BLOCKED.md` for what needs them.
