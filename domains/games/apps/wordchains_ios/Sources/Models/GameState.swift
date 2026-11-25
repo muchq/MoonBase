@@ -274,7 +274,9 @@ final class GameState {
             finishTimeAttack()
             return
         }
-        timeAttackSeconds = TimeAttack.seconds(sprint.remaining(at: now))
+        // Observation notifies on every set; redraw the bar once a second.
+        let seconds = TimeAttack.seconds(sprint.remaining(at: now))
+        if seconds != timeAttackSeconds { timeAttackSeconds = seconds }
         if let advanceAt = sprint.advanceAt, now >= advanceAt {
             nextTimeAttackPuzzle()
         }
