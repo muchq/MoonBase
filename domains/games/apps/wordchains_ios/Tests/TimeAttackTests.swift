@@ -20,14 +20,13 @@ final class TimeAttackTests: XCTestCase {
 
     /// A sprint on CAT → DOG, with a generator to deal the next puzzles from.
     private func sprint() -> GameState {
-        let game = GameState(bests: TimeAttackBests(defaults: defaults))
         let words = ["cat", "cot", "cog", "dog", "dat", "dot", "cab"]
         let edges = words.map { word in
             words.indices.filter { GameState.isOneLetterAway(word, words[$0]) }
         }
         let graph = WordGraph(nodes: words, edges: edges)
+        let game = GameState(bests: TimeAttackBests(defaults: defaults), generator: PuzzleGenerator(graph: graph))
         game.graph = graph
-        game.generator = PuzzleGenerator(graph: graph)
         game.startNewGame(mode: .timeAttack, difficulty: .easy, now: t0)
         deal(game)
         return game
@@ -150,6 +149,21 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertEqual(game.timeAttackSummary?.solved, 1)
     }
 
+    func testWithNoPuzzleToDealTheSprintStillEndsAndCountsTheSolve() {
+        let empty = PuzzleGenerator(graph: WordGraph(nodes: [], edges: []))
+        let game = GameState(bests: TimeAttackBests(defaults: defaults), generator: empty)
+        game.graph = sprint().graph
+        game.currentMode = .timeAttack
+        game.difficulty = .easy
+        game.timeAttack = TimeAttack(startingAt: t0)
+        deal(game)
+        solve(game, at: 10)
+        game.tick(now: at(11))
+        XCTAssertTrue(game.isComplete)
+        game.tick(now: at(60))
+        XCTAssertEqual(game.timeAttackSummary?.solved, 1)
+    }
+
     // MARK: - The summary and the best
 
     func testTheSummaryIsRecordedOnceAndKeepsTheBest() {
@@ -179,16 +193,17 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertFalse(bests.record(solved: 2, score: 300, for: .easy).isNewBest, "A tie is not a new best")
     }
 
-    // MARK: - Leaving and restarting
-
-    func testLeavingAbandonsTheSprintUnrecorded() {
-        let game = sprint()
-        solve(game, at: 10)
-        game.leaveTimeAttack()
-        game.tick(now: at(70))
-        XCTAssertNil(game.timeAttackSummary)
-        XCTAssertEqual(TimeAttackBests(defaults: defaults).best(for: .easy), 0)
+    func testBeatingAStandingBestReplacesIt() {
+        let bests = TimeAttackBests(defaults: defaults)
+        _ = bests.record(solved: 1, score: 150, for: .medium)
+        XCTAssertEqual(
+            bests.record(solved: 2, score: 300, for: .medium),
+            TimeAttackSummary(solved: 2, score: 300, best: 300, isNewBest: true)
+        )
+        XCTAssertEqual(bests.best(for: .medium), 300)
     }
+
+    // MARK: - Leaving and restarting
 
     func testRestartingDropsTheOldSprintsPendingAdvance() {
         let game = sprint()

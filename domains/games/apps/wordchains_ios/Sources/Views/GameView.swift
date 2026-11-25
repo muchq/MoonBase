@@ -4,7 +4,6 @@ struct GameView: View {
     @Bindable var game: GameState
     @Environment(\.dismiss) private var dismiss
     @State private var showResults = false
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isTimeAttack: Bool { game.currentMode == .timeAttack }
@@ -57,20 +56,17 @@ struct GameView: View {
             }
         }
         // One clock for the sprint: suspension pauses this loop, not the
-        // deadline, and the first tick back settles what time it is.
+        // deadline, and the first tick back settles what time it is. A
+        // sprint left mid-way stops here, unrecorded.
         .task(id: game.timeAttack?.deadline) {
             while game.timeAttack != nil, game.timeAttackSummary == nil, !Task.isCancelled {
                 game.tick()
                 try? await Task.sleep(for: .milliseconds(200))
             }
         }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { game.tick() }
-        }
         .onChange(of: game.timeAttack?.solved) { old, new in
             if let old, let new, new > old { celebrateSolve() }
         }
-        .onDisappear { game.leaveTimeAttack() }
         .onChange(of: game.isComplete) {
             if game.isComplete && !isTimeAttack {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {

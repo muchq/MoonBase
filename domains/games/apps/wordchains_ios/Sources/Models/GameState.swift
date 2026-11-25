@@ -106,16 +106,16 @@ final class GameState {
     // Animation triggers
     var lastResult: InputResult?
     var showInvalidShake = false
-    var showCompletionCelebration = false
 
     // Stats
     var gamesPlayed = 0
     var optimalSolves = 0
 
-    var generator: PuzzleGenerator?
+    private(set) var generator: PuzzleGenerator?
 
-    init(bests: TimeAttackBests = TimeAttackBests()) {
+    init(bests: TimeAttackBests = TimeAttackBests(), generator: PuzzleGenerator? = nil) {
         self.bests = bests
+        self.generator = generator
     }
 
     func loadGraph() {
@@ -136,7 +136,6 @@ final class GameState {
         self.difficulty = difficulty
         self.isComplete = false
         self.score = 0
-        self.showCompletionCelebration = false
         self.lastResult = nil
         self.timeAttack = nil
         self.timeAttackSummary = nil
@@ -237,7 +236,6 @@ final class GameState {
         guard let puzzle = currentPuzzle else { return }
 
         isComplete = true
-        showCompletionCelebration = true
         gamesPlayed += 1
         puzzlesSolved += 1
 
@@ -282,19 +280,12 @@ final class GameState {
         }
     }
 
-    /// Abandons a sprint without recording it, as leaving the game does.
-    func leaveTimeAttack() {
-        timeAttack = nil
-        timeAttackSummary = nil
-    }
-
     private func nextTimeAttackPuzzle() {
         timeAttack?.advanced()
         guard let puzzle = generator?.randomPuzzle(difficulty: difficulty) else { return }
         currentPuzzle = puzzle
         chain = [puzzle.start]
         isComplete = false
-        showCompletionCelebration = false
         score = 0
         lastResult = nil
         showInvalidShake = false
@@ -304,7 +295,6 @@ final class GameState {
         guard let sprint = timeAttack, timeAttackSummary == nil else { return }
         timeAttackSeconds = 0
         isComplete = true
-        showCompletionCelebration = false
         lastResult = .timeUp
         timeAttackSummary = bests.record(solved: sprint.solved, score: sprint.score, for: difficulty)
     }
