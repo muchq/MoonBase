@@ -440,6 +440,19 @@ bool RoundRobinFromBody(const nlohmann::json& body, HubStore::ChessEventRow& row
 nlohmann::json WaitingTermsJson(GameKind kind, const HostedTerms& terms);
 std::optional<HostedTerms> WaitingTermsFromJson(GameKind kind, const nlohmann::json& stored);
 
+/// The seats a `kind` table holds: its adapter's SeatsFor(terms) where it
+/// says, kMaxSeats otherwise.
+inline std::size_t SeatsOf(GameKind kind, const std::optional<HostedTerms>& terms) {
+  return ForKind(kind, [&](auto adapter) -> std::size_t {
+    using A = decltype(adapter);
+    if constexpr (requires { A::SeatsFor(terms); }) {
+      return A::SeatsFor(terms);
+    } else {
+      return A::kMaxSeats;
+    }
+  });
+}
+
 /// A `kind` waiting table's posted terms as the lobby lists them.
 std::string TermsLineOf(GameKind kind, const HostedTerms& terms);
 

@@ -50,10 +50,6 @@ void Adopt(std::optional<HostedState>& held, const std::optional<HostedState>& s
   }
 }
 
-std::size_t MaxSeatsOf(GameKind kind) {
-  return ForKind(kind, [](auto adapter) { return decltype(adapter)::kMaxSeats; });
-}
-
 // The one place a stored row becomes a wire message. Live delivery and
 // history replay share it, so the two can never describe the same
 // message differently.
@@ -1397,6 +1393,10 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
       Reject(player_id, RejectKind::kInvalid, "invalid room id");
       return;
     }
+    if (join->roomId == kQuickRoomId) {
+      Reject(player_id, RejectKind::kState, "a quick race is found by seeking");
+      return;
+    }
     Outbox outbox;
     Writes writes;
     bool joined = false;
@@ -1543,6 +1543,10 @@ void GamesHub::HandleCommand(const std::string& player_id, const GameCommands& c
     }
     if (room_id.empty()) {
       Reject(player_id, RejectKind::kState, "not in a room");
+      return;
+    }
+    if (room_id == kQuickRoomId) {
+      Reject(player_id, RejectKind::kState, "a quick race has no chat");
       return;
     }
 
@@ -1766,6 +1770,7 @@ void GamesHub::HandleGameMove(const std::string& player_id,
           [&](WatchTable& watch) { WatchMove(player_id, watch.game_id, kind); },
           [&](AddBot& bot) { AddBotMove(player_id, bot, kind); },
           [&](PostTerms& post) { PostTermsMove(player_id, std::move(post.terms), kind); },
+          [&](Seek& seek) { SeekMove(player_id, seek.terms); },
           [&](AskHistory&) {
             if constexpr (kind == GameKind::kGo) {
               GoHistoryMove(player_id);
@@ -1831,6 +1836,25 @@ void GamesHub::CreateGameMove(const std::string& player_id, GameKind kind) {
   std::optional<Refusal> refusal;
   {
     const std::lock_guard<std::mutex> lock(mu_);
+    if (const auto here = player_room_.find(player_id);
+        here != player_room_.end() && here->second == kQuickRoomId) {
+      refusal = Refusal{RejectKind::kState, "a quick race is found by seeking"};
+    } else {
+      refusal = CreateGameLocked(player_id, kind, std::nullopt, outbox);
+    }
+  }
+  if (refusal.has_value()) {
+    Reject(player_id, std::move(*refusal));
+  } else {
+    Deliver(outbox);
+  }
+}
+
+std::optional<Refusal> GamesHub::CreateGameLocked(const std::string& player_id, GameKind kind,
+                                                  const std::optional<HostedTerms>& terms,
+                                                  Outbox& outbox) {
+  std::optional<Refusal> refusal;
+  {
     Room* room = FindRoomLocked(player_id);
     if (room == nullptr) {
       refusal = Refusal{RejectKind::kState, "not in a room"};
@@ -1843,8 +1867,8 @@ void GamesHub::CreateGameMove(const std::string& player_id, GameKind kind) {
         while (room->games.contains(game_id)) game_id = ids_->GameCode();
         GameEntry& entry = room->games[game_id];
         entry.kind = kind;
-        const Commit commit =
-            CommitEntryLocked(room_id, game_id, entry, {player_id}, std::nullopt, nullptr);
+        const Commit commit = CommitEntryLocked(room_id, game_id, entry, {player_id},
+                                                std::nullopt, nullptr, &terms);
         if (commit == Commit::kRebased)
           continue;  // code taken remotely; the
                      // adopted game is real — keep
@@ -1876,11 +1900,7 @@ void GamesHub::CreateGameMove(const std::string& player_id, GameKind kind) {
       }
     }
   }
-  if (refusal.has_value()) {
-    Reject(player_id, std::move(*refusal));
-  } else {
-    Deliver(outbox);
-  }
+  return refusal;
 }
 
 void GamesHub::JoinGameMove(const std::string& player_id, const std::string& game_id,
@@ -1897,6 +1917,8 @@ void GamesHub::JoinGameMove(const std::string& player_id, const std::string& gam
     Room* room = FindRoomLocked(player_id);
     if (room == nullptr) {
       refusal = Refusal{RejectKind::kState, "not in a room"};
+    } else if (player_room_.at(player_id) == kQuickRoomId) {
+      refusal = Refusal{RejectKind::kState, "a quick race is found by seeking"};
     } else if (player_game_.contains(player_id)) {
       refusal = Refusal{RejectKind::kState, "leave your current game first"};
     } else {
@@ -1926,7 +1948,7 @@ void GamesHub::JoinGameMove(const std::string& player_id, const std::string& gam
             refusal = Refusal{RejectKind::kState, "game already started"};
             break;
           }
-          if (entry.roster.size() >= MaxSeatsOf(entry.kind)) {
+          if (entry.roster.size() >= SeatsOf(entry.kind, entry.terms)) {
             refusal = Refusal{RejectKind::kState, "game is full"};
             break;
           }
@@ -1960,7 +1982,7 @@ void GamesHub::JoinGameMove(const std::string& player_id, const std::string& gam
           }
           StopWatchingLocked(player_id);
           player_game_[player_id] = game_id;
-          if (entry.roster.size() >= MaxSeatsOf(entry.kind)) {
+          if (entry.roster.size() >= SeatsOf(entry.kind, entry.terms)) {
             filled = FilledStartLocked(player_id, entry);
           }
 
@@ -2050,7 +2072,10 @@ void GamesHub::StartGameMove(const std::string& player_id, typename Adapter<E>::
           refusal = Refusal{RejectKind::kState, "game already started"};
           break;
         }
-        if (const std::size_t seats = MinSeatsOf(ref->entry->kind);
+        // A table on posted terms starts once it fills.
+        if (const std::size_t seats = ref->entry->terms.has_value()
+                                          ? SeatsOf(ref->entry->kind, ref->entry->terms)
+                                          : MinSeatsOf(ref->entry->kind);
             ref->entry->roster.size() < seats) {
           refusal = Refusal{RejectKind::kState,
                             absl::StrCat("need at least ", seats, " players to start")};
@@ -2285,6 +2310,7 @@ std::optional<Refusal> GamesHub::FlagLocked(GameRef ref, int64_t now_ms, Outbox&
 }
 
 int GamesHub::SweepClocksOnce() {
+  SweepSeeksOnce();
   struct Flagged {
     std::string room_id;
     std::string game_id;
@@ -2391,7 +2417,7 @@ void GamesHub::AddBotMove(const std::string& player_id, const AddBot& bot, GameK
           refusal = Refusal{RejectKind::kState, "game already started"};
           break;
         }
-        if (entry.roster.size() >= MaxSeatsOf(entry.kind)) {
+        if (entry.roster.size() >= SeatsOf(entry.kind, entry.terms)) {
           refusal = Refusal{RejectKind::kState, "the table is full"};
           break;
         }
@@ -2455,7 +2481,7 @@ void GamesHub::PostTermsMove(const std::string& player_id, HostedTerms terms, Ga
           refusal = Refusal{RejectKind::kState, "game already started"};
           break;
         }
-        if (entry.roster.size() >= MaxSeatsOf(entry.kind)) {
+        if (entry.roster.size() >= SeatsOf(entry.kind, entry.terms)) {
           refusal = Refusal{RejectKind::kState, "the table is full"};
           break;
         }
@@ -2485,6 +2511,208 @@ void GamesHub::PostTermsMove(const std::string& player_id, HostedTerms terms, Ga
   // A vanished table's news is true either way.
   Deliver(outbox);
   if (refusal.has_value()) Reject(player_id, std::move(*refusal));
+}
+
+bool GamesHub::SeekMatches(const GameEntry& entry, const WordchainTerms& seek, int64_t now_ms) {
+  if (entry.kind != GameKind::kWordchain || entry.started() || entry.roster.size() != 1 ||
+      !entry.terms.has_value()) {
+    return false;
+  }
+  const auto& open = std::get<WordchainTerms>(*entry.terms);
+  return !open.expired && now_ms < open.deadline_ms &&
+         (open.letters == 0 || seek.letters == 0 || open.letters == seek.letters);
+}
+
+void GamesHub::SeekMove(const std::string& player_id, WordchainTerms seek) {
+  Outbox outbox;
+  Writes writes;
+  std::optional<Refusal> refusal;
+  std::function<void()> filled;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    const int64_t now = NowMs();
+    seek.deadline_ms = now + kQuickSeekMs;
+    seek.expired = false;
+    const auto here = player_room_.find(player_id);
+    if (here != player_room_.end() && here->second != kQuickRoomId) {
+      refusal = Refusal{RejectKind::kState, "leave your room to race someone new"};
+    } else if (here == player_room_.end() && !EnterPoolLocked(player_id, outbox, writes)) {
+      refusal = Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
+    } else if (const auto ref = FindGameLocked(player_id); ref.has_value()) {
+      // From one's own seek: looking again, on a fresh deadline.
+      refusal = RepostSeekLocked(
+          *ref,
+          [&seek](const GameEntry& entry) -> std::optional<WordchainTerms> {
+            if (entry.started() || entry.roster.size() != 1 || !entry.terms.has_value()) {
+              return std::nullopt;
+            }
+            return seek;
+          },
+          outbox);
+    } else {
+      // The oldest seek first: the earliest deadline.
+      std::vector<std::pair<int64_t, std::string>> open;
+      for (const auto& [game_id, entry] : rooms_.at(std::string(kQuickRoomId)).games) {
+        if (SeekMatches(entry, seek, now)) {
+          open.emplace_back(std::get<WordchainTerms>(*entry.terms).deadline_ms, game_id);
+        }
+      }
+      std::sort(open.begin(), open.end());
+      bool seated = false;
+      for (const auto& [deadline, game_id] : open) {
+        refusal = TakeSeekLocked(player_id, game_id, seek, outbox, filled);
+        seated = !refusal.has_value();
+        // Taken from under us: the next one. An outage is the answer.
+        if (seated || refusal->kind == RejectKind::kUnavailable) break;
+      }
+      if (!seated && !(refusal.has_value() && refusal->kind == RejectKind::kUnavailable)) {
+        refusal = CreateGameLocked(player_id, GameKind::kWordchain, HostedTerms(seek), outbox);
+      }
+    }
+    EnqueueWritesLocked(writes);
+  }
+  Deliver(outbox);
+  if (refusal.has_value()) {
+    Reject(player_id, std::move(*refusal));
+    return;
+  }
+  if (filled) filled();
+}
+
+bool GamesHub::EnterPoolLocked(const std::string& player_id, Outbox& outbox, Writes& writes) {
+  const std::string room_id(kQuickRoomId);
+  if (!rooms_.contains(room_id) && !RefreshRoomLocked(room_id, outbox, /*project_always=*/true)) {
+    return false;
+  }
+  if (!rooms_.contains(room_id)) {
+    // Nobody is in the pool: it opens, as a room does, on the plane.
+    world_.SetSurface(room_id, Surface{});
+    rooms_[room_id];
+    chat_cursors_.emplace(room_id, ChatCursor{});
+    ListenRoomLocked(room_id);
+    StageLocked(writes, HubStore::UpsertRoom{room_id, Surface{}});
+  }
+  Room& room = rooms_.at(room_id);
+  const auto [member, inserted] = room.members.emplace(player_id, Member{});
+  LeaveWorldLocked(player_id);
+  player_room_[player_id] = room_id;
+  StageMemberLocked(room_id, player_id, member->second, writes);
+  StageWakeLocked(room_id, writes);
+  StageRoomStateLocked(room_id, outbox);
+  return true;
+}
+
+std::optional<Refusal> GamesHub::TakeSeekLocked(const std::string& player_id,
+                                                const std::string& game_id,
+                                                const WordchainTerms& seek, Outbox& outbox,
+                                                std::function<void()>& filled) {
+  const std::string room_id(kQuickRoomId);
+  Room& room = rooms_.at(room_id);
+  for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
+    const auto game = room.games.find(game_id);
+    if (game == room.games.end() || !SeekMatches(game->second, seek, NowMs())) {
+      return Refusal{RejectKind::kState, "that seek moved on"};
+    }
+    GameEntry& entry = game->second;
+    // An any seek races the joiner's letters.
+    WordchainTerms joined = std::get<WordchainTerms>(*entry.terms);
+    if (joined.letters == 0) joined.letters = seek.letters;
+    const std::optional<HostedTerms> terms = HostedTerms(joined);
+    std::vector<std::string> roster = entry.roster;
+    roster.push_back(player_id);
+    const Commit commit =
+        CommitEntryLocked(room_id, game_id, entry, roster, std::nullopt, nullptr, &terms);
+    if (commit == Commit::kRebased) continue;
+    if (commit == Commit::kGone) {
+      DropWatchersLocked(game_id, entry, outbox);
+      room.games.erase(game_id);
+      return Refusal{RejectKind::kState, "that seek moved on"};
+    }
+    if (commit == Commit::kUnavailable) {
+      return Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
+    }
+    player_game_[player_id] = game_id;
+    filled = FilledStartLocked(player_id, entry);
+    outbox.To(player_id, JoinedEventLocked(game_id, entry, player_id));
+    Outbox others;
+    StageGameViewsLocked(game_id, entry, others);
+    for (auto& [recipient, event] : others.events) {
+      if (recipient != player_id) outbox.To(recipient, std::move(event));
+    }
+    StageRoomStateLocked(room_id, outbox);
+    return std::nullopt;
+  }
+  return Refusal{RejectKind::kState, "that seek moved on"};
+}
+
+std::optional<Refusal> GamesHub::RepostSeekLocked(
+    const GameRef& ref,
+    const std::function<std::optional<WordchainTerms>(const GameEntry&)>& next,
+    Outbox& outbox) {
+  for (int attempt = 0; attempt < kMaxCommitAttempts; ++attempt) {
+    GameEntry& entry = *ref.entry;
+    const std::optional<WordchainTerms> seek = next(entry);
+    if (!seek.has_value()) return Refusal{RejectKind::kState, "that seek moved on"};
+    const std::optional<HostedTerms> terms = HostedTerms(*seek);
+    const Commit commit = CommitEntryLocked(ref.room_id, ref.game_id, entry, entry.roster,
+                                            std::nullopt, nullptr, &terms);
+    if (commit == Commit::kRebased) continue;
+    if (commit == Commit::kGone) {
+      DropGameLocked(ref, outbox);
+      StageRoomStateLocked(ref.room_id, outbox);
+      return Refusal{RejectKind::kState, "game no longer exists"};
+    }
+    if (commit == Commit::kUnavailable) {
+      return Refusal{RejectKind::kUnavailable, "storage unavailable; try again"};
+    }
+    StageGameViewsLocked(ref.game_id, entry, outbox);
+    StageRoomStateLocked(ref.room_id, outbox);
+    return std::nullopt;
+  }
+  return Refusal{RejectKind::kState, "game changed; try again"};
+}
+
+int GamesHub::SweepSeeksOnce() {
+  std::vector<std::string> due;
+  {
+    const std::lock_guard<std::mutex> lock(mu_);
+    const auto room = rooms_.find(std::string(kQuickRoomId));
+    if (room == rooms_.end()) return 0;
+    const int64_t now = NowMs();
+    for (const auto& [game_id, entry] : room->second.games) {
+      if (entry.started() || !entry.terms.has_value()) continue;
+      const auto& seek = std::get<WordchainTerms>(*entry.terms);
+      if (!seek.expired && now >= seek.deadline_ms) due.push_back(game_id);
+    }
+  }
+  // Each takes mu_ on its own, as a flag does.
+  int expired = 0;
+  for (const std::string& game_id : due) {
+    Outbox outbox;
+    {
+      const std::lock_guard<std::mutex> lock(mu_);
+      const auto room = rooms_.find(std::string(kQuickRoomId));
+      if (room == rooms_.end()) break;
+      const auto game = room->second.games.find(game_id);
+      if (game == room->second.games.end()) continue;
+      const GameRef ref{std::string(kQuickRoomId), &room->second, game_id, &game->second};
+      const int64_t now = NowMs();
+      // Rebased onto a match, or a seek that looked again: nothing due.
+      const auto refusal = RepostSeekLocked(
+          ref,
+          [now](const GameEntry& entry) -> std::optional<WordchainTerms> {
+            if (entry.started() || !entry.terms.has_value()) return std::nullopt;
+            WordchainTerms seek = std::get<WordchainTerms>(*entry.terms);
+            if (seek.expired || now < seek.deadline_ms) return std::nullopt;
+            seek.expired = true;
+            return seek;
+          },
+          outbox);
+      if (!refusal.has_value()) ++expired;
+    }
+    Deliver(outbox);
+  }
+  return expired;
 }
 
 void GamesHub::WatchMove(const std::string& player_id, const std::string& game_id, GameKind kind) {

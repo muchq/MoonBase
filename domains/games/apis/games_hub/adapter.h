@@ -113,6 +113,8 @@ enum Capability : unsigned {
   /// PostTerms it returns. Hooks: Terms, as kRoundRobins'; TermsJson(terms)
   /// and TermsFromJson(json), the terms as the state column holds them
   /// and back, if they read; TermsLine(terms), how the lobby lists them.
+  /// Optionally SeatsFor(terms), the seats a table on them holds, where
+  /// fewer than kMaxSeats.
   kChallenges = 1U << 8,
 };
 
@@ -146,6 +148,11 @@ struct AddBot {
 /// The terms a waiting table posts for its next seat to start on.
 struct PostTerms {
   HostedTerms terms;
+};
+/// A wordchain seek in the hub's public pool, on these letters; the
+/// deadline is the hub's to set.
+struct Seek {
+  WordchainTerms terms;
 };
 struct AskHistory {};
 struct AskReview {
@@ -198,7 +205,7 @@ template <typename Engine, typename Start>
 using Action =
     std::variant<Refusal, CreateTable, JoinTable, LeaveTable, StartGame<Start>, Transition<Engine>,
                  WatchTable, AddBot, PostTerms, AskHistory, AskReview, Publish, CreateRoundRobin,
-                 Withdraw, Forfeit, ListRoundRobins, PlayRoundRobin, Steer>;
+                 Withdraw, Forfeit, ListRoundRobins, PlayRoundRobin, Steer, Seek>;
 
 /// A bot seat's move to make, as its game reads the table (kEngineBots).
 template <typename Ask>

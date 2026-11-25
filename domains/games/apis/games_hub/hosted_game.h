@@ -1,6 +1,7 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_HOSTED_GAME_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_HOSTED_GAME_H
 
+#include <cstdint>
 #include <string>
 #include <variant>
 
@@ -65,11 +66,21 @@ struct GoTerms {
   bool operator==(const GoTerms&) const = default;
 };
 
+/// A wordchain quick race's seek: the letters it races (0 for any), and
+/// until when the pool offers it. Past that, unmatched, it has expired: the
+/// pool never pairs it again until it seeks anew.
+struct WordchainTerms {
+  int letters = 0;
+  int64_t deadline_ms = 0;
+  bool expired = false;
+  bool operator==(const WordchainTerms&) const = default;
+};
+
 /// What a game's challenge or round robin plays on, in that game's own
 /// shape. The hub carries it without reading it: each alternative is one
 /// adapter's Terms, and only that adapter reads or stores it (adapters.h
 /// holds them to that).
-using HostedTerms = std::variant<ChessTerms, PongTerms, GoTerms>;
+using HostedTerms = std::variant<ChessTerms, PongTerms, GoTerms, WordchainTerms>;
 
 }  // namespace games_hub
 

@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <nlohmann/json.hpp>
 
 #include "domains/games/apis/games_hub/adapter.h"
 #include "domains/games/libs/wordchain_race/table.h"
@@ -15,22 +16,25 @@ struct Adapter<wordchain_race::Table> {
   using Move = moonbase::games::WordchainMove;
   using Update = moonbase::games::WordchainUpdate;
   using View = moonbase::games::WordchainView;
-  /// The race a startGame names.
+  /// A quick race's seek.
+  using Terms = WordchainTerms;
+  /// The race a startGame names; a quick race's counts down first.
   struct Start {
     int letters = 4;
     int64_t duration_ms = 180'000;
+    int64_t start_delay_ms = 0;
   };
   static constexpr GameKind kKind = GameKind::kWordchain;
   static constexpr std::string_view kName = "wordchain";
   static constexpr std::size_t kMaxSeats = wordchain_race::kMaxRunners;
   // One seat races alone, for practice.
   static constexpr std::size_t kMinSeats = 1;
-  static constexpr unsigned kCapabilities = kNextGame | kClocked;
+  static constexpr unsigned kCapabilities = kNextGame | kClocked | kChallenges;
   static constexpr bool kOpenStartsAGame = true;
 
   static constexpr std::string_view kCommandSeries = "wordchain_commands";
-  static constexpr std::array<std::string_view, 6> kCommands = {
-      "createGame", "joinGame", "startGame", "leaveGame", "play", "retract"};
+  static constexpr std::array<std::string_view, 7> kCommands = {
+      "createGame", "joinGame", "startGame", "leaveGame", "play", "retract", "seek"};
   static constexpr std::string_view kEventSeries = "wordchain_events";
   static constexpr std::array<std::string_view, 6> kEvents = {
       "gameJoined", "gameState", "gameCreated", "gameStarted", "gameEnded", "gameLeft"};
@@ -95,10 +99,19 @@ struct Adapter<wordchain_race::Table> {
   static absl::StatusOr<wordchain_race::Table> Open(const OpenContext& context,
                                                     const Start& start,
                                                     std::deque<cards::Card> deck);
-  static std::optional<StartGame<Start>> FilledStart(const std::optional<HostedTerms>&,
-                                                     const std::optional<EventTag>&) {
-    return std::nullopt;
+  /// A seek's table starts once its second seat fills, on its letters,
+  /// after a 3 s countdown.
+  static std::optional<StartGame<Start>> FilledStart(const std::optional<HostedTerms>& terms,
+                                                     const std::optional<EventTag>&);
+  /// A seek's table is heads-up.
+  static std::size_t SeatsFor(const std::optional<HostedTerms>& terms) {
+    return terms.has_value() ? 2 : kMaxSeats;
   }
+  // {"letters", "deadlineMs", "expired"}.
+  static nlohmann::json TermsJson(const WordchainTerms& terms);
+  static std::optional<WordchainTerms> TermsFromJson(const nlohmann::json& stored);
+  // "4 letters", or "any letters".
+  static std::string TermsLine(const WordchainTerms& terms);
   static std::string Serialize(const wordchain_race::Table& engine);
   static absl::StatusOr<wordchain_race::Table> Deserialize(const std::string& stored);
   static bool IsBot(std::string_view) { return false; }
@@ -119,6 +132,11 @@ struct Adapter<wordchain_race::Table> {
         [now_ms](const wordchain_race::Race& race) { return race.expire(now_ms); });
   }
 };
+
+/// How long a quick race's seek waits in the pool, and how long its race
+/// counts down once matched.
+inline constexpr int64_t kQuickSeekMs = 90'000;
+inline constexpr int64_t kQuickCountdownMs = 3'000;
 
 /// A shuffled deck as a puzzle seed: the same order, the same seed.
 uint64_t WordchainSeed(const std::deque<cards::Card>& deck);
