@@ -1,6 +1,9 @@
 #ifndef DOMAINS_GAMES_APIS_GAMES_HUB_RATE_LIMITER_H
 #define DOMAINS_GAMES_APIS_GAMES_HUB_RATE_LIMITER_H
 
+#include <chrono>
+
+#include "domains/platform/libs/futility/rate_limiter/sliding_window_rate_limiter.h"
 #include "domains/platform/libs/futility/rate_limiter/token_bucket.h"
 
 namespace games_hub {
@@ -39,6 +42,24 @@ struct RateLimits {
   double paddle_burst = 120;
   double paddle_refill_per_sec = 60;
 };
+
+/// The unary budget on `POST /games/v2/session`, keyed by the ADR-0012
+/// client address: every mint writes a ticket row, which a reconnect loop or
+/// a script would otherwise run for free. 20/min absorbs a client's whole
+/// reconnect cycle (ten attempts) with headroom.
+///
+/// A full key table refuses every client it has not seen, so the table is
+/// sized for arrivals, not for abuse: a key is dropped once two idle windows
+/// have emptied it, which forgets no budget, and the cap admits ~800 new
+/// clients a second indefinitely in a few tens of MB. Only an address spray
+/// reaches it.
+inline futility::rate_limiter::SlidingWindowRateLimiterConfig SessionMintLimits() {
+  return {.max_requests_per_key = 20,
+          .window_size = std::chrono::seconds(60),
+          .ttl = std::chrono::minutes(2),
+          .cleanup_interval = std::chrono::seconds(30),
+          .max_keys = 100'000};
+}
 
 }  // namespace games_hub
 

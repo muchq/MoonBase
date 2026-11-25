@@ -36,6 +36,7 @@
 #include "domains/games/apis/games_hub/pg_hub_store.h"
 #include "domains/games/apis/games_hub/pg_ticket_vault.h"
 #include "domains/games/apis/games_hub/protocol_input.h"
+#include "domains/games/apis/games_hub/rate_limiter.h"
 #include "domains/games/apis/games_hub/ticket_vault.h"
 #include "domains/games/apis/games_hub/voice.h"
 #include "domains/games/libs/cards/dealer.h"
@@ -325,20 +326,11 @@ int main() {
   auto metrics =
       aura::MakeHttpMetricsSink(std::make_shared<futility::otel::HttpMetricsManager>("games_hub"));
 
-  // The unary budget: the stream budgets cannot see GetSession,
-  // and every mint writes a ticket row — the flood a reconnect loop or
-  // a scripted client would otherwise run for free. Keyed by the
-  // ADR-0012 client address; 20/min absorbs a full reconnect cycle
-  // (10 attempts, 2s apart) with headroom, same shape as portrait's.
-  futility::rate_limiter::SlidingWindowRateLimiterConfig session_limiter_config{
-      .max_requests_per_key = 20,
-      .window_size = std::chrono::seconds(60),
-      .ttl = std::chrono::minutes(5),
-      .cleanup_interval = std::chrono::seconds(30),
-      .max_keys = 1000};
+  // The unary budget (SessionMintLimits): the stream budgets cannot see
+  // GetSession.
   auto session_limiter =
       std::make_shared<futility::rate_limiter::SlidingWindowRateLimiter<std::string>>(
-          session_limiter_config);
+          games_hub::SessionMintLimits());
 
   // The reverse-proxy trust boundary (opal-cpp ADR-0012):
   // deploy/consolidated/compose.yaml pins Caddy's address into
