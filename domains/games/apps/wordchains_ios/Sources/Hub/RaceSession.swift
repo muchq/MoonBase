@@ -141,8 +141,10 @@ final class RaceSession {
 
     // MARK: - The table
 
-    /// A new table: from the room, or once this one has closed.
+    /// A new table: from the room, or once this one has closed. The pool
+    /// has no tables of one's choosing: there, another seek.
     func openTable() {
+        guard !state.inQuickRace else { return seek(letters: state.seekLetters) }
         state.opening = true
         transport.send(.wordchain(.createGame))
     }
@@ -152,7 +154,13 @@ final class RaceSession {
         transport.send(.wordchain(.joinGame(gameId)))
     }
 
-    func seek(letters: Int?) {}
+    /// A quick race on these letters, or any; the hub seats the player in
+    /// its pool. From one's own expired seek, it looks again.
+    func seek(letters: Int?) {
+        state.seekLetters = letters
+        state.opening = true
+        transport.send(.wordchain(.seek(letters: letters)))
+    }
 
     func start(letters: Int) { transport.send(.wordchain(.startGame(letters: letters))) }
 
@@ -171,7 +179,9 @@ final class RaceSession {
     /// A closed table is already gone from the hub: only the view lingers.
     /// Once Play again has asked for a new table, though, that one is on its
     /// way and would seat the player after they left: Back waits for it.
+    /// In the pool there is nothing to stay for: getting up leaves it.
     func leaveTable() {
+        if state.inQuickRace { return transport.send(.leaveRoom) }
         guard let table = state.table, table.phase != .closed else {
             if !state.opening { state.table = nil }
             return

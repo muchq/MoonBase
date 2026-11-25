@@ -66,6 +66,13 @@ final class QuickRaceTests: XCTestCase {
         XCTAssertEqual(race(matched()).spoken(nowMs: t0), "Playing bouncy-coral-quokka, starting")
     }
 
+    // Matched, its start a moment away on the hub: already the opponent's.
+    func testAMatchedTableWaitingOnItsStartIsStarting() {
+        let waiting = WordchainView(gameId: "W1", phase: .waiting, start: nil, target: nil, par: nil, startedAtMs: nil,
+                                deadlineMs: nil, runners: [runner("alice"), runner("bob")], result: nil)
+        XCTAssertEqual(race(waiting).stage(nowMs: t0), .starting(opponent: "bob", count: 3))
+    }
+
     // The waiting screen holds until the race's first word; then the table.
     func testTheWaitingScreenHoldsUntilTheStart() {
         XCTAssertTrue(race(seeking()).waits(nowMs: t0))
