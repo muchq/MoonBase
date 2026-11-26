@@ -1,8 +1,8 @@
 import Foundation
 
-/// What the player has typed, and how typing drives the game. The view binds
-/// a multi-line field to `text` through `change(to:in:)`: Return arrives as a
-/// newline, which submits instead of dismissing the keyboard.
+/// What the player has typed, and how typing drives the game. The view feeds
+/// every edit of a multi-line field to `change(to:in:)`: Return arrives as a
+/// trailing newline, which submits instead of dismissing the keyboard.
 struct WordEntry {
     private(set) var text = ""
     /// The word a Return just accepted, until the text changes or the chain
@@ -22,6 +22,14 @@ struct WordEntry {
             }
             text = new
             return nil
+        }
+        // A newline with typing after it is one the field has not cleared
+        // yet, not a Return: whatever follows an accepted word starts the next.
+        guard new.hasSuffix("\n") else {
+            if let replay, text.isEmpty, new.hasPrefix(replay + "\n") {
+                return change(to: String(new.dropFirst(replay.count + 1)).replacingOccurrences(of: "\n", with: ""), in: game)
+            }
+            return change(to: new.replacingOccurrences(of: "\n", with: ""), in: game)
         }
         let word = new.replacingOccurrences(of: "\n", with: "")
         if text.isEmpty && word == replay {

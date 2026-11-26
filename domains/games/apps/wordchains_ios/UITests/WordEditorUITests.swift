@@ -58,6 +58,7 @@ final class WordEditorUITests: XCTestCase {
 
         field.typeText("a")
         XCTAssertEqual(field.value as? String, "zzzzza", "Typing still lands in the field")
+        XCTAssertFalse(app.staticTexts["word-feedback"].exists, "Typing after a rejected Return clears the error")
     }
 
     // An accepted word leaves the field on screen, not just in the model:
@@ -74,6 +75,19 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertNotEqual(field.value as? String, hinted, "The accepted word left the field")
         field.typeText("a")
         XCTAssertEqual(field.value as? String, "a", "The field holds only what was typed since")
+    }
+
+    func testUndoClearsTheFieldOnScreen() {
+        let app = startPuzzle()
+        let field = wordInput(app)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        app.buttons["word-hint"].tap()
+        field.typeText("\n")
+        settle()
+        field.typeText("b")
+        app.buttons["word-undo"].tap()
+        field.typeText("c")
+        XCTAssertEqual(field.value as? String, "c", "Undo left nothing behind in the field")
     }
 
     func testErrorDoesNotMoveTheInputRowOrPushItUnderTheKeyboard() {
