@@ -24,4 +24,12 @@ rust_test(
     crate = ":mithril",
 )
 
+rust_test(
+    name = "mithril_packaged_test",
+    size = "small",
+    srcs = ["test/packaged_test.rs"],
+    data = [":mithril_tar"],
+    edition = "2024",
+)
+
 linux_amd64_oci_binary(bin_name = "mithril")

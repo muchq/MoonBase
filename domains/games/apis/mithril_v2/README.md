@@ -18,6 +18,11 @@ consistently. `testdata/v1_ladders.tsv` holds 500 answers from the Rust solver
 on that graph, and the tests replay them.
 [Word Chains dictionary](../../libs/wordchain_race/DICTIONARY.md)
 
+When the graph changes, use `bazel run //domains/games/apps/wordchains -- repl`
+and `shortest <start> <end>` to refresh the third column of the corpus. Record
+each ladder as space-separated words or `-` when there is no path. Keep 500
+pairs with both successful ladders and misses.
+
 Its status codes match v1's too (406, 413, 415, 400, 422),
 with two exceptions: v1 also reads a body sent as an array of the two words,
 and v1 refuses a repeated key, where v2 takes the first one.

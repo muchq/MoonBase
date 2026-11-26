@@ -67,10 +67,16 @@ async fn main() {
     // http_server_* instruments record into the no-op global meter.
     let _otel_provider = server_pal::init_otel();
 
-    let runfiles = std::env::var_os("RUNFILES_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_exe().unwrap().with_extension("runfiles"));
-    let path = runfiles.join("_main/domains/games/apps/wordchains/word_graph.json");
+    let graph_runfile = "_main/domains/games/apps/wordchains/word_graph.json";
+    let adjacent = std::env::current_exe()
+        .unwrap()
+        .with_extension("runfiles")
+        .join(graph_runfile);
+    // Launchers can inherit RUNFILES_DIR from a different Bazel binary.
+    let path = match std::env::var_os("RUNFILES_DIR") {
+        Some(dir) if !adjacent.is_file() => PathBuf::from(dir).join(graph_runfile),
+        _ => adjacent,
+    };
     let file = File::open(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     let word_graph = serde_json::from_reader(BufReader::new(file))
         .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
