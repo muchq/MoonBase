@@ -193,7 +193,7 @@ jobs:
   release:
     needs: [check-and-tag, build]
     if: always() && needs.build.result == 'success'
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
 
