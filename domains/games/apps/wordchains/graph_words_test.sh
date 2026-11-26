@@ -34,7 +34,11 @@ done
 for w in bee cat kea kex shall thee doth hath ere oft strew strews dandruff verandah; do
   check "has $w" has "$w"
 done
-for w in sall strow strows dandriff; do
+# Specialized words with modern dictionary entries and independently defined archaisms.
+for w in benzole benzoles eftsoons lentando oscule oscules pistache; do
+  check "has $w" has "$w"
+done
+for w in sall strow strown strows dandriff odyls swinneys woalds yonkers; do
   check "lacks $w" lacks "$w"
 done
 # Every 3-5 letter word is a word the race accepts, and every word the race

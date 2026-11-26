@@ -2,7 +2,7 @@ import XCTest
 @testable import WordChains
 
 // Single-player puzzles start and end on SCOWL's common words, as races do
-// (#1738); the graph, ENABLE, is every word a player may type on the way.
+// (#1738); the filtered ENABLE graph supplies each playable rung.
 final class PuzzleWordsTests: XCTestCase {
 
     // cat-cot-cog-dog, and kex, a real but obscure ENABLE word.
@@ -51,8 +51,7 @@ final class PuzzleWordsTests: XCTestCase {
         XCTAssertTrue(graph.contains("kex"))
     }
 
-    // Without a list (a bundle missing it) every graph word may be an end,
-    // as before: the graph is ENABLE, so they are still real words.
+    // Without the common-word list, every playable word of the right length may be an end.
     func testWithoutAListEveryGraphWordOfTheLengthIsAnEnd() {
         XCTAssertEqual(graph.puzzleEnds(ofLength: 3, among: nil), ["cat", "cog", "cot", "dog", "kex"])
     }

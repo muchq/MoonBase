@@ -679,14 +679,10 @@ race; with fewer than two seats left the table closes, its race in play
 ending by leave and won by its best finisher, if any. A race is recorded as
 `wordchain` and credits every runner played, each winner won.
 
-Races and the single-player graph share ENABLE filtered by
-`wordchain_race/archaic_variants.txt`. The list excludes words whose only
-senses are archaic or obsolete variants, including inflections with only
-those senses. Candidates come from Kaikki's October 2026 extraction of
-English Wiktionary and are checked for current usage. The historical
-regional form `sall` is documented in the Yorkshire Historical Dictionary.
-[Kaikki English dictionary](https://kaikki.org/dictionary/English/index.html)
-[Yorkshire Historical Dictionary](https://yorkshiredictionary.york.ac.uk/words/sall)
+Races and the single-player graph share a filtered ENABLE dictionary. The
+exclusions cover archaic or obsolete variants and individually verified
+inflections of those variants. Both lists are checked against ENABLE and
+the puzzle endpoints in CI. [Dictionary sources and review criteria](../../libs/wordchain_race/DICTIONARY.md)
 
 Once a race is over, the view carries `solution`: the shortest ladder the
 puzzle was picked on, start and target included. It is withheld while the

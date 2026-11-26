@@ -35,8 +35,6 @@ bemixt
 benzidin
 benzin
 benzins
-benzole
-benzoles
 berberin
 bidarkee
 blissing
@@ -312,7 +310,6 @@ landskip
 larum
 larums
 lashins
-lentando
 lieve
 liripipe
 lothsome
@@ -365,8 +362,6 @@ oecology
 opulency
 orrice
 orrices
-oscule
-oscules
 otalgies
 otalgy
 oxid
@@ -403,7 +398,6 @@ picolin
 picolins
 piraya
 pirayas
-pistache
 plaister
 platane
 platanes
@@ -432,7 +426,6 @@ royster
 roysters
 rusticly
 salicine
-sall
 sannop
 sannops
 scatt
@@ -486,7 +479,6 @@ stopt
 strow
 strowed
 strowing
-strown
 strows
 studdie
 studdies
