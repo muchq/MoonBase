@@ -665,10 +665,11 @@ word. `startGame` names the letters (3 to 5, default 4) and seconds (60 to
 600, default 180). The puzzle is picked from the hub's shuffle, never the
 starter's say: its start and target are SCOWL's common words, and its par
 is the fewest words a ladder can hold, both ends included. A `play` is
-refused in band unless it is an ENABLE word one letter from the runner's
-last, not already on their ladder; `retract` takes the last back until the
-runner finishes. Both lists, less a blocklist, are built into the binary
-with SCOWL's copyright (`wordchain_race:lexicon`). The fewest words wins,
+refused in band unless its word is in the race dictionary, differs by one
+letter from the runner's last word, and is new to their ladder. `retract`
+takes the last word back until the runner finishes. The race dictionary and
+the common words are built into the binary with SCOWL's copyright
+(`wordchain_race:lexicon`). The fewest words wins,
 the earlier finish breaking a tie, and runners level on both share the win; a finish on par ends the race at once,
 since nobody can beat it, and so does every seat finishing. The clock is
 the sweep's like any clocked game's, but a race has nobody to move: the
@@ -677,6 +678,15 @@ races starts the next. A leave keeps the leaver's ladder and finish in the
 race; with fewer than two seats left the table closes, its race in play
 ending by leave and won by its best finisher, if any. A race is recorded as
 `wordchain` and credits every runner played, each winner won.
+
+Races and the single-player graph share ENABLE filtered by
+`wordchain_race/archaic_variants.txt`. The list excludes words whose only
+senses are archaic or obsolete variants, including inflections with only
+those senses. Candidates come from Kaikki's October 2026 extraction of
+English Wiktionary and are checked for current usage. The historical
+regional form `sall` is documented in the Yorkshire Historical Dictionary.
+[Kaikki English dictionary](https://kaikki.org/dictionary/English/index.html)
+[Yorkshire Historical Dictionary](https://yorkshiredictionary.york.ac.uk/words/sall)
 
 Once a race is over, the view carries `solution`: the shortest ladder the
 puzzle was picked on, start and target included. It is withheld while the

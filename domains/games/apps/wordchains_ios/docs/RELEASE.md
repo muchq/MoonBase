@@ -270,8 +270,9 @@ The iOS app reuses the `wordchains` Rust library indirectly:
 - **Same graph format** — loads `word_graph.json` (JSON-serialized `Graph` struct)
 - **Same algorithms** — BFS shortest path and all-shortest-paths are reimplemented in Swift
   following the exact same algorithm structure as `graph.rs` in the Rust lib
-- **Same dictionary** — ENABLE (`@enable_words`), the list races accept; puzzles start
-  and end on SCOWL's common words (`wordchain_race:common_words.txt`, bundled with its notice)
+- **Same dictionary** — filtered ENABLE (`wordchain_race:filtered_enable_words`), the list
+  races accept with archaic-only variants excluded. Puzzles start and end on SCOWL's
+  common words (`wordchain_race:common_words.txt`, bundled with its notice).
 
 ```
 wordchains (Rust lib)

@@ -25,12 +25,25 @@ cc_test(
     ],
 )
 
-# Every word a race accepts: ENABLE's words of race length.
+# The shared dictionary for races and the single-player graph.
+genrule(
+    name = "filtered_enable_words",
+    srcs = [
+        "archaic_variants.txt",
+        "@enable_words//file",
+    ],
+    outs = ["filtered_enable_words.txt"],
+    cmd = "tr -d '\\r' < $(execpath @enable_words//file) | " +
+          "LC_ALL=C grep -Fvx -f $(execpath archaic_variants.txt) > $@",
+    visibility = ["//domains/games/apps/wordchains:__pkg__"],
+)
+
+# Every word a race accepts: shared dictionary words of race length.
 genrule(
     name = "race_words",
-    srcs = ["@enable_words//file"],
+    srcs = [":filtered_enable_words"],
     outs = ["race_words.txt"],
-    cmd = "tr -d '\\r' < $(execpath @enable_words//file) | LC_ALL=C grep -E '^[a-z]{3,5}$$' | " +
+    cmd = "LC_ALL=C grep -E '^[a-z]{3,5}$$' $(execpath :filtered_enable_words) | " +
           "LC_ALL=C sort -u > $@",
     visibility = ["//visibility:public"],
 )
