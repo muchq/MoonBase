@@ -21,7 +21,7 @@ struct QuickRaceView: View {
                 Circle().stroke(Color.secondary.opacity(0.15), lineWidth: 6)
                 Circle()
                     .trim(from: 0, to: model.ringLeft(nowMs: nowMs))
-                    .stroke(Theme.headerGradient, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .stroke(Theme.accent, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(reduceMotion ? nil : .linear(duration: 0.25), value: model.ringLeft(nowMs: nowMs))
                 if case let .starting(_, count) = stage {
@@ -76,7 +76,7 @@ struct QuickRaceView: View {
                 } label: {
                     Text("Keep looking").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(PrimaryActionStyle())
                 .disabled(!connected || session.state.opening)
                 Button("Stop", role: .cancel) { session.leaveRoom() }
                     .disabled(!connected)
@@ -123,9 +123,9 @@ private struct LadderTicker: View {
                             .frame(width: Theme.tileSize, height: Theme.tileSize)
                             .background(
                                 RoundedRectangle(cornerRadius: 10)
-                                    .fill(changed ? Theme.validGreen.opacity(0.25) : Theme.tertiaryBackground)
+                                    .fill(changed ? Theme.chainStart.opacity(0.25) : Theme.tertiaryBackground)
                             )
-                            .foregroundStyle(changed ? Theme.validGreen : .primary)
+                            .foregroundStyle(changed ? Theme.chainStart : .primary)
                             .id("\(rung)-\(index)-\(letter)")
                             .transition(changed ? .asymmetric(insertion: .flip, removal: .opacity) : .identity)
                     }

@@ -12,13 +12,20 @@ final class WordEditorUITests: XCTestCase {
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
     }
 
-    private func startPuzzle(mode: String? = nil, arguments: [String] = []) -> XCUIApplication {
+    private func startPuzzle(mode: String? = nil, difficulty: String? = nil, arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
         app.launchArguments = arguments
         app.launch()
         if let mode {
             let button = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", mode)).firstMatch
             XCTAssertTrue(button.waitForExistence(timeout: 30))
+            button.tap()
+        }
+        if let difficulty {
+            let button = app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", difficulty)).firstMatch
+            XCTAssertTrue(button.waitForExistence(timeout: 5))
+            for _ in 0..<4 where !button.isHittable { app.swipeUp() }
+            XCTAssertTrue(button.isHittable)
             button.tap()
         }
         let play = app.buttons["Play"]
@@ -28,6 +35,14 @@ final class WordEditorUITests: XCTestCase {
         play.tap()
         XCTAssertTrue(app.descendants(matching: .any)["word-input"].waitForExistence(timeout: 5))
         return app
+    }
+
+    private func capture(_ screen: String) {
+        settle()
+        let attachment = XCTAttachment(data: XCUIScreen.main.screenshot().pngRepresentation, uniformTypeIdentifier: "public.png")
+        attachment.name = "WordChains-\(screen)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     /// The one-line, vertical-axis field; which element type iOS reports for
@@ -121,6 +136,76 @@ final class WordEditorUITests: XCTestCase {
         let app = startPuzzle(mode: "Time Attack")
         XCTAssertTrue(app.descendants(matching: .any)["time-attack-bar"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["word-hint"].exists)
+    }
+
+    func testDailyChallengeHasNoHintButtonWithTheKeyboardUp() {
+        let app = startPuzzle(mode: "Daily Challenge", arguments: ["-sprintHints"])
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        let field = wordInput(app)
+        XCTAssertTrue(field.isHittable)
+        XCTAssertFalse(app.buttons["word-hint"].exists)
+        capture("02-daily-challenge")
+
+        field.typeText("a")
+        XCTAssertTrue(app.buttons["word-submit"].isHittable)
+        XCTAssertTrue(app.buttons["word-submit"].isEnabled)
+    }
+
+    func testGameMenuIsAccessibleAndReturnsToTheModePicker() {
+        let app = startPuzzle(mode: "Daily Challenge")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+
+        let menu = app.buttons["game-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertEqual(menu.label, "Back to menu")
+        XCTAssertTrue(menu.isHittable)
+        menu.tap()
+
+        let quickPlay = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Quick Play")).firstMatch
+        XCTAssertTrue(quickPlay.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["word-input"].exists)
+        let title = app.staticTexts["Word Chains"]
+        for _ in 0..<4 where !title.isHittable { app.swipeDown() }
+        XCTAssertTrue(title.isHittable)
+        capture("01-menu")
+    }
+
+    func testQuickPlayResultsCanReturnToTheMenu() {
+        let app = startPuzzle()
+        let hint = app.buttons["word-hint"]
+        let submit = app.buttons["word-submit"]
+        XCTAssertTrue(hint.waitForExistence(timeout: 5))
+        capture("03-quick-play")
+
+        for _ in 0..<8 where hint.exists {
+            hint.tap()
+            submit.tap()
+        }
+        let newPuzzle = app.buttons["New Puzzle"]
+        XCTAssertTrue(newPuzzle.waitForExistence(timeout: 5))
+        capture("04-puzzle-results")
+
+        let back = app.buttons["Back to Menu"]
+        for _ in 0..<4 where !back.isHittable { app.swipeUp() }
+        XCTAssertTrue(back.isHittable)
+        back.tap()
+        XCTAssertTrue(app.buttons["Play"].waitForExistence(timeout: 5))
+    }
+
+    func testTimeAttackSummaryOffersReplayAndMenu() {
+        let app = startPuzzle(mode: "Time Attack", difficulty: "Easy")
+        XCTAssertTrue(app.descendants(matching: .any)["time-attack-bar"].waitForExistence(timeout: 5))
+        let replay = app.buttons["time-attack-replay"]
+        XCTAssertTrue(replay.waitForExistence(timeout: 105))
+        for _ in 0..<4 where !replay.isHittable { app.swipeUp() }
+        XCTAssertTrue(replay.isHittable)
+        capture("05-time-attack-results")
+
+        let back = app.buttons["Back to Menu"]
+        for _ in 0..<4 where !back.isHittable { app.swipeUp() }
+        XCTAssertTrue(back.isHittable)
+        back.tap()
+        XCTAssertTrue(app.buttons["Play"].waitForExistence(timeout: 5))
     }
 
     // Players get no hints in a sprint; this test turns them on to solve one.

@@ -79,9 +79,9 @@ struct WordInputView: View {
         case .notInDictionary, .notOneLetterAway, .alreadyUsed, .wrongLength:
             return Theme.errorRed
         case .valid:
-            return Theme.validGreen
+            return Theme.chainStart
         default:
-            return Theme.gradientStart
+            return Theme.accent
         }
     }
 
@@ -92,14 +92,14 @@ struct WordInputView: View {
             withAnimation(motion) { entry.undo(in: game) }
             fieldText = entry.text
         } label: {
-            Image(systemName: "arrow.uturn.backward")
-                .font(.system(size: 18, weight: .semibold))
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            controlIcon(
+                "arrow.uturn.backward",
+                foreground: game.canUndo ? Theme.accent : .secondary,
+                background: game.canUndo ? Theme.accent.opacity(0.12) : Theme.secondaryBackground
+            )
         }
         .disabled(!game.canUndo)
         .buttonStyle(.plain)
-        .foregroundStyle(game.canUndo ? Theme.gradientStart : Color.secondary)
         .accessibilityLabel("Undo")
         .accessibilityIdentifier("word-undo")
     }
@@ -111,13 +111,11 @@ struct WordInputView: View {
             react(to: entry.submit(in: game))
             fieldText = entry.text
         } label: {
-            Image(systemName: "arrow.up.circle.fill")
-                .font(.system(size: 36))
-                .foregroundStyle(
-                    entry.text.isEmpty ? Color.secondary : Theme.gradientStart
-                )
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            controlIcon(
+                "arrow.up",
+                foreground: entry.text.isEmpty ? .secondary : .white,
+                background: entry.text.isEmpty ? Theme.secondaryBackground : Theme.primaryFill
+            )
         }
         .disabled(entry.text.isEmpty)
         .buttonStyle(.plain)
@@ -132,20 +130,21 @@ struct WordInputView: View {
             withAnimation(motion) { entry.hint(in: game) }
             fieldText = entry.text
         } label: {
-            Image(systemName: "lightbulb.fill")
-                .font(.system(size: 20))
-                .foregroundStyle(Theme.hintBlue)
-                .frame(width: 36, height: 36)
-                .background(
-                    Circle()
-                        .fill(Theme.hintBlue.opacity(0.12))
-                )
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+            controlIcon("lightbulb.fill", foreground: Theme.hintBlue, background: Theme.hintBlue.opacity(0.12))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Hint")
         .accessibilityIdentifier("word-hint")
+    }
+
+    private func controlIcon(_ symbol: String, foreground: Color, background: Color) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundStyle(foreground)
+            .frame(width: 36, height: 36)
+            .background(background, in: Circle())
+            .frame(width: 44, height: 44)
+            .contentShape(Rectangle())
     }
 
     // MARK: - Feedback Banner

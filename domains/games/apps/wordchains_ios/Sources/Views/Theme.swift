@@ -1,23 +1,24 @@
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
 #endif
 
 enum Theme {
     // MARK: - Colors
 
-    static let accent = Color("AccentColor")
+    static let accent = adaptive(light: 0x3347BA, dark: 0xAAB4FF)
 
-    static let gradientStart = Color(red: 0.35, green: 0.47, blue: 1.0)
-    static let gradientEnd = Color(red: 0.64, green: 0.38, blue: 1.0)
+    static let primaryFill = rgb(0x3C51BE)
+    static let gradientEnd = rgb(0x6635A0)
 
-    static let chainStart = Color(red: 0.30, green: 0.85, blue: 0.60)
-    static let chainEnd = Color(red: 0.35, green: 0.47, blue: 1.0)
+    static let chainStart = adaptive(light: 0x146747, dark: 0x65D9A2)
+    static let chainEnd = accent
 
-    static let validGreen = Color(red: 0.25, green: 0.78, blue: 0.55)
-    static let errorRed = Color(red: 0.95, green: 0.30, blue: 0.35)
-    static let warningOrange = Color(red: 1.0, green: 0.62, blue: 0.25)
-    static let hintBlue = Color(red: 0.40, green: 0.65, blue: 1.0)
+    static let errorRed = adaptive(light: 0xB42335, dark: 0xFF7E88)
+    static let warningOrange = adaptive(light: 0x89500C, dark: 0xFFB660)
+    static let hintBlue = adaptive(light: 0x215FAC, dark: 0x79B4FF)
 
     #if canImport(UIKit)
     static let cardBackground = Color(.systemBackground)
@@ -29,23 +30,34 @@ enum Theme {
     static let tertiaryBackground = Color(.textBackgroundColor)
     #endif
 
-    static var headerGradient: LinearGradient {
-        LinearGradient(colors: [gradientStart, gradientEnd], startPoint: .leading, endPoint: .trailing)
+    static let actionGradient = LinearGradient(
+        colors: [primaryFill, gradientEnd], startPoint: .leading, endPoint: .trailing
+    )
+
+    private static func rgb(_ value: UInt32) -> Color {
+        Color(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
     }
 
-    static func chainGradient(progress: Double) -> Color {
-        let r = chainStart.components.red + (chainEnd.components.red - chainStart.components.red) * progress
-        let g = chainStart.components.green + (chainEnd.components.green - chainStart.components.green) * progress
-        let b = chainStart.components.blue + (chainEnd.components.blue - chainStart.components.blue) * progress
-        return Color(red: r, green: g, blue: b)
+    private static func adaptive(light: UInt32, dark: UInt32) -> Color {
+        #if canImport(UIKit)
+        Color(UIColor { traits in UIColor(rgb(traits.userInterfaceStyle == .dark ? dark : light)) })
+        #else
+        Color(NSColor(name: nil) { appearance in
+            NSColor(rgb(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light))
+        })
+        #endif
     }
 
     // MARK: - Typography
 
-    static let titleFont = Font.system(size: 34, weight: .bold, design: .rounded)
-    static let headlineFont = Font.system(size: 22, weight: .semibold, design: .rounded)
-    static let bodyFont = Font.system(size: 17, weight: .regular, design: .rounded)
-    static let captionFont = Font.system(size: 13, weight: .medium, design: .rounded)
+    static let titleFont = Font.system(.largeTitle, design: .rounded).weight(.bold)
+    static let headlineFont = Font.system(.title2, design: .rounded).weight(.semibold)
+    static let bodyFont = Font.system(.body, design: .rounded)
+    static let captionFont = Font.system(.footnote, design: .rounded).weight(.medium)
     static let tileFont = Font.system(size: 28, weight: .bold, design: .monospaced)
     static let smallTileFont = Font.system(size: 22, weight: .bold, design: .monospaced)
 
@@ -64,20 +76,19 @@ enum Theme {
     static let bounceAnimation = Animation.spring(response: 0.5, dampingFraction: 0.5)
 }
 
-// MARK: - Color Extensions
+struct PrimaryActionStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
 
-extension Color {
-    var components: (red: Double, green: Double, blue: Double, opacity: Double) {
-        var r: CGFloat = 0
-        var g: CGFloat = 0
-        var b: CGFloat = 0
-        var o: CGFloat = 0
-        #if canImport(UIKit)
-        UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &o)
-        #else
-        NSColor(self).getRed(&r, green: &g, blue: &b, alpha: &o)
-        #endif
-        return (Double(r), Double(g), Double(b), Double(o))
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(.headline, design: .rounded))
+            .foregroundStyle(.white)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background(Theme.actionGradient, in: RoundedRectangle(cornerRadius: Theme.cornerRadius))
+            .opacity(isEnabled ? (configuration.isPressed ? 0.78 : 1) : 0.5)
     }
 }
 

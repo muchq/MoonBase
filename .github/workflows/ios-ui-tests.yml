@@ -70,6 +70,27 @@ jobs:
             --ios_simulator_device="iPhone 17" \
             --ios_simulator_version=27.0
 
+      - name: Export simulator screenshots
+        if: github.event_name == 'pull_request'
+        run: |
+          bundle="bazel-testlogs/domains/games/apps/wordchains_ios/WordChainsUITests/test.outputs/tests.xcresult"
+          attachments="$RUNNER_TEMP/wordchains-attachments"
+          screenshots="$RUNNER_TEMP/wordchains-screenshots"
+          xcrun xcresulttool export attachments --path "$bundle" --output-path "$attachments"
+          mkdir -p "$screenshots"
+          jq -r '.[] | .attachments[]? | select(.suggestedHumanReadableName | contains("WordChains-")) |
+              [.exportedFileName, (.suggestedHumanReadableName | capture("(?<name>WordChains-[0-9]+-[a-z-]+)").name)] | @tsv' \
+            "$attachments/manifest.json" | while IFS=$'\t' read -r file name; do
+              cp "$attachments/$file" "$screenshots/$name.png"
+            done
+
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'pull_request'
+        with:
+          name: wordchains-ios-screenshots
+          path: ${{ runner.temp }}/wordchains-screenshots/*.png
+          if-no-files-found: error
+
   # Require this check in branch protection. A failed filter must never turn
   # into a passing check just because its dependent simulator job was skipped.
   ios-ui:

@@ -285,14 +285,29 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertEqual(game.requestHint(), "cot")
     }
 
-    func testOtherModesKeepHints() {
+    func testQuickPlayKeepsHints() {
         let game = sprint()
-        for mode in [GameMode.quickPlay, .dailyChallenge] {
-            game.startNewGame(mode: mode, difficulty: .easy, now: at(0))
-            deal(game)
-            XCTAssertTrue(game.hintsAllowed, "\(mode)")
-            XCTAssertEqual(game.requestHint(), "cot", "\(mode)")
-        }
+        game.startNewGame(mode: .quickPlay, difficulty: .easy, now: at(0))
+        deal(game)
+        XCTAssertTrue(game.hintsAllowed)
+        XCTAssertEqual(game.requestHint(), "cot")
+    }
+
+    func testDailyChallengeHasNoHintsEvenWithTheSprintTestSwitch() {
+        let fixture = sprint()
+        let game = GameState(bests: TimeAttackBests(defaults: defaults), sprintHints: true)
+        game.graph = fixture.graph
+        game.startNewGame(mode: .dailyChallenge, difficulty: .easy, now: at(0))
+        deal(game)
+        XCTAssertFalse(game.hintsAllowed)
+        XCTAssertNil(game.requestHint())
+        XCTAssertNil(game.lastResult)
+
+        var entry = WordEntry()
+        entry.change(to: "c", in: game)
+        entry.hint(in: game)
+        XCTAssertEqual(entry.text, "c")
+        XCTAssertEqual(game.chain, ["cat"])
     }
 
     func testOtherModesHaveNoClock() {

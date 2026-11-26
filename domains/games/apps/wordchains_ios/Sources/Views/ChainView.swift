@@ -42,7 +42,6 @@ struct ChainView: View {
     // MARK: - Word Tile
 
     private func wordTile(_ word: String, at index: Int) -> some View {
-        let progress = chain.count > 1 ? Double(index) / Double(max(chain.count - 1, 1)) : 0
         let isStart = index == 0
         let isLatest = index == chain.count - 1 && !chain.contains(target)
 
@@ -53,16 +52,16 @@ struct ChainView: View {
                 Text(String(char).uppercased())
                     .font(difficulty == .hard ? Theme.smallTileFont : Theme.tileFont)
                     .frame(width: tileWidth, height: Theme.tileSize)
-                    .foregroundStyle(changed ? .white : .primary)
+                    .foregroundStyle(changed ? Theme.accent : .primary)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(changed ? Theme.chainGradient(progress: progress) : Theme.tertiaryBackground)
+                            .fill(changed ? Theme.accent.opacity(0.12) : Theme.tertiaryBackground)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .stroke(
                                 isStart ? Theme.chainStart.opacity(0.5) :
-                                    isLatest ? Theme.gradientStart.opacity(0.5) : Color.clear,
+                                    isLatest ? Theme.accent.opacity(0.5) : Color.clear,
                                 lineWidth: 2
                             )
                     )
@@ -78,11 +77,11 @@ struct ChainView: View {
                 Text(String(char).uppercased())
                     .font(difficulty == .hard ? Theme.smallTileFont : Theme.tileFont)
                     .frame(width: tileWidth, height: Theme.tileSize)
-                    .foregroundStyle(.secondary.opacity(0.5))
+                    .foregroundStyle(.secondary)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-                            .foregroundStyle(Theme.chainEnd.opacity(0.3))
+                            .foregroundStyle(Theme.chainEnd.opacity(0.65))
                     )
             }
         }
@@ -92,11 +91,10 @@ struct ChainView: View {
     // MARK: - Connector
 
     private func connector(at index: Int) -> some View {
-        let progress = chain.count > 1 ? Double(index) / Double(max(chain.count, 1)) : 0.5
-        return VStack(spacing: 2) {
-            ForEach(0..<3, id: \.self) { dotIdx in
+        VStack(spacing: 2) {
+            ForEach(0..<3, id: \.self) { _ in
                 Circle()
-                    .fill(Theme.chainGradient(progress: progress).opacity(index < chain.count ? 1 : 0.3))
+                    .fill(Theme.chainEnd.opacity(index < chain.count ? 0.8 : 0.45))
                     .frame(width: 4, height: 4)
             }
         }
