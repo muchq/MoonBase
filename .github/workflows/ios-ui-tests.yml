@@ -78,8 +78,12 @@ jobs:
           bundle="bazel-testlogs/domains/games/apps/wordchains_ios/WordChainsUITests/test.outputs/tests.xcresult"
           attachments="$RUNNER_TEMP/wordchains-attachments"
           screenshots="$RUNNER_TEMP/wordchains-screenshots"
-          xcrun xcresulttool export attachments --path "$bundle" --output-path "$attachments"
-          mkdir -p "$screenshots"
+          writable_bundle="$RUNNER_TEMP/wordchains-tests.xcresult"
+          # xcresulttool may migrate the database in place. Bazel outputs are read-only.
+          cp -R "$bundle" "$writable_bundle"
+          chmod -R u+w "$writable_bundle"
+          mkdir -p "$attachments" "$screenshots"
+          xcrun xcresulttool export attachments --path "$writable_bundle" --output-path "$attachments"
           jq -r '.[] | .attachments[]? | select(.suggestedHumanReadableName | contains("WordChains-")) |
               [.exportedFileName, (.suggestedHumanReadableName | capture("(?<name>WordChains-[0-9]+-[a-z-]+)").name)] | @tsv' \
             "$attachments/manifest.json" | while IFS=$'\t' read -r file name; do
