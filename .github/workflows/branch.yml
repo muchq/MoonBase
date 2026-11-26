@@ -60,6 +60,9 @@ jobs:
       - name: Test diff-build
         run: ./scripts/test-diff-build
 
+      - name: Test ios-ui-needed
+        run: ./scripts/test-ios-ui-needed
+
       # sanitize-needed is what skips the asan/ubsan/tsan matrix on PRs with
       # no C++ or toolchain-config blast radius, and the same lib decides
       # which tests the matrix runs when it does. A silent widen or narrow
@@ -594,12 +597,8 @@ jobs:
       - name: Check for iOS changes
         id: filter
         run: |
-          CHANGED=$(git diff --name-only origin/main...HEAD -- domains/games/apps/wordchains_ios/ domains/games/apps/wordchains/ domains/games/libs/wordchains/ bazel/apple.MODULE.bazel bazel/tools.MODULE.bazel MODULE.bazel .bazelrc .bazelversion)
-          if [ -n "$CHANGED" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          fi
+          changed=$(./scripts/ios-ui-needed origin/main)
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
 
       # Pinned, so the image moving its default Xcode can't move the build.
       - name: Select Xcode 27
