@@ -99,7 +99,7 @@ struct MenuView: View {
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(selectedMode == mode ? Theme.accent.opacity(0.3) : Color.clear, lineWidth: 1.5)
+                                .strokeBorder(selectedMode == mode ? Theme.accent.opacity(0.3) : Color.clear, lineWidth: 1.5)
                         )
                     }
                     .buttonStyle(.plain)
