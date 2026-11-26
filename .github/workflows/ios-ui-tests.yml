@@ -65,7 +65,9 @@ jobs:
 
       - name: Run iOS UI tests with bazel
         run: |
+          # Include time to boot a cold simulator and let a Time Attack round expire.
           bazel test //domains/games/apps/wordchains_ios:WordChainsUITests \
+            --test_timeout=1500 \
             --ios_minimum_os=17.0 \
             --ios_simulator_device="iPhone 17" \
             --ios_simulator_version=27.0
