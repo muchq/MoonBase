@@ -84,6 +84,28 @@ final class WordEntryTests: XCTestCase {
         XCTAssertEqual(game.chain, ["cat", "cot"])
     }
 
+    // The field shows a Return's rewrite a turn later; a keystroke in that
+    // turn arrives after the old newline, and is the start of the next word.
+    func testAKeystrokeBeforeTheFieldClearsStartsTheNextWord() {
+        let game = game()
+        var entry = WordEntry()
+        XCTAssertEqual(entry.change(to: "cot\n", in: game), .valid)
+        XCTAssertNil(entry.change(to: "cot\nc", in: game))
+        XCTAssertEqual(entry.text, "c")
+        XCTAssertEqual(game.chain, ["cat", "cot"])
+        XCTAssertEqual(game.feedbackMessage, "")
+    }
+
+    func testAKeystrokeAfterARejectedReturnAppendsWithoutResubmitting() {
+        let game = game()
+        var entry = WordEntry()
+        XCTAssertEqual(entry.change(to: "zzz\n", in: game), .notInDictionary)
+        XCTAssertNil(entry.change(to: "zzz\na", in: game))
+        XCTAssertEqual(entry.text, "zzza")
+        XCTAssertEqual(game.chain, ["cat"])
+        XCTAssertNil(game.lastResult, "Editing clears the error, as typing does")
+    }
+
     func testRetypingAnAcceptedWordStillSaysItIsInTheChain() {
         let game = game()
         var entry = WordEntry()
