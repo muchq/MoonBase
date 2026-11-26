@@ -12,6 +12,31 @@ final class WordEditorUITests: XCTestCase {
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
     }
 
+    func testModeSelectionKeepsMenuLayoutStable() {
+        let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
+        app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
+        app.launch()
+
+        let labels = ["Quick Play", "Daily Challenge", "Time Attack"]
+        let buttons = labels.map { label in
+            app.buttons.containing(NSPredicate(format: "label CONTAINS %@", label)).firstMatch
+        }
+        XCTAssertTrue(buttons[0].waitForExistence(timeout: 30))
+        settle()
+        XCTAssertEqual(buttons.map { $0.label }, labels)
+        let initialFrames = buttons.map { $0.frame }
+
+        for selected in [1, 2, 0] {
+            buttons[selected].tap()
+            settle()
+            XCTAssertTrue(buttons[selected].isSelected)
+            for (index, button) in buttons.enumerated() {
+                XCTAssertEqual(button.frame.minY, initialFrames[index].minY, accuracy: 1)
+                XCTAssertEqual(button.frame.height, initialFrames[index].height, accuracy: 1)
+            }
+        }
+    }
+
     private func startPuzzle(mode: String? = nil, difficulty: String? = nil, arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
         app.launchArguments = arguments
