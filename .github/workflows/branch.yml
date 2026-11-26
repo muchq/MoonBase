@@ -166,7 +166,7 @@ jobs:
   # job above runs bash 5 and cannot reproduce that, so run the same suite on a
   # mac against /bin/bash explicitly.
   test-deploy-macos:
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
         with:
@@ -468,7 +468,7 @@ jobs:
 
   # Metal GPU training requires macOS; run microgpt tests on Apple Silicon when relevant files change.
   test-microgpt-metal:
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
         with:
