@@ -11,10 +11,19 @@ POST /mithril/v2/wordchain
 → 200 {"path": ["cold", "cord", "card", "ward", "warm"]}
 ```
 
-It serves mithril's own `words.txt` and `.graph` and searches them the way the
-Rust solver does, so it answers every query with the same ladder.
-`testdata/v1_ladders.tsv` holds 500 answers captured from mithril v1, and the
-tests replay them. Its status codes match v1's too (406, 413, 415, 400, 422),
+Both Mithril APIs, the CLI, and iOS read the same generated `word_graph.json`.
+The graph uses the filtered ENABLE dictionary that lobby races use. The
+generator orders neighbours by word index so equally short ladders resolve
+consistently. `testdata/v1_ladders.tsv` holds 500 answers from the Rust solver
+on that graph, and the tests replay them.
+[Word Chains dictionary](../../libs/wordchain_race/DICTIONARY.md)
+
+When the graph changes, use `bazel run //domains/games/apps/wordchains -- repl`
+and `shortest <start> <end>` to refresh the third column of the corpus. Record
+each ladder as space-separated words or `-` when there is no path. Keep 500
+pairs with both successful ladders and misses.
+
+Its status codes match v1's too (406, 413, 415, 400, 422),
 with two exceptions: v1 also reads a body sent as an array of the two words,
 and v1 refuses a repeated key, where v2 takes the first one.
 

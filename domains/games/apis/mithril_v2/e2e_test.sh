@@ -50,6 +50,13 @@ check health "Ok" "$(curl -sf "http://127.0.0.1:$PORT/health")"
 check ladder '{"path":["cold","cord","card","ward","warm"]}' \
   "$(curl -sf -X POST "http://127.0.0.1:$PORT/mithril/v2/wordchain" \
     -H 'content-type: application/json' -d '{"start":"cold","end":"warm"}')"
+LADDER="$(curl -sf -X POST "http://127.0.0.1:$PORT/mithril/v2/wordchain" \
+  -H 'content-type: application/json' -d '{"start":"sake","end":"sail"}')"
+if ! jq -e '.path | first == "sake" and last == "sail" and
+    all(.[]; . != "sade" and . != "sadr" and . != "sair")' <<< "$LADDER"; then
+  echo "FAIL: sake to sail must use playable words: $LADDER" >&2
+  exit 1
+fi
 
 # A body past 4 MiB is refused by the server's read, not by the handler.
 head -c 4194305 /dev/zero | tr '\0' ' ' >"$TEST_TMPDIR/big.json"
@@ -67,7 +74,7 @@ if grep -v '^{"timestamp":"[^"]*Z","level":"[A-Z]*","message":".*}$' "$LOG"; the
   echo "FAIL: the lines above are not JSON log lines" >&2
   exit 1
 fi
-check "access lines" 3 "$(grep -c '"event":"access"' "$LOG")"
+check "access lines" 4 "$(grep -c '"event":"access"' "$LOG")"
 grep -q '"message":"reading word graph from ' "$LOG" ||
   { echo "FAIL: no startup line for the word graph" >&2; cat "$LOG" >&2; exit 1; }
 

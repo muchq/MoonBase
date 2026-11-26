@@ -2,9 +2,12 @@ use axum::extract::State;
 use axum::{extract::Json as ExtractJson, response::Json, routing::post};
 use serde::{Deserialize, Deserializer, Serialize};
 use server_pal::{listen_addr_pal, router_builder, serve};
+use std::fs::File;
+use std::io::BufReader;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{Level, event};
-use wordchains::{Graph, bfs_for_target, initialize_graph};
+use wordchains::{Graph, bfs_for_target};
 
 fn validate_word<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
@@ -64,13 +67,20 @@ async fn main() {
     // http_server_* instruments record into the no-op global meter.
     let _otel_provider = server_pal::init_otel();
 
-    let data_dir = "mithril.runfiles/_main/domains/games/apis/mithril/data";
-    let path = format!("{}/words.txt", data_dir);
-    let word_graph = initialize_graph(&path, Some(data_dir));
-
-    let shared_state = Arc::new(AppState {
-        word_graph: word_graph,
-    });
+    let graph_runfile = "_main/domains/games/apps/wordchains/word_graph.json";
+    let adjacent = std::env::current_exe()
+        .unwrap()
+        .with_extension("runfiles")
+        .join(graph_runfile);
+    // Launchers can inherit RUNFILES_DIR from a different Bazel binary.
+    let path = match std::env::var_os("RUNFILES_DIR") {
+        Some(dir) if !adjacent.is_file() => PathBuf::from(dir).join(graph_runfile),
+        _ => adjacent,
+    };
+    let file = File::open(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let word_graph = serde_json::from_reader(BufReader::new(file))
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    let shared_state = Arc::new(AppState { word_graph });
 
     let listen_address = listen_addr_pal();
 
