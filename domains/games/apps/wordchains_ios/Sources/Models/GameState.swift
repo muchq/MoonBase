@@ -44,9 +44,9 @@ enum Difficulty: Int, CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
-        case .easy: .green
-        case .medium: .orange
-        case .hard: .red
+        case .easy: Theme.chainStart
+        case .medium: Theme.warningOrange
+        case .hard: Theme.errorRed
         }
     }
 }
@@ -219,10 +219,15 @@ final class GameState {
         return path.count > 1 ? path[1] : nil
     }
 
-    /// `hint()`, but a dead end leaves a message instead of nothing.
-    /// A sprint is against the clock on the player's own words.
-    var hintsAllowed: Bool { currentMode != .timeAttack || sprintHints }
+    var hintsAllowed: Bool {
+        switch currentMode {
+        case .quickPlay: true
+        case .dailyChallenge: false
+        case .timeAttack: sprintHints
+        }
+    }
 
+    /// `hint()`, with a message when the current ladder has no route.
     func requestHint() -> String? {
         guard hintsAllowed, !isComplete else { return nil }
         let next = hint()

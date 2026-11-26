@@ -125,7 +125,7 @@ struct RaceLobbyView: View {
             } label: {
                 Text("Quick race").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(PrimaryActionStyle())
             .disabled(!connected || session.state.opening)
 
             Divider()
@@ -188,7 +188,7 @@ struct RaceLobbyView: View {
             } label: {
                 Text("Open a race table").frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(PrimaryActionStyle())
             .disabled(!connected || session.state.opening)
 
             Button("Leave the room", role: .destructive) { session.leaveRoom() }

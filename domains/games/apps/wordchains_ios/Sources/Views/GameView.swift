@@ -7,6 +7,13 @@ struct GameView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var isTimeAttack: Bool { game.currentMode == .timeAttack }
+    private var menuPlacement: ToolbarItemPlacement {
+        #if os(iOS)
+        .topBarLeading
+        #else
+        .navigation
+        #endif
+    }
 
     var body: some View {
         ZStack {
@@ -24,7 +31,7 @@ struct GameView: View {
                 ResultsView(
                     game: game,
                     onNewGame: {
-                        withAnimation(Theme.springAnimation) {
+                        withAnimation(reduceMotion ? nil : Theme.springAnimation) {
                             showResults = false
                             game.startNewGame(mode: game.currentMode, difficulty: game.difficulty)
                         }
@@ -33,26 +40,22 @@ struct GameView: View {
                         dismiss()
                     }
                 )
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
+                .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .trailing)))
             } else {
                 gameContent
-                    .transition(.opacity.combined(with: .move(edge: .leading)))
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .leading)))
             }
         }
         .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
+            ToolbarItem(placement: menuPlacement) {
                 Button {
                     dismiss()
                 } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text("Menu")
-                            .font(.system(size: 16, weight: .medium, design: .rounded))
-                    }
-                    .foregroundStyle(Theme.gradientStart)
+                    Image(systemName: "chevron.backward")
                 }
+                .accessibilityLabel("Back to menu")
+                .accessibilityIdentifier("game-menu")
             }
         }
         // One clock for the sprint: suspension pauses this loop, not the
@@ -70,7 +73,7 @@ struct GameView: View {
         .onChange(of: game.isComplete) {
             if game.isComplete && !isTimeAttack {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    withAnimation(Theme.springAnimation) {
+                    withAnimation(reduceMotion ? nil : Theme.springAnimation) {
                         showResults = true
                     }
                 }
@@ -104,10 +107,10 @@ struct GameView: View {
                 HStack(spacing: 6) {
                     Text(game.difficulty.label)
                         .font(Theme.captionFont)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(game.difficulty.color)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 4)
-                        .background(Capsule().fill(game.difficulty.color))
+                        .background(Capsule().fill(game.difficulty.color.opacity(0.12)))
 
                     Text(game.currentMode.rawValue)
                         .font(Theme.captionFont)
@@ -139,7 +142,7 @@ struct GameView: View {
                     .foregroundStyle(.secondary)
                 Text("\(game.stepsTaken)")
                     .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.gradientStart)
+                    .foregroundStyle(Theme.accent)
             }
         }
         .padding(.horizontal, Theme.cardPadding)
@@ -175,10 +178,10 @@ struct GameView: View {
     private var solvedBadge: some View {
         Text("Solved! +\(game.score)")
             .font(.system(size: 22, weight: .bold, design: .rounded))
-            .foregroundStyle(.white)
+            .foregroundStyle(Theme.chainStart)
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
-            .background(Capsule().fill(Theme.validGreen))
+            .background(Capsule().fill(Theme.cardBackground))
             .accessibilityHidden(true)
     }
 
@@ -232,6 +235,6 @@ struct TimeAttackBar: View {
     private var timerColor: Color {
         if game.timeAttackSeconds <= 10 { return Theme.errorRed }
         if game.timeAttackSeconds <= 30 { return Theme.warningOrange }
-        return Theme.gradientStart
+        return Theme.accent
     }
 }

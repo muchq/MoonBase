@@ -13,6 +13,7 @@ struct ContentView: View {
                 MenuView(game: game)
             }
         }
+        .tint(Theme.accent)
         .onAppear {
             game.loadGraph()
         }
@@ -22,7 +23,7 @@ struct ContentView: View {
         VStack(spacing: 20) {
             ProgressView()
                 .scaleEffect(1.5)
-                .tint(Theme.gradientStart)
+                .tint(Theme.accent)
 
             Text("Loading dictionary...")
                 .font(Theme.bodyFont)
@@ -50,7 +51,7 @@ struct ContentView: View {
                 game.loadGraph()
             }
             .font(Theme.bodyFont)
-            .foregroundStyle(Theme.gradientStart)
+            .foregroundStyle(Theme.accent)
         }
         .padding(Theme.cardPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

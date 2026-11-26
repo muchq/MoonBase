@@ -65,10 +65,37 @@ jobs:
 
       - name: Run iOS UI tests with bazel
         run: |
+          # Include time to boot a cold simulator and let a Time Attack round expire.
           bazel test //domains/games/apps/wordchains_ios:WordChainsUITests \
+            --test_timeout=1500 \
             --ios_minimum_os=17.0 \
             --ios_simulator_device="iPhone 17" \
             --ios_simulator_version=27.0
+
+      - name: Export simulator screenshots
+        if: github.event_name == 'pull_request'
+        run: |
+          bundle="bazel-testlogs/domains/games/apps/wordchains_ios/WordChainsUITests/test.outputs/tests.xcresult"
+          attachments="$RUNNER_TEMP/wordchains-attachments"
+          screenshots="$RUNNER_TEMP/wordchains-screenshots"
+          writable_bundle="$RUNNER_TEMP/wordchains-tests.xcresult"
+          # xcresulttool may migrate the database in place. Bazel outputs are read-only.
+          cp -R "$bundle" "$writable_bundle"
+          chmod -R u+w "$writable_bundle"
+          mkdir -p "$attachments" "$screenshots"
+          xcrun xcresulttool export attachments --path "$writable_bundle" --output-path "$attachments"
+          jq -r '.[] | .attachments[]? | select(.suggestedHumanReadableName | contains("WordChains-")) |
+              [.exportedFileName, (.suggestedHumanReadableName | capture("(?<name>WordChains-[0-9]+-[a-z-]+)").name)] | @tsv' \
+            "$attachments/manifest.json" | while IFS=$'\t' read -r file name; do
+              cp "$attachments/$file" "$screenshots/$name.png"
+            done
+
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'pull_request'
+        with:
+          name: wordchains-ios-screenshots
+          path: ${{ runner.temp }}/wordchains-screenshots/*.png
+          if-no-files-found: error
 
   # Require this check in branch protection. A failed filter must never turn
   # into a passing check just because its dependent simulator job was skipped.

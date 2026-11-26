@@ -84,16 +84,21 @@ struct RaceTableView: View {
     @ViewBuilder
     private var puzzle: some View {
         if let start = table.start, let target = table.target {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(start.uppercased()).font(.system(size: 26, weight: .bold, design: .monospaced))
-                Image(systemName: "arrow.right").accessibilityLabel("to")
-                Text(target.uppercased()).font(.system(size: 26, weight: .bold, design: .monospaced))
-                Spacer()
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(start.uppercased()).foregroundStyle(Theme.chainStart)
+                    Image(systemName: "arrow.right")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("to")
+                    Text(target.uppercased()).foregroundStyle(Theme.chainEnd)
+                }
+                .font(.system(.title2, design: .monospaced).weight(.bold))
+
                 if let deadline = table.deadlineMs, racing {
                     TimelineView(.periodic(from: .now, by: 0.25)) { context in
                         let now = Int64(context.date.timeIntervalSince1970 * 1000)
                         Text("\(RaceText.clock(msLeft: deadline - now)) left")
-                            .font(.system(size: 20, weight: .semibold, design: .rounded).monospacedDigit())
+                            .font(Theme.headlineFont.monospacedDigit())
                             .foregroundStyle(Theme.warningOrange)
                     }
                 }
@@ -131,8 +136,10 @@ struct RaceTableView: View {
                         .onSubmit { if able { session.play(draft) } }
                     Button("Play") { session.play(draft) }
                         .buttonStyle(.borderedProminent)
+                        .tint(Theme.primaryFill)
                         .disabled(!able || draft.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
+                .controlSize(.large)
                 Button("Take back") { session.retract() }
                     .buttonStyle(.bordered)
                     .disabled(!able || ladder.isEmpty)
@@ -161,7 +168,7 @@ struct RaceTableView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(RaceText.you(runner.playerId, viewer: viewer))
                             .font(.system(size: 16, weight: .semibold, design: .rounded))
-                            .foregroundStyle(runner.playerId == viewer ? Theme.gradientStart : .primary)
+                            .foregroundStyle(runner.playerId == viewer ? Theme.accent : .primary)
                         Text(line(runner)).font(Theme.captionFont).foregroundStyle(.secondary)
                         if !racing, let rungs = runner.ladder, !rungs.isEmpty {
                             Text(([table.start ?? ""] + rungs).joined(separator: " → "))
@@ -201,7 +208,7 @@ struct RaceTableView: View {
                 } label: {
                     Text(model.startLabel).frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(PrimaryActionStyle())
                 .disabled(session.connection != .connected)
             }
         case .closed:
@@ -211,7 +218,7 @@ struct RaceTableView: View {
                 } label: {
                     Text(session.state.opening ? "Opening…" : "Play again").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(PrimaryActionStyle())
                 .disabled(session.connection != .connected || session.state.opening)
                 Button("Back to the room") { session.leaveTable() }
                     .disabled(session.state.opening)

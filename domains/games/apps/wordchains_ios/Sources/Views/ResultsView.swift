@@ -5,34 +5,37 @@ struct ResultsView: View {
     let onNewGame: () -> Void
     let onMenu: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animateIn = false
     @State private var showConfetti = false
 
     var body: some View {
-        VStack(spacing: Theme.sectionSpacing) {
-            Spacer()
-
-            celebrationHeader
-            scoreCard
-            chainSummary
-            actionButtons
-
-            Spacer()
+        ScrollView {
+            VStack(spacing: Theme.sectionSpacing) {
+                celebrationHeader
+                scoreCard
+                chainSummary
+                actionButtons
+            }
+            .frame(maxWidth: .infinity)
+            .padding(Theme.cardPadding)
         }
-        .padding(.horizontal, Theme.cardPadding)
         .background(Theme.secondaryBackground.ignoresSafeArea())
         .overlay(alignment: .top) {
             if showConfetti {
                 ConfettiView()
                     .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
         .onAppear {
-            withAnimation(Theme.springAnimation.delay(0.2)) {
+            withAnimation(reduceMotion ? nil : Theme.springAnimation.delay(0.2)) {
                 animateIn = true
             }
-            withAnimation(.easeOut(duration: 0.5).delay(0.3)) {
-                showConfetti = true
+            if !reduceMotion {
+                withAnimation(.easeOut(duration: 0.5).delay(0.3)) {
+                    showConfetti = true
+                }
             }
             hapticSuccess()
         }
@@ -44,11 +47,13 @@ struct ResultsView: View {
         VStack(spacing: 8) {
             Text(headerEmoji)
                 .font(.system(size: 64))
-                .scaleEffect(animateIn ? 1 : 0.3)
+                .scaleEffect(animateIn || reduceMotion ? 1 : 0.3)
+                .accessibilityHidden(true)
 
             Text(headerTitle)
                 .font(Theme.titleFont)
-                .foregroundStyle(Theme.headerGradient)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
 
             if let puzzle = game.currentPuzzle {
                 Text("\(puzzle.start) \u{2192} \(puzzle.target)")
@@ -124,7 +129,7 @@ struct ResultsView: View {
         VStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 16))
-                .foregroundStyle(Theme.gradientStart)
+                .foregroundStyle(Theme.accent)
             Text(value)
                 .font(.system(size: 24, weight: .bold, design: .rounded))
             Text(label)
@@ -160,30 +165,13 @@ struct ResultsView: View {
     private var actionButtons: some View {
         VStack(spacing: 12) {
             Button(action: onNewGame) {
-                HStack(spacing: 8) {
-                    Image(systemName: "arrow.clockwise")
-                    Text("New Puzzle")
-                        .font(.system(size: 17, weight: .semibold, design: .rounded))
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(LinearGradient(
-                            colors: [Theme.gradientStart, Theme.gradientEnd],
-                            startPoint: .leading, endPoint: .trailing
-                        ))
-                )
+                Label(game.currentMode == .dailyChallenge ? "Play Again" : "New Puzzle", systemImage: "arrow.clockwise")
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PrimaryActionStyle())
 
-            Button(action: onMenu) {
-                Text("Back to Menu")
-                    .font(.system(size: 16, weight: .medium, design: .rounded))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
+            Button("Back to Menu", action: onMenu)
+                .buttonStyle(.bordered)
+                .controlSize(.large)
         }
         .opacity(animateIn ? 1 : 0)
         .offset(y: animateIn ? 0 : 50)
@@ -232,7 +220,7 @@ struct ConfettiParticle: Identifiable {
     let endX = Double.random(in: 0...1)
     let size = CGFloat.random(in: 4...10)
     let color: Color = [
-        Theme.gradientStart, Theme.gradientEnd, Theme.validGreen,
+        Theme.accent, Theme.gradientEnd, Theme.chainStart,
         Theme.warningOrange, Theme.hintBlue, .pink, .yellow,
     ].randomElement()!
 }

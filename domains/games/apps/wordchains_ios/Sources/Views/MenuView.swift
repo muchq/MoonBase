@@ -6,6 +6,8 @@ struct MenuView: View {
     @State private var selectedDifficulty: Difficulty = .medium
     @State private var showGame = false
     @State private var animateIn = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         NavigationStack {
@@ -27,7 +29,7 @@ struct MenuView: View {
                 GameView(game: game)
             }
             .onAppear {
-                withAnimation(Theme.springAnimation.delay(0.1)) {
+                withAnimation(reduceMotion ? nil : Theme.springAnimation.delay(0.1)) {
                     animateIn = true
                 }
             }
@@ -40,7 +42,7 @@ struct MenuView: View {
         VStack(spacing: 8) {
             Text("Word Chains")
                 .font(Theme.titleFont)
-                .foregroundStyle(Theme.headerGradient)
+                .foregroundStyle(.primary)
 
             Text("Change one letter at a time")
                 .font(Theme.bodyFont)
@@ -64,23 +66,23 @@ struct MenuView: View {
             VStack(spacing: 8) {
                 ForEach(GameMode.allCases) { mode in
                     Button {
-                        withAnimation(Theme.quickSpring) {
+                        withAnimation(reduceMotion ? nil : Theme.quickSpring) {
                             selectedMode = mode
                         }
                     } label: {
                         HStack(spacing: 14) {
                             Image(systemName: mode.iconName)
                                 .font(.system(size: 20))
-                                .foregroundStyle(selectedMode == mode ? .white : Theme.gradientStart)
+                                .foregroundStyle(selectedMode == mode ? .white : Theme.accent)
                                 .frame(width: 36, height: 36)
                                 .background(
                                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(selectedMode == mode ? Theme.gradientStart : Theme.gradientStart.opacity(0.12))
+                                        .fill(selectedMode == mode ? Theme.primaryFill : Theme.accent.opacity(0.12))
                                 )
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(mode.rawValue)
-                                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+                                    .font(.system(.headline, design: .rounded))
                                     .foregroundStyle(.primary)
                                 Text(mode.description)
                                     .font(Theme.captionFont)
@@ -91,21 +93,22 @@ struct MenuView: View {
 
                             if selectedMode == mode {
                                 Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(Theme.gradientStart)
+                                    .foregroundStyle(Theme.accent)
                                     .transition(.scale.combined(with: .opacity))
                             }
                         }
                         .padding(14)
                         .background(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .fill(selectedMode == mode ? Theme.gradientStart.opacity(0.08) : Color.clear)
+                                .fill(selectedMode == mode ? Theme.accent.opacity(0.08) : Color.clear)
                         )
                         .overlay(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                .stroke(selectedMode == mode ? Theme.gradientStart.opacity(0.3) : Color.clear, lineWidth: 1.5)
+                                .stroke(selectedMode == mode ? Theme.accent.opacity(0.3) : Color.clear, lineWidth: 1.5)
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(selectedMode == mode ? .isSelected : [])
                 }
             }
         }
@@ -124,34 +127,47 @@ struct MenuView: View {
                 .textCase(.uppercase)
                 .tracking(1)
 
-            HStack(spacing: 10) {
+            difficultyLayout {
                 ForEach(Difficulty.allCases) { diff in
                     Button {
-                        withAnimation(Theme.quickSpring) {
+                        withAnimation(reduceMotion ? nil : Theme.quickSpring) {
                             selectedDifficulty = diff
                         }
                     } label: {
                         VStack(spacing: 6) {
                             Text(diff.label)
-                                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                                .font(.system(.subheadline, design: .rounded).weight(.semibold))
                             Text("\(diff.letterCount) letters")
                                 .font(Theme.captionFont)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .foregroundStyle(selectedDifficulty == diff ? .white : .primary)
+                        .foregroundStyle(diff.color)
                         .background(
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(selectedDifficulty == diff ? diff.color : diff.color.opacity(0.1))
+                                .fill(diff.color.opacity(0.1))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(selectedDifficulty == diff ? diff.color : Color.clear, lineWidth: 2)
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(selectedDifficulty == diff ? .isSelected : [])
                 }
             }
         }
         .cardStyle()
         .opacity(animateIn ? 1 : 0)
         .offset(y: animateIn ? 0 : 40)
+    }
+
+    private var difficultyLayout: AnyLayout {
+        if dynamicTypeSize.isAccessibilitySize {
+            AnyLayout(VStackLayout(spacing: 10))
+        } else {
+            AnyLayout(HStackLayout(spacing: 10))
+        }
     }
 
     // MARK: - Play Button
@@ -168,12 +184,12 @@ struct MenuView: View {
                 Text("Race friends")
                     .font(.system(size: 18, weight: .semibold, design: .rounded))
             }
-            .foregroundStyle(Theme.gradientStart)
+            .foregroundStyle(Theme.accent)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
             .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Theme.gradientStart.opacity(0.5), lineWidth: 1.5)
+                    .stroke(Theme.accent.opacity(0.5), lineWidth: 1.5)
             )
         }
         .buttonStyle(.plain)
@@ -186,30 +202,10 @@ struct MenuView: View {
             game.startNewGame(mode: selectedMode, difficulty: selectedDifficulty)
             showGame = true
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "play.fill")
-                    .font(.system(size: 18))
-                Text("Play")
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-            }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 18)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [Theme.gradientStart, Theme.gradientEnd],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-            )
-            .shadow(color: Theme.gradientStart.opacity(0.4), radius: 12, y: 6)
+            Label("Play", systemImage: "play.fill")
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PrimaryActionStyle())
         .disabled(game.isLoading || game.graph == nil)
-        .opacity(game.isLoading ? 0.6 : 1)
         .opacity(animateIn ? 1 : 0)
         .offset(y: animateIn ? 0 : 50)
     }
