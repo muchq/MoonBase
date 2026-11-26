@@ -1,20 +1,10 @@
 name: iOS UI tests
 
-# WordChainsUITests drive the app in a booted simulator: minutes per run on
-# top of the simulator test-ios already boots, so they stay off every PR.
-# They run on main after any wordchains_ios change, on a PR labelled
-# `ios-ui`, and by hand.
+# Always report ios-ui; only allocate the simulator runner for relevant changes.
 on:
   push:
     branches: [ "main" ]
-    paths:
-      - "domains/games/apps/wordchains_ios/**"
-      - "domains/games/apps/wordchains/**"
-      - "domains/games/libs/wordchains/**"
-      - "bazel/apple.MODULE.bazel"
   pull_request:
-    branches: [ "main" ]
-    types: [ opened, synchronize, reopened, labeled ]
   workflow_dispatch:
 
 concurrency:
@@ -30,8 +20,31 @@ defaults:
     shell: bash
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      needed: ${{ steps.filter.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for iOS changes
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REVISION: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            needed=true
+          else
+            needed=$(./scripts/ios-ui-needed "$BASE_REVISION")
+          fi
+          echo "needed=$needed" >> "$GITHUB_OUTPUT"
+
   ios-ui-tests:
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ios-ui')
+    needs: changes
+    if: needs.changes.outputs.needed == 'true'
     runs-on: xcode-27
     steps:
       - uses: actions/checkout@v7
@@ -56,3 +69,22 @@ jobs:
             --ios_minimum_os=17.0 \
             --ios_simulator_device="iPhone 17" \
             --ios_simulator_version=27.0
+
+  # Require this check in branch protection. A failed filter must never turn
+  # into a passing check just because its dependent simulator job was skipped.
+  ios-ui:
+    runs-on: ubuntu-latest
+    needs: [changes, ios-ui-tests]
+    if: always()
+    steps:
+      - name: Require successful iOS UI tests when needed
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          NEEDED: ${{ needs.changes.outputs.needed }}
+          TEST_RESULT: ${{ needs.ios-ui-tests.result }}
+        run: |
+          [ "$CHANGES_RESULT" = success ]
+          case "$NEEDED:$TEST_RESULT" in
+            true:success|false:skipped) ;;
+            *) echo "Unexpected iOS UI result: needed=$NEEDED, result=$TEST_RESULT" >&2; exit 1 ;;
+          esac

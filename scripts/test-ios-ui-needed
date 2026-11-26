@@ -1,0 +1,121 @@
+#!/bin/bash
+# Real git fixtures for the shared filter, plus the workflow's actual gate.
+set -euo pipefail
+REPO=$(cd "$(dirname "$0")/.." && pwd)
+DECIDE=${DECIDE:-$REPO/scripts/ios-ui-needed}
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+mkdir "$WORK/repo"
+cd "$WORK/repo"
+git init -q
+git config user.email test@example.com
+git config user.name test
+git config commit.gpgsign false
+git -c core.hooksPath=/dev/null commit -qm base --allow-empty
+BASE=$(git rev-parse HEAD)
+
+expect() {
+  local expected=$1 actual
+  actual=$("$DECIDE" "$BASE")
+  if [ "$actual" != "$expected" ]; then
+    echo "FAIL: $2: expected $expected, got $actual" >&2
+    exit 1
+  fi
+  echo "ok: $2"
+}
+commit_file() {
+  mkdir -p "$(dirname "$1")"
+  echo change > "$1"
+  git add -- "$1"
+  git -c core.hooksPath=/dev/null commit -qm "change $1"
+}
+
+echo 'Relevant and unrelated changes'
+expect false 'no changes'
+for path in \
+  domains/games/apps/wordchains_ios/Sources/App.swift \
+  domains/games/apps/wordchains/web.ts \
+  domains/games/libs/wordchains/words.txt \
+  bazel/apple.MODULE.bazel bazel/tools.MODULE.bazel \
+  MODULE.bazel .bazelrc .bazelversion \
+  .github/workflows/ios-ui-tests.yml .github/workflows/branch.yml \
+  scripts/ios-ui-needed scripts/test-ios-ui-needed scripts/require-ios-sdk; do
+  git checkout -q "$BASE"
+  commit_file "$path"
+  expect true "$path starts iOS tests"
+done
+for path in README.md domains/games/other.cc bazel/oci.MODULE.bazel \
+  domains/games/apps/wordchains_other/file.swift; do
+  git checkout -q "$BASE"
+  commit_file "$path"
+  expect false "$path keeps iOS tests off"
+done
+
+echo 'History and removed paths'
+git checkout -q "$BASE"
+commit_file domains/games/apps/wordchains_ios/App.swift
+BASE=$(git rev-parse HEAD)
+git mv domains/games/apps/wordchains_ios/App.swift moved.swift
+git -c core.hooksPath=/dev/null commit -qm rename
+expect true 'rename out of iOS still runs tests'
+git checkout -q "$BASE"
+git rm -q domains/games/apps/wordchains_ios/App.swift
+git -c core.hooksPath=/dev/null commit -qm delete
+expect true 'deleted iOS file still runs tests'
+# Main pushes compare to before, even when origin/main already points at HEAD.
+git update-ref refs/remotes/origin/main HEAD
+expect true 'push compares to the previous commit'
+FORK=$BASE
+commit_file domains/games/libs/wordchains/words.txt
+BASE=$(git rev-parse HEAD)
+git checkout -q "$FORK"
+commit_file README.md
+expect false 'base-only changes do not count as PR changes'
+
+if "$DECIDE" missing-revision > "$WORK/out" 2> "$WORK/err"; then
+  echo 'FAIL: invalid base passed' >&2; exit 1
+fi
+[ ! -s "$WORK/out" ]
+[ -s "$WORK/err" ]
+echo 'ok: invalid base fails without printing false'
+
+echo 'Required summary check'
+awk '/^  ios-ui:/{gate=1} gate && /^        run: \|/{body=1; next} body {sub(/^          /, ""); print}' \
+  "$REPO/.github/workflows/ios-ui-tests.yml" > "$WORK/gate"
+[ -s "$WORK/gate" ]
+for changes in success failure cancelled skipped; do
+  for needed in true false ''; do
+    for result in success failure cancelled skipped; do
+      expected=1
+      if [ "$changes" = success ]; then
+        case "$needed:$result" in true:success|false:skipped) expected=0 ;; esac
+      fi
+      actual=0
+      CHANGES_RESULT=$changes NEEDED=$needed TEST_RESULT=$result \
+        bash -e "$WORK/gate" > "$WORK/gate-out" 2>&1 || actual=$?
+      if [ "$actual" -ne "$expected" ]; then
+        echo "FAIL: gate $changes/$needed/$result: expected $expected, got $actual" >&2
+        exit 1
+      fi
+    done
+  done
+done
+
+echo 'Workflow filter failure and manual override'
+awk '/^  changes:/{filter=1} /^  ios-ui-tests:/{exit} filter && /^        run: \|/{body=1; next} body {sub(/^          /, ""); print}' \
+  "$REPO/.github/workflows/ios-ui-tests.yml" > "$WORK/filter"
+[ -s "$WORK/filter" ]
+mkdir -p scripts
+cp "$DECIDE" scripts/ios-ui-needed
+for event in pull_request push; do
+  : > "$WORK/output"
+  if EVENT_NAME=$event BASE_REVISION=missing-revision GITHUB_OUTPUT=$WORK/output \
+    bash -e "$WORK/filter" > "$WORK/out" 2>&1; then
+    echo "FAIL: $event hid a failed diff" >&2; exit 1
+  fi
+  [ ! -s "$WORK/output" ]
+done
+EVENT_NAME=workflow_dispatch BASE_REVISION='' GITHUB_OUTPUT=$WORK/output \
+  bash -e "$WORK/filter"
+[ "$(cat "$WORK/output")" = needed=true ]
+echo 'all iOS gate checks passed'

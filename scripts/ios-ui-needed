@@ -1,0 +1,19 @@
+#!/bin/bash
+# Prints true or false for iOS changes since the merge base with <base-revision>.
+# Shared by the iOS build and UI workflows. Diff errors fail the calling job.
+set -euo pipefail
+
+BASE_REVISION=${1:?usage: ios-ui-needed <base-revision>}
+CHANGED=$(git diff --name-only --no-renames "$BASE_REVISION"...HEAD -- \
+  domains/games/apps/wordchains_ios/ \
+  domains/games/apps/wordchains/ \
+  domains/games/libs/wordchains/ \
+  bazel/apple.MODULE.bazel bazel/tools.MODULE.bazel \
+  MODULE.bazel .bazelrc .bazelversion \
+  .github/workflows/ios-ui-tests.yml .github/workflows/branch.yml \
+  scripts/ios-ui-needed scripts/test-ios-ui-needed scripts/require-ios-sdk)
+if [ -n "$CHANGED" ]; then
+  echo true
+else
+  echo false
+fi
