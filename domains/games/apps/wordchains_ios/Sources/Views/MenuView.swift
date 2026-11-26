@@ -79,25 +79,20 @@ struct MenuView: View {
                                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                                         .fill(selectedMode == mode ? Theme.primaryFill : Theme.accent.opacity(0.12))
                                 )
+                                .accessibilityHidden(true)
 
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(mode.rawValue)
-                                    .font(.system(.headline, design: .rounded))
-                                    .foregroundStyle(.primary)
-                                Text(mode.description)
-                                    .font(Theme.captionFont)
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text(mode.rawValue)
+                                .font(.system(.headline, design: .rounded))
+                                .foregroundStyle(.primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
 
-                            Spacer()
-
-                            if selectedMode == mode {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(Theme.accent)
-                                    .transition(.scale.combined(with: .opacity))
-                            }
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(Theme.accent)
+                                .opacity(selectedMode == mode ? 1 : 0)
+                                .accessibilityHidden(true)
                         }
                         .padding(14)
+                        .contentShape(Rectangle())
                         .background(
                             RoundedRectangle(cornerRadius: 14, style: .continuous)
                                 .fill(selectedMode == mode ? Theme.accent.opacity(0.08) : Color.clear)

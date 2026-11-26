@@ -8,14 +8,6 @@ enum GameMode: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var description: String {
-        switch self {
-        case .quickPlay: "Random puzzle, your pace"
-        case .dailyChallenge: "Same puzzle for everyone today"
-        case .timeAttack: "Solve puzzles against the clock"
-        }
-    }
-
     var iconName: String {
         switch self {
         case .quickPlay: "shuffle"
