@@ -40,7 +40,7 @@ TEST(Words, ListsHoldTheirReviewedSizes) {
     words += Words().wordsOfLength(letters).size();
     common += Common().wordsOfLength(letters).size();
   }
-  EXPECT_EQ(words, 13511U);
+  EXPECT_EQ(words, 13427U);
   EXPECT_EQ(common, 5786U);
 }
 
@@ -60,6 +60,15 @@ TEST(Words, EveryLetterCountHasPuzzles) {
 
 TEST(Words, PlaysInflectedForms) {
   for (const char* word : {"bugs", "asked", "aces", "aimed", "cats"}) {
+    EXPECT_TRUE(Words().contains(word)) << word;
+  }
+}
+
+TEST(Words, ExcludesArchaicVariants) {
+  for (const char* word : {"sall", "doat", "doats", "odyls"}) {
+    EXPECT_FALSE(Words().contains(word)) << word;
+  }
+  for (const char* word : {"shall", "dote", "dotes", "bee", "ere"}) {
     EXPECT_TRUE(Words().contains(word)) << word;
   }
 }

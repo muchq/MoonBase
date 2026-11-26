@@ -1,7 +1,5 @@
 #!/bin/bash
-# The single-player graph's words (#1738): ENABLE, the race's list, not a
-# scraped one with abbreviations and fragments in it. Reads the generated
-# word_graph.json the iOS app bundles and the CLI embeds.
+# Reads the generated word_graph.json the iOS app bundles and the CLI embeds.
 set -uo pipefail
 
 GRAPH=$1
@@ -32,9 +30,16 @@ echo "wordchains graph words"
 for w in naa nea rps dpt abp afb bcd abc obv; do
   check "lacks $w" lacks "$w"
 done
-# Real words stay, obscure and archaic ones included.
-for w in cat kea kex thee doth hath ere oft; do
+# Obscure and archaic headwords stay alongside words in current use.
+for w in bee cat kea kex shall thee doth hath ere oft strew strews dandruff verandah; do
   check "has $w" has "$w"
+done
+# Specialized words with modern dictionary entries and independently defined archaisms.
+for w in benzole benzoles eftsoons lentando oscule oscules pistache; do
+  check "has $w" has "$w"
+done
+for w in sall strow strown strows dandriff odyls swinneys woalds yonkers; do
+  check "lacks $w" lacks "$w"
 done
 # Every 3-5 letter word is a word the race accepts, and every word the race
 # accepts is here: one dictionary for every mode.

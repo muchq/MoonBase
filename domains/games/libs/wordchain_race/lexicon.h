@@ -18,7 +18,7 @@ struct Lexicon {
   std::string_view notice;
 };
 
-/// ENABLE's words (:race_words) with SCOWL's scrubbed common words
+/// Filtered ENABLE words (:race_words) with SCOWL's scrubbed common words
 /// (common_words.txt) for endpoints, built into the binary and read once.
 [[nodiscard]] const Lexicon& EnableLexicon();
 

@@ -36,6 +36,9 @@ for path in \
   domains/games/apps/wordchains_ios/Sources/App.swift \
   domains/games/apps/wordchains/web.ts \
   domains/games/libs/wordchains/words.txt \
+  domains/games/libs/wordchain_race/archaic_variants.txt \
+  domains/games/libs/wordchain_race/reviewed_variants.txt \
+  domains/games/libs/wordchain_race/BUILD.bazel \
   bazel/apple.MODULE.bazel bazel/tools.MODULE.bazel \
   MODULE.bazel .bazelrc .bazelversion \
   .github/workflows/ios-ui-tests.yml .github/workflows/branch.yml \
