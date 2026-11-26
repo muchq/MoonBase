@@ -1,6 +1,7 @@
 # Word Chains dictionary
 
-`filtered_enable_words` supplies race validation and the single-player graph.
+`filtered_enable_words` supplies race validation and the graph shared by
+single-player and both Mithril APIs.
 The build subtracts exact lines from `archaic_variants.txt` and
 `reviewed_variants.txt` from the pinned ENABLE list. `archaic_variants_test`
 checks that both lists are sorted, unique, present in ENABLE, and disjoint
@@ -39,6 +40,7 @@ for each spelling or inflection.
 | Entry | Evidence |
 | --- | --- |
 | `odyls` | Plural of the obsolete variant `odyl`, from `odyle`. [Inflection](https://scrabble.merriam.com/finder/odyls) |
+| `sade` | Excluded from play. It has a dialectal verb sense and a spelling of the Hebrew letter `sadhe`. [English Wiktionary](https://en.wiktionary.org/wiki/sade#English) |
 | `sall` | Historical regional form of `shall`. [Yorkshire Historical Dictionary](https://yorkshiredictionary.york.ac.uk/words/sall) |
 | `strown` | Past participle of the archaic variant `strow`, from `strew`. [Collins](https://www.collinsdictionary.com/dictionary/english/strow) |
 | `swinneys` | Plural of the archaic variant `swinney`, from `sweeny`. [Inflection](https://scrabble.merriam.com/finder/swinneys) |

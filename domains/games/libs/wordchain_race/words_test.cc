@@ -40,7 +40,7 @@ TEST(Words, ListsHoldTheirReviewedSizes) {
     words += Words().wordsOfLength(letters).size();
     common += Common().wordsOfLength(letters).size();
   }
-  EXPECT_EQ(words, 13427U);
+  EXPECT_EQ(words, 13426U);
   EXPECT_EQ(common, 5786U);
 }
 
@@ -71,6 +71,14 @@ TEST(Words, ExcludesArchaicVariants) {
   for (const char* word : {"shall", "dote", "dotes", "bee", "ere"}) {
     EXPECT_TRUE(Words().contains(word)) << word;
   }
+}
+
+TEST(Words, ExcludesReportedMithrilRungs) {
+  for (const char* word : {"sade", "sadr", "sair"}) {
+    EXPECT_FALSE(Words().contains(word)) << word;
+  }
+  EXPECT_TRUE(Words().contains("sake"));
+  EXPECT_TRUE(Words().contains("sail"));
 }
 
 }  // namespace

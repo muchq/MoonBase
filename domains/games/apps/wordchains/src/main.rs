@@ -25,7 +25,11 @@ fn main() {
         let path_str = dict_path.to_str().unwrap();
         info!("Generating graph from dictionary: {}", path_str);
 
-        let graph = initialize_graph(path_str, None);
+        let mut graph = initialize_graph(path_str, None);
+        // Stable tie-breaking for consumers of the generated graph.
+        for neighbors in &mut graph.edges {
+            neighbors.sort_unstable();
+        }
         let json = serde_json::to_string(&graph).expect("Failed to serialize graph");
 
         if let Some(out) = output_path {

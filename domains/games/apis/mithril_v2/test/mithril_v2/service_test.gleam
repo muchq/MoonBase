@@ -15,9 +15,8 @@ const wordchain_path = "/mithril/v2/wordchain"
 fn graph() -> wordchain.Graph {
   // 0 card, 1 cold, 2 cord, 3 ward, 4 warm: cold-cord-card-ward-warm.
   let assert Ok(graph) =
-    wordchain.from_edges(["card", "cold", "cord", "ward", "warm"], <<
-      1:size(64), 2:size(64), 2:size(64), 0:size(64), 0:size(64), 3:size(64),
-      3:size(64), 4:size(64),
+    wordchain.from_json(<<
+      "{\"nodes\":[\"card\",\"cold\",\"cord\",\"ward\",\"warm\"],\"edges\":[[2,3],[2],[0,1],[0,4],[3]]}":utf8,
     >>)
   graph
 }

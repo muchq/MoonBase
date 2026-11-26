@@ -1,30 +1,14 @@
-//// Word-ladder search over mithril's dictionary and its precomputed graph.
-////
-//// Answers match the Rust solver (//domains/games/libs/wordchains) exactly:
-//// the same dictionary reading yields the same word indices, the shipped
-//// .graph file supplies the edges in the same order, and the breadth-first
-//// search visits neighbours in that order, so ties between equally short
-//// ladders break the same way.
+//// Word-ladder search over the graph shared with the Rust solver and iOS.
 
-import gleam/bit_array
 import gleam/bool
 import gleam/dict.{type Dict}
-import gleam/int
+import gleam/dynamic/decode
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
-import gleam/set
 import gleam/string
 import mithril_v2/runtime
-
-/// Named for the digest of the word list it indexes; see the test that pins
-/// the two together.
-pub const graph_file = "j4YL7Lh1H2PAgHy_a625LegUoxk94ZOimjzzx0QKI+Y_.graph"
-
-const dictionary_file = "words.txt"
-
-/// The dictionary keeps words shorter than this many bytes.
-const max_word_bytes = 9
 
 pub opaque type Graph {
   Graph(
@@ -34,46 +18,34 @@ pub opaque type Graph {
   )
 }
 
-/// Where the data files sit in the runfiles tree.
+/// Where the generated graph sits in the runfiles tree.
 pub fn data_dir() -> String {
-  runtime.runfiles_dir() <> "/domains/games/apis/mithril/data"
+  runtime.runfiles_dir() <> "/domains/games/apps/wordchains"
 }
 
-/// The dictionary as the Rust solver reads it: one word per line, trimmed and
-/// lowercased, deduplicated, shorter than nine bytes, sorted bytewise.
-pub fn read_dictionary(contents: String) -> List(String) {
-  let lines = string.split(contents, "\n")
-  // A final newline ends the last line rather than starting an empty one.
-  let lines = case list.last(lines) {
-    Ok("") -> list.take(lines, list.length(lines) - 1)
-    _ -> lines
+/// Load the same nodes and neighbour order used by the Rust solver.
+pub fn from_json(bytes: BitArray) -> Result(Graph, String) {
+  let decoder = {
+    use words <- decode.field("nodes", decode.list(decode.string))
+    use neighbours <- decode.field(
+      "edges",
+      decode.list(decode.list(decode.int)),
+    )
+    decode.success(#(words, neighbours))
   }
-  lines
-  |> list.map(fn(line) { string.lowercase(string.trim(line)) })
-  |> list.filter(fn(word) { string.byte_size(word) < max_word_bytes })
-  |> set.from_list
-  |> set.to_list
-  |> list.sort(string.compare)
-}
-
-pub fn load_dictionary(dir: String) -> Result(List(String), String) {
-  runtime.read_text(dir <> "/" <> dictionary_file)
-  |> result.map(read_dictionary)
-}
-
-/// A graph from the dictionary and the .graph file's edges: pairs of word
-/// indices, each a big-endian 64-bit integer.
-pub fn from_edges(
-  words: List(String),
-  bytes: BitArray,
-) -> Result(Graph, String) {
+  use #(words, neighbours) <- result.try(
+    json.parse_bits(bytes, decoder)
+    |> result.replace_error("invalid word_graph.json"),
+  )
   let count = list.length(words)
-  use adjacency <- result.try(read_edges(bytes, count, dict.new()))
-  let neighbours =
-    list.repeat(Nil, count)
-    |> list.index_map(fn(_, i) {
-      dict.get(adjacency, i) |> result.unwrap([]) |> list.reverse
+  let valid_indices =
+    list.all(neighbours, fn(row) {
+      list.all(row, fn(index) { index >= 0 && index < count })
     })
+  use <- bool.guard(
+    list.length(neighbours) != count || !valid_indices,
+    Error("word graph has invalid adjacency"),
+  )
   Ok(Graph(
     index_of: dict.from_list(list.index_map(words, fn(word, i) { #(word, i) })),
     words: runtime.array_from_list(words),
@@ -81,47 +53,9 @@ pub fn from_edges(
   ))
 }
 
-// Neighbour lists are built newest-first and reversed once at the end.
-fn read_edges(
-  bytes: BitArray,
-  count: Int,
-  adjacency: Dict(Int, List(Int)),
-) -> Result(Dict(Int, List(Int)), String) {
-  case bytes {
-    <<>> -> Ok(adjacency)
-    <<i:size(64), j:size(64), rest:bits>> if i < count && j < count ->
-      adjacency
-      |> prepend(i, j)
-      |> prepend(j, i)
-      |> read_edges(rest, count, _)
-    <<i:size(64), j:size(64), _:bits>> ->
-      Error(
-        "edge "
-        <> int.to_string(i)
-        <> "-"
-        <> int.to_string(j)
-        <> " names a word past the dictionary's "
-        <> int.to_string(count),
-      )
-    _ ->
-      Error(
-        "graph ends in a partial edge of "
-        <> int.to_string(bit_array.byte_size(bytes))
-        <> " bytes",
-      )
-  }
-}
-
-fn prepend(adjacency: Dict(Int, List(Int)), from: Int, to: Int) {
-  dict.upsert(adjacency, from, fn(existing) {
-    [to, ..option.unwrap(existing, [])]
-  })
-}
-
 pub fn load(dir: String) -> Result(Graph, String) {
-  use words <- result.try(load_dictionary(dir))
-  use bytes <- result.try(runtime.read_bits(dir <> "/" <> graph_file))
-  from_edges(words, bytes)
+  runtime.read_bits(dir <> "/word_graph.json")
+  |> result.try(from_json)
 }
 
 /// The shortest ladder from `start` to `end`, both ends included. A word is

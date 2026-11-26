@@ -4,11 +4,6 @@ load("//bazel/rules:oci.bzl", "linux_amd64_oci_binary")
 
 exports_files(["manifest.toml"])
 
-_DATA = [
-    "//domains/games/apis/mithril:data/j4YL7Lh1H2PAgHy_a625LegUoxk94ZOimjzzx0QKI+Y_.graph",
-    "//domains/games/apis/mithril:data/words.txt",
-]
-
 _SRCS = [
     "src/mithril_v2.gleam",
     "src/mithril_v2/runtime.gleam",
@@ -26,11 +21,10 @@ _TEST_SRCS = [
 gleam_package(
     name = "mithril_v2",
     srcs = _SRCS,
-    data = _DATA,
+    data = ["//domains/games/apps/wordchains:generate_graph_json"],
     gleam_toml = "gleam.toml",
     test_data = ["testdata/v1_ladders.tsv"],
     test_deps = [
-        "@gleam_packages//:gleam_crypto",
         "@gleam_packages//:gleeunit",
     ],
     test_srcs = _TEST_SRCS,
