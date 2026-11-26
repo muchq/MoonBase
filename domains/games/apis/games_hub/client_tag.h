@@ -24,7 +24,7 @@ struct ClientTag {
 
 /// The app versions a mint may be counted under. An app release adds its
 /// version here; client_tag_test holds the app's Info.plist to it.
-inline constexpr std::array<std::string_view, 2> kIosVersions = {"0.1.9", "0.1.10"};
+inline constexpr std::array<std::string_view, 3> kIosVersions = {"0.1.9", "0.1.10", "0.1.11"};
 
 ClientTag ClientTagOf(const std::optional<std::string>& sent);
 

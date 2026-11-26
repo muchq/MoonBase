@@ -3,6 +3,9 @@ import SwiftUI
 struct WordInputView: View {
     @Bindable var game: GameState
     @State private var entry = WordEntry()
+    /// What the field shows. It follows `entry.text`, but owns its own state:
+    /// see `settleField`.
+    @State private var fieldText = ""
     @State private var shakeAttempt = 0
     @FocusState private var isFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -43,10 +46,7 @@ struct WordInputView: View {
         // Vertical axis: Return types a newline instead of submitting, and
         // submitting is what makes SwiftUI dismiss the keyboard. WordEntry
         // turns the newline into a submit, so the keyboard stays up.
-        TextField("Enter a word...", text: Binding(
-            get: { entry.text },
-            set: { react(to: entry.change(to: $0, in: game)) }
-        ), axis: .vertical)
+        TextField("Enter a word...", text: $fieldText, axis: .vertical)
             .lineLimit(1)
             .accessibilityIdentifier("word-input")
             .font(.system(size: 18, weight: .medium, design: .rounded))
@@ -67,6 +67,11 @@ struct WordInputView: View {
             )
             .modifier(ShakeEffect(animatableData: CGFloat(shakeAttempt)))
             .onAppear { isFocused = true }
+            .onChange(of: fieldText) { _, typed in
+                guard typed != entry.text else { return }
+                react(to: entry.change(to: typed, in: game))
+                settleField()
+            }
     }
 
     private var borderColor: Color {
@@ -85,6 +90,7 @@ struct WordInputView: View {
     private var undoButton: some View {
         Button {
             withAnimation(motion) { entry.undo(in: game) }
+            fieldText = entry.text
         } label: {
             Image(systemName: "arrow.uturn.backward")
                 .font(.system(size: 18, weight: .semibold))
@@ -101,7 +107,10 @@ struct WordInputView: View {
     // MARK: - Submit Button
 
     private var submitButton: some View {
-        Button { react(to: entry.submit(in: game)) } label: {
+        Button {
+            react(to: entry.submit(in: game))
+            fieldText = entry.text
+        } label: {
             Image(systemName: "arrow.up.circle.fill")
                 .font(.system(size: 36))
                 .foregroundStyle(
@@ -121,6 +130,7 @@ struct WordInputView: View {
     private var hintButton: some View {
         Button {
             withAnimation(motion) { entry.hint(in: game) }
+            fieldText = entry.text
         } label: {
             Image(systemName: "lightbulb.fill")
                 .font(.system(size: 20))
@@ -172,6 +182,15 @@ struct WordInputView: View {
     }
 
     // MARK: - Actions
+
+    /// When Return rewrites what was typed (the newline dropped, an accepted
+    /// word cleared), the field must show the rewrite. Set during the field's
+    /// own edit, SwiftUI keeps the text view's old contents and the next
+    /// keystroke lands after the hidden word; set on the next turn, it takes.
+    private func settleField() {
+        guard fieldText != entry.text else { return }
+        DispatchQueue.main.async { fieldText = entry.text }
+    }
 
     /// Shake and buzz on a rejected word; WordEntry already did the rest.
     private func react(to result: InputResult?) {
