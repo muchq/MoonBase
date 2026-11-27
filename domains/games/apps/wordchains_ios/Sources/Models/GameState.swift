@@ -67,8 +67,36 @@ enum InputResult {
     case timeUp
 }
 
+private struct SoloStats: Codable {
+    var puzzlesSolved = 0
+    var optimalSolves = 0
+    var bestStreak = 0
+    var totalScore = 0
+
+    init() {}
+
+    init(from decoder: any Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        puzzlesSolved = try fields.decodeIfPresent(Int.self, forKey: .puzzlesSolved) ?? 0
+        optimalSolves = try fields.decodeIfPresent(Int.self, forKey: .optimalSolves) ?? 0
+        bestStreak = try fields.decodeIfPresent(Int.self, forKey: .bestStreak) ?? 0
+        totalScore = try fields.decodeIfPresent(Int.self, forKey: .totalScore) ?? 0
+    }
+
+    mutating func recordSolve(score: Int, isOptimal: Bool, sessionStreak: Int) {
+        puzzlesSolved += 1
+        if isOptimal { optimalSolves += 1 }
+        bestStreak = max(bestStreak, sessionStreak)
+        totalScore += score
+    }
+}
+
 @Observable
 final class GameState {
+    private static let soloStatsKey = "soloStats"
+    private let defaults: UserDefaults
+    private var soloStats: SoloStats
+
     var graph: WordGraph?
     var isLoading = true
 
@@ -83,10 +111,12 @@ final class GameState {
     /// Moves in the current puzzle's shortest chain; 0 with no puzzle.
     var optimalSteps: Int { currentPuzzle?.optimalSteps ?? 0 }
     var score = 0
-    var totalScore = 0
-    var streak = 0
-    var bestStreak = 0
-    var puzzlesSolved = 0
+    var totalScore: Int { soloStats.totalScore }
+    /// Puzzles solved in this app session.
+    private(set) var streak = 0
+    var bestStreak: Int { soloStats.bestStreak }
+    var puzzlesSolved: Int { soloStats.puzzlesSolved }
+    var optimalSolves: Int { soloStats.optimalSolves }
 
     // Time attack: the sprint in play, and its summary once time is up.
     var timeAttack: TimeAttack?
@@ -99,18 +129,18 @@ final class GameState {
     var lastResult: InputResult?
     var showInvalidShake = false
 
-    // Stats
-    var gamesPlayed = 0
-    var optimalSolves = 0
-
     private(set) var generator: PuzzleGenerator?
 
     /// Hints in a sprint too. Players never get them; UI tests launch with
     /// `-sprintHints` so they can solve a sprint puzzle on a simulator.
     let sprintHints: Bool
 
-    init(bests: TimeAttackBests = TimeAttackBests(), generator: PuzzleGenerator? = nil, sprintHints: Bool = false) {
-        self.bests = bests
+    init(defaults: UserDefaults = .standard, generator: PuzzleGenerator? = nil, sprintHints: Bool = false) {
+        self.defaults = defaults
+        self.bests = TimeAttackBests(defaults: defaults)
+        self.soloStats = defaults.data(forKey: Self.soloStatsKey).flatMap {
+            try? PropertyListDecoder().decode(SoloStats.self, from: $0)
+        } ?? SoloStats()
         self.generator = generator
         self.sprintHints = sprintHints
     }
@@ -241,8 +271,6 @@ final class GameState {
         guard let puzzle = currentPuzzle else { return }
 
         isComplete = true
-        gamesPlayed += 1
-        puzzlesSolved += 1
 
         // Undo is intentionally free in every solo mode: reward the final
         // chain, not discarded exploration. Daily and Time Attack use the
@@ -251,17 +279,16 @@ final class GameState {
         let optimal = puzzle.optimalLength
         let isOptimal = wordsUsed == optimal
 
-        if isOptimal { optimalSolves += 1 }
-
         // Scoring: base 100, bonus for optimal, penalty for extra steps
         let baseScore = 100
         let optimalBonus = isOptimal ? 50 : 0
         let stepPenalty = max(0, (wordsUsed - optimal)) * 10
         score = max(10, baseScore + optimalBonus - stepPenalty)
-        totalScore += score
-
         streak += 1
-        bestStreak = max(bestStreak, streak)
+        soloStats.recordSolve(score: score, isOptimal: isOptimal, sessionStreak: streak)
+        if let data = try? PropertyListEncoder().encode(soloStats) {
+            defaults.set(data, forKey: Self.soloStatsKey)
+        }
 
         timeAttack?.solve(points: score, at: now)
     }

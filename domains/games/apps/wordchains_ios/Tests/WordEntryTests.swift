@@ -3,7 +3,7 @@ import XCTest
 
 final class WordEntryTests: XCTestCase {
     private func game() -> GameState {
-        let game = GameState()
+        let game = GameState(defaults: isolatedDefaults())
         let words = ["cat", "cot", "cog", "dog", "dat", "dot"]
         let edges = words.map { word in
             words.indices.filter { GameState.isOneLetterAway(word, words[$0]) }

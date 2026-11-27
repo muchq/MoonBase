@@ -94,6 +94,7 @@ Before submitting to the App Store, verify these scenarios:
 - [ ] **Input validation** — wrong length, not in dictionary, not one-letter-away, already used
 - [ ] **Hint system** — in Quick Play the lightbulb fills the next word without submitting and at a dead end asks the player to undo. Daily Challenge and Time Attack hide the lightbulb.
 - [ ] **Scoring** — optimal solve gives 150 pts (100 base + 50 bonus), extra steps reduce score
+- [ ] **Solo stats** — solve puzzles in two modes, quit, and relaunch. Solved, Optimal, Best Streak, and Score stay in the menu. The next solve starts a new session streak.
 - [ ] **Free Undo** — in every solo mode, explore a detour, undo it, then finish optimally: the final chain still earns 150 points. Undo intentionally carries no score penalty and encourages experimentation.
 - [ ] **Difficulty levels** — Easy (3 letters), Medium (4), Hard (5)
 - [ ] **Accessibility** — VoiceOver reads each error; with Reduce Motion on, the field does not shake
