@@ -17,7 +17,7 @@ enum GameMode: String, CaseIterable, Identifiable {
     }
 }
 
-enum Difficulty: Int, CaseIterable, Identifiable {
+enum Difficulty: Int, Codable, CaseIterable, Identifiable {
     case easy = 3
     case medium = 4
     case hard = 5
@@ -72,6 +72,7 @@ private struct SoloStats: Codable {
     var optimalSolves = 0
     var bestStreak = 0
     var totalScore = 0
+    var dailyResults: [String: PuzzleResult] = [:]
 
     init() {}
 
@@ -81,6 +82,7 @@ private struct SoloStats: Codable {
         optimalSolves = try fields.decodeIfPresent(Int.self, forKey: .optimalSolves) ?? 0
         bestStreak = try fields.decodeIfPresent(Int.self, forKey: .bestStreak) ?? 0
         totalScore = try fields.decodeIfPresent(Int.self, forKey: .totalScore) ?? 0
+        dailyResults = try fields.decodeIfPresent([String: PuzzleResult].self, forKey: .dailyResults) ?? [:]
     }
 
     mutating func recordSolve(score: Int, isOptimal: Bool, sessionStreak: Int) {
@@ -96,6 +98,7 @@ final class GameState {
     private static let soloStatsKey = "soloStats"
     private let defaults: UserDefaults
     private var soloStats: SoloStats
+    private var activeDailyChallenge: DailyChallenge?
 
     var graph: WordGraph?
     var isLoading = true
@@ -117,6 +120,9 @@ final class GameState {
     var bestStreak: Int { soloStats.bestStreak }
     var puzzlesSolved: Int { soloStats.puzzlesSolved }
     var optimalSolves: Int { soloStats.optimalSolves }
+    var puzzleResult: PuzzleResult {
+        PuzzleResult(chain: chain, optimalSteps: optimalSteps, score: score, dailyChallenge: activeDailyChallenge)
+    }
 
     // Time attack: the sprint in play, and its summary once time is up.
     var timeAttack: TimeAttack?
@@ -158,7 +164,32 @@ final class GameState {
         }
     }
 
-    func startNewGame(mode: GameMode, difficulty: Difficulty, now: ContinuousClock.Instant = .now) {
+    func dailyResult(difficulty: Difficulty, date: Date = .now, calendar: Calendar = .current) -> PuzzleResult? {
+        let challenge = DailyChallenge(date: date, difficulty: difficulty, calendar: calendar)
+        return soloStats.dailyResults[challenge.storageKey]
+    }
+
+    @discardableResult
+    func startNewGame(
+        mode: GameMode, difficulty: Difficulty, now: ContinuousClock.Instant = .now,
+        date: Date = .now, calendar: Calendar = .current
+    ) -> Bool {
+        guard let generator else { return false }
+        let challenge: DailyChallenge?
+        let puzzle: Puzzle?
+        switch mode {
+        case .dailyChallenge:
+            let daily = DailyChallenge(date: date, difficulty: difficulty, calendar: calendar)
+            guard soloStats.dailyResults[daily.storageKey] == nil else { return false }
+            challenge = daily
+            puzzle = generator.dailyPuzzle(difficulty: difficulty, date: date, calendar: calendar)
+        case .quickPlay, .timeAttack:
+            challenge = nil
+            puzzle = generator.randomPuzzle(difficulty: difficulty)
+        }
+        guard let puzzle else { return false }
+
+        activeDailyChallenge = challenge
         self.currentMode = mode
         self.difficulty = difficulty
         self.isComplete = false
@@ -167,18 +198,6 @@ final class GameState {
         self.timeAttack = nil
         self.timeAttackSummary = nil
 
-        guard let generator else { return }
-
-        let puzzle: Puzzle?
-        switch mode {
-        case .dailyChallenge:
-            puzzle = generator.dailyPuzzle(difficulty: difficulty)
-        case .quickPlay, .timeAttack:
-            puzzle = generator.randomPuzzle(difficulty: difficulty)
-        }
-
-        guard let puzzle else { return }
-
         self.currentPuzzle = puzzle
         self.chain = [puzzle.start]
 
@@ -186,6 +205,7 @@ final class GameState {
             timeAttack = TimeAttack(startingAt: now, difficulty: difficulty)
             timeAttackSeconds = TimeAttack.seconds(TimeAttack.length(for: difficulty))
         }
+        return true
     }
 
     func submitWord(_ word: String, now: ContinuousClock.Instant = .now) -> InputResult {
@@ -286,6 +306,9 @@ final class GameState {
         score = max(10, baseScore + optimalBonus - stepPenalty)
         streak += 1
         soloStats.recordSolve(score: score, isOptimal: isOptimal, sessionStreak: streak)
+        if let challenge = activeDailyChallenge {
+            soloStats.dailyResults[challenge.storageKey] = puzzleResult
+        }
         if let data = try? PropertyListEncoder().encode(soloStats) {
             defaults.set(data, forKey: Self.soloStatsKey)
         }

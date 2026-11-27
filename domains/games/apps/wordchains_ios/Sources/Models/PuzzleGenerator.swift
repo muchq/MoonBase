@@ -62,11 +62,10 @@ struct PuzzleGenerator {
     }
 
     /// Deterministic daily puzzle — same puzzle for everyone on the same day.
-    func dailyPuzzle(difficulty: Difficulty) -> Puzzle? {
+    func dailyPuzzle(difficulty: Difficulty, date: Date = .now, calendar: Calendar = .current) -> Puzzle? {
         guard let candidates = candidatesByDifficulty[difficulty], candidates.count >= 2 else { return nil }
 
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
+        let today = calendar.startOfDay(for: date)
         let daysSinceEpoch = calendar.dateComponents([.day], from: Date(timeIntervalSince1970: 0), to: today).day ?? 0
 
         // Use day as seed for deterministic selection
