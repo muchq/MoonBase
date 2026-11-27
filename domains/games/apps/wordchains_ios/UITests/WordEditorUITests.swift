@@ -29,8 +29,10 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertEqual(motion.value as? String, "0")
         capture("06-settings")
 
-        haptics.tap()
-        motion.tap()
+        // In a Form, XCTest includes the label in the switch's frame.
+        let switchOffset = CGVector(dx: 0.9, dy: 0.5)
+        haptics.coordinate(withNormalizedOffset: switchOffset).tap()
+        motion.coordinate(withNormalizedOffset: switchOffset).tap()
         XCTAssertEqual(haptics.value as? String, "0")
         XCTAssertEqual(motion.value as? String, "1")
         done.tap()
@@ -44,8 +46,8 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertEqual(haptics.value as? String, "0")
         XCTAssertEqual(motion.value as? String, "1")
 
-        haptics.tap()
-        motion.tap()
+        haptics.coordinate(withNormalizedOffset: switchOffset).tap()
+        motion.coordinate(withNormalizedOffset: switchOffset).tap()
         done.tap()
         XCTAssertTrue(app.buttons["Play"].isHittable)
     }
