@@ -63,18 +63,16 @@ struct RaceTable {
         var sounds: [GameSound] = []
         if after.words > before.words {
             sounds.append(after.finishedAtMs == nil ? .step(after.words) : .target(after.words))
-        } else if after.words < before.words {
-            sounds.append(.takeback(steps: after.words))
+        } else if let cue = GameSound.takeback(from: before.words, to: after.words) {
+            sounds.append(cue)
         }
         if previous.result == nil, let result = view.result {
-            if result.ending == .timeout {
+            if !view.isPractice, result.winners.contains(viewer) {
+                sounds.append(result.winners.count > 1 ? .sharedWin : .win)
+            } else if result.ending == .timeout {
                 sounds.append(.timeout)
             } else if result.ending == .finished, !view.isPractice {
-                if result.winners.contains(viewer) {
-                    sounds.append(result.winners.count > 1 ? .sharedWin : .win)
-                } else {
-                    sounds.append(.raceFinished)
-                }
+                sounds.append(.raceFinished)
             }
         }
         return sounds

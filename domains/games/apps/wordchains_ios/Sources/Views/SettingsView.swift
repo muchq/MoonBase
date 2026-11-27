@@ -13,6 +13,8 @@ struct SettingsView: View {
                 Section {
                     Toggle("Sound Effects", isOn: $soundEffectsEnabled)
                         .accessibilityIdentifier("settings-sound-effects")
+                } footer: {
+                    Text("Plays short sounds for words and races. Follows your device’s silent mode.")
                 }
                 Section {
                     Toggle("Haptics", isOn: $hapticsEnabled)

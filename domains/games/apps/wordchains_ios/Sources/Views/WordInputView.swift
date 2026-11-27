@@ -103,7 +103,9 @@ struct WordInputView: View {
             let previousSteps = game.stepsTaken
             withAnimation(motion) { entry.undo(in: game) }
             fieldText = entry.text
-            if game.stepsTaken < previousSteps { feedback.playSounds([.takeback(steps: game.stepsTaken)]) }
+            if let cue = GameSound.takeback(from: previousSteps, to: game.stepsTaken) {
+                feedback.playSounds([cue])
+            }
         } label: {
             controlIcon(
                 "arrow.uturn.backward",
@@ -206,22 +208,16 @@ struct WordInputView: View {
 
     /// Use the actual submission result for feedback, including repeated refusals.
     private func react(to result: InputResult?) {
-        switch result {
-        case nil, .gameComplete, .noRoute, .timeUp:
-            return
-        case .valid:
-            feedback.playSounds([.step(game.stepsTaken)])
-        case .reachedTarget:
-            feedback.playSounds([.target(game.stepsTaken)])
-        case .notInDictionary, .notOneLetterAway, .alreadyUsed, .wrongLength:
-            feedback.playSounds([.refusal])
-            if !feedback.reduceMotion {
-                withAnimation(Theme.quickSpring) { shakeAttempt += 1 }
-            }
-            #if canImport(UIKit)
-            feedback.performHaptic { UINotificationFeedbackGenerator().notificationOccurred(.error) }
-            #endif
+        guard let cue = GameSound.cue(for: result, steps: game.stepsTaken) else { return }
+        feedback.playSounds([cue])
+
+        guard cue == .refusal else { return }
+        if !feedback.reduceMotion {
+            withAnimation(Theme.quickSpring) { shakeAttempt += 1 }
         }
+        #if canImport(UIKit)
+        feedback.performHaptic { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+        #endif
     }
 
     private func announce(_ message: String) {

@@ -3,12 +3,12 @@ import SwiftUI
 struct ContentView: View {
     @State private var game = GameState(sprintHints: ProcessInfo.processInfo.arguments.contains("-sprintHints"))
     @State private var showsSettings = false
-    @AppStorage(GameFeedback.soundEffectsKey) private var soundEffectsEnabled = true
-    @AppStorage(GameFeedback.hapticsKey) private var hapticsEnabled = true
-    @AppStorage(GameFeedback.reduceMotionKey) private var prefersReducedMotion = false
+    private var feedbackSettings = GameFeedbackSettings()
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     var body: some View {
+        let feedback = feedbackSettings.feedback(systemReduceMotion: systemReduceMotion)
+
         Group {
             if game.isLoading {
                 loadingView
@@ -18,22 +18,17 @@ struct ContentView: View {
                 MenuView(game: game, openSettings: { showsSettings = true })
                     .sheet(isPresented: $showsSettings) {
                         SettingsView(
-                            soundEffectsEnabled: $soundEffectsEnabled,
-                            hapticsEnabled: $hapticsEnabled,
-                            prefersReducedMotion: $prefersReducedMotion
+                            soundEffectsEnabled: feedbackSettings.$soundEffectsEnabled,
+                            hapticsEnabled: feedbackSettings.$hapticsEnabled,
+                            prefersReducedMotion: feedbackSettings.$prefersReducedMotion
                         )
                     }
             }
         }
-        .environment(\.gameFeedback, GameFeedback(
-            hapticsEnabled: hapticsEnabled,
-            prefersReducedMotion: prefersReducedMotion,
-            systemReduceMotion: systemReduceMotion,
-            soundEffectsEnabled: soundEffectsEnabled
-        ))
+        .environment(\.gameFeedback, feedback)
         #if os(iOS)
-        .onChange(of: soundEffectsEnabled) { _, enabled in
-            if !enabled { GameSoundPlayer.shared.stop() }
+        .onChange(of: feedback.soundEffectsEnabled) { _, _ in
+            feedback.stopSoundIfDisabled { GameSoundPlayer.shared.stop() }
         }
         #endif
         .tint(Theme.accent)

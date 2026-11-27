@@ -5,6 +5,27 @@ import AVFoundation
 @testable import WordChains
 
 final class GameSoundTests: XCTestCase {
+    func testSoloSubmissionsChooseTheCueForTheirResult() {
+        XCTAssertEqual(GameSound.cue(for: .valid, steps: 3), .step(3))
+        XCTAssertEqual(GameSound.cue(for: .reachedTarget, steps: 4), .target(4))
+
+        let refusals: [InputResult] = [.notInDictionary, .notOneLetterAway, .alreadyUsed, .wrongLength]
+        for refusal in refusals {
+            XCTAssertEqual(GameSound.cue(for: refusal, steps: 3), .refusal)
+        }
+    }
+
+    func testOnlyAnActualSubmissionOrTakebackPlaysASoloCue() {
+        let silentResults: [InputResult?] = [nil, .noRoute, .timeUp, .gameComplete]
+        for result in silentResults {
+            XCTAssertNil(GameSound.cue(for: result, steps: 3))
+        }
+
+        XCTAssertEqual(GameSound.takeback(from: 1, to: 0), .takeback(steps: 0))
+        XCTAssertNil(GameSound.takeback(from: 0, to: 0))
+        XCTAssertNil(GameSound.takeback(from: 1, to: 2))
+    }
+
     func testPitchClimbsGentlyAndStaysBounded() {
         let pitches = (0...24).map { GameSound.pitch(for: $0) }
         for (lower, higher) in zip(pitches, pitches.dropFirst()) {

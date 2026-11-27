@@ -10,6 +10,20 @@ enum GameSound: Equatable {
     case raceFinished
     case timeout
 
+    static func cue(for result: InputResult?, steps: Int) -> GameSound? {
+        switch result {
+        case .valid: return .step(steps)
+        case .reachedTarget: return .target(steps)
+        case .notInDictionary, .notOneLetterAway, .alreadyUsed, .wrongLength: return .refusal
+        case nil, .gameComplete, .noRoute, .timeUp: return nil
+        }
+    }
+
+    static func takeback(from previousSteps: Int, to steps: Int) -> GameSound? {
+        guard steps < previousSteps else { return nil }
+        return .takeback(steps: steps)
+    }
+
     /// Small steps in pitch, with a ceiling for unusually long ladders.
     static func pitch(for steps: Int) -> Double {
         150 + 110 * (1 - exp(-Double(max(0, steps)) / 18))
