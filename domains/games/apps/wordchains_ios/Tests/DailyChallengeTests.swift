@@ -51,20 +51,22 @@ final class DailyChallengeTests: XCTestCase {
         XCTAssertEqual(saved.shareText, playing.puzzleResult.shareText)
     }
 
-    func testShareUsesTilesWithoutRevealingWordsOrChangedPositions() {
+    func testShareHighlightsChangedPositionsAndHidesTheLetters() {
         let challenge = DailyChallenge(date: today, difficulty: .easy, calendar: utc)
-        let first = PuzzleResult(chain: ["cat", "cot", "cog", "dog"], optimalSteps: 3, score: 150, dailyChallenge: challenge)
-        let second = PuzzleResult(chain: ["bat", "cat", "cot", "cog"], optimalSteps: 3, score: 150, dailyChallenge: challenge)
+        let chain = PuzzleResult(chain: ["cat", "cot", "cog", "dog"], optimalSteps: 3, score: 150, dailyChallenge: challenge)
+        let samePositions = PuzzleResult(chain: ["bat", "bot", "bog", "dog"], optimalSteps: 3, score: 150, dailyChallenge: challenge)
+        let differentPositions = PuzzleResult(chain: ["cat", "dat", "dot", "dog"], optimalSteps: 3, score: 150, dailyChallenge: challenge)
 
-        XCTAssertEqual(first.shareText, """
+        XCTAssertEqual(chain.shareText, """
             Word Chains Daily Challenge · 2023-11-14 · Easy
             3 moves · 150 points
 
-            ⬜⬜⬜
-            ⬜⬜⬜
-            🟩🟩🟩
+            ⬜🟩⬜
+            ⬜⬜🟩
+            🟩⬜⬜
             """)
-        XCTAssertEqual(second.shareText, first.shareText)
+        XCTAssertEqual(samePositions.shareText, chain.shareText)
+        XCTAssertNotEqual(differentPositions.shareText, chain.shareText)
     }
 
     func testCompletionIsSpecificToTheStartDateAndDifficulty() throws {

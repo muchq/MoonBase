@@ -24,8 +24,10 @@ struct PuzzleResult: Codable, Hashable {
     var shareText: String? {
         guard let dailyChallenge else { return nil }
         let moves = stepsTaken == 1 ? "move" : "moves"
-        let tiles = (0..<stepsTaken).map { step in
-            String(repeating: step == stepsTaken - 1 ? "🟩" : "⬜", count: dailyChallenge.difficulty.letterCount)
+        let tiles = zip(chain, chain.dropFirst()).map { previous, next in
+            zip(previous, next).map { before, after in
+                before == after ? "⬜" : "🟩"
+            }.joined()
         }.joined(separator: "\n")
         return """
         Word Chains Daily Challenge · \(dailyChallenge.day) · \(dailyChallenge.difficulty.label)

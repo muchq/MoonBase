@@ -89,7 +89,7 @@ Before submitting to the App Store, verify these scenarios:
 
 - [ ] **Quick Play** — launch the app and tap Play. The puzzle slides in before the keyboard opens. Type valid words and reach the target word. Return submits each word once.
 - [ ] **Undo** — removes the last move and clears the field/error; disabled at the start and unavailable after completion
-- [ ] **Daily Challenge** — solve today's puzzle and relaunch. The menu marks that difficulty as Solved and offers View Result. The saved chain and score are visible. Share Result shows the move count, score, and a tile grid that hides the words. Another difficulty or day has its own puzzle.
+- [ ] **Daily Challenge** — solve today's puzzle and relaunch. The menu marks that difficulty as Solved and offers View Result. The saved chain and score are visible. Share Result shows the move count, score, and a tile grid that highlights each changed position while hiding the letters. Another difficulty or day has its own puzzle.
 - [ ] **Time Attack** — the bar above the input counts down from 90 (3 letters), 120 (4) or 180 (5); a solve shows "Solved!" and the next puzzle follows with the keyboard still up; at 0 moves stop and one summary shows solved, points and best; "Beat your best" starts a fresh sprint. Backgrounded past the deadline, returning shows the summary. VoiceOver reads the bar and announces each solve and the summary; with Reduce Motion on, nothing scales. On a compact iPhone the input row never moves.
 - [ ] **Input validation** — wrong length, not in dictionary, not one-letter-away, already used
 - [ ] **Hint system** — in Quick Play the lightbulb fills the next word without submitting and at a dead end asks the player to undo. Daily Challenge and Time Attack hide the lightbulb.
