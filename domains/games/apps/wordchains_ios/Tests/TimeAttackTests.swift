@@ -295,9 +295,9 @@ final class TimeAttackTests: XCTestCase {
 
     func testDailyChallengeHasNoHintsEvenWithTheSprintTestSwitch() {
         let fixture = sprint()
-        let game = GameState(defaults: defaults, sprintHints: true)
+        let game = GameState(defaults: defaults, generator: fixture.generator, sprintHints: true)
         game.graph = fixture.graph
-        game.startNewGame(mode: .dailyChallenge, difficulty: .easy, now: at(0))
+        XCTAssertTrue(game.startNewGame(mode: .dailyChallenge, difficulty: .easy, now: at(0)))
         deal(game)
         XCTAssertFalse(game.hintsAllowed)
         XCTAssertNil(game.requestHint())

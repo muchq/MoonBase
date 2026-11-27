@@ -1,8 +1,10 @@
 import SwiftUI
 
 struct ResultsView: View {
-    @Bindable var game: GameState
-    let onNewGame: () -> Void
+    let result: PuzzleResult
+    var streak = 0
+    var celebrate = true
+    var onNewGame: (() -> Void)? = nil
     let onMenu: () -> Void
 
     @Environment(\.gameFeedback) private var feedback
@@ -10,6 +12,7 @@ struct ResultsView: View {
     @State private var showConfetti = false
 
     private var reduceMotion: Bool { feedback.reduceMotion }
+    private var revealed: Bool { animateIn || !celebrate }
 
     var body: some View {
         ScrollView {
@@ -31,6 +34,7 @@ struct ResultsView: View {
             }
         }
         .onAppear {
+            guard celebrate else { return }
             withAnimation(reduceMotion ? nil : Theme.springAnimation.delay(0.2)) {
                 animateIn = true
             }
@@ -51,7 +55,7 @@ struct ResultsView: View {
         VStack(spacing: 8) {
             Text(headerEmoji)
                 .font(.system(size: 64))
-                .scaleEffect(animateIn || reduceMotion ? 1 : 0.3)
+                .scaleEffect(revealed || reduceMotion ? 1 : 0.3)
                 .accessibilityHidden(true)
 
             Text(headerTitle)
@@ -59,30 +63,32 @@ struct ResultsView: View {
                 .multilineTextAlignment(.center)
                 .accessibilityAddTraits(.isHeader)
 
-            if let puzzle = game.currentPuzzle {
-                Text("\(puzzle.start) \u{2192} \(puzzle.target)")
+            if let start = result.chain.first, let target = result.chain.last {
+                Text("\(start) → \(target)")
                     .font(Theme.bodyFont)
                     .foregroundStyle(.secondary)
             }
+
+            if let daily = result.dailyChallenge {
+                Text("Daily Challenge · \(daily.difficulty.label) · \(daily.day)")
+                    .font(Theme.captionFont)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
-        .opacity(animateIn ? 1 : 0)
+        .opacity(revealed ? 1 : 0)
     }
 
     private var headerEmoji: String {
-        if isOptimal { return "\u{1F31F}" }
-        if game.chain.count <= (game.currentPuzzle?.optimalLength ?? 0) + 1 { return "\u{1F389}" }
+        if result.isOptimal { return "\u{1F31F}" }
+        if result.stepsTaken <= result.optimalSteps + 1 { return "\u{1F389}" }
         return "\u{2705}"
     }
 
     private var headerTitle: String {
-        if isOptimal { return "Optimal!" }
-        if game.chain.count <= (game.currentPuzzle?.optimalLength ?? 0) + 1 { return "Great Job!" }
+        if result.isOptimal { return "Optimal!" }
+        if result.stepsTaken <= result.optimalSteps + 1 { return "Great Job!" }
         return "Complete!"
-    }
-
-    private var isOptimal: Bool {
-        guard let puzzle = game.currentPuzzle else { return false }
-        return game.chain.count == puzzle.optimalLength
     }
 
     // MARK: - Score
@@ -91,29 +97,29 @@ struct ResultsView: View {
         VStack(spacing: 16) {
             HStack(spacing: 0) {
                 scoreItem(
-                    value: "\(game.stepsTaken)",
+                    value: "\(result.stepsTaken)",
                     label: "Steps",
                     icon: "figure.walk"
                 )
                 Divider().frame(height: 44)
                 scoreItem(
-                    value: "\(game.optimalSteps)",
+                    value: "\(result.optimalSteps)",
                     label: "Optimal",
                     icon: "star"
                 )
                 Divider().frame(height: 44)
                 scoreItem(
-                    value: "+\(game.score)",
+                    value: "+\(result.score)",
                     label: "Points",
                     icon: "flame"
                 )
             }
 
-            if game.streak > 1 {
+            if streak > 1 {
                 HStack(spacing: 6) {
                     Image(systemName: "bolt.fill")
                         .foregroundStyle(Theme.warningOrange)
-                    Text("\(game.streak) streak!")
+                    Text("\(streak) streak!")
                         .font(.system(size: 15, weight: .semibold, design: .rounded))
                         .foregroundStyle(Theme.warningOrange)
                 }
@@ -125,8 +131,8 @@ struct ResultsView: View {
             }
         }
         .cardStyle()
-        .opacity(animateIn ? 1 : 0)
-        .offset(y: animateIn ? 0 : 30)
+        .opacity(revealed ? 1 : 0)
+        .offset(y: revealed ? 0 : 30)
     }
 
     private func scoreItem(value: String, label: String, icon: String) -> some View {
@@ -153,32 +159,39 @@ struct ResultsView: View {
                 .textCase(.uppercase)
                 .tracking(1)
 
-            Text(game.chain.joined(separator: " \u{2192} "))
+            Text(result.chain.joined(separator: " → "))
                 .font(.system(size: 15, weight: .medium, design: .monospaced))
                 .foregroundStyle(.primary)
                 .lineLimit(nil)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardStyle()
-        .opacity(animateIn ? 1 : 0)
-        .offset(y: animateIn ? 0 : 40)
+        .opacity(revealed ? 1 : 0)
+        .offset(y: revealed ? 0 : 40)
     }
 
     // MARK: - Actions
 
     private var actionButtons: some View {
         VStack(spacing: 12) {
-            Button(action: onNewGame) {
-                Label(game.currentMode == .dailyChallenge ? "Play Again" : "New Puzzle", systemImage: "arrow.clockwise")
+            if let shareText = result.shareText {
+                ShareLink(item: shareText) {
+                    Label("Share Result", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(PrimaryActionStyle())
+            } else if let onNewGame {
+                Button(action: onNewGame) {
+                    Label("New Puzzle", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(PrimaryActionStyle())
             }
-            .buttonStyle(PrimaryActionStyle())
 
             Button("Back to Menu", action: onMenu)
                 .buttonStyle(.bordered)
                 .controlSize(.large)
         }
-        .opacity(animateIn ? 1 : 0)
-        .offset(y: animateIn ? 0 : 50)
+        .opacity(revealed ? 1 : 0)
+        .offset(y: revealed ? 0 : 50)
     }
 }
 

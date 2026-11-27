@@ -107,6 +107,7 @@ ios_ui_test(
     timeout = "long",
     env = {"CREATE_XCRESULT_BUNDLE": "1"},
     minimum_os_version = "17.0",
+    resources = [":word_graph_json"],
     tags = ["manual"],
     target_compatible_with = ["@platforms//os:macos"],
     test_host = ":WordChains",

@@ -6,10 +6,16 @@ struct MenuView: View {
     @State private var selectedMode: GameMode = .quickPlay
     @State private var selectedDifficulty: Difficulty = .medium
     @State private var showGame = false
+    @State private var savedDailyResult: PuzzleResult?
+    @State private var today = Date.now
     @State private var animateIn = false
     @Environment(\.gameFeedback.reduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.scenePhase) private var scenePhase
     private let settingsTargetSize: CGFloat = 44
+
+    private var dailyIsSolved: Bool { game.dailyResult(difficulty: selectedDifficulty, date: today) != nil }
+    private var canViewDailyResult: Bool { selectedMode == .dailyChallenge && dailyIsSolved }
 
     var body: some View {
         NavigationStack {
@@ -30,11 +36,20 @@ struct MenuView: View {
             .navigationDestination(isPresented: $showGame) {
                 GameView(game: game)
             }
+            .navigationDestination(item: $savedDailyResult) { result in
+                ResultsView(result: result, celebrate: false, onMenu: { savedDailyResult = nil })
+            }
             .onAppear {
+                today = .now
                 withAnimation(reduceMotion ? nil : Theme.springAnimation.delay(0.1)) {
                     animateIn = true
                 }
             }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { today = .now }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in today = .now }
+            .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in today = .now }
         }
     }
 
@@ -94,6 +109,7 @@ struct MenuView: View {
 
             VStack(spacing: 8) {
                 ForEach(GameMode.allCases) { mode in
+                    let solved = mode == .dailyChallenge && dailyIsSolved
                     Button {
                         withAnimation(reduceMotion ? nil : Theme.quickSpring) {
                             selectedMode = mode
@@ -115,6 +131,12 @@ struct MenuView: View {
                                 .foregroundStyle(.primary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
+                            if solved {
+                                Text("Solved")
+                                    .font(Theme.captionFont)
+                                    .foregroundStyle(Theme.chainStart)
+                            }
+
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(Theme.accent)
                                 .opacity(selectedMode == mode ? 1 : 0)
@@ -132,6 +154,8 @@ struct MenuView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(mode.rawValue)
+                    .accessibilityValue(solved ? "Solved today" : "")
                     .accessibilityAddTraits(selectedMode == mode ? .isSelected : [])
                 }
             }
@@ -223,10 +247,19 @@ struct MenuView: View {
 
     private var playButton: some View {
         Button {
-            game.startNewGame(mode: selectedMode, difficulty: selectedDifficulty)
-            showGame = true
+            let date = Date.now
+            today = date
+            if selectedMode == .dailyChallenge, let result = game.dailyResult(difficulty: selectedDifficulty, date: date) {
+                savedDailyResult = result
+            } else if game.startNewGame(mode: selectedMode, difficulty: selectedDifficulty, date: date) {
+                showGame = true
+            }
         } label: {
-            Label("Play", systemImage: "play.fill")
+            if canViewDailyResult {
+                Label("View Result", systemImage: "checkmark.circle")
+            } else {
+                Label("Play", systemImage: "play.fill")
+            }
         }
         .buttonStyle(PrimaryActionStyle())
         .disabled(game.isLoading || game.graph == nil)

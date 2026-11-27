@@ -30,11 +30,13 @@ struct GameView: View {
                 .transition(.opacity)
             } else if !isTimeAttack && game.isComplete && showResults {
                 ResultsView(
-                    game: game,
+                    result: game.puzzleResult,
+                    streak: game.streak,
                     onNewGame: {
                         withAnimation(reduceMotion ? nil : Theme.springAnimation) {
-                            showResults = false
-                            game.startNewGame(mode: game.currentMode, difficulty: game.difficulty)
+                            if game.startNewGame(mode: game.currentMode, difficulty: game.difficulty) {
+                                showResults = false
+                            }
                         }
                     },
                     onMenu: {
@@ -123,6 +125,7 @@ struct GameView: View {
                         Text(puzzle.start.uppercased())
                             .font(.system(size: 18, weight: .bold, design: .monospaced))
                             .foregroundStyle(Theme.chainStart)
+                            .accessibilityIdentifier("puzzle-start")
 
                         Image(systemName: "arrow.right")
                             .font(.system(size: 14, weight: .bold))
@@ -131,6 +134,7 @@ struct GameView: View {
                         Text(puzzle.target.uppercased())
                             .font(.system(size: 18, weight: .bold, design: .monospaced))
                             .foregroundStyle(Theme.chainEnd)
+                            .accessibilityIdentifier("puzzle-target")
                     }
                 }
             }

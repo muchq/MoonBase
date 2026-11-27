@@ -231,6 +231,52 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertTrue(app.buttons["word-submit"].isEnabled)
     }
 
+    func testFinishedDailyShowsItsSavedChainAndShareSheetAfterRelaunch() throws {
+        let app = startPuzzle(mode: "Daily Challenge", difficulty: "Easy")
+        let field = wordInput(app)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+
+        let start = app.staticTexts["puzzle-start"].label.lowercased()
+        let target = app.staticTexts["puzzle-target"].label.lowercased()
+        let graphURL = try XCTUnwrap(Bundle(for: WordEditorUITests.self).url(forResource: "word_graph", withExtension: "json"))
+        let graph = try JSONDecoder().decode(TestWordGraph.self, from: Data(contentsOf: graphURL))
+        let words = try graph.path(from: start, to: target)
+        for word in words.dropFirst() {
+            field.typeText(word + "\n")
+        }
+
+        let chain = app.staticTexts[words.joined(separator: " → ")]
+        let share = app.buttons["Share Result"]
+        XCTAssertTrue(share.waitForExistence(timeout: 5))
+        XCTAssertTrue(chain.exists)
+        XCTAssertFalse(app.buttons["Play Again"].exists)
+
+        app.terminate()
+        app.launch()
+        let daily = app.buttons["Daily Challenge"]
+        XCTAssertTrue(daily.waitForExistence(timeout: 30))
+        daily.tap()
+        let easy = app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "Easy")).firstMatch
+        XCTAssertTrue(easy.waitForExistence(timeout: 5))
+        for _ in 0..<4 where !easy.isHittable { app.swipeUp() }
+        easy.tap()
+        XCTAssertEqual(daily.value as? String, "Solved today")
+        let viewResult = app.buttons["View Result"]
+        for _ in 0..<4 where !viewResult.isHittable { app.swipeUp() }
+        XCTAssertTrue(viewResult.isHittable)
+        capture("07-daily-solved-menu")
+        viewResult.tap()
+
+        XCTAssertTrue(chain.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.keyboards.firstMatch.exists)
+        capture("08-saved-daily-result")
+        for _ in 0..<4 where !share.isHittable { app.swipeUp() }
+        XCTAssertTrue(share.isHittable)
+        share.tap()
+        let copy = app.descendants(matching: .any)["Copy"].firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 15), "Share sheet did not show Copy.\n\(app.debugDescription)")
+    }
+
     func testGameMenuIsAccessibleAndReturnsToTheModePicker() {
         let app = startPuzzle(mode: "Daily Challenge")
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
@@ -312,5 +358,35 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertEqual(field.frame.minY, row, accuracy: 1)
         field.typeText("a")
         XCTAssertEqual(field.value as? String, "a", "Typing lands in the next puzzle's field")
+    }
+}
+
+/// Find a solution in the same bundled dictionary without enabling in-app hints.
+private struct TestWordGraph: Decodable {
+    let nodes: [String]
+    let edges: [[Int]]
+
+    func path(from start: String, to target: String) throws -> [String] {
+        let first = try XCTUnwrap(nodes.firstIndex(of: start))
+        let last = try XCTUnwrap(nodes.firstIndex(of: target))
+        var parents = [first: first]
+        var queue = [first]
+        var head = 0
+        while head < queue.count && parents[last] == nil {
+            let current = queue[head]
+            head += 1
+            for neighbor in edges[current] where parents[neighbor] == nil {
+                parents[neighbor] = current
+                queue.append(neighbor)
+            }
+        }
+
+        var chain = [target]
+        var current = last
+        while current != first {
+            current = try XCTUnwrap(parents[current], "No route from \(start) to \(target)")
+            chain.append(nodes[current])
+        }
+        return chain.reversed()
     }
 }
