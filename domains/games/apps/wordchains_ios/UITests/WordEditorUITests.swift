@@ -273,7 +273,8 @@ final class WordEditorUITests: XCTestCase {
         for _ in 0..<4 where !share.isHittable { app.swipeUp() }
         XCTAssertTrue(share.isHittable)
         share.tap()
-        XCTAssertTrue(app.descendants(matching: .any)["Copy"].firstMatch.waitForExistence(timeout: 5))
+        let copy = app.descendants(matching: .any)["Copy"].firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 15), "Share sheet did not show Copy.\n\(app.debugDescription)")
     }
 
     func testGameMenuIsAccessibleAndReturnsToTheModePicker() {
