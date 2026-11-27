@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 struct WordInputView: View {
     @Bindable var game: GameState
@@ -66,7 +69,15 @@ struct WordInputView: View {
                     .stroke(borderColor, lineWidth: isFocused ? 2 : 0)
             )
             .modifier(ShakeEffect(animatableData: CGFloat(shakeAttempt)))
+            #if os(iOS)
+            .background {
+                FocusAfterPresentation { isFocused = true }
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            #else
             .onAppear { isFocused = true }
+            #endif
             .onChange(of: fieldText) { _, typed in
                 guard typed != entry.text else { return }
                 react(to: entry.change(to: typed, in: game))
@@ -212,3 +223,34 @@ struct WordInputView: View {
         #endif
     }
 }
+
+#if os(iOS)
+/// Wait for the navigation push before presenting the keyboard.
+private struct FocusAfterPresentation: UIViewControllerRepresentable {
+    let focus: () -> Void
+
+    func makeUIViewController(context: Context) -> Controller {
+        let controller = Controller()
+        controller.focus = focus
+        return controller
+    }
+
+    func updateUIViewController(_ controller: Controller, context: Context) {
+        controller.focus = focus
+    }
+
+    final class Controller: UIViewController {
+        var focus: (() -> Void)?
+        private var requestedFocus = false
+
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
+            Task { @MainActor [weak self] in
+                guard let self, self.viewIfLoaded?.window != nil, !self.requestedFocus else { return }
+                self.requestedFocus = true
+                self.focus?()
+            }
+        }
+    }
+}
+#endif
