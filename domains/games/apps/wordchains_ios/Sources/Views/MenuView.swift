@@ -9,6 +9,7 @@ struct MenuView: View {
     @State private var animateIn = false
     @Environment(\.gameFeedback.reduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private let settingsTargetSize: CGFloat = 44
 
     var body: some View {
         NavigationStack {
@@ -29,13 +30,6 @@ struct MenuView: View {
             .navigationDestination(isPresented: $showGame) {
                 GameView(game: game)
             }
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Settings", systemImage: "gearshape", action: openSettings)
-                        .labelStyle(.iconOnly)
-                        .accessibilityIdentifier("menu-settings")
-                }
-            }
             .onAppear {
                 withAnimation(reduceMotion ? nil : Theme.springAnimation.delay(0.1)) {
                     animateIn = true
@@ -48,17 +42,44 @@ struct MenuView: View {
 
     private var header: some View {
         VStack(spacing: 8) {
-            Text("Word Chains")
-                .font(Theme.titleFont)
-                .foregroundStyle(.primary)
+            HStack(spacing: 8) {
+                // Reserve matching space so the gear doesn't shift the title off center.
+                Color.clear
+                    .frame(width: settingsTargetSize, height: settingsTargetSize)
+                    .accessibilityHidden(true)
+
+                Text("Word Chains")
+                    .font(Theme.titleFont)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityAddTraits(.isHeader)
+
+                settingsButton
+            }
 
             Text("Change one letter at a time")
                 .font(Theme.bodyFont)
                 .foregroundStyle(.secondary)
         }
-        .padding(.top, 20)
+        .padding(.top, 12)
         .opacity(animateIn ? 1 : 0)
         .offset(y: animateIn ? 0 : 20)
+    }
+
+    private var settingsButton: some View {
+        Button(action: openSettings) {
+            Image(systemName: "gearshape")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 36, height: 36)
+                .background(Theme.accent.opacity(0.12), in: Circle())
+                .frame(width: settingsTargetSize, height: settingsTargetSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Settings")
+        .accessibilityIdentifier("menu-settings")
     }
 
     // MARK: - Mode Selector

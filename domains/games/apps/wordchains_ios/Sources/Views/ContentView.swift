@@ -66,7 +66,7 @@ struct ContentView: View {
 }
 
 private struct LoadingFractal: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.gameFeedback.reduceMotion) private var reduceMotion
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { timeline in

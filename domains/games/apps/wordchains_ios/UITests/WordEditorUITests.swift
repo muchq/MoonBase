@@ -18,6 +18,7 @@ final class WordEditorUITests: XCTestCase {
 
         let settings = app.buttons["menu-settings"]
         XCTAssertTrue(settings.waitForExistence(timeout: 30))
+        assertSettingsSharesTitleRow(in: app)
         settings.tap()
 
         let haptics = app.switches["settings-haptics"]
@@ -48,6 +49,8 @@ final class WordEditorUITests: XCTestCase {
 
         haptics.coordinate(withNormalizedOffset: switchOffset).tap()
         motion.coordinate(withNormalizedOffset: switchOffset).tap()
+        XCTAssertEqual(haptics.value as? String, "1")
+        XCTAssertEqual(motion.value as? String, "0")
         done.tap()
         XCTAssertTrue(app.buttons["Play"].isHittable)
     }
@@ -62,7 +65,7 @@ final class WordEditorUITests: XCTestCase {
             app.buttons.containing(NSPredicate(format: "label CONTAINS %@", label)).firstMatch
         }
         XCTAssertTrue(buttons[0].waitForExistence(timeout: 30))
-        settle()
+        assertSettingsSharesTitleRow(in: app)
         XCTAssertEqual(buttons.map { $0.label }, labels)
         let initialFrames = buttons.map { $0.frame }
 
@@ -75,6 +78,18 @@ final class WordEditorUITests: XCTestCase {
                 XCTAssertEqual(button.frame.height, initialFrames[index].height, accuracy: 1)
             }
         }
+    }
+
+    private func assertSettingsSharesTitleRow(in app: XCUIApplication) {
+        let title = app.staticTexts["Word Chains"]
+        let settings = app.buttons["menu-settings"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertTrue(settings.exists)
+        settle()
+        XCTAssertEqual(settings.frame.midY, title.frame.midY, accuracy: 3)
+        XCTAssertLessThanOrEqual(title.frame.maxX, settings.frame.minX)
+        XCTAssertGreaterThanOrEqual(settings.frame.width.rounded(), 44)
+        XCTAssertGreaterThanOrEqual(settings.frame.height.rounded(), 44)
     }
 
     private func startPuzzle(mode: String? = nil, difficulty: String? = nil, arguments: [String] = []) -> XCUIApplication {
