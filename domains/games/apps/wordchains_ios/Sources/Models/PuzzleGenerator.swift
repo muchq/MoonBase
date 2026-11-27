@@ -4,7 +4,16 @@ import Foundation
 struct PuzzleGenerator {
     let graph: WordGraph
     /// The words a puzzle may start and end on (PuzzleWords); nil, any graph word.
-    var ends: Set<String>? = nil
+    let ends: Set<String>?
+    private let candidatesByDifficulty: [Difficulty: [String]]
+
+    init(graph: WordGraph, ends: Set<String>? = nil) {
+        self.graph = graph
+        self.ends = ends
+        self.candidatesByDifficulty = Dictionary(uniqueKeysWithValues: Difficulty.allCases.map { difficulty in
+            (difficulty, graph.puzzleEnds(ofLength: difficulty.letterCount, among: ends))
+        })
+    }
 
     /// The app's generator: the graph, with the bundle's puzzle words.
     static func bundled(graph: WordGraph, in bundle: Bundle = .main) -> PuzzleGenerator {
@@ -13,8 +22,7 @@ struct PuzzleGenerator {
 
     /// Random puzzle for the given difficulty.
     func randomPuzzle(difficulty: Difficulty) -> Puzzle? {
-        let candidates = graph.puzzleEnds(ofLength: difficulty.letterCount, among: ends)
-        guard candidates.count >= 2 else { return nil }
+        guard let candidates = candidatesByDifficulty[difficulty], candidates.count >= 2 else { return nil }
 
         // Try to find a pair with a path of reasonable length (3-8 words)
         for _ in 0..<100 {
@@ -55,8 +63,7 @@ struct PuzzleGenerator {
 
     /// Deterministic daily puzzle — same puzzle for everyone on the same day.
     func dailyPuzzle(difficulty: Difficulty) -> Puzzle? {
-        let candidates = graph.puzzleEnds(ofLength: difficulty.letterCount, among: ends)
-        guard candidates.count >= 2 else { return nil }
+        guard let candidates = candidatesByDifficulty[difficulty], candidates.count >= 2 else { return nil }
 
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
