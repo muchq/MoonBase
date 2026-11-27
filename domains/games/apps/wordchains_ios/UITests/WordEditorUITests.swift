@@ -16,15 +16,13 @@ final class WordEditorUITests: XCTestCase {
         let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
         app.launch()
 
-        let settings = app.buttons["menu-settings"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 30))
-        assertSettingsSharesTitleRow(in: app)
-        settings.tap()
+        assertMenuSharesTitleRow(in: app)
+        openMenuPage("Settings", in: app)
 
         let sound = app.switches["settings-sound-effects"]
         let haptics = app.switches["settings-haptics"]
         let motion = app.switches["settings-reduce-motion"]
-        let done = app.buttons["settings-done"]
+        let done = app.buttons["menu-sheet-done"]
         XCTAssertTrue(haptics.waitForExistence(timeout: 5))
         XCTAssertTrue(motion.exists)
         XCTAssertEqual(sound.value as? String, "1")
@@ -45,8 +43,7 @@ final class WordEditorUITests: XCTestCase {
 
         app.terminate()
         app.launch()
-        XCTAssertTrue(settings.waitForExistence(timeout: 30))
-        settings.tap()
+        openMenuPage("Settings", in: app)
         XCTAssertTrue(haptics.waitForExistence(timeout: 5))
         XCTAssertEqual(sound.value as? String, "0")
         XCTAssertEqual(haptics.value as? String, "0")
@@ -62,6 +59,44 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Play"].isHittable)
     }
 
+    func testMenuOpensHelpAndAbout() {
+        let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
+        app.launch()
+
+        let menu = app.buttons["menu-open"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 30))
+        XCTAssertFalse(app.buttons["menu-settings"].exists)
+        menu.tap()
+        let help = app.buttons["Help"]
+        XCTAssertTrue(help.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["About"].exists)
+        XCTAssertTrue(app.buttons["Settings"].exists)
+        capture("09-open-menu")
+        help.tap()
+
+        XCTAssertTrue(app.staticTexts["How to play"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["help-example"].exists)
+        XCTAssertTrue(app.staticTexts["Controls"].exists)
+        capture("10-help")
+        app.buttons["menu-sheet-done"].tap()
+
+        openMenuPage("About", in: app)
+        XCTAssertTrue(app.navigationBars["About"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Version ")).firstMatch.exists)
+        capture("11-about")
+        app.buttons["menu-sheet-done"].tap()
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+    }
+
+    private func openMenuPage(_ page: String, in app: XCUIApplication) {
+        let menu = app.buttons["menu-open"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 30))
+        menu.tap()
+        let item = app.buttons[page]
+        XCTAssertTrue(item.waitForExistence(timeout: 5))
+        item.tap()
+    }
+
     func testModeSelectionKeepsMenuLayoutStable() {
         let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
         app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
@@ -72,7 +107,7 @@ final class WordEditorUITests: XCTestCase {
             app.buttons.containing(NSPredicate(format: "label CONTAINS %@", label)).firstMatch
         }
         XCTAssertTrue(buttons[0].waitForExistence(timeout: 30))
-        assertSettingsSharesTitleRow(in: app)
+        assertMenuSharesTitleRow(in: app)
         XCTAssertEqual(buttons.map { $0.label }, labels)
         let initialFrames = buttons.map { $0.frame }
 
@@ -87,16 +122,16 @@ final class WordEditorUITests: XCTestCase {
         }
     }
 
-    private func assertSettingsSharesTitleRow(in app: XCUIApplication) {
+    private func assertMenuSharesTitleRow(in app: XCUIApplication) {
         let title = app.staticTexts["Word Chains"]
-        let settings = app.buttons["menu-settings"]
-        XCTAssertTrue(title.waitForExistence(timeout: 5))
-        XCTAssertTrue(settings.exists)
+        let menu = app.buttons["menu-open"]
+        XCTAssertTrue(title.waitForExistence(timeout: 30))
+        XCTAssertTrue(menu.exists)
         settle()
-        XCTAssertEqual(settings.frame.midY, title.frame.midY, accuracy: 3)
-        XCTAssertLessThanOrEqual(title.frame.maxX, settings.frame.minX)
-        XCTAssertGreaterThanOrEqual(settings.frame.width.rounded(), 44)
-        XCTAssertGreaterThanOrEqual(settings.frame.height.rounded(), 44)
+        XCTAssertEqual(menu.frame.midY, title.frame.midY, accuracy: 3)
+        XCTAssertLessThanOrEqual(menu.frame.maxX, title.frame.minX)
+        XCTAssertGreaterThanOrEqual(menu.frame.width.rounded(), 44)
+        XCTAssertGreaterThanOrEqual(menu.frame.height.rounded(), 44)
     }
 
     private func startPuzzle(mode: String? = nil, difficulty: String? = nil, arguments: [String] = []) -> XCUIApplication {
