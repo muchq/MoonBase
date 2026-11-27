@@ -22,8 +22,7 @@ struct ContentView: View {
     private var loadingView: some View {
         LoadingFractal()
             .frame(width: 52, height: 52)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Loading dictionary")
+            .accessibilityHidden(true)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.secondaryBackground.ignoresSafeArea())
     }
