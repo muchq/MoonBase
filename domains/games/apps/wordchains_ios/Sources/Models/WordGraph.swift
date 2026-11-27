@@ -6,8 +6,24 @@ struct WordGraph: Codable {
     let nodes: [String]
     let edges: [[Int]]
 
-    private var wordToIndex: [String: Int] {
-        Dictionary(uniqueKeysWithValues: nodes.enumerated().map { ($1, $0) })
+    private let wordToIndex: [String: Int]
+
+    private enum CodingKeys: String, CodingKey {
+        case nodes, edges
+    }
+
+    init(nodes: [String], edges: [[Int]]) {
+        self.nodes = nodes
+        self.edges = edges
+        self.wordToIndex = Dictionary(nodes.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    init(from decoder: any Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            nodes: try fields.decode([String].self, forKey: .nodes),
+            edges: try fields.decode([[Int]].self, forKey: .edges)
+        )
     }
 
     /// BFS for a single shortest path — mirrors `bfs_for_target` in the Rust lib.
@@ -16,7 +32,7 @@ struct WordGraph: Codable {
         if start.count != target.count { return nil }
 
         let index = wordToIndex
-        guard let startIdx = index[start], index[target] != nil else { return nil }
+        guard let startIdx = index[start], let targetIdx = index[target] else { return nil }
 
         var parent: [Int: Int] = [:]
         var visited = Set(excluded.compactMap { index[$0] })
@@ -28,7 +44,7 @@ struct WordGraph: Codable {
             let current = queue[head]
             head += 1
 
-            if nodes[current] == target {
+            if current == targetIdx {
                 var path: [String] = []
                 var node = current
                 while node != startIdx {

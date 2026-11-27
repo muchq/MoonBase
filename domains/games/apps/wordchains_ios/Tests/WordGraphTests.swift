@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import WordChains
 
@@ -103,6 +104,18 @@ final class WordGraphTests: XCTestCase {
     }
 
     // MARK: - Graph Query Tests
+
+    func testDecodedGraphBuildsIndexWithoutChangingJSONFormat() throws {
+        let data = Data(#"{"nodes":["cat","cot"],"edges":[[1],[0]]}"#.utf8)
+        let graph = try JSONDecoder().decode(WordGraph.self, from: data)
+
+        XCTAssertTrue(graph.contains("cot"))
+        XCTAssertEqual(graph.shortestPath(from: "cat", to: "cot"), ["cat", "cot"])
+
+        let encoded = try JSONEncoder().encode(graph)
+        let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual(Set(fields.keys), ["nodes", "edges"])
+    }
 
     func testContains() {
         let graph = makeTestGraph()
