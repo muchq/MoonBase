@@ -87,7 +87,7 @@ CI runs it apart from `test-ios`, in the iOS UI tests workflow: on main after a
 
 Before submitting to the App Store, verify these scenarios:
 
-- [ ] **Quick Play** — start a game, type valid words, reach the target word; Return on the keyboard submits a word once, with no "Already in the chain" after it
+- [ ] **Quick Play** — launch the app and tap Play. The puzzle slides in before the keyboard opens. Type valid words and reach the target word. Return submits each word once.
 - [ ] **Undo** — removes the last move and clears the field/error; disabled at the start and unavailable after completion
 - [ ] **Daily Challenge** — same puzzle generates for the same date
 - [ ] **Time Attack** — the bar above the input counts down from 90 (3 letters), 120 (4) or 180 (5); a solve shows "Solved!" and the next puzzle follows with the keyboard still up; at 0 moves stop and one summary shows solved, points and best; "Beat your best" starts a fresh sprint. Backgrounded past the deadline, returning shows the summary. VoiceOver reads the bar and announces each solve and the summary; with Reduce Motion on, nothing scales. On a compact iPhone the input row never moves.
