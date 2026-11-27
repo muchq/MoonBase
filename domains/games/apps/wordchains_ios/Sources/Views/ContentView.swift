@@ -20,17 +20,11 @@ struct ContentView: View {
     }
 
     private var loadingView: some View {
-        VStack(spacing: 20) {
-            ProgressView()
-                .scaleEffect(1.5)
-                .tint(Theme.accent)
-
-            Text("Loading dictionary...")
-                .font(Theme.bodyFont)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Theme.secondaryBackground.ignoresSafeArea())
+        ProgressView()
+            .progressViewStyle(.circular)
+            .accessibilityLabel("Loading dictionary")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Theme.secondaryBackground.ignoresSafeArea())
     }
 
     private var errorView: some View {
