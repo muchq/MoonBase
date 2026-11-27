@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MenuView: View {
     @Bindable var game: GameState
-    let openSettings: () -> Void
+    let openPage: (MenuPage) -> Void
     @State private var selectedMode: GameMode = .quickPlay
     @State private var selectedDifficulty: Difficulty = .medium
     @State private var showGame = false
@@ -12,7 +12,7 @@ struct MenuView: View {
     @Environment(\.gameFeedback.reduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.scenePhase) private var scenePhase
-    private let settingsTargetSize: CGFloat = 44
+    private let menuTargetSize: CGFloat = 44
 
     private var dailyIsSolved: Bool { game.dailyResult(difficulty: selectedDifficulty, date: today) != nil }
     private var canViewDailyResult: Bool { selectedMode == .dailyChallenge && dailyIsSolved }
@@ -58,10 +58,7 @@ struct MenuView: View {
     private var header: some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
-                // Reserve matching space so the gear doesn't shift the title off center.
-                Color.clear
-                    .frame(width: settingsTargetSize, height: settingsTargetSize)
-                    .accessibilityHidden(true)
+                menuButton
 
                 Text("Word Chains")
                     .font(Theme.titleFont)
@@ -70,7 +67,9 @@ struct MenuView: View {
                     .frame(maxWidth: .infinity)
                     .accessibilityAddTraits(.isHeader)
 
-                settingsButton
+                Color.clear
+                    .frame(width: menuTargetSize, height: menuTargetSize)
+                    .accessibilityHidden(true)
             }
 
             Text("Change one letter at a time")
@@ -82,19 +81,28 @@ struct MenuView: View {
         .offset(y: animateIn ? 0 : 20)
     }
 
-    private var settingsButton: some View {
-        Button(action: openSettings) {
-            Image(systemName: "gearshape")
-                .font(.system(size: 19, weight: .semibold))
+    private var menuButton: some View {
+        Menu {
+            ForEach(MenuPage.allCases) { page in
+                Button { openPage(page) } label: {
+                    Label(page.rawValue, systemImage: page.icon)
+                }
+            }
+        } label: {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(Theme.accent)
                 .frame(width: 36, height: 36)
                 .background(Theme.accent.opacity(0.12), in: Circle())
-                .frame(width: settingsTargetSize, height: settingsTargetSize)
+                .frame(width: menuTargetSize, height: menuTargetSize)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Settings")
-        .accessibilityIdentifier("menu-settings")
+        #if os(macOS)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        #endif
+        .accessibilityLabel("Menu")
+        .accessibilityIdentifier("menu-open")
     }
 
     // MARK: - Mode Selector
