@@ -70,15 +70,23 @@ enum InputResult {
 private struct SoloStats: Codable {
     var puzzlesSolved = 0
     var optimalSolves = 0
-    var streak = 0
     var bestStreak = 0
     var totalScore = 0
 
-    mutating func recordSolve(score: Int, isOptimal: Bool) {
+    init() {}
+
+    init(from decoder: any Decoder) throws {
+        let fields = try decoder.container(keyedBy: CodingKeys.self)
+        puzzlesSolved = try fields.decodeIfPresent(Int.self, forKey: .puzzlesSolved) ?? 0
+        optimalSolves = try fields.decodeIfPresent(Int.self, forKey: .optimalSolves) ?? 0
+        bestStreak = try fields.decodeIfPresent(Int.self, forKey: .bestStreak) ?? 0
+        totalScore = try fields.decodeIfPresent(Int.self, forKey: .totalScore) ?? 0
+    }
+
+    mutating func recordSolve(score: Int, isOptimal: Bool, sessionStreak: Int) {
         puzzlesSolved += 1
         if isOptimal { optimalSolves += 1 }
-        streak += 1
-        bestStreak = max(bestStreak, streak)
+        bestStreak = max(bestStreak, sessionStreak)
         totalScore += score
     }
 }
@@ -104,7 +112,8 @@ final class GameState {
     var optimalSteps: Int { currentPuzzle?.optimalSteps ?? 0 }
     var score = 0
     var totalScore: Int { soloStats.totalScore }
-    var streak: Int { soloStats.streak }
+    /// Puzzles solved in this app session.
+    private(set) var streak = 0
     var bestStreak: Int { soloStats.bestStreak }
     var puzzlesSolved: Int { soloStats.puzzlesSolved }
     var optimalSolves: Int { soloStats.optimalSolves }
@@ -275,7 +284,8 @@ final class GameState {
         let optimalBonus = isOptimal ? 50 : 0
         let stepPenalty = max(0, (wordsUsed - optimal)) * 10
         score = max(10, baseScore + optimalBonus - stepPenalty)
-        soloStats.recordSolve(score: score, isOptimal: isOptimal)
+        streak += 1
+        soloStats.recordSolve(score: score, isOptimal: isOptimal, sessionStreak: streak)
         if let data = try? PropertyListEncoder().encode(soloStats) {
             defaults.set(data, forKey: Self.soloStatsKey)
         }

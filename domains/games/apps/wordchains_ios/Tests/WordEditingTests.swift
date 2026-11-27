@@ -2,25 +2,23 @@ import XCTest
 @testable import WordChains
 
 final class WordEditingTests: XCTestCase {
-    private func isolatedDefaults() -> UserDefaults {
-        let suite = "word-editing-\(UUID())"
-        let defaults = UserDefaults(suiteName: suite)!
-        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
-        return defaults
-    }
-
     private func game(defaults: UserDefaults? = nil) -> GameState {
-        let game = GameState(defaults: defaults ?? isolatedDefaults())
         // CAB is a dead end reachable only through CAT; DOG has two routes.
         let words = ["cat", "cot", "cog", "dog", "dat", "dot", "cab"]
         let edges = words.map { word in
             words.indices.filter { GameState.isOneLetterAway(word, words[$0]) }
         }
-        game.graph = WordGraph(nodes: words, edges: edges)
+        let graph = WordGraph(nodes: words, edges: edges)
+        let game = GameState(defaults: defaults ?? isolatedDefaults(), generator: PuzzleGenerator(graph: graph))
+        game.graph = graph
         game.difficulty = .easy
+        deal(game)
+        return game
+    }
+
+    private func deal(_ game: GameState) {
         game.currentPuzzle = Puzzle(start: "cat", target: "dog", optimalLength: 4, difficulty: .easy)
         game.chain = ["cat"]
-        return game
     }
 
     // MARK: - Hints
@@ -85,19 +83,74 @@ final class WordEditingTests: XCTestCase {
         let relaunched = GameState(defaults: defaults)
         XCTAssertEqual(relaunched.puzzlesSolved, 3)
         XCTAssertEqual(relaunched.optimalSolves, 2)
-        XCTAssertEqual(relaunched.streak, 3)
-        XCTAssertEqual(relaunched.bestStreak, 3)
+        XCTAssertEqual(relaunched.streak, 0)
+        XCTAssertEqual(relaunched.bestStreak, 1)
         XCTAssertEqual(relaunched.totalScore, 380)
         XCTAssertEqual(relaunched.bests.best(for: .easy), 150)
         XCTAssertEqual(relaunched.score, 0)
         XCTAssertNil(relaunched.currentPuzzle)
     }
 
-    func testUnfinishedPuzzleLeavesFreshStatsAtZero() {
+    func testBestStreakSurvivesRelaunchAndAShorterSession() {
+        let defaults = isolatedDefaults()
+        let playing = game(defaults: defaults)
+        for _ in 0..<2 {
+            playing.startNewGame(mode: .quickPlay, difficulty: .easy)
+            deal(playing)
+            XCTAssertEqual(playing.submitWord("cot"), .valid)
+            XCTAssertEqual(playing.submitWord("cog"), .valid)
+            XCTAssertEqual(playing.submitWord("dog"), .reachedTarget)
+        }
+        XCTAssertEqual(playing.streak, 2)
+
+        let relaunched = game(defaults: defaults)
+        XCTAssertEqual(relaunched.streak, 0)
+        XCTAssertEqual(relaunched.bestStreak, 2)
+        XCTAssertEqual(relaunched.submitWord("cot"), .valid)
+        XCTAssertEqual(relaunched.submitWord("cog"), .valid)
+        XCTAssertEqual(relaunched.submitWord("dog"), .reachedTarget)
+        XCTAssertEqual(relaunched.streak, 1)
+        let nextLaunch = GameState(defaults: defaults)
+        XCTAssertEqual(nextLaunch.bestStreak, 2)
+        XCTAssertEqual(nextLaunch.puzzlesSolved, 3)
+    }
+
+    func testStatsBlobMissingAFieldKeepsOtherCounters() throws {
+        let defaults = isolatedDefaults()
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: ["puzzlesSolved": 6, "streak": 3, "bestStreak": 3, "totalScore": 680],
+            format: .binary, options: 0
+        )
+        defaults.set(data, forKey: "soloStats")
+        let loaded = GameState(defaults: defaults)
+        XCTAssertEqual(loaded.puzzlesSolved, 6)
+        XCTAssertEqual(loaded.bestStreak, 3)
+        XCTAssertEqual(loaded.totalScore, 680)
+        XCTAssertEqual(loaded.optimalSolves, 0)
+        XCTAssertEqual(loaded.streak, 0)
+    }
+
+    func testUnreadableStatsStartFreshAndTheNextSolveReplacesThem() {
+        let defaults = isolatedDefaults()
+        defaults.set(Data("invalid plist".utf8), forKey: "soloStats")
+        let playing = game(defaults: defaults)
+        XCTAssertEqual(playing.puzzlesSolved, 0)
+        XCTAssertEqual(playing.totalScore, 0)
+        XCTAssertEqual(playing.submitWord("cot"), .valid)
+        XCTAssertEqual(playing.submitWord("cog"), .valid)
+        XCTAssertEqual(playing.submitWord("dog"), .reachedTarget)
+        XCTAssertEqual(GameState(defaults: defaults).totalScore, 150)
+    }
+
+    func testStartingANewPuzzleDoesNotCountTheAbandonedOne() {
         let defaults = isolatedDefaults()
         let unfinished = game(defaults: defaults)
         XCTAssertEqual(unfinished.submitWord("cot"), .valid)
         XCTAssertEqual(unfinished.submitWord("xxx"), .notInDictionary)
+        let abandoned = unfinished.currentPuzzle?.id
+        unfinished.startNewGame(mode: .quickPlay, difficulty: .easy)
+        XCTAssertNotEqual(unfinished.currentPuzzle?.id, abandoned)
+        XCTAssertEqual(unfinished.stepsTaken, 0)
 
         let relaunched = GameState(defaults: defaults)
         XCTAssertEqual(relaunched.puzzlesSolved, 0)
@@ -149,7 +202,8 @@ final class WordEditingTests: XCTestCase {
     // MARK: - Completion and validation
 
     func testCompletedPuzzleCannotBeUndoneOrScoredTwice() {
-        let game = game()
+        let defaults = isolatedDefaults()
+        let game = game(defaults: defaults)
         XCTAssertEqual(game.submitWord("cot"), .valid)
         XCTAssertEqual(game.submitWord("cog"), .valid)
         XCTAssertEqual(game.submitWord("dog"), .reachedTarget)
@@ -164,6 +218,9 @@ final class WordEditingTests: XCTestCase {
         XCTAssertEqual(game.chain, ["cat", "cot", "cog", "dog"])
         XCTAssertEqual(game.puzzlesSolved, 1)
         XCTAssertEqual(game.totalScore, 150)
+        let relaunched = GameState(defaults: defaults)
+        XCTAssertEqual(relaunched.puzzlesSolved, 1)
+        XCTAssertEqual(relaunched.totalScore, 150)
     }
 
     func testUsedWordStillReportsAlreadyUsedDuringAnActivePuzzle() {
