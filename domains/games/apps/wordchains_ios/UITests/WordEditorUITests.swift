@@ -246,7 +246,7 @@ final class WordEditorUITests: XCTestCase {
         }
 
         let chain = app.staticTexts[words.joined(separator: " → ")]
-        let share = app.buttons["Share Chain"]
+        let share = app.buttons["Share Result"]
         XCTAssertTrue(share.waitForExistence(timeout: 5))
         XCTAssertTrue(chain.exists)
         XCTAssertFalse(app.buttons["Play Again"].exists)

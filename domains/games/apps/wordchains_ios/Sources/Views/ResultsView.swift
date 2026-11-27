@@ -176,7 +176,7 @@ struct ResultsView: View {
         VStack(spacing: 12) {
             if let shareText = result.shareText {
                 ShareLink(item: shareText) {
-                    Label("Share Chain", systemImage: "square.and.arrow.up")
+                    Label("Share Result", systemImage: "square.and.arrow.up")
                 }
                 .buttonStyle(PrimaryActionStyle())
             } else if let onNewGame {
