@@ -25,7 +25,7 @@ final class TimeAttackTests: XCTestCase {
             words.indices.filter { GameState.isOneLetterAway(word, words[$0]) }
         }
         let graph = WordGraph(nodes: words, edges: edges)
-        let game = GameState(bests: TimeAttackBests(defaults: defaults), generator: PuzzleGenerator(graph: graph))
+        let game = GameState(defaults: defaults, generator: PuzzleGenerator(graph: graph))
         game.graph = graph
         game.startNewGame(mode: .timeAttack, difficulty: .easy, now: t0)
         deal(game)
@@ -70,7 +70,7 @@ final class TimeAttackTests: XCTestCase {
         let words = ["stare", "store", "stone", "shone", "shine"]
         let edges = words.map { word in words.indices.filter { GameState.isOneLetterAway(word, words[$0]) } }
         let graph = WordGraph(nodes: words, edges: edges)
-        let game = GameState(bests: TimeAttackBests(defaults: defaults), generator: PuzzleGenerator(graph: graph))
+        let game = GameState(defaults: defaults, generator: PuzzleGenerator(graph: graph))
         game.graph = graph
         game.startNewGame(mode: .timeAttack, difficulty: .hard, now: t0)
         XCTAssertEqual(game.timeAttackSeconds, 180)
@@ -181,7 +181,7 @@ final class TimeAttackTests: XCTestCase {
 
     func testWithNoPuzzleToDealTheSprintStillEndsAndCountsTheSolve() {
         let empty = PuzzleGenerator(graph: WordGraph(nodes: [], edges: []))
-        let game = GameState(bests: TimeAttackBests(defaults: defaults), generator: empty)
+        let game = GameState(defaults: defaults, generator: empty)
         game.graph = sprint().graph
         game.currentMode = .timeAttack
         game.difficulty = .easy
@@ -277,7 +277,7 @@ final class TimeAttackTests: XCTestCase {
         let words = ["cat", "cot", "cog", "dog"]
         let edges = words.map { word in words.indices.filter { GameState.isOneLetterAway(word, words[$0]) } }
         let graph = WordGraph(nodes: words, edges: edges)
-        let game = GameState(bests: TimeAttackBests(defaults: defaults), generator: PuzzleGenerator(graph: graph), sprintHints: true)
+        let game = GameState(defaults: defaults, generator: PuzzleGenerator(graph: graph), sprintHints: true)
         game.graph = graph
         game.startNewGame(mode: .timeAttack, difficulty: .easy, now: t0)
         deal(game)
@@ -295,7 +295,7 @@ final class TimeAttackTests: XCTestCase {
 
     func testDailyChallengeHasNoHintsEvenWithTheSprintTestSwitch() {
         let fixture = sprint()
-        let game = GameState(bests: TimeAttackBests(defaults: defaults), sprintHints: true)
+        let game = GameState(defaults: defaults, sprintHints: true)
         game.graph = fixture.graph
         game.startNewGame(mode: .dailyChallenge, difficulty: .easy, now: at(0))
         deal(game)

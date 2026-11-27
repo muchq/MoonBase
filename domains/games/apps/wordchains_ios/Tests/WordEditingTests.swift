@@ -2,8 +2,15 @@ import XCTest
 @testable import WordChains
 
 final class WordEditingTests: XCTestCase {
-    private func game() -> GameState {
-        let game = GameState()
+    private func isolatedDefaults() -> UserDefaults {
+        let suite = "word-editing-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        return defaults
+    }
+
+    private func game(defaults: UserDefaults? = nil) -> GameState {
+        let game = GameState(defaults: defaults ?? isolatedDefaults())
         // CAB is a dead end reachable only through CAT; DOG has two routes.
         let words = ["cat", "cot", "cog", "dog", "dat", "dot", "cab"]
         let edges = words.map { word in
@@ -49,6 +56,56 @@ final class WordEditingTests: XCTestCase {
     }
 
     // MARK: - Undo and scoring
+
+    func testSoloStatsSurviveRelaunchAndAccumulateAcrossModes() {
+        let defaults = isolatedDefaults()
+        let quickPlay = game(defaults: defaults)
+        XCTAssertEqual(quickPlay.submitWord("cot"), .valid)
+        XCTAssertEqual(quickPlay.submitWord("cog"), .valid)
+        XCTAssertEqual(quickPlay.submitWord("dog"), .reachedTarget)
+
+        let daily = game(defaults: defaults)
+        daily.currentMode = .dailyChallenge
+        for word in ["dat", "dot", "cot", "cog"] {
+            XCTAssertEqual(daily.submitWord(word), .valid)
+        }
+        XCTAssertEqual(daily.submitWord("dog"), .reachedTarget)
+        XCTAssertEqual(daily.score, 80)
+
+        let sprint = game(defaults: defaults)
+        sprint.currentMode = .timeAttack
+        let now = ContinuousClock.now
+        sprint.timeAttack = TimeAttack(startingAt: now, difficulty: .easy)
+        XCTAssertEqual(sprint.submitWord("cot", now: now), .valid)
+        XCTAssertEqual(sprint.submitWord("cog", now: now), .valid)
+        XCTAssertEqual(sprint.submitWord("dog", now: now), .reachedTarget)
+        XCTAssertEqual(sprint.submitWord("dog", now: now), .gameComplete)
+        sprint.tick(now: now + .seconds(90))
+
+        let relaunched = GameState(defaults: defaults)
+        XCTAssertEqual(relaunched.puzzlesSolved, 3)
+        XCTAssertEqual(relaunched.optimalSolves, 2)
+        XCTAssertEqual(relaunched.streak, 3)
+        XCTAssertEqual(relaunched.bestStreak, 3)
+        XCTAssertEqual(relaunched.totalScore, 380)
+        XCTAssertEqual(relaunched.bests.best(for: .easy), 150)
+        XCTAssertEqual(relaunched.score, 0)
+        XCTAssertNil(relaunched.currentPuzzle)
+    }
+
+    func testUnfinishedPuzzleLeavesFreshStatsAtZero() {
+        let defaults = isolatedDefaults()
+        let unfinished = game(defaults: defaults)
+        XCTAssertEqual(unfinished.submitWord("cot"), .valid)
+        XCTAssertEqual(unfinished.submitWord("xxx"), .notInDictionary)
+
+        let relaunched = GameState(defaults: defaults)
+        XCTAssertEqual(relaunched.puzzlesSolved, 0)
+        XCTAssertEqual(relaunched.optimalSolves, 0)
+        XCTAssertEqual(relaunched.streak, 0)
+        XCTAssertEqual(relaunched.bestStreak, 0)
+        XCTAssertEqual(relaunched.totalScore, 0)
+    }
 
     func testUndoIsFreeAndOnlyTheFinalChainDeterminesScoreInEverySoloMode() {
         for mode in GameMode.allCases {
