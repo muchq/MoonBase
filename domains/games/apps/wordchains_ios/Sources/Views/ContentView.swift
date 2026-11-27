@@ -3,11 +3,12 @@ import SwiftUI
 struct ContentView: View {
     @State private var game = GameState(sprintHints: ProcessInfo.processInfo.arguments.contains("-sprintHints"))
     @State private var showsSettings = false
-    @AppStorage(GameFeedback.hapticsKey) private var hapticsEnabled = true
-    @AppStorage(GameFeedback.reduceMotionKey) private var prefersReducedMotion = false
+    private var feedbackSettings = GameFeedbackSettings()
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     var body: some View {
+        let feedback = feedbackSettings.feedback(systemReduceMotion: systemReduceMotion)
+
         Group {
             if game.isLoading {
                 loadingView
@@ -16,15 +17,20 @@ struct ContentView: View {
             } else {
                 MenuView(game: game, openSettings: { showsSettings = true })
                     .sheet(isPresented: $showsSettings) {
-                        SettingsView(hapticsEnabled: $hapticsEnabled, prefersReducedMotion: $prefersReducedMotion)
+                        SettingsView(
+                            soundEffectsEnabled: feedbackSettings.$soundEffectsEnabled,
+                            hapticsEnabled: feedbackSettings.$hapticsEnabled,
+                            prefersReducedMotion: feedbackSettings.$prefersReducedMotion
+                        )
                     }
             }
         }
-        .environment(\.gameFeedback, GameFeedback(
-            hapticsEnabled: hapticsEnabled,
-            prefersReducedMotion: prefersReducedMotion,
-            systemReduceMotion: systemReduceMotion
-        ))
+        .environment(\.gameFeedback, feedback)
+        #if os(iOS)
+        .onChange(of: feedback.soundEffectsEnabled) { _, _ in
+            feedback.stopSoundIfDisabled { GameSoundPlayer.shared.stop() }
+        }
+        #endif
         .tint(Theme.accent)
         .onAppear {
             game.loadGraph()

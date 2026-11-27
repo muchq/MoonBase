@@ -99,6 +99,55 @@ final class RaceTableTests: XCTestCase {
         XCTAssertEqual(table(view(.racing, runners: [runner("alice", words: 1, ladder: ["cord"]), runner("bob", words: 4)])).draftKey, before)
     }
 
+    func testOnlyTheViewersRungChangesPlayThumps() {
+        let previous = view(.racing, runners: pair)
+        let stepped = view(.racing, runners: [runner("alice", words: 2), runner("bob", words: 3)])
+        let tookBack = view(.racing, runners: [runner("alice"), runner("bob", words: 3)])
+        let opponentStepped = view(.racing, runners: [runner("alice", words: 1), runner("bob", words: 4)])
+        let nextRace = view(.racing, startedAtMs: 500_000, runners: [runner("alice"), runner("bob")])
+
+        XCTAssertEqual(table(stepped).sounds(since: previous), [.step(2)])
+        XCTAssertEqual(table(tookBack).sounds(since: previous), [.takeback(steps: 0)])
+        XCTAssertEqual(table(opponentStepped).sounds(since: previous), [])
+        XCTAssertEqual(table(nextRace).sounds(since: previous), [])
+    }
+
+    func testFinishingPlaysTheTargetOnceAndThenTheResult() {
+        let previous = view(.racing, runners: pair)
+        let finished = [runner("alice", words: 2, finished: true), runner("bob", words: 3)]
+
+        let win = view(.over, runners: finished, result: WordchainResult(ending: .finished, winners: ["alice"]))
+        XCTAssertEqual(table(win).sounds(since: previous), [.target(2), .win])
+        XCTAssertEqual(table(win).sounds(since: win), [])
+        let shared = view(.over, runners: finished, result: WordchainResult(ending: .finished, winners: ["alice", "bob"]))
+        XCTAssertEqual(table(shared).sounds(since: previous), [.target(2), .sharedWin])
+        let timedOut = view(.over, runners: pair, result: WordchainResult(ending: .timeout, winners: []))
+        XCTAssertEqual(table(timedOut).sounds(since: previous), [.timeout])
+    }
+
+    func testTimeoutPlaysTheWinCueForWinners() {
+        let runners = [runner("alice", words: 3, finished: true), runner("bob", words: 3, finished: true)]
+        let previous = view(.racing, runners: runners)
+        let win = view(.over, runners: runners, result: WordchainResult(ending: .timeout, winners: ["alice"]))
+        let shared = view(.over, runners: runners, result: WordchainResult(ending: .timeout, winners: ["alice", "bob"]))
+
+        XCTAssertEqual(table(win).sounds(since: previous), [.win])
+        XCTAssertEqual(table(win, viewer: "bob").sounds(since: previous), [.timeout])
+        XCTAssertEqual(table(shared).sounds(since: previous), [.sharedWin])
+        XCTAssertEqual(table(shared, viewer: "watcher").sounds(since: previous), [])
+    }
+
+    func testPracticeUsesTheTargetAndTimeoutCuesWithoutCompetitiveResults() {
+        let previous = view(.racing, practice: true, runners: alone)
+        let finished = view(.over, practice: true, runners: [runner("alice", words: 1, finished: true)],
+                            result: WordchainResult(ending: .finished, winners: ["alice"]))
+        let timedOut = view(.over, practice: true, runners: alone,
+                            result: WordchainResult(ending: .timeout, winners: []))
+
+        XCTAssertEqual(table(finished).sounds(since: previous), [.target(1)])
+        XCTAssertEqual(table(timedOut).sounds(since: previous), [.timeout])
+    }
+
     func testNoWordIsLongerThanThePuzzle() {
         let racing = table(view(.racing, runners: pair))
         XCTAssertEqual(racing.capped("cards"), "card")
