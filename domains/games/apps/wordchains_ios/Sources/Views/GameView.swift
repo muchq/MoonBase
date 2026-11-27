@@ -4,9 +4,10 @@ struct GameView: View {
     @Bindable var game: GameState
     @Environment(\.dismiss) private var dismiss
     @State private var showResults = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.gameFeedback) private var feedback
 
     private var isTimeAttack: Bool { game.currentMode == .timeAttack }
+    private var reduceMotion: Bool { feedback.reduceMotion }
     private var menuPlacement: ToolbarItemPlacement {
         #if os(iOS)
         .topBarLeading
@@ -190,7 +191,7 @@ struct GameView: View {
         AccessibilityNotification.Announcement("Solved, plus \(game.score) points").post()
         #endif
         #if canImport(UIKit)
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        feedback.performHaptic { UINotificationFeedbackGenerator().notificationOccurred(.success) }
         #endif
     }
 }

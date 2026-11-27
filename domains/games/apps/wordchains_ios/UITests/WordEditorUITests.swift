@@ -12,6 +12,44 @@ final class WordEditorUITests: XCTestCase {
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
     }
 
+    func testSettingsCanBeChangedAndSurviveRelaunch() {
+        let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
+        app.launch()
+
+        let settings = app.buttons["menu-settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 30))
+        settings.tap()
+
+        let haptics = app.switches["settings-haptics"]
+        let motion = app.switches["settings-reduce-motion"]
+        let done = app.buttons["settings-done"]
+        XCTAssertTrue(haptics.waitForExistence(timeout: 5))
+        XCTAssertTrue(motion.exists)
+        XCTAssertEqual(haptics.value as? String, "1")
+        XCTAssertEqual(motion.value as? String, "0")
+        capture("06-settings")
+
+        haptics.tap()
+        motion.tap()
+        XCTAssertEqual(haptics.value as? String, "0")
+        XCTAssertEqual(motion.value as? String, "1")
+        done.tap()
+        XCTAssertTrue(app.buttons["Play"].waitForExistence(timeout: 5))
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(settings.waitForExistence(timeout: 30))
+        settings.tap()
+        XCTAssertTrue(haptics.waitForExistence(timeout: 5))
+        XCTAssertEqual(haptics.value as? String, "0")
+        XCTAssertEqual(motion.value as? String, "1")
+
+        haptics.tap()
+        motion.tap()
+        done.tap()
+        XCTAssertTrue(app.buttons["Play"].isHittable)
+    }
+
     func testModeSelectionKeepsMenuLayoutStable() {
         let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
         app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]

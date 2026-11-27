@@ -2,6 +2,10 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var game = GameState(sprintHints: ProcessInfo.processInfo.arguments.contains("-sprintHints"))
+    @State private var showsSettings = false
+    @AppStorage(GameFeedback.hapticsKey) private var hapticsEnabled = true
+    @AppStorage(GameFeedback.reduceMotionKey) private var prefersReducedMotion = false
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     var body: some View {
         Group {
@@ -10,9 +14,17 @@ struct ContentView: View {
             } else if game.graph == nil {
                 errorView
             } else {
-                MenuView(game: game)
+                MenuView(game: game, openSettings: { showsSettings = true })
+                    .sheet(isPresented: $showsSettings) {
+                        SettingsView(hapticsEnabled: $hapticsEnabled, prefersReducedMotion: $prefersReducedMotion)
+                    }
             }
         }
+        .environment(\.gameFeedback, GameFeedback(
+            hapticsEnabled: hapticsEnabled,
+            prefersReducedMotion: prefersReducedMotion,
+            systemReduceMotion: systemReduceMotion
+        ))
         .tint(Theme.accent)
         .onAppear {
             game.loadGraph()

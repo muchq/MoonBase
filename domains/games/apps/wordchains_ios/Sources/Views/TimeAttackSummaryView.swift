@@ -7,7 +7,7 @@ struct TimeAttackSummaryView: View {
     let onReplay: () -> Void
     let onMenu: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.gameFeedback) private var feedback
     @State private var animateIn = false
 
     var body: some View {
@@ -65,14 +65,16 @@ struct TimeAttackSummaryView: View {
         }
         .background(Theme.secondaryBackground.ignoresSafeArea())
         .opacity(animateIn ? 1 : 0)
-        .scaleEffect(animateIn || reduceMotion ? 1 : 0.95)
+        .scaleEffect(animateIn || feedback.reduceMotion ? 1 : 0.95)
         .onAppear {
-            withAnimation(reduceMotion ? nil : Theme.springAnimation) { animateIn = true }
+            withAnimation(feedback.reduceMotion ? nil : Theme.springAnimation) { animateIn = true }
             #if os(iOS)
             AccessibilityNotification.Announcement(spoken).post()
             #endif
             #if canImport(UIKit)
-            UINotificationFeedbackGenerator().notificationOccurred(summary.isNewBest ? .success : .warning)
+            feedback.performHaptic {
+                UINotificationFeedbackGenerator().notificationOccurred(summary.isNewBest ? .success : .warning)
+            }
             #endif
         }
     }

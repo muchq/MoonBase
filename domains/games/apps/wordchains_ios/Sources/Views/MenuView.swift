@@ -2,11 +2,12 @@ import SwiftUI
 
 struct MenuView: View {
     @Bindable var game: GameState
+    let openSettings: () -> Void
     @State private var selectedMode: GameMode = .quickPlay
     @State private var selectedDifficulty: Difficulty = .medium
     @State private var showGame = false
     @State private var animateIn = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.gameFeedback.reduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
@@ -27,6 +28,13 @@ struct MenuView: View {
             .background(Theme.secondaryBackground.ignoresSafeArea())
             .navigationDestination(isPresented: $showGame) {
                 GameView(game: game)
+            }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Settings", systemImage: "gearshape", action: openSettings)
+                        .labelStyle(.iconOnly)
+                        .accessibilityIdentifier("menu-settings")
+                }
             }
             .onAppear {
                 withAnimation(reduceMotion ? nil : Theme.springAnimation.delay(0.1)) {

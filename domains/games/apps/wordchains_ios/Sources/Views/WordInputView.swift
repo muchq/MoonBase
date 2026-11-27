@@ -8,10 +8,10 @@ struct WordInputView: View {
     @State private var fieldText = ""
     @State private var shakeAttempt = 0
     @FocusState private var isFocused: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.gameFeedback) private var feedback
 
     /// Nil under Reduce Motion, so state changes land without movement.
-    private var motion: Animation? { reduceMotion ? nil : Theme.quickSpring }
+    private var motion: Animation? { feedback.reduceMotion ? nil : Theme.quickSpring }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -197,23 +197,18 @@ struct WordInputView: View {
         case nil, .gameComplete, .noRoute, .valid, .reachedTarget, .timeUp:
             return
         case .notInDictionary, .notOneLetterAway, .alreadyUsed, .wrongLength:
-            if !reduceMotion {
+            if !feedback.reduceMotion {
                 withAnimation(Theme.quickSpring) { shakeAttempt += 1 }
             }
-            hapticError()
+            #if canImport(UIKit)
+            feedback.performHaptic { UINotificationFeedbackGenerator().notificationOccurred(.error) }
+            #endif
         }
     }
 
     private func announce(_ message: String) {
         #if os(iOS)
         if !message.isEmpty { AccessibilityNotification.Announcement(message).post() }
-        #endif
-    }
-
-    private func hapticError() {
-        #if canImport(UIKit)
-        let generator = UINotificationFeedbackGenerator()
-        generator.notificationOccurred(.error)
         #endif
     }
 }

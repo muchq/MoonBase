@@ -8,7 +8,7 @@ struct QuickRaceView: View {
     let table: WordchainView
     let nowMs: Int64
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.gameFeedback.reduceMotion) private var reduceMotion
 
     private var model: QuickRace { QuickRace(view: table, viewer: session.state.playerId ?? "") }
     private var stage: QuickRace.Stage { model.stage(nowMs: nowMs) }
@@ -98,7 +98,7 @@ private struct LadderTicker: View {
     let letters: Int
     let running: Bool
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.gameFeedback.reduceMotion) private var reduceMotion
     @State private var tour: LadderTour?
     @State private var ladder: [String] = []
     @State private var rung = 0
