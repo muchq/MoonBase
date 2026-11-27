@@ -98,6 +98,7 @@ Before submitting to the App Store, verify these scenarios:
 - [ ] **Free Undo** — in every solo mode, explore a detour, undo it, then finish optimally: the final chain still earns 150 points. Undo intentionally carries no score penalty and encourages experimentation.
 - [ ] **Difficulty levels** — Easy (3 letters), Medium (4), Hard (5)
 - [ ] **Accessibility** — VoiceOver reads each error; with Reduce Motion on, the field does not shake
+- [ ] **Settings** — turn off Haptics and turn on Reduce Motion from the menu, then relaunch. On an iPhone, verify that incorrect words, solves, and the sprint summary produce no haptics. The field and celebrations stay still. With device Reduce Motion enabled, the app shows Reduce Motion as on.
 - [ ] **Dark mode** — colors remain readable in dark appearance
 - [ ] **Quick race — seek** — choose Any/3/4/5 letters, start looking, verify the waiting ladder and 90-second ring/countdown, then Stop looking and confirm matchmaking ends
 - [ ] **Quick race — expiry** — let the seek expire; verify “Nobody came. Keep looking?”, retry with Keep looking, and exit with Stop

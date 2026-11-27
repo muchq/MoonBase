@@ -2,12 +2,14 @@ import SwiftUI
 
 struct MenuView: View {
     @Bindable var game: GameState
+    let openSettings: () -> Void
     @State private var selectedMode: GameMode = .quickPlay
     @State private var selectedDifficulty: Difficulty = .medium
     @State private var showGame = false
     @State private var animateIn = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.gameFeedback.reduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private let settingsTargetSize: CGFloat = 44
 
     var body: some View {
         NavigationStack {
@@ -40,17 +42,44 @@ struct MenuView: View {
 
     private var header: some View {
         VStack(spacing: 8) {
-            Text("Word Chains")
-                .font(Theme.titleFont)
-                .foregroundStyle(.primary)
+            HStack(spacing: 8) {
+                // Reserve matching space so the gear doesn't shift the title off center.
+                Color.clear
+                    .frame(width: settingsTargetSize, height: settingsTargetSize)
+                    .accessibilityHidden(true)
+
+                Text("Word Chains")
+                    .font(Theme.titleFont)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityAddTraits(.isHeader)
+
+                settingsButton
+            }
 
             Text("Change one letter at a time")
                 .font(Theme.bodyFont)
                 .foregroundStyle(.secondary)
         }
-        .padding(.top, 20)
+        .padding(.top, 12)
         .opacity(animateIn ? 1 : 0)
         .offset(y: animateIn ? 0 : 20)
+    }
+
+    private var settingsButton: some View {
+        Button(action: openSettings) {
+            Image(systemName: "gearshape")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(Theme.accent)
+                .frame(width: 36, height: 36)
+                .background(Theme.accent.opacity(0.12), in: Circle())
+                .frame(width: settingsTargetSize, height: settingsTargetSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Settings")
+        .accessibilityIdentifier("menu-settings")
     }
 
     // MARK: - Mode Selector

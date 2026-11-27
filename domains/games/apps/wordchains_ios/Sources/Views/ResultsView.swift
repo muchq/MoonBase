@@ -5,9 +5,11 @@ struct ResultsView: View {
     let onNewGame: () -> Void
     let onMenu: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.gameFeedback) private var feedback
     @State private var animateIn = false
     @State private var showConfetti = false
+
+    private var reduceMotion: Bool { feedback.reduceMotion }
 
     var body: some View {
         ScrollView {
@@ -22,7 +24,7 @@ struct ResultsView: View {
         }
         .background(Theme.secondaryBackground.ignoresSafeArea())
         .overlay(alignment: .top) {
-            if showConfetti {
+            if showConfetti && !reduceMotion {
                 ConfettiView()
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
@@ -37,7 +39,9 @@ struct ResultsView: View {
                     showConfetti = true
                 }
             }
-            hapticSuccess()
+            #if canImport(UIKit)
+            feedback.performHaptic { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+            #endif
         }
     }
 
@@ -175,13 +179,6 @@ struct ResultsView: View {
         }
         .opacity(animateIn ? 1 : 0)
         .offset(y: animateIn ? 0 : 50)
-    }
-
-    private func hapticSuccess() {
-        #if canImport(UIKit)
-        let generator = UINotificationFeedbackGenerator()
-        generator.notificationOccurred(.success)
-        #endif
     }
 }
 

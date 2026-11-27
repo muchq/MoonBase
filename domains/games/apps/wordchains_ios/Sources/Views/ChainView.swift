@@ -4,7 +4,7 @@ struct ChainView: View {
     let chain: [String]
     let target: String
     let difficulty: Difficulty
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.gameFeedback.reduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollViewReader { proxy in

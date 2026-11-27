@@ -12,6 +12,49 @@ final class WordEditorUITests: XCTestCase {
         _ = XCTWaiter.wait(for: [XCTestExpectation(description: "settle")], timeout: 1)
     }
 
+    func testSettingsCanBeChangedAndSurviveRelaunch() {
+        let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
+        app.launch()
+
+        let settings = app.buttons["menu-settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 30))
+        assertSettingsSharesTitleRow(in: app)
+        settings.tap()
+
+        let haptics = app.switches["settings-haptics"]
+        let motion = app.switches["settings-reduce-motion"]
+        let done = app.buttons["settings-done"]
+        XCTAssertTrue(haptics.waitForExistence(timeout: 5))
+        XCTAssertTrue(motion.exists)
+        XCTAssertEqual(haptics.value as? String, "1")
+        XCTAssertEqual(motion.value as? String, "0")
+        capture("06-settings")
+
+        // In a Form, XCTest includes the label in the switch's frame.
+        let switchOffset = CGVector(dx: 0.9, dy: 0.5)
+        haptics.coordinate(withNormalizedOffset: switchOffset).tap()
+        motion.coordinate(withNormalizedOffset: switchOffset).tap()
+        XCTAssertEqual(haptics.value as? String, "0")
+        XCTAssertEqual(motion.value as? String, "1")
+        done.tap()
+        XCTAssertTrue(app.buttons["Play"].waitForExistence(timeout: 5))
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(settings.waitForExistence(timeout: 30))
+        settings.tap()
+        XCTAssertTrue(haptics.waitForExistence(timeout: 5))
+        XCTAssertEqual(haptics.value as? String, "0")
+        XCTAssertEqual(motion.value as? String, "1")
+
+        haptics.coordinate(withNormalizedOffset: switchOffset).tap()
+        motion.coordinate(withNormalizedOffset: switchOffset).tap()
+        XCTAssertEqual(haptics.value as? String, "1")
+        XCTAssertEqual(motion.value as? String, "0")
+        done.tap()
+        XCTAssertTrue(app.buttons["Play"].isHittable)
+    }
+
     func testModeSelectionKeepsMenuLayoutStable() {
         let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
         app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]
@@ -22,7 +65,7 @@ final class WordEditorUITests: XCTestCase {
             app.buttons.containing(NSPredicate(format: "label CONTAINS %@", label)).firstMatch
         }
         XCTAssertTrue(buttons[0].waitForExistence(timeout: 30))
-        settle()
+        assertSettingsSharesTitleRow(in: app)
         XCTAssertEqual(buttons.map { $0.label }, labels)
         let initialFrames = buttons.map { $0.frame }
 
@@ -35,6 +78,18 @@ final class WordEditorUITests: XCTestCase {
                 XCTAssertEqual(button.frame.height, initialFrames[index].height, accuracy: 1)
             }
         }
+    }
+
+    private func assertSettingsSharesTitleRow(in app: XCUIApplication) {
+        let title = app.staticTexts["Word Chains"]
+        let settings = app.buttons["menu-settings"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertTrue(settings.exists)
+        settle()
+        XCTAssertEqual(settings.frame.midY, title.frame.midY, accuracy: 3)
+        XCTAssertLessThanOrEqual(title.frame.maxX, settings.frame.minX)
+        XCTAssertGreaterThanOrEqual(settings.frame.width.rounded(), 44)
+        XCTAssertGreaterThanOrEqual(settings.frame.height.rounded(), 44)
     }
 
     private func startPuzzle(mode: String? = nil, difficulty: String? = nil, arguments: [String] = []) -> XCUIApplication {
