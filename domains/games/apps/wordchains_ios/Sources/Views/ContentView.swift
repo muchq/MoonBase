@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var game = GameState(sprintHints: ProcessInfo.processInfo.arguments.contains("-sprintHints"))
     @State private var showsSettings = false
+    @AppStorage(GameFeedback.soundEffectsKey) private var soundEffectsEnabled = true
     @AppStorage(GameFeedback.hapticsKey) private var hapticsEnabled = true
     @AppStorage(GameFeedback.reduceMotionKey) private var prefersReducedMotion = false
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -16,15 +17,25 @@ struct ContentView: View {
             } else {
                 MenuView(game: game, openSettings: { showsSettings = true })
                     .sheet(isPresented: $showsSettings) {
-                        SettingsView(hapticsEnabled: $hapticsEnabled, prefersReducedMotion: $prefersReducedMotion)
+                        SettingsView(
+                            soundEffectsEnabled: $soundEffectsEnabled,
+                            hapticsEnabled: $hapticsEnabled,
+                            prefersReducedMotion: $prefersReducedMotion
+                        )
                     }
             }
         }
         .environment(\.gameFeedback, GameFeedback(
             hapticsEnabled: hapticsEnabled,
             prefersReducedMotion: prefersReducedMotion,
-            systemReduceMotion: systemReduceMotion
+            systemReduceMotion: systemReduceMotion,
+            soundEffectsEnabled: soundEffectsEnabled
         ))
+        #if os(iOS)
+        .onChange(of: soundEffectsEnabled) { _, enabled in
+            if !enabled { GameSoundPlayer.shared.stop() }
+        }
+        #endif
         .tint(Theme.accent)
         .onAppear {
             game.loadGraph()

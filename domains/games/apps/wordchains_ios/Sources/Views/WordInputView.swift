@@ -100,8 +100,10 @@ struct WordInputView: View {
 
     private var undoButton: some View {
         Button {
+            let previousSteps = game.stepsTaken
             withAnimation(motion) { entry.undo(in: game) }
             fieldText = entry.text
+            if game.stepsTaken < previousSteps { feedback.playSounds([.takeback(steps: game.stepsTaken)]) }
         } label: {
             controlIcon(
                 "arrow.uturn.backward",
@@ -202,12 +204,17 @@ struct WordInputView: View {
         DispatchQueue.main.async { fieldText = entry.text }
     }
 
-    /// Shake and buzz on a rejected word; WordEntry already did the rest.
+    /// Use the actual submission result for feedback, including repeated refusals.
     private func react(to result: InputResult?) {
         switch result {
-        case nil, .gameComplete, .noRoute, .valid, .reachedTarget, .timeUp:
+        case nil, .gameComplete, .noRoute, .timeUp:
             return
+        case .valid:
+            feedback.playSounds([.step(game.stepsTaken)])
+        case .reachedTarget:
+            feedback.playSounds([.target(game.stepsTaken)])
         case .notInDictionary, .notOneLetterAway, .alreadyUsed, .wrongLength:
+            feedback.playSounds([.refusal])
             if !feedback.reduceMotion {
                 withAnimation(Theme.quickSpring) { shakeAttempt += 1 }
             }

@@ -86,6 +86,38 @@ final class RaceStateTests: XCTestCase {
         XCTAssertEqual(state.table, view())
     }
 
+    func testRepeatedWordRefusalsCountEvenWithOtherRunnerUpdates() {
+        var state = RaceState()
+        state.apply(.sessionReady(SessionReady(playerId: "alice", roomId: nil)))
+        state.apply(.wordchain(.view(view())))
+
+        state.sending = true
+        state.apply(.wordchain(.view(view(runners: [runner("alice", words: 1), runner("bob", words: 4)]))))
+        XCTAssertTrue(state.sending)
+
+        state.apply(.commandRejected("That word is not allowed"))
+        XCTAssertEqual(state.wordRefusals, 1)
+        XCTAssertFalse(state.sending)
+
+        state.sending = true
+        state.apply(.commandRejected("That word is not allowed"))
+        XCTAssertEqual(state.wordRefusals, 2)
+
+        state.apply(.commandRejected("Cannot start a race"))
+        XCTAssertEqual(state.wordRefusals, 2)
+    }
+
+    func testOwnWordChangeSettlesThePendingCommand() {
+        var state = RaceState()
+        state.apply(.sessionReady(SessionReady(playerId: "alice", roomId: nil)))
+        state.apply(.wordchain(.view(view())))
+        state.sending = true
+
+        state.apply(.wordchain(.view(view(runners: [runner("alice", words: 2), runner("bob", words: 3)]))))
+        XCTAssertFalse(state.sending)
+        XCTAssertEqual(state.wordRefusals, 0)
+    }
+
     func testGameLeftClearsTheTable() {
         var state = RaceState()
         state.apply(.wordchain(.view(view())))

@@ -15,6 +15,8 @@ struct RaceTableView: View {
     /// The race whose shortest ladder the viewer asked to see.
     @State private var solvedRace: String?
     @FocusState private var typing: Bool
+    @Environment(\.gameFeedback) private var feedback
+    @Environment(\.scenePhase) private var scenePhase
 
     private var viewer: String { session.state.playerId ?? "" }
     /// Every decision this screen makes; tested in RaceTableTests.
@@ -72,6 +74,12 @@ struct RaceTableView: View {
         .onChange(of: draft) { _, typed in
             let capped = model.capped(typed)
             if capped != typed { draft = capped }
+        }
+        .onChange(of: table) { previous, _ in
+            if scenePhase == .active { feedback.playSounds(model.sounds(since: previous)) }
+        }
+        .onChange(of: session.state.wordRefusals) { _, _ in
+            if scenePhase == .active { feedback.playSounds([.refusal]) }
         }
         // What a sighted player reads in passing, VoiceOver says: why a
         // word was refused, and how the race ended.

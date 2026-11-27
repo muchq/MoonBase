@@ -53,6 +53,33 @@ struct RaceTable {
             : RaceText.result(result, runners: view.runners, viewer: viewer)
     }
 
+    /// Only changes to the viewer's climb within the same race make a rung sound.
+    func sounds(since previous: WordchainView) -> [GameSound] {
+        guard previous.phase == .racing, previous.gameId == view.gameId,
+              previous.startedAtMs == view.startedAtMs,
+              let before = RaceTable(view: previous, viewer: viewer).me,
+              let after = me else { return [] }
+
+        var sounds: [GameSound] = []
+        if after.words > before.words {
+            sounds.append(after.finishedAtMs == nil ? .step(after.words) : .target(after.words))
+        } else if after.words < before.words {
+            sounds.append(.takeback(steps: after.words))
+        }
+        if previous.result == nil, let result = view.result {
+            if result.ending == .timeout {
+                sounds.append(.timeout)
+            } else if result.ending == .finished, !view.isPractice {
+                if result.winners.contains(viewer) {
+                    sounds.append(result.winners.count > 1 ? .sharedWin : .win)
+                } else {
+                    sounds.append(.raceFinished)
+                }
+            }
+        }
+        return sounds
+    }
+
     /// A shortest ladder to show once the race is over: never while it
     /// runs, since it would show the way.
     var solution: [String]? {

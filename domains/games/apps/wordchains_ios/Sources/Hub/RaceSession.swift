@@ -13,6 +13,8 @@ struct RaceState: Equatable {
     var opening = false
     /// The last thing to tell the player: the hub's reason for a refusal.
     var notice: String?
+    /// Counts refused word actions, even when the reason stays the same.
+    private(set) var wordRefusals = 0
     /// The letters the last quick race sought; nil for any.
     var seekLetters: Int?
 
@@ -38,11 +40,21 @@ struct RaceState: Equatable {
             table = nil
             settle()
         case let .commandRejected(reason):
+            if sending { wordRefusals += 1 }
             settle()
             notice = reason
         case let .wordchain(.view(view)):
+            // A broadcast about another runner can arrive before the hub
+            // answers our word. Keep waiting while our own rung is unchanged.
+            if sending, let previous = table, let playerId, view.phase == .racing,
+               view.gameId == previous.gameId, view.startedAtMs == previous.startedAtMs,
+               let ownWords = view.runners.first(where: { $0.playerId == playerId })?.words,
+               ownWords == previous.runners.first(where: { $0.playerId == playerId })?.words {
+                opening = false
+            } else {
+                settle()
+            }
             table = view
-            settle()
         case .wordchain(.left):
             table = nil
             settle()

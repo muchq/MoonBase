@@ -21,19 +21,23 @@ final class WordEditorUITests: XCTestCase {
         assertSettingsSharesTitleRow(in: app)
         settings.tap()
 
+        let sound = app.switches["settings-sound-effects"]
         let haptics = app.switches["settings-haptics"]
         let motion = app.switches["settings-reduce-motion"]
         let done = app.buttons["settings-done"]
         XCTAssertTrue(haptics.waitForExistence(timeout: 5))
         XCTAssertTrue(motion.exists)
+        XCTAssertEqual(sound.value as? String, "1")
         XCTAssertEqual(haptics.value as? String, "1")
         XCTAssertEqual(motion.value as? String, "0")
         capture("06-settings")
 
         // In a Form, XCTest includes the label in the switch's frame.
         let switchOffset = CGVector(dx: 0.9, dy: 0.5)
+        sound.coordinate(withNormalizedOffset: switchOffset).tap()
         haptics.coordinate(withNormalizedOffset: switchOffset).tap()
         motion.coordinate(withNormalizedOffset: switchOffset).tap()
+        XCTAssertEqual(sound.value as? String, "0")
         XCTAssertEqual(haptics.value as? String, "0")
         XCTAssertEqual(motion.value as? String, "1")
         done.tap()
@@ -44,11 +48,14 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 30))
         settings.tap()
         XCTAssertTrue(haptics.waitForExistence(timeout: 5))
+        XCTAssertEqual(sound.value as? String, "0")
         XCTAssertEqual(haptics.value as? String, "0")
         XCTAssertEqual(motion.value as? String, "1")
 
+        sound.coordinate(withNormalizedOffset: switchOffset).tap()
         haptics.coordinate(withNormalizedOffset: switchOffset).tap()
         motion.coordinate(withNormalizedOffset: switchOffset).tap()
+        XCTAssertEqual(sound.value as? String, "1")
         XCTAssertEqual(haptics.value as? String, "1")
         XCTAssertEqual(motion.value as? String, "0")
         done.tap()
