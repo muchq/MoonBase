@@ -232,9 +232,22 @@ final class TimeAttackTests: XCTestCase {
     }
 
     func testABestFromASprintOfAnotherLengthDoesNotCount() {
-        defaults.set(900, forKey: "timeAttackBest.3.90s")
-        XCTAssertEqual(TimeAttackBests(defaults: defaults).best(for: .easy), 0)
-        XCTAssertEqual(defaults.integer(forKey: "timeAttackBest.3.90s"), 900)
+        let previousKeys: [(Difficulty, String)] = [
+            (.easy, "timeAttackBest.3.90s"),
+            (.medium, "timeAttackBest.4.120s"),
+            (.hard, "timeAttackBest.5.180s"),
+        ]
+        for (_, key) in previousKeys {
+            defaults.set(900, forKey: key)
+        }
+        defaults.set(800, forKey: "timeAttackBest.3")
+
+        let bests = TimeAttackBests(defaults: defaults)
+        for (difficulty, key) in previousKeys {
+            XCTAssertEqual(bests.best(for: difficulty), 0)
+            XCTAssertEqual(defaults.integer(forKey: key), 900)
+        }
+        XCTAssertEqual(defaults.integer(forKey: "timeAttackBest.3"), 800)
     }
 
     func testBeatingAStandingBestReplacesIt() {
