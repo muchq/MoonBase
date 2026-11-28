@@ -63,7 +63,8 @@ struct MenuView: View {
                 Text("Word Chains")
                     .font(Theme.titleFont)
                     .foregroundStyle(.primary)
-                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
                     .frame(maxWidth: .infinity)
                     .accessibilityAddTraits(.isHeader)
 
@@ -92,11 +93,10 @@ struct MenuView: View {
             Image(systemName: "line.3.horizontal")
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(Theme.accent)
-                .frame(width: 36, height: 36)
-                .background(Theme.accent.opacity(0.12), in: Circle())
                 .frame(width: menuTargetSize, height: menuTargetSize)
                 .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         #if os(macOS)
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)

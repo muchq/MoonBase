@@ -129,6 +129,8 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertTrue(menu.exists)
         settle()
         XCTAssertEqual(menu.frame.midY, title.frame.midY, accuracy: 3)
+        XCTAssertEqual(title.frame.midX, app.frame.midX, accuracy: 3)
+        XCTAssertLessThan(title.frame.height, 70, "The home title should fit on one line.")
         XCTAssertLessThanOrEqual(menu.frame.maxX, title.frame.minX)
         XCTAssertGreaterThanOrEqual(menu.frame.width.rounded(), 44)
         XCTAssertGreaterThanOrEqual(menu.frame.height.rounded(), 44)
