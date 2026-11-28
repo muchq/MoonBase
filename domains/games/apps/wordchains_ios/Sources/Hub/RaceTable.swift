@@ -20,7 +20,7 @@ struct RaceTable {
 
     /// Alone, a start is practice (#1730); with company, a race.
     var startLabel: String {
-        if seated < 2 { return view.phase == .over ? "Practise again" : "Practise" }
+        if seated < 2 { return view.phase == .over ? "Practice again" : "Practice" }
         return view.phase == .over ? "Next race" : "Start the race"
     }
 
@@ -30,7 +30,7 @@ struct RaceTable {
     var hint: String? {
         switch view.phase {
         case .waiting:
-            return seated < 2 ? "Practise alone, or wait for someone to join." : "\(seated) seated: start when everyone’s here."
+            return seated < 2 ? "Practice alone, or wait for someone to join." : "Start when everyone’s here."
         case .racing where climbing && view.isPractice:
             return "Practice: one letter at a time. Anyone who joins ends it."
         case .racing where climbing:
@@ -38,7 +38,7 @@ struct RaceTable {
         case .racing where me != nil:
             return "You reached \(view.target ?? "") in \(RaceText.steps(ladder.count)). Waiting for the others."
         case .over where view.isPractice:
-            return "Practise again, or wait for someone to join."
+            return "Practice again, or wait for someone to join."
         case .over:
             return "Anyone can start the next race."
         default:

@@ -18,6 +18,7 @@ struct RaceTableView: View {
     @Environment(\.gameFeedback) private var feedback
     @Environment(\.scenePhase) private var scenePhase
 
+    private var friendRoom: HubRoom? { session.state.inQuickRace ? nil : session.state.room }
     private var viewer: String { session.state.playerId ?? "" }
     /// Every decision this screen makes; tested in RaceTableTests.
     private var model: RaceTable { RaceTable(view: table, viewer: viewer) }
@@ -30,7 +31,13 @@ struct RaceTableView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                if let hint = model.hint { Text(hint).font(Theme.bodyFont).foregroundStyle(.secondary) }
+                if let friendRoom, !racing {
+                    RaceRoomInvite(roomCode: friendRoom.roomId, canInvite: table.phase != .closed)
+                        .cardStyle()
+                }
+                if let hint = model.hint {
+                    Text(hint).font(Theme.bodyFont).foregroundStyle(.secondary)
+                }
                 if let result = table.result {
                     Text(model.said(result))
                         .font(Theme.headlineFont)
@@ -48,19 +55,19 @@ struct RaceTableView: View {
             .padding(.horizontal, Theme.cardPadding)
             .padding(.vertical, 16)
         }
-        .navigationTitle(model.title)
+        .navigationTitle(friendRoom == nil ? model.title : "Race room")
         .toolbar {
-            if table.phase != .closed {
+            if table.phase != .closed || friendRoom != nil {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Leave") {
-                        if model.asksBeforeLeaving { confirmingLeave = true } else { session.leaveTable() }
+                        if model.asksBeforeLeaving { confirmingLeave = true } else { session.leaveRoom() }
                     }
-                    .disabled(session.connection != .connected)
+                    .disabled(session.connection != .connected || session.state.roomRequest != nil)
                 }
             }
         }
         .confirmationDialog("Leave the race?", isPresented: $confirmingLeave, titleVisibility: .visible) {
-            Button("Leave the race", role: .destructive) { session.leaveTable() }
+            Button("Leave the race", role: .destructive) { session.leaveRoom() }
             Button("Stay", role: .cancel) {}
         }
         .onChange(of: model.draftKey) { _, _ in
@@ -171,6 +178,9 @@ struct RaceTableView: View {
 
     private var runnersCard: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if friendRoom != nil, !racing {
+                Text("Runners").font(Theme.headlineFont).accessibilityAddTraits(.isHeader)
+            }
             ForEach(table.runners, id: \.playerId) { runner in
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -221,15 +231,23 @@ struct RaceTableView: View {
             }
         case .closed:
             VStack(spacing: 12) {
+                if friendRoom != nil, session.state.raceEntryBlocked {
+                    Text("No race is open to join right now.")
+                        .font(Theme.bodyFont)
+                        .foregroundStyle(.secondary)
+                }
                 Button {
-                    session.openTable()
+                    session.prepareRace()
                 } label: {
                     Text(session.state.opening ? "Opening…" : "Play again").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PrimaryActionStyle())
-                .disabled(session.connection != .connected || session.state.opening)
-                Button("Back to the room") { session.leaveTable() }
-                    .disabled(session.state.opening)
+                .disabled(session.connection != .connected || session.state.opening || session.state.roomRequest != nil
+                          || (friendRoom != nil && session.state.raceEntryBlocked))
+                if friendRoom == nil {
+                    Button("Stop") { session.leaveRoom() }
+                        .disabled(session.state.opening || session.state.roomRequest != nil)
+                }
             }
         case .racing:
             EmptyView()

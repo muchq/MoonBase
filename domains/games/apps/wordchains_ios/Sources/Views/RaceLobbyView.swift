@@ -1,11 +1,9 @@
 import SwiftUI
 
-/// Racing other people on the games hub: a room, created here or joined
-/// by the code the web lobby shows, and its race tables. No chat. Seated
-/// at a table, the table takes the screen. Single-player stays on the
-/// menu, whatever the network does.
+/// The friends room and its race share one screen. Quick races use the
+/// separate matchmaking flow.
 struct RaceLobbyView: View {
-    @State private var session = RaceSession(transport: HubSocket())
+    @State private var session = RaceSession(transport: Self.makeTransport())
     @State private var code = ""
     /// The quick race's letters; nil for any.
     @State private var quickLetters: Int?
@@ -107,6 +105,16 @@ struct RaceLobbyView: View {
     }
 
     private var connected: Bool { session.connection == .connected }
+    private var busy: Bool { session.state.roomRequest != nil || session.state.opening }
+
+    private static func makeTransport() -> any HubTransport {
+        #if targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-raceRoomUITest") {
+            return RaceRoomUITestTransport()
+        }
+        #endif
+        return HubSocket()
+    }
 
     private var noRoomCard: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -126,27 +134,28 @@ struct RaceLobbyView: View {
                 Text("Quick race").frame(maxWidth: .infinity)
             }
             .buttonStyle(PrimaryActionStyle())
-            .disabled(!connected || session.state.opening)
+            .disabled(!connected || busy)
 
             Divider()
-            Text("Or race friends up the same ladder, on one clock. Fewest steps wins. Alone at a table, practise.")
+            Text("Create a room to race friends on the same ladder, or join with a room code.")
                 .font(Theme.bodyFont)
             Button {
                 session.createRoom()
             } label: {
-                Text("Create a room").frame(maxWidth: .infinity)
+                Text(session.state.roomRequest == .create ? "Creating room…" : "Create a room")
+                    .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
-            .disabled(!connected)
+            .disabled(!connected || busy)
 
             HStack {
                 TextField("Room code", text: $code)
                     .typedAs(.characters)
                     .textFieldStyle(.roundedBorder)
-                    .onSubmit { if connected { session.joinRoom(code) } }
+                    .onSubmit { if connected && !busy { session.joinRoom(code) } }
                 Button("Join") { session.joinRoom(code) }
                     .buttonStyle(.bordered)
-                    .disabled(!connected)
+                    .disabled(!connected || busy || code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .cardStyle()
@@ -154,47 +163,57 @@ struct RaceLobbyView: View {
 
     private func roomCard(_ room: HubRoom) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("Room \(room.roomId)").font(Theme.headlineFont)
-                Spacer()
-                if let link = URL(string: "https://muchq.com/games/room/\(room.roomId)") {
-                    ShareLink(item: link) { Image(systemName: "square.and.arrow.up") }
-                        .accessibilityLabel("Share room \(room.roomId)")
-                }
-            }
-            Text("\(room.players.count) in the room").font(Theme.captionFont).foregroundStyle(.secondary)
-
-            let tables = session.state.raceTables
-            if tables.isEmpty {
-                Text("No race tables yet.").font(Theme.captionFont).foregroundStyle(.secondary)
-            }
-            ForEach(tables, id: \.gameId) { table in
-                HStack {
-                    VStack(alignment: .leading) {
-                        Text("Table \(table.gameId)").font(.system(size: 16, weight: .semibold, design: .rounded))
-                        Text("\(table.status) · \(table.playerCount)/4 seated").font(Theme.captionFont).foregroundStyle(.secondary)
+            if session.state.roomRequest == .leave {
+                ProgressView("Leaving room…")
+            } else if session.state.opening || session.state.roomSeat?.game == "wordchain" {
+                ProgressView("Getting the race ready…")
+            } else if session.state.roomSeat != nil {
+                Text("Leave your current game before joining the race.")
+                    .font(Theme.bodyFont)
+                    .foregroundStyle(.secondary)
+            } else {
+                RaceRoomInvite(roomCode: room.roomId)
+                if session.state.raceEntryBlocked {
+                    Text("No race is open to join right now.")
+                        .font(Theme.bodyFont)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button(session.state.raceTables.isEmpty ? "Set up race" : "Join race") {
+                        session.prepareRace()
                     }
-                    Spacer()
-                    if table.status == "waiting" && table.playerCount < 4 {
-                        Button("Join") { session.joinTable(table.gameId) }
-                            .buttonStyle(.bordered)
-                            .disabled(!connected || session.state.opening)
-                    }
+                    .buttonStyle(PrimaryActionStyle())
+                    .disabled(!connected)
                 }
             }
 
-            Button {
-                session.openTable()
-            } label: {
-                Text("Open a race table").frame(maxWidth: .infinity)
-            }
-            .buttonStyle(PrimaryActionStyle())
-            .disabled(!connected || session.state.opening)
-
-            Button("Leave the room", role: .destructive) { session.leaveRoom() }
-                .disabled(!connected)
+            Button("Leave room", role: .destructive) { session.leaveRoom() }
+                .disabled(!connected || session.state.roomRequest != nil)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .cardStyle()
+    }
+}
+
+struct RaceRoomInvite: View {
+    let roomCode: String
+    var canInvite = true
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Room code").font(Theme.captionFont).foregroundStyle(.secondary)
+                Text(roomCode)
+                    .font(.system(.title2, design: .monospaced).weight(.bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .accessibilityIdentifier("race-room-code")
+            }
+            Spacer()
+            if canInvite, let link = URL(string: "https://muchq.com/games/room/\(roomCode)") {
+                ShareLink(item: link) { Label("Invite friends", systemImage: "square.and.arrow.up") }
+                    .buttonStyle(.bordered)
+            }
+        }
     }
 }
 

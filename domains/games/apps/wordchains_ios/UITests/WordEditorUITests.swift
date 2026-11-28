@@ -113,6 +113,44 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertTrue(app.buttons["menu-open"].waitForExistence(timeout: 5))
     }
 
+    func testRaceRoomCreationAndJoiningLeadDirectlyToTheLobby() {
+        let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
+        app.launchArguments = ["-raceRoomUITest"]
+        app.launch()
+
+        let race = app.buttons["Race friends"]
+        XCTAssertTrue(race.waitForExistence(timeout: 30))
+        for _ in 0..<4 where !race.isHittable { app.swipeUp() }
+        race.tap()
+        let create = app.buttons["Create a room"]
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+        create.tap()
+
+        let code = app.staticTexts["race-room-code"]
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        XCTAssertEqual(code.label, "AB12")
+        XCTAssertTrue(app.buttons["Invite friends"].exists)
+        XCTAssertTrue(app.buttons["Practice"].exists)
+        XCTAssertFalse(app.buttons["Open a race table"].exists)
+        capture("12-race-room-created")
+
+        app.navigationBars.buttons["Leave"].tap()
+        XCTAssertTrue(create.waitForExistence(timeout: 5))
+
+        let field = app.textFields["Room code"]
+        field.tap()
+        field.typeText("AB12")
+        app.buttons["Join"].tap()
+
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        XCTAssertEqual(code.label, "AB12")
+        XCTAssertTrue(app.buttons["Start the race"].exists)
+        let friend = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "alex")).firstMatch
+        XCTAssertTrue(friend.exists)
+        capture("13-race-room-joined")
+    }
+
     func testModeSelectionKeepsMenuLayoutStable() {
         let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
         app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"]

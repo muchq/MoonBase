@@ -4,6 +4,8 @@ import Observation
 /// Everything the race screens show, as the hub's frames leave it. Pure:
 /// each frame in, the next state out.
 struct RaceState: Equatable {
+    enum RoomRequest: Equatable { case create, join, leave }
+    var roomRequest: RoomRequest?
     var playerId: String?
     var room: HubRoom?
     var table: WordchainView?
@@ -24,10 +26,24 @@ struct RaceState: Equatable {
     /// The room's race tables, in the hub's order.
     var raceTables: [HubGameSummary] { room?.games.filter { $0.game == "wordchain" } ?? [] }
 
+    /// The public hub can host several games in a room. The iOS room
+    /// takes the first race with an open seat instead of listing games.
+    var availableRace: HubGameSummary? {
+        raceTables.first { $0.status == "waiting" && $0.playerCount < 4 }
+    }
+
+    var raceEntryBlocked: Bool { !raceTables.isEmpty && availableRace == nil }
+
+    var roomSeat: HubTable? {
+        room?.players.first { $0.playerId == playerId }?.table
+    }
+
     mutating func apply(_ frame: HubFrame) {
         switch frame {
         case let .sessionReady(ready):
             playerId = ready.playerId
+            roomRequest = nil
+            notice = nil
             // A seat that survived the drop comes back as its own
             // gameJoined; one that didn't sends nothing.
             table = nil
@@ -35,12 +51,16 @@ struct RaceState: Equatable {
             if ready.roomId != room?.roomId { room = nil }
         case let .roomState(next):
             room = next
+            if roomRequest != .leave { roomRequest = nil }
         case .roomLeft:
+            roomRequest = nil
+            notice = nil
             room = nil
             table = nil
             settle()
         case let .commandRejected(reason):
             if sending { wordRefusals += 1 }
+            roomRequest = nil
             settle()
             notice = reason
         case let .wordchain(.view(view)):
@@ -112,12 +132,12 @@ final class RaceSession {
                 self.connection = status
                 // What was asked for on a stream that dropped never reached
                 // the hub: nothing waits on its answer.
-                if status != .connected { self.state.settle() }
+                if status != .connected { self.resetRequests() }
             },
             frame: { [weak self] frame in self?.receive(frame) },
             sendFailed: { [weak self] in
                 // Never reached the hub: nothing waits on its answer.
-                self?.state.settle()
+                self?.resetRequests()
                 self?.state.notice = "Not sent: reconnecting"
             }
         )
@@ -126,7 +146,18 @@ final class RaceSession {
     // A refusal that ends the stream reaches the player as the transport's
     // status; the state has nothing to do with it.
     private func receive(_ frame: HubFrame) {
+        let roomWasCreated = state.roomRequest == .create
         state.apply(frame)
+        // After a failed command, leave retrying to the player. Room
+        // broadcasts can arrive before the conditions for joining change.
+        if case .roomState = frame, state.table == nil, state.notice == nil {
+            enterFriendRace(createIfEmpty: roomWasCreated)
+        }
+    }
+
+    private func resetRequests() {
+        state.roomRequest = nil
+        state.settle()
     }
 
     func connect() { transport.connect() }
@@ -137,7 +168,7 @@ final class RaceSession {
 
     // MARK: - The room
 
-    func createRoom() { transport.send(.createRoom) }
+    func createRoom() { requestRoom(.create, command: .createRoom) }
 
     /// Room codes are typed as the web lobby shows them.
     func joinRoom(_ code: String) {
@@ -146,29 +177,52 @@ final class RaceSession {
             state.notice = "Enter a room code"
             return
         }
-        transport.send(.joinRoom(roomId))
+        requestRoom(.join, command: .joinRoom(roomId))
     }
 
-    func leaveRoom() { transport.send(.leaveRoom) }
+    func leaveRoom() { requestRoom(.leave, command: .leaveRoom) }
+
+    private func requestRoom(_ request: RaceState.RoomRequest, command: HubCommand) {
+        guard connection == .connected, state.roomRequest == nil else { return }
+        state.roomRequest = request
+        state.notice = nil
+        transport.send(command)
+    }
 
     // MARK: - The table
 
-    /// A new table: from the room, or once this one has closed. The pool
-    /// has no tables of one's choosing: there, another seek.
-    func openTable() {
-        guard !state.inQuickRace else { return seek(letters: state.seekLetters) }
-        state.opening = true
-        transport.send(.wordchain(.createGame))
+    func prepareRace() {
+        if state.inQuickRace {
+            seek(letters: state.seekLetters)
+        } else {
+            enterFriendRace(createIfEmpty: true)
+        }
     }
 
-    func joinTable(_ gameId: String) {
+    private func enterFriendRace(createIfEmpty: Bool) {
+        guard connection == .connected, state.room != nil, !state.inQuickRace,
+              state.roomRequest == nil, !state.opening, state.roomSeat == nil,
+              state.table == nil || state.table?.phase == .closed else { return }
+
+        let command: WordchainMove
+        if let race = state.availableRace {
+            command = .joinGame(race.gameId)
+        } else if createIfEmpty, state.raceTables.isEmpty {
+            command = .createGame
+        } else {
+            return
+        }
+
+        state.notice = nil
         state.opening = true
-        transport.send(.wordchain(.joinGame(gameId)))
+        transport.send(.wordchain(command))
     }
 
     /// A quick race on these letters, or any; the hub seats the player in
     /// its pool. From one's own expired seek, it looks again.
     func seek(letters: Int?) {
+        guard connection == .connected, state.roomRequest == nil, !state.opening else { return }
+        state.notice = nil
         state.seekLetters = letters
         state.opening = true
         transport.send(.wordchain(.seek(letters: letters)))
@@ -187,20 +241,6 @@ final class RaceSession {
         state.sending = true
         transport.send(.wordchain(.retract))
     }
-
-    /// A closed table is already gone from the hub: only the view lingers.
-    /// Once Play again has asked for a new table, though, that one is on its
-    /// way and would seat the player after they left: Back waits for it.
-    /// In the pool there is nothing to stay for: getting up leaves it.
-    func leaveTable() {
-        if state.inQuickRace { return transport.send(.leaveRoom) }
-        guard let table = state.table, table.phase != .closed else {
-            if !state.opening { state.table = nil }
-            return
-        }
-        transport.send(.wordchain(.leaveGame))
-    }
-
 }
 
 /// The ceiling of each wait: doubling from half a second to thirty, ten
