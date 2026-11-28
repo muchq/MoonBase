@@ -213,14 +213,17 @@ final class RaceSessionTests: XCTestCase {
                 HubGameSummary(gameId: "K1", game: "chess", status: "waiting", playerCount: 1),
                 HubGameSummary(gameId: "W1", game: "wordchain", status: "racing", playerCount: 2),
                 HubGameSummary(gameId: "W2", game: "wordchain", status: "waiting", playerCount: 4),
-                HubGameSummary(gameId: "W3", game: "wordchain", status: "waiting", playerCount: 1),
+                HubGameSummary(gameId: "W3", game: "wordchain", status: "over", playerCount: 2),
+                HubGameSummary(gameId: "W4", game: "wordchain", status: "waiting", playerCount: 1),
             ]
             session.joinRoom("AB12")
             transport.events?.frame(.roomState(room(games: Array(games.dropLast()))))
+            XCTAssertTrue(session.state.raceEntryBlocked)
             XCTAssertEqual(transport.sent, [.joinRoom("AB12")])
             transport.events?.frame(.roomState(room(games: games)))
             transport.events?.frame(.roomState(room(games: games)))
-            XCTAssertEqual(transport.sent, [.joinRoom("AB12"), .wordchain(.joinGame("W3"))])
+            XCTAssertFalse(session.state.raceEntryBlocked)
+            XCTAssertEqual(transport.sent, [.joinRoom("AB12"), .wordchain(.joinGame("W4"))])
         }
     }
 
@@ -238,6 +241,14 @@ final class RaceSessionTests: XCTestCase {
             session.prepareRace()
             XCTAssertEqual(transport.sent.last, .wordchain(.createGame))
             XCTAssertTrue(session.state.opening)
+
+            transport.events?.frame(.commandRejected("Try again"))
+            let race = HubGameSummary(gameId: "W1", game: "wordchain", status: "waiting", playerCount: 1)
+            transport.events?.frame(.roomState(room(games: [race])))
+            XCTAssertEqual(transport.sent, [.joinRoom("AB12"), .wordchain(.createGame), .wordchain(.createGame)])
+            session.prepareRace()
+            XCTAssertEqual(transport.sent.last, .wordchain(.joinGame("W1")))
+            XCTAssertNil(session.state.notice)
         }
     }
 
@@ -286,9 +297,23 @@ final class RaceSessionTests: XCTestCase {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
             session.createRoom()
+            XCTAssertEqual(session.state.roomRequest, .create)
             transport.events?.status(.connecting)
             XCTAssertNil(session.state.roomRequest)
+
+            transport.events?.status(.connected)
+            session.createRoom()
+            transport.events?.frame(.roomState(room()))
+            XCTAssertTrue(session.state.opening)
+            transport.events?.status(.connecting)
             XCTAssertFalse(session.state.opening)
+
+            transport.events?.status(.connected)
+            transport.events?.frame(.wordchain(.view(view())))
+            session.play("card")
+            XCTAssertTrue(session.state.sending)
+            transport.events?.status(.connecting)
+            XCTAssertFalse(session.state.sending)
         }
     }
 
@@ -348,11 +373,24 @@ final class RaceSessionTests: XCTestCase {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
             session.createRoom()
+            XCTAssertEqual(session.state.roomRequest, .create)
+            transport.events?.sendFailed()
+            XCTAssertNil(session.state.roomRequest)
+            XCTAssertEqual(session.state.notice, "Not sent: reconnecting")
+
+            session.createRoom()
             transport.events?.frame(.roomState(room()))
             XCTAssertTrue(session.state.opening)
             transport.events?.sendFailed()
-            XCTAssertFalse(session.state.sending)
             XCTAssertFalse(session.state.opening)
+            XCTAssertEqual(session.state.notice, "Not sent: reconnecting")
+
+            transport.events?.frame(.wordchain(.view(view())))
+            session.dismissNotice()
+            session.retract()
+            XCTAssertTrue(session.state.sending)
+            transport.events?.sendFailed()
+            XCTAssertFalse(session.state.sending)
             XCTAssertEqual(session.state.notice, "Not sent: reconnecting")
         }
     }

@@ -172,17 +172,17 @@ struct RaceLobbyView: View {
                     .font(Theme.bodyFont)
                     .foregroundStyle(.secondary)
             } else {
-                RaceRoomInvite(roomCode: room.roomId, canInvite: !session.state.raceTables.isEmpty)
-                if session.state.raceTables.isEmpty || session.state.availableRace != nil {
+                RaceRoomInvite(roomCode: room.roomId)
+                if session.state.raceEntryBlocked {
+                    Text("No race is open to join right now.")
+                        .font(Theme.bodyFont)
+                        .foregroundStyle(.secondary)
+                } else {
                     Button(session.state.raceTables.isEmpty ? "Set up race" : "Join race") {
                         session.prepareRace()
                     }
                     .buttonStyle(PrimaryActionStyle())
                     .disabled(!connected)
-                } else {
-                    Text("The race has started or has no open spots.")
-                        .font(Theme.bodyFont)
-                        .foregroundStyle(.secondary)
                 }
             }
 

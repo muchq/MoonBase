@@ -32,6 +32,8 @@ struct RaceState: Equatable {
         raceTables.first { $0.status == "waiting" && $0.playerCount < 4 }
     }
 
+    var raceEntryBlocked: Bool { !raceTables.isEmpty && availableRace == nil }
+
     var roomSeat: HubTable? {
         room?.players.first { $0.playerId == playerId }?.table
     }
@@ -146,6 +148,8 @@ final class RaceSession {
     private func receive(_ frame: HubFrame) {
         let roomWasCreated = state.roomRequest == .create
         state.apply(frame)
+        // After a failed command, leave retrying to the player. Room
+        // broadcasts can arrive before the conditions for joining change.
         if case .roomState = frame, state.table == nil, state.notice == nil {
             enterFriendRace(createIfEmpty: roomWasCreated)
         }

@@ -231,6 +231,11 @@ struct RaceTableView: View {
             }
         case .closed:
             VStack(spacing: 12) {
+                if friendRoom != nil, session.state.raceEntryBlocked {
+                    Text("No race is open to join right now.")
+                        .font(Theme.bodyFont)
+                        .foregroundStyle(.secondary)
+                }
                 Button {
                     session.prepareRace()
                 } label: {
@@ -238,7 +243,7 @@ struct RaceTableView: View {
                 }
                 .buttonStyle(PrimaryActionStyle())
                 .disabled(session.connection != .connected || session.state.opening || session.state.roomRequest != nil
-                          || (friendRoom != nil && !session.state.raceTables.isEmpty && session.state.availableRace == nil))
+                          || (friendRoom != nil && session.state.raceEntryBlocked))
                 if friendRoom == nil {
                     Button("Stop") { session.leaveRoom() }
                         .disabled(session.state.opening || session.state.roomRequest != nil)
