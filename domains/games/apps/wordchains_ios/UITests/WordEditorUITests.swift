@@ -155,7 +155,9 @@ final class WordEditorUITests: XCTestCase {
     private func startPuzzle(mode: String? = nil, difficulty: String? = nil, arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication(bundleIdentifier: "com.muchq.wordchains")
         app.launchArguments = arguments
+        let launchStarted = ContinuousClock.now
         app.launch()
+        print("Word Chains timing: app launch took \(launchStarted.duration(to: .now))")
         if let mode {
             let button = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", mode)).firstMatch
             XCTAssertTrue(button.waitForExistence(timeout: 30))
@@ -172,8 +174,10 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertTrue(play.waitForExistence(timeout: 30))
         for _ in 0..<4 where !play.isHittable { app.swipeUp() }
         XCTAssertTrue(play.isHittable)
+        let playStarted = ContinuousClock.now
         play.tap()
         XCTAssertTrue(app.descendants(matching: .any)["word-input"].waitForExistence(timeout: 5))
+        print("Word Chains timing: \(mode ?? "Quick Play") Play to word input took \(playStarted.duration(to: .now))")
         return app
     }
 
@@ -278,7 +282,7 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertFalse(app.buttons["word-hint"].exists)
     }
 
-    func testDailyChallengeHasNoHintButtonWithTheKeyboardUp() {
+    func testDailyChallengeHasNoHintsAndCanReturnToMenu() {
         let app = startPuzzle(mode: "Daily Challenge", arguments: ["-sprintHints"])
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         let field = wordInput(app)
@@ -289,6 +293,20 @@ final class WordEditorUITests: XCTestCase {
         field.typeText("a")
         XCTAssertTrue(app.buttons["word-submit"].isHittable)
         XCTAssertTrue(app.buttons["word-submit"].isEnabled)
+
+        let menu = app.buttons["game-menu"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5))
+        XCTAssertEqual(menu.label, "Back to menu")
+        XCTAssertTrue(menu.isHittable)
+        menu.tap()
+
+        let quickPlay = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Quick Play")).firstMatch
+        XCTAssertTrue(quickPlay.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.descendants(matching: .any)["word-input"].exists)
+        let title = app.staticTexts["Word Chains"]
+        for _ in 0..<4 where !title.isHittable { app.swipeDown() }
+        XCTAssertTrue(title.isHittable)
+        capture("01-menu")
     }
 
     func testFinishedDailyShowsItsSavedChainAndShareSheetAfterRelaunch() throws {
@@ -337,25 +355,6 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertTrue(copy.waitForExistence(timeout: 15), "Share sheet did not show Copy.\n\(app.debugDescription)")
     }
 
-    func testGameMenuIsAccessibleAndReturnsToTheModePicker() {
-        let app = startPuzzle(mode: "Daily Challenge")
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
-
-        let menu = app.buttons["game-menu"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 5))
-        XCTAssertEqual(menu.label, "Back to menu")
-        XCTAssertTrue(menu.isHittable)
-        menu.tap()
-
-        let quickPlay = app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Quick Play")).firstMatch
-        XCTAssertTrue(quickPlay.waitForExistence(timeout: 5))
-        XCTAssertFalse(app.descendants(matching: .any)["word-input"].exists)
-        let title = app.staticTexts["Word Chains"]
-        for _ in 0..<4 where !title.isHittable { app.swipeDown() }
-        XCTAssertTrue(title.isHittable)
-        capture("01-menu")
-    }
-
     func testQuickPlayResultsCanReturnToTheMenu() {
         let app = startPuzzle()
         let hint = app.buttons["word-hint"]
@@ -379,10 +378,16 @@ final class WordEditorUITests: XCTestCase {
     }
 
     func testTimeAttackSummaryOffersReplayAndMenu() {
-        let app = startPuzzle(mode: "Time Attack", difficulty: "Easy")
+        let app = startPuzzle(mode: "Time Attack", difficulty: "Easy", arguments: ["-expireSprintInBackground"])
         XCTAssertTrue(app.descendants(matching: .any)["time-attack-bar"].waitForExistence(timeout: 5))
+
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5) || app.state == .runningBackgroundSuspended)
+        app.activate()
+
         let replay = app.buttons["time-attack-replay"]
-        XCTAssertTrue(replay.waitForExistence(timeout: 135))
+        XCTAssertTrue(replay.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["Easy · 120 seconds"].exists)
         for _ in 0..<4 where !replay.isHittable { app.swipeUp() }
         XCTAssertTrue(replay.isHittable)
         capture("05-time-attack-results")

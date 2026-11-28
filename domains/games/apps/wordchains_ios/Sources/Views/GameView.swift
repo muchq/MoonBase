@@ -5,6 +5,9 @@ struct GameView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showResults = false
     @Environment(\.gameFeedback) private var feedback
+    #if targetEnvironment(simulator)
+    @Environment(\.scenePhase) private var scenePhase
+    #endif
 
     private var isTimeAttack: Bool { game.currentMode == .timeAttack }
     private var reduceMotion: Bool { feedback.reduceMotion }
@@ -70,6 +73,16 @@ struct GameView: View {
                 try? await Task.sleep(for: .milliseconds(200))
             }
         }
+        #if targetEnvironment(simulator)
+        .onChange(of: scenePhase) { _, phase in
+            // Let the UI test reach the normal deadline when it sends the app to the background.
+            if phase == .background,
+               ProcessInfo.processInfo.arguments.contains("-expireSprintInBackground"),
+               let deadline = game.timeAttack?.deadline {
+                game.tick(now: deadline)
+            }
+        }
+        #endif
         .onChange(of: game.timeAttack?.solved) { old, new in
             if let old, let new, new > old { celebrateSolve() }
         }
