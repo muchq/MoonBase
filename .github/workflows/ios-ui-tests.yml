@@ -65,12 +65,31 @@ jobs:
 
       - name: Run iOS UI tests with bazel
         run: |
-          # Allow for a cold simulator boot, the full Time Attack round, and simulator teardown.
+          # Allow for a cold simulator boot, test execution, and result collection.
           bazel test //domains/games/apps/wordchains_ios:WordChainsUITests \
             --test_timeout=1800 \
             --ios_minimum_os=17.0 \
             --ios_simulator_device="iPhone 17" \
             --ios_simulator_version=27.0
+
+      - name: Report simulator timings
+        if: always()
+        run: |
+          log="bazel-testlogs/domains/games/apps/wordchains_ios/WordChainsUITests/test.log"
+          if [ ! -s "$log" ]; then
+            exit 0
+          fi
+          {
+            echo '### Word Chains simulator timings'
+            echo 'The workflow shows separate wall times for Bazel and screenshot export.'
+            echo
+            echo '```text'
+            awk '/isTerminal=YES.*Elapsed=/ ||
+                 /Test Suite .All tests. (started|passed|failed) at/ ||
+                 /Test Case .* (passed|failed) \(/ ||
+                 /Word Chains timing:|Test timed out/' "$log"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Export simulator screenshots
         if: github.event_name == 'pull_request'
