@@ -39,17 +39,17 @@ final class TimeAttackTests: XCTestCase {
 
     // MARK: - The clock
 
-    func testTheClockCountsDownFromNinetyAndReadsZeroOnlyAtTheDeadline() {
+    func testTheClockCountsDownFromTwoMinutesAndReadsZeroOnlyAtTheDeadline() {
         let game = sprint()
-        XCTAssertEqual(game.timeAttackSeconds, 90)
+        XCTAssertEqual(game.timeAttackSeconds, 120)
         game.tick(now: at(0.2))
-        XCTAssertEqual(game.timeAttackSeconds, 90, "89.8s left reads as 90")
+        XCTAssertEqual(game.timeAttackSeconds, 120, "119.8s left reads as 120")
         game.tick(now: at(30))
-        XCTAssertEqual(game.timeAttackSeconds, 60)
-        game.tick(now: at(89.9))
+        XCTAssertEqual(game.timeAttackSeconds, 90)
+        game.tick(now: at(119.9))
         XCTAssertEqual(game.timeAttackSeconds, 1)
         XCTAssertNil(game.timeAttackSummary)
-        game.tick(now: at(90))
+        game.tick(now: at(120))
         XCTAssertEqual(game.timeAttackSeconds, 0)
         XCTAssertNotNil(game.timeAttackSummary)
         XCTAssertEqual(GameState(defaults: defaults).puzzlesSolved, 0)
@@ -57,22 +57,22 @@ final class TimeAttackTests: XCTestCase {
     }
 
     func testTheSprintIsLongerForLongerWords() {
-        XCTAssertEqual(TimeAttack(startingAt: t0, difficulty: .easy).remaining(at: t0), .seconds(90))
-        XCTAssertEqual(TimeAttack(startingAt: t0, difficulty: .medium).remaining(at: t0), .seconds(120))
-        XCTAssertEqual(TimeAttack(startingAt: t0, difficulty: .hard).remaining(at: t0), .seconds(180))
+        XCTAssertEqual(TimeAttack(startingAt: t0, difficulty: .easy).remaining(at: t0), .seconds(120))
+        XCTAssertEqual(TimeAttack(startingAt: t0, difficulty: .medium).remaining(at: t0), .seconds(150))
+        XCTAssertEqual(TimeAttack(startingAt: t0, difficulty: .hard).remaining(at: t0), .seconds(210))
     }
 
-    func testAHardSprintRunsForThreeMinutes() {
+    func testAHardSprintRunsForThreeAndAHalfMinutes() {
         let words = ["stare", "store", "stone", "shone", "shine"]
         let edges = words.map { word in words.indices.filter { GameState.isOneLetterAway(word, words[$0]) } }
         let graph = WordGraph(nodes: words, edges: edges)
         let game = GameState(defaults: defaults, generator: PuzzleGenerator(graph: graph))
         game.graph = graph
         game.startNewGame(mode: .timeAttack, difficulty: .hard, now: t0)
-        XCTAssertEqual(game.timeAttackSeconds, 180)
-        game.tick(now: at(90))
-        XCTAssertNil(game.timeAttackSummary)
+        XCTAssertEqual(game.timeAttackSeconds, 210)
         game.tick(now: at(180))
+        XCTAssertNil(game.timeAttackSummary)
+        game.tick(now: at(210))
         XCTAssertNotNil(game.timeAttackSummary)
     }
 
@@ -93,7 +93,7 @@ final class TimeAttackTests: XCTestCase {
         let game = sprint()
         game.tick(now: at(10))
         game.tick(now: at(40))
-        XCTAssertEqual(game.timeAttackSeconds, 50)
+        XCTAssertEqual(game.timeAttackSeconds, 80)
         XCTAssertNil(game.timeAttackSummary)
     }
 
@@ -112,8 +112,8 @@ final class TimeAttackTests: XCTestCase {
     func testTimeoutDuringTypingRefusesTheWordAndEveryMoveAfter() {
         let game = sprint()
         XCTAssertEqual(game.submitWord("cot", now: at(20)), .valid)
-        game.tick(now: at(90))
-        XCTAssertEqual(game.submitWord("cog", now: at(90)), .timeUp)
+        game.tick(now: at(120))
+        XCTAssertEqual(game.submitWord("cog", now: at(120)), .timeUp)
         XCTAssertFalse(game.canUndo)
         game.undo()
         XCTAssertNil(game.requestHint())
@@ -124,14 +124,14 @@ final class TimeAttackTests: XCTestCase {
         let early = sprint()
         XCTAssertEqual(early.submitWord("cot", now: at(50)), .valid)
         XCTAssertEqual(early.submitWord("cog", now: at(50)), .valid)
-        XCTAssertEqual(early.submitWord("dog", now: at(89.999)), .reachedTarget)
-        early.tick(now: at(90))
+        XCTAssertEqual(early.submitWord("dog", now: at(119.999)), .reachedTarget)
+        early.tick(now: at(120))
         XCTAssertEqual(early.timeAttackSummary, TimeAttackSummary(solved: 1, score: 150, best: 150, isNewBest: true))
 
         let late = sprint()
         XCTAssertEqual(late.submitWord("cot", now: at(50)), .valid)
         XCTAssertEqual(late.submitWord("cog", now: at(50)), .valid)
-        XCTAssertEqual(late.submitWord("dog", now: at(90)), .timeUp)
+        XCTAssertEqual(late.submitWord("dog", now: at(120)), .timeUp)
         XCTAssertEqual(late.timeAttackSummary, TimeAttackSummary(solved: 0, score: 0, best: 150, isNewBest: false), "The early sprint set the best")
         let relaunched = GameState(defaults: defaults)
         XCTAssertEqual(relaunched.puzzlesSolved, 1)
@@ -160,7 +160,7 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertEqual(game.score, 0)
         XCTAssertEqual(game.timeAttack?.solved, 1)
         XCTAssertEqual(game.timeAttack?.score, 150)
-        XCTAssertEqual(game.timeAttackSeconds, 80)
+        XCTAssertEqual(game.timeAttackSeconds, 110)
 
         deal(game)
         solve(game, at: 20)
@@ -170,9 +170,9 @@ final class TimeAttackTests: XCTestCase {
 
     func testTheDeadlineCancelsAPendingAdvance() {
         let game = sprint()
-        solve(game, at: 89.5)
+        solve(game, at: 119.5)
         let solved = game.currentPuzzle?.id
-        game.tick(now: at(91))
+        game.tick(now: at(121))
         XCTAssertEqual(game.currentPuzzle?.id, solved)
         XCTAssertTrue(game.isComplete)
         XCTAssertEqual(game.timeAttackSummary, TimeAttackSummary(solved: 1, score: 150, best: 150, isNewBest: true))
@@ -189,7 +189,7 @@ final class TimeAttackTests: XCTestCase {
         solve(game, at: 10)
         game.tick(now: at(11))
         XCTAssertTrue(game.isComplete)
-        game.tick(now: at(90))
+        game.tick(now: at(120))
         XCTAssertEqual(game.timeAttackSummary, TimeAttackSummary(solved: 1, score: 150, best: 150, isNewBest: true))
     }
 
@@ -198,10 +198,10 @@ final class TimeAttackTests: XCTestCase {
     func testTheSummaryIsRecordedOnceAndKeepsTheBest() {
         let game = sprint()
         solve(game, at: 10)
-        game.tick(now: at(90))
+        game.tick(now: at(120))
         XCTAssertEqual(game.timeAttackSummary, TimeAttackSummary(solved: 1, score: 150, best: 150, isNewBest: true))
-        game.tick(now: at(91))
-        _ = game.submitWord("cot", now: at(92))
+        game.tick(now: at(121))
+        _ = game.submitWord("cot", now: at(122))
         XCTAssertEqual(
             game.timeAttackSummary, TimeAttackSummary(solved: 1, score: 150, best: 150, isNewBest: true),
             "Finishing again must not re-record"
@@ -209,12 +209,12 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertEqual(TimeAttackBests(defaults: defaults).best(for: .easy), 150)
 
         // Beat your best: a fresh sprint, and a lower score keeps the best.
-        game.startNewGame(mode: .timeAttack, difficulty: .easy, now: at(100))
+        game.startNewGame(mode: .timeAttack, difficulty: .easy, now: at(130))
         XCTAssertNil(game.timeAttackSummary)
         XCTAssertEqual(game.timeAttack?.solved, 0)
         XCTAssertEqual(game.timeAttack?.score, 0)
-        XCTAssertEqual(game.timeAttackSeconds, 90)
-        game.tick(now: at(190))
+        XCTAssertEqual(game.timeAttackSeconds, 120)
+        game.tick(now: at(250))
         XCTAssertEqual(game.timeAttackSummary, TimeAttackSummary(solved: 0, score: 0, best: 150, isNewBest: false))
     }
 
@@ -228,12 +228,13 @@ final class TimeAttackTests: XCTestCase {
 
     func testBestsAreKeyedByWordAndSprintLength() {
         _ = TimeAttackBests(defaults: defaults).record(solved: 1, score: 150, for: .easy)
-        XCTAssertEqual(defaults.integer(forKey: "timeAttackBest.3.90s"), 150)
+        XCTAssertEqual(defaults.integer(forKey: "timeAttackBest.3.120s"), 150)
     }
 
     func testABestFromASprintOfAnotherLengthDoesNotCount() {
-        defaults.set(900, forKey: "timeAttackBest.3")
-        XCTAssertEqual(TimeAttackBests(defaults: defaults).best(for: .easy), 0, "A 60-second sprint's best")
+        defaults.set(900, forKey: "timeAttackBest.3.90s")
+        XCTAssertEqual(TimeAttackBests(defaults: defaults).best(for: .easy), 0)
+        XCTAssertEqual(defaults.integer(forKey: "timeAttackBest.3.90s"), 900)
     }
 
     func testBeatingAStandingBestReplacesIt() {
@@ -260,7 +261,7 @@ final class TimeAttackTests: XCTestCase {
         XCTAssertEqual(game.chain, ["cat", "cot"])
         XCTAssertEqual(game.timeAttack?.solved, 0)
         XCTAssertEqual(game.timeAttack?.score, 0)
-        XCTAssertEqual(game.timeAttackSeconds, 90, "89.1s left on the new clock")
+        XCTAssertEqual(game.timeAttackSeconds, 120, "119.1s left on the new clock")
     }
 
     func testRestartingBeforeTheDeadlineDoesNotRecordABest() {

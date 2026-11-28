@@ -40,13 +40,21 @@ final class GameSoundTests: XCTestCase {
             .step(1), .takeback(steps: 0), .refusal, .target(4),
             .win, .sharedWin, .raceFinished, .timeout,
         ]
-        for sound in sounds {
-            let wav = GameSoundWaveform.wav(for: [sound])
+        let waveforms = sounds.map { GameSoundWaveform.wav(for: [$0]) }
+        XCTAssertEqual(Set(waveforms).count, sounds.count)
+
+        for wav in waveforms {
             XCTAssertGreaterThan(wav.count, 44)
             XCTAssertEqual(Array(wav.prefix(4)), Array("RIFF".utf8))
             XCTAssertEqual(Array(wav.dropFirst(44).prefix(2)), [0, 0])
             XCTAssertEqual(Array(wav.suffix(2)), [0, 0])
-            XCTAssertTrue(wav.dropFirst(44).contains { $0 != 0 })
+            let pcm = Array(wav.dropFirst(44))
+            let peak = stride(from: 0, to: pcm.count, by: 2).map { offset in
+                let bits = UInt16(pcm[offset]) | UInt16(pcm[offset + 1]) << 8
+                return abs(Int(Int16(bitPattern: bits)))
+            }.max() ?? 0
+            XCTAssertGreaterThan(peak, 0)
+            XCTAssertLessThan(peak, Int(Int16.max) / 3)
         }
     }
 
@@ -54,7 +62,7 @@ final class GameSoundTests: XCTestCase {
     func testAVAudioPlayerDecodesASequenceOfCues() throws {
         let player = try AVAudioPlayer(data: GameSoundWaveform.wav(for: [.target(4), .win]))
         XCTAssertEqual(player.numberOfChannels, 1)
-        XCTAssertEqual(player.duration, 0.44, accuracy: 0.001)
+        XCTAssertEqual(player.duration, 0.72, accuracy: 0.001)
     }
     #endif
 }

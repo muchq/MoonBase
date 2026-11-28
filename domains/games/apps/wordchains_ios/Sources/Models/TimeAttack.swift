@@ -7,9 +7,9 @@ struct TimeAttack {
     /// Longer words take longer to change, so they get a longer sprint.
     static func length(for difficulty: Difficulty) -> Duration {
         switch difficulty {
-        case .easy: .seconds(90)
-        case .medium: .seconds(120)
-        case .hard: .seconds(180)
+        case .easy: .seconds(120)
+        case .medium: .seconds(150)
+        case .hard: .seconds(210)
         }
     }
     /// How long a solved puzzle stays on screen before the next one.

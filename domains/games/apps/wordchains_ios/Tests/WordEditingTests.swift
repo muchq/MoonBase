@@ -78,7 +78,7 @@ final class WordEditingTests: XCTestCase {
         XCTAssertEqual(sprint.submitWord("cog", now: now), .valid)
         XCTAssertEqual(sprint.submitWord("dog", now: now), .reachedTarget)
         XCTAssertEqual(sprint.submitWord("dog", now: now), .gameComplete)
-        sprint.tick(now: now + .seconds(90))
+        sprint.tick(now: now + TimeAttack.length(for: .easy))
 
         let relaunched = GameState(defaults: defaults)
         XCTAssertEqual(relaunched.puzzlesSolved, 3)

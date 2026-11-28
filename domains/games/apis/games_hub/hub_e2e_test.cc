@@ -2226,6 +2226,7 @@ TEST_F(GamesHubStreamFixture, BuildingAHandlerDeclaresEveryCounterSeriesAtZero) 
       {"hub_session_mints", {{"client", "ios"}, {"version", "0.1.20"}}},
       {"hub_session_mints", {{"client", "ios"}, {"version", "0.1.21"}}},
       {"hub_session_mints", {{"client", "ios"}, {"version", "0.1.22"}}},
+      {"hub_session_mints", {{"client", "ios"}, {"version", "0.1.23"}}},
       {"hub_session_mints", {{"client", "ios"}, {"version", "other"}}},
       {"hub_session_mints", {{"client", "other"}, {"version", "none"}}},
       {"bot_requests", {{"bot", "microgpt"}, {"result", "ok"}}},

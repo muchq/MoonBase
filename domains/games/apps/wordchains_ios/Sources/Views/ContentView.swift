@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var game = GameState(sprintHints: ProcessInfo.processInfo.arguments.contains("-sprintHints"))
-    @State private var menuPage: MenuPage?
     private var feedbackSettings = GameFeedbackSettings()
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
@@ -15,23 +14,14 @@ struct ContentView: View {
             } else if game.graph == nil {
                 errorView
             } else {
-                MenuView(game: game, openPage: { menuPage = $0 })
-            }
-        }
-        .sheet(item: $menuPage) { page in
-            MenuPageSheet(page: page) {
-                switch page {
-                case .about:
-                    AboutView()
-                case .settings:
-                    SettingsView(
+                MenuView(
+                    game: game,
+                    settings: SettingsView(
                         soundEffectsEnabled: feedbackSettings.$soundEffectsEnabled,
                         hapticsEnabled: feedbackSettings.$hapticsEnabled,
                         prefersReducedMotion: feedbackSettings.$prefersReducedMotion
                     )
-                case .help:
-                    HelpView()
-                }
+                )
             }
         }
         .environment(\.gameFeedback, feedback)

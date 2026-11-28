@@ -22,7 +22,6 @@ final class WordEditorUITests: XCTestCase {
         let sound = app.switches["settings-sound-effects"]
         let haptics = app.switches["settings-haptics"]
         let motion = app.switches["settings-reduce-motion"]
-        let done = app.buttons["menu-sheet-done"]
         XCTAssertTrue(haptics.waitForExistence(timeout: 5))
         XCTAssertTrue(motion.exists)
         XCTAssertEqual(sound.value as? String, "1")
@@ -30,15 +29,10 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertEqual(motion.value as? String, "0")
         capture("06-settings")
 
-        // In a Form, XCTest includes the label in the switch's frame.
-        let switchOffset = CGVector(dx: 0.9, dy: 0.5)
-        sound.coordinate(withNormalizedOffset: switchOffset).tap()
-        haptics.coordinate(withNormalizedOffset: switchOffset).tap()
-        motion.coordinate(withNormalizedOffset: switchOffset).tap()
-        XCTAssertEqual(sound.value as? String, "0")
-        XCTAssertEqual(haptics.value as? String, "0")
-        XCTAssertEqual(motion.value as? String, "1")
-        done.tap()
+        setSwitch(sound, to: "0")
+        setSwitch(haptics, to: "0")
+        setSwitch(motion, to: "1")
+        returnFromMenuPage("Settings", in: app)
         XCTAssertTrue(app.buttons["Play"].waitForExistence(timeout: 5))
 
         app.terminate()
@@ -49,14 +43,25 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertEqual(haptics.value as? String, "0")
         XCTAssertEqual(motion.value as? String, "1")
 
-        sound.coordinate(withNormalizedOffset: switchOffset).tap()
-        haptics.coordinate(withNormalizedOffset: switchOffset).tap()
-        motion.coordinate(withNormalizedOffset: switchOffset).tap()
-        XCTAssertEqual(sound.value as? String, "1")
-        XCTAssertEqual(haptics.value as? String, "1")
-        XCTAssertEqual(motion.value as? String, "0")
-        done.tap()
+        setSwitch(sound, to: "1")
+        setSwitch(haptics, to: "1")
+        setSwitch(motion, to: "0")
+        returnFromMenuPage("Settings", in: app)
         XCTAssertTrue(app.buttons["Play"].isHittable)
+    }
+
+    private func setSwitch(_ element: XCUIElement, to value: String) {
+        // In a Form, XCTest includes the label in the switch's frame.
+        let control = element.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        for _ in 0..<2 {
+            if element.value as? String == value { return }
+            control.tap()
+            let changed = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == %@", value), object: element
+            )
+            if XCTWaiter.wait(for: [changed], timeout: 3) == .completed { return }
+        }
+        XCTAssertEqual(element.value as? String, value, element.identifier)
     }
 
     func testMenuOpensHelpAndAbout() {
@@ -78,13 +83,14 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["help-example"].exists)
         XCTAssertTrue(app.staticTexts["Controls"].exists)
         capture("10-help")
-        app.buttons["menu-sheet-done"].tap()
+        returnFromMenuPage("Help", in: app)
 
         openMenuPage("About", in: app)
         XCTAssertTrue(app.navigationBars["About"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Version ")).firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["Source code"].exists)
         capture("11-about")
-        app.buttons["menu-sheet-done"].tap()
+        returnFromMenuPage("About", in: app)
         XCTAssertTrue(menu.waitForExistence(timeout: 5))
     }
 
@@ -95,6 +101,16 @@ final class WordEditorUITests: XCTestCase {
         let item = app.buttons[page]
         XCTAssertTrue(item.waitForExistence(timeout: 5))
         item.tap()
+    }
+
+    private func returnFromMenuPage(_ page: String, in app: XCUIApplication) {
+        let navigationBar = app.navigationBars[page]
+        XCTAssertTrue(navigationBar.waitForExistence(timeout: 5))
+        XCTAssertFalse(navigationBar.buttons["Done"].exists)
+        let back = navigationBar.buttons.firstMatch
+        XCTAssertTrue(back.isHittable)
+        back.tap()
+        XCTAssertTrue(app.buttons["menu-open"].waitForExistence(timeout: 5))
     }
 
     func testModeSelectionKeepsMenuLayoutStable() {
@@ -366,7 +382,7 @@ final class WordEditorUITests: XCTestCase {
         let app = startPuzzle(mode: "Time Attack", difficulty: "Easy")
         XCTAssertTrue(app.descendants(matching: .any)["time-attack-bar"].waitForExistence(timeout: 5))
         let replay = app.buttons["time-attack-replay"]
-        XCTAssertTrue(replay.waitForExistence(timeout: 105))
+        XCTAssertTrue(replay.waitForExistence(timeout: 135))
         for _ in 0..<4 where !replay.isHittable { app.swipeUp() }
         XCTAssertTrue(replay.isHittable)
         capture("05-time-attack-results")

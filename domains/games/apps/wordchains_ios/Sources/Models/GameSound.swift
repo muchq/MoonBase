@@ -29,34 +29,59 @@ enum GameSound: Equatable {
         150 + 110 * (1 - exp(-Double(max(0, steps)) / 18))
     }
 
-    fileprivate var thumps: [Thump] {
+    fileprivate var notes: [Note] {
         switch self {
         case let .step(steps):
-            return [Thump(pitch: Self.pitch(for: steps))]
+            let pitch = Self.pitch(for: steps)
+            return [Note(pitch: pitch, bend: -pitch * 0.04)]
         case let .takeback(steps):
             let pitch = Self.pitch(for: steps)
-            return [Thump(pitch: pitch, fall: pitch * 0.08, volume: 0.15)]
+            return [Note(pitch: pitch, bend: pitch * 0.12, volume: 0.15, brightness: 0.25)]
         case .refusal:
-            return [Thump(pitch: 128, fall: 23, volume: 0.13, duration: 0.09)]
+            return [
+                Note(pitch: 137, bend: 14, volume: 0.13, duration: 0.06, brightness: 0.18),
+                Note(pitch: 112, bend: 9, volume: 0.10, duration: 0.07, brightness: 0.14),
+            ]
         case let .target(steps):
-            return [Thump(pitch: Self.pitch(for: steps), volume: 0.24, duration: 0.15)]
+            let pitch = Self.pitch(for: steps)
+            return [
+                Note(pitch: pitch, volume: 0.19, duration: 0.075),
+                Note(pitch: pitch * 1.5, volume: 0.17, duration: 0.085, brightness: 0.7),
+                Note(pitch: pitch * 2, volume: 0.16, duration: 0.14, brightness: 0.85),
+            ]
         case .win:
-            return [Thump(pitch: 205), Thump(pitch: 273, duration: 0.14)]
+            return [
+                Note(pitch: 220, volume: 0.19, duration: 0.08),
+                Note(pitch: 275, volume: 0.19, duration: 0.085, brightness: 0.7),
+                Note(pitch: 330, volume: 0.18, duration: 0.13, brightness: 0.85),
+            ]
         case .sharedWin:
-            return [Thump(pitch: 205), Thump(pitch: 245), Thump(pitch: 273, duration: 0.14)]
+            return [
+                Note(pitch: 220, volume: 0.19, duration: 0.08),
+                Note(pitch: 275, volume: 0.18, duration: 0.08, brightness: 0.7),
+                Note(pitch: 330, volume: 0.18, duration: 0.08, brightness: 0.75),
+                Note(pitch: 440, volume: 0.16, duration: 0.14, brightness: 0.85),
+            ]
         case .raceFinished:
-            return [Thump(pitch: 190, volume: 0.15, duration: 0.13)]
+            return [
+                Note(pitch: 233, volume: 0.15, duration: 0.075),
+                Note(pitch: 196, volume: 0.14, duration: 0.12, brightness: 0.28),
+            ]
         case .timeout:
-            return [Thump(pitch: 158, volume: 0.15), Thump(pitch: 125, fall: 16, volume: 0.13)]
+            return [
+                Note(pitch: 165, volume: 0.15, duration: 0.10, brightness: 0.28),
+                Note(pitch: 123, bend: 12, volume: 0.12, duration: 0.13, brightness: 0.16),
+            ]
         }
     }
 }
 
-private struct Thump {
+private struct Note {
     let pitch: Double
-    var fall = 8.0
+    var bend = 0.0
     var volume = 0.20
     var duration = 0.10
+    var brightness = 0.48
 }
 
 enum GameSoundWaveform {
@@ -64,11 +89,11 @@ enum GameSoundWaveform {
 
     /// Mono 16-bit PCM, wrapped in a WAV so the whole cue plays as one sound.
     static func wav(for sounds: [GameSound]) -> Data {
-        let thumps = sounds.flatMap(\.thumps)
+        let notes = sounds.flatMap(\.notes)
         let rate = Double(sampleRate)
         let gapFrames = Int(rate * 0.025)
-        let frames = thumps.map { Int(rate * $0.duration) }
-        let pcmSize = UInt32(2 * (frames.reduce(0, +) + max(0, thumps.count - 1) * gapFrames))
+        let frames = notes.map { Int(rate * $0.duration) }
+        let pcmSize = UInt32(2 * (frames.reduce(0, +) + max(0, notes.count - 1) * gapFrames))
         var wav = Data("RIFF".utf8)
         wav.appendLittleEndian(36 + pcmSize)
         wav.append(contentsOf: "WAVEfmt ".utf8)
@@ -83,20 +108,22 @@ enum GameSoundWaveform {
         wav.appendLittleEndian(pcmSize)
         wav.reserveCapacity(44 + Int(pcmSize))
 
-        for (index, thump) in thumps.enumerated() {
+        for (index, note) in notes.enumerated() {
             if index > 0 { wav.append(contentsOf: repeatElement(UInt8(0), count: gapFrames * 2)) }
             var phase = 0.0
             for frame in 0..<frames[index] {
                 let time = Double(frame) / rate
-                let progress = time / thump.duration
-                let frequency = thump.pitch + thump.fall * (1 - progress)
+                let release = 1 - time / note.duration
+                let frequency = note.pitch + note.bend * release * release
                 phase += 2 * .pi * frequency / rate
-                // Smooth ends avoid a click. A little harmonic at the attack
-                // keeps the low thump audible on a phone speaker.
-                let attack = min(1, time / 0.008)
-                let envelope = attack * attack * (1 - progress) * (1 - progress)
-                let tone = sin(phase) + 0.25 * (1 - progress) * sin(2 * phase)
-                let sample = Int16(tone * envelope * thump.volume * Double(Int16.max))
+
+                // The fundamental rings longer than the upper partials of the strike.
+                let attack = min(1, time / 0.005)
+                let resonance = sin(phase) + 0.24 * sin(2 * phase)
+                let strike = 0.52 * sin(2.76 * phase) + 0.28 * sin(4.08 * phase) + 0.20 * sin(5.41 * phase)
+                let tone = resonance + note.brightness * exp(-time / 0.023) * strike
+                let envelope = attack * attack * release * release
+                let sample = Int16(tone * envelope * note.volume * Double(Int16.max))
                 wav.appendLittleEndian(sample)
             }
         }
