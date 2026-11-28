@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum MenuPage: String, CaseIterable, Identifiable {
+enum MenuPage: String, CaseIterable, Identifiable, Hashable {
     case about = "About"
     case settings = "Settings"
     case help = "Help"
@@ -12,28 +12,6 @@ enum MenuPage: String, CaseIterable, Identifiable {
         case .about: "info.circle"
         case .settings: "slider.horizontal.3"
         case .help: "questionmark.circle"
-        }
-    }
-}
-
-struct MenuPageSheet<Content: View>: View {
-    let page: MenuPage
-    @ViewBuilder let content: () -> Content
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            content()
-                .navigationTitle(page.rawValue)
-                #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)
-                #endif
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { dismiss() }
-                            .accessibilityIdentifier("menu-sheet-done")
-                    }
-                }
         }
     }
 }
@@ -134,10 +112,6 @@ struct AboutView: View {
                 Text("Play a quick puzzle, solve the Daily Challenge, race the clock in Time Attack, or race friends online.")
                     .font(Theme.bodyFont)
                     .foregroundStyle(.secondary)
-                Link(destination: URL(string: "https://github.com/muchq/MoonBase/tree/main/domains/games/apps/wordchains_ios")!) {
-                    Label("Source code", systemImage: "arrow.up.right")
-                        .font(.system(.headline, design: .rounded))
-                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .cardStyle()

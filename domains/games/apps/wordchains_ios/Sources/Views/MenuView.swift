@@ -2,7 +2,8 @@ import SwiftUI
 
 struct MenuView: View {
     @Bindable var game: GameState
-    let openPage: (MenuPage) -> Void
+    let settings: SettingsView
+    @State private var menuPage: MenuPage?
     @State private var selectedMode: GameMode = .quickPlay
     @State private var selectedDifficulty: Difficulty = .medium
     @State private var showGame = false
@@ -33,6 +34,17 @@ struct MenuView: View {
                 .padding(.bottom, 40)
             }
             .background(Theme.secondaryBackground.ignoresSafeArea())
+            .navigationDestination(item: $menuPage) { page in
+                Group {
+                    switch page {
+                    case .about: AboutView()
+                    case .settings: settings
+                    case .help: HelpView()
+                    }
+                }
+                .navigationTitle(page.rawValue)
+                .inlineTitle()
+            }
             .navigationDestination(isPresented: $showGame) {
                 GameView(game: game)
             }
@@ -85,7 +97,7 @@ struct MenuView: View {
     private var menuButton: some View {
         Menu {
             ForEach(MenuPage.allCases) { page in
-                Button { openPage(page) } label: {
+                Button { menuPage = page } label: {
                     Label(page.rawValue, systemImage: page.icon)
                 }
             }
