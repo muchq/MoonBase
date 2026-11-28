@@ -104,7 +104,7 @@ Before submitting to the App Store, verify these scenarios:
 - [ ] **Quick race — expiry** — let the seek expire; verify “Nobody came. Keep looking?”, retry with Keep looking, and exit with Stop
 - [ ] **Quick race — match** — match a second player, verify the opponent announcement and 3–2–1 countdown lead into the race; check VoiceOver and Reduce Motion
 - [ ] **Race friends** — create a room, join it from the web lobby (muchq.com/games) by
-  its code, open and join a race table from both, race to the end, Next race; a
+  its code, join the iOS-created race from the web, race to the end, then choose Next race; a
   refused word shows the hub's reason; backgrounding and returning keeps the seat;
   alone at a table, **Practise** races with no wins, and a join ends it
 
@@ -260,7 +260,7 @@ a server-minted player id (**Identifiers → User ID**) and the race's words
 person, no tracking.
 
 **App Review notes:** alone at a table, a reviewer can **Practise**: **Race
-friends → Create a room → Open a race table → Practise** races the clock with
+friends → Create a room → Practise** races the clock with
 nothing recorded. To see a real race, open `https://muchq.com/games/room/<code>`
 in a browser, join the same table as a second seat (which ends any practice),
 and tap **Start the race** in the app.

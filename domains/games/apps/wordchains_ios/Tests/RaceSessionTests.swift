@@ -185,56 +185,109 @@ final class RaceSessionTests: XCTestCase {
         }
     }
 
-    func testTableMovesSpeakTheRaceVocabulary() {
+    func testCreatingARoomPreparesItsRaceExactlyOnce() {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
-            session.openTable()
+            session.createRoom()
+            session.createRoom()
+            XCTAssertEqual(transport.sent, [.createRoom])
+
+            transport.events?.frame(.roomState(room()))
+            transport.events?.frame(.roomState(room()))
+            XCTAssertEqual(transport.sent, [.createRoom, .wordchain(.createGame)])
             XCTAssertTrue(session.state.opening)
-            session.joinTable("W1")
+
+            transport.events?.frame(.wordchain(.view(view(.waiting))))
+            XCTAssertEqual(session.state.table?.phase, .waiting)
+            XCTAssertFalse(session.state.opening)
             session.start(letters: 3)
             session.retract()
-            XCTAssertEqual(transport.sent, [
-                .wordchain(.createGame), .wordchain(.joinGame("W1")), .wordchain(.startGame(letters: 3)), .wordchain(.retract),
-            ])
+            XCTAssertEqual(Array(transport.sent.suffix(2)), [.wordchain(.startGame(letters: 3)), .wordchain(.retract)])
         }
     }
 
-    func testLeavingAnOpenTableAsksTheHubAndAClosedOneIsJustLetGo() {
+    func testJoiningARoomUsesTheFirstRaceWithAnOpenSeat() {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
-            transport.events?.frame(.wordchain(.view(view())))
-            session.leaveTable()
-            XCTAssertEqual(transport.sent.last, .wordchain(.leaveGame))
-            XCTAssertNotNil(session.state.table)
-
-            transport.events?.frame(.wordchain(.view(view(.closed))))
-            transport.sent = []
-            session.leaveTable()
-            XCTAssertEqual(transport.sent, [])
-            XCTAssertNil(session.state.table)
+            let games = [
+                HubGameSummary(gameId: "K1", game: "chess", status: "waiting", playerCount: 1),
+                HubGameSummary(gameId: "W1", game: "wordchain", status: "racing", playerCount: 2),
+                HubGameSummary(gameId: "W2", game: "wordchain", status: "waiting", playerCount: 4),
+                HubGameSummary(gameId: "W3", game: "wordchain", status: "waiting", playerCount: 1),
+            ]
+            session.joinRoom("AB12")
+            transport.events?.frame(.roomState(room(games: Array(games.dropLast()))))
+            XCTAssertEqual(transport.sent, [.joinRoom("AB12")])
+            transport.events?.frame(.roomState(room(games: games)))
+            transport.events?.frame(.roomState(room(games: games)))
+            XCTAssertEqual(transport.sent, [.joinRoom("AB12"), .wordchain(.joinGame("W3"))])
         }
     }
 
-    func testPlayAgainOpensANewTable() {
+    func testEmptyExistingRoomCanBeSetUpAndARefusalAllowsRetry() {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
-            transport.events?.frame(.wordchain(.view(view(.closed))))
-            session.openTable()
+            session.joinRoom("AB12")
+            transport.events?.frame(.roomState(room()))
+            XCTAssertEqual(transport.sent, [.joinRoom("AB12")])
+            session.prepareRace()
+            transport.events?.frame(.commandRejected("Try again"))
+            transport.events?.frame(.roomState(room()))
+            XCTAssertEqual(transport.sent, [.joinRoom("AB12"), .wordchain(.createGame)])
+            XCTAssertFalse(session.state.opening)
+            session.prepareRace()
             XCTAssertEqual(transport.sent.last, .wordchain(.createGame))
             XCTAssertTrue(session.state.opening)
         }
     }
 
-    // A word or table asked for while the stream is down never reaches
-    // the hub, so nothing waits on its answer.
+    func testResumingWithASeatWaitsForTheHubRaceView() {
+        MainActor.assumeIsolated {
+            let (session, transport) = mount()
+            let seat = HubTable(game: "wordchain", gameId: "W1")
+            let race = HubGameSummary(gameId: "W1", game: "wordchain", status: "waiting", playerCount: 1)
+            transport.events?.frame(.sessionReady(SessionReady(playerId: "alice", roomId: "AB12")))
+            transport.events?.frame(.roomState(room(games: [race], aliceAt: seat)))
+            XCTAssertTrue(transport.sent.isEmpty)
+            transport.events?.frame(.wordchain(.view(view(.waiting))))
+            XCTAssertEqual(session.state.table?.gameId, "W1")
+        }
+    }
+
+    func testLeavingTheRoomAlsoLeavesItsRaceWithoutJoiningAgain() {
+        MainActor.assumeIsolated {
+            let (session, transport) = mount()
+            let race = HubGameSummary(gameId: "W1", game: "wordchain", status: "waiting", playerCount: 1)
+            transport.events?.frame(.roomState(room()))
+            transport.events?.frame(.wordchain(.view(view(.waiting))))
+            session.leaveRoom()
+            transport.events?.frame(.wordchain(.left))
+            transport.events?.frame(.roomState(room(games: [race])))
+            XCTAssertEqual(transport.sent, [.leaveRoom])
+            transport.events?.frame(.roomLeft("AB12"))
+            XCTAssertNil(session.state.room)
+            XCTAssertNil(session.state.table)
+        }
+    }
+
+    func testPlayAgainSetsUpARaceInTheSameRoom() {
+        MainActor.assumeIsolated {
+            let (session, transport) = mount()
+            transport.events?.frame(.roomState(room()))
+            transport.events?.frame(.wordchain(.view(view(.closed))))
+            session.prepareRace()
+            XCTAssertEqual(transport.sent, [.wordchain(.createGame)])
+            XCTAssertTrue(session.state.opening)
+            XCTAssertEqual(session.state.room?.roomId, "AB12")
+        }
+    }
+
     func testADropAnswersWhateverWasWaiting() {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
-            transport.events?.frame(.wordchain(.view(view())))
-            session.play("card")
-            session.joinTable("W2")
+            session.createRoom()
             transport.events?.status(.connecting)
-            XCTAssertFalse(session.state.sending)
+            XCTAssertNil(session.state.roomRequest)
             XCTAssertFalse(session.state.opening)
         }
     }
@@ -247,15 +300,14 @@ final class RaceSessionTests: XCTestCase {
             session.seek(letters: 5)
             XCTAssertEqual(transport.sent, [.wordchain(.seek(letters: 5))])
             XCTAssertTrue(session.state.opening)
-            XCTAssertEqual(session.state.seekLetters, 5)
+            transport.events?.frame(.roomState(room(HubEndpoints.quickRoomId)))
+            transport.events?.frame(.wordchain(.view(view(.closed))))
             session.seek(letters: nil)
             XCTAssertEqual(transport.sent.last, .wordchain(.seek(letters: nil)))
             XCTAssertNil(session.state.seekLetters)
         }
     }
 
-    // The pool has no tables of one's choosing and nothing to stay for:
-    // another table is another seek, and getting up leaves the pool.
     func testInThePoolPlayAgainSeeksAgainAndLeavingLeavesThePool() {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
@@ -264,33 +316,12 @@ final class RaceSessionTests: XCTestCase {
             XCTAssertTrue(session.state.inQuickRace)
             transport.events?.frame(.wordchain(.view(view(.closed))))
             transport.sent = []
-            session.openTable()
+            session.prepareRace()
             XCTAssertEqual(transport.sent, [.wordchain(.seek(letters: 3))])
             transport.events?.frame(.wordchain(.view(view())))
             transport.sent = []
-            session.leaveTable()
-            XCTAssertEqual(transport.sent, [.leaveRoom])
-        }
-    }
-
-    // Outside the pool, a table is still a table.
-    func testInARoomPlayAgainAndLeavingAreTheTables() {
-        MainActor.assumeIsolated {
-            let (session, transport) = mount()
-            transport.events?.frame(.roomState(room()))
-            XCTAssertFalse(session.state.inQuickRace)
-            transport.events?.frame(.wordchain(.view(view())))
-            session.leaveTable()
-            XCTAssertEqual(transport.sent, [.wordchain(.leaveGame)])
-        }
-    }
-
-    func testRoomCommands() {
-        MainActor.assumeIsolated {
-            let (session, transport) = mount()
-            session.createRoom()
             session.leaveRoom()
-            XCTAssertEqual(transport.sent, [.createRoom, .leaveRoom])
+            XCTAssertEqual(transport.sent, [.leaveRoom])
         }
     }
 
@@ -300,21 +331,6 @@ final class RaceSessionTests: XCTestCase {
             XCTAssertEqual(session.connection, .connected)
             transport.events?.status(.lost("slow down"))
             XCTAssertEqual(session.connection, .lost("slow down"))
-        }
-    }
-
-    // A closed table lingers only as a view, so leaving it is local; but
-    // once Play again has asked for a new table, that one is on its way,
-    // and the player would land at it after leaving. Back waits.
-    func testBackFromAClosedTableWaitsWhileANewOneOpens() {
-        MainActor.assumeIsolated {
-            let (session, transport) = mount()
-            transport.events?.frame(.wordchain(.view(view(.closed))))
-            session.openTable()
-            session.leaveTable()
-            XCTAssertEqual(session.state.table?.phase, .closed)
-            XCTAssertTrue(session.state.opening)
-            XCTAssertEqual(transport.sent, [.wordchain(.createGame)])
         }
     }
 
@@ -331,9 +347,9 @@ final class RaceSessionTests: XCTestCase {
     func testAFailedSendLetsGoOfWhatWasWaitingAndSaysWhy() {
         MainActor.assumeIsolated {
             let (session, transport) = mount()
-            transport.events?.frame(.wordchain(.view(view())))
-            session.play("card")
-            session.joinTable("W2")
+            session.createRoom()
+            transport.events?.frame(.roomState(room()))
+            XCTAssertTrue(session.state.opening)
             transport.events?.sendFailed()
             XCTAssertFalse(session.state.sending)
             XCTAssertFalse(session.state.opening)
