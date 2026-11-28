@@ -120,7 +120,8 @@ final class GameSoundTests: XCTestCase {
             previous = frame
         }
         notes.append(pcm[start...previous])
-        return try notes.map { try pitch(in: $0, during: 0.017..<0.047) }
+        // Measure after the brighter strike has decayed so crossings track the fundamental.
+        return try notes.map { try pitch(in: $0, during: 0.024..<0.052) }
     }
 
     private func pitch(in note: ArraySlice<Int16>, during window: Range<Double>) throws -> Double {
