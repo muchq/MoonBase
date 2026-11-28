@@ -30,15 +30,15 @@ final class RaceTableTests: XCTestCase {
 
     // Alone, a start is practice (#1730); with company, a race.
     func testTheStartButtonSaysWhatItStarts() {
-        XCTAssertEqual(table(view(.waiting, start: nil, runners: alone)).startLabel, "Practise")
-        XCTAssertEqual(table(view(.over, practice: true, runners: alone)).startLabel, "Practise again")
+        XCTAssertEqual(table(view(.waiting, start: nil, runners: alone)).startLabel, "Practice")
+        XCTAssertEqual(table(view(.over, practice: true, runners: alone)).startLabel, "Practice again")
         XCTAssertEqual(table(view(.waiting, start: nil, runners: pair)).startLabel, "Start the race")
         XCTAssertEqual(table(view(.over, runners: pair)).startLabel, "Next race")
     }
 
     // A seat that left still has a runner; it does not make company.
     func testALeaverDoesNotCountAsASeat() {
-        XCTAssertEqual(table(view(.over, runners: [runner("alice"), runner("bob", left: true)])).startLabel, "Practise again")
+        XCTAssertEqual(table(view(.over, runners: [runner("alice"), runner("bob", left: true)])).startLabel, "Practice again")
     }
 
     func testTheNextRaceOffersTheLastOnesLetters() {
@@ -49,13 +49,13 @@ final class RaceTableTests: XCTestCase {
     // MARK: - What the table says
 
     func testTheHintFollowsThePhaseAndWhetherItIsPractice() {
-        XCTAssertEqual(table(view(.waiting, start: nil, runners: alone)).hint, "Practise alone, or wait for someone to join.")
-        XCTAssertEqual(table(view(.waiting, start: nil, runners: pair)).hint, "2 seated: start when everyone’s here.")
+        XCTAssertEqual(table(view(.waiting, start: nil, runners: alone)).hint, "Practice alone, or wait for someone to join.")
+        XCTAssertEqual(table(view(.waiting, start: nil, runners: pair)).hint, "Start when everyone’s here.")
         XCTAssertEqual(table(view(.racing, practice: true, runners: alone)).hint, "Practice: one letter at a time. Anyone who joins ends it.")
         XCTAssertEqual(table(view(.racing, runners: pair)).hint, "One letter at a time, every rung a word.")
         XCTAssertEqual(table(view(.racing, runners: [runner("alice", words: 4, ladder: ["a", "b", "c", "warm"], finished: true), runner("bob")])).hint,
                        "You reached warm in 4 steps. Waiting for the others.")
-        XCTAssertEqual(table(view(.over, practice: true, runners: alone)).hint, "Practise again, or wait for someone to join.")
+        XCTAssertEqual(table(view(.over, practice: true, runners: alone)).hint, "Practice again, or wait for someone to join.")
         XCTAssertEqual(table(view(.over, runners: pair)).hint, "Anyone can start the next race.")
         XCTAssertNil(table(view(.closed, runners: pair)).hint)
     }

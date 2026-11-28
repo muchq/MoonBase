@@ -130,7 +130,7 @@ final class WordEditorUITests: XCTestCase {
         XCTAssertTrue(code.waitForExistence(timeout: 5))
         XCTAssertEqual(code.label, "AB12")
         XCTAssertTrue(app.buttons["Invite friends"].exists)
-        XCTAssertTrue(app.buttons["Practise"].exists)
+        XCTAssertTrue(app.buttons["Practice"].exists)
         XCTAssertFalse(app.buttons["Open a race table"].exists)
         capture("12-race-room-created")
 

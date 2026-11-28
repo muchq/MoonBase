@@ -43,7 +43,7 @@ final class RaceTextTests: XCTestCase {
 
     // MARK: - Practice
 
-    // A lone seat practising has no one to beat: the result is how it went
+    // A lone seat practicing has no one to beat: the result is how it went
     // against par, never a win, whatever the hub's result lists.
     func testAPracticeRaceIsSaidAgainstParNotAsAWin() {
         let finished = [WordchainRunner(playerId: "alice", words: 5, finishedAtMs: 1, left: false, ladder: nil, wins: 0)]
